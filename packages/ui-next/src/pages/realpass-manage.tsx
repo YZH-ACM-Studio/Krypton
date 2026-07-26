@@ -16,9 +16,70 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { useBootstrap } from '@/lib/bootstrap';
 
-type R = Record<string, any>;
+interface OriginalContestStats {
+  accepted: number;
+  submitted: number;
+  updatedAt?: string | Date;
+  updatedBy?: string | number;
+}
 
-async function postOp(fields: Record<string, string>): Promise<any> {
+interface RealPassProblem {
+  docId: number;
+  pid?: string | number;
+  title: string;
+  origStat?: OriginalContestStats;
+}
+
+interface MigrationUnmatched {
+  _id: string;
+  accepted: number;
+  submitted: number;
+}
+
+interface MigrationConflict extends MigrationUnmatched {
+  byDocId: string | number;
+  byPid: string | number;
+}
+
+interface RealPassMigration {
+  at: string;
+  total: number;
+  ok: number;
+  unmatched: MigrationUnmatched[];
+  conflicts: MigrationConflict[];
+}
+
+interface BatchPreviewRow {
+  status: string;
+  line: string;
+  pid?: string | number;
+  docId?: string | number;
+  title?: string;
+  reason?: string;
+  accepted?: number;
+  submitted?: number;
+}
+
+interface BatchPreviewSummary {
+  total: number;
+  ok: number;
+  unmatched: number;
+  conflict: number;
+  invalid: number;
+  duplicate: number;
+}
+
+interface BatchPreviewResponse {
+  rows: BatchPreviewRow[];
+  summary: BatchPreviewSummary;
+}
+
+function messageFromError(error: unknown): string {
+  const message = (error as { message?: unknown } | null)?.message;
+  return typeof message === 'string' && message ? message : String(error);
+}
+
+async function postOp<T = Record<string, unknown>>(fields: Record<string, string>): Promise<T> {
   const form = new FormData();
   for (const [k, v] of Object.entries(fields)) form.append(k, v);
   const res = await fetch('/manage/realpass', {
@@ -26,14 +87,15 @@ async function postOp(fields: Record<string, string>): Promise<any> {
     body: form,
     headers: { Accept: 'application/json' },
   });
-  let body: any = null;
+  let body: unknown = null;
   try {
     body = await res.json();
   } catch {
     /* 非 JSON 响应 */
   }
-  if (!res.ok || body?.error) throw new Error(body?.error?.message || `HTTP ${res.status}`);
-  return body;
+  const error = (body as { error?: { message?: unknown } } | null)?.error;
+  if (!res.ok || error) throw new Error(typeof error?.message === 'string' && error.message ? error.message : `HTTP ${res.status}`);
+  return body as T;
 }
 
 function pct(a: number, s: number) {
@@ -51,12 +113,12 @@ const BATCH_STATUS: Record<string, { label: string; variant: 'default' | 'second
 export function RealPassManagePage() {
   const bs = useBootstrap();
   const data = bs.page.data as {
-    pdocs: R[];
+    pdocs: RealPassProblem[];
     page: number;
     ppcount: number;
     pcount: number;
     q: string;
-    migration: { at: string; total: number; ok: number; unmatched: R[]; conflicts: R[] } | null;
+    migration: RealPassMigration | null;
   };
   const pdocs = data.pdocs || [];
   const page = data.page || 1;
@@ -68,12 +130,12 @@ export function RealPassManagePage() {
   const [payload, setPayload] = useState('');
   // preview 绑定发起预览时的 payload 快照——确认写入只写快照内容，
   // 且在途响应回来时若内容已被改动则整个丢弃（防"确认写入未预览内容"竞态）。
-  const [preview, setPreview] = useState<{ rows: R[]; summary: R; payload: string } | null>(null);
+  const [preview, setPreview] = useState<(BatchPreviewResponse & { payload: string }) | null>(null);
   const payloadRef = useRef('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
 
-  const fail = (e: any) => setMsg({ kind: 'err', text: e?.message || String(e) });
+  const fail = (error: unknown) => setMsg({ kind: 'err', text: messageFromError(error) });
 
   const saveSingle = async () => {
     if (!target.trim() || accepted === '' || submitted === '') {
@@ -126,7 +188,7 @@ export function RealPassManagePage() {
         return;
       }
       const snap = payload;
-      const r = await postOp({ operation: 'batch', payload: snap, commit: 'false' });
+      const r = await postOp<BatchPreviewResponse>({ operation: 'batch', payload: snap, commit: 'false' });
       // 在途期间内容被改过 → 该预览已过期，丢弃（用户需重新预览）。
       if (payloadRef.current !== snap) return;
       setPreview({ ...r, payload: snap });
@@ -144,8 +206,8 @@ export function RealPassManagePage() {
     setPreview(null);
   };
 
-  const fillForm = (p: R) => {
-    setTarget(p.pid || String(p.docId));
+  const fillForm = (p: RealPassProblem) => {
+    setTarget(String(p.pid || p.docId));
     setAccepted(String(p.origStat?.accepted ?? ''));
     setSubmitted(String(p.origStat?.submitted ?? ''));
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -277,12 +339,12 @@ export function RealPassManagePage() {
               迁移遗留待处理：未匹配 {migration.unmatched?.length || 0} 条 · 冲突 {migration.conflicts?.length || 0} 条
             </h2>
             <div className="space-y-1 text-xs text-muted-foreground">
-              {(migration.unmatched || []).slice(0, 20).map((u: R, i: number) => (
+              {(migration.unmatched || []).slice(0, 20).map((u, i) => (
                 <div key={`u${i}`} className="font-mono">
                   未匹配：{u._id} → {u.accepted}/{u.submitted}（可用上方单题录入手动补）
                 </div>
               ))}
-              {(migration.conflicts || []).slice(0, 20).map((c: R, i: number) => (
+              {(migration.conflicts || []).slice(0, 20).map((c, i) => (
                 <div key={`c${i}`} className="font-mono">
                   冲突：{c._id} → docId #{c.byDocId} / pid #{c.byPid}，请人工裁决后用 pid 录入
                 </div>

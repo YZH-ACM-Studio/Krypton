@@ -22,22 +22,54 @@ import { useBootstrap } from '@/lib/bootstrap';
 import { replaceRouteTokens } from '@/lib/format';
 import { createEmptyStructuredRegionDraft, parseStructuredRegionDraft } from '@/lib/structured-region-draft';
 
-type R = Record<string, any>;
+interface StructuredSubmitConfig {
+  type?: string;
+  mode?: string;
+  time?: string | number;
+  memory?: string | number;
+  template?: {
+    surface?: ClientStructuredCodeSegment[];
+    lang?: string;
+  };
+}
+
+interface SubmitProblemDocument {
+  pid?: string | number;
+  docId?: string | number;
+  title?: string;
+  problemKind?: string;
+  structureRevision?: number;
+  config?: StructuredSubmitConfig;
+}
+
+interface SubmitContestDocument {
+  docId?: string | number;
+  pids?: unknown[];
+  rule?: string;
+  title?: string;
+}
+
+interface SubmitPageData {
+  pdoc?: SubmitProblemDocument;
+  tdoc?: SubmitContestDocument | null;
+  langRange?: Record<string, string>;
+}
 
 export function ProblemSubmitPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
-  const pdoc: R = data.pdoc || {};
-  const tdoc: R | null = data.tdoc || null;
+  const data = bs.page.data as SubmitPageData;
+  const pdoc = data.pdoc || {};
+  const tdoc = data.tdoc || null;
   const langRange: Record<string, string> = data.langRange || {};
-  const config: R = typeof pdoc.config === 'object' ? pdoc.config : {};
+  const config = pdoc.config || {};
   const pid = pdoc.pid || pdoc.docId || '';
   const baseTitle = pdoc.title || String(pid);
   const problemUrl = replaceRouteTokens(bs.urls.problemDetail, { PID: String(pid) });
   const tid = tdoc?.docId ? String(tdoc.docId) : null;
   const contestQS = tid ? `?tid=${tid}` : '';
   const submitUrl = `${problemUrl}/submit${contestQS}`;
-  const isStructuredAnswer = ['program_fill', 'function'].includes(config.type) && ['program_fill', 'function'].includes(String(pdoc.problemKind));
+  const isStructuredAnswer =
+    ['program_fill', 'function'].includes(String(config.type)) && ['program_fill', 'function'].includes(String(pdoc.problemKind));
   const textProgramFill = config.type === 'program_fill' && config.mode === 'text';
   const surface: ClientStructuredCodeSegment[] = Array.isArray(config.template?.surface) ? config.template.surface : [];
   const regions = useMemo(() => surface.filter((segment) => segment.type === 'region'), [surface]);
@@ -45,7 +77,7 @@ export function ProblemSubmitPage() {
   const singleLineRegion = pdoc.problemKind === 'program_fill';
 
   // Alphabetic letter when entering via contest
-  const contestPids: any[] = Array.isArray(tdoc?.pids) ? tdoc!.pids : [];
+  const contestPids: unknown[] = Array.isArray(tdoc?.pids) ? tdoc.pids : [];
   const contestIdx = tdoc ? contestPids.findIndex((x) => String(x) === String(pdoc.docId)) : -1;
   const contestLetter = contestIdx >= 0 ? String.fromCharCode(65 + contestIdx) : null;
   const title = contestLetter ? `${contestLetter}. ${baseTitle}` : baseTitle;
@@ -134,7 +166,7 @@ export function ProblemSubmitPage() {
       // expose the redirect Location on opaque responses, so we fall back
       // to letting the form-style flow take over if needed.
       if (res.status === 200) {
-        const json = await res.json().catch(() => ({}));
+        const json = (await res.json().catch(() => ({}))) as { rid?: unknown; url?: string };
         if (json.rid || json.url) {
           window.location.href = json.url || replaceRouteTokens(bs.urls.recordDetail, { RID: String(json.rid) });
           return;
@@ -155,8 +187,9 @@ export function ProblemSubmitPage() {
       }
       document.body.appendChild(native);
       native.submit();
-    } catch (e: any) {
-      setSubmitError(e?.message || '提交失败');
+    } catch (error) {
+      const message = (error as { message?: unknown } | null)?.message;
+      setSubmitError(typeof message === 'string' && message ? message : '提交失败');
       setSubmitting(false);
     }
   }, [code, lang, tid, submitUrl, submitting, bs.urls.recordDetail]);

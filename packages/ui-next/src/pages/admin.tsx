@@ -60,14 +60,16 @@ export function DomainDashboardPage() {
             <CardTitle className="text-base">域设置</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
-            {[
+            {(
+              [
               { label: '编辑域信息', href: '/domain/edit' },
               { label: '域用户管理', href: '/domain/user' },
               { label: '角色与权限', href: bs.urls.domainPermission },
               { label: '域权限用户组', href: '/domain/group', hint: 'Hydro 自带，按 UID 分组授权' },
               { label: '反作弊后台', href: '/admin/vigil' },
               { label: '任务系统', href: '/admin/tasks' },
-            ].map((link) => (
+              ] as Array<{ label: string; href: string; hint?: string }>
+            ).map((link) => (
               <a
                 key={link.href}
                 href={link.href}
@@ -75,7 +77,7 @@ export function DomainDashboardPage() {
               >
                 <span>
                   {link.label}
-                  {(link as any).hint && <span className="ml-2 text-xs text-muted-foreground">({(link as any).hint})</span>}
+                  {link.hint && <span className="ml-2 text-xs text-muted-foreground">({link.hint})</span>}
                 </span>
                 <span className="text-muted-foreground">→</span>
               </a>

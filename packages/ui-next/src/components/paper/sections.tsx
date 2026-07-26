@@ -3,7 +3,7 @@
  * Used by pages/exam-mode/paper.tsx when section is non-`problems`.
  */
 import type { ReactNode } from 'react';
-import { Calendar, Clock, Lock, MegaphoneIcon, Trophy, User } from 'lucide-react';
+import { Calendar, Clock, Lock, MegaphoneIcon, Trophy, User, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -15,7 +15,15 @@ import { Countdown, KIND_LABELS, type PaperCell, type QuestionKind } from '@/com
 // ─── Overview ─────────────────────────────────────────────────────────────
 
 interface OverviewData {
-  tdoc: any;
+  tdoc: {
+    title: string;
+    rule: string;
+    beginAt: string | Date;
+    endAt: string | Date;
+    content?: string;
+    lockdownMode?: boolean;
+    approvalMode?: string;
+  };
   cells: PaperCell[];
   owner: { uid: number; uname: string } | null;
   inWindow: boolean;
@@ -164,7 +172,7 @@ export function OverviewSection({ data, onEnterProblems }: { data: OverviewData;
   );
 }
 
-function InfoRow({ icon: Icon, label, value }: { icon: any; label: string; value: ReactNode }) {
+function InfoRow({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: ReactNode }) {
   return (
     <div className="flex items-center gap-2">
       <Icon className="size-4 shrink-0 text-muted-foreground" />

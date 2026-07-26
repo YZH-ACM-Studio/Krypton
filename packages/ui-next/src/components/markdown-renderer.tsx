@@ -10,8 +10,8 @@
  *  - View mode (read-only) and Edit mode (side-by-side live preview)
  */
 
-import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import ReactMarkdown, { type Options as ReactMarkdownOptions } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
@@ -27,7 +27,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 /*  Plugin config                                                      */
 /* ------------------------------------------------------------------ */
 
-const remarkPlugins = [remarkGfm, remarkMath];
+const remarkPlugins = [remarkGfm, remarkMath] as NonNullable<ReactMarkdownOptions['remarkPlugins']>;
 
 // Allow KaTeX-generated elements and common HTML through sanitizer
 const sanitizeSchema = {
@@ -89,7 +89,9 @@ const sanitizeSchema = {
   },
 };
 
-const rehypePlugins = [rehypeRaw, [rehypeSanitize, sanitizeSchema], rehypeKatex, rehypeHighlight];
+const rehypePlugins = [rehypeRaw, [rehypeSanitize, sanitizeSchema], rehypeKatex, rehypeHighlight] as NonNullable<
+  ReactMarkdownOptions['rehypePlugins']
+>;
 
 /* ------------------------------------------------------------------ */
 /*  Content can be a plain string or a Record<lang, string>            */
@@ -198,7 +200,7 @@ function MarkdownContent({ source, resolveFileUrl }: { source: string; resolveFi
   const renderedSource = useMemo(() => normalizePreviewSource(source, resolveFileUrl), [source, resolveFileUrl]);
   return (
     <div className={PROSE_CLASS}>
-      <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins as any}>
+      <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins}>
         {renderedSource}
       </ReactMarkdown>
     </div>
@@ -470,7 +472,7 @@ export function MarkdownEditor({
           flips to `auto` on mobile so the panes stack with a sensible floor. */}
       <div
         className="krypton-md-shell grid grid-cols-1 gap-0 overflow-hidden rounded-lg border md:grid-cols-2"
-        style={{ ['--md-shell-h' as any]: `${minHeight}px` }}
+        style={{ '--md-shell-h': `${minHeight}px` } as CSSProperties}
       >
         {/* Editor pane */}
         <div className="relative h-full min-h-0 border-b md:border-b-0 md:border-r">

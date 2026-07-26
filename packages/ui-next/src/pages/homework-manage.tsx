@@ -25,8 +25,39 @@ import { Badge } from '@/components/ui/badge';
 import { useBootstrap } from '@/lib/bootstrap';
 import { formatDateTime, replaceRouteTokens } from '@/lib/format';
 
-interface R {
-  [key: string]: any;
+interface HomeworkDocument {
+  _id?: string | number;
+  docId?: string | number;
+  title?: string;
+  langs?: string | string[];
+  participantGroupIds?: Array<string | number>;
+  assign?: string | string[];
+  maintainer?: string | string[];
+  content?: string | Record<string, string>;
+  rated?: boolean;
+}
+
+interface HomeworkManageData {
+  tdoc?: HomeworkDocument;
+  page_name?: string;
+  fromCourse?: string | number;
+  chapter?: string | number;
+  penaltyRules?: string;
+  pids?: string;
+  participantGroupIds?: Array<string | number>;
+  scopeGroups?: Array<{ _id: string | number; name: string; archivedAt?: string }>;
+  courseContext?: { courseTitle: string; chapterTitle: string };
+  dateBeginText?: string;
+  timeBeginText?: string;
+  datePenaltyText?: string;
+  timePenaltyText?: string;
+  extensionDays?: number;
+}
+
+interface HomeworkFile {
+  name: string;
+  size?: number;
+  lastModified?: string | Date;
 }
 interface ScopeOption {
   _id: string;
@@ -52,6 +83,10 @@ const DEFAULT_PENALTY_RULES: PenaltyRuleRow[] = [
   { id: 'default-9999', hours: '9999', coefficient: '0.5' },
 ];
 
+function listInputValue(value: string | string[] | undefined): string {
+  return Array.isArray(value) ? value.join(',') : value || '';
+}
+
 function parsePenaltyRules(value: string | null | undefined): PenaltyRuleRow[] {
   if (!value?.trim()) return DEFAULT_PENALTY_RULES;
   const rows = value
@@ -76,8 +111,8 @@ function serializePenaltyRules(rows: PenaltyRuleRow[]) {
 
 export function HomeworkEditPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
-  const tdoc: R = data.tdoc || {};
+  const data = bs.page.data as HomeworkManageData;
+  const tdoc = data.tdoc || {};
   const isEdit = data.page_name === 'homework_edit';
   const hwUrl = data.fromCourse
     ? `/course/${data.fromCourse}?chapter=${data.chapter}`
@@ -124,8 +159,8 @@ export function HomeworkEditPage() {
   const [langValue, setLangValue] = useState<LangOption[]>(() => resolveLangs(initialLangIds));
   const initialGroupIds: string[] = (data.participantGroupIds || tdoc.participantGroupIds || []).map(String);
   const groupCatalog: ScopeOption[] = (data.scopeGroups || [])
-    .filter((group: R) => !group.archivedAt || initialGroupIds.includes(String(group._id)))
-    .map((group: R) => ({
+    .filter((group) => !group.archivedAt || initialGroupIds.includes(String(group._id)))
+    .map((group) => ({
       _id: String(group._id),
       name: group.archivedAt ? `${group.name}（已归档）` : group.name,
     }));
@@ -212,7 +247,7 @@ export function HomeworkEditPage() {
                 <Input
                   id="assign"
                   name="assign"
-                  defaultValue={(tdoc.assign || []).join?.(',') || tdoc.assign || ''}
+                  defaultValue={listInputValue(tdoc.assign)}
                   placeholder="用户组 / UID，逗号分隔"
                 />
               </div>
@@ -223,7 +258,7 @@ export function HomeworkEditPage() {
                 <Input
                   id="maintainer"
                   name="maintainer"
-                  defaultValue={(tdoc.maintainer || []).join?.(',') || tdoc.maintainer || ''}
+                  defaultValue={listInputValue(tdoc.maintainer)}
                   placeholder="UID，逗号分隔"
                 />
               </div>
@@ -407,9 +442,9 @@ export function HomeworkEditPage() {
 
 export function HomeworkFilesPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
-  const tdoc: R = data.tdoc || {};
-  const files: R[] = data.files || [];
+  const data = bs.page.data as { tdoc?: HomeworkDocument; files?: HomeworkFile[] };
+  const tdoc = data.tdoc || {};
+  const files = data.files || [];
   const tid = tdoc.docId || tdoc._id;
   const hwUrl = replaceRouteTokens(bs.urls.homeworkDetail, { TID: String(tid) });
 

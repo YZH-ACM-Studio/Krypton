@@ -41,8 +41,9 @@ function GradeRow({ row, pid }: { row: R; pid: number }) {
       }
       setGrade(result.manualGrade);
       setReason('');
-    } catch (caught: any) {
-      setError(caught?.message || '保存失败');
+    } catch (caught) {
+      const message = (caught as { message?: unknown } | null)?.message;
+      setError(typeof message === 'string' && message ? message : '保存失败');
     } finally {
       setSaving(false);
     }

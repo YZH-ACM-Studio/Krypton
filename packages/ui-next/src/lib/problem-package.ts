@@ -1,18 +1,35 @@
 import * as YAML from 'yaml';
 import { downloadZip, type ZipDownloadTarget } from './download-zip';
 
-type R = Record<string, any>;
+type JsonRecord = Record<string, unknown>;
+
+interface ProblemPackageDocument {
+  docId?: string | number;
+  pid?: string | number;
+  owner?: unknown;
+  title?: string;
+  tag?: unknown[];
+  nSubmit?: number;
+  nAccept?: number;
+  content?: string | JsonRecord;
+  statementFormat?: string;
+  programmingStatement?: unknown;
+}
+
+interface ProblemPackageFile {
+  name?: string;
+}
 
 interface ProblemPackageOptions {
-  pdoc: R;
+  pdoc: ProblemPackageDocument;
   problemUrl: string;
-  testdata?: R[];
-  additionalFiles?: R[];
-  content?: string | R;
+  testdata?: ProblemPackageFile[];
+  additionalFiles?: ProblemPackageFile[];
+  content?: string | JsonRecord;
 }
 
 interface ProblemFilesDownloadOptions {
-  pdoc: R;
+  pdoc: ProblemPackageDocument;
   problemUrl: string;
   files: string[];
   type: 'testdata' | 'additional_file';
@@ -29,12 +46,12 @@ function cleanDownloadName(value: string) {
   );
 }
 
-function problemFolder(pdoc: R) {
+function problemFolder(pdoc: ProblemPackageDocument) {
   return String(pdoc.docId || pdoc.pid || 'problem');
 }
 
-function metadataYaml(pdoc: R) {
-  const metadata: R = {
+function metadataYaml(pdoc: ProblemPackageDocument) {
+  const metadata: JsonRecord = {
     pid: pdoc.pid,
     owner: pdoc.owner,
     title: pdoc.title,
@@ -48,18 +65,22 @@ function metadataYaml(pdoc: R) {
   return YAML.stringify(metadata);
 }
 
-function statementTargets(folder: string, content: string | R | undefined): ZipDownloadTarget[] {
-  let statement: any = content ?? '';
+function isRecord(value: unknown): value is JsonRecord {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function statementTargets(folder: string, content: string | JsonRecord | undefined): ZipDownloadTarget[] {
+  let statement: unknown = content ?? '';
   if (typeof statement === 'string') {
     try {
-      const parsed = JSON.parse(statement);
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) statement = parsed;
+      const parsed: unknown = JSON.parse(statement);
+      if (isRecord(parsed)) statement = parsed;
     } catch {
       /* raw markdown */
     }
   }
 
-  if (statement && typeof statement === 'object' && !Array.isArray(statement)) {
+  if (isRecord(statement)) {
     const targets: ZipDownloadTarget[] = [];
     for (const key of Object.keys(statement)) {
       const value = statement[key];
@@ -76,8 +97,9 @@ function statementTargets(folder: string, content: string | R | undefined): ZipD
 
 async function responseMessage(res: Response) {
   try {
-    const data = await res.json();
-    return data?.error || data?.message || `HTTP ${res.status}`;
+    const data: unknown = await res.json();
+    if (isRecord(data)) return String(data.error || data.message || `HTTP ${res.status}`);
+    return `HTTP ${res.status}`;
   } catch {
     const text = await res.text().catch(() => '');
     return text.slice(0, 160) || `HTTP ${res.status}`;
@@ -96,9 +118,9 @@ async function getFileLinks(problemUrl: string, files: string[], type: 'testdata
     body: JSON.stringify({ operation: 'get_links', type, files }),
   });
   if (!res.ok) throw new Error(await responseMessage(res));
-  const data = await res.json().catch(() => null);
-  const links = data?.links;
-  if (!links || typeof links !== 'object' || Array.isArray(links)) {
+  const data: unknown = await res.json().catch(() => null);
+  const links = isRecord(data) ? data.links : null;
+  if (!isRecord(links)) {
     throw new Error('服务器返回的下载链接格式无效');
   }
   const missing = files.filter((file) => typeof links[file] !== 'string' || !links[file]);
@@ -131,8 +153,8 @@ export async function downloadProblemPackage({ pdoc, problemUrl, testdata = [], 
     });
   }
 
-  const testdataNames = testdata.map((file) => file?.name).filter(Boolean);
-  const additionalNames = additionalFiles.map((file) => file?.name).filter(Boolean);
+  const testdataNames = testdata.map((file) => file.name).filter((name): name is string => !!name);
+  const additionalNames = additionalFiles.map((file) => file.name).filter((name): name is string => !!name);
   const [testdataLinks, additionalLinks] = await Promise.all([
     getFileLinks(problemUrl, testdataNames, 'testdata'),
     getFileLinks(problemUrl, additionalNames, 'additional_file'),

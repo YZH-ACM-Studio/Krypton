@@ -26,7 +26,7 @@ export function normalizeVigilTimestamp(value: DateTimeProps['value']): DateTime
 
 export function parseVigilTimestamp(value: DateTimeProps['value']): Date | null {
   const normalized = normalizeVigilTimestamp(value);
-  const d = normalized instanceof Date ? normalized : new Date(normalized as any);
+  const d = normalized instanceof Date ? normalized : new Date(normalized as string | number);
   return Number.isNaN(d.getTime()) ? null : d;
 }
 

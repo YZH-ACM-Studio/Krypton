@@ -62,9 +62,10 @@ export async function searchProblems(query: string | number, limit = 20): Promis
   try {
     const res = await fetch(url.toString(), { headers: { Accept: 'application/json' } });
     if (!res.ok) return [];
-    const data = await res.json().catch(() => null);
-    if (!data || !Array.isArray(data.pdocs)) return [];
-    return data.pdocs.map((p: any) => ({
+    const data: unknown = await res.json().catch(() => null);
+    const pdocs = data && typeof data === 'object' ? (data as { pdocs?: unknown }).pdocs : null;
+    if (!Array.isArray(pdocs)) return [];
+    return (pdocs as ProblemOption[]).map((p) => ({
       docId: p.docId,
       pid: p.pid,
       title: p.title,

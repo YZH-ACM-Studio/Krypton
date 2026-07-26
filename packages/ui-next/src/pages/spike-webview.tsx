@@ -8,12 +8,29 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 // Phase 0 spike probe page. Paired with ecosystems/KryptonVigilSystem/Client/spike-webview.
 // Loaded inside a Qt 6 QWebEngineView; uses QWebChannel to talk to the host.
 
+interface WebChannelBridge {
+  toWeb: {
+    connect(listener: (message: string) => void): void;
+  };
+  fromWeb(message: string): void;
+  platformName(): Promise<string>;
+}
+
+interface WebChannel {
+  objects: {
+    bridge?: WebChannelBridge;
+    [name: string]: unknown;
+  };
+}
+
+type QWebChannelConstructor = new (transport: unknown, callback: (channel: WebChannel) => void) => unknown;
+
 declare global {
   interface Window {
     qt?: {
       webChannelTransport?: unknown;
     };
-    QWebChannel?: new (transport: unknown, callback: (channel: { objects: Record<string, any> }) => void) => void;
+    QWebChannel?: QWebChannelConstructor;
   }
 }
 
@@ -24,7 +41,7 @@ interface BridgeMessage {
 }
 
 export function SpikeWebViewProbePage() {
-  const [bridge, setBridge] = useState<any>(null);
+  const [bridge, setBridge] = useState<WebChannelBridge | null>(null);
   const [messages, setMessages] = useState<BridgeMessage[]>([]);
   const [platformName, setPlatformName] = useState<string | null>(null);
   const channelLoadedRef = useRef(false);
@@ -37,13 +54,13 @@ export function SpikeWebViewProbePage() {
     if (channelLoadedRef.current) return;
     channelLoadedRef.current = true;
 
-    function attach(QWebChannelCtor: any) {
+    function attach(QWebChannelCtor: QWebChannelConstructor) {
       if (!window.qt?.webChannelTransport) {
         log('from', '[probe] window.qt.webChannelTransport not present — running outside Qt host');
         return;
       }
       // eslint-disable-next-line no-new
-      new QWebChannelCtor(window.qt.webChannelTransport, (channel: any) => {
+      new QWebChannelCtor(window.qt.webChannelTransport, (channel) => {
         const b = channel.objects.bridge;
         if (!b) {
           log('from', '[probe] bridge object not registered');

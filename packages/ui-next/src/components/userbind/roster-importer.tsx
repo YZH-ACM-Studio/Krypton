@@ -17,7 +17,7 @@
  *   - no duplicate studentId within the batch
  */
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { CheckCircle2, FileText, Search, X } from 'lucide-react';
+import { CheckCircle2, FileText, Search, X, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -292,7 +292,7 @@ export function RosterImporter({
   );
 }
 
-function TabBtn({ active, onClick, icon: Icon, children }: { active: boolean; onClick: () => void; icon: any; children: ReactNode }) {
+function TabBtn({ active, onClick, icon: Icon, children }: { active: boolean; onClick: () => void; icon: LucideIcon; children: ReactNode }) {
   return (
     <button
       type="button"

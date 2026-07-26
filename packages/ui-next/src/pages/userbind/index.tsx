@@ -1285,7 +1285,7 @@ export function AdminUserbindStudentsPage() {
 export function AdminUserbindStudentsImportPage() {
   const data = useBootstrap().page.data as {
     schools: Array<{ _id: string; name: string }>;
-    groups: Array<{ _id: string; name: string; schoolId: string }>;
+    groups: Array<{ _id: string; name: string; schoolId: string; archivedAt?: string }>;
     report: ImportResult | null;
     preflightInvalid: Array<{ line: number; studentId: string; reason: string }> | null;
     targetKind: 'school' | 'user_group';
@@ -1373,7 +1373,7 @@ export function AdminUserbindStudentsImportPage() {
                 options={[
                   { value: '', label: '选择用户组' },
                   // 已归档组不可作为导入目标（PLAN §9）
-                  ...data.groups.filter((g: any) => !g.archivedAt).map((g) => ({ value: g._id, label: g.name })),
+                  ...data.groups.filter((g) => !g.archivedAt).map((g) => ({ value: g._id, label: g.name })),
                 ]}
               />
             </FormField>

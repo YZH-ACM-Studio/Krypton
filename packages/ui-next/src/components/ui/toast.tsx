@@ -17,7 +17,7 @@
  */
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { CheckCircle2, Info, Loader2, X, XCircle } from 'lucide-react';
+import { CheckCircle2, Info, Loader2, X, XCircle, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/cn';
 
 type ToastKind = 'info' | 'success' | 'error' | 'loading';
@@ -135,7 +135,7 @@ function ToastCard({ t, onDismiss }: { t: InternalToast; onDismiss: (id: string)
     return () => clearTimeout(timer);
   }, [dismiss, t.duration, t.kind]);
 
-  const styles: Record<ToastKind, { ring: string; iconColor: string; Icon: any }> = {
+  const styles: Record<ToastKind, { ring: string; iconColor: string; Icon: LucideIcon }> = {
     info: {
       ring: 'border-border bg-background',
       iconColor: 'text-primary',

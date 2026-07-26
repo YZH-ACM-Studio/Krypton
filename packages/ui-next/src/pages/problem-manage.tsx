@@ -569,7 +569,7 @@ export function ProblemStatisticsPage() {
   const sort: string = data.sort || 'time';
   const direction: number = Number(data.direction) || 1;
   const currentLang: string = data.lang || '';
-  const langs: Record<string, R> = data.langs || {};
+  const langs: Record<string, { display?: unknown }> = data.langs || {};
   const types: string[] = data.types || [];
   const udict: Record<string, GenericUserDoc> = bs.udict || data.udict || {};
   const pid = pdoc.pid || pdoc.docId || '';
@@ -630,7 +630,7 @@ export function ProblemStatisticsPage() {
                   { value: '', label: '全部语言' },
                   ...Object.entries(langs).map(([key, lang]) => ({
                     value: key,
-                    label: String((lang as any).display || key),
+                    label: String(lang.display || key),
                   })),
                 ]}
               />

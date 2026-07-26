@@ -206,8 +206,9 @@ export function ObjectiveAnswerPanel({
       }
       const rid = data?.rid ? String(data.rid) : '';
       window.location.href = data?.url || (rid ? `/record/${rid}` : submitUrl);
-    } catch (e: any) {
-      setError(e?.message || String(e));
+    } catch (caught) {
+      const message = (caught as { message?: unknown } | null)?.message;
+      setError(typeof message === 'string' && message ? message : String(caught));
       setSubmitting(false);
     }
   };

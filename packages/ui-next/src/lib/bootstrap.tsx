@@ -114,9 +114,13 @@ export interface KryptonBootstrap {
   page: KryptonPage;
 }
 
+type WindowKryptonBootstrap = Omit<KryptonBootstrap, 'page'> & {
+  page?: KryptonPage;
+};
+
 declare global {
   interface Window {
-    __KRYPTON_BOOTSTRAP__?: KryptonBootstrap;
+    __KRYPTON_BOOTSTRAP__?: WindowKryptonBootstrap;
   }
 }
 
@@ -139,7 +143,7 @@ export function getBootstrapFromWindow(): KryptonBootstrap {
   const bs = window.__KRYPTON_BOOTSTRAP__;
   // Ensure page always exists (guards against stale/incomplete bootstrap data)
   if (!bs.page) {
-    (bs as any).page = { templateName: 'main.html', data: {} };
+    bs.page = { templateName: 'main.html', data: {} };
   }
-  return bs;
+  return bs as KryptonBootstrap;
 }

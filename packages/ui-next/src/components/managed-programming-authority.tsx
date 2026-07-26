@@ -122,7 +122,7 @@ export function ManagedReviewPanel({
     setReviewError('');
     setReviewing(true);
     try {
-      const payload = new URLSearchParams(new FormData(form) as any);
+      const payload = new URLSearchParams(Array.from(new FormData(form), ([key, value]) => [key, String(value)]));
       payload.set('pendingContributionsConfirmed', String(pendingConfirmed));
       payload.set('pendingContributionFingerprint', pendingContributionFingerprint);
       const response = await fetch(problemsUrl, {

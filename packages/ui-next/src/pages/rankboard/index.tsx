@@ -60,6 +60,7 @@ interface LeaderboardRow {
     schoolName: string;
     groupNames: string[];
     boundUserId: number | null;
+    enrollmentYear?: string | number;
   };
   user: { uname: string; nAccept: number; avatarUrl?: string } | null;
   totalScore: number;
@@ -330,12 +331,12 @@ export function RankBoardMainPage() {
 
   // 年级（入学年）列表——来自 userbind 派生的 enrollmentYear（PLAN §5）。
   const enrollmentYears = useMemo(() => {
-    const set = new Set<number>();
+    const set = new Set<string | number>();
     for (const r of data.rows) {
-      const y = (r.student as any).enrollmentYear;
+      const y = r.student.enrollmentYear;
       if (y) set.add(y);
     }
-    return [...set].sort((a, b) => b - a);
+    return [...set].sort((a, b) => Number(b) - Number(a));
   }, [data.rows]);
 
   const filtered = useMemo(() => {
@@ -343,7 +344,7 @@ export function RankBoardMainPage() {
     return data.rows.filter((r) => {
       if (schoolFilter !== 'all' && r.student.schoolName !== schoolFilter) return false;
       if (yearFilter !== 'all') {
-        const y = (r.student as any).enrollmentYear;
+        const y = r.student.enrollmentYear;
         if (String(y ?? '') !== yearFilter) return false;
       }
       if (typeFilter.size > 0) {

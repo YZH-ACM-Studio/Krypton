@@ -18,7 +18,7 @@
  *   └─────────────────────────────────────┘
  */
 import { useCallback, useEffect, useState } from 'react';
-import { Camera, ChevronRight, Download, FileText, Film, Lock, MessageSquare, Monitor } from 'lucide-react';
+import { Camera, ChevronRight, Download, FileText, Film, Lock, MessageSquare, Monitor, type LucideIcon } from 'lucide-react';
 import { Sheet, SheetContent, SheetHeader } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -371,7 +371,7 @@ function ActionButton({
   disabled,
   variant = 'outline',
 }: {
-  icon: any;
+  icon: LucideIcon;
   label: string;
   onClick: () => void;
   disabled?: boolean;

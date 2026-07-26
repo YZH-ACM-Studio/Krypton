@@ -54,6 +54,7 @@ interface WorkspaceData {
   pdict: Record<string, { docId: number; pid?: string; title: string }>;
   previewMode?: boolean;
   currentUserId?: number;
+  examMode?: unknown;
 }
 
 const RULE_LABEL: Record<string, string> = {
@@ -73,8 +74,12 @@ export function ContestWorkspaceContent() {
   const previewMode = !!data.previewMode;
   const currentUserId = data.currentUserId || bs.user?.id;
   const tid = String(tdoc._id || tdoc.docId);
-  const examMode = (data as any).examMode || {};
-  const urls = examMode.urls || {};
+  const examMode = data.examMode || {};
+  const examModeRecord =
+    examMode && typeof examMode === 'object' && !Array.isArray(examMode)
+      ? (examMode as { enabled?: unknown; urls?: Record<string, string> })
+      : {};
+  const urls = examModeRecord.urls || {};
   const teamContext = readTeamExamModeContext(examMode);
   const adminPreview = previewMode || teamContext?.teamRole === 'admin_preview';
 
@@ -237,7 +242,7 @@ export function ContestWorkspaceContent() {
           </Button>
         )}
         {/* Legacy standalone workspace only. Client shell keeps personal submissions inside the IDE/history panel. */}
-        {!examMode.enabled ? (
+        {!examModeRecord.enabled ? (
           <Button asChild variant="outline" className="justify-start gap-2 h-auto py-3">
             <a href={`/record?tid=${tid}&uidOrName=${currentUserId}`}>
               <Code className="size-4" />

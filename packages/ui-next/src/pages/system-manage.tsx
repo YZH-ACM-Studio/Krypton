@@ -979,8 +979,10 @@ export function ManageUserPrivPage() {
 /*  Shared setting field renderer                                      */
 /* ================================================================== */
 
-function SettingField({ setting, value }: { setting: SystemSetting; value: any }) {
+function SettingField({ setting, value }: { setting: SystemSetting; value: unknown }) {
   const isDisabled = !!(setting.flag & 2);
+  const rawValue = value ?? setting.value ?? '';
+  const scalarValue = typeof rawValue === 'string' || typeof rawValue === 'number' || Array.isArray(rawValue) ? rawValue : String(rawValue);
 
   return (
     <div className="grid gap-1.5 sm:grid-cols-[200px_1fr] sm:items-start">
@@ -997,25 +999,25 @@ function SettingField({ setting, value }: { setting: SystemSetting; value: any }
         ) : setting.type === 'select' ? (
           <SimpleSelect
             name={setting.key}
-            defaultValue={String(value ?? setting.value ?? '')}
+            defaultValue={String(rawValue)}
             disabled={isDisabled}
             options={rangeOptions(setting.range)}
           />
         ) : setting.type === 'yaml' || setting.type === 'json' ? (
           <textarea
             name={setting.key}
-            defaultValue={typeof value === 'object' ? JSON.stringify(value, null, 2) : (value ?? setting.value ?? '')}
+            defaultValue={typeof rawValue === 'object' ? JSON.stringify(rawValue, null, 2) : scalarValue}
             disabled={isDisabled}
             rows={6}
             className="w-full rounded-md border bg-background p-3 font-mono text-xs disabled:opacity-50"
             spellCheck={false}
           />
         ) : setting.type === 'markdown' && !isDisabled ? (
-          <MarkdownEditor name={setting.key} value={value ?? setting.value ?? ''} minHeight={260} />
+          <MarkdownEditor name={setting.key} value={String(rawValue)} minHeight={260} />
         ) : setting.type === 'textarea' || setting.type === 'markdown' ? (
           <textarea
             name={setting.key}
-            defaultValue={value ?? setting.value ?? ''}
+            defaultValue={scalarValue}
             disabled={isDisabled}
             rows={setting.type === 'markdown' ? 6 : 3}
             className="w-full rounded-md border bg-background px-3 py-2 text-sm font-mono disabled:opacity-50"
@@ -1024,7 +1026,7 @@ function SettingField({ setting, value }: { setting: SystemSetting; value: any }
           <Input
             type="number"
             name={setting.key}
-            defaultValue={value ?? setting.value ?? ''}
+            defaultValue={scalarValue}
             disabled={isDisabled}
             step={setting.type === 'float' ? 'any' : '1'}
             className="max-w-xs"
@@ -1032,7 +1034,7 @@ function SettingField({ setting, value }: { setting: SystemSetting; value: any }
         ) : setting.type === 'password' ? (
           <Input type="password" name={setting.key} defaultValue="" disabled={isDisabled} autoComplete="new-password" className="max-w-xs" />
         ) : (
-          <Input name={setting.key} defaultValue={value ?? setting.value ?? ''} disabled={isDisabled} className="max-w-sm" />
+          <Input name={setting.key} defaultValue={scalarValue} disabled={isDisabled} className="max-w-sm" />
         )}
       </div>
     </div>

@@ -215,15 +215,20 @@ interface ImportPreview {
   summary: { total: number; ready: number; invalid: number };
 }
 
-function errorMessage(payload: any, status: number): string {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function errorMessage(payload: unknown, status: number): string {
+  if (!isRecord(payload)) return `请求失败 (${status})`;
   const error = payload?.error;
   if (typeof error === 'string') return error;
-  if (typeof error?.message === 'string') return error.message;
+  if (isRecord(error) && typeof error.message === 'string') return error.message;
   if (typeof payload?.message === 'string') return payload.message;
   return `请求失败 (${status})`;
 }
 
-async function postOperation(fields: Record<string, string>): Promise<any> {
+async function postOperation<T = Record<string, unknown>>(fields: Record<string, string>): Promise<T> {
   const response = await fetch(ENDPOINT, {
     method: 'POST',
     credentials: 'include',
@@ -233,11 +238,11 @@ async function postOperation(fields: Record<string, string>): Promise<any> {
     },
     body: new URLSearchParams(fields),
   });
-  const payload = await response.json().catch((error) => {
+  const payload: unknown = await response.json().catch((error) => {
     throw new Error(`服务器返回了无法解析的响应：${error instanceof Error ? error.message : String(error)}`);
   });
   if (!response.ok) throw new Error(errorMessage(payload, response.status));
-  return payload;
+  return payload as T;
 }
 
 function formatDate(value: string | null | undefined): string {
@@ -625,7 +630,7 @@ function CreateAccountDialog({ open, onClose, onCreated }: {
     setBusy(true);
     setError(null);
     try {
-      const result = await postOperation({
+      const result = await postOperation<{ uid: string | number }>({
         operation: 'create',
         username: username.trim(),
         email: email.trim(),
@@ -768,8 +773,8 @@ function ImportAccountsDialog({ open, onClose }: { open: boolean; onClose: () =>
     setBusy(true);
     setError(null);
     try {
-      const result = await postOperation({ operation: 'import_preview', __users: text });
-      setPreview(result as ImportPreview);
+      const result = await postOperation<ImportPreview>({ operation: 'import_preview', __users: text });
+      setPreview(result);
     } catch (previewError) {
       setError(previewError instanceof Error ? previewError.message : String(previewError));
     } finally {

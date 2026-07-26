@@ -292,7 +292,7 @@ export function MultiSelect<T>({
       {/* Popover */}
       {open ? (
         <ScrollArea
-          ref={popoverRef as any}
+          ref={popoverRef}
           className="absolute z-50 mt-1 max-h-72 w-full rounded-md border bg-popover shadow-lg"
           viewportClassName="p-1"
         >

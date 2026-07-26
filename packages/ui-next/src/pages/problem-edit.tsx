@@ -933,8 +933,9 @@ export function ProblemEditPage() {
         additionalFiles,
         content: draftContent,
       });
-    } catch (e: any) {
-      setDownloadError(e?.message || '下载失败');
+    } catch (error) {
+      const message = (error as { message?: unknown } | null)?.message;
+      setDownloadError(typeof message === 'string' && message ? message : '下载失败');
     } finally {
       setDownloading(false);
     }
@@ -1119,7 +1120,7 @@ export function ProblemEditPage() {
     try {
       const editRes = await fetch(form.action || window.location.pathname, {
         method: 'POST',
-        body: new URLSearchParams(fd as any),
+        body: new URLSearchParams(Array.from(fd, ([key, value]) => [key, String(value)])),
         credentials: 'same-origin',
         headers: { Accept: 'application/json' },
       });

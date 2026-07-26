@@ -943,10 +943,9 @@ function NodeEditor(props: NodeEditorProps) {
 
 interface NodeParamInputProps {
   spec: PresetSummary['params'][number];
-  // Param values come straight out of `TaskGraphNode.params` (fed by
-  // server-stored graph JSON), so the incoming value genuinely has no static
-  // shape — kept as `any` on purpose.
-  value: any;
+  // Param values come from untrusted server-stored graph JSON and are narrowed
+  // according to the selected preset before they reach a form control.
+  value: unknown;
   onChange: (v: TaskNodeParamValue) => void;
   contests: ContestRef[];
   homeworks: HomeworkRef[];
@@ -971,11 +970,12 @@ function canonicalTagSelectOptions(options: NonNullable<PresetSummary['params'][
 }
 
 function NodeParamInput({ spec, value, onChange, contests, homeworks, trainings, schools, userGroups }: NodeParamInputProps) {
+  const scalarValue = typeof value === 'string' ? value : typeof value === 'number' ? String(value) : '';
   if (spec.type === 'select' || spec.type === 'pat_level' || spec.type === 'pat_season' || spec.type === 'gplt_level') {
     return (
       <FormField label={spec.label} hint={spec.helper} required={spec.required}>
         <SimpleSelect
-          value={value || ''}
+          value={scalarValue}
           onValueChange={onChange}
           placeholder="—"
           options={[{ value: '', label: '—' }, ...(spec.options?.map((o) => ({ value: o.value, label: o.label })) || [])]}
@@ -987,7 +987,7 @@ function NodeParamInput({ spec, value, onChange, contests, homeworks, trainings,
     return (
       <FormField label={spec.label} hint={spec.helper} required={spec.required}>
         <SimpleSelect
-          value={value || ''}
+          value={scalarValue}
           onValueChange={onChange}
           placeholder="— 选择规范标签 —"
           contentClassName="max-h-96"
@@ -999,7 +999,7 @@ function NodeParamInput({ spec, value, onChange, contests, homeworks, trainings,
   if (spec.type === 'date') {
     return (
       <FormField label={spec.label} hint={spec.helper} required={spec.required}>
-        <Input type="date" value={value || ''} onChange={(e) => onChange(e.target.value)} />
+        <Input type="date" value={scalarValue} onChange={(e) => onChange(e.target.value)} />
       </FormField>
     );
   }
@@ -1007,7 +1007,7 @@ function NodeParamInput({ spec, value, onChange, contests, homeworks, trainings,
     return (
       <FormField label={spec.label} hint={spec.helper} required={spec.required}>
         <SimpleSelect
-          value={value || ''}
+          value={scalarValue}
           onValueChange={onChange}
           placeholder="— 选择比赛 —"
           options={[{ value: '', label: '— 选择比赛 —' }, ...contests.map((c) => ({ value: c._id, label: c.title }))]}
@@ -1019,7 +1019,7 @@ function NodeParamInput({ spec, value, onChange, contests, homeworks, trainings,
     return (
       <FormField label={spec.label} hint={spec.helper} required={spec.required}>
         <SimpleSelect
-          value={value || ''}
+          value={scalarValue}
           onValueChange={onChange}
           placeholder="— 选择 homework —"
           options={[{ value: '', label: '— 选择 homework —' }, ...homeworks.map((c) => ({ value: c._id, label: c.title }))]}
@@ -1031,7 +1031,7 @@ function NodeParamInput({ spec, value, onChange, contests, homeworks, trainings,
     return (
       <FormField label={spec.label} hint={spec.helper} required={spec.required}>
         <SimpleSelect
-          value={value || ''}
+          value={scalarValue}
           onValueChange={onChange}
           placeholder="— 选择 training —"
           options={[{ value: '', label: '— 选择 training —' }, ...trainings.map((c) => ({ value: c._id, label: c.title }))]}
@@ -1043,7 +1043,7 @@ function NodeParamInput({ spec, value, onChange, contests, homeworks, trainings,
     return (
       <FormField label={spec.label} hint={spec.helper} required={spec.required}>
         <SimpleSelect
-          value={value || ''}
+          value={scalarValue}
           onValueChange={onChange}
           placeholder="— 选择学校 —"
           options={[{ value: '', label: '— 选择学校 —' }, ...schools.map((c) => ({ value: c._id, label: c.name }))]}
@@ -1055,10 +1055,10 @@ function NodeParamInput({ spec, value, onChange, contests, homeworks, trainings,
     return (
       <FormField label={spec.label} hint={spec.helper} required={spec.required}>
         <SimpleSelect
-          value={value || ''}
+          value={scalarValue}
           onValueChange={onChange}
           placeholder="— 选择用户组 —"
-          options={[{ value: '', label: '— 选择用户组 —' }, ...groupSelectOptions(userGroups, schools, value || '')]}
+          options={[{ value: '', label: '— 选择用户组 —' }, ...groupSelectOptions(userGroups, schools, scalarValue)]}
         />
       </FormField>
     );
@@ -1066,7 +1066,7 @@ function NodeParamInput({ spec, value, onChange, contests, homeworks, trainings,
   if (spec.type === 'problem') {
     return (
       <FormField label={spec.label} hint={spec.helper || '题目 ID / pid（v2: 后续接入 autocomplete）'} required={spec.required}>
-        <Input value={value || ''} onChange={(e) => onChange(e.target.value)} placeholder="例如 1001 或 P1001" />
+        <Input value={scalarValue} onChange={(e) => onChange(e.target.value)} placeholder="例如 1001 或 P1001" />
       </FormField>
     );
   }
@@ -1075,7 +1075,7 @@ function NodeParamInput({ spec, value, onChange, contests, homeworks, trainings,
     return (
       <FormField label={spec.label} hint={spec.helper} required={spec.required}>
         <Input
-          value={years.join(' ')}
+          value={years.map(String).join(' ')}
           onChange={(e) =>
             onChange(
               e.target.value
@@ -1093,7 +1093,7 @@ function NodeParamInput({ spec, value, onChange, contests, homeworks, trainings,
     <FormField label={spec.label} hint={spec.helper} required={spec.required}>
       <Input
         type={spec.type === 'number' ? 'number' : 'text'}
-        value={value ?? ''}
+        value={scalarValue}
         onChange={(e) => onChange(spec.type === 'number' ? +e.target.value : e.target.value)}
         placeholder={spec.default !== undefined ? String(spec.default) : ''}
       />

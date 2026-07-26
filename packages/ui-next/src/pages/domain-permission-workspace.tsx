@@ -82,14 +82,14 @@ async function postRoleOperation(endpoint: string, fields: Record<string, string
   if (!response.ok) throw new Error(await readHydroResponseError(response, '权限操作失败'));
   const contentType = response.headers.get('content-type') || '';
   if (!contentType.includes('application/json')) throw new Error('服务器未返回明确的 JSON 成功结果');
-  const payload = await response.json();
+  const payload: unknown = await response.json();
   const sudoUrl = resolveSudoChallengeUrl(payload, window.location.href);
   if (sudoUrl) {
     window.location.assign(sudoUrl);
     throw new Error('正在跳转到身份验证页面…');
   }
-  if (!payload || typeof payload !== 'object' || payload.ok !== true) throw new Error('服务器未确认权限操作成功');
-  return payload as Record<string, any>;
+  if (!payload || typeof payload !== 'object' || (payload as { ok?: unknown }).ok !== true) throw new Error('服务器未确认权限操作成功');
+  return payload as Record<string, unknown>;
 }
 
 function MutationError({ message }: { message: string | null }) {

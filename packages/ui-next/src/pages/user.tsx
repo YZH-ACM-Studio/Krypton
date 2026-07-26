@@ -535,12 +535,13 @@ export function SettingsPage() {
   );
 }
 
-function SettingControl({ setting, value }: { setting: R; value: any }) {
+function SettingControl({ setting, value }: { setting: R; value: unknown }) {
   const name = String(setting.key);
   const type = setting.type || 'text';
+  const formValue = value ? String(value) : '';
   if (setting.range && typeof setting.range === 'object') {
     const entries = Object.entries(setting.range);
-    return <SimpleSelect name={name} defaultValue={value || ''} options={entries.map(([k, v]) => ({ value: k, label: String(v) }))} />;
+    return <SimpleSelect name={name} defaultValue={formValue} options={entries.map(([k, v]) => ({ value: k, label: String(v) }))} />;
   }
   if (type === 'boolean') {
     return (
@@ -551,9 +552,9 @@ function SettingControl({ setting, value }: { setting: R; value: any }) {
     );
   }
   if (type === 'markdown' || type === 'textarea') {
-    return <MarkdownEditor name={name} value={value || ''} minHeight={220} />;
+    return <MarkdownEditor name={name} value={formValue} minHeight={220} />;
   }
-  return <Input name={name} defaultValue={value || ''} />;
+  return <Input name={name} defaultValue={formValue} />;
 }
 
 export function SecurityPage() {

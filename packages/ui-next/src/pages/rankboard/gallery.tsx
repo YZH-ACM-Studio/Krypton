@@ -102,9 +102,10 @@ function TeamCard({ card, canUpload, uid, onLightbox }: { card: GalleryCard; can
       }
       setImageUrls(data.imageUrls);
       setUploadSucceeded(true);
-    } catch (e: any) {
+    } catch (error) {
       setUploadSucceeded(false);
-      setErrorMessage(e?.message || '图片上传失败');
+      const message = (error as { message?: unknown } | null)?.message;
+      setErrorMessage(typeof message === 'string' && message ? message : '图片上传失败');
     } finally {
       setUploading(false);
     }

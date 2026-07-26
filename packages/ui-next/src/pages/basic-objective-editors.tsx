@@ -91,7 +91,7 @@ function ObjectiveEditorShell({
     try {
       const response = await fetch(form.action || window.location.pathname, {
         method: 'POST',
-        body: new URLSearchParams(formData as any),
+        body: new URLSearchParams(Array.from(formData, ([key, value]) => [key, String(value)])),
         credentials: 'same-origin',
         headers: { Accept: 'application/json' },
       });
@@ -107,8 +107,9 @@ function ObjectiveEditorShell({
       dirtyState.markClean();
       navigationGuard.allowNavigation();
       window.location.assign(destination);
-    } catch (caught: any) {
-      setError(caught?.message || '保存失败');
+    } catch (caught) {
+      const message = (caught as { message?: unknown } | null)?.message;
+      setError(typeof message === 'string' && message ? message : '保存失败');
       setSaving(false);
     }
   };

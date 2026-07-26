@@ -285,6 +285,38 @@ for (const pkg of modules) {
         }
     }
 }
+// Package-local mirror of UINextConfig so `bun run typecheck` works from
+// inside packages/ui-next (tsc -b needs a tsconfig.json in the package dir).
+const UINextPackageConfig = {
+    compilerOptions: {
+        ...UINextConfig.compilerOptions,
+        composite: undefined,
+        outDir: undefined,
+        incremental: true,
+        tsBuildInfoFile: './node_modules/.cache/ui-next.tsbuildinfo',
+        baseUrl: '.',
+        paths: {
+            '@/*': ['./src/*'],
+            'vj/*': ['../ui-default/*'],
+        },
+    },
+    include: [
+        'src/**/*.ts',
+        'src/**/*.tsx',
+        'test/**/*.ts',
+        'test/**/*.tsx',
+        'vite.config.ts',
+        'vitest.config.ts',
+        'announcement-capabilities.ts',
+        'domain-permission-capabilities.ts',
+        'rankboard-capabilities.ts',
+        'task-capabilities.ts',
+        'ui-locale.ts',
+    ],
+    exclude: ['node_modules', 'public'],
+};
+tryUpdate(path.resolve(process.cwd(), 'packages/ui-next', 'tsconfig.json'), UINextPackageConfig);
+
 tryUpdate(path.resolve(process.cwd(), 'tsconfig.ui.json'), UIConfig);
 tryUpdate(path.resolve(process.cwd(), 'tsconfig.ui-next.json'), UINextConfig);
 tryUpdate(path.resolve(process.cwd(), 'tsconfig.ui-workers.json'), UIWorkersConfig);

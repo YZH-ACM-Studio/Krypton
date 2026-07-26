@@ -20,6 +20,7 @@ import {
   Loader2,
   ListChecks,
   Lock,
+  type LucideIcon,
   Network,
   RefreshCw,
   Tag,
@@ -298,7 +299,7 @@ function TaskTimeBlock({
   );
 }
 
-function TimeRow({ icon: Icon, label, value }: { icon: any; label: string; value: ReactNode }) {
+function TimeRow({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: ReactNode }) {
   return (
     <div className="flex min-w-0 items-start gap-1.5 text-muted-foreground">
       <Icon className="mt-0.5 size-3 shrink-0" />
@@ -401,13 +402,15 @@ function ProgressBar({ result }: { result: TaskPointResult }) {
   );
 }
 
-function isEmptyParamValue(value: any): boolean {
+function isEmptyParamValue(value: unknown): boolean {
   return value == null || value === '' || (Array.isArray(value) && value.length === 0);
 }
 
-function refId(value: any): string {
+function refId(value: unknown): string {
   if (value == null) return '';
-  if (typeof value === 'object' && typeof value.toHexString === 'function') return value.toHexString();
+  if (typeof value === 'object' && typeof (value as { toHexString?: unknown }).toHexString === 'function') {
+    return (value as { toHexString: () => string }).toHexString();
+  }
   return String(value);
 }
 
@@ -420,7 +423,7 @@ function RefDisplay({ title, meta }: { title: ReactNode; meta?: ReactNode }) {
   );
 }
 
-function missingRefLabel(value: any): ReactNode {
+function missingRefLabel(value: unknown): ReactNode {
   const id = refId(value);
   if (!id) return '未配置';
   return <span className="break-all text-muted-foreground">未找到：{id}</span>;
@@ -431,7 +434,7 @@ function effectiveParamValue(
   spec: PresetSummary['params'][number],
   task: TaskDoc,
 ): {
-  value: any;
+  value: unknown;
   note?: string;
 } {
   const raw = node.params?.[spec.name];
@@ -1111,7 +1114,7 @@ export function TaskDetailPage() {
   );
 }
 
-function Row({ icon: Icon, label, value }: { icon: any; label: string; value: ReactNode }) {
+function Row({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: ReactNode }) {
   return (
     <div className="flex items-center justify-between">
       <span className="flex items-center gap-1.5 text-muted-foreground">

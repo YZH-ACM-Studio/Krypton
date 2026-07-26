@@ -36,7 +36,7 @@ import { StructuredRegionInputs } from '@/components/structured-region-inputs';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { SimpleSelect } from '@/components/ui/select';
-import { useBootstrap } from '@/lib/bootstrap';
+import { type KryptonUser, useBootstrap } from '@/lib/bootstrap';
 
 interface PdocLike {
   docId: number;
@@ -46,7 +46,7 @@ interface PdocLike {
     type?: string;
     mode?: 'text' | 'compile';
     subType?: string;
-    answers?: Record<string, any>;
+    answers?: Record<string, unknown>;
     template?: {
       lang?: string;
       surface: ClientStructuredCodeSegment[];
@@ -87,6 +87,26 @@ const EMPTY_DRAFT: DraftState = {
   lockedKinds: [],
   dirty: false,
 };
+
+/** Exam bootstrap augments the signed-in user with student identity fields (via userbind). */
+type ExamUser = KryptonUser & { studentId?: string; realName?: string };
+
+/** JSON-serialized `PaperDraft` row from GET /paper/:tid/draft — dates arrive as ISO strings. */
+interface SavedDraftRow {
+  pid: number;
+  answers?: Record<string, string | string[]>;
+  code?: string;
+  lang?: string;
+  lockedKinds?: QuestionKind[];
+  judgeResult?: Record<string, 'correct' | 'wrong' | 'partial'>;
+  problemFingerprint?: string;
+  updatedAt?: string;
+}
+
+interface DraftListResponse {
+  drafts: SavedDraftRow[];
+  recordStatus?: Record<string, string>;
+}
 
 const SUBSIDEBAR_KEY = 'krypton:exam-subsidebar-collapsed';
 const STRUCTURED_REGION_KINDS: QuestionKind[] = ['program_fill_text', 'program_fill_compile', 'function'];
@@ -147,8 +167,8 @@ export function ExamPaperPage() {
             now: data.now,
             signedInUser: {
               name: bs.user.name,
-              studentId: (bs.user as any).studentId,
-              realName: (bs.user as any).realName,
+              studentId: (bs.user as ExamUser).studentId,
+              realName: (bs.user as ExamUser).realName,
             },
           }}
           onEnterProblems={() => setSection('problems')}
@@ -225,7 +245,7 @@ function ProblemsSection({
     fetch(`/paper/${tid}/draft`, { headers: { Accept: 'application/json' } })
       .then(async (response) => {
         if (!response.ok) throw new Error(`草稿接口返回 HTTP ${response.status}`);
-        const body = await response.json();
+        const body: DraftListResponse = await response.json();
         if (!Array.isArray(body?.drafts)) throw new Error('草稿接口响应缺少 drafts 数组');
         return body;
       })
@@ -246,7 +266,7 @@ function ProblemsSection({
             dirty: false,
             lastSavedAt: d.updatedAt ? new Date(d.updatedAt).getTime() : undefined,
           };
-          for (const k of d.lockedKinds || []) locked.add(k as QuestionKind);
+          for (const k of d.lockedKinds || []) locked.add(k);
         }
         setDrafts(map);
         setLockedKinds(locked);
@@ -331,7 +351,7 @@ function ProblemsSection({
     const pdoc = pdict[pid];
     if (!pdoc) return;
 
-    const body: any = {};
+    const body: Record<string, string> = {};
     const type = pdoc.config?.type || 'default';
     if (type === 'objective') {
       body.answers = JSON.stringify(draft.answers);
@@ -378,7 +398,7 @@ function ProblemsSection({
       alert(`提交本类失败：${res.statusText}`);
       return;
     }
-    const body = await res.json();
+    const body: { judgeResults?: Record<string, NonNullable<DraftState['judgeResult']>> } = await res.json();
     setLockedKinds((prev) => new Set([...prev, activeKind]));
     // Merge per-pid judgeResults back.
     setDrafts((prev) => {
@@ -388,7 +408,7 @@ function ProblemsSection({
         const pid = Number(pidStr);
         next[pid] &&= {
           ...next[pid],
-          judgeResult: { ...(next[pid].judgeResult || {}), ...(results as any) },
+          judgeResult: { ...(next[pid].judgeResult || {}), ...results },
           lockedKinds: [...(next[pid].lockedKinds || []), activeKind],
         };
       }
@@ -408,7 +428,7 @@ function ProblemsSection({
       alert(`提交失败：${res.statusText}`);
       return;
     }
-    const { rid } = await res.json();
+    const { rid }: { rid: string } = await res.json();
     alert(`已提交评测，评测记录 ID: ${rid}`);
   };
 
@@ -429,7 +449,7 @@ function ProblemsSection({
       alert(`交卷失败：${res.statusText}`);
       return;
     }
-    const { count } = await res.json();
+    const { count }: { count: number } = await res.json();
     alert(`交卷成功，已生成 ${count} 份评测记录。`);
     window.location.href = `/c/${tid}/scoreboard`;
   };

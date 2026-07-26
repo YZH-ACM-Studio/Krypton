@@ -38,7 +38,72 @@ import { MarkdownEditor, MarkdownView } from '@/components/markdown-renderer';
 import { useBootstrap, type GenericUserDoc } from '@/lib/bootstrap';
 import { formatRelativeTime, makeInitials, replaceRouteTokens } from '@/lib/format';
 
-type R = Record<string, any>;
+interface DiscussionDoc {
+  _id?: unknown;
+  docId?: unknown;
+  title?: string;
+  content?: string | Record<string, string>;
+  owner?: string | number;
+  updateAt?: unknown;
+  views?: number;
+  nReply?: number;
+  pin?: boolean;
+  highlight?: boolean;
+  lock?: boolean;
+  react?: Record<string, unknown>;
+  lastRUid?: string | number;
+}
+
+interface DiscussionTailReplyDoc {
+  _id?: unknown;
+  owner?: string | number;
+  content?: string;
+  updateAt?: unknown;
+}
+
+interface DiscussionReplyDoc {
+  _id?: unknown;
+  docId?: unknown;
+  owner?: string | number;
+  content?: string;
+  updateAt?: unknown;
+  react?: Record<string, unknown>;
+  reply?: DiscussionTailReplyDoc[];
+}
+
+interface TailReplyPermissions {
+  canEdit?: boolean;
+  canDelete?: boolean;
+}
+
+interface ReplyPermissions extends TailReplyPermissions {
+  tail?: Record<string, TailReplyPermissions | undefined>;
+}
+
+interface DiscussionPermissions {
+  canEditDiscussion?: boolean;
+  canLockDiscussion?: boolean;
+  canReply?: boolean;
+  canReact?: boolean;
+  canDeleteDiscussion?: boolean;
+  replies?: Record<string, ReplyPermissions | undefined>;
+}
+
+interface DiscussionExamUrls {
+  discussion?: string;
+  discussionDetail?: string;
+  discussionCreate?: string;
+}
+
+/** A `TYPE_DISCUSSION_NODE` document — see the NodeList doc comment below. */
+interface VNodeDoc {
+  _id?: unknown;
+  docId?: string;
+  content?: string;
+  count?: number;
+}
+
+type VNodeCollection = VNodeDoc[] | Record<string, VNodeDoc[] | Record<string, VNodeDoc>>;
 
 function getUser(udict: Record<string, GenericUserDoc>, uid: string | number | undefined) {
   return uid != null ? (udict[String(uid)] ?? null) : null;
@@ -48,7 +113,19 @@ function getUser(udict: Record<string, GenericUserDoc>, uid: string | number | u
 /*  Shared: reactions                                                  */
 /* ────────────────────────────────────────────────────────────────── */
 
-function ReactionBar({ react, status, nodeType, id, canReact }: { react?: R; status?: R; nodeType: 'did' | 'drid'; id: string; canReact?: boolean }) {
+function ReactionBar({
+  react,
+  status,
+  nodeType,
+  id,
+  canReact,
+}: {
+  react?: Record<string, unknown>;
+  status?: Record<string, unknown>;
+  nodeType: 'did' | 'drid';
+  id: string;
+  canReact?: boolean;
+}) {
   const entries = Object.entries(react || {}).filter(([, count]) => Number(count) > 0);
   if (!entries.length && !canReact) return null;
   const quick = ['👍', '👀', '🎉', '❤️'];
@@ -100,14 +177,14 @@ type SortKey = 'updateAt' | 'docId' | 'views' | 'nReply';
 export function DiscussionsPage() {
   const bs = useBootstrap();
   const data = bs.page.data;
-  const ddocs: R[] = data.ddocs || [];
+  const ddocs: DiscussionDoc[] = data.ddocs || [];
   const udict: Record<string, GenericUserDoc> = bs.udict || data.udict || {};
   const page = Number(data.page) || 1;
   const dpcount = Number(data.dpcount) || 1;
-  const vnode: R = data.vnode || {};
-  const vnodes: R = data.vnodes || {}; // grouped nodes by category
+  const vnode: { title?: string; id?: string | number } = data.vnode || {};
+  const vnodes: VNodeCollection = data.vnodes || {}; // grouped nodes by category
   const locale = bs.locale;
-  const examUrls: R = data.examMode?.urls || {};
+  const examUrls: DiscussionExamUrls = data.examMode?.urls || {};
   const inExamMode = !!data.examMode?.enabled;
   const discussionsBase = examUrls.discussion || bs.urls.discussions;
   const discussionDetailRoute = examUrls.discussionDetail || bs.urls.discussionDetail;
@@ -122,8 +199,8 @@ export function DiscussionsPage() {
     const q = search.trim().toLowerCase();
     let list = !q ? ddocs : ddocs.filter((d) => (d.title || '').toLowerCase().includes(q));
     list = [...list].sort((a, b) => {
-      const va = Number((a as any)[sortKey] ?? 0);
-      const vb = Number((b as any)[sortKey] ?? 0);
+      const va = Number(a[sortKey] ?? 0);
+      const vb = Number(b[sortKey] ?? 0);
       return vb - va;
     });
     // Pinned always first
@@ -243,16 +320,24 @@ function vnodeTypeSlug(type: number | string | undefined): string {
   }
 }
 
-function NodeList({ vnodes, currentId, discussionsUrl }: { vnodes: any; currentId?: any; discussionsUrl: string }) {
+function NodeList({
+  vnodes,
+  currentId,
+  discussionsUrl,
+}: {
+  vnodes: VNodeCollection | null | undefined;
+  currentId?: string | number;
+  discussionsUrl: string;
+}) {
   // Normalize to an array — be tolerant if hydrooj ever changes the shape.
-  let items: R[] = [];
+  let items: VNodeDoc[] = [];
   if (Array.isArray(vnodes)) {
     items = vnodes;
   } else if (vnodes && typeof vnodes === 'object') {
     // Legacy/alternate shapes: { docType: [vnode, ...] } or { docType: { id: vnode } }
     for (const v of Object.values(vnodes)) {
-      if (Array.isArray(v)) items.push(...(v as R[]));
-      else if (v && typeof v === 'object') items.push(...(Object.values(v) as R[]));
+      if (Array.isArray(v)) items.push(...v);
+      else if (v && typeof v === 'object') items.push(...Object.values(v));
     }
   }
 
@@ -300,7 +385,7 @@ function DiscussionRow({
   locale,
   discussionsUrl,
 }: {
-  d: R;
+  d: DiscussionDoc;
   udict: Record<string, GenericUserDoc>;
   locale: string;
   discussionsUrl: string;
@@ -357,24 +442,24 @@ function DiscussionRow({
 export function DiscussionDetailPage() {
   const bs = useBootstrap();
   const data = bs.page.data;
-  const ddoc: R = data.ddoc || {};
-  const drdocs: R[] = data.drdocs || [];
+  const ddoc: DiscussionDoc = data.ddoc || {};
+  const drdocs: DiscussionReplyDoc[] = data.drdocs || [];
   const page = Number(data.page) || 1;
   const pcount = Number(data.pcount) || 1;
   const drcount = Number(data.drcount) || 1;
   const udict: Record<string, GenericUserDoc> = bs.udict || data.udict || {};
   const owner = getUser(udict, ddoc.owner);
   const locale = bs.locale;
-  const examUrls: R = data.examMode?.urls || {};
+  const examUrls: DiscussionExamUrls = data.examMode?.urls || {};
   const inExamMode = !!data.examMode?.enabled;
   const discussionsBase = examUrls.discussion || bs.urls.discussions;
   const discussionUrl = examUrls.discussionDetail
     ? replaceRouteTokens(examUrls.discussionDetail, { DID: String(ddoc._id || ddoc.docId || '') })
     : replaceRouteTokens(bs.urls.discussionDetail, { DID: String(ddoc._id || ddoc.docId || '') });
   const isOwner = Number(ddoc.owner) === Number(bs.user.id);
-  const permissions: R = data.permissions || {};
-  const replyPermissions: R = permissions.replies || {};
-  const reactions: R = data.reactions || {};
+  const permissions: DiscussionPermissions = data.permissions || {};
+  const replyPermissions: Record<string, ReplyPermissions | undefined> = permissions.replies || {};
+  const reactions: Record<string, Record<string, unknown> | undefined> = data.reactions || {};
   const did = String(ddoc._id || ddoc.docId || '');
   const canEditDiscussion = permissions.canEditDiscussion ?? isOwner;
   const canLockDiscussion = permissions.canLockDiscussion ?? isOwner;
@@ -385,7 +470,7 @@ export function DiscussionDetailPage() {
   const floorOffset = (page - 1) * 20; // assuming page size 20; adjust if backend differs
 
   // Quote handler: insert "> @uname wrote:\n> ..." into the bottom reply editor.
-  function quoteReply(reply: R) {
+  function quoteReply(reply: DiscussionReplyDoc) {
     const u = getUser(udict, reply.owner);
     const body = String(reply.content || '')
       .split('\n')
@@ -620,9 +705,9 @@ export function DiscussionDetailPage() {
           <h2 className="text-sm font-semibold text-muted-foreground">{drcount} 条回复</h2>
           {drdocs.map((reply, i) => {
             const rOwner = getUser(udict, reply.owner);
-            const tailReplies: R[] = reply.reply || [];
+            const tailReplies: DiscussionTailReplyDoc[] = reply.reply || [];
             const rid = String(reply._id || reply.docId || i);
-            const perms = replyPermissions[rid] || {};
+            const perms: ReplyPermissions = replyPermissions[rid] || {};
             const floor = floorOffset + i + 2; // OP is #1
             return (
               <Card key={rid} id={`floor-${floor}`}>
@@ -699,7 +784,7 @@ export function DiscussionDetailPage() {
                       {tailReplies.map((tail) => {
                         const tailOwner = getUser(udict, tail.owner);
                         const tid = String(tail._id);
-                        const tailPerms = perms.tail?.[tid] || {};
+                        const tailPerms: TailReplyPermissions = perms.tail?.[tid] || {};
                         return (
                           <div key={tid} className="space-y-2 border-b pb-3 last:border-b-0 last:pb-0">
                             <div className="flex flex-wrap items-center justify-between gap-2">

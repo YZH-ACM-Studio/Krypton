@@ -10,8 +10,8 @@
  *     attachments). Renders our own progress bars.
  */
 
-import Uppy from '@uppy/core';
-import XHRUpload from '@uppy/xhr-upload';
+import Uppy, { type Meta } from '@uppy/core';
+import XHRUpload, { type XhrUploadOpts } from '@uppy/xhr-upload';
 import { Crop, Loader2, Upload, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -22,6 +22,14 @@ import { cn } from '@/lib/cn';
 import { fileUploaderAllowedMetaFields } from '@/lib/file-uploader-meta';
 import { makeInitials } from '@/lib/format';
 import { formatHydroErrorResponse } from '@/lib/problem-save-response';
+
+/** Thrown values surfaced to the user (Error / DOMException / Uppy failures). */
+interface ErrorLike {
+  message?: string;
+}
+
+/** Hydro upload endpoints answer with a parsed JSON object (see getResponseData). */
+type UploadResponseBody = Record<string, unknown>;
 
 /* ────────────────────────────────────────────────────────────────── */
 /*  AvatarUpload — pick → square-crop → upload                        */
@@ -133,8 +141,8 @@ export function AvatarUpload({
       closeCrop();
       // Reload the page so user.avatarUrl re-resolves everywhere
       window.location.reload();
-    } catch (e: any) {
-      setErrorMsg(e?.message || '上传失败');
+    } catch (e) {
+      setErrorMsg((e as ErrorLike | null)?.message || '上传失败');
     } finally {
       setBusy(false);
     }
@@ -413,8 +421,8 @@ function ProviderPicker({ endpoint, onClose, onSubmitted }: { endpoint: string; 
       } else {
         setErr(`保存失败 (${res.status})`);
       }
-    } catch (e: any) {
-      setErr(e?.message || '保存失败');
+    } catch (e) {
+      setErr((e as ErrorLike | null)?.message || '保存失败');
     } finally {
       setBusy(false);
     }
@@ -518,11 +526,11 @@ export function FileUploader({
   const [dragOver, setDragOver] = useState(false);
   const [ingestError, setIngestError] = useState('');
 
-  const uppyRef = useRef<Uppy | null>(null);
+  const uppyRef = useRef<Uppy<Meta, UploadResponseBody> | null>(null);
 
   // Lazy-create the Uppy instance once
   if (!uppyRef.current && typeof window !== 'undefined') {
-    const uppy = new Uppy({
+    const uppy = new Uppy<Meta, UploadResponseBody>({
       autoProceed: false,
       restrictions: {
         maxFileSize,
@@ -577,7 +585,7 @@ export function FileUploader({
     });
     uppy.on('upload-success', (file, response) => {
       setItems((prev) => prev.map((it) => (it.id === file?.id ? { ...it, status: 'done', progress: 100 } : it)));
-      if (file?.name) onUploaded?.(file.name, response?.body as Record<string, unknown> | undefined);
+      if (file?.name) onUploaded?.(file.name, response?.body);
     });
     uppy.on('upload-error', (file, error) => {
       const message = error?.message || '上传失败';
@@ -625,10 +633,10 @@ export function FileUploader({
           });
           uppy.setFileState(id, {
             xhrUpload: {
-              ...((uppy.getFile(id) as any).xhrUpload || {}),
+              ...(uppy.getFile(id).xhrUpload || {}),
               allowedMetaFields: fileUploaderAllowedMetaFields(meta),
-            },
-          } as any);
+            } as XhrUploadOpts<Meta, UploadResponseBody>,
+          });
         } catch (error) {
           console.error('File rejected before upload', { filename: f.name, error });
           setIngestError(error instanceof Error ? error.message : `${f.name} 无法加入上传队列`);

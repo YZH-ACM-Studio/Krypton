@@ -64,8 +64,26 @@ interface PageData {
 
 const ENDPOINT = '/admin/authtoken';
 
+/**
+ * JSON envelope from the auth-token handler. `issue` returns `{ token, doc }`;
+ * `update` / `renew` / `revoke` return `{ ok }`. Failures carry an `error`
+ * payload that is either a bare string or `{ message }` — typed as an
+ * intersection so both access paths below typecheck without runtime narrowing.
+ */
+interface PostOpResponse {
+  token?: string;
+  ok?: boolean;
+  error?: string & { message?: string };
+  [key: string]: unknown;
+}
+
+/** Best-effort `.message` access on a caught value without assuming an Error instance. */
+interface ErrorLike {
+  message?: unknown;
+}
+
 /** POST an operation to the auth-token handler; returns parsed JSON, throws on failure. */
-async function postOp(fields: Record<string, string>): Promise<any> {
+async function postOp(fields: Record<string, string>): Promise<PostOpResponse> {
   const resp = await fetch(ENDPOINT, {
     method: 'POST',
     headers: {
@@ -75,7 +93,7 @@ async function postOp(fields: Record<string, string>): Promise<any> {
     credentials: 'include',
     body: new URLSearchParams(fields),
   });
-  const json = await resp.json().catch(() => ({}) as any);
+  const json: PostOpResponse = await resp.json().catch(() => ({}));
   if (!resp.ok) {
     throw new Error(json?.error?.message || json?.error || `请求失败 (${resp.status})`);
   }
@@ -147,11 +165,11 @@ function IssueDialog({ open, onClose, onIssued }: { open: boolean; onClose: () =
       if (ys.length) fields.years = ys.join(',');
       const json = await postOp(fields);
       if (!json?.token) throw new Error('服务器未返回令牌');
-      const tok = json.token as string;
+      const tok = json.token;
       reset();
       onIssued(tok);
-    } catch (e: any) {
-      setError(String(e?.message || e));
+    } catch (e) {
+      setError(String((e as ErrorLike)?.message || e));
       setBusy(false);
     }
   };
@@ -290,8 +308,8 @@ function RenewDialog({ target, onClose }: { target: AuthTokenRow | null; onClose
       if (expireDays.trim()) fields.expireDays = expireDays.trim();
       await postOp(fields);
       window.location.reload();
-    } catch (e: any) {
-      setError(String(e?.message || e));
+    } catch (e) {
+      setError(String((e as ErrorLike)?.message || e));
       setBusy(false);
     }
   };
@@ -352,8 +370,8 @@ function RevokeDialog({ target, onClose }: { target: AuthTokenRow | null; onClos
     try {
       await postOp({ operation: 'revoke', id: target._id });
       window.location.reload();
-    } catch (e: any) {
-      setError(String(e?.message || e));
+    } catch (e) {
+      setError(String((e as ErrorLike)?.message || e));
       setBusy(false);
     }
   };
@@ -436,8 +454,8 @@ function EditDialog({ target, onClose }: { target: AuthTokenRow | null; onClose:
         years: ys.join(','),
       });
       window.location.reload();
-    } catch (e: any) {
-      setError(String(e?.message || e));
+    } catch (e) {
+      setError(String((e as ErrorLike)?.message || e));
       setBusy(false);
     }
   };

@@ -12,8 +12,23 @@
  */
 import { useEffect, useRef } from 'react';
 
+// Kept loose on purpose: consumers merge/spread rdocs into their own local
+// record shapes (records.tsx `R`, problem-detail's `RawRecordDoc`).
 export type Rdoc = Record<string, any>;
 export type RecordSocketPath = '/record-conn' | '/record-detail-conn' | '/exam-mode/team-role-conn';
+
+/**
+ * Untrusted wire message pushed over the record sockets. Every field is
+ * validated/coerced at its use site; `rdoc` stays loose by design (see Rdoc).
+ */
+interface RecordSocketMessage {
+  teamRoleChanged?: unknown;
+  teamRevision?: unknown;
+  teamCodeAvailable?: unknown;
+  snapshotId?: unknown;
+  rdoc?: Rdoc | null;
+  recordScoreAction?: Record<string, unknown> | null;
+}
 
 export interface UseRecordSocketOptions {
   /** WS endpoint base path, default `/record-conn`. */
@@ -23,9 +38,9 @@ export interface UseRecordSocketOptions {
   /** Called whenever a new rdoc snapshot arrives. */
   onRdoc: (rdoc: Rdoc) => void;
   /** Server-issued score-management capability paired with the rdoc snapshot. */
-  onRecordScoreAction?: (action: Record<string, any> | null, rid: string) => void;
+  onRecordScoreAction?: (action: Record<string, unknown> | null, rid: string) => void;
   /** Optional error callback for diagnostics. */
-  onError?: (e: any) => void;
+  onError?: (e: unknown) => void;
   /** Team roster/captain revision changed; callers must refresh server capabilities. */
   onTeamRoleChange?: (revision: number | null) => void;
   /** A virtual-print snapshot was persisted for this team member. */
@@ -35,25 +50,26 @@ export interface UseRecordSocketOptions {
 }
 
 export function dispatchRecordSocketPayload(
-  payload: any,
+  payload: unknown,
   onRdoc: (rdoc: Rdoc) => void,
   onTeamRoleChange?: (revision: number | null) => void,
   onTeamCodeAvailable?: (snapshotId: string) => void,
-  onRecordScoreAction?: (action: Record<string, any> | null, rid: string) => void,
+  onRecordScoreAction?: (action: Record<string, unknown> | null, rid: string) => void,
 ) {
-  if (payload?.teamRoleChanged === true) {
-    const revision = Number(payload.teamRevision);
+  const msg = payload as RecordSocketMessage | null | undefined;
+  if (msg?.teamRoleChanged === true) {
+    const revision = Number(msg.teamRevision);
     onTeamRoleChange?.(Number.isSafeInteger(revision) && revision >= 0 ? revision : null);
     return;
   }
-  if (payload?.teamCodeAvailable === true) {
-    const snapshotId = String(payload.snapshotId || '');
+  if (msg?.teamCodeAvailable === true) {
+    const snapshotId = String(msg.snapshotId || '');
     if (/^[0-9a-f]{24}$/.test(snapshotId)) onTeamCodeAvailable?.(snapshotId);
     return;
   }
-  if (payload?.rdoc) {
-    onRdoc(payload.rdoc);
-    if ('recordScoreAction' in payload) onRecordScoreAction?.(payload.recordScoreAction || null, String(payload.rdoc._id || ''));
+  if (msg?.rdoc) {
+    onRdoc(msg.rdoc);
+    if ('recordScoreAction' in msg) onRecordScoreAction?.(msg.recordScoreAction || null, String(msg.rdoc._id || ''));
   }
 }
 
@@ -124,7 +140,7 @@ export function useRecordSocket({
         return;
       }
       ws.onmessage = (e) => {
-        let payload: any;
+        let payload: RecordSocketMessage | null;
         try {
           payload = JSON.parse(e.data);
         } catch {
@@ -168,7 +184,7 @@ export function useRecordSocket({
   }, [path, filterKey, disabled]);
 }
 
-function stableFilterKey(filters?: Record<string, any>): string {
+function stableFilterKey(filters?: Record<string, string | number | boolean | undefined>): string {
   if (!filters) return '';
   return Object.keys(filters)
     .sort()

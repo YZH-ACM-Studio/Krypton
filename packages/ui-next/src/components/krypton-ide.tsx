@@ -309,6 +309,12 @@ export function getStatus(s: number): StatusDisplay {
   return STATUS_MAP[s] || { label: `Status ${s}`, className: 'text-muted-foreground' };
 }
 
+/** Thrown values surfaced to the user (Error / DOMException from fetch). */
+interface ErrorLike {
+  name?: string;
+  message?: string;
+}
+
 /* ================================================================== */
 /*  Small UI primitives (used only inside this file)                   */
 /* ================================================================== */
@@ -1181,7 +1187,7 @@ export function KryptonIDE({
         return m;
       });
 
-      const distributeFromRdoc = (rdoc: any) => {
+      const distributeFromRdoc = (rdoc: PretestResult) => {
         const distributed = distributePretestRecord(rdoc, runningIds);
         setPretestResults((prev) => {
           const m = new Map(prev);
@@ -1248,9 +1254,9 @@ export function KryptonIDE({
         }
 
         setErrorForAll(8, '评测超时，请稍后重试');
-      } catch (e: any) {
-        if (e.name !== 'AbortError') {
-          setErrorForAll(8, e.message || '请求失败');
+      } catch (e) {
+        if ((e as ErrorLike).name !== 'AbortError') {
+          setErrorForAll(8, (e as ErrorLike).message || '请求失败');
         }
       } finally {
         setPretestRunning((prev) => {
@@ -1483,7 +1489,7 @@ export function KryptonIDE({
             langMenuPos &&
             createPortal(
               <ScrollArea
-                ref={langDropdownRef as any}
+                ref={langDropdownRef}
                 style={{ position: 'fixed', top: langMenuPos.top, left: langMenuPos.left }}
                 className="z-[60] max-h-64 w-48 rounded-lg border bg-popover shadow-lg"
                 viewportClassName="p-1"

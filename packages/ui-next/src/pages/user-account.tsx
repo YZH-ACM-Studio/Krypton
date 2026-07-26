@@ -42,7 +42,77 @@ import { useBootstrap } from '@/lib/bootstrap';
 import { makeInitials, formatRelativeTime, formatDateTime, replaceRouteTokens } from '@/lib/format';
 import { cn } from '@/lib/cn';
 
-type R = Record<string, any>;
+/* ------------------------------------------------------------------ */
+/*  Server-doc shapes flowing through the loosely-typed page data      */
+/* ------------------------------------------------------------------ */
+
+/** Subset of hydrooj `Setting` consumed by the settings form. */
+interface SettingDescriptor {
+  key: string;
+  name?: string;
+  desc?: string;
+  family?: string;
+  type?: string;
+  flag: number;
+  ui?: string;
+  value?: unknown;
+  range?: Array<string | [string, string]> | Record<string, string>;
+}
+
+/** JSON-serialized MongoDB `Binary` (WebAuthn credential id). */
+interface BinaryIdLike {
+  $binary?: { base64?: unknown };
+  buffer?: string | { data?: unknown };
+  data?: unknown;
+}
+
+interface SessionDoc {
+  _id: string;
+  isCurrent?: boolean;
+  updateIp?: string;
+  createIp?: string;
+  updateUaInfo?: { browser?: { name?: string }; os?: { name?: string } };
+}
+
+interface AuthenticatorDoc {
+  credentialID?: string | BinaryIdLike;
+  name?: string;
+  credentialDeviceType?: string;
+  fmt?: string;
+  regat?: number;
+}
+
+interface OauthRelation {
+  platform?: string;
+  id?: string;
+  name?: string;
+}
+
+interface LoginMethod {
+  id?: string;
+  type?: string;
+  name?: string;
+  text?: string;
+}
+
+interface MessageDoc {
+  _id: string;
+  from?: number;
+  flag?: number;
+  content?: unknown;
+}
+
+interface MessageUser {
+  uname?: string;
+  avatarUrl?: string;
+}
+
+interface UserFileDoc {
+  _id?: string;
+  name?: string;
+  filename?: string;
+  size?: number;
+}
 
 function objectIdDate(id: unknown) {
   const value = String(id || '');
@@ -65,7 +135,7 @@ function parseSystemMessage(content: unknown) {
   }
 }
 
-function getMessagePreview(message: R) {
+function getMessagePreview(message: MessageDoc) {
   const system = parseSystemMessage(message.content);
   if (!system) return String(message.content || '');
   return system.message.replace(/\{([^{}]+)\}/g, (_, key: string) => {
@@ -74,7 +144,7 @@ function getMessagePreview(message: R) {
   });
 }
 
-function renderMessageContent(message: R, linkClassName: string) {
+function renderMessageContent(message: MessageDoc, linkClassName: string) {
   const system = parseSystemMessage(message.content);
   if (!system) return String(message.content || '');
   const parts: React.ReactNode[] = [];
@@ -104,7 +174,7 @@ function renderMessageContent(message: R, linkClassName: string) {
   return parts;
 }
 
-function binaryIdToBase64(value: any) {
+function binaryIdToBase64(value: string | BinaryIdLike | null | undefined) {
   if (!value) return '';
   if (typeof value === 'string') return value;
   if (value.$binary?.base64) return String(value.$binary.base64);
@@ -210,11 +280,11 @@ export function UserAccountPage() {
 function SettingsPanel() {
   const bs = useBootstrap();
   const data = bs.page.data;
-  const settings: R[] = data.settings || [];
-  const current: R = data.current || {};
+  const settings: SettingDescriptor[] = data.settings || [];
+  const current: Record<string, unknown> = data.current || {};
 
   // Group settings by family
-  const families = new Map<string, R[]>();
+  const families = new Map<string, SettingDescriptor[]>();
   for (const s of settings) {
     if (s.flag & 1) continue; // FLAG_HIDDEN
     const fam = s.family || 'general';
@@ -254,7 +324,7 @@ function SettingsPanel() {
   );
 }
 
-function SettingField({ setting, value }: { setting: R; value: any }) {
+function SettingField({ setting, value }: { setting: SettingDescriptor; value: unknown }) {
   const isDisabled = !!(setting.flag & 2); // FLAG_DISABLED
   const isSecret = !!(setting.flag & 4); // FLAG_SECRET
   const bs = useBootstrap();
@@ -265,8 +335,8 @@ function SettingField({ setting, value }: { setting: R; value: any }) {
     // The text input is still emitted as a hidden input so the form
     // round-trips a non-empty value if the user picks a provider via
     // the popover (the popover hits /home/avatar directly and reloads).
-    const data = bs.page.data as R;
-    const current = data.current || {};
+    const data = bs.page.data as { current?: { avatarUrl?: string | null } };
+    const current: { avatarUrl?: string | null } = data.current || {};
     const uname = bs.user.name;
     const avatarUrl = current.avatarUrl || null;
     return (
@@ -278,7 +348,7 @@ function SettingField({ setting, value }: { setting: R; value: any }) {
         <div>
           <AvatarUpload uname={uname} currentUrl={avatarUrl || (typeof value === 'string' && /^https?:|^\//.test(value) ? value : null)} size={96} />
           {/* Preserve the existing text value when posting the rest of the form. */}
-          <input type="hidden" name={setting.key} value={value ?? ''} readOnly />
+          <input type="hidden" name={setting.key} value={(value ?? '') as string} readOnly />
         </div>
       </div>
     );
@@ -304,11 +374,11 @@ function SettingField({ setting, value }: { setting: R; value: any }) {
             options={rangeOptions(setting.range)}
           />
         ) : setting.type === 'markdown' && !isDisabled ? (
-          <MarkdownEditor name={setting.key} value={value ?? setting.value ?? ''} minHeight={260} />
+          <MarkdownEditor name={setting.key} value={(value ?? setting.value ?? '') as string} minHeight={260} />
         ) : setting.type === 'textarea' || setting.type === 'markdown' ? (
           <textarea
             name={setting.key}
-            defaultValue={value ?? setting.value ?? ''}
+            defaultValue={(value ?? setting.value ?? '') as string}
             disabled={isDisabled}
             rows={setting.type === 'markdown' ? 6 : 3}
             className="w-full rounded-md border bg-background px-3 py-2 text-sm font-mono disabled:opacity-50"
@@ -317,7 +387,7 @@ function SettingField({ setting, value }: { setting: R; value: any }) {
           <Input
             type="number"
             name={setting.key}
-            defaultValue={value ?? setting.value ?? ''}
+            defaultValue={(value ?? setting.value ?? '') as string | number}
             disabled={isDisabled}
             step={setting.type === 'float' ? 'any' : '1'}
             className="max-w-xs"
@@ -327,7 +397,7 @@ function SettingField({ setting, value }: { setting: R; value: any }) {
         ) : (
           <Input
             name={setting.key}
-            defaultValue={isSecret ? '' : (value ?? setting.value ?? '')}
+            defaultValue={isSecret ? '' : ((value ?? setting.value ?? '') as string)}
             disabled={isDisabled}
             type={isSecret ? 'password' : 'text'}
             className="max-w-sm"
@@ -338,10 +408,10 @@ function SettingField({ setting, value }: { setting: R; value: any }) {
   );
 }
 
-function rangeOptions(range: any): { value: string; label: string }[] {
+function rangeOptions(range: SettingDescriptor['range']): { value: string; label: string }[] {
   if (!range) return [];
   if (Array.isArray(range)) {
-    return range.map((opt: any) => {
+    return range.map((opt) => {
       const val = Array.isArray(opt) ? opt[0] : opt;
       const label = Array.isArray(opt) ? opt[1] || opt[0] : opt;
       return { value: String(val), label: String(label) };
@@ -361,10 +431,10 @@ function rangeOptions(range: any): { value: string; label: string }[] {
 function SecurityPanel() {
   const bs = useBootstrap();
   const data = bs.page.data;
-  const sessions: R[] = data.sessions || [];
-  const authenticators: R[] = data.authenticators || [];
-  const relations: R[] = data.relations || [];
-  const loginMethods: R[] = data.loginMethods || [];
+  const sessions: SessionDoc[] = data.sessions || [];
+  const authenticators: AuthenticatorDoc[] = data.authenticators || [];
+  const relations: OauthRelation[] = data.relations || [];
+  const loginMethods: LoginMethod[] = data.loginMethods || [];
   const linkedPlatforms = new Set(relations.map((relation) => relation.platform));
   const methodsToLink = loginMethods.filter((method) => !linkedPlatforms.has(method.id || method.type));
 
@@ -578,7 +648,7 @@ function SecurityPanel() {
                 </TableRow>
               ) : (
                 sessions.map((s) => {
-                  const ua = s.updateUaInfo || {};
+                  const ua: NonNullable<SessionDoc['updateUaInfo']> = s.updateUaInfo || {};
                   const browser = ua.browser?.name || '未知';
                   const os = ua.os?.name || '';
                   return (
@@ -652,15 +722,15 @@ function SecurityPanel() {
 
 interface Conv {
   uid: number;
-  udoc: R;
-  messages: R[];
+  udoc: MessageUser;
+  messages: MessageDoc[];
 }
 
-function parseConversations(raw: any): Conv[] {
+function parseConversations(raw: unknown): Conv[] {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [];
   const result: Conv[] = [];
   for (const [uid, conv] of Object.entries(raw)) {
-    const c = conv as R;
+    const c = conv as { udoc?: MessageUser; messages?: MessageDoc[] };
     result.push({
       uid: Number(uid),
       udoc: c.udoc || {},
@@ -676,7 +746,7 @@ function parseConversations(raw: any): Conv[] {
   return result;
 }
 
-function lastMessageTime(messages: R[]): number {
+function lastMessageTime(messages: MessageDoc[]): number {
   const last = messages[messages.length - 1];
   if (!last) return 0;
   return objectIdDate(last._id)?.getTime() || 0;
@@ -701,7 +771,7 @@ function MessagesPanel() {
   const [selectedUid, setSelectedUid] = useState<number | null>(conversations[0]?.uid ?? null);
   const [search, setSearch] = useState('');
   const [draftContent, setDraftContent] = useState('');
-  const [pendingDelete, setPendingDelete] = useState<R | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<MessageDoc | null>(null);
   const [sending, setSending] = useState(false);
   const draftRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -772,7 +842,7 @@ function MessagesPanel() {
 
   const activeConv = conversations.find((c) => c.uid === selectedUid) || null;
 
-  const insertQuote = (m: R) => {
+  const insertQuote = (m: MessageDoc) => {
     if (!activeConv) return;
     const uname = activeConv.udoc.uname || `UID ${activeConv.uid}`;
     const body = String(m.content || '')
@@ -813,7 +883,7 @@ function MessagesPanel() {
     }
   };
 
-  const confirmDelete = async (msg: R) => {
+  const confirmDelete = async (msg: MessageDoc) => {
     setPendingDelete(null);
     if (!msg?._id) return;
     const form = new FormData();
@@ -972,7 +1042,13 @@ function MessagesPanel() {
  * first message of each minute-bucket) and per-message quote / delete
  * affordances.
  */
-function renderGroupedMessages(messages: R[], selfUid: number, locale: string, onQuote: (m: R) => void, onAskDelete: (m: R) => void) {
+function renderGroupedMessages(
+  messages: MessageDoc[],
+  selfUid: number,
+  locale: string,
+  onQuote: (m: MessageDoc) => void,
+  onAskDelete: (m: MessageDoc) => void,
+) {
   return messages.map((m, i) => {
     const fromMe = m.from === selfUid;
     const time = objectIdDate(m._id);
@@ -1032,7 +1108,7 @@ function renderGroupedMessages(messages: R[], selfUid: number, locale: string, o
 function FilesPanel() {
   const bs = useBootstrap();
   const data = bs.page.data;
-  const files: R[] = data.files || [];
+  const files: UserFileDoc[] = data.files || [];
   const [uploadName, setUploadName] = useState('');
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
 

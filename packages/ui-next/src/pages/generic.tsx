@@ -9,7 +9,14 @@ import { useBootstrap } from '@/lib/bootstrap';
 import { formatDateTime } from '@/lib/format';
 import { cn } from '@/lib/cn';
 
-type R = Record<string, any>;
+type R = Record<string, unknown>;
+
+/** Rows rendered by ObjectTable — hydro docs commonly carry one of these identifying keys. */
+interface RowDoc extends R {
+  _id?: string | number;
+  docId?: string | number;
+  name?: string;
+}
 
 const TEMPLATE_LABELS: Record<string, string> = {
   'problem_edit.html': '编辑题目',
@@ -133,7 +140,7 @@ const LABELS: Record<string, string> = {
   content: '内容',
 };
 
-function usefulEntries(data: R): [string, any][] {
+function usefulEntries(data: R): [string, unknown][] {
   return Object.entries(data || {})
     .filter(([key, value]) => !HIDDEN_KEYS.has(key) && value !== undefined)
     .filter(([key]) => !key.startsWith('__'));
@@ -162,7 +169,7 @@ function isDateLike(value: unknown) {
   const text = String(value);
   if (/^\d{24}$/.test(text)) return false;
   if (!/^\d{4}-\d{2}-\d{2}|^\d{13}$/.test(text)) return false;
-  const date = new Date(value as any);
+  const date = new Date(value);
   return !Number.isNaN(date.getTime());
 }
 
@@ -205,7 +212,7 @@ function MetricTile({ name, value, locale }: { name: string; value: unknown; loc
   );
 }
 
-function DataSection({ name, value, locale }: { name: string; value: any; locale: string }) {
+function DataSection({ name, value, locale }: { name: string; value: unknown; locale: string }) {
   const title = labelFor(name);
   const Icon = iconFor(value);
 
@@ -227,7 +234,7 @@ function DataSection({ name, value, locale }: { name: string; value: any; locale
   );
 }
 
-function ValueView({ value, locale, depth }: { value: any; locale: string; depth: number }): ReactNode {
+function ValueView({ value, locale, depth }: { value: unknown; locale: string; depth: number }): ReactNode {
   if (isScalar(value)) return <ScalarValue value={value} locale={locale} />;
   if (Array.isArray(value)) return <ArrayValue value={value} locale={locale} depth={depth} />;
   if (isPlainObject(value)) return <ObjectValue value={value} locale={locale} depth={depth} />;
@@ -251,13 +258,13 @@ function ScalarValue({ value, locale }: { value: unknown; locale: string }) {
   return <span className="break-words text-sm">{describeValue(value, locale)}</span>;
 }
 
-function ArrayValue({ value, locale, depth }: { value: any[]; locale: string; depth: number }) {
+function ArrayValue({ value, locale, depth }: { value: unknown[]; locale: string; depth: number }) {
   if (value.length === 0) {
     return <EmptyData label="暂无条目" />;
   }
 
   if (value.every(isPlainObject)) {
-    return <ObjectTable rows={value as R[]} locale={locale} depth={depth} />;
+    return <ObjectTable rows={value as RowDoc[]} locale={locale} depth={depth} />;
   }
 
   return (
@@ -278,7 +285,7 @@ function ObjectValue({ value, locale, depth }: { value: R; locale: string; depth
 
   const arrayEntries = entries.filter(([, item]) => Array.isArray(item) && item.every(isPlainObject));
   if (depth === 0 && arrayEntries.length === 1 && entries.length <= 3) {
-    return <ObjectTable rows={arrayEntries[0][1] as R[]} locale={locale} depth={depth} />;
+    return <ObjectTable rows={arrayEntries[0][1] as RowDoc[]} locale={locale} depth={depth} />;
   }
 
   return (
@@ -342,7 +349,7 @@ function pickColumns(rows: R[]) {
   return ordered.slice(0, 6);
 }
 
-function ObjectTable({ rows, locale, depth }: { rows: R[]; locale: string; depth: number }) {
+function ObjectTable({ rows, locale, depth }: { rows: RowDoc[]; locale: string; depth: number }) {
   if (rows.length === 0) return <EmptyData label="暂无条目" />;
   const columns = pickColumns(rows);
   if (columns.length === 0) return <EmptyData label={`${rows.length} 项`} />;

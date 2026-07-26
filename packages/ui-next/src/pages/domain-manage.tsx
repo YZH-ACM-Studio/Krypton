@@ -22,9 +22,32 @@ import {
   getSelectableDomainUserIds,
   paginateDomainUsers,
   type DomainUserRow,
+  type DomainUserSource,
 } from '@/lib/domain-user-workspace';
 
-type R = Record<string, any>;
+type SettingValue = string | number | boolean | null | undefined;
+type SettingRange = Array<string | [string, string]> | Record<string, unknown>;
+
+interface DomainSetting {
+  key: string;
+  name?: string;
+  desc?: string;
+  type?: string;
+  ui?: string;
+  value?: SettingValue;
+  flag: number;
+  family?: string;
+  range?: SettingRange;
+}
+
+interface DomainRoleDoc {
+  _id?: string | number;
+}
+
+interface DomainGroupDoc {
+  name: string;
+  uids?: (string | number)[];
+}
 
 /* ================================================================== */
 /*  Shared layout for domain admin pages                               */
@@ -42,7 +65,7 @@ function DomainAdminShell({ title, children }: { title: string; children: React.
 /*  Settings field renderer (reused from user-account pattern)         */
 /* ================================================================== */
 
-function SettingField({ setting, value }: { setting: R; value: any }) {
+function SettingField({ setting, value }: { setting: DomainSetting; value: SettingValue }) {
   const isDisabled = !!(setting.flag & 2);
 
   return (
@@ -65,11 +88,11 @@ function SettingField({ setting, value }: { setting: R; value: any }) {
             options={rangeOptions(setting.range)}
           />
         ) : setting.type === 'markdown' && !isDisabled ? (
-          <MarkdownEditor name={setting.key} value={value ?? setting.value ?? ''} minHeight={260} />
+          <MarkdownEditor name={setting.key} value={(value ?? setting.value ?? '') as string} minHeight={260} />
         ) : setting.type === 'textarea' || setting.type === 'markdown' ? (
           <textarea
             name={setting.key}
-            defaultValue={value ?? setting.value ?? ''}
+            defaultValue={(value ?? setting.value ?? '') as string | number}
             disabled={isDisabled}
             rows={setting.type === 'markdown' ? 6 : 3}
             className="w-full rounded-md border bg-background px-3 py-2 text-sm font-mono disabled:opacity-50"
@@ -78,7 +101,7 @@ function SettingField({ setting, value }: { setting: R; value: any }) {
           <Input
             type="number"
             name={setting.key}
-            defaultValue={value ?? setting.value ?? ''}
+            defaultValue={(value ?? setting.value ?? '') as string | number}
             disabled={isDisabled}
             step={setting.type === 'float' ? 'any' : '1'}
             className="max-w-xs"
@@ -86,7 +109,7 @@ function SettingField({ setting, value }: { setting: R; value: any }) {
         ) : setting.type === 'password' ? (
           <Input type="password" name={setting.key} defaultValue="" disabled={isDisabled} autoComplete="new-password" className="max-w-xs" />
         ) : (
-          <Input name={setting.key} defaultValue={value ?? setting.value ?? ''} disabled={isDisabled} className="max-w-sm" />
+          <Input name={setting.key} defaultValue={(value ?? setting.value ?? '') as string | number} disabled={isDisabled} className="max-w-sm" />
         )}
       </div>
     </div>
@@ -133,10 +156,10 @@ function RoleQuickSelect({
   );
 }
 
-function rangeOptions(range: any): { value: string; label: string }[] {
+function rangeOptions(range: SettingRange | undefined): { value: string; label: string }[] {
   if (!range) return [];
   if (Array.isArray(range)) {
-    return range.map((opt: any) => {
+    return range.map((opt) => {
       const val = Array.isArray(opt) ? opt[0] : opt;
       const label = Array.isArray(opt) ? opt[1] || opt[0] : opt;
       return { value: String(val), label: String(label) };
@@ -155,10 +178,10 @@ function rangeOptions(range: any): { value: string; label: string }[] {
 export function DomainEditPage() {
   const bs = useBootstrap();
   const data = bs.page.data;
-  const current: R = data.current || {};
-  const settings: R[] = data.settings || [];
+  const current: Record<string, SettingValue> = data.current || {};
+  const settings: DomainSetting[] = data.settings || [];
 
-  const families = new Map<string, R[]>();
+  const families = new Map<string, DomainSetting[]>();
   for (const s of settings) {
     if (s.flag & 1) continue; // FLAG_HIDDEN
     const fam = s.family || 'general';
@@ -388,8 +411,8 @@ function RemoveDomainUsersDialog({
 export function DomainUserPage() {
   const bs = useBootstrap();
   const data = bs.page.data;
-  const roles: R[] = data.roles || [];
-  const rudocs: R = data.rudocs || {};
+  const roles: DomainRoleDoc[] = data.roles || [];
+  const rudocs: Record<string, DomainUserSource[] | undefined> = data.rudocs || {};
   const roleOptions = roles.map((role) => String(role._id || role)).filter((role) => role !== 'guest');
   const assignableRoles = roleOptions.filter((role) => role !== 'default');
   const rows = flattenDomainUsers(rudocs, roleOptions);
@@ -710,7 +733,7 @@ export function DomainUserPage() {
 export function DomainGroupPage() {
   const bs = useBootstrap();
   const data = bs.page.data;
-  const groups: R[] = data.groups || [];
+  const groups: DomainGroupDoc[] = data.groups || [];
   const [groupValues, setGroupValues] = useState<Record<string, string>>(() =>
     Object.fromEntries(groups.map((group) => [String(group.name), (group.uids || []).join(',')])),
   );

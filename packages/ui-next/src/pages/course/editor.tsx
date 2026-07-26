@@ -163,8 +163,8 @@ export function CourseEditPage() {
       });
       if (!response.ok) throw new Error(await responseError(response));
       setCourseFiles((current) => current.filter((file) => file.name !== filename));
-    } catch (error: any) {
-      setFileError(error?.message || '课件删除失败');
+    } catch (error) {
+      setFileError((error as { message?: string } | null)?.message || '课件删除失败');
     }
   };
 
@@ -176,7 +176,7 @@ export function CourseEditPage() {
       const form = event.currentTarget;
       const response = await fetch(form.action, {
         method: 'POST',
-        body: new URLSearchParams(new FormData(form) as any),
+        body: new URLSearchParams(new FormData(form) as unknown as URLSearchParams),
         credentials: 'same-origin',
       });
       if (!response.ok) throw new Error(await responseError(response));
@@ -189,8 +189,8 @@ export function CourseEditPage() {
       if (!body?.tid) throw new Error('课程保存成功响应缺少 tid');
       setSaveState('idle');
       window.location.assign(`/course/${body.tid}`);
-    } catch (error: any) {
-      setSaveError(error?.message || '课程保存失败');
+    } catch (error) {
+      setSaveError((error as { message?: string } | null)?.message || '课程保存失败');
       setSaveState('dirty');
     }
   };

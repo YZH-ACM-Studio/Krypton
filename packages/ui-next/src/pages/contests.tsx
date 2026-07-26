@@ -41,11 +41,48 @@ import {
 } from '@/lib/contest-exam-display';
 import { formatDateTime, replaceRouteTokens, toDate } from '@/lib/format';
 
-type R = Record<string, any>;
+interface ContestDoc {
+  docId?: string | number;
+  title?: string;
+  rule?: string;
+  beginAt?: unknown;
+  endAt?: unknown;
+  lockAt?: unknown;
+  attend?: number;
+  rated?: boolean;
+  participationMode?: string;
+  entryMode?: string;
+  content?: string | Record<string, string>;
+  allowViewCode?: boolean;
+  allowPrint?: boolean;
+  unlocked?: boolean;
+  pids?: (string | number)[];
+}
+
+interface ContestStatusDoc {
+  attend?: number;
+  rank?: number;
+  score?: number;
+  endAt?: unknown;
+}
+
+interface ContestExamUrls {
+  overview?: string;
+  ranking?: string;
+  record?: string;
+  problem?: string;
+}
+
+interface ScoreboardProblemBrief {
+  title?: string;
+  nAccept?: number;
+  nSubmit?: number;
+}
+
 interface ScoreboardCell {
   type?: string;
   value?: string | number;
-  raw?: any;
+  raw?: unknown;
   team?: TeamScoreboardCellMeta;
   score?: number;
   hover?: string;
@@ -62,7 +99,7 @@ interface TeamScoreboardCellMeta {
 /*  Shared helpers                                                   */
 /* ────────────────────────────────────────────────────────────────── */
 
-function contestState(c: R) {
+function contestState(c: ContestDoc) {
   const now = Date.now();
   const begin = toDate(c.beginAt)?.getTime() || 0;
   const end = toDate(c.endAt)?.getTime() || 0;
@@ -105,11 +142,11 @@ function ruleBadgeVariant(rule?: string): 'default' | 'secondary' | 'outline' {
   }
 }
 
-function isTeamContest(c: R): boolean {
+function isTeamContest(c: ContestDoc): boolean {
   return c.rule === 'acm' && c.participationMode === 'team';
 }
 
-function teamWorkspaceUrl(c: R): string {
+function teamWorkspaceUrl(c: ContestDoc): string {
   return `/contest/${encodeURIComponent(String(c.docId))}/teams`;
 }
 
@@ -238,20 +275,20 @@ const VIEW_KEY = 'krypton.contests.view';
 export function ContestsPage() {
   const bs = useBootstrap();
   const data = bs.page.data;
-  const tdocs: R[] = data.tdocs || [];
+  const tdocs: ContestDoc[] = data.tdocs || [];
   const page = Number(data.page) || 1;
   const tpcount = Number(data.tpcount) || 1;
   const locale = bs.locale;
   const groups: string[] = data.groups || [];
   const rules: Record<string, string> = data.rules || {};
-  const tsdict: Record<string, R> = data.tsdict || {};
+  const tsdict: Record<string, ContestStatusDoc> = data.tsdict || {};
   const currentGroup = data.group || '';
   const currentRule = data.rule || '';
   const currentQuery = data.q || '';
 
   const [view, setView] = useState<'list' | 'cards'>(() => {
     try {
-      return (localStorage.getItem(VIEW_KEY) as any) || 'list';
+      return (localStorage.getItem(VIEW_KEY) as 'list' | 'cards' | null) || 'list';
     } catch {
       return 'list';
     }
@@ -269,9 +306,9 @@ export function ContestsPage() {
 
   // Bucket contests by phase for stats + sort
   const buckets = useMemo(() => {
-    const running: R[] = [];
-    const upcoming: R[] = [];
-    const ended: R[] = [];
+    const running: ContestDoc[] = [];
+    const upcoming: ContestDoc[] = [];
+    const ended: ContestDoc[] = [];
     for (const c of tdocs) {
       const st = contestState(c);
       if (st.phase === 'running') running.push(c);
@@ -335,7 +372,7 @@ export function ContestsPage() {
         />
         <StatCell
           label="我参加"
-          value={Object.values(tsdict).filter((s: any) => s?.attend).length}
+          value={Object.values(tsdict).filter((s) => s?.attend).length}
           icon={<Trophy className="size-4 text-primary" />}
         />
       </div>
@@ -369,7 +406,7 @@ export function ContestsPage() {
               <SimpleSelect
                 name="rule"
                 defaultValue={currentRule}
-                options={[{ value: '', label: '全部' }, ...Object.entries(rules).map(([key, label]) => ({ value: key, label: label as string }))]}
+                options={[{ value: '', label: '全部' }, ...Object.entries(rules).map(([key, label]) => ({ value: key, label }))]}
               />
             </div>
             <div className="flex items-center gap-2">
@@ -464,10 +501,10 @@ function StatCell({
   );
 }
 
-function RunningContestCard({ c, bs, tsdict }: { c: R; bs: ReturnType<typeof useBootstrap>; tsdict: Record<string, R> }) {
+function RunningContestCard({ c, bs, tsdict }: { c: ContestDoc; bs: ReturnType<typeof useBootstrap>; tsdict: Record<string, ContestStatusDoc> }) {
   const endAt = toDate(c.endAt)?.getTime() || 0;
   const cd = useCountdown(endAt);
-  const tsdoc = tsdict[String(c.docId)] || {};
+  const tsdoc: ContestStatusDoc = tsdict[String(c.docId)] || {};
   const detailUrl = replaceRouteTokens(bs.urls.contestDetail, { TID: String(c.docId) });
   return (
     <Card className="group h-full transition-all hover:border-primary/40 hover:shadow-md">
@@ -509,9 +546,9 @@ function RunningContestCard({ c, bs, tsdict }: { c: R; bs: ReturnType<typeof use
   );
 }
 
-function ContestCard({ c, bs, tsdict }: { c: R; bs: ReturnType<typeof useBootstrap>; tsdict: Record<string, R> }) {
+function ContestCard({ c, bs, tsdict }: { c: ContestDoc; bs: ReturnType<typeof useBootstrap>; tsdict: Record<string, ContestStatusDoc> }) {
   const st = contestState(c);
-  const tsdoc = tsdict[String(c.docId)] || {};
+  const tsdoc: ContestStatusDoc = tsdict[String(c.docId)] || {};
   const detailUrl = replaceRouteTokens(bs.urls.contestDetail, { TID: String(c.docId) });
   return (
     <Card className="group h-full transition-all hover:border-primary/40 hover:shadow-md">
@@ -549,7 +586,17 @@ function ContestCard({ c, bs, tsdict }: { c: R; bs: ReturnType<typeof useBootstr
   );
 }
 
-function ContestTable({ docs, bs, tsdict, locale }: { docs: R[]; bs: ReturnType<typeof useBootstrap>; tsdict: Record<string, R>; locale: string }) {
+function ContestTable({
+  docs,
+  bs,
+  tsdict,
+  locale,
+}: {
+  docs: ContestDoc[];
+  bs: ReturnType<typeof useBootstrap>;
+  tsdict: Record<string, ContestStatusDoc>;
+  locale: string;
+}) {
   return (
     <Card>
       <CardContent className="p-0">
@@ -567,7 +614,7 @@ function ContestTable({ docs, bs, tsdict, locale }: { docs: R[]; bs: ReturnType<
           <TableBody>
             {docs.map((c) => {
               const st = contestState(c);
-              const ts = tsdict[String(c.docId)] || {};
+              const ts: ContestStatusDoc = tsdict[String(c.docId)] || {};
               return (
                 <TableRow key={String(c.docId)}>
                   <TableCell>
@@ -627,9 +674,9 @@ function ContestTable({ docs, bs, tsdict, locale }: { docs: R[]; bs: ReturnType<
 export function ContestDetailPage() {
   const bs = useBootstrap();
   const data = bs.page.data;
-  const tdoc: R = data.tdoc || {};
+  const tdoc: ContestDoc = data.tdoc || {};
   const pids: (string | number)[] = data.pids || tdoc.pids || [];
-  const tsdoc: R = data.tsdoc || {};
+  const tsdoc: ContestStatusDoc = data.tsdoc || {};
   const attended = data.attended || tsdoc.attend;
   const st = contestState(tdoc);
   const locale = bs.locale;
@@ -637,7 +684,7 @@ export function ContestDetailPage() {
   const isACM = tdoc.rule === 'acm';
   const isExam = tdoc.rule === 'exam';
   const isTeam = isTeamContest(tdoc);
-  const scoreDoc: R = isTeam ? data.teamStatus || {} : tsdoc;
+  const scoreDoc: ContestStatusDoc = isTeam ? data.teamStatus || {} : tsdoc;
   const canManageContest = !!data.canManageContest;
   const canViewRecord = !!data.canViewRecord;
   const isClientRequired = tdoc.entryMode === 'client_required';
@@ -923,7 +970,7 @@ export function ContestDetailPage() {
                 <CardTitle className="text-sm">附件</CardTitle>
               </CardHeader>
               <CardContent className="space-y-1.5">
-                {data.files.map((f: R) => (
+                {data.files.map((f: { name?: string }) => (
                   <a
                     key={f.name}
                     href={`${detailUrl}/file/contest/${f.name}`}
@@ -1012,14 +1059,14 @@ function formatDuration(begin: number, end: number): string {
 export function ContestScoreboardPage() {
   const bs = useBootstrap();
   const data = bs.page.data;
-  const tdoc: R = data.tdoc || {};
+  const tdoc: ContestDoc = data.tdoc || {};
   const rows: ScoreboardCell[][] = Array.isArray(data.rows) ? data.rows : [];
   const header = rows[0] || [];
   const body = rows.slice(1);
-  const pdict: Record<string, R> = data.pdict || {};
+  const pdict: Record<string, ScoreboardProblemBrief> = data.pdict || {};
   const udict: Record<string, GenericUserDoc> = { ...(bs.udict || {}), ...(data.udict || {}) };
   const isHomework = tdoc.rule === 'homework';
-  const examUrls: R = data.examMode?.urls || {};
+  const examUrls: ContestExamUrls = data.examMode?.urls || {};
   const inExamMode = !!data.examMode?.enabled;
   const detailUrl =
     examUrls.overview ||
@@ -1148,7 +1195,7 @@ export function ContestScoreboardPage() {
 
   function renderHeaderCell(cell: ScoreboardCell, index: number) {
     if (cell.type === 'problem' && cell.raw) {
-      const problem = pdict[String(cell.raw)] || {};
+      const problem: ScoreboardProblemBrief = pdict[String(cell.raw)] || {};
       return (
         <a
           href={

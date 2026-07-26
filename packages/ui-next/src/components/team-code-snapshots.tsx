@@ -54,18 +54,31 @@ export interface TeamCodeBuffer {
   code: string;
 }
 
-function responseMessage(payload: any, status: number): string {
+/** Thrown values surfaced to the user (Error / DOMException from fetch). */
+interface ErrorLike {
+  name?: string;
+  message?: string;
+}
+
+/** Error body shapes produced by Hydro handlers behind this endpoint. */
+interface ApiErrorPayload {
+  message?: unknown;
+  error?: { message?: unknown } | null;
+  detail?: unknown;
+}
+
+function responseMessage(payload: ApiErrorPayload | null, status: number): string {
   const message = payload?.message || payload?.error?.message || payload?.error || payload?.detail;
   return typeof message === 'string' && message.trim() ? message.trim() : `HTTP ${status}`;
 }
 
-async function requestJson(url: string, init?: RequestInit): Promise<any> {
+async function requestJson<T = unknown>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     ...init,
     credentials: 'same-origin',
     headers: { Accept: 'application/json', ...(init?.headers || {}) },
   });
-  let payload: any = null;
+  let payload: (ApiErrorPayload & { page?: { data?: T } }) | null = null;
   try {
     payload = await response.json();
   } catch {
@@ -77,7 +90,7 @@ async function requestJson(url: string, init?: RequestInit): Promise<any> {
     throw new Error('队伍状态已变化，正在刷新。');
   }
   if (!response.ok) throw new Error(responseMessage(payload, response.status));
-  return payload?.page?.data || payload;
+  return (payload?.page?.data || payload) as T;
 }
 
 function snapshotUrl(endpoint: string, snapshotId: string): string {
@@ -117,12 +130,12 @@ export function TeamCodeSendDialog({
     setSelected(new Set());
     setLoading(true);
     setError(null);
-    void requestJson(endpoint, { signal: controller.signal })
+    void requestJson<TeamCodeListPayload>(endpoint, { signal: controller.signal })
       .then((payload: TeamCodeListPayload) => {
         setTargets(Array.isArray(payload.targets) ? payload.targets : []);
         setPresenceError(payload.presenceError || null);
       })
-      .catch((caught: any) => {
+      .catch((caught: ErrorLike | null) => {
         if (caught?.name !== 'AbortError') setError(caught?.message || '无法读取当前队员。');
       })
       .finally(() => {
@@ -143,7 +156,7 @@ export function TeamCodeSendDialog({
     form.append('language', buffer.language);
     form.append('code', buffer.code);
     try {
-      const payload = await requestJson(endpoint, { method: 'POST', body: form });
+      const payload = await requestJson<{ notificationFailures?: unknown[] }>(endpoint, { method: 'POST', body: form });
       const failures = Array.isArray(payload.notificationFailures) ? payload.notificationFailures.length : 0;
       toast.success('代码快照已保存', {
         description: failures
@@ -151,8 +164,8 @@ export function TeamCodeSendDialog({
           : `已保存给 ${selected.size} 名队员；在线页面会自动打开，离线时可稍后读取。`,
       });
       onOpenChange(false);
-    } catch (caught: any) {
-      setError(caught?.message || '代码快照发送失败。');
+    } catch (caught) {
+      setError((caught as ErrorLike | null)?.message || '代码快照发送失败。');
     } finally {
       setSending(false);
     }
@@ -293,16 +306,16 @@ export function TeamCodeSnapshotDrawer({
       setDetailLoading(true);
       setError(null);
       try {
-        const payload = await requestJson(snapshotUrl(endpoint, snapshotId), { signal: controller.signal });
+        const payload = await requestJson<{ snapshot: TeamCodeSnapshotDetail }>(snapshotUrl(endpoint, snapshotId), { signal: controller.signal });
         if (!detailRequestGate.current.isCurrent(generation)) return;
-        const next = payload.snapshot as TeamCodeSnapshotDetail;
+        const next = payload.snapshot;
         setDetail(next);
         setSnapshots((current) =>
           current.map((snapshot) => (snapshot.snapshotId === snapshotId ? { ...snapshot, state: next.state, openedAt: next.openedAt } : snapshot)),
         );
-      } catch (caught: any) {
-        if (caught?.name !== 'AbortError' && detailRequestGate.current.isCurrent(generation)) {
-          setError(caught?.message || '无法读取代码快照。');
+      } catch (caught) {
+        if ((caught as ErrorLike | null)?.name !== 'AbortError' && detailRequestGate.current.isCurrent(generation)) {
+          setError((caught as ErrorLike | null)?.message || '无法读取代码快照。');
         }
       } finally {
         if (detailRequestGate.current.isCurrent(generation)) setDetailLoading(false);
@@ -323,7 +336,7 @@ export function TeamCodeSnapshotDrawer({
     const controller = new AbortController();
     setLoading(true);
     setError(null);
-    void requestJson(endpoint, { signal: controller.signal })
+    void requestJson<TeamCodeListPayload>(endpoint, { signal: controller.signal })
       .then(async (payload: TeamCodeListPayload) => {
         const next = Array.isArray(payload.snapshots) ? payload.snapshots : [];
         setSnapshots(next);
@@ -336,7 +349,7 @@ export function TeamCodeSnapshotDrawer({
           setDetailLoading(false);
         }
       })
-      .catch((caught: any) => {
+      .catch((caught: ErrorLike | null) => {
         if (caught?.name !== 'AbortError') {
           setDetailLoading(false);
           setError(caught?.message || '无法读取代码快照列表。');

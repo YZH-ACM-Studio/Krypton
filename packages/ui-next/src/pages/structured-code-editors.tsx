@@ -2,10 +2,10 @@ import { buildClientStructuredCodeSurface, type ClientStructuredCodeSegment } fr
 import { ArrowLeft, CheckCircle2, Copy, Eye, EyeOff, FileCode2, PencilLine, Plus, Save, Trash2 } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
 import { MarkdownEditor } from '@/components/markdown-renderer';
-import { useProblemDataWriteGuard } from '@/components/problem-data-write-guard';
+import { useProblemDataWriteGuard, type ProblemDataWriteGuardState } from '@/components/problem-data-write-guard';
 import { StructuredRegionAuthorEditor, type AuthorLineRange, type AuthorLineSelection } from '@/components/structured-region-author-editor';
 import { StructuredRegionInputs } from '@/components/structured-region-inputs';
-import { StructuredProblemMetadataPanel, type KnowledgeMindmapOption } from '@/components/structured-problem-metadata-panel';
+import { StructuredProblemMetadataPanel, type KnowledgeMapOption, type KnowledgeMindmapOption } from '@/components/structured-problem-metadata-panel';
 import { useFormDirtyState, useUnsavedChangesGuard } from '@/components/unsaved-changes-guard';
 import { FileUploader } from '@/components/uploader';
 import { Button } from '@/components/ui/button';
@@ -16,7 +16,52 @@ import { cn } from '@/lib/cn';
 import { readProblemSaveSuccess } from '@/lib/problem-save-response';
 import { sha256Text } from '@/lib/sha256';
 
-type R = Record<string, any>;
+interface StructuredEditorProblemDoc {
+  pid?: string | number;
+  docId?: string | number;
+  title?: string;
+  content?: string;
+  structureLockedAt?: unknown;
+  structureRevision?: number;
+  codeEvaluationStatus?: string;
+}
+interface DraftLineRange {
+  startLine?: unknown;
+  endLine?: unknown;
+}
+interface DraftRegion extends DraftLineRange {
+  id?: unknown;
+  title?: unknown;
+  description?: unknown;
+  prompt?: unknown;
+}
+interface DraftCase {
+  input?: unknown;
+  output?: unknown;
+}
+interface StructuredMainDraft {
+  mode?: string;
+  lang?: string;
+  source?: string;
+  publicRanges?: DraftLineRange[];
+  regions?: DraftRegion[];
+  cases?: DraftCase[];
+}
+interface TestdataFilePayload {
+  name?: unknown;
+  size?: unknown;
+}
+interface StructuredEditorPageData {
+  page_name?: string;
+  pdoc?: StructuredEditorProblemDoc;
+  structuredConfig?: { main?: StructuredMainDraft };
+  testdata?: TestdataFilePayload[];
+  langRange?: Record<string, string>;
+  knowledgeMaps?: KnowledgeMapOption[];
+  knowledgeMindmapOptions?: KnowledgeMindmapOption[];
+  canUseCustomPid?: unknown;
+  statementWriteGuard?: ProblemDataWriteGuardState;
+}
 interface RegionMeta {
   key: string;
   id: string;
@@ -146,9 +191,9 @@ function CasesEditor({ cases, files, onChange }: { cases: CaseMeta[]; files: Tes
 
 function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
   const bs = useBootstrap();
-  const data = bs.page.data as R;
-  const pdoc = data.pdoc || {};
-  const initial = data.structuredConfig?.main || {};
+  const data = bs.page.data as StructuredEditorPageData;
+  const pdoc: StructuredEditorProblemDoc = data.pdoc || {};
+  const initial: StructuredMainDraft = data.structuredConfig?.main || {};
   const isCreate = String(data.page_name || '').startsWith('problem_create_');
   const locked = !!pdoc.structureLockedAt;
   const pid = String(pdoc.pid || pdoc.docId || '');
@@ -158,7 +203,7 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
   const [source, setSource] = useState(String(initial.source || ''));
   const [publicRanges, setPublicRanges] = useState<PublicRangeMeta[]>(() =>
     Array.isArray(initial.publicRanges)
-      ? initial.publicRanges.map((item: R, index: number) => ({
+      ? initial.publicRanges.map((item: DraftLineRange, index: number) => ({
           key: `public-${index}`,
           startLine: Number(item.startLine),
           endLine: Number(item.endLine),
@@ -172,7 +217,7 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
   const [regions, setRegions] = useState<RegionMeta[]>(() => {
     if (!Array.isArray(initial.regions)) return [];
     return initial.regions
-      .map((item: R, index: number) => {
+      .map((item: DraftRegion, index: number) => {
         const startLine = Number(item.startLine);
         const endLine = Number(item.endLine);
         return {
@@ -189,11 +234,11 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
       .sort((a, b) => a.startLine - b.startLine || a.endLine - b.endLine || a.key.localeCompare(b.key));
   });
   const [cases, setCases] = useState<CaseMeta[]>(() =>
-    Array.isArray(initial.cases) ? initial.cases.map((item: R) => ({ input: String(item.input || ''), output: String(item.output || '') })) : [],
+    Array.isArray(initial.cases) ? initial.cases.map((item: DraftCase) => ({ input: String(item.input || ''), output: String(item.output || '') })) : [],
   );
   const [testdataFiles, setTestdataFiles] = useState<TestdataFile[]>(() =>
     Array.isArray(data.testdata)
-      ? data.testdata.map((file: R) => ({ name: String(file.name || ''), size: Number(file.size) || 0 })).filter((file) => file.name)
+      ? data.testdata.map((file: TestdataFilePayload) => ({ name: String(file.name || ''), size: Number(file.size) || 0 })).filter((file) => file.name)
       : [],
   );
   const [structureRevision, setStructureRevision] = useState(Number(pdoc.structureRevision) || 1);
@@ -401,7 +446,7 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
       if (typeof confirmation === 'string') formData.set('activeContainerConfirmation', confirmation);
       const response = await fetch(form.action || window.location.pathname, {
         method: 'POST',
-        body: new URLSearchParams(formData as any),
+        body: new URLSearchParams(formData as unknown as URLSearchParams),
         credentials: 'same-origin',
         headers: { Accept: 'application/json' },
       });
@@ -418,8 +463,8 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
       dirtyState.markClean();
       navigationGuard.allowNavigation();
       window.location.assign(destination);
-    } catch (caught: any) {
-      setError(caught?.message || '保存失败');
+    } catch (caught) {
+      setError((caught as { message?: string } | null)?.message || '保存失败');
       setSaving(false);
       setSaveAction('save');
     }
@@ -433,7 +478,7 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
       setError('文件已上传，但服务端未返回最新结构版本与文件清单；为避免覆盖并发修改，请重新载入。');
       return;
     }
-    const canonicalFiles = files.map((file: R) => ({ name: String(file?.name || ''), size: Number(file?.size) || 0 })).filter((file) => file.name);
+    const canonicalFiles = files.map((file: TestdataFilePayload) => ({ name: String(file?.name || ''), size: Number(file?.size) || 0 })).filter((file) => file.name);
     setStructureRevision(revision);
     setTestdataFiles(canonicalFiles);
     setCases((current) => proposeCasePairs(current, canonicalFiles));
@@ -465,8 +510,8 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
       if (!Array.isArray(ids) || !ids[0]) throw new Error('克隆响应缺少新题 ID');
       navigationGuard.allowNavigation();
       window.location.assign(`/p/${ids[0]}/edit`);
-    } catch (caught: any) {
-      setError(caught?.message || '克隆失败');
+    } catch (caught) {
+      setError((caught as { message?: string } | null)?.message || '克隆失败');
       setCloning(false);
     }
   };
@@ -795,7 +840,7 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
           isCreate={isCreate}
           locked={locked}
           knowledgeMaps={data.knowledgeMaps || []}
-          mindmapOptions={(data.knowledgeMindmapOptions || []) as KnowledgeMindmapOption[]}
+          mindmapOptions={data.knowledgeMindmapOptions || []}
           canUseCustomPid={data.canUseCustomPid === true}
           formDirty={dirtyState.dirty}
           onMetadataChange={dirtyState.recompute}

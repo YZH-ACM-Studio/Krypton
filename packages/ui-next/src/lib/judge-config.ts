@@ -175,12 +175,61 @@ export function joinMemory(value: string, unit: 'k' | 'm' | 'g'): string | undef
 /*  Parsing                                                           */
 /* ────────────────────────────────────────────────────────────────── */
 
+/**
+ * Untrusted shapes produced by `YAML.parse` before normalization. Scalar
+ * fields the code forwards verbatim are typed optimistically (the runtime
+ * tolerates any truthy value there); everything else stays `unknown` and is
+ * narrowed/coerced at the use site.
+ */
+interface RawJudgeCase {
+  input?: unknown;
+  in?: unknown;
+  output?: unknown;
+  out?: unknown;
+  time?: unknown;
+  memory?: unknown;
+  hint?: unknown;
+  hintPublic?: unknown;
+  videoUrl?: unknown;
+  videoPublic?: unknown;
+}
+
+interface RawJudgeSubtask {
+  id?: unknown;
+  score?: unknown;
+  type?: ScoreMode;
+  time?: unknown;
+  memory?: unknown;
+  if?: unknown;
+  cases?: unknown;
+}
+
+interface RawJudgeConfig {
+  type?: unknown;
+  time?: unknown;
+  memory?: unknown;
+  checker?: string;
+  checker_type?: CheckerType | string;
+  score?: ScoreMode;
+  langs?: unknown;
+  interactor?: string;
+  user?: string;
+  manager?: string;
+  filename?: string;
+  float_relative?: unknown;
+  float_absolute?: unknown;
+  time_limit_rate?: unknown;
+  memory_limit_rate?: unknown;
+  cases?: unknown;
+  subtasks?: unknown;
+}
+
 export function parseJudgeConfig(yaml: string): { config: JudgeConfig; error?: string } {
   if (!yaml.trim()) {
     return { config: emptyConfig() };
   }
   try {
-    const raw = YAML.parse(yaml);
+    const raw: RawJudgeConfig | null | undefined = YAML.parse(yaml);
     if (!raw || typeof raw !== 'object') return { config: emptyConfig() };
     const config: JudgeConfig = {
       type: (raw.type || 'default') as ProblemType,
@@ -215,15 +264,15 @@ export function parseJudgeConfig(yaml: string): { config: JudgeConfig; error?: s
     }
     if (Array.isArray(raw.cases)) config.cases = raw.cases.map(normalizeCase).filter(Boolean) as JudgeCase[];
     if (Array.isArray(raw.subtasks)) {
-      config.subtasks = raw.subtasks.map((s: any, i: number) => normalizeSubtask(s, i + 1)).filter(Boolean) as JudgeSubtask[];
+      config.subtasks = raw.subtasks.map((s: RawJudgeSubtask | null, i: number) => normalizeSubtask(s, i + 1)).filter(Boolean) as JudgeSubtask[];
     }
     return { config };
-  } catch (err: any) {
-    return { config: emptyConfig(), error: err?.message || String(err) };
+  } catch (err) {
+    return { config: emptyConfig(), error: (err as Error | undefined)?.message || String(err) };
   }
 }
 
-function normalizeCase(raw: any): JudgeCase | null {
+function normalizeCase(raw: RawJudgeCase | null | undefined): JudgeCase | null {
   if (!raw || typeof raw !== 'object') return null;
   const input = raw.input || raw.in || '';
   const output = raw.output || raw.out || '';
@@ -238,7 +287,7 @@ function normalizeCase(raw: any): JudgeCase | null {
   return c;
 }
 
-function normalizeSubtask(raw: any, fallbackId: number): JudgeSubtask | null {
+function normalizeSubtask(raw: RawJudgeSubtask | null | undefined, fallbackId: number): JudgeSubtask | null {
   if (!raw || typeof raw !== 'object') return null;
   const cases = Array.isArray(raw.cases) ? (raw.cases.map(normalizeCase).filter(Boolean) as JudgeCase[]) : [];
   const out: JudgeSubtask = {
@@ -262,7 +311,7 @@ export function emptyConfig(): JudgeConfig {
 /* ────────────────────────────────────────────────────────────────── */
 
 export function serializeJudgeConfig(config: JudgeConfig, opts?: { preserveSource?: string }): string {
-  const obj: Record<string, any> = {};
+  const obj: Record<string, unknown> = {};
   if (config.type && config.type !== 'default') obj.type = config.type;
   if (config.time) obj.time = config.time;
   if (config.memory) obj.memory = config.memory;
@@ -285,7 +334,7 @@ export function serializeJudgeConfig(config: JudgeConfig, opts?: { preserveSourc
 
   if (config.subtasks && config.subtasks.length > 0) {
     obj.subtasks = config.subtasks.map((s, i) => {
-      const out: Record<string, any> = { id: s.id ?? i + 1 };
+      const out: Record<string, unknown> = { id: s.id ?? i + 1 };
       if (typeof s.score === 'number') out.score = s.score;
       if (s.type) out.type = s.type;
       if (s.time) out.time = s.time;
@@ -307,7 +356,7 @@ export function serializeJudgeConfig(config: JudgeConfig, opts?: { preserveSourc
   if (opts?.preserveSource) {
     try {
       const doc = YAML.parseDocument(opts.preserveSource);
-      const oldTop = doc.toJS() || {};
+      const oldTop: Record<string, unknown> = doc.toJS() || {};
       const structuralChange =
         JSON.stringify(oldTop.cases || []) !== JSON.stringify(obj.cases || []) ||
         JSON.stringify(oldTop.subtasks || []) !== JSON.stringify(obj.subtasks || []);
@@ -346,8 +395,8 @@ export function serializeJudgeConfig(config: JudgeConfig, opts?: { preserveSourc
   return YAML.stringify(obj, { lineWidth: 0 });
 }
 
-function caseToObj(c: JudgeCase): Record<string, any> {
-  const o: Record<string, any> = { input: c.input, output: c.output };
+function caseToObj(c: JudgeCase): Record<string, unknown> {
+  const o: Record<string, unknown> = { input: c.input, output: c.output };
   if (c.time) o.time = c.time;
   if (c.memory) o.memory = c.memory;
   if (c.hint) o.hint = c.hint;

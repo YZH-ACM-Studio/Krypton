@@ -70,7 +70,11 @@ __*
 .monokle
 
 packages/*/public/assets
+packages/*/public/**/assets
 node_modules.*
+
+# Local generated and imported artifacts
+/output/
 
 # Local ops handbook — contains sudo passwords for oj / oj-vigil
 # DO NOT commit. See `docs/KRYPTON-PLAN.md` for non-sensitive deployment notes.

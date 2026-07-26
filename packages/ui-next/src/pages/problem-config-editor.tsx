@@ -70,6 +70,7 @@ import {
   JudgeSubtask,
   ProblemType,
   CheckerType,
+  ScoreMode,
   parseJudgeConfig,
   serializeJudgeConfig,
   autoPair,
@@ -85,7 +86,17 @@ import {
   joinMemory,
 } from '@/lib/judge-config';
 
-type R = Record<string, any>;
+/** Minimal slice of the problem document this editor reads (header title fallback). */
+interface ProblemDocSummary {
+  title?: string;
+  pid?: string | number;
+}
+
+/** Testdata file entry (Hydro `FileInfo`) as served in `data.testdata`. */
+interface ProblemFileEntry {
+  name: string;
+  size?: number;
+}
 
 const PROBLEM_TYPES: { value: ProblemType; label: string; desc: string }[] = [
   { value: 'default', label: '传统评测', desc: '标准输入输出，逐用例判分' },
@@ -114,18 +125,23 @@ const CHECKER_TYPES_NEEDING_FILE: CheckerType[] = ['lemon', 'syzoj', 'testlib', 
 export function ProblemConfigEditor({
   problemUrl,
   pdoc,
-  files,
+  files: looseFiles,
   initialYaml,
   dataWriteGuard,
   embedded = false,
 }: {
   problemUrl: string;
-  pdoc: R;
-  files: R[];
+  pdoc: ProblemDocSummary;
+  /** Entries arrive from the untyped page-bootstrap payload; narrowed below. */
+  files: Partial<ProblemFileEntry>[];
   initialYaml: string;
   dataWriteGuard?: ProblemDataWriteGuardState;
   embedded?: boolean;
 }) {
+  // `data.testdata` entries are Hydro `FileInfo` objects (always named); the
+  // payload is untyped upstream, so narrow once here and keep the rest of the
+  // tree strictly typed.
+  const files = looseFiles as ProblemFileEntry[];
   // --- state ---
   const [yamlText, setYamlText] = useState(initialYaml);
   const initialParse = useMemo(() => parseJudgeConfig(initialYaml), [initialYaml]);
@@ -142,7 +158,7 @@ export function ProblemConfigEditor({
   const editVersion = useRef(0);
   const [mobileTab, setMobileTab] = useState<'files' | 'cases' | 'subtasks'>('files');
   // File being edited in the modal — null = closed.
-  const [editingFile, setEditingFile] = useState<R | null>(null);
+  const [editingFile, setEditingFile] = useState<ProblemFileEntry | null>(null);
   const dataGuard = useProblemDataWriteGuard(dataWriteGuard);
 
   // --- file pool with classification ---
@@ -233,9 +249,9 @@ export function ProblemConfigEditor({
       setSavedYaml(submittedYaml);
       setSaveMsg(editVersion.current === savedVersion ? '已保存' : '提交时版本已保存，当前修改尚未保存');
       setTimeout(() => setSaveMsg(null), 1800);
-    } catch (e: any) {
+    } catch (e) {
       console.error('Failed to save problem judge config', e);
-      setSaveError(e?.message || '保存失败');
+      setSaveError((e instanceof Error && e.message) || '保存失败');
     } finally {
       setSaving(false);
     }
@@ -310,7 +326,7 @@ export function ProblemConfigEditor({
       const nextId = (existing.length ? Math.max(...existing.map((s) => s.id ?? 0)) : 0) + 1;
       const newSt: JudgeSubtask = { id: nextId, score: 0, type: 'min', cases: [] };
       const newConfig: JudgeConfig = { ...cfg, subtasks: [...existing, newSt] };
-      if (cfg.cases) delete (newConfig as any).cases;
+      if (cfg.cases) delete newConfig.cases;
       return newConfig;
     });
   };
@@ -501,7 +517,7 @@ export function ProblemConfigEditor({
                       // remove these cases from flat list
                       if (cfg.cases) {
                         out.cases = cfg.cases.filter((c) => !cases.some((cc) => cc.input === c.input && cc.output === c.output));
-                        if (out.cases.length === 0) delete (out as any).cases;
+                        if (out.cases.length === 0) delete out.cases;
                       }
                       return out;
                     });
@@ -526,7 +542,7 @@ export function ProblemConfigEditor({
                 <div className="flex min-h-0 flex-col">
                   <MiniTabs
                     value={mobileTab === 'subtasks' ? 'cases' : mobileTab}
-                    onValueChange={(v) => setMobileTab(v as any)}
+                    onValueChange={(v) => setMobileTab(v as 'files' | 'cases')}
                     items={[
                       { value: 'files', label: '文件' },
                       { value: 'cases', label: '用例' },
@@ -589,7 +605,7 @@ function BasicConfigStrip({
 }: {
   config: JudgeConfig;
   updateConfig: (m: (c: JudgeConfig) => JudgeConfig) => void;
-  files: R[];
+  files: ProblemFileEntry[];
 }) {
   const [showAdvanced, setShowAdvanced] = useState(false);
   return (
@@ -617,7 +633,7 @@ function BasicConfigStrip({
             <Field label="扁平算分模式">
               <SimpleSelect
                 value={config.score || ''}
-                onValueChange={(v) => updateConfig((c) => ({ ...c, score: (v || undefined) as any }))}
+                onValueChange={(v) => updateConfig((c) => ({ ...c, score: (v || undefined) as ScoreMode | undefined }))}
                 size="sm"
                 ariaLabel="扁平算分模式"
                 options={[
@@ -953,7 +969,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function FilePicker({ value, files, onChange }: { value: string; files: R[]; onChange: (v: string) => void }) {
+function FilePicker({ value, files, onChange }: { value: string; files: ProblemFileEntry[]; onChange: (v: string) => void }) {
   return (
     <SimpleSelect
       value={value}
@@ -1104,11 +1120,11 @@ function FilesColumn({
   addCase: _addCase,
   onOpenFile,
 }: {
-  files: R[];
+  files: ProblemFileEntry[];
   usedInPairs: Set<string>;
   problemUrl: string;
   addCase: (c: JudgeCase) => void;
-  onOpenFile: (file: R) => void;
+  onOpenFile: (file: ProblemFileEntry) => void;
 }) {
   const [filter, setFilter] = useState('');
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -1205,7 +1221,7 @@ function FilesColumn({
   );
 }
 
-function FileRow({ f, onOpen }: { f: R; onOpen?: () => void }) {
+function FileRow({ f, onOpen }: { f: ProblemFileEntry; onOpen?: () => void }) {
   const cls = classify(f.name);
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `file:${f.name}`,
@@ -1633,7 +1649,7 @@ function SubtaskCard({
         />
         <SimpleSelect
           value={subtask.type || 'min'}
-          onValueChange={(v) => onUpdate({ type: v as any })}
+          onValueChange={(v) => onUpdate({ type: v as ScoreMode })}
           size="sm"
           className="w-auto min-w-[5rem] text-[11px]"
           options={[

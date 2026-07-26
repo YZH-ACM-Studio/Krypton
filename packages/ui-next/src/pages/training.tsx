@@ -13,7 +13,83 @@ import { formatPlainTextSummary, replaceRouteTokens } from '@/lib/format';
 import { useChapterQuery } from './course/chapter-query';
 import { searchTrainingProblems } from './training-search';
 
-type R = Record<string, any>;
+/** Section node of a training DAG (serialized hydrooj `TrainingNode`). */
+interface TrainingDagNode {
+  _id: number;
+  title: string;
+  content?: string;
+  /** Legacy field kept by old editors; rendered like `content`. */
+  description?: string;
+  requireNids: number[];
+  pids: number[];
+}
+
+/** Training document fields read by the list and detail pages. */
+interface TrainingDoc {
+  docId: string;
+  title: string;
+  content?: string;
+  description?: string;
+  /** Legacy list-page summary field. */
+  desc?: string;
+  attend?: number;
+  dag?: TrainingDagNode[];
+}
+
+/** Per-user training status (`tsdoc` / `tsdict` values). */
+interface TrainingStatusDoc {
+  enroll?: number;
+  donePids?: number[];
+  doneNids?: number[];
+}
+
+/** Per-section status computed by the training detail handler (`nsdict`). */
+interface TrainingNodeStatus {
+  progress?: number;
+  isDone?: boolean;
+  isProgress?: boolean;
+  isOpen?: boolean;
+  isInvalid?: boolean;
+}
+
+/** Problem fields rendered in section problem lists (`pdict` values). */
+interface TrainingProblemDoc {
+  docId?: number;
+  pid?: string;
+  title?: string;
+  nSubmit?: number;
+  nAccept?: number;
+  origStat?: { accepted: number; submitted: number };
+}
+
+/** Per-user problem status (`psdict` values). */
+interface TrainingProblemStatusDoc {
+  status?: number;
+}
+
+/** 参加名单 row（P2.3，服务端仅对管理员/教师下发）。 */
+interface TrainingMember {
+  uid: number;
+  uname: string;
+  realName: string;
+  studentId: string;
+  groups: string[];
+  done: number;
+  total: number;
+}
+
+/** Per-training stats derived on the list page. */
+interface TrainingListEntry {
+  t: TrainingDoc;
+  ts: TrainingStatusDoc;
+  total: number;
+  done: number;
+  pct: number;
+  sectionCount: number;
+  sectionDone: number;
+  enrolled: boolean;
+  fullyDone: boolean;
+}
 
 /* ────────────────────────────────────────────────────────────────── */
 /*  Training list page                                                */
@@ -24,15 +100,15 @@ const VIEW_KEY = 'krypton.training.view';
 export function TrainingPage() {
   const bs = useBootstrap();
   const data = bs.page.data;
-  const tdocs: R[] = data.tdocs || [];
+  const tdocs: TrainingDoc[] = data.tdocs || [];
   const page = Number(data.page) || 1;
   const tpcount = Number(data.tpcount) || 1;
-  const tsdict: Record<string, R> = data.tsdict || {};
+  const tsdict: Record<string, TrainingStatusDoc | undefined> = data.tsdict || {};
   const q: string = data.q || '';
 
   const [view, setView] = useState<'cards' | 'list'>(() => {
     try {
-      return (localStorage.getItem(VIEW_KEY) as any) || 'cards';
+      return (localStorage.getItem(VIEW_KEY) as 'cards' | 'list' | null) || 'cards';
     } catch {
       return 'cards';
     }
@@ -52,7 +128,7 @@ export function TrainingPage() {
     () =>
       tdocs.map((t) => {
         const ts = tsdict[String(t.docId)] || {};
-        const total = Array.isArray(t.dag) ? t.dag.reduce((n: number, s: R) => n + (Array.isArray(s.pids) ? s.pids.length : 0), 0) : 0;
+        const total = Array.isArray(t.dag) ? t.dag.reduce((n, s) => n + (Array.isArray(s.pids) ? s.pids.length : 0), 0) : 0;
         const done = Array.isArray(ts.donePids) ? ts.donePids.length : 0;
         const pct = total > 0 ? Math.round((done / total) * 100) : 0;
         const sectionCount = Array.isArray(t.dag) ? t.dag.length : 0;
@@ -222,7 +298,7 @@ function StatCell({
   );
 }
 
-function TrainingCard({ e, bs }: { e: any; bs: ReturnType<typeof useBootstrap> }) {
+function TrainingCard({ e, bs }: { e: TrainingListEntry; bs: ReturnType<typeof useBootstrap> }) {
   const { t, ts, total, done, pct, sectionCount, enrolled, fullyDone } = e;
   const url = replaceRouteTokens(bs.urls.trainingDetail, { TID: String(t.docId) });
   return (
@@ -285,7 +361,7 @@ function TrainingCard({ e, bs }: { e: any; bs: ReturnType<typeof useBootstrap> }
   );
 }
 
-function TrainingTable({ rows, bs }: { rows: any[]; bs: ReturnType<typeof useBootstrap> }) {
+function TrainingTable({ rows, bs }: { rows: TrainingListEntry[]; bs: ReturnType<typeof useBootstrap> }) {
   return (
     <Card>
       <CardContent className="p-0">
@@ -343,12 +419,12 @@ function DagThumbnail({
   donePids,
   nsdictHint,
 }: {
-  dag: R[];
+  dag: TrainingDagNode[];
   doneNids: number[];
   /** when nsdict isn't available on the list page we approximate from donePids */
   donePids?: number[];
   /** Optional precomputed status dict — preferred when caller has it. */
-  nsdictHint?: Record<string, R>;
+  nsdictHint?: Record<string, TrainingNodeStatus>;
 }) {
   if (!Array.isArray(dag) || dag.length === 0) return null;
   const doneNidSet = new Set((doneNids || []).map(Number));
@@ -356,7 +432,7 @@ function DagThumbnail({
 
   // Status for each section: done / progress / open / locked
   // Locked = any required section not in doneNidSet AND this section also not done.
-  function statusOf(s: R): 'done' | 'progress' | 'open' | 'locked' {
+  function statusOf(s: TrainingDagNode): 'done' | 'progress' | 'open' | 'locked' {
     if (nsdictHint && nsdictHint[s._id]) {
       const ns = nsdictHint[s._id];
       if (ns.isDone) return 'done';
@@ -369,7 +445,7 @@ function DagThumbnail({
     const locked = reqs.some((r) => !doneNidSet.has(r));
     if (locked) return 'locked';
     // Has it been touched? If any of its pids in donePidSet, mark progress.
-    if (donePidSet.size > 0 && Array.isArray(s.pids) && s.pids.some((p: any) => donePidSet.has(Number(p)))) {
+    if (donePidSet.size > 0 && Array.isArray(s.pids) && s.pids.some((p) => donePidSet.has(Number(p)))) {
       return 'progress';
     }
     return 'open';
@@ -402,14 +478,14 @@ function DagThumbnail({
 export function TrainingDetailPage() {
   const bs = useBootstrap();
   const data = bs.page.data;
-  const tdoc: R = data.tdoc || {};
-  const pdict: Record<string, R> = data.pdict || {};
-  const psdict: Record<string, R> = data.psdict || {};
-  const tsdoc: R = data.tsdoc || {};
-  const ndict: Record<string, R> = data.ndict || {};
-  const nsdict: Record<string, R> = data.nsdict || {};
+  const tdoc: TrainingDoc = data.tdoc || {};
+  const pdict: Record<string, TrainingProblemDoc> = data.pdict || {};
+  const psdict: Record<string, TrainingProblemStatusDoc> = data.psdict || {};
+  const tsdoc: TrainingStatusDoc = data.tsdoc || {};
+  const ndict: Record<string, TrainingDagNode> = data.ndict || {};
+  const nsdict: Record<string, TrainingNodeStatus> = data.nsdict || {};
   const enrolled = !!tsdoc.enroll;
-  const dag = (Array.isArray(tdoc.dag) ? tdoc.dag : []) as Array<R & { _id: number }>;
+  const dag = Array.isArray(tdoc.dag) ? tdoc.dag : [];
 
   const totalProblems = dag.reduce((n, s) => n + (Array.isArray(s.pids) ? s.pids.length : 0), 0);
   const doneProblems = Array.isArray(tsdoc.donePids) ? tsdoc.donePids.length : 0;
@@ -523,7 +599,7 @@ export function TrainingDetailPage() {
             <StatBlock label="已通过题数" big={String(doneProblems)} small={`/ ${totalProblems} 题`} />
             <StatBlock
               label="平均进度"
-              big={`${dag.length ? Math.round(Object.values(nsdict).reduce((n: number, x: any) => n + (x?.progress || 0), 0) / dag.length) : 0}%`}
+              big={`${dag.length ? Math.round(Object.values(nsdict).reduce((n, x) => n + (x?.progress || 0), 0) / dag.length) : 0}%`}
               small="每阶段均值"
             />
           </div>
@@ -534,7 +610,7 @@ export function TrainingDetailPage() {
       {tdoc.content || tdoc.description ? (
         <Card>
           <CardContent className="p-4">
-            <MarkdownView content={tdoc.content || tdoc.description} className="text-sm" />
+            <MarkdownView content={tdoc.content || tdoc.description || ''} className="text-sm" />
           </CardContent>
         </Card>
       ) : null}
@@ -649,13 +725,13 @@ export function TrainingDetailPage() {
               <CardContent>
                 {selected.content || selected.description ? (
                   <div className="mb-3 rounded-md bg-muted/30 p-3">
-                    <MarkdownView content={selected.content || selected.description} className="text-xs" />
+                    <MarkdownView content={selected.content || selected.description || ''} className="text-xs" />
                   </div>
                 ) : null}
                 {(selected.requireNids || []).length > 0 ? (
                   <div className="mb-3 flex flex-wrap items-center gap-1.5 text-xs">
                     <span className="text-muted-foreground">前置依赖：</span>
-                    {(selected.requireNids || []).map((rid: any) => {
+                    {(selected.requireNids || []).map((rid) => {
                       const r = ndict[rid] || dag.find((n) => n._id === rid);
                       const done = doneNids.includes(Number(rid));
                       return (
@@ -702,12 +778,12 @@ export function TrainingDetailPage() {
                                 </span>
                                 <span>·</span>
                                 <span>
-                                  本站 {p.nAccept || 0}/{p.nSubmit || 0} ({p.nSubmit ? Math.round((p.nAccept / p.nSubmit) * 100) : 0}%)
+                                  本站 {p.nAccept || 0}/{p.nSubmit || 0} ({p.nSubmit ? Math.round(((p.nAccept || 0) / p.nSubmit) * 100) : 0}%)
                                 </span>
                               </>
                             ) : (
                               <>
-                                <span>通过率 {p.nSubmit ? Math.round((p.nAccept / p.nSubmit) * 100) : 0}%</span>
+                                <span>通过率 {p.nSubmit ? Math.round(((p.nAccept || 0) / p.nSubmit) * 100) : 0}%</span>
                                 <span>·</span>
                                 <span>
                                   {p.nAccept || 0}/{p.nSubmit || 0}
@@ -802,7 +878,7 @@ export function TrainingDetailPage() {
 }
 
 /** 参加名单区块（管理员+教师可见；数据由服务端 gate，前端只负责展示/导出）。 */
-function TrainingMembersCard({ members, trainingTitle, truncated }: { members: R[]; trainingTitle: string; truncated?: boolean }) {
+function TrainingMembersCard({ members, trainingTitle, truncated }: { members: TrainingMember[]; trainingTitle: string; truncated?: boolean }) {
   const [q, setQ] = useState('');
   const kw = q.trim().toLowerCase();
   const filtered = kw
@@ -818,7 +894,7 @@ function TrainingMembersCard({ members, trainingTitle, truncated }: { members: R
   const exportCsv = () => {
     // 公式注入防护：uname/realName 学生可控，= + - @ 开头的单元格前置
     // 单引号，防 Excel 打开时求值（对抗审查发现）。
-    const esc = (v: any) => {
+    const esc = (v: unknown) => {
       let s = String(v ?? '');
       if (/^[=+\-@]/.test(s)) s = `'${s}`;
       return `"${s.replace(/"/g, '""')}"`;
@@ -929,8 +1005,8 @@ function StatBlock({ label, big, small, progress }: { label: string; big: string
 interface DagLayout {
   width: number;
   height: number;
-  nodes: { id: any; x: number; y: number; depth: number }[];
-  edges: { from: any; to: any; d: string }[];
+  nodes: { id: number; x: number; y: number; depth: number }[];
+  edges: { from: number; to: number; d: string }[];
 }
 
 /**
@@ -939,15 +1015,15 @@ interface DagLayout {
  *
  * Pure function — usable from any component.
  */
-function computeDagLayout(dag: R[], width: number, height: number, padding: number): DagLayout {
+function computeDagLayout(dag: TrainingDagNode[], width: number, height: number, padding: number): DagLayout {
   if (!dag.length) return { width, height, nodes: [], edges: [] };
 
-  const byId = new Map<any, R>();
+  const byId = new Map<number, TrainingDagNode>();
   for (const n of dag) byId.set(n._id, n);
 
   // Compute depth via memoized recursion.
-  const depthCache = new Map<any, number>();
-  function depthOf(nid: any, visiting = new Set<any>()): number {
+  const depthCache = new Map<number, number>();
+  function depthOf(nid: number, visiting = new Set<number>()): number {
     if (depthCache.has(nid)) return depthCache.get(nid)!;
     if (visiting.has(nid)) return 0; // cycle guard
     visiting.add(nid);
@@ -964,7 +1040,7 @@ function computeDagLayout(dag: R[], width: number, height: number, padding: numb
   }
 
   // Group nodes by depth
-  const layers = new Map<number, any[]>();
+  const layers = new Map<number, number[]>();
   let maxDepth = 0;
   for (const n of dag) {
     const d = depthOf(n._id);
@@ -975,7 +1051,7 @@ function computeDagLayout(dag: R[], width: number, height: number, padding: numb
 
   const cols = maxDepth + 1;
   const colWidth = (width - padding * 2) / Math.max(1, cols - 1 || 1);
-  const positions = new Map<any, { x: number; y: number; depth: number }>();
+  const positions = new Map<number, { x: number; y: number; depth: number }>();
   for (const [d, ids] of layers) {
     const rowCount = ids.length;
     ids.forEach((id, i) => {
@@ -987,7 +1063,7 @@ function computeDagLayout(dag: R[], width: number, height: number, padding: numb
 
   const nodes = dag.map((n) => ({ id: n._id, ...positions.get(n._id)! }));
 
-  const edges: { from: any; to: any; d: string }[] = [];
+  const edges: { from: number; to: number; d: string }[] = [];
   for (const n of dag) {
     if (!Array.isArray(n.requireNids)) continue;
     const to = positions.get(n._id);
@@ -1005,7 +1081,7 @@ function computeDagLayout(dag: R[], width: number, height: number, padding: numb
 }
 
 /** Hook wrapper around computeDagLayout for components. */
-function useDagLayout(dag: R[], width: number, height: number, padding: number): DagLayout {
+function useDagLayout(dag: TrainingDagNode[], width: number, height: number, padding: number): DagLayout {
   return useMemo(() => computeDagLayout(dag, width, height, padding), [dag, width, height, padding]);
 }
 
@@ -1016,8 +1092,8 @@ function _DagCanvas({
   onSelectNid,
   compact,
 }: {
-  dag: R[];
-  nsdict: Record<string, R>;
+  dag: TrainingDagNode[];
+  nsdict: Record<string, TrainingNodeStatus>;
   selectedNid: number | null;
   onSelectNid: (nid: number) => void;
   /** Smaller canvas + smaller nodes for the right-column placement. */
@@ -1033,14 +1109,14 @@ function _DagCanvas({
   const labelClass = compact ? 'text-[9px]' : 'text-[10px]';
   const minWidth = compact ? 280 : 360;
 
-  function fillFor(ns: R): string {
+  function fillFor(ns: TrainingNodeStatus): string {
     if (ns.isDone) return 'fill-green-500';
     if (ns.isProgress) return 'fill-blue-500';
     if (ns.isOpen) return 'fill-muted-foreground/40';
     return 'fill-muted-foreground/15';
   }
 
-  function strokeFor(ns: R): string {
+  function strokeFor(ns: TrainingNodeStatus): string {
     if (ns.isDone) return 'stroke-green-700';
     if (ns.isProgress) return 'stroke-blue-700';
     if (ns.isOpen) return 'stroke-muted-foreground/70';
@@ -1128,7 +1204,7 @@ function _Legend({ color, label }: { color: string; label: string }) {
   );
 }
 
-function SectionStatusBadge({ ns }: { ns: R }) {
+function SectionStatusBadge({ ns }: { ns: TrainingNodeStatus }) {
   if (ns.isInvalid) {
     return (
       <Badge variant="destructive" className="text-[10px]">
@@ -1164,7 +1240,7 @@ function SectionStatusBadge({ ns }: { ns: R }) {
   );
 }
 
-function SectionStatusDot({ ns }: { ns: R }) {
+function SectionStatusDot({ ns }: { ns: TrainingNodeStatus }) {
   let cls = 'bg-muted-foreground/30';
   if (ns.isDone) cls = 'bg-green-500';
   else if (ns.isProgress) cls = 'bg-blue-500';

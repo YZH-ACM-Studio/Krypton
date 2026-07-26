@@ -123,8 +123,8 @@ function TeammatesPicker({ value, onChange, placeholder }: { value: string[]; on
         const r = await fetch(`/admin/rankboard/user-search?q=${encodeURIComponent(query.trim())}`, {
           headers: { Accept: 'application/json' },
         });
-        const body = await r.json();
-        setResults((body.results || []) as SearchResult[]);
+        const body = (await r.json()) as { results?: SearchResult[] };
+        setResults(body.results || []);
       } catch {
         setResults([]);
       } finally {
@@ -270,6 +270,35 @@ interface AdminRow {
   awardScores: number[];
 }
 
+/** TSV 批量导入结果摘要（krypton-rankboard `importAwardsBatch` 的返回）。 */
+interface BatchImportReport {
+  ok: number;
+  notFound: string[];
+  unknownType: string[];
+  errors: { line: number; reason: string }[];
+  createdStudents: number;
+  batchId?: string;
+}
+
+/** 序列化后的导入批次行（`_id` / 时间戳在 bootstrap 数据中为字符串）。 */
+interface ImportBatch {
+  _id: string;
+  createdAt: string;
+  okCount: number;
+  rowCount: number;
+  createdStudents?: number;
+  rolledBackAt?: string;
+}
+
+/** `/admin/rankboard/search` 返回的学生档案摘要。 */
+interface StudentSummary {
+  _id: string;
+  studentId: string;
+  realName: string;
+  schoolId: string;
+  boundUserId: number | null;
+}
+
 /* ─────────────────────────── People list ─────────────────────────── */
 
 export function AdminRankBoardListPage() {
@@ -277,15 +306,8 @@ export function AdminRankBoardListPage() {
     section: 'people' | 'import' | 'settings';
     rows?: AdminRow[];
     config?: { baseScore: number; decayFactor: number };
-    report?: any;
-    batches?: Array<{
-      _id: string;
-      createdAt: string;
-      okCount: number;
-      rowCount: number;
-      createdStudents?: number;
-      rolledBackAt?: string;
-    }>;
+    report?: BatchImportReport;
+    batches?: ImportBatch[];
     schools?: Array<{ _id: string; name: string }>;
     canImport: boolean;
     canManage: boolean;
@@ -440,7 +462,7 @@ export function AdminRankBoardListPage() {
   );
 }
 
-function ImportReport({ report }: { report: any }) {
+function ImportReport({ report }: { report: BatchImportReport }) {
   return (
     <Card className="border-primary/30 bg-primary/5">
       <CardHeader className="pb-2">
@@ -456,7 +478,7 @@ function ImportReport({ report }: { report: any }) {
         {report.errors?.length > 0 && (
           <div>
             <p>{report.errors.length} 行未导入：</p>
-            {report.errors.slice(0, 5).map((error: any, index: number) => (
+            {report.errors.slice(0, 5).map((error, index) => (
               <p key={index} className="pl-4 text-muted-foreground">
                 行 {error.line}: {error.reason}
               </p>
@@ -472,18 +494,7 @@ function ImportReport({ report }: { report: any }) {
  * 导入批次审计列表（PLAN §6）：每次 TSV 导入一条记录，可一键回滚。
  * 批次历史和导入主任务同区呈现，危险操作贴近对应批次。
  */
-function ImportBatchesSection({
-  batches,
-}: {
-  batches: Array<{
-    _id: string;
-    createdAt: string;
-    okCount: number;
-    rowCount: number;
-    createdStudents?: number;
-    rolledBackAt?: string;
-  }>;
-}) {
+function ImportBatchesSection({ batches }: { batches: ImportBatch[] }) {
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -546,15 +557,7 @@ function ImportBatchesSection({
 
 function AddPersonDialog({ onClose }: { onClose: () => void }) {
   const [q, setQ] = useState('');
-  const [results, setResults] = useState<
-    Array<{
-      _id: string;
-      studentId: string;
-      realName: string;
-      schoolId: string;
-      boundUserId: number | null;
-    }>
-  >([]);
+  const [results, setResults] = useState<StudentSummary[]>([]);
   const [loading, setLoading] = useState(false);
 
   const doSearch = async (text: string) => {
@@ -567,7 +570,7 @@ function AddPersonDialog({ onClose }: { onClose: () => void }) {
       const r = await fetch(`/admin/rankboard/search?q=${encodeURIComponent(text)}`, {
         headers: { Accept: 'application/json' },
       });
-      const body = await r.json();
+      const body = (await r.json()) as { students?: StudentSummary[] };
       setResults(body.students || []);
     } finally {
       setLoading(false);
@@ -917,8 +920,8 @@ export function AdminRankBoardPersonPage() {
     let url: string;
     try {
       url = await uploadUserFile(file, bs.user.id);
-    } catch (e: any) {
-      alert(e?.message || '上传失败');
+    } catch (e) {
+      alert(e instanceof Error && e.message ? e.message : '上传失败');
       return;
     }
     setAwards((prev) => prev.map((a, i) => (i === idx ? { ...a, imageUrls: [...(a.imageUrls || []), url] } : a)));

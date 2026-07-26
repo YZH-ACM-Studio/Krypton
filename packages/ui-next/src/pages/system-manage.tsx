@@ -20,7 +20,45 @@ import { SimpleSelect } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useBootstrap } from '@/lib/bootstrap';
 
-type R = Record<string, any>;
+/** Option source for select-type settings; tuples are `[value, label]`. */
+type SettingRange = (string | [string, string])[] | Record<string, string>;
+
+/** System setting descriptor produced by `setting.SYSTEM_SETTINGS` on the server. */
+interface SystemSetting {
+  key: string;
+  family?: string;
+  name?: string;
+  desc?: string;
+  type?: string;
+  subType?: string;
+  flag: number;
+  value?: unknown;
+  range?: SettingRange | null;
+  /** Optional label rendered next to boolean checkboxes. */
+  ui?: string;
+}
+
+/** Serialized `global.Hydro.script` entry (function fields survive as schema JSON or are dropped). */
+interface ScriptEntry {
+  description?: string;
+  validate?: object | boolean;
+  hidden?: boolean;
+}
+
+/** Row of the user-import preview / result table. */
+interface ImportedUser {
+  email?: string;
+  username?: string;
+  password?: string;
+  displayName?: string;
+}
+
+/** User row in the privilege table; rows opened via the manual editor carry string ids. */
+interface UserPrivRecord {
+  _id: number | string;
+  uname?: string;
+  priv?: number | string;
+}
 
 /* ================================================================== */
 /*  Shared layout                                                      */
@@ -49,10 +87,10 @@ function ManageShell({ title, icon: Icon, children }: { title: string; icon: Rea
 export function ManageSettingPage() {
   const bs = useBootstrap();
   const data = bs.page.data;
-  const settings: R[] = data.settings || [];
-  const current: R = data.current || {};
+  const settings: SystemSetting[] = data.settings || [];
+  const current: Record<string, unknown> = data.current || {};
 
-  const families = new Map<string, R[]>();
+  const families = new Map<string, SystemSetting[]>();
   for (const s of settings) {
     if (s.flag & 1) continue; // FLAG_HIDDEN
     const fam = s.family || 'general';
@@ -162,30 +200,30 @@ function lookupRef(env: SchemaEnvelope | undefined, ref: number | SchemaNode | u
 }
 
 /** Walk an object along a path, returning the value or undefined. */
-function getPath(obj: any, path: string[]): unknown {
-  let cur: any = obj;
+function getPath(obj: unknown, path: string[]): unknown {
+  let cur: unknown = obj;
   for (const seg of path) {
     if (cur == null || typeof cur !== 'object') return undefined;
-    cur = cur[seg];
+    cur = (cur as Record<string, unknown>)[seg];
   }
   return cur;
 }
 
 /** Immutably set a value at a nested path; creates intermediate objects. */
-function setPath(obj: any, path: string[], value: unknown): any {
+function setPath(obj: unknown, path: string[], value: unknown): unknown {
   if (path.length === 0) return value;
   const [head, ...rest] = path;
-  const next = obj && typeof obj === 'object' && !Array.isArray(obj) ? { ...obj } : {};
+  const next: Record<string, unknown> = obj && typeof obj === 'object' && !Array.isArray(obj) ? { ...obj } : {};
   next[head] = setPath(next[head], rest, value);
   return next;
 }
 
 /** Strip undefined nested entries so we don't emit empty `key:` lines. */
-function compact(value: any): any {
+function compact(value: unknown): unknown {
   if (value == null) return value;
   if (Array.isArray(value)) return value.map(compact);
   if (typeof value !== 'object') return value;
-  const out: Record<string, any> = {};
+  const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(value)) {
     if (v === undefined) continue;
     const compacted = compact(v);
@@ -258,7 +296,7 @@ function SchemaField({
         {description ? <p className="text-[11px] text-muted-foreground">{description}</p> : null}
         <Input
           type="number"
-          value={typeof value === 'number' ? value : ((value as any) ?? '')}
+          value={typeof value === 'number' ? value : ((value as string | undefined) ?? '')}
           onChange={(e) => onChange(e.target.value === '' ? undefined : Number(e.target.value))}
           placeholder={meta.default != null ? String(meta.default) : ''}
           className="max-w-[200px]"
@@ -277,7 +315,7 @@ function SchemaField({
   if (node.type === 'const') {
     return (
       <div className="text-xs text-muted-foreground">
-        固定值：<code className="rounded bg-muted px-1.5 py-0.5 font-mono">{String((node as any).value)}</code>
+        固定值：<code className="rounded bg-muted px-1.5 py-0.5 font-mono">{String(node.value)}</code>
       </div>
     );
   }
@@ -360,7 +398,7 @@ function SchemaSection({
         <div className={cn('space-y-4', path.length > 0 ? 'border-t bg-background/40 p-4' : 'p-0')}>
           {Object.entries(resolved.dict).map(([key, child]) => {
             const childPath = [...path, key];
-            const childValue = getPath(value as any, [key]);
+            const childValue = getPath(value, [key]);
             const childResolved = resolveSchema(env, child);
             const isLeaf = childResolved.type !== 'object';
 
@@ -408,7 +446,7 @@ export function ManageConfigPage() {
 
   // Parsed object state for visual editor — re-derived from yaml string.
   const [yamlText, setYamlText] = useState(initialYaml);
-  const parsed = useMemo(() => {
+  const parsed = useMemo<unknown>(() => {
     try {
       return YAML.parse(yamlText) || {};
     } catch {
@@ -495,8 +533,8 @@ export function ManageConfigPage() {
 export function ManageScriptPage() {
   const bs = useBootstrap();
   const data = bs.page.data;
-  const scripts: R = data.scripts || {};
-  const visibleScripts = Object.entries(scripts).filter(([, script]) => !(script as R).hidden);
+  const scripts: Record<string, ScriptEntry> = data.scripts || {};
+  const visibleScripts = Object.entries(scripts).filter(([, script]) => !script.hidden);
 
   return (
     <ManageShell title="运行脚本" icon={Play}>
@@ -507,7 +545,7 @@ export function ManageScriptPage() {
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">
           {visibleScripts.map(([id, script]) => {
-            const s = script as R;
+            const s = script;
             return (
               <Card key={id}>
                 <CardContent className="p-4">
@@ -544,7 +582,7 @@ export function ManageScriptPage() {
 
 export function ManageUserImportPage() {
   const data = useBootstrap().page.data;
-  const users: R[] = data.users || [];
+  const users: ImportedUser[] = data.users || [];
   const messages: string[] = data.messages || [];
 
   return (
@@ -677,7 +715,7 @@ function toPrivBits(value: unknown) {
   }
 }
 
-function getPrivEntries(privEnum: R): PrivEntry[] {
+function getPrivEntries(privEnum: Record<string, unknown>): PrivEntry[] {
   return Object.entries(privEnum)
     .filter(([, value]) => value != null && /^\d+$/.test(String(value)))
     .map(([key, value]) => ({
@@ -766,13 +804,13 @@ function PrivEditor({
 export function ManageUserPrivPage() {
   const bs = useBootstrap();
   const data = bs.page.data;
-  const udocs: R[] = data.udocs || [];
+  const udocs: UserPrivRecord[] = data.udocs || [];
   const defaultPriv: number = data.defaultPriv || 0;
-  const privEnum: R = data.Priv || {};
+  const privEnum: Record<string, unknown> = data.Priv || {};
   const [search, setSearch] = useState('');
   const [manualUid, setManualUid] = useState('');
   const [manualInitialPriv, setManualInitialPriv] = useState(String(defaultPriv));
-  const [editingUser, setEditingUser] = useState<R | null>(null);
+  const [editingUser, setEditingUser] = useState<UserPrivRecord | null>(null);
   const defaultPrivBits = toPrivBits(defaultPriv);
   const privEntries = getPrivEntries(privEnum);
 
@@ -941,7 +979,7 @@ export function ManageUserPrivPage() {
 /*  Shared setting field renderer                                      */
 /* ================================================================== */
 
-function SettingField({ setting, value }: { setting: R; value: any }) {
+function SettingField({ setting, value }: { setting: SystemSetting; value: any }) {
   const isDisabled = !!(setting.flag & 2);
 
   return (
@@ -1001,10 +1039,10 @@ function SettingField({ setting, value }: { setting: R; value: any }) {
   );
 }
 
-function rangeOptions(range: any): { value: string; label: string }[] {
+function rangeOptions(range: SettingRange | null | undefined): { value: string; label: string }[] {
   if (!range) return [];
   if (Array.isArray(range)) {
-    return range.map((opt: any) => {
+    return range.map((opt) => {
       const val = Array.isArray(opt) ? opt[0] : opt;
       const label = Array.isArray(opt) ? opt[1] || opt[0] : opt;
       return { value: String(val), label: String(label) };

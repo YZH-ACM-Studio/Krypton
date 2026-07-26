@@ -14,7 +14,7 @@
  * Edges have no special semantics beyond "path option" — see
  * krypton-tasks evaluateGraph for the eval rule.
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import {
   Background,
   BackgroundVariant,
@@ -28,9 +28,13 @@ import {
   applyNodeChanges,
   type Edge,
   type EdgeChange,
+  type EdgeRemoveChange,
   type Node as RFNode,
   type NodeChange,
+  type NodePositionChange,
+  type NodeRemoveChange,
   type OnConnect,
+  type XYPosition,
   useReactFlow,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
@@ -46,7 +50,7 @@ export interface TaskGraphNode {
   position: { x: number; y: number };
   presetId?: string;
   name?: string;
-  params?: Record<string, any>;
+  params?: Record<string, unknown>;
 }
 
 export interface TaskGraphEdge {
@@ -70,7 +74,7 @@ export interface PresetSummary {
     label: string;
     type: string;
     required?: boolean;
-    default?: any;
+    default?: unknown;
     options?: { value: string; label: string; group?: string }[];
     helper?: string;
   }>;
@@ -389,10 +393,12 @@ function TaskGraphInner({ graph, presets, progress, onChange, selectedNodeId, on
       // Two persistable changes:
       //   - 'position' (drag): update node coordinates
       //   - 'remove'   (Delete key): drop node + every edge touching it
-      const positional = changes.filter((c) => c.type === 'position' && (c as any).position);
+      const positional = changes.filter(
+        (c): c is NodePositionChange & { position: XYPosition } => c.type === 'position' && !!c.position,
+      );
       const removed = changes
-        .filter((c) => c.type === 'remove')
-        .map((c: any) => c.id as string)
+        .filter((c): c is NodeRemoveChange => c.type === 'remove')
+        .map((c) => c.id)
         .filter((id) => {
           const node = graph.nodes.find((n) => n.id === id);
           return node && node.type === 'task'; // sentinels protected via `deletable: false`
@@ -403,9 +409,9 @@ function TaskGraphInner({ graph, presets, progress, onChange, selectedNodeId, on
       let nextNodes = graph.nodes;
       if (positional.length) {
         nextNodes = nextNodes.map((n) => {
-          const c = positional.find((cc: any) => cc.id === n.id);
+          const c = positional.find((cc) => cc.id === n.id);
           if (!c) return n;
-          return { ...n, position: { x: (c as any).position.x, y: (c as any).position.y } };
+          return { ...n, position: { x: c.position.x, y: c.position.y } };
         });
       }
       if (removed.length) {
@@ -426,7 +432,7 @@ function TaskGraphInner({ graph, presets, progress, onChange, selectedNodeId, on
     (changes: EdgeChange<Edge>[]) => {
       setRfEdges((prev) => applyEdgeChanges(changes, prev));
       if (editable) {
-        const removed = changes.filter((c) => c.type === 'remove').map((c: any) => c.id);
+        const removed = changes.filter((c): c is EdgeRemoveChange => c.type === 'remove').map((c) => c.id);
         if (removed.length) {
           onChange!({ ...graph, edges: graph.edges.filter((e) => !removed.includes(e.id)) });
         }
@@ -467,7 +473,7 @@ function TaskGraphInner({ graph, presets, progress, onChange, selectedNodeId, on
       const preset = presetMap.get(presetId);
       if (!preset) return;
       const position = screenToFlowPosition({ x: event.clientX, y: event.clientY });
-      const defaults: Record<string, any> = {};
+      const defaults: Record<string, unknown> = {};
       for (const p of preset.params || []) {
         if (p.default !== undefined) defaults[p.name] = p.default;
       }
@@ -495,7 +501,7 @@ function TaskGraphInner({ graph, presets, progress, onChange, selectedNodeId, on
   );
 
   const onNodeClick = useCallback(
-    (_: any, node: RFNode<NodeDataShape>) => {
+    (_: ReactMouseEvent, node: RFNode<NodeDataShape>) => {
       onNodeSelect?.(node.id);
       setSelectedEdgeIds(new Set()); // clicking a node clears edge selection
     },
@@ -508,7 +514,7 @@ function TaskGraphInner({ graph, presets, progress, onChange, selectedNodeId, on
   }, [onNodeSelect]);
 
   const onEdgeClick = useCallback(
-    (_: any, edge: Edge) => {
+    (_: ReactMouseEvent, edge: Edge) => {
       setSelectedEdgeIds(new Set([edge.id]));
       onNodeSelect?.(null);
     },
@@ -519,7 +525,7 @@ function TaskGraphInner({ graph, presets, progress, onChange, selectedNodeId, on
   // "select edge + press Delete/Backspace". The keyboard path stays wired
   // via `deleteKeyCode` below for power-users.
   const onEdgeDoubleClick = useCallback(
-    (_: any, edge: Edge) => {
+    (_: ReactMouseEvent, edge: Edge) => {
       if (!editable) return;
       if (!window.confirm('删除这条连线？')) return;
       onChange!({ ...graph, edges: graph.edges.filter((e) => e.id !== edge.id) });

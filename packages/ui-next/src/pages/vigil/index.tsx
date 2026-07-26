@@ -15,7 +15,8 @@
  * Defensive design: when Vigil server is unreachable the pages render a
  * banner + skeleton instead of throwing.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import type { LucideIcon } from 'lucide-react';
 import {
   Activity,
   AlertCircle,
@@ -74,7 +75,7 @@ import {
   type VigilStudentListResponse,
   type VigilStudentStatus,
 } from '@/lib/vigil-api';
-import { useVigilSocket, type ContestSubscription } from '@/hooks/use-vigil-socket';
+import { useVigilSocket, type ContestSubscription, type VigilEventMessage } from '@/hooks/use-vigil-socket';
 import { useProctorCommands, notifyCommandResult } from '@/hooks/use-proctor-commands';
 import { StudentCard } from '@/pages/vigil/student-card';
 import { StudentDetailSheet } from '@/pages/vigil/student-detail-sheet';
@@ -132,7 +133,7 @@ function OfflineBanner({ err, onRetry }: { err: VigilOfflineError; onRetry: () =
   );
 }
 
-function EmptyTable({ message, icon: Icon }: { message: string; icon?: any }) {
+function EmptyTable({ message, icon: Icon }: { message: string; icon?: LucideIcon }) {
   const I = Icon || ServerOff;
   return (
     <div className="flex flex-col items-center gap-2 px-5 py-10 text-center">
@@ -158,7 +159,7 @@ function SkeletonTable({ rows = 5, cols = 5 }: { rows?: number; cols?: number })
 
 function useVigilData<T>(
   loader: () => Promise<T>,
-  deps: any[] = [],
+  deps: readonly unknown[] = [],
 ): {
   data: T | null;
   loading: boolean;
@@ -183,10 +184,10 @@ function useVigilData<T>(
         setErr(null);
         setOfflineErr(null);
       })
-      .catch((e) => {
+      .catch((e: unknown) => {
         if (cancelled) return;
         if (e instanceof VigilOfflineError) setOfflineErr(e);
-        else setErr(e?.message || '加载失败');
+        else setErr(e instanceof Error && e.message ? e.message : '加载失败');
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -200,7 +201,7 @@ function useVigilData<T>(
   return { data, loading, offlineErr, err, retry: () => setReloadKey((k) => k + 1) };
 }
 
-function Stat({ label, value, icon: Icon, highlight, loading }: { label: string; value: any; icon: any; highlight?: boolean; loading?: boolean }) {
+function Stat({ label, value, icon: Icon, highlight, loading }: { label: string; value: ReactNode; icon: LucideIcon; highlight?: boolean; loading?: boolean }) {
   return (
     <Card className={highlight ? 'border-amber-500/40 bg-amber-500/5' : ''}>
       <CardContent className="p-4">
@@ -564,7 +565,7 @@ export function AdminVigilOverviewPage() {
 
 function VigilLiveOverviewPage() {
   const bs = useBootstrap();
-  const localContests = ((bs.page.data as any)?.activeVigilContests || []) as LocalVigilContest[];
+  const localContests = (bs.page.data as { activeVigilContests?: LocalVigilContest[] }).activeVigilContests || [];
   const clientsQ = useVigilData<VigilClient[]>(() => fetchClients());
   const sessionsQ = useVigilData<VigilExamSession[]>(() => fetchExamSessions());
   const approvalsQ = useVigilData<VigilApproval[]>(() => fetchApprovals());
@@ -789,7 +790,7 @@ export function AdminVigilExamDetailPage() {
   // Contest config — needed for live-player URL + record-enabled UI gates.
   // Hydro injects this via page.data; the student list carries the same field
   // as a fallback for older OJ pages that did not expose it yet.
-  const pageRecordEnabled = (bs.page.data as any)?.recordEnabled;
+  const pageRecordEnabled: unknown = (bs.page.data as { recordEnabled?: unknown }).recordEnabled;
 
   // ─── Toolbar state (URL-aware so refresh keeps the user's filter) ───
   const initialUrl = useMemo(() => new URL(window.location.href), []);
@@ -912,7 +913,7 @@ export function AdminVigilExamDetailPage() {
   }, []);
 
   const handleWsMessage = useCallback(
-    (msg: any) => {
+    (msg: VigilEventMessage) => {
       // Forward command results to useProctorCommands' pending bus.
       if (msg.type === 'command_result') {
         notifyCommandResult(msg);
@@ -1505,8 +1506,8 @@ function SessionsTable({ sessions, proctorOjUserId, onChanged }: { sessions: Vig
       await invalidateExamSession(invalidateTarget.id, reason, proctorOjUserId);
       setInvalidateTarget(null);
       onChanged();
-    } catch (e: any) {
-      setActionError(e?.message || '作废会话失败');
+    } catch (e) {
+      setActionError(e instanceof Error && e.message ? e.message : '作废会话失败');
     } finally {
       setBusy(false);
     }
@@ -1518,8 +1519,8 @@ function SessionsTable({ sessions, proctorOjUserId, onChanged }: { sessions: Vig
       await resetStudentFinishSession(resetTarget.id, proctorOjUserId);
       setResetTarget(null);
       onChanged();
-    } catch (e: any) {
-      setActionError(e?.message || '重置主动结束状态失败');
+    } catch (e) {
+      setActionError(e instanceof Error && e.message ? e.message : '重置主动结束状态失败');
     } finally {
       setBusy(false);
     }
@@ -1735,8 +1736,8 @@ function ApprovalsTable({ approvals, onChanged }: { approvals: VigilApproval[]; 
       await approveRequest(a.id, asTemp);
       setApproveTarget(null);
       onChanged();
-    } catch (e: any) {
-      setActionError(e?.message || '操作失败');
+    } catch (e) {
+      setActionError(e instanceof Error && e.message ? e.message : '操作失败');
     } finally {
       setBusy(false);
     }
@@ -1767,8 +1768,8 @@ function ApprovalsTable({ approvals, onChanged }: { approvals: VigilApproval[]; 
       await rejectRequest(rejectTarget.id, reason);
       setRejectTarget(null);
       onChanged();
-    } catch (e: any) {
-      setActionError(e?.message || '操作失败');
+    } catch (e) {
+      setActionError(e instanceof Error && e.message ? e.message : '操作失败');
     } finally {
       setBusy(false);
     }

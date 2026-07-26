@@ -61,7 +61,91 @@ import { getContestProblemStatus, getPersonalPracticeStatus, type PersonalPracti
 import { formatDateTime, formatRelativeTime, makeInitials, replaceRouteTokens } from '@/lib/format';
 import { isSystemAdmin } from '@/lib/perms';
 
-type R = Record<string, any>;
+/**
+ * Loose server-payload record — kept only for payloads whose shape is not
+ * modelled precisely (e.g. the exam status journal entries below). Everything
+ * else on these pages has a narrow interface.
+ */
+type R = Record<string, unknown>;
+
+/** Minimal projection of a problem doc as used on these management pages. */
+interface ProblemBrief {
+  title?: string;
+}
+
+/** Per-problem balloon config stored on the contest doc (legacy value: bare color string). */
+interface ContestBalloonConfig {
+  color?: string;
+  name?: string;
+}
+
+/** A contest file entry (`tdoc.files` / `tdoc.privateFiles`), JSON-serialized. */
+interface ContestFileInfo {
+  _id?: string;
+  name: string;
+  size?: number;
+  etag?: string;
+  lastModified?: string;
+}
+
+/** JSON-serialized contest document — only the fields these pages read. */
+interface ContestDoc {
+  _id?: string;
+  docId?: string;
+  title?: string;
+  content?: string;
+  rule?: string;
+  owner?: number;
+  maintainer?: number[];
+  pids?: number[];
+  beginAt?: string;
+  endAt?: string;
+  lockAt?: string;
+  /** Flexible per-user duration (hours); absent = fixed window. */
+  duration?: number;
+  rated?: boolean;
+  assign?: string[];
+  _code?: string;
+  code?: string;
+  langs?: string[];
+  score?: Record<string, number>;
+  balloon?: Record<string, ContestBalloonConfig | string>;
+  autoHide?: boolean;
+  allowViewCode?: boolean;
+  allowPrint?: boolean;
+  keepScoreboardHidden?: boolean;
+  verifiers?: number[];
+  participationMode?: string;
+  teamBatchId?: string;
+  plannedTeamBatchId?: string;
+  vigilEnabled?: boolean;
+  entryMode?: string;
+  approvalMode?: string;
+  lockdownMode?: boolean;
+  networkLockdownMode?: boolean;
+  networkLockdownFailurePolicy?: string;
+  pauseOnDisconnect?: boolean;
+  exclusive?: boolean;
+  liveEnabled?: boolean;
+  cameraEnabled?: boolean;
+  recordEnabled?: boolean;
+  screenshotIntervalMs?: number;
+  screenshotJitterMs?: number;
+  clientLoginBlockBeforeMinutes?: number;
+  clientLoginBlockAfterMinutes?: number;
+  vigilProcessWhitelist?: string[];
+  networkWhitelistHosts?: string[];
+  networkWhitelistIps?: string[];
+  networkWhitelistPorts?: string[];
+  participantScopeMode?: ParticipantScopeMode;
+  participantSchoolIds?: string[];
+  participantGroupIds?: string[];
+}
+
+type ParticipantScopeMode = 'none' | 'schools' | 'groups';
+type ContestEntryMode = 'open' | 'client_required';
+type ContestApprovalMode = 'strict' | 'auto';
+type NetworkFailurePolicy = 'strict' | 'report_only' | 'off';
 
 function getUser(udict: Record<string, GenericUserDoc>, uid: string | number | undefined) {
   return uid != null ? (udict[String(uid)] ?? null) : null;
@@ -147,7 +231,7 @@ interface BalloonColorRow {
 
 const DEFAULT_BALLOON_COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899'];
 
-function clarificationSubjectLabel(tdoc: R, pdict: Record<string, R>, subject: unknown) {
+function clarificationSubjectLabel(tdoc: ContestDoc, pdict: Record<string, ProblemBrief>, subject: unknown) {
   const pids: Array<string | number> = tdoc.pids || [];
   const numeric = Number(subject);
   if (numeric === -1) return '技术问题';
@@ -157,19 +241,19 @@ function clarificationSubjectLabel(tdoc: R, pdict: Record<string, R>, subject: u
   const index = byPidIndex >= 0 ? byPidIndex : legacyIndex;
   if (index >= 0) {
     const pid = pids[index];
-    const problem = pdict[String(pid)] || {};
+    const problem: ProblemBrief = pdict[String(pid)] || {};
     return `${getAlphabeticId(index)} — ${problem.title || `P${pid}`}`;
   }
   return String(subject);
 }
 
-function normalizeBalloonRows(tdoc: R, pdict: Record<string, R>): BalloonColorRow[] {
+function normalizeBalloonRows(tdoc: ContestDoc, pdict: Record<string, ProblemBrief>): BalloonColorRow[] {
   const pids: Array<string | number> = tdoc.pids || [];
-  const existing: R = tdoc.balloon || {};
+  const existing: Record<string, ContestBalloonConfig | string> = tdoc.balloon || {};
   return pids.map((pid, index) => {
     const key = String(pid);
-    const config = existing[key] || existing[Number(pid)] || {};
-    const problem = pdict[key] || {};
+    const config: ContestBalloonConfig | string = existing[key] || existing[Number(pid)] || {};
+    const problem: ProblemBrief = pdict[key] || {};
     const isObject = config && typeof config === 'object';
     return {
       pid: key,
@@ -196,7 +280,7 @@ function serializeBalloonRows(rows: BalloonColorRow[]) {
 // only renders the active panel — that breaks form submission because
 // inputs in inactive panels never get serialized. For editor forms we
 // want them all live.
-function MiniTabsNav({ items, active, onChange }: { items: { value: string; label: string }[]; active: string; onChange: (next: string) => void }) {
+function MiniTabsNav<T extends string>({ items, active, onChange }: { items: { value: T; label: string }[]; active: T; onChange: (next: T) => void }) {
   return (
     <div className="inline-flex items-center rounded-lg bg-muted p-1 text-muted-foreground">
       {items.map((tab) => (
@@ -220,6 +304,18 @@ interface ScopeOption {
   name: string;
   schoolName?: string;
 }
+/** Raw school catalog row (`data.scopeSchools`, from krypton-userbind). */
+interface ScopeSchoolPayload {
+  _id: unknown;
+  name: string;
+}
+/** Raw user-group catalog row (`data.scopeGroups`, from krypton-userbind). */
+interface ScopeGroupPayload {
+  _id: unknown;
+  name: string;
+  schoolId?: unknown;
+  archivedAt?: unknown;
+}
 interface UserOption {
   _id: number;
   uname?: string;
@@ -227,21 +323,65 @@ interface UserOption {
   avatarUrl?: string;
 }
 
+/** One entry of `data.teamBatches` as shipped by the contest edit handler. */
+interface TeamBatchSummary {
+  batchId?: string;
+  name?: string;
+  status?: 'open' | 'closed';
+  teamCount?: number;
+  memberCount?: number;
+  closedAt?: string;
+}
+
+type TeamReadinessLevel = 'pass' | 'warning' | 'block';
+interface TeamReadinessItem {
+  level: TeamReadinessLevel;
+  code: string;
+  title: string;
+  message: string;
+}
+/** JSON shape of `contestTeamBatch.checkContestReadiness` (TeamBatchReadinessReport). */
+interface TeamReadinessReport {
+  checkId?: string;
+  checkedAt?: string;
+  result: TeamReadinessLevel;
+  teamCount: number;
+  memberCount: number;
+  snapshotHash?: string;
+  canFinalize: boolean;
+  canStart: boolean;
+  items: TeamReadinessItem[];
+}
+/** Response of the `check_team_readiness` contest-edit operation. */
+interface TeamReadinessResponse {
+  ok?: boolean;
+  message?: string;
+  error?: string;
+  readiness?: TeamReadinessReport;
+}
+
 type ManagementSection = 'overview' | 'edit' | 'users' | 'clarification' | 'balloon' | 'print';
 
-function contestId(tdoc: R) {
+function contestId(tdoc: ContestDoc) {
   return String(tdoc.docId || tdoc._id || '');
 }
 
-function contestDetailUrl(bs: ReturnType<typeof useBootstrap>, tdoc: R) {
+function contestDetailUrl(bs: ReturnType<typeof useBootstrap>, tdoc: ContestDoc) {
   return replaceRouteTokens(bs.urls.contestDetail, { TID: contestId(tdoc) });
 }
 
-function examModeUrls(bs: ReturnType<typeof useBootstrap>) {
+/** Exam-shell URL overrides injected by the exam-mode handler. */
+interface ExamModeUrls {
+  overview?: string;
+  problem?: string;
+  record?: string;
+}
+
+function examModeUrls(bs: ReturnType<typeof useBootstrap>): ExamModeUrls | null {
   return bs.page.data?.examMode?.urls || null;
 }
 
-function contestProblemUrl(bs: ReturnType<typeof useBootstrap>, tdoc: R, pid: string | number) {
+function contestProblemUrl(bs: ReturnType<typeof useBootstrap>, tdoc: ContestDoc, pid: string | number) {
   const urls = examModeUrls(bs);
   if (urls?.problem) return String(urls.problem).replace('__PID__', String(pid));
   const problemUrl = replaceRouteTokens(bs.urls.problemDetail, { PID: String(pid) });
@@ -256,7 +396,7 @@ interface ManagementItem {
   show?: boolean;
 }
 
-function managementItems(tdoc: R, contestUrl: string, canGradeSubjective: boolean): ManagementItem[] {
+function managementItems(tdoc: ContestDoc, contestUrl: string, canGradeSubjective: boolean): ManagementItem[] {
   const isACM = tdoc.rule === 'acm';
   const items: ManagementItem[] = [
     { key: 'overview', label: '概览与文件', href: `${contestUrl}/management`, icon: LayoutDashboard },
@@ -279,7 +419,7 @@ function managementItems(tdoc: R, contestUrl: string, canGradeSubjective: boolea
   return items.filter((item) => item.show !== false);
 }
 
-function ContestManagementChrome({ tdoc, active, children }: { tdoc: R; active: ManagementSection; children: React.ReactNode }) {
+function ContestManagementChrome({ tdoc, active, children }: { tdoc: ContestDoc; active: ManagementSection; children: React.ReactNode }) {
   const bs = useBootstrap();
   const tid = contestId(tdoc);
   if (!tid) return <>{children}</>;
@@ -327,7 +467,7 @@ function ContestManagementChrome({ tdoc, active, children }: { tdoc: R; active: 
 export function ContestEditPage() {
   const bs = useBootstrap();
   const data = bs.page.data;
-  const tdoc: R = data.tdoc || {};
+  const tdoc: ContestDoc = data.tdoc || {};
   const rules: Record<string, string> = data.rules || {};
   const isEdit = data.page_name === 'contest_edit';
   const canAutoHideProblems = !!data.canAutoHideProblems;
@@ -345,7 +485,7 @@ export function ContestEditPage() {
   const finalizedTeamBatchId = String(tdoc.teamBatchId || '');
   const persistedPlannedTeamBatchId = String(tdoc.plannedTeamBatchId || '');
   const [plannedTeamBatchId, setPlannedTeamBatchId] = useState(persistedPlannedTeamBatchId || finalizedTeamBatchId);
-  const teamBatches: R[] = data.teamBatches || [];
+  const teamBatches: TeamBatchSummary[] = data.teamBatches || [];
   const selectedTeamBatch = teamBatches.find((batch) => String(batch.batchId) === plannedTeamBatchId) || null;
   const canUpdatePlannedTeamBatch = !!data.canUpdatePlannedTeamBatch && !finalizedTeamBatchId;
   const canFinalizePlannedTeamBatch =
@@ -359,7 +499,7 @@ export function ContestEditPage() {
   const [modeClearOpen, setModeClearOpen] = useState(false);
   const [modeClearConfirmed, setModeClearConfirmed] = useState(false);
   const [finalizeTeamBatchOpen, setFinalizeTeamBatchOpen] = useState(false);
-  const [teamReadiness, setTeamReadiness] = useState<R | null>(null);
+  const [teamReadiness, setTeamReadiness] = useState<TeamReadinessReport | null>(null);
   const [teamReadinessLoading, setTeamReadinessLoading] = useState(false);
   const [teamReadinessError, setTeamReadinessError] = useState('');
   const formRef = useRef<HTMLFormElement | null>(null);
@@ -402,31 +542,31 @@ export function ContestEditPage() {
   // ── Krypton: client-required & participant scope ─────────────────────
   const [activeTab, setActiveTab] = useState<'basic' | 'access' | 'scope' | 'vigil' | 'settings'>('basic');
   const [vigilEnabled, setVigilEnabled] = useState<boolean>(!!tdoc.vigilEnabled);
-  const [entryMode, setEntryMode] = useState<'open' | 'client_required'>(tdoc.entryMode === 'client_required' ? 'client_required' : 'open');
-  const [approvalMode, setApprovalMode] = useState<'strict' | 'auto'>(tdoc.approvalMode === 'auto' ? 'auto' : 'strict');
+  const [entryMode, setEntryMode] = useState<ContestEntryMode>(tdoc.entryMode === 'client_required' ? 'client_required' : 'open');
+  const [approvalMode, setApprovalMode] = useState<ContestApprovalMode>(tdoc.approvalMode === 'auto' ? 'auto' : 'strict');
   const [lockdownMode, setLockdownMode] = useState<boolean>(!!tdoc.lockdownMode);
   const [networkTouched, setNetworkTouched] = useState<boolean>(tdoc.networkLockdownMode != null);
   const [networkLockdownMode, setNetworkLockdownMode] = useState<boolean>(
     tdoc.networkLockdownMode != null ? !!tdoc.networkLockdownMode : !!tdoc.lockdownMode,
   );
-  const [networkFailurePolicy, setNetworkFailurePolicy] = useState<'strict' | 'report_only' | 'off'>(
+  const [networkFailurePolicy, setNetworkFailurePolicy] = useState<NetworkFailurePolicy>(
     tdoc.networkLockdownFailurePolicy === 'report_only' ? 'report_only' : tdoc.networkLockdownFailurePolicy === 'off' ? 'off' : 'strict',
   );
-  const [scopeMode, setScopeMode] = useState<'none' | 'schools' | 'groups'>(tdoc.participantScopeMode || 'none');
+  const [scopeMode, setScopeMode] = useState<ParticipantScopeMode>(tdoc.participantScopeMode || 'none');
 
   // Scope option catalog comes pre-loaded from the handler (data.scopeSchools,
   // data.scopeGroups). Each is `{_id, name}` (groups also carry `schoolId`).
-  const schoolCatalog: ScopeOption[] = (data.scopeSchools || []).map((s: any) => ({
+  const schoolCatalog: ScopeOption[] = (data.scopeSchools || []).map((s: ScopeSchoolPayload) => ({
     _id: String(s._id),
     name: s.name,
   }));
-  const initialSchoolIds: string[] = (tdoc.participantSchoolIds || []).map((id: any) => String(id));
-  const initialGroupIds: string[] = (tdoc.participantGroupIds || []).map((id: any) => String(id));
+  const initialSchoolIds: string[] = (tdoc.participantSchoolIds || []).map((id) => String(id));
+  const initialGroupIds: string[] = (tdoc.participantGroupIds || []).map((id) => String(id));
   // 已归档组不进常规选择器（PLAN §9）；但已被本比赛引用的历史值保留可解析。
   const groupCatalog: ScopeOption[] = (data.scopeGroups || [])
-    .filter((g: any) => !g.archivedAt || initialGroupIds.includes(String(g._id)))
-    .map((g: any) => {
-      const parent = (data.scopeSchools || []).find((s: any) => String(s._id) === String(g.schoolId));
+    .filter((g: ScopeGroupPayload) => !g.archivedAt || initialGroupIds.includes(String(g._id)))
+    .map((g: ScopeGroupPayload) => {
+      const parent = (data.scopeSchools || []).find((s: ScopeSchoolPayload) => String(s._id) === String(g.schoolId));
       return {
         _id: String(g._id),
         name: g.archivedAt ? `${g.name}（已归档）` : g.name,
@@ -478,7 +618,7 @@ export function ContestEditPage() {
         body: new URLSearchParams({ operation: 'check_team_readiness' }),
       });
       const text = await response.text();
-      let payload: R = {};
+      let payload: TeamReadinessResponse = {};
       try {
         payload = text ? JSON.parse(text) : {};
       } catch {
@@ -539,7 +679,7 @@ export function ContestEditPage() {
                   { value: 'settings', label: '比赛设置' },
                 ]}
                 active={activeTab}
-                onChange={(v) => setActiveTab(v as any)}
+                onChange={(v) => setActiveTab(v)}
               />
 
               {/* ─── Tab 1: 基本信息 ─── */}
@@ -708,12 +848,12 @@ export function ContestEditPage() {
                               <p className="break-all font-mono text-[10px] text-muted-foreground">snapshot {teamReadiness.snapshotHash}</p>
                             ) : null}
                             {(['block', 'warning', 'pass'] as const).map((level) => {
-                              const levelItems = (teamReadiness.items || []).filter((item: R) => item.level === level);
+                              const levelItems = (teamReadiness.items || []).filter((item) => item.level === level);
                               if (!levelItems.length) return null;
                               const LevelIcon = level === 'pass' ? CheckCircle2 : AlertTriangle;
                               return (
                                 <div key={level} className="space-y-1.5">
-                                  {levelItems.map((item: R) => (
+                                  {levelItems.map((item) => (
                                     <div key={item.code} className="flex items-start gap-2 rounded-xl bg-muted/35 px-3 py-2">
                                       <LevelIcon
                                         className={`mt-0.5 size-4 shrink-0 ${
@@ -909,7 +1049,7 @@ export function ContestEditPage() {
                   <label className="text-sm font-medium">参赛范围模式</label>
                   <SimpleSelect
                     value={scopeMode}
-                    onValueChange={(v) => setScopeMode(v as any)}
+                    onValueChange={(v) => setScopeMode(v as ParticipantScopeMode)}
                     options={[
                       { value: 'none', label: '不限（仅看老 Hydro 访问控制）' },
                       { value: 'schools', label: '按学校限定' },
@@ -973,7 +1113,7 @@ export function ContestEditPage() {
                         <SimpleSelect
                           value={entryMode}
                           disabled={participationMode === 'team'}
-                          onValueChange={(v) => setEntryMode(v as any)}
+                          onValueChange={(v) => setEntryMode(v as ContestEntryMode)}
                           options={[
                             { value: 'open', label: '普通网页可进入（Vigil 可选）' },
                             { value: 'client_required', label: '必须通过 Qt Client 进入' },
@@ -985,7 +1125,7 @@ export function ContestEditPage() {
                         <label className="text-sm font-medium">审批模式</label>
                         <SimpleSelect
                           value={approvalMode}
-                          onValueChange={(v) => setApprovalMode(v as any)}
+                          onValueChange={(v) => setApprovalMode(v as ContestApprovalMode)}
                           options={[
                             { value: 'auto', label: 'auto（已绑定且命中范围的学生自动通过）' },
                             { value: 'strict', label: 'strict（全部进入老师审批）' },
@@ -1099,7 +1239,7 @@ export function ContestEditPage() {
                           <label className="text-sm font-medium">失败策略</label>
                           <SimpleSelect
                             value={networkFailurePolicy}
-                            onValueChange={(v) => setNetworkFailurePolicy(v as any)}
+                            onValueChange={(v) => setNetworkFailurePolicy(v as NetworkFailurePolicy)}
                             options={[
                               { value: 'strict', label: 'strict：失败则不进入考试' },
                               { value: 'report_only', label: 'report_only：失败上报后放行' },
@@ -1389,13 +1529,32 @@ function ContestVerifierPanel({ tid, verifiers }: { tid: string; verifiers: numb
 
 /* ---------- Contest Manage (files) ---------- */
 
+interface SubmissionProblemStat {
+  pid: number;
+  total: number;
+  accepted: number;
+}
+interface SubmissionHourStat {
+  hour: string;
+  count: number;
+}
+/** JSON shape of the management-page submission statistics aggregate. */
+interface ContestSubmissionStats {
+  total: number;
+  accepted: number;
+  participants: number;
+  participantUnit: 'team' | 'user';
+  byProblem: SubmissionProblemStat[];
+  byHour: SubmissionHourStat[];
+}
+
 export function ContestManagePage() {
   const bs = useBootstrap();
   const data = bs.page.data;
-  const tdoc: R = data.tdoc || {};
-  const files: R[] = data.files || [];
-  const privateFiles: R[] = data.privateFiles || [];
-  const pdict: Record<string, R> = data.pdict || {};
+  const tdoc: ContestDoc = data.tdoc || {};
+  const files: ContestFileInfo[] = data.files || [];
+  const privateFiles: ContestFileInfo[] = data.privateFiles || [];
+  const pdict: Record<string, ProblemBrief> = data.pdict || {};
   // tdoc.pids is the canonical, de-duplicated, ordered list of problem docIds.
   // pdict is keyed by BOTH docId and pid (ProblemModel.getList merges r + l),
   // so iterating Object.entries(pdict) renders problems with a custom pid twice
@@ -1406,7 +1565,7 @@ export function ContestManagePage() {
   const [selectedPublic, setSelectedPublic] = useState<Set<string>>(new Set());
   const [selectedPrivate, setSelectedPrivate] = useState<Set<string>>(new Set());
   const [activeManageTab, setActiveManageTab] = useState<'score' | 'stats' | 'public' | 'private'>('score');
-  const submissionStats: R | null = data.submissionStats || null;
+  const submissionStats: ContestSubmissionStats | null = data.submissionStats || null;
 
   const toggleContestFile = (selected: Set<string>, setSelected: (next: Set<string>) => void, name: string) => {
     const next = new Set(selected);
@@ -1423,7 +1582,7 @@ export function ContestManagePage() {
     setSelected,
   }: {
     title: string;
-    fileList: R[];
+    fileList: ContestFileInfo[];
     type: string;
     selected: Set<string>;
     setSelected: (next: Set<string>) => void;
@@ -1560,7 +1719,7 @@ export function ContestManagePage() {
                     </TableHeader>
                     <TableBody>
                       {pids.map((pid, idx) => {
-                        const p = pdict[String(pid)] || {};
+                        const p: ProblemBrief = pdict[String(pid)] || {};
                         return (
                           <TableRow key={String(pid)}>
                             <TableCell className="text-center font-mono font-semibold">{getAlphabeticId(idx)}</TableCell>
@@ -1624,9 +1783,9 @@ export function ContestManagePage() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {(submissionStats.byProblem as R[]).map((row) => {
+                        {submissionStats.byProblem.map((row) => {
                           const idx = pids.indexOf(row.pid);
-                          const p = pdict[String(row.pid)] || {};
+                          const p: ProblemBrief = pdict[String(row.pid)] || {};
                           const rate = row.total ? row.accepted / row.total : 0;
                           return (
                             <TableRow key={String(row.pid)}>
@@ -1655,7 +1814,7 @@ export function ContestManagePage() {
                     <div className="mb-1.5 text-xs font-medium text-muted-foreground">按小时提交</div>
                     <div className="space-y-1">
                       {(() => {
-                        const rows: R[] = submissionStats.byHour;
+                        const rows = submissionStats.byHour;
                         const max = Math.max(...rows.map((r) => r.count), 1);
                         return rows.map((r) => (
                           <div key={r.hour} className="flex items-center gap-2">
@@ -1689,15 +1848,47 @@ export function ContestManagePage() {
 
 /* ---------- Contest Problem List ---------- */
 
+/** A jury reply attached to a clarification document. */
+interface ClarificationReplyDoc {
+  _id?: string;
+  content?: string;
+}
+/** JSON-serialized contest clarification (discussion) document. */
+interface ClarificationDoc {
+  _id?: string;
+  owner?: number;
+  subject?: unknown;
+  content?: string;
+  updateAt?: string;
+  reply?: ClarificationReplyDoc[];
+}
+/** JSON-serialized record row as rendered in the "my submissions" table. */
+interface ContestRecordDoc {
+  _id?: string;
+  pid?: number;
+  status?: number;
+  statusText?: string;
+  lang?: string;
+  time?: number;
+  memory?: number;
+}
+/** Per-problem live pass statistics (P1.4, ACM only). */
+interface ContestLiveProblemStat {
+  acUsers?: number;
+  triedUsers?: number;
+  acSubmits?: number;
+  totalSubmits?: number;
+}
+
 export function ContestProblemListPage() {
   const bs = useBootstrap();
   const data = bs.page.data;
-  const tdoc: R = data.tdoc || {};
-  const pdict: Record<string, R> = data.pdict || {};
+  const tdoc: ContestDoc = data.tdoc || {};
+  const pdict: Record<string, ProblemBrief> = data.pdict || {};
   const problemStatusByPid: Record<string, R> = data.problemStatusByPid || {};
   const personalPracticeStatusByPid: Record<string, PersonalPracticeStatusSnapshot & { rid?: unknown }> = data.personalPracticeStatusByPid || {};
-  const tcdocs: R[] = data.tcdocs || [];
-  const rdocs: R[] = data.rdocs || [];
+  const tcdocs: ClarificationDoc[] = data.tcdocs || [];
+  const rdocs: ContestRecordDoc[] = data.rdocs || [];
   const pids: number[] = data.visiblePids || tdoc.pids || [];
   const tid = tdoc.docId || tdoc._id;
   const urls = examModeUrls(bs);
@@ -1715,7 +1906,7 @@ export function ContestProblemListPage() {
   const canViewContestRecord = data.canViewContestRecord ?? canViewRecord;
   const showPostContestPractice = data.postContestPractice?.eligible === true;
   // P1.4：本场每题通过统计（仅 ACM；考试壳 examMode 下后端不下发、前端也不渲染——红线1）。
-  const liveStats: Record<string, R> | null = tdoc.rule === 'acm' && !data.examMode && data.liveStats ? data.liveStats : null;
+  const liveStats: Record<string, ContestLiveProblemStat> | null = tdoc.rule === 'acm' && !data.examMode && data.liveStats ? data.liveStats : null;
   const liveStatsUnit = data.liveStatsParticipantUnit === 'team' ? '队' : '人';
   const teamMode = tdoc.participationMode === 'team';
   const [workspaceTab, setWorkspaceTab] = useState<'problems' | 'submissions' | 'clarifications'>('problems');
@@ -1778,7 +1969,7 @@ export function ContestProblemListPage() {
                 </TableHeader>
                 <TableBody>
                   {pids.map((pid, idx) => {
-                    const p = pdict[String(pid)] || {};
+                    const p: ProblemBrief = pdict[String(pid)] || {};
                     const ls = liveStats?.[String(pid)];
                     const statusDoc = showPostContestPractice ? data.psdict?.[String(pid)] || null : problemStatusByPid[String(pid)] || null;
                     const status =
@@ -1881,7 +2072,7 @@ export function ContestProblemListPage() {
                 </TableHeader>
                 <TableBody>
                   {rdocs.map((rdoc) => {
-                    const problem = pdict[String(rdoc.pid)] || {};
+                    const problem: ProblemBrief = pdict[String(rdoc.pid)] || {};
                     return (
                       <TableRow key={String(rdoc._id)}>
                         <TableCell>
@@ -1925,7 +2116,7 @@ export function ContestProblemListPage() {
                 <MarkdownView content={tc.content || ''} className="mt-2" preferredLang={bs.locale} />
                 {Array.isArray(tc.reply) && tc.reply.length > 0 ? (
                   <div className="mt-3 space-y-2 border-l pl-3">
-                    {tc.reply.map((reply: R) => (
+                    {tc.reply.map((reply) => (
                       <div key={String(reply._id || reply.content)} className="rounded-md bg-muted/30 p-3">
                         <div className="mb-1 text-xs text-muted-foreground">
                           Jury{reply._id ? ` · ${formatObjectIdTime(reply._id, bs.locale)}` : ''}
@@ -1959,7 +2150,7 @@ export function ContestProblemListPage() {
                     { value: '0', label: '通用' },
                     { value: '-1', label: '技术问题' },
                     ...pids.map((pid, idx) => {
-                      const p = pdict[String(pid)] || {};
+                      const p: ProblemBrief = pdict[String(pid)] || {};
                       return {
                         value: String(pid),
                         label: `${getAlphabeticId(idx)} — ${p.title || `P${pid}`}`,
@@ -1983,11 +2174,20 @@ export function ContestProblemListPage() {
 
 /* ---------- Contest User ---------- */
 
+/** JSON-serialized contest participation status row (`tsdocs`). */
+interface ContestUserStatusDoc {
+  uid: number;
+  attend?: number;
+  unrank?: boolean;
+  startAt?: string;
+  endAt?: string;
+}
+
 export function ContestUserPage() {
   const bs = useBootstrap();
   const data = bs.page.data;
-  const tdoc: R = data.tdoc || {};
-  const tsdocs: R[] = data.tsdocs || [];
+  const tdoc: ContestDoc = data.tdoc || {};
+  const tsdocs: ContestUserStatusDoc[] = data.tsdocs || [];
   const udict: Record<string, GenericUserDoc> = bs.udict || data.udict || {};
   const tid = tdoc.docId || tdoc._id;
   const contestUrl = replaceRouteTokens(bs.urls.contestDetail, { TID: String(tid) });
@@ -2170,14 +2370,33 @@ export function ContestUserPage() {
 
 /* ---------- Contest Balloon ---------- */
 
+/** JSON-serialized balloon task document. */
+interface BalloonDoc {
+  _id?: string;
+  uid?: number;
+  pid?: number | string;
+  first?: boolean;
+  /** Uid of the deliverer once the balloon has been sent. */
+  sent?: number;
+  sentAt?: string;
+  contestTeamId?: string;
+}
+/** Team projection shipped in `data.teamDict` for team-mode balloons. */
+interface ContestTeamBrief {
+  teamId?: string;
+  name?: string;
+  captainUid?: number;
+  memberUids?: number[];
+}
+
 export function ContestBalloonPage() {
   const bs = useBootstrap();
   const data = bs.page.data;
-  const tdoc: R = data.tdoc || {};
-  const bdocs: R[] = data.bdocs || [];
-  const pdict: Record<string, R> = data.pdict || {};
+  const tdoc: ContestDoc = data.tdoc || {};
+  const bdocs: BalloonDoc[] = data.bdocs || [];
+  const pdict: Record<string, ProblemBrief> = data.pdict || {};
   const udict: Record<string, GenericUserDoc> = bs.udict || data.udict || {};
-  const teamDict: Record<string, R> = data.teamDict || {};
+  const teamDict: Record<string, ContestTeamBrief> = data.teamDict || {};
   const tid = tdoc.docId || tdoc._id;
   const contestUrl = replaceRouteTokens(bs.urls.contestDetail, { TID: String(tid) });
   const [balloonRows, setBalloonRows] = useState<BalloonColorRow[]>(() => normalizeBalloonRows(tdoc, pdict));
@@ -2281,9 +2500,9 @@ export function ContestBalloonPage() {
                     const u = getUser(udict, b.uid);
                     const team = b.contestTeamId ? teamDict[String(b.contestTeamId)] : null;
                     const sentBy = getUser(udict, b.sent);
-                    const p = pdict[String(b.pid)] || {};
+                    const p: ProblemBrief = pdict[String(b.pid)] || {};
                     const index = (tdoc.pids || []).map(String).indexOf(String(b.pid));
-                    const config = (tdoc.balloon || {})[String(b.pid)] || {};
+                    const config: ContestBalloonConfig | string = (tdoc.balloon || {})[String(b.pid)] || {};
                     const sent = Boolean(b.sent);
                     const submitTime = formatObjectIdTime(b._id, bs.locale);
                     return (
@@ -2358,9 +2577,9 @@ export function ContestBalloonPage() {
 export function ContestClarificationPage() {
   const bs = useBootstrap();
   const data = bs.page.data;
-  const tdoc: R = data.tdoc || {};
-  const tcdocs: R[] = data.tcdocs || [];
-  const pdict: Record<string, R> = data.pdict || {};
+  const tdoc: ContestDoc = data.tdoc || {};
+  const tcdocs: ClarificationDoc[] = data.tcdocs || [];
+  const pdict: Record<string, ProblemBrief> = data.pdict || {};
   const udict: Record<string, GenericUserDoc> = bs.udict || data.udict || {};
   const tid = tdoc.docId || tdoc._id;
   const contestUrl = replaceRouteTokens(bs.urls.contestDetail, { TID: String(tid) });
@@ -2414,7 +2633,7 @@ export function ContestClarificationPage() {
                         { value: '0', label: '通用通知' },
                         { value: '-1', label: '技术问题' },
                         ...pids.map((pid, idx) => {
-                          const p = pdict[String(pid)] || {};
+                          const p: ProblemBrief = pdict[String(pid)] || {};
                           return {
                             value: String(pid),
                             label: `${getAlphabeticId(idx)} — ${p.title || `P${pid}`}`,
@@ -2456,7 +2675,7 @@ export function ContestClarificationPage() {
                       <MarkdownView content={tc.content || ''} className="mt-3" preferredLang={bs.locale} />
                       {Array.isArray(tc.reply) && tc.reply.length > 0 ? (
                         <div className="mt-3 space-y-2 border-l pl-3">
-                          {tc.reply.map((reply: R) => (
+                          {tc.reply.map((reply) => (
                             <div key={String(reply._id || reply.content)} className="rounded-md bg-muted/30 p-3">
                               <div className="mb-1 text-xs text-muted-foreground">
                                 Jury{reply._id ? ` · ${formatObjectIdTime(reply._id, bs.locale)}` : ''}
@@ -2494,21 +2713,37 @@ export function ContestClarificationPage() {
 
 /* ---------- Contest Print ---------- */
 
+/** JSON-serialized print task document. */
+interface PrintTaskDoc {
+  _id?: string;
+  owner?: number;
+  title?: string;
+  content?: string;
+  status?: string;
+}
+/** Response envelope of the print-page POST operations. */
+interface PrintOperationResponse {
+  tasks?: PrintTaskDoc[];
+  udict?: Record<string, GenericUserDoc>;
+  task?: PrintTaskDoc;
+  udoc?: GenericUserDoc;
+}
+
 export function ContestPrintPage() {
   const bs = useBootstrap();
   const data = bs.page.data;
-  const tdoc: R = data.tdoc || {};
+  const tdoc: ContestDoc = data.tdoc || {};
   const tid = tdoc.docId || tdoc._id;
   const urls = examModeUrls(bs);
   const contestUrl = urls?.overview || replaceRouteTokens(bs.urls.contestDetail, { TID: String(tid) });
   const isPrintAdmin = Boolean(data.isAdmin || data.canEdit || String(bs.user.id) === String(tdoc.owner));
-  const [tasks, setTasks] = useState<R[]>([]);
+  const [tasks, setTasks] = useState<PrintTaskDoc[]>([]);
   const [udict, setUdict] = useState<Record<string, GenericUserDoc>>({});
   const [loadingTasks, setLoadingTasks] = useState(false);
   const [kioskEnabled, setKioskEnabled] = useState(false);
   const [printTab, setPrintTab] = useState<'submit' | 'queue' | 'kiosk'>('queue');
 
-  const postPrintOperation = async (payload: Record<string, string>) => {
+  const postPrintOperation = async (payload: Record<string, string>): Promise<PrintOperationResponse> => {
     const response = await fetch(window.location.href, {
       method: 'POST',
       headers: {
@@ -2537,7 +2772,7 @@ export function ContestPrintPage() {
     }
   };
 
-  const printTask = (task: R, owner: R) => {
+  const printTask = (task: PrintTaskDoc, owner: Partial<GenericUserDoc>) => {
     const printWindow = window.open('', '_blank', 'width=800,height=600,popup=1');
     if (!printWindow) return;
     const lines = String(task.content || '').split('\n');
@@ -2612,7 +2847,7 @@ export function ContestPrintPage() {
     };
   }, [kioskEnabled]);
 
-  const PrintChrome = ({ children }: { children: any }) =>
+  const PrintChrome = ({ children }: { children: React.ReactNode }) =>
     urls ? (
       <>{children}</>
     ) : (
@@ -2740,7 +2975,7 @@ export function ContestPrintPage() {
                       </TableRow>
                     ) : (
                       tasks.map((task) => {
-                        const owner = udict[String(task.owner)] || {};
+                        const owner: Partial<GenericUserDoc> = udict[String(task.owner)] || {};
                         return (
                           <TableRow key={String(task._id)}>
                             <TableCell className="pl-5 text-sm">{owner.uname || `UID ${task.owner}`}</TableCell>

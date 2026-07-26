@@ -12,6 +12,7 @@ import {
   HardDrive,
   History,
   Loader2,
+  type LucideIcon,
   MessageSquare,
   Network,
   Send,
@@ -26,7 +27,7 @@ import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } fro
 import { getLangEntry, getStatus, KryptonIDE, type RecordEntry } from '@/components/krypton-ide';
 import { MarkdownView } from '@/components/markdown-renderer';
 import { ObjectiveAnswerPanel, type ObjectiveClientQuestion } from '@/components/objective-answer-panel';
-import { ProblemAuthorText, ProblemEditGate } from '@/components/problem-authoring-state';
+import { ProblemAuthorText, type ProblemAuthorView, ProblemEditGate } from '@/components/problem-authoring-state';
 import {
   ProgrammingStatementView,
   structuredStatementSamples,
@@ -46,7 +47,94 @@ import { replaceRouteTokens } from '@/lib/format';
 import { shouldShowNoTestdataWarning } from '@/lib/problem-testcase-warning';
 import { extractSamples } from '@/lib/samples';
 
-type R = Record<string, any>;
+/**
+ * Judge configuration as delivered inside `pdoc.config` (server-side
+ * `parseConfig`). Kept optional/loose because older problems may miss
+ * fields; runtime guards below stay authoritative.
+ */
+interface ProblemConfig {
+  type?: string;
+  time?: string | number;
+  memory?: string | number;
+  timeMin?: string | number;
+  timeMax?: string | number;
+  memoryMin?: string | number;
+  memoryMax?: string | number;
+  langs?: string[];
+  time_limit_rate?: Record<string, number>;
+  memory_limit_rate?: Record<string, number>;
+  /** type=objective 时服务端下发的无答案题面描述符。 */
+  questions?: ObjectiveClientQuestion[];
+}
+
+/** Subset of the serialized problem document this page reads. */
+interface ProblemDoc {
+  docId?: number;
+  pid?: string;
+  title?: string;
+  content?: string;
+  config?: ProblemConfig | string | null;
+  tag?: string[];
+  nSubmit?: number;
+  nAccept?: number;
+  difficulty?: number;
+  origStat?: { accepted: number; submitted: number };
+  problemKind?: string;
+  programmingStatementView?: ProgrammingStatementViewData | null;
+  reference?: unknown;
+}
+
+/** Per-user problem status doc (`psdoc`). */
+interface ProblemStatusDoc {
+  status?: number;
+}
+
+/** Subset of the serialized contest/homework document this page reads. */
+interface ContestDoc {
+  docId?: string | number;
+  title?: string;
+  rule?: string;
+  beginAt?: string | Date;
+  endAt?: string | Date;
+  pids?: unknown[];
+}
+
+/** Exam-mode bootstrap payload (see paper.ts; team fields read separately). */
+interface ExamModeData {
+  enabled?: boolean;
+  urls?: ExamModeUrls;
+}
+
+interface ExamModeUrls {
+  overview?: string;
+  record?: string;
+  teamCodeSnapshots?: string;
+}
+
+/** Related contest/homework rows (`ctdocs` / `htdocs`). */
+interface RelatedContestDoc {
+  _id?: unknown;
+  title?: string;
+}
+
+/**
+ * Loose record document as it arrives from the `/records` JSON endpoint or
+ * the record websocket. Every field is re-validated before use.
+ */
+interface RawRecordDoc {
+  _id?: unknown;
+  rid?: unknown;
+  contest?: unknown;
+  status?: unknown;
+  score?: unknown;
+  lang?: unknown;
+  url?: string;
+  time?: unknown;
+  memory?: unknown;
+  submitAt?: unknown;
+  judgeAt?: unknown;
+  timestamp?: unknown;
+}
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -127,7 +215,9 @@ function objectIdTimestamp(value: unknown): number | null {
 function dateTimestamp(value: unknown): number | null {
   if (!value) return null;
   const raw = typeof value === 'object' && value && '$date' in value ? (value as { $date?: unknown }).$date : value;
-  const ts = new Date(raw as any).getTime();
+  // `new Date` tolerates arbitrary input at runtime; the cast only names the
+  // shapes this field realistically carries (ISO string / epoch ms / Date).
+  const ts = new Date(raw as string | number | Date).getTime();
   return Number.isFinite(ts) ? ts : null;
 }
 
@@ -161,13 +251,13 @@ function mergeRecordEntries(...lists: RecordEntry[][]): RecordEntry[] {
 const PRETEST_CONTEST_ID = '000000000000000000000000';
 const GENERATE_CONTEST_ID = '000000000000000000000001';
 
-function isPretestOrGenerate(rdoc: R): boolean {
+function isPretestOrGenerate(rdoc: RawRecordDoc): boolean {
   const contest = normalizeId(rdoc.contest);
   if (!contest) return false;
   return contest === PRETEST_CONTEST_ID || contest === GENERATE_CONTEST_ID;
 }
 
-function recordEntryFromRdoc(rdoc: R, recordDetailRoute: string): RecordEntry | null {
+function recordEntryFromRdoc(rdoc: RawRecordDoc, recordDetailRoute: string): RecordEntry | null {
   const rid = normalizeId(rdoc._id ?? rdoc.rid);
   if (!rid) return null;
   // Defensive: even if the backend leaks a pretest/generate record
@@ -212,7 +302,7 @@ function difficultyBadge(d: number | undefined) {
 }
 
 /** Contest entry banner with live countdown and a back-to-contest link. */
-function ContestBanner({ tdoc, mode, letter, contestUrl }: { tdoc: R; mode: string; letter: string | null; contestUrl: string }) {
+function ContestBanner({ tdoc, mode, letter, contestUrl }: { tdoc: ContestDoc; mode: string; letter: string | null; contestUrl: string }) {
   const isHomework = tdoc.rule === 'homework';
   const begin = (() => {
     if (!tdoc.beginAt) return 0;
@@ -378,7 +468,7 @@ function ResizableSplit({
 /*  Info bar — dense row of stats                                      */
 /* ------------------------------------------------------------------ */
 
-function InfoChip({ icon: Icon, label, value }: { icon: any; label: string; value: React.ReactNode }) {
+function InfoChip({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: React.ReactNode }) {
   return (
     <div className="flex items-center gap-1.5 text-xs">
       <Icon className="size-3.5 text-muted-foreground" />
@@ -442,7 +532,7 @@ function organizeAllowedLangs(ids: string[]): LangGroup[] {
   });
 }
 
-function LimitsSection({ config }: { config: R }) {
+function LimitsSection({ config }: { config: ProblemConfig }) {
   if (typeof config === 'string' || !config) return null;
 
   const timeMin = parseConfigTimeMS(config.timeMin);
@@ -575,7 +665,7 @@ function AllowedLangs({ ids }: { ids: string[] }) {
 }
 
 /** Parse a Hydro time string ('1s', '1500ms') → milliseconds; tolerant. */
-function parseConfigTimeMS(input: any): number | null {
+function parseConfigTimeMS(input: unknown): number | null {
   if (input == null) return null;
   if (typeof input === 'number' && Number.isFinite(input)) return input;
   const s = String(input).trim().toLowerCase();
@@ -586,7 +676,7 @@ function parseConfigTimeMS(input: any): number | null {
   return m[2] === 'ms' || !m[2] ? Math.round(v) : Math.round(v * 1000);
 }
 
-function parseConfigMemoryMB(input: any): number | null {
+function parseConfigMemoryMB(input: unknown): number | null {
   if (input == null) return null;
   if (typeof input === 'number' && Number.isFinite(input)) return input;
   const s = String(input).trim().toLowerCase();
@@ -624,12 +714,12 @@ function formatConfigMemory(mb: number | undefined | null): string {
 export function ProblemDetailPage() {
   const bs = useBootstrap();
   const data = bs.page.data;
-  const pdoc: R = data.pdoc || {};
-  const authorUdocs: R[] = Array.isArray(data.authorUdocs) ? data.authorUdocs : [];
-  const dataContributorUdocs: R[] = Array.isArray(data.dataContributorUdocs) ? data.dataContributorUdocs : [];
+  const pdoc: ProblemDoc = data.pdoc || {};
+  const authorUdocs: ProblemAuthorView[] = Array.isArray(data.authorUdocs) ? data.authorUdocs : [];
+  const dataContributorUdocs: ProblemAuthorView[] = Array.isArray(data.dataContributorUdocs) ? data.dataContributorUdocs : [];
   const canEditProblem = data.canEditProblem === true;
-  const psdoc: R = data.psdoc || {};
-  const config: R = pdoc.config && typeof pdoc.config === 'object' ? pdoc.config : {};
+  const psdoc: ProblemStatusDoc = data.psdoc || {};
+  const config: ProblemConfig = pdoc.config && typeof pdoc.config === 'object' ? pdoc.config : {};
   const content = pdoc.content || '';
   const nSubmit = pdoc.nSubmit || 0;
   const nAccept = pdoc.nAccept || 0;
@@ -639,20 +729,20 @@ export function ProblemDetailPage() {
   const difficulty = pdoc.difficulty;
   const solutionCount = data.solutionCount || 0;
   const discussionCount = data.discussionCount || 0;
-  const ctdocs: R[] = data.ctdocs || [];
-  const htdocs: R[] = data.htdocs || [];
+  const ctdocs: RelatedContestDoc[] = data.ctdocs || [];
+  const htdocs: RelatedContestDoc[] = data.htdocs || [];
   const rate = nSubmit > 0 ? Math.round((nAccept / nSubmit) * 100) : 0;
 
   /* ── Contest mode ── */
-  const tdoc: R | null = data.tdoc || null;
-  const examMode: R | null = data.examMode || null;
+  const tdoc: ContestDoc | null = data.tdoc || null;
+  const examMode: ExamModeData | null = data.examMode || null;
   const teamExamMode = readTeamExamModeContext(examMode);
   const teamCodeWritable = teamExamMode?.teamRole === 'captain' && teamExamMode.canEditCode && teamExamMode.canRun && teamExamMode.canSubmit;
   const teamCodeReadOnly = !!teamExamMode && !teamCodeWritable;
   const teamCanVirtualPrint = teamCodeWritable && teamExamMode?.canUseVirtualPrint === true;
   const teamCanViewRecords = !teamExamMode || teamExamMode.canViewTeamRecords;
   const showNoTestdataWarning = shouldShowNoTestdataWarning(pdoc, !!examMode?.enabled);
-  const examUrls: R = examMode?.urls || {};
+  const examUrls: ExamModeUrls = examMode?.urls || {};
   const teamCodeEndpoint = String(examUrls.teamCodeSnapshots || '');
   const mode: string = data.mode || 'normal';
   const postContestPracticeActive = data.postContestPracticeActive === true;
@@ -674,7 +764,7 @@ export function ProblemDetailPage() {
     practice: recordPracticeScope,
   });
   // Alphabetic id "A" / "B" / "C" from contest problem order
-  const contestPids: any[] = Array.isArray(tdoc?.pids) ? tdoc!.pids : [];
+  const contestPids: unknown[] = Array.isArray(tdoc?.pids) ? tdoc!.pids : [];
   const contestIdx = inContest ? contestPids.findIndex((x) => String(x) === String(pdoc.docId)) : -1;
   const contestLetter = contestIdx >= 0 ? String.fromCharCode(65 + contestIdx) : null;
   // Inside contest, drop the raw pid prefix from the title; the letter takes its place.
@@ -696,7 +786,7 @@ export function ProblemDetailPage() {
   // type=objective 下发无答案的 questions 描述符，走面板作答提交。
   const objectiveQuestions: ObjectiveClientQuestion[] = config.type === 'objective' && Array.isArray(config.questions) ? config.questions : [];
   const isObjective = objectiveQuestions.length > 0;
-  const isStructuredAnswer = ['program_fill', 'function'].includes(config.type) && ['program_fill', 'function'].includes(String(pdoc.problemKind));
+  const isStructuredAnswer = ['program_fill', 'function'].includes(config.type ?? '') && ['program_fill', 'function'].includes(String(pdoc.problemKind));
   const isSubjective = pdoc.problemKind === 'subjective';
   const canPreviewSubjective = !!data.canPreviewSubjective;
   const objectiveDraftKey = `objective-draft:${bs.user?.id || 0}/${bs.domain?.id || 'default'}/${pdoc.docId || pid}${tid ? `@${tid}` : ''}`;
@@ -746,13 +836,17 @@ export function ProblemDetailPage() {
           return;
         }
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const json = await res.json();
+        const json = (await res.json()) as {
+          code?: unknown;
+          rdoc?: { code?: unknown; lang?: unknown };
+          page?: { data?: { rdoc?: { code?: unknown; lang?: unknown } } };
+        };
         const record = json.rdoc || json.page?.data?.rdoc || {};
         const code = json.code ?? record.code;
         if (typeof code !== 'string' || !code) throw new Error('该记录没有可查看的文本源码');
         setReadonlySource({ rid: entry.rid, lang: String(record.lang || entry.lang || ''), code });
-      } catch (error: any) {
-        setReadonlySourceError(error?.message || '加载本队源码失败');
+      } catch (error) {
+        setReadonlySourceError(error instanceof Error && error.message ? error.message : '加载本队源码失败');
       } finally {
         setReadonlySourceLoading(false);
       }
@@ -776,14 +870,14 @@ export function ProblemDetailPage() {
         credentials: 'same-origin',
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
+      const json = (await res.json()) as { rdocs?: unknown; page?: { data?: { rdocs?: unknown } } };
       const rdocs = Array.isArray(json.rdocs) ? json.rdocs : Array.isArray(json.page?.data?.rdocs) ? json.page.data.rdocs : [];
-      const entries = rdocs.map((rdoc: R) => recordEntryFromRdoc(rdoc, recordDetailRoute)).filter(Boolean) as RecordEntry[];
+      const entries = rdocs.map((rdoc: RawRecordDoc) => recordEntryFromRdoc(rdoc, recordDetailRoute)).filter(Boolean) as RecordEntry[];
       setIdeRecords((prev) => mergeRecordEntries(prev, entries));
       if (teamCodeReadOnly && entries[0]) await loadReadonlySource(entries[0]);
       setIdeRecordsLoaded(true);
-    } catch (e: any) {
-      setIdeRecordsError(e?.message || '加载提交记录失败');
+    } catch (e) {
+      setIdeRecordsError(e instanceof Error && e.message ? e.message : '加载提交记录失败');
       setIdeRecordsLoaded(true);
     } finally {
       setIdeRecordsLoading(false);

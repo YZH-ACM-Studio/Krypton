@@ -6,8 +6,48 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useBootstrap } from '@/lib/bootstrap';
 
+// ─── Page-data payloads (produced server-side by the matching plugins) ─────
+
+/** `fps-importer` FpsProblemImportHandler.get → listKnowledgeMapsForProblemSelection(). */
+interface FpsImportPageData {
+  knowledgeMaps?: Array<{ id: string; title: string }>;
+}
+
+/** `telegram` plugin login handler → `{ botLogin: config.botLogin }`. */
+interface TelegramLoginPageData {
+  botLogin?: string;
+}
+
+/** Global injected for the Telegram login widget's `data-onauth` callback. */
+interface TelegramAuthWindow extends Window {
+  onTelegramAuth?: (user: unknown) => void;
+}
+
+/** `scoreboard-xcpcio` display handler body for the `xcpcio_board.html` route. */
+interface XcpcioBoardPageData {
+  /** Content hash of the built `index-<hash>.js` bundle (absent until assets are built). */
+  js?: string;
+  /** Content hash of the built `index-<hash>.css` bundle. */
+  css?: string;
+  dataSource?: string;
+  refreshInterval?: number;
+  realtime?: boolean;
+  tdoc?: { title?: string };
+}
+
+/** Globals read by the xcpcio board bundle at startup. */
+interface XcpcioBoardWindow extends Window {
+  CDN_HOST?: string;
+  __toAssetUrl?: (url: string) => string;
+  DATA_HOST?: string;
+  DATA_REGION?: string;
+  DEFAULT_LANG?: string;
+  DATA_SOURCE?: string;
+  REFRESH_INTERVAL?: number;
+}
+
 export function FpsImportPage() {
-  const data = useBootstrap().page.data;
+  const data = useBootstrap().page.data as FpsImportPageData;
   const knowledgeMaps: Array<{ id: string; title: string }> = data.knowledgeMaps || [];
   const defaultMapId = knowledgeMaps.length === 1 ? knowledgeMaps[0].id : '';
   return (
@@ -89,11 +129,11 @@ export function FpsImportPage() {
 
 export function TelegramLoginPage() {
   const bs = useBootstrap();
-  const botLogin = bs.page.data.botLogin || '';
+  const botLogin = (bs.page.data as TelegramLoginPageData).botLogin || '';
 
   useEffect(() => {
     if (!botLogin) return undefined;
-    (window as any).onTelegramAuth = (user: unknown) => {
+    (window as TelegramAuthWindow).onTelegramAuth = (user: unknown) => {
       window.location.href = `/oauth/telegram/callback?payload=${encodeURIComponent(JSON.stringify(user))}`;
     };
     const script = document.createElement('script');
@@ -106,7 +146,7 @@ export function TelegramLoginPage() {
     document.getElementById('telegram-login-widget')?.appendChild(script);
     return () => {
       script.remove();
-      delete (window as any).onTelegramAuth;
+      delete (window as TelegramAuthWindow).onTelegramAuth;
     };
   }, [botLogin]);
 
@@ -134,18 +174,18 @@ export function TelegramLoginPage() {
 
 export function XcpcioBoardPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
+  const data = bs.page.data as XcpcioBoardPageData;
   const scriptSrc = data.js ? `/assets/index-${data.js}.js` : '';
   const cssHref = data.css ? `/assets/index-${data.css}.css` : '';
 
   useEffect(() => {
-    (window as any).CDN_HOST = '/';
-    (window as any).__toAssetUrl = (url: string) => `/${url}`.replace(/\/+/g, '/');
-    (window as any).DATA_HOST = '/';
-    (window as any).DATA_REGION = 'Hydro';
-    (window as any).DEFAULT_LANG = bs.locale?.startsWith('zh') ? 'zh-CN' : 'en';
-    (window as any).DATA_SOURCE = data.dataSource || '';
-    if (data.refreshInterval) (window as any).REFRESH_INTERVAL = data.refreshInterval;
+    (window as XcpcioBoardWindow).CDN_HOST = '/';
+    (window as XcpcioBoardWindow).__toAssetUrl = (url: string) => `/${url}`.replace(/\/+/g, '/');
+    (window as XcpcioBoardWindow).DATA_HOST = '/';
+    (window as XcpcioBoardWindow).DATA_REGION = 'Hydro';
+    (window as XcpcioBoardWindow).DEFAULT_LANG = bs.locale?.startsWith('zh') ? 'zh-CN' : 'en';
+    (window as XcpcioBoardWindow).DATA_SOURCE = data.dataSource || '';
+    if (data.refreshInterval) (window as XcpcioBoardWindow).REFRESH_INTERVAL = data.refreshInterval;
 
     const created: HTMLElement[] = [];
     if (cssHref) {

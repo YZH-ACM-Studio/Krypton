@@ -32,18 +32,18 @@ import type { VigilEventSeverity, VigilStudentStatus } from '@/lib/vigil-api';
 
 /* ─── Message types ────────────────────────────────────────────────────── */
 
-interface SnapshotMsg {
+export interface SnapshotMsg {
   type: 'snapshot';
   sent_at: string;
-  clients: any[];
-  recent_events: any[];
-  recent_commands: any[];
-  recent_screenshots: any[];
+  clients: unknown[];
+  recent_events: unknown[];
+  recent_commands: unknown[];
+  recent_screenshots: unknown[];
 }
 
 interface ApprovalRequestMsg {
   type: 'approval_request';
-  approval: any;
+  approval: unknown;
 }
 
 interface ApprovalResolvedMsg {
@@ -56,12 +56,15 @@ interface ApprovalResolvedMsg {
 interface SessionLifecycleMsg {
   type: 'session_opened' | 'session_closed' | 'session_transferred';
   sessionId: string;
-  payload: any;
+  /** Server-defined session dict; only `oj_contest_id` is read by the UI. */
+  payload: { oj_contest_id?: string; [k: string]: unknown };
+  /** Not sent by the current server — defensive fallback read by the exam page. */
+  contestId?: string;
 }
 
 interface ClientEventMsg {
   type: 'client_event';
-  event: any;
+  event: unknown;
 }
 
 /* New Phase 1 messages */
@@ -105,7 +108,7 @@ export interface CommandResultMsg {
   machineId: string;
   result: 'ok' | 'client_offline' | 'timeout' | 'error';
   errorMessage?: string;
-  data?: any;
+  data?: unknown;
 }
 
 export interface StreamStatusChangeMsg {
@@ -126,8 +129,7 @@ export type VigilEventMessage =
   | ScreenshotAddedMsg
   | EventAddedMsg
   | CommandResultMsg
-  | StreamStatusChangeMsg
-  | { type: string; [k: string]: any };
+  | StreamStatusChangeMsg;
 
 /* ─── Hook API ─────────────────────────────────────────────────────────── */
 
@@ -146,7 +148,7 @@ interface UseVigilSocketOptions {
 
 export interface UseVigilSocket {
   connected: boolean;
-  lastSnapshot: any;
+  lastSnapshot: SnapshotMsg | null;
   /**
    * Subscribe (or update the subscription) for a contest. Sent immediately if
    * the socket is open; queued otherwise and resent after reconnect.
@@ -160,7 +162,7 @@ export function useVigilSocket(opts: UseVigilSocketOptions = {}): UseVigilSocket
   const { onMessage, enabled = true } = opts;
   const wsRef = useRef<WebSocket | null>(null);
   const [connected, setConnected] = useState(false);
-  const [lastSnapshot, setLastSnapshot] = useState<any>(null);
+  const [lastSnapshot, setLastSnapshot] = useState<SnapshotMsg | null>(null);
   const reconnectAttempt = useRef(0);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Latest subscription request — re-sent on every (re)connect so the server
@@ -207,7 +209,8 @@ export function useVigilSocket(opts: UseVigilSocketOptions = {}): UseVigilSocket
 
     async function connect() {
       try {
-        const tk = await fetch('/api/admin/vigil/dashboard-token', { credentials: 'include' }).then((r) => r.json());
+        const tk = await fetch('/api/admin/vigil/dashboard-token', { credentials: 'include' })
+          .then((r) => r.json() as Promise<{ token: string; vigilWsUrl: string }>);
         if (cancelled) return;
         const url = `${tk.vigilWsUrl}?token=${encodeURIComponent(tk.token)}`;
         const ws = new WebSocket(url);

@@ -124,8 +124,8 @@ export function useProctorCommands({ contestId }: UseProctorCommandsOptions) {
       let response: ProctorCommandResponse;
       try {
         response = await sendProctorCommandV2({ contestId, ...requestBody });
-      } catch (e: any) {
-        toast.error(`${label}失败`, { id: toastId, description: e?.message || '网络错误' });
+      } catch (e) {
+        toast.error(`${label}失败`, { id: toastId, description: e instanceof Error && e.message ? e.message : '网络错误' });
         throw e;
       }
 

@@ -194,8 +194,8 @@ interface AuditEntry {
   eventType: string;
   pointId?: string;
   adminUid: number;
-  before: any;
-  after: any;
+  before: unknown;
+  after: unknown;
   reason: string;
   createdAt: string;
 }
@@ -207,6 +207,12 @@ interface StudentLite {
   schoolId: string;
   groupIds?: string[];
 }
+
+/** `udict` payloads: OJ user summaries keyed by uid. */
+type UserDict = Record<string, { _id: number; uname: string }>;
+
+/** Values a task-point param editor can produce (see NodeParamInput). */
+type TaskNodeParamValue = string | number | number[];
 
 // ─── Status helpers (used across pages) ───────────────────────────────────
 
@@ -465,7 +471,7 @@ export function AdminTasksEditPage() {
   const [maxAssignments, setMaxAssignments] = useState(initial?.maxAssignments?.toString() || '');
   const [accessType, setAccessType] = useState<TaskAccess['type']>(initial?.access.type || 'public');
   const [accessTargetId, setAccessTargetId] = useState(
-    initial?.access.type === 'user_group' || initial?.access.type === 'school' ? (initial.access as any).targetId : '',
+    initial?.access.type === 'user_group' || initial?.access.type === 'school' ? initial.access.targetId : '',
   );
   const [accessYears, setAccessYears] = useState<number[]>(initial?.access.type === 'grade' ? initial.access.years : []);
   const [admissionMode, setAdmissionMode] = useState<AdmissionMode>(initial?.admissionMode || 'auto');
@@ -516,7 +522,7 @@ export function AdminTasksEditPage() {
       nodes: graph.nodes.map((n) => (n.id === nodeId ? { ...n, ...patch } : n)),
     });
   }
-  function updateNodeParams(nodeId: string, name: string, value: any) {
+  function updateNodeParams(nodeId: string, name: string, value: TaskNodeParamValue) {
     const node = graph.nodes.find((n) => n.id === nodeId);
     if (!node) return;
     updateNode(nodeId, { params: { ...(node.params || {}), [name]: value } });
@@ -886,7 +892,7 @@ interface NodeEditorProps {
   schools: SchoolRef[];
   userGroups: GroupRef[];
   onChangeName: (name: string) => void;
-  onChangeParam: (name: string, value: any) => void;
+  onChangeParam: (name: string, value: TaskNodeParamValue) => void;
   onDelete: () => void;
 }
 
@@ -937,8 +943,11 @@ function NodeEditor(props: NodeEditorProps) {
 
 interface NodeParamInputProps {
   spec: PresetSummary['params'][number];
+  // Param values come straight out of `TaskGraphNode.params` (fed by
+  // server-stored graph JSON), so the incoming value genuinely has no static
+  // shape — kept as `any` on purpose.
   value: any;
-  onChange: (v: any) => void;
+  onChange: (v: TaskNodeParamValue) => void;
   contests: ContestRef[];
   homeworks: HomeworkRef[];
   trainings: TrainingRef[];
@@ -1098,7 +1107,7 @@ export function AdminTasksAssignPage() {
   const data = useBootstrap().page.data as {
     task: TaskDoc;
     assignments: AssignmentEntry[];
-    udict: Record<string, { _id: number; uname: string }>;
+    udict: UserDict;
     schools: SchoolRef[];
     userGroups: GroupRef[];
   };
@@ -1132,7 +1141,7 @@ export function AdminTasksAssignPage() {
             <MiniTabs
               size="md"
               value={scope}
-              onValueChange={setScope as any}
+              onValueChange={setScope}
               items={[
                 { value: 'uid', label: '单个用户' },
                 { value: 'user_group', label: '整个用户组' },
@@ -1227,7 +1236,7 @@ export function AdminTasksStatsPage() {
   const data = useBootstrap().page.data as {
     task: TaskDoc;
     assignments: AssignmentEntry[];
-    udict: Record<string, { _id: number; uname: string }>;
+    udict: UserDict;
     studentByUid: Record<string, StudentLite>;
     audit: AuditEntry[];
     presets: PresetSummary[];
@@ -1499,7 +1508,7 @@ export function AdminTasksCandidatesPage() {
   const data = useBootstrap().page.data as {
     task: TaskDoc;
     assignments: AssignmentEntry[];
-    udict: Record<string, { _id: number; uname: string }>;
+    udict: UserDict;
     studentByUid: Record<string, StudentLite>;
     schools: SchoolRef[];
     userGroups: GroupRef[];
@@ -1587,7 +1596,7 @@ export function AdminTasksCandidatesPage() {
           />
           <MiniTabs
             value={statusFilter}
-            onValueChange={setStatusFilter as any}
+            onValueChange={setStatusFilter}
             items={[
               { value: 'all', label: `全部 (${data.assignments.length})` },
               { value: 'qualified', label: `候选 (${data.counts.qualified})` },
@@ -1938,19 +1947,33 @@ interface StayEvent {
   createdAt: string;
 }
 
+type ScoresTab = 'pat' | 'gplt' | 'csp' | 'stay';
+
+/** Score rows join student records for display; keyed by studentDocId. */
+type StudentDict = Record<string, { studentId: string; realName: string; schoolId: string; boundUserId: number | null }>;
+
+/**
+ * `admin_tasks_scores.html` payload — `scores` is tab-dependent, so the shape
+ * is a union discriminated on `tab` (the `stay` tab ships an empty `scores`).
+ */
+type ScoresPageData = {
+  stayEvents?: StayEvent[];
+  schools?: { _id: string; name: string }[];
+  udict: UserDict;
+  studentDict: StudentDict;
+  settings: DomainSettings;
+  level: string;
+  year: number;
+} & (
+  | { tab: 'pat'; scores: PatScore[] }
+  | { tab: 'gplt'; scores: GpltScore[] }
+  | { tab: 'csp'; scores: CspScore[] }
+  | { tab: 'stay'; scores: never[] }
+);
+
 export function AdminTasksScoresPage() {
-  const data = useBootstrap().page.data as {
-    tab: 'pat' | 'gplt' | 'csp' | 'stay';
-    scores: any[];
-    stayEvents?: StayEvent[];
-    schools?: { _id: string; name: string }[];
-    udict: Record<string, { _id: number; uname: string }>;
-    studentDict: Record<string, { studentId: string; realName: string; schoolId: string; boundUserId: number | null }>;
-    settings: DomainSettings;
-    level: string;
-    year: number;
-  };
-  const tabs = [
+  const data = useBootstrap().page.data as ScoresPageData;
+  const tabs: { key: ScoresTab; label: string }[] = [
     { key: 'pat', label: 'PAT 认证' },
     { key: 'gplt', label: '天梯赛' },
     { key: 'csp', label: 'CSP 认证' },
@@ -1966,7 +1989,7 @@ export function AdminTasksScoresPage() {
       <MiniTabs
         size="md"
         value={data.tab}
-        items={tabs.map((t) => ({ value: t.key as any, label: t.label, href: `/admin/tasks/scores?tab=${t.key}` }))}
+        items={tabs.map((t) => ({ value: t.key, label: t.label, href: `/admin/tasks/scores?tab=${t.key}` }))}
       />
 
       {data.tab === 'pat' && <PatScoreTab scores={data.scores} udict={data.udict} studentDict={data.studentDict} settings={data.settings} />}
@@ -1978,7 +2001,7 @@ export function AdminTasksScoresPage() {
 }
 
 /** Score rows are keyed by studentDocId; show 学号/姓名 (+ OJ uname if bound). */
-function StudentCell({ studentDict, udict, studentDocId }: { studentDict: any; udict: any; studentDocId: string }) {
+function StudentCell({ studentDict, udict, studentDocId }: { studentDict: StudentDict; udict: UserDict; studentDocId: string }) {
   const sd = studentDict?.[studentDocId];
   if (!sd) return <span className="text-muted-foreground">未知学生</span>;
   const uname = sd.boundUserId ? udict?.[sd.boundUserId]?.uname : null;
@@ -2007,11 +2030,11 @@ function BulkScoreImport({ action, operation, formatHint }: { action: string; op
         headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8', Accept: 'application/json' },
         body: new URLSearchParams({ operation, text }),
       });
-      const json = await resp.json().catch(() => ({}));
+      const json = (await resp.json().catch(() => ({}))) as { imported?: number; errors?: string[] };
       setResult(json);
       if (json?.imported && !json?.errors?.length) setTimeout(() => window.location.reload(), 600);
-    } catch (e: any) {
-      setResult({ errors: [String(e?.message || e)] });
+    } catch (e) {
+      setResult({ errors: [String((e as { message?: unknown } | null | undefined)?.message || e)] });
     } finally {
       setBusy(false);
     }
@@ -2048,7 +2071,7 @@ function BulkScoreImport({ action, operation, formatHint }: { action: string; op
   );
 }
 
-function PatScoreTab({ scores, udict, studentDict, settings }: { scores: PatScore[]; udict: any; studentDict: any; settings: DomainSettings }) {
+function PatScoreTab({ scores, udict, studentDict, settings }: { scores: PatScore[]; udict: UserDict; studentDict: StudentDict; settings: DomainSettings }) {
   return (
     <>
       <BulkScoreImport
@@ -2150,7 +2173,7 @@ function PatScoreTab({ scores, udict, studentDict, settings }: { scores: PatScor
   );
 }
 
-function GpltScoreTab({ scores, udict, studentDict, settings }: { scores: GpltScore[]; udict: any; studentDict: any; settings: DomainSettings }) {
+function GpltScoreTab({ scores, udict, studentDict, settings }: { scores: GpltScore[]; udict: UserDict; studentDict: StudentDict; settings: DomainSettings }) {
   return (
     <>
       <BulkScoreImport action="/admin/tasks/scores?tab=gplt" operation="gplt_import" formatHint="学号,school|national,年,分" />
@@ -2236,7 +2259,7 @@ function GpltScoreTab({ scores, udict, studentDict, settings }: { scores: GpltSc
   );
 }
 
-function CspScoreTab({ scores, udict, studentDict, settings }: { scores: CspScore[]; udict: any; studentDict: any; settings: DomainSettings }) {
+function CspScoreTab({ scores, udict, studentDict, settings }: { scores: CspScore[]; udict: UserDict; studentDict: StudentDict; settings: DomainSettings }) {
   return (
     <>
       <BulkScoreImport action="/admin/tasks/scores?tab=csp" operation="csp_import" formatHint="学号,轮次,分" />
@@ -2304,7 +2327,7 @@ function CspScoreTab({ scores, udict, studentDict, settings }: { scores: CspScor
   );
 }
 
-function StayCountTab({ events, schools, udict }: { events: StayEvent[]; schools: { _id: string; name: string }[]; udict: any }) {
+function StayCountTab({ events, schools, udict }: { events: StayEvent[]; schools: { _id: string; name: string }[]; udict: UserDict }) {
   return (
     <>
       <Card>

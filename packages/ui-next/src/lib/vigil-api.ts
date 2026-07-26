@@ -33,6 +33,11 @@ interface DashboardTokenResponse {
 
 let cached: DashboardTokenResponse | null = null;
 
+/** Narrow an unknown caught value down to a human-readable detail string. */
+function errorDetail(e: unknown): string | undefined {
+  return e instanceof Error ? e.message : undefined;
+}
+
 function looksLikeUrl(v: string | null | undefined): boolean {
   if (!v || typeof v !== 'string') return false;
   return /^https?:\/\//i.test(v.trim());
@@ -43,8 +48,8 @@ async function getToken(): Promise<DashboardTokenResponse> {
   let res: Response;
   try {
     res = await fetch('/api/admin/vigil/dashboard-token', { credentials: 'include' });
-  } catch (e: any) {
-    throw new VigilOfflineError('token_failed', e?.message);
+  } catch (e) {
+    throw new VigilOfflineError('token_failed', errorDetail(e));
   }
   if (!res.ok) {
     throw new VigilOfflineError('token_failed', `HTTP ${res.status}`);
@@ -52,7 +57,7 @@ async function getToken(): Promise<DashboardTokenResponse> {
   let data: DashboardTokenResponse;
   try {
     data = await res.json();
-  } catch (e: any) {
+  } catch {
     throw new VigilOfflineError('token_failed', 'non-JSON token response');
   }
   if (!looksLikeUrl(data?.vigilBaseUrl)) {
@@ -70,7 +75,7 @@ function stripHtml(s: string): string {
     .slice(0, 200);
 }
 
-async function vigilFetch<T = any>(path: string, init: RequestInit = {}): Promise<T> {
+async function vigilFetch<T = unknown>(path: string, init: RequestInit = {}): Promise<T> {
   const tk = await getToken();
   const url = `${tk.vigilBaseUrl}${path}`;
   let res: Response;
@@ -83,10 +88,10 @@ async function vigilFetch<T = any>(path: string, init: RequestInit = {}): Promis
         ...(init.headers || {}),
       },
     });
-  } catch (e: any) {
+  } catch (e) {
     // Reset cached token: maybe baseUrl changed.
     cached = null;
-    throw new VigilOfflineError('network', e?.message);
+    throw new VigilOfflineError('network', errorDetail(e));
   }
 
   const contentType = res.headers.get('content-type') || '';
@@ -107,7 +112,7 @@ async function vigilFetch<T = any>(path: string, init: RequestInit = {}): Promis
   if (!res.ok) {
     let bodyMsg = '';
     try {
-      const j = await res.json();
+      const j = await res.json() as { detail?: string; message?: string } | null;
       bodyMsg = j?.detail || j?.message || JSON.stringify(j);
     } catch {}
     throw new Error(`Vigil ${init.method || 'GET'} ${path}: ${res.status} ${bodyMsg.slice(0, 200)}`);
@@ -169,39 +174,39 @@ export async function fetchClients(): Promise<VigilClient[]> {
 }
 export async function fetchEvents(params: Record<string, string> = {}): Promise<VigilEvent[]> {
   const qs = new URLSearchParams(params).toString();
-  return await vigilFetch(`/api/events${qs ? `?${qs}` : ''}`);
+  return await vigilFetch<VigilEvent[]>(`/api/events${qs ? `?${qs}` : ''}`);
 }
 export async function fetchApprovals(): Promise<VigilApproval[]> {
-  return await vigilFetch('/api/approvals');
+  return await vigilFetch<VigilApproval[]>('/api/approvals');
 }
-export async function approveRequest(id: string, asTemporary: boolean): Promise<any> {
+export async function approveRequest(id: string, asTemporary: boolean): Promise<unknown> {
   return await vigilFetch(`/api/approvals/${id}/approve`, {
     method: 'POST',
     body: JSON.stringify({ asTemporary }),
   });
 }
-export async function rejectRequest(id: string, reason: string): Promise<any> {
+export async function rejectRequest(id: string, reason: string): Promise<unknown> {
   return await vigilFetch(`/api/approvals/${id}/reject`, {
     method: 'POST',
     body: JSON.stringify({ reason }),
   });
 }
 export async function fetchExamSessions(): Promise<VigilExamSession[]> {
-  return await vigilFetch('/api/exam-sessions');
+  return await vigilFetch<VigilExamSession[]>('/api/exam-sessions');
 }
-export async function invalidateExamSession(sessionId: string, reason: string, proctorOjUserId?: number): Promise<any> {
+export async function invalidateExamSession(sessionId: string, reason: string, proctorOjUserId?: number): Promise<unknown> {
   return await vigilFetch(`/api/exam-sessions/${encodeURIComponent(sessionId)}/invalidate`, {
     method: 'POST',
     body: JSON.stringify({ reason, proctorOjUserId }),
   });
 }
-export async function resetStudentFinishSession(sessionId: string, proctorOjUserId?: number): Promise<any> {
+export async function resetStudentFinishSession(sessionId: string, proctorOjUserId?: number): Promise<unknown> {
   return await vigilFetch('/api/proctor/reset-student-finish', {
     method: 'POST',
     body: JSON.stringify({ sessionId, proctorOjUserId }),
   });
 }
-export async function sendProctorCommand(machineId: string, command: string, payload: Record<string, any> = {}): Promise<any> {
+export async function sendProctorCommand(machineId: string, command: string, payload: Record<string, unknown> = {}): Promise<unknown> {
   return await vigilFetch(`/api/clients/${machineId}/commands`, {
     method: 'POST',
     body: JSON.stringify({ command, payload }),
@@ -294,7 +299,7 @@ export interface VigilStudentEvent {
   type: string;
   severity: VigilEventSeverity;
   summary: string;
-  payload?: Record<string, any>;
+  payload?: Record<string, unknown>;
   count: number;
   firstTs: string;
   lastTs: string;
@@ -398,6 +403,13 @@ async function recordingRequestError(response: Response, action: string): Promis
   return new Error(`${action}（HTTP ${response.status}）${detail ? `：${detail}` : ''}`);
 }
 
+export interface RecordingDeleteResult {
+  ok: boolean;
+  deleted: number;
+  missing: number;
+  failures: Array<{ recordingId: string; error: string }>;
+}
+
 export async function previewRecordingDelete(scope: RecordingDeleteScope): Promise<RecordingDeletePreview> {
   const query = new URLSearchParams({ cid: scope.cid });
   if (scope.ojUserId != null) query.set('ojUserId', String(scope.ojUserId));
@@ -405,14 +417,14 @@ export async function previewRecordingDelete(scope: RecordingDeleteScope): Promi
   if (scope.recordingId) query.set('recordingId', scope.recordingId);
   const response = await fetch(`/api/admin/vigil/recordings/delete-preview?${query}`);
   if (!response.ok) throw await recordingRequestError(response, '录像删除预检失败');
-  return await response.json();
+  return await response.json() as RecordingDeletePreview;
 }
 
 export async function executeRecordingDelete(
   scope: RecordingDeleteScope,
   intent: string,
   confirmTitle?: string,
-): Promise<{ ok: boolean; deleted: number; missing: number; failures: Array<{ recordingId: string; error: string }> }> {
+): Promise<RecordingDeleteResult> {
   const form = new URLSearchParams({ cid: scope.cid, intent });
   if (scope.ojUserId != null) form.set('ojUserId', String(scope.ojUserId));
   if (scope.examSessionId) form.set('examSessionId', scope.examSessionId);
@@ -424,7 +436,7 @@ export async function executeRecordingDelete(
     body: form,
   });
   if (!response.ok) throw await recordingRequestError(response, '录像删除失败');
-  return await response.json();
+  return await response.json() as RecordingDeleteResult;
 }
 
 export interface VigilAuditEntry {
@@ -434,7 +446,7 @@ export interface VigilAuditEntry {
   targetMachineId?: string;
   targetUid?: number;
   command: string;
-  payload?: any;
+  payload?: unknown;
   reason?: string;
   ts: string;
   result: 'ok' | 'timeout' | 'client_offline' | 'error';
@@ -451,7 +463,7 @@ export interface ProctorCommandRequest {
   /** When sending a group message: filter on the *server* side instead. */
   audienceFilter?: 'all' | 'online' | 'anomaly';
   command: string;
-  payload?: Record<string, any>;
+  payload?: Record<string, unknown>;
   reason?: string;
   /**
    * Actor metadata is filled in server-side from the token, but we accept
@@ -469,7 +481,7 @@ export interface ProctorCommandResponse {
 }
 
 export async function sendProctorCommandV2(body: ProctorCommandRequest): Promise<ProctorCommandResponse> {
-  return await vigilFetch('/api/admin/vigil/proctor/commands', {
+  return await vigilFetch<ProctorCommandResponse>('/api/admin/vigil/proctor/commands', {
     method: 'POST',
     body: JSON.stringify(body),
   });
@@ -494,7 +506,7 @@ export async function listContestStudents(contestId: string, params: ListStudent
   if (params.q) qs.set('q', params.q);
   if (params.sort) qs.set('sort', params.sort);
   const suffix = qs.toString() ? `?${qs}` : '';
-  return await vigilFetch(`/api/admin/vigil/proctor/contests/${encodeURIComponent(contestId)}/students${suffix}`);
+  return await vigilFetch<VigilStudentListResponse>(`/api/admin/vigil/proctor/contests/${encodeURIComponent(contestId)}/students${suffix}`);
 }
 
 export interface ListStudentEventsParams {
@@ -508,7 +520,7 @@ export async function listStudentEvents(contestId: string, machineId: string, pa
   if (params.since) qs.set('since', params.since);
   if (params.limit) qs.set('limit', String(params.limit));
   const suffix = qs.toString() ? `?${qs}` : '';
-  return await vigilFetch(
+  return await vigilFetch<VigilStudentEvent[]>(
     `/api/admin/vigil/proctor/contests/${encodeURIComponent(contestId)}/students/${encodeURIComponent(machineId)}/events${suffix}`,
   );
 }
@@ -527,13 +539,13 @@ export async function listStudentScreenshots(
   if (params.since) qs.set('since', params.since);
   if (params.limit) qs.set('limit', String(params.limit));
   const suffix = qs.toString() ? `?${qs}` : '';
-  return await vigilFetch(
+  return await vigilFetch<VigilStudentScreenshot[]>(
     `/api/admin/vigil/proctor/contests/${encodeURIComponent(contestId)}/students/${encodeURIComponent(machineId)}/screenshots${suffix}`,
   );
 }
 
 export async function listContestRecordings(contestId: string): Promise<VigilRecording[]> {
-  return await vigilFetch(`/api/admin/vigil/proctor/contests/${encodeURIComponent(contestId)}/recordings`);
+  return await vigilFetch<VigilRecording[]>(`/api/admin/vigil/proctor/contests/${encodeURIComponent(contestId)}/recordings`);
 }
 
 export interface ListAuditParams {
@@ -550,7 +562,7 @@ export async function listContestAudit(contestId: string, params: ListAuditParam
   if (params.command) qs.set('command', params.command);
   if (params.actor) qs.set('actor', String(params.actor));
   const suffix = qs.toString() ? `?${qs}` : '';
-  return await vigilFetch(`/api/admin/vigil/proctor/contests/${encodeURIComponent(contestId)}/audit${suffix}`);
+  return await vigilFetch<VigilAuditEntry[]>(`/api/admin/vigil/proctor/contests/${encodeURIComponent(contestId)}/audit${suffix}`);
 }
 
 /**

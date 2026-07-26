@@ -9,9 +9,33 @@ import { MarkdownView } from '@/components/markdown-renderer';
 import { useBootstrap } from '@/lib/bootstrap';
 import { formatDateTime, replaceRouteTokens, toDate } from '@/lib/format';
 
-type R = Record<string, any>;
+interface HomeworkDocument {
+  docId?: string | number;
+  title?: string;
+  penaltySince?: unknown;
+  endAt?: unknown;
+  attend?: number;
+  pids?: Array<string | number>;
+  content?: string;
+}
 
-function hwState(h: R) {
+interface HomeworkProblem {
+  title?: string;
+  nAccept?: number;
+  nSubmit?: number;
+}
+
+interface HomeworkPageData {
+  tdocs?: HomeworkDocument[];
+  tdoc?: HomeworkDocument;
+  page?: string | number;
+  tpcount?: string | number;
+  pids?: Array<string | number>;
+  pdict?: Record<string, HomeworkProblem>;
+  canGradeSubjective?: boolean;
+}
+
+function hwState(h: HomeworkDocument) {
   const now = Date.now();
   const dl = toDate(h.penaltySince)?.getTime() || 0;
   const hard = toDate(h.endAt)?.getTime() || 0;
@@ -23,8 +47,8 @@ function hwState(h: R) {
 
 export function HomeworkPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
-  const tdocs: R[] = data.tdocs || [];
+  const data = bs.page.data as HomeworkPageData;
+  const tdocs = data.tdocs || [];
   const page = Number(data.page) || 1;
   const tpcount = Number(data.tpcount) || 1;
   const locale = bs.locale;
@@ -103,10 +127,10 @@ export function HomeworkPage() {
 
 export function HomeworkDetailPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
-  const tdoc: R = data.tdoc || {};
+  const data = bs.page.data as HomeworkPageData;
+  const tdoc = data.tdoc || {};
   const pids: (string | number)[] = data.pids || tdoc.pids || [];
-  const pdict: Record<string, R> = data.pdict || {};
+  const pdict = data.pdict || {};
   const st = hwState(tdoc);
   const locale = bs.locale;
 

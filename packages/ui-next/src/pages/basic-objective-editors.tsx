@@ -2,8 +2,13 @@ import { ArrowLeft, CheckCircle2, CircleDot, ListChecks, Plus, Save, TextCursorI
 import { useMemo, useRef, useState } from 'react';
 import { BASIC_OBJECTIVE_KIND, type BasicObjectiveKind } from '@hydrooj/common';
 import { MarkdownEditor } from '@/components/markdown-renderer';
-import { useProblemDataWriteGuard } from '@/components/problem-data-write-guard';
-import { StructuredProblemMetadataPanel, type KnowledgeMindmapOption } from '@/components/structured-problem-metadata-panel';
+import { type ProblemDataWriteGuardState, useProblemDataWriteGuard } from '@/components/problem-data-write-guard';
+import {
+  StructuredProblemMetadataPanel,
+  type KnowledgeMapOption,
+  type KnowledgeMindmapOption,
+  type StructuredProblemMetadataDocument,
+} from '@/components/structured-problem-metadata-panel';
 import { useFormDirtyState, useUnsavedChangesGuard } from '@/components/unsaved-changes-guard';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,7 +16,33 @@ import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 import { readProblemSaveSuccess } from '@/lib/problem-save-response';
 
-type RowConfig = Record<string, any>;
+interface ObjectiveProblemDocument extends StructuredProblemMetadataDocument {
+  content?: string;
+  structureLockedAt?: string | Date;
+  structureRevision?: number;
+}
+
+interface StoredObjectiveMain {
+  options?: string[];
+  answerIndex?: unknown;
+  answerIndexes?: number[];
+  partialCreditPercent?: unknown;
+  answer?: boolean | string;
+}
+
+interface ObjectiveEditorPageData {
+  page_name?: string;
+  pdoc?: ObjectiveProblemDocument;
+  statementWriteGuard?: ProblemDataWriteGuardState;
+  knowledgeMaps?: KnowledgeMapOption[];
+  knowledgeMindmapOptions?: KnowledgeMindmapOption[];
+  canUseCustomPid?: boolean;
+  structuredConfig?: { main?: StoredObjectiveMain };
+}
+
+interface ObjectiveEditorConfig {
+  main: Record<string, unknown>;
+}
 
 const KIND_META: Record<BasicObjectiveKind, { label: string; icon: typeof CircleDot }> = {
   [BASIC_OBJECTIVE_KIND.single]: { label: '单选题', icon: CircleDot },
@@ -46,12 +77,12 @@ function ObjectiveEditorShell({
   children,
 }: {
   kind: BasicObjectiveKind;
-  config: RowConfig;
+  config: ObjectiveEditorConfig;
   validationError: string;
   children: React.ReactNode;
 }) {
   const bs = useBootstrap();
-  const data = bs.page.data as RowConfig;
+  const data = bs.page.data as ObjectiveEditorPageData;
   const pdoc = data.pdoc || {};
   const isCreate = String(data.page_name || '').startsWith('problem_create_');
   const pid = String(pdoc.pid || pdoc.docId || '');
@@ -200,7 +231,7 @@ function ObjectiveEditorShell({
           isCreate={isCreate}
           locked={locked}
           knowledgeMaps={data.knowledgeMaps || []}
-          mindmapOptions={(data.knowledgeMindmapOptions || []) as KnowledgeMindmapOption[]}
+          mindmapOptions={data.knowledgeMindmapOptions || []}
           canUseCustomPid={data.canUseCustomPid === true}
           formDirty={dirtyState.dirty}
           onMetadataChange={dirtyState.recompute}
@@ -278,7 +309,7 @@ function ChoiceRows({
 }
 
 export function SingleProblemEditorPage() {
-  const data = useBootstrap().page.data as RowConfig;
+  const data = useBootstrap().page.data as ObjectiveEditorPageData;
   const main = data.structuredConfig?.main || {};
   const [options, setOptions] = useState<string[]>(main.options || ['', '']);
   const [answerIndex, setAnswerIndex] = useState<number>(Number(main.answerIndex) || 0);
@@ -303,7 +334,7 @@ export function SingleProblemEditorPage() {
 }
 
 export function MultiProblemEditorPage() {
-  const data = useBootstrap().page.data as RowConfig;
+  const data = useBootstrap().page.data as ObjectiveEditorPageData;
   const main = data.structuredConfig?.main || {};
   const [options, setOptions] = useState<string[]>(main.options || ['', '']);
   const [answerIndexes, setAnswerIndexes] = useState<Set<number>>(new Set(main.answerIndexes || [0]));
@@ -364,7 +395,7 @@ export function MultiProblemEditorPage() {
 }
 
 export function TrueFalseProblemEditorPage() {
-  const data = useBootstrap().page.data as RowConfig;
+  const data = useBootstrap().page.data as ObjectiveEditorPageData;
   const [answer, setAnswer] = useState<boolean>(data.structuredConfig?.main?.answer !== false);
   return (
     <ObjectiveEditorShell kind={BASIC_OBJECTIVE_KIND.trueFalse} config={{ main: { answer } }} validationError="">
@@ -390,7 +421,7 @@ export function TrueFalseProblemEditorPage() {
 }
 
 export function BlankProblemEditorPage() {
-  const data = useBootstrap().page.data as RowConfig;
+  const data = useBootstrap().page.data as ObjectiveEditorPageData;
   const [answer, setAnswer] = useState<string>(String(data.structuredConfig?.main?.answer || ''));
   return (
     <ObjectiveEditorShell

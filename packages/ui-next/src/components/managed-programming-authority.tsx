@@ -1,6 +1,10 @@
 import { Loader2 } from 'lucide-react';
 import { type FormEvent, type ReactNode, useRef, useState } from 'react';
-import { managedSourceFieldViews, type ManagedSourceTemplateOption } from '../lib/managed-problem-source';
+import {
+  managedSourceFieldViews,
+  type ManagedSourceMetaView,
+  type ManagedSourceTemplateOption,
+} from '../lib/managed-problem-source';
 import { readHydroResponseError } from '../lib/problem-save-response';
 import type { ManagedTrainingOptionView } from './problem-authoring-state';
 import { Badge } from './ui/badge';
@@ -9,7 +13,24 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
 import { Input } from './ui/input';
 import { SimpleSelect } from './ui/select';
 
-type R = Record<string, any>;
+interface ManagedReviewProblemDocument {
+  difficulty?: string | number;
+  docId?: string | number;
+  hidden?: boolean;
+  managedAuthoring?: {
+    metadataStatus?: string;
+    workingTitle?: string;
+    pendingTrainingPlacement?: {
+      trainingId?: string | number;
+      chapterId?: string | number;
+    };
+  };
+  pid?: string | number;
+  sourceMeta?: ManagedSourceMetaView;
+  structureRevision?: number;
+  tag?: string[];
+  title?: string;
+}
 
 export interface ManagedReviewPreview {
   state: 'ready' | 'confirmed' | 'invalid';
@@ -80,7 +101,7 @@ export function ManagedReviewPanel({
   pendingContributionFingerprint = '',
   contributionUdict = {},
 }: {
-  pdoc: R;
+  pdoc: ManagedReviewProblemDocument;
   sourceTemplates: ManagedSourceTemplateOption[];
   trainingOptions: ManagedTrainingOptionView[];
   problemsUrl: string;
@@ -233,7 +254,10 @@ export function ManagedReviewPanel({
               className="grid gap-4 border-t border-primary/15 pt-5 sm:grid-cols-[minmax(0,1fr)_12rem_auto] sm:items-end"
               onSubmit={requestReview}
             >
-              <ManagedPublishProtocolFields docId={pdoc.docId} expectedStructureRevision={pdoc.structureRevision} />
+              <ManagedPublishProtocolFields
+                docId={pdoc.docId ?? ''}
+                expectedStructureRevision={Number(pdoc.structureRevision)}
+              />
               <input type="hidden" name="pendingContributionsConfirmed" value="false" />
               <input type="hidden" name="pendingContributionFingerprint" value={pendingContributionFingerprint} />
               <label className="space-y-1.5">

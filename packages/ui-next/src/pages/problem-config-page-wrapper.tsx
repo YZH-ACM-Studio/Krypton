@@ -1,18 +1,40 @@
 /** Shared programming-problem workspace wrapper for judge configuration. */
 
 import { ProblemEditorWorkspace } from '@/components/problem-editor-workspace';
+import type { ProblemDataWriteGuardState } from '@/components/problem-data-write-guard';
 import { useBootstrap } from '@/lib/bootstrap';
 import { replaceRouteTokens } from '@/lib/format';
 import { ProblemConfigEditor } from './problem-config-editor';
 
-type R = Record<string, any>;
+interface ProblemConfigDocument {
+  docId?: string | number;
+  pid?: string | number;
+  title?: string;
+}
+
+interface ProblemAuthoringCapabilities {
+  canEditContent?: boolean;
+  canEditTags?: boolean;
+  canEditData?: boolean;
+  canManageCollaborators?: boolean;
+  canManageContributions?: boolean;
+  canPublish?: boolean;
+}
+
+interface ProblemConfigPageData {
+  pdoc?: ProblemConfigDocument;
+  problemAuthoringCapabilities?: ProblemAuthoringCapabilities;
+  testdata?: Array<{ name?: string; size?: number }>;
+  config?: string;
+  dataWriteGuard?: ProblemDataWriteGuardState;
+}
 
 export function ProblemConfigPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
-  const pdoc: R = data.pdoc || {};
-  const capabilities: R = data.problemAuthoringCapabilities || {};
-  const testdata: R[] = Array.isArray(data.testdata) ? data.testdata : [];
+  const data = bs.page.data as ProblemConfigPageData;
+  const pdoc = data.pdoc || {};
+  const capabilities = data.problemAuthoringCapabilities || {};
+  const testdata = Array.isArray(data.testdata) ? data.testdata : [];
   const config: string = data.config || '';
   const pid = pdoc.pid || pdoc.docId || '';
   const problemUrl = replaceRouteTokens(bs.urls.problemDetail, { PID: String(pid) });

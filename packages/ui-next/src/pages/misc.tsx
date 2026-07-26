@@ -7,14 +7,33 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { useBootstrap } from '@/lib/bootstrap';
 import { formatPlainTextSummary } from '@/lib/format';
 
-type R = Record<string, any>;
+interface DomainSummary {
+  _id?: string | number;
+  name?: string;
+  bulletin?: string;
+  owner?: string | number;
+}
+
+interface DomainsPageData {
+  ddocs?: DomainSummary[];
+  domains?: DomainSummary[];
+  canManage?: Record<string, boolean>;
+  role?: Record<string, string>;
+}
+
+interface ManagedFile {
+  _id?: string | number;
+  name?: string;
+  filename?: string;
+  size?: number;
+}
 
 export function DomainsPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
-  const domains: R[] = data.ddocs || data.domains || [];
-  const canManage: Record<string, boolean> = data.canManage || {};
-  const roles: Record<string, string> = data.role || {};
+  const data = bs.page.data as DomainsPageData;
+  const domains = data.ddocs || data.domains || [];
+  const canManage = data.canManage || {};
+  const roles = data.role || {};
   const pinnedDomains = new Set((bs.user.pinnedDomains || []).map(String));
 
   return (
@@ -136,8 +155,7 @@ export function DomainsPage() {
 
 export function FilesPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
-  const files: R[] = data.files || [];
+  const { files = [] } = bs.page.data as { files?: ManagedFile[] };
 
   return (
     <motion.div className="space-y-4" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>

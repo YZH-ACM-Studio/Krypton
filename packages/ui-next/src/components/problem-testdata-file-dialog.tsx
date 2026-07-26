@@ -8,7 +8,10 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { readHydroResponseError } from '@/lib/problem-save-response';
 
-type ProblemFile = Record<string, any>;
+interface ProblemFile {
+  name?: string;
+  size?: number;
+}
 
 function detectLanguage(filename: string): string {
   const match = filename.toLowerCase().match(/\.([^.]+)$/);

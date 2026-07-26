@@ -1,5 +1,3 @@
-type R = Record<string, any>;
-
 export type TeamExamModeRole = 'captain' | 'member' | 'admin_preview' | 'invalid';
 
 export interface TeamExamModeContext {
@@ -40,11 +38,14 @@ const TEAM_FIELDS = [
  */
 export function readTeamExamModeContext(examMode: unknown): TeamExamModeContext | null {
   if (!examMode || typeof examMode !== 'object') return null;
-  const raw = examMode as R;
+  const raw = examMode as Record<string, unknown>;
   if (!TEAM_FIELDS.some((field) => Object.hasOwn(raw, field))) return null;
-  const teamRole: TeamExamModeRole = SERVER_TEAM_ROLES.has(raw.teamRole) ? raw.teamRole : 'invalid';
+  const rawRole = typeof raw.teamRole === 'string' ? raw.teamRole : '';
+  const teamRole: TeamExamModeRole = SERVER_TEAM_ROLES.has(rawRole as TeamExamModeRole)
+    ? (rawRole as TeamExamModeRole)
+    : 'invalid';
   const validRole = teamRole !== 'invalid';
-  const rawInfo = raw.teamInfo && typeof raw.teamInfo === 'object' ? raw.teamInfo : null;
+  const rawInfo = raw.teamInfo && typeof raw.teamInfo === 'object' ? (raw.teamInfo as Record<string, unknown>) : null;
   const memberUids = Array.isArray(rawInfo?.memberUids)
     ? rawInfo.memberUids.map(Number).filter((uid: number) => Number.isSafeInteger(uid) && uid > 0)
     : [];

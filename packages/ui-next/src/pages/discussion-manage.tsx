@@ -13,14 +13,33 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { useBootstrap } from '@/lib/bootstrap';
 import { replaceRouteTokens } from '@/lib/format';
 
-type R = Record<string, any>;
+interface DiscussionNode {
+  title?: string;
+}
+
+interface DiscussionDocument {
+  _id?: string | number;
+  title?: string;
+  content?: string;
+  highlight?: boolean;
+  pin?: boolean;
+}
+
+interface DiscussionCreatePageData {
+  vnode?: DiscussionNode;
+  examMode?: { urls?: { discussion?: string } };
+}
+
+interface DiscussionEditPageData {
+  ddoc?: DiscussionDocument;
+}
 
 /* ---------- Discussion Create ---------- */
 
 export function DiscussionCreatePage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
-  const vnode: R = data.vnode || {};
+  const data = bs.page.data as DiscussionCreatePageData;
+  const vnode = data.vnode || {};
   const backUrl = data.examMode?.urls?.discussion || null;
 
   return (
@@ -84,8 +103,8 @@ export function DiscussionCreatePage() {
 
 export function DiscussionEditPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
-  const ddoc: R = data.ddoc || {};
+  const data = bs.page.data as DiscussionEditPageData;
+  const ddoc = data.ddoc || {};
   const detailUrl = replaceRouteTokens(bs.urls.discussionDetail, { DID: String(ddoc._id) });
 
   return (

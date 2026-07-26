@@ -5,10 +5,43 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useBootstrap } from '@/lib/bootstrap';
 
-type R = Record<string, any>;
+interface ManualGrade {
+  score?: string | number;
+  comment?: string;
+  revision?: number;
+}
 
-function GradeRow({ row, pid }: { row: R; pid: number }) {
-  const [grade, setGrade] = useState<R | null>(row.manualGrade);
+interface ManualGradingRow {
+  uid: string | number;
+  latestRid: string;
+  manualGrade?: ManualGrade | null;
+  displayName?: string;
+  uname?: string;
+  studentId?: string | number;
+  answer?: string;
+}
+
+interface ManualGradingProblem {
+  pid: number;
+  title?: string;
+  gradingInstructions?: string;
+}
+
+interface ManualGradingPageData {
+  tdoc?: { rule?: string; title?: string };
+  problems?: ManualGradingProblem[];
+  rows?: ManualGradingRow[];
+  pid?: string | number;
+  uid?: string | number;
+}
+
+interface ManualGradeResponse {
+  manualGrade?: ManualGrade | null;
+  error?: { message?: string };
+}
+
+function GradeRow({ row, pid }: { row: ManualGradingRow; pid: number }) {
+  const [grade, setGrade] = useState<ManualGrade | null | undefined>(row.manualGrade);
   const [score, setScore] = useState(String(row.manualGrade?.score ?? ''));
   const [comment, setComment] = useState(String(row.manualGrade?.comment || ''));
   const [reason, setReason] = useState('');
@@ -35,11 +68,11 @@ function GradeRow({ row, pid }: { row: R; pid: number }) {
         credentials: 'same-origin',
         headers: { Accept: 'application/json' },
       });
-      const result = await response.json().catch(() => null);
+      const result = (await response.json().catch(() => null)) as ManualGradeResponse | null;
       if (!response.ok || result?.error) {
         throw new Error(result?.error?.message || `保存失败（HTTP ${response.status}）`);
       }
-      setGrade(result.manualGrade);
+      setGrade(result!.manualGrade);
       setReason('');
     } catch (caught) {
       const message = (caught as { message?: unknown } | null)?.message;
@@ -96,9 +129,9 @@ function GradeRow({ row, pid }: { row: R; pid: number }) {
 }
 
 export function ManualGradingPage() {
-  const data = useBootstrap().page.data as R;
-  const problems: R[] = data.problems || [];
-  const rows: R[] = data.rows || [];
+  const data = useBootstrap().page.data as ManualGradingPageData;
+  const problems = data.problems || [];
+  const rows = data.rows || [];
   const pid = Number(data.pid || 0);
 
   return (

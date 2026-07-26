@@ -5,7 +5,11 @@ import { Badge } from '@/components/ui/badge';
 import { MarkdownView } from '@/components/markdown-renderer';
 import { useBootstrap } from '@/lib/bootstrap';
 
-type R = Record<string, any>;
+interface AboutSection {
+  id?: string;
+  title?: string;
+  content?: string;
+}
 
 const HELP_SECTIONS = [
   {
@@ -67,7 +71,7 @@ const HELP_SECTIONS = [
 
 export function AboutPage() {
   const bs = useBootstrap();
-  const sections: R[] = bs.page.data.sections || [];
+  const { sections = [] } = bs.page.data as { sections?: AboutSection[] };
   const nav = sections.length
     ? sections.map((section) => ({
         id: sectionId(section),
@@ -183,7 +187,7 @@ function ArticleSection({ id, title, content }: { id?: string; title: string; co
   );
 }
 
-function sectionId(section: R) {
+function sectionId(section: AboutSection) {
   return (
     section.id ||
     String(section.title || 'section')

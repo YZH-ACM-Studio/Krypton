@@ -7,28 +7,51 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Pagination } from '@/components/ui/pagination';
 import { MarkdownEditor, MarkdownView } from '@/components/markdown-renderer';
-import { useBootstrap, type GenericUserDoc } from '@/lib/bootstrap';
+import { useBootstrap } from '@/lib/bootstrap';
 import { formatDateTime, makeInitials } from '@/lib/format';
 
-type R = Record<string, any>;
+interface BlogPost {
+  _id?: string | number;
+  docId?: string | number;
+  owner?: string | number;
+  title?: string;
+  content?: string;
+  updateAt?: unknown;
+  views?: number;
+  nReply?: number;
+}
+
+interface BlogUser {
+  _id?: string | number;
+  uname?: string;
+  bio?: string;
+}
+
+interface BlogPageData {
+  ddocs?: BlogPost[];
+  ddoc?: BlogPost;
+  udoc?: BlogUser;
+  page?: string | number;
+  dpcount?: string | number;
+}
 
 function blogMainUrl(uid: string | number) {
   return `/blog/${encodeURIComponent(String(uid))}`;
 }
 
-function blogDetailUrl(uid: string | number, did: string | number) {
+function blogDetailUrl(uid: string | number, did: unknown) {
   return `${blogMainUrl(uid)}/${encodeURIComponent(String(did))}`;
 }
 
-function blogEditUrl(uid: string | number, did: string | number) {
+function blogEditUrl(uid: string | number, did: unknown) {
   return `${blogDetailUrl(uid, did)}/edit`;
 }
 
 export function BlogMainPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
-  const posts: R[] = data.ddocs || [];
-  const udoc: GenericUserDoc = data.udoc || {};
+  const data = bs.page.data as BlogPageData;
+  const posts = data.ddocs || [];
+  const udoc = data.udoc || {};
   const page = Number(data.page) || 1;
   const total = Number(data.dpcount) || 1;
   const ownerId = udoc._id || bs.user.id;
@@ -86,9 +109,9 @@ export function BlogMainPage() {
 
 export function BlogDetailPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
-  const post: R = data.ddoc || {};
-  const udoc: GenericUserDoc = data.udoc || {};
+  const data = bs.page.data as BlogPageData;
+  const post = data.ddoc || {};
+  const udoc = data.udoc || {};
   const ownerId = udoc._id || post.owner || bs.user.id;
   const canEdit = bs.user.signedIn && (Number(bs.user.id) === Number(ownerId) || Boolean(bs.user.priv));
 
@@ -126,12 +149,13 @@ export function BlogDetailPage() {
 
 export function BlogEditPage() {
   const bs = useBootstrap();
-  const post: R = bs.page.data.ddoc || {};
+  const data = bs.page.data as BlogPageData;
+  const post = data.ddoc || {};
   const isEdit = Boolean(post._id || post.docId);
   const ownerId = post.owner || bs.user.id;
 
   return (
-    <BlogShell title={isEdit ? '编辑博客' : '新建博客'} udoc={bs.page.data.udoc || { _id: ownerId, uname: bs.user.name }}>
+    <BlogShell title={isEdit ? '编辑博客' : '新建博客'} udoc={data.udoc || { _id: ownerId, uname: bs.user.name }}>
       <form method="post" className="space-y-5">
         <div className="space-y-2">
           <label htmlFor="blog-title" className="text-sm font-medium">
@@ -172,7 +196,7 @@ export function BlogEditPage() {
   );
 }
 
-function BlogShell({ title, udoc, aside, children }: { title: string; udoc: GenericUserDoc; aside?: React.ReactNode; children: React.ReactNode }) {
+function BlogShell({ title, udoc, aside, children }: { title: string; udoc: BlogUser; aside?: React.ReactNode; children: React.ReactNode }) {
   return (
     <motion.div
       className="grid gap-5 lg:grid-cols-[1fr_260px]"

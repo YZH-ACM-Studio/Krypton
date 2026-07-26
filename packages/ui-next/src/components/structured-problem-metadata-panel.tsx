@@ -9,8 +9,6 @@ import { MultiSelect } from '@/components/ui/multi-select';
 import { SimpleSelect } from '@/components/ui/select';
 import { readHydroResponseError } from '@/lib/problem-save-response';
 
-type R = Record<string, any>;
-
 export interface KnowledgeMindmapOption {
   id: string;
   mapId: string;
@@ -26,8 +24,18 @@ export interface KnowledgeMapOption {
   visibility: 'hidden' | 'public';
 }
 
+export interface StructuredProblemMetadataDocument {
+  difficulty?: string | number;
+  docId?: string | number;
+  hidden?: boolean;
+  knowledgeMapId?: unknown;
+  knowledgeNodeIds?: unknown[];
+  pid?: string | number;
+  title?: string;
+}
+
 interface StructuredProblemMetadataPanelProps {
-  pdoc: R;
+  pdoc: StructuredProblemMetadataDocument;
   isCreate: boolean;
   locked: boolean;
   knowledgeMaps: KnowledgeMapOption[];
@@ -65,7 +73,10 @@ const DIFFICULTY_OPTIONS = [
 
 function objectIdString(value: unknown): string {
   if (typeof value === 'string') return value;
-  if (value && typeof value === 'object' && typeof (value as R).$oid === 'string') return (value as R).$oid;
+  if (value && typeof value === 'object') {
+    const objectId = (value as { $oid?: unknown }).$oid;
+    if (typeof objectId === 'string') return objectId;
+  }
   return String(value || '');
 }
 

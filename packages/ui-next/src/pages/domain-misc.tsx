@@ -14,7 +14,28 @@ import { MarkdownEditor, MarkdownView } from '@/components/markdown-renderer';
 import { AdminPage } from '@/components/admin/admin-page';
 import { useBootstrap } from '@/lib/bootstrap';
 
-type R = Record<string, any>;
+interface DomainJoinInfo {
+  name?: string;
+  bulletin?: string;
+}
+
+interface DomainJoinSettings {
+  method?: number;
+  role?: string;
+  code?: string;
+}
+
+interface DomainMiscPageData {
+  domainInfo?: DomainJoinInfo;
+  joinSettings?: DomainJoinSettings;
+  target?: string;
+  redirect?: string;
+  code?: string;
+  rolesWithText?: Array<[string, string]>;
+  expirations?: Record<string, string>;
+  url_prefix?: string;
+  bindings?: Array<{ _id: number; loginip: string }>;
+}
 
 /* ---------- Domain Create ---------- */
 
@@ -78,9 +99,9 @@ export function DomainCreatePage() {
 
 export function DomainJoinPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
-  const domainInfo: R = data.domainInfo || {};
-  const joinSettings: R = data.joinSettings || {};
+  const data = bs.page.data as DomainMiscPageData;
+  const domainInfo = data.domainInfo || {};
+  const joinSettings = data.joinSettings || {};
   const target = data.target || '';
   const redirect = data.redirect || '';
   const code = data.code || '';
@@ -141,10 +162,10 @@ export function DomainJoinPage() {
 
 export function DomainJoinApplicationsPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
-  const joinSettings: R = data.joinSettings || null;
-  const rolesWithText: [string, string][] = data.rolesWithText || [];
-  const expirations: Record<string, string> = data.expirations || {};
+  const data = bs.page.data as DomainMiscPageData;
+  const joinSettings = data.joinSettings || null;
+  const rolesWithText = data.rolesWithText || [];
+  const expirations = data.expirations || {};
   const urlPrefix = data.url_prefix || '';
 
   const METHOD_LABELS: Record<number, string> = {
@@ -168,7 +189,7 @@ export function DomainJoinApplicationsPage() {
         <Card className="border-primary/20 bg-primary/5">
           <CardContent className="p-4">
             <div className="flex items-center gap-2">
-              <Badge>{METHOD_LABELS[joinSettings.method] || '未知'}</Badge>
+              <Badge>{METHOD_LABELS[joinSettings.method ?? -1] || '未知'}</Badge>
               {joinSettings.role && <Badge variant="outline">角色: {joinSettings.role}</Badge>}
             </div>
             {joinSettings.method === 2 && joinSettings.code && (
@@ -270,8 +291,8 @@ export function DomainJoinApplicationsPage() {
 
 export function ContestModePage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
-  const bindings: { _id: number; loginip: string }[] = data.bindings || [];
+  const data = bs.page.data as DomainMiscPageData;
+  const bindings = data.bindings || [];
 
   return (
     <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>

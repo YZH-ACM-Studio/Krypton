@@ -2,15 +2,34 @@ import { ArrowLeft, Save } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { PROBLEM_KIND_TO_SLUG } from '@hydrooj/common';
 import { MarkdownEditor } from '@/components/markdown-renderer';
-import { useProblemDataWriteGuard } from '@/components/problem-data-write-guard';
-import { StructuredProblemMetadataPanel, type KnowledgeMindmapOption } from '@/components/structured-problem-metadata-panel';
+import { type ProblemDataWriteGuardState, useProblemDataWriteGuard } from '@/components/problem-data-write-guard';
+import {
+  StructuredProblemMetadataPanel,
+  type KnowledgeMapOption,
+  type KnowledgeMindmapOption,
+  type StructuredProblemMetadataDocument,
+} from '@/components/structured-problem-metadata-panel';
 import { useFormDirtyState, useUnsavedChangesGuard } from '@/components/unsaved-changes-guard';
 import { Button } from '@/components/ui/button';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 import { readProblemSaveSuccess } from '@/lib/problem-save-response';
 
-type R = Record<string, any>;
+interface SubjectiveProblemDocument extends StructuredProblemMetadataDocument {
+  content?: string;
+  structureLockedAt?: string | Date;
+  structureRevision?: number;
+}
+
+interface SubjectiveEditorPageData {
+  page_name?: string;
+  pdoc?: SubjectiveProblemDocument;
+  structuredConfig?: { main?: { gradingInstructions?: string } };
+  statementWriteGuard?: ProblemDataWriteGuardState;
+  knowledgeMaps?: KnowledgeMapOption[];
+  knowledgeMindmapOptions?: KnowledgeMindmapOption[];
+  canUseCustomPid?: boolean;
+}
 
 async function errorMessage(response: Response) {
   if (response.status === 409) return '题目已被其他操作修改，或正在比赛/考试中使用；请重新载入。';
@@ -19,7 +38,7 @@ async function errorMessage(response: Response) {
 }
 
 export function SubjectiveProblemEditorPage() {
-  const data = useBootstrap().page.data as R;
+  const data = useBootstrap().page.data as SubjectiveEditorPageData;
   const pdoc = data.pdoc || {};
   const isCreate = String(data.page_name || '').startsWith('problem_create_');
   const locked = !!pdoc.structureLockedAt;
@@ -145,7 +164,7 @@ export function SubjectiveProblemEditorPage() {
           isCreate={isCreate}
           locked={locked}
           knowledgeMaps={data.knowledgeMaps || []}
-          mindmapOptions={(data.knowledgeMindmapOptions || []) as KnowledgeMindmapOption[]}
+          mindmapOptions={data.knowledgeMindmapOptions || []}
           canUseCustomPid={data.canUseCustomPid === true}
           formDirty={dirtyState.dirty}
           onMetadataChange={dirtyState.recompute}

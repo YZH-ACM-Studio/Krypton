@@ -7,12 +7,23 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { useBootstrap } from '@/lib/bootstrap';
 import { replaceRouteTokens } from '@/lib/format';
 
-type R = Record<string, any>;
+interface ProblemHackDocument {
+  _id?: string | number;
+  docId?: string | number;
+  pid?: string | number;
+  title?: string;
+}
+
+interface ProblemHackPageData {
+  pdoc?: ProblemHackDocument;
+  rid?: string | number;
+  title?: string;
+}
 
 export function ProblemHackPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
-  const pdoc: R = data.pdoc || {};
+  const data = bs.page.data as ProblemHackPageData;
+  const pdoc = data.pdoc || {};
   const rid = data.rid || '';
   const pid = pdoc.pid || pdoc.docId || pdoc._id;
   const problemUrl = replaceRouteTokens(bs.urls.problemDetail, { PID: String(pid || '') });

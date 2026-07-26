@@ -12,12 +12,20 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useBootstrap } from '@/lib/bootstrap';
 
-type R = Record<string, any>;
+interface OwnedProblem {
+  docId: string | number;
+  pid?: string | number;
+  title?: string;
+  tag?: string[];
+  hidden?: boolean;
+  nAccept?: number;
+  nSubmit?: number;
+}
 
 export function ProblemMinePage() {
   const bs = useBootstrap();
   const data = bs.page.data as {
-    pdocs: R[];
+    pdocs: OwnedProblem[];
     page: number;
     pcount: number;
     ppcount: number;

@@ -1,6 +1,6 @@
 import { expect } from 'chai';
 import { describe, it } from 'node:test';
-import { distributePretestRecord, pretestActualOutput, selfTestVerdict } from '../src/lib/pretest-results.ts';
+import { distributePretestRecord, preferredPretestResultTab, pretestActualOutput, selfTestVerdict } from '../src/lib/pretest-results.ts';
 
 describe('Krypton IDE multi-case pretest results', () => {
   it('binds parallel case results to tabs by the judge case id, not completion order', () => {
@@ -43,6 +43,16 @@ describe('Krypton IDE multi-case pretest results', () => {
     expect(selfTestVerdict(accepted, '')).to.equal('ran');
     expect(selfTestVerdict({ ...accepted, status: 7 }, '42\n')).to.equal('fail');
     expect(selfTestVerdict({ status: 21 }, '42\n')).to.equal('pending');
+  });
+
+  it('opens compiler diagnostics when a self-test ends with a compile error', () => {
+    const compilerText = "foo.cc:8:5: error: 'retrurn' was not declared in this scope";
+    const record = { status: 7, compilerTexts: [compilerText], testCases: [] };
+    const result = distributePretestRecord(record, ['sample-1']).get('sample-1');
+
+    expect(result?.compilerTexts).to.deep.equal([compilerText]);
+    expect(preferredPretestResultTab(record)).to.equal('compiler');
+    expect(preferredPretestResultTab({ status: 1, testCases: [{ id: 1, status: 1, time: 1, memory: 10, message: '42\n' }] })).to.equal('output');
   });
 
   it('rejects malformed or incomplete final case sets instead of reusing another output', () => {

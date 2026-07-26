@@ -19,6 +19,14 @@ export interface PretestResult {
 }
 
 export type SelfTestVerdict = 'ac' | 'wa' | 'ran' | 'fail' | 'pending' | 'none';
+export type PretestResultTab = 'output' | 'diff' | 'compiler';
+
+export function preferredPretestResultTab(result: PretestResult): PretestResultTab {
+  const hasCompilerDiagnostics =
+    result.compilerTexts?.some((text) => text.trim().length > 0) || (typeof result.stderr === 'string' && result.stderr.trim().length > 0);
+  if (result.status === 7 && hasCompilerDiagnostics) return 'compiler';
+  return 'output';
+}
 
 export function pretestActualOutput(result: Pick<PretestResult, 'testCases' | 'stdout' | 'judgeTexts'> | null | undefined): string {
   return result?.testCases?.[0]?.message || result?.stdout || result?.judgeTexts?.join('\n') || '';
@@ -64,11 +72,18 @@ export function distributePretestRecord(rdoc: PretestResult, tabIds: string[]): 
               testCases: [testCase],
               compilerTexts: rdoc.compilerTexts,
               judgeTexts: rdoc.judgeTexts,
+              stderr: rdoc.stderr,
+              error: rdoc.error,
             }
           : {
               status: rdoc.status ?? 0,
+              time: rdoc.time,
+              memory: rdoc.memory,
               compilerTexts: rdoc.compilerTexts,
               judgeTexts: rdoc.judgeTexts,
+              stdout: rdoc.stdout,
+              stderr: rdoc.stderr,
+              error: rdoc.error,
             },
       ];
     }),

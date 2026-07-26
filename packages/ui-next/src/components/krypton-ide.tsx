@@ -46,7 +46,7 @@ import { json } from '@codemirror/lang-json';
 import { oneDark } from '@codemirror/theme-one-dark';
 
 import { cn } from '@/lib/cn';
-import { distributePretestRecord, pretestActualOutput, selfTestVerdict, type PretestResult } from '@/lib/pretest-results';
+import { distributePretestRecord, preferredPretestResultTab, pretestActualOutput, selfTestVerdict, type PretestResult } from '@/lib/pretest-results';
 import { READ_ONLY_CODE_EXTENSIONS, resolveReadOnlyCodeLanguage } from '@/lib/readonly-code-policy';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -916,9 +916,7 @@ export function KryptonIDE({
       syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
       bracketMatching(),
       highlightSelectionMatches(),
-      ...(isReadOnly
-        ? []
-        : [history(), dropCursor(), indentOnInput(), closeBrackets(), autocompletion(), rectangularSelection(), crosshairCursor()]),
+      ...(isReadOnly ? [] : [history(), dropCursor(), indentOnInput(), closeBrackets(), autocompletion(), rectangularSelection(), crosshairCursor()]),
       keymap.of(
         isReadOnly
           ? [...searchKeymap, ...foldKeymap]
@@ -1135,7 +1133,19 @@ export function KryptonIDE({
     } finally {
       setSubmitting(false);
     }
-  }, [submitUrl, selectedLang, getCode, isReadOnly, onSubmit, onOpenRecords, submitting, submitCooldown, pollRecord, reloadOnConflict, resolveRecordUrl]);
+  }, [
+    submitUrl,
+    selectedLang,
+    getCode,
+    isReadOnly,
+    onSubmit,
+    onOpenRecords,
+    submitting,
+    submitCooldown,
+    pollRecord,
+    reloadOnConflict,
+    resolveRecordUrl,
+  ]);
 
   /* ── Pretest handler ──
    *  Runs one or more tabs in a single backend pretest request. The judge
@@ -1232,7 +1242,7 @@ export function KryptonIDE({
 
           // Final status: 1-19
           if (s > 0 && s < 20) {
-            setPretestResultTab('output');
+            setPretestResultTab(preferredPretestResultTab(rdoc));
             return;
           }
         }
@@ -1388,25 +1398,28 @@ export function KryptonIDE({
   }, [pretestCooldown > 0]);
 
   /* ── File upload handler ── */
-  const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    if (isReadOnly) {
-      e.target.value = '';
-      return;
-    }
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const text = reader.result as string;
-      if (viewRef.current) {
-        viewRef.current.dispatch({
-          changes: { from: 0, to: viewRef.current.state.doc.length, insert: text },
-        });
+  const handleFileUpload = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (isReadOnly) {
+        e.target.value = '';
+        return;
       }
-    };
-    reader.readAsText(file);
-    e.target.value = '';
-  }, [isReadOnly]);
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const text = reader.result as string;
+        if (viewRef.current) {
+          viewRef.current.dispatch({
+            changes: { from: 0, to: viewRef.current.state.doc.length, insert: text },
+          });
+        }
+      };
+      reader.readAsText(file);
+      e.target.value = '';
+    },
+    [isReadOnly],
+  );
 
   /* ── Reset code handler ── */
   const handleReset = useCallback(() => {
@@ -1641,9 +1654,7 @@ export function KryptonIDE({
             aria-label="放大只读代码字号"
             title="放大字号"
             disabled={readOnlyFontIndex === FONT_SIZE_OPTIONS.length - 1}
-            onClick={() =>
-              updateConfig({ ...config, fontSize: FONT_SIZE_OPTIONS[Math.min(FONT_SIZE_OPTIONS.length - 1, readOnlyFontIndex + 1)] })
-            }
+            onClick={() => updateConfig({ ...config, fontSize: FONT_SIZE_OPTIONS[Math.min(FONT_SIZE_OPTIONS.length - 1, readOnlyFontIndex + 1)] })}
             className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
           >
             <Plus className="size-3.5" />

@@ -1,7 +1,6 @@
-import { expect } from 'chai';
 import { readFileSync } from 'node:fs';
-import { describe, it } from 'node:test';
 import { resolve } from 'node:path';
+import { describe, expect, it } from 'vitest';
 import { canSubmitProblemMode, getPersonalPracticeStatus, postContestProblemEntryUrl } from '../src/lib/contest-exam-display';
 
 describe('post-contest practice UI semantics', () => {

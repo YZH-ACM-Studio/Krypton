@@ -1,8 +1,10 @@
 import { readFileSync } from 'node:fs';
-import { expect } from 'chai';
-import { describe, it } from 'node:test';
+import { resolve } from 'node:path';
+import { describe, expect, it } from 'vitest';
 
-const read = (path: string) => readFileSync(path, 'utf8');
+const workspaceRoot = resolve(import.meta.dirname, '../../..');
+
+const read = (path: string) => readFileSync(resolve(workspaceRoot, path), 'utf8');
 
 describe('P2.25 contribution assignment and task UI', () => {
   it('uses HTTP-compatible request IDs inside each mutation cleanup boundary', () => {

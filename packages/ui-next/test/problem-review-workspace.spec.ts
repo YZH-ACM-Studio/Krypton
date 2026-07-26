@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import test from 'node:test';
+import { expect, test } from 'vitest';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 
@@ -44,7 +44,7 @@ test('review route is namespace-manager scoped and registered before dynamic pro
 
   const reviewRoute = handler.indexOf("ctx.Route('problem_review'");
   const detailRoute = handler.indexOf("ctx.Route('problem_detail'");
-  assert.ok(reviewRoute >= 0 && reviewRoute < detailRoute, 'static review route must be registered before /p/:pid');
+  expect(reviewRoute >= 0 && reviewRoute < detailRoute, 'static review route must be registered before /p/:pid').toBeTruthy();
 });
 
 test('problem bank exposes one local scoped navigation without adding another sidebar item', () => {

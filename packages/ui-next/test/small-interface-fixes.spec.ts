@@ -1,7 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { expect } from 'chai';
-import { describe, it } from 'node:test';
+import { describe, expect, it } from 'vitest';
 import {
   getContestProblemStatus,
   prioritizeCurrentScoreboardRows,
@@ -58,7 +57,8 @@ describe('small interface fixes', () => {
     const paper = source('packages/hydrooj/src/handler/paper.ts');
     const record = source('packages/hydrooj/src/model/record.ts');
     expect(page).to.include('const problemStatusByPid: Record<string, R> = data.problemStatusByPid || {};');
-    expect(page).to.include('getContestProblemStatus(problemStatusByPid[String(pid)]?.status)');
+    expect(page).to.include(': problemStatusByPid[String(pid)] || null');
+    expect(page).to.include('getContestProblemStatus(statusDoc?.status)');
     expect(paper).to.include('protected latestProblemStatusesEnabled = true;');
     expect(handler).to.include('buildLatestContestProblemStatusByPid(statusJournal, this.tdoc.pids)');
     expect(record).to.include("if (args.type === 'pretest')");

@@ -1,7 +1,6 @@
 import Uppy from '@uppy/core';
 import XHRUpload from '@uppy/xhr-upload';
-import { expect } from 'chai';
-import { describe, it } from 'node:test';
+import { describe, expect, it } from 'vitest';
 import { fileUploaderAllowedMetaFields } from '../src/lib/file-uploader-meta.ts';
 
 function multipartTextFields(content: string) {

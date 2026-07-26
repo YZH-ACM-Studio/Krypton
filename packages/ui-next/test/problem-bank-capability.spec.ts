@@ -1,11 +1,4 @@
-import { createRequire } from 'node:module';
-import { expect } from 'chai';
-import { beforeEach, describe, it } from 'node:test';
-
-const require = createRequire(import.meta.url);
-const Module = require('module');
-const indexPath = require.resolve('../index.ts');
-const originalLoad = Module._load;
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 let resolution: (user: any) => boolean = () => false;
 const ProblemModel = {
@@ -14,37 +7,28 @@ const ProblemModel = {
   },
 };
 
-Module._load = function load(request: string, parent: NodeModule, isMain: boolean) {
-  if (parent?.filename === indexPath) {
-    if (request === 'hydrooj') {
-      return {
-        Context: class {},
-        PERM: {},
-        PRIV: {},
-        ProblemModel,
-      };
-    }
-    if (request === '@hydrooj/framework') return { serializer: () => undefined };
-    if (request === 'koa2-connect') return () => undefined;
-    if (request === './rankboard-capabilities') {
-      return {
-        resolveRankboardCapabilities: () => ({
-          canImportRankboard: false,
-          canManageRankboard: false,
-        }),
-      };
-    }
-  }
-  return originalLoad.call(this, request, parent, isMain);
-};
+vi.mock('hydrooj', () => ({
+  Context: class {},
+  PERM: {},
+  PRIV: {},
+  ProblemModel,
+}));
+vi.mock('@hydrooj/framework', () => ({ serializer: () => undefined }));
+vi.mock('koa2-connect', () => ({ default: () => undefined }));
+vi.mock('../rankboard-capabilities', () => ({
+  resolveRankboardCapabilities: () => ({
+    canImportRankboard: false,
+    canManageRankboard: false,
+  }),
+}));
 
-let resolveProblemBankCapability: (user: unknown, onError: (error: unknown) => void) => boolean;
-try {
-  delete require.cache[indexPath];
-  ({ resolveProblemBankCapability } = require(indexPath));
-} finally {
-  Module._load = originalLoad;
-}
+// A non-literal specifier keeps tsc from chasing index.ts into the backend
+// 'hydrooj' sources (they are typechecked by the root tsconfig.check.json
+// project, not this one); vitest still resolves it at runtime.
+const indexModuleId = '../index.ts';
+const { resolveProblemBankCapability } = (await import(/* @vite-ignore */ indexModuleId)) as {
+  resolveProblemBankCapability: (user: unknown, report: (error: unknown) => void) => boolean;
+};
 
 beforeEach(() => {
   resolution = () => false;

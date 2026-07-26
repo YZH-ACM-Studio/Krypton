@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import test from 'node:test';
+import { test } from 'vitest';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 
@@ -39,6 +39,15 @@ function assertBefore(source, first, second, label) {
     assert.notEqual(firstIndex, -1, `${label}: missing ${first}`);
     assert.notEqual(secondIndex, -1, `${label}: missing ${second}`);
     assert.ok(firstIndex < secondIndex, `${label}: ${first} must run before ${second}`);
+}
+
+// Whitespace-tolerant variant for call sites the formatter may split across lines.
+function assertBeforeRe(source, first, secondRe, label) {
+    const firstIndex = source.indexOf(first);
+    const match = secondRe.exec(source);
+    assert.notEqual(firstIndex, -1, `${label}: missing ${first}`);
+    assert.ok(match, `${label}: missing ${secondRe}`);
+    assert.ok(firstIndex < match.index, `${label}: ${first} must run before ${secondRe}`);
 }
 
 test('bootstrap exposes one fail-closed observable problem-bank capability', () => {
@@ -190,7 +199,7 @@ test('course DAG writes validate selection before create/edit and grandfather th
     assertBefore(edit, 'problem.assertProblemAclDomain', 'parseChaptersJson(', 'course DAG read');
     assert.match(edit, /assertProblemBankSelection\(authoritativeDomainId, pids, this\.user, existingPids\)/);
     assertBefore(edit, 'assertProblemBankSelection', 'training.add(authoritativeDomainId', 'course create');
-    assertBefore(edit, 'assertProblemBankSelection', 'training.edit(authoritativeDomainId, tid', 'course edit');
+    assertBeforeRe(edit, 'assertProblemBankSelection', /training\.edit\(\s*authoritativeDomainId,\s*tid\b/, 'course edit');
 });
 
 test('contest detail base ignores forged method domains before contest and status reads', () => {

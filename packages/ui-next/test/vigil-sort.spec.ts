@@ -1,5 +1,4 @@
-import { expect } from 'chai';
-import { describe, it } from 'node:test';
+import { describe, expect, it } from 'vitest';
 import { parseVigilSortKey, VIGIL_SORT_KEYS } from '../src/pages/vigil/sort.ts';
 
 describe('Vigil sort URL parser', () => {

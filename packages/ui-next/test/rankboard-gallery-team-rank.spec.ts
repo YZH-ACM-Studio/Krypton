@@ -1,5 +1,4 @@
-import { expect } from 'chai';
-import { describe, it } from 'node:test';
+import { describe, expect, it } from 'vitest';
 import { formatGalleryTeamRank } from '../src/pages/rankboard/gallery-team-rank.ts';
 
 describe('rankboard gallery team-rank presentation', () => {

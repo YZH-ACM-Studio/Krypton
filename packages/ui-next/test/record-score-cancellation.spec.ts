@@ -1,7 +1,6 @@
-import { expect } from 'chai';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { describe, it } from 'node:test';
+import { describe, expect, it } from 'vitest';
 
 describe('P2.40 record score cancellation UI', () => {
   const source = readFileSync(resolve(import.meta.dirname, '../src/pages/records.tsx'), 'utf8');

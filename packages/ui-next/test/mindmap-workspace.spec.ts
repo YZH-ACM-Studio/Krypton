@@ -1,15 +1,10 @@
 import { readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
-import { expect } from 'chai';
-import { describe, it } from 'node:test';
+import { describe, expect, it } from 'vitest';
+import { MindmapApiError, mindmapProblemHref, mutateKnowledgeMap, mutateMindmap } from '../src/pages/mindmap/api';
+import { computeMindmapLayout, resolveRootBranchSides } from '../src/pages/mindmap/layout';
+import { flattenMindmapTree, mergeMindmapTagDraft, planDrop } from '../src/pages/mindmap/tree';
 import type { MindmapNode } from '../src/pages/mindmap/types.ts';
-
-const require = createRequire(import.meta.url);
-const { mindmapProblemHref, MindmapApiError, mutateKnowledgeMap, mutateMindmap } =
-  require('../src/pages/mindmap/api.ts') as typeof import('../src/pages/mindmap/api');
-const { computeMindmapLayout, resolveRootBranchSides } = require('../src/pages/mindmap/layout.ts') as typeof import('../src/pages/mindmap/layout');
-const { flattenMindmapTree, mergeMindmapTagDraft, planDrop } = require('../src/pages/mindmap/tree.ts') as typeof import('../src/pages/mindmap/tree');
 
 const workspaceRoot = resolve(import.meta.dirname, '../../..');
 const version = '2026-07-16T00:00:00.000Z';

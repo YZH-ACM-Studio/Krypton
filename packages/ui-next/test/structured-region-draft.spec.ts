@@ -1,5 +1,4 @@
-import { expect } from 'chai';
-import { describe, it } from 'node:test';
+import { describe, expect, it } from 'vitest';
 import { createEmptyStructuredRegionDraft, parseStructuredRegionDraft } from '../src/lib/structured-region-draft';
 
 const FIRST = 'r_abcdefghijkl';

@@ -1,5 +1,4 @@
-import { expect } from 'chai';
-import { describe, it } from 'node:test';
+import { describe, expect, it } from 'vitest';
 import {
   adminAccountDynamicValueLabel,
   adminAccountSemanticValueLabel,

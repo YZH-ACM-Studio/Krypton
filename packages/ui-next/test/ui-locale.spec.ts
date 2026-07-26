@@ -1,7 +1,6 @@
-import { expect } from 'chai';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { describe, it } from 'node:test';
+import { describe, expect, it } from 'vitest';
 import { formatDateTime, resolveUiLocale } from '../src/lib/format.ts';
 
 describe('ui-next locale boundary', () => {
@@ -15,7 +14,7 @@ describe('ui-next locale boundary', () => {
   });
 
   it('normalizes the user preference before exposing bootstrap locale fields', () => {
-    const source = readFileSync(resolve(process.cwd(), 'packages/ui-next/index.ts'), 'utf8');
+    const source = readFileSync(resolve(import.meta.dirname, '../index.ts'), 'utf8');
     expect(source).to.include('const uiLocale = resolveUiLocale(currentUser.viewLang)');
     expect(source).to.include('locale: uiLocale');
     expect(source).to.include('viewLang: uiLocale');

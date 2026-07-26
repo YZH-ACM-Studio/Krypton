@@ -1,7 +1,6 @@
-import { expect } from 'chai';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, it } from 'node:test';
+import { describe, expect, it } from 'vitest';
 import {
   ManagedKnowledgeSuggestionField,
   ManagedPublishProtocolFields,

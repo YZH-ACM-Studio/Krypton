@@ -1,6 +1,5 @@
 import { EditorState } from '@codemirror/state';
-import { expect } from 'chai';
-import { describe, it } from 'node:test';
+import { describe, expect, it } from 'vitest';
 import { mapStructuredLineRanges, type StructuredLineRange } from '../src/lib/structured-code-ranges';
 
 const answer: StructuredLineRange = { key: 'answer', startLine: 1, endLine: 2, state: 'answer' };

@@ -1,7 +1,6 @@
-import { expect } from 'chai';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { describe, it } from 'node:test';
+import { describe, expect, it } from 'vitest';
 import { filterDomainUsers, flattenDomainUsers, getSelectableDomainUserIds, paginateDomainUsers } from '../src/lib/domain-user-workspace';
 
 describe('P2.35 domain user workspace', () => {

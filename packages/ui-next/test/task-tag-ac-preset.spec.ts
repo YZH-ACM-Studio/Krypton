@@ -1,33 +1,12 @@
-import { expect } from 'chai';
 import { readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
-import { describe, it } from 'node:test';
+import * as React from 'react';
+import { describe, expect, it } from 'vitest';
+import * as selectModule from '../src/components/ui/select';
 
-const require = createRequire(import.meta.url);
-const Module = require('module');
-const React: typeof import('react') = require('react');
-const selectPath = require.resolve('../src/components/ui/select.tsx');
-const originalLoad = Module._load;
-
-Module._load = function load(request: string, parent: NodeModule, isMain: boolean) {
-  if (parent?.filename === selectPath && request === '@/lib/cn') {
-    return { cn: (...values: unknown[]) => values.filter(Boolean).join(' ') };
-  }
-  return originalLoad.call(this, request, parent, isMain);
-};
-
-let selectModule: typeof import('../src/components/ui/select');
-try {
-  delete require.cache[selectPath];
-  selectModule = require(selectPath);
-} finally {
-  Module._load = originalLoad;
-}
-
-const adminSource = readFileSync(resolve(process.cwd(), 'packages/ui-next/src/pages/admin-tasks/index.tsx'), 'utf8');
-const detailSource = readFileSync(resolve(process.cwd(), 'packages/ui-next/src/pages/tasks/index.tsx'), 'utf8');
-const graphTypes = readFileSync(resolve(process.cwd(), 'packages/ui-next/src/components/task-graph.tsx'), 'utf8');
+const adminSource = readFileSync(resolve(import.meta.dirname, '../src/pages/admin-tasks/index.tsx'), 'utf8');
+const detailSource = readFileSync(resolve(import.meta.dirname, '../src/pages/tasks/index.tsx'), 'utf8');
+const graphTypes = readFileSync(resolve(import.meta.dirname, '../src/components/task-graph.tsx'), 'utf8');
 
 describe('P2.5 canonical tag task UI', () => {
   it('renders canonical tags through grouped select options instead of a free text input', () => {

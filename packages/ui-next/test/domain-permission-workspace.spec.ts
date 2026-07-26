@@ -1,7 +1,6 @@
-import { expect } from 'chai';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { describe, it } from 'node:test';
+import { describe, expect, it } from 'vitest';
 import { resolveDomainPermissionManagementCapability } from '../domain-permission-capabilities.ts';
 import { buildSudoReplayFields, resolveSudoChallengeUrl, resolveSudoReplayTarget } from '../src/lib/sudo-replay.ts';
 import {
@@ -49,8 +48,10 @@ const families: DomainPermissionFamily[] = [
   },
 ];
 
+const workspaceRoot = resolve(import.meta.dirname, '../../..');
+
 function source(file: string) {
-  return readFileSync(resolve(process.cwd(), file), 'utf8');
+  return readFileSync(resolve(workspaceRoot, file), 'utf8');
 }
 
 describe('domain permission main-sidebar capability', () => {

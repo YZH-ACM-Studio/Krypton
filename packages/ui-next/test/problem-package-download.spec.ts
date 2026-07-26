@@ -1,5 +1,4 @@
-import { expect } from 'chai';
-import { afterEach, beforeEach, describe, it } from 'node:test';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { downloadProblemFiles, downloadProblemPackage } from '../src/lib/problem-package.ts';
 
 const originalFetch = globalThis.fetch;

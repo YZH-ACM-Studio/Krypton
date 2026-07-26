@@ -1,7 +1,6 @@
-import { expect } from 'chai';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { describe, it } from 'node:test';
+import { describe, expect, it } from 'vitest';
 import { resolveTaskManagementCapability } from '../task-capabilities.ts';
 
 const PRIV_EDIT_SYSTEM = 1;
@@ -23,8 +22,10 @@ function capability(
   });
 }
 
+const workspaceRoot = resolve(import.meta.dirname, '../../..');
+
 function source(path: string) {
-  return readFileSync(resolve(process.cwd(), path), 'utf8');
+  return readFileSync(resolve(workspaceRoot, path), 'utf8');
 }
 
 describe('task management capability', () => {

@@ -1,5 +1,4 @@
-import { expect } from 'chai';
-import { afterEach, describe, it } from 'node:test';
+import { afterEach, describe, expect, it } from 'vitest';
 import { uploadUserFile } from '../src/lib/upload.ts';
 
 const originalFetch = globalThis.fetch;

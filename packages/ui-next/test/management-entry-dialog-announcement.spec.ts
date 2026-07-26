@@ -1,7 +1,6 @@
-import { expect } from 'chai';
 import { readFileSync } from 'node:fs';
 import { resolve as resolvePath } from 'node:path';
-import { describe, it } from 'node:test';
+import { describe, expect, it } from 'vitest';
 import { resolveAnnouncementManagementCapability } from '../announcement-capabilities.ts';
 
 const PRIV_EDIT_SYSTEM = 1;
@@ -21,8 +20,10 @@ function resolve(
   });
 }
 
+const workspaceRoot = resolvePath(import.meta.dirname, '../../..');
+
 function source(path: string) {
-  return readFileSync(resolvePath(process.cwd(), path), 'utf8');
+  return readFileSync(resolvePath(workspaceRoot, path), 'utf8');
 }
 
 describe('announcement management capability', () => {

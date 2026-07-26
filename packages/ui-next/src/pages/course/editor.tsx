@@ -12,7 +12,7 @@ import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 import { ChapterOutline } from './chapter-outline';
 import { useChapterQuery } from './chapter-query';
-import type { ChapterDraft, CourseRecord } from './types';
+import type { ChapterDraft, CourseFile, CourseRecord } from './types';
 
 type SaveState = 'idle' | 'dirty' | 'saving';
 
@@ -48,7 +48,7 @@ export function CourseEditPage() {
     groups: Array<{ _id: string; name: string; archivedAt?: string | null }>;
     canManageFiles: boolean;
     canCreateQuiz: boolean;
-    files: CourseRecord[];
+    files: CourseFile[];
     mindmaps: Array<{ _id: string; title: string; visibility: 'public' }>;
   };
   const isEdit = data.page_name === 'course_edit';
@@ -63,7 +63,7 @@ export function CourseEditPage() {
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [saveError, setSaveError] = useState('');
   const [outlineOpen, setOutlineOpen] = useState(false);
-  const [courseFiles, setCourseFiles] = useState<CourseRecord[]>(data.files || []);
+  const [courseFiles, setCourseFiles] = useState<CourseFile[]>(data.files || []);
   const [fileError, setFileError] = useState('');
   const { activeId, selectChapter } = useChapterQuery(chapters);
   const activeChapter = chapters.find((chapter) => chapter._id === activeId) || chapters[0];

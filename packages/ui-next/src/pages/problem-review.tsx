@@ -13,9 +13,12 @@ import { SimpleSelect } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { useBootstrap } from '@/lib/bootstrap';
 import { replaceRouteTokens } from '@/lib/format';
-import { managedSourceFieldViews, type ManagedSourceTemplateOption } from '@/lib/managed-problem-source';
+import {
+  managedSourceFieldViews,
+  type ManagedSourceMetaView,
+  type ManagedSourceTemplateOption,
+} from '@/lib/managed-problem-source';
 
-type R = Record<string, any>;
 type ReviewStatus = 'all' | 'draft' | 'confirmed';
 interface MindmapOption {
   id: string;
@@ -29,6 +32,54 @@ interface PidNamespaceOption {
   name: string;
   pidPattern: string;
   sourceTemplates: string[];
+}
+
+interface ProblemReviewDocument {
+  docId: string | number;
+  pid?: string | number;
+  title?: string;
+  difficulty?: string | number;
+  knowledgeMapId?: unknown;
+  structureRevision: number;
+  sourceMeta?: ManagedSourceMetaView;
+  pidNamespaceId?: string;
+  pidNamespaceReview?: { note?: string };
+  managedAuthoring?: {
+    selectedMindmapNodeIds?: unknown[];
+    workingTitle?: string;
+    metadataStatus?: string;
+    pendingTrainingPlacement?: {
+      trainingId?: unknown;
+      chapterId?: unknown;
+    };
+  };
+}
+
+interface ManagedTrainingReviewOption {
+  id: string;
+  title?: string;
+  chapters?: Array<{ id: unknown; title?: string }>;
+}
+
+interface ProblemReviewPageData {
+  pdocs?: ProblemReviewDocument[];
+  page?: string | number;
+  ppcount?: string | number;
+  pcount?: string | number;
+  qs?: string;
+  status?: ReviewStatus;
+  problemReviewUrl?: string;
+  managedAuthorsByDocId?: Record<string, Array<{ _id: number; uname?: string }>>;
+  pendingContributionsByDocId?: Record<string, Array<{ uid: number; scope: 'data' | 'tag' }>>;
+  pendingContributionFingerprintByDocId?: Record<string, string>;
+  contributionUdict?: Record<string, { _id: number; uname?: string }>;
+  managedSourceTemplates?: ManagedSourceTemplateOption[];
+  managedTrainingOptions?: ManagedTrainingReviewOption[];
+  knowledgeMindmapOptions?: MindmapOption[];
+  pidNamespaces?: PidNamespaceOption[];
+  canCorrectPidNamespaces?: boolean;
+  pidNamespaceUrl?: string;
+  canManagePidNamespaces?: boolean;
 }
 
 const REVIEW_STATUS_OPTIONS: Array<{ value: ReviewStatus; label: string; description: string }> = [
@@ -77,7 +128,15 @@ function buildUrl(baseUrl: string, values: Record<string, string | number>) {
   return encoded ? `${baseUrl}?${encoded}` : baseUrl;
 }
 
-function ReviewMetadataEditor({ pdoc, action, mindmapOptions }: { pdoc: R; action: string; mindmapOptions: MindmapOption[] }) {
+function ReviewMetadataEditor({
+  pdoc,
+  action,
+  mindmapOptions,
+}: {
+  pdoc: ProblemReviewDocument;
+  action: string;
+  mindmapOptions: MindmapOption[];
+}) {
   const initialIds = (pdoc.managedAuthoring?.selectedMindmapNodeIds || []).map(String);
   const options = mindmapOptions.filter((option) => option.mapId === String(pdoc.knowledgeMapId || ''));
   const optionById = new Map(options.map((option) => [option.id, option]));
@@ -184,7 +243,7 @@ function NamespaceCorrection({
   namespaces,
   sourceTemplates,
 }: {
-  pdoc: R;
+  pdoc: ProblemReviewDocument;
   action: string;
   namespaces: PidNamespaceOption[];
   sourceTemplates: ManagedSourceTemplateOption[];
@@ -305,8 +364,8 @@ function NamespaceCorrection({
 
 export function ProblemReviewPage() {
   const bs = useBootstrap();
-  const data = bs.page.data as R;
-  const pdocs: R[] = data.pdocs || [];
+  const data = bs.page.data as ProblemReviewPageData;
+  const pdocs = data.pdocs || [];
   const page = Number(data.page) || 1;
   const ppcount = Number(data.ppcount) || 1;
   const pcount = Number(data.pcount) || 0;
@@ -318,7 +377,7 @@ export function ProblemReviewPage() {
   const pendingContributionFingerprintByDocId: Record<string, string> = data.pendingContributionFingerprintByDocId || {};
   const contributionUdict: Record<string, { _id: number; uname?: string }> = data.contributionUdict || {};
   const managedSourceTemplates: ManagedSourceTemplateOption[] = data.managedSourceTemplates || [];
-  const managedTrainingOptions: R[] = data.managedTrainingOptions || [];
+  const managedTrainingOptions = data.managedTrainingOptions || [];
   const knowledgeMindmapOptions: MindmapOption[] = data.knowledgeMindmapOptions || [];
   const pidNamespaces: PidNamespaceOption[] = data.pidNamespaces || [];
   const canCorrectPidNamespaces = !!data.canCorrectPidNamespaces;
@@ -447,7 +506,7 @@ export function ProblemReviewPage() {
             const pending = pendingContributionsByDocId[docId] || [];
             const pendingPlacement = pdoc.managedAuthoring?.pendingTrainingPlacement;
             const pendingTraining = managedTrainingOptions.find((training) => training.id === String(pendingPlacement?.trainingId || ''));
-            const pendingChapter = pendingTraining?.chapters?.find((chapter: R) => chapter.id === pendingPlacement?.chapterId);
+            const pendingChapter = pendingTraining?.chapters?.find((chapter) => chapter.id === pendingPlacement?.chapterId);
             const pidNamespace = pidNamespaceById.get(String(pdoc.pidNamespaceId || ''));
             return (
               <li key={docId} className="rounded-2xl border border-border/80 bg-background p-4 sm:p-5">

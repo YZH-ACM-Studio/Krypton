@@ -15,9 +15,39 @@ import { ProblemDetailPage } from '@/pages/problem-detail';
 import { RecordDetailPage } from '@/pages/records';
 import { ContestWorkspaceContent } from '@/pages/exam-mode/workspace';
 
-type R = Record<string, any>;
+interface ExamContestDocument {
+  beginAt?: string | number | Date;
+  pids?: Array<string | number>;
+  title?: string;
+}
 
-function clarificationSubjectLabel(tdoc: R, pdict: Record<string, R>, subject: unknown) {
+interface ExamContestProblem {
+  title?: string;
+}
+
+interface ClarificationReply {
+  _id?: unknown;
+  content?: string;
+}
+
+interface ClarificationDocument {
+  _id?: unknown;
+  subject?: unknown;
+  updateAt?: unknown;
+  content?: string;
+  reply?: ClarificationReply[];
+  owner?: unknown;
+}
+
+interface ExamContestPageData {
+  examMode?: { contentTemplate?: string };
+  tdoc?: ExamContestDocument;
+  pdict?: Record<string, ExamContestProblem>;
+  tcdocs?: ClarificationDocument[];
+  previewMode?: boolean;
+}
+
+function clarificationSubjectLabel(tdoc: ExamContestDocument, pdict: Record<string, ExamContestProblem>, subject: unknown) {
   const key = String(subject ?? '0');
   if (!subject || key === '0') return '比赛整体';
   if (key === '-1') return '技术问题';
@@ -34,9 +64,9 @@ function ClarificationCard({
   locale,
   kind,
 }: {
-  tc: R;
-  tdoc: R;
-  pdict: Record<string, R>;
+  tc: ClarificationDocument;
+  tdoc: ExamContestDocument;
+  pdict: Record<string, ExamContestProblem>;
   locale: string;
   kind: 'broadcast' | 'question';
 }) {
@@ -56,7 +86,7 @@ function ClarificationCard({
         {Array.isArray(tc.reply) && tc.reply.length > 0 ? (
           <div className="space-y-2 border-t pt-3">
             <p className="text-xs font-medium text-muted-foreground">{isBroadcast ? '补充说明' : '裁判回复'}</p>
-            {tc.reply.map((reply: R, index: number) => (
+            {tc.reply.map((reply, index) => (
               <div key={String(reply._id || index)} className="rounded-md bg-muted/40 p-3">
                 <MarkdownView content={reply.content || ''} preferredLang={locale} />
               </div>
@@ -70,10 +100,10 @@ function ClarificationCard({
 
 function ExamAnnouncementsPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
-  const tdoc: R = data.tdoc || {};
-  const pdict: Record<string, R> = data.pdict || {};
-  const tcdocs: R[] = data.tcdocs || [];
+  const data = bs.page.data as ExamContestPageData;
+  const tdoc = data.tdoc || {};
+  const pdict = data.pdict || {};
+  const tcdocs = data.tcdocs || [];
   const pids: Array<string | number> = Array.isArray(tdoc.pids) ? tdoc.pids : [];
   const broadcasts = tcdocs.filter((tc) => Number(tc.owner || 0) === 0);
   const questions = tcdocs.filter((tc) => Number(tc.owner || 0) !== 0);
@@ -155,12 +185,12 @@ function ExamAnnouncementsPage() {
 
 const START_GATED_TEMPLATES = new Set(['contest_problemlist.html', 'problem_detail.html', 'contest_print.html']);
 
-function isContestBeforeStart(tdoc: R) {
-  const begin = new Date(tdoc?.beginAt).getTime();
+function isContestBeforeStart(tdoc: ExamContestDocument) {
+  const begin = new Date(tdoc.beginAt!).getTime();
   return Number.isFinite(begin) && Date.now() < begin;
 }
 
-function BeforeStartGate({ tdoc }: { tdoc: R }) {
+function BeforeStartGate({ tdoc }: { tdoc: ExamContestDocument }) {
   return (
     <Card>
       <CardHeader>
@@ -182,7 +212,7 @@ function BeforeStartGate({ tdoc }: { tdoc: R }) {
   );
 }
 
-function renderExamContestContent(template: string, data: R) {
+function renderExamContestContent(template: string, data: ExamContestPageData) {
   if (START_GATED_TEMPLATES.has(template) && isContestBeforeStart(data.tdoc || {}) && !data.previewMode) {
     return <BeforeStartGate tdoc={data.tdoc || {}} />;
   }
@@ -215,7 +245,7 @@ function renderExamContestContent(template: string, data: R) {
 
 export function ExamContestPage() {
   const bs = useBootstrap();
-  const data = bs.page.data || {};
+  const data = bs.page.data as ExamContestPageData;
   const template = String(data.examMode?.contentTemplate || 'contest_workspace.html');
   return <ExamContestShell>{renderExamContestContent(template, data)}</ExamContestShell>;
 }

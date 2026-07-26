@@ -9,7 +9,7 @@ import { cn } from '@/lib/cn';
 import { ChapterOutline } from './chapter-outline';
 import { useChapterQuery } from './chapter-query';
 import { CourseMindmapView } from './mindmap';
-import type { CourseChapter, CourseMindmapData, CourseRecord } from './types';
+import type { CourseChapter, CourseFile, CourseMindmapData, CourseRecord } from './types';
 
 function ProblemList({ chapter, problems }: { chapter: CourseChapter; problems: Record<string, CourseRecord> }) {
   if (!chapter.pids.length) return null;
@@ -85,7 +85,7 @@ export function CourseDetailPage() {
     canEnroll: boolean;
     canDownloadFiles: boolean;
     tsdoc?: CourseRecord;
-    files: CourseRecord[];
+    files: CourseFile[];
     view: 'overview' | 'mindmap';
     courseMindmap: CourseMindmapData | null;
   };

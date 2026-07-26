@@ -20,12 +20,29 @@ import { Textarea } from '@/components/ui/textarea';
 import { useBootstrap } from '@/lib/bootstrap';
 import { formatDateTime } from '@/lib/format';
 
-type R = Record<string, any>;
+interface TeamBatchSummary {
+  batchId: string;
+  name?: string;
+  description?: string;
+  status?: string;
+  teamCount?: string | number;
+  memberCount?: string | number;
+  updatedAt?: unknown;
+  ownTeam?: { name?: string };
+  pendingInviteCount?: string | number;
+}
+
+interface TeamBatchesPageData {
+  batches?: TeamBatchSummary[];
+  capabilities?: { canManage?: boolean };
+  page?: string | number;
+  pageCount?: string | number;
+}
 
 export function TeamBatchesPage() {
   const bs = useBootstrap();
-  const data = bs.page.data as R;
-  const batches = (data.batches || []) as R[];
+  const data = bs.page.data as TeamBatchesPageData;
+  const batches = data.batches || [];
   const canManage = !!data.capabilities?.canManage;
   const [createOpen, setCreateOpen] = useState(false);
 

@@ -48,6 +48,15 @@ interface NamespaceAudit {
   time: string;
 }
 
+interface PidNamespacesPageData {
+  pidNamespaces?: PidNamespaceView[];
+  namespaceAudits?: NamespaceAudit[];
+  memberUsers?: Record<string, DomainUserOption>;
+  pidNamespaceUrl?: string;
+  canAdministerPidNamespaces?: boolean;
+  problemReviewUrl?: string;
+}
+
 type NamespaceDialog =
   | { type: 'create' }
   | { type: 'config'; namespace: PidNamespaceView }
@@ -105,10 +114,10 @@ function auditOperationLabel(operation = '') {
 
 export function ProblemPidNamespacesPage() {
   const bs = useBootstrap();
-  const data = bs.page.data as Record<string, any>;
-  const namespaces: PidNamespaceView[] = data.pidNamespaces || [];
-  const namespaceAudits: NamespaceAudit[] = data.namespaceAudits || [];
-  const memberUsers: Record<string, DomainUserOption> = data.memberUsers || {};
+  const data = bs.page.data as PidNamespacesPageData;
+  const namespaces = data.pidNamespaces || [];
+  const namespaceAudits = data.namespaceAudits || [];
+  const memberUsers = data.memberUsers || {};
   const endpoint = String(data.pidNamespaceUrl || '');
   const isAdmin = data.canAdministerPidNamespaces === true;
   const [dialog, setDialog] = useState<NamespaceDialog>(null);

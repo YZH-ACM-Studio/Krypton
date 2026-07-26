@@ -25,8 +25,6 @@ import { useBootstrap } from '@/lib/bootstrap';
 import { evaluateSelfTeamName } from '@/lib/contest-team-form';
 import { formatDateTime } from '@/lib/format';
 
-type R = Record<string, any>;
-
 interface TeamUser extends DomainUserOption {
   uname: string;
   displayName: string;
@@ -65,6 +63,47 @@ interface ConfirmAction {
   operation: string;
   fields: Record<string, string | number>;
   destructive?: boolean;
+}
+
+interface ContestTeamsPageData {
+  workspaceKind?: string;
+  tdoc?: {
+    docId?: string | number;
+    title?: string;
+    beginAt?: unknown;
+  };
+  batch?: {
+    name?: string;
+    description?: string;
+    closedAt?: unknown;
+    createdAt?: unknown;
+    revision?: string | number;
+  };
+  copiedFromBatch?: { batchId?: string; name?: string } | null;
+  ownTeam?: TeamView | null;
+  pendingInvites?: InviteView[];
+  users?: Record<string, TeamUser>;
+  capabilities?: {
+    canClose?: boolean;
+    canCopy?: boolean;
+    canCreate?: boolean;
+    canEditOwn?: boolean;
+    canEmergencyEdit?: boolean;
+    canInvite?: boolean;
+    canLeave?: boolean;
+    canManage?: boolean;
+    canReopen?: boolean;
+    started?: boolean;
+  };
+  teams?: TeamView[];
+  workspaceUrl?: string;
+  teamSearch?: string;
+  vigilRoleSyncWarning?: boolean;
+  batchTeamCount?: string | number;
+  memberCount?: string | number;
+  teamCount?: string | number;
+  teamPage?: string | number;
+  teamPageCount?: string | number;
 }
 
 function userLabel(users: Record<string, TeamUser>, uid: number) {
@@ -144,7 +183,7 @@ function MemberList({ team, users, actions }: { team: TeamView; users: Record<st
 
 export function ContestTeamsPage() {
   const bs = useBootstrap();
-  const data = bs.page.data as R;
+  const data = bs.page.data as ContestTeamsPageData;
   const isBatch = data.workspaceKind === 'batch';
   const tdoc = data.tdoc || {};
   const batch = data.batch || {};

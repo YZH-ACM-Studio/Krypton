@@ -14,7 +14,23 @@ import { useBootstrap, type GenericUserDoc } from '@/lib/bootstrap';
 import { formatPlainTextSummary, makeInitials, replaceRouteTokens } from '@/lib/format';
 import { cn } from '@/lib/cn';
 
-type R = Record<string, any>;
+interface RankingUser extends GenericUserDoc {
+  avatarUrl?: string;
+  nAccept?: number;
+  rank?: number | string;
+  rpInfo?: Record<string, unknown>;
+}
+
+interface RankingPageData {
+  page?: string | number;
+  upcount?: string | number;
+  rpcount?: string | number;
+  udocs?: RankingUser[];
+  ranked?: number[];
+  rpDefinitions?: Record<string, { hidden?: boolean }>;
+  self?: RankingUser | null;
+  studentDict?: Record<string, { studentId: string; realName: string }>;
+}
 
 const RP_LABELS: Record<string, string> = {
   problem: '题目 RP',
@@ -28,7 +44,7 @@ function medalColor(rank: number) {
   return 'text-muted-foreground';
 }
 
-function getRpDetail(user: R, key: string) {
+function getRpDetail(user: RankingUser, key: string) {
   const value = user?.rpInfo?.[key];
   return typeof value === 'number' ? Math.round(value) : '—';
 }
@@ -45,11 +61,11 @@ function RankingRow({
   onShowBio,
   studentInfo,
 }: {
-  user: GenericUserDoc & R;
+  user: RankingUser;
   rank: number | string;
   rpKeys: string[];
   current?: boolean;
-  onShowBio?: (user: GenericUserDoc & R) => void;
+  onShowBio?: (user: RankingUser) => void;
   /** Admin-only column. When undefined, the cell is suppressed. */
   studentInfo?: { studentId: string; realName: string } | null;
 }) {
@@ -119,21 +135,21 @@ function RankingRow({
 
 export function RankingPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
+  const data = bs.page.data as RankingPageData;
   const page = Number(data.page) || 1;
   const upcount = Number(data.upcount || data.rpcount) || 1;
-  const users: Array<GenericUserDoc & R> = data.udocs || [];
+  const users = data.udocs || [];
   const ranked: number[] = data.ranked || [];
-  const fallbackUsers = ranked.map((uid) => bs.udict[String(uid)] as GenericUserDoc & R).filter(Boolean);
+  const fallbackUsers = ranked.map((uid) => bs.udict[String(uid)] as RankingUser).filter(Boolean);
   const rows = users.length ? users : fallbackUsers;
-  const rpDefinitions: R = data.rpDefinitions || {};
+  const rpDefinitions = data.rpDefinitions || {};
   const rpKeys = Object.entries(rpDefinitions)
-    .filter(([, def]) => !(def as R)?.hidden)
+    .filter(([, def]) => !def.hidden)
     .map(([key]) => key);
-  const self: R | null = data.self || null;
-  const studentDict: Record<string, { studentId: string; realName: string }> = data.studentDict || {};
+  const self = data.self || null;
+  const studentDict = data.studentDict || {};
   const hasStudentColumn = Object.keys(studentDict).length > 0;
-  const [bioUser, setBioUser] = useState<(GenericUserDoc & R) | null>(null);
+  const [bioUser, setBioUser] = useState<RankingUser | null>(null);
 
   return (
     <motion.div className="space-y-4" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
@@ -164,7 +180,7 @@ export function RankingPage() {
               <TableBody>
                 {self ? (
                   <RankingRow
-                    user={self as GenericUserDoc & R}
+                    user={self}
                     rank={self.rank || '—'}
                     rpKeys={rpKeys}
                     current

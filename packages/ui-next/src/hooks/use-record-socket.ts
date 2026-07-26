@@ -12,9 +12,9 @@
  */
 import { useEffect, useRef } from 'react';
 
-// Kept loose on purpose: consumers merge/spread rdocs into their own local
-// record shapes (records.tsx `R`, problem-detail's `RawRecordDoc`).
-export type Rdoc = Record<string, any>;
+// The wire document is intentionally open-ended, but its values remain
+// untrusted until each consumer narrows them.
+export type Rdoc = Record<string, unknown>;
 export type RecordSocketPath = '/record-conn' | '/record-detail-conn' | '/exam-mode/team-role-conn';
 
 /**

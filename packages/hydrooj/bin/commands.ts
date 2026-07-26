@@ -1,10 +1,11 @@
 import cac from 'cac';
+import { shouldLoadHydroRuntime } from '../src/commands/runtime-mode';
 import { getAddons } from '../src/options';
 
 const argv = cac().parse(process.argv, { run: false });
 
 async function main() {
-    if (!argv.args[0] || argv.args[0] === 'cli') {
+    if (shouldLoadHydroRuntime(argv.args, argv.options)) {
         const hydro = require('../src/loader');
         await (argv.args[0] === 'cli' ? hydro.loadCli : hydro.load)();
         return;
@@ -23,6 +24,7 @@ async function main() {
     require('../src/commands/problem-pid-namespace-migration').register(cli);
     cli.help();
     cli.parse(process.argv, { run: false });
+    if (argv.options.help || argv.options.h) return;
     if (!cli.matchedCommand) {
         const addons = getAddons();
         for (const i of addons) {

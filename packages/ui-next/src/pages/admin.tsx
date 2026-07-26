@@ -8,7 +8,36 @@ import { AdminPage } from '@/components/admin/admin-page';
 import { useBootstrap } from '@/lib/bootstrap';
 import { formatDateTime } from '@/lib/format';
 
-type R = Record<string, any>;
+interface DomainDashboardData {
+  domain?: { _id?: string; name?: string; owner?: string | number };
+  owner?: { _id?: string | number; uname?: string };
+  pcount?: number;
+  ucount?: number;
+  rcount?: number;
+  dcount?: number;
+}
+
+interface ServerStatus {
+  _id?: string;
+  mid?: string;
+  isOnline?: boolean;
+  status?: string;
+  updateAt?: string | Date;
+  osinfo?: { distro?: string; release?: string; codename?: string; arch?: string };
+  cpu?: { manufacturer?: string; brand?: string; speed?: number };
+  memory?: { used?: number; total?: number };
+  stack?: number;
+  reqCount?: number;
+}
+
+interface SystemStatusData {
+  ServerVersion?: string;
+  dbVersion?: string;
+  JudgeCount?: number;
+  stats?: ServerStatus[];
+  compilers?: Array<{ key: string[]; message: string }>;
+  languages?: Record<string, string>;
+}
 
 function formatSize(bytes: number) {
   if (!Number.isFinite(bytes)) return '—';
@@ -20,9 +49,9 @@ function formatSize(bytes: number) {
 
 export function DomainDashboardPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
-  const domain: R = data.domain || bs.domain;
-  const owner: R = data.owner || {};
+  const data = bs.page.data as DomainDashboardData;
+  const domain: NonNullable<DomainDashboardData['domain']> = data.domain || { _id: bs.domain.id, name: bs.domain.name };
+  const owner = data.owner || {};
   const ownerId = owner._id ?? domain.owner;
   const isOwner = String(bs.user.id) === String(ownerId ?? '');
 
@@ -205,10 +234,10 @@ export function ManageDashboardPage() {
 
 export function StatusPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
-  const stats: R[] = data.stats || [];
-  const compilers: Array<{ key: string[]; message: string }> = data.compilers || [];
-  const languages: Record<string, string> = data.languages || {};
+  const data = bs.page.data as SystemStatusData;
+  const stats = data.stats || [];
+  const compilers = data.compilers || [];
+  const languages = data.languages || {};
   const onlineCount = stats.filter((s) => s.isOnline).length;
   const totalMemory = stats.reduce((sum, s) => sum + Number(s.memory?.total || 0), 0);
   const usedMemory = stats.reduce((sum, s) => sum + Number(s.memory?.used || 0), 0);

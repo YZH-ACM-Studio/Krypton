@@ -20,12 +20,42 @@ import { ProblemPicker } from '@/components/problem-picker';
 import { useBootstrap } from '@/lib/bootstrap';
 import { formatDateTime, replaceRouteTokens } from '@/lib/format';
 
-type R = Record<string, any>;
 interface TrainingPlanNode {
   _id: number;
   title: string;
   requireNids: number[];
   pids: Array<string | number>;
+}
+
+interface RawTrainingPlanNode {
+  _id?: unknown;
+  id?: unknown;
+  title?: unknown;
+  requireNids?: unknown[];
+  pids?: unknown[];
+}
+
+interface TrainingManageDocument {
+  _id?: string | number;
+  docId?: string | number;
+  title?: string;
+  description?: string;
+  content?: string;
+  dag?: unknown;
+  pin?: string | number;
+}
+
+interface TrainingFile {
+  name: string;
+  size?: number;
+  lastModified?: unknown;
+}
+
+interface TrainingManagePageData {
+  tdoc?: TrainingManageDocument;
+  page_name?: string;
+  dag?: unknown;
+  files?: TrainingFile[];
 }
 
 const DEFAULT_PLAN: TrainingPlanNode[] = [
@@ -53,7 +83,7 @@ function uniqueValues<T>(items: T[]): T[] {
   return Array.from(new Set(items));
 }
 
-function normalizePlanNode(node: R, index: number): TrainingPlanNode {
+function normalizePlanNode(node: RawTrainingPlanNode, index: number): TrainingPlanNode {
   const id = Number(node._id || node.id || index + 1);
   return {
     _id: Number.isSafeInteger(id) && id > 0 ? id : index + 1,
@@ -97,8 +127,8 @@ function formatSize(bytes: number) {
 
 export function TrainingEditPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
-  const tdoc: R = data.tdoc || {};
+  const data = bs.page.data as TrainingManagePageData;
+  const tdoc = data.tdoc || {};
   const isEdit = data.page_name === 'training_edit';
   const trainingUrl = isEdit ? replaceRouteTokens(bs.urls.trainingDetail, { TID: String(tdoc.docId || tdoc._id) }) : bs.urls.training;
   const [planNodes, setPlanNodes] = useState<TrainingPlanNode[]>(() => {
@@ -502,9 +532,9 @@ function SortableStageCard({ node, index, planNodes, onRemove, onUpdate, onUpdat
 
 export function TrainingFilesPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
-  const tdoc: R = data.tdoc || {};
-  const files: R[] = data.files || [];
+  const data = bs.page.data as TrainingManagePageData;
+  const tdoc = data.tdoc || {};
+  const files = data.files || [];
   const tid = tdoc.docId || tdoc._id;
   const trainingUrl = replaceRouteTokens(bs.urls.trainingDetail, { TID: String(tid) });
 

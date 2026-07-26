@@ -32,18 +32,96 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { useBootstrap } from '@/lib/bootstrap';
 import { formatDateTime, makeInitials, replaceRouteTokens } from '@/lib/format';
 
-type R = Record<string, any>;
+interface UserProfileDocument {
+  _id?: string | number;
+  uname?: string;
+  rp?: number;
+  bio?: string;
+  nAccept?: number;
+  nSubmit?: number;
+  loginat?: unknown;
+  mail?: string;
+  qq?: string;
+  wechat?: string;
+  studentId?: string;
+  school?: string;
+  avatar?: string;
+  avatarUrl?: string;
+  displayName?: string;
+  role?: string;
+  rank?: string | number;
+  regat?: unknown;
+  timezone?: string;
+}
+
+interface UserContestDocument {
+  docId?: string | number;
+  title?: string;
+  rule?: string;
+}
+
+interface UserSolutionDocument {
+  _id?: string | number;
+  parentId?: string | number;
+  title?: string;
+  vote?: number;
+}
+
+interface UserStudentBinding {
+  bound?: boolean;
+  realName?: string;
+  studentId?: string;
+}
+
+interface UserSetting {
+  key: string;
+  name?: string;
+  desc?: string;
+  type?: string;
+  range?: Record<string, unknown>;
+}
+
+interface UserSession {
+  _id?: string | number;
+  userAgent?: string;
+  updateAt?: unknown;
+}
+
+interface UserMessage {
+  _id?: string | number;
+  from?: string;
+  updateAt?: unknown;
+  content?: string;
+}
+
+interface UserPageData {
+  udoc?: UserProfileDocument;
+  sdoc?: { updateAt?: unknown };
+  pdocs?: unknown[];
+  tags?: Array<[string, number]>;
+  tdocs?: UserContestDocument[];
+  psdocs?: UserSolutionDocument[];
+  pdict?: Record<string, { title?: string }>;
+  isSelfProfile?: boolean;
+  studentBinding?: UserStudentBinding | null;
+  daily?: Record<string, number>;
+  settings?: UserSetting[];
+  current?: Record<string, unknown>;
+  page_name?: string;
+  sessions?: UserSession[];
+  mdocs?: UserMessage[];
+}
 
 export function UserDetailPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
-  const udoc: R = data.udoc || {};
-  const sdoc: R = data.sdoc || {};
-  const pdocs: R[] = data.pdocs || [];
-  const tags: Array<[string, number]> = data.tags || [];
-  const tdocs: R[] = data.tdocs || [];
-  const psdocs: R[] = data.psdocs || [];
-  const pdict: Record<string, R> = data.pdict || {};
+  const data = bs.page.data as UserPageData;
+  const udoc = data.udoc || {};
+  const sdoc = data.sdoc || {};
+  const pdocs = data.pdocs || [];
+  const tags = data.tags || [];
+  const tdocs = data.tdocs || [];
+  const psdocs = data.psdocs || [];
+  const pdict = data.pdict || {};
   const isSelfProfile = !!data.isSelfProfile || Number(udoc._id) === Number(bs.user.id);
 
   const name = udoc.uname || 'User';
@@ -56,7 +134,7 @@ export function UserDetailPage() {
   // 真实身份（krypton-userbind 注入）：绑定状态所有人可见；姓名/学号仅登录
   // 用户可见（服务端过滤，未登录时字段不下发）。有绑定档案时它是唯一真源，
   // 用户自填的 studentId/school 不再展示（防止两个学号打架）。
-  const binding: R | null = data.studentBinding || null;
+  const binding = data.studentBinding || null;
   const isBound = !!binding?.bound;
 
   const contactItems = [
@@ -217,7 +295,7 @@ export function UserDetailPage() {
               </CardHeader>
               <CardContent className="p-0">
                 <div className="divide-y">
-                  {tdocs.slice(0, 12).map((t: R) => (
+                  {tdocs.slice(0, 12).map((t) => (
                     <a
                       key={String(t.docId)}
                       href={replaceRouteTokens(bs.urls.contestDetail, { TID: String(t.docId) })}
@@ -275,7 +353,7 @@ export function UserDetailPage() {
               </CardHeader>
               <CardContent className="p-0">
                 <div className="divide-y">
-                  {psdocs.slice(0, 8).map((ps: R) => {
+                  {psdocs.slice(0, 8).map((ps) => {
                     const p = pdict[String(ps.parentId)];
                     return (
                       <a
@@ -508,16 +586,16 @@ function ContactRow({ label, value, icon }: { label: string; value: string; icon
 
 export function SettingsPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
-  const settings: R[] = data.settings || [];
-  const current: R = data.current || {};
+  const data = bs.page.data as UserPageData;
+  const settings = data.settings || [];
+  const current = data.current || {};
 
   return (
     <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       <h1 className="text-xl font-semibold">{data.page_name === 'home_account' ? '账号' : '设置'}</h1>
 
       <form method="post" className="space-y-6">
-        {settings.map((s: R) => (
+        {settings.map((s) => (
           <Card key={String(s.key)}>
             <CardHeader>
               <CardTitle className="text-base">{s.name || s.key}</CardTitle>
@@ -535,7 +613,7 @@ export function SettingsPage() {
   );
 }
 
-function SettingControl({ setting, value }: { setting: R; value: unknown }) {
+function SettingControl({ setting, value }: { setting: UserSetting; value: unknown }) {
   const name = String(setting.key);
   const type = setting.type || 'text';
   const formValue = value ? String(value) : '';
@@ -559,8 +637,8 @@ function SettingControl({ setting, value }: { setting: R; value: unknown }) {
 
 export function SecurityPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
-  const sessions: R[] = data.sessions || [];
+  const data = bs.page.data as UserPageData;
+  const sessions = data.sessions || [];
 
   return (
     <motion.div className="space-y-4" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
@@ -591,7 +669,7 @@ export function SecurityPage() {
             <p className="text-sm text-muted-foreground">暂无会话</p>
           ) : (
             <div className="divide-y">
-              {sessions.map((s: R) => (
+              {sessions.map((s) => (
                 <div key={String(s._id)} className="flex flex-wrap items-center gap-3 py-2 text-sm">
                   <div className="min-w-0">
                     <p className="font-medium truncate">{s.userAgent || 'Unknown'}</p>
@@ -617,8 +695,8 @@ export function SecurityPage() {
 
 export function MessagesPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
-  const mdocs: R[] = data.mdocs || [];
+  const data = bs.page.data as UserPageData;
+  const mdocs = data.mdocs || [];
 
   return (
     <motion.div className="space-y-4" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
@@ -629,7 +707,7 @@ export function MessagesPage() {
             <p className="p-8 text-center text-sm text-muted-foreground">没有消息</p>
           ) : (
             <div className="divide-y">
-              {mdocs.map((m: R) => (
+              {mdocs.map((m) => (
                 <div key={String(m._id)} className="p-3 text-sm">
                   <p className="font-medium">{m.from || '系统'}</p>
                   <p className="text-xs text-muted-foreground">{m.updateAt ? formatDateTime(m.updateAt, bs.locale) : '—'}</p>

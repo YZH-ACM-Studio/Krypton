@@ -24,7 +24,11 @@ import { AdminPage } from '@/components/admin/admin-page';
 import { MarkdownEditor, MarkdownView } from '@/components/markdown-renderer';
 import { ProblemEditorWorkspace } from '@/components/problem-editor-workspace';
 import { ProblemTestdataFileDialog } from '@/components/problem-testdata-file-dialog';
-import { type ProblemDataWriteOperation, useProblemDataWriteGuard } from '@/components/problem-data-write-guard';
+import {
+  type ProblemDataWriteGuardState,
+  type ProblemDataWriteOperation,
+  useProblemDataWriteGuard,
+} from '@/components/problem-data-write-guard';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -39,8 +43,66 @@ import { type GenericUserDoc, useBootstrap } from '@/lib/bootstrap';
 import { formatDateTime, formatRelativeTime, makeInitials, replaceRouteTokens } from '@/lib/format';
 import { downloadProblemFiles } from '@/lib/problem-package';
 
-type R = Record<string, any>;
 type ProblemFileType = 'testdata' | 'additional_file';
+
+interface ProblemManageDocument {
+  docId?: string | number;
+  pid?: string | number;
+  title?: string;
+}
+
+interface ProblemManageCapabilities {
+  canEditContent?: boolean;
+  canEditData?: boolean;
+  canEditTags?: boolean;
+  canManageCollaborators?: boolean;
+  canManageContributions?: boolean;
+  canPublish?: boolean;
+}
+
+interface ProblemManagedFile {
+  name: string;
+  size?: number;
+  lastModified?: unknown;
+}
+
+interface ProblemSolutionDocument {
+  _id?: string | number;
+  owner?: string | number;
+  updateAt?: unknown;
+  vote?: number;
+  content?: string;
+}
+
+interface ProblemStatisticRecord {
+  _id?: string | number;
+  uid?: string | number;
+  time?: number;
+  memory?: number;
+  length?: number;
+  lang?: string;
+}
+
+interface ProblemManagePageData {
+  pdoc?: ProblemManageDocument;
+  problemAuthoringCapabilities?: ProblemManageCapabilities;
+  testdata?: ProblemManagedFile[];
+  additional_file?: ProblemManagedFile[];
+  reference?: Record<string, unknown> | null;
+  dataWriteGuard?: ProblemDataWriteGuardState;
+  psdocs?: ProblemSolutionDocument[];
+  page?: string | number;
+  pcount?: string | number;
+  udict?: Record<string, GenericUserDoc>;
+  rsdocs?: ProblemStatisticRecord[];
+  sort?: string;
+  direction?: string | number;
+  lang?: string;
+  langs?: Record<string, { display?: unknown }>;
+  types?: string[];
+  knowledgeMaps?: Array<{ id: string; title: string }>;
+  canKeepOriginalAuthor?: boolean;
+}
 
 function getUser(udict: Record<string, GenericUserDoc>, uid: string | number | undefined) {
   return uid != null ? (udict[String(uid)] ?? null) : null;
@@ -60,12 +122,12 @@ export { ProblemConfigPage } from './problem-config-page-wrapper';
 
 export function ProblemFilesPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
-  const pdoc: R = data.pdoc || {};
-  const capabilities: R = data.problemAuthoringCapabilities || {};
-  const testdata: R[] = data.testdata || [];
-  const additionalFile: R[] = data.additional_file || [];
-  const reference: R | null = data.reference || null;
+  const data = bs.page.data as ProblemManagePageData;
+  const pdoc = data.pdoc || {};
+  const capabilities = data.problemAuthoringCapabilities || {};
+  const testdata = data.testdata || [];
+  const additionalFile = data.additional_file || [];
+  const reference = data.reference || null;
   const pid = pdoc.pid || pdoc.docId || '';
   const problemUrl = replaceRouteTokens(bs.urls.problemDetail, { PID: String(pid) });
   const fileSection =
@@ -79,7 +141,7 @@ export function ProblemFilesPage() {
   const [renamingType, setRenamingType] = useState<'testdata' | 'additional_file'>('testdata');
   const [showGenerate, setShowGenerate] = useState(false);
   const [uploadTarget, setUploadTarget] = useState<ProblemFileType | null>(null);
-  const [previewingTestdataFile, setPreviewingTestdataFile] = useState<R | null>(null);
+  const [previewingTestdataFile, setPreviewingTestdataFile] = useState<ProblemManagedFile | null>(null);
   const [downloadingType, setDownloadingType] = useState<ProblemFileType | null>(null);
   const [downloadError, setDownloadError] = useState('');
   const [uploadConfirmationRequestId, setUploadConfirmationRequestId] = useState('');
@@ -95,7 +157,7 @@ export function ProblemFilesPage() {
     setFn(next);
   };
 
-  const toggleAll = (files: R[], selected: Set<string>, setSelected: (s: Set<string>) => void) => {
+  const toggleAll = (files: ProblemManagedFile[], selected: Set<string>, setSelected: (s: Set<string>) => void) => {
     if (selected.size === files.length) setSelected(new Set());
     else setSelected(new Set(files.map((f) => f.name)));
   };
@@ -160,7 +222,7 @@ export function ProblemFilesPage() {
     setSelected,
   }: {
     title: string;
-    files: R[];
+    files: ProblemManagedFile[];
     type: ProblemFileType;
     selected: Set<string>;
     setSelected: (s: Set<string>) => void;
@@ -450,9 +512,9 @@ export function ProblemFilesPage() {
 
 export function ProblemSolutionPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
-  const pdoc: R = data.pdoc || {};
-  const psdocs: R[] = data.psdocs || [];
+  const data = bs.page.data as ProblemManagePageData;
+  const pdoc = data.pdoc || {};
+  const psdocs = data.psdocs || [];
   const page = Number(data.page) || 1;
   const pcount = Number(data.pcount) || 1;
   const udict: Record<string, GenericUserDoc> = bs.udict || data.udict || {};
@@ -561,9 +623,9 @@ export function ProblemSolutionPage() {
 
 export function ProblemStatisticsPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
-  const pdoc: R = data.pdoc || {};
-  const rsdocs: R[] = data.rsdocs || [];
+  const data = bs.page.data as ProblemManagePageData;
+  const pdoc = data.pdoc || {};
+  const rsdocs = data.rsdocs || [];
   const page = Number(data.page) || 1;
   const pcount = Number(data.pcount) || 1;
   const sort: string = data.sort || 'time';
@@ -707,8 +769,8 @@ export function ProblemStatisticsPage() {
 /* ---------- Problem Import ---------- */
 
 export function ProblemImportPage() {
-  const data = useBootstrap().page.data;
-  const knowledgeMaps: Array<{ id: string; title: string }> = data.knowledgeMaps || [];
+  const data = useBootstrap().page.data as ProblemManagePageData;
+  const knowledgeMaps = data.knowledgeMaps || [];
   const defaultMapId = knowledgeMaps.length === 1 ? knowledgeMaps[0].id : '';
   const canKeepOriginalAuthor = data.canKeepOriginalAuthor === true;
   return (

@@ -16,11 +16,13 @@ import { SimpleSelect } from '@/components/ui/select';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { useBootstrap } from '@/lib/bootstrap';
 import { replaceRouteTokens } from '@/lib/format';
-import { managedSourceFieldViews, type ManagedSourceTemplateOption } from '@/lib/managed-problem-source';
+import {
+  managedSourceFieldViews,
+  type ManagedSourceMetaView,
+  type ManagedSourceTemplateOption,
+} from '@/lib/managed-problem-source';
 import { readHydroResponseError } from '@/lib/problem-save-response';
 import { createRequestId } from '@/lib/request-id';
-
-type R = Record<string, any>;
 
 const KIND_LABEL: Record<ProblemKind, string> = {
   programming: '编程题',
@@ -42,6 +44,76 @@ interface BankFilters {
   lifecycle?: 'active' | 'archived' | 'all';
   managedReview?: 'all' | 'pending';
   pidNamespaceId?: string;
+}
+
+interface ProblemListDocument {
+  docId: number;
+  pid?: string | number;
+  title?: string;
+  difficulty?: string | number;
+  archivedAt?: unknown;
+  hidden?: boolean;
+  owner?: string | number;
+  sourceMeta?: ManagedSourceMetaView;
+  structureLockedAt?: unknown;
+  structureRevision: number;
+  tag?: string[];
+  problemKind?: unknown;
+  kind?: ProblemKind;
+  type?: string;
+  config?: { type?: string };
+  managedAuthoring?: {
+    metadataStatus?: string;
+    workingTitle?: string;
+    pendingTrainingPlacement?: {
+      trainingId?: unknown;
+      chapterId?: unknown;
+    };
+  };
+}
+
+interface ManagedTrainingListOption {
+  id: string;
+  title?: string;
+  chapters?: Array<{ id: unknown; title?: string }>;
+}
+
+interface ContributionBatchFailure {
+  publicPid?: string | number;
+  pid?: string | number;
+  scope?: string;
+  message?: string;
+}
+
+interface ProblemsPageData {
+  pdocs?: ProblemListDocument[];
+  page?: string | number;
+  ppcount?: string | number;
+  pcount?: string | number;
+  qs?: string;
+  sort?: string;
+  filters?: BankFilters;
+  problemKinds?: Array<{ kind: ProblemKind; slug: string }>;
+  contestOptions?: Array<{ id: string; title: string; beginAt?: string | Date }>;
+  pidNamespaces?: Array<{ namespaceId: string; name: string; pidPattern: string }>;
+  ownerNames?: Record<string, string>;
+  canManageByDocId?: Record<string, boolean>;
+  canArchiveByDocId?: Record<string, boolean>;
+  canManageContributionsByDocId?: Record<string, boolean>;
+  canCloneByDocId?: Record<string, boolean>;
+  managedReviewableByDocId?: Record<string, boolean>;
+  pendingContributionsByDocId?: Record<string, Array<{ uid: number; scope: 'data' | 'tag' }>>;
+  pendingContributionFingerprintByDocId?: Record<string, string>;
+  contributionUdict?: Record<string, { _id: number; uname?: string }>;
+  managedSourceTemplates?: ManagedSourceTemplateOption[];
+  managedTrainingOptions?: ManagedTrainingListOption[];
+  problemCreationCapabilities?: { canCreateAny: boolean; canImport: boolean };
+  psdict?: Record<string, { status?: number }>;
+  problemReviewUrl?: string;
+  canReviewManaged?: boolean;
+  pidNamespaceUrl?: string;
+  canManagePidNamespaces?: boolean;
+  canFilterOwner?: boolean;
 }
 
 function buildUrlWithQuery(baseUrl: string, params: Record<string, unknown>) {
@@ -210,8 +282,8 @@ function SubmissionStatus({ status }: { status?: number }) {
 
 export function ProblemsPage() {
   const bs = useBootstrap();
-  const data = bs.page.data as R;
-  const pdocs: R[] = data.pdocs || [];
+  const data = bs.page.data as ProblemsPageData;
+  const pdocs = data.pdocs || [];
   const page = Number(data.page) || 1;
   const ppcount = Number(data.ppcount) || 1;
   const pcount = Number(data.pcount) || pdocs.length;
@@ -231,7 +303,7 @@ export function ProblemsPage() {
   const pendingContributionFingerprintByDocId: Record<string, string> = data.pendingContributionFingerprintByDocId || {};
   const contributionUdict: Record<string, { _id: number; uname?: string }> = data.contributionUdict || {};
   const managedSourceTemplates: ManagedSourceTemplateOption[] = data.managedSourceTemplates || [];
-  const managedTrainingOptions: R[] = data.managedTrainingOptions || [];
+  const managedTrainingOptions = data.managedTrainingOptions || [];
   const problemCreationCapabilities = data.problemCreationCapabilities as { canCreateAny: boolean; canImport: boolean } | undefined;
   if (
     !problemCreationCapabilities ||
@@ -240,7 +312,7 @@ export function ProblemsPage() {
   ) {
     throw new Error('Problem creation capabilities are missing');
   }
-  const psdict: Record<string, R> = data.psdict || {};
+  const psdict = data.psdict || {};
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const [selectedContributionPids, setSelectedContributionPids] = useState<Set<number>>(new Set());
   const [batchOpen, setBatchOpen] = useState(false);
@@ -323,7 +395,7 @@ export function ProblemsPage() {
         if (Array.isArray(body?.failed) && body.failed.length) {
           throw new Error(
             `批量分配未全部完成（requestId: ${body.requestId || '未知'}）：${body.failed
-              .map((failure: R) => `${failure.publicPid || failure.pid} / ${failure.scope}: ${failure.message}`)
+              .map((failure: ContributionBatchFailure) => `${failure.publicPid || failure.pid} / ${failure.scope}: ${failure.message}`)
               .join('；')}`,
           );
         }
@@ -475,7 +547,7 @@ export function ProblemsPage() {
               const sourceFields = managedSourceFieldViews(pdoc.sourceMeta, sourceTemplate);
               const pendingPlacement = pdoc.managedAuthoring?.pendingTrainingPlacement;
               const pendingTraining = managedTrainingOptions.find((training) => training.id === String(pendingPlacement?.trainingId || ''));
-              const pendingChapter = pendingTraining?.chapters?.find((chapter: R) => chapter.id === pendingPlacement?.chapterId);
+              const pendingChapter = pendingTraining?.chapters?.find((chapter) => chapter.id === pendingPlacement?.chapterId);
               const pendingContributions = pendingContributionsByDocId[docId] || [];
               return (
                 <li key={docId} className="px-4 py-4 sm:px-5">

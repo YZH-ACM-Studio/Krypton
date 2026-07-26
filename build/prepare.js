@@ -153,7 +153,7 @@ const UINextConfig = {
         outDir: path.join(baseOutDir, 'ui-next'),
 
         strict: true,
-        noImplicitAny: false,
+        noImplicitAny: true,
 
         useDefineForClassFields: true,
         lib: ['esnext', 'DOM', 'DOM.Iterable'],

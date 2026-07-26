@@ -102,8 +102,20 @@ interface ParsedSubtask {
     if?: number[];
 }
 
-export function readSubtasksFromFiles(files: string[], config) {
-    const subtask: Record<number, ParsedSubtask> = {};
+interface ParsedSubtaskInput extends Omit<ParsedSubtask, 'cases' | 'type'> {
+    cases?: ParsedCase[];
+    type?: string;
+}
+
+interface ReadSubtasksConfig {
+    memory?: number | string;
+    noOutputFile?: boolean;
+    subtasks?: ParsedSubtaskInput[];
+    time?: number | string;
+}
+
+export function readSubtasksFromFiles(files: string[], config: ReadSubtasksConfig) {
+    const subtask: Record<number, ParsedSubtaskInput> = {};
     for (const s of config.subtasks || []) if (s.id && Number.isSafeInteger(s.id)) subtask[s.id] = s;
     for (const file of files) {
         let match = false;
@@ -137,8 +149,8 @@ export function readSubtasksFromFiles(files: string[], config) {
             if (match) break;
         }
     }
-    for (const id in subtask) subtask[id].cases = sortFiles(subtask[id].cases, 'input');
-    return Object.values(subtask);
+    for (const id in subtask) subtask[id].cases = sortFiles(subtask[id].cases!, 'input');
+    return Object.values(subtask) as ParsedSubtask[];
 }
 
 export interface NormalizedCase extends Required<ParsedCase> {

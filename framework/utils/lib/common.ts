@@ -49,7 +49,7 @@ String.prototype.rawformat = function rawFormat(object) {
     return [res[0], object, res[1]].join();
 };
 
-export function diffArray(a, b) {
+export function diffArray(a: unknown[], b: unknown[]) {
     if (a.length !== b.length) return true;
     a.sort();
     b.sort();

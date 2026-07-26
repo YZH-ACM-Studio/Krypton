@@ -1,6 +1,7 @@
 import yaml from 'js-yaml';
 
 export interface LangConfig {
+    [key: string]: unknown;
     disabled?: boolean;
     compile?: string;
     execute: string;

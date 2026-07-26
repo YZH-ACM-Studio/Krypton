@@ -8,6 +8,14 @@
 4. **Design for Debugging / Traceability**：关键节点和外部写入必须可追溯，能够确认执行到了哪里、写入了什么以及验证结果。
 5. **Living Documentation / Single Source of Truth**：关键技术栈、产品方向或固定工作流变化时，同步更新本文件和对应的唯一事实源，避免文档与实际实现脱节。
 
+## UINext TypeScript 与测试约束
+
+- `packages/ui-next` 使用严格 TypeScript，`noImplicitAny` 必须保持开启；`src` 禁止新增显式 `any`，不可信输入先使用 `unknown`，再通过真实的结构判断或生产者协议收窄。
+- `KryptonPage.data` 是外部 bootstrap 边界，canonical 类型固定为 `unknown`。每个页面应在消费入口声明自己的最小 payload 接口，不得恢复全局 `Record<string, any>` 或用双重断言绕过建模。
+- UINext 的 `tsconfig.json` 与根 `tsconfig.ui-next.json` 都由 `build/prepare.js` 生成；类型门禁只能修改生成器，禁止只改生成产物造成下次安装后回退。
+- UINext 测试统一使用 Vitest；不得恢复 `node:test` 或 Chai 独立导入。覆盖率阈值是当前实测下限的 ratchet，只能随覆盖率增长而提高，不得用降阈值掩盖回归。
+- 功能不变的类型重构至少验证包级与根 UI TypeScript、全量 ESLint、Vitest、覆盖率和生产构建。源码文本契约只约束真实行为表达式，不得绑定可擦除的类型别名或注解。
+
 ## 知识导图 schema 约束
 
 - canonical 模型为 `mindmap.maps` 中的一等导图记录、`mindmap.nodes.mapId` 和 `document.knowledgeMapId`；不得恢复 `_id:'global'` 单例配置或无 map scope 的读写兜底。

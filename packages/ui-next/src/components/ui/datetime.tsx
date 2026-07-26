@@ -17,7 +17,7 @@
  * to give callers full info without crowding the layout.
  */
 import { type HTMLAttributes, useEffect, useState } from 'react';
-import { type DateInput, formatDateTime, formatDateTimeWithRelative, formatRelative, parseDate } from '@hydrooj/common';
+import { type DateInput, type FormatOptions, formatDateTime, formatDateTimeWithRelative, formatRelative, parseDate } from '@hydrooj/common';
 import { cn } from '@/lib/cn';
 
 export type DateTimeMode =
@@ -69,7 +69,7 @@ export function DateTime({ value, mode = 'datetime', fallback = '—', refreshIn
     display = `${absolute} · ${relative}`;
     title = formatDateTime(parsed, { precision: 'second' });
   } else {
-    const precisionMap: Record<Exclude<DateTimeMode, 'relative' | 'both'>, any> = {
+    const precisionMap: Record<Exclude<DateTimeMode, 'relative' | 'both'>, NonNullable<FormatOptions['precision']>> = {
       datetime: 'minute',
       'datetime-sec': 'second',
       date: 'date',

@@ -120,7 +120,7 @@ describe('p2.34 record detail workspace', () => {
 
   it('preserves record routes while exposing copy and full case details', () => {
     const source = readFileSync(resolve(import.meta.dirname, '../src/pages/records.tsx'), 'utf8');
-    expect(source).to.include('const examUrls: R = data.examMode?.urls || {}');
+    expect(source).to.include('const examUrls = data.examMode?.urls || {}');
     expect(source).to.include('function normalizeId(value: unknown): string');
     expect(source).to.include('practice: postContestPracticeRecordAccess');
     expect(source).to.include('useRecordSocket({');

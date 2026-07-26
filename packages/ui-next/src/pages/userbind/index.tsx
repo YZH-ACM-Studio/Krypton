@@ -45,7 +45,7 @@ import { useBootstrap } from '@/lib/bootstrap';
 import { PRIV } from '@/lib/perms';
 
 function BindingRequestsNavLabel() {
-  const pending = Number(useBootstrap().page.data.pendingBindingRequests || 0);
+  const pending = Number((useBootstrap().page.data as { pendingBindingRequests?: unknown }).pendingBindingRequests || 0);
   return (
     <span className="inline-flex items-center gap-1.5">
       绑定申请
@@ -297,7 +297,11 @@ export function AdminUserbindOverviewPage() {
 
 export function AdminUserbindSchoolsPage() {
   const bs = useBootstrap();
-  const schools = (bs.page.data.schools || []) as Array<{ _id: string; name: string; createdAt: string }>;
+  const schools = ((bs.page.data as { schools?: Array<{ _id: string; name: string; createdAt: string }> }).schools || []) as Array<{
+    _id: string;
+    name: string;
+    createdAt: string;
+  }>;
   const [createOpen, setCreateOpen] = useState(false);
 
   return (

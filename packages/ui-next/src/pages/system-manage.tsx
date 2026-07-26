@@ -60,6 +60,19 @@ interface UserPrivRecord {
   priv?: number | string;
 }
 
+interface SystemManagePageData {
+  Priv?: Record<string, unknown>;
+  current?: Record<string, unknown>;
+  defaultPriv?: number;
+  messages?: string[];
+  schema?: unknown;
+  scripts?: Record<string, ScriptEntry>;
+  settings?: SystemSetting[];
+  udocs?: UserPrivRecord[];
+  users?: ImportedUser[];
+  value?: unknown;
+}
+
 /* ================================================================== */
 /*  Shared layout                                                      */
 /* ================================================================== */
@@ -86,7 +99,7 @@ function ManageShell({ title, icon: Icon, children }: { title: string; icon: Rea
 
 export function ManageSettingPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
+  const data = bs.page.data as SystemManagePageData;
   const settings: SystemSetting[] = data.settings || [];
   const current: Record<string, unknown> = data.current || {};
 
@@ -434,7 +447,7 @@ function SchemaSection({
 
 export function ManageConfigPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
+  const data = bs.page.data as SystemManagePageData;
   const initialYaml: string = typeof data.value === 'string' ? data.value : '';
   const env: SchemaEnvelope | undefined =
     data.schema && typeof data.schema === 'object' && 'uid' in data.schema ? (data.schema as SchemaEnvelope) : undefined;
@@ -532,7 +545,7 @@ export function ManageConfigPage() {
 
 export function ManageScriptPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
+  const data = bs.page.data as SystemManagePageData;
   const scripts: Record<string, ScriptEntry> = data.scripts || {};
   const visibleScripts = Object.entries(scripts).filter(([, script]) => !script.hidden);
 
@@ -581,7 +594,7 @@ export function ManageScriptPage() {
 /* ================================================================== */
 
 export function ManageUserImportPage() {
-  const data = useBootstrap().page.data;
+  const data = useBootstrap().page.data as SystemManagePageData;
   const users: ImportedUser[] = data.users || [];
   const messages: string[] = data.messages || [];
 
@@ -803,7 +816,7 @@ function PrivEditor({
 
 export function ManageUserPrivPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
+  const data = bs.page.data as SystemManagePageData;
   const udocs: UserPrivRecord[] = data.udocs || [];
   const defaultPriv: number = data.defaultPriv || 0;
   const privEnum: Record<string, unknown> = data.Priv || {};

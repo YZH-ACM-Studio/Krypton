@@ -18,6 +18,13 @@ interface RowDoc extends R {
   name?: string;
 }
 
+interface GenericPageData extends R {
+  ddoc?: { title?: string };
+  pdoc?: { title?: string };
+  tdoc?: { title?: string };
+  udoc?: { uname?: string };
+}
+
 const TEMPLATE_LABELS: Record<string, string> = {
   'problem_edit.html': '编辑题目',
   'problem_config.html': '题目配置',
@@ -65,7 +72,7 @@ const TEMPLATE_LABELS: Record<string, string> = {
 export function GenericPage() {
   const bs = useBootstrap();
   const tpl = bs.page.templateName;
-  const data = bs.page.data;
+  const data = bs.page.data as GenericPageData;
   const label = TEMPLATE_LABELS[tpl] || tpl.replace(/\.html$/, '').replace(/_/g, ' ');
 
   const title = data.pdoc?.title || data.tdoc?.title || data.ddoc?.title || data.udoc?.uname || '';

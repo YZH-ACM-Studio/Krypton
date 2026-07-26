@@ -51,7 +51,11 @@ export function SudoPage() {
  * request after sudo verification succeeds.
  */
 export function SudoRedirectPage() {
-  const data = useBootstrap().page.data;
+  const data = useBootstrap().page.data as {
+    args?: unknown;
+    method?: unknown;
+    redirect?: unknown;
+  };
   const formRef = useRef<HTMLFormElement | null>(null);
   const submittedRef = useRef(false);
   const target = resolveSudoReplayTarget(data.method, data.redirect);

@@ -114,6 +114,18 @@ interface UserFileDoc {
   size?: number;
 }
 
+interface UserAccountPageData {
+  authenticators?: AuthenticatorDoc[];
+  category?: string;
+  current?: Record<string, unknown> & { avatarUrl?: string | null };
+  files?: UserFileDoc[];
+  loginMethods?: LoginMethod[];
+  messages?: unknown;
+  relations?: OauthRelation[];
+  sessions?: SessionDoc[];
+  settings?: SettingDescriptor[];
+}
+
 function objectIdDate(id: unknown) {
   const value = String(id || '');
   if (!/^[0-9a-f]{24}$/i.test(value)) return null;
@@ -215,7 +227,7 @@ function useTabs() {
   ];
   // Determine active from templateName + data.category
   const tpl = bs.page.templateName;
-  const category = bs.page.data?.category;
+  const category = (bs.page.data as UserAccountPageData | undefined)?.category;
   let activeId: string;
 
   if (tpl === 'home_settings.html') {
@@ -279,7 +291,7 @@ export function UserAccountPage() {
 
 function SettingsPanel() {
   const bs = useBootstrap();
-  const data = bs.page.data;
+  const data = bs.page.data as UserAccountPageData;
   const settings: SettingDescriptor[] = data.settings || [];
   const current: Record<string, unknown> = data.current || {};
 
@@ -430,7 +442,7 @@ function rangeOptions(range: SettingDescriptor['range']): { value: string; label
 
 function SecurityPanel() {
   const bs = useBootstrap();
-  const data = bs.page.data;
+  const data = bs.page.data as UserAccountPageData;
   const sessions: SessionDoc[] = data.sessions || [];
   const authenticators: AuthenticatorDoc[] = data.authenticators || [];
   const relations: OauthRelation[] = data.relations || [];
@@ -764,7 +776,7 @@ function countUnread(conv: Conv, selfUid: number): number {
 
 function MessagesPanel() {
   const bs = useBootstrap();
-  const data = bs.page.data;
+  const data = bs.page.data as UserAccountPageData;
   const selfUid = bs.user.id;
 
   const [conversations, setConversations] = useState<Conv[]>(() => parseConversations(data.messages));
@@ -1107,7 +1119,7 @@ function renderGroupedMessages(
 
 function FilesPanel() {
   const bs = useBootstrap();
-  const data = bs.page.data;
+  const data = bs.page.data as UserAccountPageData;
   const files: UserFileDoc[] = data.files || [];
   const [uploadName, setUploadName] = useState('');
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());

@@ -28,6 +28,7 @@ interface TrainingDagNode {
 interface TrainingDoc {
   docId: string;
   title: string;
+  owner?: number;
   content?: string;
   description?: string;
   /** Legacy list-page summary field. */
@@ -91,6 +92,24 @@ interface TrainingListEntry {
   fullyDone: boolean;
 }
 
+interface TrainingPageData {
+  members?: TrainingMember[];
+  membersTruncated?: boolean;
+  missing?: unknown[];
+  ndict?: Record<string, TrainingDagNode>;
+  nsdict?: Record<string, TrainingNodeStatus>;
+  page?: unknown;
+  pdict?: Record<string, TrainingProblemDoc>;
+  psdict?: Record<string, TrainingProblemStatusDoc>;
+  q?: string;
+  tdoc?: TrainingDoc;
+  tdocs?: TrainingDoc[];
+  tpcount?: unknown;
+  tsdict?: Record<string, TrainingStatusDoc | undefined>;
+  tsdoc?: TrainingStatusDoc;
+  udoc?: { uname?: string };
+}
+
 /* ────────────────────────────────────────────────────────────────── */
 /*  Training list page                                                */
 /* ────────────────────────────────────────────────────────────────── */
@@ -99,7 +118,7 @@ const VIEW_KEY = 'krypton.training.view';
 
 export function TrainingPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
+  const data = bs.page.data as TrainingPageData;
   const tdocs: TrainingDoc[] = data.tdocs || [];
   const page = Number(data.page) || 1;
   const tpcount = Number(data.tpcount) || 1;
@@ -477,8 +496,8 @@ function DagThumbnail({
 
 export function TrainingDetailPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
-  const tdoc: TrainingDoc = data.tdoc || {};
+  const data = bs.page.data as TrainingPageData;
+  const tdoc: TrainingDoc = data.tdoc || ({} as TrainingDoc);
   const pdict: Record<string, TrainingProblemDoc> = data.pdict || {};
   const psdict: Record<string, TrainingProblemStatusDoc> = data.psdict || {};
   const tsdoc: TrainingStatusDoc = data.tsdoc || {};

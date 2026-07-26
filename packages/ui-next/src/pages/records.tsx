@@ -41,11 +41,128 @@ import {
 } from '@/lib/record-detail-workspace';
 import { readHydroResponseError } from '@/lib/problem-save-response';
 
-type R = Record<string, any>;
-type SubtaskView = R & { id: string };
 type RecordScoreAction =
   | { kind: 'cancel'; expectedStatus: number; expectedJudgeAt: string; contestId?: string; contestTeamId?: string }
   | { kind: 'rejudge'; expectedCancellationAt: string; contestId?: string; contestTeamId?: string };
+
+type JsonRecord = Record<string, unknown>;
+
+interface RecordLanguage {
+  display?: string;
+  name?: string;
+}
+
+type RecordLanguages = Record<string, RecordLanguage>;
+type RecordStatusTexts = Record<string, unknown>;
+
+interface RecordCase {
+  id?: string | number;
+  memory?: number;
+  message?: unknown;
+  score?: string | number;
+  status?: number;
+  subtask?: string | number;
+  subtaskId?: string | number;
+  time?: number;
+}
+
+interface SubtaskView extends JsonRecord {
+  id: string;
+  score?: string | number;
+  status?: number;
+  type?: string | number;
+}
+
+interface RecordDocument {
+  _id?: unknown;
+  cases?: RecordCase[];
+  code?: unknown;
+  compilerTexts?: unknown;
+  files?: {
+    code?: unknown;
+    hack?: unknown;
+  };
+  judgeAt?: unknown;
+  judgeTexts?: unknown;
+  lang?: string;
+  memory?: number;
+  pid?: string | number;
+  progress?: string | number;
+  score?: number;
+  status?: number;
+  subtasks?: unknown;
+  testCases?: RecordCase[];
+  time?: number;
+  uid?: string | number;
+}
+
+interface RecordProblemSummary {
+  title?: string;
+}
+
+interface RecordLanguageContext {
+  langs?: RecordLanguages;
+}
+
+interface RecordStatistics extends Record<string, number> {
+  accepted: number;
+  participants: number;
+  total: number;
+}
+
+interface RecordsPageData extends RecordLanguageContext {
+  all?: unknown;
+  allDomain?: unknown;
+  filterLang?: string;
+  filterPid?: string;
+  filterStatus?: unknown;
+  filterTid?: string;
+  filterUidOrName?: string;
+  page?: unknown;
+  pdict?: Record<string, RecordProblemSummary>;
+  postContestPracticeActive?: boolean;
+  rdocs?: RecordDocument[];
+  recordDetailTid?: unknown;
+  recordScoreActions?: Record<string, RecordScoreAction>;
+  statistics?: RecordStatistics | null;
+  statisticsScope?: string;
+  statusTexts?: RecordStatusTexts;
+  studentDict?: Record<string, { studentId: string; realName: string }>;
+  tdoc?: { docId?: unknown };
+  udict?: Record<string, GenericUserDoc>;
+}
+
+interface RecordExamModeData {
+  urls?: {
+    problem?: string;
+    problems?: string;
+    record?: string;
+  };
+  [key: string]: unknown;
+}
+
+interface RecordDetailPageData extends RecordLanguageContext {
+  allRevs?: Record<string, string>;
+  code?: unknown;
+  examMode?: RecordExamModeData;
+  examRecordCodeOnly?: boolean;
+  examRecordDownloadAvailable?: unknown;
+  pdoc?: RecordProblemSummary;
+  postContestPracticeRecordAccess?: boolean;
+  practiceTid?: unknown;
+  rdoc?: RecordDocument;
+  recordScoreAction?: RecordScoreAction | null;
+  recordStudent?: { studentId?: unknown; realName?: unknown } | null;
+  rev?: string;
+  tdoc?: { docId?: unknown };
+  testHints?: Record<string, { hint?: string; videoUrl?: string }>;
+  udoc?: GenericUserDoc;
+}
+
+interface RecordScoreResponse {
+  rdoc?: RecordDocument;
+  recordScoreAction?: RecordScoreAction | null;
+}
 
 function getUser(udict: Record<string, GenericUserDoc>, uid: string | number | undefined) {
   return uid != null ? (udict[String(uid)] ?? null) : null;
@@ -80,7 +197,7 @@ function statusDisplay(status: number | undefined) {
   return <span className={`text-sm font-medium ${s.color}`}>{s.label}</span>;
 }
 
-function statusLabel(status: number | string, statusTexts: R) {
+function statusLabel(status: number | string, statusTexts: RecordStatusTexts) {
   const value = statusTexts[String(status)] ?? statusTexts[Number(status)];
   if (typeof value === 'string') return value;
   const fallback = STATUS_MAP[Number(status)];
@@ -139,7 +256,7 @@ function formatJudgeText(text: unknown): string {
   if (typeof text === 'string') return text;
   if (typeof text === 'number' || typeof text === 'boolean') return String(text);
   if (typeof text === 'object') {
-    const item = text as R;
+    const item = text as JsonRecord;
     const message = item.message ?? item.msg ?? item.text ?? '';
     const params = Array.isArray(item.params) ? item.params.map((p) => String(p)) : [];
     const template = String(message);
@@ -159,13 +276,18 @@ function collectTexts(value: unknown): string[] {
 function normalizeSubtasks(value: unknown): SubtaskView[] {
   if (!value) return [];
   if (Array.isArray(value)) {
-    return value.map((item, index) => ({
-      ...(typeof item === 'object' && item ? (item as R) : {}),
-      id: String((typeof item === 'object' && item ? (item as R).id : undefined) ?? index + 1),
-    }));
+    return value.map(
+      (item, index) =>
+        ({
+          ...(typeof item === 'object' && item ? (item as JsonRecord) : {}),
+          id: String((typeof item === 'object' && item ? (item as JsonRecord).id : undefined) ?? index + 1),
+        }) as SubtaskView,
+    );
   }
   if (typeof value === 'object') {
-    return Object.entries(value as Record<string, R>).map(([id, item]) => ({ ...(item || {}), id }));
+    return Object.entries(value as Record<string, JsonRecord | null | undefined>).map(
+      ([id, item]) => ({ ...(item || {}), id }) as SubtaskView,
+    );
   }
   return [];
 }
@@ -175,10 +297,10 @@ function normalizeSubtasks(value: unknown): SubtaskView[] {
  * display name from `data.langs` (e.g. "C++ 17"). Falls back to the
  * raw id if the lookup table or entry is missing.
  */
-function langDisplay(langs: R | undefined, id: string | undefined): string {
+function langDisplay(langs: RecordLanguages | undefined, id: string | undefined): string {
   if (!id) return '—';
-  const entry = (langs || {})[id] as R | undefined;
-  return (entry?.display as string) || (entry?.name as string) || id;
+  const entry = (langs || {})[id];
+  return entry?.display || entry?.name || id;
 }
 
 function DiagnosticPanel({ title, texts }: { title: string; texts: string[] }) {
@@ -252,13 +374,13 @@ function LegacyRecordDetailBody({
   testHints,
   code,
 }: {
-  rdoc: R;
-  data: R;
+  rdoc: RecordDocument;
+  data: RecordLanguageContext;
   locale: string;
   compilerTexts: string[];
   judgeTexts: string[];
   subtasks: SubtaskView[];
-  cases: R[];
+  cases: RecordCase[];
   testHints: Record<string, { hint?: string; videoUrl?: string }>;
   code: unknown;
 }) {
@@ -449,8 +571,8 @@ function RecordCodeContent({
   onCopy,
   examCodeOnly = false,
 }: {
-  data: R;
-  rdoc: R;
+  data: RecordLanguageContext;
+  rdoc: RecordDocument;
   code: unknown;
   copyState: 'idle' | 'copied' | 'failed';
   onCopy: () => void;
@@ -525,13 +647,13 @@ function RecordScoreActionDialog({
   onSuccess,
 }: {
   open: boolean;
-  record: R | null;
+  record: RecordDocument | null;
   action: RecordScoreAction | null;
   endpoint: string;
   problemTitle: string;
   username: string;
   onOpenChange: (open: boolean) => void;
-  onSuccess: (payload: R) => void;
+  onSuccess: (payload: RecordScoreResponse) => void;
 }) {
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
@@ -561,7 +683,7 @@ function RecordScoreActionDialog({
         body,
       });
       if (!response.ok) throw new Error(await readHydroResponseError(response, cancel ? '取消成绩失败' : '重新评测失败'));
-      const payload = await response.json();
+      const payload: RecordScoreResponse = await response.json();
       onSuccess(payload);
       setReason('');
       onOpenChange(false);
@@ -638,24 +760,24 @@ function RecordScoreActionDialog({
 
 export function RecordsPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
-  const initialRdocs: R[] = data.rdocs || [];
+  const data = bs.page.data as RecordsPageData;
+  const initialRdocs = data.rdocs || [];
   // Local state so WS updates can splice in / patch existing rows.
   // The first render mirrors server pagination; subsequent rdoc updates
   // arrive via the WS hook below and merge by `_id`.
-  const [rdocs, setRdocs] = useState<R[]>(initialRdocs);
+  const [rdocs, setRdocs] = useState<RecordDocument[]>(initialRdocs);
   const [recordScoreActions, setRecordScoreActions] = useState<Record<string, RecordScoreAction>>(data.recordScoreActions || {});
   const [scoreActionRid, setScoreActionRid] = useState('');
   const page = Number(data.page) || 1;
   const locale = bs.locale;
-  const pdict: Record<string, R> = data.pdict || {};
+  const pdict = data.pdict || {};
   const udict: Record<string, GenericUserDoc> = { ...bs.udict, ...(data.udict || {}) };
   // Admin-only studentId/realName column data. Empty for non-admin viewers;
   // we render the column conditionally on `hasStudentColumn`.
   const studentDict: Record<string, { studentId: string; realName: string }> = data.studentDict || {};
   const hasStudentColumn = Object.keys(studentDict).length > 0;
-  const langs: R = data.langs || {};
-  const statusTexts: R = data.statusTexts || {};
+  const langs = data.langs || {};
+  const statusTexts = data.statusTexts || {};
   const filterStatus = typeof data.filterStatus === 'number' ? String(data.filterStatus) : '';
   const postContestPracticeActive = data.postContestPracticeActive === true;
   const practiceTid = postContestPracticeActive ? normalizeId(data.recordDetailTid || data.tdoc?.docId) : '';
@@ -672,7 +794,7 @@ export function RecordsPage() {
   };
   const nextUrl = buildUrlWithQuery(bs.urls.records, { ...filterParams, page: page + 1 });
   const prevUrl = buildUrlWithQuery(bs.urls.records, { ...filterParams, page: page - 1 });
-  const statistics: R | null = data.statistics || null;
+  const statistics = data.statistics || null;
   const languageOptions = Object.entries(langs);
   const statusOptions: Array<[string, string]> = Object.keys(statusTexts).length
     ? Object.keys(statusTexts).map((key) => [key, statusLabel(key, statusTexts)])
@@ -701,13 +823,13 @@ export function RecordsPage() {
         const idx = prev.findIndex((r) => String(r._id) === id);
         if (idx >= 0) {
           const next = prev.slice();
-          next[idx] = { ...prev[idx], ...rdoc };
+          next[idx] = { ...prev[idx], ...rdoc } as RecordDocument;
           return next;
         }
         // Insert new record at the top; keep the page-size cap so we
         // don't grow unboundedly between page navigations.
         const limit = prev.length || 100;
-        return [rdoc, ...prev].slice(0, limit);
+        return [rdoc as RecordDocument, ...prev].slice(0, limit);
       });
     },
     onRecordScoreAction: (action, rid) => {
@@ -760,7 +882,7 @@ export function RecordsPage() {
                   { value: '', label: '全部语言' },
                   ...languageOptions.map(([key, value]) => ({
                     value: key,
-                    label: String((value as R)?.display || (value as R)?.name || key),
+                    label: String(value?.display || value?.name || key),
                   })),
                 ]}
               />
@@ -1018,14 +1140,14 @@ export function RecordsPage() {
 
 export function RecordDetailPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
-  const initialRdoc: R = data.rdoc || {};
+  const data = bs.page.data as RecordDetailPageData;
+  const initialRdoc = data.rdoc || {};
   // Live-tracking state — WS updates patch subtask/case progress in place
   // so the user sees judging move from "Pending" → "Judging" → final.
-  const [rdoc, setRdoc] = useState<R>(initialRdoc);
+  const [rdoc, setRdoc] = useState<RecordDocument>(initialRdoc);
   const [recordScoreAction, setRecordScoreAction] = useState<RecordScoreAction | null>(data.recordScoreAction || null);
   const [scoreActionOpen, setScoreActionOpen] = useState(false);
-  const pdoc: R = data.pdoc || {};
+  const pdoc = data.pdoc || {};
   const code = data.code || rdoc.code || '';
   const locale = bs.locale;
   const user = data.udoc || getUser(bs.udict, rdoc.uid);
@@ -1034,11 +1156,11 @@ export function RecordDetailPage() {
     uid: rdoc.uid,
     student: data.recordStudent,
   });
-  const cases: R[] = rdoc.testCases || rdoc.cases || [];
+  const cases = rdoc.testCases || rdoc.cases || [];
   // PTA-style per-test-point hints, already visibility-filtered server-side
   // (RecordDetailHandler). Keyed by case identity `${subtaskId}-${caseId}` (the
   // same numbering the judge assigns), looked up per row below.
-  const testHints: Record<string, { hint?: string; videoUrl?: string }> = data.testHints || {};
+  const testHints = data.testHints || {};
   const compilerTexts = collectTexts(rdoc.compilerTexts);
   const judgeTexts = collectTexts(rdoc.judgeTexts);
   const subtasks = normalizeSubtasks(rdoc.subtasks);
@@ -1049,8 +1171,8 @@ export function RecordDetailPage() {
   const currentTab = tabs.includes(activeTab) ? activeTab : defaultRecordDetailTab({ hasCode: !!code, caseCount: cases.length });
   const caseSummary = summarizeRecordCases(cases);
   const casePageData = paginateRecordCases(cases, casePage);
-  const allRevs = Object.entries(data.allRevs || {}) as Array<[string, string]>;
-  const examUrls: R = data.examMode?.urls || {};
+  const allRevs = Object.entries(data.allRevs || {});
+  const examUrls = data.examMode?.urls || {};
   const teamExamMode = readTeamExamModeContext(data.examMode);
   const postContestPracticeRecordAccess = data.postContestPracticeRecordAccess === true;
   const detailMode = recordDetailMode({
@@ -1098,7 +1220,7 @@ export function RecordDetailPage() {
       if (!next || !next._id) return;
       // Merge — preserve any fields the server may not echo (e.g. `code`
       // may be omitted from later updates to save bandwidth).
-      setRdoc((cur) => ({ ...cur, ...next }));
+      setRdoc((cur) => ({ ...cur, ...next }) as RecordDocument);
     },
     onRecordScoreAction: (action) => setRecordScoreAction((action as RecordScoreAction | null) || null),
     disabled: !rdoc._id || detailMode === 'exam-code',

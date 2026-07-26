@@ -105,6 +105,31 @@ interface VNodeDoc {
 
 type VNodeCollection = VNodeDoc[] | Record<string, VNodeDoc[] | Record<string, VNodeDoc>>;
 
+interface DiscussionsPageData {
+  dcount?: number;
+  ddoc?: DiscussionDoc;
+  ddocs?: DiscussionDoc[];
+  dpcount?: unknown;
+  drcount?: unknown;
+  drdocs?: DiscussionReplyDoc[];
+  dsdoc?: { star?: boolean };
+  examMode?: {
+    enabled?: boolean;
+    urls?: DiscussionExamUrls;
+  };
+  page?: unknown;
+  pcount?: unknown;
+  permissions?: DiscussionPermissions;
+  reactions?: Record<string, Record<string, unknown> | undefined>;
+  udict?: Record<string, GenericUserDoc>;
+  vnode?: {
+    id?: string | number;
+    title?: string;
+    type?: string | number;
+  };
+  vnodes?: VNodeCollection;
+}
+
 function getUser(udict: Record<string, GenericUserDoc>, uid: string | number | undefined) {
   return uid != null ? (udict[String(uid)] ?? null) : null;
 }
@@ -176,7 +201,7 @@ type SortKey = 'updateAt' | 'docId' | 'views' | 'nReply';
 
 export function DiscussionsPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
+  const data = bs.page.data as DiscussionsPageData;
   const ddocs: DiscussionDoc[] = data.ddocs || [];
   const udict: Record<string, GenericUserDoc> = bs.udict || data.udict || {};
   const page = Number(data.page) || 1;
@@ -441,7 +466,7 @@ function DiscussionRow({
 
 export function DiscussionDetailPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
+  const data = bs.page.data as DiscussionsPageData;
   const ddoc: DiscussionDoc = data.ddoc || {};
   const drdocs: DiscussionReplyDoc[] = data.drdocs || [];
   const page = Number(data.page) || 1;

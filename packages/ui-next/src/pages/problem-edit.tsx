@@ -5,9 +5,10 @@
 
 import { AlertCircle, ArrowRight, CheckCircle2, Download, Eye, EyeOff, FileText, Loader2, Lock, Save, ShieldCheck, Tag, Trash2 } from 'lucide-react';
 import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react';
-import { MarkdownEditor, MarkdownView } from '@/components/markdown-renderer';
+import { type ContentValue, MarkdownEditor, MarkdownView } from '@/components/markdown-renderer';
 import { DomainUserSearchOption, type DomainUserOption, domainUserSearchLabel, loadDomainUsers } from '@/components/domain-user-search';
 import { ManagedProgrammingAuthorControl, ManagedProgrammingTrainingControl, ManagedReviewPanel } from '@/components/managed-programming-authority';
+import type { ManagedReviewPreview } from '@/components/managed-programming-authority';
 import {
   ManagedProblemTrainingStatus,
   type ManagedTrainingOptionView,
@@ -15,7 +16,7 @@ import {
 } from '@/components/problem-authoring-state';
 import { ProblemEditorWorkspace } from '@/components/problem-editor-workspace';
 import { emptyProgrammingStatement, ProgrammingStatementEditor, type ProgrammingStatementCanonical } from '@/components/programming-statement';
-import { useProblemDataWriteGuard } from '@/components/problem-data-write-guard';
+import { type ProblemDataWriteGuardState, useProblemDataWriteGuard } from '@/components/problem-data-write-guard';
 import { useFormDirtyState, useUnsavedChangesGuard } from '@/components/unsaved-changes-guard';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -28,12 +29,11 @@ import { Textarea } from '@/components/ui/textarea';
 import { useBootstrap } from '@/lib/bootstrap';
 import { replaceRouteTokens } from '@/lib/format';
 import { downloadProblemPackage } from '@/lib/problem-package';
-import { managedSourceFieldViews, managedSourceTagPreview, type ManagedSourceTemplateOption } from '@/lib/managed-problem-source';
+import { managedSourceFieldViews, managedSourceTagPreview } from '@/lib/managed-problem-source';
+import type { ManagedSourceMetaView, ManagedSourceTemplateOption } from '@/lib/managed-problem-source';
 import { readHydroResponseError, readProblemSaveSuccess } from '@/lib/problem-save-response';
 import { requiresLegacyProgrammingTagNormalization, type ProgrammingTagState } from '@/lib/programming-tag-state';
 import { createRequestId } from '@/lib/request-id';
-
-type R = Record<string, any>;
 
 interface ManagedMindmapOption {
   id: string;
@@ -47,6 +47,108 @@ interface KnowledgeMapOption {
   id: string;
   title: string;
   visibility: 'hidden' | 'public';
+}
+
+interface ProblemEditFile {
+  name?: string;
+}
+
+interface ProblemEditDocument {
+  authoringMode?: string;
+  content?: ContentValue;
+  data?: ProblemEditFile[];
+  difficulty?: string | number;
+  docId?: number;
+  hidden?: boolean;
+  knowledgeMapId?: string | number;
+  lockHidden?: boolean;
+  managedAuthoring?: {
+    metadataStatus?: string;
+    pendingTrainingPlacement?: {
+      trainingId?: string | number;
+      chapterId?: string | number;
+    };
+    selectedMindmapNodeIds?: Array<string | number>;
+    workingTitle?: string;
+  };
+  pid?: string | number;
+  pidNamespaceId?: string;
+  pidNamespaceReview?: { note?: string };
+  problemKind?: unknown;
+  programmingStatement?: ProgrammingStatementCanonical;
+  sourceMeta?: ManagedSourceMetaView;
+  statementFormat?: string;
+  structureRevision?: number;
+  tag?: string[];
+  title?: string;
+}
+
+interface ProblemAuthoringCapabilities {
+  canDelete?: boolean;
+  canEditContent?: boolean;
+  canEditData?: boolean;
+  canEditDraftMetadata?: boolean;
+  canEditTags?: boolean;
+  canManageCollaborators?: boolean;
+  canManageContributions?: boolean;
+  canPublish?: boolean;
+  managed?: boolean;
+}
+
+interface LegacyStatementPreview {
+  fingerprint?: string;
+  statement?: ProgrammingStatementCanonical;
+  unclassified?: string;
+}
+
+interface PidNamespaceOption {
+  namespaceId: string;
+  name: string;
+  kind: 'builtin' | 'custom';
+  pidPattern: string;
+  sourceTemplates: string[];
+}
+
+interface ManagedContributionSummary {
+  uid: number;
+  scope: 'data' | 'tag';
+}
+
+interface ContributionBatchFailure {
+  publicPid?: string | number;
+  pid?: string | number;
+  scope?: string;
+  message?: string;
+}
+
+interface ProblemEditPageData {
+  pdoc?: ProblemEditDocument;
+  problemAuthoringCapabilities?: ProblemAuthoringCapabilities;
+  canAssignManagedAuthor?: boolean;
+  canAssignManagedTraining?: boolean;
+  programmingTagState?: ProgrammingTagState;
+  additional_file?: ProblemEditFile[];
+  testdata?: ProblemEditFile[];
+  programmingStatementLimits?: {
+    complete?: boolean;
+    time?: unknown;
+    memory?: unknown;
+  };
+  legacyStatementPreview?: LegacyStatementPreview | null;
+  legacyStatementConversionRequired?: boolean;
+  statementWriteGuard?: ProblemDataWriteGuardState;
+  managedSourceTemplates?: ManagedSourceTemplateOption[];
+  pidNamespaces?: PidNamespaceOption[];
+  knowledgeMaps?: KnowledgeMapOption[];
+  programmingMindmapOptions?: ManagedMindmapOption[];
+  managedMindmapOptions?: ManagedMindmapOption[];
+  managedTrainingOptions?: ManagedTrainingOptionView[];
+  managedTrainingPlacements?: ManagedTrainingPlacementView[];
+  defaultPidNamespaceId?: string | number;
+  managedReviewPreview?: ManagedReviewPreview;
+  managedPendingContributions?: ManagedContributionSummary[];
+  managedPendingContributionFingerprint?: string;
+  managedContributionUdict?: Record<string, { _id: number; uname: string }>;
 }
 
 interface ProgrammingTagPreview {
@@ -111,7 +213,7 @@ const PERMIT_ROLE_LABELS: Record<PermitRole, string> = {
   maintainer: '维护者',
 };
 
-function PermitsPanel({ pid, pdocId, hidden, managed }: { pid: string; pdocId: number; hidden: boolean; managed: boolean }) {
+function PermitsPanel({ pid, pdocId, hidden, managed }: { pid: string; pdocId?: number; hidden: boolean; managed: boolean }) {
   const bs = useBootstrap();
   const [permits, setPermits] = useState<PermitRow[]>([]);
   const [udict, setUdict] = useState<Record<string, { _id: number; uname: string }>>({});
@@ -404,7 +506,7 @@ function PermitsPanel({ pid, pdocId, hidden, managed }: { pid: string; pdocId: n
   );
 }
 
-function ContributionsPanel({ pid, pdocId, structureRevision }: { pid: string; pdocId: number; structureRevision?: number }) {
+function ContributionsPanel({ pid, pdocId, structureRevision }: { pid: string; pdocId?: number; structureRevision?: number }) {
   const bs = useBootstrap();
   const apiPid = String(pdocId || pid);
   const [rows, setRows] = useState<ContributionRow[]>([]);
@@ -463,7 +565,7 @@ function ContributionsPanel({ pid, pdocId, structureRevision }: { pid: string; p
     try {
       const form = new FormData(event.currentTarget);
       form.set('pids', String(pdocId));
-      form.set('expectedRevisions', JSON.stringify({ [pdocId]: Number(structureRevision ?? 0) }));
+      form.set('expectedRevisions', JSON.stringify({ [pdocId as number]: Number(structureRevision ?? 0) }));
       form.set('uid', String(selectedUser[0]._id));
       form.set('scopes', [dataScope ? 'data' : '', tagScope ? 'tag' : ''].filter(Boolean).join(','));
       form.set('requestId', createRequestId());
@@ -481,7 +583,7 @@ function ContributionsPanel({ pid, pdocId, structureRevision }: { pid: string; p
         if (Array.isArray(body?.failed) && body.failed.length) {
           throw new Error(
             `分配未全部完成（requestId: ${body.requestId || '未知'}）：${body.failed
-              .map((failure: R) => `${failure.publicPid || failure.pid} / ${failure.scope}: ${failure.message}`)
+              .map((failure: ContributionBatchFailure) => `${failure.publicPid || failure.pid} / ${failure.scope}: ${failure.message}`)
               .join('；')}`,
           );
         }
@@ -683,9 +785,9 @@ function ContributionsPanel({ pid, pdocId, structureRevision }: { pid: string; p
 
 export function ProblemEditPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
-  const pdoc: R = data.pdoc || {};
-  const capabilities: R = data.problemAuthoringCapabilities || {};
+  const data = bs.page.data as ProblemEditPageData;
+  const pdoc = data.pdoc || {};
+  const capabilities = data.problemAuthoringCapabilities || {};
   const isCreate = !pdoc.docId;
   const managedExisting = pdoc.authoringMode === 'managed' || capabilities.managed === true;
   const managed = managedExisting || isCreate;
@@ -703,8 +805,8 @@ export function ProblemEditPage() {
   const pidEditable = !managed && programmingTagMode === 'unconverted';
   const pid = pdoc.pid || pdoc.docId || '';
   const problemUrl = replaceRouteTokens(bs.urls.problemDetail, { PID: String(pid) });
-  const additionalFiles: R[] = data.additional_file || [];
-  const testdataFiles: R[] = data.testdata || pdoc.data || [];
+  const additionalFiles = data.additional_file || [];
+  const testdataFiles = data.testdata || pdoc.data || [];
   const canEditContent = isCreate || capabilities.canEditContent === true;
   const canEditData = !isCreate && capabilities.canEditData === true;
   const canEditTags = !isCreate && capabilities.canEditTags === true;
@@ -739,9 +841,9 @@ export function ProblemEditPage() {
     typeof rawContent === 'string' || (rawContent && typeof rawContent === 'object' && !Array.isArray(rawContent))
       ? rawContent
       : String(rawContent || '');
-  const [draftContent, setDraftContent] = useState<string | R>(contentValue);
+  const [draftContent, setDraftContent] = useState<ContentValue>(contentValue);
   const structuredExisting = !isCreate && pdoc.statementFormat === 'structured-v1';
-  const legacyStatementPreview: R | null = data.legacyStatementPreview || null;
+  const legacyStatementPreview = data.legacyStatementPreview || null;
   const [convertingLegacy, setConvertingLegacy] = useState(data.legacyStatementConversionRequired === true);
   const [conversionUnclassified, setConversionUnclassified] = useState(String(legacyStatementPreview?.unclassified || ''));
   const [programmingStatement, setProgrammingStatement] = useState<ProgrammingStatementCanonical>(() => {
@@ -763,13 +865,7 @@ export function ProblemEditPage() {
   const [lockHiddenValue, setLockHiddenValue] = useState(!!pdoc.lockHidden);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const sourceTemplates: ManagedSourceTemplateOption[] = data.managedSourceTemplates || [];
-  const pidNamespaces: Array<{
-    namespaceId: string;
-    name: string;
-    kind: 'builtin' | 'custom';
-    pidPattern: string;
-    sourceTemplates: string[];
-  }> = data.pidNamespaces || [];
+  const pidNamespaces = data.pidNamespaces || [];
   const knowledgeMaps: KnowledgeMapOption[] = data.knowledgeMaps || [];
   const mindmapOptions: ManagedMindmapOption[] = data.programmingMindmapOptions || data.managedMindmapOptions || [];
   const trainingOptions: ManagedTrainingOptionView[] = data.managedTrainingOptions || [];

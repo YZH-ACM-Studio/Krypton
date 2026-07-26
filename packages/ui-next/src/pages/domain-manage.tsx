@@ -49,6 +49,16 @@ interface DomainGroupDoc {
   uids?: (string | number)[];
 }
 
+interface DomainManagePageData {
+  current?: Record<string, SettingValue>;
+  ddoc?: Record<string, SettingValue>;
+  domain?: { name?: string; owner?: string | number };
+  groups?: DomainGroupDoc[];
+  roles?: DomainRoleDoc[];
+  rudocs?: Record<string, DomainUserSource[] | undefined>;
+  settings?: DomainSetting[];
+}
+
 /* ================================================================== */
 /*  Shared layout for domain admin pages                               */
 /* ================================================================== */
@@ -177,7 +187,7 @@ function rangeOptions(range: SettingRange | undefined): { value: string; label: 
 
 export function DomainEditPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
+  const data = bs.page.data as DomainManagePageData;
   const current: Record<string, SettingValue> = data.current || {};
   const settings: DomainSetting[] = data.settings || [];
 
@@ -410,7 +420,7 @@ function RemoveDomainUsersDialog({
 
 export function DomainUserPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
+  const data = bs.page.data as DomainManagePageData;
   const roles: DomainRoleDoc[] = data.roles || [];
   const rudocs: Record<string, DomainUserSource[] | undefined> = data.rudocs || {};
   const roleOptions = roles.map((role) => String(role._id || role)).filter((role) => role !== 'guest');
@@ -732,7 +742,7 @@ export function DomainUserPage() {
 
 export function DomainGroupPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
+  const data = bs.page.data as DomainManagePageData;
   const groups: DomainGroupDoc[] = data.groups || [];
   const [groupValues, setGroupValues] = useState<Record<string, string>>(() =>
     Object.fromEntries(groups.map((group) => [String(group.name), (group.uids || []).join(',')])),

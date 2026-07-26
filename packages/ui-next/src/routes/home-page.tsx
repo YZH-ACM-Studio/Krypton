@@ -25,7 +25,31 @@ import { MarkdownView } from '@/components/markdown-renderer';
 import { type GenericUserDoc, useBootstrap } from '@/lib/bootstrap';
 import { formatDateTime, formatPlainTextSummary, formatRelativeTime, formatShortDate, makeInitials, replaceRouteTokens, toDate } from '@/lib/format';
 
-type R = Record<string, any>;
+interface HomeContentDocument {
+  _id?: unknown;
+  docId?: string | number;
+  title?: string;
+  beginAt?: unknown;
+  endAt?: unknown;
+  penaltySince?: unknown;
+  rule?: string;
+  attend?: number;
+  dag?: Array<{ pids?: unknown[] }>;
+  content?: string;
+  desc?: string;
+  owner?: string | number;
+  nReply?: number;
+  updateAt?: unknown;
+}
+
+interface HomeTrainingStatus {
+  enroll?: boolean;
+  donePids?: unknown[];
+}
+
+interface HomePageData {
+  contents?: Array<{ sections: Array<[string, unknown]> }>;
+}
 
 // ── data helpers ──────────────────────────────────────────
 
@@ -54,7 +78,7 @@ function getUser(udict: Record<string, GenericUserDoc>, uid: string | number | u
   return uid != null ? (udict[String(uid)] ?? null) : null;
 }
 
-function contestState(c: R) {
+function contestState(c: HomeContentDocument) {
   const now = Date.now();
   const begin = toDate(c.beginAt)?.getTime() || 0;
   const end = toDate(c.endAt)?.getTime() || 0;
@@ -64,7 +88,7 @@ function contestState(c: R) {
   return { label: '进行中', color: 'default' as const };
 }
 
-function homeworkState(h: R) {
+function homeworkState(h: HomeContentDocument) {
   const now = Date.now();
   const dl = toDate(h.penaltySince)?.getTime() || 0;
   const hard = toDate(h.endAt)?.getTime() || 0;
@@ -74,9 +98,9 @@ function homeworkState(h: R) {
   return '已结束';
 }
 
-function trainingProgress(t: R, st: R) {
+function trainingProgress(t: HomeContentDocument, st: HomeTrainingStatus) {
   if (!st?.enroll) return null;
-  const total = Array.isArray(t.dag) ? t.dag.reduce((n: number, s: R) => n + (Array.isArray(s.pids) ? s.pids.length : 0), 0) : 0;
+  const total = Array.isArray(t.dag) ? t.dag.reduce((n, s) => n + (Array.isArray(s.pids) ? s.pids.length : 0), 0) : 0;
   const done = Array.isArray(st.donePids) ? st.donePids.length : 0;
   if (!total) return 0;
   return Math.round((done / total) * 100);
@@ -124,17 +148,23 @@ function Empty({ text }: { text: string }) {
 
 export function KryptonHomePage() {
   const bs = useBootstrap();
-  const { sections, errors } = collectSections(bs.page.data.contents);
+  const { sections, errors } = collectSections((bs.page.data as HomePageData).contents);
   const locale = bs.locale || 'zh-CN';
 
   // unpack sections
-  const [contests] = readTuple(sections.get('contest'), [[], {}] as [R[], Record<string, R>]);
-  const [homework] = readTuple(sections.get('homework'), [[], {}] as [R[], Record<string, R>]);
-  const [training, trStatus] = readTuple(sections.get('training'), [[], {}] as [R[], Record<string, R>]);
-  const [discussions] = readTuple(sections.get('discussion'), [[], {}] as [R[], Record<string, Record<string, R>>]);
+  const [contests] = readTuple(sections.get('contest'), [[], {}] as [HomeContentDocument[], Record<string, unknown>]);
+  const [homework] = readTuple(sections.get('homework'), [[], {}] as [HomeContentDocument[], Record<string, unknown>]);
+  const [training, trStatus] = readTuple(
+    sections.get('training'),
+    [[], {}] as [HomeContentDocument[], Record<string, HomeTrainingStatus>],
+  );
+  const [discussions] = readTuple(
+    sections.get('discussion'),
+    [[], {}] as [HomeContentDocument[], Record<string, Record<string, unknown>>],
+  );
   const ranking = readList<number>(sections.get('ranking'));
-  const [starred] = readTuple(sections.get('starred_problems'), [[], null] as [R[], null]);
-  const [recent] = readTuple(sections.get('recent_problems'), [[], null] as [R[], null]);
+  const [starred] = readTuple(sections.get('starred_problems'), [[], null] as [HomeContentDocument[], null]);
+  const [recent] = readTuple(sections.get('recent_problems'), [[], null] as [HomeContentDocument[], null]);
 
   // search
   const [search, setSearch] = useState('');
@@ -358,7 +388,7 @@ export function KryptonHomePage() {
             ) : (
               <div className="grid gap-3 sm:grid-cols-2">
                 {training.slice(0, 4).map((t) => {
-                  const pct = trainingProgress(t, trStatus[t.docId] || {});
+                  const pct = trainingProgress(t, trStatus[t.docId!] || {});
                   return (
                     <a
                       key={String(t.docId)}

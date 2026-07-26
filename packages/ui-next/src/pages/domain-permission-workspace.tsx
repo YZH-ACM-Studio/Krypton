@@ -629,7 +629,12 @@ export function DomainPermissionWorkspace({ domainName, endpoint, initialRoles, 
 
 export function DomainPermissionPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
+  const data = bs.page.data as {
+    domain?: { name?: string };
+    permissionEndpoint?: string;
+    permissionFamilies?: DomainPermissionFamily[];
+    roles?: DomainPermissionRole[];
+  };
   if (!Array.isArray(data.roles) || !Array.isArray(data.permissionFamilies)) {
     throw new TypeError('域权限工作区缺少服务端角色或权限目录');
   }

@@ -95,6 +95,42 @@ interface TeamScoreboardCellMeta {
   memberUids?: number[];
 }
 
+interface ContestsPageData {
+  attended?: boolean | number;
+  availableViews?: Array<[string, string]>;
+  canManageContest?: boolean;
+  canViewRecord?: boolean;
+  currentUserId?: unknown;
+  examMode?: {
+    enabled?: boolean;
+    teamId?: unknown;
+    urls?: ContestExamUrls;
+  };
+  files?: Array<{ name?: string }>;
+  group?: string;
+  groups?: string[];
+  page?: unknown;
+  pdict?: Record<string, ScoreboardProblemBrief>;
+  pids?: Array<string | number>;
+  postContestPractice?: {
+    open?: boolean;
+    supported?: boolean;
+  };
+  q?: string;
+  rows?: ScoreboardCell[][];
+  rule?: string;
+  rules?: Record<string, string>;
+  studentDict?: Record<string, { studentId: string; realName: string }>;
+  tdoc?: ContestDoc;
+  tdocs?: ContestDoc[];
+  teamCount?: number;
+  teamStatus?: ContestStatusDoc;
+  tpcount?: unknown;
+  tsdict?: Record<string, ContestStatusDoc>;
+  tsdoc?: ContestStatusDoc;
+  udict?: Record<string, GenericUserDoc>;
+}
+
 /* ────────────────────────────────────────────────────────────────── */
 /*  Shared helpers                                                   */
 /* ────────────────────────────────────────────────────────────────── */
@@ -274,7 +310,7 @@ const VIEW_KEY = 'krypton.contests.view';
 
 export function ContestsPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
+  const data = bs.page.data as ContestsPageData;
   const tdocs: ContestDoc[] = data.tdocs || [];
   const page = Number(data.page) || 1;
   const tpcount = Number(data.tpcount) || 1;
@@ -673,7 +709,7 @@ function ContestTable({
 
 export function ContestDetailPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
+  const data = bs.page.data as ContestsPageData;
   const tdoc: ContestDoc = data.tdoc || {};
   const pids: (string | number)[] = data.pids || tdoc.pids || [];
   const tsdoc: ContestStatusDoc = data.tsdoc || {};
@@ -1058,7 +1094,7 @@ function formatDuration(begin: number, end: number): string {
 
 export function ContestScoreboardPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
+  const data = bs.page.data as ContestsPageData;
   const tdoc: ContestDoc = data.tdoc || {};
   const rows: ScoreboardCell[][] = Array.isArray(data.rows) ? data.rows : [];
   const header = rows[0] || [];
@@ -1075,7 +1111,7 @@ export function ContestScoreboardPage() {
     });
   const scoreboardUrl = examUrls.ranking || `${detailUrl}/scoreboard`;
   const availableViews = Array.isArray(data.availableViews) ? data.availableViews : [];
-  const extraViews = availableViews.filter(([id]: [string]) => !['html', 'csv', 'default', 'ghost'].includes(id));
+  const extraViews = availableViews.filter(([id]) => !['html', 'csv', 'default', 'ghost'].includes(id));
 
   // Admin-only 学号 / 姓名 columns. The backend only sends studentDict to
   // system admins, so a non-empty dict is the signal to render the columns —
@@ -1363,7 +1399,7 @@ export function ContestScoreboardPage() {
                 </a>
               </Button>
             ))}
-            {extraViews.map(([id, name]: [string, string]) => (
+            {extraViews.map(([id, name]) => (
               <Button key={id} asChild variant="outline" size="sm">
                 <a href={`${scoreboardUrl}/${id}`} target="_blank" rel="noreferrer">
                   {name || id}

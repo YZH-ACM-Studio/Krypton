@@ -136,6 +136,28 @@ interface RawRecordDoc {
   timestamp?: unknown;
 }
 
+interface ProblemDetailPageData {
+  authorUdocs?: ProblemAuthorView[];
+  canEditProblem?: boolean;
+  canPreviewSubjective?: boolean;
+  ctdocs?: RelatedContestDoc[];
+  dataContributorUdocs?: ProblemAuthorView[];
+  discussionCount?: number;
+  examMode?: ExamModeData | null;
+  htdocs?: RelatedContestDoc[];
+  knowledgeMapView?: {
+    id: string;
+    title: string;
+    nodes: Array<{ id: string; label: string }>;
+  } | null;
+  mode?: string;
+  pdoc?: ProblemDoc;
+  postContestPracticeActive?: boolean;
+  psdoc?: ProblemStatusDoc;
+  solutionCount?: number;
+  tdoc?: ContestDoc | null;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
@@ -713,7 +735,7 @@ function formatConfigMemory(mb: number | undefined | null): string {
 
 export function ProblemDetailPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
+  const data = bs.page.data as ProblemDetailPageData;
   const pdoc: ProblemDoc = data.pdoc || {};
   const authorUdocs: ProblemAuthorView[] = Array.isArray(data.authorUdocs) ? data.authorUdocs : [];
   const dataContributorUdocs: ProblemAuthorView[] = Array.isArray(data.dataContributorUdocs) ? data.dataContributorUdocs : [];

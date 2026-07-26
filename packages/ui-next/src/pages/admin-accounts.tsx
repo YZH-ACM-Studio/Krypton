@@ -249,7 +249,9 @@ function formatDate(value: string | null | undefined): string {
   if (!value) return '—';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
-  const configured = window.__KRYPTON_BOOTSTRAP__?.page?.data?.metadata?.timeZone;
+  const configured = (
+    window.__KRYPTON_BOOTSTRAP__?.page?.data as { metadata?: { timeZone?: unknown } } | undefined
+  )?.metadata?.timeZone;
   const timeZone = typeof configured === 'string' && configured ? configured : 'Asia/Shanghai';
   return formatDateTime(date, 'zh-CN', timeZone);
 }

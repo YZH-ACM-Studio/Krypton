@@ -377,8 +377,87 @@ interface ExamModeUrls {
   record?: string;
 }
 
+interface ContestExamModePageData {
+  examMode?: {
+    enabled?: boolean;
+    urls?: ExamModeUrls;
+  } | null;
+}
+
+interface ContestEditPageData {
+  activeTeamCount?: number;
+  beginAt?: string;
+  canAutoHideProblems?: boolean;
+  canManageTeamBatches?: boolean;
+  canUpdatePlannedTeamBatch?: boolean;
+  duration?: number;
+  page_name?: string;
+  participationRevision?: number;
+  pids?: string;
+  rules?: Record<string, string>;
+  scopeGroups?: ScopeGroupPayload[];
+  scopeSchools?: ScopeSchoolPayload[];
+  tdoc?: ContestDoc;
+  teamBatches?: TeamBatchSummary[];
+  teamModeClearConfirmation?: string;
+}
+
+interface ContestManagePageData {
+  files?: ContestFileInfo[];
+  pdict?: Record<string, ProblemBrief>;
+  privateFiles?: ContestFileInfo[];
+  submissionStats?: ContestSubmissionStats | null;
+  tdoc?: ContestDoc;
+}
+
+interface ContestProblemListPageData extends ContestExamModePageData {
+  canViewContestRecord?: boolean;
+  canViewRecord?: boolean;
+  liveStats?: Record<string, ContestLiveProblemStat>;
+  liveStatsParticipantUnit?: 'team' | 'user';
+  pdict?: Record<string, ProblemBrief>;
+  personalPracticeStatusByPid?: Record<string, PersonalPracticeStatusSnapshot & { rid?: unknown }>;
+  postContestPractice?: {
+    eligible?: boolean;
+  } | null;
+  problemStatusByPid?: Record<string, R>;
+  psdict?: Record<string, R>;
+  rdocs?: ContestRecordDoc[];
+  showScore?: boolean;
+  tcdocs?: ClarificationDoc[];
+  tdoc?: ContestDoc;
+  visiblePids?: number[];
+}
+
+interface ContestUserPageData {
+  tdoc?: ContestDoc;
+  tsdocs?: ContestUserStatusDoc[];
+  udict?: Record<string, GenericUserDoc>;
+}
+
+interface ContestBalloonPageData {
+  bdocs?: BalloonDoc[];
+  pdict?: Record<string, ProblemBrief>;
+  tdoc?: ContestDoc;
+  teamDict?: Record<string, ContestTeamBrief>;
+  udict?: Record<string, GenericUserDoc>;
+}
+
+interface ContestClarificationPageData {
+  pdict?: Record<string, ProblemBrief>;
+  tcdocs?: ClarificationDoc[];
+  tdoc?: ContestDoc;
+  udict?: Record<string, GenericUserDoc>;
+}
+
+interface ContestPrintPageData {
+  canEdit?: boolean;
+  isAdmin?: boolean;
+  tdoc?: ContestDoc;
+}
+
 function examModeUrls(bs: ReturnType<typeof useBootstrap>): ExamModeUrls | null {
-  return bs.page.data?.examMode?.urls || null;
+  return (bs.page.data as ContestExamModePageData | null | undefined)?.examMode?.urls || null;
 }
 
 function contestProblemUrl(bs: ReturnType<typeof useBootstrap>, tdoc: ContestDoc, pid: string | number) {
@@ -466,7 +545,7 @@ function ContestManagementChrome({ tdoc, active, children }: { tdoc: ContestDoc;
 
 export function ContestEditPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
+  const data = bs.page.data as ContestEditPageData;
   const tdoc: ContestDoc = data.tdoc || {};
   const rules: Record<string, string> = data.rules || {};
   const isEdit = data.page_name === 'contest_edit';
@@ -1550,7 +1629,7 @@ interface ContestSubmissionStats {
 
 export function ContestManagePage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
+  const data = bs.page.data as ContestManagePageData;
   const tdoc: ContestDoc = data.tdoc || {};
   const files: ContestFileInfo[] = data.files || [];
   const privateFiles: ContestFileInfo[] = data.privateFiles || [];
@@ -1882,7 +1961,7 @@ interface ContestLiveProblemStat {
 
 export function ContestProblemListPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
+  const data = bs.page.data as ContestProblemListPageData;
   const tdoc: ContestDoc = data.tdoc || {};
   const pdict: Record<string, ProblemBrief> = data.pdict || {};
   const problemStatusByPid: Record<string, R> = data.problemStatusByPid || {};
@@ -2185,7 +2264,7 @@ interface ContestUserStatusDoc {
 
 export function ContestUserPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
+  const data = bs.page.data as ContestUserPageData;
   const tdoc: ContestDoc = data.tdoc || {};
   const tsdocs: ContestUserStatusDoc[] = data.tsdocs || [];
   const udict: Record<string, GenericUserDoc> = bs.udict || data.udict || {};
@@ -2391,7 +2470,7 @@ interface ContestTeamBrief {
 
 export function ContestBalloonPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
+  const data = bs.page.data as ContestBalloonPageData;
   const tdoc: ContestDoc = data.tdoc || {};
   const bdocs: BalloonDoc[] = data.bdocs || [];
   const pdict: Record<string, ProblemBrief> = data.pdict || {};
@@ -2576,7 +2655,7 @@ export function ContestBalloonPage() {
 
 export function ContestClarificationPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
+  const data = bs.page.data as ContestClarificationPageData;
   const tdoc: ContestDoc = data.tdoc || {};
   const tcdocs: ClarificationDoc[] = data.tcdocs || [];
   const pdict: Record<string, ProblemBrief> = data.pdict || {};
@@ -2731,7 +2810,7 @@ interface PrintOperationResponse {
 
 export function ContestPrintPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
+  const data = bs.page.data as ContestPrintPageData;
   const tdoc: ContestDoc = data.tdoc || {};
   const tid = tdoc.docId || tdoc._id;
   const urls = examModeUrls(bs);

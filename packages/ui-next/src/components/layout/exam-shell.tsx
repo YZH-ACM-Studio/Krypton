@@ -30,6 +30,27 @@ interface ExamSidebarItem {
   icon: LucideIcon;
 }
 
+interface ExamShellModeData {
+  allowPrint?: boolean;
+  beginAt?: string;
+  endAt?: string;
+  previewMode?: boolean;
+  section?: ExamSection;
+  student?: {
+    studentId?: string;
+    realName?: string;
+  };
+  tid?: unknown;
+  title?: string;
+  urls?: Record<string, string | undefined>;
+  [key: string]: unknown;
+}
+
+interface ExamShellPageData {
+  examMode?: ExamShellModeData;
+  tdoc?: { title?: string };
+}
+
 const EXAM_SIDEBAR: ExamSidebarItem[] = [
   { key: 'overview', label: '概览', icon: ClipboardList },
   { key: 'problems', label: '题目', icon: ListOrdered },
@@ -89,7 +110,7 @@ function formatRemaining(ms: number): string {
  */
 function ExamCountdown() {
   const bs = useBootstrap();
-  const examMode = (bs.page.data || {}).examMode || {};
+  const examMode = ((bs.page.data || {}) as ExamShellPageData).examMode || {};
   const beginIso = examMode.beginAt as string | undefined;
   const endIso = examMode.endAt as string | undefined;
   const [now, setNow] = useState(() => Date.now());
@@ -142,8 +163,8 @@ function ExamCountdown() {
 function StudentBadge() {
   const bs = useBootstrap();
   if (!bs.user.signedIn) return null;
-  const examMode = (bs.page.data || {}).examMode || {};
-  const student = examMode.student as { studentId?: string; realName?: string } | undefined;
+  const examMode = ((bs.page.data || {}) as ExamShellPageData).examMode || {};
+  const student = examMode.student;
   const realName = student?.realName?.trim();
   const studentId = student?.studentId?.trim();
   const avatarUrl = bs.user.avatarUrl;
@@ -276,8 +297,8 @@ export function ExamDetailShell({
 export function ExamContestShell({ children }: { children: ReactNode }) {
   const bs = useBootstrap();
   const data = bs.page.data || {};
-  const examMode = data.examMode || {};
-  const tdoc = data.tdoc || {};
+  const examMode = (data as ExamShellPageData).examMode || {};
+  const tdoc = (data as ExamShellPageData).tdoc || {};
   const section = (examMode.section || 'overview') as ExamSection;
   const title = examMode.title || tdoc.title || '考试';
   const urls = examMode.urls || {};

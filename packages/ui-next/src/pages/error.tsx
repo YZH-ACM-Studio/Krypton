@@ -4,6 +4,12 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useBootstrap } from '@/lib/bootstrap';
 
+interface ErrorPageData {
+  code?: string | number;
+  error?: string | { message?: string; msg?: string; params?: unknown[] };
+  status?: string | number;
+}
+
 /**
  * Substitute Hydro-style `{0}`, `{1}` placeholders in an error template with
  * the matching entries from `params`. Falls back to leaving the literal token
@@ -24,7 +30,7 @@ function substituteErrorParams(template: string, params: unknown[] | undefined):
 
 export function ErrorPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
+  const data = bs.page.data as ErrorPageData;
   const error = data.error;
   const rawMessage = typeof error === 'string' ? error : error?.message || error?.msg || '发生了一个错误';
   const params = typeof error === 'object' && error !== null ? (error.params as unknown[] | undefined) : undefined;
@@ -65,7 +71,7 @@ export function ErrorPage() {
 
 export function BsodPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
+  const data = bs.page.data as ErrorPageData;
   const error = typeof data.error === 'string' ? data.error : '';
 
   return (

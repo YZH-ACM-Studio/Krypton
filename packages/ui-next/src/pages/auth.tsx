@@ -5,6 +5,12 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useBootstrap } from '@/lib/bootstrap';
 
+interface AuthPageData {
+  mail?: string;
+  oauth?: Array<{ type: string; name: string }>;
+  uname?: string;
+}
+
 export function LoginPage() {
   const bs = useBootstrap();
 
@@ -51,13 +57,13 @@ export function LoginPage() {
         </CardContent>
       </Card>
 
-      {bs.page.data.oauth?.length ? (
+      {(bs.page.data as AuthPageData).oauth?.length ? (
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-center text-sm text-muted-foreground">第三方登录</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-wrap justify-center gap-2">
-            {(bs.page.data.oauth as Array<{ type: string; name: string }>).map((o) => (
+            {(bs.page.data as AuthPageData).oauth!.map((o) => (
               <Button key={o.type} asChild variant="outline" size="sm">
                 <a href={`/oauth/${o.type}/login`}>{o.name || o.type}</a>
               </Button>
@@ -75,7 +81,7 @@ export function RegisterPage() {
 
   // Step 2: user_register_with_code.html — user has a code, show username/password form
   if (tpl === 'user_register_with_code.html') {
-    const mail = bs.page.data.mail || '';
+    const mail = (bs.page.data as AuthPageData).mail || '';
     return (
       <motion.div
         className="mx-auto max-w-sm space-y-6 pt-8"
@@ -233,7 +239,7 @@ export function LostPasswordPage() {
 
 export function RegisterMailSentPage() {
   const bs = useBootstrap();
-  const mail = bs.page.data.mail || '';
+  const mail = (bs.page.data as AuthPageData).mail || '';
 
   return (
     <motion.div
@@ -260,7 +266,7 @@ export function RegisterMailSentPage() {
 
 export function LostPasswordMailSentPage() {
   const bs = useBootstrap();
-  const mail = bs.page.data.mail || '';
+  const mail = (bs.page.data as AuthPageData).mail || '';
 
   return (
     <motion.div
@@ -295,7 +301,7 @@ export function LostPasswordMailSentPage() {
 
 export function LostPasswordWithCodePage() {
   const bs = useBootstrap();
-  const uname = bs.page.data.uname || '';
+  const uname = (bs.page.data as AuthPageData).uname || '';
 
   return (
     <motion.div

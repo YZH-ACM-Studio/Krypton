@@ -785,8 +785,8 @@ const PAGE_SIZE = 30;
 
 export function AdminVigilExamDetailPage() {
   const bs = useBootstrap();
-  const examId = String(bs.page.data.examId || '');
-  const examTitle = bs.page.data.examTitle as string | null | undefined;
+  const examId = String((bs.page.data as { examId?: unknown }).examId || '');
+  const examTitle = (bs.page.data as { examTitle?: string | null }).examTitle;
   // Contest config — needed for live-player URL + record-enabled UI gates.
   // Hydro injects this via page.data; the student list carries the same field
   // as a fallback for older OJ pages that did not expose it yet.

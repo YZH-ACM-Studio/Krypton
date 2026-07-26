@@ -254,7 +254,7 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
           label: '用户绑定',
           href: '/admin/userbind/schools',
           icon: UserRoundCog,
-          badge: Number(bs.page.data.pendingBindingRequests || 0),
+          badge: Number((bs.page.data as { pendingBindingRequests?: unknown }).pendingBindingRequests || 0),
           templates: [
             'admin_userbind_overview.html',
             'admin_userbind_schools.html',

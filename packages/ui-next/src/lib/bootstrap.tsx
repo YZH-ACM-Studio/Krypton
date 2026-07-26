@@ -90,7 +90,7 @@ export interface GenericUserDoc {
 
 export interface KryptonPage {
   templateName: string;
-  data: Record<string, any>;
+  data: unknown;
 }
 
 export interface KryptonFooter {

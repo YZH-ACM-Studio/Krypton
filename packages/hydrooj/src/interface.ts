@@ -342,6 +342,11 @@ export interface ScoreboardNode {
     type: 'string' | 'rank' | 'user' | 'email' | 'record' | 'records' | 'problem' | 'solved' | 'time' | 'total_score';
     value: string; // 显示分数
     raw?: any;
+    team?: {
+        name: string;
+        captainUid: number;
+        memberUids: number[];
+    };
     score?: number; // 原始分数（100，不含赛制加成）
     style?: string;
     hover?: string;

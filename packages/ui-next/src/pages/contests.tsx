@@ -8,6 +8,7 @@ import {
   ChevronRight,
   Clock,
   Code,
+  Crown,
   Download,
   FileText,
   Flag,
@@ -45,9 +46,16 @@ interface ScoreboardCell {
   type?: string;
   value?: string | number;
   raw?: any;
+  team?: TeamScoreboardCellMeta;
   score?: number;
   hover?: string;
   style?: string;
+}
+
+interface TeamScoreboardCellMeta {
+  name?: string;
+  captainUid?: number;
+  memberUids?: number[];
 }
 
 /* ────────────────────────────────────────────────────────────────── */
@@ -687,7 +695,7 @@ export function ContestDetailPage() {
             <div className="mt-4 grid gap-3 text-sm text-muted-foreground sm:grid-cols-3">
               <span className="inline-flex items-center gap-2">
                 <Users className="size-4" />
-                {isTeam ? data.teamCount ?? 0 : tdoc.attend || 0} {isTeam ? '队参赛' : '人参加'}
+                {isTeam ? (data.teamCount ?? 0) : tdoc.attend || 0} {isTeam ? '队参赛' : '人参加'}
               </span>
               <span className="inline-flex items-center gap-2">
                 <List className="size-4" />
@@ -1052,9 +1060,7 @@ export function ContestScoreboardPage() {
   const teamMode = tdoc.participationMode === 'team';
   const participantColumn = scoreboardParticipantColumn(displayHeader, teamMode);
   const currentParticipantId = teamMode ? data.examMode?.teamId : (data.currentUserId ?? bs.user?.id);
-  const orderedDisplayBody = inExamMode
-    ? prioritizeCurrentScoreboardRows(displayBody, participantColumn, currentParticipantId)
-    : displayBody;
+  const orderedDisplayBody = inExamMode ? prioritizeCurrentScoreboardRows(displayBody, participantColumn, currentParticipantId) : displayBody;
 
   function cellText(cell: ScoreboardCell) {
     return cell.value == null ? '—' : String(cell.value);
@@ -1163,6 +1169,66 @@ export function ContestScoreboardPage() {
     return <span className={index === 0 ? 'font-mono' : 'whitespace-pre-line'}>{cellText(cell)}</span>;
   }
 
+  function renderTeamParticipant(cell: ScoreboardCell, isCurrent: boolean) {
+    const meta = cell.team;
+    const fallback = cellText(cell).split('\n')[0];
+    const teamName = typeof meta?.name === 'string' && meta.name.trim() ? meta.name.trim() : fallback;
+    const memberUids = Array.isArray(meta?.memberUids) ? meta.memberUids.filter(Number.isInteger) : [];
+    if (!meta || memberUids.length === 0) {
+      return (
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="truncate font-semibold" title={teamName}>
+            {teamName}
+          </span>
+          {isCurrent ? (
+            <Badge variant="outline" className="shrink-0 border-primary/25 bg-primary/10 text-[10px] text-primary">
+              本队
+            </Badge>
+          ) : null}
+        </div>
+      );
+    }
+
+    return (
+      <div className="w-72 min-w-0 py-1">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="truncate text-sm font-semibold leading-tight" title={teamName}>
+            {teamName}
+          </span>
+          {isCurrent ? (
+            <Badge variant="outline" className="shrink-0 border-primary/25 bg-primary/10 text-[10px] text-primary">
+              本队
+            </Badge>
+          ) : null}
+        </div>
+        <div className="mt-1.5 flex flex-wrap gap-1">
+          {memberUids.map((uid) => {
+            const user = udict[String(uid)] || null;
+            const uname = typeof user?.uname === 'string' && user.uname.trim() ? user.uname.trim() : `UID ${uid}`;
+            const displayName =
+              typeof user?.displayName === 'string' && user.displayName.trim() && user.displayName.trim() !== uname ? user.displayName.trim() : '';
+            const label = displayName || uname;
+            const fullIdentity = displayName ? `${displayName} · ${uname} · UID ${uid}` : `${uname} · UID ${uid}`;
+            const isCaptain = uid === meta.captainUid;
+            return (
+              <span
+                key={uid}
+                className={cn(
+                  'inline-flex max-w-[9.5rem] items-center gap-1 rounded-full bg-muted/70 px-2 py-1 text-xs leading-none text-muted-foreground',
+                  isCaptain && 'bg-amber-500/10 text-foreground ring-1 ring-inset ring-amber-500/20',
+                )}
+                title={fullIdentity}
+              >
+                {isCaptain ? <Crown className="size-3 shrink-0 text-amber-500" aria-label="队长" /> : null}
+                <span className="truncate">{label}</span>
+              </span>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
   function renderBodyCell(cell: ScoreboardCell) {
     if (cell.type === 'rank') {
       return <span className="font-mono text-sm text-muted-foreground">{cell.value === '0' || cell.value === 0 ? '*' : cellText(cell)}</span>;
@@ -1195,6 +1261,15 @@ export function ContestScoreboardPage() {
               {record.raw ? renderRecordCell(record) : <span className="whitespace-pre-line">{renderScoreboardText(record)}</span>}
             </span>
           ))}
+        </span>
+      );
+    }
+    if (teamMode && cell.type === 'time') {
+      const [solved = '0', totalTime = '0:00'] = cellText(cell).split('\n');
+      return (
+        <span className="inline-grid justify-items-end gap-0.5 tabular-nums" title={cell.hover || undefined}>
+          <span className="text-base font-semibold leading-none text-foreground">{solved}</span>
+          <span className="text-xs leading-none text-muted-foreground">{totalTime}</span>
         </span>
       );
     }
@@ -1267,9 +1342,13 @@ export function ContestScoreboardPage() {
                   {displayHeader.map((cell, index) => (
                     <TableHead
                       key={`${cell.type || 'col'}-${index}`}
-                      className={cell.type === 'problem' || cell.type === 'record' || cell.type === 'records' ? 'min-w-20 text-center' : 'min-w-24'}
+                      className={cn(
+                        cell.type === 'problem' || cell.type === 'record' || cell.type === 'records' ? 'min-w-20 text-center' : 'min-w-24',
+                        teamMode && index === participantColumn && 'w-80 min-w-80 normal-case tracking-normal',
+                        teamMode && cell.type === 'time' && 'text-right',
+                      )}
                     >
-                      {renderHeaderCell(cell, index)}
+                      {teamMode && index === participantColumn ? '队伍' : renderHeaderCell(cell, index)}
                     </TableHead>
                   ))}
                 </TableRow>
@@ -1283,23 +1362,23 @@ export function ContestScoreboardPage() {
                       key={`${String(participantKey ?? 'row')}-${rowIndex}`}
                       aria-current={isCurrent ? 'true' : undefined}
                       className={
-                        isCurrent
-                          ? 'bg-primary/[0.08] hover:bg-primary/[0.12] dark:bg-primary/[0.13] dark:hover:bg-primary/[0.17]'
-                          : undefined
+                        isCurrent ? 'bg-primary/[0.08] hover:bg-primary/[0.12] dark:bg-primary/[0.13] dark:hover:bg-primary/[0.17]' : undefined
                       }
                     >
                       {displayHeader.map((head, columnIndex) => {
                         const cell = row[columnIndex] || {};
-                        const content = renderBodyCell(cell);
+                        const isTeamParticipant = teamMode && columnIndex === participantColumn;
+                        const content = isTeamParticipant ? renderTeamParticipant(cell, isCurrent) : renderBodyCell(cell);
                         return (
                           <TableCell
                             key={`${rowIndex}-${columnIndex}`}
                             className={cn(
                               head.type === 'problem' || cell.type === 'record' || cell.type === 'records' ? 'text-center' : '',
+                              teamMode && cell.type === 'time' && 'text-right',
                               firstBloodClass(cell),
                             )}
                           >
-                            {isCurrent && columnIndex === participantColumn ? (
+                            {isCurrent && columnIndex === participantColumn && !isTeamParticipant ? (
                               <span className="inline-flex items-center gap-2">
                                 {content}
                                 <Badge variant="outline" className="border-primary/25 bg-primary/10 text-[10px] text-primary">

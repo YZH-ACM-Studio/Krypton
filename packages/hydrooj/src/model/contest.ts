@@ -1587,7 +1587,8 @@ function teamScoreboardName(team: ContestTeamDoc, udict: BaseUserDict, showDispl
     const display = (uid: number) => {
         const udoc = udict[uid];
         if (!udoc) return `UID ${uid}`;
-        return showDisplayName && udoc.displayName ? `${udoc.displayName} (${udoc.uname})` : udoc.uname;
+        const displayName = udoc.displayName?.trim();
+        return showDisplayName && displayName && displayName !== udoc.uname ? `${displayName} (${udoc.uname})` : udoc.uname;
     };
     return `${team.name}\nCaptain: ${display(team.captainUid)}\nMembers: ${team.memberUids.map(display).join(' / ')}`;
 }
@@ -1617,7 +1618,16 @@ async function getTeamScoreboard(this: Handler, tdoc: Tdoc, config: ScoreboardCo
             { ...entry.status, uid: entry.team.captainUid },
             { first },
         );
-        row[1] = { type: 'string', value: teamScoreboardName(entry.team, udict, config.showDisplayName), raw: entry.team.teamId };
+        row[1] = {
+            type: 'string',
+            value: teamScoreboardName(entry.team, udict, config.showDisplayName),
+            raw: entry.team.teamId,
+            team: {
+                name: entry.team.name,
+                captainUid: entry.team.captainUid,
+                memberUids: entry.team.memberUids,
+            },
+        };
         row.raw = {
             teamId: entry.team.teamId,
             captainUid: entry.team.captainUid,

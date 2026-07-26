@@ -21,6 +21,8 @@ describe('P1.13 team scoring and record-access contracts', () => {
     expect(contestModel).to.include('getTeamScoreboardEntries');
     expect(contestModel).to.include('getTeamScoreboard.call(this, tdoc, config, pdict)');
     expect(contestModel).to.include("columns[1] = { type: 'string'");
+    expect(contestModel).to.include('team: {');
+    expect(contestModel).to.include('name: entry.team.name');
     expect(contestHandler).to.include("if (contest.getParticipationMode(tdoc) === 'team')");
     expect(contestHandler).to.include('contest.getTeamScoreboardEntries(tdoc)');
     expect(contestHandler).to.match(/`@teams \$\{entries\.length\}`/);
@@ -43,6 +45,8 @@ describe('P1.13 team scoring and record-access contracts', () => {
   it('shows team semantics while retaining the true actor on record rows', () => {
     expect(contestsPage).to.include("title={isTeam ? '本队提交' : '我的提交'}");
     expect(contestsPage).to.include("{isTeam ? '本队成绩' : '我的成绩'}");
+    expect(contestsPage).to.include('renderTeamParticipant(cell, isCurrent)');
+    expect(contestsPage).to.include('aria-label="队长"');
     expect(managePage).to.include("teamMode ? '本队提交' : '我的提交'");
     expect(contestHandler).to.include('this.response.body.rdocs.map((rdoc: any) => rdoc.uid)');
   });

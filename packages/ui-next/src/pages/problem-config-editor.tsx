@@ -58,7 +58,13 @@ import { MultiSelect } from '@/components/ui/multi-select';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { SimpleSelect } from '@/components/ui/select';
 import { ProblemTestdataFileDialog } from '@/components/problem-testdata-file-dialog';
-import { type ProblemDataWriteGuardState, useProblemDataWriteGuard } from '@/components/problem-data-write-guard';
+import {
+  type ProblemDataWriteConfirmationResult,
+  type ProblemDataWriteGuardState,
+  type ProblemDataWriteOperation,
+  prepareProblemDataWrite,
+  useProblemDataWriteGuard,
+} from '@/components/problem-data-write-guard';
 import { useUnsavedChangesGuard } from '@/components/unsaved-changes-guard';
 import { COMMON_LANG_OPTIONS as PRESET_LANG_OPTIONS, type LangOption, resolveLangs } from '@/lib/multi-select-presets';
 import { readHydroResponseError, readProblemConfigUploadSuccess } from '@/lib/problem-save-response';
@@ -159,7 +165,11 @@ export function ProblemConfigEditor({
   const [mobileTab, setMobileTab] = useState<'files' | 'cases' | 'subtasks'>('files');
   // File being edited in the modal — null = closed.
   const [editingFile, setEditingFile] = useState<ProblemFileEntry | null>(null);
-  const dataGuard = useProblemDataWriteGuard(dataWriteGuard);
+  const prepareDataWrite = useCallback(
+    (operation: ProblemDataWriteOperation) => prepareProblemDataWrite(`${problemUrl}/files`, operation),
+    [problemUrl],
+  );
+  const dataGuard = useProblemDataWriteGuard(dataWriteGuard, 'data', prepareDataWrite);
 
   // --- file pool with classification ---
   const fileSet = useMemo(() => new Set(files.map((f) => f.name)), [files]);
@@ -500,7 +510,14 @@ export function ProblemConfigEditor({
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={onDragStart} onDragEnd={onDragEnd}>
             {viewport === 'mobile' ? null : viewport === 'desktop' ? (
               <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[280px_minmax(0,1fr)_minmax(0,1.2fr)] xl:grid-cols-[300px_minmax(0,1fr)_minmax(0,1.3fr)]">
-                <FilesColumn files={files} usedInPairs={usedInPairs} problemUrl={problemUrl} addCase={addCase} onOpenFile={setEditingFile} />
+                <FilesColumn
+                  files={files}
+                  usedInPairs={usedInPairs}
+                  problemUrl={problemUrl}
+                  addCase={addCase}
+                  onOpenFile={setEditingFile}
+                  confirmWrite={dataGuard.confirm}
+                />
                 <CasesColumn
                   config={config}
                   fileSet={fileSet}
@@ -550,7 +567,14 @@ export function ProblemConfigEditor({
                   />
                   <div className="mt-3 min-h-0 flex-1">
                     {mobileTab === 'files' ? (
-                      <FilesColumn files={files} usedInPairs={usedInPairs} problemUrl={problemUrl} addCase={addCase} onOpenFile={setEditingFile} />
+                      <FilesColumn
+                        files={files}
+                        usedInPairs={usedInPairs}
+                        problemUrl={problemUrl}
+                        addCase={addCase}
+                        onOpenFile={setEditingFile}
+                        confirmWrite={dataGuard.confirm}
+                      />
                     ) : (
                       <CasesColumn
                         config={config}
@@ -1119,15 +1143,28 @@ function FilesColumn({
   problemUrl,
   addCase: _addCase,
   onOpenFile,
+  confirmWrite,
 }: {
   files: ProblemFileEntry[];
   usedInPairs: Set<string>;
   problemUrl: string;
   addCase: (c: JudgeCase) => void;
   onOpenFile: (file: ProblemFileEntry) => void;
+  confirmWrite: (action: string, operation?: ProblemDataWriteOperation) => Promise<ProblemDataWriteConfirmationResult>;
 }) {
   const [filter, setFilter] = useState('');
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploadConfirmationRequestId, setUploadConfirmationRequestId] = useState('');
+  const openUpload = useCallback(async () => {
+    const confirmation = await confirmWrite('上传测试数据', 'files-upload');
+    if (!confirmation) return;
+    setUploadConfirmationRequestId(typeof confirmation === 'string' ? confirmation : '');
+    setUploadOpen(true);
+  }, [confirmWrite]);
+  const closeUpload = useCallback(() => {
+    setUploadOpen(false);
+    setUploadConfirmationRequestId('');
+  }, []);
   // Hide files already referenced by some case — keeps the pool focused on
   // "what still needs assigning". To move a file between cases, drag it
   // straight in the Cases column instead.
@@ -1158,7 +1195,7 @@ function FilesColumn({
             <FolderOpen className="size-4" />
             文件池
           </CardTitle>
-          <Button type="button" size="sm" variant="outline" onClick={() => setUploadOpen(true)}>
+          <Button type="button" size="sm" variant="outline" onClick={() => void openUpload()}>
             <Upload className="size-3 mr-1" />
             上传
           </Button>
@@ -1187,8 +1224,8 @@ function FilesColumn({
       </CardContent>
 
       {/* Upload dialog */}
-      <Dialog open={uploadOpen} onOpenChange={setUploadOpen}>
-        <DialogContent className="w-full max-w-xl" onClose={() => setUploadOpen(false)}>
+      <Dialog open={uploadOpen} onOpenChange={(open) => (open ? setUploadOpen(true) : closeUpload())}>
+        <DialogContent className="w-full max-w-xl" onClose={closeUpload}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Upload className="size-4" />
@@ -1199,7 +1236,10 @@ function FilesColumn({
             <FileUploader
               endpoint={`${problemUrl}/files`}
               fieldName="file"
-              meta={{ type: 'testdata' }}
+              meta={{
+                type: 'testdata',
+                ...(uploadConfirmationRequestId ? { activeContainerConfirmation: uploadConfirmationRequestId } : {}),
+              }}
               maxFileSize={null}
               maxFiles={null}
               uploadConcurrency={1}
@@ -1210,7 +1250,7 @@ function FilesColumn({
               }}
             />
             <div className="flex justify-end">
-              <Button variant="outline" onClick={() => setUploadOpen(false)}>
+              <Button variant="outline" onClick={closeUpload}>
                 关闭
               </Button>
             </div>

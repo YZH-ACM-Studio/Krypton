@@ -2881,24 +2881,73 @@ describe('P3.15 files workspace capability contract', () => {
 
         await handler.get({}, ['testdata', 'additional_file'], false);
 
-        const confirmations = handler.response.body.dataWriteGuard.confirmationRequestIds;
-        expect(confirmations).to.have.keys('files-upload', 'files-rename', 'files-delete', 'generate-testdata-request');
-        await handler.postDeleteFiles('forged', ['1.in'], 'testdata', confirmations['files-delete']);
+        expect(handler.response.body.dataWriteGuard).to.deep.equal({
+            active: [{ id: 'contest-1', title: '期中考试', rule: 'exam', endAt: undefined }],
+            canOverride: true,
+        });
+        await handler.postPrepareDataWrite('forged', 'files-delete');
+        const deleteConfirmation = handler.response.body.confirmationRequestId;
+        await handler.postDeleteFiles('forged', ['1.in'], 'testdata', deleteConfirmation);
         expect(calls.claims.at(-1).options.activeContainerConfirmation).to.deep.include({
-            requestId: confirmations['files-delete'],
+            requestId: deleteConfirmation,
             domainId: 'system',
             pid: 7,
             actor: 42,
             operation: 'files-delete',
             containerFingerprint: 'fingerprint:contest-1',
         });
-        await handler.postDeleteFiles('forged', ['1.in'], 'testdata', confirmations['files-delete']);
-        expect(calls.claims.at(-1).options.activeContainerConfirmation.requestId).to.equal(confirmations['files-delete']);
+        await handler.postDeleteFiles('forged', ['1.in'], 'testdata', deleteConfirmation);
+        expect(calls.claims.at(-1).options.activeContainerConfirmation.requestId).to.equal(deleteConfirmation);
 
+        await handler.postPrepareDataWrite('forged', 'files-upload');
+        const uploadConfirmation = handler.response.body.confirmationRequestId;
         const claimCount = calls.claims.length;
-        const wrongOperation = await captureFailure(() => handler.postDeleteFiles('forged', ['1.in'], 'testdata', confirmations['files-upload']));
+        const wrongOperation = await captureFailure(() => handler.postDeleteFiles('forged', ['1.in'], 'testdata', uploadConfirmation));
         expect(wrongOperation).to.be.instanceOf(GenericError);
         expect(calls.claims).to.have.length(claimCount);
+    });
+
+    it('issues a fresh upload challenge when a contest starts after the files page was loaded', async () => {
+        const pdoc = {
+            domainId: 'system',
+            docId: 7,
+            pid: 'P3101',
+            title: 'Managed problem',
+            authoringMode: 'managed',
+            data: [],
+            additional_file: [],
+        };
+        const handler = makeHandler(ProblemFilesHandler, { admin: true, canEditData: true });
+        handler.pdoc = pdoc;
+        maintainableResults = [{ ...pdoc }];
+
+        await handler.get({}, ['testdata', 'additional_file'], false);
+        expect(handler.response.body.dataWriteGuard.active).to.deep.equal([]);
+
+        activeDataWriteContainers = [{ docId: 'contest-1', title: '期中考试', rule: 'exam' }];
+        handler.request.body = { operation: 'prepare_data_write', writeOperation: 'files-upload' };
+        handler.args = { ...handler.request.body };
+        maintainableResults = [{ ...pdoc }];
+        await handler.post();
+        await handler.postPrepareDataWrite('forged', 'files-upload');
+
+        const prepared = handler.response.body;
+        expect(prepared).to.deep.include({ ok: true, canOverride: true });
+        expect(prepared.active).to.deep.equal([{ id: 'contest-1', title: '期中考试', rule: 'exam', endAt: undefined }]);
+        expect(prepared.confirmationRequestId).to.be.a('string').and.not.equal('');
+
+        handler.request.files = {
+            file: { filepath: '/tmp/1.in', originalFilename: '1.in', size: 1 },
+        };
+        await handler.postUploadFile('forged', '1.in', 'testdata', prepared.confirmationRequestId);
+        expect(calls.claims.at(-1).options.activeContainerConfirmation).to.deep.include({
+            requestId: prepared.confirmationRequestId,
+            domainId: 'system',
+            pid: 7,
+            actor: 42,
+            operation: 'files-upload',
+            containerFingerprint: 'fingerprint:contest-1',
+        });
     });
 
     it('does not present the contribution-only contest guard to an existing content editor', async () => {

@@ -3,7 +3,7 @@ import XHRUpload from '@uppy/xhr-upload';
 import { describe, expect, it } from 'vitest';
 import { fileUploaderAllowedMetaFields } from '../src/lib/file-uploader-meta.ts';
 
-function multipartTextFields(content: string) {
+function multipartTextFields(content: string, meta: Record<string, string> = { type: 'testdata' }) {
   const uppy = new Uppy().use(XHRUpload, {
     endpoint: '/d/system/p/P5035/files',
     formData: true,
@@ -15,9 +15,9 @@ function multipartTextFields(content: string) {
     data: new Blob([content]),
     meta: { operation: 'upload_file', filename: '1.in' },
   });
-  uppy.setFileMeta(id, { operation: 'upload_file', filename: '1.in', type: 'testdata' });
+  uppy.setFileMeta(id, { operation: 'upload_file', filename: '1.in', ...meta });
   uppy.setFileState(id, {
-    xhrUpload: { allowedMetaFields: fileUploaderAllowedMetaFields({ type: 'testdata' }) },
+    xhrUpload: { allowedMetaFields: fileUploaderAllowedMetaFields(meta) },
   } as any);
   const file = uppy.getFile(id)!;
   const plugin = uppy.getPlugin('XHRUpload') as XHRUpload<any, any>;
@@ -34,5 +34,19 @@ describe('managed problem file uploader contract', () => {
     ];
     expect(multipartTextFields('')).to.deep.equal(expected);
     expect(multipartTextFields('x')).to.deep.equal(expected);
+  });
+
+  it('attaches the active-container confirmation to every file request', () => {
+    expect(
+      multipartTextFields('x', {
+        type: 'testdata',
+        activeContainerConfirmation: 'fresh-upload-confirmation',
+      }),
+    ).to.deep.equal([
+      ['operation', 'upload_file'],
+      ['filename', '1.in'],
+      ['type', 'testdata'],
+      ['activeContainerConfirmation', 'fresh-upload-confirmation'],
+    ]);
   });
 });

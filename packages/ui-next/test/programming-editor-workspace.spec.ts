@@ -119,6 +119,11 @@ describe('p3.15 programming editor workspace correction', () => {
     expect(config).to.include(`fetch(\`${problemUrlExpression}/files\``);
     expect(files).to.include(`endpoint={\`${problemUrlExpression}/files\`}`);
     expect(files).to.include('meta={{ type, ...(uploadConfirmationRequestId ? { activeContainerConfirmation: uploadConfirmationRequestId } : {}) }}');
+    expect(files).not.to.include('if (!dataGuard.active) return;');
+    expect(files).to.include('HTMLFormElement.prototype.submit.call(form);');
+    expect(config).to.include('confirmWrite={dataGuard.confirm}');
+    expect(config).to.include("confirmWrite('上传测试数据', 'files-upload')");
+    expect(config).to.include('uploadConfirmationRequestId ? { activeContainerConfirmation: uploadConfirmationRequestId } : {}');
     for (const operation of ['rename_files', 'delete_files', 'generate_testdata']) {
       expect(files).to.include(`value="${operation}"`);
     }

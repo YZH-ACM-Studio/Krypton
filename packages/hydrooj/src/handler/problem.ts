@@ -415,6 +415,7 @@ async function assertProblemWriteCapability(handler: Handler, pdoc: ProblemDoc, 
 }
 
 const MANAGED_FILE_WRITE_FIELDS: Record<string, string[]> = {
+    prepare_data_write: ['operation', 'writeOperation'],
     upload_file: ['operation', 'filename', 'type', 'activeContainerConfirmation'],
     rename_files: ['operation', 'files', 'newNames', 'type', 'activeContainerConfirmation'],
     delete_files: ['operation', 'files', 'type', 'activeContainerConfirmation'],
@@ -615,7 +616,13 @@ function resolveDataWriteConfirmation(
     return confirmation;
 }
 
-async function dataWriteGuardState(handler: Handler, pdoc: ProblemDoc, udoc: User, scope: 'data' | 'statement' = 'data') {
+async function dataWriteGuardState(
+    handler: Handler,
+    pdoc: ProblemDoc,
+    udoc: User,
+    scope: 'data' | 'statement' = 'data',
+    operations?: ProblemDataWriteOperation[],
+) {
     const active = await problem.listActiveDataWriteContainers(pdoc.domainId, pdoc.docId);
     const facts = problem.activeDataWriteContainerFacts(active);
     const canOverride = problem.isProblemBankAdmin(udoc);
@@ -626,6 +633,8 @@ async function dataWriteGuardState(handler: Handler, pdoc: ProblemDoc, udoc: Use
         canOverride,
     };
     if (!guardedFacts.length || !canOverride) return state;
+    const confirmationOperations = scope === 'statement' ? (['statement-edit'] as ProblemDataWriteOperation[]) : operations || [];
+    if (!confirmationOperations.length) return state;
     if (!handler.session) throw new TypeError('active-container confirmation requires an HTTP session');
     const issuedAt = Date.now();
     const retained = Object.values(confirmationStore(handler))
@@ -640,7 +649,7 @@ async function dataWriteGuardState(handler: Handler, pdoc: ProblemDoc, udoc: Use
     const store = Object.fromEntries(retained.map((entry) => [entry.requestId, entry]));
     const containerFingerprint = problem.activeDataWriteContainerFingerprint(pdoc.domainId, pdoc.docId, guardedFacts);
     state.confirmationRequestIds = Object.fromEntries(
-        (scope === 'statement' ? (['statement-edit'] as ProblemDataWriteOperation[]) : DATA_WRITE_CONFIRMATION_OPERATIONS).map((operation) => {
+        confirmationOperations.map((operation) => {
             const requestId = `problem-data-confirm:${nanoid(20)}`;
             store[requestId] = {
                 requestId,
@@ -2923,6 +2932,29 @@ export class ProblemFilesHandler extends ProblemDetailHandler {
         this.canEditLoadedProblem = problem.canEditProblemData(this.user, this.pdoc);
         if (this.pdoc.reference) throw new ProblemIsReferencedError('edit files');
         await assertProblemWriteCapability(this, this.pdoc, this.canEditLoadedProblem, 'files', 'data');
+    }
+
+    @post('writeOperation', Types.Range(DATA_WRITE_CONFIRMATION_OPERATIONS))
+    async postPrepareDataWrite(_domainId: string, writeOperation: ProblemDataWriteOperation) {
+        const guard = await dataWriteGuardState(this, this.pdoc, this.user, 'data', [writeOperation]);
+        const confirmationRequestId = guard.confirmationRequestIds?.[writeOperation];
+        const result = !guard.active.length ? 'not-required' : confirmationRequestId ? 'issued' : 'denied';
+        logger.info(
+            'Active-container data challenge prepared domain=%s pid=%d actor=%d operation=%s confirmationRequestId=%s containers=%o result=%s',
+            this.pdoc.domainId,
+            this.pdoc.docId,
+            this.user._id,
+            writeOperation,
+            confirmationRequestId || '-',
+            guard.active.map((item) => item.id),
+            result,
+        );
+        this.response.body = {
+            ok: true,
+            active: guard.active,
+            canOverride: guard.canOverride,
+            confirmationRequestId: confirmationRequestId || null,
+        };
     }
 
     @post('files', Types.Set)

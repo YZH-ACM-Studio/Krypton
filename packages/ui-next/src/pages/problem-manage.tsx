@@ -27,6 +27,7 @@ import { ProblemTestdataFileDialog } from '@/components/problem-testdata-file-di
 import {
   type ProblemDataWriteGuardState,
   type ProblemDataWriteOperation,
+  prepareProblemDataWrite,
   useProblemDataWriteGuard,
 } from '@/components/problem-data-write-guard';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -145,7 +146,11 @@ export function ProblemFilesPage() {
   const [downloadingType, setDownloadingType] = useState<ProblemFileType | null>(null);
   const [downloadError, setDownloadError] = useState('');
   const [uploadConfirmationRequestId, setUploadConfirmationRequestId] = useState('');
-  const dataGuard = useProblemDataWriteGuard(data.dataWriteGuard);
+  const prepareDataWrite = useCallback(
+    (operation: ProblemDataWriteOperation) => prepareProblemDataWrite(`${problemUrl}/files`, operation),
+    [problemUrl],
+  );
+  const dataGuard = useProblemDataWriteGuard(data.dataWriteGuard, 'data', prepareDataWrite);
   const generatorCandidates = testdata.filter(
     (file) => !file.name.endsWith('.in') && !file.name.endsWith('.out') && !file.name.endsWith('.ans') && file.name !== 'config.yaml',
   );
@@ -186,19 +191,19 @@ export function ProblemFilesPage() {
   );
 
   const guardedSubmit = (event: FormEvent<HTMLFormElement>, action: string, operation: ProblemDataWriteOperation) => {
-    if (!dataGuard.active) return;
     const form = event.currentTarget;
-    if (new FormData(form).get('activeContainerConfirmation')) return;
     event.preventDefault();
     if (dataGuard.blocked) return;
     void dataGuard.confirm(action, operation).then((confirmation) => {
-      if (typeof confirmation !== 'string') return;
-      const marker = document.createElement('input');
-      marker.type = 'hidden';
-      marker.name = 'activeContainerConfirmation';
-      marker.value = confirmation;
-      form.append(marker);
-      form.requestSubmit();
+      if (!confirmation) return;
+      if (typeof confirmation === 'string') {
+        const marker = document.createElement('input');
+        marker.type = 'hidden';
+        marker.name = 'activeContainerConfirmation';
+        marker.value = confirmation;
+        form.append(marker);
+      }
+      HTMLFormElement.prototype.submit.call(form);
     });
   };
 

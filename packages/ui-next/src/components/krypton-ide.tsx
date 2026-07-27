@@ -46,6 +46,7 @@ import { json } from '@codemirror/lang-json';
 import { oneDark } from '@codemirror/theme-one-dark';
 
 import { cn } from '@/lib/cn';
+import { readHydroResponseError } from '@/lib/problem-save-response';
 import {
   distributePretestRecord,
   parseRecordResponse,
@@ -127,6 +128,12 @@ let LANG_KEYS_DESC: string[] | null = null;
 function langKeysDesc(): string[] {
   LANG_KEYS_DESC ||= Object.keys(LANGUAGES).sort((a, b) => b.length - a.length);
   return LANG_KEYS_DESC;
+}
+
+function sameOriginSubmissionUrl(raw: string): string {
+  const target = new URL(raw, window.location.href);
+  if (target.origin !== window.location.origin) throw new Error('提交响应包含非本站地址');
+  return `${target.pathname}${target.search}${target.hash}`;
 }
 
 /**
@@ -795,6 +802,7 @@ export function KryptonIDE({
   const [showSettings, setShowSettings] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState('');
   const [config, setConfig] = useState<IdeConfig>(loadConfig);
   const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
   const [submitCooldown, setSubmitCooldown] = useState(0);
@@ -1104,6 +1112,7 @@ export function KryptonIDE({
     }
 
     setSubmitting(true);
+    setSubmitError('');
     try {
       const res = await fetch(submitUrl, {
         method: 'POST',
@@ -1115,33 +1124,53 @@ export function KryptonIDE({
         window.location.reload();
         return;
       }
-      if (res.ok) {
-        const data = await res.json();
-        const rid = data.rid ? String(data.rid) : '';
-        if (rid) {
-          const url = resolveRecordUrl(rid, data.url || `/record/${rid}`);
-          const entry: RecordEntry = {
-            rid,
-            url,
-            lang: selectedLang,
-            status: 20,
-            timestamp: Date.now(),
-          };
-          setRecords((prev) => [entry, ...prev]);
-          setShowRecords(true);
-          onOpenRecords?.();
-          setSubmitCooldown(3);
-          pollRecord(rid, url);
-          return;
-        }
-        if (data.url) {
-          window.location.href = data.url;
-          return;
-        }
+      if (!res.ok) throw new Error(await readHydroResponseError(res, '提交失败'));
+      if (res.redirected) throw new Error('提交响应发生了非预期重定向');
+
+      const data: unknown = await res.json();
+      if (!data || typeof data !== 'object' || Array.isArray(data)) {
+        throw new Error('提交响应不是有效对象');
       }
-      onSubmit?.(selectedLang, code);
-    } catch {
-      onSubmit?.(selectedLang, code);
+      const payload = data as Record<string, unknown>;
+      let rid = '';
+      if (payload.rid !== undefined) {
+        if (typeof payload.rid !== 'string' || !payload.rid.trim()) throw new Error('提交响应包含无效记录编号');
+        rid = payload.rid.trim();
+      }
+      let responseUrl = '';
+      if (payload.url !== undefined) {
+        if (typeof payload.url !== 'string' || !payload.url.trim()) throw new Error('提交响应包含无效跳转地址');
+        responseUrl = sameOriginSubmissionUrl(payload.url.trim());
+      }
+      if (rid) {
+        const url = sameOriginSubmissionUrl(resolveRecordUrl(rid, responseUrl || `/record/${rid}`));
+        const entry: RecordEntry = {
+          rid,
+          url,
+          lang: selectedLang,
+          status: 20,
+          timestamp: Date.now(),
+        };
+        setRecords((prev) => [entry, ...prev]);
+        setShowRecords(true);
+        onOpenRecords?.();
+        setSubmitCooldown(3);
+        pollRecord(rid, url);
+        return;
+      }
+      if (responseUrl) {
+        window.location.href = responseUrl;
+        return;
+      }
+      throw new Error('提交响应缺少记录编号或跳转地址');
+    } catch (error) {
+      const message = error instanceof Error && error.message ? error.message : '提交失败，请检查网络后重试';
+      setSubmitError(message);
+      console.error('Problem submission failed', {
+        submitUrl,
+        language: selectedLang,
+        error,
+      });
     } finally {
       setSubmitting(false);
     }
@@ -1670,6 +1699,12 @@ export function KryptonIDE({
           >
             <Plus className="size-3.5" />
           </button>
+        </div>
+      ) : null}
+
+      {submitError ? (
+        <div role="alert" className="shrink-0 border-b border-red-500/25 bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:text-red-400">
+          {submitError}
         </div>
       ) : null}
 

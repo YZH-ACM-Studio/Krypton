@@ -299,6 +299,7 @@ const {
     canMaintainProblem,
     canOpenProblemWorkspace,
     canPublishProblem,
+    canSubmitProblem,
     canImportProblems,
     canViewProblem,
     isProblemBankAdmin,
@@ -611,6 +612,7 @@ describe('P2.13 managed programming authoring matrix', () => {
 
         expect(canAuthorProblem(author, draft)).to.equal(true);
         expect(canViewProblem(author, draft)).to.equal(true);
+        expect(canSubmitProblem(author, draft)).to.equal(true);
         expect(canEditProblemContent(author, draft)).to.equal(true);
         expect(canEditProblemMetadata(author, draft)).to.equal(true);
         expect(canManageProblemCollaborators(author, draft)).to.equal(false);
@@ -620,11 +622,16 @@ describe('P2.13 managed programming authoring matrix', () => {
 
         expect(canEditProblemContent(trustedCreator, draft)).to.equal(false);
         expect(canEditProblemContent(verifier, draft)).to.equal(false);
+        expect(canSubmitProblem(verifier, draft)).to.equal(true);
+        expect(canSubmitProblem(verifier, { ...draft, hidden: false })).to.equal(false);
+        expect(canSubmitProblem(author, { ...draft, archivedAt: new Date() })).to.equal(false);
+        expect(canSubmitProblem(makeUser('student', { _authoredPids: new Set([100]), _problemAclLoaded: false }), draft)).to.equal(false);
         expect(canViewProblem(verifier, draft)).to.equal(true);
 
         expect(canMaintainProblem(maintainer, draft)).to.equal(true);
         expect(canEditProblemContent(maintainer, draft)).to.equal(true);
         expect(canEditProblemMetadata(maintainer, draft)).to.equal(true);
+        expect(canSubmitProblem(maintainer, draft)).to.equal(false);
         expect(canManageProblemCollaborators(maintainer, draft)).to.equal(true);
         expect(canManageProblemMaintainers(maintainer, draft)).to.equal(false);
         expect(canPublishProblem(maintainer, draft)).to.equal(false);
@@ -632,6 +639,17 @@ describe('P2.13 managed programming authoring matrix', () => {
         expect(canDeleteProblem(maintainer, draft)).to.equal(false);
 
         const confirmed = { ...draft, hidden: false, managedAuthoring: { ...draft.managedAuthoring, metadataStatus: 'confirmed' } };
+        expect(canSubmitProblem(author, confirmed)).to.equal(false);
+        expect(canSubmitProblem(makeUser('student', { _dataContributionPids: new Set([100]) }), confirmed)).to.equal(true);
+        expect(canSubmitProblem(makeUser('student', { _tagContributionPids: new Set([100]) }), confirmed)).to.equal(false);
+        expect(
+            canSubmitProblem(
+                makeUser('student', {
+                    hasPerm: (permission: bigint) => permission === PERM.PERM_SUBMIT_PROBLEM,
+                }),
+                confirmed,
+            ),
+        ).to.equal(true);
         expect(canEditProblemContent(author, confirmed)).to.equal(true);
         expect(canEditProblemMetadata(author, confirmed)).to.equal(true);
         expect(canEditProblemTags(author, confirmed)).to.equal(true);
@@ -2464,6 +2482,7 @@ describe('P2.11 ProblemModel public surface', () => {
             'canBrowseProblemBank',
             'buildProblemBankScope',
             'canMaintainProblem',
+            'canSubmitProblem',
             'assertProblemBankSelection',
             'getMaintainableAuthorized',
             'getViewableAuthorized',

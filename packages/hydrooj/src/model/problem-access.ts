@@ -922,6 +922,30 @@ export function canAuthorProblem(user: ProblemAclUser, pdoc: ProblemDoc): boolea
     return user._authoredPids?.has(pdoc.docId) === true;
 }
 
+/**
+ * Direct submission/testing capability.
+ *
+ * The ordinary domain permission remains authoritative for normal and
+ * container submissions. Direct problem pages additionally honor the existing
+ * per-problem testing roles: a hidden-problem verifier, a data contributor, or
+ * the assigned author of an active hidden managed draft. The handler never
+ * carries these narrow grants into a contest or homework context.
+ */
+export function canSubmitProblem(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
+    if (user.hasPerm(PERM.PERM_SUBMIT_PROBLEM)) return true;
+    if (pdoc.archivedAt || !hasLoadedAclForProblem(user, pdoc) || isAclFenced(user, pdoc.docId)) return false;
+    if (user._dataContributionPids?.has(pdoc.docId) === true) return true;
+    const hasVerifierPermit =
+        user._permitPids?.has(pdoc.docId) === true && user._authoredPids?.has(pdoc.docId) !== true && user._maintainedPids?.has(pdoc.docId) !== true;
+    if (pdoc.hidden === true && hasVerifierPermit) return true;
+    return (
+        pdoc.authoringMode === 'managed' &&
+        pdoc.hidden === true &&
+        pdoc.managedAuthoring?.metadataStatus === 'draft' &&
+        user._authoredPids?.has(pdoc.docId) === true
+    );
+}
+
 function isManagedAuthorEditableState(pdoc: ProblemDoc): boolean {
     return pdoc.managedAuthoring?.metadataStatus === 'confirmed' || (pdoc.hidden === true && pdoc.managedAuthoring?.metadataStatus === 'draft');
 }

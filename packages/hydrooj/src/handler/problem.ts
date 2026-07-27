@@ -1517,6 +1517,7 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
     udoc: User;
     psdoc: ProblemStatusDoc;
     protected canEditLoadedProblem = false;
+    protected canSubmitLoadedProblem = false;
     protected knowledgeNodeIdsForDetail: string[] = [];
 
     @route('pid', Types.ProblemId, true)
@@ -1527,6 +1528,7 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
             ? await problem.get(domainId, pid)
             : await problem.getViewableAuthorized(domainId, pid, this.user, [...problem.PROJECTION_PUBLIC, 'managedAuthoring']);
         if (!this.pdoc) throw new ProblemNotFoundError(domainId, pid);
+        this.canSubmitLoadedProblem = tid ? this.user.hasPerm(PERM.PERM_SUBMIT_PROBLEM) : problem.canSubmitProblem(this.user, this.pdoc);
         const canManageContest =
             !!tid && (this.user.own(this.tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST) || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM));
         const canViewDirectly = !!tid && problem.canViewBy(this.pdoc, this.user);
@@ -1716,6 +1718,8 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
             mode,
             postContestPracticeActive,
             canPreviewSubjective: effectiveProblemKind(this.pdoc) === SUBJECTIVE_KIND && problem.canMaintainProblem(this.user, this.pdoc),
+            canSubmitProblem: this.canSubmitLoadedProblem,
+            canRejudgeProblem: !tid && this.user.hasPerm(PERM.PERM_REJUDGE_PROBLEM),
             canEditProblem:
                 this.canEditLoadedProblem ||
                 problem.canEditProblemData(this.user, this.pdoc) ||
@@ -1799,6 +1803,16 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
     async postRejudge(_domainId: string, _pid: number) {
         const domainId = this.pdoc.domainId;
         this.checkPerm(PERM.PERM_REJUDGE_PROBLEM);
+        if (this.tdoc) {
+            logger.warn(
+                'Whole-problem rejudge rejected domain=%s contest=%s pid=%d actor=%d stage=context-gate result=denied',
+                domainId,
+                this.tdoc.docId,
+                this.pdoc.docId,
+                this.user._id,
+            );
+            throw new ValidationError('tid', null, '整题重测仅支持从题目详情页执行');
+        }
         if (!this.pdoc.config || typeof this.pdoc.config === 'string') throw new ProblemConfigError();
         const rdocs = await record
             .getMulti(domainId, {
@@ -1835,7 +1849,19 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
                 ),
             ]);
         }
-        this.back();
+        logger.info(
+            'Whole-problem rejudge queued domain=%s pid=%d actor=%d count=%d result=success',
+            domainId,
+            this.pdoc.docId,
+            this.user._id,
+            rdocs.length,
+        );
+        await oplog.log(this, 'problem.rejudge.all', {
+            pid: this.pdoc.docId,
+            count: rdocs.length,
+            result: 'success',
+        });
+        this.back({ ok: true, rejudged: rdocs.length });
     }
 
     async postDelete() {
@@ -1863,6 +1889,16 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
 
     @param('tid', Types.ObjectId, true)
     async prepare(_domainId: string, tid?: ObjectId) {
+        if (!this.canSubmitLoadedProblem) {
+            logger.warn(
+                'Problem submit rejected domain=%s container=%s pid=%d actor=%d stage=submit-prepare result=denied',
+                this.pdoc.domainId,
+                tid || '-',
+                this.pdoc.docId,
+                this.user._id,
+            );
+            throw new PermissionError(PERM.PERM_SUBMIT_PROBLEM);
+        }
         this.assertContestSubmissionContext(tid);
         const postContestPractice = !!tid && effectiveProblemKind(this.pdoc) !== SUBJECTIVE_KIND && canUsePostContestPractice(this.tdoc, this.tsdoc);
         if (tid && !postContestPractice && !contest.isOngoing(this.tdoc, this.tsdoc)) throw new ContestNotLiveError(this.tdoc.docId);
@@ -3734,7 +3770,7 @@ export async function apply(ctx: Context) {
     ctx.Route('problem_pid_namespace', '/p/namespaces', ProblemPidNamespaceHandler, PERM.PERM_VIEW_PROBLEM);
     ctx.Route('problem_random', '/problem/random', ProblemRandomHandler, PERM.PERM_VIEW_PROBLEM);
     ctx.Route('problem_detail', '/p/:pid', ProblemDetailHandler);
-    ctx.Route('problem_submit', '/p/:pid/submit', ProblemSubmitHandler, PERM.PERM_SUBMIT_PROBLEM);
+    ctx.Route('problem_submit', '/p/:pid/submit', ProblemSubmitHandler);
     ctx.Route('problem_hack', '/p/:pid/hack/:rid', ProblemHackHandler, PERM.PERM_SUBMIT_PROBLEM);
     ctx.Route('problem_edit', '/p/:pid/edit', ProblemEditHandler);
     ctx.Route('problem_programming_tags_preview', '/p/:pid/tags/preview', ProblemProgrammingTagPreviewHandler);

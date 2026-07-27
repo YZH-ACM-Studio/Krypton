@@ -81,6 +81,7 @@ import {
     canMaintainProblem as canMaintainProblemAccess,
     canOpenProblemWorkspace as canOpenProblemWorkspaceAccess,
     canPublishProblem as canPublishProblemAccess,
+    canSubmitProblem as canSubmitProblemAccess,
     canImportProblems as canImportProblemsAccess,
     canUseProblemWriteCapability,
     canViewProblem,
@@ -961,6 +962,10 @@ export class ProblemModel {
 
     static canAuthorProblem(user: ProblemAclUser, pdoc: ProblemDoc) {
         return canAuthorProblemAccess(user, pdoc);
+    }
+
+    static canSubmitProblem(user: ProblemAclUser, pdoc: ProblemDoc) {
+        return canSubmitProblemAccess(user, pdoc);
     }
 
     static canEditProblemContent(user: ProblemAclUser, pdoc: ProblemDoc) {

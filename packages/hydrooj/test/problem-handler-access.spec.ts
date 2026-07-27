@@ -15,6 +15,8 @@ const PERM = {
     PERM_EDIT_PROBLEM: 16n,
     PERM_READ_PROBLEM_DATA: 32n,
     PERM_CREATE_PROGRAMMING_DRAFT: 64n,
+    PERM_SUBMIT_PROBLEM: 128n,
+    PERM_REJUDGE_PROBLEM: 256n,
 };
 const PRIV = {
     PRIV_EDIT_SYSTEM: 1,
@@ -67,6 +69,9 @@ const calls = {
     random: [] as any[],
     refresh: [] as any[],
     recordAdd: [] as any[],
+    recordGetMulti: [] as any[],
+    recordJudge: [] as any[],
+    recordReset: [] as any[],
     renameFile: [] as any[],
     status: [] as any[],
     statementSaves: [] as any[],
@@ -80,6 +85,7 @@ const calls = {
     storageSign: [] as any[],
 };
 let getMultiResults: any[][] = [];
+let recordGetMultiResults: any[][] = [];
 let getResults: any[] = [];
 let maintainableResults: any[] = [];
 let countResult = 0;
@@ -173,6 +179,7 @@ const problemStub = {
     canEditProblemData: (user: any) => user.canEditData ?? user.canEditContent ?? maintainResult,
     canEditProblemTags: (user: any) => user.canEditTags ?? user.canEditContent ?? maintainResult,
     canEditProblemMetadata: (user: any) => user.canEditMetadata ?? maintainResult,
+    canSubmitProblem: (user: any) => user.hasPerm?.(PERM.PERM_SUBMIT_PROBLEM) === true || user.canSubmitManagedDraft === true,
     canManageProblemCollaborators: (user: any) => user.canManageCollaborators ?? maintainResult,
     canManageProblemContributions: (user: any) => user.canManageContributions ?? maintainResult,
     pendingProblemContributionFingerprint: () => 'pending-fingerprint',
@@ -395,7 +402,13 @@ const serverStub = {
 };
 
 const systemStub = { get: () => false };
-const builtinStub = { PERM, PRIV, STATUS: {} };
+const builtinStub = {
+    PERM,
+    PRIV,
+    STATUS: {
+        STATUS_CANCELED: -2,
+    },
+};
 const contestHandlerStub = { ContestDetailBaseHandler: class {} };
 let contestOngoing = true;
 const emptyModel = {
@@ -426,9 +439,24 @@ const domainStub = {
 };
 const recordStub = {
     STAT_QUERY: {},
+    RECORD_GENERATE: 'generate',
+    RECORD_PRETEST: 'pretest',
     async add(...args: any[]) {
         calls.recordAdd.push(args);
         return 'rid';
+    },
+    getMulti(...args: any[]) {
+        calls.recordGetMulti.push(args);
+        return cursor(recordGetMultiResults.shift() || []);
+    },
+    async judge(...args: any[]) {
+        calls.recordJudge.push(args);
+    },
+    async reset(...args: any[]) {
+        calls.recordReset.push(args);
+    },
+    async submissionPriority() {
+        return -100;
     },
 };
 const settingStub = { langs: { cpp: { disabled: false } }, SETTINGS_BY_KEY: { codeLang: { range: {} } } };
@@ -693,6 +721,7 @@ const {
     ProblemRandomHandler,
     ProblemReviewHandler,
     ProblemSubmitHandler,
+    apply: applyProblemHandlers,
 } = handlerModule as any;
 
 function makeHandler(HandlerClass: any, user: Record<string, unknown>) {
@@ -751,6 +780,7 @@ async function captureFailure(run: () => Promise<unknown>) {
 beforeEach(() => {
     for (const values of Object.values(calls)) values.length = 0;
     getMultiResults = [];
+    recordGetMultiResults = [];
     getResults = [];
     maintainableResults = [];
     countResult = 0;
@@ -1351,6 +1381,8 @@ describe('P2.11 authoritative problem route domain', () => {
         expect(calls.status[0][0]).to.equal('system');
         expect(handler.response.body.authorUdocs).to.deep.equal([{ _id: 42 }]);
         expect(handler.response.body.canEditProblem).to.equal(false);
+        expect(handler.response.body.canSubmitProblem).to.equal(false);
+        expect(handler.response.body.canRejudgeProblem).to.equal(false);
     });
 
     it('redacts a hidden knowledge map from an ordinary problem-detail response', async () => {
@@ -1381,13 +1413,13 @@ describe('P2.11 authoritative problem route domain', () => {
     });
 
     it('computes the managed draft edit entry from internal state without exposing that state', async () => {
-        const handler = makeHandler(ProblemDetailHandler, { canEditContent: true });
+        const handler = makeHandler(ProblemDetailHandler, { canEditContent: true, canSubmitManagedDraft: true });
         getResults = [
             {
                 domainId: 'system',
                 docId: 7,
                 owner: 42,
-                hidden: true,
+                hidden: false,
                 title: 'Managed draft',
                 content: 'statement',
                 config: '',
@@ -1402,8 +1434,32 @@ describe('P2.11 authoritative problem route domain', () => {
 
         expect(calls.getViewableAuthorized[0][3]).to.include('managedAuthoring');
         expect(handler.response.body.canEditProblem).to.equal(true);
+        expect(handler.response.body.canSubmitProblem).to.equal(true);
         expect(handler.response.body.pdoc).not.to.have.property('managedAuthoring');
         expect(handler.pdoc).not.to.have.property('managedAuthoring');
+    });
+
+    it('publishes the whole-problem rejudge capability only to an authorized direct viewer', async () => {
+        const handler = makeHandler(ProblemDetailHandler, {
+            hasPerm: (permission: bigint) => permission === PERM.PERM_REJUDGE_PROBLEM,
+        });
+        getResults = [
+            {
+                domainId: 'system',
+                docId: 7,
+                owner: 42,
+                hidden: false,
+                title: 'P7',
+                content: 'statement',
+                config: {},
+                additional_file: [],
+                tag: [],
+            },
+        ];
+
+        await handler._prepare('forged', 7);
+
+        expect(handler.response.body.canRejudgeProblem).to.equal(true);
     });
 
     it('materializes a legacy managed problem detail from its private canonical node selection', async () => {
@@ -1490,7 +1546,7 @@ describe('P2.11 authoritative problem route domain', () => {
     });
 
     it('preserves the storage owner in contest and exam problem DOM without querying managed permits', async () => {
-        const handler = makeHandler(ProblemDetailHandler, {});
+        const handler = makeHandler(ProblemDetailHandler, { canSubmitManagedDraft: true });
         handler.tdoc = {
             docId: 'contest',
             owner: 99,
@@ -1520,6 +1576,8 @@ describe('P2.11 authoritative problem route domain', () => {
         await handler._prepare('forged', 7, 'contest');
 
         expect(handler.response.body.authorUdocs).to.deep.equal([{ _id: 42 }]);
+        expect(handler.response.body.canSubmitProblem).to.equal(false);
+        expect(handler.response.body.canRejudgeProblem).to.equal(false);
         expect(calls.permits).to.deep.equal([]);
     });
 
@@ -2031,6 +2089,98 @@ describe('P2.11 authoritative problem route domain', () => {
         hack.rdoc = { _id: 'target', lang: 'cpp', code: 'code' };
         await hack.post('forged', '1 2', false, undefined);
         expect(calls.recordAdd[0][0]).to.equal('system');
+    });
+
+    it('moves the submit route permission into the problem-aware handler without weakening hacks', async () => {
+        const routes: any[][] = [];
+        await applyProblemHandlers({
+            Route: (...args: any[]) => routes.push(args),
+            inject: async (_deps: string[], callback: (services: any) => unknown) => callback({ api: { provide: () => undefined } }),
+        });
+
+        const submitRoute = routes.find(([name]) => name === 'problem_submit');
+        const hackRoute = routes.find(([name]) => name === 'problem_hack');
+        expect(submitRoute).to.have.length(3);
+        expect(hackRoute?.[3]).to.equal(PERM.PERM_SUBMIT_PROBLEM);
+    });
+
+    it('uses the problem-aware submit capability for both legacy submit and scratchpad entries', () => {
+        const template = readFileSync(resolve(process.cwd(), 'packages/ui-default/templates/partials/problem_sidebar_normal.html'), 'utf8');
+        expect(template).to.include("{% if canSubmitProblem and handler.ctx.setting.get('ui-default.enableScratchpad') %}");
+        expect(template).to.include('{% if canSubmitProblem %}');
+        expect(template).not.to.include(
+            "{% if handler.user.hasPerm(perm.PERM_SUBMIT_PROBLEM) and handler.ctx.setting.get('ui-default.enableScratchpad') %}",
+        );
+    });
+
+    it('allows only a problem-aware direct draft author through submit prepare', async () => {
+        const denied = makeHandler(ProblemSubmitHandler, {});
+        denied.pdoc = { domainId: 'system', docId: 7, problemKind: 'programming', config: { type: 'default' } };
+        denied.canSubmitLoadedProblem = false;
+        const error = await captureFailure(() => denied.prepare('forged', undefined));
+        expect(error).to.be.instanceOf(TestPermissionError);
+        expect(error.params).to.deep.equal([PERM.PERM_SUBMIT_PROBLEM]);
+
+        const author = makeHandler(ProblemSubmitHandler, {});
+        author.pdoc = { domainId: 'system', docId: 7, problemKind: 'programming', config: { type: 'default' } };
+        author.canSubmitLoadedProblem = true;
+        await author.prepare('forged', undefined);
+    });
+
+    it('returns and audits the exact number of records queued by whole-problem rejudge', async () => {
+        const handler = makeHandler(ProblemDetailHandler, {});
+        handler.pdoc = { domainId: 'system', docId: 7, pid: 'P7', config: { type: 'default' } };
+        handler.checkPerm = (permission: bigint) => {
+            expect(permission).to.equal(PERM.PERM_REJUDGE_PROBLEM);
+        };
+        handler.back = (body: unknown) => {
+            handler.response.body = body;
+        };
+        recordGetMultiResults = [
+            [
+                { _id: 'rid-1', contest: null },
+                { _id: 'rid-2', contest: 'contest-1' },
+            ],
+        ];
+
+        await handler.postRejudge('forged', 7);
+
+        expect(calls.recordGetMulti).to.deep.equal([
+            [
+                'system',
+                {
+                    pid: 7,
+                    contest: { $nin: ['generate', 'pretest'] },
+                    status: { $ne: -2 },
+                    'files.hack': { $exists: false },
+                    manualPending: { $ne: true },
+                    manualGrade: { $exists: false },
+                },
+            ],
+        ]);
+        expect(calls.recordReset).to.deep.equal([['system', ['rid-1', 'rid-2'], true]]);
+        expect(calls.recordJudge).to.deep.equal([
+            ['system', ['rid-2'], -100, { detail: false }, { rejudge: true }],
+            ['system', ['rid-1'], -100, {}, { rejudge: true }],
+        ]);
+        expect(handler.response.body).to.deep.equal({ ok: true, rejudged: 2 });
+        expect(calls.oplog.at(-1)?.[1]).to.equal('problem.rejudge.all');
+        expect(calls.oplog.at(-1)?.[2]).to.deep.include({ pid: 7, count: 2 });
+    });
+
+    it('rejects forged contest context before whole-problem rejudge reads any records', async () => {
+        const handler = makeHandler(ProblemDetailHandler, {});
+        handler.pdoc = { domainId: 'system', docId: 7, pid: 'P7', config: { type: 'default' } };
+        handler.tdoc = { docId: 'contest-1' };
+        handler.checkPerm = () => undefined;
+
+        const error = await captureFailure(() => handler.postRejudge('forged', 7));
+
+        expect(error).to.be.instanceOf(GenericError);
+        expect(error.message).to.equal('tid');
+        expect(calls.recordGetMulti).to.deep.equal([]);
+        expect(calls.recordReset).to.deep.equal([]);
+        expect(calls.recordJudge).to.deep.equal([]);
     });
 
     it('edits problem metadata and config/files only in the loaded problem domain', async () => {

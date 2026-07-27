@@ -137,6 +137,8 @@ describe('p3.15 programming editor workspace correction', () => {
 
     expect(detail).to.include('const canEditProblem = data.canEditProblem === true;');
     expect(detail).to.include('<ProblemEditGate canEditProblem={canEditProblem} inContest={!!inContest}>');
+    expect(detail).to.include('const canRejudgeProblem = data.canRejudgeProblem === true;');
+    expect(detail).to.include('<ProblemRejudgeDialog');
     expect(detail).to.include('<ProblemAuthorText authors={authorUdocs} />');
     expect(detail).to.include('data.authorUdocs');
     expect(detail).not.to.include('label="出题人" value={udoc.uname');

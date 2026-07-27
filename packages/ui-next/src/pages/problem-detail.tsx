@@ -15,6 +15,7 @@ import {
   type LucideIcon,
   MessageSquare,
   Network,
+  RotateCcw,
   Send,
   Tag,
   Trophy,
@@ -28,11 +29,8 @@ import { getLangEntry, getStatus, KryptonIDE, type RecordEntry } from '@/compone
 import { MarkdownView } from '@/components/markdown-renderer';
 import { ObjectiveAnswerPanel, type ObjectiveClientQuestion } from '@/components/objective-answer-panel';
 import { ProblemAuthorText, type ProblemAuthorView, ProblemEditGate } from '@/components/problem-authoring-state';
-import {
-  ProgrammingStatementView,
-  structuredStatementSamples,
-  type ProgrammingStatementViewData,
-} from '@/components/programming-statement';
+import { ProblemRejudgeDialog } from '@/components/problem-rejudge-dialog';
+import { ProgrammingStatementView, structuredStatementSamples, type ProgrammingStatementViewData } from '@/components/programming-statement';
 import { TeamCodeSendDialog, type TeamCodeBuffer } from '@/components/team-code-snapshots';
 import { readTeamExamModeContext } from '@/components/team-exam-mode';
 import { Badge } from '@/components/ui/badge';
@@ -140,6 +138,8 @@ interface ProblemDetailPageData {
   authorUdocs?: ProblemAuthorView[];
   canEditProblem?: boolean;
   canPreviewSubjective?: boolean;
+  canRejudgeProblem?: boolean;
+  canSubmitProblem?: boolean;
   ctdocs?: RelatedContestDoc[];
   dataContributorUdocs?: ProblemAuthorView[];
   discussionCount?: number;
@@ -740,6 +740,7 @@ export function ProblemDetailPage() {
   const authorUdocs: ProblemAuthorView[] = Array.isArray(data.authorUdocs) ? data.authorUdocs : [];
   const dataContributorUdocs: ProblemAuthorView[] = Array.isArray(data.dataContributorUdocs) ? data.dataContributorUdocs : [];
   const canEditProblem = data.canEditProblem === true;
+  const canRejudgeProblem = data.canRejudgeProblem === true;
   const psdoc: ProblemStatusDoc = data.psdoc || {};
   const config: ProblemConfig = pdoc.config && typeof pdoc.config === 'object' ? pdoc.config : {};
   const content = pdoc.content || '';
@@ -768,7 +769,7 @@ export function ProblemDetailPage() {
   const teamCodeEndpoint = String(examUrls.teamCodeSnapshots || '');
   const mode: string = data.mode || 'normal';
   const postContestPracticeActive = data.postContestPracticeActive === true;
-  const canSubmit = canSubmitProblemMode(mode);
+  const canSubmit = canSubmitProblemMode(mode) && data.canSubmitProblem === true;
   // mode ∈ 'normal' | 'view' | 'contest' | 'correction' | 'none' (from problem.ts ProblemDetailHandler)
   // Contest mode shows banner + locks down external links; correction reopens them.
   const inContest = !!tdoc && tdoc.docId && mode !== 'normal';
@@ -798,6 +799,7 @@ export function ProblemDetailPage() {
 
   const problemUrl = replaceRouteTokens(bs.urls.problemDetail, { PID: String(pid) });
   const [ideMode, setIdeMode] = useState(false);
+  const [rejudgeOpen, setRejudgeOpen] = useState(false);
   const [teamCodeBuffer, setTeamCodeBuffer] = useState<TeamCodeBuffer | null>(null);
   // Keep tid on the submit endpoint for correction authorization; the server
   // deliberately stores correction records without a contest id.
@@ -808,7 +810,8 @@ export function ProblemDetailPage() {
   // type=objective 下发无答案的 questions 描述符，走面板作答提交。
   const objectiveQuestions: ObjectiveClientQuestion[] = config.type === 'objective' && Array.isArray(config.questions) ? config.questions : [];
   const isObjective = objectiveQuestions.length > 0;
-  const isStructuredAnswer = ['program_fill', 'function'].includes(config.type ?? '') && ['program_fill', 'function'].includes(String(pdoc.problemKind));
+  const isStructuredAnswer =
+    ['program_fill', 'function'].includes(config.type ?? '') && ['program_fill', 'function'].includes(String(pdoc.problemKind));
   const isSubjective = pdoc.problemKind === 'subjective';
   const canPreviewSubjective = !!data.canPreviewSubjective;
   const objectiveDraftKey = `objective-draft:${bs.user?.id || 0}/${bs.domain?.id || 'default'}/${pdoc.docId || pid}${tid ? `@${tid}` : ''}`;
@@ -1216,6 +1219,7 @@ export function ProblemDetailPage() {
 
   return (
     <motion.div className="space-y-4" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
+      <ProblemRejudgeDialog open={rejudgeOpen} onOpenChange={setRejudgeOpen} endpoint={problemUrl} pid={String(pid)} title={baseTitle} />
       {/* Contest mode banner — visible whenever we entered via a contest tid */}
       {inContest && contestUrl ? <ContestBanner tdoc={tdoc!} mode={mode} letter={contestLetter} contestUrl={contestUrl} /> : null}
 
@@ -1303,6 +1307,12 @@ export function ProblemDetailPage() {
               </a>
             </Button>
           ) : null}
+          {canRejudgeProblem && !inContest ? (
+            <Button type="button" size="sm" variant="ghost" onClick={() => setRejudgeOpen(true)}>
+              <RotateCcw className="mr-1 size-3.5" />
+              整题重测
+            </Button>
+          ) : null}
           <ProblemEditGate canEditProblem={canEditProblem} inContest={!!inContest}>
             <Button asChild size="sm" variant="ghost">
               <a href={`${problemUrl}/edit`}>
@@ -1336,11 +1346,7 @@ export function ProblemDetailPage() {
           <Card>
             <CardContent className="p-4 sm:p-6">
               {structuredStatement ? (
-                <ProgrammingStatementView
-                  statement={structuredStatement}
-                  preferredLang={preferredLang}
-                  limits={<LimitsSection config={config} />}
-                />
+                <ProgrammingStatementView statement={structuredStatement} preferredLang={preferredLang} limits={<LimitsSection config={config} />} />
               ) : (
                 <MarkdownView content={content} preferredLang={preferredLang} />
               )}

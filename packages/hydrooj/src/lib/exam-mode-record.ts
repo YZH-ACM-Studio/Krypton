@@ -6,14 +6,16 @@ export function shouldUseLiveClientRecordCodeOnly({
     contestOwner,
     canEditContest,
     systemAdmin,
+    contextualRecordAccess = false,
 }: {
     clientRequired: boolean;
     ongoing: boolean;
     contestOwner: boolean;
     canEditContest: boolean;
     systemAdmin: boolean;
+    contextualRecordAccess?: boolean;
 }) {
-    return clientRequired && ongoing && !contestOwner && !canEditContest && !systemAdmin;
+    return clientRequired && ongoing && !contestOwner && !canEditContest && !systemAdmin && !contextualRecordAccess;
 }
 
 function minimalProblem(pdoc: RecordLike | null | undefined) {

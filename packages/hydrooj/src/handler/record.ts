@@ -380,6 +380,7 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
                 contestOwner: this.user.own(this.tdoc),
                 canEditContest: this.user.hasPerm(PERM.PERM_EDIT_CONTEST),
                 systemAdmin: this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM),
+                contextualRecordAccess: this.postContestPracticeRecordAccess || this.contestPretestRecordAccess,
             });
         if (liveClientRecordCodeOnly && rev) throw new PermissionError(PERM.PERM_VIEW_RECORD);
         const contextualProblemAccess = this.postContestPracticeRecordAccess || this.contestPretestRecordAccess;

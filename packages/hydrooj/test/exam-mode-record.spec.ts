@@ -116,6 +116,7 @@ describe('Exam Mode record code payload', () => {
         expect(shouldUseLiveClientRecordCodeOnly({ ...base, contestOwner: true })).to.equal(false);
         expect(shouldUseLiveClientRecordCodeOnly({ ...base, canEditContest: true })).to.equal(false);
         expect(shouldUseLiveClientRecordCodeOnly({ ...base, systemAdmin: true })).to.equal(false);
+        expect(shouldUseLiveClientRecordCodeOnly({ ...base, contextualRecordAccess: true })).to.equal(false);
     });
 
     it('fails fast when the canonical record or source shape is invalid', () => {

@@ -42,6 +42,7 @@ import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { ContestParticipationField } from '@/components/contest-participation-field';
 import { MarkdownEditor, MarkdownView } from '@/components/markdown-renderer';
 import { TEAM_DIALOG_BUTTON_CLASS, TeamDialogBody, TeamDialogContent, TeamDialogFooter } from '@/components/team-dialog';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -771,7 +772,7 @@ export function ContestEditPage() {
                 </div>
 
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="space-y-1.5">
+                  <div className={rule === 'acm' ? 'space-y-1.5' : 'space-y-1.5 sm:col-span-2'}>
                     <label htmlFor="rule" className="text-sm font-medium">
                       赛制
                     </label>
@@ -788,22 +789,14 @@ export function ContestEditPage() {
                     />
                     {participationMode === 'team' ? <input type="hidden" name="rule" value="acm" /> : null}
                   </div>
-                  <div className="space-y-1.5">
-                    <label className="text-sm font-medium">参赛身份</label>
-                    <SimpleSelect
-                      name="participationMode"
-                      value={participationMode}
-                      onValueChange={(value) => {
-                        setParticipationMode(value as 'individual' | 'team');
-                        setModeClearConfirmed(false);
-                      }}
-                      options={[
-                        { value: 'individual', label: '个人 ACM / 普通比赛' },
-                        { value: 'team', label: '1–3 人团队 ACM' },
-                      ]}
-                    />
-                    <p className="text-[11px] text-muted-foreground">团队模式固定为 ACM，强制通过 Vigil Client 进入且不计个人 Rating。</p>
-                  </div>
+                  <ContestParticipationField
+                    rule={rule}
+                    value={participationMode}
+                    onValueChange={(value) => {
+                      setParticipationMode(value);
+                      setModeClearConfirmed(false);
+                    }}
+                  />
                 </div>
 
                 {participationMode === 'team' ? (

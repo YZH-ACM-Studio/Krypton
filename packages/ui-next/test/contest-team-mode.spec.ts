@@ -1,13 +1,17 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
+import { ContestParticipationField } from '../src/components/contest-participation-field';
 
 const root = resolve(import.meta.dirname, '..');
 
 describe('p1.11 contest team-mode editor contract', () => {
   it('posts the authoritative mode revision and uses a custom destructive confirmation', () => {
     const editor = readFileSync(resolve(root, 'src/pages/contest-manage.tsx'), 'utf8');
-    expect(editor).to.include('name="participationMode"');
+    expect(
+      renderToStaticMarkup(ContestParticipationField({ rule: 'acm', value: 'individual', onValueChange: () => undefined })),
+    ).to.include('name="participationMode"');
     expect(editor).to.include('name="participationRevision"');
     expect(editor).to.include('name="teamModeClearConfirmation"');
     expect(editor).to.include('停用本场全部队伍？');

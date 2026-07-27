@@ -18,6 +18,30 @@ export interface PretestResult {
   error?: string;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Hydro's JSON renderer may return handler data directly or inside the
+ * UINext bootstrap envelope. Record polling must understand both shapes;
+ * otherwise a completed record is mistaken for an object with no `status`
+ * and remains pending until the client-side timeout.
+ */
+export function parseRecordResponse(payload: unknown): PretestResult & { status: number } {
+  if (!isRecord(payload)) throw new Error('评测记录接口返回了无效 JSON');
+
+  let candidate: Record<string, unknown> = payload;
+  if (isRecord(payload.rdoc)) {
+    candidate = payload.rdoc;
+  } else if (isRecord(payload.page) && isRecord(payload.page.data) && isRecord(payload.page.data.rdoc)) {
+    candidate = payload.page.data.rdoc;
+  }
+
+  if (typeof candidate.status !== 'number') throw new Error('评测记录响应缺少有效状态');
+  return { ...candidate, status: candidate.status };
+}
+
 export type SelfTestVerdict = 'ac' | 'wa' | 'ran' | 'fail' | 'pending' | 'none';
 export type PretestResultTab = 'output' | 'diff' | 'compiler';
 

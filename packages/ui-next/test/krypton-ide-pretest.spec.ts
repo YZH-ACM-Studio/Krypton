@@ -1,7 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import { distributePretestRecord, preferredPretestResultTab, pretestActualOutput, selfTestVerdict } from '../src/lib/pretest-results.ts';
+import {
+  distributePretestRecord,
+  parseRecordResponse,
+  preferredPretestResultTab,
+  pretestActualOutput,
+  selfTestVerdict,
+} from '../src/lib/pretest-results.ts';
 
 describe('krypton IDE multi-case pretest results', () => {
+  it('reads terminal records from direct, handler, and UINext bootstrap responses', () => {
+    const rdoc = { status: 1, testCases: [{ id: 1, status: 1, time: 1, memory: 10, message: '42\n' }] };
+
+    expect(parseRecordResponse(rdoc)).to.deep.equal(rdoc);
+    expect(parseRecordResponse({ rdoc })).to.deep.equal(rdoc);
+    expect(parseRecordResponse({ page: { data: { rdoc } } })).to.deep.equal(rdoc);
+    expect(() => parseRecordResponse({ page: { data: {} } })).to.throw('缺少有效状态');
+  });
+
   it('binds parallel case results to tabs by the judge case id, not completion order', () => {
     const results = distributePretestRecord(
       {

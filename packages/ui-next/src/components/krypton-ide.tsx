@@ -46,7 +46,14 @@ import { json } from '@codemirror/lang-json';
 import { oneDark } from '@codemirror/theme-one-dark';
 
 import { cn } from '@/lib/cn';
-import { distributePretestRecord, preferredPretestResultTab, pretestActualOutput, selfTestVerdict, type PretestResult } from '@/lib/pretest-results';
+import {
+  distributePretestRecord,
+  parseRecordResponse,
+  preferredPretestResultTab,
+  pretestActualOutput,
+  selfTestVerdict,
+  type PretestResult,
+} from '@/lib/pretest-results';
 import { READ_ONLY_CODE_EXTENSIONS, resolveReadOnlyCodeLanguage } from '@/lib/readonly-code-policy';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -1054,9 +1061,8 @@ export function KryptonIDE({
           headers: { Accept: 'application/json' },
           credentials: 'same-origin',
         });
-        const data = await res.json();
-        const rdoc = data.rdoc || data;
-        const s: number = rdoc.status ?? 0;
+        const rdoc = parseRecordResponse(await res.json());
+        const s = rdoc.status;
         setRecords((prev) => prev.map((r) => (r.rid === rid ? { ...r, status: s, time: rdoc.time, memory: rdoc.memory } : r)));
         if (s > 0 && s < 20) return;
       } catch {
@@ -1241,9 +1247,8 @@ export function KryptonIDE({
           if (!contentType.includes('application/json')) {
             throw new Error('评测记录接口返回了非 JSON，请检查记录轮询地址');
           }
-          const rData = await rRes.json();
-          const rdoc = rData.rdoc || rData;
-          const s: number = rdoc.status ?? 0;
+          const rdoc = parseRecordResponse(await rRes.json());
+          const s = rdoc.status;
           distributeFromRdoc(rdoc);
 
           // Final status: 1-19

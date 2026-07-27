@@ -41,7 +41,6 @@ function fallbackCopyText(text: string): boolean {
 }
 
 async function copyText(text: string): Promise<boolean> {
-  if (!text) return false;
   if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText && window.isSecureContext) {
     try {
       await navigator.clipboard.writeText(text);
@@ -69,31 +68,36 @@ export function SampleBlocks({ samples, className, suppressHeader }: { samples: 
 }
 
 export function SampleBlock({ label, content }: { label: string; content: string }) {
+  return (
+    <div className="rounded-md border bg-muted/20 overflow-hidden">
+      <div className="flex items-center justify-between px-3 py-1.5 border-b bg-muted/40">
+        <span className="text-[11px] font-medium text-muted-foreground">{label}</span>
+        <SampleCopyButton label={label} content={content} />
+      </div>
+      <pre className="p-3 font-mono text-xs whitespace-pre-wrap break-all min-h-[2em]">{content}</pre>
+    </div>
+  );
+}
+
+export function SampleCopyButton({ label, content }: { label: string; content: string }) {
   const [copyState, setCopyState] = useState<CopyState>('idle');
   const handleCopy = async (e: MouseEvent<HTMLButtonElement>) => {
     e.preventDefault();
     e.stopPropagation();
-    if (!content) return;
     const ok = await copyText(content);
     setCopyState(ok ? 'copied' : 'failed');
     window.setTimeout(() => setCopyState('idle'), 1500);
   };
   const Icon = copyState === 'copied' ? Check : copyState === 'failed' ? XCircle : ClipboardCopy;
   return (
-    <div className="rounded-md border bg-muted/20 overflow-hidden">
-      <div className="flex items-center justify-between px-3 py-1.5 border-b bg-muted/40">
-        <span className="text-[11px] font-medium text-muted-foreground">{label}</span>
-        <button
-          type="button"
-          onClick={handleCopy}
-          className="inline-flex h-6 items-center gap-1 rounded px-1.5 text-[10px] text-muted-foreground transition-colors hover:bg-background/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-          aria-label={`复制${label}`}
-        >
-          <Icon className="size-3" />
-          {copyState === 'copied' ? '已复制' : copyState === 'failed' ? '复制失败' : '复制'}
-        </button>
-      </div>
-      <pre className="p-3 font-mono text-xs whitespace-pre-wrap break-all min-h-[2em]">{content}</pre>
-    </div>
+    <button
+      type="button"
+      onClick={handleCopy}
+      className="inline-flex h-6 items-center gap-1 rounded px-1.5 text-[10px] text-muted-foreground transition-colors hover:bg-background/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      aria-label={`复制${label}`}
+    >
+      <Icon className="size-3" />
+      {copyState === 'copied' ? '已复制' : copyState === 'failed' ? '复制失败' : '复制'}
+    </button>
   );
 }

@@ -153,6 +153,7 @@ export interface ProblemConfig {
     time_limit_rate?: Record<string, number>;
     memory_limit_rate?: Record<string, number>;
     type: string;
+    maxScore: number;
     mode?: 'text' | 'compile';
     subType?: string;
     target?: string;
@@ -348,6 +349,7 @@ export interface ScoreboardNode {
         memberUids: number[];
     };
     score?: number; // 原始分数（100，不含赛制加成）
+    scorePercentage?: number; // 按该题实际满分归一化后的展示百分比
     style?: string;
     hover?: string;
 }

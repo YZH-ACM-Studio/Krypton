@@ -24,4 +24,23 @@ describe('problem detail testcase count', () => {
         expect(parsed.type).to.equal('remote_judge');
         expect(parsed.count).to.equal(0);
     });
+
+    it('reports the actual configured maximum score', async () => {
+        const parsed = await parseConfig(
+            [
+                'subtasks:',
+                '  - score: 5',
+                '    cases:',
+                '      - input: 1.in',
+                '        output: 1.out',
+                '  - score: 10',
+                '    cases:',
+                '      - input: 2.in',
+                '        output: 2.out',
+            ].join('\n'),
+            ['1.in', '1.out', '2.in', '2.out'],
+        );
+
+        expect(parsed.maxScore).to.equal(15);
+    });
 });

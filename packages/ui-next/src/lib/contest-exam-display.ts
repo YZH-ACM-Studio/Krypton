@@ -1,6 +1,15 @@
+import { getScoreColor } from '@hydrooj/common';
+
 export interface ScoreboardDisplayCell {
   type?: string;
   raw?: unknown;
+}
+
+export function scoreboardScoreColor(percentage: unknown): string | undefined {
+  if (percentage === null || percentage === undefined || percentage === '') return undefined;
+  const numeric = Number(percentage);
+  if (!Number.isFinite(numeric)) return undefined;
+  return getScoreColor(Math.min(100, Math.max(0, numeric)));
 }
 
 export interface ContestProblemStatusDisplay {

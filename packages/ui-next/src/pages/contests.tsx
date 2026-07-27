@@ -38,6 +38,7 @@ import {
   prioritizeCurrentScoreboardRows,
   scoreboardParticipantColumn,
   scoreboardRowMatches,
+  scoreboardScoreColor,
 } from '@/lib/contest-exam-display';
 import { formatDateTime, replaceRouteTokens, toDate } from '@/lib/format';
 
@@ -85,6 +86,7 @@ interface ScoreboardCell {
   raw?: unknown;
   team?: TeamScoreboardCellMeta;
   score?: number;
+  scorePercentage?: number;
   hover?: string;
   style?: string;
 }
@@ -406,11 +408,7 @@ export function ContestsPage() {
           active={statusFilter === 'ended'}
           onClick={() => setStatusFilter(statusFilter === 'ended' ? 'all' : 'ended')}
         />
-        <StatCell
-          label="我参加"
-          value={Object.values(tsdict).filter((s) => s?.attend).length}
-          icon={<Trophy className="size-4 text-primary" />}
-        />
+        <StatCell label="我参加" value={Object.values(tsdict).filter((s) => s?.attend).length} icon={<Trophy className="size-4 text-primary" />} />
       </div>
 
       {/* Search + group + rule filter form */}
@@ -1197,17 +1195,14 @@ export function ContestScoreboardPage() {
     return '';
   }
 
-  function scoreClass(cell: ScoreboardCell) {
-    const score = Number(cell.score ?? cell.value);
-    if (!Number.isFinite(score)) return 'text-foreground';
-    if (score >= 100) return 'text-green-600 dark:text-green-400';
-    if (score > 0) return 'text-amber-600 dark:text-amber-400';
-    return 'text-muted-foreground';
+  function scoreStyle(cell: ScoreboardCell) {
+    const color = scoreboardScoreColor(cell.scorePercentage ?? cell.score ?? cell.value);
+    return color ? { color } : undefined;
   }
 
   function renderRecordCell(cell: ScoreboardCell) {
     const content = (
-      <span className={`whitespace-pre-line font-semibold ${scoreClass(cell)}`} title={cell.hover || undefined}>
+      <span className="whitespace-pre-line font-semibold" title={cell.hover || undefined} style={scoreStyle(cell)}>
         {renderScoreboardText(cell)}
       </span>
     );
@@ -1359,8 +1354,9 @@ export function ContestScoreboardPage() {
     if (cell.type === 'total_score' || cell.type === 'solved' || cell.type === 'time') {
       return (
         <span
-          className={`whitespace-pre-line font-medium tabular-nums ${cell.type === 'total_score' ? scoreClass(cell) : ''}`}
+          className="whitespace-pre-line font-medium tabular-nums"
           title={cell.hover || undefined}
+          style={cell.type === 'total_score' ? scoreStyle(cell) : undefined}
         >
           {renderScoreboardText(cell)}
         </span>

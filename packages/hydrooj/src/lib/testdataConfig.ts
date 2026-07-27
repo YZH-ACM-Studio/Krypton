@@ -15,6 +15,7 @@ export async function parseConfig(config: string | ProblemConfigFile = {}, files
         timeMin: Number.MAX_SAFE_INTEGER,
         timeMax: 0,
         type: cfg.type || 'default',
+        maxScore: 100,
         hackable: cfg.validator && cfg.checker && !['default', 'strict'].includes(cfg.checker_type),
     };
     if (cfg.time != null) result.time = cfg.time as unknown as number;
@@ -50,13 +51,17 @@ export async function parseConfig(config: string | ProblemConfigFile = {}, files
         if (result.type === 'program_fill') result.mode = client.mode;
     }
     result.count ||= Math.sum(readSubtasksFromFiles(files, cfg).map((i) => i.cases.length));
-    if (cfg.subtasks?.length) {
-        for (const subtask of normalizeSubtasks((cfg.subtasks as any) || [], (i) => i, cfg.time, cfg.memory)) {
+    const normalizedSubtasks = cfg.subtasks?.length ? normalizeSubtasks((cfg.subtasks as any) || [], (i) => i, cfg.time, cfg.memory) : [];
+    if (normalizedSubtasks.length) {
+        result.maxScore = Math.sum(normalizedSubtasks.map((subtask) => subtask.score));
+        for (const subtask of normalizedSubtasks) {
             result.memoryMax = Math.max(result.memoryMax, ...subtask.cases.map((i) => parseMemoryMB(i.memory)));
             result.memoryMin = Math.min(result.memoryMin, ...subtask.cases.map((i) => parseMemoryMB(i.memory)));
             result.timeMax = Math.max(result.timeMax, ...subtask.cases.map((i) => parseTimeMS(i.time)));
             result.timeMin = Math.min(result.timeMin, ...subtask.cases.map((i) => parseTimeMS(i.time)));
         }
+    } else if (result.type === 'objective' && result.questions?.length) {
+        result.maxScore = Math.sum(result.questions.map((question) => question.score));
     } else {
         if (cfg.time) result.timeMax = result.timeMin = cfg.time as unknown as number;
         if (cfg.memory) result.memoryMax = result.memoryMin = cfg.memory as unknown as number;

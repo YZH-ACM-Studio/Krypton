@@ -26,6 +26,7 @@ import {
 } from '../interface';
 import avatar from '../lib/avatar';
 import { effectiveLockoutWindow } from '../lib/contest-lockout';
+import { annotateScoreboardPercentages } from '../lib/scoreboard-score-percentage';
 import bus, { parallelAllSettled } from '../service/bus';
 import db from '../service/db';
 import type { Handler } from '../service/server';
@@ -1658,6 +1659,7 @@ export async function getScoreboard(
                   getMultiStatus(domainId, { docId: tid }).sort(RULES[tdoc.rule].statusSort),
               );
     await bus.parallel('contest/scoreboard', tdoc, rows, udict, pdict);
+    annotateScoreboardPercentages(tdoc, rows, pdict);
     return [tdoc, rows, udict, pdict];
 }
 

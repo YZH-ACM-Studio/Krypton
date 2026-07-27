@@ -1,6 +1,7 @@
 import { ArrowDown, ArrowUp, CheckCircle2, CircleDashed, Eye, FileText, Plus, Trash2 } from 'lucide-react';
 import { type ReactNode, useMemo, useState } from 'react';
 import { MarkdownEditor, MarkdownView } from '@/components/markdown-renderer';
+import { SampleCopyButton } from '@/components/sample-blocks';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -62,15 +63,7 @@ export function structuredStatementSamples(view: ProgrammingStatementViewData | 
   }));
 }
 
-function Section({
-  title,
-  children,
-  icon = <FileText className="size-4" />,
-}: {
-  title: string;
-  children: ReactNode;
-  icon?: ReactNode;
-}) {
+function Section({ title, children, icon = <FileText className="size-4" /> }: { title: string; children: ReactNode; icon?: ReactNode }) {
   return (
     <section className="space-y-3">
       <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight">
@@ -131,11 +124,17 @@ export function ProgrammingStatementView({
                 <header className="border-b px-4 py-2 text-sm font-medium">样例 {index + 1}</header>
                 <div className="grid gap-px bg-border md:grid-cols-2">
                   <div className="bg-card p-4">
-                    <p className="mb-2 text-xs font-medium text-muted-foreground">输入</p>
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <p className="text-xs font-medium text-muted-foreground">输入</p>
+                      <SampleCopyButton label={`样例 ${index + 1} 输入`} content={item.inputEmpty ? '' : item.input} />
+                    </div>
                     <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-sm">{item.inputEmpty ? '（空）' : item.input}</pre>
                   </div>
                   <div className="bg-card p-4">
-                    <p className="mb-2 text-xs font-medium text-muted-foreground">输出</p>
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <p className="text-xs font-medium text-muted-foreground">输出</p>
+                      <SampleCopyButton label={`样例 ${index + 1} 输出`} content={item.outputEmpty ? '' : item.output} />
+                    </div>
                     <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-sm">{item.outputEmpty ? '（空）' : item.output}</pre>
                   </div>
                 </div>
@@ -179,9 +178,7 @@ function completion(statement: ProgrammingStatementCanonical) {
     ['examples', statement.examples.state],
     ['hints', statement.hints.state],
   ] as const;
-  const missing = entries
-    .filter(([, state]) => state === 'undecided')
-    .map(([key]) => ({ key, label: SECTION_LABELS[key] }));
+  const missing = entries.filter(([, state]) => state === 'undecided').map(([key]) => ({ key, label: SECTION_LABELS[key] }));
   return { missing, completed: entries.length - missing.length, total: entries.length };
 }
 
@@ -386,10 +383,24 @@ export function ProgrammingStatementEditor({
               <header className="flex items-center gap-2 border-b bg-muted/25 px-4 py-3">
                 <span className="font-medium">样例 {index + 1}</span>
                 <div className="ml-auto flex gap-1">
-                  <Button type="button" size="icon" variant="ghost" disabled={index === 0} onClick={() => moveExample(index, -1)} aria-label={`上移样例 ${index + 1}`}>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    disabled={index === 0}
+                    onClick={() => moveExample(index, -1)}
+                    aria-label={`上移样例 ${index + 1}`}
+                  >
                     <ArrowUp className="size-4" />
                   </Button>
-                  <Button type="button" size="icon" variant="ghost" disabled={index === value.examples.items.length - 1} onClick={() => moveExample(index, 1)} aria-label={`下移样例 ${index + 1}`}>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    disabled={index === value.examples.items.length - 1}
+                    onClick={() => moveExample(index, 1)}
+                    aria-label={`下移样例 ${index + 1}`}
+                  >
                     <ArrowDown className="size-4" />
                   </Button>
                   <Button

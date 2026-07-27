@@ -6,6 +6,7 @@ import {
   getPersonalPracticeStatus,
   postContestProblemEntryUrl,
   prioritizeCurrentScoreboardRows,
+  scoreboardScoreColor,
   type ScoreboardDisplayCell,
   scoreboardParticipantColumn,
   scoreboardRowMatches,
@@ -67,8 +68,7 @@ describe('getPersonalPracticeStatus', () => {
   });
 
   it('passes non-pass verdicts through untouched regardless of phase', () => {
-    expect(getPersonalPracticeStatus({ status: 2, phase: 'before' }))
-      .to.deep.equal({ label: 'WA', title: 'Wrong Answer', code: 'fail' });
+    expect(getPersonalPracticeStatus({ status: 2, phase: 'before' })).to.deep.equal({ label: 'WA', title: 'Wrong Answer', code: 'fail' });
     expect(getPersonalPracticeStatus({ status: 20, phase: 'after' })?.code).to.equal('progress');
   });
 
@@ -81,8 +81,7 @@ describe('getPersonalPracticeStatus', () => {
   });
 
   it('relabels other passes but keeps the original title', () => {
-    expect(getPersonalPracticeStatus({ status: 1, phase: 'after' }))
-      .to.deep.equal({ label: '已通过', title: 'Accepted', code: 'pass' });
+    expect(getPersonalPracticeStatus({ status: 1, phase: 'after' })).to.deep.equal({ label: '已通过', title: 'Accepted', code: 'pass' });
     expect(getPersonalPracticeStatus({ status: 1, phase: 'other' })?.label).to.equal('已通过');
   });
 
@@ -109,22 +108,17 @@ describe('postContestProblemEntryUrl', () => {
   };
 
   it('always routes exam-rule contests into exam mode', () => {
-    expect(postContestProblemEntryUrl({ ...base, rule: 'exam', clientRequired: false, ended: false }))
-      .to.equal('/exam-mode/abc');
+    expect(postContestProblemEntryUrl({ ...base, rule: 'exam', clientRequired: false, ended: false })).to.equal('/exam-mode/abc');
   });
 
   it('uri-encodes the contest id', () => {
-    expect(postContestProblemEntryUrl({ ...base, rule: 'exam', contestId: 'a b/c' }))
-      .to.equal('/exam-mode/a%20b%2Fc');
+    expect(postContestProblemEntryUrl({ ...base, rule: 'exam', contestId: 'a b/c' })).to.equal('/exam-mode/a%20b%2Fc');
   });
 
   it('keeps client-required contests in exam mode until practice is available', () => {
-    expect(postContestProblemEntryUrl({ ...base, clientRequired: true, practiceSupported: false }))
-      .to.equal('/exam-mode/abc');
-    expect(postContestProblemEntryUrl({ ...base, clientRequired: true, ended: false }))
-      .to.equal('/exam-mode/abc');
-    expect(postContestProblemEntryUrl({ ...base, clientRequired: true, practiceOpen: false }))
-      .to.equal('/exam-mode/abc');
+    expect(postContestProblemEntryUrl({ ...base, clientRequired: true, practiceSupported: false })).to.equal('/exam-mode/abc');
+    expect(postContestProblemEntryUrl({ ...base, clientRequired: true, ended: false })).to.equal('/exam-mode/abc');
+    expect(postContestProblemEntryUrl({ ...base, clientRequired: true, practiceOpen: false })).to.equal('/exam-mode/abc');
   });
 
   it('routes client-required contests to problems once ended with open practice', () => {
@@ -132,8 +126,7 @@ describe('postContestProblemEntryUrl', () => {
   });
 
   it('routes ordinary contests straight to the problems page', () => {
-    expect(postContestProblemEntryUrl({ ...base, ended: false, practiceOpen: false }))
-      .to.equal('/contest/abc/problems');
+    expect(postContestProblemEntryUrl({ ...base, ended: false, practiceOpen: false })).to.equal('/contest/abc/problems');
   });
 });
 
@@ -173,7 +166,10 @@ describe('scoreboardParticipantColumn', () => {
 });
 
 describe('scoreboardRowMatches', () => {
-  const row: ScoreboardDisplayCell[] = [{ type: 'rank', raw: 1 }, { type: 'user', raw: 42 }];
+  const row: ScoreboardDisplayCell[] = [
+    { type: 'rank', raw: 1 },
+    { type: 'user', raw: 42 },
+  ];
 
   it('matches on stringified equality of the raw cell value', () => {
     expect(scoreboardRowMatches(row, 1, 42)).to.equal(true);
@@ -203,8 +199,7 @@ describe('prioritizeCurrentScoreboardRows', () => {
 
   it('moves matching rows to the front, keeping both groups in order', () => {
     const rows = [rowFor(1), rowFor(2), rowFor(3), rowFor(2)];
-    expect(prioritizeCurrentScoreboardRows(rows, 1, 2))
-      .to.deep.equal([rowFor(2), rowFor(2), rowFor(1), rowFor(3)]);
+    expect(prioritizeCurrentScoreboardRows(rows, 1, 2)).to.deep.equal([rowFor(2), rowFor(2), rowFor(1), rowFor(3)]);
   });
 
   it('returns the original array reference when nothing matches', () => {
@@ -217,5 +212,20 @@ describe('prioritizeCurrentScoreboardRows', () => {
   it('handles empty scoreboards', () => {
     const rows: ScoreboardDisplayCell[][] = [];
     expect(prioritizeCurrentScoreboardRows(rows, 1, 1)).to.equal(rows);
+  });
+});
+
+describe('scoreboardScoreColor', () => {
+  it('uses the normalized percentage supplied by the scoreboard contract', () => {
+    expect(scoreboardScoreColor(0)).to.equal('#ff4f4f');
+    expect(scoreboardScoreColor(50)).to.equal('#f7bb3b');
+    expect(scoreboardScoreColor(100)).to.equal('#25ad40');
+  });
+
+  it('clamps out-of-range values and ignores invalid values', () => {
+    expect(scoreboardScoreColor(-20)).to.equal('#ff4f4f');
+    expect(scoreboardScoreColor(140)).to.equal('#25ad40');
+    expect(scoreboardScoreColor(undefined)).to.equal(undefined);
+    expect(scoreboardScoreColor('not-a-score')).to.equal(undefined);
   });
 });

@@ -28,6 +28,7 @@ import {
 import { FileInfo, ScoreboardConfig, Tdoc } from '../interface';
 import { canUsePostContestPractice, getPostContestPracticeState } from '../lib/contest-correction';
 import { withContestEditBoundary } from '../lib/contest-edit-boundary';
+import { getScoreboardExportCapabilities, getScoreboardSnapshotMode } from '../lib/contest-scoreboard-export';
 import {
     buildLatestContestProblemStatusByPid,
     buildPersonalPracticeRecordQuery,
@@ -2055,6 +2056,13 @@ export async function apply(ctx: Context) {
                             Object.entries(students).map(([uid, s]: [string, any]) => [uid, { studentId: s.studentId, realName: s.realName }]),
                         );
                     }
+                    const scoreboardExportCapabilities = getScoreboardExportCapabilities({
+                        ownsContest: this.user.own(tdoc),
+                        canEditContest: this.user.hasPerm(PERM.PERM_EDIT_CONTEST),
+                        isSystemAdmin: this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM),
+                        hasPrivateIdentityData: Object.keys(studentDict).length > 0,
+                        teamMode: contest.getParticipationMode(tdoc) === 'team',
+                    });
                     this.response.body = {
                         tdoc: this.tdoc,
                         tsdoc: this.tsdocAsPublic(),
@@ -2065,6 +2073,9 @@ export async function apply(ctx: Context) {
                         groups,
                         availableViews,
                         studentDict,
+                        canExportScoreboardImage: scoreboardExportCapabilities.canExportImage,
+                        canExportScoreboardPrivateIdentity: scoreboardExportCapabilities.canIncludePrivateIdentity,
+                        scoreboardSnapshotMode: getScoreboardSnapshotMode(!!realtime, contest.isLocked(this.tdoc)),
                     };
                     this.response.pjax = 'partials/scoreboard.html';
                     this.response.template = 'contest_scoreboard.html';

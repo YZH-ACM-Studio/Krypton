@@ -12,6 +12,7 @@ import {
   Download,
   FileText,
   Flag,
+  ImageDown,
   LayoutGrid,
   List,
   Lock,
@@ -27,6 +28,8 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Pagination } from '@/components/ui/pagination';
 import { SimpleSelect } from '@/components/ui/select';
@@ -41,6 +44,17 @@ import {
   scoreboardScoreColor,
 } from '@/lib/contest-exam-display';
 import { formatDateTime, replaceRouteTokens, toDate } from '@/lib/format';
+import {
+  buildScoreboardImageModel,
+  canShowScoreboardImageExport,
+  renderScoreboardImage,
+  scoreboardExportPlainText,
+  scoreboardImageFilename,
+  type ScoreboardImageCell,
+  type ScoreboardImageColumn,
+  type ScoreboardImageRow,
+  type ScoreboardSnapshotMode,
+} from '@/lib/scoreboard-image-export';
 
 interface ContestDoc {
   docId?: string | number;
@@ -100,6 +114,8 @@ interface TeamScoreboardCellMeta {
 interface ContestsPageData {
   attended?: boolean | number;
   availableViews?: Array<[string, string]>;
+  canExportScoreboardImage?: boolean;
+  canExportScoreboardPrivateIdentity?: boolean;
   canManageContest?: boolean;
   canViewRecord?: boolean;
   currentUserId?: unknown;
@@ -123,6 +139,7 @@ interface ContestsPageData {
   rule?: string;
   rules?: Record<string, string>;
   studentDict?: Record<string, { studentId: string; realName: string }>;
+  scoreboardSnapshotMode?: ScoreboardSnapshotMode;
   tdoc?: ContestDoc;
   tdocs?: ContestDoc[];
   teamCount?: number;
@@ -1142,9 +1159,114 @@ export function ContestScoreboardPage() {
   const participantColumn = scoreboardParticipantColumn(displayHeader, teamMode);
   const currentParticipantId = teamMode ? data.examMode?.teamId : (data.currentUserId ?? bs.user?.id);
   const orderedDisplayBody = inExamMode ? prioritizeCurrentScoreboardRows(displayBody, participantColumn, currentParticipantId) : displayBody;
+  const canExportImage = canShowScoreboardImageExport(!!data.canExportScoreboardImage, inExamMode);
+  const canExportPrivateIdentity = !!data.canExportScoreboardPrivateIdentity && showStudentCols;
+  const [imageExportOpen, setImageExportOpen] = useState(false);
+  const [includePrivateIdentity, setIncludePrivateIdentity] = useState(false);
+  const [imageExportBusy, setImageExportBusy] = useState(false);
+  const [imageExportError, setImageExportError] = useState('');
 
   function cellText(cell: ScoreboardCell) {
     return cell.value == null ? '—' : String(cell.value);
+  }
+
+  function exportUserIdentity(uid: number): string {
+    const user = udict[String(uid)] || null;
+    const uname = typeof user?.uname === 'string' && user.uname.trim() ? user.uname.trim() : `UID ${uid}`;
+    const displayName =
+      typeof user?.displayName === 'string' && user.displayName.trim() && user.displayName.trim() !== uname ? user.displayName.trim() : '';
+    return displayName ? `${displayName} (${uname})` : uname;
+  }
+
+  function exportTeamIdentity(cell: ScoreboardCell): string {
+    const meta = cell.team;
+    const fallback = scoreboardExportPlainText(cell.value).split('\n')[0] || '未命名队伍';
+    const teamName = typeof meta?.name === 'string' && meta.name.trim() ? meta.name.trim() : fallback;
+    const memberUids = Array.isArray(meta?.memberUids) ? meta.memberUids.filter(Number.isInteger) : [];
+    if (!meta || memberUids.length === 0) return teamName;
+    const captain = memberUids.includes(meta.captainUid || -1) ? exportUserIdentity(meta.captainUid as number) : '未指定';
+    return `${teamName}\n队长：${captain}\n成员：${memberUids.map(exportUserIdentity).join(' / ')}`;
+  }
+
+  function exportCellText(cell: ScoreboardCell, columnIndex: number): string {
+    if (teamMode && columnIndex === participantColumn) return exportTeamIdentity(cell);
+    if (cell.type === 'rank' && (cell.value === 0 || cell.value === '0')) return '*';
+    if (cell.type === 'user') return scoreboardExportPlainText(cell.value);
+    if (cell.type === 'records' && Array.isArray(cell.raw)) {
+      return cell.raw.map((record: ScoreboardCell) => scoreboardExportPlainText(record.value)).join(' / ') || '—';
+    }
+    return scoreboardExportPlainText(cell.value);
+  }
+
+  function isFirstBlood(cell: ScoreboardCell): boolean {
+    if (typeof cell.style === 'string' && /background-color/i.test(cell.style)) return true;
+    return (
+      cell.type === 'records' &&
+      Array.isArray(cell.raw) &&
+      cell.raw.some((record: ScoreboardCell) => /background-color/i.test(String(record.style || '')))
+    );
+  }
+
+  function imageExportColumns(): ScoreboardImageColumn[] {
+    return displayHeader.map((cell, index) => {
+      const problem = cell.type === 'problem' && cell.raw ? pdict[String(cell.raw)] : null;
+      const label =
+        problem && (problem.nAccept !== undefined || problem.nSubmit !== undefined)
+          ? `${scoreboardExportPlainText(cell.value)}  ${problem.nAccept || 0}/${problem.nSubmit || 0}`
+          : scoreboardExportPlainText(cell.value);
+      return {
+        type: teamMode && index === participantColumn ? 'team' : cell.type || 'text',
+        label: teamMode && index === participantColumn ? '队伍' : label,
+      };
+    });
+  }
+
+  function imageExportRows(): ScoreboardImageRow[] {
+    return orderedDisplayBody.map((row) => ({
+      cells: displayHeader.map((_, columnIndex): ScoreboardImageCell => {
+        const cell = row[columnIndex] || {};
+        const isScoredCell = cell.type === 'record' || cell.type === 'records' || cell.type === 'total_score';
+        return {
+          text: exportCellText(cell, columnIndex),
+          color: isScoredCell ? scoreboardScoreColor(cell.scorePercentage ?? cell.score ?? cell.value) : undefined,
+          firstBlood: isFirstBlood(cell),
+        };
+      }),
+    }));
+  }
+
+  async function downloadScoreboardImage() {
+    setImageExportBusy(true);
+    setImageExportError('');
+    const generatedAt = new Date();
+    try {
+      const model = buildScoreboardImageModel({
+        title: tdoc.title || (isHomework ? '作业排行榜' : '比赛排行榜'),
+        generatedAt: formatDateTime(generatedAt, bs.locale),
+        snapshotMode: data.scoreboardSnapshotMode === 'frozen' ? 'frozen' : 'realtime',
+        columns: imageExportColumns(),
+        rows: imageExportRows(),
+        canIncludePrivateIdentity: canExportPrivateIdentity,
+        includePrivateIdentity,
+      });
+      const blob = await renderScoreboardImage(model);
+      const objectUrl = URL.createObjectURL(blob);
+      try {
+        const anchor = document.createElement('a');
+        anchor.href = objectUrl;
+        anchor.download = scoreboardImageFilename(model.title, generatedAt);
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+      } finally {
+        window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+      }
+      setImageExportOpen(false);
+    } catch (error) {
+      setImageExportError(error instanceof Error ? error.message : '排行榜图片导出失败');
+    } finally {
+      setImageExportBusy(false);
+    }
   }
 
   function renderScoreboardText(cell: ScoreboardCell): ReactNode {
@@ -1182,17 +1304,7 @@ export function ContestScoreboardPage() {
   }
 
   function firstBloodClass(cell: ScoreboardCell) {
-    if (typeof cell.style === 'string' && /background-color/i.test(cell.style)) {
-      return 'bg-[#d9f0c7] dark:bg-emerald-950/50';
-    }
-    if (
-      cell.type === 'records' &&
-      Array.isArray(cell.raw) &&
-      cell.raw.some((record: ScoreboardCell) => /background-color/i.test(String(record.style || '')))
-    ) {
-      return 'bg-[#d9f0c7] dark:bg-emerald-950/50';
-    }
-    return '';
+    return isFirstBlood(cell) ? 'bg-[#d9f0c7] dark:bg-emerald-950/50' : '';
   }
 
   function scoreStyle(cell: ScoreboardCell) {
@@ -1387,6 +1499,21 @@ export function ContestScoreboardPage() {
         </div>
         {!inExamMode ? (
           <div className="flex flex-wrap gap-2">
+            {canExportImage ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setIncludePrivateIdentity(false);
+                  setImageExportError('');
+                  setImageExportOpen(true);
+                }}
+              >
+                <ImageDown className="size-4" />
+                导出 PNG
+              </Button>
+            ) : null}
             {['html', 'csv', 'ghost'].map((view) => (
               <Button key={view} asChild variant="outline" size="sm">
                 <a href={`${scoreboardUrl}/${view}`} target="_blank" rel="noreferrer">
@@ -1480,6 +1607,65 @@ export function ContestScoreboardPage() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog
+        open={imageExportOpen && canExportImage}
+        onOpenChange={(open) => {
+          if (imageExportBusy) return;
+          setImageExportOpen(open);
+          if (!open) setImageExportError('');
+        }}
+      >
+        <DialogContent className="w-full sm:w-[520px]" onClose={() => !imageExportBusy && setImageExportOpen(false)}>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ImageDown className="size-4 text-primary" />
+              导出完整排行榜
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 px-6 py-5">
+            <div className="rounded-xl border bg-muted/35 p-4">
+              <p className="font-medium">{tdoc.title || (isHomework ? '作业排行榜' : '比赛排行榜')}</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                将当前页面的 {orderedDisplayBody.length} 行、{displayHeader.length} 列生成一张完整 PNG。
+              </p>
+              <p className="mt-2 text-xs font-medium text-muted-foreground">
+                {data.scoreboardSnapshotMode === 'frozen' ? '封榜快照：不会绕过封榜读取真实结果' : '实时排行榜：导出当前已显示的实时数据'}
+              </p>
+            </div>
+            {canExportPrivateIdentity ? (
+              <label className="group flex cursor-pointer items-start gap-3 rounded-xl border p-4 transition-colors hover:bg-muted/30">
+                <Checkbox
+                  className="mt-0.5"
+                  checked={includePrivateIdentity}
+                  onCheckedChange={setIncludePrivateIdentity}
+                  disabled={imageExportBusy}
+                />
+                <span>
+                  <span className="block text-sm font-medium">包含学号和姓名</span>
+                  <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
+                    仅全站系统管理员可选。图片可能包含个人信息，请按管理用途妥善保存。
+                  </span>
+                </span>
+              </label>
+            ) : null}
+            {imageExportError ? (
+              <div role="alert" className="rounded-xl border border-destructive/35 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                {imageExportError}
+              </div>
+            ) : null}
+          </div>
+          <div className="flex justify-end gap-2 border-t px-6 py-4">
+            <Button type="button" variant="outline" disabled={imageExportBusy} onClick={() => setImageExportOpen(false)}>
+              取消
+            </Button>
+            <Button type="button" disabled={imageExportBusy || displayHeader.length === 0} onClick={() => void downloadScoreboardImage()}>
+              <ImageDown className="size-4" />
+              {imageExportBusy ? '正在生成…' : '生成并下载'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </motion.div>
   );
 }

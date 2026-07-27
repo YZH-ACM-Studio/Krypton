@@ -945,10 +945,13 @@ export async function listProblemsForNode(
     const allNodes = await listAllNodes(mapId);
     const subtree = descendantsOf(node._id.toHexString(), allNodes);
     const subtreeIds = [...subtree].map((id) => new ObjectId(id));
+    const manualProblemIds = Array.from(
+        new Set(allNodes.filter((candidate) => subtree.has(candidate._id.toHexString())).flatMap((candidate) => candidate.problemIds || [])),
+    );
     const orClauses: any[] = [{ knowledgeNodeIds: { $in: subtreeIds } }, { 'managedAuthoring.selectedMindmapNodeIds': { $in: subtreeIds } }];
-    if (node.problemIds?.length) {
-        orClauses.push({ pid: { $in: node.problemIds } });
-        const numericIds = node.problemIds.map(Number).filter((value) => Number.isSafeInteger(value));
+    if (manualProblemIds.length) {
+        orClauses.push({ pid: { $in: manualProblemIds } });
+        const numericIds = manualProblemIds.map(Number).filter((value) => Number.isSafeInteger(value));
         if (numericIds.length) orClauses.push({ docId: { $in: numericIds } });
     }
     if (!orClauses.length) return [];
@@ -976,9 +979,8 @@ export async function listProblemsForNode(
             knowledgeNodeIds: 1,
             'managedAuthoring.selectedMindmapNodeIds': 1,
         })
-        .limit(500)
         .toArray();
-    const manualSet = new Set(node.problemIds || []);
+    const manualSet = new Set(manualProblemIds);
     return docs.map((doc: any) => {
         const pid = String(doc.pid || doc.docId);
         const sources: Array<'canonical' | 'manual'> = [];

@@ -346,6 +346,7 @@ describe('mindmap problem query scope', () => {
         const problems = await model.listProblemsForNode('system', config._id, node._id, scope as any);
 
         expect(documentCalls).to.have.lengthOf(1);
+        expect(documentCalls[0].limit).to.equal(undefined);
         expect(documentCalls[0].filter.$and[0]).to.deep.equal(scope);
         expect(documentCalls[0].filter.$and[1].knowledgeMapId.equals(config._id)).to.equal(true);
         const canonicalClauses = documentCalls[0].filter.$and[1].$or;
@@ -364,6 +365,73 @@ describe('mindmap problem query scope', () => {
                 sources: ['canonical', 'manual'],
             },
         ]);
+    });
+
+    it('includes manual problem associations from descendant nodes', async () => {
+        const parent = makeNode('graph', config.rootNodeId, 10, ['graph']);
+        const child = makeNode('tree', parent._id, 20, ['tree']);
+        child.problemIds = ['P17'];
+        nodes.push(parent, child);
+        documentResults = [
+            {
+                domainId: 'system',
+                docId: 17,
+                pid: 'P17',
+                title: 'Manually associated descendant problem',
+                nSubmit: 4,
+                nAccept: 2,
+                hidden: false,
+                knowledgeMapId: config._id,
+            },
+        ];
+
+        const problems = await model.listProblemsForNode('system', config._id, parent._id, {});
+
+        const manualClause = documentCalls[0].filter.$and[1].$or.find((clause: Record<string, unknown>) => 'pid' in clause);
+        expect(manualClause.pid.$in).to.deep.equal(['P17']);
+        expect(problems).to.deep.equal([
+            {
+                domainId: 'system',
+                docId: 17,
+                pid: 'P17',
+                title: 'Manually associated descendant problem',
+                hidden: false,
+                nSubmit: 4,
+                nAccept: 2,
+                difficulty: 3,
+                sources: ['manual'],
+            },
+        ]);
+    });
+
+    it('returns only problems from the authoritative domain', async () => {
+        const node = makeNode('graph', config.rootNodeId, 10, ['graph']);
+        nodes.push(node);
+        documentResults = [
+            {
+                domainId: 'system',
+                docId: 18,
+                pid: 'P18',
+                title: 'System problem',
+                hidden: false,
+                knowledgeMapId: config._id,
+                knowledgeNodeIds: [node._id],
+            },
+            {
+                domainId: 'course-a',
+                docId: 19,
+                pid: 'P19',
+                title: 'Cross-domain problem',
+                hidden: false,
+                knowledgeMapId: config._id,
+                knowledgeNodeIds: [node._id],
+            },
+        ];
+
+        const problems = await model.listProblemsForNode('system', config._id, node._id, {});
+
+        expect(documentCalls[0].filter.$and[1].domainId).to.equal('system');
+        expect(problems.map((problem) => problem.pid)).to.deep.equal(['P18']);
     });
 
     it('keeps hidden filtering on public queries and removes it only for the admin option', async () => {

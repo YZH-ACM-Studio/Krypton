@@ -16,7 +16,6 @@ class PrivilegeError extends framework.ForbiddenError {
 
 const calls = {
     assertDomain: [] as any[],
-    buildScope: [] as any[],
     canBrowse: [] as any[],
     createMap: [] as any[],
     createNode: [] as any[],
@@ -36,8 +35,6 @@ const calls = {
 let browseAllowed = false;
 let assertFailure: Error | null = null;
 let browseFailure: Error | null = null;
-let scopeFailure: Error | null = null;
-let canonicalScope: Record<string, unknown> = {};
 let bootstrapMaps: any[] = [];
 let bootstrapNodes: any[] = [];
 let mutationFailure:
@@ -74,11 +71,6 @@ const ProblemModel = {
         calls.canBrowse.push(user);
         if (browseFailure) throw browseFailure;
         return browseAllowed;
-    },
-    buildProblemBankScope(user: any) {
-        calls.buildScope.push(user);
-        if (scopeFailure) throw scopeFailure;
-        return canonicalScope;
     },
 };
 
@@ -149,7 +141,6 @@ const modelStub = {
 
 const hydroojStub = {
     ...framework,
-    ForbiddenError: framework.ForbiddenError,
     Handler: framework.Handler,
     NotFoundError: framework.NotFoundError,
     ObjectId,
@@ -466,8 +457,6 @@ beforeEach(() => {
     browseAllowed = false;
     assertFailure = null;
     browseFailure = null;
-    scopeFailure = null;
-    canonicalScope = {};
     mutationFailure = null;
     const mapId = new ObjectId();
     const rootId = new ObjectId();
@@ -526,7 +515,6 @@ describe('mindmap page bootstrap metadata boundary', () => {
 
     it('preserves visible tags but never exposes manual problem ids in the public bootstrap', async () => {
         browseAllowed = true;
-        canonicalScope = { owner: 42 };
 
         const { response } = await dispatchMindmapPage();
 
@@ -583,58 +571,29 @@ describe('mindmap page bootstrap metadata boundary', () => {
 });
 
 describe('mindmap problem enumeration HTTP boundary', () => {
-    it('returns 403 without problem-bank capability before calling the model', async () => {
-        const { response } = await dispatchProblemsApi();
-
-        expect(response.status).to.equal(403);
-        expect(calls.canBrowse).to.have.lengthOf(1);
-        expect(calls.buildScope).to.deep.equal([]);
-        expect(calls.listProblems).to.deep.equal([]);
-        expectNoProblemDisclosure(response.body);
-    });
-
-    it('passes the canonical problem-bank scope to the model for an allowed caller', async () => {
-        browseAllowed = true;
-        canonicalScope = { $or: [{ owner: 42 }, { docId: { $in: [7] } }] };
-
+    it('enumerates every published node problem without applying the caller problem-bank scope', async () => {
         const { mapId, nodeId, response } = await dispatchProblemsApi();
 
         expect(response.status).to.equal(200);
-        expect(calls.buildScope).to.have.lengthOf(1);
+        expect(calls.canBrowse).to.deep.equal([]);
         expect(calls.listProblems).to.have.lengthOf(1);
-        expect(calls.listProblems[0]).to.deep.equal(['system', mapId, nodeId, canonicalScope]);
+        expect(calls.listProblems[0]).to.deep.equal(['system', mapId, nodeId, {}]);
         expect(response.body).to.deep.equal({ problems: sensitiveProblems });
     });
 
     it('ignores a forged args domain and queries only the authoritative domain', async () => {
-        browseAllowed = true;
-        canonicalScope = { owner: 42 };
-
         const { mapId, nodeId, response } = await dispatchProblemsApi(makeUser(), 'evil', 'system');
 
         expect(response.status).to.equal(200);
-        expect(calls.assertDomain[0][1]).to.equal('system');
-        expect(calls.listProblems[0]).to.deep.equal(['system', mapId, nodeId, canonicalScope]);
+        expect(calls.assertDomain).to.deep.equal([]);
+        expect(calls.listProblems[0]).to.deep.equal(['system', mapId, nodeId, {}]);
     });
 
-    it('fails closed when the capability wrapper throws', async () => {
-        browseAllowed = true;
-        browseFailure = new Error('capability unavailable');
-
+    it('never enumerates problems through a hidden map', async () => {
+        bootstrapMaps[0].visibility = 'hidden';
         const { response } = await dispatchProblemsApi();
 
-        expect(response.status).to.equal(500);
-        expect(calls.listProblems).to.deep.equal([]);
-        expectNoProblemDisclosure(response.body);
-    });
-
-    it('fails closed when the scope wrapper throws', async () => {
-        browseAllowed = true;
-        scopeFailure = new Error('scope unavailable');
-
-        const { response } = await dispatchProblemsApi();
-
-        expect(response.status).to.equal(500);
+        expect(response.status).to.equal(404);
         expect(calls.listProblems).to.deep.equal([]);
         expectNoProblemDisclosure(response.body);
     });

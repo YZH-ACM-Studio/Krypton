@@ -4,7 +4,7 @@
  */
 import { Logger } from '@hydrooj/utils';
 import type { Context } from 'hydrooj';
-import { ForbiddenError, Handler, NotFoundError, ObjectId, param, PRIV, PrivilegeError, ProblemModel, Types } from 'hydrooj';
+import { Handler, NotFoundError, ObjectId, param, PRIV, PrivilegeError, ProblemModel, Types } from 'hydrooj';
 import { MindmapRequestError } from './error';
 import {
     createNode,
@@ -141,12 +141,9 @@ class ProblemsApi extends Handler {
     @param('nodeId', Types.ObjectId)
     async get(_args: { domainId: string }, mapId: ObjectId, nodeId: ObjectId) {
         const domainId = String(this.domain?._id);
-        ProblemModel.assertProblemAclDomain(this.user as any, domainId);
-        if (!ProblemModel.canBrowseProblemBank(this.user as any)) throw new ForbiddenError();
         const map = await getKnowledgeMap(mapId);
         if (!map || map.visibility !== 'public') throw new NotFoundError('mindmap', String(mapId));
-        const scope = ProblemModel.buildProblemBankScope(this.user as any);
-        const problems = await listProblemsForNode(domainId, mapId, nodeId, scope);
+        const problems = await listProblemsForNode(domainId, mapId, nodeId, {});
         this.response.body = { problems };
     }
 }

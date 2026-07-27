@@ -53,7 +53,7 @@ async function successfulAuth(this: Handler, udoc: User) {
 }
 
 async function blockNormalBrowserLoginIfNeeded(this: Handler, domainId: string, udoc: User) {
-    if (!udoc?._id || udoc.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) return false;
+    if (!udoc?._id || udoc.hasPriv(PRIV.PRIV_EDIT_SYSTEM) || udoc.hasPerm(PERM.PERM_EDIT_CONTEST)) return false;
     const vg = (global as any).Hydro?.model?.vigilguard;
     if (!vg?.getBrowserLockoutDecision) return false;
     const decision = await vg.getBrowserLockoutDecision(domainId, udoc._id);

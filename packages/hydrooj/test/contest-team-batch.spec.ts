@@ -27,6 +27,7 @@ const contestTeams: any[] = [];
 const contestDocs: any[] = [];
 const records: any[] = [];
 const audits: any[] = [];
+const lockoutInvalidations: string[] = [];
 const users = new Map<number, any>();
 let rejectedRosterUid: number | null = null;
 let failInsertManyAfter: number | null = null;
@@ -248,6 +249,7 @@ function validateTeamShape(value: number[], captainUid: number) {
 
 const contestTeamStub = {
     coll: contestTeamCollection,
+    requireVigilLockoutCacheInvalidator: () => (domainId: string) => lockoutInvalidations.push(domainId),
     normalizeTeamName: normalizeName,
     normalizeTeamDescription: (value: unknown) => String(value || '').trim(),
     validateTeamShape,
@@ -392,6 +394,7 @@ beforeEach(() => {
     contestDocs.length = 0;
     records.length = 0;
     audits.length = 0;
+    lockoutInvalidations.length = 0;
     users.clear();
     rejectedRosterUid = null;
     failInsertManyAfter = null;
@@ -400,6 +403,9 @@ beforeEach(() => {
     mutateRuleBeforeBinding = false;
     failInviteUpdateManyOnce = false;
     failBatchInsertOnce = false;
+    (global as any).Hydro.model.vigilguard = {
+        invalidateLockoutCache: (domainId: string) => lockoutInvalidations.push(domainId),
+    };
     for (const uid of [10, 11, 12, 13, 14, 15, 16, 99]) {
         users.set(uid, {
             _id: uid,
@@ -941,6 +947,10 @@ describe('P1.17 pre-contest team batches', () => {
         });
         const batch = await createPlannedClosedBatch('Finalized Readiness');
         await batchModel.finalizePlannedBatchToContest('system', contestDocs[0].docId, batch.batchId, { user: actor(99, true) });
+        expect(lockoutInvalidations).to.deep.equal(['system']);
+        const repeated = await batchModel.snapshotToContest('system', contestDocs[0].docId, batch.batchId, 99);
+        expect(repeated.alreadyApplied).to.equal(true);
+        expect(lockoutInvalidations).to.deep.equal(['system', 'system']);
         const ready = await batchModel.checkContestReadiness('system', contestDocs[0].docId, { user: actor(99, true) });
         expect(ready).to.include({ result: 'pass', canFinalize: false, canStart: true, teamCount: 2, memberCount: 3 });
         expect(ready.items.some((item) => item.code === 'snapshot_consistent')).to.equal(true);

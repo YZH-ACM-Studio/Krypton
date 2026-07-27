@@ -115,6 +115,16 @@ function normalizeText(value: unknown): string {
     return normalized.replace(/\s+/g, ' ').trim();
 }
 
+type VigilLockoutCacheInvalidator = (domainId?: string, uid?: number) => void;
+
+export function requireVigilLockoutCacheInvalidator(): VigilLockoutCacheInvalidator {
+    const invalidateLockoutCache = (global as any).Hydro?.model?.vigilguard?.invalidateLockoutCache;
+    if (typeof invalidateLockoutCache !== 'function') {
+        throw new TypeError('Vigil lockout cache invalidation service is unavailable.');
+    }
+    return invalidateLockoutCache;
+}
+
 export function normalizeTeamName(value: unknown): { name: string; nameKey: string } {
     const name = normalizeText(value);
     if (!name || name.length > 64) throw new ValidationError('name', null, 'Team name must contain 1-64 characters.');
@@ -317,6 +327,7 @@ export async function createTeam(
     actor: ContestTeamActor,
     input: ContestTeamCreateInput,
 ): Promise<ContestTeamDoc> {
+    const invalidateLockoutCache = requireVigilLockoutCacheInvalidator();
     const teamId = new ObjectId();
     const auditData: TeamAuditData = {
         operation: 'create',
@@ -327,8 +338,8 @@ export async function createTeam(
         targetUids: Array.isArray(input?.memberUids) ? input.memberUids.filter((uid) => Number.isSafeInteger(uid)) : [],
         fromRevision: 0,
     };
-    return await withContestTeamBoundary(domainId, contestId, async () =>
-        auditedMutation(
+    return await withContestTeamBoundary(domainId, contestId, async () => {
+        const created = await auditedMutation(
             auditData,
             async () => {
                 const now = actor.now || new Date();
@@ -399,8 +410,10 @@ export async function createTeam(
                 return doc;
             },
             (team) => team.revision,
-        ),
-    );
+        );
+        invalidateLockoutCache(domainId);
+        return created;
+    });
 }
 
 async function loadActiveTeam(domainId: string, contestId: ObjectId, teamId: ObjectId): Promise<ContestTeamDoc> {
@@ -444,6 +457,7 @@ export async function updateTeam(
     actor: ContestTeamActor,
     input: ContestTeamUpdateInput,
 ): Promise<ContestTeamDoc> {
+    const invalidateLockoutCache = requireVigilLockoutCacheInvalidator();
     const auditData: TeamAuditData = {
         operation: 'update',
         domainId,
@@ -453,8 +467,8 @@ export async function updateTeam(
         targetUids: Array.isArray(input?.memberUids) ? input.memberUids.filter((uid) => Number.isSafeInteger(uid)) : [],
         fromRevision: Number.isSafeInteger(input?.expectedRevision) ? input.expectedRevision : 0,
     };
-    const outcome = await withContestTeamBoundary(domainId, contestId, async () =>
-        auditedMutation(
+    const outcome = await withContestTeamBoundary(domainId, contestId, async () => {
+        const committed = await auditedMutation(
             auditData,
             async () => {
                 const tdoc = await assertTeamContest(domainId, contestId);
@@ -544,8 +558,10 @@ export async function updateTeam(
                 return { updated, roleChanged, before, emergency };
             },
             (result) => result.updated.revision,
-        ),
-    );
+        );
+        if (committed.roleChanged) invalidateLockoutCache(domainId);
+        return committed;
+    });
     await runPostCommitStep('sync-invitations', outcome.updated, actor.user._id, () =>
         syncPendingInvitesAfterTeamMutation(outcome.updated, actor.user._id, actor.now || new Date()),
     );
@@ -880,6 +896,7 @@ async function restoreInviteClaim(invite: ContestTeamInviteDoc, now: Date): Prom
 }
 
 export async function acceptInvite(domainId: string, contestId: ObjectId, inviteId: ObjectId, actor: ContestTeamActor): Promise<ContestTeamDoc> {
+    const invalidateLockoutCache = requireVigilLockoutCacheInvalidator();
     const auditData: InviteAuditData = {
         operation: 'invite-accept',
         domainId,
@@ -889,8 +906,8 @@ export async function acceptInvite(domainId: string, contestId: ObjectId, invite
         targetUids: [actor.user._id],
         fromRevision: 0,
     };
-    const outcome = await withContestTeamBoundary(domainId, contestId, async () =>
-        auditedInviteMutation(
+    const outcome = await withContestTeamBoundary(domainId, contestId, async () => {
+        const committed = await auditedInviteMutation(
             auditData,
             async () => {
                 const now = actor.now || new Date();
@@ -959,8 +976,10 @@ export async function acceptInvite(domainId: string, contestId: ObjectId, invite
                 }
             },
             (result) => result.updated.revision,
-        ),
-    );
+        );
+        invalidateLockoutCache(domainId);
+        return committed;
+    });
     await runPostCommitStep('finalize-accepted-invitation', outcome.updated, actor.user._id, async () => {
         const finalized = await inviteColl.updateOne(
             { _id: outcome.invite._id, status: 'accepting', inviteeUid: actor.user._id },
@@ -1099,6 +1118,7 @@ export async function apply(ctx: Context) {
 
 global.Hydro.model.contestTeam = {
     coll,
+    requireVigilLockoutCacheInvalidator,
     normalizeTeamName,
     normalizeTeamDescription,
     normalizeMemberUids,

@@ -28,6 +28,8 @@ const docs: any[] = [];
 const invites: any[] = [];
 const audit: any[] = [];
 const events: any[] = [];
+const lockoutInvalidations: string[] = [];
+const postCommitOrder: string[] = [];
 const vigilRoleRefreshes: any[] = [];
 const vigilRoleNotifies: any[] = [];
 const indexes: any[] = [];
@@ -38,6 +40,8 @@ let currentContest: any;
 let failNextInviteUpdateOne = false;
 let failNextInviteUpdateMany = false;
 let activeVigilSessionChanges = 0;
+let vigilNotifyGate: Promise<void> | null = null;
+let signalVigilNotifyStarted: (() => void) | null = null;
 
 function same(left: any, right: any): boolean {
     if (left instanceof ObjectId && right instanceof ObjectId) return left.equals(right);
@@ -170,6 +174,7 @@ const inviteCollection = {
         return doc;
     },
     async updateOne(filter: any, update: any) {
+        postCommitOrder.push('invite-finalize');
         if (failNextInviteUpdateOne) {
             failNextInviteUpdateOne = false;
             throw new Error('injected invite updateOne failure');
@@ -261,7 +266,14 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
         if (request === '../service/bus') return { __esModule: true, default: { broadcast: async (...args: any[]) => events.push(args) } };
         if (request === '../service/db') return { __esModule: true, default: dbStub };
         if (request === '../service/vigil-bridge') {
-            return { notifyTeamRoleChangeOnVigil: async (payload: any) => vigilRoleNotifies.push(payload) };
+            return {
+                notifyTeamRoleChangeOnVigil: async (payload: any) => {
+                    postCommitOrder.push('vigil-notify');
+                    vigilRoleNotifies.push(payload);
+                    signalVigilNotifyStarted?.();
+                    if (vigilNotifyGate) await vigilNotifyGate;
+                },
+            };
         }
         if (request === './builtin') return { PERM, PRIV };
         if (request === './contest') return contestStub;
@@ -288,6 +300,10 @@ function actor(uid: number, admin = false) {
     } as any;
 }
 
+function roleEvents() {
+    return events.filter(([event]) => event === 'contest/team-role-change');
+}
+
 function ownerWithoutSelfEdit(uid: number) {
     return {
         _id: uid,
@@ -312,6 +328,8 @@ beforeEach(() => {
     invites.length = 0;
     audit.length = 0;
     events.length = 0;
+    lockoutInvalidations.length = 0;
+    postCommitOrder.length = 0;
     vigilRoleRefreshes.length = 0;
     vigilRoleNotifies.length = 0;
     indexes.length = 0;
@@ -321,8 +339,15 @@ beforeEach(() => {
     failNextInviteUpdateOne = false;
     failNextInviteUpdateMany = false;
     activeVigilSessionChanges = 0;
+    vigilNotifyGate = null;
+    signalVigilNotifyStarted = null;
     (global as any).Hydro.model.vigilguard = {
+        invalidateLockoutCache: (domainId: string) => {
+            lockoutInvalidations.push(domainId);
+            postCommitOrder.push('cache-invalidate');
+        },
         refreshActiveTeamSessionRoles: async (before: any, after: any) => {
+            postCommitOrder.push('role-refresh');
             vigilRoleRefreshes.push({ before, after });
             return { updated: activeVigilSessionChanges, invalidated: 0 };
         },
@@ -460,6 +485,7 @@ describe('P1.11 canonical contest team lifecycle', () => {
         );
         expect(created.teamId).to.equal(created._id);
         expect(created).to.include({ active: true, revision: 1, captainUid: 10, managementMode: 'self' });
+        expect(lockoutInvalidations).to.deep.equal(['system']);
         await rejects(
             teamModel.createTeam(
                 'system',
@@ -620,10 +646,9 @@ describe('P1.11 canonical contest team lifecycle', () => {
             },
         );
         expect(stopped.active).to.equal(false);
-        expect(events).to.have.length(1);
-        expect(events[0][0]).to.equal('contest/team-role-change');
-        expect(events[0][1].before.active).to.equal(true);
-        expect(events[0][1].after.active).to.equal(false);
+        expect(roleEvents()).to.have.length(1);
+        expect(roleEvents()[0][1].before.active).to.equal(true);
+        expect(roleEvents()[0][1].after.active).to.equal(false);
 
         const adminTeam = await teamModel.createTeam(
             'system',
@@ -661,9 +686,9 @@ describe('P1.11 canonical contest team lifecycle', () => {
             },
         );
         expect(adminStopped.active).to.equal(false);
-        expect(events).to.have.length(2);
-        expect(events[1][1].before.active).to.equal(true);
-        expect(events[1][1].after.active).to.equal(false);
+        expect(roleEvents()).to.have.length(2);
+        expect(roleEvents()[1][1].before.active).to.equal(true);
+        expect(roleEvents()[1][1].after.active).to.equal(false);
     });
 
     it('allows an admin-managed captain to edit display info but not roster', async () => {
@@ -749,8 +774,7 @@ describe('P1.11 canonical contest team lifecycle', () => {
             { expectedRevision: team.revision, captainUid: 11 },
         );
         expect(updated.captainUid).to.equal(11);
-        expect(events).to.have.length(1);
-        expect(events[0][0]).to.equal('contest/team-role-change');
+        expect(roleEvents()).to.have.length(1);
         expect(audit.some((entry) => entry.type === 'contest.team.emergency-update' && entry.result === 'success')).to.equal(true);
     });
 
@@ -779,6 +803,39 @@ describe('P1.11 canonical contest team lifecycle', () => {
             actorUid: 99,
         });
         expect(vigilRoleNotifies[0].affectedUids).to.deep.equal([10, 11]);
+    });
+
+    it('invalidates the browser lockout cache before waiting on Vigil role notification', async () => {
+        const team = await teamModel.createTeam(
+            'system',
+            currentContest.docId,
+            { user: actor(99, true) },
+            { name: 'Ordered refresh', memberUids: [10, 11], captainUid: 10, managementMode: 'admin' },
+        );
+        lockoutInvalidations.length = 0;
+        postCommitOrder.length = 0;
+        activeVigilSessionChanges = 1;
+        let releaseNotify!: () => void;
+        vigilNotifyGate = new Promise<void>((resolve) => {
+            releaseNotify = resolve;
+        });
+        const notifyStarted = new Promise<void>((resolve) => {
+            signalVigilNotifyStarted = resolve;
+        });
+
+        const updating = teamModel.updateTeam(
+            'system',
+            currentContest.docId,
+            team.teamId,
+            { user: actor(99, true) },
+            { expectedRevision: team.revision, captainUid: 11 },
+        );
+        await notifyStarted;
+
+        expect(lockoutInvalidations).to.deep.equal(['system']);
+        expect(postCommitOrder).to.deep.equal(['cache-invalidate', 'role-refresh', 'vigil-notify']);
+        releaseNotify();
+        await updating;
     });
 
     it('registers only equality-partial unique indexes', async () => {
@@ -958,12 +1015,16 @@ describe('P1.12 invitation and assignment lifecycle', () => {
         const originalError = console.error;
         console.error = (...args: any[]) => errors.push(args);
         failNextInviteUpdateOne = true;
+        lockoutInvalidations.length = 0;
+        postCommitOrder.length = 0;
         try {
             const committed = await teamModel.acceptInvite('system', currentContest.docId, invite.inviteId, { user: actor(11) });
             expect(committed.memberUids).to.deep.equal([10, 11]);
         } finally {
             console.error = originalError;
         }
+        expect(lockoutInvalidations).to.deep.equal(['system']);
+        expect(postCommitOrder.slice(0, 2)).to.deep.equal(['cache-invalidate', 'invite-finalize']);
         expect(events.at(-1)?.[0]).to.equal('contest/team-role-change');
         expect(errors.some((entry) => entry[0] === '[contest-team] committed mutation post-commit step failed')).to.equal(true);
         expect(audit.some((entry) => entry.operation === 'invite-accept' && entry.result === 'success')).to.equal(true);

@@ -281,7 +281,15 @@ function serializeBalloonRows(rows: BalloonColorRow[]) {
 // only renders the active panel — that breaks form submission because
 // inputs in inactive panels never get serialized. For editor forms we
 // want them all live.
-function MiniTabsNav<T extends string>({ items, active, onChange }: { items: { value: T; label: string }[]; active: T; onChange: (next: T) => void }) {
+function MiniTabsNav<T extends string>({
+  items,
+  active,
+  onChange,
+}: {
+  items: { value: T; label: string }[];
+  active: T;
+  onChange: (next: T) => void;
+}) {
   return (
     <div className="inline-flex items-center rounded-lg bg-muted p-1 text-muted-foreground">
       {items.map((tab) => (
@@ -817,7 +825,7 @@ export function ContestEditPage() {
                       ) : null}
                     </div>
                     <SimpleSelect
-                  name={canUpdatePlannedTeamBatch ? 'plannedTeamBatchId' : undefined}
+                      name={canUpdatePlannedTeamBatch ? 'plannedTeamBatchId' : undefined}
                       value={plannedTeamBatchId}
                       onValueChange={setPlannedTeamBatchId}
                       disabled={!canUpdatePlannedTeamBatch}
@@ -1123,13 +1131,15 @@ export function ContestEditPage() {
                     value={scopeMode}
                     onValueChange={(v) => setScopeMode(v as ParticipantScopeMode)}
                     options={[
-                      { value: 'none', label: '不限（仅看老 Hydro 访问控制）' },
+                      { value: 'none', label: '不限（个人赛按实际入场锁定）' },
                       { value: 'schools', label: '按学校限定' },
                       { value: 'groups', label: '按用户组限定' },
                     ]}
                   />
                   <input type="hidden" name="participantScopeMode" value={scopeMode} />
-                  <p className="text-[11px] text-muted-foreground">范围与老 Hydro 访问控制取 AND（同时满足）。学校与用户组互斥。</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    学校、用户组和老 Hydro 分组会提前锁定命中用户；不限个人赛仅锁定已从客户端入场者，团队赛仅锁定定版队员。
+                  </p>
                 </div>
 
                 {scopeMode === 'schools' && (

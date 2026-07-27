@@ -1658,12 +1658,15 @@ async function snapshotToContestWithPolicy(
     actorUid: number,
     rejectAlreadyFinalized: boolean,
 ): Promise<TeamBatchSnapshotResult> {
+    const invalidateLockoutCache = contestTeam.requireVigilLockoutCacheInvalidator();
     const trace: SnapshotTrace = { stage: 'queued' };
     return await withContestTeamBoundary(domainId, contestId, async () => {
         try {
-            return await withBatchMutation(domainId, batchId, () =>
+            const result = await withBatchMutation(domainId, batchId, () =>
                 snapshotToContestUnlocked(domainId, contestId, batchId, actorUid, trace, rejectAlreadyFinalized),
             );
+            invalidateLockoutCache(domainId);
+            return result;
         } catch (error) {
             if (error && typeof error === 'object') {
                 Object.assign(error, {

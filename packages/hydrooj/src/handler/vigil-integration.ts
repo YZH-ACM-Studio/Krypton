@@ -22,6 +22,7 @@ import { buildVigilContestRoleResolution, type VigilContestRoleResolution } from
 import system from '../model/system';
 import db from '../service/db';
 import { executeRecordingDelete, previewRecordingDelete } from '../service/vigil-bridge';
+import { ensureVigilContestParticipation } from './vigil-integration-attendance';
 
 function parseStringList(value: any): string[] {
     if (Array.isArray(value)) return value.map((item) => String(item).trim()).filter(Boolean);
@@ -202,27 +203,6 @@ function roleAccessError(role: VigilContestRoleResolution, clientProtocolVersion
 async function resolveVerifiedTokenRole(result: any): Promise<VigilContestRoleResolution> {
     if (!result?.ojContestId || !result?.ojUserId) throw new ValidationError('ojContestId');
     return await resolveVigilContestRole(result.ojDomainId || 'system', result.ojContestId, result.ojUserId);
-}
-
-async function ensureVigilContestParticipation(domainId: string, contestId: string | undefined, uid: number) {
-    if (!contestId || !ObjectId.isValid(contestId) || !uid) return;
-    const tid = new ObjectId(contestId);
-    const tdoc = await contestModel.get(domainId, tid);
-    if (!tdoc) return;
-
-    let tsdoc = await contestModel.getStatus(domainId, tid, uid);
-    if (!tsdoc?.attend && !contestModel.isDone(tdoc, tsdoc)) {
-        try {
-            await contestModel.attend(domainId, tid, uid, { subscribe: 1 });
-        } catch (e) {
-            tsdoc = await contestModel.getStatus(domainId, tid, uid);
-            if (!tsdoc?.attend) throw e;
-        }
-        tsdoc = await contestModel.getStatus(domainId, tid, uid);
-    }
-    if (tsdoc?.attend && !tsdoc.startAt && contestModel.isOngoing(tdoc, tsdoc)) {
-        await contestModel.setStatus(domainId, tid, uid, { startAt: new Date() });
-    }
 }
 
 async function deleteLocalClientSession(vigilSessionId: string) {
@@ -662,7 +642,7 @@ class VigilExchangeAccessTokenHandler extends Handler {
             return;
         }
         try {
-            await ensureVigilContestParticipation(result.ojDomainId || 'system', result.ojContestId, result.ojUserId);
+            await ensureVigilContestParticipation(this, result.ojDomainId || 'system', result.ojContestId, result.ojUserId);
         } catch (e: any) {
             this.response.status = 500;
             this.response.body = {
@@ -799,7 +779,7 @@ class VigilExamModeLaunchHandler extends Handler {
         }
 
         try {
-            await ensureVigilContestParticipation(result.ojDomainId || 'system', result.ojContestId, result.ojUserId);
+            await ensureVigilContestParticipation(this, result.ojDomainId || 'system', result.ojContestId, result.ojUserId);
         } catch (e: any) {
             await OplogModel.log(this as any, 'vigilguard.attend_fail', {
                 sessionId,

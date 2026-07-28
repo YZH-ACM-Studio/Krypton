@@ -701,7 +701,7 @@ describe('permit handler authoritative domain boundary', () => {
         expect(calls.oplog.at(-1)?.[1]).to.equal('problem.permit.denied');
     });
 
-    it('lets only the managed administrator grant or revoke maintainer', async () => {
+    it('lets an authorized managed author grant or revoke maintainer', async () => {
         const managed = { ...pdoc, authoringMode: 'managed' };
         const grantHandler = makeHandler('problem_permit_grant');
         stableProblemResults = [managed];
@@ -711,7 +711,7 @@ describe('permit handler authoritative domain boundary', () => {
         await grantHandler.post({ domainId: 'system' }, 42, 8, undefined, 'maintainer', '', 'admin-maintainer');
 
         expect(calls.grant[0][3]).to.equal('maintainer');
-        expect(calls.writeClaim[0][4]).to.include({ capability: 'publish' });
+        expect(calls.writeClaim[0][4]).to.include({ capability: 'collaborators' });
 
         const revokeHandler = makeHandler('problem_permit_revoke');
         permitRow = { _id: permitId, domainId: 'system', pid: 42, uid: 8, active: true, role: 'maintainer' };
@@ -736,7 +736,7 @@ describe('permit handler authoritative domain boundary', () => {
         manageMaintainerResults = [true];
         await revokeHandler.post({ domainId: 'system' }, 42, permitId, 'admin-revoke');
         expect(calls.revoke).to.have.lengthOf(1);
-        expect(calls.writeClaim.at(-1)?.[4]).to.include({ capability: 'publish' });
+        expect(calls.writeClaim.at(-1)?.[4]).to.include({ capability: 'collaborators' });
         expect(calls.oplog.at(-1)?.[1]).to.equal('problem.permit.revoke');
     });
 

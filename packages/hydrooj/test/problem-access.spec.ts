@@ -615,7 +615,8 @@ describe('P2.13 managed programming authoring matrix', () => {
         expect(canSubmitProblem(author, draft)).to.equal(true);
         expect(canEditProblemContent(author, draft)).to.equal(true);
         expect(canEditProblemMetadata(author, draft)).to.equal(true);
-        expect(canManageProblemCollaborators(author, draft)).to.equal(false);
+        expect(canManageProblemCollaborators(author, draft)).to.equal(true);
+        expect(canManageProblemMaintainers(author, draft)).to.equal(true);
         expect(canPublishProblem(author, draft)).to.equal(false);
         expect(canArchiveProblem(author, draft)).to.equal(false);
         expect(canDeleteProblem(author, draft)).to.equal(false);
@@ -702,6 +703,13 @@ describe('P2.13 managed programming authoring matrix', () => {
         expect(guardedUpdateCalls.at(-1)?.filter).not.to.have.property('maintainer');
         expect(guardedUpdateCalls.at(-1)?.filter).to.include({ hidden: true, 'managedAuthoring.metadataStatus': 'draft' });
         expect(await clear(metadataClaim)).to.equal(true);
+
+        const collaborationClaim = await acquire(author, structuredClone(liveProblem), 'author-draft-collaborators', 'permit-grant', {
+            capability: 'collaborators',
+        });
+        expect(collaborationClaim?.capability).to.equal('collaborators');
+        expect(guardedUpdateCalls.at(-1)?.filter).not.to.have.property('maintainer');
+        expect(await clear(collaborationClaim)).to.equal(true);
 
         const tagClaim = await acquire(author, structuredClone(liveProblem), 'author-draft-tags', 'programming-tag-normalize', {
             capability: 'tag',

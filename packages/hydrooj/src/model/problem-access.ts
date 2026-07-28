@@ -994,7 +994,7 @@ export function canEditProblemTags(user: ProblemAclUser, pdoc: ProblemDoc): bool
 
 export function canManageProblemCollaborators(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
     if (pdoc.authoringMode !== 'managed') return canMaintainProblem(user, pdoc);
-    return canMaintainProblem(user, pdoc);
+    return canMaintainProblem(user, pdoc) || canAuthorProblem(user, pdoc);
 }
 
 export function canManageProblemContributions(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
@@ -1013,7 +1013,7 @@ export function canOpenProblemWorkspace(user: ProblemAclUser, pdoc: ProblemDoc):
 
 export function canManageProblemMaintainers(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
     if (pdoc.authoringMode !== 'managed') return canMaintainProblem(user, pdoc);
-    return hasLoadedAclForProblem(user, pdoc) && !isAclFenced(user, pdoc.docId) && isProblemBankAdmin(user);
+    return canAuthorProblem(user, pdoc);
 }
 
 function canPublishProblemByProblemRole(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
@@ -1120,7 +1120,12 @@ function applyCapabilityIdentityFilter(
         return;
     }
     if (capability === 'tag' && user._tagContributionPids?.has(pdoc.docId) && !canEditProblemContent(user, pdoc)) return;
-    if (capability === 'contributions' && pdoc.authoringMode === 'managed' && canAuthorProblem(user, pdoc) && !canMaintainProblem(user, pdoc)) {
+    if (
+        ['collaborators', 'contributions'].includes(capability) &&
+        pdoc.authoringMode === 'managed' &&
+        canAuthorProblem(user, pdoc) &&
+        !canMaintainProblem(user, pdoc)
+    ) {
         return;
     }
     if (pdoc.authoringMode !== 'managed') {

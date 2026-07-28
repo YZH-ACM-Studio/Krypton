@@ -1563,7 +1563,7 @@ export function KryptonIDE({
               <Button
                 size="sm"
                 variant="outline"
-                className="h-7 gap-1 text-xs"
+                className="h-7 w-[7.25rem] shrink-0 gap-1 text-xs"
                 disabled={pretestLoading || pretestCooldown > 0}
                 onClick={handleRunAll}
                 title="一次评测所有样例和已填写的自定义 tab"

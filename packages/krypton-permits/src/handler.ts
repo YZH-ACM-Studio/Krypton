@@ -260,7 +260,7 @@ class ProblemPermitGrantHandler extends Handler {
                     targetUids,
                 );
             },
-            { requestId: mutationId, capability: initialMaintainerInvolved ? 'publish' : 'collaborators' },
+            { requestId: mutationId, capability: 'collaborators' },
         );
         if (deniedInsideClaim) {
             await logManagedPermitDenied(this, pdoc, 'grant', role as PermitRole);
@@ -375,7 +375,7 @@ class ProblemPermitRevokeHandler extends Handler {
             {
                 requestId: mutationId,
                 selfRevokeUid: canSelfRevoke && !initialMaintainerInvolved ? row.uid : undefined,
-                capability: initialMaintainerInvolved ? 'publish' : 'collaborators',
+                capability: 'collaborators',
             },
         );
         if (missingInsideClaim) throw new NotFoundError('权限记录不存在');

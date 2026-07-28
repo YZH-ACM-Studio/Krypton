@@ -1,6 +1,8 @@
 import { expect } from 'chai';
+import { existsSync } from 'fs';
 import { beforeEach, describe, it } from 'node:test';
 import { ObjectId } from 'mongodb';
+import { resolve } from 'path';
 
 const Module = require('module');
 const contestId = new ObjectId('64a000000000000000000702');
@@ -36,7 +38,7 @@ const contestStub = {
     },
 };
 
-const modulePath = require.resolve('../src/handler/vigil-integration-attendance.ts');
+const modulePath = require.resolve('../src/lib/vigil-integration-attendance.ts');
 const originalLoad = Module._load;
 Module._load = function load(request: string, parent: NodeModule, isMain: boolean) {
     if (parent?.filename === modulePath) {
@@ -56,7 +58,7 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     return originalLoad.call(this, request, parent, isMain);
 };
 
-let attendance: typeof import('../src/handler/vigil-integration-attendance');
+let attendance: typeof import('../src/lib/vigil-integration-attendance');
 try {
     delete require.cache[modulePath];
     attendance = require(modulePath);
@@ -81,6 +83,11 @@ beforeEach(() => {
 });
 
 describe('P1.28 Vigil Client attendance transition', () => {
+    it('keeps the non-plugin helper outside the auto-loaded handler directory', () => {
+        expect(existsSync(resolve(__dirname, '../src/handler/vigil-integration-attendance.ts'))).to.equal(false);
+        expect(existsSync(resolve(__dirname, '../src/lib/vigil-integration-attendance.ts'))).to.equal(true);
+    });
+
     it('persists attendance, invalidates the exact user cache, audits, then starts the contest status', async () => {
         await attendance.ensureVigilContestParticipation({} as any, 'system', contestId.toHexString(), 64);
 

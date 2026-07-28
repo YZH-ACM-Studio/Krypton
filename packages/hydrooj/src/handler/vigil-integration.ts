@@ -22,7 +22,7 @@ import { buildVigilContestRoleResolution, type VigilContestRoleResolution } from
 import system from '../model/system';
 import db from '../service/db';
 import { executeRecordingDelete, previewRecordingDelete } from '../service/vigil-bridge';
-import { ensureVigilContestParticipation } from './vigil-integration-attendance';
+import { ensureVigilContestParticipation } from '../lib/vigil-integration-attendance';
 
 function parseStringList(value: any): string[] {
     if (Array.isArray(value)) return value.map((item) => String(item).trim()).filter(Boolean);

@@ -1,4 +1,5 @@
 import { expect } from 'chai';
+import { localizedErrorText } from '@hydrooj/framework';
 import { beforeEach, describe, it } from 'node:test';
 
 const Module = require('module');
@@ -36,7 +37,7 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     if (parent?.filename !== handlerPath) return originalLoad.call(this, request, parent, isMain);
     if (request === '@hydrooj/utils') return { sleep: () => new Promise((resolve) => setTimeout(resolve, 10)) };
     if (request === '../context') return { Context: class {} };
-    if (request === '../error') return { PermissionError: TestPermissionError, ValidationError: TestValidationError };
+    if (request === '../error') return { localizedErrorText, PermissionError: TestPermissionError, ValidationError: TestValidationError };
     if (request === '../model/builtin') return { PERM, PRIV };
     if (request === '../model/message') {
         return {

@@ -1,4 +1,4 @@
-import { DomainRolePermissionConflictError, RoleAlreadyExistError, ValidationError } from '../error';
+import { localizedErrorText, DomainRolePermissionConflictError, RoleAlreadyExistError, ValidationError } from '../error';
 import { BUILTIN_ROLES, PERMS } from '../model/builtin';
 
 export const PROTECTED_DOMAIN_ROLES = ['root', 'guest', 'default', 'teacher'] as const;
@@ -17,7 +17,7 @@ export function resolveCurrentDomainId(requestedDomainId: unknown, authoritative
     const requested = typeof requestedDomainId === 'string' ? requestedDomainId : '';
     const authoritative = typeof authoritativeDomainId === 'string' ? authoritativeDomainId : '';
     if (!requested || !authoritative || requested !== authoritative) {
-        throw new ValidationError('domainId', requestedDomainId, 'The requested domain does not match the current domain.');
+        throw new ValidationError('domainId', requestedDomainId, localizedErrorText`The requested domain does not match the current domain.`);
     }
     return authoritative;
 }
@@ -36,15 +36,8 @@ export interface DomainRolePermissionRepository {
         expected: bigint,
         next: bigint,
     ): Promise<{ state: 'updated' } | { state: 'missing' | 'conflict'; current?: bigint }>;
-    addRoleFromDefault(
-        domainId: string,
-        role: string,
-        expectedDefault: bigint,
-    ): Promise<{ state: 'created' } | { state: 'exists' | 'conflict' }>;
-    deleteRoleWithFallback(
-        domainId: string,
-        role: string,
-    ): Promise<{ state: 'deleted'; affectedUsers: number } | { state: 'missing' | 'conflict' }>;
+    addRoleFromDefault(domainId: string, role: string, expectedDefault: bigint): Promise<{ state: 'created' } | { state: 'exists' | 'conflict' }>;
+    deleteRoleWithFallback(domainId: string, role: string): Promise<{ state: 'deleted'; affectedUsers: number } | { state: 'missing' | 'conflict' }>;
 }
 
 export interface DomainPermissionWorkspaceRole {
@@ -67,7 +60,7 @@ function rolePermission(role: DomainRoleRecord): bigint {
 
 function validateRoleName(role: string) {
     if (!ROLE_NAME_PATTERN.test(role)) {
-        throw new ValidationError('role', role, 'Role name can only contains numbers, letters and underscores.');
+        throw new ValidationError('role', role, localizedErrorText`Role name can only contains numbers, letters and underscores.`);
     }
 }
 
@@ -85,7 +78,7 @@ function normalizePermissionValues(raw: unknown): unknown[] {
     if (typeof raw === 'string' || typeof raw === 'bigint') return [raw];
     if (typeof raw === 'object') {
         const entries = Object.entries(raw);
-        if (!entries.length || entries.some(([key]) => !/^(0|[1-9]\d*)$/.test(key))) {
+        if (!entries.length || entries.some(([key]) => !/^(?:0|[1-9]\d*)$/.test(key))) {
             throw new ValidationError('permissions', raw);
         }
         entries.sort(([left], [right]) => Number(left) - Number(right));
@@ -104,25 +97,23 @@ export function parseDomainPermissionSelection(raw: unknown): { mask: bigint; ke
         const bit = parseNonNegativeMask(entry, 'permissions');
         const key = bit.toString();
         if (bit === 0n || (bit & (bit - 1n)) !== 0n || !PERMISSION_BY_KEY.has(key)) {
-            throw new ValidationError('permissions', entry, 'Unknown domain permission bit.');
+            throw new ValidationError('permissions', entry, localizedErrorText`Unknown domain permission bit.`);
         }
-        if (seen.has(key)) throw new ValidationError('permissions', entry, 'Duplicate domain permission bit.');
+        if (seen.has(key)) throw new ValidationError('permissions', entry, localizedErrorText`Duplicate domain permission bit.`);
         seen.add(key);
         mask |= bit;
     }
     return { mask, keys: [...seen] };
 }
 
-export function buildDomainRolePermissionUpdate(input: {
-    expectedMask: unknown;
-    submittedMask: unknown;
-    permissions: unknown;
-}) {
+export function buildDomainRolePermissionUpdate(input: { expectedMask: unknown; submittedMask: unknown; permissions: unknown }) {
     const expected = parseNonNegativeMask(input.expectedMask, 'expectedMask');
     const submitted = parseNonNegativeMask(input.submittedMask, 'mask');
     const selection = parseDomainPermissionSelection(input.permissions);
     const next = (expected & ~KNOWN_DOMAIN_PERMISSION_MASK) | selection.mask;
-    if (submitted !== next) throw new ValidationError('mask', input.submittedMask, 'Permission mask does not match selected permission bits.');
+    if (submitted !== next) {
+        throw new ValidationError('mask', input.submittedMask, localizedErrorText`Permission mask does not match selected permission bits.`);
+    }
     const added = DOMAIN_PERMISSION_DEFINITIONS.filter((permission) => !(expected & permission.key) && next & permission.key).map(
         (permission) => permission.desc,
     );
@@ -174,11 +165,11 @@ export async function updateDomainRolePermissions(
     },
 ) {
     validateRoleName(input.role);
-    if (input.role === 'root') throw new ValidationError('role', input.role, 'The root role is read-only.');
+    if (input.role === 'root') throw new ValidationError('role', input.role, localizedErrorText`The root role is read-only.`);
     const change = buildDomainRolePermissionUpdate(input);
     const roles = await repository.getRoles(input.domainId);
     const currentRole = roles.find((role) => role._id === input.role);
-    if (!currentRole) throw new ValidationError('role', input.role, 'Unknown domain role.');
+    if (!currentRole) throw new ValidationError('role', input.role, localizedErrorText`Unknown domain role.`);
     if (rolePermission(currentRole) !== change.expected) throw new DomainRolePermissionConflictError(input.role);
     const affectedUsers = await repository.countUser(input.domainId, input.role);
     const result = await repository.compareAndSetRolePermission(input.domainId, input.role, change.expected, change.next);
@@ -217,10 +208,10 @@ export async function createDomainRole(repository: DomainRolePermissionRepositor
 export async function deleteDomainRole(repository: DomainRolePermissionRepository, domainId: string, role: string) {
     validateRoleName(role);
     if (PROTECTED_ROLE_SET.has(role)) {
-        throw new ValidationError('role', role, 'The root, guest, default and teacher roles cannot be deleted.');
+        throw new ValidationError('role', role, localizedErrorText`The root, guest, default and teacher roles cannot be deleted.`);
     }
     const roles = await repository.getRoles(domainId);
-    if (!roles.some((candidate) => candidate._id === role)) throw new ValidationError('role', role, 'Unknown domain role.');
+    if (!roles.some((candidate) => candidate._id === role)) throw new ValidationError('role', role, localizedErrorText`Unknown domain role.`);
     const result = await repository.deleteRoleWithFallback(domainId, role);
     if (result.state !== 'deleted') throw new DomainRolePermissionConflictError(role);
     return { role, affectedUsers: result.affectedUsers, fallbackRole: 'default' as const };

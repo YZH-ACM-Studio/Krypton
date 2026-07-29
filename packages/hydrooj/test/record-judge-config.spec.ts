@@ -1,4 +1,5 @@
 import { expect } from 'chai';
+import { localizedErrorText } from '@hydrooj/framework';
 import { ObjectId } from 'mongodb';
 import { beforeEach, describe, it } from 'node:test';
 import { templateSourceHash } from '../src/lib/problem-config';
@@ -6,6 +7,12 @@ import { templateSourceHash } from '../src/lib/problem-config';
 const Module = require('module');
 const recordPath = require.resolve('../src/model/record.ts');
 const originalLoad = Module._load;
+
+class TestValidationError extends Error {
+    constructor(...params: unknown[]) {
+        super(String(params[2] ?? params[0] ?? 'ValidationError'));
+    }
+}
 
 let problemConfig: unknown;
 let problemKind: string | undefined;
@@ -93,7 +100,16 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     }
     if (request === '../context') return { Context: class {} };
     if (request === '../error') {
-        return { ProblemNotFoundError: class extends Error {}, ValidationError: class extends Error {} };
+        return {
+            localizedErrorText,
+            ProblemConfigError: class extends Error {
+                constructor() {
+                    super('Cannot parse problem config');
+                }
+            },
+            ProblemNotFoundError: class extends Error {},
+            ValidationError: TestValidationError,
+        };
     }
     if (request === '../lib/problem-config') {
         return originalLoad.call(this, request, parent, isMain);
@@ -349,7 +365,7 @@ describe('record judge problem config', () => {
 
         const error = await recordModel.judge('system', record).catch((caught) => caught);
         expect(error).to.be.instanceOf(Error);
-        expect(error.message).to.include('language mismatch');
+        expect(error.message).to.include('当前题目配置或提交结构无法重新评测');
         expect(queuedTasks).to.deep.equal([]);
     });
 
@@ -381,7 +397,7 @@ describe('record judge problem config', () => {
         const error = await recordModel.judge('system', record, 0, {}, { rejudge: true }).catch((caught) => caught);
 
         expect(error).to.be.instanceOf(Error);
-        expect(error.message).to.include('keys do not match');
+        expect(error.message).to.include('当前题目配置或提交结构无法重新评测');
         expect(deletedTaskQueries).to.deep.equal([]);
         expect(queuedTasks).to.deep.equal([]);
     });
@@ -420,7 +436,7 @@ describe('record judge problem config', () => {
         const error = await recordModel.reset('system', rid, true).catch((caught) => caught);
 
         expect(error).to.be.instanceOf(Error);
-        expect(error.message).to.include('keys do not match');
+        expect(error.message).to.include('当前题目配置或提交结构无法重新评测');
         expect(deletedTaskQueries).to.deep.equal([]);
         expect(deletedStatQueries).to.deep.equal([]);
         expect(historyInserts).to.deep.equal([]);

@@ -14,9 +14,12 @@ import { ObjectId } from 'mongodb';
 import { effectiveProblemKind, gradeObjectiveAnswer } from '@hydrooj/common';
 import { Logger } from '@hydrooj/utils';
 import {
+    localizeErrorParameter,
+    localizedErrorText,
     clientProblemConfig,
     Context,
     Handler,
+    getProblemConfigErrorText,
     NotFoundError,
     OplogModel,
     PaperDraftModel,
@@ -30,6 +33,7 @@ import {
     ProblemModel,
     questionKindMap,
     route,
+    type LocalizedErrorText,
     Types,
     UserModel,
     validateCompiledStructuredConfig,
@@ -117,6 +121,10 @@ function absolutizeProgrammingStatementFileUrls(handler: Handler, view: any, pdo
 const parsedProblemConfig = parseProblemConfigObject;
 const logger = new Logger('paper');
 
+function localizedConfigValidation(field: string, detail: LocalizedErrorText) {
+    return new ValidationError(field, null, detail);
+}
+
 function validatePaperRegionSubmission(
     pdoc: any,
     config: any,
@@ -143,7 +151,12 @@ function validatePaperRegionSubmission(
             context.uid,
             error,
         );
-        throw new ValidationError('code', null, error.message);
+        const localizedDetail =
+            error instanceof Error && error.message === `${kind}: region payload is required`
+                ? localizedErrorText`${kind}: region payload is required`
+                : getProblemConfigErrorText(error);
+        if (localizedDetail) throw localizedConfigValidation('code', localizedDetail);
+        throw localizeErrorParameter(new ValidationError('code', null, error.message), 2, 'The structured answer is invalid: {0}', error.message);
     }
     return { code: rawCode, lang: kind === 'program_fill' && config.mode === 'text' ? '_' : (config.template.lang as string) };
 }
@@ -157,9 +170,9 @@ class PaperBaseHandler extends Handler {
         const authoritativeDomainId = String(this.domain?._id);
         this.tid = tid;
         this.tdoc = await contest.get(authoritativeDomainId, tid);
-        if (!this.tdoc) throw new NotFoundError('Contest');
+        if (!this.tdoc) throw new NotFoundError(localizedErrorText`Contest`);
         if (this.tdoc.rule !== 'exam') {
-            throw new ValidationError('rule', null, 'Paper mode is only for exam-rule contests');
+            throw new ValidationError('rule', null, localizedErrorText`Paper mode is only for exam-rule contests`);
         }
         // ── Krypton: client-required gate ────────────────────────────
         // Paper mode's _prepare is its own (it doesn't extend
@@ -585,25 +598,30 @@ class PaperDraftUpsertHandler extends PaperBaseHandler {
     @param('code', Types.Content, true)
     @param('lang', Types.Name, true)
     async post({ domainId }: { domainId: string }, pid: number, answersJson?: string, code?: string, lang?: string) {
-        if (!this.isInWindow()) throw new ValidationError('contest', null, 'Contest not in active window');
+        if (!this.isInWindow()) throw new ValidationError('contest', null, localizedErrorText`Contest not in active window`);
         if (!(this.tdoc.pids as number[]).includes(pid)) {
-            throw new ValidationError('pid', null, 'Problem is not part of this contest');
+            throw new ValidationError('pid', null, localizedErrorText`Problem is not part of this contest`);
         }
         // rawConfig=true + 自行解析：与 getProblemDict/finalize 的指纹口径
         // 一致（默认投影拿到的是 parseConfig 净化摘要，不含 answers，
         // 指纹永远对不上 —— 既有 bug，PLAN P3.2 一并修复）。
         const pdoc = await ProblemModel.get(this.tdoc.domainId, pid, undefined, true);
-        if (!pdoc) throw new NotFoundError('Problem');
+        if (!pdoc) throw new NotFoundError(localizedErrorText`Problem`);
 
         let parsedAnswers: Record<string, string | string[]> | undefined;
         if (answersJson) {
             try {
                 parsedAnswers = JSON.parse(answersJson);
-                if (typeof parsedAnswers !== 'object' || parsedAnswers === null) {
-                    throw new Error('answers must be an object');
-                }
             } catch (e: any) {
-                throw new ValidationError('answers', null, e.message);
+                throw localizeErrorParameter(
+                    new ValidationError('answers', null, e.message),
+                    2,
+                    'The answer data could not be parsed: {0}',
+                    e.message,
+                );
+            }
+            if (typeof parsedAnswers !== 'object' || parsedAnswers === null) {
+                throw new ValidationError('answers', null, localizedErrorText`answers must be an object`);
             }
         }
 
@@ -637,9 +655,13 @@ class PaperLockKindHandler extends PaperBaseHandler {
         if (!['single', 'multi', 'blank', 'fill_program', 'subjective'].includes(kind)) {
             throw new ValidationError('kind');
         }
-        if (!this.isInWindow()) throw new ValidationError('contest', null, 'Contest not in active window');
+        if (!this.isInWindow()) throw new ValidationError('contest', null, localizedErrorText`Contest not in active window`);
         if (!this.tdoc.allowSubmitByKind) {
-            throw new ValidationError('allowSubmitByKind', null, 'This contest does not allow per-kind submission. Use finalize to submit.');
+            throw new ValidationError(
+                'allowSubmitByKind',
+                null,
+                localizedErrorText`This contest does not allow per-kind submission. Use finalize to submit.`,
+            );
         }
         const pdict = await this.getProblemDict();
         await PaperDraftModel.lockKindForUser(domainId, this.tid, this.user._id, kind as any);
@@ -664,18 +686,18 @@ class PaperLockKindHandler extends PaperBaseHandler {
 class PaperSubmitCodeHandler extends PaperBaseHandler {
     @param('pid', Types.UnsignedInt)
     async post({ domainId }: { domainId: string }, pid: number) {
-        if (!this.isInWindow()) throw new ValidationError('contest', null, 'Contest not in active window');
+        if (!this.isInWindow()) throw new ValidationError('contest', null, localizedErrorText`Contest not in active window`);
         const pdoc = await ProblemModel.get(this.tdoc.domainId, pid, undefined, true);
-        if (!pdoc) throw new NotFoundError('Problem');
+        if (!pdoc) throw new NotFoundError(localizedErrorText`Problem`);
         const config = parsedProblemConfig(pdoc);
         const type = config?.type || 'default';
         if (!['default', 'program_fill', 'function'].includes(type)) {
-            throw new ValidationError('type', null, 'Only default and structured-code problems support immediate submit');
+            throw new ValidationError('type', null, localizedErrorText`Only default and structured-code problems support immediate submit`);
         }
 
         const draft = await PaperDraftModel.getDraft(domainId, this.tid, pid, this.user._id);
         if (!draft || !draft.code) {
-            throw new ValidationError('draft', null, 'No code saved yet — call save first');
+            throw new ValidationError('draft', null, localizedErrorText`No code saved yet — call save first`);
         }
         const validated = ['program_fill', 'function'].includes(type)
             ? validatePaperRegionSubmission(pdoc, config, draft.code, {
@@ -703,7 +725,7 @@ export async function finalizePaperForUser(
     options: { tdoc?: any; meta?: any } = {},
 ): Promise<ObjectId[]> {
     const tdoc = options.tdoc || (await contest.get(domainId, tid));
-    if (!tdoc) throw new NotFoundError('Contest');
+    if (!tdoc) throw new NotFoundError(localizedErrorText`Contest`);
     if (tdoc.rule !== 'exam') return [];
 
     const drafts = await PaperDraftModel.getDraftsForUser(domainId, tid, uid);
@@ -729,7 +751,7 @@ export async function finalizePaperForUser(
             if (!isSubjective) await gradeObjectiveDraft(domainId, tid, uid, draft.pid, pdoc);
             const rawSubjectiveAnswer = draft.answers?.main;
             if (isSubjective && rawSubjectiveAnswer !== undefined && typeof rawSubjectiveAnswer !== 'string') {
-                throw new ValidationError('answer', null, '主观题答案必须是文本');
+                throw new ValidationError('answer', null, localizedErrorText`主观题答案必须是文本`);
             }
             const code = isSubjective ? (rawSubjectiveAnswer as string | undefined) || '' : yaml.dump(draft.answers || {});
             const rid = await record.add(domainId, draft.pid, uid, '_', code, true, {
@@ -779,7 +801,7 @@ class PaperFinalizeHandler extends PaperBaseHandler {
         const now = Date.now();
         const grace = 60 * 1000;
         if (now > this.tdoc.endAt.getTime() + grace) {
-            throw new ValidationError('contest', null, 'Contest finalize window has closed');
+            throw new ValidationError('contest', null, localizedErrorText`Contest finalize window has closed`);
         }
 
         const rids = await finalizePaperForUser(domainId, this.tid, this.user._id, { tdoc: this.tdoc });
@@ -895,7 +917,7 @@ class ExamModeEntryHandler extends Handler {
     async get(_domainId: string, tid: ObjectId) {
         const authoritativeDomainId = String(this.domain?._id);
         const tdoc = await contest.get(authoritativeDomainId, tid);
-        if (!tdoc) throw new NotFoundError('Contest');
+        if (!tdoc) throw new NotFoundError(localizedErrorText`Contest`);
         if (await redirectEndedProgrammingWorkspaceBeforeClientAccess(this, authoritativeDomainId, tdoc, tid)) return;
         const { previewMode, tsdoc, isAdminBypass, teamContext } = await ensureExamModeAccess(this, authoritativeDomainId, tid, tdoc);
         if (tdoc.rule === 'exam') {
@@ -1001,7 +1023,7 @@ class ExamModeProblemDetailHandler extends ProblemDetailHandler {
     @route('pid', Types.ProblemId, true)
     @param('tid', Types.ObjectId)
     async _prepare(_domainId: string, pid: number | string, tid?: ObjectId) {
-        if (!tid) throw new NotFoundError('Contest');
+        if (!tid) throw new NotFoundError(localizedErrorText`Contest`);
         const authoritativeDomainId = this.authoritativeDomainId();
         if (await redirectEndedProgrammingWorkspaceBeforeClientAccess(this, authoritativeDomainId, this.tdoc, tid)) return;
         const { tsdoc, isAdminBypass } = await ensureExamModeAccess(this, authoritativeDomainId, tid, this.tdoc);
@@ -1080,7 +1102,7 @@ class ExamModeRecordDetailHandler extends RecordDetailHandler {
     async get(_domainId: string, rid: ObjectId, download = false, rev?: ObjectId) {
         const authoritativeDomainId = this.authoritativeDomainId();
         const tid = this.tdoc?.docId;
-        if (!this.tdoc || !this.rdoc?.contest?.equals?.(tid)) throw new NotFoundError('Record');
+        if (!this.tdoc || !this.rdoc?.contest?.equals?.(tid)) throw new NotFoundError(localizedErrorText`Record`);
         const { previewMode, teamContext } = await ensureExamModeAccess(this, authoritativeDomainId, tid, this.tdoc);
         if (rev) throw new PermissionError(PERM.PERM_VIEW_RECORD);
         if (download && teamContext && !teamContext.canEditCode) throw new PermissionError(PERM.PERM_READ_RECORD_CODE);
@@ -1103,7 +1125,7 @@ class ExamModeDiscussionListHandler extends Handler {
         this.checkPriv(PRIV.PRIV_USER_PROFILE);
         this.checkPerm(PERM.PERM_VIEW_DISCUSSION);
         this.tdoc = await contest.get(authoritativeDomainId, tid);
-        if (!this.tdoc) throw new NotFoundError('Contest');
+        if (!this.tdoc) throw new NotFoundError(localizedErrorText`Contest`);
         await ensureExamModeAccess(this, authoritativeDomainId, tid, this.tdoc);
     }
 
@@ -1148,7 +1170,7 @@ class ExamModeDiscussionCreateHandler extends Handler {
         this.checkPriv(PRIV.PRIV_USER_PROFILE);
         this.checkPerm(PERM.PERM_CREATE_DISCUSSION);
         this.tdoc = await contest.get(authoritativeDomainId, tid);
-        if (!this.tdoc) throw new NotFoundError('Contest');
+        if (!this.tdoc) throw new NotFoundError(localizedErrorText`Contest`);
         await ensureExamModeAccess(this, authoritativeDomainId, tid, this.tdoc);
         this.vnode = await discussion.getVnode(authoritativeDomainId, document.TYPE_CONTEST, tid.toHexString(), this.user._id);
     }
@@ -1194,10 +1216,10 @@ class ExamModeDiscussionDetailHandler extends DiscussionDetailHandler {
     async prepare(_domainId: string, tid: ObjectId) {
         const authoritativeDomainId = String(this.domain?._id);
         this.tdoc = await contest.get(authoritativeDomainId, tid);
-        if (!this.tdoc) throw new NotFoundError('Contest');
+        if (!this.tdoc) throw new NotFoundError(localizedErrorText`Contest`);
         await ensureExamModeAccess(this, authoritativeDomainId, tid, this.tdoc);
         if (this.ddoc?.parentType !== document.TYPE_CONTEST || !(this.ddoc.parentId as any)?.equals?.(tid)) {
-            throw new NotFoundError('Discussion');
+            throw new NotFoundError(localizedErrorText`Discussion`);
         }
     }
 
@@ -1227,7 +1249,7 @@ class ExamModeTeamRoleConnectionHandler extends ConnectionHandler {
         const authoritativeDomainId = String(this.domain?._id);
         this.domainId = authoritativeDomainId;
         const tdoc = await contest.get(authoritativeDomainId, tid);
-        if (!tdoc) throw new NotFoundError('Contest');
+        if (!tdoc) throw new NotFoundError(localizedErrorText`Contest`);
         let teamContext: ContestTeamExamModeContext | null;
         try {
             ({ teamContext } = await ensureExamModeAccess(this, authoritativeDomainId, tid, tdoc));

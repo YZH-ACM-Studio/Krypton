@@ -8,7 +8,7 @@
  *                                            here.
  */
 import type { Context } from 'hydrooj';
-import { Handler, NotFoundError, ObjectId, OplogModel, param, PRIV, Types } from 'hydrooj';
+import { localizedErrorText, Handler, NotFoundError, ObjectId, OplogModel, param, PRIV, Types } from 'hydrooj';
 import * as contest from 'hydrooj/src/model/contest';
 import system from 'hydrooj/src/model/system';
 
@@ -104,7 +104,7 @@ class VigilGuardResyncContestHandler extends Handler {
         // domainId comes from the URL path (`/d/:domainId/...`).
         domainId ||= (this as any).args.domainId || 'system';
         const tdoc = await contest.get(domainId, tid).catch(() => null);
-        if (!tdoc) throw new NotFoundError('Contest', tid);
+        if (!tdoc) throw new NotFoundError(localizedErrorText`Contest`, tid);
 
         try {
             if (tdoc.vigilEnabled) {

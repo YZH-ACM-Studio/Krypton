@@ -1,5 +1,5 @@
 import { Logger } from '@hydrooj/utils';
-import { ManagedProblemMetadataConflictError } from '../error';
+import { localizedErrorText, ManagedProblemMetadataConflictError } from '../error';
 import type { ProblemDoc } from '../interface';
 import type { ObjectId } from 'mongodb';
 import db from '../service/db';
@@ -111,7 +111,7 @@ async function attachToTraining(input: ManagedProblemPublicationCommit, session?
             session ? { session } : undefined,
         );
         if (result.modifiedCount !== 1) {
-            throw new ManagedProblemMetadataConflictError('待挂训练章节已删除或题目已重复');
+            throw new ManagedProblemMetadataConflictError(localizedErrorText`待挂训练章节已删除或题目已重复`);
         }
     } catch (error) {
         if (error instanceof ManagedProblemMetadataConflictError || session) throw error;

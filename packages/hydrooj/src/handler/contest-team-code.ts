@@ -1,7 +1,7 @@
 import { Logger } from '@hydrooj/utils';
 import { ObjectId } from 'mongodb';
 import { Context } from '../context';
-import { ContestNotFoundError, NotFoundError, PermissionError } from '../error';
+import { localizedErrorText, ContestNotFoundError, NotFoundError, PermissionError } from '../error';
 import { PERM, PRIV } from '../model/builtin';
 import * as contest from '../model/contest';
 import * as contestTeam from '../model/contest-team';
@@ -94,7 +94,7 @@ export class ContestTeamCodeHandler extends Handler {
     async get(_domainId: string, tid: ObjectId, snapshotId: ObjectId = null) {
         if (snapshotId) {
             const snapshot = await contestTeamCode.openAccessible(this.domainId, tid, snapshotId, this.user);
-            if (!snapshot) throw new NotFoundError('Team code snapshot');
+            if (!snapshot) throw new NotFoundError(localizedErrorText`Team code snapshot`);
             const users = await this.userDict([snapshot]);
             this.response.body = { snapshot: publicSnapshot(snapshot, users, true) };
             return;
@@ -172,7 +172,13 @@ export class ContestTeamCodeHandler extends Handler {
                     time: new Date(),
                 });
             } catch (auditError) {
-                logger.error('Failed to audit rejected team-code send domain=%s tid=%s actor=%d error=%o', this.domainId, tid, this.user._id, auditError);
+                logger.error(
+                    'Failed to audit rejected team-code send domain=%s tid=%s actor=%d error=%o',
+                    this.domainId,
+                    tid,
+                    this.user._id,
+                    auditError,
+                );
             }
             throw error;
         }
@@ -218,7 +224,13 @@ export class ContestTeamCodeHandler extends Handler {
                 time: new Date(),
             });
         } catch (auditError) {
-            logger.error('Team-code snapshots committed but audit failed domain=%s tid=%s actor=%d error=%o', this.domainId, tid, this.user._id, auditError);
+            logger.error(
+                'Team-code snapshots committed but audit failed domain=%s tid=%s actor=%d error=%o',
+                this.domainId,
+                tid,
+                this.user._id,
+                auditError,
+            );
         }
 
         const users = await this.userDict(snapshots);

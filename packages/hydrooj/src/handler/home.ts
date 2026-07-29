@@ -7,6 +7,8 @@ import { Binary, ObjectId } from 'mongodb';
 import { UAParser } from 'ua-parser-js';
 import { Context } from '../context';
 import {
+    localizeError,
+    localizedErrorText,
     AuthOperationError,
     BadRequestError,
     BlacklistedError,
@@ -358,7 +360,7 @@ class HomeSecurityHandler extends Handler {
                 return this.back();
             }
         }
-        throw new InvalidTokenError(token.TYPE_TEXTS[token.TYPE_SESSION], tokenDigest);
+        throw new InvalidTokenError(localizedErrorText`Session`, tokenDigest);
     }
 
     async postDeleteAllTokens() {
@@ -371,7 +373,7 @@ class HomeSecurityHandler extends Handler {
     @param('secret', Types.String)
     async postEnableTfa({}, code: string, secret: string) {
         if (this.user._tfa) throw new AuthOperationError('2FA', 'enabled');
-        if (!verifyTFA(secret, code)) throw new InvalidTokenError('2FA');
+        if (!verifyTFA(secret, code)) throw new InvalidTokenError(localizedErrorText`2FA`);
         await user.setById(this.user._id, { tfa: secret });
         this.back();
     }
@@ -409,7 +411,7 @@ class HomeSecurityHandler extends Handler {
     @requireSudo
     @param('name', Types.String)
     async postEnableAuthn({}, name: string) {
-        if (!this.session.webauthnVerify) throw new InvalidTokenError(token.TYPE_TEXTS[token.TYPE_WEBAUTHN]);
+        if (!this.session.webauthnVerify) throw new InvalidTokenError(localizedErrorText`WebAuthn`);
         const verification = await verifyRegistrationResponse({
             response: this.args.result,
             expectedChallenge: this.session.webauthnVerify,
@@ -511,7 +513,7 @@ class HomeSettingsHandler extends Handler {
             this.response.body.settings = setting.ACCOUNT_SETTINGS;
         } else if (category === 'domain') {
             this.response.body.settings = setting.DOMAIN_USER_SETTINGS;
-        } else throw new NotFoundError(category);
+        } else throw localizeError(new NotFoundError(category), 'Resource {0} not found.', category);
     }
 
     async post(args: any) {
@@ -563,7 +565,7 @@ class UserChangemailWithCodeHandler extends Handler {
     async get(domainId: string, code: string) {
         const tdoc = await token.get(code, token.TYPE_CHANGEMAIL);
         if (!tdoc || tdoc.uid !== this.user._id) {
-            throw new InvalidTokenError(token.TYPE_TEXTS[token.TYPE_CHANGEMAIL], code);
+            throw new InvalidTokenError(localizedErrorText`Change Email`, code);
         }
         const udoc = await user.getByEmail(domainId, tdoc.email);
         if (udoc) throw new UserAlreadyExistError(tdoc.email);
@@ -607,7 +609,7 @@ class HomeDomainHandler extends Handler {
     async postStar({}, id: string, star = false) {
         if (star) {
             const ddoc = await domain.get(id);
-            if (!ddoc) throw new NotFoundError(id);
+            if (!ddoc) throw localizeError(new NotFoundError(id), 'Resource {0} not found.', id);
             await user.setById(this.user._id, { pinnedDomains: [...this.user.pinnedDomains, id] });
         } else user.setById(this.user._id, { pinnedDomains: this.user.pinnedDomains.filter((i) => i !== id) });
         this.back({ star });
@@ -617,7 +619,7 @@ class HomeDomainHandler extends Handler {
     async postLeave({}, id: string) {
         if (id === 'system') throw new BadRequestError();
         const ddoc = await domain.get(id);
-        if (!ddoc) throw new NotFoundError(id);
+        if (!ddoc) throw localizeError(new NotFoundError(id), 'Resource {0} not found.', id);
         await domain.setJoin(id, this.user._id, false);
         this.back();
     }
@@ -690,7 +692,7 @@ class HomeMessagesHandler extends Handler {
     async postDeleteMessage({}, messageId: ObjectId) {
         const msg = await message.get(messageId);
         if (msg.from === this.user._id) await message.del(messageId);
-        else throw new PermissionError();
+        else throw localizeError(new PermissionError(), 'You cannot delete a message sent by another user.');
         this.back();
     }
 }

@@ -17,7 +17,7 @@ describe('P3.17 code evaluation lifecycle wiring', () => {
         const create = handler.slice(start, end);
 
         expect(create).to.include("@post('codeEvaluationDraft', Types.Boolean, true)");
-        expect(create).to.include("throw new ValidationError('content', null, '代码评测草稿第一阶段不接受题面、模板或测试数据')");
+        expect(create).to.include("throw new ValidationError('content', null, localizedErrorText`代码评测草稿第一阶段不接受题面、模板或测试数据`)");
         expect(create).to.include('normalizeCodeEvaluationDraftCreationConfig(this.problemKind, parsedConfig)');
         expect(create).to.include("codeEvaluationStatus: 'draft' as const");
         expect(create).to.include('structureRevision: 1');

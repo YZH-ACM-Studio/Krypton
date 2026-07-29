@@ -1,6 +1,7 @@
 import { Logger } from '@hydrooj/utils';
 import type { Filter } from 'mongodb';
-import { ObjectId, db } from 'hydrooj';
+import { localizeError, localizedErrorText, ObjectId, db } from 'hydrooj';
+import type { LocalizedErrorText } from 'hydrooj';
 import { insertMapWithRoot, mapsColl, nodesColl } from './db';
 import { MindmapConflictError, MindmapRequestError } from './error';
 import type { KnowledgeMapDoc, MindmapNode } from './types';
@@ -50,7 +51,7 @@ interface NodePatch {
 
 function objectId(value: ObjectId | string, field = 'nodeId'): ObjectId {
     if (value instanceof ObjectId) return value;
-    if (!ObjectId.isValid(value)) throw new MindmapRequestError(`${field} 无效`);
+    if (!ObjectId.isValid(value)) throw new MindmapRequestError(localizedErrorText`${field} 无效`);
     return new ObjectId(value);
 }
 
@@ -67,47 +68,47 @@ function sameId(left: unknown, right: unknown): boolean {
 }
 
 function canonicalStrings(values: unknown, field: string, limit: number, itemLimit: number): string[] {
-    if (!Array.isArray(values)) throw new MindmapRequestError(`${field} 必须是数组`);
-    if (values.length > limit) throw new MindmapRequestError(`${field} 最多允许 ${limit} 项`);
+    if (!Array.isArray(values)) throw new MindmapRequestError(localizedErrorText`${field} 必须是数组`);
+    if (values.length > limit) throw new MindmapRequestError(localizedErrorText`${field} 最多允许 ${limit} 项`);
     const result: string[] = [];
     for (const value of values) {
-        if (typeof value !== 'string') throw new MindmapRequestError(`${field} 包含非字符串值`);
+        if (typeof value !== 'string') throw new MindmapRequestError(localizedErrorText`${field} 包含非字符串值`);
         const normalized = value.trim();
         if (!normalized) continue;
-        if (normalized.length > itemLimit) throw new MindmapRequestError(`${field} 单项过长`);
+        if (normalized.length > itemLimit) throw new MindmapRequestError(localizedErrorText`${field} 单项过长`);
         if (!result.includes(normalized)) result.push(normalized);
     }
     return result;
 }
 
 function canonicalTopic(value: unknown): string {
-    if (typeof value !== 'string') throw new MindmapRequestError('节点名称必填');
+    if (typeof value !== 'string') throw new MindmapRequestError(localizedErrorText`节点名称必填`);
     const topic = value.trim();
-    if (!topic) throw new MindmapRequestError('节点名称不能为空');
-    if (topic.length > 100) throw new MindmapRequestError('节点名称不能超过 100 个字符');
+    if (!topic) throw new MindmapRequestError(localizedErrorText`节点名称不能为空`);
+    if (topic.length > 100) throw new MindmapRequestError(localizedErrorText`节点名称不能超过 100 个字符`);
     return topic;
 }
 
 function canonicalMapTitle(value: unknown): string {
-    if (typeof value !== 'string') throw new MindmapRequestError('导图名称必填');
+    if (typeof value !== 'string') throw new MindmapRequestError(localizedErrorText`导图名称必填`);
     const title = value.trim();
-    if (!title) throw new MindmapRequestError('导图名称不能为空');
-    if (title.length > 100) throw new MindmapRequestError('导图名称不能超过 100 个字符');
+    if (!title) throw new MindmapRequestError(localizedErrorText`导图名称不能为空`);
+    if (title.length > 100) throw new MindmapRequestError(localizedErrorText`导图名称不能超过 100 个字符`);
     return title;
 }
 
 function canonicalDescription(value: unknown): string | undefined {
     if (value === undefined || value === null || value === '') return undefined;
-    if (typeof value !== 'string') throw new MindmapRequestError('节点说明格式无效');
+    if (typeof value !== 'string') throw new MindmapRequestError(localizedErrorText`节点说明格式无效`);
     const description = value.trim();
     if (!description) return undefined;
-    if (description.length > 2000) throw new MindmapRequestError('节点说明不能超过 2000 个字符');
+    if (description.length > 2000) throw new MindmapRequestError(localizedErrorText`节点说明不能超过 2000 个字符`);
     return description;
 }
 
 function canonicalColor(value: unknown): string | undefined {
     if (value === undefined || value === null || value === '') return undefined;
-    if (typeof value !== 'string' || !ALLOWED_COLORS.has(value)) throw new MindmapRequestError('节点颜色无效');
+    if (typeof value !== 'string' || !ALLOWED_COLORS.has(value)) throw new MindmapRequestError(localizedErrorText`节点颜色无效`);
     return value;
 }
 
@@ -178,7 +179,7 @@ async function findReferencingProblems(mapId: ObjectId, nodeIds: ObjectId[]): Pr
     return problems;
 }
 
-function conflict(message: string, reason: string, problems: ProblemSummary[] = []): never {
+function conflict(message: LocalizedErrorText, reason: string, problems: ProblemSummary[] = []): never {
     throw new MindmapConflictError(message, { reason, problems });
 }
 
@@ -204,19 +205,19 @@ function rethrowWithMutationContext(error: unknown, context: MutationFailureCont
 
 async function staleOrMissing(mapId: ObjectId, id: ObjectId): Promise<never> {
     const exists = await nodesColl.findOne({ _id: id }, { projection: { _id: 1, mapId: 1 } });
-    if (!exists) conflict('导图节点不存在，请刷新后重试', 'node-missing');
-    if (!sameId(exists.mapId, mapId)) conflict('节点属于另一张导图，请刷新后重试', 'cross-map-node');
-    conflict('导图已被其他操作修改，请刷新后重试', 'stale-version');
+    if (!exists) conflict(localizedErrorText`导图节点不存在，请刷新后重试`, 'node-missing');
+    if (!sameId(exists.mapId, mapId)) conflict(localizedErrorText`节点属于另一张导图，请刷新后重试`, 'cross-map-node');
+    conflict(localizedErrorText`导图已被其他操作修改，请刷新后重试`, 'stale-version');
 }
 
 async function staleOrMissingMap(id: ObjectId): Promise<never> {
     const exists = await mapsColl.findOne({ _id: id }, { projection: { _id: 1 } });
-    if (!exists) conflict('导图不存在，请刷新后重试', 'map-missing');
-    conflict('导图已被其他操作修改，请刷新后重试', 'stale-map-version');
+    if (!exists) conflict(localizedErrorText`导图不存在，请刷新后重试`, 'map-missing');
+    conflict(localizedErrorText`导图已被其他操作修改，请刷新后重试`, 'stale-map-version');
 }
 
 function nextVersion(previous: Date): Date {
-    if (!(previous instanceof Date) || Number.isNaN(previous.getTime())) throw new MindmapRequestError('节点版本无效');
+    if (!(previous instanceof Date) || Number.isNaN(previous.getTime())) throw new MindmapRequestError(localizedErrorText`节点版本无效`);
     return new Date(Math.max(Date.now(), previous.getTime() + 1));
 }
 
@@ -247,7 +248,7 @@ function descendantsOf(nodeId: string, nodes: MindmapNode[]): Set<string> {
     const queue = [nodeId];
     while (queue.length) {
         const current = queue.shift()!;
-        if (found.has(current)) conflict('当前导图已经存在环，拒绝继续修改', 'existing-cycle');
+        if (found.has(current)) conflict(localizedErrorText`当前导图已经存在环，拒绝继续修改`, 'existing-cycle');
         found.add(current);
         queue.push(...(children.get(current) || []));
     }
@@ -305,7 +306,7 @@ async function assertReparentKeepsReferencedTags(
         if (!arraysEqual(before, after)) affected.push(asProblemSummary(problem));
     }
     if (affected.length) {
-        conflict('移动会改变已引用题目的继承标签，请先执行单独的标签迁移', 'inherited-tags-change', affected);
+        conflict(localizedErrorText`移动会改变已引用题目的继承标签，请先执行单独的标签迁移`, 'inherited-tags-change', affected);
     }
 }
 
@@ -349,14 +350,19 @@ async function canonicalProblemIds(domainId: string, mapId: ObjectId, values: un
         if (!resolved.includes(canonical)) resolved.push(canonical);
     }
     if (missing.length || ambiguous.length || wrongMap.length) {
-        throw new MindmapRequestError(
-            [
-                missing.length ? `题目不存在或不属于当前域：${missing.join('、')}` : '',
-                ambiguous.length ? `题号有歧义：${ambiguous.join('、')}` : '',
-                wrongMap.length ? `题目属于另一张导图：${wrongMap.join('、')}` : '',
-            ]
-                .filter(Boolean)
-                .join('；'),
+        const detail = [
+            missing.length ? `题目不存在或不属于当前域：${missing.join('、')}` : '',
+            ambiguous.length ? `题号有歧义：${ambiguous.join('、')}` : '',
+            wrongMap.length ? `题目属于另一张导图：${wrongMap.join('、')}` : '',
+        ]
+            .filter(Boolean)
+            .join('；');
+        throw localizeError(
+            new MindmapRequestError(detail),
+            'The requested problems could not be resolved (missing or outside the current domain: {0}; ambiguous: {1}; belongs to another map: {2}).',
+            missing.join('、') || '-',
+            ambiguous.join('、') || '-',
+            wrongMap.join('、') || '-',
         );
     }
     return resolved;
@@ -505,7 +511,7 @@ export async function createKnowledgeMap(
     const title = canonicalMapTitle(input.title);
     const rootTopic = canonicalTopic(input.rootTopic);
     const layoutDirection = input.layoutDirection ?? 'RIGHT';
-    if (layoutDirection !== 'RIGHT' && layoutDirection !== 'DOWN') throw new MindmapRequestError('导图布局方向无效');
+    if (layoutDirection !== 'RIGHT' && layoutDirection !== 'DOWN') throw new MindmapRequestError(localizedErrorText`导图布局方向无效`);
     const now = new Date();
     const mapId = new ObjectId();
     const rootId = new ObjectId();
@@ -543,23 +549,23 @@ export async function updateKnowledgeMap(
 ): Promise<KnowledgeMapDoc> {
     const mapId = objectId(input.id, 'mapId');
     const current = await mapsColl.findOne({ _id: mapId });
-    if (!current) conflict('导图不存在，请刷新后重试', 'map-missing');
+    if (!current) conflict(localizedErrorText`导图不存在，请刷新后重试`, 'map-missing');
     const keys = Object.keys(input.patch);
-    if (!keys.length) throw new MindmapRequestError('没有可保存的导图字段');
+    if (!keys.length) throw new MindmapRequestError(localizedErrorText`没有可保存的导图字段`);
     if (keys.some((key) => !['title', 'layoutDirection', 'visibility'].includes(key))) {
-        throw new MindmapRequestError('请求包含不可编辑的导图字段');
+        throw new MindmapRequestError(localizedErrorText`请求包含不可编辑的导图字段`);
     }
     const set: Record<string, unknown> = { updatedAt: nextVersion(input.expectedUpdatedAt) };
     if (Object.hasOwn(input.patch, 'title')) set.title = canonicalMapTitle(input.patch.title);
     if (Object.hasOwn(input.patch, 'layoutDirection')) {
         if (input.patch.layoutDirection !== 'RIGHT' && input.patch.layoutDirection !== 'DOWN') {
-            throw new MindmapRequestError('导图布局方向无效');
+            throw new MindmapRequestError(localizedErrorText`导图布局方向无效`);
         }
         set.layoutDirection = input.patch.layoutDirection;
     }
     if (Object.hasOwn(input.patch, 'visibility')) {
         if (input.patch.visibility !== 'hidden' && input.patch.visibility !== 'public') {
-            throw new MindmapRequestError('导图公开状态无效');
+            throw new MindmapRequestError(localizedErrorText`导图公开状态无效`);
         }
         if (input.patch.visibility === 'public' && current.visibility !== 'public') {
             assertMapTree(current, await listAllNodes(mapId));
@@ -569,8 +575,10 @@ export async function updateKnowledgeMap(
                 documentColl.countDocuments({ docType: 40, kind: 'course', mindmapId: mapId }),
                 documentColl.countDocuments({ docType: HYDRO_PROBLEM_DOCTYPE, knowledgeMapId: mapId }),
             ]);
-            if (courses > 0) conflict(`该导图仍被 ${courses} 门课程使用，请先逐课解绑`, 'map-course-referenced');
-            if (problems > 0) conflict(`该导图仍被 ${problems} 道题引用，请先逐题更换所属导图`, 'map-problem-referenced');
+            if (courses > 0) conflict(localizedErrorText`该导图仍被 ${courses} 门课程使用，请先逐课解绑`, 'map-course-referenced');
+            if (problems > 0) {
+                conflict(localizedErrorText`该导图仍被 ${problems} 道题引用，请先逐题更换所属导图`, 'map-problem-referenced');
+            }
         }
         set.visibility = input.patch.visibility;
     }
@@ -585,8 +593,8 @@ export async function updateKnowledgeMap(
 export async function deleteKnowledgeMap(input: MutationContext & { id: ObjectId | string; expectedUpdatedAt: Date }): Promise<void> {
     const mapId = objectId(input.id, 'mapId');
     const map = await mapsColl.findOne({ _id: mapId });
-    if (!map) conflict('导图不存在，请刷新后重试', 'map-missing');
-    if (map.visibility !== 'hidden') conflict('只有隐藏导图可以删除', 'map-public');
+    if (!map) conflict(localizedErrorText`导图不存在，请刷新后重试`, 'map-missing');
+    if (map.visibility !== 'hidden') conflict(localizedErrorText`只有隐藏导图可以删除`, 'map-public');
     const nodes = await listAllNodes(mapId);
     assertMapTree(map, nodes);
     await findReferencingProblems(
@@ -595,9 +603,9 @@ export async function deleteKnowledgeMap(input: MutationContext & { id: ObjectId
     );
     const usage = await getKnowledgeMapUsage(mapId);
     if (usage.problems || usage.courses) {
-        conflict(`导图仍被 ${usage.problems} 道题和 ${usage.courses} 门课程引用`, 'map-referenced');
+        conflict(localizedErrorText`导图仍被 ${usage.problems} 道题和 ${usage.courses} 门课程引用`, 'map-referenced');
     }
-    if (nodes.length !== 1) conflict('导图仍有子节点，请先逐个清理', 'map-has-children');
+    if (nodes.length !== 1) conflict(localizedErrorText`导图仍有子节点，请先逐个清理`, 'map-has-children');
     const root = nodes[0];
     let removed;
     try {
@@ -675,12 +683,12 @@ export async function createNode(
     const tags = canonicalStrings(input.tags ?? [], 'tags', 30, 80);
     const problemIds = await canonicalProblemIds(input.domainId, mapId, input.problemIds ?? []);
     const [allNodes, config] = await Promise.all([listAllNodes(mapId), getKnowledgeMap(mapId)]);
-    if (!config) conflict('导图不存在，请刷新后重试', 'map-missing');
+    if (!config) conflict(localizedErrorText`导图不存在，请刷新后重试`, 'map-missing');
     const parent = allNodes.find((node) => sameId(node._id, parentId));
     if (!parent) {
         const crossMapParent = await nodesColl.findOne({ _id: parentId }, { projection: { mapId: 1 } });
         conflict(
-            crossMapParent ? '不能把节点添加到另一张导图' : '父节点不存在，请刷新后重试',
+            crossMapParent ? localizedErrorText`不能把节点添加到另一张导图` : localizedErrorText`父节点不存在，请刷新后重试`,
             crossMapParent ? 'cross-map-parent' : 'parent-missing',
         );
     }
@@ -730,12 +738,15 @@ export async function updateNode(
     const current = await nodesColl.findOne({ _id: id, mapId });
     if (!current) {
         const crossMapNode = await nodesColl.findOne({ _id: id }, { projection: { mapId: 1 } });
-        conflict(crossMapNode ? '不能编辑另一张导图的节点' : '导图节点不存在，请刷新后重试', crossMapNode ? 'cross-map-node' : 'node-missing');
+        conflict(
+            crossMapNode ? localizedErrorText`不能编辑另一张导图的节点` : localizedErrorText`导图节点不存在，请刷新后重试`,
+            crossMapNode ? 'cross-map-node' : 'node-missing',
+        );
     }
     const keys = Object.keys(input.patch);
-    if (!keys.length) throw new MindmapRequestError('没有可保存的字段');
+    if (!keys.length) throw new MindmapRequestError(localizedErrorText`没有可保存的字段`);
     if (keys.some((key) => !['topic', 'description', 'color', 'tags', 'problemIds'].includes(key))) {
-        throw new MindmapRequestError('请求包含不可编辑的节点字段');
+        throw new MindmapRequestError(localizedErrorText`请求包含不可编辑的节点字段`);
     }
 
     const set: Record<string, unknown> = { updatedAt: nextVersion(input.expectedUpdatedAt) };
@@ -758,7 +769,9 @@ export async function updateNode(
             const allNodes = await listAllNodes(mapId);
             const affectedNodeIds = [...descendantsOf(id.toHexString(), allNodes)].map((nodeId) => new ObjectId(nodeId));
             const refs = await findReferencingProblems(mapId, affectedNodeIds);
-            if (refs.length) conflict('该节点已被题目引用，不能直接修改标签', 'referenced-tags-locked', refs.map(asProblemSummary));
+            if (refs.length) {
+                conflict(localizedErrorText`该节点已被题目引用，不能直接修改标签`, 'referenced-tags-locked', refs.map(asProblemSummary));
+            }
         }
         set.tags = tags;
     }
@@ -795,7 +808,7 @@ function insertionOrder(siblings: MindmapNode[], targetIndex: number): number {
         const middle = left + (right - left) / 2;
         if (middle > left && middle < right) return middle;
     }
-    conflict('同级顺序已无法继续细分，请调整到其它落点后重试', 'order-space-exhausted');
+    conflict(localizedErrorText`同级顺序已无法继续细分，请调整到其它落点后重试`, 'order-space-exhausted');
 }
 
 export async function moveNode(
@@ -811,19 +824,22 @@ export async function moveNode(
     const mapId = objectId(input.mapId, 'mapId');
     const id = objectId(input.id);
     const newParentId = objectId(input.newParentId, 'newParentId');
-    if (!Number.isSafeInteger(input.targetIndex) || input.targetIndex < 0) throw new MindmapRequestError('目标顺序无效');
+    if (!Number.isSafeInteger(input.targetIndex) || input.targetIndex < 0) throw new MindmapRequestError(localizedErrorText`目标顺序无效`);
     const [allNodes, config] = await Promise.all([listAllNodes(mapId), getKnowledgeMap(mapId)]);
-    if (!config) conflict('导图不存在，请刷新后重试', 'map-missing');
+    if (!config) conflict(localizedErrorText`导图不存在，请刷新后重试`, 'map-missing');
     const node = allNodes.find((entry) => sameId(entry._id, id));
     const parent = allNodes.find((entry) => sameId(entry._id, newParentId));
     if (!node) {
         const crossMapNode = await nodesColl.findOne({ _id: id }, { projection: { mapId: 1 } });
-        conflict(crossMapNode ? '不能移动另一张导图的节点' : '导图节点不存在，请刷新后重试', crossMapNode ? 'cross-map-node' : 'node-missing');
+        conflict(
+            crossMapNode ? localizedErrorText`不能移动另一张导图的节点` : localizedErrorText`导图节点不存在，请刷新后重试`,
+            crossMapNode ? 'cross-map-node' : 'node-missing',
+        );
     }
     if (!parent) {
         const crossMapParent = await nodesColl.findOne({ _id: newParentId }, { projection: { mapId: 1 } });
         conflict(
-            crossMapParent ? '不能把节点移动到另一张导图' : '目标父节点不存在，请刷新后重试',
+            crossMapParent ? localizedErrorText`不能把节点移动到另一张导图` : localizedErrorText`目标父节点不存在，请刷新后重试`,
             crossMapParent ? 'cross-map-parent' : 'parent-missing',
         );
     }
@@ -839,18 +855,20 @@ export async function moveNode(
         expectedParentUpdatedAt: input.expectedParentUpdatedAt.toISOString(),
     };
     try {
-        if (config.rootNodeId && sameId(config.rootNodeId, id)) conflict('根节点不能移动', 'root-move');
-        if (sameId(id, newParentId)) conflict('节点不能成为自己的父节点', 'self-parent');
+        if (config.rootNodeId && sameId(config.rootNodeId, id)) conflict(localizedErrorText`根节点不能移动`, 'root-move');
+        if (sameId(id, newParentId)) conflict(localizedErrorText`节点不能成为自己的父节点`, 'self-parent');
         const subtree = descendantsOf(id.toHexString(), allNodes);
-        if (subtree.has(newParentId.toHexString())) conflict('节点不能移动到自己的后代中', 'descendant-parent');
+        if (subtree.has(newParentId.toHexString())) conflict(localizedErrorText`节点不能移动到自己的后代中`, 'descendant-parent');
         await assertReparentKeepsReferencedTags(mapId, node, newParentId, allNodes, subtree);
 
         const order = insertionOrder(siblings, targetIndex);
         const rootChild = !!config.rootNodeId && sameId(config.rootNodeId, newParentId);
         let layoutSide: 'left' | 'right' | undefined;
-        if (!rootChild && input.layoutSide !== undefined) throw new MindmapRequestError('只有根节点的直接分支可以设置左右方向');
+        if (!rootChild && input.layoutSide !== undefined) throw new MindmapRequestError(localizedErrorText`只有根节点的直接分支可以设置左右方向`);
         if (rootChild) {
-            if (input.layoutSide && input.layoutSide !== 'left' && input.layoutSide !== 'right') throw new MindmapRequestError('根分支侧边无效');
+            if (input.layoutSide && input.layoutSide !== 'left' && input.layoutSide !== 'right') {
+                throw new MindmapRequestError(localizedErrorText`根分支侧边无效`);
+            }
             const currentSide = sameId(node.parentId, newParentId) ? resolveRootBranchSides(allNodes, newParentId).get(id.toHexString()) : undefined;
             layoutSide = input.layoutSide || currentSide || defaultRootSide(allNodes, newParentId);
         }
@@ -888,16 +906,19 @@ export async function deleteNode(input: NodeMutationContext & { id: ObjectId | s
     const mapId = objectId(input.mapId, 'mapId');
     const id = objectId(input.id);
     const [node, config] = await Promise.all([nodesColl.findOne({ _id: id, mapId }), getKnowledgeMap(mapId)]);
-    if (!config) conflict('导图不存在，请刷新后重试', 'map-missing');
+    if (!config) conflict(localizedErrorText`导图不存在，请刷新后重试`, 'map-missing');
     if (!node) {
         const crossMapNode = await nodesColl.findOne({ _id: id }, { projection: { mapId: 1 } });
-        conflict(crossMapNode ? '不能删除另一张导图的节点' : '导图节点不存在，请刷新后重试', crossMapNode ? 'cross-map-node' : 'node-missing');
+        conflict(
+            crossMapNode ? localizedErrorText`不能删除另一张导图的节点` : localizedErrorText`导图节点不存在，请刷新后重试`,
+            crossMapNode ? 'cross-map-node' : 'node-missing',
+        );
     }
-    if (config.rootNodeId && sameId(config.rootNodeId, id)) conflict('根节点不能删除', 'root-delete');
+    if (config.rootNodeId && sameId(config.rootNodeId, id)) conflict(localizedErrorText`根节点不能删除`, 'root-delete');
     const child = await nodesColl.findOne({ mapId, parentId: id }, { projection: { _id: 1 } });
-    if (child) conflict('只能删除没有子节点的叶子，请先处理其子节点', 'node-has-children');
+    if (child) conflict(localizedErrorText`只能删除没有子节点的叶子，请先处理其子节点`, 'node-has-children');
     const refs = await findReferencingProblems(mapId, [id]);
-    if (refs.length) conflict('该节点仍被题目引用，不能删除', 'node-referenced', refs.map(asProblemSummary));
+    if (refs.length) conflict(localizedErrorText`该节点仍被题目引用，不能删除`, 'node-referenced', refs.map(asProblemSummary));
     await bumpMapVersion(mapId, input.expectedMapUpdatedAt);
     const result = await nodesColl.deleteOne({ _id: id, mapId, updatedAt: input.expectedUpdatedAt });
     if (result.deletedCount !== 1) await staleOrMissing(mapId, id);
@@ -941,7 +962,7 @@ export async function listProblemsForNode(
 ): Promise<PanelProblem[]> {
     const mapId = objectId(mapIdValue, 'mapId');
     const node = await getNode(mapId, nodeId);
-    if (!node) throw new MindmapRequestError('导图节点不存在');
+    if (!node) throw new MindmapRequestError(localizedErrorText`导图节点不存在`);
     const allNodes = await listAllNodes(mapId);
     const subtree = descendantsOf(node._id.toHexString(), allNodes);
     const subtreeIds = [...subtree].map((id) => new ObjectId(id));
@@ -1002,10 +1023,10 @@ function escapeRegExp(value: string): string {
 
 export async function searchProblemsForAdmin(domainId: string, mapIdValue: ObjectId | string, query: unknown): Promise<ProblemSummary[]> {
     const mapId = objectId(mapIdValue, 'mapId');
-    if (typeof query !== 'string') throw new MindmapRequestError('搜索关键词无效');
+    if (typeof query !== 'string') throw new MindmapRequestError(localizedErrorText`搜索关键词无效`);
     const q = query.trim();
     if (!q) return [];
-    if (q.length > 80) throw new MindmapRequestError('搜索关键词不能超过 80 个字符');
+    if (q.length > 80) throw new MindmapRequestError(localizedErrorText`搜索关键词不能超过 80 个字符`);
     const regex = new RegExp(escapeRegExp(q), 'i');
     const numeric = Number(q);
     const clauses: Record<string, unknown>[] = [{ pid: regex }, { title: regex }];

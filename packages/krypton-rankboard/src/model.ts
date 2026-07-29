@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { db, NotFoundError, ObjectId, UserModel } from 'hydrooj';
+import { localizedErrorText, db, NotFoundError, ObjectId, UserModel } from 'hydrooj';
 import { awardTypesColl, getConfig, importBatchesColl, peopleColl, seedAwardTypesIfEmpty, setConfig } from './db';
 import type { Award, AwardType, ImportBatch, LeaderboardRow, PersonRecord } from './types';
 
@@ -100,7 +100,7 @@ async function getScopedPersonOrNull(id: ObjectId | string): Promise<PersonRecor
 
 async function requireScopedPerson(id: ObjectId | string): Promise<PersonRecord> {
     const person = await getScopedPersonOrNull(id);
-    if (!person) throw new NotFoundError('person', String(id));
+    if (!person) throw new NotFoundError(localizedErrorText`person`, String(id));
     return person;
 }
 
@@ -132,7 +132,7 @@ export async function createPerson(input: {
     // the system domain. Missing and outer-domain IDs intentionally share the
     // same not-found response.
     const student = await studentsColl.findOne({ _id: sid, domainId: RANKBOARD_DOMAIN });
-    if (!student) throw new NotFoundError('student', String(sid));
+    if (!student) throw new NotFoundError(localizedErrorText`student`, String(sid));
     const existing = await peopleColl.findOne({ studentDocId: sid });
     if (existing) return existing;
     const doc: PersonRecord = {
@@ -384,7 +384,7 @@ export async function listImportBatches(limit = 50): Promise<ImportBatch[]> {
  */
 export async function rollbackImportBatch(batchId: ObjectId, actor: number): Promise<{ pulled: number }> {
     const batch = await importBatchesColl.findOne({ _id: batchId });
-    if (!batch) throw new NotFoundError('ImportBatch');
+    if (!batch) throw new NotFoundError(localizedErrorText`ImportBatch`);
     if (batch.rolledBackAt) return { pulled: 0 };
     const scopedPeople = await listScopedPeople({ 'awards.importBatchId': batchId });
     const scopedPersonIds = scopedPeople.map((person) => person._id);

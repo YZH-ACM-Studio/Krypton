@@ -1,5 +1,5 @@
 import { ObjectId } from 'mongodb';
-import { NotFoundError, OplogModel, ValidationError } from 'hydrooj';
+import { localizedErrorText, NotFoundError, OplogModel, ValidationError } from 'hydrooj';
 import type { Handler } from 'hydrooj';
 import * as contestModel from '../model/contest';
 
@@ -8,7 +8,7 @@ export async function ensureVigilContestParticipation(handler: Handler, domainId
     if (!Number.isSafeInteger(uid) || uid <= 0) throw new ValidationError('uid');
     const tid = new ObjectId(contestId);
     const tdoc = await contestModel.get(domainId, tid);
-    if (!tdoc) throw new NotFoundError('Contest', contestId);
+    if (!tdoc) throw new NotFoundError(localizedErrorText`Contest`, contestId);
 
     let tsdoc = await contestModel.getStatus(domainId, tid, uid);
     let autoAttended = false;

@@ -1,6 +1,6 @@
 import { ObjectId, type Filter } from 'mongodb';
 import type { Context } from '../context';
-import { ContestTeamConflictError, NotAssignedError, PermissionError, UserNotFoundError, ValidationError } from '../error';
+import { localizedErrorText, ContestTeamConflictError, NotAssignedError, PermissionError, UserNotFoundError, ValidationError } from '../error';
 import type { Tdoc } from '../interface';
 import bus from '../service/bus';
 import db from '../service/db';
@@ -111,7 +111,7 @@ function teamConflict(reason: string): never {
 
 function normalizeText(value: unknown): string {
     const normalized = String(value ?? '').normalize('NFKC');
-    if (/\p{Cc}/u.test(normalized)) throw new ValidationError('teamText', null, 'Control characters are not allowed.');
+    if (/\p{Cc}/u.test(normalized)) throw new ValidationError('teamText', null, localizedErrorText`Control characters are not allowed.`);
     return normalized.replace(/\s+/g, ' ').trim();
 }
 
@@ -127,27 +127,31 @@ export function requireVigilLockoutCacheInvalidator(): VigilLockoutCacheInvalida
 
 export function normalizeTeamName(value: unknown): { name: string; nameKey: string } {
     const name = normalizeText(value);
-    if (!name || name.length > 64) throw new ValidationError('name', null, 'Team name must contain 1-64 characters.');
+    if (!name || name.length > 64) throw new ValidationError('name', null, localizedErrorText`Team name must contain 1-64 characters.`);
     return { name, nameKey: name.toLocaleLowerCase('en-US') };
 }
 
 export function normalizeTeamDescription(value: unknown): string {
     const description = normalizeText(value);
-    if (description.length > 500) throw new ValidationError('description', null, 'Team description must not exceed 500 characters.');
+    if (description.length > 500) {
+        throw new ValidationError('description', null, localizedErrorText`Team description must not exceed 500 characters.`);
+    }
     return description;
 }
 
 export function normalizeMemberUids(value: number[]): number[] {
     const memberUids = Array.from(new Set((value || []).map(Number)));
     if (memberUids.some((uid) => !Number.isSafeInteger(uid) || uid <= 0)) throw new ValidationError('memberUids');
-    if (memberUids.length < 1 || memberUids.length > 3) throw new ValidationError('memberUids', null, 'A team must have 1-3 members.');
+    if (memberUids.length < 1 || memberUids.length > 3) {
+        throw new ValidationError('memberUids', null, localizedErrorText`A team must have 1-3 members.`);
+    }
     return memberUids.sort((a, b) => a - b);
 }
 
 export function validateTeamShape(memberUids: number[], captainUid: number): number[] {
     const normalized = normalizeMemberUids(memberUids);
     if (!Number.isSafeInteger(captainUid) || !normalized.includes(captainUid)) {
-        throw new ValidationError('captainUid', null, 'The captain must be exactly one current team member.');
+        throw new ValidationError('captainUid', null, localizedErrorText`The captain must be exactly one current team member.`);
     }
     return normalized;
 }
@@ -200,7 +204,7 @@ function started(tdoc: Tdoc, now: Date): boolean {
 async function assertTeamContest(domainId: string, contestId: ObjectId): Promise<Tdoc> {
     const tdoc = await contest.get(domainId, contestId);
     if (contest.getParticipationMode(tdoc) !== 'team' || tdoc.rule !== 'acm') {
-        throw new ValidationError('participationMode', null, 'Teams are only available for team-mode ACM contests.');
+        throw new ValidationError('participationMode', null, localizedErrorText`Teams are only available for team-mode ACM contests.`);
     }
     if (tdoc.plannedTeamBatchId && !tdoc.teamBatchId) teamConflict('team_batch_not_finalized');
     return tdoc;
@@ -210,12 +214,14 @@ async function assertContestTeamBaseEligibility(domainId: string, tdoc: Tdoc, ui
     const udoc = await UserModel.getById(domainId, uid);
     if (!udoc || !udoc._id) throw new UserNotFoundError(uid);
     if (!udoc.hasPerm(PERM.PERM_VIEW_CONTEST) || !udoc.hasPerm(PERM.PERM_ATTEND_CONTEST)) {
-        throw new NotAssignedError('contest', tdoc.docId);
+        throw new NotAssignedError(localizedErrorText`contest`, tdoc.docId);
     }
 
     if (tdoc.assign?.length) {
         const groups = await UserModel.listGroup(domainId, uid);
-        if (!tdoc.assign.some((name) => groups.some((group) => group.name === name))) throw new NotAssignedError('contest', tdoc.docId);
+        if (!tdoc.assign.some((name) => groups.some((group) => group.name === name))) {
+            throw new NotAssignedError(localizedErrorText`contest`, tdoc.docId);
+        }
     }
     if (tdoc.participantScopeMode && !['none', 'schools', 'groups'].includes(tdoc.participantScopeMode)) {
         throw new ValidationError('participantScopeMode');
@@ -223,9 +229,11 @@ async function assertContestTeamBaseEligibility(domainId: string, tdoc: Tdoc, ui
     if (contest.hasParticipantScope(tdoc)) {
         const vigilguard = (global as any).Hydro?.model?.vigilguard;
         if (!vigilguard?.hitsParticipantScope) {
-            throw new ValidationError('participantScopeMode', null, 'Participant scope service is unavailable.');
+            throw new ValidationError('participantScopeMode', null, localizedErrorText`Participant scope service is unavailable.`);
         }
-        if (!(await vigilguard.hitsParticipantScope(domainId, tdoc, uid))) throw new NotAssignedError('contest', tdoc.docId);
+        if (!(await vigilguard.hitsParticipantScope(domainId, tdoc, uid))) {
+            throw new NotAssignedError(localizedErrorText`contest`, tdoc.docId);
+        }
     }
 }
 
@@ -242,7 +250,7 @@ export async function assertContestTeamEligibility(domainId: string, tdoc: Tdoc,
     await assertContestTeamBaseEligibility(domainId, tdoc, uid);
     if (tdoc._code) {
         const tsdoc = await contest.getStatus(domainId, tdoc.docId, uid);
-        if (!tsdoc?.attend) throw new NotAssignedError('contest', tdoc.docId);
+        if (!tsdoc?.attend) throw new NotAssignedError(localizedErrorText`contest`, tdoc.docId);
     }
 }
 

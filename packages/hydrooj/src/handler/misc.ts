@@ -2,7 +2,7 @@ import { writeHeapSnapshot } from 'v8';
 import { pick } from 'lodash';
 import { lookup } from 'mime-types';
 import { Context } from '../context';
-import { AccessDeniedError, FileExistsError, FileLimitExceededError, FileUploadError, NotFoundError, ValidationError } from '../error';
+import { localizeError, AccessDeniedError, FileExistsError, FileLimitExceededError, FileUploadError, NotFoundError, ValidationError } from '../error';
 import { PRIV } from '../model/builtin';
 import * as oplog from '../model/oplog';
 import storage from '../model/storage';
@@ -101,7 +101,7 @@ export class FSDownloadHandler extends Handler {
             this.response.redirect = await storage.signDownloadLink(target, noDisposition ? undefined : filename, false, 'user');
             this.response.addHeader('Cache-Control', 'public');
         } catch (e) {
-            if (e.message.includes('Invalid path')) throw new NotFoundError(filename);
+            if (e.message.includes('Invalid path')) throw localizeError(new NotFoundError(filename), 'Resource {0} not found.', filename);
             throw e;
         }
     }

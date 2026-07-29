@@ -14,7 +14,19 @@
 import { randomBytes } from 'node:crypto';
 import { escapeRegExp } from 'lodash';
 import { ObjectId } from 'mongodb';
-import { Context, Handler, NotFoundError, OplogModel, param, PRIV, requireServiceToken, Types, UserModel, ValidationError } from 'hydrooj';
+import {
+    localizedErrorText,
+    Context,
+    Handler,
+    NotFoundError,
+    OplogModel,
+    param,
+    PRIV,
+    requireServiceToken,
+    Types,
+    UserModel,
+    ValidationError,
+} from 'hydrooj';
 import * as contestModel from '../model/contest';
 import * as contestTeam from '../model/contest-team';
 import * as document from '../model/document';
@@ -116,7 +128,7 @@ export async function resolveVigilContestRole(domainId: string, contestId: strin
     if (!ObjectId.isValid(contestId) || !Number.isSafeInteger(uid) || uid <= 0) throw new ValidationError('contestId');
     const tid = new ObjectId(contestId);
     const tdoc = await contestModel.get(domainId, tid);
-    if (!tdoc) throw new NotFoundError('Contest');
+    if (!tdoc) throw new NotFoundError(localizedErrorText`Contest`);
     if (contestModel.getParticipationMode(tdoc) !== 'team') {
         return buildVigilContestRoleResolution(tdoc, null, uid);
     }
@@ -1039,7 +1051,7 @@ class VigilAdminContestsHandler extends Handler {
 
 function recordingDeleteScope(cid: ObjectId, ojUserId?: number, examSessionId?: string, recordingId?: string) {
     const selectors = [ojUserId, examSessionId, recordingId].filter((value) => value !== undefined && value !== '').length;
-    if (selectors > 1) throw new ValidationError('recordingScope', null, 'Choose only one recording deletion scope');
+    if (selectors > 1) throw new ValidationError('recordingScope', null, localizedErrorText`Choose only one recording deletion scope`);
     return {
         cid: String(cid),
         ...(ojUserId ? { ojUserId } : {}),
@@ -1050,7 +1062,7 @@ function recordingDeleteScope(cid: ObjectId, ojUserId?: number, examSessionId?: 
 
 async function recordingDeleteContest(cid: ObjectId) {
     const tdoc = await document.coll.findOne({ docType: document.TYPE_CONTEST, docId: cid }, { projection: { title: 1 } });
-    if (!tdoc) throw new NotFoundError('Contest');
+    if (!tdoc) throw new NotFoundError(localizedErrorText`Contest`);
     return tdoc;
 }
 
@@ -1068,7 +1080,7 @@ class VigilRecordingDeletePreviewHandler extends Handler {
         const scope = recordingDeleteScope(cid, ojUserId, examSessionId, recordingId);
         const preview = await previewRecordingDelete(scope, { uid: this.user._id, uname: this.user.uname });
         if (preview.contestTitle !== contest.title) {
-            throw new ValidationError('cid', null, 'OJ and Vigil contest titles differ; synchronize before deleting recordings');
+            throw new ValidationError('cid', null, localizedErrorText`OJ and Vigil contest titles differ; synchronize before deleting recordings`);
         }
         this.response.body = preview;
     }
@@ -1098,7 +1110,7 @@ class VigilRecordingDeleteHandler extends Handler {
         const scope = recordingDeleteScope(cid, ojUserId, examSessionId, recordingId);
         const isContestScope = !ojUserId && !examSessionId && !recordingId;
         if (isContestScope && confirmTitle !== contest.title) {
-            throw new ValidationError('confirmTitle', null, 'Contest title confirmation mismatch');
+            throw new ValidationError('confirmTitle', null, localizedErrorText`Contest title confirmation mismatch`);
         }
         try {
             const result = await executeRecordingDelete(scope, { uid: this.user._id, uname: this.user.uname }, intent, confirmTitle);

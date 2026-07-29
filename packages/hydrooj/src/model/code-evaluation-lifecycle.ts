@@ -1,8 +1,9 @@
 import type { ProblemKind, StructuredCodeRange, StructuredCodeRegion, StructuredCodeTemplate } from '@hydrooj/common';
 import { compareStructuredCodeRegions, parseProblemKind } from '@hydrooj/common';
 import { nanoid } from 'nanoid';
-import { ValidationError } from '../error';
+import { localizeErrorParameter, localizedErrorText, type LocalizedErrorText, ValidationError } from '../error';
 import {
+    getProblemConfigErrorText,
     parseProblemConfigObject,
     STRUCTURED_CODE_REGION_ID,
     templateSourceHash,
@@ -34,6 +35,10 @@ interface CodeEvaluationProblemSnapshot {
     data?: Array<{ name: string }>;
 }
 
+function localizedConfigValidation(field: string, detail: LocalizedErrorText) {
+    return new ValidationError(field, null, detail);
+}
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
     const prototype = Object.getPrototypeOf(value);
@@ -42,11 +47,11 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 function assertExactKeys(value: Record<string, unknown>, allowed: string[], field: string): void {
     const unknown = Object.keys(value).filter((key) => !allowed.includes(key));
-    if (unknown.length) throw new ValidationError(field, null, `${field} 不接受字段：${unknown.join(', ')}`);
+    if (unknown.length) throw new ValidationError(field, null, localizedErrorText`${field} 不接受字段：${unknown.join(', ')}`);
 }
 
 export function normalizeCodeEvaluationFilename(value: unknown, field: string): string {
-    if (typeof value !== 'string') throw new ValidationError(field, null, '测试数据文件名必须是文本');
+    if (typeof value !== 'string') throw new ValidationError(field, null, localizedErrorText`测试数据文件名必须是文本`);
     const filename = value.trim();
     const containsControlCharacter = [...filename].some((character) => {
         const code = character.charCodeAt(0);
@@ -62,28 +67,28 @@ export function normalizeCodeEvaluationFilename(value: unknown, field: string): 
         containsControlCharacter ||
         /[. ]$/.test(filename)
     ) {
-        throw new ValidationError(field, null, `测试数据文件名非法：${value}`);
+        throw new ValidationError(field, null, localizedErrorText`测试数据文件名非法：${value}`);
     }
     return filename;
 }
 
 export function normalizeCodeEvaluationCases(value: unknown, allowEmpty: boolean): CodeEvaluationCase[] {
-    if (!Array.isArray(value)) throw new ValidationError('cases', null, '测试数据映射必须是数组');
-    if (!allowEmpty && !value.length) throw new ValidationError('cases', null, '至少需要一个完整测试点');
+    if (!Array.isArray(value)) throw new ValidationError('cases', null, localizedErrorText`测试数据映射必须是数组`);
+    if (!allowEmpty && !value.length) throw new ValidationError('cases', null, localizedErrorText`至少需要一个完整测试点`);
     return value.map((item, index) => {
-        if (!isPlainObject(item)) throw new ValidationError('cases', null, `测试点 ${index + 1} 格式错误`);
+        if (!isPlainObject(item)) throw new ValidationError('cases', null, localizedErrorText`测试点 ${index + 1} 格式错误`);
         const unknown = Object.keys(item).filter((key) => !['input', 'output'].includes(key));
-        if (unknown.length) throw new ValidationError('cases', null, `测试点 ${index + 1} 不接受字段：${unknown.join(', ')}`);
+        if (unknown.length) throw new ValidationError('cases', null, localizedErrorText`测试点 ${index + 1} 不接受字段：${unknown.join(', ')}`);
         const input = normalizeCodeEvaluationFilename(item.input, `cases[${index}].input`);
         const output = normalizeCodeEvaluationFilename(item.output, `cases[${index}].output`);
-        if (input === output) throw new ValidationError('cases', null, `测试点 ${index + 1} 的输入输出不能是同一文件`);
+        if (input === output) throw new ValidationError('cases', null, localizedErrorText`测试点 ${index + 1} 的输入输出不能是同一文件`);
         return { input, output };
     });
 }
 
 function normalizeLanguage(value: unknown): string {
     const lang = typeof value === 'string' ? value.trim() : '';
-    if (!lang || !/^[A-Za-z0-9_.+-]{1,64}$/.test(lang)) throw new ValidationError('lang', null, '必须选择唯一评测语言');
+    if (!lang || !/^[A-Za-z0-9_.+-]{1,64}$/.test(lang)) throw new ValidationError('lang', null, localizedErrorText`必须选择唯一评测语言`);
     return lang;
 }
 
@@ -95,12 +100,12 @@ function normalizeOptionalLanguage(value: unknown): string | undefined {
 function expectedMode(kind: ProblemKind): 'compile' | 'function' {
     if (kind === 'program_fill') return 'compile';
     if (kind === 'function') return 'function';
-    throw new ValidationError('problemKind', null, '只有编译型程序填空和代码实现题使用代码评测草稿');
+    throw new ValidationError('problemKind', null, localizedErrorText`只有编译型程序填空和代码实现题使用代码评测草稿`);
 }
 
 export function normalizeCodeEvaluationCreationStatus(value: unknown): 'draft' | undefined {
     if (value === undefined) return undefined;
-    if (value !== 'draft') throw new ValidationError('codeEvaluationStatus', null, '代码评测题创建时只能进入 draft 状态');
+    if (value !== 'draft') throw new ValidationError('codeEvaluationStatus', null, localizedErrorText`代码评测题创建时只能进入 draft 状态`);
     return value;
 }
 
@@ -108,10 +113,10 @@ export function normalizeCodeEvaluationDraftCreationConfig(kindInput: ProblemKin
     const kind = parseProblemKind(kindInput);
     if (!isPlainObject(value)) throw new ValidationError('structuredConfig');
     assertExactKeys(value, ['main'], 'structuredConfig');
-    if (!isPlainObject(value.main)) throw new ValidationError('structuredConfig', null, 'main 必须是对象');
+    if (!isPlainObject(value.main)) throw new ValidationError('structuredConfig', null, localizedErrorText`main 必须是对象`);
     assertExactKeys(value.main, ['mode', 'lang'], 'structuredConfig.main');
     const mode = expectedMode(kind);
-    if (value.main.mode !== mode) throw new ValidationError('mode', null, `评测方式必须是 ${mode}`);
+    if (value.main.mode !== mode) throw new ValidationError('mode', null, localizedErrorText`评测方式必须是 ${mode}`);
     return { main: { mode, lang: normalizeLanguage(value.main.lang) } };
 }
 
@@ -127,11 +132,11 @@ export function normalizeStructuredCodeConfig(kindInput: ProblemKind, value: unk
     const kind = parseProblemKind(kindInput);
     if (!isPlainObject(value)) throw new ValidationError('structuredConfig');
     assertExactKeys(value, ['main'], 'structuredConfig');
-    if (!isPlainObject(value.main)) throw new ValidationError('structuredConfig', null, 'main 必须是对象');
+    if (!isPlainObject(value.main)) throw new ValidationError('structuredConfig', null, localizedErrorText`main 必须是对象`);
     assertExactKeys(value.main, ['mode', 'lang', 'source', 'sourceHash', 'publicRanges', 'regions', 'cases'], 'structuredConfig.main');
     const mode = kind === 'function' ? 'function' : value.main.mode === 'text' || value.main.mode === 'compile' ? value.main.mode : undefined;
-    if (!mode) throw new ValidationError('mode', null, '程序填空模式必须是 text 或 compile');
-    if (kind === 'function' && value.main.mode !== 'function') throw new ValidationError('mode', null, '评测方式必须是 function');
+    if (!mode) throw new ValidationError('mode', null, localizedErrorText`程序填空模式必须是 text 或 compile`);
+    if (kind === 'function' && value.main.mode !== 'function') throw new ValidationError('mode', null, localizedErrorText`评测方式必须是 function`);
     const lang = mode === 'text' ? normalizeOptionalLanguage(value.main.lang) : normalizeLanguage(value.main.lang);
     const initialDraftShell = !['source', 'sourceHash', 'publicRanges', 'regions', 'cases'].some((field) =>
         Object.hasOwn(value.main as Record<string, unknown>, field),
@@ -140,21 +145,21 @@ export function normalizeStructuredCodeConfig(kindInput: ProblemKind, value: unk
         const missing = ['source', 'sourceHash', 'publicRanges', 'regions'].find(
             (field) => !Object.hasOwn(value.main as Record<string, unknown>, field),
         );
-        if (missing) throw new ValidationError(missing, null, `完整代码模板缺少字段：${missing}`);
+        if (missing) throw new ValidationError(missing, null, localizedErrorText`完整代码模板缺少字段：${missing}`);
     }
     const sourceInput = value.main.source === undefined ? '' : value.main.source;
-    if (typeof sourceInput !== 'string') throw new ValidationError('source', null, '私有模板必须是文本');
+    if (typeof sourceInput !== 'string') throw new ValidationError('source', null, localizedErrorText`私有模板必须是文本`);
     const source = sourceInput.replace(/\r\n?/g, '\n');
     if (!initialDraftShell && (typeof value.main.sourceHash !== 'string' || value.main.sourceHash !== templateSourceHash(source))) {
-        throw new ValidationError('sourceHash', null, '源码摘要与本次提交内容不一致，请重新载入后再保存');
+        throw new ValidationError('sourceHash', null, localizedErrorText`源码摘要与本次提交内容不一致，请重新载入后再保存`);
     }
     const rawPublicRanges = value.main.publicRanges === undefined ? [] : value.main.publicRanges;
-    if (!Array.isArray(rawPublicRanges)) throw new ValidationError('publicRanges', null, '公开区必须是数组');
+    if (!Array.isArray(rawPublicRanges)) throw new ValidationError('publicRanges', null, localizedErrorText`公开区必须是数组`);
     const publicRanges = rawPublicRanges.map((item, index): StructuredCodeRange => {
-        if (!isPlainObject(item)) throw new ValidationError('publicRanges', null, `公开区 ${index + 1} 格式错误`);
+        if (!isPlainObject(item)) throw new ValidationError('publicRanges', null, localizedErrorText`公开区 ${index + 1} 格式错误`);
         assertExactKeys(item, ['startLine', 'endLine'], `publicRanges[${index}]`);
         if (!Number.isSafeInteger(item.startLine) || !Number.isSafeInteger(item.endLine)) {
-            throw new ValidationError('publicRanges', null, `公开区 ${index + 1} 的行范围无效`);
+            throw new ValidationError('publicRanges', null, localizedErrorText`公开区 ${index + 1} 的行范围无效`);
         }
         return { startLine: Number(item.startLine), endLine: Number(item.endLine) };
     });
@@ -167,45 +172,47 @@ export function normalizeStructuredCodeConfig(kindInput: ProblemKind, value: unk
     );
     const allocatedIds = new Set(currentRegions.keys());
     const regions = rawRegions.map((item, index) => {
-        if (!isPlainObject(item)) throw new ValidationError('regions', null, `区域 ${index + 1} 格式错误`);
+        if (!isPlainObject(item)) throw new ValidationError('regions', null, localizedErrorText`区域 ${index + 1} 格式错误`);
         assertExactKeys(
             item,
             kind === 'function' ? ['id', 'startLine', 'endLine', 'title', 'description'] : ['id', 'startLine', 'endLine', 'prompt'],
             `regions[${index}]`,
         );
         const submittedId = item.id === undefined ? '' : item.id;
-        if (typeof submittedId !== 'string') throw new ValidationError('regions', null, `区域 ${index + 1} ID 格式错误`);
+        if (typeof submittedId !== 'string') throw new ValidationError('regions', null, localizedErrorText`区域 ${index + 1} ID 格式错误`);
         if (submittedId && !STRUCTURED_CODE_REGION_ID.test(submittedId)) {
-            throw new ValidationError('regions', null, `区域 ${index + 1} ID 不是有效的服务端 ID`);
+            throw new ValidationError('regions', null, localizedErrorText`区域 ${index + 1} ID 不是有效的服务端 ID`);
         }
         const existing = submittedId ? currentRegions.get(submittedId) : undefined;
-        if (submittedId && !existing) throw new ValidationError('regions', null, `区域 ${index + 1} ID 不属于当前题目`);
+        if (submittedId && !existing) throw new ValidationError('regions', null, localizedErrorText`区域 ${index + 1} ID 不属于当前题目`);
         if (!Number.isSafeInteger(item.startLine) || !Number.isSafeInteger(item.endLine)) {
-            throw new ValidationError('regions', null, `区域 ${index + 1} 的行范围无效`);
+            throw new ValidationError('regions', null, localizedErrorText`区域 ${index + 1} 的行范围无效`);
         }
         const startLine = Number(item.startLine);
         const endLine = Number(item.endLine);
         const id = existing?.id || nextRegionId(allocatedIds);
         if (kind === 'function') {
             if (item.title !== undefined && typeof item.title !== 'string') {
-                throw new ValidationError('regions', null, `区域 ${index + 1} 标题必须是文本`);
+                throw new ValidationError('regions', null, localizedErrorText`区域 ${index + 1} 标题必须是文本`);
             }
             if (item.description !== undefined && typeof item.description !== 'string') {
-                throw new ValidationError('regions', null, `区域 ${index + 1} 说明必须是文本`);
+                throw new ValidationError('regions', null, localizedErrorText`区域 ${index + 1} 说明必须是文本`);
             }
             const title = typeof item.title === 'string' ? item.title.trim() : '';
             const description = typeof item.description === 'string' ? item.description.trim() : '';
             return { id, startLine, endLine, ...(title ? { title } : {}), ...(description ? { description } : {}) };
         }
         if (item.prompt !== undefined && typeof item.prompt !== 'string') {
-            throw new ValidationError('regions', null, `区域 ${index + 1} 提示必须是文本`);
+            throw new ValidationError('regions', null, localizedErrorText`区域 ${index + 1} 提示必须是文本`);
         }
         const prompt = typeof item.prompt === 'string' ? item.prompt.trim() : '';
         return { id, startLine, endLine, ...(prompt ? { prompt } : {}) };
     });
-    if (new Set(regions.map((region) => region.id)).size !== regions.length) throw new ValidationError('regions', null, '区域 ID 不能重复');
+    if (new Set(regions.map((region) => region.id)).size !== regions.length) {
+        throw new ValidationError('regions', null, localizedErrorText`区域 ID 不能重复`);
+    }
     if (mode === 'text' && Object.hasOwn(value.main, 'cases')) {
-        throw new ValidationError('cases', null, '文本程序填空不使用测试数据映射');
+        throw new ValidationError('cases', null, localizedErrorText`文本程序填空不使用测试数据映射`);
     }
     const cases = mode === 'text' ? [] : normalizeCodeEvaluationCases(value.main.cases ?? [], true);
     const template = {
@@ -218,7 +225,14 @@ export function normalizeStructuredCodeConfig(kindInput: ProblemKind, value: unk
     try {
         validateStructuredCodeTemplate(template, kind as 'program_fill' | 'function', { allowEmpty: true });
     } catch (error: any) {
-        throw new ValidationError('regions', null, error.message);
+        const localizedDetail = getProblemConfigErrorText(error);
+        if (localizedDetail) throw localizedConfigValidation('regions', localizedDetail);
+        throw localizeErrorParameter(
+            new ValidationError('regions', null, error.message),
+            2,
+            'The code-evaluation configuration is invalid: {0}',
+            error.message,
+        );
     }
     return {
         type: kind === 'function' ? 'function' : 'program_fill',
@@ -234,7 +248,7 @@ export function normalizeCodeEvaluationDraftConfig(kindInput: ProblemKind, value
     const kind = parseProblemKind(kindInput);
     const config = normalizeStructuredCodeConfig(kind, value, currentConfigInput);
     if (!isCodeEvaluationProblem(kind, config)) {
-        throw new ValidationError('mode', null, '只有编译型程序填空和代码实现题使用代码评测草稿');
+        throw new ValidationError('mode', null, localizedErrorText`只有编译型程序填空和代码实现题使用代码评测草稿`);
     }
     return config;
 }
@@ -254,10 +268,10 @@ export function assertCodeEvaluationStatusInvariant(
 ): asserts status is CodeEvaluationStatus | undefined {
     const codeEvaluation = isCodeEvaluationProblem(kindInput, configInput);
     if (codeEvaluation && !['draft', 'ready'].includes(String(status))) {
-        throw new ValidationError('codeEvaluationStatus', null, '代码评测题必须具有显式 draft/ready 状态');
+        throw new ValidationError('codeEvaluationStatus', null, localizedErrorText`代码评测题必须具有显式 draft/ready 状态`);
     }
     if (!codeEvaluation && status !== undefined) {
-        throw new ValidationError('codeEvaluationStatus', null, '非代码评测题不能设置代码评测状态');
+        throw new ValidationError('codeEvaluationStatus', null, localizedErrorText`非代码评测题不能设置代码评测状态`);
     }
 }
 
@@ -271,8 +285,12 @@ export function assertCodeEvaluationMappingsExist(configInput: unknown, files: A
     const cases = mappedCases(configInput, allowEmpty);
     const available = new Set((files || []).map((file) => file.name));
     for (const [index, item] of cases.entries()) {
-        if (!available.has(item.input)) throw new ValidationError('cases', null, `测试点 ${index + 1} 输入文件不存在：${item.input}`);
-        if (!available.has(item.output)) throw new ValidationError('cases', null, `测试点 ${index + 1} 输出文件不存在：${item.output}`);
+        if (!available.has(item.input)) {
+            throw new ValidationError('cases', null, localizedErrorText`测试点 ${index + 1} 输入文件不存在：${item.input}`);
+        }
+        if (!available.has(item.output)) {
+            throw new ValidationError('cases', null, localizedErrorText`测试点 ${index + 1} 输出文件不存在：${item.output}`);
+        }
     }
 }
 
@@ -280,19 +298,26 @@ export function assertProblemReadyForUse(pdoc: CodeEvaluationProblemSnapshot, _c
     const codeEvaluation = isCodeEvaluationProblem(pdoc.problemKind, pdoc.config);
     if (!codeEvaluation) {
         if (pdoc.codeEvaluationStatus !== undefined) {
-            throw new ValidationError('codeEvaluationStatus', null, '非代码评测题包含非法评测状态');
+            throw new ValidationError('codeEvaluationStatus', null, localizedErrorText`非代码评测题包含非法评测状态`);
         }
         return;
     }
     if (pdoc.codeEvaluationStatus !== 'ready') {
-        throw new ValidationError('codeEvaluationStatus', null, '代码评测题草稿尚未完成，不能用于发布、引用、提交或评测');
+        throw new ValidationError('codeEvaluationStatus', null, localizedErrorText`代码评测题草稿尚未完成，不能用于发布、引用、提交或评测`);
     }
     try {
         const config = parseProblemConfigObject(pdoc);
         validateCompiledStructuredConfig(String(pdoc.problemKind), config);
         validateStructuredCodeTestdataFiles(config, pdoc.data || [], pdoc.problemKind as 'program_fill' | 'function');
     } catch (error: any) {
-        throw new ValidationError('codeEvaluationStatus', null, error.message);
+        const localizedDetail = getProblemConfigErrorText(error);
+        if (localizedDetail) throw localizedConfigValidation('codeEvaluationStatus', localizedDetail);
+        throw localizeErrorParameter(
+            new ValidationError('codeEvaluationStatus', null, error.message),
+            2,
+            'The code-evaluation configuration is invalid: {0}',
+            error.message,
+        );
     }
 }
 
@@ -324,19 +349,27 @@ export function assertCodeEvaluationFileMutation(
         }
     }
     if (mutation.type === 'upload') {
-        if (existing.has(mutation.filename)) throw new ValidationError('filename', null, `同名测试数据已存在：${mutation.filename}`);
+        if (existing.has(mutation.filename)) {
+            throw new ValidationError('filename', null, localizedErrorText`同名测试数据已存在：${mutation.filename}`);
+        }
         return;
     }
     if (mutation.type === 'rename') {
         const cases = referenced.get(mutation.filename);
-        if (cases?.length) throw new ValidationError('files', null, `${mutation.filename} 正被测试点 ${cases.join(', ')} 引用，请先调整映射`);
-        if (!existing.has(mutation.filename)) throw new ValidationError('files', null, `待改名文件不存在：${mutation.filename}`);
-        if (existing.has(mutation.newFilename)) throw new ValidationError('newNames', null, `目标文件名已存在：${mutation.newFilename}`);
+        if (cases?.length) {
+            throw new ValidationError('files', null, localizedErrorText`${mutation.filename} 正被测试点 ${cases.join(', ')} 引用，请先调整映射`);
+        }
+        if (!existing.has(mutation.filename)) throw new ValidationError('files', null, localizedErrorText`待改名文件不存在：${mutation.filename}`);
+        if (existing.has(mutation.newFilename)) {
+            throw new ValidationError('newNames', null, localizedErrorText`目标文件名已存在：${mutation.newFilename}`);
+        }
         return;
     }
     for (const filename of mutation.filenames) {
         const cases = referenced.get(filename);
-        if (cases?.length) throw new ValidationError('files', null, `${filename} 正被测试点 ${cases.join(', ')} 引用，请先调整映射`);
+        if (cases?.length) {
+            throw new ValidationError('files', null, localizedErrorText`${filename} 正被测试点 ${cases.join(', ')} 引用，请先调整映射`);
+        }
     }
 }
 
@@ -356,7 +389,7 @@ export function assertCodeEvaluationStatusTransition(
         $set.codeEvaluationStatus !== 'ready' ||
         Object.keys($unset).some((field) => field === 'codeEvaluationStatus' || field.startsWith('codeEvaluationStatus.'))
     ) {
-        throw new ValidationError('codeEvaluationStatus', null, '代码评测状态只能由完成草稿服务从 draft 原子切换为 ready');
+        throw new ValidationError('codeEvaluationStatus', null, localizedErrorText`代码评测状态只能由完成草稿服务从 draft 原子切换为 ready`);
     }
 }
 
@@ -371,7 +404,7 @@ export function assertCodeEvaluationLifecyclePatch(
     const fields = [...Object.keys($set), ...Object.keys($unset)];
     const dotted = fields.filter((field) => field.includes('.') && lifecycleRoots.has(field.split('.')[0]));
     if (dotted.length) {
-        throw new ValidationError('fields', null, `代码评测生命周期字段必须整体写入：${dotted.join(', ')}`);
+        throw new ValidationError('fields', null, localizedErrorText`代码评测生命周期字段必须整体写入：${dotted.join(', ')}`);
     }
     assertCodeEvaluationStatusTransition(current.codeEvaluationStatus, $set, $unset, operation);
     const next = (field: 'problemKind' | 'config' | 'codeEvaluationStatus' | 'data') => {
@@ -388,7 +421,7 @@ export function assertCodeEvaluationLifecyclePatch(
         (isCodeEvaluationProblem(current.problemKind, current.config) || isCodeEvaluationProblem(problemKind, config)) &&
         options.physicalTestdataMutation !== true
     ) {
-        throw new ValidationError('data', null, '代码评测题测试数据元数据只能由测试数据文件服务写入');
+        throw new ValidationError('data', null, localizedErrorText`代码评测题测试数据元数据只能由测试数据文件服务写入`);
     }
     assertCodeEvaluationStatusInvariant(problemKind, config, codeEvaluationStatus);
     if (codeEvaluationStatus === 'ready') {

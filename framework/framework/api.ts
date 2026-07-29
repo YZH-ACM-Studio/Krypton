@@ -1,7 +1,7 @@
 import { Context, Service } from 'cordis';
 import Schema from 'schemastery';
 import { param } from './decorators';
-import { BadRequestError, MethodNotAllowedError, NotFoundError } from './error';
+import { localizeError, localizedErrorText, BadRequestError, MethodNotAllowedError, NotFoundError } from './error';
 import {} from './interface';
 import { ConnectionHandler, Handler } from './server';
 import { Types } from './validator';
@@ -122,7 +122,7 @@ function handleArguments(args: any) {
                       .filter((i) => i);
         }
     } catch (e) {
-        throw new BadRequestError('Invalid arguments');
+        throw new BadRequestError(localizedErrorText`Invalid arguments`);
     }
 }
 
@@ -166,7 +166,7 @@ export class ApiService extends Service {
         sendPayload?: (payload: any) => void,
     ) {
         const call = typeof callOrName === 'string' ? APIS[callOrName] : callOrName;
-        if (!call) throw new NotFoundError(callOrName);
+        if (!call) throw localizeError(new NotFoundError(callOrName), 'Resource {0} not found.', callOrName);
         const { input, func, hooks } = call;
 
         for (const hook of hooks) await this.execute(context, hook, rawArgs);
@@ -175,7 +175,7 @@ export class ApiService extends Service {
         try {
             args = input ? input(rawArgs as any) : rawArgs;
         } catch (e) {
-            throw new BadRequestError(e.message);
+            throw localizeError(new BadRequestError(e.message), 'Invalid request: {0}', e.message);
         }
         if (typeof callOrName === 'string') {
             await emitHook?.('api/before', args);
@@ -208,14 +208,14 @@ export class ApiHandler extends Handler {
     @param('op', Types.String)
     async all({}, op: string) {
         if (!['get', 'post'].includes(this.request.method.toLowerCase())) {
-            throw new MethodNotAllowedError(this.request.method);
+            throw localizeError(new MethodNotAllowedError(this.request.method), 'Method {0} is not allowed.', this.request.method);
         }
-        if (!APIS[op]) throw new BadRequestError(`Invalid API operation: ${op}`);
+        if (!APIS[op]) throw new BadRequestError(localizedErrorText`Invalid API operation: ${op}`);
         if (APIS[op].type === 'Subscription') {
-            throw new BadRequestError('Subscription operation cannot be called in HTTP handler');
+            throw new BadRequestError(localizedErrorText`Subscription operation cannot be called in HTTP handler`);
         }
         if (APIS[op].type === 'Mutation' && this.request.method.toLowerCase() === 'get') {
-            throw new BadRequestError('Mutation operation cannot be called with GET method');
+            throw new BadRequestError(localizedErrorText`Mutation operation cannot be called with GET method`);
         }
         handleArguments(this.args);
         // @ts-ignore
@@ -249,9 +249,9 @@ export class ApiConnectionHandler extends ConnectionHandler {
             this.isRpc = true;
             return;
         }
-        if (!APIS[op]) throw new BadRequestError(`Invalid API operation: ${op}`);
+        if (!APIS[op]) throw new BadRequestError(localizedErrorText`Invalid API operation: ${op}`);
         if (APIS[op].type !== 'Subscription') {
-            throw new BadRequestError('Only subscription operations are supported');
+            throw new BadRequestError(localizedErrorText`Only subscription operations are supported`);
         }
         handleArguments(this.args);
         // @ts-ignore
@@ -269,17 +269,17 @@ export class ApiConnectionHandler extends ConnectionHandler {
     }
 
     async message(message) {
-        if (!this.isRpc) throw new BadRequestError('Only RPC operations are supported');
+        if (!this.isRpc) throw new BadRequestError(localizedErrorText`Only RPC operations are supported`);
         if (typeof message === 'string') {
             try {
                 message = JSON.parse(message);
             } catch (e) {
-                throw new BadRequestError('Invalid message');
+                throw new BadRequestError(localizedErrorText`Invalid message`);
             }
         }
-        if (!APIS[message.op]) throw new BadRequestError(`Invalid API operation: ${message.op}`);
+        if (!APIS[message.op]) throw new BadRequestError(localizedErrorText`Invalid API operation: ${message.op}`);
         if (APIS[message.op].type !== 'Subscription') {
-            throw new BadRequestError('Only subscription operations are supported');
+            throw new BadRequestError(localizedErrorText`Only subscription operations are supported`);
         }
         handleArguments(message);
         const result = await this.ctx.api.execute(

@@ -19,7 +19,7 @@
  */
 import type { Filter } from 'mongodb';
 import { Logger } from '@hydrooj/utils';
-import { ObjectId, ValidationError, UserModel, NotFoundError } from 'hydrooj';
+import { localizedErrorText, ObjectId, ValidationError, UserModel, NotFoundError } from 'hydrooj';
 import RecordModel from 'hydrooj/src/model/record';
 import { randomBytes } from 'node:crypto';
 import { bindingRequestsColl, bindTokensColl, schoolsColl, studentsColl, userGroupsColl } from './db';
@@ -58,9 +58,9 @@ export async function generateStudentInviteToken(
     ttlMs?: number,
 ): Promise<StudentBindToken> {
     const student = await studentsColl.findOne({ domainId, _id: studentRecordId });
-    if (!student) throw new NotFoundError('Student record');
+    if (!student) throw new NotFoundError(localizedErrorText`Student record`);
     if (student.boundUserId) {
-        throw new ValidationError('studentRecord', null, 'This student is already bound; cannot generate a new invite token');
+        throw new ValidationError('studentRecord', null, localizedErrorText`This student is already bound; cannot generate a new invite token`);
     }
     const doc: StudentBindToken = {
         _id: randomTokenId(),
@@ -80,7 +80,7 @@ export async function generateStudentInviteToken(
 
 export async function generateSchoolInviteToken(domainId: string, schoolId: ObjectId, createdBy: number, ttlMs?: number): Promise<SchoolBindToken> {
     const school = await schoolsColl.findOne({ domainId, _id: schoolId });
-    if (!school) throw new NotFoundError('School');
+    if (!school) throw new NotFoundError(localizedErrorText`School`);
     const doc: SchoolBindToken = {
         _id: randomTokenId(),
         domainId,
@@ -104,8 +104,8 @@ export async function generateUserGroupInviteToken(
     ttlMs?: number,
 ): Promise<UserGroupBindToken> {
     const group = await userGroupsColl.findOne({ domainId, _id: userGroupId });
-    if (!group) throw new NotFoundError('UserGroup');
-    if (group.archivedAt) throw new ValidationError('userGroupId', null, '该用户组已归档，无法生成邀请');
+    if (!group) throw new NotFoundError(localizedErrorText`UserGroup`);
+    if (group.archivedAt) throw new ValidationError('userGroupId', null, localizedErrorText`该用户组已归档，无法生成邀请`);
     const doc: UserGroupBindToken = {
         _id: randomTokenId(),
         domainId,
@@ -127,18 +127,18 @@ export async function generateUserGroupInviteToken(
 /** Fetch a token by id without consuming. Throws if invalid/expired. */
 export async function getInviteToken(tokenId: string): Promise<BindToken> {
     const token = await bindTokensColl.findOne({ _id: tokenId });
-    if (!token) throw new NotFoundError('Bind token');
+    if (!token) throw new NotFoundError(localizedErrorText`Bind token`);
     if (token.expiresAt && token.expiresAt < nowDate()) {
-        throw new ValidationError('token', null, 'Token expired');
+        throw new ValidationError('token', null, localizedErrorText`Token expired`);
     }
     if (token.kind === 'student' && token.used) {
-        throw new ValidationError('token', null, 'Token already used');
+        throw new ValidationError('token', null, localizedErrorText`Token already used`);
     }
     // 归档组的既有邀请链接（多次可用、可能永不过期）在落地页即拒绝，
     // 防止归档后继续扩员（PLAN §9）。
     if (token.kind === 'user_group') {
         const group = await userGroupsColl.findOne({ domainId: token.domainId, _id: token.userGroupId });
-        if (group?.archivedAt) throw new ValidationError('token', null, '该邀请对应的用户组已归档');
+        if (group?.archivedAt) throw new ValidationError('token', null, localizedErrorText`该邀请对应的用户组已归档`);
     }
     return token as BindToken;
 }
@@ -170,24 +170,24 @@ export async function rosterLookup(
 
 export async function consumeStudentInviteToken(tokenId: string, userId: number): Promise<{ studentRecord: StudentRecord; school: School }> {
     const token = await bindTokensColl.findOne({ _id: tokenId, kind: 'student' });
-    if (!token) throw new NotFoundError('Bind token');
-    if (token.used) throw new ValidationError('token', null, 'Token already used');
+    if (!token) throw new NotFoundError(localizedErrorText`Bind token`);
+    if (token.used) throw new ValidationError('token', null, localizedErrorText`Token already used`);
     if (token.expiresAt && token.expiresAt < nowDate()) {
-        throw new ValidationError('token', null, 'Token expired');
+        throw new ValidationError('token', null, localizedErrorText`Token expired`);
     }
     const studentRecordId = (token as StudentBindToken).studentRecordId;
     const student = await studentsColl.findOne({ _id: studentRecordId });
-    if (!student) throw new NotFoundError('Student record');
+    if (!student) throw new NotFoundError(localizedErrorText`Student record`);
     if (student.boundUserId) {
         await bindTokensColl.updateOne({ _id: tokenId }, { $set: { used: true, usedAt: nowDate() } });
-        throw new ValidationError('studentRecord', null, 'This student is already bound');
+        throw new ValidationError('studentRecord', null, localizedErrorText`This student is already bound`);
     }
     const school = await schoolsColl.findOne({ _id: student.schoolId });
-    if (!school) throw new NotFoundError('School');
+    if (!school) throw new NotFoundError(localizedErrorText`School`);
 
     const existing = await UserModel.coll.findOne({ _id: userId });
     if (existing?.studentId && existing.studentId !== student.studentId) {
-        throw new ValidationError('user', null, `Your account is already bound to studentId "${existing.studentId}"`);
+        throw new ValidationError('user', null, localizedErrorText`Your account is already bound to studentId "${existing.studentId}"`);
     }
 
     await Promise.all([
@@ -229,14 +229,14 @@ export async function bindMatchedStudent(
     extraGroupId?: ObjectId,
 ): Promise<{ studentRecord: StudentRecord; school: School }> {
     if (record.boundUserId && record.boundUserId !== userId) {
-        throw new ValidationError('studentRecord', null, 'Already bound to another user');
+        throw new ValidationError('studentRecord', null, localizedErrorText`Already bound to another user`);
     }
     const existingUser = await UserModel.coll.findOne({ _id: userId });
     if (existingUser?.studentId && existingUser.studentId !== record.studentId) {
-        throw new ValidationError('user', null, `Your account is already bound to studentId "${existingUser.studentId}"`);
+        throw new ValidationError('user', null, localizedErrorText`Your account is already bound to studentId "${existingUser.studentId}"`);
     }
     const school = await schoolsColl.findOne({ _id: record.schoolId });
-    if (!school) throw new NotFoundError('School');
+    if (!school) throw new NotFoundError(localizedErrorText`School`);
 
     // 归档组拦截必须在这里（任何写入之前）——落地页 POST 的 matched_unbound
     // 分支和管理员审批 approveBindingRequest 都汇聚到本函数，是归档后继续
@@ -244,7 +244,7 @@ export async function bindMatchedStudent(
     if (extraGroupId) {
         const extraGroup = await userGroupsColl.findOne({ _id: extraGroupId });
         if (extraGroup?.archivedAt) {
-            throw new ValidationError('userGroupId', null, '该邀请对应的用户组已归档，无法加入');
+            throw new ValidationError('userGroupId', null, localizedErrorText`该邀请对应的用户组已归档，无法加入`);
         }
     }
     const groupIdsToAdd = [...record.groupIds];
@@ -282,7 +282,7 @@ export async function bindMatchedStudent(
 export async function joinUserGroup(userId: number, studentRecord: StudentRecord, userGroupId: ObjectId): Promise<void> {
     // 兜底防线：无论从哪条 claim/审批路径走到这里，归档组一律拒绝加人。
     const group = await userGroupsColl.findOne({ _id: userGroupId });
-    if (group?.archivedAt) throw new ValidationError('userGroupId', null, '该用户组已归档，无法加入');
+    if (group?.archivedAt) throw new ValidationError('userGroupId', null, localizedErrorText`该用户组已归档，无法加入`);
     await Promise.all([
         studentsColl.updateOne({ _id: studentRecord._id }, { $addToSet: { groupIds: userGroupId as any } }),
         UserModel.coll.updateOne({ _id: userId }, { $addToSet: { parentUserGroupId: userGroupId as any } }),
@@ -295,9 +295,9 @@ export async function joinUserGroup(userId: number, studentRecord: StudentRecord
  */
 export async function consumeInviteToken(tokenId: string, userId: number): Promise<{ studentRecord: StudentRecord; school: School }> {
     const token = await bindTokensColl.findOne({ _id: tokenId });
-    if (!token) throw new NotFoundError('Bind token');
+    if (!token) throw new NotFoundError(localizedErrorText`Bind token`);
     if (token.kind && token.kind !== 'student') {
-        throw new ValidationError('token', null, 'This invite link requires the new landing flow; visit it in a browser instead.');
+        throw new ValidationError('token', null, localizedErrorText`This invite link requires the new landing flow; visit it in a browser instead.`);
     }
     return await consumeStudentInviteToken(tokenId, userId);
 }
@@ -347,10 +347,10 @@ export async function submitBindingRequest(
     studentIdInput = (studentIdInput || '').trim();
     realNameInput = (realNameInput || '').trim();
     if (!studentIdInput || !realNameInput) {
-        throw new ValidationError('input', null, 'studentId and realName are required');
+        throw new ValidationError('input', null, localizedErrorText`studentId and realName are required`);
     }
     const school = await schoolsColl.findOne({ domainId, _id: schoolId });
-    if (!school) throw new NotFoundError('School');
+    if (!school) throw new NotFoundError(localizedErrorText`School`);
 
     // Reject if the same user already has a *pending* request.
     const pending = await bindingRequestsColl.findOne({
@@ -359,7 +359,11 @@ export async function submitBindingRequest(
         status: 'pending',
     });
     if (pending) {
-        throw new ValidationError('request', null, 'You already have a pending binding application. Please wait for the admin review.');
+        throw new ValidationError(
+            'request',
+            null,
+            localizedErrorText`You already have a pending binding application. Please wait for the admin review.`,
+        );
     }
 
     const doc: BindingRequest = {
@@ -415,9 +419,9 @@ export async function getBindingRequest(id: ObjectId): Promise<BindingRequest | 
 
 export async function approveBindingRequest(requestId: ObjectId, reviewerUid: number): Promise<void> {
     const req = await bindingRequestsColl.findOne({ _id: requestId });
-    if (!req) throw new NotFoundError('BindingRequest');
+    if (!req) throw new NotFoundError(localizedErrorText`BindingRequest`);
     if (req.status !== 'pending') {
-        throw new ValidationError('status', null, `Request is already ${req.status}`);
+        throw new ValidationError('status', null, localizedErrorText`Request is already ${req.status}`);
     }
 
     // Locate or create the student record.
@@ -447,10 +451,10 @@ export async function approveBindingRequest(requestId: ObjectId, reviewerUid: nu
         throw new ValidationError(
             'realName',
             null,
-            `Found existing record with studentId ${req.studentIdInput} but different realName "${record.realName}"; resolve manually.`,
+            localizedErrorText`Found existing record with studentId ${req.studentIdInput} but different realName "${record.realName}"; resolve manually.`,
         );
     } else if (record.boundUserId && record.boundUserId !== req.userId) {
-        throw new ValidationError('studentRecord', null, `Student record already bound to another uid (${record.boundUserId}).`);
+        throw new ValidationError('studentRecord', null, localizedErrorText`Student record already bound to another uid (${record.boundUserId}).`);
     }
 
     // Special path: claim temp user — instead of binding the requester user,
@@ -469,12 +473,12 @@ export async function approveBindingRequest(requestId: ObjectId, reviewerUid: nu
 export async function rejectBindingRequest(requestId: ObjectId, reviewerUid: number, reason: string): Promise<void> {
     const trimmed = (reason || '').trim();
     if (!trimmed) {
-        throw new ValidationError('reason', null, 'Reject reason is required');
+        throw new ValidationError('reason', null, localizedErrorText`Reject reason is required`);
     }
     const req = await bindingRequestsColl.findOne({ _id: requestId });
-    if (!req) throw new NotFoundError('BindingRequest');
+    if (!req) throw new NotFoundError(localizedErrorText`BindingRequest`);
     if (req.status !== 'pending') {
-        throw new ValidationError('status', null, `Request is already ${req.status}`);
+        throw new ValidationError('status', null, localizedErrorText`Request is already ${req.status}`);
     }
     await bindingRequestsColl.updateOne(
         { _id: requestId },
@@ -710,9 +714,9 @@ export const computeEligibleExamContests = computeEligibleContests;
 
 export async function claimTemporaryAccount(tempUid: number, realUid: number): Promise<{ recordsTransferred: number }> {
     const tempUser = await UserModel.coll.findOne({ _id: tempUid });
-    if (!tempUser) throw new NotFoundError('Temp user');
+    if (!tempUser) throw new NotFoundError(localizedErrorText`Temp user`);
     if (!(tempUser as any).isTemporary) {
-        throw new ValidationError('user', null, 'Source UID is not a temporary account');
+        throw new ValidationError('user', null, localizedErrorText`Source UID is not a temporary account`);
     }
     // Reassign all the temp user's records to the real user.
     let recordsTransferred = 0;

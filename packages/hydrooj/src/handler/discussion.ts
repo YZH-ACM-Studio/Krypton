@@ -1,6 +1,13 @@
 import { isSafeInteger } from 'lodash';
 import { ObjectId } from 'mongodb';
-import { DiscussionLockedError, DiscussionNodeNotFoundError, DiscussionNotFoundError, DocumentNotFoundError, PermissionError } from '../error';
+import {
+    localizeError,
+    DiscussionLockedError,
+    DiscussionNodeNotFoundError,
+    DiscussionNotFoundError,
+    DocumentNotFoundError,
+    PermissionError,
+} from '../error';
 import { DiscussionDoc, DiscussionReplyDoc, DiscussionTailReplyDoc } from '../interface';
 import { PERM, PRIV } from '../model/builtin';
 import * as discussion from '../model/discussion';
@@ -43,7 +50,7 @@ class DiscussionHandler extends Handler {
                 this.drdoc = await discussion.getReply(domainId, drid);
                 if (!this.drdoc) throw new DiscussionNotFoundError(domainId, drid);
                 if (!this.drdoc.parentId.equals(this.ddoc._id)) {
-                    throw new DocumentNotFoundError(domainId, drid);
+                    throw localizeError(new DocumentNotFoundError(domainId, drid), 'Document {0} not found.', drid);
                 }
             }
         }

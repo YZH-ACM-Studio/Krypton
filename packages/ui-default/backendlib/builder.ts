@@ -1,6 +1,20 @@
 import { tmpdir } from 'os';
 import { basename, join, relative, resolve } from 'path';
-import { Context, fs, Handler, Logger, NotFoundError, param, SettingModel, sha1, size, SystemModel, Types, UiContextBase } from 'hydrooj';
+import {
+  localizeError,
+  Context,
+  fs,
+  Handler,
+  Logger,
+  NotFoundError,
+  param,
+  SettingModel,
+  sha1,
+  size,
+  SystemModel,
+  Types,
+  UiContextBase,
+} from 'hydrooj';
 import esbuild from 'esbuild';
 
 declare module 'hydrooj' {
@@ -157,7 +171,7 @@ class UiConstantsHandler extends Handler {
   @param('name', Types.Filename)
   async all(domainId: string, name: string) {
     this.response.type = 'application/javascript';
-    if (!vfs[name]) throw new NotFoundError(name);
+    if (!vfs[name]) throw localizeError(new NotFoundError(name), 'Resource {0} not found.', name);
     this.response.addHeader('ETag', hashes[name]);
     this.response.body = vfs[name];
     this.response.addHeader('Cache-Control', 'public, max-age=86400');

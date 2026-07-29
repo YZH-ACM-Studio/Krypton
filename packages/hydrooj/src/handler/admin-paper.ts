@@ -12,7 +12,7 @@
  *     session required).
  */
 import { ObjectId } from 'mongodb';
-import { Context, Handler, NotFoundError, OplogModel, param, PRIV, Types, ValidationError } from 'hydrooj';
+import { localizedErrorText, Context, Handler, NotFoundError, OplogModel, param, PRIV, Types, ValidationError } from 'hydrooj';
 import * as contest from '../model/contest';
 import record from '../model/record';
 import { finalizePaperForUser } from './paper';
@@ -32,7 +32,7 @@ class ForceUnlockHandler extends AdminPaperHandler {
             throw new ValidationError(
                 'confirm',
                 null,
-                'Force-unlock is destructive: it will re-grade existing records. Pass confirm=YES to proceed.',
+                localizedErrorText`Force-unlock is destructive: it will re-grade existing records. Pass confirm=YES to proceed.`,
             );
         }
 
@@ -70,7 +70,7 @@ class ForceSubmitHandler extends AdminPaperHandler {
     @param('uid', Types.Int)
     async post({ domainId }: { domainId: string }, tid: ObjectId, uid: number) {
         const tdoc = await contest.get(domainId, tid);
-        if (!tdoc) throw new NotFoundError('Contest');
+        if (!tdoc) throw new NotFoundError(localizedErrorText`Contest`);
         // 复用 finalize 主路径（PLAN P3.2）：此前这里是它的复制品，且
         // config 用 `typeof === 'object'` 老判断（对字符串 config 恒 false，
         // objective/structured-code 分流失效）。finalizePaperForUser 已统一

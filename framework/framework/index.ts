@@ -1,6 +1,7 @@
 export * from './api';
 export * from './decorators';
 export * from './error';
+export * from './error-catalog';
 export * from './error-resolver';
 export * from './interface';
 export * from './router';

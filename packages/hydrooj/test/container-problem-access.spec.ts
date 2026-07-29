@@ -1,4 +1,5 @@
 import { expect } from 'chai';
+import { localizeErrorParameter, localizedErrorText } from '@hydrooj/framework';
 import { beforeEach, describe, it } from 'node:test';
 
 const Module = require('module');
@@ -240,6 +241,8 @@ const serverStub = {
 const errors = {
     FileLimitExceededError: class extends Error {},
     FileUploadError: class extends Error {},
+    localizeErrorParameter,
+    localizedErrorText,
     NotFoundError: TestNotFoundError,
     ProblemNotFoundError: TestProblemNotFoundError,
     ValidationError: TestValidationError,

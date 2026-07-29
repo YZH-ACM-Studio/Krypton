@@ -7,7 +7,7 @@ import sanitize from 'sanitize-filename';
 import { JudgeMeta, JudgeResultBody, ProblemConfigFile, TestCase } from '@hydrooj/common';
 import { sleep } from '@hydrooj/utils';
 import { Context } from '../context';
-import { BadRequestError, FileLimitExceededError, ForbiddenError, ProblemIsReferencedError, ValidationError } from '../error';
+import { localizedErrorText, BadRequestError, FileLimitExceededError, ForbiddenError, ProblemIsReferencedError, ValidationError } from '../error';
 import { RecordDoc, Task } from '../interface';
 import { Logger } from '../logger';
 import * as builtin from '../model/builtin';
@@ -265,7 +265,7 @@ export async function processJudgeFileCallback(rid: ObjectId, filename: string, 
             try {
                 const pdoc = await problem.get(rdoc.domainId, rdoc.pid);
                 if (!pdoc) throw new ForbiddenError();
-                if (pdoc.reference) throw new ProblemIsReferencedError('edit files');
+                if (pdoc.reference) throw new ProblemIsReferencedError(localizedErrorText`edit files`);
                 const stat = await fs.stat(filePath);
                 if ((pdoc.data?.length || 0) + (pdoc.additional_file?.length || 0) >= system.get('limit.problem_files_max')) {
                     throw new FileLimitExceededError('count');
@@ -377,7 +377,7 @@ export class JudgeConnectionHandler extends ConnectionHandler {
                 this.consumer?.setQuery(this.query);
             }
         } else if (msg.key === 'start') {
-            if (this.consumer) throw new BadRequestError('Judge daemon already started');
+            if (this.consumer) throw new BadRequestError(localizedErrorText`Judge daemon already started`);
             this.consumer = task.consume(this.query, this.newTask.bind(this), true, this.concurrency);
             logger.info('Judge daemon started');
         }

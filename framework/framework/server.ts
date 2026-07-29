@@ -16,7 +16,7 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { Counter, errorMessage, isClass, Logger, parseMemoryMB } from '@hydrooj/utils/lib/utils';
 import base from './base';
 import * as decorators from './decorators';
-import { CsrfTokenError, HydroError, InvalidOperationError, MethodNotAllowedError, NotFoundError, UserFacingError } from './error';
+import { localizeError, CsrfTokenError, HydroError, InvalidOperationError, MethodNotAllowedError, NotFoundError, UserFacingError } from './error';
 import type { KnownHandlers, ServerEvents } from './interface';
 import { Router } from './router';
 import serializer from './serializer';
@@ -302,7 +302,7 @@ export class ConnectionHandler extends HandlerCommon {
 
 export class NotFoundHandler extends Handler {
     prepare() {
-        throw new NotFoundError(this.request.path);
+        throw localizeError(new NotFoundError(this.request.path), 'Resource {0} not found.', this.request.path);
     }
 
     all() {}
@@ -542,10 +542,10 @@ ${c.response.status} ${endTime - startTime}ms ${c.response.length}`);
                             throw new InvalidOperationError(operation);
                         }
                     } else if (typeof h.post !== 'function') {
-                        throw new MethodNotAllowedError(method);
+                        throw localizeError(new MethodNotAllowedError(method), 'Method {0} is not allowed.', method);
                     }
                 } else if (typeof h[method] !== 'function') {
-                    throw new MethodNotAllowedError(method);
+                    throw localizeError(new MethodNotAllowedError(method), 'Method {0} is not allowed.', method);
                 }
             }
 

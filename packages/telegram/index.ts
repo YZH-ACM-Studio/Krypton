@@ -1,5 +1,5 @@
 import { createHash, createHmac } from 'crypto';
-import { Context, ForbiddenError, Handler, Schema, Service } from 'hydrooj';
+import { localizedErrorText, Context, ForbiddenError, Handler, Schema, Service } from 'hydrooj';
 
 // from https://www.svgrepo.com/svg/333610/telegram
 
@@ -27,7 +27,7 @@ export default class TelegramService extends Service {
                 try {
                     parsed = JSON.parse(payload);
                 } catch (e) {
-                    throw new ForbiddenError('Invalid payload');
+                    throw new ForbiddenError(localizedErrorText`Invalid payload`);
                 }
                 const hash = parsed.hash;
                 delete parsed.hash;
@@ -37,7 +37,7 @@ export default class TelegramService extends Service {
                     .join('\n');
                 const secretKey = createHash('sha256').update(config.token).digest();
                 const dataCheckSum = createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
-                if (hash !== dataCheckSum) throw new ForbiddenError('Invalid hash');
+                if (hash !== dataCheckSum) throw new ForbiddenError(localizedErrorText`Invalid hash`);
                 const { id, first_name, last_name, username, photo_url } = parsed;
                 const ret = {
                     _id: id.toString(),
@@ -46,7 +46,7 @@ export default class TelegramService extends Service {
                     uname: [`${first_name} ${last_name}`, username, `telegram${id.toString()}`].filter((i) => i),
                     avatar: `url:${photo_url}`,
                 };
-                if (!ret.email) throw new ForbiddenError("You don't have a verified email.");
+                if (!ret.email) throw new ForbiddenError(localizedErrorText`You don't have a verified email.`);
                 return ret;
             },
             async get(this: Handler) {

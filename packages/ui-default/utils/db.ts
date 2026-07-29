@@ -1,5 +1,6 @@
 import { openDB as _open } from 'idb';
 import { alert } from 'vj/components/dialog';
+import { i18n } from 'vj/utils';
 
 export const openDB = _open('hydro', 1, {
   upgrade(db, oldVersion) {
@@ -20,11 +21,11 @@ export const openDB = _open('hydro', 1, {
   },
   blocked(currentVersion, blockedVersion) {
     console.error('IDB Blocked by version', blockedVersion, 'want', currentVersion);
-    alert('Some other opened tabs locked the database. Please close them.');
+    alert(i18n('Some other opened tabs locked the database. Please close them.'));
   },
   blocking(currentVersion, blockedVersion) {
     console.error('IDB Blocking version', blockedVersion);
-    alert('Please close or refresh this tab to perform the upgrade.');
+    alert(i18n('Please close or refresh this tab to perform the upgrade.'));
   },
   terminated() {
     console.error('IDB Terminated');

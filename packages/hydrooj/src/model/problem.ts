@@ -12,6 +12,9 @@ import { parseProblemKind, ProblemConfigFile, type ProblemKind, ProblemType } fr
 import { extractZip, Logger, size, streamToBuffer } from '@hydrooj/utils/lib/utils';
 import { Context } from '../context';
 import {
+    localizeError,
+    localizeErrorParameter,
+    localizedErrorText,
     FileUploadError,
     ManagedProblemMetadataConflictError,
     NotFoundError,
@@ -29,7 +32,6 @@ import { copyProblemStorageFiles } from '../lib/problem-clone';
 import { isProblemConfigFilename, parseProblemConfigObject } from '../lib/problem-config';
 import {
     assertLegacyProgrammingStatementFingerprint,
-    assertProgrammingStatementComplete,
     assertProgrammingStatementProjection,
     compileProgrammingStatement,
     normalizeProgrammingStatement,
@@ -229,7 +231,7 @@ function assertManagedProgrammingCreateBoundary(
         context.owner,
         context.entry,
     );
-    throw new ValidationError('problemKind', null, '编程题必须通过托管出题流程创建');
+    throw new ValidationError('problemKind', null, localizedErrorText`编程题必须通过托管出题流程创建`);
 }
 
 interface ProblemTestdataObserverContext {
@@ -419,10 +421,10 @@ function canonicalizeProgrammingStatementPatch(current: ProblemDoc, $set: Partia
     const currentStructured = current.statementFormat === 'structured-v1';
     const requestedFormat = $set.statementFormat ?? current.statementFormat;
     if (currentStructured && (Object.hasOwn($unset, 'statementFormat') || Object.hasOwn($unset, 'programmingStatement'))) {
-        throw new ValidationError('statementFormat', null, '结构化题面不能降级为自由 Markdown');
+        throw new ValidationError('statementFormat', null, localizedErrorText`结构化题面不能降级为自由 Markdown`);
     }
     if (currentStructured && requestedFormat !== 'structured-v1') {
-        throw new ValidationError('statementFormat', null, '结构化题面不能切换格式');
+        throw new ValidationError('statementFormat', null, localizedErrorText`结构化题面不能切换格式`);
     }
     if (requestedFormat !== undefined && !['structured-v1', 'legacy-import-v1'].includes(requestedFormat)) {
         throw new ValidationError('statementFormat');
@@ -431,19 +433,24 @@ function canonicalizeProgrammingStatementPatch(current: ProblemDoc, $set: Partia
         if (touchesCanonical) throw new ValidationError('programmingStatement');
         return $set;
     }
-    if (!(touchesFormat || touchesCanonical || touchesContent)) return $set;
+    if (!touchesFormat && !touchesCanonical && !touchesContent) return $set;
     if (!Object.hasOwn($set, 'programmingStatement')) {
-        throw new ValidationError('content', null, '结构化题面正文只能由 programmingStatement 生成');
+        throw new ValidationError('content', null, localizedErrorText`结构化题面正文只能由 programmingStatement 生成`);
     }
     if (Object.hasOwn($set, 'content')) {
-        throw new ValidationError('content', null, '结构化题面正文必须由服务端生成，不能直接提交');
+        throw new ValidationError('content', null, localizedErrorText`结构化题面正文必须由服务端生成，不能直接提交`);
     }
     let programmingStatement: ProblemDoc['programmingStatement'];
     try {
         programmingStatement = normalizeProgrammingStatement($set.programmingStatement);
     } catch (error) {
         if (error instanceof ProgrammingStatementValidationError) {
-            throw new ValidationError(error.field, null, error.message);
+            throw localizeErrorParameter(
+                new ValidationError(error.field, null, error.message),
+                2,
+                error.localizedMessage.template,
+                ...error.localizedMessage.params,
+            );
         }
         throw error;
     }
@@ -471,7 +478,7 @@ function assertProgrammingStatementWriteUnchanged(
         programmingStatement = normalizeProgrammingStatement($set.programmingStatement);
     } catch (error) {
         if (error instanceof ProgrammingStatementValidationError) {
-            throw new ValidationError(error.field, null, '写入钩子不能修改已验证的结构化题面');
+            throw new ValidationError(error.field, null, localizedErrorText`写入钩子不能修改已验证的结构化题面`);
         }
         throw error;
     }
@@ -482,7 +489,7 @@ function assertProgrammingStatementWriteUnchanged(
         $set.html !== confirmed.html ||
         ['statementFormat', 'programmingStatement', 'content', 'html'].some((field) => Object.hasOwn($unset, field))
     ) {
-        throw new ValidationError('programmingStatement', null, '写入钩子不能修改已验证的结构化题面');
+        throw new ValidationError('programmingStatement', null, localizedErrorText`写入钩子不能修改已验证的结构化题面`);
     }
 }
 
@@ -502,7 +509,12 @@ function assertPublicProgrammingStatementReady(current: ProblemDoc, $set: Partia
         assertProgrammingStatementProjection(nextValue('programmingStatement'), nextValue('config'), nextValue('content'));
     } catch (error) {
         if (error instanceof ProgrammingStatementValidationError) {
-            throw new ValidationError(error.field, null, error.message);
+            throw localizeErrorParameter(
+                new ValidationError(error.field, null, error.message),
+                2,
+                error.localizedMessage.template,
+                ...error.localizedMessage.params,
+            );
         }
         throw error;
     }
@@ -620,7 +632,12 @@ function assertPublishableProblem(input: {
             assertProgrammingStatementProjection(input.programmingStatement, input.config, input.content);
         } catch (error) {
             if (error instanceof ProgrammingStatementValidationError) {
-                throw new ValidationError(error.field, null, error.message);
+                throw localizeErrorParameter(
+                    new ValidationError(error.field, null, error.message),
+                    2,
+                    error.localizedMessage.template,
+                    ...error.localizedMessage.params,
+                );
             }
             throw error;
         }
@@ -678,7 +695,7 @@ async function prepareManagedPublish(
                 claim.actor,
                 pendingContributions.length,
             );
-            throw new ManagedProblemMetadataConflictError('仍有数据或标签协作任务未完成，请刷新页面并确认后再发布');
+            throw new ManagedProblemMetadataConflictError(localizedErrorText`仍有数据或标签协作任务未完成，请刷新页面并确认后再发布`);
         }
     }
     const authorUids = [
@@ -696,7 +713,7 @@ async function prepareManagedPublish(
             authorUids,
             malformedAuthor,
         );
-        throw new ManagedProblemMetadataConflictError('发布前必须存在唯一有效出题人');
+        throw new ManagedProblemMetadataConflictError(localizedErrorText`发布前必须存在唯一有效出题人`);
     }
     return [...new Set<number>(rows.filter((row: any) => row.role === 'verifier').map((row: any) => row.uid))].sort((a, b) => a - b);
 }
@@ -1128,7 +1145,7 @@ export class ProblemModel {
         const codeEvaluationStatus = normalizeCodeEvaluationCreationStatus((meta as unknown as Record<string, unknown>).codeEvaluationStatus);
         const originalCreateTags = [...tag];
         if (problemKind === 'programming' && codeEvaluationStatus !== undefined) {
-            throw new ValidationError('codeEvaluationStatus', null, '编程题不能设置结构化代码评测状态');
+            throw new ValidationError('codeEvaluationStatus', null, localizedErrorText`编程题不能设置结构化代码评测状态`);
         }
         const args: Partial<ProblemDoc> = {
             title,
@@ -1190,7 +1207,7 @@ export class ProblemModel {
                 { requireKnowledgePair: true, allowEmptyKnowledgeNodes: codeEvaluationStatus === 'draft' },
             );
             if (codeEvaluationStatus !== 'draft' && !args.knowledgeNodeIds?.length) {
-                throw new ValidationError('knowledgeNodeIds', null, '完成配置的题目必须选择至少一个知识节点');
+                throw new ValidationError('knowledgeNodeIds', null, localizedErrorText`完成配置的题目必须选择至少一个知识节点`);
             }
         }
         const managedProgrammingSnapshot =
@@ -1208,13 +1225,13 @@ export class ProblemModel {
                 owner,
                 changedFields,
             );
-            throw new ValidationError('fields', null, '创建钩子不能修改托管编程题的服务端派生字段');
+            throw new ValidationError('fields', null, localizedErrorText`创建钩子不能修改托管编程题的服务端派生字段`);
         }
         if (args.problemKind !== problemKind) throw new ValidationError('problemKind');
         if (args.codeEvaluationStatus !== codeEvaluationStatus) {
-            throw new ValidationError('codeEvaluationStatus', null, '创建钩子不能改变代码评测生命周期状态');
+            throw new ValidationError('codeEvaluationStatus', null, localizedErrorText`创建钩子不能改变代码评测生命周期状态`);
         }
-        if (args.hidden !== true) throw new ValidationError('hidden', null, '创建钩子不能公开尚未完成创建流程的题目');
+        if (args.hidden !== true) throw new ValidationError('hidden', null, localizedErrorText`创建钩子不能公开尚未完成创建流程的题目`);
         assertCodeEvaluationStatusInvariant(problemKind, args.config, args.codeEvaluationStatus);
         await canonicalizeStructuredKnowledgePatch(
             { problemKind, tag: originalCreateTags, authoringMode: args.authoringMode, codeEvaluationStatus },
@@ -1228,7 +1245,7 @@ export class ProblemModel {
             },
         );
         if (problemKind !== 'programming' && codeEvaluationStatus !== 'draft' && !args.knowledgeNodeIds?.length) {
-            throw new ValidationError('knowledgeNodeIds', null, '完成配置的题目必须选择至少一个知识节点');
+            throw new ValidationError('knowledgeNodeIds', null, localizedErrorText`完成配置的题目必须选择至少一个知识节点`);
         }
         const result = await document.add(domainId, content, owner, document.TYPE_PROBLEM, docId, null, null, args, {
             onPrepared: (prepared) => hooks.onAllocated?.(docId, prepared._id),
@@ -1577,13 +1594,13 @@ export class ProblemModel {
                     'aclWriteClaim.state': 'active',
                 });
                 if (!pdoc?.sourceMeta || !pdoc.managedAuthoring) {
-                    throw new ManagedProblemMetadataConflictError('批量导入草稿状态已变化');
+                    throw new ManagedProblemMetadataConflictError(localizedErrorText`批量导入草稿状态已变化`);
                 }
                 const placement = await validateManagedTrainingPlacement(input.domainId, pdoc.sourceMeta.template, {
                     trainingId: input.trainingId,
                     chapterId: input.chapterId,
                 });
-                if (!placement) throw new ManagedProblemMetadataConflictError('批量导入训练章节不存在');
+                if (!placement) throw new ManagedProblemMetadataConflictError(localizedErrorText`批量导入训练章节不存在`);
                 const nextManagedAuthoring = { ...pdoc.managedAuthoring, pendingTrainingPlacement: placement };
                 const updated = await document.coll.findOneAndUpdate(
                     {
@@ -1778,7 +1795,7 @@ export class ProblemModel {
         const selectedMindmapNodeIds = input.selectedMindmapNodeIds.map((value) => String(value));
         const returnNote = input.returnNote?.trim();
         if (input.returnNote !== undefined && (!returnNote || returnNote.length > 1000)) {
-            throw new ValidationError('returnNote', null, '退回说明需为 1–1000 个字符');
+            throw new ValidationError('returnNote', null, localizedErrorText`退回说明需为 1–1000 个字符`);
         }
         if (input.user._id !== input.actor) throw new PermissionError(PERM.PERM_EDIT_PROBLEM);
         const operation = returnNote ? 'managed-review-return' : 'managed-review-update';
@@ -1826,7 +1843,7 @@ export class ProblemModel {
                     current.archivedAt ||
                     current.managedAuthoring?.metadataStatus !== 'draft'
                 ) {
-                    throw new ManagedProblemMetadataConflictError('题目不再是可审核的托管草稿');
+                    throw new ManagedProblemMetadataConflictError(localizedErrorText`题目不再是可审核的托管草稿`);
                 }
                 if (current.structureRevision !== input.expectedStructureRevision || current.structureLockedAt) {
                     throw new ProblemStructureConflictError(input.docId);
@@ -1986,11 +2003,11 @@ export class ProblemModel {
                     current.archivedAt ||
                     current.managedAuthoring?.metadataStatus !== 'draft'
                 ) {
-                    throw new ManagedProblemMetadataConflictError('只有首次审核前的托管草稿可以纠正题号命名空间');
+                    throw new ManagedProblemMetadataConflictError(localizedErrorText`只有首次审核前的托管草稿可以纠正题号命名空间`);
                 }
                 if (!current.pidNamespaceId) throw new TypeError(`managed draft ${input.domainId}/${input.docId} has no pidNamespaceId`);
                 if (current.pidNamespaceId === input.targetPidNamespaceId) {
-                    throw new ValidationError('targetPidNamespaceId', null, '目标命名空间与当前命名空间相同');
+                    throw new ValidationError('targetPidNamespaceId', null, localizedErrorText`目标命名空间与当前命名空间相同`);
                 }
                 if (current.structureRevision !== input.expectedStructureRevision || current.structureLockedAt) {
                     throw new ProblemStructureConflictError(input.docId);
@@ -2047,7 +2064,7 @@ export class ProblemModel {
                     const sourceTags = deriveManagedSourceTags(allocation.sourceMeta);
                     const tags = [...new Set([...sourceTags, ...knowledge.tags])];
                     const ddoc = await DomainModel.get(input.domainId);
-                    if (!ddoc) throw new NotFoundError(input.domainId);
+                    if (!ddoc) throw localizeError(new NotFoundError(input.domainId), 'Resource {0} not found.', input.domainId);
                     const updated = await document.coll.findOneAndUpdate(
                         {
                             domainId: input.domainId,
@@ -2276,10 +2293,10 @@ export class ProblemModel {
                         pdoc.archivedAt ||
                         !['draft', 'confirmed'].includes(pdoc.managedAuthoring?.metadataStatus || '')
                     ) {
-                        throw new ManagedProblemMetadataConflictError('题目不再是可发布的托管草稿');
+                        throw new ManagedProblemMetadataConflictError(localizedErrorText`题目不再是可发布的托管草稿`);
                     }
                     if (!pdoc.pidNamespaceId || pdoc.pidNamespaceId !== auditSnapshot.pidNamespaceId) {
-                        throw new ManagedProblemMetadataConflictError('题目命名空间已变化，请刷新后重试');
+                        throw new ManagedProblemMetadataConflictError(localizedErrorText`题目命名空间已变化，请刷新后重试`);
                     }
                     const isConfirmedRepublish = pdoc.managedAuthoring.metadataStatus === 'confirmed';
                     if (pdoc.structureRevision !== input.expectedStructureRevision || (!isConfirmedRepublish && pdoc.structureLockedAt)) {
@@ -2305,10 +2322,10 @@ export class ProblemModel {
                     }
                     try {
                         if (typeof pdoc.content !== 'string' || !pdoc.content.trim()) {
-                            throw new ValidationError('content', null, '发布前必须填写题面正文');
+                            throw new ValidationError('content', null, localizedErrorText`发布前必须填写题面正文`);
                         }
                         if (pdoc.statementFormat !== 'structured-v1' && pdoc.statementFormat !== 'legacy-import-v1' && !isConfirmedRepublish) {
-                            throw new ValidationError('statementFormat', null, '新托管题发布前必须完成结构化题面');
+                            throw new ValidationError('statementFormat', null, localizedErrorText`新托管题发布前必须完成结构化题面`);
                         }
                         assertStructureRevision(pdoc.structureRevision);
                         assertPublishableProblem({
@@ -2637,7 +2654,7 @@ export class ProblemModel {
         );
         if (!pdoc) throw new ProblemNotFoundError(domainId, pid);
         if (pdoc.problemKind !== undefined) parseProblemKind(pdoc.problemKind);
-        if (pdoc.archivedAt) throw new ValidationError('archivedAt', null, '已归档题目不能修改标签');
+        if (pdoc.archivedAt) throw new ValidationError('archivedAt', null, localizedErrorText`已归档题目不能修改标签`);
     }
 
     /** Shared preview entrypoint for non-UI clients; all canonical rules stay in one model path. */
@@ -2690,7 +2707,7 @@ export class ProblemModel {
                 );
                 if (!current) throw new Error(`problem write claim ownership lost before tag normalization: ${claim.requestId}`);
                 const problemKind = current.problemKind === undefined ? 'programming' : parseProblemKind(current.problemKind);
-                if (current.archivedAt) throw new ValidationError('archivedAt', null, '已归档题目不能修改标签');
+                if (current.archivedAt) throw new ValidationError('archivedAt', null, localizedErrorText`已归档题目不能修改标签`);
                 const preview = await previewProgrammingTagNormalization({
                     domainId: input.domainId,
                     docId: input.pid,
@@ -2924,10 +2941,10 @@ export class ProblemModel {
                 const existingEditor = structuredProblemConfigForEditor(input.expectedProblemKind, existingConfig).main as any;
                 const nextEditor = structuredProblemConfigForEditor(input.expectedProblemKind, nextConfig).main as any;
                 if (input.expectedProblemKind === 'program_fill' && existingEditor.mode !== nextEditor.mode) {
-                    throw new ValidationError('mode', null, '程序填空模式创建后不可修改');
+                    throw new ValidationError('mode', null, localizedErrorText`程序填空模式创建后不可修改`);
                 }
                 if (existingEditor.mode !== 'text' && existingEditor.lang && existingEditor.lang !== nextEditor.lang) {
-                    throw new ValidationError('lang', null, '评测语言创建后不可修改');
+                    throw new ValidationError('lang', null, localizedErrorText`评测语言创建后不可修改`);
                 }
             }
             input.validateSnapshot?.(before, nextConfig);
@@ -2996,7 +3013,7 @@ export class ProblemModel {
         if (parseProblemKind(lifecycle.problemKind) !== problemKind) throw new ValidationError('problemKind');
         const codeEvaluation = isCodeEvaluationProblem(problemKind, lifecycle.config);
         if (input.completeCodeEvaluationDraft && (!codeEvaluation || lifecycle.codeEvaluationStatus !== 'draft')) {
-            throw new ValidationError('codeEvaluationStatus', null, '只有未完成的代码评测草稿可以执行完成操作');
+            throw new ValidationError('codeEvaluationStatus', null, localizedErrorText`只有未完成的代码评测草稿可以执行完成操作`);
         }
         let config: Record<string, unknown>;
         try {
@@ -3020,7 +3037,7 @@ export class ProblemModel {
         const editsKnowledge =
             !!input.metadata && ['tag', 'knowledgeMapId', 'knowledgeNodeIds'].some((field) => Object.hasOwn(input.metadata!, field));
         if ((completing || (lifecycle.codeEvaluationStatus !== 'draft' && editsKnowledge)) && !input.metadata?.knowledgeNodeIds?.length) {
-            throw new ValidationError('knowledgeNodeIds', null, '完成配置或显式标签编辑必须选择至少一个知识节点');
+            throw new ValidationError('knowledgeNodeIds', null, localizedErrorText`完成配置或显式标签编辑必须选择至少一个知识节点`);
         }
         const $set = {
             ...input.metadata,
@@ -3072,7 +3089,7 @@ export class ProblemModel {
                         return;
                     }
                     if (before.codeEvaluationStatus !== 'ready') {
-                        throw new ValidationError('codeEvaluationStatus', null, '代码评测题缺少有效生命周期状态');
+                        throw new ValidationError('codeEvaluationStatus', null, localizedErrorText`代码评测题缺少有效生命周期状态`);
                     }
                     assertProblemReadyForUseWithTrace({ ...before, config: nextConfig as any }, { actor: input.actor, stage: 'ready-save' });
                 },
@@ -3129,7 +3146,7 @@ export class ProblemModel {
         if (problemKind === 'programming') throw new ValidationError('problemKind');
         const editsKnowledge = ['tag', 'knowledgeMapId', 'knowledgeNodeIds'].some((field) => Object.hasOwn(input.metadata, field));
         if (editsKnowledge && !input.metadata.knowledgeNodeIds?.length) {
-            throw new ValidationError('knowledgeNodeIds', null, '显式标签编辑必须选择至少一个知识节点');
+            throw new ValidationError('knowledgeNodeIds', null, localizedErrorText`显式标签编辑必须选择至少一个知识节点`);
         }
         const { before, result, auditedFields } = await ProblemModel.editAuthorizedWithSnapshot({
             domainId: input.domainId,
@@ -3192,7 +3209,7 @@ export class ProblemModel {
         }
         if (!problemReferenceCount(report)) return;
         logger.warn('Hard delete rejected domain=%s pid=%d references=%o', domainId, pid, report);
-        throw new ProblemIsReferencedError('delete');
+        throw new ProblemIsReferencedError(localizedErrorText`delete`);
     }
 
     static async get(
@@ -3493,14 +3510,14 @@ export class ProblemModel {
         );
         if (!current) throw new ProblemNotFoundError(domainId, _id);
         if (current.archivedAt && isStructuralPatch($set as any, $unset)) {
-            throw new ValidationError('archivedAt', null, '已归档题目不能修改题面或评测结构');
+            throw new ValidationError('archivedAt', null, localizedErrorText`已归档题目不能修改题面或评测结构`);
         }
         if (current.authoringMode === 'managed') {
             logger.error('Raw managed problem edit rejected domain=%s pid=%d fields=%o', domainId, _id, [
                 ...Object.keys($set),
                 ...Object.keys($unset),
             ]);
-            throw new ValidationError('authoringMode', null, '托管题必须使用授权写入口');
+            throw new ValidationError('authoringMode', null, localizedErrorText`托管题必须使用授权写入口`);
         }
         assertCodeEvaluationStatusTransition(current.codeEvaluationStatus, $set as Record<string, unknown>, $unset, 'raw-edit');
         const rawEditContext = { domainId, pid: _id, operation: 'raw-edit' };
@@ -3529,7 +3546,7 @@ export class ProblemModel {
                         field.startsWith('knowledgeNodeIds.'),
                 ),
             );
-            throw new ValidationError('tag', null, '未请求标签变更时，写入钩子不能修改编程题标签');
+            throw new ValidationError('tag', null, localizedErrorText`未请求标签变更时，写入钩子不能修改编程题标签`);
         }
         assertCodeEvaluationStatusTransition(current.codeEvaluationStatus, $set as Record<string, unknown>, $unset, 'raw-edit');
         assertCodeEvaluationLifecyclePatchWithTrace(current as ProblemDoc, $set as Record<string, unknown>, $unset, {
@@ -3540,7 +3557,7 @@ export class ProblemModel {
             requireKnowledgePair: knowledgePairRequired,
         });
         if (current.archivedAt && isStructuralPatch($set as any, $unset)) {
-            throw new ValidationError('archivedAt', null, '写入钩子不能修改已归档题目的题面或评测结构');
+            throw new ValidationError('archivedAt', null, localizedErrorText`写入钩子不能修改已归档题目的题面或评测结构`);
         }
         const publishes = publishesProblemPatch($set as Record<string, unknown>, $unset);
         if (current.archivedAt && publishes) throw new ValidationError('hidden');
@@ -3987,7 +4004,7 @@ export class ProblemModel {
                         },
                     );
                     if (!current) throw new Error(`problem write claim ownership lost before ${operation}: ${claim.requestId}`);
-                    if (current.archivedAt) throw new ValidationError('archivedAt', null, '已归档题目不能修改评测数据');
+                    if (current.archivedAt) throw new ValidationError('archivedAt', null, localizedErrorText`已归档题目不能修改评测数据`);
                     if (claim.pidNamespaceGrant === 'editAll' && current.structureLockedAt) {
                         throw new ProblemStructureConflictError(pid);
                     }
@@ -4046,15 +4063,15 @@ export class ProblemModel {
         if (!pdoc) throw new ProblemNotFoundError(domainId, pid);
         if (pdoc.authoringMode === 'managed') {
             logger.error('Raw managed problem file write rejected domain=%s pid=%d names=%o', domainId, pid, testdataNames);
-            throw new ValidationError('authoringMode', null, '托管题文件必须使用授权写入口');
+            throw new ValidationError('authoringMode', null, localizedErrorText`托管题文件必须使用授权写入口`);
         }
         if (pdoc.problemKind === undefined) return null;
         const problemKind = parseProblemKind(pdoc.problemKind);
         if (testdata && problemKind !== 'programming' && !structuredProblemUsesTestdata(problemKind, pdoc.config)) {
-            throw new ValidationError('problemKind', null, '结构化题不接受 testdata/config.yaml 文件写入');
+            throw new ValidationError('problemKind', null, localizedErrorText`结构化题不接受 testdata/config.yaml 文件写入`);
         }
         if (testdata && problemKind !== 'programming' && testdataNames.some(isProblemConfigFilename)) {
-            throw new ValidationError('name', null, '结构化题配置不通过 testdata 文件修改');
+            throw new ValidationError('name', null, localizedErrorText`结构化题配置不通过 testdata 文件修改`);
         }
         if (pdoc.archivedAt || pdoc.structureLockedAt || (await ProblemModel.materializeStartedContainerLock(domainId, pid))) {
             throw new ProblemStructureConflictError(pid);
@@ -4140,7 +4157,7 @@ export class ProblemModel {
         );
         if (!current) throw new Error(`problem write claim ownership lost before edit: ${claim.requestId}`);
         if (current.archivedAt && isStructuralPatch($set as any, $unset)) {
-            throw new ValidationError('archivedAt', null, '已归档题目不能修改题面或评测结构');
+            throw new ValidationError('archivedAt', null, localizedErrorText`已归档题目不能修改题面或评测结构`);
         }
         $set = canonicalizeProgrammingStatementPatch(current as ProblemDoc, $set, $unset);
         const confirmedProgrammingStatement = captureProgrammingStatementWrite($set);
@@ -4150,17 +4167,17 @@ export class ProblemModel {
             managedGuard = managedProblemPatchCapability(current, $set, $unset);
             if (managedGuard.immutableFields.length || !problemWriteCapabilityAllows(claim.capability, managedGuard.capability)) {
                 await auditManagedClaimPatchDenied(claim, managedGuard, 'request');
-                throw new ValidationError('fields', null, '写入字段超出当前托管题写入凭据');
+                throw new ValidationError('fields', null, localizedErrorText`写入字段超出当前托管题写入凭据`);
             }
             if (managedGuard.publishes) {
                 await auditManagedClaimPatchDenied(claim, managedGuard, 'request');
-                throw new ValidationError('hidden', null, '托管草稿必须从统一题库审核入口发布');
+                throw new ValidationError('hidden', null, localizedErrorText`托管草稿必须从统一题库审核入口发布`);
             }
             confirmedManagedMindmapNodeIds = await canonicalizeManagedDraftMindmapPatch(current, $set);
             managedGuard = managedProblemPatchCapability(current, $set, $unset);
             if (managedGuard.immutableFields.length || !problemWriteCapabilityAllows(claim.capability, managedGuard.capability)) {
                 await auditManagedClaimPatchDenied(claim, managedGuard, 'request');
-                throw new ValidationError('fields', null, '知识节点物化结果超出托管题写入凭据');
+                throw new ValidationError('fields', null, localizedErrorText`知识节点物化结果超出托管题写入凭据`);
             }
         }
         const preserveProgrammingTagPair =
@@ -4193,7 +4210,7 @@ export class ProblemModel {
                 claim.operation,
                 hookTagFields,
             );
-            throw new ValidationError('tag', null, '未请求标签变更时，写入钩子不能修改编程题标签');
+            throw new ValidationError('tag', null, localizedErrorText`未请求标签变更时，写入钩子不能修改编程题标签`);
         }
         if (
             confirmedProgrammingTagPair &&
@@ -4213,7 +4230,7 @@ export class ProblemModel {
                 claim.actor,
                 claim.operation,
             );
-            throw new ValidationError('tag', null, '写入钩子不能改变用户已确认的标签结果');
+            throw new ValidationError('tag', null, localizedErrorText`写入钩子不能改变用户已确认的标签结果`);
         }
         if (current.authoringMode === 'managed') {
             if (
@@ -4228,16 +4245,16 @@ export class ProblemModel {
                     claim.actor,
                     claim.operation,
                 );
-                throw new ValidationError('knowledgeNodeIds', null, '写入钩子不能改变已验证的知识节点建议');
+                throw new ValidationError('knowledgeNodeIds', null, localizedErrorText`写入钩子不能改变已验证的知识节点建议`);
             }
             const finalGuard = managedProblemPatchCapability(current, $set, $unset);
             if (finalGuard.immutableFields.length || !problemWriteCapabilityAllows(claim.capability, finalGuard.capability)) {
                 await auditManagedClaimPatchDenied(claim, finalGuard, 'after-hook');
-                throw new ValidationError('fields', null, '写入钩子产生了超出托管题凭据的字段');
+                throw new ValidationError('fields', null, localizedErrorText`写入钩子产生了超出托管题凭据的字段`);
             }
             if (finalGuard.publishes) {
                 await auditManagedClaimPatchDenied(claim, finalGuard, 'after-hook');
-                throw new ValidationError('hidden', null, '托管草稿必须从统一题库审核入口发布');
+                throw new ValidationError('hidden', null, localizedErrorText`托管草稿必须从统一题库审核入口发布`);
             }
             managedGuard = finalGuard;
         }
@@ -4246,7 +4263,7 @@ export class ProblemModel {
             allowMapChange: claim.operation === 'programming-tag-normalize',
         });
         if (current.archivedAt && isStructuralPatch($set as any, $unset)) {
-            throw new ValidationError('archivedAt', null, '写入钩子不能修改已归档题目的题面或评测结构');
+            throw new ValidationError('archivedAt', null, localizedErrorText`写入钩子不能修改已归档题目的题面或评测结构`);
         }
         assertCodeEvaluationLifecyclePatchWithTrace(current as ProblemDoc, $set as Record<string, unknown>, $unset, {
             actor: claim.actor,
@@ -4393,17 +4410,17 @@ export class ProblemModel {
         try {
             if (converting) {
                 if (!input.conversionFingerprint) {
-                    throw new ValidationError('conversionFingerprint', null, '旧题面必须先完成显式转换预览');
+                    throw new ValidationError('conversionFingerprint', null, localizedErrorText`旧题面必须先完成显式转换预览`);
                 }
                 assertLegacyProgrammingStatementFingerprint(current.content, input.conversionFingerprint);
                 if (input.conversionUnclassified === undefined) {
-                    throw new ValidationError('conversionUnclassified', null, '旧题面转换必须显式确认未归类内容');
+                    throw new ValidationError('conversionUnclassified', null, localizedErrorText`旧题面转换必须显式确认未归类内容`);
                 }
                 if (input.conversionUnclassified.trim()) {
-                    throw new ValidationError('conversionUnclassified', null, '旧题面仍有未归类内容，不能转换');
+                    throw new ValidationError('conversionUnclassified', null, localizedErrorText`旧题面仍有未归类内容，不能转换`);
                 }
             } else if (input.conversionFingerprint !== undefined || input.conversionUnclassified !== undefined) {
-                throw new ValidationError('conversionFingerprint', null, '结构化题面不接受重复转换');
+                throw new ValidationError('conversionFingerprint', null, localizedErrorText`结构化题面不接受重复转换`);
             }
             const programmingStatement = normalizeProgrammingStatement(input.programmingStatement);
             const nextConfig = Object.hasOwn(input.metadata || {}, 'config') ? input.metadata?.config : current.config;
@@ -4413,7 +4430,12 @@ export class ProblemModel {
                     assertProgrammingStatementProjection(programmingStatement, nextConfig, compileProgrammingStatement(programmingStatement));
                 } catch (error) {
                     if (error instanceof ProgrammingStatementValidationError) {
-                        throw new ValidationError(error.field, null, error.message);
+                        throw localizeErrorParameter(
+                            new ValidationError(error.field, null, error.message),
+                            2,
+                            error.localizedMessage.template,
+                            ...error.localizedMessage.params,
+                        );
                     }
                     throw error;
                 }
@@ -4494,7 +4516,7 @@ export class ProblemModel {
             authorizedSet = { ...$set };
             authorizedUnset = { ...requestedUnset };
             if (Object.hasOwn(authorizedSet, 'managedAuthoring') || Object.hasOwn(authorizedUnset, 'managedAuthoring')) {
-                throw new ValidationError('managedAuthoring', null, '普通题目不能写入托管出题状态');
+                throw new ValidationError('managedAuthoring', null, localizedErrorText`普通题目不能写入托管出题状态`);
             }
             for (const field of ['pid', 'hidden', 'lockHidden'] as const) {
                 if (Object.hasOwn(authorizedSet, field) && isEqual(preliminary[field], authorizedSet[field])) {
@@ -4527,7 +4549,7 @@ export class ProblemModel {
                     time: new Date(),
                 } as any);
             }
-            throw new ValidationError('authoringMode', null, '题目授权模式创建后不可修改');
+            throw new ValidationError('authoringMode', null, localizedErrorText`题目授权模式创建后不可修改`);
         }
         const initialGuard =
             preliminary.authoringMode === 'managed'
@@ -4573,10 +4595,10 @@ export class ProblemModel {
                             result: 'denied',
                             time: new Date(),
                         } as any);
-                        const message = guard.immutableFields.length
-                            ? `字段创建后不可修改：${guard.immutableFields.join(', ')}`
-                            : '请求包含当前角色不可修改的托管题字段';
-                        throw new ValidationError('fields', null, message);
+                        if (guard.immutableFields.length) {
+                            throw new ValidationError('fields', null, localizedErrorText`字段创建后不可修改：${guard.immutableFields.join(', ')}`);
+                        }
+                        throw new ValidationError('fields', null, localizedErrorText`请求包含当前角色不可修改的托管题字段`);
                     }
                 }
                 const result = await ProblemModel.editWithClaim(claim, authorizedSet, authorizedUnset, {
@@ -4632,13 +4654,13 @@ export class ProblemModel {
                 target,
                 attribution.actor ?? '-',
             );
-            throw new ValidationError('problemKind', null, '编程题不能通过复制创建；请从托管编程题入口新建');
+            throw new ValidationError('problemKind', null, localizedErrorText`编程题不能通过复制创建；请从托管编程题入口新建`);
         }
         if (original.authoringMode === 'managed') {
             const claim = attribution.claim;
             if (!claim || claim.domainId !== domainId || claim.pid !== _id || !problemWriteCapabilityAllows(claim.capability, 'clone')) {
                 logger.error('Raw managed problem clone rejected domain=%s pid=%d actor=%s', domainId, _id, attribution.actor ?? '-');
-                throw new ValidationError('authoringMode', null, '托管题复制必须使用授权写入口');
+                throw new ValidationError('authoringMode', null, localizedErrorText`托管题复制必须使用授权写入口`);
             }
             const activeClaim = await document.coll.findOne({
                 domainId,
@@ -4775,13 +4797,13 @@ export class ProblemModel {
 
     static push<T extends ArrayKeys<ProblemDoc>>(domainId: string, _id: number, key: ArrayKeys<ProblemDoc>, value: ProblemDoc[T][0]) {
         assertNoCanonicalProblemPrimitiveMutation(String(key), { domainId, pid: _id, operation: 'problem-array-write' }, 'push');
-        if (key === 'data') throw new ValidationError('data', null, '测试数据元数据只能由测试数据文件服务写入');
+        if (key === 'data') throw new ValidationError('data', null, localizedErrorText`测试数据元数据只能由测试数据文件服务写入`);
         return document.push(domainId, document.TYPE_PROBLEM, _id, key, value);
     }
 
     static pull<T extends ArrayKeys<ProblemDoc>>(domainId: string, pid: number, key: ArrayKeys<ProblemDoc>, values: ProblemDoc[T][0][]) {
         assertNoCanonicalProblemPrimitiveMutation(String(key), { domainId, pid, operation: 'problem-array-write' }, 'pull');
-        if (key === 'data') throw new ValidationError('data', null, '测试数据元数据只能由测试数据文件服务写入');
+        if (key === 'data') throw new ValidationError('data', null, localizedErrorText`测试数据元数据只能由测试数据文件服务写入`);
         return document.deleteSub(domainId, document.TYPE_PROBLEM, pid, key, values);
     }
 
@@ -4850,7 +4872,7 @@ export class ProblemModel {
         if (!pdoc) return false;
         if (pdoc.authoringMode === 'managed') {
             logger.error('Raw managed problem delete rejected domain=%s pid=%d', domainId, docId);
-            throw new ValidationError('authoringMode', null, '托管题删除必须使用授权写入口');
+            throw new ValidationError('authoringMode', null, localizedErrorText`托管题删除必须使用授权写入口`);
         }
         await ProblemModel.assertNoProblemReferences(domainId, docId, pdoc.pid);
         return ProblemModel.deleteProblemDocumentUnchecked(domainId, docId);
@@ -5071,15 +5093,15 @@ export class ProblemModel {
         );
         if (!doc) throw new Error(`problem write claim ownership lost before file operation: ${claim.requestId}`);
         if (!problemWriteCapabilityAllows(claim.capability, 'data')) {
-            throw new ValidationError('fields', null, `写入凭据 ${claim.capability} 不允许修改托管题文件`);
+            throw new ValidationError('fields', null, localizedErrorText`写入凭据 ${claim.capability} 不允许修改托管题文件`);
         }
         if (key === 'data' && doc.problemKind !== undefined) {
             const kind = parseProblemKind(doc.problemKind);
             if (kind !== 'programming' && !structuredProblemUsesTestdata(kind, doc.config)) {
-                throw new ValidationError('problemKind', null, '此结构化题不接受 testdata 文件写入');
+                throw new ValidationError('problemKind', null, localizedErrorText`此结构化题不接受 testdata 文件写入`);
             }
             if (kind !== 'programming' && testdataNames.some(isProblemConfigFilename)) {
-                throw new ValidationError('name', null, '结构化题配置不通过 testdata 文件修改');
+                throw new ValidationError('name', null, localizedErrorText`结构化题配置不通过 testdata 文件修改`);
             }
         }
         const { files, snapshot } = normalizeProblemFileListSnapshot(doc[key], Object.hasOwn(doc, key), key);
@@ -5438,7 +5460,7 @@ export class ProblemModel {
         let delSource = options.delSource;
         let problems: string[];
         const ddoc = await DomainModel.get(domainId);
-        if (!ddoc) throw new NotFoundError(domainId);
+        if (!ddoc) throw localizeError(new NotFoundError(domainId), 'Resource {0} not found.', domainId);
         try {
             if (filepath.endsWith('.zip')) {
                 tmpdir = path.join(os.tmpdir(), 'hydro', `${Math.random()}.import`);
@@ -5447,14 +5469,14 @@ export class ProblemModel {
                 try {
                     entries = await zip.getEntries();
                 } catch (e) {
-                    throw new ValidationError('zip', null, e.message);
+                    throw localizeErrorParameter(new ValidationError('zip', null, e.message), 2, 'Unable to read the archive: {0}', e.message);
                 }
                 delSource = true;
                 await extractZip(entries, tmpdir);
             } else if (fs.statSync(filepath).isDirectory()) {
                 tmpdir = filepath;
             } else {
-                throw new ValidationError('file', null, 'Invalid file');
+                throw new ValidationError('file', null, localizedErrorText`Invalid file`);
             }
             const files = await fs.readdir(tmpdir, { withFileTypes: true });
             if (files.find((f) => f.name === 'problem.yaml')) {
@@ -5475,9 +5497,9 @@ export class ProblemModel {
                     if (process.env.HYDRO_CLI) logger.info(`Importing problem ${i}`);
                     const content = fs.readFileSync(path.join(tmpdir, i, 'problem.yaml'), 'utf-8');
                     const pdoc: ProblemDoc = yaml.load(content) as any;
-                    if (!pdoc) throw new ValidationError('problem.yaml', null, 'Invalid problem.yaml');
+                    if (!pdoc) throw new ValidationError('problem.yaml', null, localizedErrorText`Invalid problem.yaml`);
                     if (pdoc.problemKind !== undefined && parseProblemKind(pdoc.problemKind) !== 'programming') {
-                        throw new ValidationError('problemKind', null, '结构化题导入将在对应题型任务中开放');
+                        throw new ValidationError('problemKind', null, localizedErrorText`结构化题导入将在对应题型任务中开放`);
                     }
                     const getFiles = async (...type: string[]): Promise<[fs.Dirent, string][]> => {
                         if (type.length > 1) {
@@ -5501,16 +5523,20 @@ export class ProblemModel {
                                 JSON.parse(fs.readFileSync(structuredStatementPath, 'utf8')),
                             );
                         } catch (error) {
-                            throw new ValidationError('programming-statement.json', null, 'Invalid programming-statement.json');
+                            throw new ValidationError('programming-statement.json', null, localizedErrorText`Invalid programming-statement.json`);
                         }
                         const compiled = compileProgrammingStatement(importedProgrammingStatement);
                         if (overrideContent !== compiled) {
-                            throw new ValidationError('programming-statement.json', null, 'problem.md differs from programming-statement.json');
+                            throw new ValidationError(
+                                'programming-statement.json',
+                                null,
+                                localizedErrorText`problem.md differs from programming-statement.json`,
+                            );
                         }
                     }
                     if (pdoc.difficulty && !Number.isSafeInteger(pdoc.difficulty)) delete pdoc.difficulty;
                     const title = pdoc.title || (pdoc as any).name;
-                    if (typeof title !== 'string') throw new ValidationError('title', null, 'Invalid title');
+                    if (typeof title !== 'string') throw new ValidationError('title', null, localizedErrorText`Invalid title`);
                     const allFiles = await getFiles(
                         'testdata',
                         'additional_file',
@@ -5523,8 +5549,12 @@ export class ProblemModel {
                         'problem_statement',
                     );
                     const totalSize = allFiles.map((f) => fs.statSync(f[1]).size).reduce((a, b) => a + b, 0);
-                    if (allFiles.length > SystemModel.get('limit.problem_files')) throw new ValidationError('files', null, 'Too many files');
-                    if (totalSize > SystemModel.get('limit.problem_files_size')) throw new ValidationError('files', null, 'Files too large');
+                    if (allFiles.length > SystemModel.get('limit.problem_files')) {
+                        throw new ValidationError('files', null, localizedErrorText`Too many files`);
+                    }
+                    if (totalSize > SystemModel.get('limit.problem_files_size')) {
+                        throw new ValidationError('files', null, localizedErrorText`Files too large`);
+                    }
                     const validateImportedTestdataConfigs = async () => {
                         const entries = await getFiles('testdata', 'attachments', 'generators', 'include', 'data', 'output_validators');
                         for (const [entry, location] of entries) {
@@ -5549,7 +5579,7 @@ export class ProblemModel {
                         try {
                             config = yaml.load(await fs.readFile(path.join(tmpdir, i, 'testdata/config.yaml'), 'utf-8'));
                         } catch (e) {
-                            throw new ValidationError('config', null, `Invalid testdata/config.yaml: ${e.message}`);
+                            throw new ValidationError('config', null, localizedErrorText`Invalid testdata/config.yaml: ${e.message}`);
                         }
                     }
                     if (await fs.exists(path.join(tmpdir, i, 'domjudge-problem.ini'))) {
@@ -5706,7 +5736,7 @@ export class ProblemModel {
         } finally {
             if (delSource) await fs.remove(tmpdir);
         }
-        if (!imported) throw new ValidationError('file', null, 'No importable programming problems found');
+        if (!imported) throw new ValidationError('file', null, localizedErrorText`No importable programming problems found`);
         return { imported };
     }
 
@@ -5748,7 +5778,11 @@ export class ProblemModel {
             if (pdoc.statementFormat === 'structured-v1') {
                 const canonical = normalizeProgrammingStatement(pdoc.programmingStatement);
                 if (compileProgrammingStatement(canonical) !== pdoc.content) {
-                    throw new ValidationError('content', null, `Problem ${pdoc.pid || pdoc.docId} has a mismatched statement projection`);
+                    throw new ValidationError(
+                        'content',
+                        null,
+                        localizedErrorText`Problem ${pdoc.pid || pdoc.docId} has a mismatched statement projection`,
+                    );
                 }
                 await fs.writeFile(path.join(problemPath, 'programming-statement.json'), `${JSON.stringify(canonical, null, 2)}\n`);
             }
@@ -5793,7 +5827,7 @@ async function assertConfigTestdataEventAllowed(domainId: string, docId: number)
     );
     if (!pdoc) throw new ProblemNotFoundError(domainId, docId);
     if (pdoc.problemKind !== undefined && parseProblemKind(pdoc.problemKind) !== 'programming') {
-        throw new ValidationError('name', null, '结构化题配置不通过 testdata 文件修改');
+        throw new ValidationError('name', null, localizedErrorText`结构化题配置不通过 testdata 文件修改`);
     }
 }
 

@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 import { parseMemoryMB, parseTimeMS } from '@hydrooj/utils';
+import { localizedErrorText } from '../error';
+import type { LocalizedErrorText } from '../error';
 import { parseProblemConfigObject } from './problem-config';
 
 export const PROGRAMMING_STATEMENT_SCHEMA_VERSION = 1 as const;
@@ -69,14 +71,14 @@ export interface LegacyProgrammingStatementPreview {
 export class ProgrammingStatementValidationError extends Error {
     constructor(
         readonly field: string,
-        message: string,
+        readonly localizedMessage: LocalizedErrorText,
     ) {
-        super(message);
+        super(localizedMessage.raw);
         this.name = 'ProgrammingStatementValidationError';
     }
 }
 
-function fail(field: string, message: string): never {
+function fail(field: string, message: LocalizedErrorText): never {
     throw new ProgrammingStatementValidationError(field, message);
 }
 
@@ -88,32 +90,34 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 function assertKeys(value: Record<string, unknown>, allowed: readonly string[], field: string) {
     const unknown = Object.keys(value).filter((key) => !allowed.includes(key));
-    if (unknown.length) fail(field, `${field} contains unsupported fields: ${unknown.join(', ')}`);
+    if (unknown.length) fail(field, localizedErrorText`${field} contains unsupported fields: ${unknown.join(', ')}`);
 }
 
 function text(value: unknown, field: string): string {
-    if (typeof value !== 'string') fail(field, `${field} must be text`);
+    if (typeof value !== 'string') fail(field, localizedErrorText`${field} must be text`);
     return value;
 }
 
 function triState(value: unknown, field: string): ProgrammingStatementTriState {
-    if (!['undecided', 'present', 'absent'].includes(String(value))) fail(field, `${field} has an invalid state`);
+    if (!['undecided', 'present', 'absent'].includes(String(value))) fail(field, localizedErrorText`${field} has an invalid state`);
     return value as ProgrammingStatementTriState;
 }
 
 function normalizeTextSection(value: unknown, field: string): ProgrammingStatementTextSection {
-    if (!isPlainObject(value)) fail(field, `${field} must be an object`);
+    if (!isPlainObject(value)) fail(field, localizedErrorText`${field} must be an object`);
     assertKeys(value, ['state', 'content'], field);
     const state = triState(value.state, `${field}.state`);
     const content = text(value.content, `${field}.content`);
-    if (state === 'absent' && content) fail(`${field}.content`, `${field} cannot retain hidden content`);
+    if (state === 'absent' && content) fail(`${field}.content`, localizedErrorText`${field} cannot retain hidden content`);
     return { state, content };
 }
 
 function normalizeDescription(value: unknown): ProgrammingStatementDescriptionSection {
-    if (!isPlainObject(value)) fail('description', 'description must be an object');
+    if (!isPlainObject(value)) fail('description', localizedErrorText`description must be an object`);
     assertKeys(value, ['state', 'content'], 'description');
-    if (!['undecided', 'present'].includes(String(value.state))) fail('description.state', 'description has an invalid state');
+    if (!['undecided', 'present'].includes(String(value.state))) {
+        fail('description.state', localizedErrorText`description has an invalid state`);
+    }
     return {
         state: value.state as 'undecided' | 'present',
         content: text(value.content, 'description.content'),
@@ -122,29 +126,33 @@ function normalizeDescription(value: unknown): ProgrammingStatementDescriptionSe
 
 function normalizeExample(value: unknown, index: number): ProgrammingStatementExample {
     const field = `examples.items.${index}`;
-    if (!isPlainObject(value)) fail(field, `${field} must be an object`);
+    if (!isPlainObject(value)) fail(field, localizedErrorText`${field} must be an object`);
     assertKeys(value, ['input', 'inputEmpty', 'output', 'outputEmpty', 'note'], field);
     const input = text(value.input, `${field}.input`);
     const output = text(value.output, `${field}.output`);
     const note = text(value.note, `${field}.note`);
-    if (typeof value.inputEmpty !== 'boolean') fail(`${field}.inputEmpty`, `${field}.inputEmpty must be boolean`);
-    if (typeof value.outputEmpty !== 'boolean') fail(`${field}.outputEmpty`, `${field}.outputEmpty must be boolean`);
-    if (value.inputEmpty && input) fail(`${field}.input`, `${field} cannot retain hidden input`);
-    if (value.outputEmpty && output) fail(`${field}.output`, `${field} cannot retain hidden output`);
-    if (!value.inputEmpty && !input) fail(`${field}.input`, `${field} input must have content or be explicitly empty`);
-    if (!value.outputEmpty && !output) fail(`${field}.output`, `${field} output must have content or be explicitly empty`);
-    if (value.inputEmpty && value.outputEmpty) fail(field, `${field} cannot have both sides empty`);
+    if (typeof value.inputEmpty !== 'boolean') fail(`${field}.inputEmpty`, localizedErrorText`${field}.inputEmpty must be boolean`);
+    if (typeof value.outputEmpty !== 'boolean') fail(`${field}.outputEmpty`, localizedErrorText`${field}.outputEmpty must be boolean`);
+    if (value.inputEmpty && input) fail(`${field}.input`, localizedErrorText`${field} cannot retain hidden input`);
+    if (value.outputEmpty && output) fail(`${field}.output`, localizedErrorText`${field} cannot retain hidden output`);
+    if (!value.inputEmpty && !input) {
+        fail(`${field}.input`, localizedErrorText`${field} input must have content or be explicitly empty`);
+    }
+    if (!value.outputEmpty && !output) {
+        fail(`${field}.output`, localizedErrorText`${field} output must have content or be explicitly empty`);
+    }
+    if (value.inputEmpty && value.outputEmpty) fail(field, localizedErrorText`${field} cannot have both sides empty`);
     return { input, inputEmpty: value.inputEmpty, output, outputEmpty: value.outputEmpty, note };
 }
 
 function normalizeExamples(value: unknown): ProgrammingStatementExamplesSection {
-    if (!isPlainObject(value)) fail('examples', 'examples must be an object');
+    if (!isPlainObject(value)) fail('examples', localizedErrorText`examples must be an object`);
     assertKeys(value, ['state', 'items'], 'examples');
     const state = triState(value.state, 'examples.state');
-    if (!Array.isArray(value.items)) fail('examples.items', 'examples.items must be an array');
+    if (!Array.isArray(value.items)) fail('examples.items', localizedErrorText`examples.items must be an array`);
     const items = value.items.map(normalizeExample);
-    if (state === 'absent' && items.length) fail('examples.items', 'absent examples cannot retain hidden items');
-    if (state === 'present' && !items.length) fail('examples.items', 'present examples require at least one item');
+    if (state === 'absent' && items.length) fail('examples.items', localizedErrorText`absent examples cannot retain hidden items`);
+    if (state === 'present' && !items.length) fail('examples.items', localizedErrorText`present examples require at least one item`);
     return { state, items };
 }
 
@@ -162,10 +170,12 @@ export function emptyProgrammingStatement(): ProgrammingStatement {
 }
 
 export function normalizeProgrammingStatement(value: unknown): ProgrammingStatement {
-    if (!isPlainObject(value)) fail('programmingStatement', 'programmingStatement must be an object');
+    if (!isPlainObject(value)) fail('programmingStatement', localizedErrorText`programmingStatement must be an object`);
     assertKeys(value, ['schemaVersion', 'locale', 'background', 'description', 'input', 'output', 'examples', 'hints'], 'programmingStatement');
-    if (value.schemaVersion !== PROGRAMMING_STATEMENT_SCHEMA_VERSION) fail('schemaVersion', 'unsupported programming statement schema');
-    if (value.locale !== PROGRAMMING_STATEMENT_LOCALE) fail('locale', 'unsupported programming statement locale');
+    if (value.schemaVersion !== PROGRAMMING_STATEMENT_SCHEMA_VERSION) {
+        fail('schemaVersion', localizedErrorText`unsupported programming statement schema`);
+    }
+    if (value.locale !== PROGRAMMING_STATEMENT_LOCALE) fail('locale', localizedErrorText`unsupported programming statement locale`);
     return {
         schemaVersion: PROGRAMMING_STATEMENT_SCHEMA_VERSION,
         locale: PROGRAMMING_STATEMENT_LOCALE,
@@ -236,24 +246,30 @@ export function assertProgrammingStatementComplete(statementInput: unknown, conf
         statement.examples.state === 'undecided' && 'examples',
         statement.hints.state === 'undecided' && 'hints',
     ].filter(Boolean);
-    if (unresolved.length) fail('programmingStatement', `unresolved sections: ${unresolved.join(', ')}`);
+    if (unresolved.length) fail('programmingStatement', localizedErrorText`unresolved sections: ${unresolved.join(', ')}`);
     if (statement.description.state !== 'present' || !statement.description.content.trim()) {
-        fail('description.content', 'description must be present and non-empty');
+        fail('description.content', localizedErrorText`description must be present and non-empty`);
     }
     if (statement.background.state === 'present' && !statement.background.content.trim()) {
-        fail('background.content', 'present background must be non-empty');
+        fail('background.content', localizedErrorText`present background must be non-empty`);
     }
-    if (statement.input.state === 'present' && !statement.input.content.trim()) fail('input.content', 'present input must be non-empty');
-    if (statement.output.state === 'present' && !statement.output.content.trim()) fail('output.content', 'present output must be non-empty');
-    if (statement.hints.state === 'present' && !statement.hints.content.trim()) fail('hints.content', 'present hints must be non-empty');
-    if (!programmingStatementLimits(configInput).complete) fail('config', 'time and memory limits must be configured');
+    if (statement.input.state === 'present' && !statement.input.content.trim()) {
+        fail('input.content', localizedErrorText`present input must be non-empty`);
+    }
+    if (statement.output.state === 'present' && !statement.output.content.trim()) {
+        fail('output.content', localizedErrorText`present output must be non-empty`);
+    }
+    if (statement.hints.state === 'present' && !statement.hints.content.trim()) {
+        fail('hints.content', localizedErrorText`present hints must be non-empty`);
+    }
+    if (!programmingStatementLimits(configInput).complete) fail('config', localizedErrorText`time and memory limits must be configured`);
     return statement;
 }
 
 export function assertProgrammingStatementProjection(statementInput: unknown, configInput: unknown, content: unknown): ProgrammingStatement {
     const statement = assertProgrammingStatementComplete(statementInput, configInput);
     if (typeof content !== 'string' || compileProgrammingStatement(statement) !== content) {
-        fail('content', 'structured statement projection differs from canonical');
+        fail('content', localizedErrorText`structured statement projection differs from canonical`);
     }
     return statement;
 }
@@ -313,7 +329,7 @@ function parseExampleSection(source: string): { items: ProgrammingStatementExamp
 }
 
 export function previewLegacyProgrammingStatement(source: string): LegacyProgrammingStatementPreview {
-    if (typeof source !== 'string') fail('content', 'legacy content must be text');
+    if (typeof source !== 'string') fail('content', localizedErrorText`legacy content must be text`);
     const sections = new Map<string, string[]>();
     const unclassified: string[] = [];
     let target: string | null = null;
@@ -363,6 +379,6 @@ export function previewLegacyProgrammingStatement(source: string): LegacyProgram
 
 export function assertLegacyProgrammingStatementFingerprint(source: string, fingerprint: string): void {
     if (!/^[a-f0-9]{64}$/.test(fingerprint) || sourceFingerprint(source) !== fingerprint) {
-        fail('conversionFingerprint', 'legacy statement changed after conversion preview');
+        fail('conversionFingerprint', localizedErrorText`legacy statement changed after conversion preview`);
     }
 }

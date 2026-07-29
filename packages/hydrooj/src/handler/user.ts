@@ -6,6 +6,7 @@ import Schema from 'schemastery';
 import { randomstring } from '@hydrooj/utils';
 import type { Context } from '../context';
 import {
+    localizedErrorText,
     AuthOperationError,
     BadRequestError,
     BlacklistedError,
@@ -102,10 +103,10 @@ class UserLoginHandler extends Handler {
         ]);
         if (udoc.tfa || udoc.authn) {
             if (udoc.tfa && tfa) {
-                if (!verifyTFA(udoc._tfa, tfa)) throw new InvalidTokenError('2FA');
+                if (!verifyTFA(udoc._tfa, tfa)) throw new InvalidTokenError(localizedErrorText`2FA`);
             } else if (udoc.authn && authnChallenge) {
                 const challenge = await token.get(authnChallenge, token.TYPE_WEBAUTHN);
-                if (!challenge || challenge.uid !== udoc._id) throw new InvalidTokenError(token.TYPE_TEXTS[token.TYPE_WEBAUTHN]);
+                if (!challenge || challenge.uid !== udoc._id) throw new InvalidTokenError(localizedErrorText`WebAuthn`);
                 if (!challenge.verified) throw new ValidationError('challenge');
                 await token.del(authnChallenge, token.TYPE_WEBAUTHN);
             } else throw new ValidationError('2FA', 'Authn');
@@ -150,11 +151,11 @@ class UserSudoHandler extends Handler {
         if (impersonated) await authUser.checkPassword(password);
         else if (authUser.authn && authnChallenge) {
             const challenge = await token.get(authnChallenge, token.TYPE_WEBAUTHN);
-            if (challenge?.uid !== authUser._id) throw new InvalidTokenError(token.TYPE_TEXTS[token.TYPE_WEBAUTHN]);
+            if (challenge?.uid !== authUser._id) throw new InvalidTokenError(localizedErrorText`WebAuthn`);
             if (!challenge.verified) throw new ValidationError('challenge');
             await token.del(authnChallenge, token.TYPE_WEBAUTHN);
         } else if (authUser.tfa && tfa) {
-            if (!verifyTFA(authUser._tfa, tfa)) throw new InvalidTokenError('2FA');
+            if (!verifyTFA(authUser._tfa, tfa)) throw new InvalidTokenError(localizedErrorText`2FA`);
         } else await authUser.checkPassword(password);
         this.session.sudo = Date.now();
         if (this.session.sudoArgs.method.toLowerCase() !== 'get') {
@@ -215,9 +216,9 @@ class UserWebauthnHandler extends Handler {
 
     async post({ domainId, result, redirect }) {
         const challenge = this.session.challenge;
-        if (!challenge) throw new ForbiddenError('no-challenge');
+        if (!challenge) throw new ForbiddenError(localizedErrorText`no-challenge`);
         const tdoc = await token.get(challenge, token.TYPE_WEBAUTHN);
-        if (!tdoc) throw new InvalidTokenError(token.TYPE_TEXTS[token.TYPE_WEBAUTHN]);
+        if (!tdoc) throw new InvalidTokenError(localizedErrorText`WebAuthn`);
         const udoc = await (tdoc.uid === 'login'
             ? (async () => {
                   const u = await user.coll.findOne({ 'authenticators.credentialID': Binary.createFromBase64(result.id) });
@@ -318,7 +319,7 @@ class UserRegisterWithCodeHandler extends Handler {
         if (!this.tdoc?.identity) {
             // prevent brute forcing tokens
             await this.limitRate('user_register_with_code', 60, 5);
-            throw new InvalidTokenError(token.TYPE_TEXTS[token.TYPE_REGISTRATION], code);
+            throw new InvalidTokenError(localizedErrorText`Registration`, code);
         }
     }
 
@@ -385,7 +386,7 @@ class UserLostPassWithCodeHandler extends Handler {
 
     async get({ domainId, code }) {
         const tdoc = await token.get(code, token.TYPE_LOSTPASS);
-        if (!tdoc) throw new InvalidTokenError(token.TYPE_TEXTS[token.TYPE_LOSTPASS], code);
+        if (!tdoc) throw new InvalidTokenError(localizedErrorText`Lost Password`, code);
         const udoc = await user.getById(domainId, tdoc.uid);
         this.response.body = { uname: udoc.uname };
         this.response.template = 'user_lostpass_with_code.html';
@@ -396,7 +397,7 @@ class UserLostPassWithCodeHandler extends Handler {
     @param('verifyPassword', Types.Password)
     async post(domainId: string, code: string, password: string, verifyPassword: string) {
         const tdoc = await token.get(code, token.TYPE_LOSTPASS);
-        if (!tdoc) throw new InvalidTokenError(token.TYPE_TEXTS[token.TYPE_LOSTPASS], code);
+        if (!tdoc) throw new InvalidTokenError(localizedErrorText`Lost Password`, code);
         if (password !== verifyPassword) throw new VerifyPasswordError();
         await user.setById(tdoc.uid, { authenticators: [], tfa: false });
         await user.setPassword(tdoc.uid, password);
@@ -536,7 +537,7 @@ class OauthCallbackHandler extends Handler {
 
     async get(args: any) {
         const provider = this.ctx.oauth.providers[args.type];
-        if (!provider) throw new UserFacingError('Oauth type');
+        if (!provider) throw new UserFacingError(localizedErrorText`Oauth type`);
         await this.limitRate('oauth_callback', 60, 5);
         const r = await provider.callback.call(this, args);
         const ids = Array.isArray(r._id) ? r._id : [r._id];
@@ -544,7 +545,7 @@ class OauthCallbackHandler extends Handler {
         if (this.session.oauthBind === args.type) {
             delete this.session.oauthBind;
             if (existing.some((id) => id && id !== this.user._id)) {
-                throw new BadRequestError('Already binded to another account');
+                throw new BadRequestError(localizedErrorText`Already binded to another account`);
             }
             this.response.redirect = '/home/security';
             await Promise.all(ids.map((i) => this.ctx.oauth.set(args.type, i, this.user._id)));
@@ -567,7 +568,7 @@ class OauthCallbackHandler extends Handler {
             this.response.redirect = '/';
             return;
         }
-        if (!provider.canRegister) throw new ForbiddenError('No binded account found');
+        if (!provider.canRegister) throw new ForbiddenError(localizedErrorText`No binded account found`);
         this.checkPriv(PRIV.PRIV_REGISTER_USER);
         let username = '';
         r.uname ||= [];

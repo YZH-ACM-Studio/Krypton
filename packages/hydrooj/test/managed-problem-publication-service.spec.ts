@@ -1,4 +1,5 @@
 import { expect } from 'chai';
+import { localizeErrorParameter, localizedErrorText } from '@hydrooj/framework';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -123,6 +124,8 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     if (request === '../error') {
         return new Proxy(
             {
+                localizeErrorParameter,
+                localizedErrorText,
                 ManagedProblemMetadataConflictError: TestMetadataConflictError,
                 PermissionError: TestPermissionError,
                 ProblemStructureConflictError: TestStructureConflictError,

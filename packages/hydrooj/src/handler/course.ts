@@ -15,7 +15,15 @@ import { escapeRegExp, pick } from 'lodash';
 import { Filter, ObjectId } from 'mongodb';
 import { Logger } from '@hydrooj/utils';
 import { sortFiles } from '@hydrooj/utils/lib/utils';
-import { FileLimitExceededError, FileUploadError, NotFoundError, PermissionError, ValidationError } from '../error';
+import {
+    localizeErrorParameter,
+    localizedErrorText,
+    FileLimitExceededError,
+    FileUploadError,
+    NotFoundError,
+    PermissionError,
+    ValidationError,
+} from '../error';
 import { TrainingDoc, TrainingNode } from '../interface';
 import { PERM, PRIV, STATUS } from '../model/builtin';
 import * as contest from '../model/contest';
@@ -98,7 +106,7 @@ async function resolveCourseMindmapId(domainId: string, tid: ObjectId | null, ac
     if (!requested) return null;
     if (!ObjectId.isValid(requested) || new ObjectId(requested).toHexString() !== requested.toLowerCase()) {
         logger.warn('Course mindmap binding rejected domain=%s tid=%s actor=%d requested=%s reason=invalid-id', domainId, tid || 'new', actor, raw);
-        throw new ValidationError('mindmapId', null, '知识导图 id 无效');
+        throw new ValidationError('mindmapId', null, localizedErrorText`知识导图 id 无效`);
     }
     const mindmapId = new ObjectId(requested);
     const map = await courseMindmapService().getPublicMap(mindmapId);
@@ -110,7 +118,7 @@ async function resolveCourseMindmapId(domainId: string, tid: ObjectId | null, ac
             actor,
             mindmapId,
         );
-        throw new ValidationError('mindmapId', null, '只能绑定真实且已公开的知识导图');
+        throw new ValidationError('mindmapId', null, localizedErrorText`只能绑定真实且已公开的知识导图`);
     }
     if (storedObjectIdString(map._id, 'mindmap._id') !== mindmapId.toHexString() || map.visibility !== 'public') {
         throw new TypeError(`mindmap service returned mismatched public map requested=${mindmapId}`);
@@ -234,7 +242,7 @@ function courseFilePrefix(domainId: string, tid: ObjectId): string {
 
 function listedCourseFile(tdoc: TrainingDoc, filename: string) {
     const file = (tdoc.files || []).find((item) => item.name === filename);
-    if (!file) throw new NotFoundError('file');
+    if (!file) throw new NotFoundError(localizedErrorText`file`);
     return file;
 }
 
@@ -250,7 +258,7 @@ async function parseChaptersJson(domainId: string, raw: string): Promise<Trainin
             assert(node._id, 'each chapter needs an _id');
             assert(node.title, 'each chapter needs a title');
             if (node.content !== undefined && typeof node.content !== 'string') {
-                throw new ValidationError('chapters', null, `章节 ${node._id} 的讲义必须是字符串`);
+                throw new ValidationError('chapters', null, localizedErrorText`章节 ${node._id} 的讲义必须是字符串`);
             }
             const pids = normalizeProblemDocIds(Array.isArray(node.pids) ? node.pids : []);
             const rawTids: string[] = Array.isArray(node.tids) ? node.tids : [];
@@ -261,11 +269,11 @@ async function parseChaptersJson(domainId: string, raw: string): Promise<Trainin
                 try {
                     tid = new ObjectId(t);
                 } catch {
-                    throw new ValidationError('tids', null, `无效的比赛 id: ${t}`);
+                    throw new ValidationError('tids', null, localizedErrorText`无效的比赛 id: ${t}`);
                 }
 
                 const tdoc = await contest.get(domainId, tid).catch(() => null);
-                if (!tdoc) throw new ValidationError('tids', null, `比赛不存在: ${t}`);
+                if (!tdoc) throw new ValidationError('tids', null, localizedErrorText`比赛不存在: ${t}`);
                 tids.push(tid);
             }
             parsed.push({
@@ -278,7 +286,7 @@ async function parseChaptersJson(domainId: string, raw: string): Promise<Trainin
             });
         }
     } catch (e: any) {
-        throw new ValidationError('chapters', null, e.message);
+        throw localizeErrorParameter(new ValidationError('chapters', null, e.message), 2, 'The course structure is invalid: {0}', e.message);
     }
     return parsed;
 }
@@ -348,14 +356,14 @@ class CourseDetailHandler extends Handler {
         const domainId = String(this.domain?._id);
         problem.assertProblemAclDomain(this.user, domainId);
         const tdoc = await training.get(domainId, tid);
-        if (tdoc.kind !== 'course') throw new ValidationError('tid', null, 'Not a course');
+        if (tdoc.kind !== 'course') throw new ValidationError('tid', null, localizedErrorText`Not a course`);
         const activeView = view === 'mindmap' ? 'mindmap' : 'overview';
         const canManage = this.user.own(tdoc) || this.user.hasPerm(PERM.PERM_EDIT_COURSE) || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
         // 可见性拦截（非管理者且不属于课程班级 → 拒绝）。
         if (!canManage && (tdoc.courseGroupIds || []).length) {
             const myGroups = await userGroupIds(domainId, this.user._id);
             if (!courseVisibleTo(tdoc, myGroups, false)) {
-                throw new ValidationError('tid', null, '你不在该课程的可见范围内');
+                throw new ValidationError('tid', null, localizedErrorText`你不在该课程的可见范围内`);
             }
         }
         const pids = training.getPids(tdoc.dag);
@@ -438,7 +446,7 @@ class CourseDetailHandler extends Handler {
     async postEnroll(domainId: string, tid: ObjectId) {
         this.checkPriv(PRIV.PRIV_USER_PROFILE);
         const tdoc = await training.get(domainId, tid);
-        if (tdoc.kind !== 'course') throw new ValidationError('tid', null, 'Not a course');
+        if (tdoc.kind !== 'course') throw new ValidationError('tid', null, localizedErrorText`Not a course`);
         // 可见范围外不允许报名。
         if ((tdoc.courseGroupIds || []).length) {
             const myGroups = await userGroupIds(domainId, this.user._id);
@@ -460,7 +468,7 @@ class CourseEditHandler extends Handler {
         problem.assertProblemAclDomain(this.user, authoritativeDomainId);
         if (tid) {
             this.tdoc = await training.get(authoritativeDomainId, tid);
-            if (this.tdoc.kind !== 'course') throw new ValidationError('tid', null, 'Not a course');
+            if (this.tdoc.kind !== 'course') throw new ValidationError('tid', null, localizedErrorText`Not a course`);
             if (!this.user.own(this.tdoc)) this.checkPerm(PERM.PERM_EDIT_COURSE);
         } else if (!this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) {
             if (!this.user.hasPerm(PERM.PERM_CREATE_COURSE)) {
@@ -601,7 +609,7 @@ class CourseEditHandler extends Handler {
     async postDelete(_domainId: string, tid: ObjectId) {
         const domainId = String(this.domain?._id);
         const tdoc = await training.get(domainId, tid);
-        if (tdoc.kind !== 'course') throw new ValidationError('tid', null, 'Not a course');
+        if (tdoc.kind !== 'course') throw new ValidationError('tid', null, localizedErrorText`Not a course`);
         if (!this.user.own(tdoc)) this.checkPerm(PERM.PERM_EDIT_COURSE);
         await Promise.all([
             training.del(domainId, tid),
@@ -623,7 +631,7 @@ class CourseFilesHandler extends Handler {
     async prepare(_domainId: string, tid: ObjectId) {
         this.domainId = String(this.domain?._id);
         this.tdoc = await training.get(this.domainId, tid);
-        if (this.tdoc.kind !== 'course') throw new NotFoundError('course');
+        if (this.tdoc.kind !== 'course') throw new NotFoundError(localizedErrorText`course`);
         if (!this.user.own(this.tdoc)) this.checkPriv(PRIV.PRIV_EDIT_SYSTEM);
     }
 
@@ -683,7 +691,7 @@ class CourseFileDownloadHandler extends Handler {
         this.checkPriv(PRIV.PRIV_USER_PROFILE);
         const domainId = String(this.domain?._id);
         const tdoc = await training.get(domainId, tid);
-        if (tdoc.kind !== 'course') throw new NotFoundError('course');
+        if (tdoc.kind !== 'course') throw new NotFoundError(localizedErrorText`course`);
         const file = listedCourseFile(tdoc, filename);
         const canManage = this.user.own(tdoc) || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
         if (!canManage && (tdoc.courseGroupIds || []).length) {

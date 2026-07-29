@@ -1,4 +1,5 @@
 import { expect } from 'chai';
+import { LocalizedErrorText, localizeErrorParameter, localizedErrorText } from '@hydrooj/framework';
 import { ObjectId } from 'mongodb';
 import { describe, it } from 'node:test';
 import type { BoundUserGroupTarget, CreateGroupFromBoundUsersDependencies } from '../src/group-export';
@@ -11,7 +12,7 @@ class FakeHydroError extends Error {
     constructor(code: number, ...params: unknown[]) {
         super();
         this.code = code;
-        this.params = params;
+        this.params = params.map((value) => (value instanceof LocalizedErrorText ? value.raw : value));
     }
 }
 
@@ -33,6 +34,8 @@ function loadGroupExportModule() {
     Module._load = function load(request: string, parent: unknown, isMain: boolean) {
         if (request === 'hydrooj') {
             return {
+                localizeErrorParameter,
+                localizedErrorText,
                 ObjectId,
                 SystemError: FakeSystemError,
                 ValidationError: FakeValidationError,

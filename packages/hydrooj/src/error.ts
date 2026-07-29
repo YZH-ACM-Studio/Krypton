@@ -2,7 +2,7 @@ import { CreateError as Err, HydroError, UserFacingError, BadRequestError, Forbi
 
 export * from '@hydrooj/framework/error';
 export const RemoteOnlineJudgeError = Err('RemoteOnlineJudgeError', UserFacingError, 'RemoteOnlineJudgeError', 500);
-export const SendMailError = Err('SendMailError', UserFacingError, 'Failed to send mail to {0}. (1)', 500);
+export const SendMailError = Err('SendMailError', UserFacingError, 'Failed to send mail to {0}. ({1})', 500);
 
 export const AlreadyVotedError = Err('AlreadyVotedError', ForbiddenError, "You've already voted.");
 export const BuiltinLoginError = Err('BuiltinLoginError', ForbiddenError, 'Builtin login is disabled.');

@@ -12,6 +12,7 @@
  */
 import type { Context } from 'hydrooj';
 import {
+    localizedErrorText,
     BadRequestError,
     db,
     Handler,
@@ -83,7 +84,7 @@ class RankBoardDetailHandler extends Handler {
     async get(_ctx: any, studentDocId: ObjectId) {
         const rows = await listLeaderboard();
         const row = rows.find((r) => String(r.student._id) === String(studentDocId));
-        if (!row) throw new NotFoundError('person', String(studentDocId));
+        if (!row) throw new NotFoundError(localizedErrorText`person`, String(studentDocId));
         const awardTypes = await listAwardTypes();
         this.response.template = 'rankboard_detail.html';
         this.response.body = {
@@ -194,7 +195,7 @@ class AdminRankBoardListHandler extends AdminBase {
     async get(_ctx: any, requestedSection?: string) {
         const section = requestedSection || 'people';
         if (section !== 'people' && section !== 'import' && section !== 'settings') {
-            throw new BadRequestError('未知的荣誉管理分区');
+            throw new BadRequestError(localizedErrorText`未知的荣誉管理分区`);
         }
         if (section === 'settings') this.checkStructuralOp();
         await this.renderSection(section);
@@ -207,7 +208,7 @@ class AdminRankBoardListHandler extends AdminBase {
             _id: studentDocId,
             domainId: RANKBOARD_DOMAIN,
         });
-        if (!student) throw new NotFoundError('student', String(studentDocId));
+        if (!student) throw new NotFoundError(localizedErrorText`student`, String(studentDocId));
         const person = await createPerson({
             studentDocId,
             createdBy: this.user._id,
@@ -251,7 +252,7 @@ class AdminRankBoardListHandler extends AdminBase {
         this.checkDataOp();
         // Radix Select 的 required 不可靠，空值提交会让 createMissing
         // 静默失效——显式报错（对抗性审查 #11）。
-        if (createMissing && !schoolId) throw new ValidationError('schoolId', null, '开启自动建档时必须选择学校');
+        if (createMissing && !schoolId) throw new ValidationError('schoolId', null, localizedErrorText`开启自动建档时必须选择学校`);
         const rows: BatchImportRow[] = batchTsv
             .split('\n')
             .map((line) => line.trim())
@@ -327,7 +328,7 @@ class AdminPersonDetailHandler extends AdminBase {
     @param('id', Types.ObjectId)
     async get(_ctx: any, id: ObjectId) {
         const person = await getPerson(id);
-        if (!person) throw new NotFoundError('person', String(id));
+        if (!person) throw new NotFoundError(localizedErrorText`person`, String(id));
         // Overlay 天梯赛 scores from the store (store-first, embedded fallback)
         // so the admin sees the same numeric score as the public board.
         await applyGpltStoreScores([person]);
@@ -491,7 +492,7 @@ class RankBoardGalleryHandler extends Handler {
         // 外链 `//evil.com` 和反斜杠变体 `/\evil.com`（浏览器按 // 解析），
         // 长度限 2048（对抗性审查 #8 / G4）。
         if (url.length > 2048 || !/^(?:https?:\/\/|\/(?![/\\]))/i.test(url)) {
-            throw new ValidationError('url', null, '图片链接无效');
+            throw new ValidationError('url', null, localizedErrorText`图片链接无效`);
         }
         // TOCTOU 防护（审查 #6/G8）：expectType 作为原子写条件传入，
         // 页面快照里的 awardIndex 因他人回滚/编辑而错位时 matched=0 → null。

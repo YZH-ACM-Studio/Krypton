@@ -18,6 +18,8 @@
 import { Logger } from '@hydrooj/utils';
 import type { Context } from 'hydrooj';
 import {
+    localizeError,
+    localizedErrorText,
     ContestModel,
     Handler,
     NotFoundError,
@@ -43,6 +45,18 @@ import type { ContestPermitRole, PermitRole, ProblemContributionScope, ProblemCo
 const PROBLEM_ROLES: PermitRole[] = ['verifier', 'author', 'maintainer'];
 const CONTEST_ROLES: ContestPermitRole[] = ['verifier', 'maintainer'];
 const logger = new Logger('krypton-permits.handler');
+
+function problemNotFound() {
+    return localizeError(new NotFoundError('题目不存在'), '题目不存在');
+}
+
+function permitNotFound() {
+    return localizeError(new NotFoundError('权限记录不存在'), '权限记录不存在');
+}
+
+function contestNotFound() {
+    return localizeError(new NotFoundError('比赛不存在'), '比赛不存在');
+}
 
 function grantableProblemRoles(user: any, pdoc: any): PermitRole[] {
     if (pdoc.authoringMode !== 'managed') return ProblemModel.canMaintainProblem(user, pdoc) ? ['verifier', 'maintainer'] : [];
@@ -92,7 +106,7 @@ async function assertManagedPermitBody(handler: Handler, pdoc: any, allowed: str
         fields: unknownFields,
         result: 'denied',
     });
-    throw new ValidationError('fields', null, `托管题权限接口不接受字段：${unknownFields.join(', ')}`);
+    throw new ValidationError('fields', null, localizedErrorText`托管题权限接口不接受字段：${unknownFields.join(', ')}`);
 }
 
 async function targetHasMaintainerSource(domainId: string, pid: number, targetUids: number[]): Promise<boolean> {
@@ -118,7 +132,7 @@ function canManageContestVerifiers(user: any, tdoc: any): boolean {
 function authoritativeDomainId(handler: Handler, args: { domainId?: unknown }): string {
     const domainId = String((handler as any).domain?._id || '');
     if (!domainId || (args.domainId !== undefined && String(args.domainId) !== domainId)) {
-        throw new PermissionError('请求域与当前会话域不一致');
+        throw new PermissionError(localizedErrorText`请求域与当前会话域不一致`);
     }
     return domainId;
 }
@@ -128,10 +142,10 @@ class ProblemPermitGrantHandler extends Handler {
     async get(args: { domainId?: unknown }, pid: number) {
         const domainId = authoritativeDomainId(this, args);
         const pdoc = await ProblemModel.getViewableAuthorized(domainId, pid, this.user);
-        if (!pdoc) throw new NotFoundError('题目不存在');
+        if (!pdoc) throw problemNotFound();
         const grantableRoles = grantableProblemRoles(this.user, pdoc);
         if (!grantableRoles.length) {
-            throw new PermissionError('无权查看此题目的权限列表');
+            throw new PermissionError(localizedErrorText`无权查看此题目的权限列表`);
         }
         const permits = await permitsModel.listForProblem(domainId, pdoc.docId);
         const uids = Array.from(new Set([...permits.map((p) => p.uid), ...permits.map((p) => p.grantedBy)]));
@@ -139,7 +153,7 @@ class ProblemPermitGrantHandler extends Handler {
         const confirmedPdoc = await ProblemModel.getViewableAuthorized(domainId, pdoc.docId, this.user);
         const confirmedGrantableRoles = confirmedPdoc ? grantableProblemRoles(this.user, confirmedPdoc) : [];
         if (!confirmedPdoc || confirmedPdoc.docId !== pdoc.docId || !confirmedGrantableRoles.length) {
-            throw new PermissionError('无权查看此题目的权限列表');
+            throw new PermissionError(localizedErrorText`无权查看此题目的权限列表`);
         }
         this.response.body = {
             permits,
@@ -166,38 +180,38 @@ class ProblemPermitGrantHandler extends Handler {
     ) {
         const domainId = authoritativeDomainId(this, args);
         if (!PROBLEM_ROLES.includes(role as PermitRole)) {
-            throw new ValidationError('role', null, 'role 必须是 verifier、author 或 maintainer');
+            throw new ValidationError('role', null, localizedErrorText`role 必须是 verifier、author 或 maintainer`);
         }
         const targetUids = Array.from(
             new Set([...(uid ? [uid] : []), ...(uids || []).map((i) => +i)].filter((i) => Number.isSafeInteger(i) && i > 0)),
         );
         if (!targetUids.length) {
-            throw new ValidationError('uid', null, '请选择至少一个目标用户');
+            throw new ValidationError('uid', null, localizedErrorText`请选择至少一个目标用户`);
         }
         const pdoc = await ProblemModel.getViewableAuthorized(domainId, pid, this.user);
-        if (!pdoc) throw new NotFoundError('题目不存在');
+        if (!pdoc) throw problemNotFound();
         await assertManagedPermitBody(this, pdoc, ['uid', 'uids', 'role', 'note', 'requestId'], 'grant');
         if (pdoc.authoringMode === 'managed' && targetUids.length !== 1) {
             await logManagedPermitDenied(this, pdoc, 'grant', role as PermitRole);
-            throw new ValidationError('uids', null, '托管题每次只能变更一个用户的角色');
+            throw new ValidationError('uids', null, localizedErrorText`托管题每次只能变更一个用户的角色`);
         }
         const allowedRoles = grantableProblemRoles(this.user, pdoc);
         if (!allowedRoles.includes(role as PermitRole)) {
             if (pdoc.authoringMode === 'managed') await logManagedPermitDenied(this, pdoc, 'grant', role as PermitRole);
-            throw new PermissionError('无权授予该题目角色');
+            throw new PermissionError(localizedErrorText`无权授予该题目角色`);
         }
         const targets = await UserModel.getList(domainId, targetUids);
         for (const targetUid of targetUids) {
-            if (!targets[targetUid]) throw new ValidationError('uid', null, `目标用户 ${targetUid} 不存在`);
+            if (!targets[targetUid]) throw new ValidationError('uid', null, localizedErrorText`目标用户 ${targetUid} 不存在`);
             if (pdoc.authoringMode !== 'managed' && targetUid === pdoc.owner) {
-                throw new ValidationError('uid', null, '不能给作者自己授权');
+                throw new ValidationError('uid', null, localizedErrorText`不能给作者自己授权`);
             }
         }
         const initialMaintainerInvolved =
             pdoc.authoringMode === 'managed' && (role === 'maintainer' || (await targetHasMaintainerSource(domainId, pdoc.docId, targetUids)));
         if (initialMaintainerInvolved && !ProblemModel.canManageProblemMaintainers(this.user, pdoc)) {
             await logManagedPermitDenied(this, pdoc, 'grant', role as PermitRole);
-            throw new PermissionError('无权授予或覆盖该题目角色');
+            throw new PermissionError(localizedErrorText`无权授予或覆盖该题目角色`);
         }
         const link = `/p/${pdoc.pid || pdoc.docId}`;
         const roleZh = role === 'maintainer' ? '题目维护者' : role === 'author' ? '出题人' : '验题人';
@@ -264,7 +278,7 @@ class ProblemPermitGrantHandler extends Handler {
         );
         if (deniedInsideClaim) {
             await logManagedPermitDenied(this, pdoc, 'grant', role as PermitRole);
-            throw new PermissionError('无权授予或覆盖该题目角色');
+            throw new PermissionError(localizedErrorText`无权授予或覆盖该题目角色`);
         }
         await Promise.all(
             targetUids.map(async (targetUid) => {
@@ -295,7 +309,7 @@ class ProblemPermitRevokeHandler extends Handler {
     async post(args: { domainId?: unknown }, pid: number, permitId: ObjectId, requestId: string | undefined) {
         const domainId = authoritativeDomainId(this, args);
         const pdoc = await ProblemModel.getViewableAuthorized(domainId, pid, this.user);
-        if (!pdoc) throw new NotFoundError('题目不存在');
+        if (!pdoc) throw problemNotFound();
         await assertManagedPermitBody(this, pdoc, ['permitId', 'requestId'], 'revoke');
         const row = await permitsColl.findOne({
             domainId,
@@ -303,7 +317,7 @@ class ProblemPermitRevokeHandler extends Handler {
             pid: pdoc.docId,
             active: canonicalActiveFilter(),
         });
-        if (!row) throw new NotFoundError('权限记录不存在');
+        if (!row) throw permitNotFound();
         const isSelf = row.uid === this.user._id;
         const canSelfRevoke = isSelf && (pdoc.authoringMode !== 'managed' || row.role !== 'maintainer');
         const initialMaintainerInvolved = pdoc.authoringMode === 'managed' && (await targetHasMaintainerSource(domainId, pdoc.docId, [row.uid]));
@@ -312,7 +326,7 @@ class ProblemPermitRevokeHandler extends Handler {
             : canSelfRevoke || canRevokeProblemRole(this.user, pdoc, row.role);
         if (!canManageInitialRole) {
             if (pdoc.authoringMode === 'managed') await logManagedPermitDenied(this, pdoc, 'revoke', row.role);
-            throw new PermissionError('无权撤销该权限');
+            throw new PermissionError(localizedErrorText`无权撤销该权限`);
         }
         const mutationId = deriveAclRequestId(requestId, 'problem-permit-revoke', domainId, pdoc.docId, row.uid);
         let deniedInsideClaim: PermitRole | null = null;
@@ -378,10 +392,10 @@ class ProblemPermitRevokeHandler extends Handler {
                 capability: 'collaborators',
             },
         );
-        if (missingInsideClaim) throw new NotFoundError('权限记录不存在');
+        if (missingInsideClaim) throw permitNotFound();
         if (deniedInsideClaim) {
             await logManagedPermitDenied(this, pdoc, 'revoke', deniedInsideClaim);
-            throw new PermissionError('无权撤销该题目角色');
+            throw new PermissionError(localizedErrorText`无权撤销该题目角色`);
         }
         this.response.body = { success: true, requestId: mutationId };
     }
@@ -405,7 +419,7 @@ function parseContributionScopes(raw: string): ProblemContributionScope[] {
         ),
     ];
     if (!scopes.length || scopes.some((scope) => !CONTRIBUTION_SCOPES.includes(scope as ProblemContributionScope))) {
-        throw new ValidationError('scopes', null, 'scopes 必须是 data、tag 或二者');
+        throw new ValidationError('scopes', null, localizedErrorText`scopes 必须是 data、tag 或二者`);
     }
     return scopes as ProblemContributionScope[];
 }
@@ -415,20 +429,20 @@ function parseExpectedContributionRevisions(raw: string, pids: number[]): Map<nu
     try {
         parsed = JSON.parse(raw);
     } catch {
-        throw new ValidationError('expectedRevisions', null, 'expectedRevisions 必须是合法 JSON 对象');
+        throw new ValidationError('expectedRevisions', null, localizedErrorText`expectedRevisions 必须是合法 JSON 对象`);
     }
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        throw new ValidationError('expectedRevisions', null, 'expectedRevisions 必须是题号到 revision 的对象');
+        throw new ValidationError('expectedRevisions', null, localizedErrorText`expectedRevisions 必须是题号到 revision 的对象`);
     }
     const requested = new Set(pids.map(String));
     const entries = Object.entries(parsed as Record<string, unknown>);
     if (entries.length !== requested.size || entries.some(([pid]) => !requested.has(pid))) {
-        throw new ValidationError('expectedRevisions', null, 'expectedRevisions 必须与本次题目列表完全一致');
+        throw new ValidationError('expectedRevisions', null, localizedErrorText`expectedRevisions 必须与本次题目列表完全一致`);
     }
     const result = new Map<number, number>();
     for (const [pid, revision] of entries) {
         if (!Number.isSafeInteger(revision) || Number(revision) < 0) {
-            throw new ValidationError('expectedRevisions', null, `题目 ${pid} 的 revision 无效`);
+            throw new ValidationError('expectedRevisions', null, localizedErrorText`题目 ${pid} 的 revision 无效`);
         }
         result.set(Number(pid), Number(revision));
     }
@@ -463,16 +477,16 @@ class ProblemContributionHandler extends Handler {
     async get(args: { domainId?: unknown }, pid: number) {
         const domainId = authoritativeDomainId(this, args);
         const pdoc = await ProblemModel.getViewableAuthorized(domainId, pid, this.user);
-        if (!pdoc) throw new NotFoundError('题目不存在');
+        if (!pdoc) throw problemNotFound();
         if (!ProblemModel.canManageProblemContributions(this.user, pdoc)) {
-            throw new PermissionError('无权查看此题目的贡献分工');
+            throw new PermissionError(localizedErrorText`无权查看此题目的贡献分工`);
         }
         const rows = await permitsModel.listContributionsForProblem(domainId, pdoc.docId);
         const uids = [...new Set(rows.flatMap((row) => [row.uid, row.assignedBy, row.updatedBy]))];
         const udict = await UserModel.getList(domainId, uids);
         const confirmed = await ProblemModel.getViewableAuthorized(domainId, pdoc.docId, this.user);
         if (!confirmed || !ProblemModel.canManageProblemContributions(this.user, confirmed)) {
-            throw new PermissionError('无权查看此题目的贡献分工');
+            throw new PermissionError(localizedErrorText`无权查看此题目的贡献分工`);
         }
         this.response.body = { contributions: rows, udict };
     }
@@ -485,16 +499,16 @@ class ProblemContributionHandler extends Handler {
     async post(args: { domainId?: unknown }, pid: number, uid: number, scope: string, note: string, requestId: string) {
         const domainId = authoritativeDomainId(this, args);
         if (!CONTRIBUTION_SCOPES.includes(scope as ProblemContributionScope)) {
-            throw new ValidationError('scope', null, 'scope 必须是 data 或 tag');
+            throw new ValidationError('scope', null, localizedErrorText`scope 必须是 data 或 tag`);
         }
         const target = await UserModel.getById(domainId, uid);
-        if (!target) throw new ValidationError('uid', null, '目标用户不存在');
+        if (!target) throw new ValidationError('uid', null, localizedErrorText`目标用户不存在`);
         const pdoc = await ProblemModel.getViewableAuthorized(domainId, pid, this.user);
-        if (!pdoc) throw new NotFoundError('题目不存在');
+        if (!pdoc) throw problemNotFound();
         const mutationId = deriveContributionMutationId(requestId, 'problem-contribution-assign', domainId, pdoc.docId, uid, scope);
         if (!ProblemModel.canManageProblemContributions(this.user, pdoc)) {
             await auditContributionDenied(this, pdoc, uid, scope, 'authorize-assign', mutationId);
-            throw new PermissionError('无权分配此题目的贡献范围');
+            throw new PermissionError(localizedErrorText`无权分配此题目的贡献范围`);
         }
         let deniedInsideClaim = false;
         await ProblemModel.withAuthorizedWriteClaim(
@@ -541,7 +555,7 @@ class ProblemContributionHandler extends Handler {
         );
         if (deniedInsideClaim) {
             await auditContributionDenied(this, pdoc, uid, scope, 'claim-assign', mutationId);
-            throw new PermissionError('无权分配此题目的贡献范围');
+            throw new PermissionError(localizedErrorText`无权分配此题目的贡献范围`);
         }
         const scopeZh = scope === 'data' ? '数据贡献者' : '标签贡献者';
         try {
@@ -575,11 +589,11 @@ class ProblemContributionRevokeHandler extends Handler {
         const domainId = authoritativeDomainId(this, args);
         if (!CONTRIBUTION_SCOPES.includes(scope as ProblemContributionScope)) throw new ValidationError('scope');
         const pdoc = await ProblemModel.getViewableAuthorized(domainId, pid, this.user);
-        if (!pdoc) throw new NotFoundError('题目不存在');
+        if (!pdoc) throw problemNotFound();
         const mutationId = deriveContributionMutationId(requestId, 'problem-contribution-revoke', domainId, pdoc.docId, uid, scope);
         if (!ProblemModel.canManageProblemContributions(this.user, pdoc)) {
             await auditContributionDenied(this, pdoc, uid, scope, 'authorize-revoke', mutationId);
-            throw new PermissionError('无权撤销此题目的贡献范围');
+            throw new PermissionError(localizedErrorText`无权撤销此题目的贡献范围`);
         }
         let deniedInsideClaim = false;
         await ProblemModel.withAuthorizedWriteClaim(
@@ -624,7 +638,7 @@ class ProblemContributionRevokeHandler extends Handler {
         );
         if (deniedInsideClaim) {
             await auditContributionDenied(this, pdoc, uid, scope, 'claim-revoke', mutationId);
-            throw new PermissionError('无权撤销此题目的贡献范围');
+            throw new PermissionError(localizedErrorText`无权撤销此题目的贡献范围`);
         }
         this.response.body = { success: true, requestId: mutationId };
     }
@@ -648,31 +662,31 @@ class ProblemContributionBulkHandler extends Handler {
     ) {
         const domainId = authoritativeDomainId(this, args);
         const batchRequestId = requestId.trim();
-        if (!batchRequestId) throw new ValidationError('requestId', null, 'requestId 不能为空');
+        if (!batchRequestId) throw new ValidationError('requestId', null, localizedErrorText`requestId 不能为空`);
         if (!pids.length || pids.length > MAX_CONTRIBUTION_BATCH_SIZE) {
-            throw new ValidationError('pids', null, `每次必须选择 1-${MAX_CONTRIBUTION_BATCH_SIZE} 道题`);
+            throw new ValidationError('pids', null, localizedErrorText`每次必须选择 1-${MAX_CONTRIBUTION_BATCH_SIZE} 道题`);
         }
         if (new Set(pids).size !== pids.length || pids.some((pid) => !Number.isSafeInteger(pid) || pid <= 0)) {
-            throw new ValidationError('pids', null, 'pids 必须是互不重复的正整数');
+            throw new ValidationError('pids', null, localizedErrorText`pids 必须是互不重复的正整数`);
         }
         const scopes = parseContributionScopes(scopesRaw);
         const expectedRevisions = parseExpectedContributionRevisions(expectedRevisionsRaw, pids);
         const target = await UserModel.getById(domainId, uid);
-        if (!target) throw new ValidationError('uid', null, '目标用户不存在');
+        if (!target) throw new ValidationError('uid', null, localizedErrorText`目标用户不存在`);
         await ProblemModel.refreshProblemAcl(this.user, domainId);
         ProblemModel.assertProblemAclDomain(this.user, domainId);
 
         const preflight: Array<{ pdoc: any; revision: number }> = [];
         for (const pid of pids) {
             const pdoc = await ProblemModel.get(domainId, pid);
-            if (!pdoc) throw new NotFoundError(`题目 ${pid} 不存在`);
+            if (!pdoc) throw localizeError(new NotFoundError(`题目 ${pid} 不存在`), '题目 {0} 不存在', pid);
             const revision = Number(pdoc.structureRevision ?? 0);
             if (!Number.isSafeInteger(revision) || revision < 0 || revision !== expectedRevisions.get(pid)) {
-                throw new ValidationError('expectedRevisions', null, `题目 ${pdoc.pid || pid} 已发生变化，请刷新后重试`);
+                throw new ValidationError('expectedRevisions', null, localizedErrorText`题目 ${pdoc.pid || pid} 已发生变化，请刷新后重试`);
             }
             if (!ProblemModel.canManageProblemContributions(this.user, pdoc)) {
                 await auditContributionDenied(this, pdoc, uid, scopes.join(','), 'bulk-preflight', batchRequestId);
-                throw new PermissionError(`无权分配题目 ${pdoc.pid || pid} 的贡献范围`);
+                throw new PermissionError(localizedErrorText`无权分配题目 ${pdoc.pid || pid} 的贡献范围`);
             }
             preflight.push({ pdoc, revision });
         }
@@ -708,7 +722,7 @@ class ProblemContributionBulkHandler extends Handler {
                                 return;
                             }
                             if (!ProblemModel.canManageProblemContributions(this.user, current)) {
-                                rejected = new PermissionError(`题目 ${current.pid || current.docId} 的管理权限已变化`);
+                                rejected = new PermissionError(localizedErrorText`题目 ${current.pid || current.docId} 的管理权限已变化`);
                                 return;
                             }
                             try {
@@ -816,20 +830,20 @@ class ProblemContributionStatusHandler extends Handler {
         if (!CONTRIBUTION_SCOPES.includes(scope as ProblemContributionScope)) throw new ValidationError('scope');
         if (!CONTRIBUTION_STATUSES.includes(status as ProblemContributionStatus)) throw new ValidationError('status');
         const pdoc = await ProblemModel.getViewableAuthorized(domainId, pid, this.user);
-        if (!pdoc) throw new NotFoundError('题目不存在');
+        if (!pdoc) throw problemNotFound();
         const managerAction = status === 'pending';
         const targetUid = uid ?? this.user._id;
-        if (managerAction && uid === undefined) throw new ValidationError('uid', null, '重开任务必须指定目标用户');
-        if (!managerAction && targetUid !== this.user._id) throw new PermissionError('只能完成自己的贡献任务');
+        if (managerAction && uid === undefined) throw new ValidationError('uid', null, localizedErrorText`重开任务必须指定目标用户`);
+        if (!managerAction && targetUid !== this.user._id) throw new PermissionError(localizedErrorText`只能完成自己的贡献任务`);
         if (managerAction && !ProblemModel.canManageProblemContributions(this.user, pdoc)) {
-            throw new PermissionError('无权重开此题目的贡献任务');
+            throw new PermissionError(localizedErrorText`无权重开此题目的贡献任务`);
         }
         const rows = await permitsModel.listContributionsForProblem(domainId, pdoc.docId);
         const row = rows.find((item) => item.uid === targetUid && item.scope === scope && item.active);
         const mutationId = deriveContributionMutationId(requestId, 'problem-contribution-status', domainId, pdoc.docId, targetUid, scope, status);
         if (!row) {
             await auditContributionDenied(this, pdoc, targetUid, scope, 'authorize-status', mutationId);
-            throw new PermissionError('当前没有这项贡献任务');
+            throw new PermissionError(localizedErrorText`当前没有这项贡献任务`);
         }
         await OplogModel.log(this as any, 'problem.contribution.status', {
             domainId,
@@ -869,7 +883,7 @@ class ProblemContributionStatusHandler extends Handler {
         );
         if (deniedInsideClaim) {
             await auditContributionDenied(this, pdoc, targetUid, scope, 'claim-status', mutationId);
-            throw new PermissionError('无权更新此题目的贡献任务');
+            throw new PermissionError(localizedErrorText`无权更新此题目的贡献任务`);
         }
         logger.info(
             'Problem contribution changed domain=%s pid=%d actor=%d target=%d scope=%s stage=%s result=success requestId=%s',
@@ -895,23 +909,23 @@ class ContestVerifierAddHandler extends Handler {
         const domainId = authoritativeDomainId(this, args);
         const r = (role || 'verifier') as ContestPermitRole;
         if (!CONTEST_ROLES.includes(r)) {
-            throw new ValidationError('role', null, 'role 必须是 verifier 或 maintainer');
+            throw new ValidationError('role', null, localizedErrorText`role 必须是 verifier 或 maintainer`);
         }
         const tdoc = await ContestModel.get(domainId, tid);
-        if (!tdoc) throw new NotFoundError('比赛不存在');
+        if (!tdoc) throw contestNotFound();
         if (!canManageContestVerifiers(this.user, tdoc)) {
-            throw new PermissionError('无权管理此比赛的验题人');
+            throw new PermissionError(localizedErrorText`无权管理此比赛的验题人`);
         }
         const target = await UserModel.getById(domainId, uid);
-        if (!target) throw new ValidationError('uid', null, '目标用户不存在');
+        if (!target) throw new ValidationError('uid', null, localizedErrorText`目标用户不存在`);
         if (uid === tdoc.owner) {
-            throw new ValidationError('uid', null, '不能给比赛作者自己授权');
+            throw new ValidationError('uid', null, localizedErrorText`不能给比赛作者自己授权`);
         }
         if (r === 'maintainer') {
             for (const pid of tdoc.pids || []) {
                 const pdoc = await ProblemModel.get(domainId, pid);
                 if (pdoc?.authoringMode === 'managed') {
-                    throw new ValidationError('role', null, '托管题维护者必须由系统管理员逐题直接授予');
+                    throw new ValidationError('role', null, localizedErrorText`托管题维护者必须由系统管理员逐题直接授予`);
                 }
             }
         }
@@ -966,10 +980,10 @@ class ContestVerifierRemoveHandler extends Handler {
     async post(args: { domainId?: unknown }, tid: ObjectId, uid: number, requestId: string | undefined) {
         const domainId = authoritativeDomainId(this, args);
         const tdoc = await ContestModel.get(domainId, tid);
-        if (!tdoc) throw new NotFoundError('比赛不存在');
+        if (!tdoc) throw contestNotFound();
         const isSelf = uid === this.user._id;
         if (!isSelf && !canManageContestVerifiers(this.user, tdoc)) {
-            throw new PermissionError('无权移除该验题人');
+            throw new PermissionError(localizedErrorText`无权移除该验题人`);
         }
         const verifiers = (tdoc.verifiers || []).filter((u) => u !== uid);
         const mutationId = deriveAclRequestId(requestId, 'contest-permit-revoke', domainId, tid.toHexString(), uid);

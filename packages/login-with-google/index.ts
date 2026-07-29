@@ -1,4 +1,4 @@
-import { Context, Handler, Schema, Service, superagent, SystemModel, TokenModel, UserFacingError } from 'hydrooj';
+import { localizeError, Context, Handler, Schema, Service, superagent, SystemModel, TokenModel, UserFacingError } from 'hydrooj';
 
 function unescapedString(escapedString: string) {
     escapedString += Array.from({ length: 5 - (escapedString.length % 4) }).join('=');
@@ -39,7 +39,7 @@ export default class GoogleOAuthService extends Service {
             name: 'Google',
             canRegister: config.canRegister,
             callback: async function callback(this: Handler, { state, code, error }) {
-                if (error) throw new UserFacingError(error);
+                if (error) throw localizeError(new UserFacingError(error), 'External service returned an error: {0}', error);
                 const [url, s] = await Promise.all([SystemModel.get('server.url'), TokenModel.get(state, TokenModel.TYPE_OAUTH)]);
                 const res = await superagent.post('https://oauth2.googleapis.com/token').send({
                     client_id: config.id,

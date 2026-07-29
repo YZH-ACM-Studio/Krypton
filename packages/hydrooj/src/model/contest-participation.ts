@@ -1,5 +1,5 @@
 import { ObjectId } from 'mongodb';
-import { ContestTeamConflictError, ValidationError } from '../error';
+import { localizedErrorText, ContestTeamConflictError, ValidationError } from '../error';
 import type { Tdoc } from '../interface';
 
 export type ContestParticipationMode = 'individual' | 'team';
@@ -61,7 +61,9 @@ export function normalizeParticipationConfig<T extends Partial<Tdoc> & Pick<Tdoc
         throw new ValidationError('participationMode');
     }
     if (getParticipationMode(tdoc) !== 'team') return tdoc;
-    if (tdoc.rule !== 'acm') throw new ValidationError('participationMode', 'rule', 'Team participation is only supported by ACM contests.');
+    if (tdoc.rule !== 'acm') {
+        throw new ValidationError('participationMode', 'rule', localizedErrorText`Team participation is only supported by ACM contests.`);
+    }
     tdoc.vigilEnabled = true;
     tdoc.entryMode = 'client_required';
     tdoc.rated = false;

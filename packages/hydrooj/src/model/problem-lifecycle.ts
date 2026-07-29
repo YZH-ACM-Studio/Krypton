@@ -1,13 +1,22 @@
 import type { ProblemKind } from '@hydrooj/common';
 import { compareStructuredCodeRegions, parseProblemKind } from '@hydrooj/common';
-import { ValidationError } from '../error';
-import { parseProblemConfigObject, validateCompiledStructuredConfig, validateStructuredCodeJudgeConfig } from '../lib/problem-config';
+import { localizeErrorParameter, localizedErrorText, type LocalizedErrorText, ValidationError } from '../error';
+import {
+    getProblemConfigErrorText,
+    parseProblemConfigObject,
+    validateCompiledStructuredConfig,
+    validateStructuredCodeJudgeConfig,
+} from '../lib/problem-config';
 import db from '../service/db';
 import { normalizeStructuredCodeConfig } from './code-evaluation-lifecycle';
 import * as document from './document';
 
 const recordColl = db.collection('record');
 const recordStatColl = db.collection('record.stat');
+
+function localizedConfigValidation(field: string, detail: LocalizedErrorText) {
+    return new ValidationError(field, null, detail);
+}
 
 const FORBIDDEN_STATEMENT_FIELDS = new Set(['prompt', 'statement', 'description', 'instructions', 'introduction', 'preface']);
 
@@ -126,7 +135,7 @@ function assertNoSecondaryStatement(value: unknown, path = 'config'): void {
     for (const [key, child] of Object.entries(value)) {
         const regionStudentText = ['title', 'prompt', 'description'].includes(key) && /\.regions\[\d+\]$/.test(path);
         if (FORBIDDEN_STATEMENT_FIELDS.has(key) && !regionStudentText) {
-            throw new ValidationError('config', null, `题面只能存放在 content，禁止字段 ${path}.${key}`);
+            throw new ValidationError('config', null, localizedErrorText`题面只能存放在 content，禁止字段 ${path}.${key}`);
         }
         assertNoSecondaryStatement(child, `${path}.${key}`);
     }
@@ -138,23 +147,30 @@ function normalizeAuthorStructuredCode(kind: 'program_fill' | 'function', main: 
         if (kind === 'program_fill' && config.mode === 'text') validateStructuredCodeJudgeConfig(config, 'program_fill');
         else validateCompiledStructuredConfig(kind, config);
     } catch (error: any) {
-        throw new ValidationError('config', null, error.message);
+        const localizedDetail = getProblemConfigErrorText(error);
+        if (localizedDetail) throw localizedConfigValidation('config', localizedDetail);
+        throw localizeErrorParameter(
+            new ValidationError('config', null, error.message),
+            2,
+            'The code-evaluation configuration is invalid: {0}',
+            error.message,
+        );
     }
     return config;
 }
 
 function normalizeOptions(value: unknown): string[] {
     if (!Array.isArray(value) || value.length < 2 || value.length > 26) {
-        throw new ValidationError('config', null, '选项数量必须为 2–26');
+        throw new ValidationError('config', null, localizedErrorText`选项数量必须为 2–26`);
     }
     const options = value.map((option) => {
         if (typeof option !== 'string' || !option.trim()) {
-            throw new ValidationError('config', null, '选项不能为空');
+            throw new ValidationError('config', null, localizedErrorText`选项不能为空`);
         }
         return option.trim();
     });
     if (new Set(options).size !== options.length) {
-        throw new ValidationError('config', null, '选项内容不能重复');
+        throw new ValidationError('config', null, localizedErrorText`选项内容不能重复`);
     }
     return options;
 }
@@ -167,7 +183,7 @@ function normalizeBasicObjective(kind: ProblemKind, main: Record<string, unknown
     if (kind === 'single') {
         const options = normalizeOptions(main.options);
         if (!Number.isSafeInteger(main.answerIndex) || Number(main.answerIndex) < 0 || Number(main.answerIndex) >= options.length) {
-            throw new ValidationError('config', null, '单选题正确项必须属于选项');
+            throw new ValidationError('config', null, localizedErrorText`单选题正确项必须属于选项`);
         }
         const answerIndex = Number(main.answerIndex);
         return {
@@ -180,7 +196,7 @@ function normalizeBasicObjective(kind: ProblemKind, main: Record<string, unknown
     }
     if (kind === 'true_false') {
         if (typeof main.answer !== 'boolean') {
-            throw new ValidationError('config', null, '判断题答案必须为正确或错误');
+            throw new ValidationError('config', null, localizedErrorText`判断题答案必须为正确或错误`);
         }
         const options = ['正确', '错误'];
         return {
@@ -203,7 +219,7 @@ function normalizeBasicObjective(kind: ProblemKind, main: Record<string, unknown
     }
     if (kind === 'blank') {
         if (typeof main.answer !== 'string' || !main.answer.trim()) {
-            throw new ValidationError('config', null, '填空题可接受答案不能为空');
+            throw new ValidationError('config', null, localizedErrorText`填空题可接受答案不能为空`);
         }
         return {
             type: 'objective',
@@ -214,7 +230,7 @@ function normalizeBasicObjective(kind: ProblemKind, main: Record<string, unknown
     }
     if (kind === 'subjective') {
         if (main.gradingInstructions !== undefined && typeof main.gradingInstructions !== 'string') {
-            throw new ValidationError('config', null, '阅卷说明必须是文本');
+            throw new ValidationError('config', null, localizedErrorText`阅卷说明必须是文本`);
         }
         const gradingInstructions = String(main.gradingInstructions || '').trim();
         return {
@@ -230,15 +246,15 @@ function normalizeBasicObjective(kind: ProblemKind, main: Record<string, unknown
         !main.answerIndexes.length ||
         main.answerIndexes.some((index) => !Number.isSafeInteger(index) || Number(index) < 0 || Number(index) >= options.length)
     ) {
-        throw new ValidationError('config', null, '多选题正确项必须是非空选项子集');
+        throw new ValidationError('config', null, localizedErrorText`多选题正确项必须是非空选项子集`);
     }
     const answerIndexes = Array.from(new Set(main.answerIndexes.map(Number))).sort((a, b) => a - b);
     if (answerIndexes.length !== main.answerIndexes.length) {
-        throw new ValidationError('config', null, '多选题正确项不能重复');
+        throw new ValidationError('config', null, localizedErrorText`多选题正确项不能重复`);
     }
     const rawPartialCreditPercent = main.partialCreditPercent ?? 0;
     if (!Number.isSafeInteger(rawPartialCreditPercent) || Number(rawPartialCreditPercent) < 0 || Number(rawPartialCreditPercent) > 100) {
-        throw new ValidationError('config', null, '多选题部分分比例必须是 0–100 整数');
+        throw new ValidationError('config', null, localizedErrorText`多选题部分分比例必须是 0–100 整数`);
     }
     const partialCreditPercent = Number(rawPartialCreditPercent);
     return {
@@ -263,25 +279,25 @@ function normalizeBasicObjective(kind: ProblemKind, main: Record<string, unknown
 export function normalizeStructuredProblemConfig(kind: ProblemKind, config: unknown, currentConfig?: unknown): Record<string, unknown> {
     parseProblemKind(kind);
     if (kind === 'programming') {
-        throw new ValidationError('problemKind', null, '编程题继续使用现有 config.yaml/testdata 编辑链路');
+        throw new ValidationError('problemKind', null, localizedErrorText`编程题继续使用现有 config.yaml/testdata 编辑链路`);
     }
     if (!isPlainObject(config) || !Object.hasOwn(config, 'main')) {
-        throw new ValidationError('config', null, '结构化题配置必须是包含 main 的对象');
+        throw new ValidationError('config', null, localizedErrorText`结构化题配置必须是包含 main 的对象`);
     }
     if (Object.hasOwn(config, 'testdataSourcePid')) {
-        throw new ValidationError('config', null, '共享测试数据尚未实现');
+        throw new ValidationError('config', null, localizedErrorText`共享测试数据尚未实现`);
     }
     assertNoSecondaryStatement(config);
     if (['single', 'multi', 'true_false', 'blank', 'subjective'].includes(kind)) {
-        if (!isPlainObject(config.main)) throw new ValidationError('config', null, 'main 必须是对象');
+        if (!isPlainObject(config.main)) throw new ValidationError('config', null, localizedErrorText`main 必须是对象`);
         return normalizeBasicObjective(kind, config.main);
     }
     if (kind === 'program_fill') {
-        if (!isPlainObject(config.main)) throw new ValidationError('config', null, 'main 必须是对象');
+        if (!isPlainObject(config.main)) throw new ValidationError('config', null, localizedErrorText`main 必须是对象`);
         return normalizeAuthorStructuredCode('program_fill', config.main, currentConfig);
     }
     if (kind === 'function') {
-        if (!isPlainObject(config.main)) throw new ValidationError('config', null, 'main 必须是对象');
+        if (!isPlainObject(config.main)) throw new ValidationError('config', null, localizedErrorText`main 必须是对象`);
         return normalizeAuthorStructuredCode('function', config.main, currentConfig);
     }
     return { ...config, score: 100 };
@@ -293,7 +309,7 @@ export function structuredProblemUsesTestdata(kind: ProblemKind, config: any): b
 
 export function structuredProblemConfigForEditor(kind: ProblemKind, configInput: unknown): Record<string, unknown> {
     const config = parseProblemConfigObject({ config: configInput });
-    if (!config) throw new ValidationError('config', null, '结构化题配置无法解析');
+    if (!config) throw new ValidationError('config', null, localizedErrorText`结构化题配置无法解析`);
     if (kind === 'function' || (kind === 'program_fill' && config.type === 'program_fill')) {
         const template = config.template || {};
         return {
@@ -308,7 +324,7 @@ export function structuredProblemConfigForEditor(kind: ProblemKind, configInput:
             },
         };
     }
-    if (kind === 'program_fill') throw new ValidationError('config', null, '程序填空配置不是 canonical program_fill');
+    if (kind === 'program_fill') throw new ValidationError('config', null, localizedErrorText`程序填空配置不是 canonical program_fill`);
     return { main: config.main };
 }
 
@@ -336,35 +352,35 @@ export function assertStructureRevision(value: unknown): asserts value is number
 export function assertProgrammingTestcasesConfigured(configInput: unknown, data: Array<{ name: string }> | undefined): void {
     const config = parseProblemConfigObject({ config: configInput });
     if (!config || typeof config !== 'object' || Array.isArray(config)) {
-        throw new ValidationError('config', null, '发布前必须保存有效评测配置');
+        throw new ValidationError('config', null, localizedErrorText`发布前必须保存有效评测配置`);
     }
     const cases: unknown[] = [];
     if (Array.isArray(config.cases)) cases.push(...config.cases);
     if (Array.isArray(config.subtasks)) {
         for (const subtask of config.subtasks) {
             if (!subtask || typeof subtask !== 'object' || Array.isArray(subtask) || !Array.isArray(subtask.cases)) {
-                throw new ValidationError('cases', null, '子任务必须包含显式测试点');
+                throw new ValidationError('cases', null, localizedErrorText`子任务必须包含显式测试点`);
             }
             cases.push(...subtask.cases);
         }
     }
-    if (!cases.length) throw new ValidationError('cases', null, '发布前至少需要一个显式测试点');
+    if (!cases.length) throw new ValidationError('cases', null, localizedErrorText`发布前至少需要一个显式测试点`);
 
     const files = new Set((data || []).map((file) => file?.name).filter((name): name is string => typeof name === 'string' && !!name));
     for (const [index, testcase] of cases.entries()) {
         if (!testcase || typeof testcase !== 'object' || Array.isArray(testcase)) {
-            throw new ValidationError('cases', null, `测试点 ${index + 1} 格式错误`);
+            throw new ValidationError('cases', null, localizedErrorText`测试点 ${index + 1} 格式错误`);
         }
         const input = (testcase as { input?: unknown }).input;
         const output = (testcase as { output?: unknown }).output;
         if (typeof input !== 'string' || !input.trim() || typeof output !== 'string' || !output.trim()) {
-            throw new ValidationError('cases', null, `测试点 ${index + 1} 必须同时配置输入与输出`);
+            throw new ValidationError('cases', null, localizedErrorText`测试点 ${index + 1} 必须同时配置输入与输出`);
         }
         if (input !== '/dev/null' && !files.has(input)) {
-            throw new ValidationError('cases', null, `测试点 ${index + 1} 输入文件不存在：${input}`);
+            throw new ValidationError('cases', null, localizedErrorText`测试点 ${index + 1} 输入文件不存在：${input}`);
         }
         if (output !== '/dev/null' && !files.has(output)) {
-            throw new ValidationError('cases', null, `测试点 ${index + 1} 输出文件不存在：${output}`);
+            throw new ValidationError('cases', null, localizedErrorText`测试点 ${index + 1} 输出文件不存在：${output}`);
         }
     }
 }

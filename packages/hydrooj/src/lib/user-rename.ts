@@ -1,4 +1,4 @@
-import { AccountStateConflictError, UserAlreadyExistError, UserNotFoundError, ValidationError } from '../error';
+import { localizedErrorText, AccountStateConflictError, UserAlreadyExistError, UserNotFoundError, ValidationError } from '../error';
 import type { Udoc } from '../interface';
 
 interface UsernameRenameCollection {
@@ -74,8 +74,8 @@ export async function renameUsernameRecord(
     const unameLower = username.toLowerCase();
     const current = await collection.findOne({ _id: input.uid });
     if (!current) throw new UserNotFoundError(input.uid);
-    if (current.unameLower !== expectedUnameLower) throw new AccountStateConflictError('用户名已变化，请刷新页面后重试');
-    if (current.unameLower === unameLower) throw new ValidationError('username', null, '新用户名不能与当前用户名相同');
+    if (current.unameLower !== expectedUnameLower) throw new AccountStateConflictError(localizedErrorText`用户名已变化，请刷新页面后重试`);
+    if (current.unameLower === unameLower) throw new ValidationError('username', null, localizedErrorText`新用户名不能与当前用户名相同`);
 
     const occupied = await collection.findOne({ _id: { $ne: input.uid }, unameLower });
     if (occupied) throw new UserAlreadyExistError(username);
@@ -92,7 +92,7 @@ export async function renameUsernameRecord(
         if ((error as any)?.code === 11000) throw new UserAlreadyExistError(username);
         throw error;
     }
-    if (!updated) throw new AccountStateConflictError('用户名已变化，请刷新页面后重试');
+    if (!updated) throw new AccountStateConflictError(localizedErrorText`用户名已变化，请刷新页面后重试`);
     // A concurrent old-name lookup may repopulate the cache between the first
     // invalidation and the committed Mongo write. Clear that identity again
     // only after the CAS succeeds, then clear the new identity as usual.

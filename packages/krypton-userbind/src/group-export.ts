@@ -1,4 +1,4 @@
-import { ObjectId, SystemError, ValidationError } from 'hydrooj';
+import { localizeErrorParameter, localizedErrorText, ObjectId, SystemError, ValidationError } from 'hydrooj';
 import type { StudentRecord, UserGroup } from './types';
 
 export interface BoundUserGroupTarget {
@@ -48,18 +48,18 @@ export async function createGroupFromBoundUsersWithDependencies(
     dependencies: CreateGroupFromBoundUsersDependencies,
 ): Promise<CreateGroupFromBoundUsersResult> {
     const groupName = name.trim();
-    if (!groupName) throw new ValidationError('name', null, '用户组名称不能为空');
+    if (!groupName) throw new ValidationError('name', null, localizedErrorText`用户组名称不能为空`);
 
     const invalidUserIds = inputTargets
         .filter((target) => !Number.isInteger(target.userId) || target.userId <= 0)
         .map((target) => String((target as any).userId));
     if (invalidUserIds.length > 0) {
-        throw new ValidationError('users', null, `任务包含非法用户 ID：${invalidUserIds.join('、')}`);
+        throw new ValidationError('users', null, localizedErrorText`任务包含非法用户 ID：${invalidUserIds.join('、')}`);
     }
     const targets = Array.from(
         new Map(inputTargets.map((target) => [target.userId, { userId: target.userId, username: String(target.username || '') }])).values(),
     );
-    if (targets.length === 0) throw new ValidationError('users', null, '任务没有可导出的非取消成员');
+    if (targets.length === 0) throw new ValidationError('users', null, localizedErrorText`任务没有可导出的非取消成员`);
 
     const userIds = targets.map((target) => target.userId);
     const baseLogContext = {
@@ -106,26 +106,39 @@ export async function createGroupFromBoundUsersWithDependencies(
         }
 
         const validationFailures: string[] = [];
+        const missingUsers: string[] = [];
+        const missingBindings: string[] = [];
+        const ambiguousBindings: string[] = [];
         const selectedRecords: StudentRecord[] = [];
         for (const target of targets) {
             const label = targetLabel(target);
             if (!existingUsers.has(target.userId)) {
                 validationFailures.push(`${label}：OJ 用户不存在`);
+                missingUsers.push(label);
                 continue;
             }
             const matches = recordsByUid.get(target.userId) || [];
             if (matches.length === 0) {
                 validationFailures.push(`${label}：没有有效的学生绑定记录`);
+                missingBindings.push(label);
                 continue;
             }
             if (matches.length > 1) {
                 validationFailures.push(`${label}：绑定身份不唯一（${matches.length} 条学生记录）`);
+                ambiguousBindings.push(`${label}（${matches.length} 条）`);
                 continue;
             }
             selectedRecords.push(matches[0]);
         }
         if (validationFailures.length > 0) {
-            throw new ValidationError('users', null, validationFailures.join('；'));
+            throw localizeErrorParameter(
+                new ValidationError('users', null, validationFailures.join('；')),
+                2,
+                'The selected users failed validation (OJ user missing: {0}; no valid student binding: {1}; ambiguous student binding: {2}).',
+                missingUsers.join('、') || '-',
+                missingBindings.join('、') || '-',
+                ambiguousBindings.join('、') || '-',
+            );
         }
 
         const schoolIds = new Set(selectedRecords.map((record) => record.schoolId.toHexString()));
@@ -134,7 +147,7 @@ export async function createGroupFromBoundUsersWithDependencies(
                 const record = recordsByUid.get(target.userId)![0];
                 return `${targetLabel(target)}=${record.schoolId.toHexString()}`;
             });
-            throw new ValidationError('users', null, `任务成员属于多个学校：${schoolDetails.join('；')}`);
+            throw new ValidationError('users', null, localizedErrorText`任务成员属于多个学校：${schoolDetails.join('；')}`);
         }
 
         records = selectedRecords;

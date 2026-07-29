@@ -1,5 +1,5 @@
 import { Context } from '../context';
-import { ForbiddenError } from '../error';
+import { localizedErrorText, ForbiddenError } from '../error';
 import SystemModel from '../model/system';
 import TokenModel from '../model/token';
 import UserModel from '../model/user';
@@ -20,7 +20,7 @@ class WebsocketEventsConnectionManagerHandler extends ConnectionHandler {
         const secret = SystemModel.get('websocket.secret');
         const token = this.request.headers['x-hydro-websocket-gateway'];
         if (token) {
-            if (!secret || token !== secret) throw new ForbiddenError('Invalid token');
+            if (!secret || token !== secret) throw new ForbiddenError(localizedErrorText`Invalid token`);
             logger.info('Gateway websocket connection from %s, id=%s', this.request.ip, this.id);
             this.privileged = true;
         }

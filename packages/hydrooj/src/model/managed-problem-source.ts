@@ -1,5 +1,5 @@
 import type { ProblemDoc } from '../interface';
-import { ValidationError } from '../error';
+import { localizedErrorText, ValidationError } from '../error';
 
 export type ManagedSourceMeta = NonNullable<ProblemDoc['sourceMeta']>;
 export type ManagedSourceTemplate = ManagedSourceMeta['template'];
@@ -86,7 +86,7 @@ export function normalizeManagedSourceMeta(input: unknown): ManagedSourceMeta {
     if (!definition) throw new ValidationError('template');
     const allowed = new Set<string>(['template', ...definition.fields]);
     const unknown = Object.keys(input).filter((field) => !allowed.has(field));
-    if (unknown.length) throw new ValidationError('sourceMeta', null, `来源模板不接受字段：${unknown.join(', ')}`);
+    if (unknown.length) throw new ValidationError('sourceMeta', null, localizedErrorText`来源模板不接受字段：${unknown.join(', ')}`);
 
     const sourceMeta: ManagedSourceMeta = {
         template,

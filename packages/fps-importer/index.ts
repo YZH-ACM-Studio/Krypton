@@ -3,6 +3,8 @@ import decodeHTML from 'decode-html';
 import type { ObjectId } from 'mongodb';
 import xml2js from 'xml2js';
 import {
+    localizeErrorParameter,
+    localizedErrorText,
     _,
     BadRequestError,
     buildContent,
@@ -36,7 +38,7 @@ class FpsProblemImportHandler extends Handler {
     }
 
     async run(domainId: string, result: any, knowledgeMapId: ObjectId) {
-        if (!result?.fps) throw new BadRequestError('Selected file is not a valid FPS problemset.');
+        if (!result?.fps) throw new BadRequestError(localizedErrorText`Selected file is not a valid FPS problemset.`);
         for (const p of result.fps.item) {
             const markdown = [p.description?.[0], p.input?.[0], p.output?.[0], p.hint?.[0]].some((i) => i?.includes('[md]'));
             let content = buildContent(
@@ -132,7 +134,7 @@ class FpsProblemImportHandler extends Handler {
             try {
                 entries = await zip.getEntries();
             } catch (err) {
-                throw new ValidationError('zip', null, err.message);
+                throw localizeErrorParameter(new ValidationError('zip', null, err.message), 2, 'Unable to read the archive: {0}', err.message);
             }
             for (const entry of entries) {
                 try {
@@ -144,7 +146,7 @@ class FpsProblemImportHandler extends Handler {
                 } catch {}
             }
         }
-        if (!tasks.length) throw new ValidationError('file', null, 'No valid fps format file found');
+        if (!tasks.length) throw new ValidationError('file', null, localizedErrorText`No valid fps format file found`);
         for (const task of tasks) await this.run(domainId, task, knowledge.mapId);
         this.response.redirect = this.url('problem_main');
     }

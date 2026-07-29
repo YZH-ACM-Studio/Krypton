@@ -1,6 +1,6 @@
 import type { Filter } from 'mongodb';
 import { Logger } from '@hydrooj/utils';
-import { PermissionError, ValidationError } from '../error';
+import { localizedErrorText, PermissionError, ValidationError } from '../error';
 import { assertProgrammingStatementComplete, compileProgrammingStatement } from '../lib/programming-statement';
 import { PERM, PRIV } from './builtin';
 import { assertCodeEvaluationLifecyclePatch, assertProblemReadyForUse, CODE_EVALUATION_CANDIDATE_FILTER } from './code-evaluation-lifecycle';
@@ -429,7 +429,7 @@ export function normalizeProblemFileListSnapshot(
     if (!present) return { files: [], snapshot: { state: 'missing' } };
     if (value === null) return { files: [], snapshot: { state: 'null' } };
     if (!Array.isArray(value)) {
-        throw new ValidationError(field, null, `题目 ${field} 文件元数据必须是数组、null 或缺失`);
+        throw new ValidationError(field, null, localizedErrorText`题目 ${field} 文件元数据必须是数组、null 或缺失`);
     }
     const invalidIndex = value.findIndex(
         (item) =>
@@ -440,7 +440,7 @@ export function normalizeProblemFileListSnapshot(
             !(item as { name: string }).name.trim(),
     );
     if (invalidIndex !== -1) {
-        throw new ValidationError(field, null, `题目 ${field} 文件元数据第 ${invalidIndex + 1} 项缺少有效文件名`);
+        throw new ValidationError(field, null, localizedErrorText`题目 ${field} 文件元数据第 ${invalidIndex + 1} 项缺少有效文件名`);
     }
     return { files: value as NonNullable<ProblemDoc['data']>, snapshot: { state: 'array', value: value as NonNullable<ProblemDoc['data']> } };
 }
@@ -663,7 +663,7 @@ export function assertProblemWriteClaimFieldScope(claim: ProblemWriteClaim, fiel
             claim.capability,
             denied,
         );
-        throw new ValidationError('fields', null, `${claim.capability} 协作权限不能修改字段：${denied.join(', ')}`);
+        throw new ValidationError('fields', null, localizedErrorText`${claim.capability} 协作权限不能修改字段：${denied.join(', ')}`);
     }
 }
 
@@ -751,7 +751,7 @@ export async function commitProblemWriteClaimUpdate(
             current.hidden,
             current.managedAuthoring?.metadataStatus || '-',
         );
-        throw new ValidationError('fields', null, '普通出题人只能修改尚未发布的托管草稿');
+        throw new ValidationError('fields', null, localizedErrorText`普通出题人只能修改尚未发布的托管草稿`);
     }
     const set = $set as Record<string, unknown>;
     assertCodeEvaluationLifecyclePatchWithTrace(current as ProblemDoc, set, $unset, {
@@ -779,12 +779,12 @@ export async function commitProblemWriteClaimUpdate(
                 guard.requestedFields,
                 guard.publishes,
             );
-            throw new ValidationError('fields', null, '写入字段不能绕过托管题统一服务');
+            throw new ValidationError('fields', null, localizedErrorText`写入字段不能绕过托管题统一服务`);
         }
         await canonicalizeManagedDraftMindmapPatch(current, $set);
         guard = managedProblemPatchCapability(current, $set, $unset);
         if (guard.immutableFields.length || guard.publishes || !problemWriteCapabilityAllows(claim.capability, guard.capability)) {
-            throw new ValidationError('fields', null, '知识节点物化结果超出托管题写入凭据');
+            throw new ValidationError('fields', null, localizedErrorText`知识节点物化结果超出托管题写入凭据`);
         }
         filter = { ...filter, ...managedProblemPatchStateFilter(current) };
         if (managedAuthorDraftOnly) {
@@ -1409,7 +1409,7 @@ export async function assertProblemBankSelection(
                 if (candidate.statementFormat === 'structured-v1') {
                     const statement = assertProgrammingStatementComplete(candidate.programmingStatement, candidate.config);
                     if (compileProgrammingStatement(statement) !== candidate.content) {
-                        throw new ValidationError('content', null, '结构化题面投影不一致');
+                        throw new ValidationError('content', null, localizedErrorText`结构化题面投影不一致`);
                     }
                 }
             } catch (error) {

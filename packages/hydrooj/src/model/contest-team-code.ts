@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { ObjectId } from 'mongodb';
 import type { Context } from '../context';
-import { ContestTeamConflictError, PermissionError, ValidationError } from '../error';
+import { localizedErrorText, ContestTeamConflictError, PermissionError, ValidationError } from '../error';
 import type { Tdoc } from '../interface';
 import { parseProblemConfigObject } from '../lib/problem-config';
 import db from '../service/db';
@@ -69,7 +69,7 @@ function normalizeTargets(targetUids: number[]): number[] {
     if (!Array.isArray(targetUids)) throw new ValidationError('targetUids');
     const normalized = [...new Set(targetUids.map(Number))];
     if (normalized.length < 1 || normalized.length > 2 || normalized.some((uid) => !Number.isSafeInteger(uid) || uid <= 0)) {
-        throw new ValidationError('targetUids', null, 'Select one or two current teammates.');
+        throw new ValidationError('targetUids', null, localizedErrorText`Select one or two current teammates.`);
     }
     return normalized.sort((left, right) => left - right);
 }
@@ -90,7 +90,7 @@ function validateProblemAndSource(
     code: unknown,
 ): { pdoc: ProblemDoc; language: string; code: string } {
     if (!Number.isSafeInteger(problemId) || problemId <= 0 || !tdoc.pids?.includes(problemId) || !pdoc || pdoc.docId !== problemId) {
-        throw new ValidationError('problemId', null, 'The problem is not part of this contest.');
+        throw new ValidationError('problemId', null, localizedErrorText`The problem is not part of this contest.`);
     }
     const language = String(languageInput || '').trim();
     const config = parseProblemConfigObject(pdoc);
@@ -105,11 +105,11 @@ function validateProblemAndSource(
         (configuredLanguages && !configuredLanguages.includes(language)) ||
         (contestLanguages && !contestLanguages.includes(language))
     ) {
-        throw new ValidationError('language', null, 'The selected language is not allowed for this problem.');
+        throw new ValidationError('language', null, localizedErrorText`The selected language is not allowed for this problem.`);
     }
-    if (typeof code !== 'string' || !code.length) throw new ValidationError('code', null, 'The current editor buffer is empty.');
+    if (typeof code !== 'string' || !code.length) throw new ValidationError('code', null, localizedErrorText`The current editor buffer is empty.`);
     if (Buffer.byteLength(code, 'utf8') > MAX_TEAM_CODE_BYTES) {
-        throw new ValidationError('code', null, `The current editor buffer exceeds ${MAX_TEAM_CODE_BYTES} bytes.`);
+        throw new ValidationError('code', null, localizedErrorText`The current editor buffer exceeds ${MAX_TEAM_CODE_BYTES} bytes.`);
     }
     return { pdoc, language, code };
 }
@@ -127,18 +127,14 @@ function validateTeamAuthority(
         throw new PermissionError('team_captain');
     }
     if (targets.includes(senderUid) || targets.some((uid) => !team.memberUids.includes(uid) || uid === team.captainUid)) {
-        throw new ValidationError('targetUids', null, 'Every target must be a current non-captain teammate.');
+        throw new ValidationError('targetUids', null, localizedErrorText`Every target must be a current non-captain teammate.`);
     }
     return team;
 }
 
 async function nextSequence(domainId: string, contestId: ObjectId, teamId: ObjectId): Promise<number> {
     const key = `${domainId}:${contestId.toHexString()}:${teamId.toHexString()}`;
-    const updated = await counterColl.findOneAndUpdate(
-        { _id: key },
-        { $inc: { sequence: 1 } },
-        { upsert: true, returnDocument: 'after' },
-    );
+    const updated = await counterColl.findOneAndUpdate({ _id: key }, { $inc: { sequence: 1 } }, { upsert: true, returnDocument: 'after' });
     if (!updated || !Number.isSafeInteger(updated.sequence) || updated.sequence <= 0) {
         throw new Error(`Failed to allocate team code sequence for ${domainId}/${contestId}/${teamId}.`);
     }
@@ -231,12 +227,7 @@ export async function createSnapshots(
     return docs;
 }
 
-function assertSnapshotAccess(
-    snapshot: TeamCodeSnapshotDoc,
-    team: contestTeam.ContestTeamDoc | null,
-    viewer: User,
-    admin: boolean,
-): void {
+function assertSnapshotAccess(snapshot: TeamCodeSnapshotDoc, team: contestTeam.ContestTeamDoc | null, viewer: User, admin: boolean): void {
     if (admin) return;
     if (!team?.active || !team.teamId.equals(snapshot.teamId) || !team.memberUids.includes(viewer._id)) {
         throw new PermissionError('team_code_snapshot');
@@ -244,12 +235,7 @@ function assertSnapshotAccess(
     if (viewer._id !== snapshot.senderUid && viewer._id !== snapshot.targetUid) throw new PermissionError('team_code_snapshot');
 }
 
-export async function getAccessible(
-    domainId: string,
-    contestId: ObjectId,
-    snapshotId: ObjectId,
-    viewer: User,
-): Promise<TeamCodeSnapshotDoc | null> {
+export async function getAccessible(domainId: string, contestId: ObjectId, snapshotId: ObjectId, viewer: User): Promise<TeamCodeSnapshotDoc | null> {
     const [tdoc, snapshot] = await Promise.all([contest.get(domainId, contestId), coll.findOne({ _id: snapshotId, domainId, contestId })]);
     if (!snapshot) return null;
     const admin = contestTeam.canManageContestTeams(viewer, tdoc);
@@ -325,7 +311,10 @@ export async function apply(ctx: Context) {
         },
     );
     ctx.on('domain/delete', async (domainId) => {
-        await Promise.all([coll.deleteMany({ domainId }), counterColl.deleteMany({ _id: { $regex: `^${domainId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:` } })]);
+        await Promise.all([
+            coll.deleteMany({ domainId }),
+            counterColl.deleteMany({ _id: { $regex: `^${domainId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:` } }),
+        ]);
     });
     ctx.on('contest/del', async (domainId, contestId) => {
         await Promise.all([

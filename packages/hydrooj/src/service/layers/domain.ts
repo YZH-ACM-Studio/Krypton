@@ -1,4 +1,4 @@
-import { KoaContext, NotFoundError } from '@hydrooj/framework';
+import { localizeError, KoaContext, NotFoundError } from '@hydrooj/framework';
 import BlackListModel from '../../model/blacklist';
 import DomainModel from '../../model/domain';
 import system from '../../model/system';
@@ -26,7 +26,7 @@ export default async (ctx: KoaContext, next) => {
     if (ctx.domainInfo && ctx.domainId !== ctx.domainInfo._id) ctx.redirect(ctx.originalPath.replace(/^\/d\/[^/]+\//, `/d/${ctx.domainInfo._id}/`));
     else {
         if (!ctx.domainInfo) {
-            ctx.pendingError = new NotFoundError(ctx.domainId);
+            ctx.pendingError = localizeError(new NotFoundError(ctx.domainId), 'Resource {0} not found.', ctx.domainId);
             ctx.domainId = 'system';
             ctx.domainInfo = await DomainModel.get('system');
         }

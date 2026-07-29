@@ -1,4 +1,5 @@
 import { expect } from 'chai';
+import { localizedErrorText } from '@hydrooj/framework';
 import { existsSync } from 'fs';
 import { beforeEach, describe, it } from 'node:test';
 import { ObjectId } from 'mongodb';
@@ -44,6 +45,7 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     if (parent?.filename === modulePath) {
         if (request === 'hydrooj') {
             return {
+                localizedErrorText,
                 NotFoundError: TestNotFoundError,
                 OplogModel: {
                     log: async (_handler: unknown, type: string, data: { uid: number }) => {

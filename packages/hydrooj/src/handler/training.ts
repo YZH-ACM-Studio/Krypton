@@ -2,7 +2,7 @@ import assert from 'assert';
 import { escapeRegExp, pick } from 'lodash';
 import { Filter, ObjectId } from 'mongodb';
 import { sortFiles } from '@hydrooj/utils/lib/utils';
-import { FileLimitExceededError, FileUploadError, NotFoundError, ValidationError } from '../error';
+import { localizeErrorParameter, localizedErrorText, FileLimitExceededError, FileUploadError, NotFoundError, ValidationError } from '../error';
 import { Tdoc, TrainingDoc } from '../interface';
 import { PERM, PRIV, STATUS } from '../model/builtin';
 import * as document from '../model/document';
@@ -42,7 +42,7 @@ async function _parseDagJson(domainId: string, _dag: string): Promise<Tdoc['dag'
             parsed.push(newNode);
         }
     } catch (e) {
-        throw new ValidationError('dag', null, e.message);
+        throw localizeErrorParameter(new ValidationError('dag', null, e.message), 2, 'The training structure is invalid: {0}', e.message);
     }
     return parsed;
 }
@@ -54,7 +54,7 @@ async function _parseDagJson(domainId: string, _dag: string): Promise<Tdoc['dag'
  * #1/#2）。
  */
 function assertNotCourse(tdoc: { kind?: string }): void {
-    if (tdoc?.kind === 'course') throw new NotFoundError('training');
+    if (tdoc?.kind === 'course') throw new NotFoundError(localizedErrorText`training`);
 }
 
 class TrainingMainHandler extends Handler {
@@ -303,7 +303,7 @@ class TrainingEditHandler extends Handler {
         if (!!this.tdoc?.pin !== !!pin) this.checkPerm(PERM.PERM_PIN_TRAINING);
         const dag = await _parseDagJson(authoritativeDomainId, _dag);
         const pids = training.getPids(dag);
-        assert(pids.length, new ValidationError('dag', null, 'Please specify at least one problem'));
+        assert(pids.length, new ValidationError('dag', null, localizedErrorText`Please specify at least one problem`));
         const existingPids = training.getPids(this.tdoc?.dag || []);
         await assertProblemBankSelection(authoritativeDomainId, pids, this.user, existingPids);
         if (!tid) {
@@ -388,7 +388,7 @@ export class TrainingFileDownloadHandler extends Handler {
         const domainId = String(this.domain?._id);
         const tdoc = await training.get(domainId, tid);
         assertNotCourse(tdoc);
-        if (!(tdoc.files || []).some((file) => file.name === filename)) throw new NotFoundError('file');
+        if (!(tdoc.files || []).some((file) => file.name === filename)) throw new NotFoundError(localizedErrorText`file`);
         this.response.addHeader('Cache-Control', 'public');
         const target = `training/${domainId}/${tid}/${filename}`;
         const file = await storage.getMeta(target);

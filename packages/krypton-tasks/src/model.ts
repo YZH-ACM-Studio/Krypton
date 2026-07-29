@@ -20,7 +20,8 @@
  *      with assignedBy !== 0 (admin assign); it does NOT downgrade.
  *   - Cancellation refuses to operate on `completed` assignments.
  */
-import { NotFoundError, ObjectId, PermissionError } from 'hydrooj';
+import { localizeError, localizedErrorText, NotFoundError, ObjectId, PermissionError } from 'hydrooj';
+import type { LocalizedErrorText } from 'hydrooj';
 import { userBindModel } from '@hydrooj/krypton-userbind';
 import { assignmentsColl, auditColl, gpltScoreColl, settingsColl, stayEventsColl, tasksColl } from './db';
 import { runChecker, taskPointPresets } from './presets';
@@ -37,6 +38,18 @@ import type {
     TaskPointResult,
 } from './types';
 import { DEFAULT_DOMAIN_SETTINGS, emptyTaskGraph } from './types';
+
+function taskNotFound() {
+    return localizeError(new NotFoundError('任务不存在'), '任务不存在');
+}
+
+function assignmentNotFound() {
+    return localizeError(new NotFoundError('任务分配不存在'), '任务分配不存在');
+}
+
+function taskPointNotFound() {
+    return localizeError(new NotFoundError('任务点不存在'), '任务点不存在');
+}
 
 // ============ Tasks CRUD ============
 
@@ -140,7 +153,7 @@ async function assignTask(domainId: string, taskId: ObjectId, userId: number, as
         return existing._id;
     }
     const task = await getTask(domainId, taskId);
-    if (!task) throw new NotFoundError('任务不存在');
+    if (!task) throw taskNotFound();
     if (task.maxAssignments && task.currentAssignments >= task.maxAssignments) {
         throw new Error('该任务认领数已满');
     }
@@ -171,8 +184,8 @@ async function assignTask(domainId: string, taskId: ObjectId, userId: number, as
 
 async function cancelAssignment(domainId: string, assignmentId: ObjectId, actorUid: number): Promise<void> {
     const a = await assignmentsColl.findOne({ _id: assignmentId, domainId });
-    if (!a) throw new NotFoundError('任务分配不存在');
-    if (a.userId !== actorUid) throw new PermissionError('无权操作');
+    if (!a) throw assignmentNotFound();
+    if (a.userId !== actorUid) throw new PermissionError(localizedErrorText`无权操作`);
     if (!a.canCancel) throw new Error('该任务由管理员分配，无法取消');
     if (a.status === 'completed') throw new Error('已完成的任务无法取消');
     await assignmentsColl.updateOne({ _id: assignmentId }, { $set: { status: 'cancelled' } });
@@ -262,9 +275,9 @@ async function checkTaskCompletion(
     opts: { force?: boolean } = {},
 ): Promise<{ conditionMet: boolean; progress: Record<string, TaskPointResult> }> {
     const a = await assignmentsColl.findOne({ _id: assignmentId, domainId });
-    if (!a) throw new NotFoundError('任务分配不存在');
+    if (!a) throw assignmentNotFound();
     const task = await getTask(domainId, a.taskId);
-    if (!task) throw new NotFoundError('任务不存在');
+    if (!task) throw taskNotFound();
 
     // Terminal — never re-pull live data for completed assignments.
     if (a.status === 'completed') {
@@ -389,9 +402,9 @@ async function writeAudit(row: {
  */
 async function admitAssignment(domainId: string, assignmentId: ObjectId, adminUid: number, note = ''): Promise<void> {
     const a = await assignmentsColl.findOne({ _id: assignmentId, domainId });
-    if (!a) throw new NotFoundError('任务分配不存在');
+    if (!a) throw assignmentNotFound();
     const task = await getTask(domainId, a.taskId);
-    if (!task) throw new NotFoundError('任务不存在');
+    if (!task) throw taskNotFound();
     if (task.admissionMode !== 'quota') {
         throw new Error('该任务非配额模式，无需 admit');
     }
@@ -428,7 +441,7 @@ async function admitAssignment(domainId: string, assignmentId: ObjectId, adminUi
  */
 async function unadmitAssignment(domainId: string, assignmentId: ObjectId, adminUid: number, reason = ''): Promise<void> {
     const a = await assignmentsColl.findOne({ _id: assignmentId, domainId });
-    if (!a) throw new NotFoundError('任务分配不存在');
+    if (!a) throw assignmentNotFound();
     if (a.status !== 'admitted') {
         throw new Error(`只能 unadmit 状态为 admitted 的分配（当前 ${a.status}）`);
     }
@@ -462,9 +475,9 @@ async function unadmitAssignment(domainId: string, assignmentId: ObjectId, admin
  */
 async function confirmAssignment(domainId: string, assignmentId: ObjectId, adminUid: number, reason = ''): Promise<void> {
     const a = await assignmentsColl.findOne({ _id: assignmentId, domainId });
-    if (!a) throw new NotFoundError('任务分配不存在');
+    if (!a) throw assignmentNotFound();
     const task = await getTask(domainId, a.taskId);
-    if (!task) throw new NotFoundError('任务不存在');
+    if (!task) throw taskNotFound();
     if (task.admissionMode !== 'quota') {
         throw new Error('该任务非配额模式，无需 confirm');
     }
@@ -507,11 +520,11 @@ async function overridePointCompletion(
     completed: boolean,
 ): Promise<void> {
     const a = await assignmentsColl.findOne({ _id: assignmentId, domainId });
-    if (!a) throw new NotFoundError('任务分配不存在');
+    if (!a) throw assignmentNotFound();
     const task = await getTask(domainId, a.taskId);
-    if (!task) throw new NotFoundError('任务不存在');
+    if (!task) throw taskNotFound();
     const node = task.graph.nodes.find((n) => n.id === pointId && n.type === 'task');
-    if (!node) throw new NotFoundError('任务点不存在');
+    if (!node) throw taskPointNotFound();
 
     const before = a.progress?.[pointId] || null;
     const after: TaskPointResult = {
@@ -618,13 +631,21 @@ async function addManualStayEvent(
     realName: string,
     year: number,
     adminUid: number,
-): Promise<{ ok: true; userId: number } | { ok: false; reason: string }> {
+): Promise<{ ok: true; userId: number } | { ok: false; reason: string; localizedReason: LocalizedErrorText }> {
     const student = await userBindModel.findStudentByStudentId(domainId, schoolId, studentId);
-    if (!student) return { ok: false, reason: '学生档案不存在' };
-    if (student.realName !== realName) {
-        return { ok: false, reason: `姓名不匹配（档案内"${student.realName}"）` };
+    if (!student) {
+        return { ok: false, reason: '学生档案不存在', localizedReason: localizedErrorText`学生档案不存在` };
     }
-    if (!student.boundUserId) return { ok: false, reason: '学生未绑定 OJ 账号' };
+    if (student.realName !== realName) {
+        return {
+            ok: false,
+            reason: `姓名不匹配（档案内"${student.realName}"）`,
+            localizedReason: localizedErrorText`姓名不匹配（档案内"${student.realName}"）`,
+        };
+    }
+    if (!student.boundUserId) {
+        return { ok: false, reason: '学生未绑定 OJ 账号', localizedReason: localizedErrorText`学生未绑定 OJ 账号` };
+    }
     const source = `manual:${new ObjectId().toHexString()}`;
     await stayEventsColl.insertOne({
         _id: new ObjectId(),

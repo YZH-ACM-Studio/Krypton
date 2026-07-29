@@ -4,7 +4,7 @@
  * Templates set on `this.response.template` are consumed by ui-next's PAGE_MAP
  * (see packages/ui-next/src/pages/resolver.tsx).
  */
-import { Context, Handler, NotFoundError, ObjectId, OplogModel, param, PRIV, Types, UserModel, ValidationError } from 'hydrooj';
+import { localizedErrorText, Context, Handler, NotFoundError, ObjectId, OplogModel, param, PRIV, Types, UserModel, ValidationError } from 'hydrooj';
 import { bindingRequestsColl, bindTokensColl, schoolsColl, studentsColl, userGroupsColl } from './db';
 import { userBindModel } from './model';
 import type { ParsedStudentFilterQuery } from './student-filter';
@@ -34,7 +34,7 @@ async function buildSchoolDetailData(
     } = {},
 ) {
     const school = await userBindModel.getSchool(domainId, schoolId);
-    if (!school) throw new NotFoundError('School');
+    if (!school) throw new NotFoundError(localizedErrorText`School`);
 
     const studentLimit = 50;
     const groupLimit = 20;
@@ -237,7 +237,7 @@ class AdminSchoolDetailHandler extends UserbindAdminHandler {
                 autoBound: importReport.autoBound || 0,
             });
         } else {
-            throw new ValidationError('input', null, '请输入名单或选择用户');
+            throw new ValidationError('input', null, localizedErrorText`请输入名单或选择用户`);
         }
         this.response.template = 'admin_userbind_school_detail.html';
         this.response.body = await buildSchoolDetailData(domainId, schoolId, {
@@ -331,7 +331,7 @@ async function buildGroupDetailData(
     } = {},
 ) {
     const group = await userBindModel.getUserGroup(domainId, groupId);
-    if (!group) throw new NotFoundError('Group');
+    if (!group) throw new NotFoundError(localizedErrorText`Group`);
 
     const tab = normalizeGroupDetailTab(options.tab);
     const membersLimit = 50;
@@ -502,7 +502,7 @@ class AdminGroupDetailHandler extends UserbindAdminHandler {
                 picked: ids.length,
             });
         } else {
-            throw new ValidationError('input', null, '请输入名单或选择学生');
+            throw new ValidationError('input', null, localizedErrorText`请输入名单或选择学生`);
         }
 
         this.response.template = 'admin_userbind_group_detail.html';
@@ -629,11 +629,11 @@ class AdminStudentImportHandler extends UserbindAdminHandler {
 
         let report: any;
         if (targetKind === 'user_group') {
-            if (!groupId) throw new ValidationError('groupId', null, '请选择用户组');
+            if (!groupId) throw new ValidationError('groupId', null, localizedErrorText`请选择用户组`);
             report = await userBindModel.importStudentsToGroup(domainId, groupId, validRows, this.user._id);
             report.kind = 'user_group';
         } else {
-            if (!schoolId) throw new ValidationError('schoolId', null, '请选择学校');
+            if (!schoolId) throw new ValidationError('schoolId', null, localizedErrorText`请选择学校`);
             report = await userBindModel.importStudents(domainId, schoolId, validRows, this.user._id);
             report.kind = 'school';
         }
@@ -734,7 +734,7 @@ class AdminRequestsHandler extends UserbindAdminHandler {
     async postReject(_: any, requestId: ObjectId, reason: string) {
         // Reason required — model enforces too, but check here for early feedback.
         if (!reason || !reason.trim()) {
-            throw new ValidationError('reason', null, '驳回理由必填');
+            throw new ValidationError('reason', null, localizedErrorText`驳回理由必填`);
         }
         await userBindModel.rejectBindingRequest(requestId, this.user._id, reason);
         await OplogModel.log(this, 'userbind.request.reject', { requestId, reason });
@@ -967,9 +967,9 @@ class BindLandingHandler extends Handler {
     async post({ domainId }: { domainId: string }, token: string, studentIdInput?: string, realNameInput?: string) {
         this.checkPriv(PRIV.PRIV_USER_PROFILE);
         const tokenDoc = await bindTokensColl.findOne({ _id: token });
-        if (!tokenDoc) throw new NotFoundError('Bind token');
+        if (!tokenDoc) throw new NotFoundError(localizedErrorText`Bind token`);
         if (tokenDoc.expiresAt && tokenDoc.expiresAt < new Date()) {
-            throw new ValidationError('token', null, 'Token expired');
+            throw new ValidationError('token', null, localizedErrorText`Token expired`);
         }
 
         if (tokenDoc.kind === 'student') {
@@ -985,7 +985,7 @@ class BindLandingHandler extends Handler {
         }
 
         if (!studentIdInput || !realNameInput) {
-            throw new ValidationError('input', null, '请填写学号和姓名');
+            throw new ValidationError('input', null, localizedErrorText`请填写学号和姓名`);
         }
 
         let targetSchoolId: ObjectId;
@@ -994,16 +994,16 @@ class BindLandingHandler extends Handler {
             targetSchoolId = tokenDoc.schoolId;
         } else if (tokenDoc.kind === 'user_group') {
             const group = await userGroupsColl.findOne({ _id: tokenDoc.userGroupId });
-            if (!group) throw new NotFoundError('UserGroup');
+            if (!group) throw new NotFoundError(localizedErrorText`UserGroup`);
             // POST 侧同样提前拦（GET 已拦，但直接构造 POST 也走不进来；
             // bindMatchedStudent 内还有最后一道防线）。
             if (group.archivedAt) {
-                throw new ValidationError('token', null, '该邀请对应的用户组已归档，无法加入');
+                throw new ValidationError('token', null, localizedErrorText`该邀请对应的用户组已归档，无法加入`);
             }
             targetSchoolId = group.schoolId;
             targetGroupId = group._id;
         } else {
-            throw new ValidationError('token', null, 'Unknown token kind');
+            throw new ValidationError('token', null, localizedErrorText`Unknown token kind`);
         }
 
         const outcome = await userBindModel.rosterLookup(domainId, targetSchoolId, studentIdInput, realNameInput, this.user._id);
@@ -1120,7 +1120,7 @@ class UserBindClaimHandler extends Handler {
         if (action === 'lookup') {
             const sid = (studentIdInput || '').trim();
             const name = (realNameInput || '').trim();
-            if (!sid || !name) throw new ValidationError('input', null, '请填写学号和姓名');
+            if (!sid || !name) throw new ValidationError('input', null, localizedErrorText`请填写学号和姓名`);
             const candidates = await userBindModel.findClaimCandidates(domainId, sid, name);
             const userSchoolId = (this.user as any).parentSchoolId?.[0] || null;
             const schools = userSchoolId ? await schoolsColl.find({ _id: userSchoolId }).toArray() : await userBindModel.listSchools(domainId);
@@ -1139,7 +1139,7 @@ class UserBindClaimHandler extends Handler {
         }
         if (action === 'submit') {
             if (!tempUserId || !schoolId || !studentIdInput || !realNameInput) {
-                throw new ValidationError('input', null, '请补全所有字段');
+                throw new ValidationError('input', null, localizedErrorText`请补全所有字段`);
             }
             const req = await userBindModel.submitBindingRequest(domainId, this.user._id, schoolId, studentIdInput, realNameInput, {
                 claimTempUserId: tempUserId,

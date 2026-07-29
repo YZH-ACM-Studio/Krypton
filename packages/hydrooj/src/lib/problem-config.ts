@@ -13,6 +13,25 @@ import {
     type StructuredCodeRange,
     type StructuredCodeTemplate,
 } from '@hydrooj/common';
+import { localizedErrorText, type LocalizedErrorText } from '../error';
+
+const localizedProblemConfigErrors = new WeakMap<Error, LocalizedErrorText>();
+
+function problemConfigError(message: LocalizedErrorText, options?: ErrorOptions): Error {
+    const error = new Error(message.raw, options);
+    localizedProblemConfigErrors.set(error, message);
+    return error;
+}
+
+function problemConfigTypeError(message: LocalizedErrorText): TypeError {
+    const error = new TypeError(message.raw);
+    localizedProblemConfigErrors.set(error, message);
+    return error;
+}
+
+export function getProblemConfigErrorText(error: unknown): LocalizedErrorText | undefined {
+    return error instanceof Error ? localizedProblemConfigErrors.get(error) : undefined;
+}
 
 /**
  * pdoc.config 在库里是 YAML 字符串（与 testdata config.yaml 镜像）。
@@ -199,70 +218,82 @@ export function validateStructuredCodeTemplate(
     kind: 'program_fill' | 'function',
     options: { allowEmpty?: boolean } = {},
 ): void {
-    if (!template || typeof template !== 'object') throw new Error(`${kind}: missing private template`);
+    if (!template || typeof template !== 'object') throw problemConfigError(localizedErrorText`${kind}: missing private template`);
     const templateKeys = new Set(['lang', 'source', 'sourceHash', 'publicRanges', 'regions']);
     const extraTemplateKey = Object.keys(template).find((key) => !templateKeys.has(key));
-    if (extraTemplateKey) throw new Error(`${kind}: unexpected template field ${extraTemplateKey}`);
-    if (typeof template.source !== 'string') throw new Error(`${kind}: template source must be text`);
-    if (template.source.includes('\r')) throw new Error(`${kind}: template source must use LF line endings`);
-    if (!options.allowEmpty && !template.source.length) throw new Error(`${kind}: template source is required`);
+    if (extraTemplateKey) throw problemConfigError(localizedErrorText`${kind}: unexpected template field ${extraTemplateKey}`);
+    if (typeof template.source !== 'string') throw problemConfigError(localizedErrorText`${kind}: template source must be text`);
+    if (template.source.includes('\r')) throw problemConfigError(localizedErrorText`${kind}: template source must use LF line endings`);
+    if (!options.allowEmpty && !template.source.length) throw problemConfigError(localizedErrorText`${kind}: template source is required`);
     if (kind === 'function' && (!template.lang || typeof template.lang !== 'string')) {
-        throw new Error('function: template language is required');
+        throw problemConfigError(localizedErrorText`function: template language is required`);
     }
     if (template.lang !== undefined && (typeof template.lang !== 'string' || !template.lang)) {
-        throw new Error(`${kind}: template language must be non-empty text when provided`);
+        throw problemConfigError(localizedErrorText`${kind}: template language must be non-empty text when provided`);
     }
-    if (template.sourceHash !== templateSourceHash(template.source)) throw new Error(`${kind}: template source hash mismatch`);
-    if (!Array.isArray(template.publicRanges)) throw new Error(`${kind}: template publicRanges must be an array`);
-    if (!Array.isArray(template.regions)) throw new Error(`${kind}: template regions must be an array`);
-    if (!options.allowEmpty && !template.regions.length) throw new Error(`${kind}: at least one region is required`);
+    if (template.sourceHash !== templateSourceHash(template.source)) {
+        throw problemConfigError(localizedErrorText`${kind}: template source hash mismatch`);
+    }
+    if (!Array.isArray(template.publicRanges)) throw problemConfigError(localizedErrorText`${kind}: template publicRanges must be an array`);
+    if (!Array.isArray(template.regions)) throw problemConfigError(localizedErrorText`${kind}: template regions must be an array`);
+    if (!options.allowEmpty && !template.regions.length) throw problemConfigError(localizedErrorText`${kind}: at least one region is required`);
 
     const lines = template.source.split('\n');
     const validateRange = (range: StructuredCodeRange, label: string) => {
-        if (!range || typeof range !== 'object' || Array.isArray(range)) throw new Error(`${kind}: ${label} is invalid`);
+        if (!range || typeof range !== 'object' || Array.isArray(range)) {
+            throw problemConfigError(localizedErrorText`${kind}: ${label} is invalid`);
+        }
         if (!Number.isSafeInteger(range.startLine) || !Number.isSafeInteger(range.endLine)) {
-            throw new TypeError(`${kind}: ${label} has invalid line bounds`);
+            throw problemConfigTypeError(localizedErrorText`${kind}: ${label} has invalid line bounds`);
         }
         if (range.startLine < 0 || range.endLine <= range.startLine || range.endLine > lines.length) {
-            throw new Error(`${kind}: ${label} is out of bounds`);
+            throw problemConfigError(localizedErrorText`${kind}: ${label} is out of bounds`);
         }
     };
     for (const [index, range] of template.publicRanges.entries()) {
         const extraKey = Object.keys(range).find((key) => !['startLine', 'endLine'].includes(key));
-        if (extraKey) throw new Error(`${kind}: public range ${index + 1} has unexpected field ${extraKey}`);
+        if (extraKey) {
+            throw problemConfigError(localizedErrorText`${kind}: public range ${index + 1} has unexpected field ${extraKey}`);
+        }
         validateRange(range, `public range ${index + 1}`);
         if (index && template.publicRanges[index - 1].startLine > range.startLine) {
-            throw new Error(`${kind}: public ranges must be in source order`);
+            throw problemConfigError(localizedErrorText`${kind}: public ranges must be in source order`);
         }
     }
     const ids = new Set<string>();
     for (const [index, region] of template.regions.entries()) {
-        if (!region || typeof region !== 'object') throw new Error(`${kind}: region ${index + 1} is invalid`);
+        if (!region || typeof region !== 'object') {
+            throw problemConfigError(localizedErrorText`${kind}: region ${index + 1} is invalid`);
+        }
         const allowedRegionKeys =
             kind === 'function' ? ['id', 'startLine', 'endLine', 'title', 'description'] : ['id', 'startLine', 'endLine', 'prompt'];
         const extraKey = Object.keys(region).find((key) => !allowedRegionKeys.includes(key));
-        if (extraKey) throw new Error(`${kind}: region ${index + 1} has unexpected field ${extraKey}`);
-        if (!STRUCTURED_CODE_REGION_ID.test(region.id)) throw new Error(`${kind}: region ${index + 1} has an invalid server id`);
-        if (ids.has(region.id)) throw new Error(`${kind}: duplicate region id "${region.id}"`);
+        if (extraKey) {
+            throw problemConfigError(localizedErrorText`${kind}: region ${index + 1} has unexpected field ${extraKey}`);
+        }
+        if (!STRUCTURED_CODE_REGION_ID.test(region.id)) {
+            throw problemConfigError(localizedErrorText`${kind}: region ${index + 1} has an invalid server id`);
+        }
+        if (ids.has(region.id)) throw problemConfigError(localizedErrorText`${kind}: duplicate region id "${region.id}"`);
         ids.add(region.id);
         validateRange(region, `region ${region.id}`);
         if (kind === 'program_fill' && region.endLine !== region.startLine + 1) {
-            throw new Error('program_fill: every editable region must be exactly one line');
+            throw problemConfigError(localizedErrorText`program_fill: every editable region must be exactly one line`);
         }
         if (kind === 'function') {
             if (region.title !== undefined && typeof region.title !== 'string') {
-                throw new Error(`function: region ${region.id} title must be text`);
+                throw problemConfigError(localizedErrorText`function: region ${region.id} title must be text`);
             }
             if (region.description !== undefined && typeof region.description !== 'string') {
-                throw new Error(`function: region ${region.id} description must be text`);
+                throw problemConfigError(localizedErrorText`function: region ${region.id} description must be text`);
             }
         } else if (region.prompt !== undefined && typeof region.prompt !== 'string') {
-            throw new Error(`program_fill: region ${region.id} prompt must be text`);
+            throw problemConfigError(localizedErrorText`program_fill: region ${region.id} prompt must be text`);
         }
     }
     for (let index = 1; index < template.regions.length; index++) {
         if (compareStructuredCodeRegions(template.regions[index - 1], template.regions[index]) >= 0) {
-            throw new Error(`${kind}: regions must be in canonical source order`);
+            throw problemConfigError(localizedErrorText`${kind}: regions must be in canonical source order`);
         }
     }
     const visibleRanges = [
@@ -271,7 +302,7 @@ export function validateStructuredCodeTemplate(
     ].sort((left, right) => left.startLine - right.startLine || left.endLine - right.endLine || left.label.localeCompare(right.label));
     for (let index = 1; index < visibleRanges.length; index++) {
         if (visibleRanges[index - 1].endLine > visibleRanges[index].startLine) {
-            throw new Error(`${kind}: ${visibleRanges[index - 1].label} and ${visibleRanges[index].label} overlap`);
+            throw problemConfigError(localizedErrorText`${kind}: ${visibleRanges[index - 1].label} and ${visibleRanges[index].label} overlap`);
         }
     }
 }
@@ -285,13 +316,13 @@ export function spliceStructuredCodeTemplate(
     validateStructuredCodeTemplate(template, kind);
     const expected = new Set(template.regions.map((region) => region.id));
     const unknown = Object.keys(regionContents).find((id) => !expected.has(id));
-    if (unknown) throw new Error(`${kind}: unknown region "${unknown}"`);
+    if (unknown) throw problemConfigError(localizedErrorText`${kind}: unknown region "${unknown}"`);
     const lines = template.source.split('\n');
     const sortedRegions = [...template.regions].sort((a, b) => b.startLine - a.startLine);
 
     for (const region of sortedRegions) {
         const content = regionContents[region.id];
-        if (content === undefined) throw new Error(`${kind}: missing region "${region.id}"`);
+        if (content === undefined) throw problemConfigError(localizedErrorText`${kind}: missing region "${region.id}"`);
         const replacement = content.replace(/\r\n?/g, '\n').split('\n');
         lines.splice(region.startLine, region.endLine - region.startLine, ...replacement);
     }
@@ -301,13 +332,13 @@ export function spliceStructuredCodeTemplate(
 export function validateCompiledStructuredConfig(kind: string, config: any): void {
     if (!['program_fill', 'function'].includes(kind)) return;
     const expectedType = kind === 'function' ? 'function' : 'program_fill';
-    if (config?.type !== expectedType) throw new Error(`${kind}: invalid structured configuration`);
+    if (config?.type !== expectedType) throw problemConfigError(localizedErrorText`${kind}: invalid structured configuration`);
     validateStructuredCodeJudgeConfig(config, kind as 'program_fill' | 'function');
     if (kind === 'program_fill' && config.mode === 'text') return;
     const template = config.template as StructuredCodeTemplate;
-    if (!template.lang) throw new Error(`${kind}: template language is required`);
+    if (!template.lang) throw problemConfigError(localizedErrorText`${kind}: template language is required`);
     if (!Array.isArray(config.langs) || config.langs.length !== 1 || config.langs[0] !== template.lang) {
-        throw new Error(`${kind}: language mismatch`);
+        throw problemConfigError(localizedErrorText`${kind}: language mismatch`);
     }
 }
 
@@ -315,27 +346,31 @@ export function validateCompiledStructuredConfig(kind: string, config: any): voi
 export function validateStructuredCodeJudgeConfig(config: any, kindInput?: 'program_fill' | 'function'): void {
     const kind = kindInput || (config?.type === 'function' ? 'function' : 'program_fill');
     const expectedType = kind === 'function' ? 'function' : 'program_fill';
-    if (config?.type !== expectedType) throw new Error(`${kind}: invalid problem type`);
+    if (config?.type !== expectedType) throw problemConfigError(localizedErrorText`${kind}: invalid problem type`);
     if (kind === 'program_fill' && !['text', 'compile'].includes(config.mode)) {
-        throw new Error('program_fill: mode must be text or compile');
+        throw problemConfigError(localizedErrorText`program_fill: mode must be text or compile`);
     }
     validateStructuredCodeTemplate(config.template as StructuredCodeTemplate, kind);
     if (kind === 'program_fill' && config.mode === 'text') {
-        if (config.cases !== undefined) throw new Error('program_fill: text mode cannot contain testdata cases');
+        if (config.cases !== undefined) {
+            throw problemConfigError(localizedErrorText`program_fill: text mode cannot contain testdata cases`);
+        }
         return;
     }
-    if (!config.template.lang) throw new Error(`${kind}: template language is required`);
-    if (!Array.isArray(config.cases) || !config.cases.length) throw new Error(`${kind}: testdata cases are required`);
+    if (!config.template.lang) throw problemConfigError(localizedErrorText`${kind}: template language is required`);
+    if (!Array.isArray(config.cases) || !config.cases.length) {
+        throw problemConfigError(localizedErrorText`${kind}: testdata cases are required`);
+    }
 }
 
 export function validateStructuredCodeTestdataFiles(config: any, files: Array<{ name: string }>, kindInput?: 'program_fill' | 'function'): void {
     validateStructuredCodeJudgeConfig(config, kindInput);
     if ((kindInput === 'program_fill' || config.type === 'program_fill') && config.mode !== 'compile') {
-        throw new Error('program_fill: text mode does not use testdata files');
+        throw problemConfigError(localizedErrorText`program_fill: text mode does not use testdata files`);
     }
     const available = new Set((files || []).map((item) => item.name));
     const missing = (config.cases || []).flatMap((item) => [item.input, item.output]).find((name) => !available.has(name));
-    if (missing) throw new Error(`${kindInput || config.type}: missing testdata file ${missing}`);
+    if (missing) throw problemConfigError(localizedErrorText`${kindInput || config.type}: missing testdata file ${missing}`);
 }
 
 /** Parse and validate a student region payload before inserting a Record. */
@@ -353,32 +388,34 @@ export function parseStructuredRegionSubmission(
           ? template.surface.filter((segment): segment is { type: 'region'; id: string } => segment.type === 'region')
           : [];
     if (!template || !regionDescriptors.length) {
-        throw new Error(`${kind}: missing template region description`);
+        throw problemConfigError(localizedErrorText`${kind}: missing template region description`);
     }
     let regions: unknown;
     try {
         regions = JSON.parse(rawCode);
     } catch (error: any) {
-        throw new Error(`${kind}: region payload is not valid JSON`, { cause: error });
+        throw problemConfigError(localizedErrorText`${kind}: region payload is not valid JSON`, { cause: error });
     }
     if (!regions || typeof regions !== 'object' || Array.isArray(regions)) {
-        throw new Error(`${kind}: region payload must be an object`);
+        throw problemConfigError(localizedErrorText`${kind}: region payload must be an object`);
     }
     const expected = regionDescriptors.map((region) => region.id).sort();
     if (expected.some((id) => typeof id !== 'string' || !STRUCTURED_CODE_REGION_ID.test(id))) {
-        throw new Error(`${kind}: invalid template region id`);
+        throw problemConfigError(localizedErrorText`${kind}: invalid template region id`);
     }
-    if (new Set(expected).size !== expected.length) throw new Error(`${kind}: duplicate template region id`);
+    if (new Set(expected).size !== expected.length) {
+        throw problemConfigError(localizedErrorText`${kind}: duplicate template region id`);
+    }
     const actual = Object.keys(regions).sort();
     if (expected.length !== actual.length || expected.some((id, index) => id !== actual[index])) {
-        throw new Error(`${kind}: region payload keys do not match template`);
+        throw problemConfigError(localizedErrorText`${kind}: region payload keys do not match template`);
     }
     const result = regions as Record<string, unknown>;
     if (actual.some((id) => typeof result[id] !== 'string')) {
-        throw new Error(`${kind}: every region value must be a string`);
+        throw problemConfigError(localizedErrorText`${kind}: every region value must be a string`);
     }
     if (kind === 'program_fill' && actual.some((id) => /[\r\n]/.test(result[id] as string))) {
-        throw new Error('program_fill: every submitted region must be one line');
+        throw problemConfigError(localizedErrorText`program_fill: every submitted region must be one line`);
     }
     return result as Record<string, string>;
 }
@@ -392,7 +429,7 @@ export interface ProgramFillTextGrade {
 /** Grade canonical text program-fill answers without materializing a second answer source. */
 export function gradeProgramFillTextSubmission(config: any, rawCode: string): ProgramFillTextGrade {
     validateStructuredCodeJudgeConfig(config, 'program_fill');
-    if (config.mode !== 'text') throw new Error('program_fill: text grader requires text mode');
+    if (config.mode !== 'text') throw problemConfigError(localizedErrorText`program_fill: text grader requires text mode`);
     const submitted = parseStructuredRegionSubmission('program_fill', config.template, rawCode);
     const lines = config.template.source.split('\n');
     const regions = config.template.regions.map((region) => {

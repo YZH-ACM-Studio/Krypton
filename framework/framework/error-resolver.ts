@@ -1,4 +1,4 @@
-import { HydroError } from './error';
+import { getLocalizedErrorMetadata, HydroError, type LocalizedErrorTemplate } from './error';
 
 export type ErrorSurface = 'ui-next' | 'legacy-ui' | 'api' | 'websocket';
 
@@ -266,22 +266,52 @@ export function resolveErrorMessage(descriptor: ErrorMessageDescriptor, options:
 }
 
 export function describeHydroError(error: HydroError): ErrorMessageDescriptor {
-    const template = error.msg();
+    const dynamicTemplate = error.msg();
     const params = [...(error.params || [])];
-    const messageParams: Record<number, unknown> = {};
-    const nested: Record<number, ErrorMessageDescriptor> = {};
-    for (const match of template.matchAll(/\{(0|[1-9]\d*)\}/g)) {
-        const index = Number(match[1]);
-        messageParams[index] = params[index];
-        if (params[index] instanceof HydroError) nested[index] = describeHydroError(params[index]);
-    }
-    return {
-        name: error.name,
-        errorCode: error.name,
-        status: error.code,
-        template,
-        params,
-        messageParams,
-        ...(Object.keys(nested).length ? { nested } : {}),
+    const metadata = getLocalizedErrorMetadata(error);
+    const parameterZeroTemplate = metadata?.parameters.get(0);
+    const promotesParameterZero =
+        !metadata?.message &&
+        !!parameterZeroTemplate &&
+        (dynamicTemplate === params[0] || ['BadRequestError', 'ForbiddenError', 'MethodNotAllowedError', 'UserFacingError'].includes(error.name));
+    const promotedTemplate = promotesParameterZero ? parameterZeroTemplate : undefined;
+    const template = metadata?.message?.template || promotedTemplate?.template || dynamicTemplate;
+    const templateParams = metadata?.message?.params || promotedTemplate?.params || params;
+    const describeTemplate = (
+        name: string,
+        errorCode: string,
+        status: number,
+        sourceTemplate: string,
+        rawParams: readonly unknown[],
+    ): ErrorMessageDescriptor => {
+        const messageParams: Record<number, unknown> = {};
+        const nested: Record<number, ErrorMessageDescriptor> = {};
+        for (const match of sourceTemplate.matchAll(/\{(0|[1-9]\d*)\}/g)) {
+            const index = Number(match[1]);
+            messageParams[index] = rawParams[index];
+            if (rawParams[index] instanceof HydroError) nested[index] = describeHydroError(rawParams[index]);
+        }
+        return {
+            name,
+            errorCode,
+            status,
+            template: sourceTemplate,
+            params: rawParams,
+            messageParams,
+            ...(Object.keys(nested).length ? { nested } : {}),
+        };
     };
+    const descriptor = describeTemplate(error.name, error.name, error.code, template, templateParams);
+    descriptor.params = params;
+    const nested = { ...(descriptor.nested || {}) };
+    const describeParameterTemplate = (index: number, value: LocalizedErrorTemplate) => {
+        nested[index] = describeTemplate(`${error.name}.Parameter`, `${error.name}.Parameter`, error.code, value.template, value.params);
+    };
+    for (const [index, value] of metadata?.parameters || []) {
+        if (promotesParameterZero && index === 0) continue;
+        describeParameterTemplate(index, value);
+    }
+    if (Object.keys(nested).length) descriptor.nested = nested;
+    else delete descriptor.nested;
+    return descriptor;
 }

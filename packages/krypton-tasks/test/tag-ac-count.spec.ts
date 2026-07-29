@@ -1,4 +1,5 @@
 import { expect } from 'chai';
+import { localizedErrorText } from '@hydrooj/framework';
 import { ObjectId } from 'mongodb';
 import { beforeEach, describe, it } from 'node:test';
 
@@ -82,6 +83,7 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
                         },
                     },
                 },
+                localizedErrorText,
                 STATUS: { STATUS_ACCEPTED: 1, STATUS_CANCELED: 0 },
                 ValidationError: TestValidationError,
             };

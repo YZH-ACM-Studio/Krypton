@@ -1,7 +1,7 @@
 import type { Readable } from 'stream';
 import fs from 'fs-extra';
 import yaml from 'js-yaml';
-import { ValidationError } from '../error';
+import { localizedErrorText, ValidationError } from '../error';
 import { isProblemConfigFilename } from './problem-config';
 
 /**
@@ -23,13 +23,17 @@ export async function normalizeProblemTestdataUpload(name: string, source: Reada
     try {
         parsed = yaml.load(content.toString('utf8'));
     } catch (error) {
-        throw new ValidationError('config', null, `配置 YAML 无法解析：${error.message}`);
+        throw new ValidationError('config', null, localizedErrorText`配置 YAML 无法解析：${error.message}`);
     }
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        throw new ValidationError('config', null, '配置 YAML 必须是对象');
+        throw new ValidationError('config', null, localizedErrorText`配置 YAML 必须是对象`);
     }
     if (['objective', 'fill_function', 'program_fill', 'function'].includes(parsed.type)) {
-        throw new ValidationError('config', null, '复合客观题与结构化代码题配置不能通过 config.yaml 创建，请从创建题目页选择独立题型');
+        throw new ValidationError(
+            'config',
+            null,
+            localizedErrorText`复合客观题与结构化代码题配置不能通过 config.yaml 创建，请从创建题目页选择独立题型`,
+        );
     }
     return content;
 }

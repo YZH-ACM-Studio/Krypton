@@ -30,6 +30,8 @@
  *   POST /admin/tasks/settings
  */
 import {
+    localizeError,
+    localizedErrorText,
     Context,
     DocumentModel,
     ForbiddenError,
@@ -45,6 +47,7 @@ import {
     UserModel,
     ValidationError,
 } from 'hydrooj';
+import type { LocalizedErrorText } from 'hydrooj';
 import { userBindModel } from '@hydrooj/krypton-userbind';
 import { canCreateTask, canManageAllTasks, canModifyTask } from './auth';
 import { cspScoreColl, gpltScoreColl, patScoreColl } from './db';
@@ -55,6 +58,18 @@ import type { AdmissionMode, GpltLevel, PatLevel, PatSeason, TaskAccess, TaskDoc
 import { emptyTaskGraph } from './types';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
+
+function taskNotFound() {
+    return localizeError(new NotFoundError('任务不存在'), '任务不存在');
+}
+
+function assignmentNotFound() {
+    return localizeError(new NotFoundError('分配不存在'), '分配不存在');
+}
+
+function stayValidation(reason: LocalizedErrorText): never {
+    throw new ValidationError('studentId', null, reason);
+}
 
 function parsePosition(p: any): { x: number; y: number } {
     if (!p || typeof p !== 'object') return { x: 0, y: 0 };
@@ -80,7 +95,7 @@ function parseTaskGraphJson(json: string): TaskGraph {
     try {
         parsed = JSON.parse(json);
     } catch {
-        throw new ValidationError('graph', null, 'JSON 格式错误');
+        throw new ValidationError('graph', null, localizedErrorText`JSON 格式错误`);
     }
     if (!parsed || typeof parsed !== 'object') return emptyTaskGraph();
 
@@ -409,7 +424,7 @@ class TaskDetailHandler extends Handler {
     async get({ domainId }: { domainId: string }, tid: ObjectId) {
         this.checkPriv(PRIV.PRIV_USER_PROFILE);
         const task = await taskModel.getTask(domainId, tid);
-        if (!task) throw new NotFoundError('任务不存在');
+        if (!task) throw taskNotFound();
         // Recompute current user's progress if any.
         const myAssignment = await taskModel
             .getUserAssignments(domainId, this.user._id, {
@@ -458,19 +473,19 @@ class TaskDetailHandler extends Handler {
     async postClaim({ domainId }: { domainId: string }, tid: ObjectId) {
         this.checkPriv(PRIV.PRIV_USER_PROFILE);
         const task = await taskModel.getTask(domainId, tid);
-        if (!task) throw new NotFoundError('任务不存在');
+        if (!task) throw taskNotFound();
         // Re-check visibility before allowing claim.
         const visible = await visibleTasksForUser(domainId, this.user as any);
         if (!visible.find((t) => t._id.equals(tid))) {
-            throw new ValidationError('tid', null, '无权认领此任务');
+            throw new ValidationError('tid', null, localizedErrorText`无权认领此任务`);
         }
-        if (!task.isActive) throw new ValidationError('tid', null, '任务已停用');
+        if (!task.isActive) throw new ValidationError('tid', null, localizedErrorText`任务已停用`);
         const now = Date.now();
         if (task.claimStartAt && task.claimStartAt.getTime() > now) {
-            throw new ValidationError('tid', null, '未到认领时间');
+            throw new ValidationError('tid', null, localizedErrorText`未到认领时间`);
         }
         if (task.claimEndAt && task.claimEndAt.getTime() < now) {
-            throw new ValidationError('tid', null, '认领已截止');
+            throw new ValidationError('tid', null, localizedErrorText`认领已截止`);
         }
         await taskModel.assignTask(domainId, tid, this.user._id, 0);
         await OplogModel.log(this, 'tasks.claim', { taskId: tid });
@@ -491,9 +506,9 @@ class TaskAssignmentActionHandler extends Handler {
     async postRecheck({ domainId }: { domainId: string }, aid: ObjectId) {
         this.checkPriv(PRIV.PRIV_USER_PROFILE);
         const a = await taskModel.getAssignment(domainId, aid);
-        if (!a) throw new NotFoundError('分配不存在');
+        if (!a) throw assignmentNotFound();
         if (a.userId !== this.user._id && !canManageAllTasks(this.user as any)) {
-            throw new ValidationError('aid', null, '无权重算他人进度');
+            throw new ValidationError('aid', null, localizedErrorText`无权重算他人进度`);
         }
         await taskModel.checkTaskCompletion(domainId, aid, { force: true });
         this.response.redirect = this.url('tasks_my');
@@ -528,9 +543,9 @@ export class AdminTasksListHandler extends Handler {
         const authoritativeDomainId = String(this.domain?._id);
         ProblemModel.assertProblemAclDomain(this.user as any, authoritativeDomainId);
         const src = await taskModel.getTask(authoritativeDomainId, tid);
-        if (!src) throw new NotFoundError('任务不存在');
+        if (!src) throw taskNotFound();
         if (!canModifyTask(this.user as any, src)) {
-            throw new ValidationError('tid', null, '无权复制');
+            throw new ValidationError('tid', null, localizedErrorText`无权复制`);
         }
         await validateTagAcCountGraph(authoritativeDomainId, src.graph, this.user._id);
         const problemIds = Array.from(collectTaskParamRefs(src.graph).problemIds);
@@ -544,9 +559,9 @@ export class AdminTasksListHandler extends Handler {
     @param('tid', Types.ObjectId)
     async postDelete({ domainId }: { domainId: string }, tid: ObjectId) {
         const t = await taskModel.getTask(domainId, tid);
-        if (!t) throw new NotFoundError('任务不存在');
+        if (!t) throw taskNotFound();
         if (!canModifyTask(this.user as any, t)) {
-            throw new ValidationError('tid', null, '无权删除');
+            throw new ValidationError('tid', null, localizedErrorText`无权删除`);
         }
         await taskModel.deleteTask(domainId, tid);
         await OplogModel.log(this, 'tasks.delete', { taskId: tid });
@@ -568,9 +583,9 @@ export class AdminTasksEditHandler extends Handler {
         let task: TaskDoc | null = null;
         if (tid) {
             task = await taskModel.getTask(authoritativeDomainId, tid);
-            if (!task) throw new NotFoundError('任务不存在');
+            if (!task) throw taskNotFound();
             if (!canModifyTask(this.user as any, task)) {
-                throw new ValidationError('tid', null, '无权编辑');
+                throw new ValidationError('tid', null, localizedErrorText`无权编辑`);
             }
         }
         // Bootstrap small-cardinality picker sources so the right-side editor
@@ -667,9 +682,9 @@ export class AdminTasksEditHandler extends Handler {
         const problemIds = Array.from(collectTaskParamRefs(data.graph as TaskGraph).problemIds);
         if (tid) {
             const existing = await taskModel.getTask(authoritativeDomainId, tid);
-            if (!existing) throw new NotFoundError('任务不存在');
+            if (!existing) throw taskNotFound();
             if (!canModifyTask(this.user as any, existing)) {
-                throw new ValidationError('tid', null, '无权编辑');
+                throw new ValidationError('tid', null, localizedErrorText`无权编辑`);
             }
             await validateTagAcCountGraph(authoritativeDomainId, data.graph as TaskGraph, this.user._id);
             const existingProblemIds = Array.from(collectTaskParamRefs(existing.graph).problemIds);
@@ -713,9 +728,9 @@ class AdminTasksAssignHandler extends Handler {
     @param('tid', Types.ObjectId)
     async get({ domainId }: { domainId: string }, tid: ObjectId) {
         const task = await taskModel.getTask(domainId, tid);
-        if (!task) throw new NotFoundError('任务不存在');
+        if (!task) throw taskNotFound();
         if (!canModifyTask(this.user as any, task)) {
-            throw new ValidationError('tid', null, '无权分配');
+            throw new ValidationError('tid', null, localizedErrorText`无权分配`);
         }
         const assignments = await taskModel.getTaskAssignments(domainId, tid);
         const uids = Array.from(new Set(assignments.map((a) => a.userId)));
@@ -739,9 +754,9 @@ class AdminTasksAssignHandler extends Handler {
     @param('note', Types.String, true)
     async postBatch({ domainId }: { domainId: string }, tid: ObjectId, scope: string, targetId: string, uid: number, note: string) {
         const task = await taskModel.getTask(domainId, tid);
-        if (!task) throw new NotFoundError('任务不存在');
+        if (!task) throw taskNotFound();
         if (!canModifyTask(this.user as any, task)) {
-            throw new ValidationError('tid', null, '无权分配');
+            throw new ValidationError('tid', null, localizedErrorText`无权分配`);
         }
         let uids: number[] = [];
         if (scope === 'uid' && uid) uids = [uid];
@@ -782,9 +797,9 @@ class AdminTasksAssignHandler extends Handler {
     @param('reason', Types.String, true)
     async postOverride({ domainId }: { domainId: string }, tid: ObjectId, aid: ObjectId, pointId: string, completed: boolean, reason: string) {
         const task = await taskModel.getTask(domainId, tid);
-        if (!task) throw new NotFoundError('任务不存在');
+        if (!task) throw taskNotFound();
         if (!canModifyTask(this.user as any, task)) {
-            throw new ValidationError('tid', null, '无权覆盖');
+            throw new ValidationError('tid', null, localizedErrorText`无权覆盖`);
         }
         await taskModel.overridePointCompletion(domainId, aid, pointId, this.user._id, reason || '', completed);
         await OplogModel.log(this, 'tasks.override', { aid, pointId, completed });
@@ -815,9 +830,9 @@ class AdminTasksOverrideHandler extends Handler {
         redirect: string,
     ) {
         const task = await taskModel.getTask(domainId, tid);
-        if (!task) throw new NotFoundError('任务不存在');
+        if (!task) throw taskNotFound();
         if (!canModifyTask(this.user as any, task)) {
-            throw new ValidationError('tid', null, '无权覆盖');
+            throw new ValidationError('tid', null, localizedErrorText`无权覆盖`);
         }
         await taskModel.overridePointCompletion(domainId, aid, pointId, this.user._id, reason || '', completed);
         await OplogModel.log(this, 'tasks.override', { aid, pointId, completed });
@@ -836,9 +851,9 @@ export class AdminTasksStatsHandler extends Handler {
     @param('format', Types.String, true)
     async get({ domainId }: { domainId: string }, tid: ObjectId, format = '') {
         const task = await taskModel.getTask(domainId, tid);
-        if (!task) throw new NotFoundError('任务不存在');
+        if (!task) throw taskNotFound();
         if (!canModifyTask(this.user as any, task)) {
-            throw new ValidationError('tid', null, '无权查看');
+            throw new ValidationError('tid', null, localizedErrorText`无权查看`);
         }
         const assignments = await taskModel.getTaskAssignments(domainId, tid, {
             status: { $ne: 'cancelled' },
@@ -903,7 +918,7 @@ export class AdminTasksStatsHandler extends Handler {
     async postExportGroup({ domainId }: { domainId: string }, tid: ObjectId, name: string) {
         this.checkPriv(PRIV.PRIV_EDIT_SYSTEM);
         const task = await taskModel.getTask(domainId, tid);
-        if (!task) throw new NotFoundError('任务不存在');
+        if (!task) throw taskNotFound();
         const assignments = await taskModel.getTaskAssignments(domainId, tid, { status: { $ne: 'cancelled' } });
         const userIds = Array.from(new Set(assignments.map((assignment) => assignment.userId)));
         const users = await UserModel.getList(domainId, userIds);
@@ -934,8 +949,8 @@ export class AdminTasksStatsHandler extends Handler {
     @param('tid', Types.ObjectId)
     async postRecheckAll({ domainId }: { domainId: string }, tid: ObjectId) {
         const task = await taskModel.getTask(domainId, tid);
-        if (!task) throw new NotFoundError('任务不存在');
-        if (!canModifyTask(this.user as any, task)) throw new ValidationError('tid', null, '无权操作');
+        if (!task) throw taskNotFound();
+        if (!canModifyTask(this.user as any, task)) throw new ValidationError('tid', null, localizedErrorText`无权操作`);
         const assignments = await taskModel.getTaskAssignments(domainId, tid, { status: { $ne: 'cancelled' } });
         let rechecked = 0;
         for (const a of assignments) {
@@ -980,9 +995,9 @@ class AdminTasksCandidatesHandler extends Handler {
     @param('tid', Types.ObjectId)
     async get({ domainId }: { domainId: string }, tid: ObjectId) {
         const task = await taskModel.getTask(domainId, tid);
-        if (!task) throw new NotFoundError('任务不存在');
+        if (!task) throw taskNotFound();
         if (!canModifyTask(this.user as any, task)) {
-            throw new ValidationError('tid', null, '无权查看候选池');
+            throw new ValidationError('tid', null, localizedErrorText`无权查看候选池`);
         }
 
         const assignments = await taskModel.getTaskAssignments(domainId, tid, {
@@ -1046,12 +1061,12 @@ class AdminTasksCandidatesHandler extends Handler {
     @param('note', Types.String, true)
     async post({ domainId }: { domainId: string }, tid: ObjectId, operation: string, aidsCsv: string, note: string) {
         const task = await taskModel.getTask(domainId, tid);
-        if (!task) throw new NotFoundError('任务不存在');
+        if (!task) throw taskNotFound();
         if (!canModifyTask(this.user as any, task)) {
-            throw new ValidationError('tid', null, '无权操作候选池');
+            throw new ValidationError('tid', null, localizedErrorText`无权操作候选池`);
         }
         const aids = this.parseAids(aidsCsv);
-        if (!aids.length) throw new ValidationError('aids', null, '未选中任何分配');
+        if (!aids.length) throw new ValidationError('aids', null, localizedErrorText`未选中任何分配`);
 
         let ok = 0;
         const errors: Array<{ aid: string; reason: string }> = [];
@@ -1064,7 +1079,7 @@ class AdminTasksCandidatesHandler extends Handler {
                 } else if (operation === 'confirm') {
                     await taskModel.confirmAssignment(domainId, aid, this.user._id, note || '');
                 } else {
-                    throw new ValidationError('operation', null, '未知操作');
+                    throw new ValidationError('operation', null, localizedErrorText`未知操作`);
                 }
                 ok++;
             } catch (e: any) {
@@ -1148,9 +1163,9 @@ const PAT_SEASONS_OK: PatSeason[] = ['spring', 'summer', 'autumn', 'winter'];
 const GPLT_LEVELS_OK: GpltLevel[] = ['school', 'national'];
 
 function clampScore(value: number, max: number): number {
-    if (Number.isNaN(value)) throw new ValidationError('score', null, '分数无效');
-    if (value < 0) throw new ValidationError('score', null, '分数不能为负');
-    if (value > max) throw new ValidationError('score', null, `分数不能超过 ${max}`);
+    if (Number.isNaN(value)) throw new ValidationError('score', null, localizedErrorText`分数无效`);
+    if (value < 0) throw new ValidationError('score', null, localizedErrorText`分数不能为负`);
+    if (value > max) throw new ValidationError('score', null, localizedErrorText`分数不能超过 ${max}`);
     return value;
 }
 
@@ -1259,7 +1274,7 @@ class AdminScoresHandler extends Handler {
         if (!PAT_LEVELS_OK.includes(level as PatLevel)) throw new ValidationError('level');
         if (!PAT_SEASONS_OK.includes(season as PatSeason)) throw new ValidationError('season');
         const student = await findStudentDoc(domainId, studentId);
-        if (!student) throw new ValidationError('studentId', null, `学号 ${studentId}: 未找到学生档案`);
+        if (!student) throw new ValidationError('studentId', null, localizedErrorText`学号 ${studentId}: 未找到学生档案`);
         const settings = await taskModel.getDomainSettings(domainId);
         const safe = clampScore(score, settings.maxPatScore);
         await patScoreColl.updateOne(
@@ -1332,7 +1347,7 @@ class AdminScoresHandler extends Handler {
     async postGplt({ domainId }: { domainId: string }, studentId: string, level: string, year: number, score: number, rank: number) {
         if (!GPLT_LEVELS_OK.includes(level as GpltLevel)) throw new ValidationError('level');
         const student = await findStudentDoc(domainId, studentId);
-        if (!student) throw new ValidationError('studentId', null, `学号 ${studentId}: 未找到学生档案`);
+        if (!student) throw new ValidationError('studentId', null, localizedErrorText`学号 ${studentId}: 未找到学生档案`);
         const settings = await taskModel.getDomainSettings(domainId);
         const safe = clampScore(score, settings.maxGpltScore);
         await gpltScoreColl.updateOne(
@@ -1398,9 +1413,9 @@ class AdminScoresHandler extends Handler {
     @param('round', Types.Int)
     @param('score', Types.Float)
     async postCsp({ domainId }: { domainId: string }, studentId: string, round: number, score: number) {
-        if (!round || round < 1) throw new ValidationError('round', null, '认证次数无效');
+        if (!round || round < 1) throw new ValidationError('round', null, localizedErrorText`认证次数无效`);
         const student = await findStudentDoc(domainId, studentId);
-        if (!student) throw new ValidationError('studentId', null, `学号 ${studentId}: 未找到学生档案`);
+        if (!student) throw new ValidationError('studentId', null, localizedErrorText`学号 ${studentId}: 未找到学生档案`);
         const settings = await taskModel.getDomainSettings(domainId);
         const safe = clampScore(score, settings.maxCspScore);
         await cspScoreColl.updateOne(
@@ -1470,7 +1485,9 @@ class AdminScoresHandler extends Handler {
     @param('year', Types.Int)
     async postStay({ domainId }: { domainId: string }, schoolId: ObjectId, studentId: string, realName: string, year: number) {
         const r = await taskModel.addManualStayEvent(domainId, schoolId, studentId.trim(), realName.trim(), year, this.user._id);
-        if (!r.ok) throw new ValidationError('studentId', null, 'reason' in r ? r.reason : '添加失败');
+        if (r.ok === false) {
+            stayValidation(r.localizedReason);
+        }
         this.response.redirect = this.url('admin_tasks_scores', { query: { tab: 'stay' } });
     }
 
@@ -1549,7 +1566,7 @@ abstract class ScoresApiBase extends Handler {
         const { doc, scopeFilters } = await requireAuthToken(this, 'scores');
         // Scores carry createdBy/updatedBy; a pure service token (no bound user)
         // must not author them.
-        if (doc.uid == null) throw new ForbiddenError('录入分数需要绑定用户的令牌');
+        if (doc.uid == null) throw new ForbiddenError(localizedErrorText`录入分数需要绑定用户的令牌`);
         const ys = scopeFilters.years;
         this.scopeYears = Array.isArray(ys) ? ys.filter((y): y is number => Number.isInteger(y)) : null; // null = unscoped (no year constraint)
     }
@@ -1614,10 +1631,10 @@ class ScoresApiHandler extends ScoresApiBase {
     @param('rank', Types.Int, true)
     async postUpsert({ domainId }: { domainId: string }, studentId: string, level: string, year: number, score: number, rank: number) {
         if (!GPLT_LEVELS_OK.includes(level as GpltLevel)) throw new ValidationError('level');
-        if (!this.yearAllowed(year)) throw new ForbiddenError(`令牌无权录入 ${year} 年的分数`);
+        if (!this.yearAllowed(year)) throw new ForbiddenError(localizedErrorText`令牌无权录入 ${year} 年的分数`);
         const student = await findStudentDoc(domainId, studentId);
         if (!student) {
-            throw new ValidationError('studentId', null, `学号 ${studentId}: 未找到学生档案(或跨校重名)`);
+            throw new ValidationError('studentId', null, localizedErrorText`学号 ${studentId}: 未找到学生档案(或跨校重名)`);
         }
         const settings = await taskModel.getDomainSettings(domainId);
         const safe = clampScore(score, settings.maxGpltScore);
@@ -1684,10 +1701,10 @@ class PatScoresApiHandler extends ScoresApiBase {
     async postUpsert({ domainId }: { domainId: string }, studentId: string, level: string, year: number, season: string, score: number) {
         if (!PAT_LEVELS_OK.includes(level as PatLevel)) throw new ValidationError('level');
         if (!PAT_SEASONS_OK.includes(season as PatSeason)) throw new ValidationError('season');
-        if (!this.yearAllowed(year)) throw new ForbiddenError(`令牌无权录入 ${year} 年的分数`);
+        if (!this.yearAllowed(year)) throw new ForbiddenError(localizedErrorText`令牌无权录入 ${year} 年的分数`);
         const student = await findStudentDoc(domainId, studentId);
         if (!student) {
-            throw new ValidationError('studentId', null, `学号 ${studentId}: 未找到学生档案(或跨校重名)`);
+            throw new ValidationError('studentId', null, localizedErrorText`学号 ${studentId}: 未找到学生档案(或跨校重名)`);
         }
         const settings = await taskModel.getDomainSettings(domainId);
         const safe = clampScore(score, settings.maxPatScore);
@@ -1739,10 +1756,10 @@ class CspScoresApiHandler extends ScoresApiBase {
     @param('round', Types.Int)
     @param('score', Types.Float)
     async postUpsert({ domainId }: { domainId: string }, studentId: string, round: number, score: number) {
-        if (!round || round < 1) throw new ValidationError('round', null, '认证次数无效');
+        if (!round || round < 1) throw new ValidationError('round', null, localizedErrorText`认证次数无效`);
         const student = await findStudentDoc(domainId, studentId);
         if (!student) {
-            throw new ValidationError('studentId', null, `学号 ${studentId}: 未找到学生档案(或跨校重名)`);
+            throw new ValidationError('studentId', null, localizedErrorText`学号 ${studentId}: 未找到学生档案(或跨校重名)`);
         }
         const settings = await taskModel.getDomainSettings(domainId);
         const safe = clampScore(score, settings.maxCspScore);

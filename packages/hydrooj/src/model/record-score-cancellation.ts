@@ -1,7 +1,7 @@
 import { ObjectId } from 'mongodb';
 import { STATUS } from '@hydrooj/common';
 import { Logger } from '@hydrooj/utils';
-import { ProblemConfigError, ProblemNotFoundError, ValidationError } from '../error';
+import { localizedErrorText, ProblemConfigError, ProblemNotFoundError, ValidationError } from '../error';
 import type { RecordDoc } from '../interface';
 import * as document from './document';
 import * as contest from './contest';
@@ -176,7 +176,9 @@ async function projectProblemStatus(rdoc: RecordDoc) {
         docId: rdoc.pid,
         uid: rdoc.uid,
     });
-    if (concurrent?.rid instanceof ObjectId && concurrent.rid.equals(rdoc._id)) throw new Error('problem status still references the canceled record');
+    if (concurrent?.rid instanceof ObjectId && concurrent.rid.equals(rdoc._id)) {
+        throw new Error('problem status still references the canceled record');
+    }
     return concurrent;
 }
 
@@ -261,11 +263,7 @@ async function failAudit(auditId: ObjectId, stage: string, error: unknown) {
     });
 }
 
-export async function auditRecordScorePermissionRejection(input: {
-    rdoc: RecordDoc;
-    actor: number;
-    operation: string;
-}) {
+export async function auditRecordScorePermissionRejection(input: { rdoc: RecordDoc; actor: number; operation: string }) {
     await oplog.add({
         type: 'record.score.request_rejected',
         domainId: input.rdoc.domainId,
@@ -322,7 +320,7 @@ export async function cancelRecordScore(input: {
         sameDate(rdoc.scoreCancellation.before.judgeAt, input.expectedJudgeAt);
     if (!retry) {
         if (rdoc.status !== input.expectedStatus || !sameDate(rdoc.judgeAt, input.expectedJudgeAt) || !buildRecordScoreAction(rdoc, true)) {
-            const error = new ValidationError('record', null, '提交状态已变化，请刷新后重试');
+            const error = new ValidationError('record', null, localizedErrorText`提交状态已变化，请刷新后重试`);
             await rejectAudit(auditId, 'eligibility', error);
             throw error;
         }
@@ -369,7 +367,7 @@ export async function cancelRecordScore(input: {
             { returnDocument: 'after' },
         );
         if (!updated) {
-            const error = new ValidationError('record', null, '提交状态已变化，请刷新后重试');
+            const error = new ValidationError('record', null, localizedErrorText`提交状态已变化，请刷新后重试`);
             await rejectAudit(auditId, 'cas', error);
             throw error;
         }
@@ -393,12 +391,7 @@ export async function cancelRecordScore(input: {
     return { rdoc, projection, recordScoreAction: await getRecordScoreAction(rdoc, true) };
 }
 
-export async function recoverCanceledRecord(input: {
-    domainId: string;
-    rid: ObjectId;
-    actor: number;
-    expectedCancellationAt: Date;
-}) {
+export async function recoverCanceledRecord(input: { domainId: string; rid: ObjectId; actor: number; expectedCancellationAt: Date }) {
     const completed = await oplog.coll.findOne({
         type: 'record.score.rejudge_requested',
         domainId: input.domainId,
@@ -444,7 +437,7 @@ export async function recoverCanceledRecord(input: {
             !(rdoc.scoreCancellation?.at instanceof Date) ||
             rdoc.scoreCancellation.at.getTime() !== input.expectedCancellationAt.getTime()
         ) {
-            throw new ValidationError('record', null, '该记录不能通过重新评测恢复成绩');
+            throw new ValidationError('record', null, localizedErrorText`该记录不能通过重新评测恢复成绩`);
         }
         canceled = rdoc;
         stage = 'rejudge_preflight';

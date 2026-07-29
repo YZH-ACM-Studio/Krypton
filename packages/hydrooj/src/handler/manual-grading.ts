@@ -1,7 +1,7 @@
 import { ObjectId } from 'mongodb';
 import { effectiveProblemKind } from '@hydrooj/common';
 import { Context } from '../context';
-import { NotFoundError, PermissionError, ValidationError } from '../error';
+import { localizedErrorText, NotFoundError, PermissionError, ValidationError } from '../error';
 import type { Tdoc } from '../interface';
 import { parseProblemConfigObject } from '../lib/problem-config';
 import { PRIV } from '../model/builtin';
@@ -19,7 +19,7 @@ export class ManualGradingHandler extends Handler {
     async _prepare(_domainId: string, tid: ObjectId) {
         const domainId = String(this.domain?._id);
         this.tdoc = await contest.get(domainId, tid);
-        if (!this.tdoc) throw new NotFoundError('Contest');
+        if (!this.tdoc) throw new NotFoundError(localizedErrorText`Contest`);
         if (!MANUAL_GRADE_RULES.includes(this.tdoc.rule as any)) throw new ValidationError('rule');
         if (this.tdoc.owner !== this.user._id && !this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) {
             throw new PermissionError(PRIV.PRIV_EDIT_SYSTEM);

@@ -4,7 +4,7 @@ import { Filter, FindOptions, MatchKeysAndValues, ObjectId, OnlyFieldsOfType, Pu
 import { effectiveProblemKind, ProblemConfigFile, STATUS_TEXTS } from '@hydrooj/common';
 import { Logger } from '@hydrooj/utils';
 import { Context } from '../context';
-import { ProblemConfigError, ProblemNotFoundError, ValidationError } from '../error';
+import { localizedErrorText, ProblemConfigError, ProblemNotFoundError, ValidationError } from '../error';
 import { JudgeMeta, ProblemDataWriteConfirmation, RecordDoc } from '../interface';
 import {
     parseProblemConfigObject,
@@ -117,7 +117,7 @@ export default class RecordModel {
 
     private static async preflightJudgeRecords(domainId: string, rdocs: RecordDoc[], meta: Partial<JudgeMeta> = {}) {
         if (rdocs.some((rdoc) => rdoc.manualPending || rdoc.manualGrade)) {
-            throw new ValidationError('rid', null, '人工阅卷记录不能进入自动评测队列');
+            throw new ValidationError('rid', null, localizedErrorText`人工阅卷记录不能进入自动评测队列`);
         }
         const byProblem = new Map<number, RecordDoc[]>();
         for (const rdoc of rdocs) {
@@ -168,7 +168,7 @@ export default class RecordModel {
                     error,
                 );
                 if (error instanceof ValidationError) throw error;
-                throw new ValidationError('rid', null, '当前题目配置或提交结构无法重新评测');
+                throw new ValidationError('rid', null, localizedErrorText`当前题目配置或提交结构无法重新评测`);
             }
             contexts.push({ rdocs: group, pdoc, source, judgeConfig });
         }
@@ -323,10 +323,7 @@ export default class RecordModel {
                 throw error;
             }
         }
-        if (
-            contestContext &&
-            ![RecordModel.RECORD_PRETEST, RecordModel.RECORD_GENERATE].some((sentinel) => sentinel.equals(contestContext))
-        ) {
+        if (contestContext && ![RecordModel.RECORD_PRETEST, RecordModel.RECORD_GENERATE].some((sentinel) => sentinel.equals(contestContext))) {
             const resolver = global.Hydro?.model?.contest?.resolveTeamSubmissionCapability;
             if (typeof resolver !== 'function') throw new Error('Contest submission capability resolver is unavailable.');
             const capability = await resolver(domainId, contestContext, uid, { vigilSessionKey: args.vigilSessionKey });
@@ -420,7 +417,7 @@ export default class RecordModel {
             },
             { projection: { _id: 1 } },
         );
-        if (manual) throw new ValidationError('rid', null, '人工阅卷记录不能重判');
+        if (manual) throw new ValidationError('rid', null, localizedErrorText`人工阅卷记录不能重判`);
         const upd: any = {
             score: 0,
             status: STATUS.STATUS_WAITING,
@@ -473,7 +470,7 @@ export default class RecordModel {
             },
             { readPreference: 'primary' },
         );
-        if (!current) throw new ValidationError('record', null, '提交状态已变化，请刷新后重试');
+        if (!current) throw new ValidationError('record', null, localizedErrorText`提交状态已变化，请刷新后重试`);
         await RecordModel.preflightJudgeRecords(domainId, [current], { rejudge: true });
         const updated = await RecordModel.coll.findOneAndUpdate(
             {
@@ -502,11 +499,8 @@ export default class RecordModel {
             },
             { returnDocument: 'after' },
         );
-        if (!updated) throw new ValidationError('record', null, '提交状态已变化，请刷新后重试');
-        await Promise.all([
-            RecordModel.collStat.deleteMany({ _id: rid }),
-            task.deleteMany({ rid }),
-        ]);
+        if (!updated) throw new ValidationError('record', null, localizedErrorText`提交状态已变化，请刷新后重试`);
+        await Promise.all([RecordModel.collStat.deleteMany({ _id: rid }), task.deleteMany({ rid })]);
         return updated;
     }
 
@@ -548,7 +542,7 @@ export default class RecordModel {
             { $unset: { scoreCancellation: '' } },
             { returnDocument: 'after' },
         );
-        if (!updated) throw new ValidationError('record', null, '恢复状态已变化，请刷新后重试');
+        if (!updated) throw new ValidationError('record', null, localizedErrorText`恢复状态已变化，请刷新后重试`);
         return updated;
     }
 

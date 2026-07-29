@@ -1,4 +1,17 @@
-import { Context, ForbiddenError, Handler, Schema, Service, superagent, SystemModel, TokenModel, UserFacingError, ValidationError } from 'hydrooj';
+import {
+    localizeError,
+    localizedErrorText,
+    Context,
+    ForbiddenError,
+    Handler,
+    Schema,
+    Service,
+    superagent,
+    SystemModel,
+    TokenModel,
+    UserFacingError,
+    ValidationError,
+} from 'hydrooj';
 
 // from https://github.com/logos
 
@@ -36,7 +49,13 @@ export default class LoginWithGithubService extends Service {
                     })
                     .set('accept', 'application/json');
                 if (res.body.error) {
-                    throw new UserFacingError(res.body.error, res.body.error_description, res.body.error_uri);
+                    throw localizeError(
+                        new UserFacingError(res.body.error, res.body.error_description, res.body.error_uri),
+                        'External service returned an error: {0}. {1} {2}',
+                        res.body.error,
+                        res.body.error_description || '',
+                        res.body.error_uri || '',
+                    );
                 }
                 const t = res.body.access_token;
                 const userInfo = await superagent
@@ -62,7 +81,7 @@ export default class LoginWithGithubService extends Service {
                     }
                 }
                 await TokenModel.del(s._id, TokenModel.TYPE_OAUTH);
-                if (!ret.email) throw new ForbiddenError("You don't have a verified email.");
+                if (!ret.email) throw new ForbiddenError(localizedErrorText`You don't have a verified email.`);
                 return ret;
             },
             get: async function get(this: Handler) {

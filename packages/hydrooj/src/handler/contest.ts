@@ -8,6 +8,8 @@ import { ObjectId } from 'mongodb';
 import { Counter, getAlphabeticId, Logger, randomstring, sortFiles, Time, yaml } from '@hydrooj/utils/lib/utils';
 import { Context, Service } from '../context';
 import {
+    localizeError,
+    localizedErrorText,
     BadRequestError,
     ContestClientFinishedError,
     ContestClientRequiredError,
@@ -344,7 +346,7 @@ export class ContestDetailBaseHandler extends Handler {
             ) {
                 const groups = await user.listGroup(authoritativeDomainId, this.user._id);
                 if (!new Set(this.tdoc.assign).intersection(new Set(groups.map((i) => i.name))).size) {
-                    throw new NotAssignedError('contest', tid);
+                    throw new NotAssignedError(localizedErrorText`contest`, tid);
                 }
             }
             // ── Krypton: client-required contest gate ────────────────────────
@@ -383,7 +385,7 @@ export class ContestDetailBaseHandler extends Handler {
                     const result = await vg.effectiveContestAccess(authoritativeDomainId, this.tdoc, this.user._id, sid);
                     if (!result.ok) {
                         if (result.reason === 'scope_miss' && !postContestPracticeEligible) {
-                            throw new NotAssignedError('contest', tid);
+                            throw new NotAssignedError(localizedErrorText`contest`, tid);
                         }
                         if (result.reason === 'client_only' && !contestDone) {
                             throw new ContestClientRequiredError();
@@ -536,7 +538,7 @@ export class ContestDetailHandler extends ContestDetailBaseHandler {
         const authoritativeDomainId = this.authoritativeDomainId();
         this.checkPerm(PERM.PERM_ATTEND_CONTEST);
         if (contest.isDone(this.tdoc)) throw new ContestNotLiveError(tid);
-        if (this.tdoc._code && code !== this.tdoc._code) throw new InvalidTokenError('Contest Invitation', code);
+        if (this.tdoc._code && code !== this.tdoc._code) throw new InvalidTokenError(localizedErrorText`Contest Invitation`, code);
         await contest.attend(authoritativeDomainId, tid, this.user._id, { subscribe: 1 });
         this.back();
     }
@@ -581,7 +583,7 @@ export class ContestPrintHandler extends ContestDetailBaseHandler {
             } finally {
                 delete this.response.redirect;
             }
-        } else throw new MethodNotAllowedError('POST');
+        } else throw new MethodNotAllowedError(localizedErrorText`POST`);
     }
 
     @param('tid', Types.ObjectId)
@@ -1072,7 +1074,7 @@ export class ContestEditHandler extends Handler {
         }
         const pendingNeedsUnhide = !!pendingAutoHidePids.size && !persistedAutoHideActive;
         if (pendingNeedsUnhide && autoHide && autoHideActive) {
-            throw new ValidationError('autoHide', null, '上一次自动公开尚未完成，请先保持当前结束状态并重试保存');
+            throw new ValidationError('autoHide', null, localizedErrorText`上一次自动公开尚未完成，请先保持当前结束状态并重试保存`);
         }
         const autoUnhideTargets = !autoHide || !autoHideActive ? Array.from(trackedAutoHidePids) : [];
         const removedAutoHideTargets = autoHide && autoHideActive ? Array.from(trackedAutoHidePids).filter((pid) => !pids.includes(pid)) : [];
@@ -1114,7 +1116,9 @@ export class ContestEditHandler extends Handler {
             (!!existingPlannedTeamBatchId && !!requestedPlannedTeamBatchId && !existingPlannedTeamBatchId.equals(requestedPlannedTeamBatchId));
         if (plannedTeamBatchChanged) {
             if (!contestTeamBatch.canManageTeamBatches(this.user)) throw new PermissionError(PERM.PERM_EDIT_CONTEST);
-            if (existingTeamBatchId) throw new ValidationError('plannedTeamBatchId', null, 'A finalized contest roster cannot be rebound.');
+            if (existingTeamBatchId) {
+                throw new ValidationError('plannedTeamBatchId', null, localizedErrorText`A finalized contest roster cannot be rebound.`);
+            }
             if (requestedPlannedTeamBatchId && !(await contestTeamBatch.getBatch(authoritativeDomainId, requestedPlannedTeamBatchId))) {
                 throw new ValidationError('plannedTeamBatchId');
             }
@@ -1409,8 +1413,7 @@ export class ContestEditHandler extends Handler {
                 const active = await vg.listActiveSessionsForContest(authoritativeDomainId, tid);
                 if (active.length) {
                     throw new BadRequestError(
-                        `Cannot delete this contest: ${active.length} Vigil client session(s) are still active.` +
-                            ' Force-close them from the Vigil dashboard first.',
+                        localizedErrorText`Cannot delete this contest: ${active.length} Vigil client session(s) are still active. Force-close them from the Vigil dashboard first.`,
                     );
                 }
             }
@@ -1911,7 +1914,7 @@ export class ContestScoreboardHandler extends ContestDetailBaseHandler {
             if (contest.isNotStarted(this.tdoc)) throw new ContestNotLiveError(authoritativeDomainId, tid);
         }
         const view = this.ctx.scoreboard.getView(viewId);
-        if (!view) throw new NotFoundError(`View ${viewId} not found`);
+        if (!view) throw localizeError(new NotFoundError(`View ${viewId} not found`), 'View {0} not found', viewId);
         const args = {};
         const fetcher = {
             tdoc: () => this.tdoc,

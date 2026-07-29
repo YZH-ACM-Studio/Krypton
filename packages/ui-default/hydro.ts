@@ -4,7 +4,7 @@ import $ from 'jquery';
 import _ from 'lodash';
 import Notification from 'vj/components/notification';
 import PageLoader from 'vj/misc/PageLoader';
-import { delay } from 'vj/utils';
+import { delay, i18n } from 'vj/utils';
 
 declare global {
   interface Window {
@@ -90,7 +90,7 @@ export async function initPageLoader() {
       await func(currentPageName, loadPage(1, type));
     } catch (e) {
       (window as any).captureException?.(e);
-      Notification.warn(`Failed to call '${type}Loading' of ${page.name}`);
+      Notification.warn(i18n("Failed to call '{0}Loading' of {1}", type, page.name));
       console.error(`Failed to call '${type}Loading' of ${page.name}\n${e.stack}`);
       console.error(e);
     }

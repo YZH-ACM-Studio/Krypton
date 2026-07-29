@@ -2,7 +2,8 @@ import { isDeepStrictEqual } from 'node:util';
 import { parseProblemKind, type ProblemKind } from '@hydrooj/common';
 import { Logger } from '@hydrooj/utils';
 import type { ObjectId } from 'mongodb';
-import { ValidationError } from '../error';
+import { localizedErrorText, ValidationError } from '../error';
+import type { LocalizedErrorText } from '../error';
 import type { ProblemDoc } from './problem';
 import { isCanonicalManagedSourceTag } from './managed-problem-source';
 
@@ -43,7 +44,7 @@ function deny(
     fields: string[],
     result: string,
     field: string,
-    message: string,
+    message: LocalizedErrorText,
 ): never {
     logger.warn(
         'Structured metadata write denied domain=%s pid=%d kind=%s actor=%s operation=%s stage=%s fields=%o result=%s',
@@ -79,13 +80,29 @@ export async function canonicalizeStructuredKnowledgePatch(
     const dottedCanonicalFields = fields.filter((field) => field.includes('.') && canonicalRoot(field));
     if (dottedCanonicalFields.length) {
         const root = canonicalRoot(dottedCanonicalFields[0])!;
-        deny(context, current.problemKind, stage, dottedCanonicalFields, 'dotted-canonical-field', root, '结构化题规范字段必须整体保存');
+        deny(
+            context,
+            current.problemKind,
+            stage,
+            dottedCanonicalFields,
+            'dotted-canonical-field',
+            root,
+            localizedErrorText`结构化题规范字段必须整体保存`,
+        );
     }
 
     const setsKind = Object.hasOwn($set, 'problemKind');
     const unsetsKind = Object.hasOwn($unset, 'problemKind');
     if (unsetsKind || (setsKind && (current.problemKind === undefined || $set.problemKind !== current.problemKind))) {
-        deny(context, current.problemKind, stage, ['problemKind'], 'problem-kind-mutation', 'problemKind', '题型创建后不可原地修改');
+        deny(
+            context,
+            current.problemKind,
+            stage,
+            ['problemKind'],
+            'problem-kind-mutation',
+            'problemKind',
+            localizedErrorText`题型创建后不可原地修改`,
+        );
     }
 
     const problemKind = current.problemKind === undefined ? 'programming' : parseProblemKind(current.problemKind);
@@ -117,12 +134,20 @@ export async function canonicalizeStructuredKnowledgePatch(
             fields.filter((field) => ['tag', 'knowledgeMapId', 'knowledgeNodeIds'].includes(canonicalRoot(field) || '')),
             'incomplete-knowledge-pair',
             'knowledgeNodeIds',
-            '结构化题所属导图、节点与标签必须一起派生保存',
+            localizedErrorText`结构化题所属导图、节点与标签必须一起派生保存`,
         );
     }
 
     if (current.knowledgeMapId && String(current.knowledgeMapId) !== String($set.knowledgeMapId) && options.allowMapChange !== true) {
-        deny(context, problemKind, stage, ['knowledgeMapId'], 'implicit-map-change', 'knowledgeMapId', '更换所属导图必须单独预览并确认');
+        deny(
+            context,
+            problemKind,
+            stage,
+            ['knowledgeMapId'],
+            'implicit-map-change',
+            'knowledgeMapId',
+            localizedErrorText`更换所属导图必须单独预览并确认`,
+        );
     }
 
     const knowledge = await (
@@ -145,7 +170,7 @@ export async function canonicalizeStructuredKnowledgePatch(
             ['tag', 'knowledgeNodeIds'],
             'empty-knowledge-selection',
             'knowledgeNodeIds',
-            '显式标签编辑至少需要一个知识导图节点',
+            localizedErrorText`显式标签编辑至少需要一个知识导图节点`,
         );
     }
     const preservesMapOnlyProgrammingTags = problemKind === 'programming' && !knowledge.nodeIds.length && options.allowEmptyKnowledgeNodes === true;
@@ -157,7 +182,15 @@ export async function canonicalizeStructuredKnowledgePatch(
           ? [...new Set([...(Array.isArray(current.tag) ? current.tag.filter(isCanonicalManagedSourceTag) : []), ...knowledge.tags])]
           : knowledge.tags;
     if (!Array.isArray($set.tag) || !isDeepStrictEqual($set.tag, canonicalTags)) {
-        deny(context, problemKind, stage, ['tag', 'knowledgeNodeIds'], 'tag-mismatch', 'tag', '结构化题标签与知识导图派生结果不一致');
+        deny(
+            context,
+            problemKind,
+            stage,
+            ['tag', 'knowledgeNodeIds'],
+            'tag-mismatch',
+            'tag',
+            localizedErrorText`结构化题标签与知识导图派生结果不一致`,
+        );
     }
     $set.knowledgeMapId = knowledge.mapId;
     $set.knowledgeNodeIds = knowledge.nodeIds;
@@ -185,5 +218,5 @@ export function assertNoCanonicalProblemPrimitiveMutation(
 ): void {
     const root = canonicalRoot(field);
     if (!root) return;
-    deny(context, undefined, operation, [field], 'piecemeal-canonical-mutation', root, '题目规范字段不能通过通用增量写入口修改');
+    deny(context, undefined, operation, [field], 'piecemeal-canonical-mutation', root, localizedErrorText`题目规范字段不能通过通用增量写入口修改`);
 }

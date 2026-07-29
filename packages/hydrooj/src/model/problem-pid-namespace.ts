@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { ObjectId } from 'mongodb';
 import { Logger } from '@hydrooj/utils';
-import { PermissionError, ValidationError } from '../error';
+import { localizedErrorText, PermissionError, ValidationError } from '../error';
 import type { User } from '../interface';
 import {
     BUILTIN_PID_NAMESPACE_DEFINITIONS,
@@ -205,7 +205,7 @@ export function normalizeCustomPidNamespaceInput(input: unknown): { name: string
     if (!isPlainObject(input)) throw new ValidationError('namespace');
     const allowed = new Set(['name', 'prefix', 'start']);
     const unknown = Object.keys(input).filter((field) => !allowed.has(field));
-    if (unknown.length) throw new ValidationError('namespace', null, `命名空间不接受字段：${unknown.join(', ')}`);
+    if (unknown.length) throw new ValidationError('namespace', null, localizedErrorText`命名空间不接受字段：${unknown.join(', ')}`);
     const name = typeof input.name === 'string' ? input.name.trim() : '';
     const prefix = typeof input.prefix === 'string' ? input.prefix.trim().toUpperCase() : '';
     if (!name || name.length > 64) throw new ValidationError('name');
@@ -488,10 +488,10 @@ export async function listManageablePidNamespaces(domainId: string, user: PidNam
 function sourceMetaForNamespace(namespace: PidNamespaceView, sourceMetaInput: unknown): ManagedSourceMeta {
     const sourceMeta = normalizeManagedSourceMeta(sourceMetaInput);
     if (!namespace.sourceTemplates.includes(sourceMeta.template)) {
-        throw new ValidationError('template', null, `来源模板不属于题号命名空间 ${namespace.name}`);
+        throw new ValidationError('template', null, localizedErrorText`来源模板不属于题号命名空间 ${namespace.name}`);
     }
     if (namespace.kind === 'custom' && sourceMeta.template !== 'self') {
-        throw new ValidationError('template', null, '自定义命名空间只保留自命题来源事实，不自动派生课程标签');
+        throw new ValidationError('template', null, localizedErrorText`自定义命名空间只保留自命题来源事实，不自动派生课程标签`);
     }
     return sourceMeta;
 }
@@ -572,7 +572,7 @@ function adminRequired(user: PidNamespaceAclUser): void {
 }
 
 function duplicateNamespace(error: any): never {
-    if (error?.code === 11000) throw new ValidationError('prefix', null, '当前域已存在相同题号前缀或命名空间');
+    if (error?.code === 11000) throw new ValidationError('prefix', null, localizedErrorText`当前域已存在相同题号前缀或命名空间`);
     throw error;
 }
 
@@ -586,7 +586,7 @@ async function assertCustomPrefixDoesNotMatchExistingProblem(domainId: string, p
         { projection: { docId: 1, pid: 1 } },
     );
     if (collision) {
-        throw new ValidationError('prefix', null, `前缀已匹配现有题号 ${collision.pid}，不能建立自定义命名空间`);
+        throw new ValidationError('prefix', null, localizedErrorText`前缀已匹配现有题号 ${collision.pid}，不能建立自定义命名空间`);
     }
 }
 
@@ -659,7 +659,9 @@ export async function updatePidNamespaceConfig(input: {
     const expectedRevision = parseInteger(input.expectedRevision, 'expectedRevision', 0, Number.MAX_SAFE_INTEGER);
     return withPidNamespaceBoundary(input.domainId, input.namespaceId, async () => {
         const current = await getPidNamespace(input.domainId, input.namespaceId);
-        if (!current || current.revision !== expectedRevision) throw new ValidationError('expectedRevision', null, '命名空间已变化，请刷新后重试');
+        if (!current || current.revision !== expectedRevision) {
+            throw new ValidationError('expectedRevision', null, localizedErrorText`命名空间已变化，请刷新后重试`);
+        }
         const name = input.name === undefined ? current.name : typeof input.name === 'string' ? input.name.trim() : '';
         const enabled = input.enabled === undefined ? current.enabled : input.enabled;
         if (!name || name.length > 64) throw new ValidationError('name');
@@ -668,17 +670,17 @@ export async function updatePidNamespaceConfig(input: {
             current.kind === 'builtin' &&
             ((input.name !== undefined && name !== current.name) || input.prefix !== undefined || input.start !== undefined)
         ) {
-            throw new ValidationError('fields', null, '内置命名空间的名称、前缀和编号规则不可修改');
+            throw new ValidationError('fields', null, localizedErrorText`内置命名空间的名称、前缀和编号规则不可修改`);
         }
         let prefix = current.prefix;
         let start = current.start;
         if (current.kind === 'custom' && (input.prefix !== undefined || input.start !== undefined)) {
-            if (current.allocated) throw new ValidationError('prefix', null, '命名空间已分配过题号，前缀与起始编号已永久锁定');
+            if (current.allocated) throw new ValidationError('prefix', null, localizedErrorText`命名空间已分配过题号，前缀与起始编号已永久锁定`);
             const referenced = await document.coll.findOne(
                 { domainId: input.domainId, docType: document.TYPE_PROBLEM, pidNamespaceId: input.namespaceId },
                 { projection: { docId: 1 } },
             );
-            if (referenced) throw new ValidationError('prefix', null, '命名空间已有题目归属，前缀与起始编号已永久锁定');
+            if (referenced) throw new ValidationError('prefix', null, localizedErrorText`命名空间已有题目归属，前缀与起始编号已永久锁定`);
             const normalized = normalizeCustomPidNamespaceInput({
                 name,
                 prefix: input.prefix === undefined ? current.prefix : input.prefix,
@@ -736,7 +738,7 @@ export async function updatePidNamespaceConfig(input: {
                             { $set: { enabled, updatedAt: now }, $inc: { revision: 1 } },
                             { returnDocument: 'after' },
                         );
-                        if (!updated) throw new ValidationError('expectedRevision', null, '命名空间已变化，请刷新后重试');
+                        if (!updated) throw new ValidationError('expectedRevision', null, localizedErrorText`命名空间已变化，请刷新后重试`);
                         markCommitted();
                     }
                 } else {
@@ -752,7 +754,7 @@ export async function updatePidNamespaceConfig(input: {
                             { $set: update, $inc: { revision: 1 } },
                             { returnDocument: 'after' },
                         );
-                        if (!updated) throw new ValidationError('expectedRevision', null, '命名空间已变化，请刷新后重试');
+                        if (!updated) throw new ValidationError('expectedRevision', null, localizedErrorText`命名空间已变化，请刷新后重试`);
                         markCommitted();
                     } catch (error) {
                         duplicateNamespace(error);
@@ -776,18 +778,20 @@ export async function deleteCustomPidNamespace(input: {
     assertDomainId(input.domainId);
     assertNamespaceId(input.namespaceId);
     adminRequired(input.user);
-    if (builtinDefinition(input.namespaceId)) throw new ValidationError('pidNamespaceId', null, '内置命名空间不可删除');
+    if (builtinDefinition(input.namespaceId)) throw new ValidationError('pidNamespaceId', null, localizedErrorText`内置命名空间不可删除`);
     const expectedRevision = parseInteger(input.expectedRevision, 'expectedRevision', 1, Number.MAX_SAFE_INTEGER);
     await withPidNamespaceBoundary(input.domainId, input.namespaceId, async () => {
         const current = await getPidNamespace(input.domainId, input.namespaceId);
         if (!current || current.kind !== 'custom') throw new ValidationError('pidNamespaceId');
-        if (current.revision !== expectedRevision) throw new ValidationError('expectedRevision', null, '命名空间已变化，请刷新后重试');
-        if (current.allocated) throw new ValidationError('pidNamespaceId', null, '命名空间已分配过题号，只能停用，不能删除');
+        if (current.revision !== expectedRevision) {
+            throw new ValidationError('expectedRevision', null, localizedErrorText`命名空间已变化，请刷新后重试`);
+        }
+        if (current.allocated) throw new ValidationError('pidNamespaceId', null, localizedErrorText`命名空间已分配过题号，只能停用，不能删除`);
         const referenced = await document.coll.findOne(
             { domainId: input.domainId, docType: document.TYPE_PROBLEM, pidNamespaceId: input.namespaceId },
             { projection: { docId: 1 } },
         );
-        if (referenced) throw new ValidationError('pidNamespaceId', null, '命名空间已有题目归属，只能停用，不能删除');
+        if (referenced) throw new ValidationError('pidNamespaceId', null, localizedErrorText`命名空间已有题目归属，只能停用，不能删除`);
         await auditedPidNamespaceMutation(
             {
                 operation: 'delete',
@@ -805,7 +809,7 @@ export async function deleteCustomPidNamespace(input: {
                     revision: expectedRevision,
                     allocated: { $ne: true },
                 } as any);
-                if (deleted.deletedCount !== 1) throw new ValidationError('expectedRevision', null, '命名空间已变化，请刷新后重试');
+                if (deleted.deletedCount !== 1) throw new ValidationError('expectedRevision', null, localizedErrorText`命名空间已变化，请刷新后重试`);
                 markCommitted();
             },
         );
@@ -830,7 +834,9 @@ export async function setPidNamespaceMember(input: {
     const expectedRevision = parseInteger(input.expectedRevision, 'expectedRevision', 0, Number.MAX_SAFE_INTEGER);
     return withPidNamespaceBoundary(input.domainId, input.namespaceId, async () => {
         const current = await getPidNamespace(input.domainId, input.namespaceId);
-        if (!current || current.revision !== expectedRevision) throw new ValidationError('expectedRevision', null, '命名空间已变化，请刷新后重试');
+        if (!current || current.revision !== expectedRevision) {
+            throw new ValidationError('expectedRevision', null, localizedErrorText`命名空间已变化，请刷新后重试`);
+        }
         const admin = isProblemBankAdmin(input.user);
         const actorMember = current.members.find((member) => member.uid === input.user._id);
         if (!admin && actorMember?.role !== 'manager') throw new PermissionError(PRIV.PRIV_EDIT_SYSTEM);
@@ -886,7 +892,7 @@ export async function setPidNamespaceMember(input: {
                         { $set: { members, updatedAt: now }, $inc: { revision: 1 } },
                         { returnDocument: 'after' },
                     );
-                    if (!updated) throw new ValidationError('expectedRevision', null, '命名空间已变化，请刷新后重试');
+                    if (!updated) throw new ValidationError('expectedRevision', null, localizedErrorText`命名空间已变化，请刷新后重试`);
                     markCommitted();
                 }
                 const result = await getPidNamespace(input.domainId, input.namespaceId);
@@ -912,7 +918,7 @@ export async function reservePidForNamespace(input: {
         await refreshPidNamespaceAcl(input.user, input.domainId);
         const namespace = await getPidNamespace(input.domainId, input.namespaceId);
         if (!namespace) throw new ValidationError('pidNamespaceId');
-        if (!namespace.enabled) throw new ValidationError('pidNamespaceId', null, '题号命名空间已停用');
+        if (!namespace.enabled) throw new ValidationError('pidNamespaceId', null, localizedErrorText`题号命名空间已停用`);
         if (!canCreateInPidNamespace(input.user, input.domainId, input.namespaceId)) {
             throw new PermissionError(PERM.PERM_CREATE_PROGRAMMING_DRAFT);
         }
@@ -954,9 +960,9 @@ export async function reservePidForNamespace(input: {
                         throw new TypeError(`PID counter is invalid: ${input.domainId}/${counterNamespace}`);
                     }
                     if (live.value >= maxSequence) {
-                        throw new ValidationError('pidNamespaceId', null, `题号命名空间已耗尽（最大 ${maxSequence}）`);
+                        throw new ValidationError('pidNamespaceId', null, localizedErrorText`题号命名空间已耗尽（最大 ${maxSequence}）`);
                     }
-                    throw new ValidationError('pidNamespaceId', null, '题号计数器已变化，请重试');
+                    throw new ValidationError('pidNamespaceId', null, localizedErrorText`题号计数器已变化，请重试`);
                 }
                 sequence = counter.value;
                 pid = formatManagedProblemPid(sourceMeta, sequence);
@@ -979,9 +985,11 @@ export async function reservePidForNamespace(input: {
                 if (!updated) {
                     const live = await getPidNamespace(input.domainId, input.namespaceId);
                     if (!live) throw new ValidationError('pidNamespaceId');
-                    if (!live.enabled) throw new ValidationError('pidNamespaceId', null, '题号命名空间已停用');
-                    if ((live.counter || 0) >= 9999) throw new ValidationError('pidNamespaceId', null, '题号命名空间已耗尽（最大 9999）');
-                    throw new ValidationError('expectedRevision', null, '题号命名空间已变化，请重试');
+                    if (!live.enabled) throw new ValidationError('pidNamespaceId', null, localizedErrorText`题号命名空间已停用`);
+                    if ((live.counter || 0) >= 9999) {
+                        throw new ValidationError('pidNamespaceId', null, localizedErrorText`题号命名空间已耗尽（最大 9999）`);
+                    }
+                    throw new ValidationError('expectedRevision', null, localizedErrorText`题号命名空间已变化，请重试`);
                 }
                 sequence = updated.counter!;
                 pid = formatCustomPid(updated.prefix, sequence);
@@ -992,7 +1000,11 @@ export async function reservePidForNamespace(input: {
                 { projection: { docId: 1, pid: 1 } },
             );
             if (collision) {
-                throw new ValidationError('pidNamespaceId', null, `分配出的题号 ${pid} 已存在；counter 已消耗，请检查初始化或迁移状态`);
+                throw new ValidationError(
+                    'pidNamespaceId',
+                    null,
+                    localizedErrorText`分配出的题号 ${pid} 已存在；counter 已消耗，请检查初始化或迁移状态`,
+                );
             }
             completedAllocation = { namespaceId: input.namespaceId, pid, sourceMeta };
             const finalized = await oplog.coll.updateOne(

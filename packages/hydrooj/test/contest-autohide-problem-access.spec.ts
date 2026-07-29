@@ -1,4 +1,5 @@
 import { expect } from 'chai';
+import { localizedErrorText } from '@hydrooj/framework';
 import { readFileSync } from 'node:fs';
 import { beforeEach, describe, it } from 'node:test';
 
@@ -258,6 +259,7 @@ const storageStub = {
 };
 const errors = new Proxy(
     {
+        localizedErrorText,
         PermissionError: TestPermissionError,
         ValidationError: TestValidationError,
     },

@@ -1,6 +1,6 @@
 import { Filter, ObjectId } from 'mongodb';
 import { Logger } from '@hydrooj/utils';
-import { NotAssignedError } from '../error';
+import { localizedErrorText, NotAssignedError } from '../error';
 import { Tdoc } from '../interface';
 import { PERM, PRIV } from './builtin';
 
@@ -42,12 +42,12 @@ export function homeworkParticipantScopeAllows(tdoc: Tdoc, groupIds: Set<string>
 export async function assertHomeworkAccess(domainId: string, tdoc: Tdoc, user: any): Promise<void> {
     if (canBypassHomeworkAccess(user, tdoc)) return;
     if (tdoc.assign?.length && !new Set(tdoc.assign).intersection(new Set(user.group || [])).size) {
-        throw new NotAssignedError('homework', tdoc.docId);
+        throw new NotAssignedError(localizedErrorText`homework`, tdoc.docId);
     }
     if (tdoc.participantScopeMode && tdoc.participantScopeMode !== 'none') {
         const groupIds = await getHomeworkUserGroupIds(domainId, user._id);
         if (!homeworkParticipantScopeAllows(tdoc, groupIds)) {
-            throw new NotAssignedError('homework', tdoc.docId);
+            throw new NotAssignedError(localizedErrorText`homework`, tdoc.docId);
         }
     }
 }

@@ -127,7 +127,12 @@ require.cache[errorPath] = {
     id: errorPath,
     filename: errorPath,
     loaded: true,
-    exports: { ManagedProblemMetadataConflictError: TestMetadataConflictError },
+    exports: {
+        ManagedProblemMetadataConflictError: TestMetadataConflictError,
+        localizedErrorText(strings: TemplateStringsArray, ...params: readonly unknown[]) {
+            return strings.reduce((result, part, index) => result + (index ? String(params[index - 1]) : '') + part, '');
+        },
+    },
 } as NodeModule;
 delete require.cache[modulePath];
 

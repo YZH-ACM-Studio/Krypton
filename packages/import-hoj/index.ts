@@ -7,6 +7,8 @@ import {
     extractZip,
     fs,
     Handler,
+    localizeError,
+    localizeErrorParameter,
     param,
     PERM,
     ProblemConfigFile,
@@ -28,7 +30,7 @@ class ImportHojHandler extends Handler {
         const tmp = path.resolve(tmpdir, randomstring(32));
         await extractZip(zip, tmp, {
             strip: true,
-            parseError: (e) => new ValidationError('zip', null, e.message),
+            parseError: (e) => localizeErrorParameter(new ValidationError('zip', null, e.message), 2, 'Unable to read the archive: {0}', e.message),
         });
         let cnt = 0;
         try {
@@ -118,7 +120,7 @@ class ImportHojHandler extends Handler {
         } finally {
             await fs.remove(tmp);
         }
-        if (!cnt) throw new ValidationError('zip', 'No problemset imported');
+        if (!cnt) throw localizeError(new ValidationError('zip', 'No problemset imported'), 'No problem set was imported.');
     }
 
     async get() {
@@ -130,7 +132,9 @@ class ImportHojHandler extends Handler {
     async post({ domainId }, knowledgeMapId?: string) {
         const file = this.request.files.file;
         if (!file) throw new ValidationError('file');
-        if (file.size > 128 * 1024 * 1024) throw new ValidationError('file', 'File too large');
+        if (file.size > 128 * 1024 * 1024) {
+            throw localizeError(new ValidationError('file', 'File too large'), 'The uploaded file is too large.');
+        }
         await this.fromFile(domainId, file.filepath, knowledgeMapId);
         this.response.redirect = this.url('problem_main');
     }

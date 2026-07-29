@@ -6,7 +6,7 @@
  * and `claimTemporaryAccount` specifically — those are stable contracts.
  */
 import type { Filter } from 'mongodb';
-import { db, ObjectId, UserModel, ValidationError } from 'hydrooj';
+import { localizedErrorText, db, ObjectId, UserModel, ValidationError } from 'hydrooj';
 import { bindTokensColl, ensureIndexes, schoolsColl, studentsColl, userGroupsColl } from './db';
 import {
     createGroupFromBoundUsersWithDependencies,
@@ -246,7 +246,7 @@ export async function createSchool(domainId: string, name: string, createdBy: nu
     try {
         await schoolsColl.insertOne(doc);
     } catch (e: any) {
-        if (e?.code === 11000) throw new ValidationError('name', null, 'School name already exists in this domain');
+        if (e?.code === 11000) throw new ValidationError('name', null, localizedErrorText`School name already exists in this domain`);
         throw e;
     }
     return doc;
@@ -271,7 +271,7 @@ export async function updateSchool(domainId: string, id: ObjectId, patch: { name
     try {
         await schoolsColl.updateOne({ domainId, _id: id }, { $set: setOps });
     } catch (e: any) {
-        if (e?.code === 11000) throw new ValidationError('name', null, 'School name already exists in this domain');
+        if (e?.code === 11000) throw new ValidationError('name', null, localizedErrorText`School name already exists in this domain`);
         throw e;
     }
 }
@@ -279,11 +279,11 @@ export async function updateSchool(domainId: string, id: ObjectId, patch: { name
 export async function deleteSchool(domainId: string, id: ObjectId): Promise<void> {
     const studentCount = await studentsColl.countDocuments({ domainId, schoolId: id });
     if (studentCount > 0) {
-        throw new ValidationError('school', null, `Cannot delete school: ${studentCount} student record(s) still belong to it`);
+        throw new ValidationError('school', null, localizedErrorText`Cannot delete school: ${studentCount} student record(s) still belong to it`);
     }
     const groupCount = await userGroupsColl.countDocuments({ domainId, schoolId: id });
     if (groupCount > 0) {
-        throw new ValidationError('school', null, `Cannot delete school: ${groupCount} user group(s) still belong to it`);
+        throw new ValidationError('school', null, localizedErrorText`Cannot delete school: ${groupCount} user group(s) still belong to it`);
     }
     await schoolsColl.deleteOne({ domainId, _id: id });
 }
@@ -300,7 +300,7 @@ export async function createUserGroup(
     name = name.trim();
     if (!name) throw new ValidationError('name');
     const school = await schoolsColl.findOne({ domainId, _id: schoolId });
-    if (!school) throw new ValidationError('schoolId', null, 'School not found');
+    if (!school) throw new ValidationError('schoolId', null, localizedErrorText`School not found`);
     const doc: UserGroup = {
         _id: groupId,
         domainId,
@@ -312,7 +312,7 @@ export async function createUserGroup(
     try {
         await userGroupsColl.insertOne(doc);
     } catch (e: any) {
-        if (e?.code === 11000) throw new ValidationError('name', null, 'Group name already exists in this school');
+        if (e?.code === 11000) throw new ValidationError('name', null, localizedErrorText`Group name already exists in this school`);
         throw e;
     }
     return doc;
@@ -388,7 +388,7 @@ export async function updateUserGroup(domainId: string, id: ObjectId, patch: { n
     try {
         await userGroupsColl.updateOne({ domainId, _id: id }, { $set: setOps });
     } catch (e: any) {
-        if (e?.code === 11000) throw new ValidationError('name', null, 'Group name already exists in this school');
+        if (e?.code === 11000) throw new ValidationError('name', null, localizedErrorText`Group name already exists in this school`);
         throw e;
     }
 }
@@ -416,11 +416,11 @@ export async function deleteUserGroup(domainId: string, id: ObjectId): Promise<v
     const group = await userGroupsColl.findOne({ domainId, _id: id });
     if (!group) return;
     if (!group.archivedAt) {
-        throw new ValidationError('groupId', null, '请先归档该用户组，只有已归档的用户组才能永久删除');
+        throw new ValidationError('groupId', null, localizedErrorText`请先归档该用户组，只有已归档的用户组才能永久删除`);
     }
     const memberCount = await studentsColl.countDocuments({ domainId, groupIds: id });
     if (memberCount > 0) {
-        throw new ValidationError('groupId', null, `该用户组仍有 ${memberCount} 名成员，请先移除全部成员`);
+        throw new ValidationError('groupId', null, localizedErrorText`该用户组仍有 ${memberCount} 名成员，请先移除全部成员`);
     }
     // References that would dangle: task graphs store the group as a hex
     // string in node params; task访问范围 (TaskDoc.access) stores it as an
@@ -438,13 +438,13 @@ export async function deleteUserGroup(domainId: string, id: ObjectId): Promise<v
         db.collection('document' as any).countDocuments({ domainId, docType: 30, participantGroupIds: id }),
     ]);
     if (taskRefs > 0) {
-        throw new ValidationError('groupId', null, `该用户组被 ${taskRefs} 个任务引用（图节点或可见范围），请先在任务中移除`);
+        throw new ValidationError('groupId', null, localizedErrorText`该用户组被 ${taskRefs} 个任务引用（图节点或可见范围），请先在任务中移除`);
     }
     if (courseRefs > 0) {
-        throw new ValidationError('groupId', null, `该用户组被 ${courseRefs} 个课程/训练引用，请先在其中移除`);
+        throw new ValidationError('groupId', null, localizedErrorText`该用户组被 ${courseRefs} 个课程/训练引用，请先在其中移除`);
     }
     if (contestRefs > 0) {
-        throw new ValidationError('groupId', null, `该用户组被 ${contestRefs} 个比赛/作业的参赛范围引用，请先在其中移除`);
+        throw new ValidationError('groupId', null, localizedErrorText`该用户组被 ${contestRefs} 个比赛/作业的参赛范围引用，请先在其中移除`);
     }
     // Clean up group invite tokens (ephemeral), then the group itself.
     await bindTokensColl.deleteMany({ domainId, kind: 'user_group', userGroupId: id } as any);
@@ -460,7 +460,7 @@ export async function importStudents(
     createdBy: number,
 ): Promise<ImportStudentReport> {
     const school = await schoolsColl.findOne({ domainId, _id: schoolId });
-    if (!school) throw new ValidationError('schoolId', null, 'School not found');
+    if (!school) throw new ValidationError('schoolId', null, localizedErrorText`School not found`);
 
     const report: ImportStudentReport = {
         inserted: 0,
@@ -544,7 +544,7 @@ export interface SearchBindableUserResult {
 
 export async function searchBindableUsers(domainId: string, schoolId: ObjectId, query: string, limit = 50): Promise<SearchBindableUserResult[]> {
     const school = await schoolsColl.findOne({ domainId, _id: schoolId });
-    if (!school) throw new ValidationError('schoolId', null, 'School not found');
+    if (!school) throw new ValidationError('schoolId', null, localizedErrorText`School not found`);
     const q = (query || '').trim();
     if (!q) return [];
     const regex = new RegExp(escapeRegexLiteral(q), 'i');
@@ -570,7 +570,7 @@ export async function searchBindableUsers(domainId: string, schoolId: ObjectId, 
 
 export async function importUsersToSchool(domainId: string, schoolId: ObjectId, userIds: number[], createdBy: number): Promise<ImportStudentReport> {
     const school = await schoolsColl.findOne({ domainId, _id: schoolId });
-    if (!school) throw new ValidationError('schoolId', null, 'School not found');
+    if (!school) throw new ValidationError('schoolId', null, localizedErrorText`School not found`);
     const report: ImportStudentReport = {
         inserted: 0,
         duplicates: [],
@@ -674,8 +674,8 @@ export async function importStudentsToGroup(
     createdBy: number,
 ): Promise<ImportGroupReport> {
     const group = await userGroupsColl.findOne({ domainId, _id: groupId });
-    if (!group) throw new ValidationError('groupId', null, '用户组不存在');
-    if (group.archivedAt) throw new ValidationError('groupId', null, '该用户组已归档，无法导入成员');
+    if (!group) throw new ValidationError('groupId', null, localizedErrorText`用户组不存在`);
+    if (group.archivedAt) throw new ValidationError('groupId', null, localizedErrorText`该用户组已归档，无法导入成员`);
     const schoolId = group.schoolId;
 
     const report: ImportGroupReport = {
@@ -789,7 +789,7 @@ export interface RetryGroupAutoBindReport {
 
 export async function retryAutoBindStudentsInGroup(domainId: string, groupId: ObjectId): Promise<RetryGroupAutoBindReport> {
     const group = await userGroupsColl.findOne({ domainId, _id: groupId });
-    if (!group) throw new ValidationError('groupId', null, '用户组不存在');
+    if (!group) throw new ValidationError('groupId', null, localizedErrorText`用户组不存在`);
     const records = await studentsColl
         .find({
             domainId,
@@ -919,7 +919,7 @@ export async function updateStudent(
     if (typeof patch.realName === 'string') {
         const trimmed = patch.realName.trim();
         if (!isValidRealName(trimmed)) {
-            throw new ValidationError('realName', null, '姓名格式非法');
+            throw new ValidationError('realName', null, localizedErrorText`姓名格式非法`);
         }
         $set.realName = trimmed;
     }
@@ -928,7 +928,7 @@ export async function updateStudent(
             patch.enrollmentYear !== null &&
             (!Number.isInteger(patch.enrollmentYear) || patch.enrollmentYear < 1900 || patch.enrollmentYear > 2099)
         ) {
-            throw new ValidationError('enrollmentYear', null, '年份范围必须在 1900–2099');
+            throw new ValidationError('enrollmentYear', null, localizedErrorText`年份范围必须在 1900–2099`);
         }
         $set.enrollmentYear = patch.enrollmentYear;
     }
@@ -943,7 +943,7 @@ export async function deleteStudent(domainId: string, id: ObjectId): Promise<voi
     const doc = await studentsColl.findOne({ domainId, _id: id });
     if (!doc) return;
     if (doc.boundUserId) {
-        throw new ValidationError('student', null, 'Cannot delete a student record that is bound to a user; unbind first');
+        throw new ValidationError('student', null, localizedErrorText`Cannot delete a student record that is bound to a user; unbind first`);
     }
     // Drop any pending tokens for this student.
     await bindTokensColl.deleteMany({ studentRecordId: id, used: false });
@@ -953,8 +953,8 @@ export async function deleteStudent(domainId: string, id: ObjectId): Promise<voi
 export async function assignStudentsToGroup(domainId: string, groupId: ObjectId, studentRecordIds: ObjectId[]): Promise<void> {
     if (studentRecordIds.length === 0) return;
     const group = await userGroupsColl.findOne({ domainId, _id: groupId });
-    if (!group) throw new ValidationError('groupId', null, 'Group not found');
-    if (group.archivedAt) throw new ValidationError('groupId', null, '该用户组已归档，无法添加成员');
+    if (!group) throw new ValidationError('groupId', null, localizedErrorText`Group not found`);
+    if (group.archivedAt) throw new ValidationError('groupId', null, localizedErrorText`该用户组已归档，无法添加成员`);
     await studentsColl.updateMany(
         { domainId, _id: { $in: studentRecordIds }, schoolId: group.schoolId },
         { $addToSet: { groupIds: groupId } as any },

@@ -3,6 +3,8 @@ import moment from 'moment-timezone';
 import Schema from 'schemastery';
 import type { Context } from '../context';
 import {
+    localizedErrorText,
+    localizeError,
     CannotDeleteSystemDomainError,
     DomainJoinAlreadyMemberError,
     DomainJoinForbiddenError,
@@ -456,15 +458,15 @@ class DomainJoinHandler extends Handler {
     @param('target', Types.DomainId, true)
     async prepare({ domainId }, target: string = domainId) {
         const [ddoc, dudoc] = await Promise.all([domain.get(target), domain.collUser.findOne({ domainId: target, uid: this.user._id })]);
-        if (!ddoc) throw new NotFoundError(target);
+        if (!ddoc) throw localizeError(new NotFoundError(target), 'Resource {0} not found.', target);
         const assignedRole = this.user.hasPriv(PRIV.PRIV_MANAGE_ALL_DOMAIN) ? 'root' : dudoc?.role || 'default';
         if (dudoc?.join) throw new DomainJoinAlreadyMemberError(target, this.user._id);
         const r = await domain.getRoles(ddoc);
         const roles = r.map((role) => role._id);
         this.joinSettings = domain.getJoinSettings(ddoc, roles);
         if (assignedRole !== 'default') delete this.joinSettings;
-        else if (!this.joinSettings) throw new DomainJoinForbiddenError(target, 'The link is either invalid or expired.');
-        if (assignedRole === 'guest') throw new DomainJoinForbiddenError(target, 'You are banned by the domain moderator.');
+        else if (!this.joinSettings) throw new DomainJoinForbiddenError(target, localizedErrorText`The link is either invalid or expired.`);
+        if (assignedRole === 'guest') throw new DomainJoinForbiddenError(target, localizedErrorText`You are banned by the domain moderator.`);
     }
 
     @param('code', Types.Content, true)

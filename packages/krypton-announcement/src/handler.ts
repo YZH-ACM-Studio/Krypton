@@ -20,7 +20,7 @@
  *   - Category management: PRIV_EDIT_SYSTEM (system-wide list).
  */
 import type { Context } from 'hydrooj';
-import { Handler, NotFoundError, ObjectId, param, PERM, PermissionError, PRIV, PrivilegeError, Types } from 'hydrooj';
+import { localizedErrorText, Handler, NotFoundError, ObjectId, param, PERM, PermissionError, PRIV, PrivilegeError, Types } from 'hydrooj';
 import {
     countUnreadForUser,
     createAnnouncement,
@@ -101,14 +101,14 @@ class AnnounceDetailHandler extends Handler {
     @param('aid', Types.ObjectId)
     async get({ domainId }: { domainId: string }, aid: ObjectId) {
         const doc = await getAnnouncement(aid);
-        if (!doc) throw new NotFoundError('announcement', String(aid));
+        if (!doc) throw new NotFoundError(localizedErrorText`announcement`, String(aid));
         // Non-admins can't see hidden / future / expired announcements.
         const canSeeHidden = this.user.hasPerm(PERM.PERM_EDIT_DOMAIN) || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
         if (!canSeeHidden && !isEffectivelyVisible(doc)) {
-            throw new NotFoundError('announcement', String(aid));
+            throw new NotFoundError(localizedErrorText`announcement`, String(aid));
         }
         if (doc.scope === 'domain' && doc.domainId !== domainId && !canSeeHidden) {
-            throw new NotFoundError('announcement', String(aid));
+            throw new NotFoundError(localizedErrorText`announcement`, String(aid));
         }
         await incrementViews(doc._id);
         if (this.user._id) {
@@ -215,7 +215,7 @@ class AdminAnnounceEditHandler extends Handler {
     @param('aid', Types.ObjectId)
     async get(_ctx: any, aid: ObjectId) {
         const doc = await getAnnouncement(aid);
-        if (!doc) throw new NotFoundError('announcement', String(aid));
+        if (!doc) throw new NotFoundError(localizedErrorText`announcement`, String(aid));
         const categories = await listCategories({ includeHidden: true });
         this.response.template = 'admin_announce_edit.html';
         this.response.body = {
@@ -246,7 +246,7 @@ class AdminAnnounceEditHandler extends Handler {
     ) {
         if (!aid) throw new Error('aid required');
         const doc = await getAnnouncement(aid);
-        if (!doc) throw new NotFoundError('announcement', String(aid));
+        if (!doc) throw new NotFoundError(localizedErrorText`announcement`, String(aid));
         ensureCanEditAnnouncement(this.user, doc);
         const patch: any = {};
         if (title !== undefined) patch.title = title;
@@ -264,7 +264,7 @@ class AdminAnnounceEditHandler extends Handler {
     async postDelete(_ctx: any, aid?: ObjectId) {
         if (!aid) throw new Error('aid required');
         const doc = await getAnnouncement(aid);
-        if (!doc) throw new NotFoundError('announcement', String(aid));
+        if (!doc) throw new NotFoundError(localizedErrorText`announcement`, String(aid));
         ensureCanEditAnnouncement(this.user, doc);
         await deleteAnnouncement(aid);
         this.response.redirect = this.url('admin_announce');

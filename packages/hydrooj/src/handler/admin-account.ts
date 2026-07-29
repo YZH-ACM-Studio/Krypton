@@ -1,7 +1,15 @@
 import { createHash } from 'node:crypto';
 import { ObjectId } from 'mongodb';
 import { Context } from '../context';
-import { AccountStateConflictError, BadRequestError, ForbiddenError, UserNotFoundError, ValidationError } from '../error';
+import {
+    localizedErrorText,
+    AccountStateConflictError,
+    BadRequestError,
+    ForbiddenError,
+    LocalizedErrorText,
+    UserNotFoundError,
+    ValidationError,
+} from '../error';
 import {
     ACCOUNT_BULK_LIMIT,
     SUPERADMIN_UID,
@@ -106,13 +114,15 @@ interface AuditWorkResult<T> {
     targetUids?: number[];
 }
 
-function validation(field: string, message: string): never {
+function validation(field: string, message: LocalizedErrorText): never {
     throw new ValidationError(field, null, message);
 }
 
 function integerArg(value: unknown, field: string, positive = true): number {
     const parsed = typeof value === 'number' ? value : Number(String(value || '').trim());
-    if (!Number.isSafeInteger(parsed) || (positive && parsed <= 0)) validation(field, `${field} 必须是${positive ? '正' : ''}整数`);
+    if (!Number.isSafeInteger(parsed) || (positive && parsed <= 0)) {
+        validation(field, positive ? localizedErrorText`${field} 必须是正整数` : localizedErrorText`${field} 必须是整数`);
+    }
     return parsed;
 }
 
@@ -137,19 +147,19 @@ function legacyAccountDetailPath(args: any, uid: number): string {
 function booleanArg(value: unknown, field: string): boolean {
     if (value === true || value === 'true' || value === '1') return true;
     if (value === false || value === 'false' || value === '0') return false;
-    validation(field, `${field} 必须是布尔值`);
+    validation(field, localizedErrorText`${field} 必须是布尔值`);
 }
 
 function stringArg(value: unknown, field: string, max: number, allowEmpty = true): string {
     const parsed = value == null ? '' : String(value);
-    if (!allowEmpty && !parsed.trim()) validation(field, `${field} 不能为空`);
-    if (parsed.length > max) validation(field, `${field} 最多 ${max} 个字符`);
+    if (!allowEmpty && !parsed.trim()) validation(field, localizedErrorText`${field} 不能为空`);
+    if (parsed.length > max) validation(field, localizedErrorText`${field} 最多 ${max} 个字符`);
     return parsed;
 }
 
 function enumArg(value: unknown, field: string, allowed: Set<string>, fallback: string): string {
     const parsed = String(value || fallback);
-    if (!allowed.has(parsed)) validation(field, `${field} 的值无效`);
+    if (!allowed.has(parsed)) validation(field, localizedErrorText`${field} 的值无效`);
     return parsed;
 }
 
@@ -157,7 +167,7 @@ function dateArg(value: unknown, field: string, endOfDay = false): Date | null {
     if (!value) return null;
     const raw = String(value);
     const date = new Date(/^\d{4}-\d{2}-\d{2}$/.test(raw) ? `${raw}T${endOfDay ? '23:59:59.999' : '00:00:00.000'}+08:00` : raw);
-    if (Number.isNaN(date.getTime())) validation(field, `${field} 不是有效日期`);
+    if (Number.isNaN(date.getTime())) validation(field, localizedErrorText`${field} 不是有效日期`);
     return date;
 }
 
@@ -166,18 +176,16 @@ function isSystemAdmin(priv: number): boolean {
 }
 
 function isUsableSystemAdmin(priv: number): boolean {
-    return priv !== PRIV.PRIV_NONE
-        && isSystemAdmin(priv)
-        && (priv & PRIV.PRIV_USER_PROFILE) === PRIV.PRIV_USER_PROFILE;
+    return priv !== PRIV.PRIV_NONE && isSystemAdmin(priv) && (priv & PRIV.PRIV_USER_PROFILE) === PRIV.PRIV_USER_PROFILE;
 }
 
 function siteDefaultPrivilege(): number {
     const configured = Number(system.get('default.priv'));
     if (
-        !Number.isSafeInteger(configured)
-        || configured <= 0
-        || isSystemAdmin(configured)
-        || (configured & PRIV.PRIV_USER_PROFILE) !== PRIV.PRIV_USER_PROFILE
+        !Number.isSafeInteger(configured) ||
+        configured <= 0 ||
+        isSystemAdmin(configured) ||
+        (configured & PRIV.PRIV_USER_PROFILE) !== PRIV.PRIV_USER_PROFILE
     ) {
         throw new Error(`系统设置 default.priv 无效：${String(system.get('default.priv'))}`);
     }
@@ -208,18 +216,33 @@ function accountProfileVersion(summary: ReturnType<typeof safeUserSummary>): str
 function assertExpectedProfileVersion(expected: unknown, summary: ReturnType<typeof safeUserSummary>) {
     const version = stringArg(expected, 'expectedProfileVersion', 128, false);
     if (version !== accountProfileVersion(summary)) {
-        throw new AccountStateConflictError('基本资料已被其他操作修改');
+        throw new AccountStateConflictError(localizedErrorText`基本资料已被其他操作修改`);
     }
 }
 
 function assertExpectedPrivilege(expected: unknown, current: number) {
     if (integerArg(expected, 'expectedPriv', false) !== current) {
-        throw new AccountStateConflictError('账号权限或禁用状态已被其他操作修改');
+        throw new AccountStateConflictError(localizedErrorText`账号权限或禁用状态已被其他操作修改`);
     }
 }
 
 function convertTargetPolicyError(error: unknown): never {
-    throw new BadRequestError(error instanceof Error ? error.message : String(error));
+    if (!(error instanceof Error)) throw error;
+    if (error.message === '目标 UID 无效') throw new BadRequestError(localizedErrorText`目标 UID 无效`);
+    if (error.message === 'UID 2 是受保护的超级管理员，不能在账号管理页修改') {
+        throw new BadRequestError(localizedErrorText`UID 2 是受保护的超级管理员，不能在账号管理页修改`);
+    }
+    if (error.message === '不能禁用当前管理员账号') {
+        throw new BadRequestError(localizedErrorText`不能禁用当前管理员账号`);
+    }
+    if (error.message === '不能禁用或切换到系统管理员账号；请先在权限编辑器中显式降级') {
+        throw new BadRequestError(localizedErrorText`不能禁用或切换到系统管理员账号；请先在权限编辑器中显式降级`);
+    }
+    if (error.message === 'UID 列表包含无效值') throw new BadRequestError(localizedErrorText`UID 列表包含无效值`);
+    if (error.message === `单次最多操作 ${ACCOUNT_BULK_LIMIT} 个账号`) {
+        throw new BadRequestError(localizedErrorText`单次最多操作 ${ACCOUNT_BULK_LIMIT} 个账号`);
+    }
+    throw error;
 }
 
 function assertTarget(actorUid: number, target: any, operation: AccountTargetOperation) {
@@ -251,7 +274,7 @@ async function requireAdminPassword(handler: Handler, password: unknown) {
     await handler.user.checkPassword(value);
     const actor = await user.coll.findOne({ _id: handler.user._id }, { projection: { priv: 1 } });
     if (!actor || !isUsableSystemAdmin(Number(actor.priv))) {
-        throw new ForbiddenError('当前账号已不再拥有系统管理权限');
+        throw new ForbiddenError(localizedErrorText`当前账号已不再拥有系统管理权限`);
     }
 }
 
@@ -326,7 +349,11 @@ async function runAccountOperation<T>(
             );
             if (finalized.matchedCount !== 1) throw new Error(`账号审计 ${auditId.toHexString()} 在失败收尾时不存在`);
         } catch (auditError) {
-            logger.error('Failed to finalize account audit %s: %s', auditId.toHexString(), auditError instanceof Error ? auditError.stack : String(auditError));
+            logger.error(
+                'Failed to finalize account audit %s: %s',
+                auditId.toHexString(),
+                auditError instanceof Error ? auditError.stack : String(auditError),
+            );
             throw new AggregateError([error, auditError], '账号操作失败，且审计结果写入失败');
         }
         throw error;
@@ -439,7 +466,7 @@ async function listAccountRows(handler: Handler, query: ListQuery): Promise<{ ro
     let groupMembers: Set<number> | null = null;
     if (query.group) {
         const group = await user.collGroup.findOne({ domainId: query.groupDomain, name: query.group }, { projection: { uids: 1 } });
-        if (!group) validation('group', '所选用户组不存在');
+        if (!group) validation('group', localizedErrorText`所选用户组不存在`);
         groupMembers = new Set(group.uids || []);
     }
     let roleMembers: Set<number> | null = null;
@@ -488,27 +515,44 @@ async function listAccountRows(handler: Handler, query: ListQuery): Promise<{ ro
 
 async function getAccountDetail(handler: Handler, uid: number) {
     const raw = await getTarget(uid);
-    const [systemUser, sessions, relations, authTokens, memberships, groups, bindingDict, submissionCount, acceptedCount, ownedProblems, activity, audit] =
-        await Promise.all([
-            domain.collUser.findOne({ domainId: 'system', uid }, { projection: { displayName: 1 } }),
-            token.getAccountSessionListByUid(uid),
-            handler.ctx.oauth.list(uid),
-            listAuthTokens({ uid }),
-            domain.collUser.find({ uid, join: true }, { projection: { domainId: 1, role: 1, join: 1 } }).toArray(),
-            user.collGroup.find({ uids: uid }, { projection: { domainId: 1, name: 1 } }).sort({ domainId: 1, name: 1 }).toArray(),
-            (global as any).Hydro?.model?.userbind?.findStudentsByUserIds
-                ? (global as any).Hydro.model.userbind.findStudentsByUserIds('system', [uid])
-                : null,
-            RecordModel.coll.countDocuments({ domainId: 'system', contest: { $exists: false }, uid }),
-            RecordModel.coll.countDocuments({ domainId: 'system', contest: { $exists: false }, uid, status: STATUS.STATUS_ACCEPTED }),
-            document.coll.countDocuments({ domainId: 'system', docType: document.TYPE_PROBLEM, owner: uid }),
-            oplog.coll
-                .find({ type: 'user.loginSuccess', uid }, { projection: { time: 1, operateIp: 1, ua: 1 } })
-                .sort({ time: -1 })
-                .limit(20)
-                .toArray(),
-            oplog.coll
-                .find({ type: { $regex: '^admin\\.account\\.' }, $or: [{ targetUid: uid }, { targetUids: uid }] }, {
+    const [
+        systemUser,
+        sessions,
+        relations,
+        authTokens,
+        memberships,
+        groups,
+        bindingDict,
+        submissionCount,
+        acceptedCount,
+        ownedProblems,
+        activity,
+        audit,
+    ] = await Promise.all([
+        domain.collUser.findOne({ domainId: 'system', uid }, { projection: { displayName: 1 } }),
+        token.getAccountSessionListByUid(uid),
+        handler.ctx.oauth.list(uid),
+        listAuthTokens({ uid }),
+        domain.collUser.find({ uid, join: true }, { projection: { domainId: 1, role: 1, join: 1 } }).toArray(),
+        user.collGroup
+            .find({ uids: uid }, { projection: { domainId: 1, name: 1 } })
+            .sort({ domainId: 1, name: 1 })
+            .toArray(),
+        (global as any).Hydro?.model?.userbind?.findStudentsByUserIds
+            ? (global as any).Hydro.model.userbind.findStudentsByUserIds('system', [uid])
+            : null,
+        RecordModel.coll.countDocuments({ domainId: 'system', contest: { $exists: false }, uid }),
+        RecordModel.coll.countDocuments({ domainId: 'system', contest: { $exists: false }, uid, status: STATUS.STATUS_ACCEPTED }),
+        document.coll.countDocuments({ domainId: 'system', docType: document.TYPE_PROBLEM, owner: uid }),
+        oplog.coll
+            .find({ type: 'user.loginSuccess', uid }, { projection: { time: 1, operateIp: 1, ua: 1 } })
+            .sort({ time: -1 })
+            .limit(20)
+            .toArray(),
+        oplog.coll
+            .find(
+                { type: { $regex: '^admin\\.account\\.' }, $or: [{ targetUid: uid }, { targetUids: uid }] },
+                {
                     projection: {
                         type: 1,
                         time: 1,
@@ -524,14 +568,18 @@ async function getAccountDetail(handler: Handler, uid: number) {
                         targetUid: 1,
                         targetUids: 1,
                     },
-                })
-                .sort({ time: -1 })
-                .limit(50)
-                .toArray(),
-        ]);
+                },
+            )
+            .sort({ time: -1 })
+            .limit(50)
+            .toArray(),
+    ]);
     const domainIds = memberships.map((membership) => membership.domainId);
     const domainDocs = domainIds.length
-        ? await domain.getMulti({ _id: { $in: domainIds } }).project({ _id: 1, name: 1 }).toArray()
+        ? await domain
+              .getMulti({ _id: { $in: domainIds } })
+              .project({ _id: 1, name: 1 })
+              .toArray()
         : [];
     const domainNames = new Map(domainDocs.map((doc) => [doc._id, doc.name]));
     const summary = safeUserSummary(raw, systemUser?.displayName || '');
@@ -589,9 +637,7 @@ async function getAccountDetail(handler: Handler, uid: number) {
             role: membership.role || 'default',
         })),
         groups: groups.map((group) => ({ domainId: group.domainId, name: group.name })),
-        binding: bindingDict === null
-            ? { available: false, student: null }
-            : { available: true, student: bindingDict[String(uid)] || null },
+        binding: bindingDict === null ? { available: false, student: null } : { available: true, student: bindingDict[String(uid)] || null },
         related: {
             submissionCount,
             acceptedCount,
@@ -609,10 +655,13 @@ async function getAccountDetail(handler: Handler, uid: number) {
 async function listAdminMetadata(groupDomain: string, roleDomain: string) {
     const domains = await domain.getMulti({}).project({ _id: 1, name: 1 }).sort({ _id: 1 }).toArray();
     if (!domains.some((doc) => doc._id === 'system')) throw new Error('账号管理依赖的 system 域不存在');
-    if (!domains.some((doc) => doc._id === groupDomain)) validation('groupDomain', '所选用户组域不存在');
-    if (!domains.some((doc) => doc._id === roleDomain)) validation('roleDomain', '所选角色域不存在');
+    if (!domains.some((doc) => doc._id === groupDomain)) validation('groupDomain', localizedErrorText`所选用户组域不存在`);
+    if (!domains.some((doc) => doc._id === roleDomain)) validation('roleDomain', localizedErrorText`所选角色域不存在`);
     const [groups, roleDomainDoc] = await Promise.all([
-        user.collGroup.find({ domainId: groupDomain }, { projection: { name: 1, uids: 1 } }).sort({ name: 1 }).toArray(),
+        user.collGroup
+            .find({ domainId: groupDomain }, { projection: { name: 1, uids: 1 } })
+            .sort({ name: 1 })
+            .toArray(),
         domain.get(roleDomain),
     ]);
     if (!roleDomainDoc) throw new Error(`账号管理读取角色时域 ${roleDomain} 已不存在`);
@@ -639,17 +688,20 @@ async function updateGroupMembership(
     expectedMembership?: ReadonlyMap<number, boolean>,
 ) {
     const group = await user.collGroup.findOne({ domainId, name });
-    if (!group) validation('group', '所选用户组不存在');
+    if (!group) validation('group', localizedErrorText`所选用户组不存在`);
     const current = new Set<number>(group.uids || []);
     if (expectedMembership) {
         for (const [uid, expected] of expectedMembership) {
-            if (current.has(uid) !== expected) throw new AccountStateConflictError(`UID ${uid} 的用户组成员关系已改变`);
+            if (current.has(uid) !== expected) {
+                throw new AccountStateConflictError(localizedErrorText`UID ${uid} 的用户组成员关系已改变`);
+            }
         }
     }
     const selected = new Set(uids);
-    const next = action === 'add'
-        ? [...new Set([...(group.uids || []), ...uids])].sort((a, b) => a - b)
-        : (group.uids || []).filter((uid) => !selected.has(uid));
+    const next =
+        action === 'add'
+            ? [...new Set([...(group.uids || []), ...uids])].sort((a, b) => a - b)
+            : (group.uids || []).filter((uid) => !selected.has(uid));
     await user.updateGroup(domainId, name, next);
     return {
         beforeCount: group.uids?.length || 0,
@@ -661,16 +713,16 @@ async function updateGroupMembership(
 
 async function setDomainRole(domainId: string, role: string, uids: number[]) {
     const ddoc = await domain.get(domainId);
-    if (!ddoc) validation('domainId', '所选域不存在');
+    if (!ddoc) validation('domainId', localizedErrorText`所选域不存在`);
     const roles = await domain.getRoles(ddoc);
-    if (!roles.some((item) => item._id === role)) validation('role', '所选角色不存在');
+    if (!roles.some((item) => item._id === role)) validation('role', localizedErrorText`所选角色不存在`);
     for (const uid of uids) await domain.setUserRole(domainId, uid, role, true);
 }
 
 class AdminAccountManagementHandler extends Handler {
     async prepare() {
         this.checkPriv(PRIV.PRIV_EDIT_SYSTEM);
-        if (this.session.sudoUid) throw new ForbiddenError('请先退出代理身份再管理账号');
+        if (this.session.sudoUid) throw new ForbiddenError(localizedErrorText`请先退出代理身份再管理账号`);
     }
 }
 
@@ -684,7 +736,7 @@ class AdminAccountsHandler extends AdminAccountManagementHandler {
         const query = parseListQuery(args);
         const { rows, bindingAvailable } = await listAccountRows(this, query);
         if (String(args.format || '') === 'csv') {
-            if (rows.length > 5000) validation('format', '单次最多导出 5000 个账号');
+            if (rows.length > 5000) validation('format', localizedErrorText`单次最多导出 5000 个账号`);
             this.response.type = 'text/csv; charset=utf-8';
             this.response.disposition = 'attachment; filename="krypton-accounts.csv"';
             this.response.body = buildAccountCsv(rows);
@@ -730,9 +782,9 @@ class AdminAccountsHandler extends AdminAccountManagementHandler {
         const displayName = stringArg(args.displayName, 'displayName', 100).trim();
         const school = stringArg(args.school, 'school', 200).trim();
         const studentId = stringArg(args.studentId, 'studentId', 100).trim();
-        if (!Types.Username[1](username)) validation('username', '用户名格式无效');
-        if (!Types.Email[1](email)) validation('email', '邮箱格式无效');
-        if (!Types.Password[1](accountPassword)) validation('__accountPassword', '密码格式无效');
+        if (!Types.Username[1](username)) validation('username', localizedErrorText`用户名格式无效`);
+        if (!Types.Email[1](email)) validation('email', localizedErrorText`邮箱格式无效`);
+        if (!Types.Password[1](accountPassword)) validation('__accountPassword', localizedErrorText`密码格式无效`);
         const defaultPriv = siteDefaultPrivilege();
         const auditContext: AuditContext = { impact: `创建账号 ${username}`, progress: { stage: 'reauthenticate' } };
         const value = await runAccountOperation(this, 'create', auditContext, async () => {
@@ -760,19 +812,25 @@ class AdminAccountsHandler extends AdminAccountManagementHandler {
         const rows = parsed.map(({ password: _password, ...row }) => redactAccountSecrets(row));
         const valid = rows.filter((row) => row.status === 'ok');
         const existing = valid.length
-            ? await user.coll.find({
-                  $or: [
-                      { mailLower: { $in: valid.map((row) => handleMailLower(row.email)) } },
-                      { unameLower: { $in: valid.map((row) => row.username.toLowerCase()) } },
-                  ],
-              }, { projection: { mailLower: 1, unameLower: 1 } }).toArray()
+            ? await user.coll
+                  .find(
+                      {
+                          $or: [
+                              { mailLower: { $in: valid.map((row) => handleMailLower(row.email)) } },
+                              { unameLower: { $in: valid.map((row) => row.username.toLowerCase()) } },
+                          ],
+                      },
+                      { projection: { mailLower: 1, unameLower: 1 } },
+                  )
+                  .toArray()
             : [];
         const existingMails = new Set(existing.map((row) => row.mailLower));
         const existingNames = new Set(existing.map((row) => row.unameLower));
-        const preview = rows.map((row) => row.status === 'ok'
-            && (existingMails.has(handleMailLower(row.email)) || existingNames.has(row.username.toLowerCase()))
-            ? { ...row, status: 'duplicate', message: '邮箱或用户名已存在' }
-            : row);
+        const preview = rows.map((row) =>
+            row.status === 'ok' && (existingMails.has(handleMailLower(row.email)) || existingNames.has(row.username.toLowerCase()))
+                ? { ...row, status: 'duplicate', message: '邮箱或用户名已存在' }
+                : row,
+        );
         this.response.body = {
             rows: preview,
             summary: {
@@ -786,9 +844,9 @@ class AdminAccountsHandler extends AdminAccountManagementHandler {
     async postImportCommit(args: any) {
         const input = stringArg(args.__users, '__users', 2_000_000, false);
         const rows = validateImportRows(parseAccountImportForCommit(input));
-        if (!rows.length) validation('__users', '导入内容为空');
+        if (!rows.length) validation('__users', localizedErrorText`导入内容为空`);
         const invalid = rows.filter((row) => row.status !== 'ok');
-        if (invalid.length) validation('__users', `有 ${invalid.length} 行未通过校验，请重新预览`);
+        if (invalid.length) validation('__users', localizedErrorText`有 ${invalid.length} 行未通过校验，请重新预览`);
         siteDefaultPrivilege();
         const auditContext: AuditContext = {
             before: { accountCount: rows.length },
@@ -797,13 +855,18 @@ class AdminAccountsHandler extends AdminAccountManagementHandler {
         };
         const value = await runAccountOperation(this, 'import', auditContext, async () => {
             await requireAdminPassword(this, args.password);
-            const existing = await user.coll.find({
-                $or: [
-                    { mailLower: { $in: rows.map((row) => handleMailLower(row.email)) } },
-                    { unameLower: { $in: rows.map((row) => row.username.toLowerCase()) } },
-                ],
-            }, { projection: { _id: 1 } }).toArray();
-            if (existing.length) throw new AccountStateConflictError('导入期间邮箱或用户名已存在');
+            const existing = await user.coll
+                .find(
+                    {
+                        $or: [
+                            { mailLower: { $in: rows.map((row) => handleMailLower(row.email)) } },
+                            { unameLower: { $in: rows.map((row) => row.username.toLowerCase()) } },
+                        ],
+                    },
+                    { projection: { _id: 1 } },
+                )
+                .toArray();
+            if (existing.length) throw new AccountStateConflictError(localizedErrorText`导入期间邮箱或用户名已存在`);
             const prepared: Array<{
                 row: (typeof rows)[number];
                 payload: Record<string, any>;
@@ -836,7 +899,11 @@ class AdminAccountsHandler extends AdminAccountManagementHandler {
             for (const name of [...new Set(created.map((item) => item.group).filter((item): item is string => !!item))]) {
                 const current = existingGroups.find((group) => group.name === name)?.uids || [];
                 const additions = created.filter((item) => item.group === name).map((item) => item.uid);
-                await user.updateGroup('system', name, [...new Set([...current, ...additions])].sort((a, b) => a - b));
+                await user.updateGroup(
+                    'system',
+                    name,
+                    [...new Set([...current, ...additions])].sort((a, b) => a - b),
+                );
             }
             auditContext.progress = { stage: 'complete', createdUids: created.map((item) => item.uid) };
             return {
@@ -864,32 +931,40 @@ class AdminAccountsHandler extends AdminAccountManagementHandler {
             studentId: stringArg(args.studentId, 'studentId', 100).trim(),
         };
         const displayName = stringArg(args.displayName, 'displayName', 100).trim();
-        if (![0, 1, 2].includes(patch.gender)) validation('gender', '性别值无效');
-        if (!Types.Username[1](username)) validation('username', '用户名格式无效');
-        if (!Types.Email[1](email)) validation('email', '邮箱格式无效');
+        if (![0, 1, 2].includes(patch.gender)) validation('gender', localizedErrorText`性别值无效`);
+        if (!Types.Username[1](username)) validation('username', localizedErrorText`用户名格式无效`);
+        if (!Types.Email[1](email)) validation('email', localizedErrorText`邮箱格式无效`);
         const identityChanged = target.uname !== username || target.mail !== email;
-        const value = await runAccountOperation(this, 'profile', { targetUid: uid, before, impact: identityChanged ? '修改登录标识与资料' : '修改账号资料' }, async () => {
-            if (identityChanged) await requireAdminPassword(this, args.password);
-            const current = await getTarget(uid);
-            assertTarget(this.user._id, current, 'profile');
-            const currentSystemUser = await domain.collUser.findOne({ domainId: 'system', uid }, { projection: { displayName: 1 } });
-            assertExpectedProfileVersion(args.expectedProfileVersion, safeUserSummary(current, currentSystemUser?.displayName || ''));
-            const duplicate = await user.coll.findOne({
-                _id: { $ne: uid },
-                $or: [{ unameLower: username.toLowerCase() }, { mailLower: handleMailLower(email) }],
-            }, { projection: { _id: 1 } });
-            if (duplicate) throw new AccountStateConflictError('用户名或邮箱已被其他账号占用');
-            await user.setById(uid, {
-                ...patch,
-                uname: username,
-                unameLower: username.toLowerCase(),
-                mail: email,
-                mailLower: handleMailLower(email),
-            });
-            await domain.setUserInDomain('system', uid, { displayName });
-            const after = { ...before, ...patch, username, email, displayName };
-            return { value: { ok: true }, after };
-        });
+        const value = await runAccountOperation(
+            this,
+            'profile',
+            { targetUid: uid, before, impact: identityChanged ? '修改登录标识与资料' : '修改账号资料' },
+            async () => {
+                if (identityChanged) await requireAdminPassword(this, args.password);
+                const current = await getTarget(uid);
+                assertTarget(this.user._id, current, 'profile');
+                const currentSystemUser = await domain.collUser.findOne({ domainId: 'system', uid }, { projection: { displayName: 1 } });
+                assertExpectedProfileVersion(args.expectedProfileVersion, safeUserSummary(current, currentSystemUser?.displayName || ''));
+                const duplicate = await user.coll.findOne(
+                    {
+                        _id: { $ne: uid },
+                        $or: [{ unameLower: username.toLowerCase() }, { mailLower: handleMailLower(email) }],
+                    },
+                    { projection: { _id: 1 } },
+                );
+                if (duplicate) throw new AccountStateConflictError(localizedErrorText`用户名或邮箱已被其他账号占用`);
+                await user.setById(uid, {
+                    ...patch,
+                    uname: username,
+                    unameLower: username.toLowerCase(),
+                    mail: email,
+                    mailLower: handleMailLower(email),
+                });
+                await domain.setUserInDomain('system', uid, { displayName });
+                const after = { ...before, ...patch, username, email, displayName };
+                return { value: { ok: true }, after };
+            },
+        );
         this.response.body = value;
     }
 
@@ -897,8 +972,8 @@ class AdminAccountsHandler extends AdminAccountManagementHandler {
         const uid = integerArg(args.uid, 'uid');
         const next = stringArg(args.__newPassword, '__newPassword', 1024, false);
         const verify = stringArg(args.__verifyPassword, '__verifyPassword', 1024, false);
-        if (next !== verify) validation('__verifyPassword', '两次输入的新密码不一致');
-        if (!Types.Password[1](next)) validation('__newPassword', '新密码格式无效');
+        if (next !== verify) validation('__verifyPassword', localizedErrorText`两次输入的新密码不一致`);
+        if (!Types.Password[1](next)) validation('__newPassword', localizedErrorText`新密码格式无效`);
         const auditContext: AuditContext = {
             targetUid: uid,
             before: { password: 'unchanged', sessions: 'active' },
@@ -933,7 +1008,7 @@ class AdminAccountsHandler extends AdminAccountManagementHandler {
             const current = await getTarget(uid);
             assertTarget(this.user._id, current, 'disable');
             assertExpectedPrivilege(args.expectedPriv, Number(current.priv));
-            if (current.priv === PRIV.PRIV_NONE) throw new AccountStateConflictError('账号已被禁用');
+            if (current.priv === PRIV.PRIV_NONE) throw new AccountStateConflictError(localizedErrorText`账号已被禁用`);
             auditContext.progress = { stage: 'revoke-access' };
             const revoked = await revokeAccountAccess(uid, true, true);
             auditContext.progress = { stage: 'disable-account', accessRevoked: true };
@@ -951,30 +1026,39 @@ class AdminAccountsHandler extends AdminAccountManagementHandler {
     async postRestore(args: any) {
         const uid = integerArg(args.uid, 'uid');
         const target = await getTarget(uid);
-        const value = await runAccountOperation(this, 'restore', {
-            targetUid: uid,
-            before: { priv: target.priv, status: target.priv === 0 ? 'disabled' : 'enabled' },
-            impact: '恢复账号为非系统管理员权限',
-        }, async () => {
-            await requireAdminPassword(this, args.password);
-            const current = await getTarget(uid);
-            assertTarget(this.user._id, current, 'restore');
-            assertExpectedPrivilege(args.expectedPriv, Number(current.priv));
-            if (current.priv !== PRIV.PRIV_NONE) throw new AccountStateConflictError('账号当前未被禁用');
-            const restoredPriv = resolveRestoredPrivilege(current.adminDisabled?.previousPriv, siteDefaultPrivilege());
-            await user.setById(uid, { priv: restoredPriv }, { adminDisabled: '', banReason: '' });
-            return { value: { ok: true, priv: restoredPriv }, after: { priv: restoredPriv, status: 'enabled' } };
-        });
+        const value = await runAccountOperation(
+            this,
+            'restore',
+            {
+                targetUid: uid,
+                before: { priv: target.priv, status: target.priv === 0 ? 'disabled' : 'enabled' },
+                impact: '恢复账号为非系统管理员权限',
+            },
+            async () => {
+                await requireAdminPassword(this, args.password);
+                const current = await getTarget(uid);
+                assertTarget(this.user._id, current, 'restore');
+                assertExpectedPrivilege(args.expectedPriv, Number(current.priv));
+                if (current.priv !== PRIV.PRIV_NONE) throw new AccountStateConflictError(localizedErrorText`账号当前未被禁用`);
+                const restoredPriv = resolveRestoredPrivilege(current.adminDisabled?.previousPriv, siteDefaultPrivilege());
+                await user.setById(uid, { priv: restoredPriv }, { adminDisabled: '', banReason: '' });
+                return { value: { ok: true, priv: restoredPriv }, after: { priv: restoredPriv, status: 'enabled' } };
+            },
+        );
         this.response.body = value;
     }
 
     async postPrivilege(args: any) {
         const uid = integerArg(args.uid, 'uid');
         const nextPriv = integerArg(args.priv, 'priv', false);
-        if (nextPriv < 0 || (nextPriv & ~KNOWN_PRIV_MASK) !== 0) validation('priv', '权限值包含不允许的位或超级管理员值');
-        if (nextPriv === PRIV.PRIV_NONE) validation('priv', '禁用账号必须使用可逆禁用操作，不能把权限值直接设为 0');
+        if (nextPriv < 0 || (nextPriv & ~KNOWN_PRIV_MASK) !== 0) {
+            validation('priv', localizedErrorText`权限值包含不允许的位或超级管理员值`);
+        }
+        if (nextPriv === PRIV.PRIV_NONE) {
+            validation('priv', localizedErrorText`禁用账号必须使用可逆禁用操作，不能把权限值直接设为 0`);
+        }
         if (isSystemAdmin(nextPriv) && (nextPriv & PRIV.PRIV_USER_PROFILE) !== PRIV.PRIV_USER_PROFILE) {
-            validation('priv', '系统管理员必须保留用户登录权限');
+            validation('priv', localizedErrorText`系统管理员必须保留用户登录权限`);
         }
         const target = await getTarget(uid);
         const auditContext: AuditContext = {
@@ -988,12 +1072,14 @@ class AdminAccountsHandler extends AdminAccountManagementHandler {
             const current = await getTarget(uid);
             assertTarget(this.user._id, current, 'privilege');
             assertExpectedPrivilege(args.expectedPriv, Number(current.priv));
-            if (current.priv === PRIV.PRIV_NONE) throw new AccountStateConflictError('请先恢复被禁用账号再修改权限');
-            if (uid === this.user._id && !isSystemAdmin(nextPriv)) throw new BadRequestError('不能移除当前管理员自己的系统管理权限');
+            if (current.priv === PRIV.PRIV_NONE) throw new AccountStateConflictError(localizedErrorText`请先恢复被禁用账号再修改权限`);
+            if (uid === this.user._id && !isSystemAdmin(nextPriv)) {
+                throw new BadRequestError(localizedErrorText`不能移除当前管理员自己的系统管理权限`);
+            }
             if (isSystemAdmin(current.priv) && !isSystemAdmin(nextPriv)) {
                 const admins = await user.coll.find({}, { projection: { _id: 1, priv: 1 } }).toArray();
                 if (admins.filter((item) => isUsableSystemAdmin(Number(item.priv))).length <= 1) {
-                    throw new AccountStateConflictError('不能移除最后一个可用系统管理员');
+                    throw new AccountStateConflictError(localizedErrorText`不能移除最后一个可用系统管理员`);
                 }
             }
             const adminChanged = isSystemAdmin(current.priv) !== isSystemAdmin(nextPriv);
@@ -1014,32 +1100,39 @@ class AdminAccountsHandler extends AdminAccountManagementHandler {
         const uid = integerArg(args.uid, 'uid');
         const action = enumArg(args.action, 'action', SECURITY_ACTIONS, '');
         const target = await getTarget(uid);
-        const value = await runAccountOperation(this, `security.${action}`, {
-            targetUid: uid,
-            before: { hasTfa: !!target.tfa, authenticatorCount: target.authenticators?.length || 0 },
-            impact: action,
-        }, async () => {
-            await requireAdminPassword(this, args.password);
-            const current = await getTarget(uid);
-            assertTarget(this.user._id, current, action.startsWith('revoke_') ? 'session' : 'security');
-            let detail: Record<string, unknown> = {};
-            if (action === 'clear_tfa') {
-                if (!current.tfa) throw new AccountStateConflictError('该账号未启用 TOTP');
-                await user.setById(uid, undefined, { tfa: '' });
-            } else if (action === 'clear_webauthn') {
-                if (!current.authenticators?.length) throw new AccountStateConflictError('该账号没有 WebAuthn/passkey');
-                await user.setById(uid, { authenticators: [] });
-            } else if (action === 'unlink_oauth') {
-                const platform = stringArg(args.platform, 'platform', 100, false).trim();
-                const relations = await this.ctx.oauth.list(uid);
-                if (!relations.some((relation) => relation.platform === platform)) throw new AccountStateConflictError('该 OAuth 关联不存在');
-                await this.ctx.oauth.unbind(platform, uid);
-                detail = { platform };
-            } else if (action === 'revoke_sessions') detail = await revokeAccountAccess(uid, true, false);
-            else if (action === 'revoke_api_tokens') detail = await revokeAccountAccess(uid, false, true);
-            else detail = await revokeAccountAccess(uid, true, true);
-            return { value: { ok: true, ...detail }, after: { action, ...detail } };
-        });
+        const value = await runAccountOperation(
+            this,
+            `security.${action}`,
+            {
+                targetUid: uid,
+                before: { hasTfa: !!target.tfa, authenticatorCount: target.authenticators?.length || 0 },
+                impact: action,
+            },
+            async () => {
+                await requireAdminPassword(this, args.password);
+                const current = await getTarget(uid);
+                assertTarget(this.user._id, current, action.startsWith('revoke_') ? 'session' : 'security');
+                let detail: Record<string, unknown> = {};
+                if (action === 'clear_tfa') {
+                    if (!current.tfa) throw new AccountStateConflictError(localizedErrorText`该账号未启用 TOTP`);
+                    await user.setById(uid, undefined, { tfa: '' });
+                } else if (action === 'clear_webauthn') {
+                    if (!current.authenticators?.length) throw new AccountStateConflictError(localizedErrorText`该账号没有 WebAuthn/passkey`);
+                    await user.setById(uid, { authenticators: [] });
+                } else if (action === 'unlink_oauth') {
+                    const platform = stringArg(args.platform, 'platform', 100, false).trim();
+                    const relations = await this.ctx.oauth.list(uid);
+                    if (!relations.some((relation) => relation.platform === platform)) {
+                        throw new AccountStateConflictError(localizedErrorText`该 OAuth 关联不存在`);
+                    }
+                    await this.ctx.oauth.unbind(platform, uid);
+                    detail = { platform };
+                } else if (action === 'revoke_sessions') detail = await revokeAccountAccess(uid, true, false);
+                else if (action === 'revoke_api_tokens') detail = await revokeAccountAccess(uid, false, true);
+                else detail = await revokeAccountAccess(uid, true, true);
+                return { value: { ok: true, ...detail }, after: { action, ...detail } };
+            },
+        );
         this.response.body = value;
     }
 
@@ -1050,20 +1143,19 @@ class AdminAccountsHandler extends AdminAccountManagementHandler {
         const action = enumArg(args.action, 'action', new Set(['add', 'remove']), '');
         const expectedMember = booleanArg(args.expectedMember, 'expectedMember');
         const groupDoc = await user.collGroup.findOne({ domainId, name: group }, { projection: { uids: 1 } });
-        if (!groupDoc) validation('group', '所选用户组不存在');
+        if (!groupDoc) validation('group', localizedErrorText`所选用户组不存在`);
         const before = { domainId, group, member: (groupDoc.uids || []).includes(uid) };
-        const value = await runAccountOperation(this, `group.${action}`, { targetUid: uid, before, impact: `${action} ${domainId}/${group}` }, async () => {
-            await requireAdminPassword(this, args.password);
-            assertTarget(this.user._id, await getTarget(uid), 'group');
-            const counts = await updateGroupMembership(
-                domainId,
-                group,
-                [uid],
-                action as 'add' | 'remove',
-                new Map([[uid, expectedMember]]),
-            );
-            return { value: { ok: true, ...counts }, after: { domainId, group, action, ...counts } };
-        });
+        const value = await runAccountOperation(
+            this,
+            `group.${action}`,
+            { targetUid: uid, before, impact: `${action} ${domainId}/${group}` },
+            async () => {
+                await requireAdminPassword(this, args.password);
+                assertTarget(this.user._id, await getTarget(uid), 'group');
+                const counts = await updateGroupMembership(domainId, group, [uid], action as 'add' | 'remove', new Map([[uid, expectedMember]]));
+                return { value: { ok: true, ...counts }, after: { domainId, group, action, ...counts } };
+            },
+        );
         this.response.body = value;
     }
 
@@ -1079,7 +1171,7 @@ class AdminAccountsHandler extends AdminAccountManagementHandler {
             assertTarget(this.user._id, await getTarget(uid), 'role');
             const current = await domain.collUser.findOne({ domainId, uid }, { projection: { role: 1, join: 1 } });
             if (String(current?.role || '') !== expectedRole || !!current?.join !== expectedJoin) {
-                throw new AccountStateConflictError('域成员或角色已被其他操作修改');
+                throw new AccountStateConflictError(localizedErrorText`域成员或角色已被其他操作修改`);
             }
             await setDomainRole(domainId, role, [uid]);
             return { value: { ok: true }, after: { domainId, role, join: true } };
@@ -1096,15 +1188,16 @@ class AdminAccountsHandler extends AdminAccountManagementHandler {
         }
         const action = enumArg(args.action, 'action', BULK_ACTIONS, '');
         const targets = await getTargets(uids);
-        const policyOperation: AccountTargetOperation = action === 'disable'
-            ? 'disable'
-            : action === 'restore'
-                ? 'restore'
-                : action === 'force_logout'
+        const policyOperation: AccountTargetOperation =
+            action === 'disable'
+                ? 'disable'
+                : action === 'restore'
+                  ? 'restore'
+                  : action === 'force_logout'
                     ? 'session'
                     : action.startsWith('group_')
-                        ? 'group'
-                        : 'role';
+                      ? 'group'
+                      : 'role';
         const auditContext: AuditContext = {
             targetUids: uids,
             before: {
@@ -1120,31 +1213,37 @@ class AdminAccountsHandler extends AdminAccountManagementHandler {
         };
         const value = await runAccountOperation(this, `bulk.${action}`, auditContext, async () => {
             for (const target of targets) assertTarget(this.user._id, target, policyOperation);
-            if (action === 'force_logout' && uids.includes(this.user._id)) throw new BadRequestError('批量强制退出不能包含当前管理员');
+            if (action === 'force_logout' && uids.includes(this.user._id)) {
+                throw new BadRequestError(localizedErrorText`批量强制退出不能包含当前管理员`);
+            }
             if (action === 'restore' && targets.some((target) => target.priv !== PRIV.PRIV_NONE)) {
-                throw new AccountStateConflictError('恢复目标中包含未禁用账号');
+                throw new AccountStateConflictError(localizedErrorText`恢复目标中包含未禁用账号`);
             }
             if (action === 'disable' && targets.some((target) => target.priv === PRIV.PRIV_NONE)) {
-                throw new AccountStateConflictError('禁用目标中包含已禁用账号');
+                throw new AccountStateConflictError(localizedErrorText`禁用目标中包含已禁用账号`);
             }
             await requireAdminPassword(this, args.password);
             const currentTargets = await getTargets(uids);
             for (const target of currentTargets) assertTarget(this.user._id, target, policyOperation);
             const initialPrivByUid = new Map(targets.map((target) => [target._id, Number(target.priv)]));
             if (currentTargets.some((target) => initialPrivByUid.get(target._id) !== Number(target.priv))) {
-                throw new AccountStateConflictError('批量目标的权限或禁用状态在确认期间发生变化');
+                throw new AccountStateConflictError(localizedErrorText`批量目标的权限或禁用状态在确认期间发生变化`);
             }
             if (action === 'restore' && currentTargets.some((target) => target.priv !== PRIV.PRIV_NONE)) {
-                throw new AccountStateConflictError('恢复目标状态在确认期间发生变化');
+                throw new AccountStateConflictError(localizedErrorText`恢复目标状态在确认期间发生变化`);
             }
             if (action === 'disable' && currentTargets.some((target) => target.priv === PRIV.PRIV_NONE)) {
-                throw new AccountStateConflictError('禁用目标状态在确认期间发生变化');
+                throw new AccountStateConflictError(localizedErrorText`禁用目标状态在确认期间发生变化`);
             }
             let detail: Record<string, unknown> = { count: uids.length };
             if (action === 'disable') {
                 const revoked = [];
                 for (const target of currentTargets) {
-                    auditContext.progress = { stage: 'revoke-before-disable', currentUid: target._id, processedUids: revoked.map((item) => item.uid) };
+                    auditContext.progress = {
+                        stage: 'revoke-before-disable',
+                        currentUid: target._id,
+                        processedUids: revoked.map((item) => item.uid),
+                    };
                     revoked.push({ uid: target._id, ...(await revokeAccountAccess(target._id, true, true)) });
                 }
                 const processedUids: number[] = [];
@@ -1203,7 +1302,7 @@ class AdminAccountsHandler extends AdminAccountManagementHandler {
             await requireAdminPassword(this, args.password);
             const current = await getTarget(uid);
             assertTarget(this.user._id, current, 'impersonate');
-            if (current.priv === PRIV.PRIV_NONE) throw new AccountStateConflictError('不能切换到已禁用账号');
+            if (current.priv === PRIV.PRIV_NONE) throw new AccountStateConflictError(localizedErrorText`不能切换到已禁用账号`);
             auditContext.progress = { stage: 'write-session' };
             this.session.sudoUid = this.user._id;
             this.session.sudoUname = this.user.uname;
@@ -1224,10 +1323,7 @@ class AdminAccountDetailHandler extends AdminAccountManagementHandler {
     async get(args: any, uid: number) {
         const groupDomain = stringArg(args.groupDomain || 'system', 'groupDomain', 128, false).trim();
         const roleDomain = stringArg(args.roleDomain || 'system', 'roleDomain', 128, false).trim();
-        const [metadata, detail] = await Promise.all([
-            listAdminMetadata(groupDomain, roleDomain),
-            getAccountDetail(this, uid),
-        ]);
+        const [metadata, detail] = await Promise.all([listAdminMetadata(groupDomain, roleDomain), getAccountDetail(this, uid)]);
         this.response.template = 'admin_account_detail.html';
         this.response.body = {
             detail,
@@ -1242,24 +1338,30 @@ class AdminAccountsReturnHandler extends Handler {
 
     async post() {
         const actorUid = Number(this.session.sudoUid);
-        if (!Number.isSafeInteger(actorUid) || actorUid <= 0) throw new ForbiddenError('当前会话不在代理身份中');
+        if (!Number.isSafeInteger(actorUid) || actorUid <= 0) throw new ForbiddenError(localizedErrorText`当前会话不在代理身份中`);
         const actor = await user.coll.findOne({ _id: actorUid }, { projection: ACCOUNT_PROJECTION });
         if (!actor) throw new UserNotFoundError(actorUid);
         const targetUid = this.user._id;
-        await runAccountOperation(this, 'impersonate.return', {
-            targetUid,
-            before: { actorUid, targetUid },
-            impact: '返回原账号',
-        }, async () => {
-            this.session.uid = actorUid;
-            this.session.scope = PERM.PERM_ALL.toString();
-            this.session.sudoUid = null;
-            this.session.sudoUname = null;
-            this.session.sudoStartedAt = null;
-            this.session.sudo = null;
-            this.session.sudoArgs = null;
-            return { value: undefined, after: { uid: actorUid } };
-        }, actorUid);
+        await runAccountOperation(
+            this,
+            'impersonate.return',
+            {
+                targetUid,
+                before: { actorUid, targetUid },
+                impact: '返回原账号',
+            },
+            async () => {
+                this.session.uid = actorUid;
+                this.session.scope = PERM.PERM_ALL.toString();
+                this.session.sudoUid = null;
+                this.session.sudoUname = null;
+                this.session.sudoStartedAt = null;
+                this.session.sudo = null;
+                this.session.sudoArgs = null;
+                return { value: undefined, after: { uid: actorUid } };
+            },
+            actorUid,
+        );
         this.response.redirect = '/';
     }
 }

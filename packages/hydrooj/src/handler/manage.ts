@@ -2,7 +2,7 @@ import { exec } from 'child_process';
 import { inspect } from 'util';
 import * as yaml from 'js-yaml';
 import Schema from 'schemastery';
-import { NotLaunchedByPM2Error, ValidationError } from '../error';
+import { localizeErrorParameter, NotLaunchedByPM2Error, ValidationError } from '../error';
 import { Logger } from '../logger';
 import { PRIV, STATUS } from '../model/builtin';
 import record from '../model/record';
@@ -223,7 +223,12 @@ class SystemConfigHandler extends SystemHandler {
             config = yaml.load(value);
             for (const schema of this.ctx.setting.settings) processNode(config, oldConfig, schema, null, '');
         } catch (e) {
-            throw new ValidationError('value', '', e.message);
+            throw localizeErrorParameter(
+                new ValidationError('value', '', e.message),
+                2,
+                'The server configuration could not be parsed: {0}',
+                e.message,
+            );
         }
         await this.ctx.setting.saveConfig(config);
     }

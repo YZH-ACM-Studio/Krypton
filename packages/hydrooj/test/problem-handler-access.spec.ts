@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { expect } from 'chai';
+import { localizeError, localizeErrorParameter, localizedErrorText } from '@hydrooj/framework';
 import { beforeEach, describe, it } from 'node:test';
 
 const Module = require('module');
@@ -37,7 +38,7 @@ class TestPermissionError extends Error {
 class GenericError extends Error {}
 
 const errors = new Proxy(
-    { PermissionError: TestPermissionError },
+    { localizeError, localizeErrorParameter, localizedErrorText, PermissionError: TestPermissionError },
     {
         get(target, key: string) {
             return target[key] || GenericError;
@@ -624,6 +625,7 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     if (request === '../error') return errors;
     if (request === '../lib/problem-config') {
         return {
+            getProblemConfigErrorText: () => undefined,
             isProblemConfigFilename: (name: string) => name.toLowerCase() === 'config.yaml',
             parseProblemConfigObject: (pdoc: any) => (pdoc?.config && typeof pdoc.config === 'object' ? pdoc.config : null),
             parseStructuredRegionSubmission: (kind: string, template: any, rawCode: string) => {

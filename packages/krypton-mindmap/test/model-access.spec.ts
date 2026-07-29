@@ -1,5 +1,6 @@
 import { createRequire } from 'node:module';
 import { expect } from 'chai';
+import { localizeError, localizedErrorText } from '@hydrooj/framework';
 import { beforeEach, describe, it } from 'node:test';
 
 const Module = require('module');
@@ -237,7 +238,7 @@ require.cache[errorPath] = {
     exports: { MindmapRequestError, MindmapConflictError },
 } as NodeModule;
 Module._load = function load(request: string, parent: NodeModule, isMain: boolean) {
-    if (parent?.filename === modelPath && request === 'hydrooj') return { ObjectId, db: dbStub };
+    if (parent?.filename === modelPath && request === 'hydrooj') return { localizeError, localizedErrorText, ObjectId, db: dbStub };
     if (parent?.filename === modelPath && request === './db') return mindmapDbStub;
     if (parent?.filename === modelPath && request === '@hydrooj/utils') return { Logger };
     return originalLoad.call(this, request, parent, isMain);

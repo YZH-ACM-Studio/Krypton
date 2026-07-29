@@ -1,6 +1,7 @@
 import { LRUCache } from 'lru-cache';
 import moment from 'moment';
 import {
+    localizedErrorText,
     _,
     avatar,
     ContestModel,
@@ -89,7 +90,7 @@ export function apply(ctx: Context, config: ReturnType<typeof Config>) {
             that.user = await UserModel.getById(that.domain._id, iplogin.uid);
             if (!that.user) {
                 that.user = await UserModel.getById(that.domain._id, 0);
-                throw new ForbiddenError(`User ${iplogin.uid} not found`);
+                throw new ForbiddenError(localizedErrorText`User ${iplogin.uid} not found`);
             }
             that.session.ipLoggedIn = that.request.ip;
             that.session.uid = iplogin.uid;
@@ -98,7 +99,7 @@ export function apply(ctx: Context, config: ReturnType<typeof Config>) {
     }
 
     const disable = (that) => {
-        if (that.user.contestMode) throw new ForbiddenError('Not available');
+        if (that.user.contestMode) throw new ForbiddenError(localizedErrorText`Not available`);
     };
     ctx.on('handler/before/HomeDomain', disable);
     ctx.on('handler/before/DomainUser', disable);
@@ -110,7 +111,7 @@ export function apply(ctx: Context, config: ReturnType<typeof Config>) {
     ctx.on('handler/before/UserLostPass', disable);
     ctx.on('handler/before/HomeSettings', (that) => {
         if (!that.user.contestMode) return;
-        if (['domain', 'account'].includes(that.args.category)) throw new ForbiddenError('Not available');
+        if (['domain', 'account'].includes(that.args.category)) throw new ForbiddenError(localizedErrorText`Not available`);
     });
 
     async function generateCdpZip(tdoc) {

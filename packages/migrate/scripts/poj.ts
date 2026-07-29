@@ -4,6 +4,7 @@ import path from 'path';
 import zlib from 'zlib';
 import mariadb from 'mariadb';
 import {
+    localizeError,
     buildContent,
     ContestModel,
     DomainModel,
@@ -65,7 +66,7 @@ export async function run(
                 .catch((e) => rej(e));
         });
     const target = await DomainModel.get(domainId);
-    if (!target) throw new NotFoundError(domainId);
+    if (!target) throw localizeError(new NotFoundError(domainId), 'Resource {0} not found.', domainId);
     report({ message: 'Connected to database' });
     /*
         user_id     varchar 20	N	用户id（主键）

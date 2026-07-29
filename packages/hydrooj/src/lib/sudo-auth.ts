@@ -1,4 +1,4 @@
-import { ForbiddenError, UserNotFoundError } from '../error';
+import { localizedErrorText, ForbiddenError, UserNotFoundError } from '../error';
 
 interface SudoAuthenticationUser {
     _id: number;
@@ -16,7 +16,7 @@ interface ImpersonationActor {
 
 export function assertImpersonationActorPrivileges(actor: ImpersonationActor, requiredPrivileges: number[]) {
     if (requiredPrivileges.some((privilege) => !actor.hasPriv(privilege))) {
-        throw new ForbiddenError('原管理员账号已无权继续代理操作');
+        throw new ForbiddenError(localizedErrorText`原管理员账号已无权继续代理操作`);
     }
 }
 
@@ -28,7 +28,7 @@ export async function resolveSudoAuthenticationUser<T extends SudoAuthentication
 ): Promise<SudoAuthenticationContext<T>> {
     if (sudoUid === null || sudoUid === undefined) return { user: currentUser, impersonated: false };
     const actorUid = Number(sudoUid);
-    if (!Number.isSafeInteger(actorUid) || actorUid <= 0) throw new ForbiddenError('代理身份记录无效');
+    if (!Number.isSafeInteger(actorUid) || actorUid <= 0) throw new ForbiddenError(localizedErrorText`代理身份记录无效`);
     const actor = await loadUser(actorUid);
     if (!actor) throw new UserNotFoundError(actorUid);
     return { user: actor, impersonated: true };

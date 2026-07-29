@@ -27,7 +27,7 @@ const page = new NamedPage('contest_manage', () => {
           return false;
         }
         if (!Number.isFinite(+$('[name="score"]').val()) || +$('[name="score"]').val() <= 0) {
-          Notification.error('Invalid score');
+          Notification.error(i18n('Invalid score'));
           return false;
         }
         return true;

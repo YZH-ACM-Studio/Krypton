@@ -1,6 +1,6 @@
 import { sleep } from '@hydrooj/utils';
 import { Context } from '../context';
-import { PermissionError, ValidationError } from '../error';
+import { localizedErrorText, PermissionError, ValidationError } from '../error';
 import { PERM, PRIV } from '../model/builtin';
 import MessageModel from '../model/message';
 import problem from '../model/problem';
@@ -23,7 +23,7 @@ export class ProblemImportHydroHandler extends Handler {
         if (keepUser && !problem.canAssignManagedAuthor(this.user)) throw new PermissionError(PERM.PERM_CREATE_PROBLEM);
         const allowedFields = new Set(['keepUser', 'knowledgeMapId']);
         const unknownFields = Object.keys(this.request.body || {}).filter((field) => !allowedFields.has(field));
-        if (unknownFields.length) throw new ValidationError('fields', null, `题目导入不接受字段：${unknownFields.join(', ')}`);
+        if (unknownFields.length) throw new ValidationError('fields', null, localizedErrorText`题目导入不接受字段：${unknownFields.join(', ')}`);
         if (!this.request.files.file) throw new ValidationError('file');
         const promise = problem
             .import(domainId, this.request.files.file.filepath, {

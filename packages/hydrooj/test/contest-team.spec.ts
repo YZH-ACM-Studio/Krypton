@@ -1,4 +1,5 @@
 import { expect } from 'chai';
+import { localizedErrorText } from '@hydrooj/framework';
 import { beforeEach, describe, it } from 'node:test';
 import { ObjectId } from 'mongodb';
 import {
@@ -257,6 +258,7 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
         if (request === '../error') {
             return {
                 ContestTeamConflictError: TestConflictError,
+                localizedErrorText,
                 NotAssignedError: TestNotAssignedError,
                 PermissionError: TestPermissionError,
                 UserNotFoundError: TestUserNotFoundError,

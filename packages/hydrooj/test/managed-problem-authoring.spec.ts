@@ -1,4 +1,5 @@
 import { expect } from 'chai';
+import { localizedErrorText } from '@hydrooj/framework';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { beforeEach, describe, it } from 'node:test';
@@ -106,6 +107,7 @@ require.cache[errorPath] = {
     filename: errorPath,
     loaded: true,
     exports: {
+        localizedErrorText,
         ManagedProblemMetadataConflictError: TestMetadataConflictError,
         ValidationError: TestValidationError,
     },

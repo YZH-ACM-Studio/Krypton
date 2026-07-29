@@ -1,6 +1,8 @@
 import mariadb from 'mariadb';
 import xml2js from 'xml2js';
 import {
+    localizeError,
+    localizeErrorParameter,
     ContestModel,
     DomainModel,
     fs,
@@ -76,7 +78,7 @@ export async function run(
                 .catch((e) => rej(e));
         });
     const target = await DomainModel.get(domainId);
-    if (!target) throw new NotFoundError(domainId);
+    if (!target) throw localizeError(new NotFoundError(domainId), 'Resource {0} not found.', domainId);
     report({ message: 'Connected to database' });
     /*
         CREATE TABLE `user_info` (
@@ -420,7 +422,7 @@ export async function run(
                 try {
                     entries = await zip.getEntries();
                 } catch (e) {
-                    throw new ValidationError('zip', null, e.message);
+                    throw localizeErrorParameter(new ValidationError('zip', null, e.message), 2, 'Unable to read the archive: {0}', e.message);
                 }
                 const codeEntry = entries.find((i) => i.filename.endsWith('answer.code') && i.directory === false);
                 data.code = (await (codeEntry as any)?.getData(new Zip.TextWriter())) || '';

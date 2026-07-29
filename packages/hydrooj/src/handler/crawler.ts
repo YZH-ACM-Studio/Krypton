@@ -19,7 +19,7 @@
 import yaml from 'js-yaml';
 import { ObjectId } from 'mongodb';
 import { Context, Handler, OplogModel, param, PERM, PermissionError, Types } from 'hydrooj';
-import { ForbiddenError } from '../error';
+import { localizedErrorText, ForbiddenError } from '../error';
 import { requireAuthToken } from '../lib/auth-token';
 import { Logger } from '../logger';
 import problem from '../model/problem';
@@ -75,7 +75,7 @@ class CrawlerApiHandler extends Handler {
     async prepare() {
         const { doc } = await requireAuthToken(this, CHANNEL);
         // Problems carry an owner; a pure service token (no bound user) must not import.
-        if (doc.uid == null) throw new ForbiddenError('入库需要绑定用户的令牌');
+        if (doc.uid == null) throw new ForbiddenError(localizedErrorText`入库需要绑定用户的令牌`);
         this.crawlerDomain = doc.domainId || 'system';
         await loadCrawlerProblemAcl(this.user, this.crawlerDomain);
     }

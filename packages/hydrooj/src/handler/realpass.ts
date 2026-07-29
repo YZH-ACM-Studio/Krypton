@@ -16,7 +16,7 @@
  *   - 非数字串只按 pid 查。
  */
 import { escapeRegExp } from 'lodash';
-import { Context, db, Handler, OplogModel, param, PRIV, Types, ValidationError } from 'hydrooj';
+import { localizedErrorText, Context, db, Handler, OplogModel, param, PRIV, Types, ValidationError } from 'hydrooj';
 import problem from '../model/problem';
 
 const PROJ_RESOLVE = ['docId', 'pid', 'title'] as any[];
@@ -116,12 +116,16 @@ class RealPassManageHandler extends Handler {
     @param('accepted', Types.UnsignedInt)
     @param('submitted', Types.UnsignedInt)
     async postSet(domainId: string, target: string, accepted: number, submitted: number) {
-        if (accepted > submitted) throw new ValidationError('accepted', null, 'accepted 不能大于 submitted');
+        if (accepted > submitted) throw new ValidationError('accepted', null, localizedErrorText`accepted 不能大于 submitted`);
         const r = await resolveTarget(domainId, target);
         if (r.status === 'conflict') {
-            throw new ValidationError('target', null, `docId 与 pid 双命中不同题（docId→#${r.byDocId} / pid→#${r.byPid}），请改用明确的 pid`);
+            throw new ValidationError(
+                'target',
+                null,
+                localizedErrorText`docId 与 pid 双命中不同题（docId→#${r.byDocId} / pid→#${r.byPid}），请改用明确的 pid`,
+            );
         }
-        if (r.status !== 'ok') throw new ValidationError('target', null, `未找到题目：${target}`);
+        if (r.status !== 'ok') throw new ValidationError('target', null, localizedErrorText`未找到题目：${target}`);
         await problem.editAuthorized(domainId, r.docId!, { origStat: buildOrigStat(accepted, submitted, this.user._id) } as any, this.user);
         await OplogModel.log(this as any, 'realpass.set', {
             docId: r.docId,
@@ -141,7 +145,7 @@ class RealPassManageHandler extends Handler {
     async postRemove(domainId: string, docId: number) {
         // 先验证题目存在，随后由 ACL revision 条件写完成原子删除。
         const exists = await problem.getMulti(domainId, { docId }, PROJ_RESOLVE).limit(1).toArray();
-        if (!exists[0]) throw new ValidationError('docId', null, `题目不存在：#${docId}`);
+        if (!exists[0]) throw new ValidationError('docId', null, localizedErrorText`题目不存在：#${docId}`);
         await problem.editAuthorized(domainId, docId, {}, this.user, { origStat: '' });
         await OplogModel.log(this as any, 'realpass.remove', { docId });
         this.response.body = { ok: true, docId };
@@ -154,8 +158,8 @@ class RealPassManageHandler extends Handler {
             .split(/\r?\n/)
             .map((l) => l.trim())
             .filter(Boolean);
-        if (!lines.length) throw new ValidationError('payload', null, '内容为空');
-        if (lines.length > 2000) throw new ValidationError('payload', null, '单次最多 2000 行');
+        if (!lines.length) throw new ValidationError('payload', null, localizedErrorText`内容为空`);
+        if (lines.length > 2000) throw new ValidationError('payload', null, localizedErrorText`单次最多 2000 行`);
         const rows: BatchRow[] = [];
         const seen = new Set<number>();
         for (const line of lines) {

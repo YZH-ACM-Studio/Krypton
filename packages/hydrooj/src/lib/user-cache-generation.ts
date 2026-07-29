@@ -1,4 +1,4 @@
-import { AccountStateConflictError } from '../error';
+import { localizedErrorText, AccountStateConflictError } from '../error';
 
 export function cacheKeyMatchesIdentity(cacheKey: string, identities: string[]) {
     const domainSeparator = cacheKey.lastIndexOf('/');
@@ -43,5 +43,5 @@ export async function loadAndCommitWhenGenerationIsStable<T, R>(
         if (generation !== getGeneration()) continue;
         return commit(candidate);
     }
-    throw new AccountStateConflictError('用户资料在读取期间发生变化，请重试');
+    throw new AccountStateConflictError(localizedErrorText`用户资料在读取期间发生变化，请重试`);
 }

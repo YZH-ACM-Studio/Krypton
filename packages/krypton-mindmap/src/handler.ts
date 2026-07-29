@@ -4,7 +4,7 @@
  */
 import { Logger } from '@hydrooj/utils';
 import type { Context } from 'hydrooj';
-import { Handler, NotFoundError, ObjectId, param, PRIV, PrivilegeError, ProblemModel, Types } from 'hydrooj';
+import { localizedErrorText, Handler, NotFoundError, ObjectId, param, PRIV, PrivilegeError, ProblemModel, Types } from 'hydrooj';
 import { MindmapRequestError } from './error';
 import {
     createNode,
@@ -66,7 +66,7 @@ async function adminSnapshot(requestedMapId?: ObjectId | string) {
     const maps = await listKnowledgeMaps(true);
     const requested = requestedMapId ? String(requestedMapId) : null;
     const config = requested ? maps.find((map) => map._id.toHexString() === requested) : maps[0];
-    if (requested && !config) throw new NotFoundError('mindmap', requested);
+    if (requested && !config) throw new NotFoundError(localizedErrorText`mindmap`, requested);
     const serializedMaps = await Promise.all(maps.map(async (map) => ({ ...serializeMap(map), usage: await getKnowledgeMapUsage(map._id) })));
     if (!config) return { nodes: [], config: null, maps: serializedMaps, referenceCounts: {} };
     const nodes = await listAllNodes(config._id);
@@ -81,33 +81,33 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 function parsePayload(payload: string | undefined): Record<string, unknown> {
-    if (!payload) throw new MindmapRequestError('缺少操作数据');
+    if (!payload) throw new MindmapRequestError(localizedErrorText`缺少操作数据`);
     let parsed: unknown;
     try {
         parsed = JSON.parse(payload);
     } catch {
-        throw new MindmapRequestError('操作数据不是有效 JSON');
+        throw new MindmapRequestError(localizedErrorText`操作数据不是有效 JSON`);
     }
-    if (!isPlainObject(parsed)) throw new MindmapRequestError('操作数据必须是对象');
+    if (!isPlainObject(parsed)) throw new MindmapRequestError(localizedErrorText`操作数据必须是对象`);
     return parsed;
 }
 
 function requiredString(payload: Record<string, unknown>, field: string): string {
     const value = payload[field];
-    if (typeof value !== 'string' || !value.trim()) throw new MindmapRequestError(`${field} 必填`);
+    if (typeof value !== 'string' || !value.trim()) throw new MindmapRequestError(localizedErrorText`${field} 必填`);
     return value;
 }
 
 function requiredDate(payload: Record<string, unknown>, field: string): Date {
     const raw = requiredString(payload, field);
     const value = new Date(raw);
-    if (Number.isNaN(value.getTime()) || value.toISOString() !== raw) throw new MindmapRequestError(`${field} 无效`);
+    if (Number.isNaN(value.getTime()) || value.toISOString() !== raw) throw new MindmapRequestError(localizedErrorText`${field} 无效`);
     return value;
 }
 
 function assertOnlyKeys(value: Record<string, unknown>, allowed: readonly string[], label: string): void {
     const unknown = Object.keys(value).filter((key) => !allowed.includes(key));
-    if (unknown.length) throw new MindmapRequestError(`${label}包含不支持的字段：${unknown.join('、')}`);
+    if (unknown.length) throw new MindmapRequestError(localizedErrorText`${label}包含不支持的字段：${unknown.join('、')}`);
 }
 
 class MindmapPage extends Handler {
@@ -117,7 +117,7 @@ class MindmapPage extends Handler {
         const exposeProblemMetadata = canExposeProblemMetadata(this.user as any, String(this.domain?._id || ''));
         const maps = await listKnowledgeMaps(false);
         const config = mapId ? maps.find((map) => map._id.equals(mapId)) : maps[0];
-        if (mapId && !config) throw new NotFoundError('mindmap', String(mapId));
+        if (mapId && !config) throw new NotFoundError(localizedErrorText`mindmap`, String(mapId));
         const nodes = config ? await listAllNodes(config._id) : [];
         this.response.template = 'mindmap_main.html';
         this.response.body = {
@@ -142,7 +142,7 @@ class ProblemsApi extends Handler {
     async get(_args: { domainId: string }, mapId: ObjectId, nodeId: ObjectId) {
         const domainId = String(this.domain?._id);
         const map = await getKnowledgeMap(mapId);
-        if (!map || map.visibility !== 'public') throw new NotFoundError('mindmap', String(mapId));
+        if (!map || map.visibility !== 'public') throw new NotFoundError(localizedErrorText`mindmap`, String(mapId));
         const problems = await listProblemsForNode(domainId, mapId, nodeId, {});
         this.response.body = { problems };
     }
@@ -174,7 +174,7 @@ class AdminProblemSearchApi extends AdminBase {
     @param('mapId', Types.ObjectId)
     @param('q', Types.String, true)
     async get(_args: unknown, mapId: ObjectId, q = '') {
-        if (!(await getKnowledgeMap(mapId))) throw new NotFoundError('mindmap', String(mapId));
+        if (!(await getKnowledgeMap(mapId))) throw new NotFoundError(localizedErrorText`mindmap`, String(mapId));
         this.response.body = { problems: await searchProblemsForAdmin(String(this.domain?._id), mapId, q) };
     }
 }
@@ -183,7 +183,7 @@ class AdminNodeProblemsApi extends AdminBase {
     @param('mapId', Types.ObjectId)
     @param('nodeId', Types.ObjectId)
     async get(_args: unknown, mapId: ObjectId, nodeId: ObjectId) {
-        if (!(await getKnowledgeMap(mapId))) throw new NotFoundError('mindmap', String(mapId));
+        if (!(await getKnowledgeMap(mapId))) throw new NotFoundError(localizedErrorText`mindmap`, String(mapId));
         const problems = await listProblemsForNode(String(this.domain?._id), mapId, nodeId, {}, { includeHidden: true });
         this.response.body = { problems };
     }
@@ -198,7 +198,7 @@ class AdminMutateNodes extends AdminBase {
         try {
             const rawBody = (this.request.body || {}) as Record<string, unknown>;
             const legacyFields = Object.keys(rawBody).filter((key) => !['operation', 'payload', '_csrf'].includes(key));
-            if (legacyFields.length) throw new MindmapRequestError(`旧版写入字段已停用：${legacyFields.join('、')}`);
+            if (legacyFields.length) throw new MindmapRequestError(localizedErrorText`旧版写入字段已停用：${legacyFields.join('、')}`);
             payload = parsePayload(payloadJson);
             const mapId = requiredString(payload, 'mapId');
             const expectedMapUpdatedAt = requiredDate(payload, 'expectedMapUpdatedAt');
@@ -223,7 +223,7 @@ class AdminMutateNodes extends AdminBase {
                 });
             } else if (operation === 'update') {
                 assertOnlyKeys(payload, ['mapId', 'expectedMapUpdatedAt', 'id', 'expectedUpdatedAt', 'fields'], '更新请求');
-                if (!isPlainObject(payload.fields)) throw new MindmapRequestError('fields 必须是对象');
+                if (!isPlainObject(payload.fields)) throw new MindmapRequestError(localizedErrorText`fields 必须是对象`);
                 await updateNode({
                     domainId,
                     actor,
@@ -248,9 +248,11 @@ class AdminMutateNodes extends AdminBase {
                     ],
                     '移动请求',
                 );
-                if (!Number.isSafeInteger(payload.targetIndex) || Number(payload.targetIndex) < 0) throw new MindmapRequestError('targetIndex 无效');
+                if (!Number.isSafeInteger(payload.targetIndex) || Number(payload.targetIndex) < 0) {
+                    throw new MindmapRequestError(localizedErrorText`targetIndex 无效`);
+                }
                 if (payload.layoutSide !== undefined && payload.layoutSide !== 'left' && payload.layoutSide !== 'right') {
-                    throw new MindmapRequestError('layoutSide 无效');
+                    throw new MindmapRequestError(localizedErrorText`layoutSide 无效`);
                 }
                 await moveNode({
                     domainId,
@@ -275,7 +277,7 @@ class AdminMutateNodes extends AdminBase {
                     expectedUpdatedAt: requiredDate(payload, 'expectedUpdatedAt'),
                 });
             } else {
-                throw new MindmapRequestError(`未知操作：${operation}`);
+                throw new MindmapRequestError(localizedErrorText`未知操作：${operation}`);
             }
             committed = true;
             this.response.body = { ok: true, ...(await adminSnapshot(requiredString(payload, 'mapId'))) };
@@ -343,7 +345,7 @@ class AdminMutateMaps extends AdminBase {
         try {
             const rawBody = (this.request.body || {}) as Record<string, unknown>;
             const legacyFields = Object.keys(rawBody).filter((key) => !['operation', 'payload', '_csrf'].includes(key));
-            if (legacyFields.length) throw new MindmapRequestError(`旧版导图写入字段已停用：${legacyFields.join('、')}`);
+            if (legacyFields.length) throw new MindmapRequestError(localizedErrorText`旧版导图写入字段已停用：${legacyFields.join('、')}`);
             payload = parsePayload(payloadJson);
             let selectedMapId: string | undefined;
             if (operation === 'create') {
@@ -358,7 +360,7 @@ class AdminMutateMaps extends AdminBase {
                 selectedMapId = created._id.toHexString();
             } else if (operation === 'update') {
                 assertOnlyKeys(payload, ['id', 'expectedUpdatedAt', 'fields'], '更新导图请求');
-                if (!isPlainObject(payload.fields)) throw new MindmapRequestError('fields 必须是对象');
+                if (!isPlainObject(payload.fields)) throw new MindmapRequestError(localizedErrorText`fields 必须是对象`);
                 const updated = await updateKnowledgeMap({
                     domainId,
                     actor,
@@ -376,7 +378,7 @@ class AdminMutateMaps extends AdminBase {
                     expectedUpdatedAt: requiredDate(payload, 'expectedUpdatedAt'),
                 });
             } else {
-                throw new MindmapRequestError(`未知导图操作：${operation}`);
+                throw new MindmapRequestError(localizedErrorText`未知导图操作：${operation}`);
             }
             this.response.body = { ok: true, ...(await adminSnapshot(selectedMapId)) };
         } catch (error: any) {

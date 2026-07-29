@@ -22,6 +22,9 @@ import parser from '@hydrooj/utils/lib/search';
 import { Logger, randomstring, sortFiles, streamToBuffer } from '@hydrooj/utils/lib/utils';
 import type { Context } from '../context';
 import {
+    localizeError,
+    localizeErrorParameter,
+    localizedErrorText,
     BadRequestError,
     ContestNotAttendedError,
     ContestNotEndedError,
@@ -43,12 +46,13 @@ import {
     ProblemNotFoundError,
     RecordNotFoundError,
     SolutionNotFoundError,
+    type LocalizedErrorText,
     ValidationError,
 } from '../error';
 import { ProblemDataWriteConfirmation, ProblemDataWriteOperation, ProblemDoc, ProblemStatusDoc, RecordDoc, User } from '../interface';
 import { canUsePostContestPractice, getContestSubmissionScope, resolvePostContestProblemMode } from '../lib/contest-correction';
 import { buildPersonalPracticeRecordQuery, buildPersonalPracticeStatusByPid, PersonalPracticeRecord } from '../lib/contest-problem-status';
-import { isProblemConfigFilename, parseProblemConfigObject, parseStructuredRegionSubmission } from '../lib/problem-config';
+import { getProblemConfigErrorText, isProblemConfigFilename, parseProblemConfigObject, parseStructuredRegionSubmission } from '../lib/problem-config';
 import {
     compileProgrammingStatement,
     emptyProgrammingStatement,
@@ -107,6 +111,10 @@ export const parseCategory = (value: string) =>
         .split(',')
         .map((e) => e.trim());
 const logger = new Logger('problem-handler');
+
+function localizedConfigValidation(field: string, detail: LocalizedErrorText) {
+    return new ValidationError(field, null, detail);
+}
 
 function pidNamespaceClientOption(namespace: Awaited<ReturnType<typeof listPidNamespaces>>[number]) {
     return {
@@ -356,13 +364,21 @@ function allowsStructuredTestdata(pdoc: ProblemDoc): boolean {
 }
 
 function parseStructuredConfigInput(raw: string): unknown {
+    let parsed: unknown;
     try {
-        const parsed = JSON.parse(raw);
-        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('config must be an object');
-        return parsed;
+        parsed = JSON.parse(raw);
     } catch (error) {
-        throw new ValidationError('structuredConfig', null, error.message);
+        throw localizeErrorParameter(
+            new ValidationError('structuredConfig', null, error.message),
+            2,
+            'The structured problem configuration could not be parsed: {0}',
+            error.message,
+        );
     }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new ValidationError('structuredConfig', null, localizedErrorText`config must be an object`);
+    }
+    return parsed;
 }
 
 function createRequestUsesCodeEvaluationDraft(kind: DedicatedStructuredEditorKind, config: unknown): boolean {
@@ -431,7 +447,7 @@ async function assertManagedFileWriteBody(handler: Handler, pdoc: ProblemDoc) {
     const unknownFields = Object.keys(body).filter((field) => !allowed.includes(field));
     if (!unknownFields.length) return;
     await auditManagedWriteDenied(handler, pdoc, operation, 'content', unknownFields);
-    throw new ValidationError('fields', null, `托管题文件操作不接受字段：${unknownFields.join(', ')}`);
+    throw new ValidationError('fields', null, localizedErrorText`托管题文件操作不接受字段：${unknownFields.join(', ')}`);
 }
 
 function validateProblemBulkDownloadFiles(
@@ -452,7 +468,7 @@ function validateProblemBulkDownloadFiles(
             requested.length,
             invalidTypeCount,
         );
-        throw new ValidationError('files', null, '文件列表必须是字符串数组');
+        throw new ValidationError('files', null, localizedErrorText`文件列表必须是字符串数组`);
     }
 
     const names = requested as string[];
@@ -469,7 +485,7 @@ function validateProblemBulkDownloadFiles(
             names.length,
             missingCount,
         );
-        throw new ValidationError('files', null, `请求的文件不存在（${missingCount} 个）`);
+        throw new ValidationError('files', null, localizedErrorText`请求的文件不存在（${missingCount} 个）`);
     }
     return { names, metadata };
 }
@@ -598,7 +614,7 @@ function resolveDataWriteConfirmation(
         throw new ValidationError(
             'activeContainerConfirmation',
             null,
-            `${operation === 'statement-edit' ? '赛中题面' : '赛中数据'}修改确认已失效，请刷新页面后重新确认`,
+            localizedErrorText`${operation === 'statement-edit' ? '赛中题面' : '赛中数据'}修改确认已失效，请刷新页面后重新确认`,
         );
     }
     if (operation === 'statement-edit') {
@@ -967,7 +983,7 @@ export class ProblemMainHandler extends Handler {
         let t = `,${this.domain.share || ''},`;
         if (t !== ',*,' && !t.includes(`,${target},`)) throw new ProblemNotAllowCopyError(this.domain._id, target);
         const ddoc = await domain.get(target);
-        if (!ddoc) throw new NotFoundError(target);
+        if (!ddoc) throw localizeError(new NotFoundError(target), 'Resource {0} not found.', target);
         const dudoc = await user.getById(target, this.user._id);
         if (!dudoc.hasPerm(PERM.PERM_CREATE_PROBLEM)) throw new PermissionError(PERM.PERM_CREATE_PROBLEM);
         if (!pids.length) throw new ValidationError('pids');
@@ -1063,7 +1079,7 @@ export class ProblemMainHandler extends Handler {
             const pdoc = await problem.get(domainId, pid);
             if (!pdoc) throw new ProblemNotFoundError(domainId, pid);
             if (pdoc.authoringMode === 'managed') {
-                throw new ValidationError('hidden', null, '托管草稿必须从统一题库审核入口发布');
+                throw new ValidationError('hidden', null, localizedErrorText`托管草稿必须从统一题库审核入口发布`);
             }
             await assertProblemWriteCapability(this, pdoc, problem.canPublishProblem(this.user, pdoc), 'publish', 'publish');
 
@@ -1651,7 +1667,7 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
             try {
                 const view = programmingStatementClientView(responsePdoc.programmingStatement, responsePdoc.config);
                 if (compileProgrammingStatement(responsePdoc.programmingStatement) !== responsePdoc.content) {
-                    throw new ValidationError('content', null, '结构化题面投影不一致');
+                    throw new ValidationError('content', null, localizedErrorText`结构化题面投影不一致`);
                 }
                 responsePdoc.programmingStatementView = view;
                 delete responsePdoc.programmingStatement;
@@ -1811,7 +1827,7 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
                 this.pdoc.docId,
                 this.user._id,
             );
-            throw new ValidationError('tid', null, '整题重测仅支持从题目详情页执行');
+            throw new ValidationError('tid', null, localizedErrorText`整题重测仅支持从题目详情页执行`);
         }
         if (!this.pdoc.config || typeof this.pdoc.config === 'string') throw new ProblemConfigError();
         const rdocs = await record
@@ -1903,7 +1919,7 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
         const postContestPractice = !!tid && effectiveProblemKind(this.pdoc) !== SUBJECTIVE_KIND && canUsePostContestPractice(this.tdoc, this.tsdoc);
         if (tid && !postContestPractice && !contest.isOngoing(this.tdoc, this.tsdoc)) throw new ContestNotLiveError(this.tdoc.docId);
         if (effectiveProblemKind(this.pdoc) === SUBJECTIVE_KIND && (!tid || !this.tdoc || !['exam', 'homework', 'oi'].includes(this.tdoc.rule))) {
-            throw new ValidationError('rule', null, '主观题仅允许在 exam、homework 或 oi 容器中提交');
+            throw new ValidationError('rule', null, localizedErrorText`主观题仅允许在 exam、homework 或 oi 容器中提交`);
         }
         if (typeof this.pdoc.config === 'string') throw new ProblemConfigError();
         if (this.pdoc.config.langs && !this.pdoc.config.langs.length) throw new ProblemConfigError();
@@ -1962,7 +1978,7 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
         }
         if (isSubjective && submissionScope.postContestPractice) throw new ContestNotLiveError(this.tdoc.docId);
         if (isSubjective && (pretest || !tid || !this.tdoc || !['exam', 'homework', 'oi'].includes(this.tdoc.rule))) {
-            throw new ValidationError('rule', null, '主观题仅允许在 exam、homework 或 oi 容器中提交');
+            throw new ValidationError('rule', null, localizedErrorText`主观题仅允许在 exam、homework 或 oi 容器中提交`);
         }
         if (typeof config === 'string' || config === null) throw new ProblemConfigError();
         const structuredCode = ['program_fill', 'function'].includes(config.type) && ['program_fill', 'function'].includes(problemKind);
@@ -2019,7 +2035,14 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
                     this.user._id,
                     error,
                 );
-                throw new ValidationError('code', null, error.message);
+                const localizedDetail = getProblemConfigErrorText(error);
+                if (localizedDetail) throw localizedConfigValidation('code', localizedDetail);
+                throw localizeErrorParameter(
+                    new ValidationError('code', null, error.message),
+                    2,
+                    'The structured answer is invalid: {0}',
+                    error.message,
+                );
             }
         }
         const rid = await record.add(
@@ -2096,18 +2119,24 @@ export class ProblemHackHandler extends ProblemDetailHandler {
     @param('tid', Types.ObjectId, true)
     async prepare(_domainId: string, rid: ObjectId, tid?: ObjectId) {
         const domainId = this.pdoc.domainId;
-        if (typeof this.pdoc.config !== 'object' || !this.pdoc.config.hackable) throw new HackFailedError('This problem is not hackable.');
+        if (typeof this.pdoc.config !== 'object' || !this.pdoc.config.hackable) {
+            throw new HackFailedError(localizedErrorText`This problem is not hackable.`);
+        }
         this.rdoc = await record.get(domainId, rid);
         if (!this.rdoc || this.rdoc.pid !== this.pdoc.docId || this.rdoc.contest?.toString() !== tid?.toString()) {
-            throw new RecordNotFoundError(domainId, rid);
+            throw localizeError(new RecordNotFoundError(domainId, rid), 'Record {0} not found.', rid);
         }
         if (tid) {
-            if (this.tdoc.rule !== 'codeforces') throw new HackFailedError('This contest is not hackable.');
+            if (this.tdoc.rule !== 'codeforces') throw new HackFailedError(localizedErrorText`This contest is not hackable.`);
             if (!contest.isOngoing(this.tdoc, this.tsdoc)) throw new ContestNotLiveError(this.tdoc.docId);
         }
-        if (this.rdoc.uid === this.user._id) throw new HackFailedError('You cannot hack your own submission');
-        if (this.psdoc?.status !== STATUS.STATUS_ACCEPTED) throw new HackFailedError('You must accept this problem before hacking.');
-        if (this.rdoc.status !== STATUS.STATUS_ACCEPTED) throw new HackFailedError('You cannot hack a unsuccessful submission.');
+        if (this.rdoc.uid === this.user._id) throw new HackFailedError(localizedErrorText`You cannot hack your own submission`);
+        if (this.psdoc?.status !== STATUS.STATUS_ACCEPTED) {
+            throw new HackFailedError(localizedErrorText`You must accept this problem before hacking.`);
+        }
+        if (this.rdoc.status !== STATUS.STATUS_ACCEPTED) {
+            throw new HackFailedError(localizedErrorText`You cannot hack a unsuccessful submission.`);
+        }
     }
 
     async get() {
@@ -2272,7 +2301,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
             const config = parseProblemConfigObject(rawPdoc);
             const editorConfig = structuredProblemConfigForEditor(problemKind, config);
             if (!editorConfig.main || typeof editorConfig.main !== 'object') {
-                throw new ValidationError('config', null, '结构化题缺少 main 配置');
+                throw new ValidationError('config', null, localizedErrorText`结构化题缺少 main 配置`);
             }
             this.response.body.editorProblemKind = problemKind;
             this.response.body.structuredConfig = editorConfig;
@@ -2367,12 +2396,12 @@ export class ProblemEditHandler extends ProblemManageHandler {
             const unknownFields = Object.keys(body).filter((field) => !allowed.has(field));
             if (unknownFields.length) {
                 await auditManagedWriteDenied(this, this.pdoc, 'edit', 'unknown', unknownFields);
-                throw new ValidationError('fields', null, `托管题编辑不接受字段：${unknownFields.join(', ')}`);
+                throw new ValidationError('fields', null, localizedErrorText`托管题编辑不接受字段：${unknownFields.join(', ')}`);
             }
             const canonicalFields = ['pid', 'tag'].filter((field) => Object.hasOwn(body, field));
             if (canonicalFields.length) {
                 await auditManagedWriteDenied(this, this.pdoc, 'edit', 'fields', canonicalFields);
-                throw new ValidationError('fields', null, `托管题字段只能由服务端派生：${canonicalFields.join(', ')}`);
+                throw new ValidationError('fields', null, localizedErrorText`托管题字段只能由服务端派生：${canonicalFields.join(', ')}`);
             }
             const capabilities = problemAuthoringCapabilities(this.user, this.pdoc);
             const metadataFields = ['title', 'difficulty'].filter((field) => Object.hasOwn(body, field));
@@ -2385,7 +2414,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
             ];
             if (forbiddenFields.length) {
                 await auditManagedWriteDenied(this, this.pdoc, 'edit', 'fields', forbiddenFields);
-                throw new ValidationError('fields', null, `当前角色不可修改字段：${forbiddenFields.join(', ')}`);
+                throw new ValidationError('fields', null, localizedErrorText`当前角色不可修改字段：${forbiddenFields.join(', ')}`);
             }
             if (knowledgeFields.length) {
                 try {
@@ -2418,7 +2447,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
                     this.user._id,
                     canonicalFields,
                 );
-                throw new ValidationError('fields', null, '编程题标签只能从知识导图选择并单独确认');
+                throw new ValidationError('fields', null, localizedErrorText`编程题标签只能从知识导图选择并单独确认`);
             }
             const requestedPid = typeof newPid === 'number' ? `P${newPid}` : newPid;
             if (
@@ -2434,22 +2463,22 @@ export class ProblemEditHandler extends ProblemManageHandler {
                     this.pdoc.pidNamespaceId || 'legacy-canonical-tags',
                     this.user._id,
                 );
-                throw new ValidationError('pid', null, '已归入题号命名空间或已规范化的编号只能通过管理员迁移流程修改');
+                throw new ValidationError('pid', null, localizedErrorText`已归入题号命名空间或已规范化的编号只能通过管理员迁移流程修改`);
             }
         }
         if (dedicatedStructured) {
-            if (Object.hasOwn(body, 'tag')) throw new ValidationError('tag', null, '结构化题标签只能从知识导图选择');
+            if (Object.hasOwn(body, 'tag')) throw new ValidationError('tag', null, localizedErrorText`结构化题标签只能从知识导图选择`);
             const hasKnowledgeMap = Object.hasOwn(body, 'knowledgeMapId');
             const hasKnowledgeNodes = Object.hasOwn(body, 'knowledgeNodeIds');
             if (hasKnowledgeMap !== hasKnowledgeNodes) {
-                throw new ValidationError('knowledgeNodeIds', null, '所属导图与知识节点必须一起保存');
+                throw new ValidationError('knowledgeNodeIds', null, localizedErrorText`所属导图与知识节点必须一起保存`);
             }
             if (Object.hasOwn(body, 'pid') && !this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) {
-                throw new ValidationError('pid', null, '只有站点管理员可自定义结构化题编号');
+                throw new ValidationError('pid', null, localizedErrorText`只有站点管理员可自定义结构化题编号`);
             }
             if (hasKnowledgeMap) {
                 if (String(this.pdoc.knowledgeMapId || '') !== knowledgeMapId) {
-                    throw new ValidationError('knowledgeMapId', null, '更换所属导图必须单独预览并确认');
+                    throw new ValidationError('knowledgeMapId', null, localizedErrorText`更换所属导图必须单独预览并确认`);
                 }
                 try {
                     structuredKnowledge = await materializeKnowledgeMindmapTags(knowledgeNodeIds, {
@@ -2511,7 +2540,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
         const structuredStatementSave =
             problemKind === 'programming' && (this.pdoc.statementFormat === 'structured-v1' || programmingStatementInput !== undefined);
         if (structuredStatementSave && content !== undefined) {
-            throw new ValidationError('content', null, '结构化题面不接受直接 Markdown 写入');
+            throw new ValidationError('content', null, localizedErrorText`结构化题面不接受直接 Markdown 写入`);
         }
         if (!structuredStatementSave && content === undefined) throw new ValidationError('content');
         if (
@@ -2521,7 +2550,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
             !this.pdoc.statementFormat &&
             !structuredStatementSave
         ) {
-            throw new ValidationError('statementFormat', null, '旧托管草稿必须先完成显式题面转换');
+            throw new ValidationError('statementFormat', null, localizedErrorText`旧托管草稿必须先完成显式题面转换`);
         }
         const statementConfirmation = resolveDataWriteConfirmation(this, this.pdoc, 'statement-edit', activeContainerConfirmation);
         if (newPid === undefined) newPid = this.pdoc.pid || '';
@@ -2548,7 +2577,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
             if (Object.hasOwn(body, 'title')) {
                 if (this.pdoc.managedAuthoring?.metadataStatus !== 'draft') {
                     await auditManagedWriteDenied(this, this.pdoc, 'edit', 'fields', ['title']);
-                    throw new ValidationError('title', null, '正式标题只能从统一题库审核入口确认');
+                    throw new ValidationError('title', null, localizedErrorText`正式标题只能从统一题库审核入口确认`);
                 }
                 const workingTitle = title?.trim();
                 if (!workingTitle) throw new ValidationError('title');
@@ -2574,7 +2603,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
             try {
                 programmingStatement = JSON.parse(programmingStatementInput);
             } catch {
-                throw new ValidationError('programmingStatement', null, '结构化题面 JSON 无效');
+                throw new ValidationError('programmingStatement', null, localizedErrorText`结构化题面 JSON 无效`);
             }
             if (!expectedStructureRevision) throw new ValidationError('expectedStructureRevision');
             const pdoc = await problem.saveProgrammingStatement({
@@ -2652,7 +2681,7 @@ export class ProblemProgrammingTagPreviewHandler extends ProblemManageHandler {
         try {
             const bodyFields = Object.keys(this.request.body || {});
             if (bodyFields.some((field) => !['knowledgeMapId', 'knowledgeNodeIds'].includes(field))) {
-                throw new ValidationError('fields', null, '标签预览只接受所属导图与知识节点');
+                throw new ValidationError('fields', null, localizedErrorText`标签预览只接受所属导图与知识节点`);
             }
             const domainId = this.pdoc.domainId;
             await problem.assertProgrammingTagNormalizationUnlocked(domainId, this.pdoc.docId);
@@ -2712,10 +2741,10 @@ export class ProblemProgrammingTagApplyHandler extends ProblemManageHandler {
             const bodyFields = Object.keys(this.request.body || {});
             const allowedFields = new Set(['knowledgeMapId', 'knowledgeNodeIds', 'intent', 'confirmed', 'previewFingerprint']);
             if (bodyFields.some((field) => !allowedFields.has(field))) {
-                throw new ValidationError('fields', null, '标签规范化请求包含未允许字段');
+                throw new ValidationError('fields', null, localizedErrorText`标签规范化请求包含未允许字段`);
             }
             if (intent !== 'normalize' || confirmed !== true) {
-                throw new ValidationError('confirmed', null, '请先查看完整增删预览并明确确认');
+                throw new ValidationError('confirmed', null, localizedErrorText`请先查看完整增删预览并明确确认`);
             }
             const result = await problem.applyProgrammingTagNormalization({
                 domainId: this.pdoc.domainId,
@@ -2812,7 +2841,7 @@ abstract class DedicatedStructuredCreateHandler extends Handler {
                 this.user._id,
                 unknownFields,
             );
-            throw new ValidationError('fields', null, `结构化题创建不接受字段：${unknownFields.join(', ')}`);
+            throw new ValidationError('fields', null, localizedErrorText`结构化题创建不接受字段：${unknownFields.join(', ')}`);
         }
         if (editorProblemKind !== this.problemKind) {
             throw new ValidationError('editorProblemKind');
@@ -2820,16 +2849,15 @@ abstract class DedicatedStructuredCreateHandler extends Handler {
         const parsedConfig = parseStructuredConfigInput(structuredConfig);
         const requiresCodeEvaluationDraft = createRequestUsesCodeEvaluationDraft(this.problemKind, parsedConfig);
         if (requiresCodeEvaluationDraft !== codeEvaluationDraft) {
-            throw new ValidationError(
-                'codeEvaluationDraft',
-                null,
-                requiresCodeEvaluationDraft ? '代码评测题必须先创建真实隐藏草稿' : '当前题型或模式不能创建代码评测草稿',
-            );
+            if (requiresCodeEvaluationDraft) {
+                throw new ValidationError('codeEvaluationDraft', null, localizedErrorText`代码评测题必须先创建真实隐藏草稿`);
+            }
+            throw new ValidationError('codeEvaluationDraft', null, localizedErrorText`当前题型或模式不能创建代码评测草稿`);
         }
         let persistedConfig = parsedConfig;
         if (codeEvaluationDraft) {
             if (Object.hasOwn(this.request.body || {}, 'content')) {
-                throw new ValidationError('content', null, '代码评测草稿第一阶段不接受题面、模板或测试数据');
+                throw new ValidationError('content', null, localizedErrorText`代码评测草稿第一阶段不接受题面、模板或测试数据`);
             }
             persistedConfig = normalizeCodeEvaluationDraftCreationConfig(this.problemKind, parsedConfig);
         } else if (content === undefined) {
@@ -2910,7 +2938,7 @@ export class ProblemCreateFunctionHandler extends DedicatedStructuredCreateHandl
 export class ProblemConfigHandler extends ProblemManageHandler {
     async get() {
         this.pdoc = await requireStableCapabilityProblem(this.user, this.pdoc, 'data', problem.PROJECTION_MANAGED_EDITOR);
-        if (this.pdoc.reference) throw new ProblemIsReferencedError('edit config');
+        if (this.pdoc.reference) throw new ProblemIsReferencedError(localizedErrorText`edit config`);
         this.response.body.pdoc = this.pdoc;
         this.response.body.problemAuthoringCapabilities = problemAuthoringCapabilities(this.user, this.pdoc);
         this.response.body.dataWriteGuard = await dataWriteGuardState(this, this.pdoc, this.user);
@@ -2966,7 +2994,7 @@ export class ProblemFilesHandler extends ProblemDetailHandler {
         await assertManagedFileWriteBody(this, this.pdoc);
         this.pdoc = await requireStableCapabilityProblem(this.user, this.pdoc, 'data', problem.PROJECTION_MANAGED_EDITOR);
         this.canEditLoadedProblem = problem.canEditProblemData(this.user, this.pdoc);
-        if (this.pdoc.reference) throw new ProblemIsReferencedError('edit files');
+        if (this.pdoc.reference) throw new ProblemIsReferencedError(localizedErrorText`edit files`);
         await assertProblemWriteCapability(this, this.pdoc, this.canEditLoadedProblem, 'files', 'data');
     }
 
@@ -2997,7 +3025,7 @@ export class ProblemFilesHandler extends ProblemDetailHandler {
     @post('type', Types.Range(['testdata', 'additional_file']), true)
     async postGetLinks(_domainId: string, files: Set<unknown>, type: 'testdata' | 'additional_file' = 'testdata') {
         if (type === 'testdata' && this.pdoc.reference) {
-            throw new ProblemIsReferencedError('download testdata.');
+            throw new ProblemIsReferencedError(localizedErrorText`download testdata.`);
         }
         if (type === 'testdata') {
             const editable = await problem.getCapabilityAuthorized(this.pdoc.domainId, this.pdoc.docId, this.user, 'data');
@@ -3028,16 +3056,18 @@ export class ProblemFilesHandler extends ProblemDetailHandler {
     async postUploadFile(_domainId: string, filename: string, type = 'testdata', activeContainerConfirmation?: string) {
         const domainId = this.pdoc.domainId;
         if (type === 'testdata' && !allowsStructuredTestdata(this.pdoc)) {
-            throw new ValidationError('type', null, '此结构化题不接受 testdata 文件写入');
+            throw new ValidationError('type', null, localizedErrorText`此结构化题不接受 testdata 文件写入`);
         }
         const file = this.request.files.file;
         if (!file) throw new ValidationError('file');
         filename ||= file.originalFilename || randomstring(16);
         if (type === 'testdata' && this.pdoc.problemKind !== undefined && this.pdoc.problemKind !== 'programming') {
             if (isProblemConfigFilename(filename)) {
-                throw new ValidationError('filename', null, '结构化题配置不通过 testdata 文件修改');
+                throw new ValidationError('filename', null, localizedErrorText`结构化题配置不通过 testdata 文件修改`);
             }
-            if (filename.toLowerCase().endsWith('.zip')) throw new ValidationError('filename', null, '结构化编译题请直接上传测试数据文件');
+            if (filename.toLowerCase().endsWith('.zip')) {
+                throw new ValidationError('filename', null, localizedErrorText`结构化编译题请直接上传测试数据文件`);
+            }
         }
         const files = [];
         if (filename.toLowerCase().endsWith('.zip') && type === 'testdata') {
@@ -3046,7 +3076,7 @@ export class ProblemFilesHandler extends ProblemDetailHandler {
             try {
                 entries = await zip.getEntries();
             } catch (e) {
-                throw new ValidationError('zip', null, e.message);
+                throw localizeErrorParameter(new ValidationError('zip', null, e.message), 2, 'Unable to read the archive: {0}', e.message);
             }
             for (const entry of entries) {
                 if (!entry.filename || entry.directory === true) continue;
@@ -3124,7 +3154,7 @@ export class ProblemFilesHandler extends ProblemDetailHandler {
     async postRenameFiles(_domainId: string, files: string[], newNames: string[], type = 'testdata', activeContainerConfirmation?: string) {
         const domainId = this.pdoc.domainId;
         if (type === 'testdata' && !allowsStructuredTestdata(this.pdoc)) {
-            throw new ValidationError('type', null, '此结构化题不接受 testdata 文件写入');
+            throw new ValidationError('type', null, localizedErrorText`此结构化题不接受 testdata 文件写入`);
         }
         if (
             type === 'testdata' &&
@@ -3162,7 +3192,7 @@ export class ProblemFilesHandler extends ProblemDetailHandler {
     async postDeleteFiles(_domainId: string, files: string[], type = 'testdata', activeContainerConfirmation?: string) {
         const domainId = this.pdoc.domainId;
         if (type === 'testdata' && !allowsStructuredTestdata(this.pdoc)) {
-            throw new ValidationError('type', null, '此结构化题不接受 testdata 文件写入');
+            throw new ValidationError('type', null, localizedErrorText`此结构化题不接受 testdata 文件写入`);
         }
         if (
             type === 'testdata' &&
@@ -3206,7 +3236,7 @@ export class ProblemFilesHandler extends ProblemDetailHandler {
                     // enqueueing a generation Record.
                     const current = await problem.get(domainId, this.pdoc.docId);
                     if (!current) throw new ProblemNotFoundError(domainId, this.pdoc.docId);
-                    if (current.reference) throw new ProblemIsReferencedError('edit files');
+                    if (current.reference) throw new ProblemIsReferencedError(localizedErrorText`edit files`);
                     if (!current.data?.find((i) => i.name === std)) throw new BadRequestError();
                     if (!current.data?.find((i) => i.name === gen)) throw new BadRequestError();
                     return await record.add(domainId, this.pdoc.docId, this.user._id, '_', `${gen}\n${std}`, true, {
@@ -3237,9 +3267,10 @@ export class ProblemFileDownloadHandler extends ProblemDetailHandler {
     async get({}, type = 'additional_file', filename: string, noDisposition = false, tid: ObjectId) {
         if (!tid) this.checkPerm(PERM.PERM_VIEW_PROBLEM);
         if (this.pdoc.reference) {
-            if (type === 'testdata') throw new ProblemIsReferencedError('download testdata');
-            this.pdoc = await problem.get(this.pdoc.reference.domainId, this.pdoc.reference.pid);
-            if (!this.pdoc) throw new ProblemNotFoundError();
+            if (type === 'testdata') throw new ProblemIsReferencedError(localizedErrorText`download testdata`);
+            const reference = this.pdoc.reference;
+            this.pdoc = await problem.get(reference.domainId, reference.pid);
+            if (!this.pdoc) throw localizeError(new ProblemNotFoundError(), 'Problem {0} not found.', reference.pid);
         }
         if (type === 'testdata') {
             const dataAuthorized = await problem.getCapabilityAuthorized(this.pdoc.domainId, this.pdoc.docId, this.user, 'data');
@@ -3655,7 +3686,7 @@ export class ProblemCreateProgrammingHandler extends Handler {
                 fields,
                 result: 'denied',
             });
-            throw new ValidationError('fields', null, `托管草稿不接受字段或创建模式：${fields.join(', ')}`);
+            throw new ValidationError('fields', null, localizedErrorText`托管草稿不接受字段或创建模式：${fields.join(', ')}`);
         }
         const resolvedAuthorUid = isBankAdmin ? authorUid || this.user._id : this.user._id;
         const resolvedDifficulty = difficulty || 1;

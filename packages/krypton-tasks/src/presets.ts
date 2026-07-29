@@ -20,6 +20,7 @@ import {
     ContestModel,
     DocumentModel,
     listCanonicalProblemTagOptions,
+    localizedErrorText,
     ObjectId,
     RecordModel,
     STATUS,
@@ -93,8 +94,33 @@ type TagDateRangeValidation =
     | {
           ok: false;
           reason: 'invalid-start-date' | 'invalid-end-date' | 'start-date-out-of-range' | 'end-date-out-of-range' | 'reversed-date-range';
-          message: string;
       };
+type TagPresetValidationReason = Exclude<TagDateRangeValidation, { ok: true }>['reason'] | 'invalid-canonical-tag' | 'invalid-count';
+
+function throwTagPresetValidation(reason: TagPresetValidationReason): never {
+    if (reason === 'invalid-start-date') {
+        throw new ValidationError('graph', null, localizedErrorText`开始日期格式无效`);
+    }
+    if (reason === 'invalid-end-date') {
+        throw new ValidationError('graph', null, localizedErrorText`结束日期格式无效`);
+    }
+    if (reason === 'start-date-out-of-range') {
+        throw new ValidationError('graph', null, localizedErrorText`开始日期超出可统计范围`);
+    }
+    if (reason === 'end-date-out-of-range') {
+        throw new ValidationError('graph', null, localizedErrorText`结束日期超出可统计范围`);
+    }
+    if (reason === 'reversed-date-range') {
+        throw new ValidationError('graph', null, localizedErrorText`开始日期不能晚于结束日期`);
+    }
+    if (reason === 'invalid-canonical-tag') {
+        throw new ValidationError('graph', null, localizedErrorText`请选择有效的规范标签`);
+    }
+    if (reason === 'invalid-count') {
+        throw new ValidationError('graph', null, localizedErrorText`AC 题目数必须为正整数`);
+    }
+    throw new TypeError(`Unknown tag-preset validation reason: ${reason satisfies never}`);
+}
 
 function strictTagDateBoundaryMs(value: unknown, boundary: 'start' | 'end'): { provided: boolean; millis: number | null } {
     if (value === null || value === undefined || value === '') return { provided: false, millis: null };
@@ -119,24 +145,24 @@ function strictTagDateBoundaryMs(value: unknown, boundary: 'start' | 'end'): { p
 function strictTagDateRangeQuery(start: unknown, end: unknown): TagDateRangeValidation {
     const startBoundary = strictTagDateBoundaryMs(start, 'start');
     if (startBoundary.provided && startBoundary.millis === null) {
-        return { ok: false, reason: 'invalid-start-date', message: '开始日期格式无效' };
+        return { ok: false, reason: 'invalid-start-date' };
     }
     const endBoundary = strictTagDateBoundaryMs(end, 'end');
     if (endBoundary.provided && endBoundary.millis === null) {
-        return { ok: false, reason: 'invalid-end-date', message: '结束日期格式无效' };
+        return { ok: false, reason: 'invalid-end-date' };
     }
     const objectIdTimestampInRange = (millis: number) => {
         const seconds = Math.floor(millis / 1000);
         return Number.isSafeInteger(seconds) && seconds >= 0 && seconds <= 0xffffffff;
     };
     if (startBoundary.millis !== null && !objectIdTimestampInRange(startBoundary.millis)) {
-        return { ok: false, reason: 'start-date-out-of-range', message: '开始日期超出可统计范围' };
+        return { ok: false, reason: 'start-date-out-of-range' };
     }
     if (endBoundary.millis !== null && !objectIdTimestampInRange(endBoundary.millis)) {
-        return { ok: false, reason: 'end-date-out-of-range', message: '结束日期超出可统计范围' };
+        return { ok: false, reason: 'end-date-out-of-range' };
     }
     if (startBoundary.millis !== null && endBoundary.millis !== null && startBoundary.millis > endBoundary.millis) {
-        return { ok: false, reason: 'reversed-date-range', message: '开始日期不能晚于结束日期' };
+        return { ok: false, reason: 'reversed-date-range' };
     }
     return { ok: true, query: dateRangeQuery(start as DateLike, end as DateLike) };
 }
@@ -177,14 +203,10 @@ export async function validateTagAcCountGraph(domainId: string, graph: TaskGraph
         const rawCount = node.params?.count;
         const count = typeof rawCount === 'string' && /^\d+$/.test(rawCount) ? Number(rawCount) : rawCount;
         const dateRange = strictTagDateRangeQuery(node.params?.startDate, node.params?.endDate);
-        let reason = '';
-        let message = '';
+        let reason: TagPresetValidationReason | '' = '';
         if (typeof tag !== 'string' || !tag || tag !== tag.trim() || !allowed.has(tag)) reason = 'invalid-canonical-tag';
         else if (!Number.isSafeInteger(count) || count <= 0) reason = 'invalid-count';
-        else if ('reason' in dateRange) {
-            reason = dateRange.reason;
-            message = dateRange.message;
-        }
+        else if ('reason' in dateRange) reason = dateRange.reason;
         if (!reason) continue;
         logger.warn(
             'Tag AC preset save denied domain=%s actor=%d node=%s tag=%o count=%o start=%o end=%o stage=validate reason=%s',
@@ -197,8 +219,7 @@ export async function validateTagAcCountGraph(domainId: string, graph: TaskGraph
             node.params?.endDate,
             reason,
         );
-        if (!message) message = reason === 'invalid-canonical-tag' ? '请选择有效的规范标签' : 'AC 题目数必须为正整数';
-        throw new ValidationError('graph', null, message);
+        throwTagPresetValidation(reason);
     }
 }
 
@@ -243,7 +264,7 @@ const tagAcCountPreset: TaskPointPreset = {
         if (!Number.isSafeInteger(target) || target <= 0) throw new ValidationError('count');
         try {
             const dateRange = strictTagDateRangeQuery(params.startDate, params.endDate);
-            if ('reason' in dateRange) throw new ValidationError('graph', null, dateRange.message);
+            if ('reason' in dateRange) throwTagPresetValidation(dateRange.reason);
             const problemIds = await DocumentModel.coll.distinct('docId', {
                 domainId: ctx.domainId,
                 docType: DocumentModel.TYPE_PROBLEM,

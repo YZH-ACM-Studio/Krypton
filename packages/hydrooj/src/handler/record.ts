@@ -4,6 +4,7 @@ import { readYamlCases } from '@hydrooj/common/cases';
 import { load as loadYaml } from 'js-yaml';
 import { Filter, ObjectId } from 'mongodb';
 import {
+    localizeError,
     ContestNotFoundError,
     HackRejudgeFailedError,
     PermissionError,
@@ -38,11 +39,7 @@ import { ConnectionHandler, param, subscribe, Types } from '../service/server';
 import { buildProjection, Time } from '../utils';
 import { ContestDetailBaseHandler } from './contest';
 
-async function getCurrentTeamForRecord(
-    domainId: string,
-    rdoc: RecordDoc,
-    uid: number,
-): Promise<contestTeam.ContestTeamDoc | null> {
+async function getCurrentTeamForRecord(domainId: string, rdoc: RecordDoc, uid: number): Promise<contestTeam.ContestTeamDoc | null> {
     if (!(rdoc.contest instanceof ObjectId) || !(rdoc.contestTeamId instanceof ObjectId)) return null;
     if ([record.RECORD_GENERATE, record.RECORD_PRETEST].some((sentinel) => sentinel.equals(rdoc.contest))) return null;
     const team = await contestTeam.getTeam(domainId, rdoc.contest, rdoc.contestTeamId);
@@ -104,7 +101,7 @@ export class RecordListHandler extends ContestDetailBaseHandler {
         if (tid) {
             tdoc = await contest.get(domainId, tid);
             this.tdoc = tdoc;
-            if (!tdoc) throw new ContestNotFoundError(domainId, pid);
+            if (!tdoc) throw localizeError(new ContestNotFoundError(domainId, pid), 'Contest {0} not found.', tid);
             postContestPracticeActive = practice && canUsePostContestPractice(tdoc, this.tsdoc);
             if (practice && !postContestPracticeActive) throw new PermissionError(PERM.PERM_VIEW_RECORD);
             if (postContestPracticeActive) {
@@ -179,11 +176,9 @@ export class RecordListHandler extends ContestDetailBaseHandler {
                   .toArray();
         const recordScoreActions = this.user.hasPerm(PERM.PERM_REJUDGE)
             ? Object.fromEntries(
-                  (
-                      await Promise.all(
-                          rdocs.map(async (rdoc) => [rdoc._id.toHexString(), await getRecordScoreAction(rdoc, true)] as const),
-                      )
-                  ).filter((entry) => entry[1]),
+                  (await Promise.all(rdocs.map(async (rdoc) => [rdoc._id.toHexString(), await getRecordScoreAction(rdoc, true)] as const))).filter(
+                      (entry) => entry[1],
+                  ),
               )
             : {};
         rdocs = rdocs.map((rdoc) => omit(rdoc, ['scoreCancellation'])) as RecordDoc[];

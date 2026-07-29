@@ -8,6 +8,8 @@ import {
     FileTooLargeError,
     fs,
     Handler,
+    localizeError,
+    localizeErrorParameter,
     param,
     PERM,
     ProblemConfigFile,
@@ -69,7 +71,7 @@ class ImportQduojHandler extends Handler {
         const tmp = path.resolve(tmpdir, randomstring(32));
         await extractZip(zip, tmp, {
             strip: true,
-            parseError: (e) => new ValidationError('zip', null, e.message),
+            parseError: (e) => localizeErrorParameter(new ValidationError('zip', null, e.message), 2, 'Unable to read the archive: {0}', e.message),
         });
         let cnt = 0;
         try {
@@ -137,7 +139,7 @@ class ImportQduojHandler extends Handler {
         } finally {
             await fs.remove(tmp);
         }
-        if (!cnt) throw new ValidationError('zip', 'No problemset imported');
+        if (!cnt) throw localizeError(new ValidationError('zip', 'No problemset imported'), 'No problem set was imported.');
     }
 
     async get() {

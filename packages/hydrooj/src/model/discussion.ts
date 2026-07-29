@@ -1,7 +1,7 @@
 import { omit } from 'lodash';
 import { Filter, ObjectId } from 'mongodb';
 import { Context } from '../context';
-import { DiscussionNodeNotFoundError, DocumentNotFoundError } from '../error';
+import { localizeError, DiscussionNodeNotFoundError, DocumentNotFoundError } from '../error';
 import { DiscussionHistoryDoc, DiscussionReplyDoc, DiscussionTailReplyDoc, Document } from '../interface';
 import bus from '../service/bus';
 import db from '../service/db';
@@ -193,7 +193,7 @@ export async function editReply(domainId: string, drid: ObjectId, content: strin
 
 export async function delReply(domainId: string, drid: ObjectId) {
     const drdoc = await getReply(domainId, drid);
-    if (!drdoc) throw new DocumentNotFoundError(domainId, drid);
+    if (!drdoc) throw localizeError(new DocumentNotFoundError(domainId, drid), 'Document {0} not found.', drid);
     return await Promise.all([
         document.deleteOne(domainId, document.TYPE_DISCUSSION_REPLY, drid),
         document.inc(domainId, document.TYPE_DISCUSSION, drdoc.parentId, 'nReply', -1),

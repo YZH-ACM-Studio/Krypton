@@ -1,5 +1,6 @@
 import { expect } from 'chai';
 import { beforeEach, describe, it } from 'node:test';
+import { localizeErrorParameter, localizedErrorText } from '@hydrooj/framework';
 
 (global as any).Hydro ||= { model: {} };
 
@@ -74,7 +75,7 @@ require.cache[errorPath] = {
     id: errorPath,
     filename: errorPath,
     loaded: true,
-    exports: { ValidationError: TestValidationError },
+    exports: { localizeErrorParameter, localizedErrorText, ValidationError: TestValidationError },
 } as NodeModule;
 delete require.cache[lifecyclePath];
 

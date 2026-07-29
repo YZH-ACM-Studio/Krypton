@@ -48,13 +48,13 @@ export default async function download(filename, targets) {
       };
     } catch (e) {
       if (retry) {
-        Notification.warn(i18n('Download Error: {0} {1}, retry in 3 secs...', [target.filename, e.toString()]));
+        Notification.warn(i18n('Download Error: {0} {1}, retry in 3 secs...', target.filename, e.toString()));
         await sleep(3000);
         return await downloadFile(target, retry - 1);
       }
       window.captureException?.(e);
       stopDownload();
-      Notification.error(i18n('Download Error: {0} {1}', [target.filename, e.toString()]));
+      Notification.error(i18n('Download Error: {0} {1}', target.filename, e.toString()));
     }
     return {};
   }

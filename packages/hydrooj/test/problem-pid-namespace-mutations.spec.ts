@@ -1,4 +1,5 @@
 import { expect } from 'chai';
+import { localizedErrorText } from '@hydrooj/framework';
 import { ObjectId } from 'mongodb';
 import { beforeEach, describe, it } from 'node:test';
 
@@ -152,7 +153,7 @@ require.cache[errorPath] = {
     id: errorPath,
     filename: errorPath,
     loaded: true,
-    exports: { PermissionError: TestPermissionError, ValidationError: TestValidationError },
+    exports: { localizedErrorText, PermissionError: TestPermissionError, ValidationError: TestValidationError },
 } as NodeModule;
 require.cache[builtinPath] = {
     id: builtinPath,

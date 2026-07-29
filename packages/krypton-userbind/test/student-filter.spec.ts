@@ -2,14 +2,26 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { expect } from 'chai';
 import { describe, it } from 'node:test';
-import { buildStudentsMongoFilter, listStudentsFromCollection, parseShanghaiNaturalDate, parseStudentFilterQuery } from '../src/student-filter';
+import {
+    buildStudentsMongoFilter,
+    listStudentsFromCollection,
+    parseShanghaiNaturalDate,
+    parseStudentFilterQuery,
+    StudentFilterValidationError,
+} from '../src/student-filter';
 
 function loadStudentFilterHttpAdapter() {
     const Module = require('module');
     const framework = require('../../../framework/framework');
     const originalLoad = Module._load;
     Module._load = function load(request: string, parent: unknown, isMain: boolean) {
-        if (request === 'hydrooj') return { BadRequestError: framework.BadRequestError };
+        if (request === 'hydrooj') {
+            return {
+                BadRequestError: framework.BadRequestError,
+                localizedErrorText: framework.localizedErrorText,
+                localizeError: framework.localizeError,
+            };
+        }
         return originalLoad.call(this, request, parent, isMain);
     };
     try {
@@ -72,6 +84,11 @@ describe('P2.9 student filter query parsing', () => {
         }
     });
 
+    it('preserves field-qualified pure validation messages', () => {
+        expect(() => parseStudentFilterQuery({ enrollmentYear: 2024 })).to.throw(StudentFilterValidationError, 'enrollmentYear 参数格式非法');
+        expect(() => buildStudentsMongoFilter('system', { from: new Date(Number.NaN) })).to.throw(StudentFilterValidationError, 'from 日期格式非法');
+    });
+
     it('validates natural dates before converting boundaries', () => {
         expect(parseShanghaiNaturalDate('2000-02-29', 'from').toISOString()).to.equal('2000-02-28T16:00:00.000Z');
         expect(() => parseShanghaiNaturalDate('1900-02-29', 'from')).to.throw();
@@ -82,6 +99,7 @@ describe('P2.9 student filter query parsing', () => {
 describe('P2.9 HTTP filter validation adapter', () => {
     it('maps production parser failures to a BadRequestError with code 400', () => {
         const { parseAdminStudentFilters } = loadStudentFilterHttpAdapter();
+        const framework = require('../../../framework/framework');
         let thrown: any;
         try {
             parseAdminStudentFilters({ enrollmentYear: '2024x' });
@@ -92,6 +110,44 @@ describe('P2.9 HTTP filter validation adapter', () => {
         expect(thrown.name).to.equal('BadRequestError');
         expect(thrown.code).to.equal(400);
         expect(thrown.params).to.deep.equal(['enrollmentYear', null, '入学年必须是 1900–2099 的四位十进制年份']);
+        const descriptor = framework.describeHydroError(thrown);
+        const zh = framework.resolveErrorMessage(descriptor, {
+            locale: 'zh-CN',
+            lookup: framework.lookupErrorMessageTranslation,
+        });
+        const en = framework.resolveErrorMessage(descriptor, {
+            locale: 'en',
+            lookup: framework.lookupErrorMessageTranslation,
+        });
+        expect(zh.message).to.equal('请求无效：enrollmentYear。入学年必须是 1900–2099 的四位十进制年份');
+        expect(en.message).to.equal('Invalid request: enrollmentYear. The enrollment year must be a four-digit decimal year from 1900 through 2099.');
+    });
+
+    it('keeps field-qualified raw params while localizing dynamic parser details', () => {
+        const { parseAdminStudentFilters } = loadStudentFilterHttpAdapter();
+        const framework = require('../../../framework/framework');
+        let thrown: any;
+        try {
+            parseAdminStudentFilters({ from: 20240729 });
+        } catch (error) {
+            thrown = error;
+        }
+        expect(thrown.name).to.equal('BadRequestError');
+        expect(thrown.code).to.equal(400);
+        expect(thrown.params).to.deep.equal(['from', null, 'from 参数格式非法']);
+        const descriptor = framework.describeHydroError(thrown);
+        expect(
+            framework.resolveErrorMessage(descriptor, {
+                locale: 'zh-CN',
+                lookup: framework.lookupErrorMessageTranslation,
+            }).message,
+        ).to.equal('请求无效：from。from 参数格式非法');
+        expect(
+            framework.resolveErrorMessage(descriptor, {
+                locale: 'en',
+                lookup: framework.lookupErrorMessageTranslation,
+            }).message,
+        ).to.equal('Invalid request: from. The from parameter has an invalid format.');
     });
 });
 

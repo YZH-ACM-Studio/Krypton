@@ -4,6 +4,7 @@ import path from 'path';
 import mariadb from 'mariadb';
 import TurndownService from 'turndown';
 import {
+    localizeError,
     _,
     buildContent,
     ContestModel,
@@ -139,7 +140,7 @@ export async function run(
         });
     report({ message: JSON.stringify(await query("show VARIABLES like 'char%';")) });
     const target = await DomainModel.get(domainId);
-    if (!target) throw new NotFoundError(domainId);
+    if (!target) throw localizeError(new NotFoundError(domainId), 'Resource {0} not found.', domainId);
     report({ message: 'Connected to database' });
     await SystemModel.set('migrate.lock', 'hustoj');
     /*

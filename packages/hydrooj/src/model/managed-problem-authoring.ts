@@ -2,7 +2,7 @@ import { ObjectId } from 'mongodb';
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { Logger } from '@hydrooj/utils';
-import { ManagedProblemMetadataConflictError, ValidationError } from '../error';
+import { localizedErrorText, ManagedProblemMetadataConflictError, ValidationError } from '../error';
 import type { ProblemDoc, TrainingNode } from '../interface';
 import {
     compileProgrammingStatement,
@@ -203,7 +203,7 @@ function parseInteger(value: unknown, field: string, minimum: number, maximum: n
 export function normalizeManagedProblemBatchImport(input: unknown): ManagedProblemBatchImportIdentity {
     if (!isPlainObject(input)) throw new ValidationError('batchImport');
     const unknown = Object.keys(input).filter((field) => !['batchId', 'sourceProblemCode', 'fingerprint'].includes(field));
-    if (unknown.length) throw new ValidationError('batchImport', null, `批量导入标识不接受字段：${unknown.join(', ')}`);
+    if (unknown.length) throw new ValidationError('batchImport', null, localizedErrorText`批量导入标识不接受字段：${unknown.join(', ')}`);
     const batchId = typeof input.batchId === 'string' ? input.batchId.trim() : '';
     const sourceProblemCode = typeof input.sourceProblemCode === 'string' ? input.sourceProblemCode.trim() : '';
     const fingerprint = typeof input.fingerprint === 'string' ? input.fingerprint.trim().toLowerCase() : '';
@@ -246,16 +246,16 @@ function buildNodePath(node: MindmapNodeRecord, byId: Map<string, MindmapNodeRec
     let current: MindmapNodeRecord | undefined = node;
     while (current) {
         const id = current._id.toHexString();
-        if (visited.has(id)) throw new ManagedProblemMetadataConflictError('导图存在循环');
+        if (visited.has(id)) throw new ManagedProblemMetadataConflictError(localizedErrorText`导图存在循环`);
         visited.add(id);
         path.push(current);
         if (!current.parentId) break;
         current = byId.get(current.parentId.toHexString());
-        if (!current) throw new ManagedProblemMetadataConflictError('导图祖先节点已删除');
+        if (!current) throw new ManagedProblemMetadataConflictError(localizedErrorText`导图祖先节点已删除`);
     }
     path.reverse();
     if (!path[0]?._id.equals(expectedRootNodeId) || path[0].parentId !== null) {
-        throw new ManagedProblemMetadataConflictError('导图节点不属于该图的唯一根节点');
+        throw new ManagedProblemMetadataConflictError(localizedErrorText`导图节点不属于该图的唯一根节点`);
     }
     return path;
 }
@@ -280,7 +280,7 @@ export async function listKnowledgeMindmapOptions(mapIdInput?: unknown, includeH
         )
         .sort({ title: 1, _id: 1 })
         .toArray();
-    if (requestedMapId && maps.length !== 1) throw new ManagedProblemMetadataConflictError('所属导图不存在或不可选');
+    if (requestedMapId && maps.length !== 1) throw new ManagedProblemMetadataConflictError(localizedErrorText`所属导图不存在或不可选`);
     const options: KnowledgeMindmapOption[] = [];
     for (const map of maps) {
         const nodes = await loadMindmapNodes(map._id);
@@ -337,7 +337,7 @@ export async function previewProgrammingTagNormalization(input: {
         includePathVersion: true,
     });
     const currentKnowledgeMapId = normalizeMapId(input.currentKnowledgeMapId);
-    if (!currentKnowledgeMapId) throw new ManagedProblemMetadataConflictError('题目缺少所属导图，请先完成站点迁移');
+    if (!currentKnowledgeMapId) throw new ManagedProblemMetadataConflictError(localizedErrorText`题目缺少所属导图，请先完成站点迁移`);
     const sourceTags = input.problemKind === undefined || input.problemKind === 'programming' ? currentTags.filter(isCanonicalManagedSourceTag) : [];
     const nextTags = [...new Set([...sourceTags, ...knowledge.tags])];
     const currentSet = new Set(currentTags);
@@ -447,7 +447,7 @@ async function materializeKnowledgeMindmapState(
             .limit(2)
             .toArray();
         if (maps.length === 1) mapId = maps[0]._id;
-        else if (maps.length > 1) throw new ValidationError('knowledgeMapId', null, '存在多张公开导图，请明确选择所属导图');
+        else if (maps.length > 1) throw new ValidationError('knowledgeMapId', null, localizedErrorText`存在多张公开导图，请明确选择所属导图`);
     }
     if (!mapId) {
         if (options.requireMap !== false) throw new ValidationError('knowledgeMapId');
@@ -458,13 +458,13 @@ async function materializeKnowledgeMindmapState(
             .find({ _id: { $in: nodeIds.map((id) => new ObjectId(id)) }, mapId }, { projection: { _id: 1, mapId: 1 } })
             .toArray();
         if (selected.length !== nodeIds.length) {
-            throw new ManagedProblemMetadataConflictError('所选知识节点已删除或不属于指定导图');
+            throw new ManagedProblemMetadataConflictError(localizedErrorText`所选知识节点已删除或不属于指定导图`);
         }
     }
     const map = await knowledgeMapsColl.findOne({ _id: mapId }, { projection: { _id: 1, title: 1, rootNodeId: 1, visibility: 1 } });
-    if (!map) throw new ManagedProblemMetadataConflictError('所属导图已删除');
+    if (!map) throw new ManagedProblemMetadataConflictError(localizedErrorText`所属导图已删除`);
     if (options.requirePublicMap && map.visibility !== 'public') {
-        throw new ManagedProblemMetadataConflictError('所属导图当前不可用于题目归类');
+        throw new ManagedProblemMetadataConflictError(localizedErrorText`所属导图当前不可用于题目归类`);
     }
     const nodes = await loadMindmapNodes(mapId);
     const byId = new Map(nodes.map((node) => [node._id.toHexString(), node]));
@@ -474,7 +474,7 @@ async function materializeKnowledgeMindmapState(
     for (const id of nodeIds) {
         const node = byId.get(id);
         if (!node || !Array.isArray(node.tags) || !node.tags.some((tag) => typeof tag === 'string' && tag.trim())) {
-            throw new ManagedProblemMetadataConflictError(`导图节点 ${id} 已删除或不可选`);
+            throw new ManagedProblemMetadataConflictError(localizedErrorText`导图节点 ${id} 已删除或不可选`);
         }
         const nodePath = buildNodePath(node, byId, map.rootNodeId);
         nodePaths.push({ id, label: nodePath.map((part) => part.topic).join(' / ') });
@@ -544,7 +544,7 @@ export async function canonicalizeManagedDraftMindmapPatch(
 ): Promise<string[] | null> {
     if (current.authoringMode !== 'managed' || !Object.hasOwn($set, 'managedAuthoring')) return null;
     if (current.managedAuthoring?.metadataStatus !== 'draft' || $set.managedAuthoring?.metadataStatus !== 'draft') {
-        throw new ValidationError('knowledgeNodeIds', null, '只有托管草稿可以提交知识节点建议');
+        throw new ValidationError('knowledgeNodeIds', null, localizedErrorText`只有托管草稿可以提交知识节点建议`);
     }
     const materialized = await materializeKnowledgeMindmapTags($set.managedAuthoring.selectedMindmapNodeIds, {
         required: false,
@@ -647,7 +647,7 @@ export async function validateManagedTrainingPlacement(
     );
     const chapters = canonicalTrainingChapters(training?.dag);
     const chapter = chapters.find((candidate) => candidate._id === chapterId);
-    if (!training || !chapter) throw new ManagedProblemMetadataConflictError('待挂训练或章节已删除');
+    if (!training || !chapter) throw new ManagedProblemMetadataConflictError(localizedErrorText`待挂训练或章节已删除`);
     const memberPids = [
         ...new Set(
             chapters
@@ -663,7 +663,9 @@ export async function validateManagedTrainingPlacement(
               { projection: { docId: 1 } },
           )
         : null;
-    if (!supportingProblem) throw new ManagedProblemMetadataConflictError(`该训练不接受来源模板 ${template}`);
+    if (!supportingProblem) {
+        throw new ManagedProblemMetadataConflictError(localizedErrorText`该训练不接受来源模板 ${template}`);
+    }
     return { trainingId, chapterId };
 }
 
@@ -676,7 +678,7 @@ export async function prepareManagedProblemDraft(domainId: string, input: Manage
     if (statementFormat === 'structured-v1') {
         programmingStatement = normalizeProgrammingStatement(input.programmingStatement ?? emptyProgrammingStatement());
         content = compileProgrammingStatement(programmingStatement);
-        if (input.content !== undefined) throw new ValidationError('content', null, '结构化编程题正文只能由服务端生成');
+        if (input.content !== undefined) throw new ValidationError('content', null, localizedErrorText`结构化编程题正文只能由服务端生成`);
     } else if (statementFormat === 'legacy-import-v1') {
         if (typeof input.content !== 'string') throw new ValidationError('content');
         if (input.programmingStatement !== undefined) throw new ValidationError('programmingStatement');
@@ -719,7 +721,7 @@ export async function prepareManagedProblemPublication(
         mindmap = await materializeManagedMindmapTags(pdoc.managedAuthoring?.selectedMindmapNodeIds, pdoc.knowledgeMapId, true);
     } catch (error) {
         if (error instanceof ManagedProblemMetadataConflictError) throw error;
-        const conflict = new ManagedProblemMetadataConflictError('来源或算法标签已失效');
+        const conflict = new ManagedProblemMetadataConflictError(localizedErrorText`来源或算法标签已失效`);
         Object.defineProperty(conflict, 'cause', { value: error, configurable: true });
         throw conflict;
     }
@@ -732,7 +734,7 @@ export async function prepareManagedProblemPublication(
         );
     } catch (error) {
         if (error instanceof ManagedProblemMetadataConflictError) throw error;
-        const conflict = new ManagedProblemMetadataConflictError('待挂训练字段已失效');
+        const conflict = new ManagedProblemMetadataConflictError(localizedErrorText`待挂训练字段已失效`);
         Object.defineProperty(conflict, 'cause', { value: error, configurable: true });
         throw conflict;
     }
@@ -748,9 +750,9 @@ export async function prepareManagedProblemPublication(
         );
         const chapters = canonicalTrainingChapters(training?.dag);
         const chapter = chapters.find((candidate) => candidate._id === pendingTrainingPlacement.chapterId);
-        if (!chapter) throw new ManagedProblemMetadataConflictError('待挂训练或章节已删除');
+        if (!chapter) throw new ManagedProblemMetadataConflictError(localizedErrorText`待挂训练或章节已删除`);
         if (chapters.some((candidate) => candidate.pids.map(Number).includes(pdoc.docId))) {
-            throw new ManagedProblemMetadataConflictError('题目已存在于待挂训练');
+            throw new ManagedProblemMetadataConflictError(localizedErrorText`题目已存在于待挂训练`);
         }
     }
     return {

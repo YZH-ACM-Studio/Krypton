@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useBootstrap } from '@/lib/bootstrap';
+import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 
 interface ManualGrade {
   score?: string | number;
@@ -62,16 +63,15 @@ function GradeRow({ row, pid }: { row: ManualGradingRow; pid: number }) {
         comment,
         reason,
       });
-      const response = await fetch(window.location.pathname, {
+      const response = await fetchHydroResponse(window.location.pathname, {
         method: 'POST',
         body,
         credentials: 'same-origin',
         headers: { Accept: 'application/json' },
       });
+      if (!response.ok) throw new Error(await readHydroResponseError(response, '保存评分失败'));
       const result = (await response.json().catch(() => null)) as ManualGradeResponse | null;
-      if (!response.ok || result?.error) {
-        throw new Error(result?.error?.message || `保存失败（HTTP ${response.status}）`);
-      }
+      if (result?.error) throw new Error('保存评分响应包含错误标记');
       setGrade(result!.manualGrade);
       setReason('');
     } catch (caught) {

@@ -1,3 +1,5 @@
+import { fetchHydroResponse, readHydroResponseError } from './error-presenter';
+
 /**
  * 上传一个文件到当前用户的 Hydro 文件存储（FilesHandler，POST /file）。
  *
@@ -16,17 +18,8 @@ export async function uploadUserFile(file: File, uid: number): Promise<string> {
   form.append('filename', filename);
   form.append('file', file);
   form.append('operation', 'upload_file');
-  const res = await fetch('/file', { method: 'POST', body: form, headers: { Accept: 'application/json' } });
-  if (!res.ok) {
-    let msg = `上传失败（HTTP ${res.status}）`;
-    try {
-      const body = await res.json();
-      if (body?.error?.message) msg = `上传失败：${body.error.message}`;
-    } catch {
-      /* 非 JSON 响应，用默认文案 */
-    }
-    throw new Error(msg);
-  }
+  const res = await fetchHydroResponse('/file', { method: 'POST', body: form, headers: { Accept: 'application/json' } });
+  if (!res.ok) throw new Error(await readHydroResponseError(res, '上传失败'));
   // This helper is used for image previews. Without noDisposition the file
   // endpoint signs a download response, which is not a reliable <img> source.
   return `/file/${uid}/${filename}?noDisposition=1`;

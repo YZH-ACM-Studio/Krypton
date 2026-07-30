@@ -15,6 +15,7 @@ import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
 import { useBootstrap } from '@/lib/bootstrap';
+import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 
 interface OriginalContestStats {
   accepted: number;
@@ -82,19 +83,15 @@ function messageFromError(error: unknown): string {
 async function postOp<T = Record<string, unknown>>(fields: Record<string, string>): Promise<T> {
   const form = new FormData();
   for (const [k, v] of Object.entries(fields)) form.append(k, v);
-  const res = await fetch('/manage/realpass', {
+  const res = await fetchHydroResponse('/manage/realpass', {
     method: 'POST',
     body: form,
     headers: { Accept: 'application/json' },
   });
-  let body: unknown = null;
-  try {
-    body = await res.json();
-  } catch {
-    /* 非 JSON 响应 */
-  }
-  const error = (body as { error?: { message?: unknown } } | null)?.error;
-  if (!res.ok || error) throw new Error(typeof error?.message === 'string' && error.message ? error.message : `HTTP ${res.status}`);
+  if (!res.ok) throw new Error(await readHydroResponseError(res, '实名管理操作失败'));
+  const body: unknown = await res.json().catch(() => null);
+  const error = (body as { error?: unknown } | null)?.error;
+  if (error) throw new Error('实名管理响应包含错误标记');
   return body as T;
 }
 

@@ -1,3 +1,4 @@
+import { fetchHydroResponse, presentHydroResponseError } from '@/lib/error-presenter';
 import type { MindmapSnapshot, PanelProblem, ProblemOption } from './types';
 
 export interface MindmapApiErrorDetails {
@@ -24,21 +25,10 @@ export function mindmapProblemHref(problem: { domainId?: string; pid: string }):
 }
 
 async function errorFromResponse(response: Response, fallback: string): Promise<MindmapApiError> {
-  let message = fallback;
-  let details: MindmapApiErrorDetails | undefined;
-  try {
-    const body = await response.json();
-    const params = Array.isArray(body?.error?.params) ? body.error.params : [];
-    if (typeof params[0] === 'string' && params[0].trim()) message = params[0];
-    else if (typeof body?.error?.message === 'string' && body.error.message.trim() && !body.error.message.includes('{0}')) {
-      message = body.error.message;
-    } else if (typeof body?.error === 'string' && body.error.trim()) message = body.error;
-    if (params[1] && typeof params[1] === 'object') details = params[1] as MindmapApiErrorDetails;
-  } catch {
-    // The HTTP status remains authoritative when an upstream renderer returns
-    // non-JSON. Do not convert it into a successful empty result.
-  }
-  return new MindmapApiError(message, response.status, details);
+  const presented = await presentHydroResponseError(response, fallback);
+  const rawDetails = presented.payload?.params[1];
+  const details = rawDetails && typeof rawDetails === 'object' ? (rawDetails as MindmapApiErrorDetails) : undefined;
+  return new MindmapApiError(presented.message, response.status, details);
 }
 
 function assertSnapshot(value: unknown): asserts value is MindmapSnapshot {
@@ -58,7 +48,7 @@ export async function mutateMindmap(operation: 'create' | 'update' | 'move' | 'd
   const form = new URLSearchParams();
   form.set('operation', operation);
   form.set('payload', JSON.stringify(payload));
-  const response = await fetch('/admin/mindmap/nodes', {
+  const response = await fetchHydroResponse('/admin/mindmap/nodes', {
     method: 'POST',
     headers: { Accept: 'application/json' },
     body: form,
@@ -73,7 +63,7 @@ export async function mutateKnowledgeMap(operation: 'create' | 'update' | 'delet
   const form = new URLSearchParams();
   form.set('operation', operation);
   form.set('payload', JSON.stringify(payload));
-  const response = await fetch('/admin/mindmap/maps', {
+  const response = await fetchHydroResponse('/admin/mindmap/maps', {
     method: 'POST',
     headers: { Accept: 'application/json' },
     body: form,
@@ -86,7 +76,7 @@ export async function mutateKnowledgeMap(operation: 'create' | 'update' | 'delet
 
 export async function loadNodeProblems(mapId: string, nodeId: string, admin: boolean): Promise<PanelProblem[]> {
   const endpoint = admin ? '/api/mindmap/admin/node-problems' : '/api/mindmap/problems';
-  const response = await fetch(`${endpoint}?mapId=${encodeURIComponent(mapId)}&nodeId=${encodeURIComponent(nodeId)}`, {
+  const response = await fetchHydroResponse(`${endpoint}?mapId=${encodeURIComponent(mapId)}&nodeId=${encodeURIComponent(nodeId)}`, {
     headers: { Accept: 'application/json' },
   });
   if (!response.ok) throw await errorFromResponse(response, `关联题目加载失败（HTTP ${response.status}）`);
@@ -96,7 +86,7 @@ export async function loadNodeProblems(mapId: string, nodeId: string, admin: boo
 }
 
 export async function searchMindmapProblems(mapId: string, query: string, signal?: AbortSignal): Promise<ProblemOption[]> {
-  const response = await fetch(`/api/mindmap/admin/problems?mapId=${encodeURIComponent(mapId)}&q=${encodeURIComponent(query)}`, {
+  const response = await fetchHydroResponse(`/api/mindmap/admin/problems?mapId=${encodeURIComponent(mapId)}&q=${encodeURIComponent(query)}`, {
     headers: { Accept: 'application/json' },
     signal,
   });

@@ -13,6 +13,7 @@ import { useFormDirtyState, useUnsavedChangesGuard } from '@/components/unsaved-
 import { Button } from '@/components/ui/button';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
+import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { readProblemSaveSuccess } from '@/lib/problem-save-response';
 
 interface SubjectiveProblemDocument extends StructuredProblemMetadataDocument {
@@ -29,12 +30,6 @@ interface SubjectiveEditorPageData {
   knowledgeMaps?: KnowledgeMapOption[];
   knowledgeMindmapOptions?: KnowledgeMindmapOption[];
   canUseCustomPid?: boolean;
-}
-
-async function errorMessage(response: Response) {
-  if (response.status === 409) return '题目已被其他操作修改，或正在比赛/考试中使用；请重新载入。';
-  const body = await response.json().catch(() => null);
-  return body?.error?.message || body?.message || `保存失败（HTTP ${response.status}）`;
 }
 
 export function SubjectiveProblemEditorPage() {
@@ -70,13 +65,17 @@ export function SubjectiveProblemEditorPage() {
     setSaving(true);
     setError('');
     try {
-      const response = await fetch(form.action || window.location.pathname, {
+      const response = await fetchHydroResponse(form.action || window.location.pathname, {
         method: 'POST',
         body: new URLSearchParams(Array.from(formData, ([key, value]) => [key, String(value)])),
         credentials: 'same-origin',
         headers: { Accept: 'application/json' },
       });
-      if (!response.ok) throw new Error(await errorMessage(response));
+      if (!response.ok) {
+        throw new Error(
+          await readHydroResponseError(response, response.status === 409 ? '题目已被其他操作修改，或正在比赛/考试中使用；请重新载入' : '保存失败'),
+        );
+      }
       const { destination } = await readProblemSaveSuccess(response, PROBLEM_KIND_TO_SLUG.subjective);
       if (dirtyState.snapshot() !== submittedSnapshot) {
         console.warn('Subjective problem saved, but local form changed during request; navigation withheld', { destination });

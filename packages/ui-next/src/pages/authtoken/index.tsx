@@ -13,6 +13,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { DateTime } from '@/components/ui/datetime';
+import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 
 // ── sidebar nav (registered at module load — read by AdminSidebar) ──────────
 registerAdminNavSection({
@@ -84,7 +85,7 @@ interface ErrorLike {
 
 /** POST an operation to the auth-token handler; returns parsed JSON, throws on failure. */
 async function postOp(fields: Record<string, string>): Promise<PostOpResponse> {
-  const resp = await fetch(ENDPOINT, {
+  const resp = await fetchHydroResponse(ENDPOINT, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
@@ -93,10 +94,8 @@ async function postOp(fields: Record<string, string>): Promise<PostOpResponse> {
     credentials: 'include',
     body: new URLSearchParams(fields),
   });
+  if (!resp.ok) throw new Error(await readHydroResponseError(resp, '令牌操作失败'));
   const json: PostOpResponse = await resp.json().catch(() => ({}));
-  if (!resp.ok) {
-    throw new Error(json?.error?.message || json?.error || `请求失败 (${resp.status})`);
-  }
   return json;
 }
 

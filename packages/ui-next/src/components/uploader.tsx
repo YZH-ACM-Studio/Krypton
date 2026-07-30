@@ -19,17 +19,36 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/cn';
+import { fetchHydroResponse, formatHydroErrorResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { fileUploaderAllowedMetaFields } from '@/lib/file-uploader-meta';
 import { makeInitials } from '@/lib/format';
-import { formatHydroErrorResponse } from '@/lib/problem-save-response';
-
-/** Thrown values surfaced to the user (Error / DOMException / Uppy failures). */
-interface ErrorLike {
-  message?: string;
-}
 
 /** Hydro upload endpoints answer with a parsed JSON object (see getResponseData). */
 type UploadResponseBody = Record<string, unknown>;
+
+class HydroUploadResponseError extends Error {
+  override name = 'HydroUploadResponseError';
+}
+
+function parseHydroUploadResponse(xhr: XMLHttpRequest): UploadResponseBody {
+  const responseText = xhr.responseText || '';
+  if (!responseText.trim()) return {};
+  try {
+    const parsed: unknown = JSON.parse(responseText);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as UploadResponseBody) : {};
+  } catch {
+    return {};
+  }
+}
+
+function assertHydroUploadResponse(xhr: XMLHttpRequest): void {
+  if (xhr.status < 400) return;
+  throw new HydroUploadResponseError(formatHydroErrorResponse(xhr.responseText || '', xhr.status, '上传失败'));
+}
+
+function uploadErrorMessage(error: unknown, fallback = '上传失败'): string {
+  return error instanceof HydroUploadResponseError ? error.message : fallback;
+}
 
 /* ────────────────────────────────────────────────────────────────── */
 /*  AvatarUpload — pick → square-crop → upload                        */
@@ -124,6 +143,13 @@ export function AvatarUpload({
         formData: true,
         method: 'POST',
         withCredentials: true,
+        headers: { Accept: 'application/json' },
+        getResponseData: parseHydroUploadResponse,
+        onAfterResponse: assertHydroUploadResponse,
+      });
+      let uploadError: unknown;
+      uppy.once('upload-error', (_file, error) => {
+        uploadError = error;
       });
       uppy.addFile({
         name: 'avatar.png',
@@ -132,8 +158,7 @@ export function AvatarUpload({
       });
       const result = await uppy.upload();
       if (result?.failed?.length) {
-        const f = result.failed[0];
-        throw new Error(f.error || '上传失败');
+        throw uploadError instanceof HydroUploadResponseError ? uploadError : new Error('上传失败');
       }
       // Bust the avatar cache so the new image shows immediately
       const bust = `?v=${Date.now()}`;
@@ -142,7 +167,7 @@ export function AvatarUpload({
       // Reload the page so user.avatarUrl re-resolves everywhere
       window.location.reload();
     } catch (e) {
-      setErrorMsg((e as ErrorLike | null)?.message || '上传失败');
+      setErrorMsg(uploadErrorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -414,15 +439,20 @@ function ProviderPicker({ endpoint, onClose, onSubmitted }: { endpoint: string; 
     try {
       const form = new FormData();
       form.append('avatar', `${provider}:${value.trim()}`);
-      const res = await fetch(endpoint, { method: 'POST', body: form, credentials: 'include' });
+      const res = await fetchHydroResponse(endpoint, {
+        method: 'POST',
+        body: form,
+        credentials: 'include',
+        headers: { Accept: 'application/json' },
+      });
       if (res.ok || res.redirected) {
         onSubmitted(`${provider}:${value.trim()}`);
         onClose();
       } else {
-        setErr(`保存失败 (${res.status})`);
+        throw new Error(await readHydroResponseError(res, '头像保存失败'));
       }
     } catch (e) {
-      setErr((e as ErrorLike | null)?.message || '保存失败');
+      setErr(e instanceof Error ? e.message : '保存失败');
     } finally {
       setBusy(false);
     }
@@ -547,20 +577,8 @@ export function FileUploader({
       withCredentials: true,
       headers: { Accept: 'application/json' },
       allowedMetaFields: false,
-      getResponseData: (xhr) => {
-        const responseText = xhr.responseText || '';
-        if (!responseText.trim()) return {};
-        try {
-          const parsed = JSON.parse(responseText);
-          return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
-        } catch {
-          return {};
-        }
-      },
-      onAfterResponse: (xhr) => {
-        if (xhr.status < 400) return;
-        throw new Error(formatHydroErrorResponse(xhr.responseText || '', xhr.status, '上传失败'));
-      },
+      getResponseData: parseHydroUploadResponse,
+      onAfterResponse: assertHydroUploadResponse,
     });
     uppy.on('file-added', (file) => {
       setItems((prev) => [
@@ -588,7 +606,7 @@ export function FileUploader({
       if (file?.name) onUploaded?.(file.name, response?.body);
     });
     uppy.on('upload-error', (file, error) => {
-      const message = error?.message || '上传失败';
+      const message = uploadErrorMessage(error);
       if (!file) {
         setIngestError(message);
         return;
@@ -639,12 +657,12 @@ export function FileUploader({
           });
         } catch (error) {
           console.error('File rejected before upload', { filename: f.name, error });
-          setIngestError(error instanceof Error ? error.message : `${f.name} 无法加入上传队列`);
+          setIngestError(uploadErrorMessage(error, `${f.name} 无法加入上传队列`));
         }
       }
       void uppy.upload().catch((error) => {
         console.error('File upload batch failed', error);
-        setIngestError(error instanceof Error ? error.message : '上传批次失败');
+        setIngestError(uploadErrorMessage(error, '上传批次失败'));
       });
     },
     [meta],

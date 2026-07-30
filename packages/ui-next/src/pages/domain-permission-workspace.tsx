@@ -20,7 +20,7 @@ import {
   type DomainPermissionFamily,
   type DomainPermissionItem,
 } from '@/lib/domain-permission-state';
-import { readHydroResponseError } from '@/lib/problem-save-response';
+import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { resolveSudoChallengeUrl } from '@/lib/sudo-replay';
 
 interface DomainPermissionRole {
@@ -64,7 +64,7 @@ function sameKeys(left: ReadonlySet<string>, right: ReadonlySet<string>) {
 async function postRoleOperation(endpoint: string, fields: Record<string, string>, permissions: readonly string[] = []) {
   const body = new URLSearchParams(fields);
   for (const permission of permissions) body.append('permissions', permission);
-  const response = await fetch(endpoint, {
+  const response = await fetchHydroResponse(endpoint, {
     method: 'POST',
     credentials: 'include',
     headers: {
@@ -95,7 +95,10 @@ async function postRoleOperation(endpoint: string, fields: Record<string, string
 function MutationError({ message }: { message: string | null }) {
   if (!message) return null;
   return (
-    <div role="alert" className="flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-sm text-destructive">
+    <div
+      role="alert"
+      className="flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-sm text-destructive"
+    >
       <AlertTriangle className="mt-0.5 size-4 shrink-0" />
       <span>{message}</span>
     </div>
@@ -298,9 +301,7 @@ export function DomainPermissionWorkspace({ domainName, endpoint, initialRoles, 
   };
 
   const defaultRole = roles.find((role) => role.id === 'default');
-  const defaultPermissionCount = defaultRole
-    ? permissionKeysFromMask(parseDomainRoleMask(roleMasks.default, 'default'), allPermissions).size
-    : 0;
+  const defaultPermissionCount = defaultRole ? permissionKeysFromMask(parseDomainRoleMask(roleMasks.default, 'default'), allPermissions).size : 0;
 
   return (
     <AdminPage bypassPrivGate hideSidebar contentClassName="min-h-full">
@@ -331,9 +332,7 @@ export function DomainPermissionWorkspace({ domainName, endpoint, initialRoles, 
 
         <div className="flex items-start gap-2 rounded-xl border border-primary/20 bg-primary/5 px-3.5 py-3 text-sm leading-6">
           <ShieldCheck className="mt-0.5 size-4 shrink-0 text-primary" />
-          <p>
-            权限包含标记只说明实际能力，不会替你勾选或写入其它权限位。root 始终拥有全部域权限，且不可修改或删除。
-          </p>
+          <p>权限包含标记只说明实际能力，不会替你勾选或写入其它权限位。root 始终拥有全部域权限，且不可修改或删除。</p>
         </div>
 
         <div className="overflow-hidden rounded-2xl border bg-card/20 shadow-sm lg:grid lg:grid-cols-[17rem_minmax(0,1fr)]">
@@ -358,7 +357,9 @@ export function DomainPermissionWorkspace({ domainName, endpoint, initialRoles, 
                     className={cn(
                       'w-full rounded-xl px-3 py-2.5 text-left outline-none transition-[background-color,color,box-shadow,scale] duration-150 ease-out active:scale-[0.985]',
                       'focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
-                      active ? 'bg-background text-foreground shadow-sm ring-1 ring-border/70' : 'text-muted-foreground hover:bg-background/65 hover:text-foreground',
+                      active
+                        ? 'bg-background text-foreground shadow-sm ring-1 ring-border/70'
+                        : 'text-muted-foreground hover:bg-background/65 hover:text-foreground',
                     )}
                   >
                     <span className="flex items-center gap-2">
@@ -412,7 +413,9 @@ export function DomainPermissionWorkspace({ domainName, endpoint, initialRoles, 
                       <Users className="size-3.5" />
                       {selectedRole.memberCount} 名当前成员
                     </span>
-                    <span>{selectedKeys.size} / {allPermissions.length} 项显式权限</span>
+                    <span>
+                      {selectedKeys.size} / {allPermissions.length} 项显式权限
+                    </span>
                   </div>
                 </div>
                 {selectedRole.deletable ? (
@@ -480,7 +483,9 @@ export function DomainPermissionWorkspace({ domainName, endpoint, initialRoles, 
                 <div className="sticky bottom-2 z-10 flex flex-col gap-3 rounded-xl border bg-background p-3 shadow-lg sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <p className="text-sm font-medium">{selectedRole.id} 有未保存修改</p>
-                    <p className="text-xs text-muted-foreground">新增 {selectedDiff.added.length} 项，移除 {selectedDiff.removed.length} 项</p>
+                    <p className="text-xs text-muted-foreground">
+                      新增 {selectedDiff.added.length} 项，移除 {selectedDiff.removed.length} 项
+                    </p>
                   </div>
                   <div className="flex gap-2">
                     <Button type="button" variant="ghost" className="min-h-10 gap-1.5" onClick={() => updateDraft(new Set(originalKeys))}>
@@ -518,7 +523,9 @@ export function DomainPermissionWorkspace({ domainName, endpoint, initialRoles, 
         <DialogContent className="sm:w-[620px] sm:rounded-2xl" onClose={busy ? undefined : () => setSaveOpen(false)}>
           <DialogHeader>
             <DialogTitle>确认保存角色权限</DialogTitle>
-            <p className="mt-1 text-sm text-muted-foreground">角色 {selectedRole.id} · 当前影响 {selectedRole.memberCount} 名成员</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              角色 {selectedRole.id} · 当前影响 {selectedRole.memberCount} 名成员
+            </p>
           </DialogHeader>
           <DialogBody className="space-y-4 px-6 py-5">
             <MutationError message={mutationError} />
@@ -526,7 +533,11 @@ export function DomainPermissionWorkspace({ domainName, endpoint, initialRoles, 
               <div>
                 <p className="mb-2 text-sm font-medium text-emerald-600 dark:text-emerald-400">新增 {selectedDiff.added.length} 项</p>
                 {selectedDiff.added.length ? (
-                  <ul className="space-y-1.5 text-sm">{selectedDiff.added.map((permission) => <li key={permission.key}>{permission.name}</li>)}</ul>
+                  <ul className="space-y-1.5 text-sm">
+                    {selectedDiff.added.map((permission) => (
+                      <li key={permission.key}>{permission.name}</li>
+                    ))}
+                  </ul>
                 ) : (
                   <p className="text-sm text-muted-foreground">无新增权限</p>
                 )}
@@ -534,7 +545,11 @@ export function DomainPermissionWorkspace({ domainName, endpoint, initialRoles, 
               <div>
                 <p className="mb-2 text-sm font-medium text-destructive">移除 {selectedDiff.removed.length} 项</p>
                 {selectedDiff.removed.length ? (
-                  <ul className="space-y-1.5 text-sm">{selectedDiff.removed.map((permission) => <li key={permission.key}>{permission.name}</li>)}</ul>
+                  <ul className="space-y-1.5 text-sm">
+                    {selectedDiff.removed.map((permission) => (
+                      <li key={permission.key}>{permission.name}</li>
+                    ))}
+                  </ul>
                 ) : (
                   <p className="text-sm text-muted-foreground">无移除权限</p>
                 )}
@@ -653,7 +668,10 @@ export function DomainRolePage() {
   return (
     <AdminPage bypassPrivGate hideSidebar>
       <div className="rounded-xl border p-6 text-sm">
-        角色管理已合并到权限管理。<a className="ml-1 font-medium text-primary underline-offset-4 hover:underline" href={endpoint}>前往角色与权限</a>
+        角色管理已合并到权限管理。
+        <a className="ml-1 font-medium text-primary underline-offset-4 hover:underline" href={endpoint}>
+          前往角色与权限
+        </a>
       </div>
     </AdminPage>
   );

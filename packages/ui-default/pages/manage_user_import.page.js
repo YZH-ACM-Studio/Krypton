@@ -12,7 +12,6 @@ const page = new NamedPage('manage_user_import', () => {
       });
       if (!draft) {
         if (res.url) window.location.href = res.url;
-        else if (res.error) throw new Error(res.error?.message || res.error);
         else {
           Notification.success(i18n('Created {0} users.', res.users.length));
           await delay(2000);

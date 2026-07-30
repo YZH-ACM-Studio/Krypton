@@ -1,4 +1,5 @@
 export * from './datetime';
+export * from './error-envelope';
 export * from './lang';
 export * from './objective';
 export * from './permission';

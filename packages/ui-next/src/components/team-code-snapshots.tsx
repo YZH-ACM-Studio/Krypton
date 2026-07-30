@@ -9,6 +9,7 @@ import { Dialog } from '@/components/ui/dialog';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { toast } from '@/components/ui/toast';
 import { cn } from '@/lib/cn';
+import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { formatDateTime } from '@/lib/format';
 import { createLatestRequestGate } from '@/lib/latest-request';
 
@@ -60,36 +61,20 @@ interface ErrorLike {
   message?: string;
 }
 
-/** Error body shapes produced by Hydro handlers behind this endpoint. */
-interface ApiErrorPayload {
-  message?: unknown;
-  error?: { message?: unknown } | null;
-  detail?: unknown;
-}
-
-function responseMessage(payload: ApiErrorPayload | null, status: number): string {
-  const message = payload?.message || payload?.error?.message || payload?.error || payload?.detail;
-  return typeof message === 'string' && message.trim() ? message.trim() : `HTTP ${status}`;
-}
-
 async function requestJson<T = unknown>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, {
+  const response = await fetchHydroResponse(url, {
     ...init,
     credentials: 'same-origin',
     headers: { Accept: 'application/json', ...(init?.headers || {}) },
   });
-  let payload: (ApiErrorPayload & { page?: { data?: T } }) | null = null;
-  try {
-    payload = await response.json();
-  } catch {
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    throw new Error('服务器返回了无法解析的响应。');
-  }
   if (response.status === 409) {
     window.location.reload();
     throw new Error('队伍状态已变化，正在刷新。');
   }
-  if (!response.ok) throw new Error(responseMessage(payload, response.status));
+  if (!response.ok) throw new Error(await readHydroResponseError(response, '队伍代码操作失败'));
+  const payload = (await response.json().catch(() => {
+    throw new Error('服务器返回了无法解析的响应。');
+  })) as { page?: { data?: T } };
   return (payload?.page?.data || payload) as T;
 }
 

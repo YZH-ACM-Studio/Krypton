@@ -19,6 +19,7 @@ import rehypeHighlight from 'rehype-highlight';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import { cn } from '@/lib/cn';
+import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { splitMarkdownBySamples } from '@/lib/samples';
 import { SampleBlocks } from '@/components/sample-blocks';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -427,17 +428,25 @@ export function MarkdownEditor({
       form.append('file', file, filename);
 
       try {
-        const res = await fetch(pasteUpload.endpoint, {
-          method: 'POST',
-          body: form,
-          credentials: 'same-origin',
-        });
-        if (!res.ok) throw new Error(res.statusText || `HTTP ${res.status}`);
+        const res = await fetchHydroResponse(
+          pasteUpload.endpoint,
+          {
+            method: 'POST',
+            body: form,
+            credentials: 'same-origin',
+            headers: { Accept: 'application/json' },
+          },
+          '图片上传失败',
+        );
+        if (!res.ok) {
+          replaceInsertedText(placeholder, await readHydroResponseError(res, '图片上传失败'));
+          return;
+        }
         const url = pasteUpload.makeUrl ? pasteUpload.makeUrl(filename) : filename;
         replaceInsertedText(placeholder, `![image](${url})`);
       } catch (err) {
-        const message = err instanceof Error && err.message ? err.message : '上传失败';
-        replaceInsertedText(placeholder, `图片上传失败：${message}`);
+        console.error('Markdown image upload failed', err);
+        replaceInsertedText(placeholder, '图片上传失败');
       }
     },
     [commitSource, pasteUpload, replaceInsertedText],

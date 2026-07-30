@@ -13,6 +13,8 @@
  *   - Other Error: real business error (4xx with parseable JSON body).
  */
 
+import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
+
 export class VigilOfflineError extends Error {
   readonly reason: 'not_configured' | 'network' | 'non_json' | 'token_failed' | 'server_5xx';
   readonly detail?: string;
@@ -47,12 +49,15 @@ async function getToken(): Promise<DashboardTokenResponse> {
   if (cached && cached.expiresAt > Date.now() + 60_000) return cached;
   let res: Response;
   try {
-    res = await fetch('/api/admin/vigil/dashboard-token', { credentials: 'include' });
+    res = await fetchHydroResponse('/api/admin/vigil/dashboard-token', {
+      credentials: 'include',
+      headers: { Accept: 'application/json' },
+    });
   } catch (e) {
     throw new VigilOfflineError('token_failed', errorDetail(e));
   }
   if (!res.ok) {
-    throw new VigilOfflineError('token_failed', `HTTP ${res.status}`);
+    throw new VigilOfflineError('token_failed', await readHydroResponseError(res, 'OJ 访问令牌获取失败'));
   }
   let data: DashboardTokenResponse;
   try {
@@ -80,7 +85,7 @@ async function vigilFetch<T = unknown>(path: string, init: RequestInit = {}): Pr
   const url = `${tk.vigilBaseUrl}${path}`;
   let res: Response;
   try {
-    res = await fetch(url, {
+    res = await fetchHydroResponse(url, {
       ...init,
       headers: {
         'Content-Type': 'application/json',
@@ -398,11 +403,6 @@ export interface RecordingDeletePreview {
   totalBytes: number;
 }
 
-async function recordingRequestError(response: Response, action: string): Promise<Error> {
-  const detail = await response.text();
-  return new Error(`${action}（HTTP ${response.status}）${detail ? `：${detail}` : ''}`);
-}
-
 export interface RecordingDeleteResult {
   ok: boolean;
   deleted: number;
@@ -415,8 +415,10 @@ export async function previewRecordingDelete(scope: RecordingDeleteScope): Promi
   if (scope.ojUserId != null) query.set('ojUserId', String(scope.ojUserId));
   if (scope.examSessionId) query.set('examSessionId', scope.examSessionId);
   if (scope.recordingId) query.set('recordingId', scope.recordingId);
-  const response = await fetch(`/api/admin/vigil/recordings/delete-preview?${query}`);
-  if (!response.ok) throw await recordingRequestError(response, '录像删除预检失败');
+  const response = await fetchHydroResponse(`/api/admin/vigil/recordings/delete-preview?${query}`, {
+    headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) throw new Error(await readHydroResponseError(response, '录像删除预检失败'));
   return await response.json() as RecordingDeletePreview;
 }
 
@@ -430,12 +432,15 @@ export async function executeRecordingDelete(
   if (scope.examSessionId) form.set('examSessionId', scope.examSessionId);
   if (scope.recordingId) form.set('recordingId', scope.recordingId);
   if (confirmTitle != null) form.set('confirmTitle', confirmTitle);
-  const response = await fetch('/api/admin/vigil/recordings/delete', {
+  const response = await fetchHydroResponse('/api/admin/vigil/recordings/delete', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+    },
     body: form,
   });
-  if (!response.ok) throw await recordingRequestError(response, '录像删除失败');
+  if (!response.ok) throw new Error(await readHydroResponseError(response, '录像删除失败'));
   return await response.json() as RecordingDeleteResult;
 }
 

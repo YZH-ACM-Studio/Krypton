@@ -60,7 +60,7 @@ describe('p2.25 contribution assignment and task UI', () => {
     expect(source).to.include('selectedContributionPids');
     expect(source).to.include("form.set('pids', selectedPdocs.map((pdoc) => pdoc.docId).join(','))");
     expect(source).to.include("'expectedRevisions'");
-    expect(source).to.include("fetch('/problem-contributions/bulk'");
+    expect(source).to.include("fetchHydroResponse('/problem-contributions/bulk'");
     expect(source).not.to.include('当前筛选结果全部');
   });
 

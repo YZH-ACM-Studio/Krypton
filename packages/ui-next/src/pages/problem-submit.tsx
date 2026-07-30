@@ -18,6 +18,7 @@ import { StructuredRegionInputs } from '@/components/structured-region-inputs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { SimpleSelect } from '@/components/ui/select';
+import { fetchHydroResponse } from '@/lib/error-presenter';
 import { useBootstrap } from '@/lib/bootstrap';
 import { replaceRouteTokens } from '@/lib/format';
 import { createEmptyStructuredRegionDraft, parseStructuredRegionDraft } from '@/lib/structured-region-draft';
@@ -156,7 +157,7 @@ export function ProblemSubmitPage() {
       form.append('lang', lang);
       form.append('code', code);
       if (tid) form.append('tid', tid);
-      const res = await fetch(submitUrl, {
+      const res = await fetchHydroResponse(submitUrl, {
         method: 'POST',
         body: form,
         headers: { Accept: 'application/json' },

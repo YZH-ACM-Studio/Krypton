@@ -8,6 +8,7 @@ import { ArrowRight, Megaphone, Pin } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { DateTime } from '@/components/ui/datetime';
+import { fetchHydroResponse } from '@/lib/error-presenter';
 import { cn } from '@/lib/cn';
 
 interface HomeAnnounce {
@@ -36,7 +37,7 @@ export function AnnouncementHomeBlock() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch('/api/announce/homepage', { headers: { Accept: 'application/json' } })
+    fetchHydroResponse('/api/announce/homepage', { headers: { Accept: 'application/json' } })
       .then((r) => r.json())
       .then((body) => {
         if (cancelled) return;

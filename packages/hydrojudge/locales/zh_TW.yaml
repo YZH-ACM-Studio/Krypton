@@ -15,6 +15,7 @@ Invalid user_extra_files config.: 無效的 user_extra_files 配置。
 Max testcases per problem: 單題最多測試點數量
 Problem data not found.: 沒有找到測試資料。
 Re-Run testcase if time-limit-exceeded (max per submission): 每個提交最多重測 TLE 測試點的次數
+'On line {0}: Read {1}, expect {2}.': 第 {0} 行：讀取到 {1}，應為 {2}。
 Read {0}, expect {1}.: 讀取到 {0}，應為 {1}。
 Retry delay sec: 重試間隔（秒）
 Runner parallelism: 評測機執行程序數

@@ -1,3 +1,4 @@
+import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 export interface ZipDownloadTarget {
   name: string;
   content?: string | Blob | ArrayBuffer | Uint8Array;
@@ -61,8 +62,11 @@ function assertZip32Size(size: number, name: string) {
 
 async function toBytes(target: ZipDownloadTarget) {
   if (target.url) {
-    const res = await fetch(target.url, { credentials: 'same-origin' });
-    if (!res.ok) throw new Error(`${target.name}: HTTP ${res.status}`);
+    const res = await fetchHydroResponse(target.url, {
+      credentials: 'same-origin',
+      headers: { Accept: 'application/json' },
+    });
+    if (!res.ok) throw new Error(await readHydroResponseError(res, `下载 ${target.name} 失败`));
     return new Uint8Array(await res.arrayBuffer());
   }
   const content = target.content ?? '';

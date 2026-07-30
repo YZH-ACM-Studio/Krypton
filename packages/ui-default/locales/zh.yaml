@@ -616,6 +616,8 @@ Nav Logo Dark@2x: 左上角图标（暗）（大）
 Nav Logo Light: 左上角图标（亮）
 Nav Logo Light@2x: 左上角图标（亮）（大）
 Network error: 网络错误
+Request failed: 请求失败
+'Request failed (HTTP {0}).': '请求失败（HTTP {0}）。'
 Never expire: 从不过期
 New Email: 新电子邮件
 New Filename: 新文件名

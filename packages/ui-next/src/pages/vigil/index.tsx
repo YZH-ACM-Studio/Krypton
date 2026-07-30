@@ -38,6 +38,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { motion } from 'motion/react';
+import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { PRIV } from '@/lib/perms';
 import { AdminPage } from '@/components/admin/admin-page';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -370,7 +371,7 @@ function useContestNames(ids: string[]): Map<string, string> {
     // value of repeated form keys, so we must send the ids comma-joined.
     const form = new URLSearchParams();
     form.set('ids', ids.join(','));
-    fetch('/api/admin/vigil/resolve-contests', {
+    fetchHydroResponse('/api/admin/vigil/resolve-contests', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
       body: form,
@@ -443,9 +444,12 @@ function AllContestsPage() {
     if (debouncedQuery) params.set('q', debouncedQuery);
     setLoading(true);
     setError(null);
-    fetch(`/api/admin/vigil/contests?${params}`, { signal: controller.signal })
+    fetchHydroResponse(`/api/admin/vigil/contests?${params}`, {
+      signal: controller.signal,
+      headers: { Accept: 'application/json' },
+    })
       .then(async (response) => {
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (!response.ok) throw new Error(await readHydroResponseError(response, '加载比赛列表失败'));
         return await response.json() as AllContestsResponse;
       })
       .then((response) => {

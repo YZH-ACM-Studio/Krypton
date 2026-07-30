@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { readHydroResponseError } from '@/lib/problem-save-response';
+import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 
 interface ProblemFile {
   name?: string;
@@ -68,12 +68,34 @@ export function ProblemTestdataFileDialog({
       setLoadError(`文件过大 (${bytesLabel(size)})，请下载后用本地编辑器修改。`);
       return;
     }
-    fetch(previewUrl, {
-      headers: { Accept: 'text/plain' },
-      credentials: 'same-origin',
-    })
+    fetchHydroResponse(
+      previewUrl,
+      {
+        headers: { Accept: 'application/json' },
+        credentials: 'same-origin',
+      },
+      '测试数据文件加载失败',
+    )
       .then(async (response) => {
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (!response.ok) throw new Error(await readHydroResponseError(response, '测试数据文件加载失败'));
+        const payload: unknown = await response.json();
+        if (!payload || typeof payload !== 'object' || !('url' in payload) || typeof payload.url !== 'string' || !payload.url) {
+          throw new Error('获取文件下载链接失败');
+        }
+        return fetchHydroResponse(
+          payload.url,
+          {
+            headers: { Accept: 'text/plain' },
+            credentials: 'same-origin',
+          },
+          '测试数据文件加载失败',
+        );
+      })
+      .then(async (response) => {
+        if (!response.ok) {
+          console.error('Signed testdata file request failed', { filename, status: response.status });
+          throw new Error('测试数据文件加载失败');
+        }
         return response.text();
       })
       .then((text) => {
@@ -106,12 +128,16 @@ export function ProblemTestdataFileDialog({
       form.append('filename', filename);
       if (typeof confirmation === 'string') form.append('activeContainerConfirmation', confirmation);
       form.append('file', new Blob([content], { type: 'text/plain' }), filename);
-      const response = await fetch(`${problemUrl}/files`, {
-        method: 'POST',
-        body: form,
-        headers: { Accept: 'application/json' },
-        credentials: 'same-origin',
-      });
+      const response = await fetchHydroResponse(
+        `${problemUrl}/files`,
+        {
+          method: 'POST',
+          body: form,
+          headers: { Accept: 'application/json' },
+          credentials: 'same-origin',
+        },
+        '保存失败',
+      );
       if (!response.ok && !response.redirected) {
         throw new Error(await readHydroResponseError(response, '保存失败'));
       }

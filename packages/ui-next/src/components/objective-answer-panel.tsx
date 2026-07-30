@@ -21,6 +21,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/cn';
+import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 
 export interface ObjectiveClientQuestion {
   key: string;
@@ -181,7 +182,7 @@ export function ObjectiveAnswerPanel({
       for (const q of questions) {
         if (answered(answers[q.key])) payload[q.key] = answers[q.key];
       }
-      const res = await fetch(submitUrl, {
+      const res = await fetchHydroResponse(submitUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({
@@ -190,15 +191,14 @@ export function ObjectiveAnswerPanel({
         }),
         credentials: 'same-origin',
       });
-      const data = await res.json().catch(() => null);
       if (res.status === 409 && reloadOnConflict) {
         setSubmitting(false);
         window.location.reload();
         return;
       }
-      if (!res.ok || data?.error) {
-        throw new Error(data?.error?.message || `提交失败（HTTP ${res.status}）`);
-      }
+      if (!res.ok) throw new Error(await readHydroResponseError(res, '提交失败'));
+      const data = await res.json().catch(() => null);
+      if (data?.error) throw new Error('提交响应包含错误标记');
       try {
         window.localStorage.removeItem(storageKey);
       } catch {

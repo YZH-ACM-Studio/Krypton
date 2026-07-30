@@ -18,6 +18,7 @@
 import { Logger } from '@hydrooj/utils';
 import type { Context } from 'hydrooj';
 import {
+    CreateError as Err,
     localizeError,
     localizedErrorText,
     ContestModel,
@@ -32,6 +33,7 @@ import {
     PrivilegeError,
     ProblemModel,
     Types,
+    UserFacingError,
     UserModel,
     ValidationError,
 } from 'hydrooj';
@@ -45,6 +47,12 @@ import type { ContestPermitRole, PermitRole, ProblemContributionScope, ProblemCo
 const PROBLEM_ROLES: PermitRole[] = ['verifier', 'author', 'maintainer'];
 const CONTEST_ROLES: ContestPermitRole[] = ['verifier', 'maintainer'];
 const logger = new Logger('krypton-permits.handler');
+const ProblemContributionBatchError = Err(
+    'ProblemContributionBatchError',
+    UserFacingError,
+    'Bulk contribution assignment did not fully complete (request ID: {0}). Failed items: {1}.',
+    500,
+);
 
 function problemNotFound() {
     return localizeError(new NotFoundError('题目不存在'), '题目不存在');
@@ -697,7 +705,6 @@ class ProblemContributionBulkHandler extends Handler {
             publicPid: string;
             completedScopes: ProblemContributionScope[];
             scope: ProblemContributionScope;
-            message: string;
         }> = [];
         const notified: Array<{ pdoc: any; scopes: ProblemContributionScope[] }> = [];
         for (const { pdoc, revision } of preflight) {
@@ -781,7 +788,6 @@ class ProblemContributionBulkHandler extends Handler {
                         publicPid: String(pdoc.pid || pdoc.docId),
                         completedScopes: [...completedScopes],
                         scope,
-                        message: failure.message,
                     });
                     break;
                 }
@@ -814,8 +820,23 @@ class ProblemContributionBulkHandler extends Handler {
             }
         }
 
-        this.response.status = failed.length ? 500 : 200;
-        this.response.body = { success: failed.length === 0, requestId: batchRequestId, succeededPids, failed };
+        if (!failed.length) {
+            this.response.body = { success: true, requestId: batchRequestId, succeededPids, failed: [] };
+            return;
+        }
+
+        const transport = this.resolveErrorTransport(
+            new ProblemContributionBatchError(batchRequestId, failed.map(({ publicPid, scope }) => `${publicPid}/${scope}`).join('；')),
+            'api',
+        );
+        this.response.status = 500;
+        this.response.body = {
+            success: false,
+            requestId: batchRequestId,
+            succeededPids,
+            failed: failed.map((failure) => ({ ...failure, message: transport.error.message })),
+            error: transport.error,
+        };
     }
 }
 

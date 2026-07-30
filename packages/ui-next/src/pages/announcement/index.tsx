@@ -27,6 +27,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { useBootstrap } from '@/lib/bootstrap';
 import { PRIV } from '@/lib/perms';
 import { cn } from '@/lib/cn';
+import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 
 interface Category {
   _id: string;
@@ -84,9 +85,7 @@ const ANNOUNCEMENT_WORKSPACE_NAV: Array<ModuleWorkspaceNavItem & { systemOnly: b
 ];
 
 function announcementWorkspaceNav(canManageCategories: boolean): ModuleWorkspaceNavItem[] {
-  return ANNOUNCEMENT_WORKSPACE_NAV
-    .filter((item) => canManageCategories || !item.systemOnly)
-    .map(({ systemOnly: _systemOnly, ...item }) => item);
+  return ANNOUNCEMENT_WORKSPACE_NAV.filter((item) => canManageCategories || !item.systemOnly).map(({ systemOnly: _systemOnly, ...item }) => item);
 }
 
 function CategoryChip({ category, size = 'sm' }: { category: { name: string; color: string } | undefined; size?: 'sm' | 'md' }) {
@@ -270,15 +269,12 @@ export function AdminAnnounceListPage() {
     form.set('operation', 'reorder');
     for (const id of orderedIds) form.append('orderedIds', id);
     try {
-      const response = await fetch('/admin/announce', {
+      const response = await fetchHydroResponse('/admin/announce', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
+        headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
         body: form,
       });
-      if (!response.ok) {
-        const detail = (await response.text()).trim();
-        throw new Error(detail || `保存顺序失败（HTTP ${response.status}）`);
-      }
+      if (!response.ok) throw new Error(await readHydroResponseError(response, '保存顺序失败'));
       window.location.reload();
     } catch (error) {
       setOrderError(error instanceof Error ? error.message : String(error));
@@ -309,7 +305,11 @@ export function AdminAnnounceListPage() {
         </div>
       }
     >
-      {orderError ? <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">{orderError}</p> : null}
+      {orderError ? (
+        <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          {orderError}
+        </p>
+      ) : null}
       <Card>
         <CardContent className="overflow-x-auto p-0">
           <Table>
@@ -723,7 +723,14 @@ function CategoryEditorDialog({ category, onClose }: { category: Category | null
                 />
               </FormField>
               <FormField label="排序" htmlFor="cat-order">
-                <Input id="cat-order" name="order" type="number" value={order} onChange={(e) => setOrder(Number(e.target.value) || 100)} className="min-h-10" />
+                <Input
+                  id="cat-order"
+                  name="order"
+                  type="number"
+                  value={order}
+                  onChange={(e) => setOrder(Number(e.target.value) || 100)}
+                  className="min-h-10"
+                />
               </FormField>
             </FormRow>
             <label className="flex min-h-10 cursor-pointer items-center gap-2 text-sm">
@@ -739,7 +746,9 @@ function CategoryEditorDialog({ category, onClose }: { category: Category | null
             <Button type="button" variant="ghost" onClick={onClose} className="min-h-10">
               取消
             </Button>
-            <Button type="submit" className="min-h-10">保存</Button>
+            <Button type="submit" className="min-h-10">
+              保存
+            </Button>
           </div>
         </form>
       </DialogContent>

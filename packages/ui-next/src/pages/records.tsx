@@ -39,7 +39,7 @@ import {
   summarizeRecordCases,
   type RecordDetailTab,
 } from '@/lib/record-detail-workspace';
-import { readHydroResponseError } from '@/lib/problem-save-response';
+import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 
 type RecordScoreAction =
   | { kind: 'cancel'; expectedStatus: number; expectedJudgeAt: string; contestId?: string; contestTeamId?: string }
@@ -255,17 +255,7 @@ function formatJudgeText(text: unknown): string {
   if (text == null || text === '') return '';
   if (typeof text === 'string') return text;
   if (typeof text === 'number' || typeof text === 'boolean') return String(text);
-  if (typeof text === 'object') {
-    const item = text as JsonRecord;
-    const message = item.message ?? item.msg ?? item.text ?? '';
-    const params = Array.isArray(item.params) ? item.params.map((p) => String(p)) : [];
-    const template = String(message);
-    const formatted = params.reduce((current, param, index) => current.replaceAll(`{${index}}`, param), template);
-    const suffix = /\{\d+\}/.test(template) ? '' : params.join(' ');
-    const stack = import.meta.env.DEV && item.stack ? `\n${String(item.stack)}` : '';
-    return [formatted, suffix].filter(Boolean).join(' ').concat(stack).trim();
-  }
-  return '';
+  throw new TypeError('Record judge messages must be formatted by the server');
 }
 
 function collectTexts(value: unknown): string[] {
@@ -285,9 +275,7 @@ function normalizeSubtasks(value: unknown): SubtaskView[] {
     );
   }
   if (typeof value === 'object') {
-    return Object.entries(value as Record<string, JsonRecord | null | undefined>).map(
-      ([id, item]) => ({ ...(item || {}), id }) as SubtaskView,
-    );
+    return Object.entries(value as Record<string, JsonRecord | null | undefined>).map(([id, item]) => ({ ...(item || {}), id }) as SubtaskView);
   }
   return [];
 }
@@ -673,7 +661,7 @@ function RecordScoreActionDialog({
       } else {
         body.set('expectedCancellationAt', action.expectedCancellationAt);
       }
-      const response = await fetch(endpoint, {
+      const response = await fetchHydroResponse(endpoint, {
         method: 'POST',
         credentials: 'include',
         headers: {
@@ -952,7 +940,10 @@ export function RecordsPage() {
             <TableBody>
               {rdocs.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={8 + (hasStudentColumn ? 1 : 0) + (Object.keys(recordScoreActions).length ? 1 : 0)} className="py-8 text-center text-sm text-muted-foreground">
+                  <TableCell
+                    colSpan={8 + (hasStudentColumn ? 1 : 0) + (Object.keys(recordScoreActions).length ? 1 : 0)}
+                    className="py-8 text-center text-sm text-muted-foreground"
+                  >
                     暂无提交记录
                   </TableCell>
                 </TableRow>
@@ -1036,11 +1027,7 @@ export function RecordsPage() {
               })
             : ''
         }
-        problemTitle={
-          selectedScoreRecord
-            ? String(pdict[String(selectedScoreRecord.pid)]?.title || selectedScoreRecord.pid)
-            : ''
-        }
+        problemTitle={selectedScoreRecord ? String(pdict[String(selectedScoreRecord.pid)]?.title || selectedScoreRecord.pid) : ''}
         username={selectedScoreRecord ? String(getUser(udict, selectedScoreRecord.uid)?.uname || `#${selectedScoreRecord.uid}`) : ''}
         onOpenChange={(open) => {
           if (!open) setScoreActionRid('');

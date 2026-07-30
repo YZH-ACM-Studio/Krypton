@@ -3,9 +3,7 @@ import 'streamsaver/examples/zip-stream';
 import { request } from './base';
 
 export async function api(method: string, args: Record<string, any>, projection: any) {
-  const res = await request.post(`/d/${UiContext.domainId}/api/${encodeURIComponent(method)}`, { args, projection });
-  if (res.error) throw new Error(res.error);
-  return res;
+  return request.post(`/d/${UiContext.domainId}/api/${encodeURIComponent(method)}`, { args, projection });
 }
 
 export function getAvailableLangs(langsList?: string[]) {

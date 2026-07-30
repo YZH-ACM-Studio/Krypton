@@ -1,12 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import {
-  formatHydroErrorResponse,
-  readHydroResponseError,
-  readProblemConfigUploadSuccess,
-  readProblemSaveSuccess,
-} from '../src/lib/problem-save-response.ts';
+import { formatHydroErrorResponse, readHydroResponseError } from '../src/lib/error-presenter.ts';
+import { readProblemConfigUploadSuccess, readProblemSaveSuccess } from '../src/lib/problem-save-response.ts';
 
 const workspaceRoot = resolve(import.meta.dirname, '../../..');
 
@@ -191,38 +187,56 @@ describe('p3.16 structured metadata and unsaved-navigation contracts', () => {
     }
   });
 
-  it('renders Hydro validation parameters instead of exposing raw placeholders', async () => {
+  it('uses authoritative Hydro messages and fails malformed transport data closed', async () => {
+    const options = {
+      createTraceId: () => 'structured-editor-test-trace',
+      report: () => undefined,
+    };
     expect(
       formatHydroErrorResponse(
         JSON.stringify({
           error: {
-            message: 'Field {0} validation failed. ({2})',
+            name: 'ValidationError',
+            errorCode: 'ValidationError',
+            code: 400,
+            status: 400,
             params: ['fields', null, '托管题文件操作不接受字段：name'],
+            message: '字段 fields 校验失败。（托管题文件操作不接受字段：name）',
           },
         }),
         400,
         '上传失败',
+        options,
       ),
-    ).to.equal('Field fields validation failed. (托管题文件操作不接受字段：name)');
+    ).to.equal('字段 fields 校验失败。（托管题文件操作不接受字段：name）');
 
     const validation = await readHydroResponseError(
       new Response(
         JSON.stringify({
           error: {
-            message: 'Field {0} validation failed.',
+            name: 'ValidationError',
+            errorCode: 'ValidationError',
+            code: 400,
+            status: 400,
             params: ['content'],
+            message: '字段 content 校验失败。',
           },
         }),
         { status: 400, headers: { 'content-type': 'application/json' } },
       ),
       '保存失败',
+      options,
     );
-    expect(validation).to.equal('Field content validation failed.');
+    expect(validation).to.equal('字段 content 校验失败。');
 
-    const plain = await readHydroResponseError(new Response('upstream failed', { status: 502 }), '保存失败');
-    expect(plain).to.equal('upstream failed');
+    const plain = await readHydroResponseError(new Response('upstream failed', { status: 502 }), '保存失败', options);
+    expect(plain).to.equal('保存失败：服务器返回了无法解析的错误响应。错误编号：structured-editor-test-trace');
 
-    const html = await readHydroResponseError(new Response('<!DOCTYPE html><html><body>proxy error</body></html>', { status: 503 }), '保存失败');
-    expect(html).to.equal('保存失败：HTTP 503');
+    const html = await readHydroResponseError(
+      new Response('<!DOCTYPE html><html><body>proxy error</body></html>', { status: 503 }),
+      '保存失败',
+      options,
+    );
+    expect(html).to.equal('保存失败：服务器返回了无法解析的错误响应。错误编号：structured-editor-test-trace');
   });
 });

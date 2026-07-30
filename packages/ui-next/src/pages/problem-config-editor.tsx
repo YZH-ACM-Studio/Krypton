@@ -66,8 +66,9 @@ import {
   useProblemDataWriteGuard,
 } from '@/components/problem-data-write-guard';
 import { useUnsavedChangesGuard } from '@/components/unsaved-changes-guard';
+import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { COMMON_LANG_OPTIONS as PRESET_LANG_OPTIONS, type LangOption, resolveLangs } from '@/lib/multi-select-presets';
-import { readHydroResponseError, readProblemConfigUploadSuccess } from '@/lib/problem-save-response';
+import { readProblemConfigUploadSuccess } from '@/lib/problem-save-response';
 import '@/lib/bootstrap';
 import '@/lib/format';
 import {
@@ -249,7 +250,7 @@ export function ProblemConfigEditor({
       formData.append('filename', 'config.yaml');
       if (typeof confirmation === 'string') formData.append('activeContainerConfirmation', confirmation);
       formData.append('file', new Blob([submittedYaml], { type: 'text/yaml' }), 'config.yaml');
-      const res = await fetch(`${problemUrl}/files`, {
+      const res = await fetchHydroResponse(`${problemUrl}/files`, {
         method: 'POST',
         body: formData,
         headers: { Accept: 'application/json' },

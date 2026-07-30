@@ -10,21 +10,12 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sh
 import { FileUploader } from '@/components/uploader';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
+import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { ChapterOutline } from './chapter-outline';
 import { useChapterQuery } from './chapter-query';
 import type { ChapterDraft, CourseFile, CourseRecord } from './types';
 
 type SaveState = 'idle' | 'dirty' | 'saving';
-
-async function responseError(response: Response): Promise<string> {
-  const contentType = response.headers.get('content-type') || '';
-  if (contentType.includes('application/json')) {
-    const body = await response.json();
-    const message = body?.error?.message || body?.message || body?.error;
-    if (typeof message === 'string' && message.trim()) return message;
-  }
-  return `请求失败（${response.status} ${response.statusText || 'Unknown Error'}）`;
-}
 
 function initialChapterDrafts(serialized?: string): ChapterDraft[] {
   if (!serialized) return [];
@@ -141,11 +132,11 @@ export function CourseEditPage() {
 
   const refreshFiles = async () => {
     if (!fileEndpoint) return;
-    const response = await fetch(fileEndpoint, {
+    const response = await fetchHydroResponse(fileEndpoint, {
       credentials: 'same-origin',
       headers: { Accept: 'application/json' },
     });
-    if (!response.ok) throw new Error(await responseError(response));
+    if (!response.ok) throw new Error(await readHydroResponseError(response, '课件列表刷新失败'));
     const body = await response.json();
     if (!Array.isArray(body?.files)) throw new Error('课件列表响应格式错误');
     setCourseFiles(body.files);
@@ -156,12 +147,13 @@ export function CourseEditPage() {
     const body = new URLSearchParams({ operation: 'delete_files' });
     body.append('files', filename);
     try {
-      const response = await fetch(fileEndpoint, {
+      const response = await fetchHydroResponse(fileEndpoint, {
         method: 'POST',
         body,
         credentials: 'same-origin',
+        headers: { Accept: 'application/json' },
       });
-      if (!response.ok) throw new Error(await responseError(response));
+      if (!response.ok) throw new Error(await readHydroResponseError(response, '课件删除失败'));
       setCourseFiles((current) => current.filter((file) => file.name !== filename));
     } catch (error) {
       setFileError((error as { message?: string } | null)?.message || '课件删除失败');
@@ -174,12 +166,13 @@ export function CourseEditPage() {
     setSaveState('saving');
     try {
       const form = event.currentTarget;
-      const response = await fetch(form.action, {
+      const response = await fetchHydroResponse(form.action, {
         method: 'POST',
         body: new URLSearchParams(new FormData(form) as unknown as URLSearchParams),
         credentials: 'same-origin',
+        headers: { Accept: 'application/json' },
       });
-      if (!response.ok) throw new Error(await responseError(response));
+      if (!response.ok) throw new Error(await readHydroResponseError(response, '课程保存失败'));
       if (response.redirected) {
         setSaveState('idle');
         window.location.assign(response.url);

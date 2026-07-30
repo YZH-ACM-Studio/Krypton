@@ -166,7 +166,14 @@ describe('real-pass management page', () => {
       vi.fn().mockResolvedValue(
         jsonResponse(
           {
-            error: { message: '批量输入包含冲突题号' },
+            error: {
+              name: 'ConflictError',
+              errorCode: 'ConflictError',
+              code: 409,
+              status: 409,
+              params: [],
+              message: '批量输入包含冲突题号',
+            },
           },
           { status: 409 },
         ),

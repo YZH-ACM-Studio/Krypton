@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input';
 import { MultiSelect } from '@/components/ui/multi-select';
 import { SimpleSelect } from '@/components/ui/select';
 import { useBootstrap } from '@/lib/bootstrap';
-import { readHydroResponseError } from '@/lib/problem-save-response';
+import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 
 type MemberRole = 'author' | 'manager';
 
@@ -65,7 +65,7 @@ type NamespaceDialog =
   | null;
 
 async function postNamespaceOperation(endpoint: string, fields: Record<string, string>) {
-  const response = await fetch(endpoint, {
+  const response = await fetchHydroResponse(endpoint, {
     method: 'POST',
     credentials: 'include',
     headers: {

@@ -35,16 +35,14 @@ const page = new NamedPage('contest_manage', () => {
     }).open();
     if (op !== 'ok') return;
     try {
-      const res = await request.post('', {
+      await request.post('', {
         operation: 'set_score',
         pid,
         score: $('[name="score"]').val(),
       });
-      if (!res.error) {
-        Notification.success('Score Updated');
-        $(ev.currentTarget).text($('[name="score"]').val() as number);
-        $(ev.currentTarget).data('score', $('[name="score"]').val());
-      }
+      Notification.success('Score Updated');
+      $(ev.currentTarget).text($('[name="score"]').val() as number);
+      $(ev.currentTarget).data('score', $('[name="score"]').val());
     } catch (e) {
       Notification.error(e.message);
     }

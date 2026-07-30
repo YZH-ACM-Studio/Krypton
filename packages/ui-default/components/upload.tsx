@@ -109,7 +109,7 @@ export default async function uploadFiles(endpoint = '', files: File[] | FileLis
     }
   } catch (e) {
     console.error(e);
-    Notification.error(i18n('File upload failed: {0}', e.toString()));
+    Notification.error(e instanceof Error ? e.message : i18n('File upload failed.'));
   } finally {
     await delay(500);
     dialog.close();

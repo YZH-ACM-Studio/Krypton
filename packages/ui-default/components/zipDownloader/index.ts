@@ -16,6 +16,8 @@ function onBeforeUnload(e) {
 }
 streamsaver.mitm = `${window.isSecureContext ? '' : 'https://hydro.ac'}/streamsaver/mitm.html`;
 
+class DownloadHttpError extends Error {}
+
 const waitForWritableStream = window.WritableStream
   ? Promise.resolve()
   : import('web-streams-polyfill').then(({ WritableStream }) => {
@@ -37,7 +39,7 @@ export default async function download(filename, targets) {
       let stream;
       if (target.url) {
         const response = await fetch(target.url);
-        if (!response.ok) throw response.statusText;
+        if (!response.ok) throw new DownloadHttpError(i18n('Request failed (HTTP {0}).', response.status));
         stream = response.body;
       } else {
         stream = new Blob([target.content]).stream();
@@ -47,14 +49,15 @@ export default async function download(filename, targets) {
         stream,
       };
     } catch (e) {
+      const message = e instanceof DownloadHttpError ? e.message : i18n('Network error');
       if (retry) {
-        Notification.warn(i18n('Download Error: {0} {1}, retry in 3 secs...', target.filename, e.toString()));
+        Notification.warn(i18n('Download Error: {0} {1}, retry in 3 secs...', target.filename, message));
         await sleep(3000);
         return await downloadFile(target, retry - 1);
       }
       window.captureException?.(e);
       stopDownload();
-      Notification.error(i18n('Download Error: {0} {1}', target.filename, e.toString()));
+      Notification.error(i18n('Download Error: {0} {1}', target.filename, message));
     }
     return {};
   }
@@ -158,6 +161,6 @@ export async function downloadProblemSet(pids, name = 'Export') {
     await download(`${name}.zip`, targets);
   } catch (e) {
     window.captureException?.(e);
-    Notification.error(`${e.message} ${e.params?.[0]}`);
+    Notification.error(e.message);
   }
 }

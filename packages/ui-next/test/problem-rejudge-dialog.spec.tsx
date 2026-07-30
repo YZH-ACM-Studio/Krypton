@@ -47,10 +47,22 @@ describe('problem rejudge dialog', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ error: { message: 'Problem {0} config is invalid', params: ['P1000'] } }), {
-          status: 400,
-          headers: { 'Content-Type': 'application/json' },
-        }),
+        new Response(
+          JSON.stringify({
+            error: {
+              name: 'ValidationError',
+              errorCode: 'ValidationError',
+              code: 400,
+              status: 400,
+              params: ['P1000'],
+              message: '题目 P1000 的评测配置无效',
+            },
+          }),
+          {
+            status: 400,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
       ),
     );
     const onOpenChange = vi.fn();
@@ -58,7 +70,7 @@ describe('problem rejudge dialog', () => {
 
     await userEvent.click(screen.getByRole('button', { name: '确认重测' }));
 
-    expect(await screen.findByText('Problem P1000 config is invalid')).toBeInTheDocument();
+    expect(await screen.findByText('题目 P1000 的评测配置无效')).toBeInTheDocument();
     expect(onOpenChange).not.toHaveBeenCalledWith(false);
     expect(consoleError).toHaveBeenCalledWith('Whole-problem rejudge failed', expect.objectContaining({ endpoint: '/p/P1000', pid: 'P1000' }));
   });

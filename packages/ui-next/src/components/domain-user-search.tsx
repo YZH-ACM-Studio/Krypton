@@ -1,4 +1,4 @@
-import { readHydroResponseError } from '@/lib/problem-save-response';
+import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 
 export interface DomainUserOption {
   _id: number;
@@ -13,7 +13,7 @@ export interface DomainUserOption {
 export async function loadDomainUsers(domainId: string, query: string): Promise<DomainUserOption[]> {
   const search = query.trim();
   if (!search) return [];
-  const response = await fetch(`/d/${encodeURIComponent(domainId)}/api/users`, {
+  const response = await fetchHydroResponse(`/d/${encodeURIComponent(domainId)}/api/users`, {
     method: 'POST',
     credentials: 'include',
     headers: {

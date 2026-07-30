@@ -200,6 +200,7 @@ const CheckConfig = {
         'packages/*/package.json',
         'packages/ui-default/index.ts',
         'packages/ui-default/backendlib/**/*.ts',
+        'packages/ui-default/utils/error-presenter.ts',
         'packages/ui-next/index.ts',
         'packages/ui-next/announcement-capabilities.ts',
         'packages/ui-next/domain-permission-capabilities.ts',

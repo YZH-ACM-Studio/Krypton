@@ -41,6 +41,7 @@ import { useRecordSocket } from '@/hooks/use-record-socket';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 import { canSubmitProblemMode } from '@/lib/contest-exam-display';
+import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { replaceRouteTokens } from '@/lib/format';
 import { shouldShowNoTestdataWarning } from '@/lib/problem-testcase-warning';
 import { extractSamples } from '@/lib/samples';
@@ -852,7 +853,7 @@ export function ProblemDetailPage() {
       setReadonlySourceLoading(true);
       setReadonlySourceError(null);
       try {
-        const res = await fetch(entry.url, {
+        const res = await fetchHydroResponse(entry.url, {
           headers: { Accept: 'application/json' },
           credentials: 'same-origin',
         });
@@ -860,7 +861,7 @@ export function ProblemDetailPage() {
           window.location.reload();
           return;
         }
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) throw new Error(await readHydroResponseError(res, '加载本队源码失败'));
         const json = (await res.json()) as {
           code?: unknown;
           rdoc?: { code?: unknown; lang?: unknown };
@@ -890,11 +891,11 @@ export function ProblemDetailPage() {
         practice: recordPracticeScope,
         uidOrName: bs.user.id,
       });
-      const res = await fetch(url, {
+      const res = await fetchHydroResponse(url, {
         headers: { Accept: 'application/json' },
         credentials: 'same-origin',
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(await readHydroResponseError(res, '加载提交记录失败'));
       const json = (await res.json()) as { rdocs?: unknown; page?: { data?: { rdocs?: unknown } } };
       const rdocs = Array.isArray(json.rdocs) ? json.rdocs : Array.isArray(json.page?.data?.rdocs) ? json.page.data.rdocs : [];
       const entries = rdocs.map((rdoc: RawRecordDoc) => recordEntryFromRdoc(rdoc, recordDetailRoute)).filter(Boolean) as RecordEntry[];

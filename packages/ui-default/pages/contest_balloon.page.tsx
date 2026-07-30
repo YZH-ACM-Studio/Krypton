@@ -104,7 +104,7 @@ async function handleSetColor(tdoc) {
   try {
     await request.post('', { operation: 'set_color', color: yaml.dump(val) });
   } catch (e) {
-    Notification.error(`${e.message} ${e.params?.[0]}`);
+    Notification.error(e.message);
   }
   Notification.info(i18n('Successfully updated.'));
   if ($('[data-fragment-id="constest_balloon-tbody"]').length) pjax.request({ url: '', push: false });
@@ -130,7 +130,7 @@ const page = new NamedPage('contest_balloon', () => {
     try {
       await request.post('', { balloon, operation: 'done' });
     } catch (e) {
-      Notification.error(`${e.message} ${e.params?.[0]}`);
+      Notification.error(e.message);
     }
     Notification.info(i18n('Successfully updated.'));
     pjax.request({ url: '', push: false });

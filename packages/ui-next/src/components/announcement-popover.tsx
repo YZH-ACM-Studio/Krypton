@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { DateTime } from '@/components/ui/datetime';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { fetchHydroResponse } from '@/lib/error-presenter';
 import { cn } from '@/lib/cn';
 
 interface UnreadDoc {
@@ -44,7 +45,7 @@ export function AnnouncementPopover({ signedIn }: { signedIn: boolean }) {
   useEffect(() => {
     if (!signedIn) return;
     let cancelled = false;
-    fetch('/api/announce/unread', { headers: { Accept: 'application/json' } })
+    fetchHydroResponse('/api/announce/unread', { headers: { Accept: 'application/json' } })
       .then((r) => r.json())
       .then((body) => {
         if (cancelled) return;

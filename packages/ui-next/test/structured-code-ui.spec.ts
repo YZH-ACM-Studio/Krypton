@@ -99,7 +99,7 @@ describe('p3.17 code evaluation draft workspace', () => {
   it('parses successful upload JSON so the workspace receives canonical revision and files', () => {
     const uploader = read('packages/ui-next/src/components/uploader.tsx');
     expect(uploader).to.include("headers: { Accept: 'application/json' }");
-    expect(uploader).to.include('getResponseData: (xhr) =>');
+    expect(uploader).to.include('getResponseData: parseHydroUploadResponse');
     expect(uploader).to.include('onUploaded?.(file.name, response?.body');
   });
 });

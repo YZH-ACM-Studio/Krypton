@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Input } from '@/components/ui/input';
 import { MultiSelect } from '@/components/ui/multi-select';
 import { SimpleSelect } from '@/components/ui/select';
-import { readHydroResponseError } from '@/lib/problem-save-response';
+import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 
 export interface KnowledgeMindmapOption {
   id: string;
@@ -156,7 +156,7 @@ export function StructuredProblemMetadataPanel({
     }
     setSwitchState('previewing');
     try {
-      const response = await fetch(`${problemUrl}/tags/preview`, {
+      const response = await fetchHydroResponse(`${problemUrl}/tags/preview`, {
         method: 'POST',
         credentials: 'same-origin',
         headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
@@ -196,7 +196,7 @@ export function StructuredProblemMetadataPanel({
     setSwitchError('');
     setSwitchState('applying');
     try {
-      const response = await fetch(`${problemUrl}/tags/apply`, {
+      const response = await fetchHydroResponse(`${problemUrl}/tags/apply`, {
         method: 'POST',
         credentials: 'same-origin',
         headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },

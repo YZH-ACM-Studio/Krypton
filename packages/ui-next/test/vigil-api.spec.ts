@@ -37,6 +37,19 @@ function tokenBody(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function canonicalError(status: number, message: string) {
+  return {
+    error: {
+      name: 'VigilRequestError',
+      errorCode: 'VigilRequestError',
+      code: status,
+      status,
+      params: [],
+      message,
+    },
+  };
+}
+
 interface MockResponseSpec {
   status?: number;
   contentType?: string | null;
@@ -87,31 +100,43 @@ beforeEach(() => {
 
 describe('vigil dashboard token', () => {
   it('propagates a network failure as token_failed', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => {
-      throw new TypeError('boom');
-    }));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new TypeError('boom');
+      }),
+    );
     const err = await captureError(ensureVigilToken());
     expect(err).to.be.instanceOf(VigilOfflineError);
     expect((err as VigilOfflineError).reason).to.equal('token_failed');
-    expect((err as VigilOfflineError).detail).to.equal('boom');
+    expect((err as VigilOfflineError).detail).to.equal('请求失败');
   });
 
   it('maps a non-2xx token response to token_failed with the status', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => mockResponse({ status: 403, json: {} })));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => mockResponse({ status: 403, json: canonicalError(403, '访问被拒绝。') })),
+    );
     const err = await captureError(ensureVigilToken());
     expect((err as VigilOfflineError).reason).to.equal('token_failed');
-    expect((err as VigilOfflineError).detail).to.equal('HTTP 403');
+    expect((err as VigilOfflineError).detail).to.equal('访问被拒绝。');
   });
 
   it('maps an unparseable token body to token_failed', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => mockResponse({})));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => mockResponse({})),
+    );
     const err = await captureError(ensureVigilToken());
     expect((err as VigilOfflineError).reason).to.equal('token_failed');
     expect((err as VigilOfflineError).detail).to.equal('non-JSON token response');
   });
 
   it('rejects a token payload without a usable base url as not_configured', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => mockResponse({ json: tokenBody({ vigilBaseUrl: '' }) })));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => mockResponse({ json: tokenBody({ vigilBaseUrl: '' }) })),
+    );
     const err = await captureError(ensureVigilToken());
     expect((err as VigilOfflineError).reason).to.equal('not_configured');
   });
@@ -167,7 +192,7 @@ describe('vigilFetch request/response handling', () => {
     });
     const err = await captureError(fetchClients());
     expect((err as VigilOfflineError).reason).to.equal('network');
-    expect((err as VigilOfflineError).detail).to.equal('unreachable');
+    expect((err as VigilOfflineError).detail).to.equal('请求失败');
     expect(getCachedVigilBaseUrl()).to.equal(null);
   });
 });
@@ -225,9 +250,11 @@ describe('payload shaping', () => {
 
 describe('recording download + delete', () => {
   it('exchanges a download token and assembles the final signed url', async () => {
-    const fn = stubVigilFetch(() => mockResponse({
-      json: { dl: 'd l', expiresAt: 'later', href: '/recordings/download/abc', count: 1, totalBytes: 10 },
-    }));
+    const fn = stubVigilFetch(() =>
+      mockResponse({
+        json: { dl: 'd l', expiresAt: 'later', href: '/recordings/download/abc', count: 1, totalBytes: 10 },
+      }),
+    );
     const url = await requestRecordingDownload('c1', { recordingId: 'r1' }, { uid: 1, displayName: 'op' });
     expect(url).to.equal(`${BASE_URL}/api/admin/vigil/proctor/recordings/download/abc?dl=d%20l`);
     const [tokenUrl, init] = fn.mock.calls[1];
@@ -244,12 +271,16 @@ describe('recording download + delete', () => {
     const url = new URL(String(fn.mock.calls[0][0]), 'http://oj.local');
     expect(url.pathname).to.equal('/api/admin/vigil/recordings/delete-preview');
     expect(Object.fromEntries(url.searchParams)).to.deep.equal({ cid: 'c1', ojUserId: '9', examSessionId: 's1', recordingId: 'r1' });
+    expect((fn.mock.calls[0][1]?.headers as Record<string, string>).Accept).to.equal('application/json');
   });
 
-  it('wraps a failed preview response into a readable error', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => mockResponse({ status: 403, text: 'denied' })));
+  it('presents a failed preview through the canonical OJ error envelope', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => mockResponse({ status: 403, json: canonicalError(403, '无权删除该录像。') })),
+    );
     const err = await captureError(previewRecordingDelete({ cid: 'c1' }));
-    expect((err as Error).message).to.equal('录像删除预检失败（HTTP 403）：denied');
+    expect((err as Error).message).to.equal('无权删除该录像。');
   });
 
   it('executes a delete as a form post with intent and optional confirm title', async () => {
@@ -261,6 +292,7 @@ describe('recording download + delete', () => {
     const [url, init] = fn.mock.calls[0];
     expect(url).to.equal('/api/admin/vigil/recordings/delete');
     expect(init?.method).to.equal('POST');
+    expect((init?.headers as Record<string, string>).Accept).to.equal('application/json');
     expect(Object.fromEntries(new URLSearchParams(String(init?.body)))).to.deep.equal({
       cid: 'c1',
       intent: 'i1',

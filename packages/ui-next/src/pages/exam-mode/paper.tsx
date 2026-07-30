@@ -37,6 +37,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { SimpleSelect } from '@/components/ui/select';
 import { type KryptonUser, useBootstrap } from '@/lib/bootstrap';
+import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 
 interface PdocLike {
   docId: number;
@@ -242,9 +243,9 @@ function ProblemsSection({
   useEffect(() => {
     setDraftLoadState('loading');
     setDraftLoadError('');
-    fetch(`/paper/${tid}/draft`, { headers: { Accept: 'application/json' } })
+    fetchHydroResponse(`/paper/${tid}/draft`, { headers: { Accept: 'application/json' } }, '答题草稿加载失败')
       .then(async (response) => {
-        if (!response.ok) throw new Error(`草稿接口返回 HTTP ${response.status}`);
+        if (!response.ok) throw new Error(await readHydroResponseError(response, '答题草稿加载失败'));
         const body: DraftListResponse = await response.json();
         if (!Array.isArray(body?.drafts)) throw new Error('草稿接口响应缺少 drafts 数组');
         return body;
@@ -367,14 +368,16 @@ function ProblemsSection({
     }
 
     const form = new URLSearchParams(body);
-    const res = await fetch(`/paper/${tid}/draft/${pid}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: form.toString(),
-    });
-    if (!res.ok) {
-      throw new Error(`保存失败：${res.statusText}`);
-    }
+    const res = await fetchHydroResponse(
+      `/paper/${tid}/draft/${pid}`,
+      {
+        method: 'POST',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: form.toString(),
+      },
+      '保存失败',
+    );
+    if (!res.ok) throw new Error(await readHydroResponseError(res, '保存失败'));
     setDrafts((prev) => ({
       ...prev,
       [pid]: { ...prev[pid]!, dirty: false, lastSavedAt: Date.now() },
@@ -389,13 +392,23 @@ function ProblemsSection({
     // Save first to ensure latest state is on server.
     if (!(await saveCurrentTab())) return;
     const form = new URLSearchParams({ kind: activeKind });
-    const res = await fetch(`/paper/${tid}/lock-kind`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: form.toString(),
-    });
+    let res: Response;
+    try {
+      res = await fetchHydroResponse(
+        `/paper/${tid}/lock-kind`,
+        {
+          method: 'POST',
+          headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: form.toString(),
+        },
+        '提交本类失败',
+      );
+    } catch (error) {
+      alert(error instanceof Error ? error.message : '提交本类失败');
+      return;
+    }
     if (!res.ok) {
-      alert(`提交本类失败：${res.statusText}`);
+      alert(await readHydroResponseError(res, '提交本类失败'));
       return;
     }
     const body: { judgeResults?: Record<string, NonNullable<DraftState['judgeResult']>> } = await res.json();
@@ -423,9 +436,22 @@ function ProblemsSection({
       alert(error instanceof Error ? error.message : '保存失败');
       return;
     }
-    const res = await fetch(`/paper/${tid}/submit-code/${pid}`, { method: 'POST' });
+    let res: Response;
+    try {
+      res = await fetchHydroResponse(
+        `/paper/${tid}/submit-code/${pid}`,
+        {
+          method: 'POST',
+          headers: { Accept: 'application/json' },
+        },
+        '提交失败',
+      );
+    } catch (error) {
+      alert(error instanceof Error ? error.message : '提交失败');
+      return;
+    }
     if (!res.ok) {
-      alert(`提交失败：${res.statusText}`);
+      alert(await readHydroResponseError(res, '提交失败'));
       return;
     }
     const { rid }: { rid: string } = await res.json();
@@ -444,9 +470,22 @@ function ProblemsSection({
       alert(error instanceof Error ? error.message : '保存失败，未交卷');
       return;
     }
-    const res = await fetch(`/paper/${tid}/finalize`, { method: 'POST' });
+    let res: Response;
+    try {
+      res = await fetchHydroResponse(
+        `/paper/${tid}/finalize`,
+        {
+          method: 'POST',
+          headers: { Accept: 'application/json' },
+        },
+        '交卷失败',
+      );
+    } catch (error) {
+      alert(error instanceof Error ? error.message : '交卷失败');
+      return;
+    }
     if (!res.ok) {
-      alert(`交卷失败：${res.statusText}`);
+      alert(await readHydroResponseError(res, '交卷失败'));
       return;
     }
     const { count }: { count: number } = await res.json();
@@ -515,7 +554,7 @@ function ProblemsSection({
       ) : null}
       {draftLoadState === 'error' ? (
         <p role="alert" className="border-b border-destructive/40 px-4 py-3 text-sm text-destructive">
-          草稿加载失败：{draftLoadError}。已阻止作答、保存和交卷，请刷新重试。
+          草稿加载失败：{draftLoadError} 已阻止作答、保存和交卷，请刷新重试。
         </p>
       ) : null}
 

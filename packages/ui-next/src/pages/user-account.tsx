@@ -38,6 +38,7 @@ import { AvatarUpload } from '@/components/uploader';
 import { MarkdownEditor } from '@/components/markdown-renderer';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { useBootstrap } from '@/lib/bootstrap';
 import { makeInitials, formatRelativeTime, formatDateTime, replaceRouteTokens } from '@/lib/format';
 import { cn } from '@/lib/cn';
@@ -774,7 +775,7 @@ function countUnread(conv: Conv, selfUid: number): number {
   return n;
 }
 
-function MessagesPanel() {
+export function MessagesPanel() {
   const bs = useBootstrap();
   const data = bs.page.data as UserAccountPageData;
   const selfUid = bs.user.id;
@@ -785,6 +786,8 @@ function MessagesPanel() {
   const [draftContent, setDraftContent] = useState('');
   const [pendingDelete, setPendingDelete] = useState<MessageDoc | null>(null);
   const [sending, setSending] = useState(false);
+  const [messageError, setMessageError] = useState('');
+  const [refreshError, setRefreshError] = useState('');
   const draftRef = useRef<HTMLTextAreaElement | null>(null);
 
   /* Poll /home/messages every 15s for new messages. Hydro doesn't expose
@@ -796,10 +799,11 @@ function MessagesPanel() {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const tick = async () => {
       try {
-        const res = await fetch('/home/messages', { headers: { Accept: 'application/json' }, credentials: 'include' });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const res = await fetchHydroResponse('/home/messages', { headers: { Accept: 'application/json' }, credentials: 'include' }, '刷新消息失败');
+        if (!res.ok) throw new Error(await readHydroResponseError(res, '刷新消息失败'));
         const data2 = await res.json();
         if (cancelled) return;
+        setRefreshError('');
         const fresh = parseConversations(data2.messages);
         // Detect new messages for desktop notification
         let newIncoming = 0;
@@ -820,8 +824,10 @@ function MessagesPanel() {
         ) {
           void new Notification('Krypton', { body: `${newIncoming} 条新消息` });
         }
-      } catch {
-        /* network blips ignored */
+      } catch (error) {
+        if (cancelled) return;
+        console.error('[user-account] Message refresh failed', error);
+        setRefreshError(error instanceof Error && error.message ? error.message : '刷新消息失败');
       } finally {
         if (!cancelled) timer = setTimeout(tick, 15000);
       }
@@ -870,26 +876,40 @@ function MessagesPanel() {
     if (!activeConv) return;
     if (!draftContent.trim() || sending) return;
     setSending(true);
+    setMessageError('');
+    let fallback = '发送消息失败';
     try {
       const form = new FormData();
       form.append('operation', 'send');
       form.append('uid', String(activeConv.uid));
       form.append('content', draftContent);
-      const res = await fetch('/home/messages', {
-        method: 'POST',
-        body: form,
-        credentials: 'include',
-        headers: { Accept: 'application/json' },
-      });
-      if (res.ok || res.redirected) {
-        setDraftContent('');
-        // Refresh now so we see the just-sent message
-        const fr = await fetch('/home/messages', { headers: { Accept: 'application/json' }, credentials: 'include' });
-        if (fr.ok) {
-          const data3 = await fr.json();
-          setConversations(parseConversations(data3.messages));
-        }
+      const res = await fetchHydroResponse(
+        '/home/messages',
+        {
+          method: 'POST',
+          body: form,
+          credentials: 'include',
+          headers: { Accept: 'application/json' },
+        },
+        fallback,
+      );
+      if (!res.ok) throw new Error(await readHydroResponseError(res, fallback));
+      setDraftContent('');
+
+      // Refresh now so we see the just-sent message.
+      fallback = '刷新消息失败';
+      const fr = await fetchHydroResponse('/home/messages', { headers: { Accept: 'application/json' }, credentials: 'include' }, fallback);
+      if (!fr.ok) throw new Error(await readHydroResponseError(fr, fallback));
+      let data3: { messages?: unknown };
+      try {
+        data3 = (await fr.json()) as { messages?: unknown };
+      } catch (error) {
+        console.error('[user-account] Invalid message refresh response', error);
+        throw new Error(fallback, { cause: error });
       }
+      setConversations(parseConversations(data3.messages));
+    } catch (error) {
+      setMessageError(error instanceof Error && error.message ? error.message : fallback);
     } finally {
       setSending(false);
     }
@@ -898,16 +918,22 @@ function MessagesPanel() {
   const confirmDelete = async (msg: MessageDoc) => {
     setPendingDelete(null);
     if (!msg?._id) return;
+    setMessageError('');
     const form = new FormData();
     form.append('operation', 'delete_message');
     form.append('messageId', String(msg._id));
     try {
-      await fetch('/home/messages', {
-        method: 'POST',
-        body: form,
-        credentials: 'include',
-        headers: { Accept: 'application/json' },
-      });
+      const response = await fetchHydroResponse(
+        '/home/messages',
+        {
+          method: 'POST',
+          body: form,
+          credentials: 'include',
+          headers: { Accept: 'application/json' },
+        },
+        '删除消息失败',
+      );
+      if (!response.ok) throw new Error(await readHydroResponseError(response, '删除消息失败'));
       // Drop locally
       setConversations((cur) =>
         cur
@@ -917,8 +943,8 @@ function MessagesPanel() {
           }))
           .filter((c) => c.messages.length > 0),
       );
-    } catch {
-      /* ignore */
+    } catch (error) {
+      setMessageError(error instanceof Error && error.message ? error.message : '删除消息失败');
     }
   };
 
@@ -977,22 +1003,29 @@ function MessagesPanel() {
             actually shrink below its content and scroll internally. */}
         <div className="flex flex-col min-h-0">
           {activeConv ? (
-            <>
-              <div className="border-b px-4 py-2.5 flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2 min-w-0">
-                  <Avatar className="size-7 shrink-0">
-                    {activeConv.udoc?.avatarUrl ? <AvatarImage src={String(activeConv.udoc.avatarUrl)} alt={activeConv.udoc.uname || '?'} /> : null}
-                    <AvatarFallback className="text-[10px]">{makeInitials(activeConv.udoc.uname || '?')}</AvatarFallback>
-                  </Avatar>
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium">{activeConv.udoc.uname || `UID ${activeConv.uid}`}</p>
-                    <p className="text-[10px] text-muted-foreground">{activeConv.messages.length} 条消息</p>
-                  </div>
+            <div className="border-b px-4 py-2.5 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <Avatar className="size-7 shrink-0">
+                  {activeConv.udoc?.avatarUrl ? <AvatarImage src={String(activeConv.udoc.avatarUrl)} alt={activeConv.udoc.uname || '?'} /> : null}
+                  <AvatarFallback className="text-[10px]">{makeInitials(activeConv.udoc.uname || '?')}</AvatarFallback>
+                </Avatar>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">{activeConv.udoc.uname || `UID ${activeConv.uid}`}</p>
+                  <p className="text-[10px] text-muted-foreground">{activeConv.messages.length} 条消息</p>
                 </div>
-                <a href={replaceRouteTokens(bs.urls.userDetail, { UID: String(activeConv.uid) })} className="text-xs text-primary hover:underline">
-                  资料 →
-                </a>
               </div>
+              <a href={replaceRouteTokens(bs.urls.userDetail, { UID: String(activeConv.uid) })} className="text-xs text-primary hover:underline">
+                资料 →
+              </a>
+            </div>
+          ) : null}
+          {messageError || refreshError ? (
+            <p role="alert" className="border-b bg-destructive/10 px-4 py-2 text-xs text-destructive">
+              {messageError || refreshError}
+            </p>
+          ) : null}
+          {activeConv ? (
+            <>
               <ScrollArea className="flex-1" viewportClassName="space-y-2 p-4">
                 {renderGroupedMessages(activeConv.messages, selfUid, bs.locale, insertQuote, setPendingDelete)}
               </ScrollArea>

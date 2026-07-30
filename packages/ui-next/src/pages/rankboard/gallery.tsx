@@ -12,6 +12,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
+import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { uploadUserFile } from '@/lib/upload';
 import { formatGalleryTeamRank, type GalleryTeamRankStatus } from './gallery-team-rank';
 
@@ -46,21 +47,6 @@ interface YearBucket {
   icpc: GalleryCard[];
 }
 
-async function responseErrorMessage(response: Response, fallback: string) {
-  const raw = await response.text().catch(() => '');
-  if (raw) {
-    try {
-      const body = JSON.parse(raw);
-      const message = body?.error?.message || body?.message || body?.error;
-      if (typeof message === 'string' && message.trim()) return message;
-    } catch {
-      const text = raw.trim();
-      if (text && !text.startsWith('<!DOCTYPE') && !text.startsWith('<html')) return text.slice(0, 180);
-    }
-  }
-  return `${fallback}（HTTP ${response.status}）`;
-}
-
 function TeamCard({ card, canUpload, uid, onLightbox }: { card: GalleryCard; canUpload: boolean; uid: number; onLightbox: (url: string) => void }) {
   const [imageUrls, setImageUrls] = useState<string[]>(card.imageUrls);
   const [uploading, setUploading] = useState(false);
@@ -76,7 +62,7 @@ function TeamCard({ card, canUpload, uid, onLightbox }: { card: GalleryCard; can
     setErrorMessage('');
     try {
       const url = await uploadUserFile(file, uid);
-      const attach = await fetch('/rankboard/gallery', {
+      const attach = await fetchHydroResponse('/rankboard/gallery', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({
@@ -93,7 +79,7 @@ function TeamCard({ card, canUpload, uid, onLightbox }: { card: GalleryCard; can
       });
       if (!attach.ok) {
         throw new Error(
-          await responseErrorMessage(attach, attach.status === 409 ? '页面数据已过期（奖项列表已被他人修改），请刷新后重试' : '照片关联失败'),
+          await readHydroResponseError(attach, attach.status === 409 ? '页面数据已过期（奖项列表已被他人修改），请刷新后重试' : '照片关联失败'),
         );
       }
       const data = (await attach.json().catch(() => null)) as { imageUrls?: unknown } | null;

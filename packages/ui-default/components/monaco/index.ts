@@ -145,7 +145,7 @@ function handlePasteEvent(editor: monaco.editor.IStandaloneCodeEditor) {
         .then(() => updateText(`${isProblemPage ? 'file://' : `/file/${UserContext._id}/`}${filename}`))
         .catch((e) => {
           console.error(e);
-          updateText(`${i18n('Upload Failed')}: ${e.message}`);
+          updateText(e.message);
         });
     },
     { capture: true },

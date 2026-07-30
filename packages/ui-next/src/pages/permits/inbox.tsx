@@ -15,6 +15,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useBootstrap } from '@/lib/bootstrap';
+import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { createRequestId } from '@/lib/request-id';
 
 interface PermitRow {
@@ -84,16 +85,14 @@ export function MyVerifyInboxPage() {
     setActionError('');
     const fd = new FormData();
     fd.set('permitId', permitId);
-    const r = await fetch(`/p/${pid}/permits/revoke`, { method: 'POST', body: fd, credentials: 'include' });
+    const r = await fetchHydroResponse(`/p/${pid}/permits/revoke`, {
+      method: 'POST',
+      body: fd,
+      credentials: 'include',
+      headers: { Accept: 'application/json' },
+    });
     if (!r.ok) {
-      let message = `退出协作失败：HTTP ${r.status}`;
-      try {
-        const body = await r.json();
-        message = body?.error?.message || body?.message || body?.error || message;
-      } catch {
-        // The HTTP status remains the explicit error when the response is not JSON.
-      }
-      setActionError(message);
+      setActionError(await readHydroResponseError(r, '退出协作失败'));
       return;
     }
     window.location.reload();
@@ -108,21 +107,14 @@ export function MyVerifyInboxPage() {
       fd.set('scope', row.scope);
       fd.set('status', 'completed');
       fd.set('requestId', createRequestId());
-      const response = await fetch(`/p/${row.pid}/contributions/status`, {
+      const response = await fetchHydroResponse(`/p/${row.pid}/contributions/status`, {
         method: 'POST',
         body: fd,
         credentials: 'include',
         headers: { Accept: 'application/json' },
       });
       if (!response.ok) {
-        let message = `标记完成失败：HTTP ${response.status}`;
-        try {
-          const body = await response.json();
-          message = body?.error?.message || body?.message || body?.error || message;
-        } catch {
-          // The explicit HTTP status remains visible for non-JSON responses.
-        }
-        throw new Error(message);
+        throw new Error(await readHydroResponseError(response, '标记完成失败'));
       }
       window.location.reload();
     } catch (cause) {

@@ -23,6 +23,7 @@ import { SimpleSelect } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { useBootstrap } from '@/lib/bootstrap';
 import { evaluateSelfTeamName } from '@/lib/contest-team-form';
+import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { formatDateTime } from '@/lib/format';
 
 interface TeamUser extends DomainUserOption {
@@ -215,11 +216,11 @@ export function ContestTeamsPage() {
     async (query: string): Promise<TeamUser[]> => {
       const value = query.trim();
       if (!value) return [];
-      const response = await fetch(`${teamsUrl}?search=${encodeURIComponent(value)}`, {
+      const response = await fetchHydroResponse(`${teamsUrl}?search=${encodeURIComponent(value)}`, {
         credentials: 'include',
         headers: { Accept: 'application/json' },
       });
-      if (!response.ok) throw new Error(`Team user search failed (${response.status}).`);
+      if (!response.ok) throw new Error(await readHydroResponseError(response, '队员搜索失败'));
       const body = await response.json();
       return Array.isArray(body?.users) ? body.users : [];
     },

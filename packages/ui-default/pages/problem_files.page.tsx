@@ -48,31 +48,28 @@ const page = new NamedPage('problem_files', () => {
         gen,
         std,
       });
-      if (res.error) Notification.error(res.error);
-      else {
-        Notification.success(i18n('Generating...'));
-        const dialog = new InfoDialog({
-          $body: tpl`
+      Notification.success(i18n('Generating...'));
+      const dialog = new InfoDialog({
+        $body: tpl`
             <div class="typo">
               <iframe src="${res.url}"
                 scrolling="yes" border="0" frameborder="no" framespacing="0" width="100%" style="height: 70vh;"></iframe>
             </div>`,
-          width: `${window.innerWidth - 200}px`,
-          height: `${window.innerHeight - 100}px`,
-        });
-        const callback = (data: MessageEvent<any>) => {
-          if (data.data.status === STATUS.STATUS_ACCEPTED) {
-            dialog.close();
-            Notification.success('Testdata generated successfully.');
-          }
-        };
-        window.addEventListener('message', callback, false);
-        await dialog.open();
-        window.removeEventListener('message', callback, false);
-        await pjax.request({ push: false });
-      }
+        width: `${window.innerWidth - 200}px`,
+        height: `${window.innerHeight - 100}px`,
+      });
+      const callback = (data: MessageEvent<any>) => {
+        if (data.data.status === STATUS.STATUS_ACCEPTED) {
+          dialog.close();
+          Notification.success('Testdata generated successfully.');
+        }
+      };
+      window.addEventListener('message', callback, false);
+      await dialog.open();
+      window.removeEventListener('message', callback, false);
+      await pjax.request({ push: false });
     } catch (error) {
-      Notification.error([error.message, ...error.params].join(' '));
+      Notification.error(error.message);
     }
   }
 

@@ -59,6 +59,7 @@ import {
 } from '@/lib/multi-select-presets';
 import { useBootstrap, type GenericUserDoc } from '@/lib/bootstrap';
 import { getContestProblemStatus, getPersonalPracticeStatus, type PersonalPracticeStatusSnapshot } from '@/lib/contest-exam-display';
+import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { formatDateTime, formatRelativeTime, makeInitials, replaceRouteTokens } from '@/lib/format';
 import { isSystemAdmin } from '@/lib/perms';
 
@@ -696,7 +697,7 @@ export function ContestEditPage() {
     setTeamReadinessLoading(true);
     setTeamReadinessError('');
     try {
-      const response = await fetch(window.location.href, {
+      const response = await fetchHydroResponse(window.location.href, {
         method: 'POST',
         credentials: 'include',
         headers: {
@@ -705,14 +706,16 @@ export function ContestEditPage() {
         },
         body: new URLSearchParams({ operation: 'check_team_readiness' }),
       });
-      const text = await response.text();
-      let payload: TeamReadinessResponse = {};
+      if (!response.ok) throw new Error(await readHydroResponseError(response, '赛前检查失败'));
+      let payload: TeamReadinessResponse;
       try {
-        payload = text ? JSON.parse(text) : {};
+        payload = (await response.json()) as TeamReadinessResponse;
       } catch {
-        if (!response.ok) throw new Error(text || '赛前检查失败');
+        throw new Error('赛前检查响应不是有效 JSON');
       }
-      if (!response.ok || !payload.ok) throw new Error(String(payload.message || payload.error || text || '赛前检查失败'));
+      if (!payload || typeof payload !== 'object' || payload.ok !== true) {
+        throw new Error(payload?.message || '赛前检查响应缺少明确的成功标记');
+      }
       setTeamReadiness(payload.readiness || null);
     } catch (error) {
       setTeamReadiness(null);
@@ -2280,7 +2283,7 @@ export function ContestUserPage() {
       const q = query.trim();
       if (!q) return [];
       const domainId = encodeURIComponent(bs.domain?.id || 'system');
-      const response = await fetch(`/d/${domainId}/api/users`, {
+      const response = await fetchHydroResponse(`/d/${domainId}/api/users`, {
         method: 'POST',
         credentials: 'include',
         headers: {
@@ -2826,7 +2829,7 @@ export function ContestPrintPage() {
   const [printTab, setPrintTab] = useState<'submit' | 'queue' | 'kiosk'>('queue');
 
   const postPrintOperation = async (payload: Record<string, string>): Promise<PrintOperationResponse> => {
-    const response = await fetch(window.location.href, {
+    const response = await fetchHydroResponse(window.location.href, {
       method: 'POST',
       headers: {
         Accept: 'application/json',
@@ -2834,13 +2837,15 @@ export function ContestPrintPage() {
       },
       body: new URLSearchParams(payload),
     });
-    const text = await response.text();
-    if (!response.ok) throw new Error(text || '请求失败');
+    if (!response.ok) throw new Error(await readHydroResponseError(response, '打印操作失败'));
+    let body: unknown;
     try {
-      return JSON.parse(text);
+      body = await response.json();
     } catch {
-      return {};
+      throw new Error('打印操作响应不是有效 JSON');
     }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('打印操作响应不是有效对象');
+    return body as PrintOperationResponse;
   };
 
   const refreshTasks = async () => {

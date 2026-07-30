@@ -19,6 +19,7 @@ import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { TableAction, TableActions } from '@/components/ui/table-actions';
 import { Checkbox } from '@/components/ui/checkbox';
+import { fetchHydroResponse } from '@/lib/error-presenter';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 import { uploadUserFile } from '@/lib/upload';
@@ -120,7 +121,7 @@ function TeammatesPicker({ value, onChange, placeholder }: { value: string[]; on
     setLoading(true);
     const t = setTimeout(async () => {
       try {
-        const r = await fetch(`/admin/rankboard/user-search?q=${encodeURIComponent(query.trim())}`, {
+        const r = await fetchHydroResponse(`/admin/rankboard/user-search?q=${encodeURIComponent(query.trim())}`, {
           headers: { Accept: 'application/json' },
         });
         const body = (await r.json()) as { results?: SearchResult[] };
@@ -567,7 +568,7 @@ function AddPersonDialog({ onClose }: { onClose: () => void }) {
     }
     setLoading(true);
     try {
-      const r = await fetch(`/admin/rankboard/search?q=${encodeURIComponent(text)}`, {
+      const r = await fetchHydroResponse(`/admin/rankboard/search?q=${encodeURIComponent(text)}`, {
         headers: { Accept: 'application/json' },
       });
       const body = (await r.json()) as { students?: StudentSummary[] };

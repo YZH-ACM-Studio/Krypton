@@ -41,7 +41,7 @@ const page = new NamedPage('manage_config', async () => {
               window.location.reload();
             })
             .catch((e) => {
-              Notification.error(i18n('Failed to save changes:'), e.message);
+              Notification.error(e.message);
             });
         }}
         sidebar={<DomComponent childDom={$('.section.side').get(0)} />}

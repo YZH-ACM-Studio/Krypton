@@ -1,5 +1,7 @@
 import * as YAML from 'yaml';
 import { downloadZip, type ZipDownloadTarget } from './download-zip';
+import { readHydroResponseError } from './error-presenter';
+import { fetchHydroResponse } from '@/lib/error-presenter';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -95,20 +97,9 @@ function statementTargets(folder: string, content: string | JsonRecord | undefin
   return [{ name: `${folder}/problem.md`, content: String(content ?? '') }];
 }
 
-async function responseMessage(res: Response) {
-  try {
-    const data: unknown = await res.json();
-    if (isRecord(data)) return String(data.error || data.message || `HTTP ${res.status}`);
-    return `HTTP ${res.status}`;
-  } catch {
-    const text = await res.text().catch(() => '');
-    return text.slice(0, 160) || `HTTP ${res.status}`;
-  }
-}
-
 async function getFileLinks(problemUrl: string, files: string[], type: 'testdata' | 'additional_file') {
   if (!files.length) return {};
-  const res = await fetch(`${problemUrl}/files`, {
+  const res = await fetchHydroResponse(`${problemUrl}/files`, {
     method: 'POST',
     credentials: 'same-origin',
     headers: {
@@ -117,7 +108,7 @@ async function getFileLinks(problemUrl: string, files: string[], type: 'testdata
     },
     body: JSON.stringify({ operation: 'get_links', type, files }),
   });
-  if (!res.ok) throw new Error(await responseMessage(res));
+  if (!res.ok) throw new Error(await readHydroResponseError(res, '获取文件下载链接失败'));
   const data: unknown = await res.json().catch(() => null);
   const links = isRecord(data) ? data.links : null;
   if (!isRecord(links)) {

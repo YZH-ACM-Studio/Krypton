@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
+import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { readProblemSaveSuccess } from '@/lib/problem-save-response';
 
 interface ObjectiveProblemDocument extends StructuredProblemMetadataDocument {
@@ -50,17 +51,6 @@ const KIND_META: Record<BasicObjectiveKind, { label: string; icon: typeof Circle
   [BASIC_OBJECTIVE_KIND.trueFalse]: { label: '判断题', icon: CheckCircle2 },
   [BASIC_OBJECTIVE_KIND.blank]: { label: '填空题', icon: TextCursorInput },
 };
-
-async function responseMessage(response: Response): Promise<string> {
-  if (response.status === 409) return '题目已被其他操作修改，或正在比赛/考试中使用；请重新载入。';
-  const contentType = response.headers.get('content-type') || '';
-  if (contentType.includes('application/json')) {
-    const body = await response.json();
-    const message = body?.error?.message || body?.message || body?.error;
-    if (typeof message === 'string' && message.trim()) return message;
-  }
-  return `保存失败（${response.status} ${response.statusText || 'Unknown Error'}）`;
-}
 
 function validateOptions(options: string[]): string {
   const normalized = options.map((option) => option.trim());
@@ -120,13 +110,17 @@ function ObjectiveEditorShell({
     if (typeof confirmation === 'string') formData.set('activeContainerConfirmation', confirmation);
     setSaving(true);
     try {
-      const response = await fetch(form.action || window.location.pathname, {
+      const response = await fetchHydroResponse(form.action || window.location.pathname, {
         method: 'POST',
         body: new URLSearchParams(Array.from(formData, ([key, value]) => [key, String(value)])),
         credentials: 'same-origin',
         headers: { Accept: 'application/json' },
       });
-      if (!response.ok) throw new Error(await responseMessage(response));
+      if (!response.ok) {
+        throw new Error(
+          await readHydroResponseError(response, response.status === 409 ? '题目已被其他操作修改，或正在比赛/考试中使用；请重新载入' : '保存失败'),
+        );
+      }
       const { destination } = await readProblemSaveSuccess(response, kind);
       if (dirtyState.snapshot() !== submittedSnapshot) {
         console.warn('Objective problem saved, but local form changed during request; navigation withheld', { destination });

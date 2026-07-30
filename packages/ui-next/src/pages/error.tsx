@@ -1,40 +1,21 @@
 import { motion } from 'motion/react';
 import { AlertTriangle, ArrowLeft, Bug, Home } from 'lucide-react';
+import { useMemo } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useBootstrap } from '@/lib/bootstrap';
+import { presentHydroErrorPayload } from '@/lib/error-presenter';
 
 interface ErrorPageData {
   code?: string | number;
-  error?: string | { message?: string; msg?: string; params?: unknown[] };
+  error?: unknown;
   status?: string | number;
-}
-
-/**
- * Substitute Hydro-style `{0}`, `{1}` placeholders in an error template with
- * the matching entries from `params`. Falls back to leaving the literal token
- * in place if the index is missing — that's strictly better than emitting raw
- * "{1}" to end users.
- */
-function substituteErrorParams(template: string, params: unknown[] | undefined): string {
-  if (!template) return '';
-  const safeParams = Array.isArray(params) ? params : [];
-  return template.replace(/\{(\d+)\}/g, (token, idx) => {
-    const i = Number(idx);
-    if (!Number.isFinite(i) || i < 0 || i >= safeParams.length) return token;
-    const value = safeParams[i];
-    if (value == null) return token;
-    return String(value);
-  });
 }
 
 export function ErrorPage() {
   const bs = useBootstrap();
   const data = bs.page.data as ErrorPageData;
-  const error = data.error;
-  const rawMessage = typeof error === 'string' ? error : error?.message || error?.msg || '发生了一个错误';
-  const params = typeof error === 'object' && error !== null ? (error.params as unknown[] | undefined) : undefined;
-  const message = substituteErrorParams(String(rawMessage), params);
+  const message = useMemo(() => presentHydroErrorPayload(data.error, '页面加载失败'), [data.error]);
   const code = data.code || data.status || '';
 
   return (
@@ -72,7 +53,7 @@ export function ErrorPage() {
 export function BsodPage() {
   const bs = useBootstrap();
   const data = bs.page.data as ErrorPageData;
-  const error = typeof data.error === 'string' ? data.error : '';
+  const message = useMemo(() => presentHydroErrorPayload(data.error, '服务器内部错误'), [data.error]);
 
   return (
     <motion.div
@@ -87,10 +68,7 @@ export function BsodPage() {
             <Bug className="size-8 text-destructive" />
           </div>
           <p className="text-lg font-semibold">服务器内部错误</p>
-          <p className="text-sm text-muted-foreground">服务器遇到了未预期的错误，请稍后重试或联系管理员。</p>
-          {error ? (
-            <pre className="mt-4 max-h-64 w-full overflow-auto rounded-md bg-muted p-4 text-left text-xs text-muted-foreground">{error}</pre>
-          ) : null}
+          <p className="text-sm text-muted-foreground">{message}</p>
           <div className="flex gap-3 pt-4">
             <Button variant="outline" onClick={() => window.history.back()}>
               <ArrowLeft className="mr-2 size-4" />

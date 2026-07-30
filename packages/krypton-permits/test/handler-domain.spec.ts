@@ -535,7 +535,7 @@ describe('permit handler authoritative domain boundary', () => {
         expect(calls.contributionAssign[0].requestId).to.equal('acl:problem-contribution-assign:system:42:8:data:batch-retry');
     });
 
-    it('returns exact per-problem results when a post-preflight batch write fails', async () => {
+    it('preserves exact partial results and adds one canonical error without exposing internal failure messages', async () => {
         const handler = makeHandler('problem_contribution_bulk');
         const p42 = { ...pdoc, structureRevision: 2 };
         const p43 = { ...pdoc, docId: 43, pid: 'P43', title: 'P43', structureRevision: 4 };
@@ -552,9 +552,17 @@ describe('permit handler authoritative domain boundary', () => {
                 publicPid: 'P43',
                 completedScopes: [],
                 scope: 'data',
-                message: 'simulated database failure',
+                message: handler.response.body.error.message,
             },
         ]);
+        expect(handler.response.body.error).to.deep.include({
+            name: 'ProblemContributionBatchError',
+            errorCode: 'ProblemContributionBatchError',
+            code: 500,
+            status: 500,
+            params: ['batch-partial', 'P43/data'],
+        });
+        expect(handler.response.body.error.message).not.to.include('simulated database failure');
         expect(calls.contributionAssign.map((input) => [input.pid, input.scope])).to.deep.equal([
             [42, 'data'],
             [42, 'tag'],

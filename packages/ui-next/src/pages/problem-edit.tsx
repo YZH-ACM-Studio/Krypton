@@ -29,9 +29,10 @@ import { Textarea } from '@/components/ui/textarea';
 import { useBootstrap } from '@/lib/bootstrap';
 import { replaceRouteTokens } from '@/lib/format';
 import { downloadProblemPackage } from '@/lib/problem-package';
+import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { managedSourceFieldViews, managedSourceTagPreview } from '@/lib/managed-problem-source';
 import type { ManagedSourceMetaView, ManagedSourceTemplateOption } from '@/lib/managed-problem-source';
-import { readHydroResponseError, readProblemSaveSuccess } from '@/lib/problem-save-response';
+import { readProblemSaveSuccess } from '@/lib/problem-save-response';
 import { requiresLegacyProgrammingTagNormalization, type ProgrammingTagState } from '@/lib/programming-tag-state';
 import { createRequestId } from '@/lib/request-id';
 
@@ -112,13 +113,6 @@ interface PidNamespaceOption {
 interface ManagedContributionSummary {
   uid: number;
   scope: 'data' | 'tag';
-}
-
-interface ContributionBatchFailure {
-  publicPid?: string | number;
-  pid?: string | number;
-  scope?: string;
-  message?: string;
 }
 
 interface ProblemEditPageData {
@@ -234,7 +228,7 @@ function PermitsPanel({ pid, pdocId, hidden, managed }: { pid: string; pdocId?: 
     setLoadError('');
     setLoaded(false);
     try {
-      const r = await fetch(`/p/${apiPid}/permits`, { credentials: 'include', headers: { Accept: 'application/json' } });
+      const r = await fetchHydroResponse(`/p/${apiPid}/permits`, { credentials: 'include', headers: { Accept: 'application/json' } });
       if (!r.ok) throw new Error(await readHydroResponseError(r, '权限列表加载失败'));
       const j = await r.json();
       if (!Array.isArray(j?.permits)) throw new Error('权限列表响应格式错误');
@@ -278,7 +272,7 @@ function PermitsPanel({ pid, pdocId, hidden, managed }: { pid: string; pdocId?: 
     const fd = new FormData();
     fd.set('permitId', revokeTarget._id);
     try {
-      const r = await fetch(`/p/${apiPid}/permits/revoke`, {
+      const r = await fetchHydroResponse(`/p/${apiPid}/permits/revoke`, {
         method: 'POST',
         body: fd,
         credentials: 'include',
@@ -308,7 +302,7 @@ function PermitsPanel({ pid, pdocId, hidden, managed }: { pid: string; pdocId?: 
     try {
       const fd = new FormData(e.currentTarget);
       fd.set('uids', selectedUsers.map((u) => String(u._id)).join(','));
-      const r = await fetch(`/p/${apiPid}/permits`, {
+      const r = await fetchHydroResponse(`/p/${apiPid}/permits`, {
         method: 'POST',
         body: fd,
         credentials: 'include',
@@ -524,7 +518,7 @@ function ContributionsPanel({ pid, pdocId, structureRevision }: { pid: string; p
     setLoaded(false);
     setError('');
     try {
-      const response = await fetch(`/p/${apiPid}/contributions`, { credentials: 'include', headers: { Accept: 'application/json' } });
+      const response = await fetchHydroResponse(`/p/${apiPid}/contributions`, { credentials: 'include', headers: { Accept: 'application/json' } });
       if (!response.ok) throw new Error(await readHydroResponseError(response, '贡献分工加载失败'));
       const body = await response.json();
       if (!Array.isArray(body?.contributions)) throw new Error('贡献分工响应格式错误');
@@ -569,24 +563,13 @@ function ContributionsPanel({ pid, pdocId, structureRevision }: { pid: string; p
       form.set('uid', String(selectedUser[0]._id));
       form.set('scopes', [dataScope ? 'data' : '', tagScope ? 'tag' : ''].filter(Boolean).join(','));
       form.set('requestId', createRequestId());
-      const response = await fetch('/problem-contributions/bulk', {
+      const response = await fetchHydroResponse('/problem-contributions/bulk', {
         method: 'POST',
         body: form,
         credentials: 'include',
         headers: { Accept: 'application/json' },
       });
       if (!response.ok) {
-        const body = await response
-          .clone()
-          .json()
-          .catch(() => null);
-        if (Array.isArray(body?.failed) && body.failed.length) {
-          throw new Error(
-            `分配未全部完成（requestId: ${body.requestId || '未知'}）：${body.failed
-              .map((failure: ContributionBatchFailure) => `${failure.publicPid || failure.pid} / ${failure.scope}: ${failure.message}`)
-              .join('；')}`,
-          );
-        }
         throw new Error(await readHydroResponseError(response, '分配贡献任务失败'));
       }
       setSelectedUser([]);
@@ -610,7 +593,7 @@ function ContributionsPanel({ pid, pdocId, structureRevision }: { pid: string; p
       form.set('scope', row.scope);
       form.set('requestId', createRequestId());
       if (operation === 'reopen') form.set('status', 'pending');
-      const response = await fetch(operation === 'reopen' ? `/p/${apiPid}/contributions/status` : `/p/${apiPid}/contributions/revoke`, {
+      const response = await fetchHydroResponse(operation === 'reopen' ? `/p/${apiPid}/contributions/status` : `/p/${apiPid}/contributions/revoke`, {
         method: 'POST',
         body: form,
         credentials: 'include',
@@ -1051,7 +1034,7 @@ export function ProblemEditPage() {
     }
     setTagOperationState('previewing');
     try {
-      const response = await fetch(`${problemUrl}/tags/preview`, {
+      const response = await fetchHydroResponse(`${problemUrl}/tags/preview`, {
         method: 'POST',
         credentials: 'same-origin',
         headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
@@ -1093,7 +1076,7 @@ export function ProblemEditPage() {
     setTagOperationError('');
     setTagOperationState('applying');
     try {
-      const response = await fetch(`${problemUrl}/tags/apply`, {
+      const response = await fetchHydroResponse(`${problemUrl}/tags/apply`, {
         method: 'POST',
         credentials: 'same-origin',
         headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
@@ -1214,7 +1197,7 @@ export function ProblemEditPage() {
     setSaveState('saving');
     const savedVersion = editVersion.current;
     try {
-      const editRes = await fetch(form.action || window.location.pathname, {
+      const editRes = await fetchHydroResponse(form.action || window.location.pathname, {
         method: 'POST',
         body: new URLSearchParams(Array.from(fd, ([key, value]) => [key, String(value)])),
         credentials: 'same-origin',

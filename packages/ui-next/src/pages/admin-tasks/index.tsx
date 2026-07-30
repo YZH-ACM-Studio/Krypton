@@ -37,6 +37,7 @@ import {
 } from 'lucide-react';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
+import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { ModuleWorkspace, type ModuleWorkspaceNavItem } from '@/components/management/module-workspace';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -69,13 +70,7 @@ const TASK_WORKSPACE_NAV = [
     key: 'tasks',
     label: '任务',
     href: '/admin/tasks',
-    templateNames: [
-      'admin_tasks.html',
-      'admin_tasks_edit.html',
-      'admin_tasks_assign.html',
-      'admin_tasks_stats.html',
-      'admin_tasks_candidates.html',
-    ],
+    templateNames: ['admin_tasks.html', 'admin_tasks_edit.html', 'admin_tasks_assign.html', 'admin_tasks_stats.html', 'admin_tasks_candidates.html'],
   },
   {
     key: 'scores',
@@ -1986,11 +1981,7 @@ export function AdminTasksScoresPage() {
       title="比赛分数"
       description="录入 PAT / GPLT / CSP 等外部比赛成绩；这些分数会被任务点用作完成判定的输入。"
     >
-      <MiniTabs
-        size="md"
-        value={data.tab}
-        items={tabs.map((t) => ({ value: t.key, label: t.label, href: `/admin/tasks/scores?tab=${t.key}` }))}
-      />
+      <MiniTabs size="md" value={data.tab} items={tabs.map((t) => ({ value: t.key, label: t.label, href: `/admin/tasks/scores?tab=${t.key}` }))} />
 
       {data.tab === 'pat' && <PatScoreTab scores={data.scores} udict={data.udict} studentDict={data.studentDict} settings={data.settings} />}
       {data.tab === 'gplt' && <GpltScoreTab scores={data.scores} udict={data.udict} studentDict={data.studentDict} settings={data.settings} />}
@@ -2025,12 +2016,18 @@ function BulkScoreImport({ action, operation, formatHint }: { action: string; op
     setBusy(true);
     setResult(null);
     try {
-      const resp = await fetch(action, {
+      const resp = await fetchHydroResponse(action, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8', Accept: 'application/json' },
         body: new URLSearchParams({ operation, text }),
       });
-      const json = (await resp.json().catch(() => ({}))) as { imported?: number; errors?: string[] };
+      if (!resp.ok) throw new Error(await readHydroResponseError(resp, '批量导入失败'));
+      let json: { imported?: number; errors?: string[] };
+      try {
+        json = (await resp.json()) as { imported?: number; errors?: string[] };
+      } catch {
+        throw new Error('批量导入响应不是有效 JSON');
+      }
       setResult(json);
       if (json?.imported && !json?.errors?.length) setTimeout(() => window.location.reload(), 600);
     } catch (e) {
@@ -2071,7 +2068,17 @@ function BulkScoreImport({ action, operation, formatHint }: { action: string; op
   );
 }
 
-function PatScoreTab({ scores, udict, studentDict, settings }: { scores: PatScore[]; udict: UserDict; studentDict: StudentDict; settings: DomainSettings }) {
+function PatScoreTab({
+  scores,
+  udict,
+  studentDict,
+  settings,
+}: {
+  scores: PatScore[];
+  udict: UserDict;
+  studentDict: StudentDict;
+  settings: DomainSettings;
+}) {
   return (
     <>
       <BulkScoreImport
@@ -2173,7 +2180,17 @@ function PatScoreTab({ scores, udict, studentDict, settings }: { scores: PatScor
   );
 }
 
-function GpltScoreTab({ scores, udict, studentDict, settings }: { scores: GpltScore[]; udict: UserDict; studentDict: StudentDict; settings: DomainSettings }) {
+function GpltScoreTab({
+  scores,
+  udict,
+  studentDict,
+  settings,
+}: {
+  scores: GpltScore[];
+  udict: UserDict;
+  studentDict: StudentDict;
+  settings: DomainSettings;
+}) {
   return (
     <>
       <BulkScoreImport action="/admin/tasks/scores?tab=gplt" operation="gplt_import" formatHint="学号,school|national,年,分" />
@@ -2259,7 +2276,17 @@ function GpltScoreTab({ scores, udict, studentDict, settings }: { scores: GpltSc
   );
 }
 
-function CspScoreTab({ scores, udict, studentDict, settings }: { scores: CspScore[]; udict: UserDict; studentDict: StudentDict; settings: DomainSettings }) {
+function CspScoreTab({
+  scores,
+  udict,
+  studentDict,
+  settings,
+}: {
+  scores: CspScore[];
+  udict: UserDict;
+  studentDict: StudentDict;
+  settings: DomainSettings;
+}) {
   return (
     <>
       <BulkScoreImport action="/admin/tasks/scores?tab=csp" operation="csp_import" formatHint="学号,轮次,分" />

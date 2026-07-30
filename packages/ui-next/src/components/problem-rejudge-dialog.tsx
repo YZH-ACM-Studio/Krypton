@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast, ToastProvider } from '@/components/ui/toast';
-import { readHydroResponseError } from '@/lib/problem-save-response';
+import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 
 interface ProblemRejudgeDialogProps {
   open: boolean;
@@ -44,7 +44,7 @@ export function ProblemRejudgeDialog({ open, endpoint, pid, title, onOpenChange,
     setBusy(true);
     setError('');
     try {
-      const response = await fetch(endpoint, {
+      const response = await fetchHydroResponse(endpoint, {
         method: 'POST',
         credentials: 'include',
         headers: {

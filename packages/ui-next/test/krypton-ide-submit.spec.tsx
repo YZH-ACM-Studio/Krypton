@@ -41,10 +41,22 @@ describe('krypton IDE problem submission', () => {
 
   it('shows the Hydro error instead of silently falling back when the server rejects submission', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ error: { message: "You don't have the required permission ({0})", params: ['Submit problem'] } }), {
-        status: 403,
-        headers: { 'Content-Type': 'application/json' },
-      }),
+      new Response(
+        JSON.stringify({
+          error: {
+            name: 'PermissionError',
+            errorCode: 'PermissionError',
+            code: 403,
+            status: 403,
+            params: ['提交题目'],
+            message: '你在当前域中没有所需权限（提交题目）。',
+          },
+        }),
+        {
+          status: 403,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
     );
     const fallback = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
@@ -53,7 +65,7 @@ describe('krypton IDE problem submission', () => {
     render(<KryptonIDE langs={['cc.cc17']} defaultCode="int main() { return 0; }" submitUrl="/p/P1000/submit" onSubmit={fallback} minHeight={120} />);
     fireEvent.click(screen.getByRole('button', { name: /^提交/ }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent("You don't have the required permission (Submit problem)");
+    expect(await screen.findByRole('alert')).toHaveTextContent('你在当前域中没有所需权限（提交题目）。');
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(fallback).not.toHaveBeenCalled();
   });
@@ -66,7 +78,7 @@ describe('krypton IDE problem submission', () => {
     render(<KryptonIDE langs={['cc.cc17']} defaultCode="int main() { return 0; }" submitUrl="/p/P1000/submit" onSubmit={fallback} minHeight={120} />);
     fireEvent.click(screen.getByRole('button', { name: /^提交/ }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('network offline');
+    expect(await screen.findByRole('alert')).toHaveTextContent('请求失败');
     expect(fallback).not.toHaveBeenCalled();
   });
 

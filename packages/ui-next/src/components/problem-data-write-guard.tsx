@@ -2,7 +2,7 @@ import { AlertTriangle } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { readHydroResponseError } from '@/lib/problem-save-response';
+import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 
 export interface ActiveContainer {
   id: string;
@@ -46,7 +46,7 @@ export async function prepareProblemDataWrite(endpoint: string, operation: Probl
   const form = new FormData();
   form.set('operation', 'prepare_data_write');
   form.set('writeOperation', operation);
-  const response = await fetch(endpoint, {
+  const response = await fetchHydroResponse(endpoint, {
     method: 'POST',
     body: form,
     credentials: 'same-origin',

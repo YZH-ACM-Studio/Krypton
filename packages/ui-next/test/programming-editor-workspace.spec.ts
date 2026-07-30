@@ -116,7 +116,7 @@ describe('p3.15 programming editor workspace correction', () => {
     expect(config).to.include("formData.append('operation', 'upload_file')");
     expect(config).to.include("formData.append('type', 'testdata')");
     expect(config).to.include("formData.append('filename', 'config.yaml')");
-    expect(config).to.include(`fetch(\`${problemUrlExpression}/files\``);
+    expect(config).to.include(`fetchHydroResponse(\`${problemUrlExpression}/files\``);
     expect(files).to.include(`endpoint={\`${problemUrlExpression}/files\`}`);
     expect(files).to.include('meta={{ type, ...(uploadConfirmationRequestId ? { activeContainerConfirmation: uploadConfirmationRequestId } : {}) }}');
     expect(files).not.to.include('if (!dataGuard.active) return;');
@@ -179,7 +179,7 @@ describe('p3.15 programming editor workspace correction', () => {
     const files = read('packages/ui-next/src/pages/problem-manage.tsx');
     const uploader = read('packages/ui-next/src/components/uploader.tsx');
     const guard = read('packages/ui-next/src/components/unsaved-changes-guard.tsx');
-    const responseErrors = read('packages/ui-next/src/lib/problem-save-response.ts');
+    const responseErrors = read('packages/ui-next/src/lib/error-presenter.ts');
     expect(edit).to.include("'idle' | 'dirty' | 'saving' | 'saved' | 'error'");
     expect(edit).to.include('useFormDirtyState(formRef, editorRevisionKey)');
     expect(edit).to.include('useUnsavedChangesGuard(');
@@ -192,8 +192,8 @@ describe('p3.15 programming editor workspace correction', () => {
     expect(edit).to.include('navigationGuard.allowNavigation()');
     expect(edit).to.include("current === 'saving' ? current : 'dirty'");
     expect(edit).to.include('readHydroResponseError(editRes');
-    expect(responseErrors).to.include('error?.message || body?.message || error');
-    expect(responseErrors).to.include('Array.isArray(error?.params)');
+    expect(responseErrors).to.include('presentHydroErrorEnvelope');
+    expect(responseErrors).not.to.match(/error\?\.message\s*\|\|\s*body\?\.message/);
     expect(edit).to.include('role="alert"');
     expect(edit).not.to.include('alert(');
     expect(config).to.include('const [savedYaml, setSavedYaml] = useState(initialSubmittedYaml)');
@@ -217,7 +217,7 @@ describe('p3.15 programming editor workspace correction', () => {
     expect(uploader).to.include('aria-valuenow={it.progress}');
     expect(uploader).to.include("console.error('File upload batch failed'");
     expect(uploader).to.include('文件大小与数量以服务器限制为准');
-    expect(uploader).to.include('onAfterResponse: (xhr) =>');
+    expect(uploader).to.include('onAfterResponse: assertHydroUploadResponse');
     expect(uploader).to.include('shouldRetry: retryOnFailure ? undefined : () => false');
     expect(uploader).to.include('for (const file of result.failed) uppy.removeFile(file.id)');
     expect(uploader).to.include("formatHydroErrorResponse(xhr.responseText || '', xhr.status, '上传失败')");

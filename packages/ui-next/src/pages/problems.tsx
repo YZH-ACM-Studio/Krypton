@@ -16,12 +16,8 @@ import { SimpleSelect } from '@/components/ui/select';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { useBootstrap } from '@/lib/bootstrap';
 import { replaceRouteTokens } from '@/lib/format';
-import {
-  managedSourceFieldViews,
-  type ManagedSourceMetaView,
-  type ManagedSourceTemplateOption,
-} from '@/lib/managed-problem-source';
-import { readHydroResponseError } from '@/lib/problem-save-response';
+import { managedSourceFieldViews, type ManagedSourceMetaView, type ManagedSourceTemplateOption } from '@/lib/managed-problem-source';
+import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { createRequestId } from '@/lib/request-id';
 
 const KIND_LABEL: Record<ProblemKind, string> = {
@@ -76,13 +72,6 @@ interface ManagedTrainingListOption {
   id: string;
   title?: string;
   chapters?: Array<{ id: unknown; title?: string }>;
-}
-
-interface ContributionBatchFailure {
-  publicPid?: string | number;
-  pid?: string | number;
-  scope?: string;
-  message?: string;
 }
 
 interface ProblemsPageData {
@@ -381,24 +370,13 @@ export function ProblemsPage() {
       form.set('uid', String(batchUser[0]._id));
       form.set('scopes', [batchDataScope ? 'data' : '', batchTagScope ? 'tag' : ''].filter(Boolean).join(','));
       form.set('requestId', createRequestId());
-      const response = await fetch('/problem-contributions/bulk', {
+      const response = await fetchHydroResponse('/problem-contributions/bulk', {
         method: 'POST',
         body: form,
         credentials: 'include',
         headers: { Accept: 'application/json' },
       });
-      const body = await response
-        .clone()
-        .json()
-        .catch(() => null);
       if (!response.ok) {
-        if (Array.isArray(body?.failed) && body.failed.length) {
-          throw new Error(
-            `批量分配未全部完成（requestId: ${body.requestId || '未知'}）：${body.failed
-              .map((failure: ContributionBatchFailure) => `${failure.publicPid || failure.pid} / ${failure.scope}: ${failure.message}`)
-              .join('；')}`,
-          );
-        }
         throw new Error(await readHydroResponseError(response, '批量分配失败'));
       }
       setBatchMessage(`已为 ${batchUser[0].uname || `UID ${batchUser[0]._id}`} 分配 ${selectedPdocs.length} 道题。`);

@@ -28,6 +28,7 @@
  * `/api/admin/vigil/dashboard-token` endpoint used by lib/vigil-api.ts.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { fetchHydroResponse } from '@/lib/error-presenter';
 import type { VigilEventSeverity, VigilStudentStatus } from '@/lib/vigil-api';
 
 /* ─── Message types ────────────────────────────────────────────────────── */
@@ -209,7 +210,7 @@ export function useVigilSocket(opts: UseVigilSocketOptions = {}): UseVigilSocket
 
     async function connect() {
       try {
-        const tk = await fetch('/api/admin/vigil/dashboard-token', { credentials: 'include' })
+        const tk = await fetchHydroResponse('/api/admin/vigil/dashboard-token', { credentials: 'include' })
           .then((r) => r.json() as Promise<{ token: string; vigilWsUrl: string }>);
         if (cancelled) return;
         const url = `${tk.vigilWsUrl}?token=${encodeURIComponent(tk.token)}`;

@@ -2,7 +2,7 @@ import $ from 'jquery';
 import Notification from 'vj/components/notification';
 import Rotator from 'vj/components/rotator';
 import { AutoloadPage } from 'vj/misc/Page';
-import { i18n, request } from 'vj/utils';
+import { request } from 'vj/utils';
 
 function setVoteState($container, value, status) {
   const $num = $container.find('.vote-number');
@@ -36,7 +36,7 @@ const votePage = new AutoloadPage('votePage', () => {
         setVoteState($container, data.vote, data.user_vote);
       })
       .catch((e) => {
-        Notification.error(i18n('Failed to vote: {0}', e.message));
+        Notification.error(e.message);
       });
     return false;
   });

@@ -16,6 +16,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { SimpleSelect } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useBootstrap } from '@/lib/bootstrap';
+import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import {
   filterDomainUsers,
   flattenDomainUsers,
@@ -757,12 +758,12 @@ export function DomainGroupPage() {
   const postGroup = async (operation: 'update' | 'del', name: string, uids = '') => {
     const body = new URLSearchParams({ operation, name });
     if (operation === 'update') body.set('uids', uids);
-    const response = await fetch(window.location.href, {
+    const response = await fetchHydroResponse(window.location.href, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
+      headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
       body,
     });
-    if (!response.ok) throw new Error(await response.text());
+    if (!response.ok) throw new Error(await readHydroResponseError(response, '用户组操作失败'));
   };
 
   const toggleGroup = (name: string) => {

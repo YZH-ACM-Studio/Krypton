@@ -46,7 +46,7 @@ import { json } from '@codemirror/lang-json';
 import { oneDark } from '@codemirror/theme-one-dark';
 
 import { cn } from '@/lib/cn';
-import { readHydroResponseError } from '@/lib/problem-save-response';
+import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import {
   distributePretestRecord,
   parseRecordResponse,
@@ -1065,7 +1065,7 @@ export function KryptonIDE({
       await new Promise((r) => setTimeout(r, 1000));
       if (!mountedRef.current) return;
       try {
-        const res = await fetch(url, {
+        const res = await fetchHydroResponse(url, {
           headers: { Accept: 'application/json' },
           credentials: 'same-origin',
         });
@@ -1114,7 +1114,7 @@ export function KryptonIDE({
     setSubmitting(true);
     setSubmitError('');
     try {
-      const res = await fetch(submitUrl, {
+      const res = await fetchHydroResponse(submitUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({ lang: selectedLang, code }),
@@ -1241,7 +1241,7 @@ export function KryptonIDE({
 
       try {
         const code = getCode();
-        const res = await fetch(submitUrl, {
+        const res = await fetchHydroResponse(submitUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
           body: JSON.stringify({ lang: selectedLang, code, pretest: true, input: tabs.map((t) => t.input) }),
@@ -1252,11 +1252,11 @@ export function KryptonIDE({
           window.location.reload();
           return;
         }
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) throw new Error(await readHydroResponseError(res, '自测提交失败'));
 
         const data = await res.json();
         const rid = data.rid ? String(data.rid) : '';
-        if (!rid) throw new Error('No rid in response');
+        if (!rid) throw new Error('自测提交响应中没有记录编号');
 
         const recordUrl = resolvePretestRecordUrl(rid, data.url || `/record/${rid}`);
 
@@ -1266,12 +1266,12 @@ export function KryptonIDE({
           await new Promise((r) => setTimeout(r, 1000));
           if (abort.signal.aborted) return;
 
-          const rRes = await fetch(recordUrl, {
+          const rRes = await fetchHydroResponse(recordUrl, {
             headers: { Accept: 'application/json' },
             signal: abort.signal,
             credentials: 'same-origin',
           });
-          if (!rRes.ok) throw new Error(`Record HTTP ${rRes.status}`);
+          if (!rRes.ok) throw new Error(await readHydroResponseError(rRes, '评测记录加载失败'));
           const contentType = rRes.headers.get('content-type') || '';
           if (!contentType.includes('application/json')) {
             throw new Error('评测记录接口返回了非 JSON，请检查记录轮询地址');

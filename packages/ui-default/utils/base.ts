@@ -3,6 +3,7 @@ import _ from 'lodash';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import DOMServer from 'react-dom/server';
+import { presentLegacyUiError } from './error-presenter';
 
 export function substitute(str: string, obj: any) {
   return str.replace(/\{([^{}]+)\}/g, (match, key) => {
@@ -103,7 +104,7 @@ export const request = {
         },
         ...options,
       })
-        .fail((jqXHR, textStatus, errorThrown: any) => {
+        .fail((jqXHR, textStatus, _errorThrown: any) => {
           if (textStatus === 'abort') {
             const err = new Error(i18n('Aborted')) as any;
             err.aborted = true;
@@ -113,21 +114,19 @@ export const request = {
             const err = new Error(i18n('Network error')) as any;
             err.isUserFacingError = true;
             reject(err);
-          } else if (typeof jqXHR.responseJSON === 'object' && jqXHR.responseJSON.error) {
-            const { error } = jqXHR.responseJSON;
-            if (error.params) {
-              const message = i18n(error.message, ...error.params);
-              const err = new Error(
-                message === error.message && error.params.length ? `${error.message}: ${error.params.join(' ')}` : message,
-              ) as any;
+          } else {
+            const body = typeof jqXHR.responseJSON === 'object' ? jqXHR.responseJSON : jqXHR.responseText;
+            const message = presentLegacyUiError(body, {
+              fallback: i18n('Request failed'),
+              status: jqXHR.status,
+            });
+            const err = new Error(message) as any;
+            const error = jqXHR.responseJSON?.error;
+            if (error && typeof error === 'object') {
               err.rawMessage = error.message;
               err.params = error.params;
-              reject(err);
-            } else reject(new Error(jqXHR.responseJSON.error.message));
-          } else if (errorThrown instanceof Error) {
-            reject(errorThrown);
-          } else {
-            reject(new Error(textStatus));
+            }
+            reject(err);
           }
         })
         .done(resolve);

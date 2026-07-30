@@ -303,9 +303,7 @@ describe('downloadZip content sources', () => {
       return new Response(new Uint8Array([9, 8, 7]));
     };
 
-    const bytes = await downloadZipBytes('remote.zip', [
-      { name: 'remote.bin', url: '/assets/remote.bin', content: 'inline is ignored' },
-    ]);
+    const bytes = await downloadZipBytes('remote.zip', [{ name: 'remote.bin', url: '/assets/remote.bin', content: 'inline is ignored' }]);
 
     expect(fetchCalls).to.have.length(1);
     expect(fetchCalls[0].input).to.equal('/assets/remote.bin');
@@ -314,13 +312,27 @@ describe('downloadZip content sources', () => {
     expect(locals[0].data).to.deep.equal(new Uint8Array([9, 8, 7]));
   });
 
-  it('rejects with the normalized entry name and status when a url target fails', async () => {
-    globalThis.fetch = async () => new Response('nope', { status: 404 });
+  it('presents a canonical Hydro error for a failed url target without changing the binary success request', async () => {
+    const fetchCalls: RequestInit[] = [];
+    globalThis.fetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
+      fetchCalls.push(init || {});
+      return new Response(
+        JSON.stringify({
+          error: {
+            name: 'NotFoundError',
+            errorCode: 'NotFoundError',
+            code: 404,
+            status: 404,
+            params: ['remote.bin'],
+            message: '文件 remote.bin 不存在。',
+          },
+        }),
+        { status: 404, headers: { 'content-type': 'application/json' } },
+      );
+    };
 
-    await expectRejection(
-      downloadZip('broken.zip', [{ name: '/dir//remote.bin', url: '/assets/remote.bin' }]),
-      'dir/remote.bin: HTTP 404',
-    );
+    await expectRejection(downloadZip('broken.zip', [{ name: '/dir//remote.bin', url: '/assets/remote.bin' }]), '文件 remote.bin 不存在。');
+    expect(fetchCalls[0].headers).to.deep.equal({ Accept: 'application/json' });
     expect(capturedBlobs).to.have.length(0);
     expect(clickedAnchors).to.have.length(0);
   });

@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input';
 import { SimpleSelect } from '@/components/ui/select';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
+import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { readProblemSaveSuccess } from '@/lib/problem-save-response';
 import { sha256Text } from '@/lib/sha256';
 
@@ -85,12 +86,6 @@ interface CaseMeta {
 interface TestdataFile {
   name: string;
   size?: number;
-}
-
-async function responseMessage(response: Response) {
-  if (response.status === 409) return '题目已被其他操作修改，或正在比赛/考试中使用；请重新载入。';
-  const body = await response.json().catch(() => null);
-  return body?.error?.message || body?.message || `保存失败（HTTP ${response.status}）`;
 }
 
 function validSourceRange(source: string, range: Pick<RegionMeta, 'startLine' | 'endLine'>) {
@@ -234,11 +229,15 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
       .sort((a, b) => a.startLine - b.startLine || a.endLine - b.endLine || a.key.localeCompare(b.key));
   });
   const [cases, setCases] = useState<CaseMeta[]>(() =>
-    Array.isArray(initial.cases) ? initial.cases.map((item: DraftCase) => ({ input: String(item.input || ''), output: String(item.output || '') })) : [],
+    Array.isArray(initial.cases)
+      ? initial.cases.map((item: DraftCase) => ({ input: String(item.input || ''), output: String(item.output || '') }))
+      : [],
   );
   const [testdataFiles, setTestdataFiles] = useState<TestdataFile[]>(() =>
     Array.isArray(data.testdata)
-      ? data.testdata.map((file: TestdataFilePayload) => ({ name: String(file.name || ''), size: Number(file.size) || 0 })).filter((file) => file.name)
+      ? data.testdata
+          .map((file: TestdataFilePayload) => ({ name: String(file.name || ''), size: Number(file.size) || 0 }))
+          .filter((file) => file.name)
       : [],
   );
   const [structureRevision, setStructureRevision] = useState(Number(pdoc.structureRevision) || 1);
@@ -444,13 +443,17 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
         return;
       }
       if (typeof confirmation === 'string') formData.set('activeContainerConfirmation', confirmation);
-      const response = await fetch(form.action || window.location.pathname, {
+      const response = await fetchHydroResponse(form.action || window.location.pathname, {
         method: 'POST',
         body: new URLSearchParams(formData as unknown as URLSearchParams),
         credentials: 'same-origin',
         headers: { Accept: 'application/json' },
       });
-      if (!response.ok) throw new Error(await responseMessage(response));
+      if (!response.ok) {
+        throw new Error(
+          await readHydroResponseError(response, response.status === 409 ? '题目已被其他操作修改，或正在比赛/考试中使用；请重新载入' : '保存失败'),
+        );
+      }
       const { destination } = await readProblemSaveSuccess(response, kind);
       if (dirtyState.snapshot() !== submittedSnapshot) {
         console.warn('Structured code problem saved, but local form changed during request; navigation withheld', { destination });
@@ -478,7 +481,9 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
       setError('文件已上传，但服务端未返回最新结构版本与文件清单；为避免覆盖并发修改，请重新载入。');
       return;
     }
-    const canonicalFiles = files.map((file: TestdataFilePayload) => ({ name: String(file?.name || ''), size: Number(file?.size) || 0 })).filter((file) => file.name);
+    const canonicalFiles = files
+      .map((file: TestdataFilePayload) => ({ name: String(file?.name || ''), size: Number(file?.size) || 0 }))
+      .filter((file) => file.name);
     setStructureRevision(revision);
     setTestdataFiles(canonicalFiles);
     setCases((current) => proposeCasePairs(current, canonicalFiles));
@@ -493,7 +498,7 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
     setCloning(true);
     setError('');
     try {
-      const response = await fetch(bs.urls.problems, {
+      const response = await fetchHydroResponse(bs.urls.problems, {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
@@ -505,7 +510,7 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
           cloneLang,
         }),
       });
-      if (!response.ok) throw new Error(await responseMessage(response));
+      if (!response.ok) throw new Error(await readHydroResponseError(response, '克隆题目失败'));
       const ids = await response.json();
       if (!Array.isArray(ids) || !ids[0]) throw new Error('克隆响应缺少新题 ID');
       navigationGuard.allowNavigation();

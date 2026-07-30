@@ -19,6 +19,7 @@ import { RecordDoc, Tdoc } from '../interface';
 import { canAccessPostContestPracticeRecord, canUsePostContestPractice } from '../lib/contest-correction';
 import { buildPersonalPracticeRecordQuery } from '../lib/contest-problem-status';
 import { buildExamModeRecordCodePayload, shouldUseLiveClientRecordCodeOnly } from '../lib/exam-mode-record';
+import { formatRecordJudgeMessages } from '../lib/record-judge-presentation';
 import { matchesRecordConnectionScope, RECORD_PRETEST_CONTEST_ID } from '../lib/record-connection-scope';
 import { PERM, PRIV, STATUS, STATUS_TEXTS } from '../model/builtin';
 import * as contest from '../model/contest';
@@ -481,7 +482,7 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
             }
         }
         this.response.template = 'record_detail.html';
-        const responseRdoc = omit(rdoc, ['scoreCancellation']);
+        const responseRdoc = formatRecordJudgeMessages(omit(rdoc, ['scoreCancellation']), this.translate.bind(this));
         const recordScoreAction = this.user.hasPerm(PERM.PERM_REJUDGE) ? await getRecordScoreAction(rdoc, true) : null;
         const responseBody = {
             udoc,
@@ -948,6 +949,7 @@ export class RecordDetailConnectionHandler extends ConnectionHandler {
         const recordScoreAction =
             !this.liveClientRecordCodeOnly && this.user.hasPerm(PERM.PERM_REJUDGE) ? await getRecordScoreAction(rdoc, true) : null;
         rdoc = omit(rdoc, ['scoreCancellation']) as RecordDoc;
+        rdoc = formatRecordJudgeMessages(rdoc, this.translate.bind(this));
         if (this.liveClientRecordCodeOnly) {
             const codeVisibleRecord = this.canViewCode
                 ? rdoc

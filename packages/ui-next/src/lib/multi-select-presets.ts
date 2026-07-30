@@ -1,3 +1,4 @@
+import { fetchHydroResponse } from '@/lib/error-presenter';
 /**
  * Shared presets for `<MultiSelect>` consumers.
  *
@@ -60,7 +61,7 @@ export async function searchProblems(query: string | number, limit = 20): Promis
   url.searchParams.set('quick', 'true');
   url.searchParams.set('limit', String(limit));
   try {
-    const res = await fetch(url.toString(), { headers: { Accept: 'application/json' } });
+    const res = await fetchHydroResponse(url.toString(), { headers: { Accept: 'application/json' } });
     if (!res.ok) return [];
     const data: unknown = await res.json().catch(() => null);
     const pdocs = data && typeof data === 'object' ? (data as { pdocs?: unknown }).pdocs : null;

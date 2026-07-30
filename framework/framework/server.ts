@@ -13,10 +13,21 @@ import Compress from 'koa-compress';
 import Schema from 'schemastery';
 import { Shorty } from 'shorty.js';
 import { WebSocket, WebSocketServer } from 'ws';
-import { Counter, errorMessage, isClass, Logger, parseMemoryMB } from '@hydrooj/utils/lib/utils';
+import { Counter, isClass, Logger, parseMemoryMB } from '@hydrooj/utils/lib/utils';
 import base from './base';
 import * as decorators from './decorators';
-import { localizeError, CsrfTokenError, HydroError, InvalidOperationError, MethodNotAllowedError, NotFoundError, UserFacingError } from './error';
+import { lookupErrorMessageTranslation } from './error-catalog';
+import { type ErrorSurface, resolveErrorTransport as resolveTransport, type ResolvedErrorTransport } from './error-resolver';
+import {
+    localizeError,
+    CsrfTokenError,
+    HttpStatusError,
+    HydroError,
+    InvalidOperationError,
+    MethodNotAllowedError,
+    NotFoundError,
+    UserFacingError,
+} from './error';
 import type { KnownHandlers, ServerEvents } from './interface';
 import { Router } from './router';
 import serializer from './serializer';
@@ -24,6 +35,92 @@ import serializer from './serializer';
 export { WebSocket, WebSocketServer } from 'ws';
 
 export const kHandler = Symbol.for('hydro.handler');
+const MAX_WEBSOCKET_CLOSE_REASON_BYTES = 123;
+
+export function fitWebSocketCloseReason(message: string): string {
+    let result = message;
+    while (Buffer.byteLength(result) > MAX_WEBSOCKET_CLOSE_REASON_BYTES) result = result.slice(0, -1);
+    return result;
+}
+
+function normalizeThrownError(error: unknown): Error {
+    return error instanceof Error ? error : new Error('Non-error value was thrown', { cause: error });
+}
+
+export async function dispatchWebSocketMessage(
+    data: unknown,
+    onMessage: (payload: unknown) => void | Promise<void>,
+    onError: (error: Error) => void | Promise<void>,
+): Promise<void> {
+    try {
+        const payload = JSON.parse(typeof data === 'string' ? data : String(data));
+        await onMessage(payload);
+    } catch (error) {
+        await onError(normalizeThrownError(error));
+    }
+}
+
+type EarlyErrorTransportResolver = (error: unknown, surface: ErrorSurface) => ResolvedErrorTransport;
+
+function earlyHttpStatus(error: unknown): number | null {
+    if (!error || typeof error !== 'object') return null;
+    for (const key of ['status', 'statusCode', 'httpCode'] as const) {
+        const value = (error as Record<string, unknown>)[key];
+        if (Number.isSafeInteger(value) && Number(value) >= 400 && Number(value) <= 499) return Number(value);
+    }
+    return null;
+}
+
+function escapeHtml(value: string): string {
+    return value.replace(/[&<>"']/g, (character) => {
+        const replacements: Record<string, string> = {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;',
+        };
+        return replacements[character];
+    });
+}
+
+export function createEarlyErrorBoundary(boundaryLogger: { error: (...values: unknown[]) => unknown }, resolver: EarlyErrorTransportResolver) {
+    return async (context: KoaContext, next: () => Promise<unknown>) => {
+        try {
+            await next();
+        } catch (error) {
+            const status = earlyHttpStatus(error);
+            const normalized = error instanceof UserFacingError || status === null ? error : new HttpStatusError(status);
+            const wantsJson = String(context.request.headers.accept || '').includes('application/json');
+            const surface: ErrorSurface = wantsJson ? 'api' : 'legacy-ui';
+            let transport: ResolvedErrorTransport;
+            try {
+                transport = resolver(normalized, surface);
+            } catch (resolutionError) {
+                transport = resolveTransport(
+                    new AggregateError([normalizeThrownError(error), normalizeThrownError(resolutionError)], 'Early HTTP error transport failed'),
+                    {
+                        locale: 'zh-CN',
+                        lookup: lookupErrorMessageTranslation,
+                    },
+                );
+            }
+            if (transport.traceId) {
+                boundaryLogger.error(`[${transport.traceId}] Early HTTP request failed`, error, transport.internalError);
+            }
+            context.status = transport.status;
+            if (wantsJson) {
+                context.type = 'application/json';
+                context.body = { error: transport.error };
+            } else {
+                context.type = 'text/html';
+                context.body = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>${escapeHtml(
+                    transport.error.message,
+                )}</title></head><body><main>${escapeHtml(transport.error.message)}</main></body></html>`;
+            }
+        }
+    };
+}
 
 // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/encodeURIComponent
 export function encodeRFC5987ValueChars(str: string) {
@@ -197,6 +294,28 @@ export class HandlerCommon {
         return str;
     }
 
+    resolveErrorLocale(_surface: ErrorSurface) {
+        return 'en';
+    }
+
+    lookupErrorMessageTranslation(template: string, locale: string) {
+        return lookupErrorMessageTranslation(template, locale);
+    }
+
+    resolveErrorTransport(error: unknown, surface: ErrorSurface): ResolvedErrorTransport {
+        try {
+            return resolveTransport(error, {
+                locale: this.resolveErrorLocale(surface),
+                lookup: (template, locale) => this.lookupErrorMessageTranslation(template, locale),
+            });
+        } catch (localeError) {
+            return resolveTransport(new AggregateError([error, localeError], 'Error locale resolution failed'), {
+                locale: 'zh-CN',
+                lookup: lookupErrorMessageTranslation,
+            });
+        }
+    }
+
     renderHTML(templateName: string, args: Record<string, any>) {
         const renderers = Object.values((this.ctx as any).server.renderers as Record<string, Renderer>).filter(
             (r) => r.accept.includes(templateName) || r.asFallback,
@@ -248,14 +367,18 @@ export class Handler extends HandlerCommon {
     }
 
     async onerror(error: HydroError) {
-        error.msg ||= () => error.message;
-        console.error(`Error on user request: ${error.msg()}\n`, error);
+        const transport = this.resolveErrorTransport(error, this.request.json ? 'api' : 'legacy-ui');
+        if (transport.traceId) {
+            console.error(`Error on user request [${transport.traceId}]\n`, error, transport.internalError);
+        } else {
+            console.error(`Error on user request: ${transport.error.message}\n`, error);
+        }
         if (error instanceof UserFacingError && !process.env.DEV) error.stack = '';
-        this.response.status = error instanceof UserFacingError ? error.code : 500;
-        this.response.template = error instanceof UserFacingError ? 'error.html' : 'bsod.html';
+        this.response.status = transport.status;
+        this.response.template = transport.template;
         this.response.body = {
             UserFacingError,
-            error: { message: error.msg(), params: error.params, stack: errorMessage(error.stack || '') },
+            error: transport.error,
         };
     }
 }
@@ -287,16 +410,14 @@ export class ConnectionHandler extends HandlerCommon {
         this.conn.close(code, reason);
     }
 
-    onerror(err: HydroError) {
+    async onerror(err: HydroError) {
+        const transport = this.resolveErrorTransport(err, 'websocket');
         if (err instanceof UserFacingError) err.stack = this.request.path;
-        else console.error('Error on user websocket:', err);
+        else console.error(`Error on user websocket [${transport.traceId}]:`, err, transport.internalError);
         this.send({
-            error: {
-                name: err.name,
-                params: err.params || [],
-            },
+            error: transport.error,
         });
-        this.close(4000, err.toString());
+        this.close(4000, fitWebSocketCloseReason(transport.error.message));
     }
 }
 
@@ -352,6 +473,11 @@ export class WebService extends Service<never> {
     private captureAllRoutes = Object.create(null);
     private customDefaultContext: CordisContext;
     private activeHandlers: Map<Handler, { start: number; name: string }> = new Map();
+    private earlyErrorTransportResolver: EarlyErrorTransportResolver = (error) =>
+        resolveTransport(error, {
+            locale: 'en',
+            lookup: lookupErrorMessageTranslation,
+        });
 
     renderers: Record<string, Renderer> = Object.create(null);
     server = koa;
@@ -369,6 +495,7 @@ export class WebService extends Service<never> {
         this.server.keys = this.config.keys;
         this.server.proxy = this.config.proxy;
         const corsAllowHeaders = 'x-requested-with, accept, origin, content-type, upgrade-insecure-requests';
+        this.server.use(createEarlyErrorBoundary(logger, (error, surface) => this.earlyErrorTransportResolver(error, surface)));
         this.server.use(Compress());
         this.server.use(async (c, next) => {
             if ((c.request.headers.origin || c.request.headers.referer) && this.config.cors) {
@@ -604,11 +731,19 @@ ${c.response.status} ${endTime - startTime}ms ${c.response.length}`);
                 await (this.ctx.serial as any)(`handler/error/${name}`, h, e);
                 await (this.ctx.serial as any)('handler/error', h, e);
                 await h.onerror(e);
-            } catch (err) {
-                logger.error(err);
-                h.response.status = 500;
-                h.response.type = 'text/plain';
-                h.response.body = `${err.message}\n${err.stack}`;
+            } catch (errorHandlerFailure) {
+                const transport = h.resolveErrorTransport(
+                    new AggregateError([e, errorHandlerFailure], 'HTTP error handler failed'),
+                    h.request.json ? 'api' : 'legacy-ui',
+                );
+                logger.error(`[${transport.traceId}] HTTP error handler failed`, e, errorHandlerFailure, transport.internalError);
+                h.response.status = transport.status;
+                h.response.type = '';
+                h.response.template = transport.template;
+                h.response.body = {
+                    UserFacingError,
+                    error: transport.error,
+                };
             }
         } finally {
             this.activeHandlers.delete(h);
@@ -653,9 +788,22 @@ ${c.response.status} ${endTime - startTime}ms ${c.response.length}`);
             closed = true;
             try {
                 try {
-                    if (err) await h.onerror(err);
-                    // FIXME: should pass type check
-                    else (this.ctx.emit as any)('connection/close', h);
+                    if (err) {
+                        try {
+                            await h.onerror(err);
+                        } catch (errorHandlerFailure) {
+                            const transport = h.resolveErrorTransport(
+                                new AggregateError([err, errorHandlerFailure], 'WebSocket error handler failed'),
+                                'websocket',
+                            );
+                            logger.error(`[${transport.traceId}] WebSocket error handler failed`, err, errorHandlerFailure, transport.internalError);
+                            h.send({ error: transport.error });
+                            h.close(4000, fitWebSocketCloseReason(transport.error.message));
+                        }
+                    } else {
+                        // FIXME: should pass type check
+                        (this.ctx.emit as any)('connection/close', h);
+                    }
                 } finally {
                     h.active = false;
                     if (layer) layer.clients.delete(conn);
@@ -696,17 +844,11 @@ ${c.response.status} ${endTime - startTime}ms ${c.response.length}`);
                         conn.send('pong');
                         return;
                     }
-                    let payload;
-                    try {
-                        payload = JSON.parse(e.data.toString());
-                    } catch (err) {
-                        await clean(err);
-                    }
-                    try {
-                        await h.message?.(payload);
-                    } catch (err) {
-                        logger.error(e);
-                    }
+                    await dispatchWebSocketMessage(
+                        e.data.toString(),
+                        async (payload) => h.message?.(payload),
+                        async (error) => clean(error),
+                    );
                 };
             } else ctx.body = stream;
             // FIXME: should pass type check
@@ -805,6 +947,11 @@ ${c.response.status} ${endTime - startTime}ms ${c.response.length}`);
                 this.customDefaultContext = null;
             };
         });
+    }
+
+    public setEarlyErrorTransportResolver(resolver: EarlyErrorTransportResolver) {
+        if (typeof resolver !== 'function') throw new TypeError('Early error transport resolver must be a function');
+        this.earlyErrorTransportResolver = resolver;
     }
 
     public withHandlerClass<T extends string>(

@@ -20,6 +20,14 @@ export interface ClassifiedErrorMessage {
 const CORE_ERROR_MESSAGE_TRANSLATIONS: Readonly<Record<string, ErrorMessageTranslation>> = Object.freeze({
     'Access denied.': { en: 'Access denied.', 'zh-CN': '访问被拒绝。' },
     'Access denied: {0}': { en: 'Access denied: {0}', 'zh-CN': '访问被拒绝：{0}' },
+    'Unexpected server error. Reference: {0}': {
+        en: 'Unexpected server error. Reference: {0}',
+        'zh-CN': '服务器发生了未预期错误。错误编号：{0}',
+    },
+    'Request failed (HTTP {0}).': {
+        en: 'Request failed (HTTP {0}).',
+        'zh-CN': '请求失败（HTTP {0}）。',
+    },
     '{0} not found.': { en: '{0} not found.', 'zh-CN': '{0}不存在。' },
     '{0} {1} not found.': { en: '{0} {1} not found.', 'zh-CN': '{0} {1} 不存在。' },
     'Account state changed ({0}). Reload the account workspace and try again.': {
@@ -2096,11 +2104,27 @@ export const ERROR_MESSAGE_CLASSIFICATIONS: Readonly<Record<string, ClassifiedEr
     ),
 });
 
-export function lookupErrorMessageTranslation(template: string, locale: string): string | null {
+export type LegacyErrorMessageLookup = (template: string, locale: string) => string | null | undefined;
+
+export function lookupErrorMessageTranslation(template: string, locale: string, legacyLookup?: LegacyErrorMessageLookup): string | null {
     const translation = ERROR_MESSAGE_TRANSLATIONS[template];
-    if (!translation) return null;
     const normalized = locale.replace(/_/g, '-').toLowerCase();
-    if (normalized === 'zh' || normalized.startsWith('zh-cn')) return translation['zh-CN'];
-    if (normalized === 'en' || normalized.startsWith('en-')) return translation.en;
-    return null;
+    if (translation && (normalized === 'zh' || normalized.startsWith('zh-cn'))) return translation['zh-CN'];
+    if (translation && (normalized === 'en' || normalized.startsWith('en-'))) return translation.en;
+
+    const legacyTranslation = legacyLookup?.(template, locale);
+    if (legacyTranslation && (legacyTranslation !== template || normalized === 'en' || normalized.startsWith('en-'))) {
+        return legacyTranslation;
+    }
+
+    // The canonical Chinese catalog is complete for every first-party
+    // user-facing template, while permission names and other legacy display
+    // parameters still live in Hydro's existing locale files. A configured
+    // interface locale may legitimately have no translation for a newly added
+    // message; preserve the original error contract and show the complete
+    // Chinese text instead of promoting the 4xx error to a 500 or silently
+    // falling back to English.
+    if (translation) return translation['zh-CN'];
+    const legacyChinese = legacyLookup?.(template, 'zh-CN');
+    return legacyChinese && legacyChinese !== template ? legacyChinese : null;
 }

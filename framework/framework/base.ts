@@ -1,7 +1,6 @@
 import { PassThrough } from 'stream';
 import type { Next } from 'koa';
-import { HydroRequest, HydroResponse, KoaContext, serializer } from '@hydrooj/framework';
-import { errorMessage } from '@hydrooj/utils/lib/utils';
+import { HydroRequest, HydroResponse, KoaContext, lookupErrorMessageTranslation, resolveErrorTransport, serializer } from '@hydrooj/framework';
 import { SystemError, UserFacingError } from './error';
 
 const pick = <T extends object, K extends keyof T>(obj: T, keys: K[]): Pick<T, K> => {
@@ -89,7 +88,7 @@ export default (logger, xff, xhost) => async (ctx: KoaContext, next: Next) => {
                     }
                     response.body = JSON.stringify(response.body, serializer(false, handler));
                 } catch (e) {
-                    response.body = new SystemError('Serialize failure', e.message);
+                    throw new SystemError('Serialize failure', e instanceof Error ? e.message : String(e));
                 }
                 response.type = 'application/json';
             } else if (response.template) {
@@ -103,19 +102,52 @@ export default (logger, xff, xhost) => async (ctx: KoaContext, next: Next) => {
             ctx.set('Cache-Control', 'public');
         }
     } catch (err) {
-        const error = errorMessage(err);
-        response.status = error instanceof UserFacingError ? error.code : 500;
-        if (request.json) response.body = { error };
+        const transport =
+            typeof ctx.handler?.resolveErrorTransport === 'function'
+                ? ctx.handler.resolveErrorTransport(err, request.json ? 'api' : 'legacy-ui')
+                : resolveErrorTransport(err, {
+                      locale: 'zh-CN',
+                      lookup: lookupErrorMessageTranslation,
+                  });
+        if (transport.traceId) {
+            logger.error(`[${transport.traceId}] Unhandled error at the response boundary`, err, transport.internalError);
+        }
+        response.status = transport.status;
+        if (request.json) response.body = { error: transport.error };
         else {
             try {
-                response.body = await ctx.handler.renderHTML(error instanceof UserFacingError ? 'error.html' : 'bsod.html', {
+                response.body = await ctx.handler.renderHTML(transport.template, {
                     UserFacingError,
-                    error,
+                    error: transport.error,
                 });
                 response.type = 'text/html';
-            } catch (e) {
-                logger.error(e);
-                // this.response.body.error = {};
+            } catch (renderError) {
+                const renderFailure = new AggregateError(
+                    [
+                        err instanceof Error ? err : new Error('Non-error value reached the response boundary', { cause: err }),
+                        renderError instanceof Error
+                            ? renderError
+                            : new Error('Non-error value interrupted error-page rendering', { cause: renderError }),
+                    ],
+                    'Error-page rendering failed',
+                );
+                const fallback =
+                    typeof ctx.handler?.resolveErrorTransport === 'function'
+                        ? ctx.handler.resolveErrorTransport(renderFailure, request.json ? 'api' : 'legacy-ui')
+                        : resolveErrorTransport(renderFailure, {
+                              locale: 'zh-CN',
+                              lookup: lookupErrorMessageTranslation,
+                          });
+                logger.error(
+                    `[${fallback.traceId || fallback.error.errorCode}] Error-page rendering failed`,
+                    err,
+                    renderError,
+                    fallback.internalError,
+                );
+                response.status = fallback.status;
+                response.template = fallback.template;
+                response.body = fallback.error.message;
+                response.type = 'text/plain';
             }
         }
     } finally {

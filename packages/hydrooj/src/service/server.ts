@@ -6,13 +6,18 @@ import { type FindCursor, ObjectId } from 'mongodb';
 import {
     applyApiHandler,
     ConnectionHandler as ConnectionHandlerOriginal,
+    type ErrorSurface,
+    fitWebSocketCloseReason,
     Handler as HandlerOriginal,
     HydroError,
+    lookupErrorMessageTranslation as lookupCoreErrorMessageTranslation,
     NotFoundError,
+    resolveErrorLocale,
+    resolveErrorTransport,
     UserFacingError,
     WebService,
 } from '@hydrooj/framework';
-import { errorMessage, Time } from '@hydrooj/utils';
+import { Time } from '@hydrooj/utils';
 import { Context } from '../context';
 import { PermissionError, PrivilegeError } from '../error';
 import type { DomainDoc } from '../interface';
@@ -134,6 +139,18 @@ export async function apply(ctx: Context) {
 
         const cachedTranslate = ctx.i18n.translate;
 
+        server.setEarlyErrorTransportResolver((error, surface) =>
+            resolveErrorTransport(error, {
+                locale: resolveErrorLocale({
+                    surface,
+                    authenticated: false,
+                    domainLocale: system.get('server.language'),
+                }),
+                lookup: (template, locale) =>
+                    lookupCoreErrorMessageTranslation(template, locale, (source, requestedLocale) => cachedTranslate(source, [requestedLocale])),
+            }),
+        );
+
         server.handlerMixin({
             url(name: string, ...kwargsList: Record<string, any>[]) {
                 if (name === '#') return '#';
@@ -178,6 +195,19 @@ export async function apply(ctx: Context) {
                 const langs = lang ? [lang, ...this.context.acceptsLanguages()] : [...this.context.acceptsLanguages(), system.get('server.language')];
                 return cachedTranslate(str.toString(), langs);
             },
+            resolveErrorLocale(surface: ErrorSurface) {
+                return resolveErrorLocale({
+                    surface,
+                    authenticated: !!this.user?._id,
+                    userLocale: this.user?.viewLang,
+                    sessionLocale: this.session?.viewLang,
+                    requestLocales: this.context.acceptsLanguages(),
+                    domainLocale: system.get('server.language'),
+                });
+            },
+            lookupErrorMessageTranslation(template: string, locale: string) {
+                return lookupCoreErrorMessageTranslation(template, locale, (source, requestedLocale) => cachedTranslate(source, [requestedLocale]));
+            },
             paginate<T>(cursor: FindCursor<T>, page: number, key: string | number) {
                 return db.paginate(cursor, page, typeof key === 'number' ? key : this.ctx.setting.get(`pagination.${key}`) || 20);
             },
@@ -217,11 +247,12 @@ export async function apply(ctx: Context) {
         server.httpHandlerMixin({
             async onerror(error: HydroError) {
                 error.msg ||= () => error.message;
+                const transport = this.resolveErrorTransport(error, this.request.json ? 'api' : 'legacy-ui');
                 if (error instanceof UserFacingError && !process.env.DEV) error.stack = '';
                 if (!(error instanceof NotFoundError) && !('nolog' in error)) {
                     logger.error(
                         `User: ${this.user._id}(${this.user.uname}) ${this.request.method}: /d/${this.domain._id}${this.request.path}`,
-                        error.msg(),
+                        transport.error.message,
                         error.params,
                     );
                     if (error.stack) logger.error(error.stack);
@@ -242,37 +273,33 @@ export async function apply(ctx: Context) {
                         },
                     });
                 } else {
-                    this.response.status = error instanceof UserFacingError ? error.code : 500;
-                    this.response.template = error instanceof UserFacingError ? 'error.html' : 'bsod.html';
+                    if (transport.traceId) {
+                        logger.error(`[${transport.traceId}] Error transport diagnostic`, transport.internalError);
+                    }
+                    this.response.status = transport.status;
+                    this.response.template = transport.template;
                     this.response.body = {
                         UserFacingError,
-                        error: {
-                            message: error.msg(),
-                            stack: errorMessage(error.stack || ''),
-                            params: error.params,
-                            name: error.name,
-                            code: error.code,
-                        },
-                        _rawError: error,
+                        error: transport.error,
                     };
                 }
             },
         });
         server.wsHandlerMixin({
             async onerror(err: HydroError) {
+                const transport = this.resolveErrorTransport(err, 'websocket');
                 if (![NotFoundError, PrivilegeError, PermissionError].some((i) => err instanceof i) || this.user?._id !== 0) {
-                    const msg = 'msg' in err ? err.msg() : (err as any)?.message || '';
-                    logger.error(`Path:${this.request.path}, User:${this.user?._id}(${this.user?.uname})`, msg, err.params);
+                    logger.error(`Path:${this.request.path}, User:${this.user?._id}(${this.user?.uname})`, transport.error.message, err.params);
                     logger.error(err);
+                }
+                if (transport.traceId) {
+                    logger.error(`[${transport.traceId}] WebSocket error transport diagnostic`, transport.internalError);
                 }
                 if (err instanceof UserFacingError) err.stack = this.request.path;
                 this.send({
-                    error: {
-                        name: err.name,
-                        params: err.params || [],
-                    },
+                    error: transport.error,
                 });
-                this.close(4000, err.toString());
+                this.close(4000, fitWebSocketCloseReason(transport.error.message));
             },
         });
 

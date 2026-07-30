@@ -126,6 +126,19 @@ export const NotFoundError = Err(
 );
 export const MethodNotAllowedError = Err('MethodNotAllowedError', UserFacingError, 'MethodNotAllowedError', 405);
 
+export class HttpStatusError extends UserFacingError {
+    name = 'HttpStatusError';
+
+    constructor(status: number) {
+        super(status);
+        if (!Number.isSafeInteger(status) || status < 400 || status > 499) {
+            throw new TypeError('HttpStatusError requires a 4xx status');
+        }
+        this.code = status;
+        localizeError(this, 'Request failed (HTTP {0}).', status);
+    }
+}
+
 export const ValidationError = Err('ValidationError', ForbiddenError, function (this: HydroError) {
     if (this.params.length === 3) {
         return this.params[1] ? 'Field {0} or {1} validation failed. ({2})' : 'Field {0} validation failed. ({2})';

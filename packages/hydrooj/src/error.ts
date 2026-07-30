@@ -1,4 +1,12 @@
-import { CreateError as Err, HydroError, UserFacingError, BadRequestError, ForbiddenError, NotFoundError } from '@hydrooj/framework';
+import {
+    BadRequestError,
+    CreateError as Err,
+    ForbiddenError,
+    HydroError,
+    localizeErrorParameter,
+    NotFoundError,
+    UserFacingError,
+} from '@hydrooj/framework';
 
 export * from '@hydrooj/framework/error';
 export const RemoteOnlineJudgeError = Err('RemoteOnlineJudgeError', UserFacingError, 'RemoteOnlineJudgeError', 500);
@@ -17,12 +25,17 @@ export const OpcountExceededError = Err(
     ForbiddenError,
     'Too frequent operations of {0} (limit: {2} operations in {1} seconds).',
 );
-export const PermissionError = Err('PermissionError', ForbiddenError, function (this: HydroError) {
-    if (typeof this.params[0] === 'bigint') {
-        this.params[0] = require('./model/builtin').PERMS.find(({ key }) => key === this.params[0])?.desc || this.params[0];
+const PermissionErrorBase = Err('PermissionError', ForbiddenError, "You don't have the required permission ({0}) in this domain.");
+
+export class PermissionError extends PermissionErrorBase {
+    constructor(...params: any[]) {
+        super(...params);
+        if (typeof this.params[0] === 'bigint') {
+            const description = require('./model/builtin').PERMS.find(({ key }) => key === this.params[0])?.desc;
+            if (description) localizeErrorParameter(this, 0, description);
+        }
     }
-    return "You don't have the required permission ({0}) in this domain.";
-});
+}
 export const PrivilegeError = Err('PrivilegeError', ForbiddenError, function (this: HydroError) {
     if (this.params.includes(global.Hydro.model.builtin.PRIV.PRIV_USER_PROFILE)) {
         return "You're not logged in.";

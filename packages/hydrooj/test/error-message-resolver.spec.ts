@@ -104,6 +104,15 @@ describe('P2.42 error locale selection', () => {
             }),
             'zh-CN',
         );
+        assert.equal(
+            resolveErrorLocale({
+                surface: 'api',
+                authenticated: true,
+                requestLocales: ['*'],
+                domainLocale: 'zh_CN',
+            }),
+            'zh-CN',
+        );
     });
 
     it('uses the domain default for unauthenticated requests', () => {
@@ -301,7 +310,7 @@ describe('P2.42 strict localized error resolver', () => {
         assert.equal(notFoundResult.message, '题目 123 不存在。');
     });
 
-    it('snapshots parameters after a dynamic error template normalizes them', () => {
+    it('keeps raw params while separating dynamic display params', () => {
         const DynamicError = defineHydroError('DynamicError', UserFacingError, function (this: HydroError) {
             this.params[0] = 'View this domain';
             return 'Permission {0}.';
@@ -309,8 +318,8 @@ describe('P2.42 strict localized error resolver', () => {
         const error = new DynamicError(1n);
         const described = describeHydroError(error);
 
-        assert.deepEqual(error.params, ['View this domain']);
-        assert.deepEqual(described.params, ['View this domain']);
+        assert.deepEqual(error.params, [1n]);
+        assert.deepEqual(described.params, [1n]);
         assert.deepEqual(described.messageParams, { 0: 'View this domain' });
     });
 

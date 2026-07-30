@@ -1,4 +1,4 @@
-import { getLocalizedErrorMetadata, HydroError, type LocalizedErrorTemplate } from './error';
+import { getLocalizedErrorMetadata, HydroError, type LocalizedErrorTemplate, UserFacingError } from './error';
 
 export type ErrorSurface = 'ui-next' | 'legacy-ui' | 'api' | 'websocket';
 
@@ -42,6 +42,32 @@ export interface ResolveErrorMessageOptions {
     lookup: (template: string, locale: string) => string | null | undefined;
     createTraceId?: () => string;
 }
+
+export interface ErrorTransportPayload {
+    name: string;
+    errorCode: string;
+    code: number;
+    status: number;
+    params: readonly unknown[];
+    message: string;
+    nested?: Readonly<Record<number, ErrorTransportPayload>>;
+    traceId?: string;
+}
+
+export interface ResolvedErrorTransport {
+    status: number;
+    template: 'error.html' | 'bsod.html';
+    userFacing: boolean;
+    error: ErrorTransportPayload;
+    traceId?: string;
+    /**
+     * Server-side diagnostics only. Never copy this value into a response body
+     * or WebSocket frame.
+     */
+    internalError?: Error;
+}
+
+export type ResolveErrorTransportOptions = ResolveErrorMessageOptions;
 
 interface ResolutionFailureInput {
     reason: ErrorMessageFailureReason;
@@ -110,7 +136,8 @@ export function resolveErrorLocale(facts: ErrorLocaleFacts): string {
     for (const [source, candidate] of candidates) {
         if (candidate) return normalizeLocale(candidate, source);
     }
-    if (facts.requestLocales?.length) return normalizeLocale(facts.requestLocales[0], 'requestLocales[0]');
+    const requestLocale = facts.requestLocales?.find((locale) => locale && locale !== '*');
+    if (requestLocale) return normalizeLocale(requestLocale, 'requestLocales[0]');
     return domainLocale;
 }
 
@@ -266,17 +293,25 @@ export function resolveErrorMessage(descriptor: ErrorMessageDescriptor, options:
 }
 
 export function describeHydroError(error: HydroError): ErrorMessageDescriptor {
-    const dynamicTemplate = error.msg();
     const params = [...(error.params || [])];
+    let dynamicTemplate!: string;
+    let dynamicParams!: unknown[];
+    try {
+        dynamicTemplate = error.msg();
+        dynamicParams = [...(error.params || [])];
+    } finally {
+        error.params.splice(0, error.params.length, ...params);
+    }
     const metadata = getLocalizedErrorMetadata(error);
     const parameterZeroTemplate = metadata?.parameters.get(0);
     const promotesParameterZero =
         !metadata?.message &&
         !!parameterZeroTemplate &&
-        (dynamicTemplate === params[0] || ['BadRequestError', 'ForbiddenError', 'MethodNotAllowedError', 'UserFacingError'].includes(error.name));
+        (dynamicTemplate === dynamicParams[0] ||
+            ['BadRequestError', 'ForbiddenError', 'MethodNotAllowedError', 'UserFacingError'].includes(error.name));
     const promotedTemplate = promotesParameterZero ? parameterZeroTemplate : undefined;
     const template = metadata?.message?.template || promotedTemplate?.template || dynamicTemplate;
-    const templateParams = metadata?.message?.params || promotedTemplate?.params || params;
+    const templateParams = metadata?.message?.params || promotedTemplate?.params || dynamicParams;
     const describeTemplate = (
         name: string,
         errorCode: string,
@@ -314,4 +349,110 @@ export function describeHydroError(error: HydroError): ErrorMessageDescriptor {
     if (Object.keys(nested).length) descriptor.nested = nested;
     else delete descriptor.nested;
     return descriptor;
+}
+
+const SAFE_INTERNAL_ERROR_TEMPLATE = 'Unexpected server error. Reference: {0}';
+
+function toTransportPayload(error: ResolvedErrorMessage): ErrorTransportPayload {
+    const nested = Object.fromEntries(Object.entries(error.nested || {}).map(([index, child]) => [index, toTransportPayload(child)])) as Record<
+        number,
+        ErrorTransportPayload
+    >;
+    return {
+        name: error.name,
+        errorCode: error.errorCode,
+        code: error.status,
+        status: error.status,
+        params: error.params,
+        message: error.message,
+        ...(Object.keys(nested).length ? { nested } : {}),
+    };
+}
+
+function resolveSafeInternalErrorMessage(
+    locale: string,
+    traceId: string,
+    options: ResolveErrorTransportOptions,
+): { message: string; failure?: Error } {
+    try {
+        return {
+            message: resolveErrorMessage(
+                {
+                    name: 'SystemError',
+                    errorCode: 'SystemError',
+                    status: 500,
+                    template: SAFE_INTERNAL_ERROR_TEMPLATE,
+                    params: [traceId],
+                    messageParams: { 0: traceId },
+                },
+                {
+                    ...options,
+                    locale,
+                    createTraceId: () => traceId,
+                },
+            ).message,
+        };
+    } catch (error) {
+        const normalized = locale.replace(/_/g, '-').toLowerCase();
+        return {
+            message:
+                normalized === 'en' || normalized.startsWith('en-')
+                    ? `Unexpected server error. Reference: ${traceId}`
+                    : `服务器发生了未预期错误。错误编号：${traceId}`,
+            failure: error instanceof Error ? error : new Error('Safe error message resolution failed', { cause: error }),
+        };
+    }
+}
+
+function safeInternalErrorTransport(
+    locale: string,
+    traceId: string,
+    internalError: Error,
+    options: ResolveErrorTransportOptions,
+): ResolvedErrorTransport {
+    const safeMessage = resolveSafeInternalErrorMessage(locale, traceId, options);
+    return {
+        status: 500,
+        template: 'bsod.html',
+        userFacing: false,
+        traceId,
+        internalError: safeMessage.failure
+            ? new AggregateError([internalError, safeMessage.failure], `Error transport failed closed [${traceId}]`)
+            : internalError,
+        error: {
+            name: 'SystemError',
+            errorCode: 'SystemError',
+            code: 500,
+            status: 500,
+            params: [],
+            message: safeMessage.message,
+            traceId,
+        },
+    };
+}
+
+export function resolveErrorTransport(error: unknown, options: ResolveErrorTransportOptions): ResolvedErrorTransport {
+    if (!(error instanceof UserFacingError)) {
+        const traceId = (options.createTraceId || createErrorTraceId)();
+        const internalError = error instanceof Error ? error : new Error('Non-error value reached the error transport', { cause: error });
+        return safeInternalErrorTransport(options.locale, traceId, internalError, options);
+    }
+
+    try {
+        const resolved = resolveErrorMessage(describeHydroError(error), options);
+        return {
+            status: resolved.status,
+            template: 'error.html',
+            userFacing: true,
+            error: toTransportPayload(resolved),
+        };
+    } catch (resolutionError) {
+        const internalError =
+            resolutionError instanceof Error
+                ? resolutionError
+                : new Error('Non-error value interrupted error transport resolution', { cause: resolutionError });
+        const traceId =
+            resolutionError instanceof ErrorMessageResolutionError ? resolutionError.traceId : (options.createTraceId || createErrorTraceId)();
+        return safeInternalErrorTransport(options.locale, traceId, internalError, options);
+    }
 }

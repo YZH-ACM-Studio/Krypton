@@ -1135,6 +1135,12 @@ describe('contest autoHide canonical maintenance', () => {
 describe('permission error domain-join routing', () => {
     const permissionError = new RealPermissionError(1n);
 
+    it('keeps the raw permission bit unchanged while preparing display metadata', () => {
+        expect(permissionError.params).to.deep.equal([1n]);
+        expect(permissionError.msg()).to.equal("You don't have the required permission ({0}) in this domain.");
+        expect(permissionError.params).to.deep.equal([1n]);
+    });
+
     it('keeps an already joined administrator on the real error path', () => {
         const route = classifyPermissionErrorRoute({ _id: 2, _dudoc: { join: true }, hasPriv: () => true }, permissionError);
         expect(route).to.equal('error');

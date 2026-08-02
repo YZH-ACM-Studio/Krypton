@@ -24,7 +24,7 @@ describe('p3.11 structured code UI contract', () => {
   it('keeps mode and compile language immutable after creation', () => {
     const editor = read('packages/ui-next/src/pages/structured-code-editors.tsx');
     expect(editor.match(/disabled=\{!isCreate\}/g)).to.have.length(1);
-    expect(editor).to.include('disabled={compileMode && !isCreate}');
+    expect(editor).to.include('disabled={locked || (compileMode && !isCreate)}');
     expect(editor).to.include('评测方式创建后不可切换');
     expect(editor).to.include('评测语言创建后不可修改');
   });
@@ -67,7 +67,7 @@ describe('p3.17 code evaluation draft workspace', () => {
     expect(editor).to.include('main: draftCreation');
     expect(editor).to.include("? { mode: kind === 'program_fill' ? 'compile' : 'function', lang }");
     expect(editor).to.include('name="codeEvaluationDraft" value="true"');
-    expect(editor).to.include("draftCreation ? '创建草稿' : '保存'");
+    expect(editor).to.include("{saving ? '创建中…' : '创建草稿'}");
     expect(editor).to.include('{!draftCreation ? (');
   });
 
@@ -94,6 +94,34 @@ describe('p3.17 code evaluation draft workspace', () => {
     expect(editor).to.include('完成配置');
     expect(editor).to.include('服务端未返回最新结构版本与文件清单');
     expect(editor).to.include('visibilityLockedReason=');
+    expect(editor).to.include('structuredCodeCompletionIssues({');
+    expect(editor).to.include('setCompletionIssues(issues)');
+    expect(editor).to.include('goToStage(issues[0].stage)');
+  });
+
+  it('keeps consecutive authoring actions close without shrinking the active workspace', () => {
+    const editor = read('packages/ui-next/src/pages/structured-code-editors.tsx');
+    expect(editor).to.include('data-testid="structured-author-stage-nav"');
+    expect(editor).to.include('data-testid="structured-author-stage-panel"');
+    expect(editor).to.include('data-testid="structured-author-stage-actions"');
+    expect(editor).to.include('min-h-[32rem]');
+    expect(editor).to.include('sticky bottom-0');
+    expect(editor).to.include('上一步');
+    expect(editor).to.include('下一步');
+    expect(editor).to.include('event.preventDefault();');
+  });
+
+  it('offers self-test for compiled structured answers and a safe delete action for authors', () => {
+    const editor = read('packages/ui-next/src/pages/structured-code-editors.tsx');
+    const submit = read('packages/ui-next/src/pages/problem-submit.tsx');
+    expect(submit).to.include('const compiledStructuredAnswer = isStructuredAnswer && !textProgramFill');
+    expect(submit).to.include('pretest: true');
+    expect(submit).to.include('<PretestResultInline');
+    expect(submit).to.include('运行自测');
+    expect(submit).to.include('文本比对模式不执行程序，请填写后直接提交');
+    expect(editor).to.include('problemAuthoringCapabilities');
+    expect(editor).to.include('确认删除这道题');
+    expect(editor).to.include("formData.set('operation', 'delete')");
   });
 
   it('parses successful upload JSON so the workspace receives canonical revision and files', () => {
@@ -112,7 +140,15 @@ describe('p3.21 shared structured-code workspace', () => {
     expect(editor).to.include('startLine: start.number - 1');
     expect(editor).to.include('endLine: end.number');
     expect(editor).to.include("height: '100%'");
-    expect(editor).to.include("'.cm-gutters': { minHeight: '100%' }");
+    expect(editor).to.include("backgroundColor: 'color-mix(in srgb, var(--muted) 32%, var(--background))'");
+    expect(editor).to.include("backgroundColor: 'color-mix(in srgb, var(--muted) 68%, var(--background))'");
+    expect(editor).to.include("'.cm-gutter': { minHeight: '100%' }");
+    expect(editor).to.include("backgroundColor: 'transparent'");
+    expect(editor).to.include('EditorState.readOnly.of(readOnly)');
+    expect(editor).to.include('EditorView.editable.of(!readOnly)');
+    expect(workspace).to.include('readOnly={locked}');
+    expect(workspace).to.include('<CasesEditor cases={cases} files={testdataFiles} onChange={setCases} disabled={locked} />');
+    expect(workspace).to.include('disabled={disabled}');
     expect(editor).to.include('krypton-structured-line-public');
     expect(editor).to.include('krypton-structured-line-answer');
     expect(editor).to.match(/return `\$\{marker\} \$\{lineNo\}`/);
@@ -141,7 +177,8 @@ describe('p3.21 shared structured-code workspace', () => {
     expect(ranges).to.include('changes.mapPos');
     expect(workspace).to.include('conflicted.add');
     expect(workspace).to.include('请删除后重新框选，系统不会猜测迁移');
-    expect(workspace).to.include('disabled={saving || completionBlocked}');
+    expect(workspace).not.to.include('disabled={saving || completionBlocked}');
+    expect(workspace).to.include('disabled={saving}');
     expect(workspace).to.include("sourceHash: sha256Text(source.replace(/\\r\\n?/g, '\\n'))");
   });
 

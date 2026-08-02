@@ -2912,6 +2912,8 @@ export class ProblemModel {
                         'content',
                         'statementFormat',
                         'programmingStatement',
+                        'knowledgeMapId',
+                        'knowledgeNodeIds',
                     ]),
                 ].map((field) => [field, 1]),
             );
@@ -2973,6 +2975,12 @@ export class ProblemModel {
             const effectiveSet = Object.fromEntries(
                 Object.entries(input.$set).filter(([field, value]) => !isEqual(before[field], value)),
             ) as Partial<ProblemDoc>;
+            const canonicalKnowledgeFields = ['tag', 'knowledgeMapId', 'knowledgeNodeIds'] as const;
+            const suppliesCanonicalKnowledge = canonicalKnowledgeFields.every((field) => Object.hasOwn(input.$set, field));
+            const changesCanonicalKnowledge = canonicalKnowledgeFields.some((field) => !isEqual(before[field], input.$set[field]));
+            if (suppliesCanonicalKnowledge && changesCanonicalKnowledge) {
+                Object.assign(effectiveSet, Object.fromEntries(canonicalKnowledgeFields.map((field) => [field, input.$set[field]])));
+            }
             if (!Object.keys(effectiveSet).length) return { before, result: before, auditedFields };
             const result = await ProblemModel.editWithClaim(
                 claim,
@@ -3036,7 +3044,7 @@ export class ProblemModel {
         const completing = input.completeCodeEvaluationDraft === true;
         const editsKnowledge =
             !!input.metadata && ['tag', 'knowledgeMapId', 'knowledgeNodeIds'].some((field) => Object.hasOwn(input.metadata!, field));
-        if ((completing || (lifecycle.codeEvaluationStatus !== 'draft' && editsKnowledge)) && !input.metadata?.knowledgeNodeIds?.length) {
+        if (editsKnowledge && !input.metadata?.knowledgeNodeIds?.length) {
             throw new ValidationError('knowledgeNodeIds', null, localizedErrorText`完成配置或显式标签编辑必须选择至少一个知识节点`);
         }
         const $set = {
@@ -3072,6 +3080,15 @@ export class ProblemModel {
                     assertCodeEvaluationStatusInvariant(problemKind, nextConfig, before.codeEvaluationStatus);
                     if (before.codeEvaluationStatus === 'draft') {
                         if (completing) {
+                            const effectiveKnowledgeMapId = input.metadata?.knowledgeMapId ?? before.knowledgeMapId;
+                            const effectiveKnowledgeNodeIds = input.metadata?.knowledgeNodeIds ?? before.knowledgeNodeIds;
+                            if (!effectiveKnowledgeMapId || !effectiveKnowledgeNodeIds?.length) {
+                                throw new ValidationError(
+                                    'knowledgeNodeIds',
+                                    null,
+                                    localizedErrorText`完成配置或显式标签编辑必须选择至少一个知识节点`,
+                                );
+                            }
                             assertProblemReadyForUseWithTrace(
                                 {
                                     ...before,
@@ -4293,7 +4310,7 @@ export class ProblemModel {
         const submissionLockedPatch = isSubmissionLockedPatch($set as any, $unset);
         const editorialPatch = isEditorialPatch($set as any, $unset);
         const allowHistoricalStructureLock =
-            current.problemKind !== undefined && structuralPatch && !options.skipStructureGuard && editorialPatch && !submissionLockedPatch;
+            current.problemKind !== undefined && !options.skipStructureGuard && !submissionLockedPatch && (!structuralPatch || editorialPatch);
         if (!options.skipStructureGuard && editorialPatch && (current.problemKind === undefined || !submissionLockedPatch)) {
             if (!options.user) {
                 const activeContainers = await ProblemModel.listActiveDataWriteContainers(domainId, _id);
@@ -4335,6 +4352,7 @@ export class ProblemModel {
             result = await commitProblemWriteClaimUpdate(claim, $set, $unset, managedGuard?.capability || claim.capability, {
                 expectedStructureRevision: options.expectedStructureRevision,
                 expectedTag: options.expectedTag,
+                allowHistoricalStructureLock,
             });
         }
         if (!result && (options.expectedTag !== undefined || options.expectedStructureRevision !== undefined)) {

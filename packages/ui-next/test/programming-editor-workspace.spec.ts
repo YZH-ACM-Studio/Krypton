@@ -220,6 +220,7 @@ describe('p3.15 programming editor workspace correction', () => {
     expect(uploader).to.include('onAfterResponse: assertHydroUploadResponse');
     expect(uploader).to.include('shouldRetry: retryOnFailure ? undefined : () => false');
     expect(uploader).to.include('for (const file of result.failed) uppy.removeFile(file.id)');
+    expect(uploader).to.include('prev.filter((item) => item.id !== file.id)');
     expect(uploader).to.include("formatHydroErrorResponse(xhr.responseText || '', xhr.status, '上传失败')");
     expect(uploader).to.include('<button\n        type="button"\n        onDragOver=');
     expect(files).to.include('maxFileSize={null}');

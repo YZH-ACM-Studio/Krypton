@@ -10,17 +10,18 @@
  * editor lives here with full-height real estate.
  */
 import type { ClientStructuredCodeSegment } from '@hydrooj/common';
-import { ChevronRight, Loader2, Send } from 'lucide-react';
+import { ChevronRight, Loader2, Play, Send } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { KryptonIDE } from '@/components/krypton-ide';
+import { KryptonIDE, PretestResultInline } from '@/components/krypton-ide';
 import { StructuredRegionInputs } from '@/components/structured-region-inputs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { SimpleSelect } from '@/components/ui/select';
-import { fetchHydroResponse } from '@/lib/error-presenter';
+import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { useBootstrap } from '@/lib/bootstrap';
 import { replaceRouteTokens } from '@/lib/format';
+import { parseRecordResponse, preferredPretestResultTab, type PretestResult, type PretestResultTab } from '@/lib/pretest-results';
 import { createEmptyStructuredRegionDraft, parseStructuredRegionDraft } from '@/lib/structured-region-draft';
 
 interface StructuredSubmitConfig {
@@ -72,6 +73,7 @@ export function ProblemSubmitPage() {
   const isStructuredAnswer =
     ['program_fill', 'function'].includes(String(config.type)) && ['program_fill', 'function'].includes(String(pdoc.problemKind));
   const textProgramFill = config.type === 'program_fill' && config.mode === 'text';
+  const compiledStructuredAnswer = isStructuredAnswer && !textProgramFill;
   const surface: ClientStructuredCodeSegment[] = Array.isArray(config.template?.surface) ? config.template.surface : [];
   const regions = useMemo(() => surface.filter((segment) => segment.type === 'region'), [surface]);
   const regionIds = useMemo(() => regions.map((region) => region.id), [regions]);
@@ -143,6 +145,74 @@ export function ProblemSubmitPage() {
 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [selfTestInput, setSelfTestInput] = useState('');
+  const [selfTestExpected, setSelfTestExpected] = useState('');
+  const [selfTestRunning, setSelfTestRunning] = useState(false);
+  const [selfTestError, setSelfTestError] = useState('');
+  const [selfTestResult, setSelfTestResult] = useState<PretestResult | null>(null);
+  const [selfTestResultTab, setSelfTestResultTab] = useState<PretestResultTab>('output');
+  const selfTestAbort = useRef<AbortController | null>(null);
+
+  useEffect(
+    () => () => {
+      selfTestAbort.current?.abort();
+    },
+    [],
+  );
+
+  const handleSelfTest = useCallback(async () => {
+    if (!compiledStructuredAnswer || selfTestRunning) return;
+    selfTestAbort.current?.abort();
+    const abort = new AbortController();
+    selfTestAbort.current = abort;
+    setSelfTestRunning(true);
+    setSelfTestError('');
+    setSelfTestResult(null);
+    try {
+      const response = await fetchHydroResponse(submitUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ lang, code, pretest: true, input: [selfTestInput] }),
+        credentials: 'same-origin',
+        signal: abort.signal,
+      });
+      if (!response.ok) throw new Error(await readHydroResponseError(response, '自测提交失败'));
+      const payload: unknown = await response.json();
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('自测提交响应不是有效对象');
+      const ridValue = (payload as { rid?: unknown }).rid;
+      if (typeof ridValue !== 'string' || !ridValue.trim()) throw new Error('自测提交响应缺少记录编号');
+      const recordUrl = `${replaceRouteTokens(bs.urls.recordDetail, { RID: ridValue.trim() })}${contestQS}`;
+
+      for (let attempt = 0; attempt < 60; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        if (abort.signal.aborted) return;
+        const recordResponse = await fetchHydroResponse(recordUrl, {
+          headers: { Accept: 'application/json' },
+          credentials: 'same-origin',
+          signal: abort.signal,
+        });
+        if (!recordResponse.ok) throw new Error(await readHydroResponseError(recordResponse, '自测记录加载失败'));
+        const result = parseRecordResponse(await recordResponse.json());
+        setSelfTestResult(result);
+        if (result.status > 0 && result.status < 20) {
+          setSelfTestResultTab(preferredPretestResultTab(result));
+          return;
+        }
+      }
+      throw new Error('自测等待超时，请稍后重试');
+    } catch (error) {
+      if ((error as { name?: unknown } | null)?.name === 'AbortError') return;
+      const message = (error as { message?: unknown } | null)?.message;
+      const detail = typeof message === 'string' && message ? message : '自测失败';
+      setSelfTestError(detail);
+      console.error('Structured problem self-test failed', { pid, tid, error });
+    } finally {
+      if (selfTestAbort.current === abort) {
+        selfTestAbort.current = null;
+        setSelfTestRunning(false);
+      }
+    }
+  }, [bs.urls.recordDetail, code, compiledStructuredAnswer, contestQS, lang, pid, selfTestInput, selfTestRunning, submitUrl, tid]);
 
   const handleSubmit = useCallback(async () => {
     if (submitting) return;
@@ -294,6 +364,60 @@ export function ProblemSubmitPage() {
             />
           </div>
         )}
+
+        {compiledStructuredAnswer ? (
+          <section className="space-y-3 rounded-xl border border-border/70 p-4" aria-labelledby="structured-self-test-heading">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 id="structured-self-test-heading" className="text-sm font-semibold">
+                  自定义输入自测
+                </h2>
+                <p className="mt-1 text-xs text-muted-foreground">运行当前作答拼接出的完整程序；期望输出可留空，留空时只展示实际输出。</p>
+              </div>
+              <Button type="button" variant="outline" disabled={selfTestRunning} onClick={handleSelfTest} className="min-h-11 gap-1.5">
+                {selfTestRunning ? <Loader2 className="size-4 animate-spin motion-reduce:animate-none" /> : <Play className="size-4" />}
+                {selfTestRunning ? '运行中…' : '运行自测'}
+              </Button>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="space-y-1.5">
+                <span className="text-xs font-medium">标准输入</span>
+                <textarea
+                  value={selfTestInput}
+                  onChange={(event) => setSelfTestInput(event.target.value)}
+                  className="min-h-32 w-full resize-y rounded-md border border-input bg-background px-3 py-2 font-mono text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  spellCheck={false}
+                />
+              </label>
+              <label className="space-y-1.5">
+                <span className="text-xs font-medium">期望输出（可选）</span>
+                <textarea
+                  value={selfTestExpected}
+                  onChange={(event) => setSelfTestExpected(event.target.value)}
+                  className="min-h-32 w-full resize-y rounded-md border border-input bg-background px-3 py-2 font-mono text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  spellCheck={false}
+                />
+              </label>
+            </div>
+            {selfTestError ? (
+              <p role="alert" className="text-sm text-destructive">
+                {selfTestError}
+              </p>
+            ) : null}
+            {selfTestResult ? (
+              <div className="min-h-56 overflow-hidden rounded-lg border" aria-live="polite">
+                <PretestResultInline
+                  result={selfTestResult}
+                  expectedOutput={selfTestExpected}
+                  activeResultTab={selfTestResultTab}
+                  onResultTabChange={setSelfTestResultTab}
+                />
+              </div>
+            ) : null}
+          </section>
+        ) : textProgramFill ? (
+          <p className="rounded-lg border border-border/70 px-3 py-2 text-sm text-muted-foreground">文本比对模式不执行程序，请填写后直接提交。</p>
+        ) : null}
 
         {/* Submit row */}
         <div className="flex items-center justify-between gap-2">

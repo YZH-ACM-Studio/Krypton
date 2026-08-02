@@ -541,7 +541,7 @@ function diffLines(actual: string, expected: string): { type: 'same' | 'add' | '
  *   - 'pending' still judging / queued (>=20 or 0)
  *   - 'none'    no result yet
  */
-function PretestResultInline({
+export function PretestResultInline({
   result,
   expectedOutput,
   activeResultTab,

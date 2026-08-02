@@ -27,6 +27,23 @@ describe('P3.17 code evaluation lifecycle wiring', () => {
         expect(model).to.include('normalizeCodeEvaluationCreationStatus((meta as unknown as Record<string, unknown>).codeEvaluationStatus)');
     });
 
+    it('offers and accepts only code-evaluation languages enabled by the current domain', () => {
+        const handler = read('packages/hydrooj/src/handler/problem.ts');
+        const createStart = handler.indexOf('abstract class DedicatedStructuredCreateHandler');
+        const createEnd = handler.indexOf('export class ProblemCreateSingleHandler', createStart);
+        const create = handler.slice(createStart, createEnd);
+        const editStart = handler.indexOf('export class ProblemEditHandler');
+        const editEnd = handler.indexOf('export class ProblemProgrammingTagPreviewHandler', editStart);
+        const edit = handler.slice(editStart, editEnd);
+
+        expect(handler).to.include('function structuredCodeLanguageRange(');
+        expect(handler).to.include('if (!runtime || runtime.disabled || runtime.remote) return false');
+        expect(handler).to.include('return allowed.size ? allowed.has(lang) : !runtime.hidden');
+        expect(create).to.include('this.response.body.langRange = structuredCodeLanguageRange(this.domain)');
+        expect(create).to.include('assertStructuredCodeLanguageAllowed(this.problemKind, persistedConfig, this.domain)');
+        expect(edit).to.include('assertStructuredCodeLanguageAllowed(problemKind, parsedStructuredConfig, this.domain)');
+    });
+
     it('changes draft to ready in the same revision-CAS that revalidates config and physical files', () => {
         const model = read('packages/hydrooj/src/model/problem.ts');
         const start = model.indexOf('static async saveStructuredProblem(input');
@@ -57,7 +74,20 @@ describe('P3.17 code evaluation lifecycle wiring', () => {
         expect(claim.indexOf("stage: 'record-create-reference'")).to.be.lessThan(claim.indexOf('document.coll.updateOne('));
         expect(judge.indexOf("stage: 'judge-queue'")).to.be.lessThan(judge.indexOf('task.deleteMany('));
         expect(judge.indexOf("stage: 'judge-queue'")).to.be.lessThan(judge.indexOf('task.addMany('));
-        expect(record).to.include("claimStructureLockForSubmission(domainId, pid, args.type !== 'generate', uid)");
+        expect(record).to.include('claimStructureLockForSubmission(');
+        expect(record).to.include("!['generate', 'pretest'].includes(args.type)");
+    });
+
+    it('dispatches text program-fill without requiring nonexistent testdata', () => {
+        const task = read('packages/hydrojudge/src/task.ts');
+        const start = task.indexOf('async doSubmission()');
+        const end = task.indexOf('async pushClean(', start);
+        const method = task.slice(start, end);
+
+        expect(method).to.include("const textProgramFill = this.request.config.type === 'program_fill' && this.request.config.mode === 'text'");
+        expect(method.indexOf('if (textProgramFill)')).to.be.lessThan(method.indexOf('this.cacheOpen(this.source, this.data)'));
+        expect(method).to.include('subtasks: []');
+        expect(method).to.include("? ['program_fill', 'function'].includes(this.config.type)");
     });
 
     it('keeps drafts hidden across hooks and gates publication at both low-level commit primitives', () => {

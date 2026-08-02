@@ -40,12 +40,15 @@ describe('P3.18 function problem wiring', () => {
         expect(add).to.include('stage=before-insert');
     });
 
-    it('dispatches function configs through the existing default-judge adapter', () => {
+    it('dispatches normal and pretest function configs through the structured-code adapter', () => {
         const judges = read('packages/hydrojudge/src/judge/index.ts');
+        const task = read('packages/hydrojudge/src/task.ts');
         const adapter = read('packages/hydrojudge/src/judge/fill_function.ts');
         expect(judges).to.include('function: fill_function');
+        expect(task).to.include("['program_fill', 'function'].includes(this.config.type)");
         expect(adapter).to.include('spliceStructuredCodeTemplate(template, regionContents, kind)');
         expect(adapter).to.include('await defaultJudge(ctx)');
+        expect(adapter).to.include('await runJudge(ctx)');
     });
 
     it('serializes only the safe ordered surface to students', () => {

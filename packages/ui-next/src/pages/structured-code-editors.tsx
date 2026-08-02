@@ -1,11 +1,16 @@
 import { buildClientStructuredCodeSurface, type ClientStructuredCodeSegment } from '@hydrooj/common';
-import { ArrowLeft, CheckCircle2, Copy, Eye, EyeOff, FileCode2, PencilLine, Plus, Save, Trash2 } from 'lucide-react';
-import { useMemo, useRef, useState } from 'react';
+import { ArrowLeft, ArrowRight, CheckCircle2, Copy, Eye, EyeOff, FileCode2, PencilLine, Plus, Save, Trash2 } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { MarkdownEditor } from '@/components/markdown-renderer';
 import { useProblemDataWriteGuard, type ProblemDataWriteGuardState } from '@/components/problem-data-write-guard';
 import { StructuredRegionAuthorEditor, type AuthorLineRange, type AuthorLineSelection } from '@/components/structured-region-author-editor';
 import { StructuredRegionInputs } from '@/components/structured-region-inputs';
-import { StructuredProblemMetadataPanel, type KnowledgeMapOption, type KnowledgeMindmapOption } from '@/components/structured-problem-metadata-panel';
+import {
+  StructuredProblemMetadataPanel,
+  type KnowledgeMapOption,
+  type KnowledgeMindmapOption,
+  type StructuredProblemMetadataState,
+} from '@/components/structured-problem-metadata-panel';
 import { useFormDirtyState, useUnsavedChangesGuard } from '@/components/unsaved-changes-guard';
 import { FileUploader } from '@/components/uploader';
 import { Button } from '@/components/ui/button';
@@ -16,6 +21,7 @@ import { cn } from '@/lib/cn';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { readProblemSaveSuccess } from '@/lib/problem-save-response';
 import { sha256Text } from '@/lib/sha256';
+import { structuredCodeCompletionIssues, type StructuredAuthorStage, type StructuredCodeCompletionIssue } from '@/lib/structured-code-readiness';
 
 interface StructuredEditorProblemDoc {
   pid?: string | number;
@@ -25,6 +31,10 @@ interface StructuredEditorProblemDoc {
   structureLockedAt?: unknown;
   structureRevision?: number;
   codeEvaluationStatus?: string;
+  difficulty?: string | number;
+  hidden?: boolean;
+  knowledgeMapId?: unknown;
+  knowledgeNodeIds?: unknown[];
 }
 interface DraftLineRange {
   startLine?: unknown;
@@ -62,6 +72,7 @@ interface StructuredEditorPageData {
   knowledgeMindmapOptions?: KnowledgeMindmapOption[];
   canUseCustomPid?: unknown;
   statementWriteGuard?: ProblemDataWriteGuardState;
+  problemAuthoringCapabilities?: { canDelete?: boolean };
 }
 interface RegionMeta {
   key: string;
@@ -144,7 +155,17 @@ function proposeCasePairs(cases: CaseMeta[], files: TestdataFile[]): CaseMeta[] 
   return proposed;
 }
 
-function CasesEditor({ cases, files, onChange }: { cases: CaseMeta[]; files: TestdataFile[]; onChange: (cases: CaseMeta[]) => void }) {
+function CasesEditor({
+  cases,
+  files,
+  onChange,
+  disabled = false,
+}: {
+  cases: CaseMeta[];
+  files: TestdataFile[];
+  onChange: (cases: CaseMeta[]) => void;
+  disabled?: boolean;
+}) {
   return (
     <section className="space-y-3 border-t border-border/70 pt-5">
       <div className="flex items-center justify-between gap-3">
@@ -152,7 +173,7 @@ function CasesEditor({ cases, files, onChange }: { cases: CaseMeta[]; files: Tes
           <h2 className="text-sm font-semibold">测试数据映射</h2>
           <p className="text-xs text-muted-foreground">输入与输出只能从当前题真实存在的文件中选择；同 basename 的 .in/.out 会自动提出配对。</p>
         </div>
-        <Button type="button" variant="outline" size="sm" onClick={() => onChange([...cases, { input: '', output: '' }])}>
+        <Button type="button" variant="outline" size="sm" disabled={disabled} onClick={() => onChange([...cases, { input: '', output: '' }])}>
           <Plus className="size-3.5" />
           添加测试点
         </Button>
@@ -163,13 +184,24 @@ function CasesEditor({ cases, files, onChange }: { cases: CaseMeta[]; files: Tes
             value={item.input}
             onValueChange={(value) => onChange(cases.map((row, i) => (i === index ? { ...row, input: value } : row)))}
             options={caseFileOptions(files, item.input)}
+            ariaLabel={`测试点 ${index + 1} 输入文件`}
+            disabled={disabled}
           />
           <SimpleSelect
             value={item.output}
             onValueChange={(value) => onChange(cases.map((row, i) => (i === index ? { ...row, output: value } : row)))}
             options={caseFileOptions(files, item.output)}
+            ariaLabel={`测试点 ${index + 1} 输出文件`}
+            disabled={disabled}
           />
-          <Button type="button" variant="ghost" size="icon" onClick={() => onChange(cases.filter((_, i) => i !== index))} aria-label="删除测试点">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            disabled={disabled}
+            onClick={() => onChange(cases.filter((_, i) => i !== index))}
+            aria-label="删除测试点"
+          >
             <Trash2 className="size-4" />
           </Button>
         </div>
@@ -244,16 +276,42 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
   const [saving, setSaving] = useState(false);
   const [saveAction, setSaveAction] = useState<'save' | 'complete'>('save');
   const [cloning, setCloning] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [error, setError] = useState('');
   const [selection, setSelection] = useState<AuthorLineSelection | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
+  const stagePanelRef = useRef<HTMLDivElement>(null);
   const compileMode = kind === 'function' || mode === 'compile';
   const draftCreation = isCreate && compileMode;
   const langOptions = Object.entries(data.langRange || {}).map(([value, label]) => ({ value, label: String(label) }));
   const cloneLangOptions = langOptions.filter((option) => option.value !== lang);
   const [cloneLang, setCloneLang] = useState('');
   const structureBlocked = regions.length === 0 || regions.some((region) => region.invalid) || publicRanges.some((range) => range.invalid);
-  const completionBlocked = compileMode && structureBlocked;
+  const [metadataState, setMetadataState] = useState<StructuredProblemMetadataState>({
+    title: String(pdoc.title || ''),
+    selectedKnowledgeCount: Array.isArray(pdoc.knowledgeNodeIds) ? pdoc.knowledgeNodeIds.length : 0,
+    hasInvalidKnowledge: false,
+  });
+  const [completionIssues, setCompletionIssues] = useState<StructuredCodeCompletionIssue[]>([]);
+  const [activeStage, setActiveStage] = useState<StructuredAuthorStage>('metadata');
+  const stages = useMemo<{ id: StructuredAuthorStage; label: string }[]>(
+    () =>
+      draftCreation
+        ? [{ id: 'metadata', label: '基础信息' }]
+        : [
+            { id: 'metadata', label: '题面与信息' },
+            { id: 'template', label: '模板与作答区' },
+            ...(compileMode ? [{ id: 'testdata' as const, label: '测试数据' }] : []),
+            { id: 'review', label: '检查与完成' },
+          ],
+    [compileMode, draftCreation],
+  );
+  const activeStageIndex = Math.max(
+    0,
+    stages.findIndex((stage) => stage.id === activeStage),
+  );
+  const canDelete = !isCreate && data.problemAuthoringCapabilities?.canDelete === true;
 
   const structuredConfig = useMemo(
     () => ({
@@ -282,6 +340,29 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
     }),
     [cases, compileMode, draftCreation, kind, lang, mode, publicRanges, regions, source],
   );
+  const readinessIssues = useMemo(
+    () =>
+      structuredCodeCompletionIssues({
+        kind,
+        compileMode,
+        title: metadataState.title,
+        source,
+        lang,
+        regions,
+        publicRanges,
+        selectedKnowledgeCount: metadataState.selectedKnowledgeCount,
+        hasInvalidKnowledge: metadataState.hasInvalidKnowledge,
+        cases,
+        files: testdataFiles,
+      }),
+    [cases, compileMode, kind, lang, metadataState, publicRanges, regions, source, testdataFiles],
+  );
+  useEffect(() => {
+    if (completionIssues.length) setCompletionIssues(readinessIssues);
+  }, [completionIssues.length, readinessIssues]);
+  useEffect(() => {
+    if (!stages.some((stage) => stage.id === activeStage)) setActiveStage('metadata');
+  }, [activeStage, stages]);
   const previewSurface = useMemo<ClientStructuredCodeSegment[]>(() => {
     if (structureBlocked) return [];
     try {
@@ -302,12 +383,16 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
     }
   }, [publicRanges, regions, source, structureBlocked]);
   const dirtyState = useFormDirtyState(formRef, JSON.stringify(structuredConfig));
-  const navigationGuard = useUnsavedChangesGuard(dirtyState.dirty || saving || cloning);
+  const navigationGuard = useUnsavedChangesGuard(dirtyState.dirty || saving || cloning || deleting);
   const statementGuard = useProblemDataWriteGuard(data.statementWriteGuard, 'statement');
   const localRegionCounter = useRef(0);
   const nextLocalKey = (prefix: string) => {
     localRegionCounter.current += 1;
     return `${prefix}-${localRegionCounter.current}`;
+  };
+  const goToStage = (stage: StructuredAuthorStage) => {
+    setActiveStage(stage);
+    requestAnimationFrame(() => stagePanelRef.current?.scrollIntoView({ block: 'start' }));
   };
 
   const updateSource = (nextSource: string, mappedRanges: AuthorLineRange[]) => {
@@ -413,6 +498,28 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
     const form = event.currentTarget;
     const submitter = (event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
     const completing = submitter?.value === 'complete';
+    const requiresCompleteConfiguration = !draftCreation && (completing || !codeEvaluationDraft);
+    if (requiresCompleteConfiguration) {
+      const issues = structuredCodeCompletionIssues({
+        kind,
+        compileMode,
+        title: metadataState.title,
+        source,
+        lang,
+        regions,
+        publicRanges,
+        selectedKnowledgeCount: metadataState.selectedKnowledgeCount,
+        hasInvalidKnowledge: metadataState.hasInvalidKnowledge,
+        cases,
+        files: testdataFiles,
+      });
+      if (issues.length) {
+        setCompletionIssues(issues);
+        setError(`还有 ${issues.length} 项配置需要处理，已定位到第一项。`);
+        goToStage(issues[0].stage);
+        return;
+      }
+    }
     const submittedSnapshot = dirtyState.snapshot();
     if (submittedSnapshot === null) {
       setError('无法读取当前表单，未发送保存请求。');
@@ -521,6 +628,29 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
     }
   };
 
+  const deleteProblem = async () => {
+    if (!canDelete || deleting) return;
+    setDeleting(true);
+    setError('');
+    try {
+      const formData = new FormData();
+      formData.set('operation', 'delete');
+      const response = await fetchHydroResponse(window.location.pathname, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { Accept: 'application/json' },
+        body: new URLSearchParams(formData as unknown as URLSearchParams),
+      });
+      if (!response.ok) throw new Error(await readHydroResponseError(response, '删除题目失败'));
+      navigationGuard.allowNavigation();
+      window.location.assign(bs.urls.problems);
+    } catch (caught) {
+      setError((caught as { message?: string } | null)?.message || '删除题目失败');
+      setDeleting(false);
+    }
+  };
+  const reviewIssues = completionIssues.length ? completionIssues : readinessIssues;
+
   return (
     <main className="w-full min-w-0 space-y-5 pb-10">
       <header className="flex flex-wrap items-center gap-3 border-b border-border/70 pb-4">
@@ -535,43 +665,9 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
             {isCreate ? `新建${kind === 'program_fill' ? '程序填空题' : '代码实现题'}` : `编辑 ${pdoc.title || '题目'}`}
           </h1>
         </div>
-        {codeEvaluationDraft && !locked ? (
-          <div className="flex flex-wrap gap-2">
-            <Button type="submit" value="save" form="structured-code-form" variant="outline" disabled={saving} className="min-h-11 gap-1.5">
-              <Save className="size-4" />
-              {saving && saveAction === 'save' ? '保存中…' : '保存草稿'}
-            </Button>
-            <Button
-              type="submit"
-              value="complete"
-              form="structured-code-form"
-              disabled={saving || completionBlocked}
-              className="min-h-11 gap-1.5"
-              title={
-                completionBlocked
-                  ? kind === 'function'
-                    ? '请先设置至少一个有效作答区并修复失效区间'
-                    : '请先设置至少一个有效的单行填空区'
-                  : undefined
-              }
-            >
-              <CheckCircle2 className="size-4" />
-              {saving && saveAction === 'complete' ? '校验中…' : '完成配置'}
-            </Button>
-          </div>
-        ) : (
-          <Button
-            type="submit"
-            value="save"
-            form="structured-code-form"
-            disabled={saving || (!locked && !draftCreation && structureBlocked)}
-            className="min-h-11 gap-1.5"
-            title={!locked && !draftCreation && structureBlocked ? '请先设置并修复所有作答区域' : undefined}
-          >
-            <Save className="size-4" />
-            {saving ? '保存中…' : draftCreation ? '创建草稿' : '保存'}
-          </Button>
-        )}
+        <span className="text-xs text-muted-foreground">
+          第 {activeStageIndex + 1} / {stages.length} 步
+        </span>
       </header>
 
       {locked ? (
@@ -597,27 +693,62 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
         method="post"
         onSubmit={submit}
         onChange={dirtyState.recompute}
-        inert={saving || cloning}
-        aria-busy={saving || cloning}
-        className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_19rem]"
+        inert={saving || cloning || deleting}
+        aria-busy={saving || cloning || deleting}
+        noValidate
+        className="min-w-0"
       >
         <input type="hidden" name="editorProblemKind" value={kind} />
         <input type="hidden" name="structuredConfig" value={JSON.stringify(structuredConfig)} />
         {draftCreation ? <input type="hidden" name="codeEvaluationDraft" value="true" /> : null}
 
-        <div className="min-w-0 space-y-6">
-          {!draftCreation ? (
-            <section className="space-y-3">
-              <h2 className="text-sm font-semibold">题面</h2>
-              <MarkdownEditor name="content" value={pdoc.content || ''} minHeight={300} />
-            </section>
-          ) : null}
+        <nav
+          data-testid="structured-author-stage-nav"
+          aria-label="出题步骤"
+          className="mb-6 grid auto-cols-[minmax(11rem,1fr)] grid-flow-col overflow-x-auto border-y border-border/70"
+        >
+          {stages.map((stage, index) => (
+            <Button
+              key={stage.id}
+              type="button"
+              variant="ghost"
+              className={cn(
+                "relative min-h-14 justify-start gap-3 rounded-none px-3 text-left after:absolute after:inset-x-3 after:bottom-0 after:h-0.5 after:content-['']",
+                activeStage === stage.id
+                  ? 'text-foreground after:bg-primary hover:bg-muted/40'
+                  : 'text-muted-foreground after:bg-transparent hover:text-foreground',
+              )}
+              aria-current={activeStage === stage.id ? 'step' : undefined}
+              onClick={() => goToStage(stage.id)}
+            >
+              <span
+                aria-hidden="true"
+                className={cn(
+                  'grid size-7 shrink-0 place-items-center rounded-full border text-xs tabular-nums',
+                  activeStage === stage.id ? 'border-foreground bg-foreground text-background' : 'border-border bg-background',
+                )}
+              >
+                {index + 1}
+              </span>
+              <span className="whitespace-nowrap text-sm font-medium">{stage.label}</span>
+            </Button>
+          ))}
+        </nav>
 
-          <fieldset disabled={locked} className={cn('space-y-6', locked && 'opacity-60')}>
+        <div ref={stagePanelRef} data-testid="structured-author-stage-panel" className="min-h-[32rem] scroll-mt-20">
+          <section hidden={activeStage !== 'metadata'} data-stage="metadata" className="min-h-[32rem] space-y-5">
+            <div>
+              <h2 className="text-lg font-semibold">题面与基础信息</h2>
+              <p className="mt-1 text-sm text-muted-foreground">先确定题型、标题与知识归属，再编写题面；所有输入都留在当前阶段。</p>
+            </div>
             {kind === 'program_fill' ? (
-              <section className="space-y-3 border-t border-border/70 pt-5">
-                <h2 className="text-sm font-semibold">评测方式</h2>
+              <section className="max-w-md space-y-2">
+                <label className="text-xs font-medium" htmlFor="structured-mode-select">
+                  评测方式
+                </label>
                 <SimpleSelect
+                  id="structured-mode-select"
+                  ariaLabel="评测方式"
                   value={mode}
                   onValueChange={(value) => setMode(value as 'text' | 'compile')}
                   disabled={!isCreate}
@@ -629,94 +760,192 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
                 {!isCreate ? <p className="text-xs text-muted-foreground">评测方式创建后不可切换。</p> : null}
               </section>
             ) : null}
-
             {draftCreation ? (
-              <section className="space-y-4 border-t border-border/70 pt-5">
-                <div className="space-y-1">
-                  <h2 className="text-sm font-semibold">先固定评测语言</h2>
-                  <p className="text-xs text-muted-foreground">
-                    创建后立即获得真实题号，再在同一工作区上传测试数据并编辑题面与模板。草稿始终隐藏，完成校验前不能提交或加入任何容器。
+              <section className="max-w-xl space-y-3 rounded-xl border border-border/70 p-4">
+                <div>
+                  <h3 className="text-sm font-semibold">先固定评测语言</h3>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                    创建后立即获得真实题号，再上传测试数据并编辑模板。草稿始终隐藏，完成校验前不能提交或加入容器。
                   </p>
                 </div>
                 <SimpleSelect
                   value={lang}
                   onValueChange={setLang}
+                  ariaLabel="评测语言"
                   options={langOptions.length ? langOptions : [{ value: '', label: '请选择语言' }]}
                 />
               </section>
-            ) : (
-              <>
-                <section className="space-y-3 border-t border-border/70 pt-5">
+            ) : null}
+            <div className={cn('grid items-start gap-6', !draftCreation && 'lg:grid-cols-[22rem_minmax(0,1fr)]')}>
+              <StructuredProblemMetadataPanel
+                pdoc={pdoc}
+                isCreate={isCreate}
+                locked={locked}
+                knowledgeMaps={data.knowledgeMaps || []}
+                mindmapOptions={data.knowledgeMindmapOptions || []}
+                canUseCustomPid={data.canUseCustomPid === true}
+                formDirty={dirtyState.dirty}
+                onMetadataChange={dirtyState.recompute}
+                onMetadataStateChange={setMetadataState}
+                layout="inline"
+                visibilityLockedReason={codeEvaluationDraft ? '完成题面、私有模板、区域与测试数据映射后，才能解除隐藏。' : undefined}
+              />
+              {!draftCreation ? (
+                <section className="min-w-0 space-y-2">
+                  <h3 className="text-sm font-semibold">题面</h3>
+                  <MarkdownEditor name="content" value={pdoc.content || ''} minHeight={500} />
+                </section>
+              ) : null}
+            </div>
+          </section>
+
+          {!draftCreation ? (
+            <>
+              <section hidden={activeStage !== 'template'} data-stage="template" className="min-h-[32rem] space-y-5">
+                <fieldset disabled={locked} className="space-y-5">
                   <div>
-                    <h2 className="text-sm font-semibold">{compileMode ? '语言与完整模板' : '完整模板'}</h2>
-                    <p className="text-xs text-muted-foreground">
-                      {compileMode ? '评测语言创建后不可修改。' : '语言仅用于代码高亮，可以留空或之后调整。'}直接框选完整源码中的
-                      {kind === 'function' ? '一行或多行' : '一整行'}，再设为{kind === 'function' ? '作答区' : '填空区'}
-                      ；所选标准内容只在作者与评测链中可见。
+                    <h2 className="text-lg font-semibold">{compileMode ? '语言、模板与作答区' : '模板与填空区'}</h2>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      直接框选完整源码中的{kind === 'function' ? '一行或多行' : '一整行'}，再标记学生可见范围与作答范围。
                     </p>
                   </div>
-                  <SimpleSelect
-                    value={lang}
-                    onValueChange={setLang}
-                    disabled={compileMode && !isCreate}
-                    options={
-                      !compileMode
-                        ? [{ value: '', label: '不指定高亮语言' }, ...langOptions]
-                        : langOptions.length
-                          ? langOptions
-                          : [{ value: lang, label: lang || '请选择语言' }]
-                    }
+                  <div className="max-w-md space-y-2">
+                    <label className="text-xs font-medium" htmlFor="structured-language-select">
+                      {compileMode ? '评测语言' : '高亮语言'}
+                    </label>
+                    <SimpleSelect
+                      id="structured-language-select"
+                      ariaLabel={compileMode ? '评测语言' : '高亮语言'}
+                      value={lang}
+                      onValueChange={setLang}
+                      disabled={locked || (compileMode && !isCreate)}
+                      options={
+                        !compileMode
+                          ? [{ value: '', label: '不指定高亮语言' }, ...langOptions]
+                          : langOptions.length
+                            ? langOptions
+                            : [{ value: lang, label: lang || '请选择语言' }]
+                      }
+                    />
+                    {compileMode && !isCreate ? <p className="text-xs text-muted-foreground">评测语言创建后不可修改。</p> : null}
+                  </div>
+                  <StructuredRegionAuthorEditor
+                    lang={lang}
+                    source={source}
+                    ranges={[
+                      ...publicRanges.map((range) => ({ ...range, state: 'public' as const })),
+                      ...regions.map((region) => ({
+                        key: region.key,
+                        startLine: region.startLine,
+                        endLine: region.endLine,
+                        state: 'answer' as const,
+                        invalid: region.invalid,
+                      })),
+                    ]}
+                    onSourceChange={updateSource}
+                    onSelectionChange={setSelection}
+                    readOnly={locked}
                   />
-                  <div className="grid items-start gap-4 xl:grid-cols-2">
-                    <div className="min-w-0 space-y-3">
-                      <StructuredRegionAuthorEditor
-                        lang={lang}
-                        source={source}
-                        ranges={[
-                          ...publicRanges.map((range) => ({ ...range, state: 'public' as const })),
-                          ...regions.map((region) => ({
-                            key: region.key,
-                            startLine: region.startLine,
-                            endLine: region.endLine,
-                            state: 'answer' as const,
-                            invalid: region.invalid,
-                          })),
-                        ]}
-                        onSourceChange={updateSource}
-                        onSelectionChange={setSelection}
-                      />
-                      <div className="space-y-2 rounded-xl border bg-muted/25 p-3">
-                        <div className="text-xs text-muted-foreground">
-                          {selection ? (
-                            <>
-                              已选择第 {selection.startLine + 1}–{selection.endLine} 行{selection.expanded ? '（已扩展为完整行）' : ''}
-                            </>
-                          ) : (
-                            '拖动正文或左侧行号选择连续完整行'
-                          )}
-                        </div>
-                        <div className="flex flex-wrap gap-2" aria-label="源码可见性操作">
-                          <Button type="button" variant="outline" size="sm" disabled={!selection} onClick={markPublic}>
-                            <Eye className="size-3.5" />
-                            公开给学生
-                          </Button>
-                          <Button type="button" variant="outline" size="sm" disabled={!selection} onClick={markAnswer}>
-                            <PencilLine className="size-3.5" />
-                            设为{kind === 'function' ? '作答区' : '填空区'}
-                          </Button>
-                          <Button type="button" variant="outline" size="sm" disabled={!selection} onClick={markPrivate}>
-                            <EyeOff className="size-3.5" />
-                            设为私有
-                          </Button>
-                        </div>
-                        <p className="text-[11px] text-muted-foreground">行号前“公 / 答 / 私 / !”与行背景同时标记状态，不只依赖颜色。</p>
-                      </div>
+                  <div className="space-y-2 rounded-xl border bg-muted/25 p-3">
+                    <div className="text-xs text-muted-foreground">
+                      {selection ? (
+                        <>
+                          已选择第 {selection.startLine + 1}–{selection.endLine} 行{selection.expanded ? '（已扩展为完整行）' : ''}
+                        </>
+                      ) : (
+                        '拖动正文或左侧行号选择连续完整行'
+                      )}
                     </div>
-                    <aside className="min-w-0 space-y-3 rounded-xl border bg-muted/15 p-3" aria-label="学生实时预览">
-                      <div>
-                        <h3 className="text-sm font-semibold">学生实时预览</h3>
-                        <p className="text-xs text-muted-foreground">只使用安全序列化结果；私有行、标准答案与坐标不会出现在这里。</p>
+                    <div className="flex flex-wrap gap-2" aria-label="源码可见性操作">
+                      <Button type="button" variant="outline" size="sm" disabled={!selection} onClick={markPublic}>
+                        <Eye className="size-3.5" />
+                        公开给学生
+                      </Button>
+                      <Button type="button" variant="outline" size="sm" disabled={!selection} onClick={markAnswer}>
+                        <PencilLine className="size-3.5" />
+                        设为{kind === 'function' ? '作答区' : '填空区'}
+                      </Button>
+                      <Button type="button" variant="outline" size="sm" disabled={!selection} onClick={markPrivate}>
+                        <EyeOff className="size-3.5" />
+                        设为私有
+                      </Button>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">行号前“公 / 答 / 私 / !”与行背景同时标记状态，不只依赖颜色。</p>
+                  </div>
+
+                  <section className="space-y-3 border-t border-border/70 pt-5">
+                    <div>
+                      <h3 className="text-sm font-semibold">作答区域</h3>
+                      <p className="text-xs text-muted-foreground">区域 ID 由服务端生成；展示与提交顺序固定按源码位置排列。</p>
+                    </div>
+                    {regions.map((region, index) => (
+                      <div
+                        key={region.key}
+                        className={cn('space-y-3 rounded-lg border p-3', region.invalid && 'border-destructive bg-destructive/5')}
+                      >
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-medium">区域 {index + 1}</span>
+                          <span className="font-mono text-xs text-muted-foreground">
+                            第 {region.startLine + 1}–{region.endLine} 行 · {region.id ? region.id : '保存后生成 ID'}
+                          </span>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="ml-auto"
+                            onClick={() => removeRegion(index)}
+                            aria-label={`删除区域 ${index + 1}`}
+                          >
+                            <Trash2 className="size-4" />
+                          </Button>
+                        </div>
+                        {kind === 'function' ? (
+                          <div className="grid gap-2 sm:grid-cols-2">
+                            <label className="space-y-1.5">
+                              <span className="text-xs font-medium">作答区标题（可选）</span>
+                              <Input
+                                value={region.title}
+                                onChange={(event) =>
+                                  setRegions((current) => current.map((item, i) => (i === index ? { ...item, title: event.target.value } : item)))
+                                }
+                                placeholder={`例如 作答区 ${index + 1}`}
+                              />
+                            </label>
+                            <label className="space-y-1.5">
+                              <span className="text-xs font-medium">局部要求（可选）</span>
+                              <Input
+                                value={region.description}
+                                onChange={(event) =>
+                                  setRegions((current) =>
+                                    current.map((item, i) => (i === index ? { ...item, description: event.target.value } : item)),
+                                  )
+                                }
+                                placeholder="说明输入、输出或约束"
+                              />
+                            </label>
+                          </div>
+                        ) : (
+                          <Input
+                            value={region.prompt}
+                            onChange={(event) =>
+                              setRegions((current) => current.map((item, i) => (i === index ? { ...item, prompt: event.target.value } : item)))
+                            }
+                            placeholder="填写提示（可选）"
+                          />
+                        )}
+                        {region.invalid ? (
+                          <p role="alert" className="text-xs text-destructive">
+                            模板修改已使这个区域坐标失效；请删除后重新框选，系统不会猜测迁移。
+                          </p>
+                        ) : null}
                       </div>
+                    ))}
+                    {!regions.length ? <p className="text-sm text-muted-foreground">尚未设置作答区域。</p> : null}
+                  </section>
+
+                  <details className="rounded-xl border border-border/70 p-4">
+                    <summary className="min-h-11 cursor-pointer text-sm font-semibold">查看学生安全预览</summary>
+                    <div className="mt-3 min-w-0">
                       {structureBlocked ? (
                         <p role="alert" className="rounded-lg border border-destructive/30 p-3 text-sm text-destructive">
                           请先设置至少一个有效作答区，并修复失效或交叠区间。
@@ -731,138 +960,184 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
                           readOnly
                         />
                       )}
-                    </aside>
-                  </div>
-                </section>
+                    </div>
+                  </details>
+                </fieldset>
+              </section>
 
-                <section className="space-y-3 border-t border-border/70 pt-5">
-                  <div>
-                    <h2 className="text-sm font-semibold">作答区域</h2>
-                    <p className="text-xs text-muted-foreground">区域 ID 由服务端生成；展示与提交顺序固定按源码位置排列。</p>
+              {compileMode ? (
+                <section hidden={activeStage !== 'testdata'} data-stage="testdata" className="min-h-[32rem] space-y-5">
+                  <fieldset disabled={locked} className="space-y-5">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <h2 className="flex items-center gap-1.5 text-lg font-semibold">
+                          <FileCode2 className="size-5" />
+                          真实测试数据
+                        </h2>
+                        <p className="mt-1 text-sm text-muted-foreground">先上传真实文件，再在紧邻区域映射输入与输出；失败不会创建默认映射。</p>
+                      </div>
+                      <span className="text-xs text-muted-foreground">结构版本 {structureRevision}</span>
+                    </div>
+                    <FileUploader
+                      endpoint={`/p/${encodeURIComponent(pid)}/files`}
+                      fieldName="file"
+                      meta={{ type: 'testdata' }}
+                      maxFileSize={null}
+                      maxFiles={null}
+                      uploadConcurrency={1}
+                      retryOnFailure={false}
+                      onUploaded={acceptUploadedFile}
+                    />
+                    {testdataFiles.length ? (
+                      <div className="flex flex-wrap gap-1.5" aria-label="已上传测试数据">
+                        {testdataFiles.map((file) => (
+                          <span key={file.name} className="rounded-md border border-border/70 px-2 py-1 font-mono text-xs">
+                            {file.name}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">尚未上传测试数据文件。</p>
+                    )}
+                    <CasesEditor cases={cases} files={testdataFiles} onChange={setCases} disabled={locked} />
+                    <Button asChild variant="ghost" size="sm">
+                      <a href={`/p/${encodeURIComponent(pid)}/files?section=testdata`}>打开完整文件管理</a>
+                    </Button>
+                  </fieldset>
+                </section>
+              ) : null}
+
+              <section hidden={activeStage !== 'review'} data-stage="review" className="min-h-[32rem] space-y-5">
+                <div>
+                  <h2 className="text-lg font-semibold">检查并完成</h2>
+                  <p className="mt-1 text-sm text-muted-foreground">这里汇总服务端完成校验前可以确定的缺项；点击任一项直接回到对应阶段。</p>
+                </div>
+                {reviewIssues.length ? (
+                  <div role="alert" className="rounded-xl border border-destructive/30 bg-destructive/[0.025] p-4">
+                    <p className="text-sm font-semibold text-destructive">还有 {reviewIssues.length} 项需要处理</p>
+                    <ul className="mt-3 space-y-1.5">
+                      {reviewIssues.map((issue, index) => (
+                        <li key={`${issue.stage}:${issue.message}:${index}`}>
+                          <button
+                            type="button"
+                            className="min-h-11 text-left text-sm text-destructive underline-offset-4 hover:underline"
+                            onClick={() => goToStage(issue.stage)}
+                          >
+                            {issue.message}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
                   </div>
-                  {regions.map((region, index) => (
-                    <div key={region.key} className={cn('space-y-3 rounded-lg border p-3', region.invalid && 'border-destructive bg-destructive/5')}>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-sm font-medium">区域 {index + 1}</span>
-                        <span className="font-mono text-xs text-muted-foreground">
-                          第 {region.startLine + 1}–{region.endLine} 行 · {region.id ? region.id : '保存后生成 ID'}
-                        </span>
-                        <div className="ml-auto flex">
-                          <Button type="button" variant="ghost" size="icon" onClick={() => removeRegion(index)} aria-label="删除">
-                            <Trash2 className="size-4" />
+                ) : (
+                  <div className="flex items-start gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/[0.035] p-4">
+                    <CheckCircle2 className="mt-0.5 size-5 text-emerald-600" />
+                    <div>
+                      <p className="text-sm font-semibold">本地检查已通过</p>
+                      <p className="mt-1 text-xs text-muted-foreground">点击完成后，服务端仍会重新校验结构版本、模板、知识标签和真实文件。</p>
+                    </div>
+                  </div>
+                )}
+
+                {compileMode && !isCreate && !codeEvaluationDraft && cloneLangOptions.length ? (
+                  <section className="max-w-xl space-y-2 rounded-xl border border-border/70 p-4">
+                    <h3 className="text-sm font-semibold">克隆为其他语言</h3>
+                    <SimpleSelect
+                      value={cloneLang}
+                      onValueChange={setCloneLang}
+                      ariaLabel="克隆目标语言"
+                      options={[{ value: '', label: '选择目标语言' }, ...cloneLangOptions]}
+                    />
+                    <p className="text-xs text-muted-foreground">新题保持隐藏并物理复制测试数据；进入新题后再改写目标语言模板。</p>
+                    <Button type="button" variant="outline" size="sm" disabled={cloning || !cloneLang} onClick={cloneForLanguage}>
+                      <Copy className="size-3.5" />
+                      {cloning ? '克隆中…' : '创建语言副本'}
+                    </Button>
+                  </section>
+                ) : null}
+
+                {canDelete ? (
+                  <section className="rounded-xl border border-destructive/25 bg-destructive/[0.025] p-4" aria-labelledby="structured-danger-heading">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <h3 id="structured-danger-heading" className="text-sm font-semibold text-destructive">
+                          删除题目
+                        </h3>
+                        <p className="mt-1 text-xs text-muted-foreground">服务器会先确认题目未被比赛或考试引用，再执行永久删除。</p>
+                      </div>
+                      {!showDeleteConfirm ? (
+                        <Button type="button" variant="destructive" size="sm" onClick={() => setShowDeleteConfirm(true)}>
+                          <Trash2 className="size-3.5" />
+                          删除题目
+                        </Button>
+                      ) : (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-xs font-medium text-destructive">确认删除这道题？此操作不可撤销。</span>
+                          <Button type="button" variant="destructive" size="sm" disabled={deleting} onClick={deleteProblem}>
+                            {deleting ? '删除中…' : '确认删除'}
+                          </Button>
+                          <Button type="button" variant="outline" size="sm" disabled={deleting} onClick={() => setShowDeleteConfirm(false)}>
+                            取消
                           </Button>
                         </div>
-                      </div>
-                      {kind === 'function' ? (
-                        <div className="grid gap-2 sm:grid-cols-2">
-                          <label className="space-y-1.5">
-                            <span className="text-xs font-medium">作答区标题（可选）</span>
-                            <Input
-                              value={region.title}
-                              onChange={(event) =>
-                                setRegions((current) => current.map((item, i) => (i === index ? { ...item, title: event.target.value } : item)))
-                              }
-                              placeholder={`例如 作答区 ${index + 1}`}
-                            />
-                          </label>
-                          <label className="space-y-1.5">
-                            <span className="text-xs font-medium">局部要求（可选）</span>
-                            <Input
-                              value={region.description}
-                              onChange={(event) =>
-                                setRegions((current) => current.map((item, i) => (i === index ? { ...item, description: event.target.value } : item)))
-                              }
-                              placeholder="说明输入、输出或约束"
-                            />
-                          </label>
-                        </div>
-                      ) : (
-                        <Input
-                          value={region.prompt}
-                          onChange={(event) =>
-                            setRegions((current) => current.map((item, i) => (i === index ? { ...item, prompt: event.target.value } : item)))
-                          }
-                          placeholder="填写提示（可选）"
-                        />
                       )}
-                      {region.invalid ? (
-                        <p role="alert" className="text-xs text-destructive">
-                          模板修改已使这个区域坐标失效；请删除后重新框选，系统不会猜测迁移。
-                        </p>
-                      ) : null}
                     </div>
-                  ))}
-                  {!regions.length ? <p className="text-sm text-muted-foreground">尚未设置作答区域。</p> : null}
-                </section>
-                {compileMode ? (
-                  <>
-                    <section className="space-y-3 border-t border-border/70 pt-5">
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                          <h2 className="flex items-center gap-1.5 text-sm font-semibold">
-                            <FileCode2 className="size-4" />
-                            真实测试数据
-                          </h2>
-                          <p className="text-xs text-muted-foreground">可一次选择多个文件；上传直接写入当前题，失败不会创建空文件或默认映射。</p>
-                        </div>
-                        <span className="text-xs text-muted-foreground">结构版本 {structureRevision}</span>
-                      </div>
-                      <FileUploader
-                        endpoint={`/p/${encodeURIComponent(pid)}/files`}
-                        fieldName="file"
-                        meta={{ type: 'testdata' }}
-                        maxFileSize={null}
-                        maxFiles={null}
-                        uploadConcurrency={1}
-                        retryOnFailure={false}
-                        onUploaded={acceptUploadedFile}
-                      />
-                      {testdataFiles.length ? (
-                        <div className="flex flex-wrap gap-1.5" aria-label="已上传测试数据">
-                          {testdataFiles.map((file) => (
-                            <span key={file.name} className="rounded-md border border-border/70 px-2 py-1 font-mono text-xs">
-                              {file.name}
-                            </span>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="text-sm text-muted-foreground">尚未上传测试数据文件。</p>
-                      )}
-                      <Button asChild variant="ghost" size="sm">
-                        <a href={`/p/${encodeURIComponent(pid)}/files?section=testdata`}>打开完整文件管理</a>
-                      </Button>
-                    </section>
-                    <CasesEditor cases={cases} files={testdataFiles} onChange={setCases} />
-                  </>
+                  </section>
                 ) : null}
-              </>
-            )}
-          </fieldset>
+              </section>
+            </>
+          ) : null}
         </div>
 
-        <StructuredProblemMetadataPanel
-          pdoc={pdoc}
-          isCreate={isCreate}
-          locked={locked}
-          knowledgeMaps={data.knowledgeMaps || []}
-          mindmapOptions={data.knowledgeMindmapOptions || []}
-          canUseCustomPid={data.canUseCustomPid === true}
-          formDirty={dirtyState.dirty}
-          onMetadataChange={dirtyState.recompute}
-          visibilityLockedReason={codeEvaluationDraft ? '完成题面、私有模板、区域与测试数据映射后，才能解除隐藏。' : undefined}
+        <footer
+          data-testid="structured-author-stage-actions"
+          className="sticky bottom-0 z-20 mt-6 flex min-h-16 flex-wrap items-center justify-between gap-3 border-t border-border/70 bg-background/95 py-2 backdrop-blur"
         >
-          {compileMode && !isCreate && !codeEvaluationDraft && cloneLangOptions.length ? (
-            <div className="space-y-2 border-y py-3">
-              <p className="text-xs font-medium">克隆为其他语言</p>
-              <SimpleSelect value={cloneLang} onValueChange={setCloneLang} options={[{ value: '', label: '选择目标语言' }, ...cloneLangOptions]} />
-              <p className="text-xs text-muted-foreground">新题保持隐藏并物理复制测试数据；进入新题后再改写目标语言模板。</p>
-              <Button type="button" variant="outline" size="sm" disabled={cloning || !cloneLang} onClick={cloneForLanguage}>
-                <Copy className="size-3.5" />
-                {cloning ? '克隆中…' : '创建语言副本'}
+          <Button
+            type="button"
+            variant="outline"
+            className="min-h-11"
+            disabled={activeStageIndex === 0}
+            onClick={() => goToStage(stages[Math.max(0, activeStageIndex - 1)].id)}
+          >
+            <ArrowLeft className="size-4" />
+            上一步
+          </Button>
+          {activeStageIndex < stages.length - 1 ? (
+            <Button
+              type="button"
+              className="min-h-11"
+              onClick={(event) => {
+                event.preventDefault();
+                goToStage(stages[activeStageIndex + 1].id);
+              }}
+            >
+              下一步
+              <ArrowRight className="size-4" />
+            </Button>
+          ) : draftCreation ? (
+            <Button type="submit" value="save" disabled={saving} className="min-h-11 gap-1.5">
+              <Save className="size-4" />
+              {saving ? '创建中…' : '创建草稿'}
+            </Button>
+          ) : codeEvaluationDraft && !locked ? (
+            <div className="flex flex-wrap gap-2">
+              <Button type="submit" value="save" variant="outline" disabled={saving} className="min-h-11 gap-1.5">
+                <Save className="size-4" />
+                {saving && saveAction === 'save' ? '保存中…' : '保存草稿'}
+              </Button>
+              <Button type="submit" value="complete" disabled={saving} className="min-h-11 gap-1.5">
+                <CheckCircle2 className="size-4" />
+                {saving && saveAction === 'complete' ? '校验中…' : '完成配置'}
               </Button>
             </div>
-          ) : null}
-        </StructuredProblemMetadataPanel>
+          ) : (
+            <Button type="submit" value="save" disabled={saving} className="min-h-11 gap-1.5">
+              <Save className="size-4" />
+              {saving ? '保存中…' : '保存'}
+            </Button>
+          )}
+        </footer>
       </form>
       {statementGuard.dialog}
       {navigationGuard.guardDialog}

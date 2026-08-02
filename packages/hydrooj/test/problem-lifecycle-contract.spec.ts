@@ -23,9 +23,11 @@ describe('P2.12 YAGNI lifecycle contract', () => {
 
     it('ready-gates every problem and locks revision-managed submissions before insertion', () => {
         const source = readFileSync(resolve(root, 'src/model/record.ts'), 'utf8');
-        const lock = source.indexOf("claimStructureLockForSubmission(domainId, pid, args.type !== 'generate', uid)");
+        const lock = source.indexOf('claimStructureLockForSubmission(');
+        const pretestExemption = source.indexOf("!['generate', 'pretest'].includes(args.type)", lock);
         const insert = source.indexOf('RecordModel.coll.insertOne(data)');
         expect(lock).to.be.greaterThan(-1);
+        expect(pretestExemption).to.be.greaterThan(lock);
         expect(insert).to.be.greaterThan(lock);
     });
 
@@ -222,6 +224,49 @@ describe('P2.12 YAGNI lifecycle contract', () => {
         expect(method).to.include("type: 'problem.metadata.save'");
         expect(method.indexOf('await OplogModel.add(')).to.be.greaterThan(method.indexOf('await ProblemModel.editAuthorizedWithSnapshot({'));
         expect(method).to.include('auditedFields.filter((field) => !isEqual(before[field], result[field]))');
+    });
+
+    it('allows revision-checked metadata saves after the submission structure lock', () => {
+        const source = readFileSync(resolve(root, 'src/model/problem.ts'), 'utf8');
+        const start = source.indexOf('static async editWithClaim(');
+        const end = source.indexOf('static async editAuthorized(', start);
+        const method = source.slice(start, end);
+
+        expect(method).to.include('!submissionLockedPatch &&');
+        expect(method).to.include('(!structuralPatch || editorialPatch)');
+        expect(method.match(/allowHistoricalStructureLock,/g)).to.have.length(2);
+        expect(method.indexOf('if (submissionLockedPatch &&')).to.be.lessThan(
+            method.indexOf('allowHistoricalStructureLock,', method.indexOf('if (submissionLockedPatch &&')),
+        );
+    });
+
+    it('keeps the canonical knowledge triple atomic after unchanged-field filtering', () => {
+        const source = readFileSync(resolve(root, 'src/model/problem.ts'), 'utf8');
+        const start = source.indexOf('private static async editAuthorizedWithSnapshot');
+        const end = source.indexOf('static async saveStructuredProblem(input', start);
+        const method = source.slice(start, end);
+
+        expect(method).to.include("const canonicalKnowledgeFields = ['tag', 'knowledgeMapId', 'knowledgeNodeIds'] as const");
+        expect(method).to.include('canonicalKnowledgeFields.every((field) => Object.hasOwn(input.$set, field))');
+        expect(method).to.include('canonicalKnowledgeFields.some((field) => !isEqual(before[field], input.$set[field]))');
+        expect(method).to.include('Object.fromEntries(canonicalKnowledgeFields.map((field) => [field, input.$set[field]]))');
+    });
+
+    it('completes a code-evaluation draft against persisted knowledge when the selection is unchanged', () => {
+        const source = readFileSync(resolve(root, 'src/model/problem.ts'), 'utf8');
+        const snapshotStart = source.indexOf('private static async editAuthorizedWithSnapshot');
+        const saveStart = source.indexOf('static async saveStructuredProblem(input', snapshotStart);
+        const snapshot = source.slice(snapshotStart, saveStart);
+        const saveEnd = source.indexOf('static async saveStructuredProblemMetadata', saveStart);
+        const save = source.slice(saveStart, saveEnd);
+
+        expect(snapshot).to.include("'knowledgeMapId'");
+        expect(snapshot).to.include("'knowledgeNodeIds'");
+        expect(save).to.include('const effectiveKnowledgeMapId = input.metadata?.knowledgeMapId ?? before.knowledgeMapId');
+        expect(save).to.include('const effectiveKnowledgeNodeIds = input.metadata?.knowledgeNodeIds ?? before.knowledgeNodeIds');
+        expect(save.indexOf('if (!effectiveKnowledgeMapId || !effectiveKnowledgeNodeIds?.length)')).to.be.lessThan(
+            save.indexOf('assertProblemReadyForUseWithTrace('),
+        );
     });
 
     it('records only actual fields changed by a structured save', () => {

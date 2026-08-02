@@ -601,6 +601,33 @@ describe('record judge problem config', () => {
         expect(insertedRecords[0].contestTeamId.equals(teamId)).to.equal(true);
     });
 
+    it('does not claim the first-submission structure lock for a compiled structured pretest', async () => {
+        problemKind = 'function';
+        codeEvaluationStatus = 'ready';
+        const source = 'int solve() { return 1; }';
+        problemConfig = {
+            type: 'function',
+            langs: ['cc.cc17'],
+            template: {
+                lang: 'cc.cc17',
+                source,
+                sourceHash: templateSourceHash(source),
+                publicRanges: [],
+                regions: [{ id: REGION_ID, startLine: 0, endLine: 1 }],
+            },
+            cases: [{ input: '1.in', output: '1.out' }],
+        };
+
+        await recordModel.add('system', 7, 42, 'cc.cc17', JSON.stringify({ [REGION_ID]: 'int solve() { return 2; }' }), false, {
+            type: 'pretest',
+            input: [''],
+        });
+
+        expect(structureLockRequests).to.deep.equal([false]);
+        expect(insertedRecords).to.have.length(1);
+        expect(insertedRecords[0].contest.equals(recordModel.RECORD_PRETEST)).to.equal(true);
+    });
+
     it('does not insert any record when the unified team capability rejects the actor', async () => {
         problemConfig = { type: 'default' };
         const contestId = new ObjectId();

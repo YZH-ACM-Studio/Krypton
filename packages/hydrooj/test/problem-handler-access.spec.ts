@@ -460,7 +460,7 @@ const recordStub = {
         return -100;
     },
 };
-const settingStub = { langs: { cpp: { disabled: false } }, SETTINGS_BY_KEY: { codeLang: { range: {} } } };
+const settingStub = { langs: { cpp: { disabled: false } }, SETTINGS_BY_KEY: { codeLang: { range: { cpp: 'C++' } } } };
 const solutionStub = { count: async () => 0 };
 const storageStub = {
     async get(...args: any[]) {
@@ -3502,6 +3502,23 @@ describe('P3.9 basic objective HTTP boundaries', () => {
         expect(calls.edit).to.deep.equal([]);
     });
 
+    it('does not run the ordinary edit pipeline before the delete operation', async () => {
+        const handler = makeHandler(ProblemEditHandler, { canDelete: true });
+        handler.pdoc = {
+            domainId: 'system',
+            docId: 7,
+            pid: 'P7',
+            problemKind: 'function',
+        };
+        handler.canEditLoadedProblem = false;
+        handler.request.body = { operation: 'delete' };
+
+        await handler.post('forged', 'P7');
+
+        expect(calls.structuredSaves).to.deep.equal([]);
+        expect(calls.edit).to.deep.equal([]);
+    });
+
     it('keeps a migrated map-only structured problem maintainable until tags are explicitly edited', async () => {
         const config = JSON.stringify({ main: { options: ['A', 'B'], answerIndexes: [0], partialCreditPercent: 25 } });
         const handler = makeHandler(ProblemEditHandler, {});
@@ -3993,6 +4010,60 @@ describe('P3.19 program-fill and function HTTP boundaries', () => {
         expect(calls.recordAdd).to.have.length(1);
     });
 
+    it('runs compiled structured pretests with the immutable template language and custom input', async () => {
+        (settingStub.langs.cpp as any).pretest = 'cpp.pretest';
+        (settingStub.langs as any)['cpp.pretest'] = { disabled: false };
+        try {
+            const handler = makeHandler(ProblemSubmitHandler, {});
+            handler.pdoc = {
+                domainId: 'system',
+                docId: 7,
+                problemKind: 'function',
+                config: {
+                    type: 'function',
+                    langs: ['cpp'],
+                    template: {
+                        lang: 'cpp',
+                        surface: [
+                            { type: 'region', id: 'r_abcdefghijkl' },
+                            { type: 'region', id: 'r_mnopqrstuvwx' },
+                        ],
+                    },
+                },
+            };
+            const code = JSON.stringify({ r_abcdefghijkl: 'first()', r_mnopqrstuvwx: 'second()' });
+
+            await handler.post('forged', 'forged-lang', code, true, ['7 8\n'], undefined);
+
+            expect(calls.recordAdd).to.have.length(1);
+            expect(calls.recordAdd[0][3]).to.equal('cpp');
+            expect(calls.recordAdd[0][4]).to.equal(code);
+            expect(calls.recordAdd[0][6]).to.deep.include({ type: 'pretest', input: ['7 8\n'] });
+        } finally {
+            delete (settingStub.langs.cpp as any).pretest;
+            delete (settingStub.langs as any)['cpp.pretest'];
+        }
+    });
+
+    it('rejects text program-fill pretests before creating a record', async () => {
+        const handler = makeHandler(ProblemSubmitHandler, {});
+        handler.pdoc = {
+            domainId: 'system',
+            docId: 7,
+            problemKind: 'program_fill',
+            config: {
+                type: 'program_fill',
+                mode: 'text',
+                template: { surface: [{ type: 'region', id: 'r_abcdefghijkl' }] },
+            },
+        };
+
+        const error = await captureFailure(() => handler.post('forged', '_', JSON.stringify({ r_abcdefghijkl: 'i++;' }), true, [''], undefined));
+
+        expect(error).to.be.instanceOf(GenericError);
+        expect(calls.recordAdd).to.deep.equal([]);
+    });
+
     it('rejects a multi-line compile program-fill submission', async () => {
         const handler = makeHandler(ProblemSubmitHandler, {});
         handler.pdoc = {
@@ -4377,6 +4448,32 @@ describe('P2.11 canonical ProblemDoc maintenance gate', () => {
         const filesError = await captureFailure(() => files.post());
         expect(filesError).to.be.instanceOf(TestPermissionError);
         expect(calls.renameFile).to.deep.equal([]);
+    });
+
+    it('loads canonical raw config before applying structured testdata policy', async () => {
+        const pdoc = {
+            domainId: 'system',
+            docId: 7,
+            owner: 42,
+            problemKind: 'program_fill',
+            config: {
+                type: 'program_fill',
+                mode: 'compile',
+                template: { lang: 'cc.cc17o2', source: '', sourceHash: '', publicRanges: [], regions: [] },
+                cases: [],
+            },
+        };
+        const handler = makeHandler(ProblemFilesHandler, { _id: 42, canEditData: true });
+        handler.pdoc = pdoc;
+        handler.args = { operation: 'upload_file' };
+        handler.request.body = { operation: 'upload_file', filename: '1.in', type: 'testdata' };
+        maintainableResults = [pdoc];
+
+        await handler.post();
+
+        expect(calls.getCapabilityAuthorized.at(-1)?.slice(0, 4)).to.deep.equal(['system', 7, handler.user, 'data']);
+        expect(calls.getCapabilityAuthorized.at(-1)?.[5]).to.equal(true);
+        expect(handler.pdoc.config).to.equal(pdoc.config);
     });
 
     it('contains no legacy ProblemDoc own-or-wide-edit fallback in this handler', () => {

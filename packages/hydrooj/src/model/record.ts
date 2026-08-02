@@ -292,7 +292,7 @@ export default class RecordModel {
         } else if (args.type === 'generate') {
             data.contest = RecordModel.RECORD_GENERATE;
         }
-        const currentProblem = await problem.claimStructureLockForSubmission(domainId, pid, args.type !== 'generate', uid);
+        const currentProblem = await problem.claimStructureLockForSubmission(domainId, pid, !['generate', 'pretest'].includes(args.type), uid);
         const currentConfig = parseProblemConfigObject(currentProblem);
         const currentKind = effectiveProblemKind(currentProblem);
         if (

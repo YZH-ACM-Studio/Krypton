@@ -12,6 +12,7 @@ const sandboxPath = require.resolve('../src/sandbox.ts');
 const configPath = require.resolve('../src/config.ts');
 const hydroojPath = require.resolve('hydrooj');
 const defaultPath = require.resolve('../src/judge/default.ts');
+const runPath = require.resolve('../src/judge/run.ts');
 const checkerPath = require.resolve('../src/checkers.ts');
 const fillFunctionPath = require.resolve('../src/judge/fill_function.ts');
 const previous = new Map<string, NodeModule | undefined>([
@@ -19,6 +20,7 @@ const previous = new Map<string, NodeModule | undefined>([
     [configPath, require.cache[configPath]],
     [hydroojPath, require.cache[hydroojPath]],
     [defaultPath, require.cache[defaultPath]],
+    [runPath, require.cache[runPath]],
     [checkerPath, require.cache[checkerPath]],
     [fillFunctionPath, require.cache[fillFunctionPath]],
 ]);
@@ -76,6 +78,8 @@ require.cache[sandboxPath] = {
                 status: result.code ? STATUS.STATUS_RUNTIME_ERROR : STATUS.STATUS_ACCEPTED,
                 time: 1,
                 memory: 0,
+                stdout: result.stdout,
+                stderr: result.stderr,
                 fileIds: { stdout: id },
             });
         },
@@ -101,12 +105,13 @@ require.cache[hydroojPath] = {
 } as NodeModule;
 delete require.cache[checkerPath];
 delete require.cache[defaultPath];
+delete require.cache[runPath];
 delete require.cache[fillFunctionPath];
 const { judge } = require(fillFunctionPath) as typeof import('../src/judge/fill_function');
 
 class LocalCompileError extends Error {}
 
-async function runConfiguredSubmission(baseConfig: Record<string, any>, regionCode: Record<string, string>) {
+async function runConfiguredSubmission(baseConfig: Record<string, any>, regionCode: Record<string, string>, pretestInputs?: string[]) {
     const folder = await mkdtemp(join(tmpdir(), 'krypton-fill-function-'));
     const firstInput = join(folder, '1.in');
     const firstOutput = join(folder, '1.out');
@@ -114,6 +119,7 @@ async function runConfiguredSubmission(baseConfig: Record<string, any>, regionCo
     const secondOutput = join(folder, '2.out');
     await Promise.all([writeFile(firstInput, '1\n'), writeFile(firstOutput, '2\n'), writeFile(secondInput, '2\n'), writeFile(secondOutput, '4\n')]);
     let result: any;
+    const emittedCases: any[] = [];
     const config = {
         ...baseConfig,
         count: 2,
@@ -138,11 +144,14 @@ async function runConfiguredSubmission(baseConfig: Record<string, any>, regionCo
         config,
         lang: 'cc.cc17',
         code: { content: JSON.stringify(regionCode) },
-        request: { rejudged: false },
+        request: { rejudged: false, ...(pretestInputs ? { contest: '000000000000000000000000' } : {}) },
+        input: pretestInputs || [],
         meta: {},
         env: {},
         session: { getLang: () => ({ address_space_limit: 0, process_limit: 1 }) },
-        next() {},
+        next(payload: any) {
+            if (payload.case) emittedCases.push(payload.case);
+        },
         end(payload: any) {
             result = payload;
         },
@@ -176,10 +185,10 @@ async function runConfiguredSubmission(baseConfig: Record<string, any>, regionCo
     } finally {
         await rm(folder, { recursive: true, force: true });
     }
-    return result;
+    return { ...result, emittedCases };
 }
 
-async function runSubmission(regionCode: Record<string, string>) {
+async function runSubmission(regionCode: Record<string, string>, pretestInputs?: string[]) {
     const source = [
         '#include <iostream>',
         'int main() {',
@@ -208,6 +217,7 @@ async function runSubmission(regionCode: Record<string, string>) {
             ],
         },
         regionCode,
+        pretestInputs,
     );
 }
 
@@ -283,7 +293,7 @@ const functionFixtures = [
     },
 ] as const;
 
-async function runFunctionFixture(fixture: (typeof functionFixtures)[number], answers: Record<string, string>) {
+async function runFunctionFixture(fixture: (typeof functionFixtures)[number], answers: Record<string, string>, pretestInputs?: string[]) {
     return runConfiguredSubmission(
         {
             type: 'function',
@@ -301,6 +311,7 @@ async function runFunctionFixture(fixture: (typeof functionFixtures)[number], an
             ],
         },
         answers,
+        pretestInputs,
     );
 }
 
@@ -330,6 +341,21 @@ describe('program-fill compile-mode real compiler and testdata integration', () 
             }),
         ).to.deep.include({ status: STATUS.STATUS_WRONG_ANSWER, score: 50 });
     });
+
+    it('splices the structured answer before running custom pretest input', async () => {
+        const result = await runSubmission(
+            {
+                [ids[0]]: 'int doubled = value * 2;',
+                [ids[1]]: 'int answer = doubled;',
+                [ids[2]]: 'std::cout << answer;',
+            },
+            ['21\n'],
+        );
+
+        expect(result).to.deep.include({ status: STATUS.STATUS_ACCEPTED, score: 1 });
+        expect(result.emittedCases).to.have.length(1);
+        expect(result.emittedCases[0].message).to.include('42');
+    });
 });
 
 describe('P3.22 code implementation real compiler fixtures', () => {
@@ -353,6 +379,15 @@ describe('P3.22 code implementation real compiler fixtures', () => {
                 r_secondabcdef: 'int twice(int x) { return ; }',
             }),
         ).to.deep.include({ status: STATUS.STATUS_COMPILE_ERROR, score: 0 });
+    });
+
+    it('splices a multi-line implementation before running custom pretest input', async () => {
+        const fixture = functionFixtures[0];
+        const result = await runFunctionFixture(fixture, fixture.answers, ['9\n']);
+
+        expect(result).to.deep.include({ status: STATUS.STATUS_ACCEPTED, score: 1 });
+        expect(result.emittedCases).to.have.length(1);
+        expect(result.emittedCases[0].message).to.include('18');
     });
 });
 

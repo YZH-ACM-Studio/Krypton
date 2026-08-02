@@ -582,7 +582,7 @@ export function FileUploader({
     });
     uppy.on('file-added', (file) => {
       setItems((prev) => [
-        ...prev,
+        ...prev.filter((item) => item.id !== file.id),
         {
           id: file.id,
           name: file.name || 'file',

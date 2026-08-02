@@ -49,7 +49,7 @@ import {
     type LocalizedErrorText,
     ValidationError,
 } from '../error';
-import { ProblemDataWriteConfirmation, ProblemDataWriteOperation, ProblemDoc, ProblemStatusDoc, RecordDoc, User } from '../interface';
+import { DomainDoc, ProblemDataWriteConfirmation, ProblemDataWriteOperation, ProblemDoc, ProblemStatusDoc, RecordDoc, User } from '../interface';
 import { canUsePostContestPractice, getContestSubmissionScope, resolvePostContestProblemMode } from '../lib/contest-correction';
 import { buildPersonalPracticeRecordQuery, buildPersonalPracticeStatusByPid, PersonalPracticeRecord } from '../lib/contest-problem-status';
 import { getProblemConfigErrorText, isProblemConfigFilename, parseProblemConfigObject, parseStructuredRegionSubmission } from '../lib/problem-config';
@@ -114,6 +114,37 @@ const logger = new Logger('problem-handler');
 
 function localizedConfigValidation(field: string, detail: LocalizedErrorText) {
     return new ValidationError(field, null, detail);
+}
+
+function structuredCodeLanguageRange(ddoc: DomainDoc | null | undefined): Record<string, string> {
+    const configured =
+        typeof ddoc?.langs === 'string'
+            ? ddoc.langs
+                  .split(',')
+                  .map((lang) => lang.trim())
+                  .filter(Boolean)
+            : [];
+    const allowed = new Set(configured);
+    return Object.fromEntries(
+        Object.entries(setting.SETTINGS_BY_KEY.codeLang.range).filter(([lang]) => {
+            const runtime = setting.langs[lang];
+            if (!runtime || runtime.disabled || runtime.remote) return false;
+            return allowed.size ? allowed.has(lang) : !runtime.hidden;
+        }),
+    );
+}
+
+function assertStructuredCodeLanguageAllowed(problemKind: string, configInput: unknown, ddoc: DomainDoc | null | undefined): void {
+    if (problemKind !== PROGRAM_FILL_KIND && problemKind !== FUNCTION_KIND) return;
+    if (!configInput || typeof configInput !== 'object' || Array.isArray(configInput)) throw new ValidationError('structuredConfig');
+    const main = (configInput as Record<string, unknown>).main;
+    if (!main || typeof main !== 'object' || Array.isArray(main)) throw new ValidationError('structuredConfig');
+    const mode = (main as Record<string, unknown>).mode;
+    if (problemKind === PROGRAM_FILL_KIND && mode === 'text') return;
+    const lang = (main as Record<string, unknown>).lang;
+    if (typeof lang !== 'string' || !Object.hasOwn(structuredCodeLanguageRange(ddoc), lang)) {
+        throw new ValidationError('lang', null, localizedErrorText`请选择当前域允许的评测语言`);
+    }
 }
 
 function pidNamespaceClientOption(namespace: Awaited<ReturnType<typeof listPidNamespaces>>[number]) {
@@ -1989,8 +2020,9 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
             throw new ProblemNotAllowLanguageError();
         }
         if (pretest) {
-            if (setting.langs[lang]?.pretest) lang = setting.langs[lang].pretest as string;
-            if (!['default', 'remote_judge'].includes(this.response.body.pdoc.config?.type)) {
+            const supportsStructuredPretest = structuredCode && (config.type !== 'program_fill' || config.mode !== 'text');
+            if (!structuredCode && setting.langs[lang]?.pretest) lang = setting.langs[lang].pretest as string;
+            if (!supportsStructuredPretest && !['default', 'remote_judge'].includes(config.type)) {
                 throw new ProblemNotAllowPretestError('type');
             }
             if (!input.length) throw new ValidationError('input');
@@ -2313,7 +2345,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
             this.response.body.knowledgeMindmapOptions = knowledgeMindmapOptions;
             this.response.body.canUseCustomPid = this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
             if ([PROGRAM_FILL_KIND, FUNCTION_KIND].includes(problemKind as any)) {
-                this.response.body.langRange = setting.SETTINGS_BY_KEY.codeLang.range;
+                this.response.body.langRange = structuredCodeLanguageRange(this.domain);
             }
             this.response.template = structuredEditorTemplate(problemKind);
             return;
@@ -2363,6 +2395,10 @@ export class ProblemEditHandler extends ProblemManageHandler {
         conversionFingerprint?: string,
         parsedConversionUnclassified?: string,
     ) {
+        // The framework invokes `post` before `postDelete` for operation requests.
+        // Deletion has its own capability and reference checks, so it must not
+        // first run the ordinary edit pipeline or require an edit payload.
+        if (this.request.body?.operation === 'delete') return;
         await assertProblemWriteCapability(this, this.pdoc, this.canEditLoadedProblem, 'edit', 'content');
         const domainId = this.pdoc.domainId;
         const problemKind = effectiveProblemKind(this.pdoc);
@@ -2631,6 +2667,8 @@ export class ProblemEditHandler extends ProblemManageHandler {
         if (isDedicatedStructuredEditorKind(problemKind)) {
             if (editorProblemKind !== problemKind) throw new ValidationError('editorProblemKind');
             if (!structuredConfig) throw new ValidationError('structuredConfig');
+            const parsedStructuredConfig = parseStructuredConfigInput(structuredConfig);
+            assertStructuredCodeLanguageAllowed(problemKind, parsedStructuredConfig, this.domain);
             const pdoc = await problem.saveStructuredProblem({
                 domainId,
                 pid: this.pdoc.docId,
@@ -2639,7 +2677,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
                 expectedStructureRevision,
                 problemKind,
                 content,
-                config: parseStructuredConfigInput(structuredConfig),
+                config: parsedStructuredConfig,
                 metadata: $update,
                 completeCodeEvaluationDraft,
                 activeContainerConfirmation: statementConfirmation,
@@ -2791,7 +2829,7 @@ abstract class DedicatedStructuredCreateHandler extends Handler {
             canUseCustomPid: this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM),
         };
         if ([PROGRAM_FILL_KIND, FUNCTION_KIND].includes(this.problemKind as any)) {
-            this.response.body.langRange = setting.SETTINGS_BY_KEY.codeLang.range;
+            this.response.body.langRange = structuredCodeLanguageRange(this.domain);
         }
     }
 
@@ -2860,6 +2898,7 @@ abstract class DedicatedStructuredCreateHandler extends Handler {
                 throw new ValidationError('content', null, localizedErrorText`代码评测草稿第一阶段不接受题面、模板或测试数据`);
             }
             persistedConfig = normalizeCodeEvaluationDraftCreationConfig(this.problemKind, parsedConfig);
+            assertStructuredCodeLanguageAllowed(this.problemKind, persistedConfig, this.domain);
         } else if (content === undefined) {
             throw new ValidationError('content');
         }
@@ -2992,7 +3031,12 @@ export class ProblemFilesHandler extends ProblemDetailHandler {
     async post() {
         if (this.args.operation === 'get_links') return;
         await assertManagedFileWriteBody(this, this.pdoc);
-        this.pdoc = await requireStableCapabilityProblem(this.user, this.pdoc, 'data', problem.PROJECTION_MANAGED_EDITOR);
+        // File-write policy must inspect the canonical lifecycle config. The
+        // normal editor projection parses config into a client-safe view, and
+        // incomplete code-evaluation drafts intentionally cannot be rendered
+        // through that view yet. Using it here made a valid compile-mode
+        // program-fill draft look as if it did not support testdata.
+        this.pdoc = await requireStableCapabilityProblem(this.user, this.pdoc, 'data', problem.PROJECTION_MANAGED_EDITOR, true);
         this.canEditLoadedProblem = problem.canEditProblemData(this.user, this.pdoc);
         if (this.pdoc.reference) throw new ProblemIsReferencedError(localizedErrorText`edit files`);
         await assertProblemWriteCapability(this, this.pdoc, this.canEditLoadedProblem, 'files', 'data');

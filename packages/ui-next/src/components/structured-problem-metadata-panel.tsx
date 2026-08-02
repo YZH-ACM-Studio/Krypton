@@ -1,5 +1,5 @@
 import { ArrowRight, ChevronDown, Loader2, Tag } from 'lucide-react';
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Input } from '@/components/ui/input';
 import { MultiSelect } from '@/components/ui/multi-select';
 import { SimpleSelect } from '@/components/ui/select';
+import { cn } from '@/lib/cn';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 
 export interface KnowledgeMindmapOption {
@@ -34,6 +35,12 @@ export interface StructuredProblemMetadataDocument {
   title?: string;
 }
 
+export interface StructuredProblemMetadataState {
+  title: string;
+  selectedKnowledgeCount: number;
+  hasInvalidKnowledge: boolean;
+}
+
 interface StructuredProblemMetadataPanelProps {
   pdoc: StructuredProblemMetadataDocument;
   isCreate: boolean;
@@ -43,6 +50,8 @@ interface StructuredProblemMetadataPanelProps {
   canUseCustomPid: boolean;
   formDirty: boolean;
   onMetadataChange: () => void;
+  onMetadataStateChange?: (state: StructuredProblemMetadataState) => void;
+  layout?: 'sidebar' | 'inline';
   visibilityLockedReason?: string;
   children?: ReactNode;
 }
@@ -96,6 +105,8 @@ export function StructuredProblemMetadataPanel({
   canUseCustomPid,
   formDirty,
   onMetadataChange,
+  onMetadataStateChange,
+  layout = 'sidebar',
   visibilityLockedReason,
   children,
 }: StructuredProblemMetadataPanelProps) {
@@ -141,6 +152,14 @@ export function StructuredProblemMetadataPanel({
       initialKnowledgeNodeIds,
     );
   const submitKnowledgeFields = isCreate || knowledgeSelectionChanged;
+
+  useEffect(() => {
+    onMetadataStateChange?.({
+      title,
+      selectedKnowledgeCount: selectedKnowledge.filter((option) => !option.invalid).length,
+      hasInvalidKnowledge,
+    });
+  }, [hasInvalidKnowledge, onMetadataStateChange, selectedKnowledge, title]);
 
   const requestMapSwitchPreview = async () => {
     setSwitchError('');
@@ -226,7 +245,7 @@ export function StructuredProblemMetadataPanel({
   };
 
   return (
-    <aside className="space-y-5 lg:border-l lg:border-border/70 lg:pl-5" aria-label="题目元数据">
+    <aside className={cn('space-y-5', layout === 'sidebar' && 'lg:border-l lg:border-border/70 lg:pl-5')} aria-label="题目元数据">
       <label className="block space-y-1.5">
         <span className="text-xs font-medium">标题</span>
         <Input
@@ -300,6 +319,7 @@ export function StructuredProblemMetadataPanel({
               ...(knowledgeMaps.length > 1 ? [{ value: '', label: '请选择所属导图' }] : []),
               ...knowledgeMaps.map((map) => ({ value: map.id, label: map.title })),
             ]}
+            ariaLabel="所属知识导图"
           />
         ) : (
           <>
@@ -390,7 +410,13 @@ export function StructuredProblemMetadataPanel({
 
       <label className="block space-y-1.5">
         <span className="text-xs font-medium">难度</span>
-        <SimpleSelect name="difficulty" defaultValue={String(pdoc.difficulty || 0)} options={DIFFICULTY_OPTIONS} onValueChange={onMetadataChange} />
+        <SimpleSelect
+          name="difficulty"
+          defaultValue={String(pdoc.difficulty || 0)}
+          options={DIFFICULTY_OPTIONS}
+          onValueChange={onMetadataChange}
+          ariaLabel="题目难度"
+        />
       </label>
 
       {isCreate ? (

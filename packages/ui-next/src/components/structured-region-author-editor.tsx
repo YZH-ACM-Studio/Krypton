@@ -40,12 +40,14 @@ export function StructuredRegionAuthorEditor({
   ranges,
   onSourceChange,
   onSelectionChange,
+  readOnly = false,
 }: {
   lang: string;
   source: string;
   ranges: AuthorLineRange[];
   onSourceChange: (source: string, ranges: AuthorLineRange[]) => void;
   onSelectionChange: (selection: AuthorLineSelection | null) => void;
+  readOnly?: boolean;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -108,6 +110,9 @@ export function StructuredRegionAuthorEditor({
         syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
         keymap.of([indentWithTab, ...closeBracketsKeymap, ...defaultKeymap, ...historyKeymap]),
         language.of(structuredCodeLanguageExtension(lang)),
+        EditorState.readOnly.of(readOnly),
+        EditorView.editable.of(!readOnly),
+        EditorView.contentAttributes.of({ 'aria-label': '私有完整模板源码', 'aria-readonly': String(readOnly) }),
         EditorView.lineWrapping,
         EditorView.updateListener.of((update) => {
           if (update.docChanged) sourceChangeRef.current(update.state.doc.toString(), mapAuthorLineRanges(update, rangeSnapshot));
@@ -132,10 +137,28 @@ export function StructuredRegionAuthorEditor({
           );
         }),
         EditorView.theme({
-          '&': { height: '100%', minHeight: '28rem', fontSize: '13px' },
-          '.cm-scroller': { height: '100%', overflow: 'auto', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace' },
-          '.cm-gutters': { minHeight: '100%' },
-          '.cm-content': { minHeight: '100%', padding: '12px 0' },
+          '&': {
+            height: '100%',
+            minHeight: '32rem',
+            fontSize: '13px',
+            color: 'var(--foreground)',
+            backgroundColor: 'color-mix(in srgb, var(--muted) 32%, var(--background))',
+          },
+          '.cm-scroller': {
+            height: '100%',
+            overflow: 'auto',
+            backgroundColor: 'inherit',
+            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+          },
+          '.cm-gutters': {
+            minHeight: '100%',
+            color: 'var(--muted-foreground)',
+            backgroundColor: 'color-mix(in srgb, var(--muted) 68%, var(--background))',
+            borderRight: '1px solid var(--border)',
+          },
+          '.cm-gutter': { minHeight: '100%' },
+          '.cm-content': { minHeight: '100%', padding: '12px 0', backgroundColor: 'transparent' },
+          '.cm-activeLineGutter': { backgroundColor: 'color-mix(in srgb, var(--primary) 10%, transparent)' },
           '.cm-lineNumbers .cm-gutterElement': { minWidth: '4.5rem', cursor: 'pointer' },
           '.krypton-structured-line-public': { backgroundColor: 'color-mix(in srgb, #16a34a 12%, transparent)' },
           '.krypton-structured-line-answer': { backgroundColor: 'color-mix(in srgb, var(--primary) 14%, transparent)' },
@@ -155,7 +178,7 @@ export function StructuredRegionAuthorEditor({
       view.destroy();
       viewRef.current = null;
     };
-  }, [geometryKey, lang]);
+  }, [geometryKey, lang, readOnly]);
 
   useEffect(() => {
     const view = viewRef.current;
@@ -168,7 +191,7 @@ export function StructuredRegionAuthorEditor({
   return (
     <div
       ref={hostRef}
-      className="h-[32rem] min-h-[28rem] overflow-hidden rounded-xl border bg-background"
+      className="h-[clamp(32rem,62vh,48rem)] min-h-[32rem] overflow-hidden rounded-xl border bg-muted/20"
       aria-label="私有完整模板编辑器；行号前公、答、私分别表示公开、作答和私有"
     />
   );

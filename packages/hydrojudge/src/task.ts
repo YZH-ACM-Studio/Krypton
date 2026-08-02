@@ -177,42 +177,55 @@ export class JudgeTask {
     }
 
     async doSubmission() {
-        this.folder = await this.cacheOpen(this.source, this.data);
-        if (this.files?.code) {
-            const target = await this.session.fetchFile(null, { [this.files.code]: '' }, this);
-            this.code = { src: target };
-            this.clean.push(() => fs.remove(target));
-        }
-        using readCasesSpan = this.startChildSpan('judge.readCases', { folder: this.folder, lang: this.lang });
-        this.config = await readCases(
-            this.folder,
-            {
-                detail: this.session.config.detail,
+        const textProgramFill = this.request.config.type === 'program_fill' && this.request.config.mode === 'text';
+        if (textProgramFill) {
+            this.folder = '';
+            this.config = {
                 ...this.request.config,
-            },
-            {
-                next: this.next,
-                isSelfSubmission: this.meta.problemOwner === this.request.uid,
-                key: md5(`${this.source}/${getConfig('secret')}`),
-                trusted: this.request.trusted && this.session.config.trusted,
-                lang: this.lang,
-                langConfig:
-                    this.request.type === 'generate' ||
-                    ['objective', 'submit_answer'].includes(this.request.config.type) ||
-                    (this.request.config.type === 'program_fill' && this.request.config.mode === 'text')
-                        ? null
-                        : this.session.getLang(this.lang),
-            },
-        );
-        readCasesSpan.end();
-        const type =
-            this.request.contest?.toString() === '000000000000000000000000'
-                ? 'run'
-                : this.request.type === 'generate'
-                  ? 'generate'
-                  : this.files?.hack
-                    ? 'hack'
-                    : this.config.type || 'default';
+                count: 0,
+                time: 0,
+                memory: 0,
+                subtasks: [],
+                detail: this.session.config.detail,
+            } as ParsedConfig;
+        } else {
+            this.folder = await this.cacheOpen(this.source, this.data);
+            if (this.files?.code) {
+                const target = await this.session.fetchFile(null, { [this.files.code]: '' }, this);
+                this.code = { src: target };
+                this.clean.push(() => fs.remove(target));
+            }
+            using readCasesSpan = this.startChildSpan('judge.readCases', { folder: this.folder, lang: this.lang });
+            this.config = await readCases(
+                this.folder,
+                {
+                    detail: this.session.config.detail,
+                    ...this.request.config,
+                },
+                {
+                    next: this.next,
+                    isSelfSubmission: this.meta.problemOwner === this.request.uid,
+                    key: md5(`${this.source}/${getConfig('secret')}`),
+                    trusted: this.request.trusted && this.session.config.trusted,
+                    lang: this.lang,
+                    langConfig:
+                        this.request.type === 'generate' || ['objective', 'submit_answer'].includes(this.request.config.type)
+                            ? null
+                            : this.session.getLang(this.lang),
+                },
+            );
+            readCasesSpan.end();
+        }
+        const pretest = this.request.contest?.toString() === '000000000000000000000000';
+        const type = pretest
+            ? ['program_fill', 'function'].includes(this.config.type)
+                ? this.config.type
+                : 'run'
+            : this.request.type === 'generate'
+              ? 'generate'
+              : this.files?.hack
+                ? 'hack'
+                : this.config.type || 'default';
         if (!judge[type]) throw new FormatError('Unrecognized problemType: {0}', [type]);
         using executeSpan = this.startChildSpan('judge.execute', { judgeType: type });
         this.mainContext = trace.setSpan(context.active(), executeSpan);

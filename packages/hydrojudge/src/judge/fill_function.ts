@@ -14,6 +14,9 @@ import {
 } from 'hydrooj';
 import { judge as defaultJudge } from './default';
 import { Context } from './interface';
+import { judge as runJudge } from './run';
+
+const PRETEST_CONTEST_ID = '000000000000000000000000';
 
 export const judge = async (ctx: Context) => {
     const template = (ctx.config as any).template;
@@ -35,6 +38,17 @@ export const judge = async (ctx: Context) => {
         return;
     }
     const textMode = kind === 'program_fill' && (ctx.config as any).mode === 'text';
+    const pretest = ctx.request.contest?.toString() === PRETEST_CONTEST_ID;
+    if (pretest && textMode) {
+        ctx.end({
+            status: STATUS.STATUS_FORMAT_ERROR,
+            score: 0,
+            message: 'program_fill: text mode does not execute pretests',
+            time: 0,
+            memory: 0,
+        });
+        return;
+    }
     const expectedLang = textMode ? '_' : template.lang;
     if (ctx.lang !== expectedLang) {
         ctx.end({
@@ -114,5 +128,6 @@ export const judge = async (ctx: Context) => {
     // runs ctx.code through normal testcases.
     (ctx as any).code = { content: splicedSource };
     (ctx as any).lang = template.lang || ctx.lang;
-    await defaultJudge(ctx);
+    if (pretest) await runJudge(ctx);
+    else await defaultJudge(ctx);
 };

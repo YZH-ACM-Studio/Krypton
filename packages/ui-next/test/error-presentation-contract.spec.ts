@@ -47,7 +47,7 @@ describe('p2.45 first-party error presentation contracts', () => {
 
   it('routes the remaining first-party HTTP error surfaces through the common presenter', () => {
     const expectedCalls = new Map<string, number>([
-      ['packages/ui-next/src/components/krypton-ide.tsx', 3],
+      ['packages/ui-next/src/components/krypton-ide.tsx', 4],
       ['packages/ui-next/src/components/markdown-renderer.tsx', 1],
       ['packages/ui-next/src/components/problem-testdata-file-dialog.tsx', 2],
       ['packages/ui-next/src/components/uploader.tsx', 1],

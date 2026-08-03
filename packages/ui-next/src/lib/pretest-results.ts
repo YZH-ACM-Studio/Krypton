@@ -8,6 +8,7 @@ export interface PretestCaseResult {
 
 export interface PretestResult {
   status?: number;
+  score?: number;
   time?: number;
   memory?: number;
   compilerTexts?: string[];
@@ -45,6 +46,22 @@ export function parseRecordResponse(payload: unknown): PretestResult & { status:
 export type SelfTestVerdict = 'ac' | 'wa' | 'ran' | 'fail' | 'pending' | 'none';
 export type PretestResultTab = 'output' | 'diff' | 'compiler';
 
+export function isPendingJudgeStatus(status: number): boolean {
+  return status === 0 || status === 20 || status === 21 || status === 22;
+}
+
+export function isTerminalJudgeStatus(status: number | undefined): status is number {
+  return typeof status === 'number' && !isPendingJudgeStatus(status);
+}
+
+export function normalizePretestLineEndings(value: string): string {
+  return value.replace(/\r\n?/g, '\n');
+}
+
+export function pretestOutputsMatch(actual: string, expected: string): boolean {
+  return normalizePretestLineEndings(actual).trim() === normalizePretestLineEndings(expected).trim();
+}
+
 export function preferredPretestResultTab(result: PretestResult): PretestResultTab {
   const hasCompilerDiagnostics =
     result.compilerTexts?.some((text) => text.trim().length > 0) || (typeof result.stderr === 'string' && result.stderr.trim().length > 0);
@@ -53,7 +70,7 @@ export function preferredPretestResultTab(result: PretestResult): PretestResultT
 }
 
 export function pretestActualOutput(result: Pick<PretestResult, 'testCases' | 'stdout' | 'judgeTexts'> | null | undefined): string {
-  return result?.testCases?.[0]?.message || result?.stdout || result?.judgeTexts?.join('\n') || '';
+  return normalizePretestLineEndings(result?.testCases?.[0]?.message || result?.stdout || result?.judgeTexts?.join('\n') || '');
 }
 
 export function selfTestVerdict(
@@ -62,9 +79,10 @@ export function selfTestVerdict(
 ): SelfTestVerdict {
   const status = result?.status;
   if (status == null) return 'none';
-  if (status !== 1) return status >= 2 && status < 20 ? 'fail' : 'pending';
+  if (isPendingJudgeStatus(status)) return 'pending';
+  if (status !== 1) return 'fail';
   if (expectedOutput.trim().length === 0) return 'ran';
-  return pretestActualOutput(result).trim() === expectedOutput.trim() ? 'ac' : 'wa';
+  return pretestOutputsMatch(pretestActualOutput(result), expectedOutput) ? 'ac' : 'wa';
 }
 
 export function distributePretestRecord(rdoc: PretestResult, tabIds: string[]): Map<string, PretestResult> {

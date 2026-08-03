@@ -49,9 +49,12 @@ import { cn } from '@/lib/cn';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import {
   distributePretestRecord,
+  isTerminalJudgeStatus,
+  normalizePretestLineEndings,
   parseRecordResponse,
   preferredPretestResultTab,
   pretestActualOutput,
+  pretestOutputsMatch,
   selfTestVerdict,
   type PretestResult,
 } from '@/lib/pretest-results';
@@ -316,7 +319,10 @@ const STATUS_MAP: Record<number, StatusDisplay> = {
   20: { label: '评测中…', className: 'text-blue-500' },
   21: { label: '编译中…', className: 'text-blue-500' },
   22: { label: '等待中…', className: 'text-muted-foreground' },
-  30: { label: '格式错误', className: 'text-red-500' },
+  30: { label: '已忽略', className: 'text-muted-foreground' },
+  31: { label: '格式错误', className: 'text-red-500' },
+  32: { label: 'Hack 成功', className: 'text-green-500' },
+  33: { label: 'Hack 失败', className: 'text-red-500' },
 };
 
 export function getStatus(s: number): StatusDisplay {
@@ -508,8 +514,8 @@ export interface RecordEntry {
 /* ================================================================== */
 
 function diffLines(actual: string, expected: string): { type: 'same' | 'add' | 'del'; text: string }[] {
-  const a = actual.split('\n');
-  const b = expected.split('\n');
+  const a = normalizePretestLineEndings(actual).split('\n');
+  const b = normalizePretestLineEndings(expected).split('\n');
   const maxLen = Math.max(a.length, b.length);
   const result: { type: 'same' | 'add' | 'del'; text: string }[] = [];
   for (let i = 0; i < maxLen; i++) {
@@ -571,7 +577,7 @@ export function PretestResultInline({
   const compilerOutput = result.compilerTexts?.join('\n') || '';
   const stderr = result.stderr || '';
   const hasExpected = expectedOutput.trim().length > 0;
-  const outputMatch = hasExpected && actualOutput.trim() === expectedOutput.trim();
+  const outputMatch = hasExpected && pretestOutputsMatch(actualOutput, expectedOutput);
 
   const tabs: { id: 'output' | 'diff' | 'compiler'; label: string; show: boolean }[] = [
     { id: 'output', label: '输出', show: true },
@@ -1069,14 +1075,21 @@ export function KryptonIDE({
           headers: { Accept: 'application/json' },
           credentials: 'same-origin',
         });
+        if (!res.ok) throw new Error(await readHydroResponseError(res, '加载提交状态失败'));
         const rdoc = parseRecordResponse(await res.json());
         const s = rdoc.status;
-        setRecords((prev) => prev.map((r) => (r.rid === rid ? { ...r, status: s, time: rdoc.time, memory: rdoc.memory } : r)));
-        if (s > 0 && s < 20) return;
-      } catch {
-        break;
+        setRecords((prev) => prev.map((r) => (r.rid === rid ? { ...r, status: s, score: rdoc.score, time: rdoc.time, memory: rdoc.memory } : r)));
+        if (isTerminalJudgeStatus(s)) return;
+      } catch (error) {
+        console.error('Problem record polling failed', {
+          rid,
+          url,
+          attempt: i + 1,
+          error,
+        });
       }
     }
+    console.error('Problem record polling timed out', { rid, url, attempts: 120 });
   }, []);
 
   const resolveRecordUrl = useCallback(
@@ -1280,8 +1293,7 @@ export function KryptonIDE({
           const s = rdoc.status;
           distributeFromRdoc(rdoc);
 
-          // Final status: 1-19
-          if (s > 0 && s < 20) {
+          if (isTerminalJudgeStatus(s)) {
             setPretestResultTab(preferredPretestResultTab(rdoc));
             return;
           }

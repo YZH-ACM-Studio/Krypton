@@ -1,12 +1,116 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { KryptonIDE } from '../src/components/krypton-ide';
+import { KryptonIDE, PretestResultInline } from '../src/components/krypton-ide';
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 describe('krypton IDE problem submission', () => {
+  it('renders CRLF and LF self-test output as matching', () => {
+    render(
+      <PretestResultInline
+        result={{
+          status: 1,
+          testCases: [{ id: 1, status: 1, time: 1, memory: 10, message: 'first\r\nsecond\r\n' }],
+        }}
+        expectedOutput={'first\nsecond\n'}
+        activeResultTab="diff"
+        onResultTabChange={() => undefined}
+      />,
+    );
+
+    expect(screen.getByText('输出匹配')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '✓ 匹配' })).toBeInTheDocument();
+    expect(screen.queryByText('输出不匹配')).not.toBeInTheDocument();
+  });
+
+  it('keeps polling after one transient record request failure', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ rid: '507f1f77bcf86cd799439012' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockRejectedValueOnce(new Error('temporary network failure'))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ rdoc: { status: 2, score: 0, time: 3, memory: 128 } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    const onRecordsChange = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    render(
+      <KryptonIDE
+        langs={['cc.cc17']}
+        defaultCode="int main() { return 0; }"
+        submitUrl="/p/P1000/submit"
+        onRecordsChange={onRecordsChange}
+        minHeight={120}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /^提交/ }));
+    await act(async () => undefined);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(onRecordsChange.mock.calls.at(-1)?.[0]?.[0]).toMatchObject({ status: 2, score: 0, time: 3, memory: 128 });
+  });
+
+  it('stops polling when the judge returns a format-error terminal status', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ rid: '507f1f77bcf86cd799439013' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ rdoc: { status: 31, score: 0 } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    const onRecordsChange = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <KryptonIDE
+        langs={['cc.cc17']}
+        defaultCode="int main() { return 0; }"
+        submitUrl="/p/P1000/submit"
+        onRecordsChange={onRecordsChange}
+        minHeight={120}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /^提交/ }));
+    await act(async () => undefined);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(onRecordsChange.mock.calls.at(-1)?.[0]?.[0]).toMatchObject({ status: 31, score: 0 });
+  });
+
   it('keeps the run-all control width stable while a self-test enters cooldown', async () => {
     vi.stubGlobal(
       'fetch',

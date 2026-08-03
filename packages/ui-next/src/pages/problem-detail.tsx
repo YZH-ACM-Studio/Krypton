@@ -43,6 +43,7 @@ import { cn } from '@/lib/cn';
 import { canSubmitProblemMode } from '@/lib/contest-exam-display';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { replaceRouteTokens } from '@/lib/format';
+import { isPendingJudgeStatus, isTerminalJudgeStatus } from '@/lib/pretest-results';
 import { shouldShowNoTestdataWarning } from '@/lib/problem-testcase-warning';
 import { extractSamples } from '@/lib/samples';
 
@@ -265,6 +266,17 @@ function mergeRecordEntries(...lists: RecordEntry[][]): RecordEntry[] {
   return Array.from(byRid.values())
     .sort((a, b) => b.timestamp - a.timestamp)
     .slice(0, 50);
+}
+
+export function mergeIdeRecordSnapshot(current: RecordEntry[], snapshot: RecordEntry[]): RecordEntry[] {
+  const currentByRid = new Map(current.map((record) => [record.rid, record]));
+  const nonRegressingSnapshot = snapshot.map((record) => {
+    const liveRecord = currentByRid.get(record.rid);
+    const liveIsTerminal = !!liveRecord && isTerminalJudgeStatus(liveRecord.status);
+    const snapshotIsTerminal = isTerminalJudgeStatus(record.status);
+    return liveIsTerminal && !snapshotIsTerminal ? liveRecord : record;
+  });
+  return mergeRecordEntries(current, nonRegressingSnapshot);
 }
 
 // Sentinel contest IDs for non-submission records — pretest and generate
@@ -841,7 +853,7 @@ export function ProblemDetailPage() {
   const recordsPanelRef = useRef<HTMLDivElement>(null);
 
   const handleRecordsChange = useCallback((records: RecordEntry[]) => {
-    setIdeRecords((prev) => mergeRecordEntries(prev, records));
+    setIdeRecords((prev) => mergeIdeRecordSnapshot(prev, records));
   }, []);
   const handleToggleRecords = useCallback(() => {
     setShowIdeRecords((p) => !p);
@@ -899,7 +911,7 @@ export function ProblemDetailPage() {
       const json = (await res.json()) as { rdocs?: unknown; page?: { data?: { rdocs?: unknown } } };
       const rdocs = Array.isArray(json.rdocs) ? json.rdocs : Array.isArray(json.page?.data?.rdocs) ? json.page.data.rdocs : [];
       const entries = rdocs.map((rdoc: RawRecordDoc) => recordEntryFromRdoc(rdoc, recordDetailRoute)).filter(Boolean) as RecordEntry[];
-      setIdeRecords((prev) => mergeRecordEntries(prev, entries));
+      setIdeRecords((prev) => mergeIdeRecordSnapshot(prev, entries));
       if (teamCodeReadOnly && entries[0]) await loadReadonlySource(entries[0]);
       setIdeRecordsLoaded(true);
     } catch (e) {
@@ -1112,7 +1124,7 @@ export function ProblemDetailPage() {
                               return (
                                 <tr key={r.rid} className="border-b last:border-0 hover:bg-muted/20">
                                   <td className={cn('whitespace-nowrap px-3 py-1.5 font-medium', st.className)}>
-                                    {r.status >= 20 ? (
+                                    {isPendingJudgeStatus(r.status) ? (
                                       <span className="inline-flex items-center gap-1">
                                         <Loader2 className="size-3 animate-spin" />
                                         {st.label}

@@ -56,7 +56,17 @@ describe('krypton IDE multi-case pretest results', () => {
     expect(selfTestVerdict(accepted, '41\n')).to.equal('wa');
     expect(selfTestVerdict(accepted, '')).to.equal('ran');
     expect(selfTestVerdict({ ...accepted, status: 7 }, '42\n')).to.equal('fail');
+    expect(selfTestVerdict({ status: 31 }, '42\n')).to.equal('fail');
     expect(selfTestVerdict({ status: 21 }, '42\n')).to.equal('pending');
+  });
+
+  it('treats CRLF and LF as the same self-test output', () => {
+    const accepted = {
+      status: 1,
+      testCases: [{ id: 1, status: 1, time: 1, memory: 10, message: 'first\r\nsecond\r\n' }],
+    };
+
+    expect(selfTestVerdict(accepted, 'first\nsecond\n')).to.equal('ac');
   });
 
   it('opens compiler diagnostics when a self-test ends with a compile error', () => {

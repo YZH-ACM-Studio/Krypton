@@ -299,6 +299,8 @@ export interface MarkdownEditorProps {
     endpoint: string;
     meta?: Record<string, string>;
     makeUrl?: (filename: string) => string;
+    /** Authorize this upload and return any operation-bound form fields. */
+    authorize?: () => Promise<Record<string, string> | false>;
   };
   /** Resolve file:// attachments inside the live preview without changing the saved markdown. */
   previewFileUrl?: FileUrlResolver;
@@ -407,13 +409,25 @@ export function MarkdownEditor({
       if (!file) return;
 
       e.preventDefault();
+      const ta = e.currentTarget;
+      const start = ta.selectionStart ?? sourceRef.current.length;
+      const end = ta.selectionEnd ?? start;
+      let authorizationMeta: Record<string, string> = {};
+      if (pasteUpload.authorize) {
+        try {
+          const authorization = await pasteUpload.authorize();
+          if (authorization === false) return;
+          authorizationMeta = authorization;
+        } catch (error) {
+          console.error('Markdown image upload authorization failed', error);
+          return;
+        }
+      }
+
       const ext = imageExtension(file.type);
       const token = makeUploadToken();
       const filename = `${token}.${ext}`;
       const placeholder = `![image](uploading-${token})`;
-      const ta = e.currentTarget;
-      const start = ta.selectionStart ?? sourceRef.current.length;
-      const end = ta.selectionEnd ?? start;
       const current = sourceRef.current;
       commitSource(current.slice(0, start) + placeholder + current.slice(end));
       requestAnimationFrame(() => {
@@ -423,6 +437,7 @@ export function MarkdownEditor({
 
       const form = new FormData();
       for (const [key, val] of Object.entries(pasteUpload.meta || {})) form.append(key, val);
+      for (const [key, val] of Object.entries(authorizationMeta)) form.set(key, val);
       if (!form.has('operation')) form.append('operation', 'upload_file');
       if (!form.has('filename')) form.append('filename', filename);
       form.append('file', file, filename);

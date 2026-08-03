@@ -16,7 +16,12 @@ import {
 } from '@/components/problem-authoring-state';
 import { ProblemEditorWorkspace } from '@/components/problem-editor-workspace';
 import { emptyProgrammingStatement, ProgrammingStatementEditor, type ProgrammingStatementCanonical } from '@/components/programming-statement';
-import { type ProblemDataWriteGuardState, useProblemDataWriteGuard } from '@/components/problem-data-write-guard';
+import {
+  prepareProblemDataWrite,
+  type ProblemDataWriteGuardState,
+  type ProblemDataWriteOperation,
+  useProblemDataWriteGuard,
+} from '@/components/problem-data-write-guard';
 import { useFormDirtyState, useUnsavedChangesGuard } from '@/components/unsaved-changes-guard';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -841,6 +846,19 @@ export function ProblemEditPage() {
   const formRef = useRef<HTMLFormElement>(null);
   const editVersion = useRef(0);
   const statementGuard = useProblemDataWriteGuard(data.statementWriteGuard, 'statement');
+  const prepareStatementAttachmentWrite = useCallback(
+    (operation: ProblemDataWriteOperation) => {
+      if (!filesBase) throw new Error('题目尚未创建，不能上传题面图片');
+      return prepareProblemDataWrite(filesBase, operation);
+    },
+    [filesBase],
+  );
+  const statementAttachmentGuard = useProblemDataWriteGuard(undefined, 'attachment', prepareStatementAttachmentWrite);
+  const authorizeStatementImageUpload = useCallback(async (): Promise<Record<string, string> | false> => {
+    const confirmation = await statementAttachmentGuard.confirm('上传题面图片', 'files-upload');
+    if (!confirmation) return false;
+    return typeof confirmation === 'string' ? { activeContainerConfirmation: confirmation } : {};
+  }, [statementAttachmentGuard.confirm]);
 
   const [persistedTags, setPersistedTags] = useState<string[]>(pdoc.tag || []);
   const [persistedStructureRevision, setPersistedStructureRevision] = useState<number | undefined>(pdoc.structureRevision);
@@ -1335,6 +1353,7 @@ export function ProblemEditPage() {
             </aside>
           ) : null}
           {statementGuard.notice}
+          {statementAttachmentGuard.notice}
 
           <form
             id="programming-problem-form"
@@ -1945,6 +1964,7 @@ export function ProblemEditPage() {
                           filesBase={filesBase}
                           problemUrl={problemUrl}
                           limitsPreview={statementLimitsPreview}
+                          authorizeImageUpload={authorizeStatementImageUpload}
                         />
                       </div>
                     ) : canEditContent ? (
@@ -1974,6 +1994,7 @@ export function ProblemEditPage() {
                                   endpoint: filesBase,
                                   meta: { type: 'additional_file' },
                                   makeUrl: (filename) => `file://${filename}`,
+                                  authorize: authorizeStatementImageUpload,
                                 }
                               : undefined
                           }
@@ -2162,6 +2183,7 @@ export function ProblemEditPage() {
         </DialogContent>
       </Dialog>
       {statementGuard.dialog}
+      {statementAttachmentGuard.dialog}
       {navigationGuard.guardDialog}
     </ProblemEditorWorkspace>
   );

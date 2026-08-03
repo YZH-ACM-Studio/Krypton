@@ -227,12 +227,14 @@ export function ProgrammingStatementEditor({
   filesBase,
   problemUrl,
   limitsPreview,
+  authorizeImageUpload,
 }: {
   value: ProgrammingStatementCanonical;
   onChange: (value: ProgrammingStatementCanonical) => void;
   filesBase?: string;
   problemUrl: string;
   limitsPreview?: ReactNode;
+  authorizeImageUpload?: () => Promise<Record<string, string> | false>;
 }) {
   const [pendingAbsent, setPendingAbsent] = useState<TextSectionKey | 'examples' | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -242,6 +244,7 @@ export function ProgrammingStatementEditor({
         endpoint: filesBase,
         meta: { type: 'additional_file' },
         makeUrl: (filename: string) => `file://${filename}`,
+        authorize: authorizeImageUpload,
       }
     : undefined;
   const previewFileUrl = (filename: string, original: string) => {

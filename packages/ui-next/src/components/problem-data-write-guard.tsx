@@ -74,7 +74,7 @@ export async function prepareProblemDataWrite(endpoint: string, operation: Probl
 
 export function useProblemDataWriteGuard(
   state: ProblemDataWriteGuardState | undefined,
-  scope: 'data' | 'statement' = 'data',
+  scope: 'data' | 'statement' | 'attachment' = 'data',
   prepare?: PrepareProblemDataWrite,
 ) {
   const active = Array.isArray(state?.active) ? state.active : [];
@@ -90,6 +90,7 @@ export function useProblemDataWriteGuard(
   } | null>(null);
   const resolver = useRef<((confirmed: ProblemDataWriteConfirmationResult) => void) | null>(null);
   const preparing = useRef(false);
+  const scopeLabel = scope === 'statement' ? '题面' : scope === 'attachment' ? '题面附件' : '评测数据';
 
   const settle = useCallback(
     (confirmed: boolean) => {
@@ -135,7 +136,7 @@ export function useProblemDataWriteGuard(
         return true;
       }
       if (!prepared.canOverride) {
-        setPreparationError(`此题正在比赛或考试中使用，当前角色不能修改${scope === 'statement' ? '题面' : '评测数据'}。`);
+        setPreparationError(`此题正在比赛或考试中使用，当前角色不能修改${scopeLabel}。`);
         preparing.current = false;
         return false;
       }
@@ -154,7 +155,7 @@ export function useProblemDataWriteGuard(
         resolver.current = resolve;
       });
     },
-    [active, canOverride, confirmationRequestIds, prepare, scope],
+    [active, canOverride, confirmationRequestIds, prepare, scopeLabel],
   );
 
   const notice =
@@ -170,10 +171,10 @@ export function useProblemDataWriteGuard(
               <p className="font-medium">此题正在比赛或考试中使用</p>
               <p className="mt-1 text-xs leading-5 text-muted-foreground">
                 {!canOverride
-                  ? `当前角色不能在比赛或考试进行中修改${scope === 'statement' ? '题面' : '评测数据'}；操作时会重新检查当前状态。`
+                  ? `当前角色不能在比赛或考试进行中修改${scopeLabel}；操作时会重新检查当前状态。`
                   : blocked
-                    ? `赛中${scope === 'statement' ? '题面' : '数据'}修改确认已失效，请重试。`
-                    : `系统管理员每次修改${scope === 'statement' ? '题面' : '评测数据'}前都必须在自定义确认框中明确确认，操作会写入审计日志。`}
+                    ? `赛中${scopeLabel}修改确认已失效，请重试。`
+                    : `系统管理员每次修改${scopeLabel}前都必须在自定义确认框中明确确认，操作会写入审计日志。`}
               </p>
               <ul className="mt-1 list-inside list-disc text-xs text-muted-foreground">
                 {active.map((item) => (
@@ -195,7 +196,7 @@ export function useProblemDataWriteGuard(
     <Dialog open onOpenChange={(open) => !open && settle(false)}>
       <DialogContent className="max-w-lg" onClose={() => settle(false)}>
         <DialogHeader>
-          <DialogTitle>确认修改赛中{scope === 'statement' ? '题面' : '评测数据'}</DialogTitle>
+          <DialogTitle>确认修改赛中{scopeLabel}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 p-5 text-sm">
           <p>

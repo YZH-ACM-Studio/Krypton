@@ -499,7 +499,7 @@ export function AdminAnnounceEditorPage() {
                   minHeight={480}
                   pasteUpload={{
                     endpoint: '/file',
-                    makeUrl: (filename) => `/file/${uid}/${filename}`,
+                    makeUrl: (filename) => `/file/${uid}/${filename}?noDisposition=1`,
                   }}
                 />
               </FormField>

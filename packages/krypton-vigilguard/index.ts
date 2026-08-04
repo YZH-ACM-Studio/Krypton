@@ -33,7 +33,7 @@ import {
     listActiveSessionsForContest,
     refreshActiveTeamSessionRoles,
 } from './src/helpers';
-import { getBrowserLockoutDecision, invalidateLockoutCache, vigilGuardLockoutLayer } from './src/lockout';
+import { enforceBoundClientHandler, getBrowserLockoutDecision, invalidateLockoutCache, vigilGuardLockoutLayer } from './src/lockout';
 import { migrationScripts } from './src/migration';
 
 export * from './src/types';
@@ -89,6 +89,7 @@ export function apply(ctx: Context) {
     ctx.inject(['server'], ({ server }) => {
         server.addHandlerLayer('vigilguard:lockout', vigilGuardLockoutLayer);
     });
+    ctx.on('handler/before-prepare', enforceBoundClientHandler);
 
     ctx.inject(['migration'], (c) => {
         c.migration.registerChannel('vigilguard', migrationScripts);

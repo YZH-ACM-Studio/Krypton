@@ -5,13 +5,14 @@
  * Design ref: §7 of CLIENT_REQUIRED_CONTEST_DESIGN.md.
  *
  * Behavior (per-request, runs as a handler layer after `user`):
- *   1. Whitelist paths bypass entirely (login / logout / bind / claim /
- *      the notice page itself / static resources).
- *   2. Anonymous (uid===0) skip — there's no "session to invalidate" yet.
- *   3. Admin / PRIV_EDIT_SYSTEM bypass — operators can always reach the
- *      site, even during a lockout, for diagnostics.
- *   4. If the request already has a valid client session, skip — the
- *      student is inside Qt Client, this is exactly what we want.
+ *   1. A valid client session is marked as a contest-bound authority. A
+ *      `handler/before-prepare` hook then confines it before route-specific
+ *      preparation or business logic can run.
+ *   2. Ordinary-browser recovery paths bypass the audience lockout.
+ *   3. Anonymous (uid===0) ordinary-browser requests skip.
+ *   4. Admin / PRIV_EDIT_SYSTEM bypass — ordinary operator sessions can
+ *      always reach the site for diagnostics; a Vigil-bound operator session
+ *      deliberately remains inside its exam workspace.
  *   5. Otherwise, compute the set of client_required contests whose
  *      lockout window contains `now` AND that this student is eligible
  *      for (legacy assign + Krypton scope). If non-empty, drop the
@@ -26,6 +27,7 @@
  * to bust affected entries.
  */
 import type { KoaContext } from '@hydrooj/framework';
+import { Logger } from '@hydrooj/utils';
 import type { Tdoc } from 'hydrooj';
 import { PERM, PRIV } from 'hydrooj/src/model/builtin';
 import * as contest from 'hydrooj/src/model/contest';
@@ -34,6 +36,16 @@ import * as document from 'hydrooj/src/model/document';
 import userModel from 'hydrooj/src/model/user';
 import { clientSessionKeyFromSession, currentClientSession, hitsParticipantScope } from './helpers';
 import { isBrowserLockoutAudience } from './lockout-audience';
+import type { ClientSessionDoc } from './types';
+
+const logger = new Logger('vigilguard.lockout');
+const BOUND_CLIENT_AUTHORITY = Symbol('krypton.vigilguard.bound-client-authority');
+
+interface BoundClientAuthority {
+    contestId: string;
+    domainId: string;
+    uid: number;
+}
 
 // ── Whitelist ─────────────────────────────────────────────────────────────
 
@@ -47,8 +59,7 @@ import { isBrowserLockoutAudience } from './lockout-audience';
  * NOTE: static asset prefixes are excluded here because the static
  * server is configured *before* this layer in the chain (see
  * `server.addServerLayer(addon_public, ...)` in `service/server.ts`).
- * So static requests never reach us. We still whitelist `/` so that the
- * notice page's CSS bundle loads.
+ * So static requests never reach us.
  */
 const WHITELIST_PATHS = [
     '/client-required-notice',
@@ -155,13 +166,7 @@ export function invalidateLockoutCache(domainId?: string, uid?: number): void {
     lockoutCache.clear();
 }
 
-export async function getBrowserLockoutDecision(domainId: string, uid: number, session?: any): Promise<CacheEntry['decision']> {
-    const sid = session ? clientSessionKeyFromSession(session) : '';
-    if (sid) {
-        const sess = await currentClientSession(sid);
-        if (sess && sess.uid === uid && sess.domainId === domainId) return null;
-    }
-
+export async function getBrowserLockoutDecision(domainId: string, uid: number): Promise<CacheEntry['decision']> {
     const key = cacheKey(domainId, uid);
     for (;;) {
         const entry = cacheGet(key);
@@ -173,6 +178,100 @@ export async function getBrowserLockoutDecision(domainId: string, uid: number, s
         cacheSet(key, computed);
         return computed.decision;
     }
+}
+
+function requestPathInsideDomain(path: string, domainId: string): string {
+    const prefix = `/d/${encodeURIComponent(domainId)}`;
+    if (path === prefix) return '/';
+    if (path.startsWith(`${prefix}/`)) return path.slice(prefix.length);
+    return path;
+}
+
+function requestQueryValue(ctx: KoaContext, key: string): string {
+    const value = (ctx.query as Record<string, unknown> | undefined)?.[key] ?? (ctx.request?.query as Record<string, unknown> | undefined)?.[key];
+    if (Array.isArray(value)) return value.length === 1 ? String(value[0]) : '';
+    return value === undefined || value === null ? '' : String(value);
+}
+
+function isBoundClientWorkspacePath(path: string, contestId: string): boolean {
+    const examPrefix = `/exam-mode/${contestId}`;
+    const paperPrefix = `/paper/${contestId}`;
+    return path === examPrefix || path.startsWith(`${examPrefix}/`) || path === paperPrefix || path.startsWith(`${paperPrefix}/`);
+}
+
+/**
+ * A Vigil-bound Hydro session is authority for one exam workspace, not a
+ * general OJ login. Keep the few legacy support endpoints explicit because
+ * the exam UI still submits code and polls pretests through their canonical
+ * handlers; each of those handlers independently verifies the same `tid`.
+ */
+function isBoundClientRequestAllowed(ctx: KoaContext, domainId: string, contestId: string): boolean {
+    const requestDomainId = String((ctx as any).HydroContext?.domain?._id || '');
+    if (requestDomainId !== domainId) return false;
+    const path = requestPathInsideDomain(ctx.request?.path || '', domainId);
+    if (isBoundClientWorkspacePath(path, contestId)) return true;
+
+    const method = String(ctx.request?.method || 'GET').toUpperCase();
+    const requestedContestId = requestQueryValue(ctx, 'tid');
+    if (requestedContestId !== contestId) return false;
+
+    if (method === 'POST' && /^\/p\/[^/]+\/submit$/.test(path)) return true;
+    if (method === 'GET' && /^\/p\/[^/]+\/file\/[^/]+$/.test(path)) return true;
+    if (method === 'GET' && (ctx as any).HydroContext?.request?.json === true && /^\/record\/[0-9a-f]{24}$/i.test(path)) return true;
+    return false;
+}
+
+function domainPath(domainId: string, path: string): string {
+    return `/d/${encodeURIComponent(domainId)}${path}`;
+}
+
+function boundExamEntry(domainId: string, contestId: string): string {
+    return domainPath(domainId, `/exam-mode/${contestId}`);
+}
+
+function safeClientFormReturnPath(path: string, domainId: string, contestId: string): string {
+    const normalized = requestPathInsideDomain(path, domainId);
+    if (isBoundClientWorkspacePath(normalized, contestId)) return domainPath(domainId, normalized);
+    const submit = /^\/p\/([^/]+)\/submit$/.exec(normalized);
+    if (submit) return `${boundExamEntry(domainId, contestId)}/problem/${encodeURIComponent(submit[1])}`;
+    return boundExamEntry(domainId, contestId);
+}
+
+function clientAuthority(session: ClientSessionDoc): BoundClientAuthority {
+    const contestId = session.contestId?.toHexString?.() || '';
+    if (!contestId || !session.domainId || !Number.isSafeInteger(session.uid)) {
+        throw new TypeError('Active Vigil client session has an invalid contest binding.');
+    }
+    return { contestId, domainId: session.domainId, uid: session.uid };
+}
+
+/**
+ * Stop a bound Client request after Hydro has selected its handler but before
+ * that handler can prepare data or run business logic. Returning `cleanup`
+ * uses Hydro's supported short-circuit path and keeps response serialization
+ * intact; returning directly from the earlier Koa layer would leave Hydro
+ * without a handler and turn the intended redirect into a 500 response.
+ */
+export function enforceBoundClientHandler(handler: any): 'cleanup' | undefined {
+    const context = handler?.context as (KoaContext & { [BOUND_CLIENT_AUTHORITY]?: BoundClientAuthority }) | undefined;
+    const authority = context?.[BOUND_CLIENT_AUTHORITY];
+    if (!context || !authority || isBoundClientRequestAllowed(context, authority.domainId, authority.contestId)) return undefined;
+
+    const target = boundExamEntry(authority.domainId, authority.contestId);
+    logger.warn(
+        'Client route confinement denied domain=%s contest=%s actor=%d method=%s path=%s result=redirected target=%s',
+        authority.domainId,
+        authority.contestId,
+        authority.uid,
+        context.request?.method || '-',
+        context.request?.path || '-',
+        target,
+    );
+    handler.response.status = 302;
+    handler.response.template = null;
+    handler.response.body = {};
+    handler.response.redirect = target;
+    return 'cleanup';
 }
 
 // ── Lockout decision ──────────────────────────────────────────────────────
@@ -274,23 +373,69 @@ export const vigilGuardLockoutLayer = async (ctx: KoaContext, next: () => Promis
     // and admins close those independently. (We also skip if HydroContext
     // isn't ready yet — e.g., the setup wizard before db is online.)
     const path = ctx.request?.path || '';
-    if (matchesWhitelist(path)) {
-        await next();
-        return;
-    }
-
     const hctx = (ctx as any).HydroContext;
     if (!hctx) {
         await next();
         return;
     }
     const { user, domain } = hctx;
+    const sid = clientSessionKeyFromSession((ctx as any).session);
+    const clientSession = sid ? await currentClientSession(sid) : null;
+    if (clientSession && user && clientSession.uid === user._id) {
+        const authority = clientAuthority(clientSession);
+        (ctx as KoaContext & { [BOUND_CLIENT_AUTHORITY]?: BoundClientAuthority })[BOUND_CLIENT_AUTHORITY] = authority;
 
-    // Anonymous & admin bypasses
+        await next();
+
+        // Parameter validation for a plain HTML form used to replace the
+        // exam shell with Hydro's generic error chrome. Keep user-facing POST
+        // errors inside the bound workspace; JSON callers retain the original
+        // structured error response.
+        const request = (ctx as any).HydroContext?.request;
+        const response = (ctx as any).HydroContext?.response;
+        if (
+            request?.method === 'post' &&
+            request?.json !== true &&
+            response?.template === 'error.html' &&
+            Number(response?.status) >= 400 &&
+            Number(response?.status) < 500
+        ) {
+            const target = safeClientFormReturnPath(ctx.request?.path || '', authority.domainId, authority.contestId);
+            logger.warn(
+                'Client form error contained domain=%s contest=%s actor=%d path=%s status=%d result=redirected target=%s',
+                authority.domainId,
+                authority.contestId,
+                authority.uid,
+                ctx.request?.path || '-',
+                response.status,
+                target,
+            );
+            response.status = 302;
+            response.template = null;
+            response.body = {};
+            response.redirect = target;
+        }
+        return;
+    }
+
+    // Anonymous requests do not carry an exam authority to confine.
     if (!user || user._id === 0) {
         await next();
         return;
     }
+
+    const domainId = domain?._id || 'system';
+
+    // Login/binding recovery routes bypass only the ordinary-browser
+    // lockout. A live Client session must not turn `/logout`, `/bind`, or an
+    // OAuth page into a route out of the bound exam workspace.
+    if (matchesWhitelist(path)) {
+        await next();
+        return;
+    }
+
+    // Operator bypass applies only to ordinary browser sessions. Entering
+    // through Vigil deliberately opts even an operator into the exam shell.
     if (user.hasPriv?.(PRIV.PRIV_EDIT_SYSTEM)) {
         await next();
         return;
@@ -300,9 +445,7 @@ export const vigilGuardLockoutLayer = async (ctx: KoaContext, next: () => Promis
         return;
     }
 
-    const domainId = domain?._id || 'system';
-
-    const decision = await getBrowserLockoutDecision(domainId, user._id, ctx.session);
+    const decision = await getBrowserLockoutDecision(domainId, user._id);
     if (!decision) {
         await next();
         return;

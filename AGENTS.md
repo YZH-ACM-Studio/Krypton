@@ -61,6 +61,7 @@
 ## Vigil 普通浏览器封锁协议
 
 - `client_required` 比赛入口 gate 与普通浏览器全站封锁是两条独立边界；前者始终要求当前比赛的有效 Client session，后者只能封锁 canonical 受众。
+- 有效 Client session 只是其绑定比赛工作台的能力凭证，不是主 OJ 的全站通行证。该会话只允许绑定域和 `tid` 的 `/exam-mode/:tid`、`/paper/:tid` 及携带同一 `tid` 且由下游再次校验的提交、题面附件和评测轮询端点；访问首页、全站记录、其它域、其它比赛或其它 `tid` 必须保留会话并重定向回绑定工作台。路由拦截必须在 `handler/before-prepare` 阶段完成，既不执行被拒绝路由的数据准备或业务逻辑，也不得在 Hydro 建立 handler 前直接返回导致重定向被改写成 500。该约束先于管理员旁路，管理员只有在普通浏览器 session 中才可旁路；考试壳内普通 HTML 表单的 4xx 错误不得退回主 OJ 壳。
 - 显式学校、用户组或 legacy `assign` 受众在封锁窗口内提前封锁；邀请码继续要求 `ContestStatus.attend`。真正不限参赛的个人赛只封锁已经通过 Client 入场且存在 `attend` 的用户，不得再把域内全部已绑定学生视作受众。
 - 团队赛只封锁未处于批次待定版状态且属于 active `ContestTeam` 的成员；不得用不限范围、预绑定批次或运行时批次回查扩大受众。
 - Client 自动 attend 成功后必须立即精确失效 `(domainId, uid)` 封锁缓存并记录审计；团队定版、建队和成员变化必须在仍持有同一比赛轻量边界时同步失效对应域缓存，再执行邀请清理或 Vigil 网络调用。任何失效都要推进进程内 generation，禁止并发旧计算重新写回；退出 Client 不清除 attend，也不在窗口结束前恢复普通浏览器。不得为此新增数据库状态、后台任务或 Client/Vigil Server 协议。

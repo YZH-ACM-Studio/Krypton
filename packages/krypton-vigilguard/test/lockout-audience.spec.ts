@@ -78,7 +78,7 @@ const contests: any[] = [];
 const attended = new Set<string>();
 const legacyGroups = new Map<number, string[]>();
 const activeTeamMembers = new Set<number>();
-const clientSessions = new Map<string, { uid: number; domainId: string }>();
+const clientSessions = new Map<string, { uid: number; domainId: string; contestId: ObjectId }>();
 let contestScanCount = 0;
 let beforeStatusReturn: ((attendedAtRead: boolean) => Promise<void>) | null = null;
 const originalDateNow = Date.now;
@@ -180,6 +180,58 @@ function contestDoc(overrides: Record<string, unknown> = {}) {
         inWindow: true,
         ...overrides,
     } as any;
+}
+
+function clientRequestContext(
+    path: string,
+    options: {
+        method?: string;
+        query?: Record<string, string>;
+        json?: boolean;
+        hasPriv?: boolean;
+        hasPerm?: boolean;
+        domainId?: string;
+    } = {},
+) {
+    const redirects: string[] = [];
+    const method = options.method || 'GET';
+    const response = { status: null as number | null, template: null as string | null, body: {}, redirect: null as string | null };
+    const context = {
+        request: { path, method, query: options.query || {} },
+        query: options.query || {},
+        session: { sid: 'client-62', uid: 62 },
+        HydroContext: {
+            request: { path, method: method.toLowerCase(), json: options.json === true },
+            response,
+            user: { _id: 62, hasPriv: () => options.hasPriv === true, hasPerm: () => options.hasPerm === true },
+            domain: { _id: options.domainId || 'system' },
+        },
+        redirect: (target: string) => redirects.push(target),
+    } as any;
+    const handler = {
+        context,
+        request: context.HydroContext.request,
+        response,
+        session: context.session,
+        user: context.HydroContext.user,
+        domain: context.HydroContext.domain,
+    } as any;
+    return { context, handler, redirects, response };
+}
+
+async function runClientRequest(request: ReturnType<typeof clientRequestContext>, onAllowed?: () => void | Promise<void>) {
+    let handlerReached = false;
+    let businessLogicRan = false;
+    let control: string | undefined;
+    await lockout.vigilGuardLockoutLayer(request.context, async () => {
+        handlerReached = true;
+        control = lockout.enforceBoundClientHandler(request.handler);
+        if (!control) {
+            businessLogicRan = true;
+            await onAllowed?.();
+        }
+    });
+    return { handlerReached, businessLogicRan, control };
 }
 
 beforeEach(() => {
@@ -447,14 +499,91 @@ describe('P1.28 browser-lockout runtime facts', () => {
         expect(contestScanCount).to.equal(0);
     });
 
-    it('bypasses the active Client session but keeps attendance authoritative after that session exits', async () => {
+    it('confines an active Client session to its bound exam workspace', async () => {
         contests.push(contestDoc());
         attended.add(`${contestId.toHexString()}:62`);
-        clientSessions.set('client-62', { uid: 62, domainId: 'system' });
+        clientSessions.set('client-62', { uid: 62, domainId: 'system', contestId });
 
-        expect(await lockout.getBrowserLockoutDecision('system', 62, { sid: 'client-62' })).to.equal(null);
+        const allowed = clientRequestContext(`/exam-mode/${contestId.toHexString()}/discussion`);
+        expect(await runClientRequest(allowed)).to.deep.equal({ handlerReached: true, businessLogicRan: true, control: undefined });
+        expect(allowed.redirects).to.deep.equal([]);
+
+        const escaped = clientRequestContext('/');
+        expect(await runClientRequest(escaped)).to.deep.equal({ handlerReached: true, businessLogicRan: false, control: 'cleanup' });
+        expect(escaped.response).to.include({ status: 302, redirect: `/d/system/exam-mode/${contestId.toHexString()}` });
+        expect(escaped.context.session.uid).to.equal(62);
+
+        const operatorEscape = clientRequestContext('/record', { hasPriv: true, hasPerm: true });
+        expect(await runClientRequest(operatorEscape)).to.deep.equal({ handlerReached: true, businessLogicRan: false, control: 'cleanup' });
+        expect(operatorEscape.response.redirect).to.equal(`/d/system/exam-mode/${contestId.toHexString()}`);
+
+        const otherDomainEscape = clientRequestContext('/d/another/', { domainId: 'another' });
+        expect(await runClientRequest(otherDomainEscape)).to.deep.equal({ handlerReached: true, businessLogicRan: false, control: 'cleanup' });
+        expect(otherDomainEscape.response.redirect).to.equal(`/d/system/exam-mode/${contestId.toHexString()}`);
+
+        const samePathInOtherDomain = clientRequestContext(`/exam-mode/${contestId.toHexString()}`, { domainId: 'another' });
+        expect(await runClientRequest(samePathInOtherDomain)).to.deep.equal({ handlerReached: true, businessLogicRan: false, control: 'cleanup' });
+        expect(samePathInOtherDomain.response.redirect).to.equal(`/d/system/exam-mode/${contestId.toHexString()}`);
+
         clientSessions.delete('client-62');
         expect(await lockout.getBrowserLockoutDecision('system', 62)).to.not.equal(null);
+    });
+
+    it('keeps only contest-bound support endpoints available to the active Client session', async () => {
+        clientSessions.set('client-62', { uid: 62, domainId: 'system', contestId });
+        const tid = contestId.toHexString();
+        const allowed = [
+            clientRequestContext(`/paper/${tid}/draft/100`, { method: 'PATCH' }),
+            clientRequestContext('/p/100/submit', { method: 'POST', query: { tid }, json: true }),
+            clientRequestContext('/p/100/file/diagram.png', { query: { tid } }),
+            clientRequestContext('/record/64a000000000000000000777', { query: { tid }, json: true }),
+        ];
+        for (const request of allowed) {
+            expect(await runClientRequest(request)).to.deep.equal({ handlerReached: true, businessLogicRan: true, control: undefined });
+            expect(request.response.redirect).to.equal(null);
+        }
+
+        const wrongContest = clientRequestContext('/p/100/submit', {
+            method: 'POST',
+            query: { tid: new ObjectId().toHexString() },
+            json: true,
+        });
+        expect(await runClientRequest(wrongContest)).to.deep.equal({ handlerReached: true, businessLogicRan: false, control: 'cleanup' });
+        expect(wrongContest.response.redirect).to.equal(`/d/system/exam-mode/${tid}`);
+
+        const htmlRecord = clientRequestContext('/record/64a000000000000000000777', { query: { tid } });
+        expect(await runClientRequest(htmlRecord)).to.deep.equal({ handlerReached: true, businessLogicRan: false, control: 'cleanup' });
+        expect(htmlRecord.response.redirect).to.equal(`/d/system/exam-mode/${tid}`);
+
+        for (const path of ['/logout', '/bind', '/claim', '/oauth/authorize', '/client-required-notice']) {
+            const recoveryEscape = clientRequestContext(path);
+            expect(await runClientRequest(recoveryEscape)).to.deep.equal({ handlerReached: true, businessLogicRan: false, control: 'cleanup' });
+            expect(recoveryEscape.response.redirect).to.equal(`/d/system/exam-mode/${tid}`);
+        }
+    });
+
+    it('contains plain form validation errors inside the exam shell without hiding JSON errors', async () => {
+        clientSessions.set('client-62', { uid: 62, domainId: 'system', contestId });
+        const tid = contestId.toHexString();
+        const htmlForm = clientRequestContext(`/exam-mode/${tid}/discussion/create`, { method: 'POST' });
+        await runClientRequest(htmlForm, async () => {
+            htmlForm.response.status = 400;
+            htmlForm.response.template = 'error.html';
+            htmlForm.response.body = { error: { message: '字段 content 验证失败。' } };
+        });
+        expect(htmlForm.response).to.include({
+            status: 302,
+            template: null,
+            redirect: `/d/system/exam-mode/${tid}/discussion/create`,
+        });
+
+        const jsonForm = clientRequestContext(`/exam-mode/${tid}/discussion/create`, { method: 'POST', json: true });
+        await runClientRequest(jsonForm, async () => {
+            jsonForm.response.status = 400;
+            jsonForm.response.template = 'error.html';
+            jsonForm.response.body = { error: { message: '字段 content 验证失败。' } };
+        });
+        expect(jsonForm.response).to.include({ status: 400, template: 'error.html', redirect: null });
     });
 
     it('wires both Client launch paths and team roster models to cache invalidation', () => {
@@ -469,5 +598,7 @@ describe('P1.28 browser-lockout runtime facts', () => {
 
         const userHandler = readFileSync(resolve(__dirname, '../../hydrooj/src/handler/user.ts'), 'utf8');
         expect(userHandler).to.include('udoc.hasPerm(PERM.PERM_EDIT_CONTEST)');
+        const pluginSource = readFileSync(resolve(__dirname, '../index.ts'), 'utf8');
+        expect(pluginSource).to.include("ctx.on('handler/before-prepare', enforceBoundClientHandler)");
     });
 });

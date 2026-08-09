@@ -895,6 +895,8 @@ declare module './service/db' {
         'contest.teamCodeSnapshots': import('./model/contest-team-code').TeamCodeSnapshotDoc;
         'contest.teamCodeSnapshotCounters': import('./model/contest-team-code').TeamCodeSnapshotCounterDoc;
         'contest.teamStatuses': import('./model/contest-team-status').TeamContestStatusDoc;
+        'practice.integrityRevisions': import('./model/practice-integrity').PracticeIntegrityRevisionDoc;
+        'practice.contexts': import('./model/practice-integrity').PracticeContextDoc;
         lock: LockDoc;
     }
 }
@@ -935,6 +937,10 @@ export interface Model {
     oplog: typeof import('./model/oplog');
     token: typeof import('./model/token').default;
     training: typeof import('./model/training');
+    practiceIntegrity: Pick<
+        typeof import('./model/practice-integrity'),
+        'canonicalPracticePolicy' | 'combinePracticePolicies' | 'practiceContextColl' | 'practiceIntegrityRevisionColl' | 'practiceIntegrityService'
+    >;
     user: typeof import('./model/user').default;
     oauth: typeof import('./model/oauth').default;
     storage: typeof import('./model/storage').default;

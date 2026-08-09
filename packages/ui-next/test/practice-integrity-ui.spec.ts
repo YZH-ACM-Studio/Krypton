@@ -96,9 +96,13 @@ describe('practice integrity client boundary', () => {
     const draft = readFileSync(resolve(workspaceRoot, 'ui-default/components/scratchpad/reducers/editor.ts'), 'utf8');
     expect(detail).to.include('practiceContextId: practiceIntegrity.contextId');
     expect(detail).to.include('practiceIntegrity and practiceIntegrity.entry');
+    expect(detail).to.include('practiceControlled and practiceIntegrity.policy.antiAiCopyInjection');
+    expect(detail).to.include('This interface cannot verify anti-AI copy markers');
     expect(detail).to.include('query={lang:k, practiceContainerKind:practiceIntegrity.entry.containerKind');
     expect(sidebar).to.include('not practiceIntegrity.policy.removeIndependentSubmitForm or practiceStructuredIde');
     expect(sidebar).to.include('{% set practiceEntryActive = practiceIntegrity and practiceIntegrity.entry %}');
+    expect(sidebar).to.include('{% set practiceLegacyBlocked = practiceControlled and practiceIntegrity.policy.antiAiCopyInjection %}');
+    expect(sidebar).to.include('if practiceLegacyBlocked');
     expect(sidebar).to.include('query={practiceContainerKind:practiceIntegrity.entry.containerKind');
     expect(sidebar).to.include('practiceIntegrity.previewAvailable');
     expect(sidebar).to.include("practicePreview:practiceIntegrity.mode != 'preview'");
@@ -117,6 +121,23 @@ describe('practice integrity client boundary', () => {
     expect(draft).to.include('encodeURIComponent(lang)');
     expect(draft).to.include('localStorage.getItem(codeKey(initialLang)) ?? UiContext.codeTemplate');
     expect(draft).to.include('controlled ? { code: localStorage.getItem(codeKey(action.payload)) ?? UiContext.codeTemplate } : {}');
+  });
+
+  it('only activates marker rendering from a verified controlled context and blocks malformed initialization', () => {
+    const detail = readFileSync(resolve(workspaceRoot, 'ui-next/src/pages/problem-detail.tsx'), 'utf8');
+    const model = readFileSync(resolve(workspaceRoot, 'hydrooj/src/model/problem.ts'), 'utf8');
+    expect(detail).to.include('practiceControlled || practicePolicy?.antiAiCopyInjection !== true');
+    expect(detail).to.include('readAntiAiMarkerClientView(data.antiAiMarkerView)');
+    expect(detail).to.include('Controlled statement initialization failed');
+    expect(detail).to.include('ControlledStatementErrorBoundary');
+    expect(detail).to.include('setAntiAiRenderFailed(true)');
+    expect(detail).to.include('const antiAiCopyFailed = antiAiCopyInitialization.failed || antiAiRenderFailed');
+    expect(detail).to.include('data.canSubmitProblem === true && !antiAiCopyFailed');
+    expect(detail).to.include('当前题面无法验证复制保护数据，已阻止进入和提交');
+    expect(detail).to.include('<AntiAiCopyBoundary markers={antiAiCopyMarkers} contextId={practiceContextId}>');
+    expect(detail).to.include("observableStatementError(error, 'safe-view-parse', practiceContextId)");
+    expect(detail).to.include("observableStatementError(error, 'statement-render', this.props.contextId)");
+    expect(model).to.include('if (pdoc.antiAiMarkers === undefined) return { schemaVersion: 1 as const, markers: [] }');
   });
 
   it('flushes dedicated submit-page drafts and preserves an intentional empty cache value', () => {

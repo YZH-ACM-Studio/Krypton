@@ -1,6 +1,12 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { extractSamples, resolveContentString, splitMarkdownBySamples, stripSampleBlocks } from '../src/lib/samples';
+import {
+  extractSamples,
+  resolveContentString,
+  splitMarkdownBySamples,
+  splitMarkdownBySamplesPositioned,
+  stripSampleBlocks,
+} from '../src/lib/samples';
 
 const paired = '# Statement\n\n```input1\n1 2\n```\n\n```output1\n3\n```\n';
 
@@ -39,9 +45,7 @@ describe('extractSamples', () => {
   });
 
   it('trims trailing whitespace from bodies but keeps interior blank lines', () => {
-    expect(extractSamples('```input1\na\n\nb\t \n```\n```output1\n\n```')).to.deep.equal([
-      { id: 1, input: 'a\n\nb', output: '' },
-    ]);
+    expect(extractSamples('```input1\na\n\nb\t \n```\n```output1\n\n```')).to.deep.equal([{ id: 1, input: 'a\n\nb', output: '' }]);
   });
 
   it('ignores ordinary code fences without an input/output tag', () => {
@@ -143,6 +147,22 @@ describe('splitMarkdownBySamples', () => {
     const chunks = splitMarkdownBySamples(md);
     expect(chunks).to.have.length(1);
     expect(chunks[0].kind).to.equal('sample');
+  });
+
+  it('keeps canonical source offsets for marker-aware prose and sample rendering', () => {
+    const md = 'before\n\n```input1\nin\n```\n\n```output1\nout\n```\n\nafter';
+    const chunks = splitMarkdownBySamplesPositioned(md);
+    expect(chunks.map((chunk) => [chunk.kind, chunk.sourceStart, chunk.sourceEnd])).to.deep.equal([
+      ['md', 0, 6],
+      ['sample', md.indexOf('```input1'), md.indexOf('```output1') + '```output1\nout\n```'.length],
+      ['md', md.indexOf('after'), md.length],
+    ]);
+    expect(chunks[1].samples?.[0]).to.deep.include({
+      inputSourceStart: md.indexOf('in\n```'),
+      inputSourceEnd: md.indexOf('in\n```') + 2,
+      outputSourceStart: md.indexOf('out\n```'),
+      outputSourceEnd: md.indexOf('out\n```') + 3,
+    });
   });
 });
 

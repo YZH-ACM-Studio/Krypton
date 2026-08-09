@@ -24,8 +24,9 @@ import {
   XCircle,
 } from 'lucide-react';
 import { motion } from 'motion/react';
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Component, type ErrorInfo, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getLangEntry, getStatus, KryptonIDE, type RecordEntry } from '@/components/krypton-ide';
+import { AntiAiCopyBoundary, AntiAiMarkerRenderError } from '@/components/anti-ai-copy-boundary';
 import { MarkdownView } from '@/components/markdown-renderer';
 import { ObjectiveAnswerPanel, type ObjectiveClientQuestion } from '@/components/objective-answer-panel';
 import { ProblemAuthorText, type ProblemAuthorView, ProblemEditGate } from '@/components/problem-authoring-state';
@@ -52,6 +53,7 @@ import {
   type PracticeIntegrityPageContext,
 } from '@/lib/practice-integrity';
 import { extractSamples } from '@/lib/samples';
+import { readAntiAiMarkerClientView } from '@/lib/anti-ai-marker';
 
 /**
  * Judge configuration as delivered inside `pdoc.config` (server-side
@@ -165,6 +167,7 @@ interface ProblemDetailPageData {
   solutionCount?: number;
   tdoc?: ContestDoc | null;
   practiceIntegrity?: unknown;
+  antiAiMarkerView?: unknown;
 }
 
 /* ------------------------------------------------------------------ */
@@ -785,6 +788,49 @@ function formatConfigMemory(mb: number | undefined | null): string {
 /*  Main component                                                     */
 /* ------------------------------------------------------------------ */
 
+function ControlledStatementFailure() {
+  return (
+    <div role="alert" className="rounded-xl border border-destructive/40 bg-destructive/10 p-5 text-sm text-destructive">
+      <p className="font-semibold">真实性题面初始化失败</p>
+      <p className="mt-1">当前题面无法验证复制保护数据，已阻止进入和提交。请返回课程或题集后重新进入；若仍失败，请联系管理员。</p>
+    </div>
+  );
+}
+
+function observableStatementError(error: unknown, stage: string, contextId?: string) {
+  return error instanceof Error
+    ? { stage, contextId: contextId || 'unavailable', name: error.name, message: error.message, stack: error.stack || 'stack-unavailable' }
+    : { stage, contextId: contextId || 'unavailable', name: 'unknown', message: 'non-error thrown', stack: 'stack-unavailable' };
+}
+
+class ControlledStatementErrorBoundary extends Component<
+  { children: ReactNode; contextId?: string; onFailure: () => void },
+  { error: unknown | null }
+> {
+  state: { error: unknown | null } = { error: null };
+
+  static getDerivedStateFromError(error: unknown) {
+    return { error };
+  }
+
+  override componentDidCatch(error: unknown, info: ErrorInfo) {
+    if (!(error instanceof AntiAiMarkerRenderError)) return;
+    console.error('Controlled statement rendering failed', {
+      ...observableStatementError(error, 'statement-render', this.props.contextId),
+      componentStack: info.componentStack || 'component-stack-unavailable',
+    });
+    this.props.onFailure();
+  }
+
+  override render() {
+    if (this.state.error) {
+      if (!(this.state.error instanceof AntiAiMarkerRenderError)) throw this.state.error;
+      return <ControlledStatementFailure />;
+    }
+    return this.props.children;
+  }
+}
+
 export function ProblemDetailPage() {
   const bs = useBootstrap();
   const data = bs.page.data as ProblemDetailPageData;
@@ -794,6 +840,18 @@ export function ProblemDetailPage() {
   const practicePolicy = practiceControlled ? practiceIntegrity.policy! : null;
   const practiceContextId = practiceControlled ? practiceIntegrity.contextId : undefined;
   const practiceDraftScope = practiceIntegrity ? practiceDraftIdentity(practiceIntegrity) : null;
+  const antiAiCopyInitialization = useMemo(() => {
+    if (!practiceControlled || practicePolicy?.antiAiCopyInjection !== true) return { markers: [], failed: false };
+    try {
+      return { markers: readAntiAiMarkerClientView(data.antiAiMarkerView).markers, failed: false };
+    } catch (error) {
+      console.error('Controlled statement initialization failed', observableStatementError(error, 'safe-view-parse', practiceContextId));
+      return { markers: [], failed: true };
+    }
+  }, [data.antiAiMarkerView, practiceContextId, practiceControlled, practicePolicy?.antiAiCopyInjection]);
+  const antiAiCopyMarkers = antiAiCopyInitialization.markers;
+  const [antiAiRenderFailed, setAntiAiRenderFailed] = useState(false);
+  const antiAiCopyFailed = antiAiCopyInitialization.failed || antiAiRenderFailed;
   const authorUdocs: ProblemAuthorView[] = Array.isArray(data.authorUdocs) ? data.authorUdocs : [];
   const dataContributorUdocs: ProblemAuthorView[] = Array.isArray(data.dataContributorUdocs) ? data.dataContributorUdocs : [];
   const canEditProblem = data.canEditProblem === true;
@@ -826,7 +884,7 @@ export function ProblemDetailPage() {
   const teamCodeEndpoint = String(examUrls.teamCodeSnapshots || '');
   const mode: string = data.mode || 'normal';
   const postContestPracticeActive = data.postContestPracticeActive === true;
-  const canSubmit = canSubmitProblemMode(mode) && data.canSubmitProblem === true;
+  const canSubmit = canSubmitProblemMode(mode) && data.canSubmitProblem === true && !antiAiCopyFailed;
   // mode ∈ 'normal' | 'view' | 'contest' | 'correction' | 'none' (from problem.ts ProblemDetailHandler)
   // Contest mode shows banner + locks down external links; correction reopens them.
   const inContest = !!tdoc && tdoc.docId && mode !== 'normal';
@@ -885,6 +943,30 @@ export function ProblemDetailPage() {
     () => (structuredStatement ? structuredStatementSamples(structuredStatement) : extractSamples(content)),
     [content, structuredStatement],
   );
+  const renderStatement = (includeLegacyLimits: boolean) => {
+    const statement = structuredStatement ? (
+      <ProgrammingStatementView
+        statement={structuredStatement}
+        preferredLang={preferredLang}
+        limits={<LimitsSection config={config} />}
+        antiAiMarkers={antiAiCopyMarkers}
+      />
+    ) : (
+      <>
+        {includeLegacyLimits ? <LimitsSection config={config} /> : null}
+        <MarkdownView content={content} preferredLang={preferredLang} antiAiPath="content" antiAiMarkers={antiAiCopyMarkers} />
+      </>
+    );
+    return antiAiCopyMarkers.length ? (
+      <ControlledStatementErrorBoundary key={practiceContextId} contextId={practiceContextId} onFailure={() => setAntiAiRenderFailed(true)}>
+        <AntiAiCopyBoundary markers={antiAiCopyMarkers} contextId={practiceContextId}>
+          {statement}
+        </AntiAiCopyBoundary>
+      </ControlledStatementErrorBoundary>
+    ) : (
+      statement
+    );
+  };
 
   /* ── Records state for IDE mode ── */
   const [ideRecords, setIdeRecords] = useState<RecordEntry[]>([]);
@@ -1024,6 +1106,8 @@ export function ProblemDetailPage() {
     };
   }, []);
 
+  if (antiAiCopyFailed) return <ControlledStatementFailure />;
+
   /* Fullscreen IDE mode */
   if (ideMode) {
     return (
@@ -1103,18 +1187,7 @@ export function ProblemDetailPage() {
                   {!inContest && pdoc.origStat ? <InfoChip icon={BarChart3} label="赛时通过率" value={origStatChipValue(pdoc.origStat)} /> : null}
                 </div>
 
-                {structuredStatement ? (
-                  <ProgrammingStatementView
-                    statement={structuredStatement}
-                    preferredLang={preferredLang}
-                    limits={<LimitsSection config={config} />}
-                  />
-                ) : (
-                  <>
-                    <LimitsSection config={config} />
-                    <MarkdownView content={content} preferredLang={preferredLang} />
-                  </>
-                )}
+                {renderStatement(true)}
               </ScrollArea>
 
               {/* Records panel — bottom of left side */}
@@ -1410,13 +1483,7 @@ export function ProblemDetailPage() {
             and "题解" is reachable via the sidebar quick links / its own button). */}
         <div className="min-w-0 space-y-3">
           <Card>
-            <CardContent className="p-4 sm:p-6">
-              {structuredStatement ? (
-                <ProgrammingStatementView statement={structuredStatement} preferredLang={preferredLang} limits={<LimitsSection config={config} />} />
-              ) : (
-                <MarkdownView content={content} preferredLang={preferredLang} />
-              )}
-            </CardContent>
+            <CardContent className="p-4 sm:p-6">{renderStatement(false)}</CardContent>
           </Card>
           {canSubmit && isObjective && (!teamExamMode || teamExamMode.canSubmit) && (!isSubjective || inContest || canPreviewSubjective) ? (
             <ObjectiveAnswerPanel

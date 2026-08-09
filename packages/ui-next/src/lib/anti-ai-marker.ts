@@ -22,6 +22,18 @@ export interface AntiAiMarkerInput {
   }>;
 }
 
+export interface AntiAiMarkerClientMarker {
+  id: string;
+  path: string;
+  offset: number;
+  injectionText: string;
+}
+
+export interface AntiAiMarkerClientView {
+  schemaVersion: 1;
+  markers: AntiAiMarkerClientMarker[];
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
@@ -73,6 +85,39 @@ export function readAntiAiMarkerDrafts(value: unknown): AntiAiMarkerDraft[] {
       revision: Number(raw.revision),
     };
   });
+}
+
+export function readAntiAiMarkerClientView(value: unknown): AntiAiMarkerClientView {
+  if (!isRecord(value) || !hasExactKeys(value, ['schemaVersion', 'markers']) || value.schemaVersion !== 1 || !Array.isArray(value.markers)) {
+    throw new TypeError('antiAiMarkerView schema is invalid');
+  }
+  const ids = new Set<string>();
+  const markers = value.markers.map((raw, index) => {
+    if (!isRecord(raw) || !hasExactKeys(raw, ['id', 'path', 'offset', 'injectionText'])) {
+      throw new TypeError(`antiAiMarkerView marker ${index} is invalid`);
+    }
+    if (
+      typeof raw.id !== 'string' ||
+      !/^[A-Za-z0-9_-]{8,64}$/.test(raw.id) ||
+      ids.has(raw.id) ||
+      typeof raw.path !== 'string' ||
+      !raw.path ||
+      !Number.isSafeInteger(raw.offset) ||
+      Number(raw.offset) < 0 ||
+      typeof raw.injectionText !== 'string' ||
+      !raw.injectionText.length
+    ) {
+      throw new TypeError(`antiAiMarkerView marker ${index} is invalid`);
+    }
+    ids.add(raw.id);
+    return {
+      id: raw.id,
+      path: raw.path,
+      offset: Number(raw.offset),
+      injectionText: raw.injectionText,
+    };
+  });
+  return { schemaVersion: 1, markers };
 }
 
 function markerId(): string {

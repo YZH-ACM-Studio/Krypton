@@ -50,7 +50,13 @@ import {
     ValidationError,
 } from '../error';
 import { DomainDoc, ProblemDataWriteConfirmation, ProblemDataWriteOperation, ProblemDoc, ProblemStatusDoc, RecordDoc, User } from '../interface';
-import { assertStoredAntiAiMarkers, isRawStatementContentInput } from '../lib/anti-ai-marker';
+import {
+    assertStoredAntiAiMarkers,
+    isRawStatementContentInput,
+    remapAntiAiMarkerOffset,
+    statementSourcesForAntiAiMarkers,
+    type AntiAiMarkerSourceReplacement,
+} from '../lib/anti-ai-marker';
 import { canUsePostContestPractice, getContestSubmissionScope, resolvePostContestProblemMode } from '../lib/contest-correction';
 import { buildPersonalPracticeRecordQuery, buildPersonalPracticeStatusByPid, PersonalPracticeRecord } from '../lib/contest-problem-status';
 import { getProblemConfigErrorText, isProblemConfigFilename, parseProblemConfigObject, parseStructuredRegionSubmission } from '../lib/problem-config';
@@ -1973,28 +1979,58 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
     async get(...args: any[]) {
         // Navigate to current additional file download
         // e.g. ![img](file://a.jpg) will navigate to ![img](./pid/file/a.jpg)
-        const rewriteFileUrls = (source: string) =>
-            source.replace(/file:\/\/([^ \n)\\"]+)/g, (str: string) => {
-                const info = str.match(/file:\/\/([^ \n)\\"]+)/);
-                const fileinfo = info[1];
+        const rewriteFileUrls = (source: string) => {
+            const replacements: AntiAiMarkerSourceReplacement[] = [];
+            const content = source.replace(/file:\/\/([^ \n)\\"]+)/g, (str: string, fileinfo: string, offset: number) => {
                 let filename = fileinfo.split('?')[0]; // remove querystring
                 try {
                     filename = decodeURIComponent(filename);
                 } catch (e) {}
                 if (!this.pdoc.additional_file?.find((i) => i.name === filename)) return str;
-                if (!args[1]) return `./${this.pdoc.docId}/file/${fileinfo}`;
-                return `./${this.pdoc.docId}/file/${fileinfo}${fileinfo.includes('?') ? '&' : '?'}tid=${args[1]}`;
+                const replacement = !args[1]
+                    ? `./${this.pdoc.docId}/file/${fileinfo}`
+                    : `./${this.pdoc.docId}/file/${fileinfo}${fileinfo.includes('?') ? '&' : '?'}tid=${args[1]}`;
+                replacements.push({ start: offset, end: offset + str.length, replacementLength: replacement.length });
+                return replacement;
             });
+            return { content, replacements };
+        };
         if (!this.request.json || args[2]) {
-            this.response.body.pdoc.content = rewriteFileUrls(this.response.body.pdoc.content);
+            this.response.body.pdoc.content = rewriteFileUrls(this.response.body.pdoc.content).content;
         }
         const statementView = this.response.body.pdoc.programmingStatementView;
         if (statementView) {
             for (const section of ['background', 'description', 'input', 'output', 'hints']) {
-                if (statementView[section]?.content) statementView[section].content = rewriteFileUrls(statementView[section].content);
+                if (statementView[section]?.content) statementView[section].content = rewriteFileUrls(statementView[section].content).content;
             }
             for (const item of statementView.examples?.items || []) {
-                if (item.note) item.note = rewriteFileUrls(item.note);
+                if (item.note) item.note = rewriteFileUrls(item.note).content;
+            }
+        }
+        const antiAiMarkerView = this.response.body.antiAiMarkerView;
+        if (antiAiMarkerView) {
+            try {
+                const sources = statementSourcesForAntiAiMarkers(this.pdoc);
+                const replacementsByPath = new Map<string, AntiAiMarkerSourceReplacement[]>();
+                for (const marker of antiAiMarkerView.markers) {
+                    let replacements = replacementsByPath.get(marker.path);
+                    if (!replacements) {
+                        const source = sources.get(marker.path);
+                        if (source === undefined) throw new TypeError(`anti AI marker source is unavailable: ${marker.id}`);
+                        replacements = rewriteFileUrls(source).replacements;
+                        replacementsByPath.set(marker.path, replacements);
+                    }
+                    marker.offset = remapAntiAiMarkerOffset(marker.offset, replacements);
+                }
+            } catch (error) {
+                logger.error(
+                    'Anti AI marker attachment remap rejected domain=%s pid=%d uid=%d stage=detail-attachment-remap result=denied error=%o',
+                    this.pdoc.domainId,
+                    this.pdoc.docId,
+                    this.user._id,
+                    error,
+                );
+                throw new ValidationError('antiAiMarkers', null, localizedErrorText`防 AI 标记数据无效，请联系题目维护者`);
             }
         }
         this.response.body.page_name = this.tdoc

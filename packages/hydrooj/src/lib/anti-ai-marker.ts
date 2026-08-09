@@ -45,6 +45,24 @@ export interface AntiAiMarkerClientView {
     }>;
 }
 
+export interface AntiAiMarkerSourceReplacement {
+    start: number;
+    end: number;
+    replacementLength: number;
+}
+
+export function remapAntiAiMarkerOffset(offset: number, replacements: readonly AntiAiMarkerSourceReplacement[]): number {
+    let shift = 0;
+    for (const replacement of replacements) {
+        if (offset < replacement.start) break;
+        if (offset === replacement.start) return replacement.start + shift;
+        if (offset < replacement.end) throw new TypeError('anti AI marker is inside rewritten non-visible source');
+        if (offset === replacement.end) return replacement.start + shift + replacement.replacementLength;
+        shift += replacement.replacementLength - (replacement.end - replacement.start);
+    }
+    return offset + shift;
+}
+
 interface StatementLikeProblem {
     content?: unknown;
     statementFormat?: unknown;

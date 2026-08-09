@@ -24,7 +24,11 @@ describe('P1.6 anti AI marker integration contract', () => {
         expect(detail).to.include('delete responsePdoc.antiAiMarkers');
         expect(detail).to.include('this.practicePageContext?.controlled && this.practicePageContext.policy?.antiAiCopyInjection');
         expect(detail).to.include('problem.getAntiAiMarkerClientView(this.pdoc.domainId, this.pdoc.docId, this.pdoc)');
+        expect(detail).to.include('marker.offset = remapAntiAiMarkerOffset(marker.offset, replacements)');
+        expect(detail).to.include('stage=detail-attachment-remap result=denied');
         expect(model).to.include('problem statement changed while serializing anti AI markers');
+        expect(model).to.include('if (pdoc.antiAiMarkers === undefined) return { schemaVersion: 1 as const, markers: [] }');
+        expect(model).not.to.include('if (!pdoc.antiAiMarkers)');
         expect(handler).to.include("@post('antiAiMarkers', Types.String, true)");
         expect(handler).to.include("[...problem.PROJECTION_MANAGED_EDITOR, 'config', 'antiAiMarkers']");
     });

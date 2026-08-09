@@ -16,7 +16,8 @@ describe('p3.25 structured programming statement UI contract', () => {
     const detail = read('packages/ui-next/src/pages/problem-detail.tsx');
     const view = read('packages/ui-next/src/components/programming-statement.tsx');
 
-    expect(detail.match(/<ProgrammingStatementView/g)).to.have.length(2);
+    expect(detail.match(/<ProgrammingStatementView/g)).to.have.length(1);
+    expect(detail.match(/renderStatement\((?:true|false)\)/g)).to.have.length(2);
     expect(detail).to.include('structuredStatementSamples(structuredStatement)');
     expect(view).to.include('data-programming-statement="structured-v1"');
     expect(view).to.include('<Section title="题目描述">');

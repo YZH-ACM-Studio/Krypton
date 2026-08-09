@@ -3,6 +3,7 @@
 {% set practiceControlled = practiceIntegrity and practiceIntegrity.controlled %}
 {% set practiceEntryActive = practiceIntegrity and practiceIntegrity.entry %}
 {% set practiceStructuredIde = pdoc.problemKind == 'program_fill' or pdoc.problemKind == 'function' %}
+{% set practiceLegacyBlocked = practiceControlled and practiceIntegrity.policy.antiAiCopyInjection %}
 <div class="section side section--problem-sidebar">
 {% if page_name != 'problem_detail' and page_name != 'contest_detail_problem' %}
   <div class="section__header">
@@ -31,7 +32,7 @@
       <li class="menu__seperator"></li>
     {% endif %}
     {% if page_name == 'problem_detail' %}
-    {% if canSubmitProblem and handler.ctx.setting.get('ui-default.enableScratchpad') %}
+    {% if canSubmitProblem and not practiceLegacyBlocked and handler.ctx.setting.get('ui-default.enableScratchpad') %}
       <li class="menu__item scratchpad--hide nojs--hide"><a class="menu__link highlight" name="problem-sidebar__open-scratchpad" href="javascript:;" data-global-hotkey="alt+e">
         <span class="icon icon-enlarge"></span> {{ _('Open Scratchpad') }} (Alt+E)
       </a></li>
@@ -55,7 +56,11 @@
       </a></li>
     {% endif %}
     {% if canSubmitProblem %}
-    {% if not practiceControlled or not practiceIntegrity.policy.removeIndependentSubmitForm or practiceStructuredIde %}
+    {% if practiceLegacyBlocked %}
+      <li class="menu__item scratchpad--hide"><span class="menu__link disabled">
+        <span class="icon icon-block"></span> {{ _('Open this controlled problem with Krypton UI to submit') }}
+      </span></li>
+    {% elif not practiceControlled or not practiceIntegrity.policy.removeIndependentSubmitForm or practiceStructuredIde %}
       <li class="menu__item scratchpad--hide"><a class="menu__link{% if page_name == 'problem_submit' %} active{% endif %}" href="{{ url('problem_submit', pid=pdoc.pid|default(pdoc.docId), query={practiceContainerKind:practiceIntegrity.entry.containerKind, practiceContainerId:practiceIntegrity.entry.containerId, practiceScopeKind:practiceIntegrity.entry.scopeKind, practiceScopeId:practiceIntegrity.entry.scopeId, practicePreview:practiceIntegrity.mode == 'preview'}) if practiceEntryActive else url('problem_submit', pid=pdoc.pid|default(pdoc.docId)) }}">
         <span class="icon icon-send"></span> {{ _('Submit') }}
       </a></li>

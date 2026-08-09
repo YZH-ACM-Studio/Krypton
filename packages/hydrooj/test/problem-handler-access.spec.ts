@@ -2348,7 +2348,9 @@ describe('P2.11 authoritative problem route domain', () => {
 
     it('uses the problem-aware submit capability for both legacy submit and scratchpad entries', () => {
         const template = readFileSync(resolve(process.cwd(), 'packages/ui-default/templates/partials/problem_sidebar_normal.html'), 'utf8');
-        expect(template).to.include("{% if canSubmitProblem and handler.ctx.setting.get('ui-default.enableScratchpad') %}");
+        expect(template).to.include(
+            "{% if canSubmitProblem and not practiceLegacyBlocked and handler.ctx.setting.get('ui-default.enableScratchpad') %}",
+        );
         expect(template).to.include('{% if canSubmitProblem %}');
         expect(template).not.to.include(
             "{% if handler.user.hasPerm(perm.PERM_SUBMIT_PROBLEM) and handler.ctx.setting.get('ui-default.enableScratchpad') %}",

@@ -19,12 +19,19 @@ import rehypeHighlight from 'rehype-highlight';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import { cn } from '@/lib/cn';
-import { antiAiCopyPreview, createAntiAiMarker, remapAntiAiMarkers, type AntiAiMarkerDraft } from '@/lib/anti-ai-marker';
+import {
+  antiAiCopyPreview,
+  createAntiAiMarker,
+  remapAntiAiMarkers,
+  type AntiAiMarkerClientMarker,
+  type AntiAiMarkerDraft,
+} from '@/lib/anti-ai-marker';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
-import { splitMarkdownBySamples } from '@/lib/samples';
-import { SampleBlocks } from '@/components/sample-blocks';
+import { splitMarkdownBySamples, splitMarkdownBySamplesPositioned, type PositionedMarkdownChunk } from '@/lib/samples';
+import { SampleBlocks, type SampleAntiAiMarker } from '@/components/sample-blocks';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { AntiAiMarkerRenderError, createAntiAiMarkerRehypePlugins } from '@/components/anti-ai-copy-boundary';
 
 /* ------------------------------------------------------------------ */
 /*  Plugin config                                                      */
@@ -119,23 +126,32 @@ function resolveLangLabel(key: string): string {
   return LANG_LABELS[key] || key;
 }
 
+interface ParsedContent {
+  langs: Record<string, string>;
+  localized: boolean;
+}
+
 /** Parse content — if it looks like JSON `{"en":"…","zh":"…"}`, parse it. */
-function parseContent(content: ContentValue): Record<string, string> {
-  if (typeof content === 'object' && content !== null) return content;
-  if (typeof content !== 'string') return { default: String(content ?? '') };
+function parseContentWithMetadata(content: ContentValue): ParsedContent {
+  if (typeof content === 'object' && content !== null) return { langs: content, localized: true };
+  if (typeof content !== 'string') return { langs: { default: String(content ?? '') }, localized: false };
   const trimmed = content.trim();
   if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
     try {
       const parsed = JSON.parse(trimmed);
       if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
         const allStrings = Object.values(parsed).every((v) => typeof v === 'string');
-        if (allStrings && Object.keys(parsed).length > 0) return parsed as Record<string, string>;
+        if (allStrings && Object.keys(parsed).length > 0) return { langs: parsed as Record<string, string>, localized: true };
       }
     } catch {
       /* not JSON, treat as raw markdown */
     }
   }
-  return { default: content };
+  return { langs: { default: content }, localized: false };
+}
+
+function parseContent(content: ContentValue): Record<string, string> {
+  return parseContentWithMetadata(content).langs;
 }
 
 function pickInitialLang(langs: Record<string, string>, preferred?: string): string {
@@ -199,11 +215,31 @@ function normalizePreviewSource(source: string, resolveFileUrl?: FileUrlResolver
   });
 }
 
-function MarkdownContent({ source, resolveFileUrl }: { source: string; resolveFileUrl?: FileUrlResolver }) {
+function MarkdownContent({
+  source,
+  resolveFileUrl,
+  antiAiMarkers = [],
+}: {
+  source: string;
+  resolveFileUrl?: FileUrlResolver;
+  antiAiMarkers?: readonly AntiAiMarkerClientMarker[];
+}) {
   const renderedSource = useMemo(() => normalizePreviewSource(source, resolveFileUrl), [source, resolveFileUrl]);
+  const activeRehypePlugins = useMemo(() => {
+    if (!antiAiMarkers.length) return rehypePlugins;
+    const markerPlugins = createAntiAiMarkerRehypePlugins(renderedSource, antiAiMarkers);
+    return [
+      rehypeRaw,
+      [rehypeSanitize, sanitizeSchema],
+      markerPlugins.beforeKatex,
+      rehypeKatex,
+      rehypeHighlight,
+      markerPlugins.afterTransforms,
+    ] as NonNullable<ReactMarkdownOptions['rehypePlugins']>;
+  }, [antiAiMarkers, renderedSource]);
   return (
     <div className={PROSE_CLASS}>
-      <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins}>
+      <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={activeRehypePlugins}>
         {renderedSource}
       </ReactMarkdown>
     </div>
@@ -241,14 +277,62 @@ export interface MarkdownViewProps {
   className?: string;
   /** Preferred language code — e.g. "zh" or "en" */
   preferredLang?: string;
+  /** Student-only marker path and trusted safe marker view. */
+  antiAiPath?: string;
+  antiAiMarkers?: readonly AntiAiMarkerClientMarker[];
 }
 
-export function MarkdownView({ content, className, preferredLang }: MarkdownViewProps) {
-  const langs = useMemo(() => parseContent(content), [content]);
+interface ChunkAntiAiMarkers {
+  markdown: AntiAiMarkerClientMarker[];
+  samples: Record<string, SampleAntiAiMarker[]>;
+}
+
+function assignAntiAiMarkersToChunks(chunks: readonly PositionedMarkdownChunk[], markers: readonly AntiAiMarkerClientMarker[]): ChunkAntiAiMarkers[] {
+  const assignments = chunks.map<ChunkAntiAiMarkers>(() => ({ markdown: [], samples: {} }));
+  for (const marker of markers) {
+    const chunkIndex = chunks.findIndex((chunk) => marker.offset >= chunk.sourceStart && marker.offset <= chunk.sourceEnd);
+    if (chunkIndex < 0) throw new AntiAiMarkerRenderError(`Anti AI marker has no exact render chunk: ${marker.id}`);
+    const chunk = chunks[chunkIndex];
+    if (chunk.kind === 'md') {
+      const md = chunk.md || '';
+      assignments[chunkIndex].markdown.push({
+        ...marker,
+        offset: Math.max(0, Math.min(md.length, marker.offset - chunk.sourceStart)),
+      });
+      continue;
+    }
+    const targets = (chunk.samples || []).flatMap((sample) =>
+      [
+        sample.inputSourceStart === undefined || sample.inputSourceEnd === undefined
+          ? null
+          : { key: `input:${sample.id}`, start: sample.inputSourceStart, end: sample.inputSourceEnd },
+        sample.outputSourceStart === undefined || sample.outputSourceEnd === undefined
+          ? null
+          : { key: `output:${sample.id}`, start: sample.outputSourceStart, end: sample.outputSourceEnd },
+      ].filter((target): target is { key: string; start: number; end: number } => target !== null),
+    );
+    const target = targets.find((candidate) => marker.offset >= candidate.start && marker.offset <= candidate.end);
+    if (!target) throw new AntiAiMarkerRenderError(`Anti AI sample marker is outside visible sample text: ${marker.id}`);
+    assignments[chunkIndex].samples[target.key] ||= [];
+    assignments[chunkIndex].samples[target.key].push({
+      id: marker.id,
+      injectionText: marker.injectionText,
+      offset: Math.max(0, Math.min(target.end - target.start, marker.offset - target.start)),
+    });
+  }
+  return assignments;
+}
+
+export function MarkdownView({ content, className, preferredLang, antiAiPath, antiAiMarkers = [] }: MarkdownViewProps) {
+  const parsed = useMemo(() => parseContentWithMetadata(content), [content]);
+  const langs = parsed.langs;
   const keys = Object.keys(langs);
   const [activeLang, setActiveLang] = useState(() => pickInitialLang(langs, preferredLang));
   const md = langs[activeLang] || langs[keys[0]] || '';
-  const chunks = useMemo(() => splitMarkdownBySamples(md), [md]);
+  const chunks = useMemo(() => splitMarkdownBySamplesPositioned(md), [md]);
+  const activePath = antiAiPath ? (parsed.localized ? `${antiAiPath}.${activeLang}` : antiAiPath) : undefined;
+  const activeMarkers = activePath ? antiAiMarkers.filter((marker) => marker.path === activePath) : [];
+  const chunkMarkers = useMemo(() => assignAntiAiMarkersToChunks(chunks, activeMarkers), [activeMarkers, chunks]);
 
   return (
     <div className={className}>
@@ -256,13 +340,13 @@ export function MarkdownView({ content, className, preferredLang }: MarkdownView
       {chunks.length > 0 ? (
         chunks.map((chunk, i) =>
           chunk.kind === 'md' ? (
-            <MarkdownContent key={i} source={chunk.md || ''} />
+            <MarkdownContent key={i} source={chunk.md || ''} antiAiMarkers={chunkMarkers[i].markdown} />
           ) : (
-            <SampleBlocks key={i} samples={chunk.samples || []} suppressHeader />
+            <SampleBlocks key={i} samples={chunk.samples || []} suppressHeader antiAiMarkers={chunkMarkers[i].samples} />
           ),
         )
       ) : (
-        <MarkdownContent source={md} />
+        <MarkdownContent source={md} antiAiMarkers={activeMarkers} />
       )}
     </div>
   );
@@ -325,10 +409,11 @@ export function MarkdownEditor({
   antiAiMarkers = [],
   onAntiAiMarkersChange,
 }: MarkdownEditorProps) {
-  const initialLangs = useMemo(() => parseContent(value), [value]);
+  const parsedValue = useMemo(() => parseContentWithMetadata(value), [value]);
+  const initialLangs = parsedValue.langs;
   const [drafts, setDrafts] = useState(() => initialLangs);
   const keys = Object.keys(drafts);
-  const isMultiLang = keys.length > 1 || (keys.length === 1 && keys[0] !== 'default');
+  const isLocalized = parsedValue.localized;
   const [activeLang, setActiveLang] = useState(() => pickInitialLang(initialLangs, preferredLang));
   const [source, setSource] = useState(() => initialLangs[activeLang] || '');
   const [preview, setPreview] = useState('');
@@ -340,7 +425,7 @@ export function MarkdownEditor({
   const previewRef = useRef<HTMLDivElement>(null);
   const [antiAiPreview, setAntiAiPreview] = useState<'student' | 'copy' | null>(null);
   const [editingMarkerId, setEditingMarkerId] = useState<string | null>(null);
-  const activeAntiAiPath = antiAiPath ? (isMultiLang && activeLang !== 'default' ? `${antiAiPath}.${activeLang}` : antiAiPath) : undefined;
+  const activeAntiAiPath = antiAiPath ? (isLocalized ? `${antiAiPath}.${activeLang}` : antiAiPath) : undefined;
   const activeAntiAiMarkers = activeAntiAiPath
     ? antiAiMarkers.filter((marker) => marker.anchor.path === activeAntiAiPath).sort((left, right) => left.anchor.offset - right.anchor.offset)
     : [];
@@ -376,17 +461,15 @@ export function MarkdownEditor({
       }
       sourceRef.current = nextSource;
       setSource(nextSource);
-      if (isMultiLang) {
-        setDrafts((current) => {
-          const next = { ...current, [activeLang]: nextSource };
-          onChange?.(JSON.stringify(next));
-          return next;
-        });
+      if (isLocalized) {
+        const next = { ...drafts, [activeLang]: nextSource };
+        setDrafts(next);
+        onChange?.(JSON.stringify(next));
       } else {
         onChange?.(nextSource);
       }
     },
-    [activeAntiAiPath, activeLang, isMultiLang, onAntiAiMarkersChange, onChange],
+    [activeAntiAiPath, activeLang, drafts, isLocalized, onAntiAiMarkersChange, onChange],
   );
 
   const addAntiAiMarker = useCallback(() => {
@@ -539,7 +622,7 @@ export function MarkdownEditor({
 
   return (
     <div className={cn('space-y-2', className)}>
-      {isMultiLang && name ? <input type="hidden" name={name} value={JSON.stringify(drafts)} readOnly /> : null}
+      {isLocalized && name ? <input type="hidden" name={name} value={JSON.stringify(drafts)} readOnly /> : null}
       {/* Header bar */}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <LangTabs
@@ -690,7 +773,7 @@ export function MarkdownEditor({
           </div>
           <textarea
             ref={editorRef}
-            name={isMultiLang ? undefined : name}
+            name={isLocalized ? undefined : name}
             value={source}
             onChange={handleChange}
             onScroll={handleScroll}

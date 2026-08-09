@@ -146,7 +146,22 @@ export interface MarkdownChunk {
   samples?: SampleCase[];
 }
 
-export function splitMarkdownBySamples(md: string): MarkdownChunk[] {
+export interface PositionedSampleCase extends SampleCase {
+  inputSourceStart?: number;
+  inputSourceEnd?: number;
+  outputSourceStart?: number;
+  outputSourceEnd?: number;
+}
+
+export interface PositionedMarkdownChunk {
+  kind: 'md' | 'sample';
+  md?: string;
+  samples?: PositionedSampleCase[];
+  sourceStart: number;
+  sourceEnd: number;
+}
+
+export function splitMarkdownBySamplesPositioned(md: string): PositionedMarkdownChunk[] {
   if (!md) return [];
 
   interface Blk {
@@ -155,40 +170,49 @@ export function splitMarkdownBySamples(md: string): MarkdownChunk[] {
     kind: 'input' | 'output';
     id: number;
     body: string;
+    bodyStart: number;
+    bodyEnd: number;
   }
   const blocks: Blk[] = [];
   // Same regex as `iterateSampleBlocks` but with positions.
   const re = /(^|\n)(`{3,})(input|output)(\d*)[^\S\n]*\n([\s\S]*?)\n\2(?=\s|$)/gi;
   for (let m = re.exec(md); m !== null; m = re.exec(md)) {
     const leadingNl = m[1] ? 1 : 0;
+    const body = m[5].replace(/\s+$/u, '');
+    const openingEnd = m[0].indexOf('\n', leadingNl) + 1;
+    const bodyStart = m.index + openingEnd;
     blocks.push({
       start: m.index + leadingNl,
       end: m.index + m[0].length,
       kind: m[3].toLowerCase() as 'input' | 'output',
       id: m[4] ? Number.parseInt(m[4], 10) : 1,
-      body: m[5].replace(/\s+$/u, ''),
+      body,
+      bodyStart,
+      bodyEnd: bodyStart + body.length,
     });
   }
 
   if (blocks.length === 0) {
-    return [{ kind: 'md', md }];
+    return [{ kind: 'md', md, sourceStart: 0, sourceEnd: md.length }];
   }
 
   // Group consecutive blocks separated only by whitespace.
-  const groups: { start: number; end: number; samples: SampleCase[] }[] = [];
+  const groups: { start: number; end: number; samples: PositionedSampleCase[] }[] = [];
   let cur: Blk[] = [blocks[0]];
   const flushGroup = (blks: Blk[]) => {
-    const inputs = new Map<number, string>();
-    const outputs = new Map<number, string>();
-    for (const b of blks) (b.kind === 'input' ? inputs : outputs).set(b.id, b.body);
+    const inputs = new Map<number, Blk>();
+    const outputs = new Map<number, Blk>();
+    for (const b of blks) (b.kind === 'input' ? inputs : outputs).set(b.id, b);
     const ids = [...new Set([...inputs.keys(), ...outputs.keys()])].sort((a, b) => a - b);
     groups.push({
       start: blks[0].start,
       end: blks[blks.length - 1].end,
       samples: ids.map((id) => ({
         id,
-        input: inputs.get(id) ?? '',
-        output: outputs.get(id) ?? '',
+        input: inputs.get(id)?.body ?? '',
+        output: outputs.get(id)?.body ?? '',
+        ...(inputs.has(id) ? { inputSourceStart: inputs.get(id)!.bodyStart, inputSourceEnd: inputs.get(id)!.bodyEnd } : {}),
+        ...(outputs.has(id) ? { outputSourceStart: outputs.get(id)!.bodyStart, outputSourceEnd: outputs.get(id)!.bodyEnd } : {}),
       })),
     });
   };
@@ -203,21 +227,34 @@ export function splitMarkdownBySamples(md: string): MarkdownChunk[] {
   }
   flushGroup(cur);
 
-  const chunks: MarkdownChunk[] = [];
+  const chunks: PositionedMarkdownChunk[] = [];
   let cursor = 0;
   for (const g of groups) {
     if (g.start > cursor) {
       const text = md.slice(cursor, g.start).replace(/\n+$/, '');
-      if (text.trim()) chunks.push({ kind: 'md', md: text });
+      if (text.trim()) chunks.push({ kind: 'md', md: text, sourceStart: cursor, sourceEnd: cursor + text.length });
     }
-    chunks.push({ kind: 'sample', samples: g.samples });
+    chunks.push({ kind: 'sample', samples: g.samples, sourceStart: g.start, sourceEnd: g.end });
     cursor = g.end;
   }
   if (cursor < md.length) {
-    const text = md.slice(cursor).replace(/^\n+/, '');
-    if (text.trim()) chunks.push({ kind: 'md', md: text });
+    const raw = md.slice(cursor);
+    const text = raw.replace(/^\n+/, '');
+    if (text.trim()) chunks.push({ kind: 'md', md: text, sourceStart: cursor + raw.length - text.length, sourceEnd: md.length });
   }
   return chunks;
+}
+
+export function splitMarkdownBySamples(md: string): MarkdownChunk[] {
+  return splitMarkdownBySamplesPositioned(md).map((chunk) => ({
+    kind: chunk.kind,
+    ...(chunk.md !== undefined ? { md: chunk.md } : {}),
+    ...(chunk.samples
+      ? {
+          samples: chunk.samples.map(({ id, input, output }) => ({ id, input, output })),
+        }
+      : {}),
+  }));
 }
 
 /**

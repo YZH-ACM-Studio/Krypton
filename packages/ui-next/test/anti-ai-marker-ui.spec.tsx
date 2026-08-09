@@ -1,16 +1,23 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { useState } from 'react';
 import { describe, expect, it } from 'vitest';
-import { MarkdownEditor } from '../src/components/markdown-renderer';
+import { MarkdownEditor, type ContentValue } from '../src/components/markdown-renderer';
 import type { AntiAiMarkerDraft } from '../src/lib/anti-ai-marker';
 
-function AuthorMarkerEditor({ initialContent = 'abc' }: { initialContent?: string }) {
-  const [content, setContent] = useState(initialContent);
-  const [markers, setMarkers] = useState<AntiAiMarkerDraft[]>([]);
+function AuthorMarkerEditor({
+  initialContent = 'abc',
+  initialMarkers = [],
+}: {
+  initialContent?: ContentValue;
+  initialMarkers?: AntiAiMarkerDraft[];
+}) {
+  const [content, setContent] = useState<ContentValue>(initialContent);
+  const [markers, setMarkers] = useState<AntiAiMarkerDraft[]>(initialMarkers);
   return (
     <>
       <MarkdownEditor value={content} onChange={setContent} antiAiPath="content" antiAiMarkers={markers} onAntiAiMarkersChange={setMarkers} />
-      <output aria-label="canonical-markdown">{content}</output>
+      <output aria-label="canonical-markdown">{typeof content === 'string' ? content : JSON.stringify(content)}</output>
+      <output aria-label="marker-paths">{markers.map((marker) => marker.anchor.path).join(',')}</output>
     </>
   );
 }
@@ -71,5 +78,32 @@ describe('anti AI marker author controls', () => {
     expect(editor).toHaveValue(canonical);
     expect(screen.getByLabelText('canonical-markdown').textContent).toBe(canonical);
     expect(screen.getByTestId('anti-ai-marker-boundaries').querySelector('code')?.textContent).toContain('    │int x;');
+  });
+
+  it.each([
+    ['object', { default: 'abcdef' }],
+    ['JSON', JSON.stringify({ default: 'abcdef' })],
+  ])('keeps the canonical content.default author path for a single-key default %s value', (_label, initialContent) => {
+    render(
+      <AuthorMarkerEditor
+        initialContent={initialContent}
+        initialMarkers={[
+          {
+            id: 'marker_default_existing',
+            anchor: { path: 'content.default', offset: 1, affinity: 'after' },
+            injectionText: '已有',
+            revision: 1,
+          },
+        ]}
+      />,
+    );
+    const editor = screen.getByPlaceholderText(/在此输入 Markdown 内容/) as HTMLTextAreaElement;
+    expect(screen.getByTestId('anti-ai-marker-boundaries')).toHaveTextContent('a│bcdef');
+    editor.setSelectionRange(3, 3);
+    fireEvent.click(screen.getByRole('button', { name: '在光标处插入防 AI 标记' }));
+    expect(screen.getByLabelText('marker-paths')).toHaveTextContent('content.default,content.default');
+
+    fireEvent.change(editor, { target: { value: 'abcdeg' } });
+    expect(screen.getByLabelText('canonical-markdown')).toHaveTextContent('{"default":"abcdeg"}');
   });
 });

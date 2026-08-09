@@ -8,7 +8,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { SimpleSelect } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import type { AntiAiMarkerDraft } from '@/lib/anti-ai-marker';
+import type { AntiAiMarkerClientMarker, AntiAiMarkerDraft } from '@/lib/anti-ai-marker';
 
 export type StatementState = 'undecided' | 'present' | 'absent';
 
@@ -80,21 +80,33 @@ export function ProgrammingStatementView({
   statement,
   preferredLang,
   limits,
+  antiAiMarkers = [],
 }: {
   statement: ProgrammingStatementViewData;
   preferredLang?: string;
   limits: ReactNode;
+  antiAiMarkers?: readonly AntiAiMarkerClientMarker[];
 }) {
   return (
     <div className="space-y-8" data-programming-statement="structured-v1">
       {statement.background ? (
         <Section title="题目背景">
-          <MarkdownView content={statement.background.content} preferredLang={preferredLang} />
+          <MarkdownView
+            content={statement.background.content}
+            preferredLang={preferredLang}
+            antiAiPath="programmingStatement.background"
+            antiAiMarkers={antiAiMarkers}
+          />
         </Section>
       ) : null}
       <Section title="题目描述">
         {statement.description.state === 'present' ? (
-          <MarkdownView content={statement.description.content} preferredLang={preferredLang} />
+          <MarkdownView
+            content={statement.description.content}
+            preferredLang={preferredLang}
+            antiAiPath="programmingStatement.description"
+            antiAiMarkers={antiAiMarkers}
+          />
         ) : (
           <p className="text-sm text-amber-600 dark:text-amber-400">题目描述尚未完成。</p>
         )}
@@ -103,7 +115,12 @@ export function ProgrammingStatementView({
         {statement.input.state === 'absent' ? (
           <p className="text-sm">本题无输入。</p>
         ) : statement.input.state === 'present' ? (
-          <MarkdownView content={statement.input.content} preferredLang={preferredLang} />
+          <MarkdownView
+            content={statement.input.content}
+            preferredLang={preferredLang}
+            antiAiPath="programmingStatement.input"
+            antiAiMarkers={antiAiMarkers}
+          />
         ) : (
           <p className="text-sm text-amber-600 dark:text-amber-400">输入格式尚未决定。</p>
         )}
@@ -112,7 +129,12 @@ export function ProgrammingStatementView({
         {statement.output.state === 'absent' ? (
           <p className="text-sm">本题无输出。</p>
         ) : statement.output.state === 'present' ? (
-          <MarkdownView content={statement.output.content} preferredLang={preferredLang} />
+          <MarkdownView
+            content={statement.output.content}
+            preferredLang={preferredLang}
+            antiAiPath="programmingStatement.output"
+            antiAiMarkers={antiAiMarkers}
+          />
         ) : (
           <p className="text-sm text-amber-600 dark:text-amber-400">输出格式尚未决定。</p>
         )}
@@ -141,7 +163,12 @@ export function ProgrammingStatementView({
                 </div>
                 {item.note.trim() ? (
                   <div className="border-t px-4 py-3">
-                    <MarkdownView content={item.note} preferredLang={preferredLang} />
+                    <MarkdownView
+                      content={item.note}
+                      preferredLang={preferredLang}
+                      antiAiPath={`programmingStatement.examples.${index}.note`}
+                      antiAiMarkers={antiAiMarkers}
+                    />
                   </div>
                 ) : null}
               </article>
@@ -152,7 +179,12 @@ export function ProgrammingStatementView({
       <Section title="时空限制">{limits}</Section>
       {statement.hints ? (
         <Section title="提示">
-          <MarkdownView content={statement.hints.content} preferredLang={preferredLang} />
+          <MarkdownView
+            content={statement.hints.content}
+            preferredLang={preferredLang}
+            antiAiPath="programmingStatement.hints"
+            antiAiMarkers={antiAiMarkers}
+          />
         </Section>
       ) : null}
     </div>

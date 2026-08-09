@@ -387,6 +387,23 @@
   margin-right: 0.4em;
 }
 
+.anti-ai-copy-marker {
+  display: inline;
+  inline-size: 0;
+  block-size: 0;
+  overflow: hidden;
+  font-size: 0;
+  line-height: 0;
+  pointer-events: none;
+  user-select: none;
+}
+
+@media print {
+  .anti-ai-copy-marker {
+    display: none !important;
+  }
+}
+
 /* Dark mode: override highlight.js code block background */
 .dark .hljs {
   background: hsl(222 47% 12%);

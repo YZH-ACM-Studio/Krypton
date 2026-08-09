@@ -1,6 +1,6 @@
 import { expect } from 'chai';
 import { describe, it } from 'node:test';
-import { antiAiMarkerClientView, canonicalAntiAiMarkers, statementSourcesForAntiAiMarkers } from '../src/lib/anti-ai-marker';
+import { antiAiMarkerClientView, canonicalAntiAiMarkers, remapAntiAiMarkerOffset, statementSourcesForAntiAiMarkers } from '../src/lib/anti-ai-marker';
 
 const legacyProblem = (content: string) => ({ content });
 
@@ -121,6 +121,7 @@ describe('anti AI marker canonical boundary', () => {
     it('fails closed for unknown schemas, stale revisions and stored anchors that no longer match', () => {
         const problem = legacyProblem('abcdef');
         expect(() => canonicalAntiAiMarkers({ schemaVersion: 2, markers: [] }, problem, undefined)).to.throw('schemaVersion');
+        expect(() => antiAiMarkerClientView(null, problem)).to.throw('antiAiMarkers must be an object');
         const stored = canonicalAntiAiMarkers(
             {
                 schemaVersion: 1,
@@ -179,5 +180,21 @@ describe('anti AI marker canonical boundary', () => {
             ),
         ).to.throw('revision');
         expect(() => antiAiMarkerClientView(stored, legacyProblem('abXcdef'))).to.throw('anchor context');
+    });
+
+    it('keeps marker offsets aligned when attachment URLs are rewritten', () => {
+        const source = 'before ![x](file://a.jpg) after';
+        const start = source.indexOf('file://a.jpg');
+        const end = start + 'file://a.jpg'.length;
+        const replacement = './7/file/a.jpg';
+        const replacements = [{ start, end, replacementLength: replacement.length }];
+
+        expect(remapAntiAiMarkerOffset(source.indexOf('before') + 2, replacements)).to.equal(source.indexOf('before') + 2);
+        expect(remapAntiAiMarkerOffset(source.indexOf('after') + 2, replacements)).to.equal(
+            source.indexOf('after') + 2 + replacement.length - (end - start),
+        );
+        expect(remapAntiAiMarkerOffset(start, replacements)).to.equal(start);
+        expect(remapAntiAiMarkerOffset(end, replacements)).to.equal(start + replacement.length);
+        expect(() => remapAntiAiMarkerOffset(start + 2, replacements)).to.throw('inside rewritten non-visible source');
     });
 });

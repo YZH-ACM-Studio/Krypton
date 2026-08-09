@@ -3275,12 +3275,12 @@ export class ProblemModel {
             { domainId, docType: document.TYPE_PROBLEM, docId: pid },
             { projection: { content: 1, statementFormat: 1, programmingStatement: 1, antiAiMarkers: 1 } },
         );
-        if (!pdoc?.antiAiMarkers) return undefined;
+        if (!pdoc) throw new TypeError('problem disappeared while serializing anti AI markers');
+        if (pdoc.antiAiMarkers === undefined) return { schemaVersion: 1 as const, markers: [] };
         if (!isEqual([...statementSourcesForAntiAiMarkers(pdoc)], [...statementSourcesForAntiAiMarkers(expectedProblem)])) {
             throw new TypeError('problem statement changed while serializing anti AI markers');
         }
-        const view = antiAiMarkerClientView(pdoc.antiAiMarkers, pdoc);
-        return view.markers.length ? view : undefined;
+        return antiAiMarkerClientView(pdoc.antiAiMarkers, pdoc);
     }
 
     /**

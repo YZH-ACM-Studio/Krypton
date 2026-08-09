@@ -34,6 +34,7 @@
   {{ set(UiContext, 'pretestConnUrl', "record-conn?pretest=1&uidOrName=" + handler.user._id + "&pid=" + pdoc.docId + "&domainId=" + handler.args.domainId) }}
 {% endif %}
 </script>
+{% set practiceControlled = practiceIntegrity and practiceIntegrity.controlled %}
 {% if not tdoc %}
   {% block ogp %}
     {% set preferredLang = handler.request.query.lang or handler.user.viewLang or handler.session.viewLang %}
@@ -52,6 +53,16 @@
 {% endif %}
 <div class="row" data-sticky-parent>
   <div class="medium-9 columns">
+    {% if practiceControlled and practiceIntegrity.policy.antiAiCopyInjection %}
+    <div class="section">
+      <div class="section__body">
+        <div class="typo error">
+          <h2>{{ _('Authenticity statement initialization failed') }}</h2>
+          <p>{{ _('This interface cannot verify anti-AI copy markers. Return to the course or problem set and open the problem with Krypton UI; submission is blocked here.') }}</p>
+        </div>
+      </div>
+    </div>
+    {% else %}
     <div class="section">
       <div class="section__header">
         <h1 class="section__title">
@@ -145,6 +156,7 @@
         {% include "partials/problem_description.html" %}
       </div></div>
     </div>
+    {% endif %}
   </div>
   <div class="medium-3 columns"><div data-sticky="large">
     {% include "partials/problem_sidebar.html" %}

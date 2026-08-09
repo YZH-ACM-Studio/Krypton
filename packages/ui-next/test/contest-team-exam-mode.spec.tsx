@@ -196,7 +196,7 @@ describe('p1.14 team Exam Mode UI contracts', () => {
     expect(ide).to.include('data-readonly-code-toolbar');
     expect(ide).to.include('aria-label="缩小只读代码字号"');
     expect(ide).to.include('aria-label="放大只读代码字号"');
-    expect(ide).to.include('{!isReadOnly || !teamReadOnlyView ? (');
+    expect(ide).to.include('{(!isReadOnly || !teamReadOnlyView) && !prohibitExternalCodeInjection ? (');
     expect(ide).to.include('res.status === 409 && reloadOnConflict');
     expect(objective).to.include('res.status === 409 && reloadOnConflict');
     expect(recordHandler).to.include('currentRecordTeam.captainUid !== this.user._id');

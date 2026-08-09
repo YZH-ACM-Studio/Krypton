@@ -2,7 +2,9 @@ import type * as monaco from 'monaco-editor';
 import React from 'react';
 import { connect } from 'react-redux';
 import { load } from 'vj/components/monaco/loader';
+import Notification from 'vj/components/notification';
 import { ctx } from 'vj/context';
+import { i18n } from 'vj/utils';
 
 interface ScratchpadOptions {
   value?: string;
@@ -118,6 +120,18 @@ export default connect(
       this.disposable.map((i) => i.dispose());
     }
 
+    rejectExternalCode = (event: React.SyntheticEvent) => {
+      if (!UiContext.practiceIntegrity?.controlled || !UiContext.practiceIntegrity.policy?.prohibitExternalCodeInjection) return;
+      event.preventDefault();
+      event.stopPropagation();
+      Notification.warn(i18n('Authenticity training blocks pasted or dropped code. Enter code directly in the editor.'));
+    };
+
+    rejectBeforeInput = (event: React.FormEvent<HTMLDivElement>) => {
+      const inputType = (event.nativeEvent as InputEvent).inputType;
+      if (inputType === 'insertFromPaste' || inputType === 'insertFromDrop') this.rejectExternalCode(event);
+    };
+
     assignRef = (component) => {
       this.containerElement = component;
     };
@@ -126,6 +140,9 @@ export default connect(
       return (
         <div
           ref={this.assignRef}
+          onPasteCapture={this.rejectExternalCode}
+          onDropCapture={this.rejectExternalCode}
+          onBeforeInputCapture={this.rejectBeforeInput}
           style={{
             height: '100%',
             width: '100%',

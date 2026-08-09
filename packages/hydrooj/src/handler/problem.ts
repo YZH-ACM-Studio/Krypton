@@ -72,9 +72,16 @@ import {
     PracticeIntegrityContextError,
     practiceIntegrityService,
     trustedPracticeContextReference,
+    type PracticeContainerKind,
+    type PracticeScopeKind,
     type TrustedPracticeContextReference,
 } from '../model/practice-integrity';
-import { assertPracticeContextAccess } from '../model/practice-integrity-access';
+import {
+    assertPracticeContextAccess,
+    assertPracticeTargetAccess,
+    canManagePracticeContainer,
+    canPreviewPracticeIntegrity,
+} from '../model/practice-integrity-access';
 import problem from '../model/problem';
 import {
     classifyLegacyProgrammingTags,
@@ -1573,10 +1580,154 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
     protected canEditLoadedProblem = false;
     protected canSubmitLoadedProblem = false;
     protected knowledgeNodeIdsForDetail: string[] = [];
+    protected practicePageContext?: {
+        controlled: boolean;
+        bypassed: boolean;
+        previewAvailable: boolean;
+        entry: {
+            containerKind: PracticeContainerKind;
+            containerId: string;
+            scopeKind: PracticeScopeKind;
+            scopeId: number;
+        };
+        contextId?: string;
+        expiresAt?: string;
+        policy?: {
+            prohibitExternalCodeInjection: boolean;
+            removeIndependentSubmitForm: boolean;
+            antiAiCopyInjection: boolean;
+        };
+        mode?: 'student' | 'preview';
+        revisions?: Array<{
+            containerKind: PracticeContainerKind;
+            containerId: string;
+            scopeKind: PracticeScopeKind;
+            scopeId: number;
+            revision: number;
+        }>;
+    };
+
+    private async resolvePracticePageContext(
+        containerKindRaw: string,
+        containerId: ObjectId | undefined,
+        scopeKindRaw: string,
+        scopeId: number | undefined,
+        preview: boolean,
+    ) {
+        const hasAnyRequestField = !!containerKindRaw || !!containerId || !!scopeKindRaw || scopeId !== undefined || preview;
+        if (!hasAnyRequestField) return undefined;
+        if (!containerKindRaw || !containerId || !scopeKindRaw || scopeId === undefined) {
+            throw new ValidationError('practiceContext', null, localizedErrorText`真实性训练入口参数不完整，请返回课程或题集重新进入题目`);
+        }
+        if (this.tdoc) throw new ValidationError('practiceContext', null, localizedErrorText`比赛或 VP 题目不能使用真实性训练入口`);
+        this.checkPriv(PRIV.PRIV_USER_PROFILE);
+        if (containerKindRaw !== 'course' && containerKindRaw !== 'problemSet') {
+            throw new ValidationError('practiceContainerKind', null, localizedErrorText`真实性训练容器类型无效`);
+        }
+        if (scopeKindRaw !== 'chapter' && scopeKindRaw !== 'stage') {
+            throw new ValidationError('practiceScopeKind', null, localizedErrorText`真实性训练范围类型无效`);
+        }
+        const containerKind = containerKindRaw as PracticeContainerKind;
+        const scopeKind = scopeKindRaw as PracticeScopeKind;
+        const target = { containerKind, containerId, scopeKind, scopeId };
+        let rejectionReason = 'context-access-denied';
+        try {
+            const tdoc = await assertPracticeTargetAccess({
+                domainId: this.pdoc.domainId,
+                user: this.user,
+                handler: this,
+                target,
+                pid: this.pdoc.docId,
+                mode: preview ? 'preview' : 'student',
+                setRejectionReason: (reason) => {
+                    rejectionReason = reason;
+                },
+            });
+            const canPreview = canPreviewPracticeIntegrity(this.user, this.pdoc, canManagePracticeContainer(this.user, tdoc, containerKind));
+            rejectionReason = 'policy-read-failed';
+            const published = await practiceIntegrityService.getLatestPublished(this.pdoc.domainId, containerKind, containerId);
+            const entry = { containerKind, containerId: containerId.toHexString(), scopeKind, scopeId };
+            if (!published) return { controlled: false, bypassed: false, previewAvailable: false, entry };
+            if (canPreview && !preview) {
+                return { controlled: false, bypassed: true, previewAvailable: true, entry };
+            }
+            rejectionReason = 'context-issue-failed';
+            const context = await practiceIntegrityService.issueContext({
+                domainId: this.pdoc.domainId,
+                uid: this.user._id,
+                containerKind,
+                containerId,
+                scopeKind,
+                scopeId,
+                pid: this.pdoc.docId,
+                mode: preview ? 'preview' : 'student',
+                targets: [{ revision: published, scopeKind, scopeId }],
+            });
+            const contextId = context._id.toHexString();
+            logger.info(
+                'Practice problem entry issued domain=%s contextId=%s uid=%d container=%s/%s scope=%s/%d pid=%d mode=%s revisions=%o stage=problem-entry result=success',
+                this.pdoc.domainId,
+                contextId,
+                this.user._id,
+                containerKind,
+                containerId,
+                scopeKind,
+                scopeId,
+                this.pdoc.docId,
+                context.mode,
+                context.revisions.map((revision) => `${revision.containerKind}:${revision.containerId.toHexString()}:${revision.revision}`),
+            );
+            return {
+                controlled: true,
+                bypassed: false,
+                previewAvailable: canPreview,
+                entry,
+                contextId,
+                expiresAt: context.expiresAt.toISOString(),
+                policy: context.policy,
+                mode: context.mode,
+                revisions: context.revisions.map((revision) => ({
+                    containerKind: revision.containerKind,
+                    containerId: revision.containerId.toHexString(),
+                    scopeKind: revision.scopeKind,
+                    scopeId: revision.scopeId,
+                    revision: revision.revision,
+                })),
+            };
+        } catch (error) {
+            logger.warn(
+                'Practice problem entry rejected domain=%s uid=%d container=%s/%s scope=%s/%s pid=%d preview=%s reason=%s stage=problem-entry result=rejected',
+                this.pdoc.domainId,
+                this.user._id,
+                containerKindRaw || 'invalid',
+                containerId || 'invalid',
+                scopeKindRaw || 'invalid',
+                scopeId ?? 'invalid',
+                this.pdoc.docId,
+                preview,
+                rejectionReason,
+            );
+            throw error;
+        }
+    }
 
     @route('pid', Types.ProblemId, true)
     @query('tid', Types.ObjectId, true)
-    async _prepare(_domainId: string, pid: number | string, tid?: ObjectId) {
+    @query('practiceContainerKind', Types.String, true)
+    @query('practiceContainerId', Types.ObjectId, true)
+    @query('practiceScopeKind', Types.String, true)
+    @query('practiceScopeId', Types.PositiveInt, true)
+    @query('practicePreview', Types.Boolean, true)
+    async _prepare(
+        _domainId: string,
+        pid: number | string,
+        tid?: ObjectId,
+        practiceContainerKind = '',
+        practiceContainerId?: ObjectId,
+        practiceScopeKind = '',
+        practiceScopeId?: number,
+        practicePreview = false,
+    ) {
         const domainId = String(this.domain?._id);
         this.pdoc = tid
             ? await problem.get(domainId, pid)
@@ -1666,6 +1817,13 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
             this.pdoc.config.langs = ['objective', 'submit_answer'].includes(this.pdoc.config.type) ? ['_'] : intersection(baseLangs, ...t);
         }
         await this.ctx.parallel('problem/get', this.pdoc, this);
+        this.practicePageContext = await this.resolvePracticePageContext(
+            practiceContainerKind,
+            practiceContainerId,
+            practiceScopeKind,
+            practiceScopeId,
+            practicePreview,
+        );
         let knowledgeMapVisible = true;
         if (!tid && this.pdoc.knowledgeMapId && !problem.isProblemBankAdmin(this.user)) {
             const publicMaps = await listKnowledgeMapsForProblemSelection();
@@ -1779,6 +1937,7 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
                 problem.canEditProblemData(this.user, this.pdoc) ||
                 problem.canEditProblemTags(this.user, this.pdoc) ||
                 problem.canManageProblemContributions(this.user, this.pdoc),
+            ...(this.practicePageContext ? { practiceIntegrity: this.practicePageContext } : {}),
         };
         if (this.tdoc && this.tsdoc) {
             const fields = ['attend', 'startAt'];
@@ -2048,7 +2207,20 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
     }
 
     async get() {
+        const problemKind = effectiveProblemKind(this.pdoc);
+        const structuredIde = ['program_fill', 'function'].includes(problemKind);
+        if (this.practicePageContext?.controlled && this.practicePageContext.policy?.removeIndependentSubmitForm && !structuredIde) {
+            logger.warn(
+                'Independent submit page rejected domain=%s contextId=%s uid=%d pid=%d stage=submit-page reason=ide-only result=rejected',
+                this.pdoc.domainId,
+                this.practicePageContext.contextId,
+                this.user._id,
+                this.pdoc.docId,
+            );
+            throw new ValidationError('practiceContext', null, localizedErrorText`当前真实性训练只能使用题面内的 Krypton IDE 提交`);
+        }
         this.response.template = 'problem_submit.html';
+        if (this.practicePageContext) this.response.body.practiceIntegrity = this.practicePageContext;
         const langRange =
             typeof this.pdoc.config === 'object' && this.pdoc.config.langs
                 ? Object.fromEntries(this.pdoc.config.langs.map((i) => [i, setting.langs[i]?.display || i]))

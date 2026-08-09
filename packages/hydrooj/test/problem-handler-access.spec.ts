@@ -87,6 +87,9 @@ const calls = {
     storageSign: [] as any[],
     practiceContextAssertions: [] as any[],
     practiceContextAccess: [] as any[],
+    practiceContextIssues: [] as any[],
+    practicePolicyReads: [] as any[],
+    practiceTargetAccess: [] as any[],
 };
 let getMultiResults: any[][] = [];
 let recordGetMultiResults: any[][] = [];
@@ -105,6 +108,8 @@ let managedPublicationPreviewError: Error | null = null;
 let activeDataWriteContainers: any[] = [];
 let pendingContributionRows: any[] = [];
 let practiceContextResult: any;
+let practiceLatestRevision: any;
+let practiceContainer: any;
 const createKinds: string[] = [];
 const knowledgeMapId = '64a000000000000000000001';
 const knowledgeMapTitle = '算法知识图谱';
@@ -637,6 +642,26 @@ const practiceIntegrityStub = {
             calls.practiceContextAssertions.push(input);
             return practiceContextResult;
         },
+        async getLatestPublished(...args: any[]) {
+            calls.practicePolicyReads.push(args);
+            return practiceLatestRevision;
+        },
+        async issueContext(input: any) {
+            calls.practiceContextIssues.push(input);
+            return {
+                _id: new ObjectId('66b800000000000000000029'),
+                mode: input.mode,
+                policy: input.targets[0].revision.policy,
+                expiresAt: new Date('2026-08-09T13:15:00Z'),
+                revisions: input.targets.map((target: any) => ({
+                    containerKind: target.revision.containerKind,
+                    containerId: target.revision.containerId,
+                    scopeKind: target.scopeKind,
+                    scopeId: target.scopeId,
+                    revision: target.revision.revision,
+                })),
+            };
+        },
     },
     trustedPracticeContextReference(context: any) {
         return {
@@ -656,6 +681,17 @@ const practiceIntegrityStub = {
 const practiceIntegrityAccessStub = {
     async assertPracticeContextAccess(input: any) {
         calls.practiceContextAccess.push(input);
+    },
+    async assertPracticeTargetAccess(input: any) {
+        calls.practiceTargetAccess.push(input);
+        input.setRejectionReason?.('ok');
+        return practiceContainer;
+    },
+    canManagePracticeContainer(user: any) {
+        return user.canManagePractice === true;
+    },
+    canPreviewPracticeIntegrity(user: any) {
+        return user.canPreviewPractice === true || user.canManagePractice === true;
     },
 };
 Module._load = function load(request: string, parent: NodeModule, isMain: boolean) {
@@ -840,6 +876,21 @@ beforeEach(() => {
         _id: new ObjectId('66b800000000000000000020'),
         mode: 'student',
         revisions: [],
+    };
+    practiceContainer = { docId: new ObjectId('66b800000000000000000026'), kind: 'course', owner: 7 };
+    practiceLatestRevision = {
+        _id: new ObjectId('66b800000000000000000027'),
+        domainId: 'system',
+        containerKind: 'course',
+        containerId: practiceContainer.docId,
+        revision: 3,
+        state: 'published',
+        policy: {
+            prohibitExternalCodeInjection: true,
+            removeIndependentSubmitForm: true,
+            antiAiCopyInjection: false,
+        },
+        publishedAt: new Date('2026-08-09T13:00:00Z'),
     };
     contestOngoing = true;
     createKinds.length = 0;
@@ -2184,6 +2235,65 @@ describe('P2.11 authoritative problem route domain', () => {
         expect(calls.practiceContextAssertions).to.have.length(1);
         expect(calls.recordAdd[0][6]).to.deep.include({ type: 'pretest', input: ['1 2\n'] });
         expect(calls.recordAdd[0][6]).not.to.have.property('practiceContext');
+    });
+
+    it('issues a student context only after the canonical problem-entry access gate succeeds', async () => {
+        const detail = makeHandler(ProblemDetailHandler, {});
+        detail.pdoc = { domainId: 'system', docId: 7, pid: 'P7', config: { type: 'default' } };
+        detail.checkPriv = () => undefined;
+
+        const context = await detail.resolvePracticePageContext('course', practiceContainer.docId, 'chapter', 2, false);
+
+        expect(calls.practiceTargetAccess).to.have.length(1);
+        expect(calls.practiceTargetAccess[0]).to.include({ domainId: 'system', pid: 7, mode: 'student' });
+        expect(calls.practicePolicyReads).to.deep.equal([['system', 'course', practiceContainer.docId]]);
+        expect(calls.practiceContextIssues[0]).to.include({ domainId: 'system', uid: 42, pid: 7, scopeId: 2, mode: 'student' });
+        expect(context).to.deep.include({ controlled: true, bypassed: false, contextId: '66b800000000000000000029', mode: 'student' });
+        expect(context.policy).to.deep.equal(practiceLatestRevision.policy);
+    });
+
+    it('keeps collaborators unrestricted unless they explicitly request student preview', async () => {
+        const detail = makeHandler(ProblemDetailHandler, { canPreviewPractice: true });
+        detail.pdoc = { domainId: 'system', docId: 7, pid: 'P7', config: { type: 'default' } };
+        detail.checkPriv = () => undefined;
+
+        const bypass = await detail.resolvePracticePageContext('course', practiceContainer.docId, 'chapter', 2, false);
+        expect(bypass).to.deep.include({ controlled: false, bypassed: true, previewAvailable: true });
+        expect(calls.practiceContextIssues).to.have.length(0);
+
+        const preview = await detail.resolvePracticePageContext('course', practiceContainer.docId, 'chapter', 2, true);
+        expect(preview).to.deep.include({ controlled: true, bypassed: false, previewAvailable: true, mode: 'preview' });
+        expect(calls.practiceContextIssues.at(-1)?.mode).to.equal('preview');
+    });
+
+    it('leaves ordinary problem pages untouched and refuses practice entry inside Contest or VP', async () => {
+        const detail = makeHandler(ProblemDetailHandler, {});
+        detail.pdoc = { domainId: 'system', docId: 7, pid: 'P7', config: { type: 'default' } };
+        detail.checkPriv = () => undefined;
+
+        expect(await detail.resolvePracticePageContext('', undefined, '', undefined, false)).to.equal(undefined);
+        expect(calls.practiceTargetAccess).to.have.length(0);
+        expect(calls.practicePolicyReads).to.have.length(0);
+
+        detail.tdoc = { docId: new ObjectId('66b800000000000000000028'), pids: [7] };
+        const error = await captureFailure(() => detail.resolvePracticePageContext('course', practiceContainer.docId, 'chapter', 2, false));
+        expect(error).to.be.instanceOf(GenericError);
+        expect(calls.practiceTargetAccess).to.have.length(0);
+    });
+
+    it('removes only the independent programming submit page for a controlled IDE-only policy', async () => {
+        const submit = makeHandler(ProblemSubmitHandler, {});
+        submit.practicePageContext = {
+            controlled: true,
+            policy: { prohibitExternalCodeInjection: true, removeIndependentSubmitForm: true, antiAiCopyInjection: false },
+        };
+        submit.pdoc = { domainId: 'system', docId: 7, problemKind: 'programming', config: { type: 'default' } };
+        expect(await captureFailure(() => submit.get())).to.be.instanceOf(GenericError);
+
+        submit.pdoc = { domainId: 'system', docId: 8, problemKind: 'function', config: { type: 'function', langs: ['cpp'] } };
+        await submit.get();
+        expect(submit.response.template).to.equal('problem_submit.html');
+        expect(submit.response.body.practiceIntegrity).to.equal(submit.practicePageContext);
     });
 
     it('rejects a Contest or VP submission carrying a practice context before context lookup or Record creation', async () => {

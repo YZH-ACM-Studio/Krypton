@@ -713,6 +713,12 @@ export interface KryptonIDEProps {
   teamReadOnlyView?: boolean;
   /** Captain-only virtual print using the current unsaved editor buffer. */
   onSendToTeammates?: (buffer: { language: string; code: string }) => void;
+  /** Effective server-issued practice policy: reject paste, drop, and file import while preserving normal editing. */
+  prohibitExternalCodeInjection?: boolean;
+  /** Opaque server-issued context attached to IDE submit and pretest requests. */
+  practiceContextId?: string;
+  /** Keep one draft per language inside a controlled practice identity. */
+  isolateDraftByLanguage?: boolean;
 
   /* ── Editor modes ───────────────────────────────────────────── */
 
@@ -756,6 +762,9 @@ export function KryptonIDE({
   reloadOnConflict = false,
   teamReadOnlyView = false,
   onSendToTeammates,
+  prohibitExternalCodeInjection = false,
+  practiceContextId,
+  isolateDraftByLanguage = false,
   mode = 'full',
   value,
   onValueChange,
@@ -928,8 +937,14 @@ export function KryptonIDE({
   }, [defaultLang, isReadOnly, langs]);
 
   /* ── helpers ── */
-  const codeCacheKey = !isReadOnly && cacheKey ? `krypton:code:${cacheKey}` : null;
+  const codeCacheKey =
+    !isReadOnly && cacheKey ? `krypton:code:${cacheKey}${isolateDraftByLanguage ? `:${encodeURIComponent(selectedLang)}` : ''}` : null;
+  const previousCodeCacheKey = useRef(codeCacheKey);
   const getCode = useCallback(() => viewRef.current?.state.doc.toString() || '', []);
+
+  const rejectExternalCodeInjection = useCallback(() => {
+    setPasteError('当前真实性训练禁止粘贴或拖入外部代码，请在编辑器中直接编写。');
+  }, []);
 
   /* ── CodeMirror extensions ── */
   const extensions = useMemo((): Extension[] => {
@@ -949,6 +964,11 @@ export function KryptonIDE({
         ? [
             EditorView.domEventHandlers({
               paste(event, view) {
+                if (prohibitExternalCodeInjection) {
+                  event.preventDefault();
+                  rejectExternalCodeInjection();
+                  return true;
+                }
                 const data = event.clipboardData;
                 if (!data) return false;
                 if (data.getData('text/plain')) {
@@ -973,7 +993,32 @@ export function KryptonIDE({
                 setPasteError('');
                 return true;
               },
+              beforeinput(event) {
+                if (prohibitExternalCodeInjection && (event.inputType === 'insertFromPaste' || event.inputType === 'insertFromDrop')) {
+                  event.preventDefault();
+                  rejectExternalCodeInjection();
+                  return true;
+                }
+                return false;
+              },
+              drop(event) {
+                if (!prohibitExternalCodeInjection) return false;
+                event.preventDefault();
+                rejectExternalCodeInjection();
+                return true;
+              },
             }),
+            ...(prohibitExternalCodeInjection
+              ? [
+                  EditorState.changeFilter.of((transaction) => {
+                    const prohibited =
+                      transaction.docChanged &&
+                      (transaction.isUserEvent('input.paste') || transaction.isUserEvent('input.drop') || transaction.isUserEvent('move.drop'));
+                    if (prohibited) rejectExternalCodeInjection();
+                    return !prohibited;
+                  }),
+                ]
+              : []),
           ]
         : []),
       ...(isReadOnly ? [] : [history(), dropCursor(), indentOnInput(), closeBrackets(), autocompletion(), rectangularSelection(), crosshairCursor()]),
@@ -1022,13 +1067,15 @@ export function KryptonIDE({
       EditorView.updateListener.of((update) => {
         if (update.docChanged && codeCacheKey) {
           clearTimeout(cacheTimer.current);
-          cacheTimer.current = setTimeout(() => {
+          const save = () => {
             try {
               localStorage.setItem(codeCacheKey, update.state.doc.toString());
             } catch {
               /* empty */
             }
-          }, 500);
+          };
+          if (isolateDraftByLanguage) save();
+          else cacheTimer.current = setTimeout(save, 500);
         }
       }),
       /* Cursor position tracking */
@@ -1050,7 +1097,16 @@ export function KryptonIDE({
           ]
         : []),
     ];
-  }, [selectedLang, config, codeCacheKey, isReadOnly, onValueChange]);
+  }, [
+    selectedLang,
+    config,
+    codeCacheKey,
+    isReadOnly,
+    onValueChange,
+    prohibitExternalCodeInjection,
+    rejectExternalCodeInjection,
+    isolateDraftByLanguage,
+  ]);
 
   /* ── Create / reconfigure editor ── */
   useEffect(() => {
@@ -1068,7 +1124,7 @@ export function KryptonIDE({
     let initialDoc = value ?? defaultCode;
     if (value == null && codeCacheKey) {
       const cached = localStorage.getItem(codeCacheKey);
-      if (cached) initialDoc = cached;
+      if (cached !== null) initialDoc = cached;
     }
 
     const state = EditorState.create({
@@ -1079,10 +1135,36 @@ export function KryptonIDE({
     viewRef.current = view;
 
     return () => {
+      clearTimeout(cacheTimer.current);
+      if (codeCacheKey) {
+        try {
+          localStorage.setItem(codeCacheKey, view.state.doc.toString());
+        } catch {
+          /* The existing IDE cache is best-effort; submit remains available. */
+        }
+      }
       view.destroy();
       viewRef.current = null;
     };
   }, [extensions]);
+
+  useEffect(() => {
+    if (!isolateDraftByLanguage || previousCodeCacheKey.current === codeCacheKey) return;
+    previousCodeCacheKey.current = codeCacheKey;
+    const view = viewRef.current;
+    if (!view) return;
+    let next = defaultCode;
+    if (codeCacheKey) {
+      try {
+        next = localStorage.getItem(codeCacheKey) ?? defaultCode;
+      } catch {
+        next = defaultCode;
+      }
+    }
+    if (view.state.doc.toString() !== next) {
+      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: next } });
+    }
+  }, [codeCacheKey, defaultCode, isolateDraftByLanguage]);
 
   /* ── External value sync (controlled mode) ──
    *  When the caller changes `value` (e.g. swapping the file being edited),
@@ -1163,7 +1245,7 @@ export function KryptonIDE({
       const res = await fetchHydroResponse(submitUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ lang: selectedLang, code }),
+        body: JSON.stringify({ lang: selectedLang, code, ...(practiceContextId ? { practiceContextId } : {}) }),
         credentials: 'same-origin',
       });
       if (res.status === 409 && reloadOnConflict) {
@@ -1232,6 +1314,7 @@ export function KryptonIDE({
     pollRecord,
     reloadOnConflict,
     resolveRecordUrl,
+    practiceContextId,
   ]);
 
   /* ── Pretest handler ──
@@ -1290,7 +1373,13 @@ export function KryptonIDE({
         const res = await fetchHydroResponse(submitUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify({ lang: selectedLang, code, pretest: true, input: tabs.map((t) => t.input) }),
+          body: JSON.stringify({
+            lang: selectedLang,
+            code,
+            pretest: true,
+            input: tabs.map((t) => t.input),
+            ...(practiceContextId ? { practiceContextId } : {}),
+          }),
           signal: abort.signal,
           credentials: 'same-origin',
         });
@@ -1345,7 +1434,7 @@ export function KryptonIDE({
         });
       }
     },
-    [submitUrl, canPretest, pretestTabs, selectedLang, getCode, isReadOnly, reloadOnConflict, resolvePretestRecordUrl],
+    [submitUrl, canPretest, pretestTabs, selectedLang, getCode, isReadOnly, reloadOnConflict, resolvePretestRecordUrl, practiceContextId],
   );
 
   /** Toolbar "运行全部自测" — run all samples and populated custom tabs in one request. */
@@ -1418,10 +1507,27 @@ export function KryptonIDE({
 
   /* ── Cleanup ── */
   useEffect(() => {
+    const flushDraft = () => {
+      clearTimeout(cacheTimer.current);
+      if (!codeCacheKey || !viewRef.current) return;
+      try {
+        localStorage.setItem(codeCacheKey, viewRef.current.state.doc.toString());
+      } catch {
+        /* The existing IDE cache is best-effort; submit remains available. */
+      }
+    };
+    window.addEventListener('pagehide', flushDraft);
+    return () => {
+      window.removeEventListener('pagehide', flushDraft);
+      flushDraft();
+    };
+  }, [codeCacheKey]);
+
+  useEffect(() => {
+    mountedRef.current = true;
     return () => {
       mountedRef.current = false;
       pretestAbort.current?.abort();
-      clearTimeout(cacheTimer.current);
     };
   }, []);
 
@@ -1485,7 +1591,8 @@ export function KryptonIDE({
   /* ── File upload handler ── */
   const handleFileUpload = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      if (isReadOnly) {
+      if (isReadOnly || prohibitExternalCodeInjection) {
+        if (prohibitExternalCodeInjection) rejectExternalCodeInjection();
         e.target.value = '';
         return;
       }
@@ -1503,7 +1610,7 @@ export function KryptonIDE({
       reader.readAsText(file);
       e.target.value = '';
     },
-    [isReadOnly],
+    [isReadOnly, prohibitExternalCodeInjection, rejectExternalCodeInjection],
   );
 
   /* ── Reset code handler ── */
@@ -1523,6 +1630,22 @@ export function KryptonIDE({
       }
     }
   }, [defaultCode, codeCacheKey, isReadOnly]);
+
+  const handleLanguageChange = useCallback(
+    (next: string) => {
+      if (next === selectedLang) return;
+      if (isolateDraftByLanguage && codeCacheKey) {
+        clearTimeout(cacheTimer.current);
+        try {
+          localStorage.setItem(codeCacheKey, getCode());
+        } catch {
+          /* The existing IDE cache is best-effort; submit remains available. */
+        }
+      }
+      setSelectedLang(next);
+    },
+    [codeCacheKey, getCode, isolateDraftByLanguage, selectedLang],
+  );
 
   /* ── Derived values ── */
   const availableLangs = langs.length > 0 ? langs : Object.keys(LANGUAGES);
@@ -1580,7 +1703,7 @@ export function KryptonIDE({
                       key={id}
                       type="button"
                       onClick={() => {
-                        setSelectedLang(id);
+                        handleLanguageChange(id);
                         setShowLangMenu(false);
                       }}
                       className={cn(
@@ -1679,14 +1802,16 @@ export function KryptonIDE({
           <div className="flex-1" />
 
           {/* Upload file */}
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            className="rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-            title="上传代码文件"
-          >
-            <FileUp className="size-3.5" />
-          </button>
+          {!prohibitExternalCodeInjection ? (
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+              title="上传代码文件"
+            >
+              <FileUp className="size-3.5" />
+            </button>
+          ) : null}
 
           {/* Reset code */}
           <button
@@ -2003,7 +2128,7 @@ export function KryptonIDE({
       <SettingsDialog open={showSettings} onOpenChange={setShowSettings} config={config} onChange={updateConfig} />
 
       {/* ── Hidden file input ── */}
-      {!isReadOnly || !teamReadOnlyView ? (
+      {(!isReadOnly || !teamReadOnlyView) && !prohibitExternalCodeInjection ? (
         <input
           ref={fileInputRef}
           type="file"

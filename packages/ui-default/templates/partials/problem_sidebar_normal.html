@@ -1,5 +1,8 @@
 {% import "components/user.html" as user with context %}
 {% import "components/problem.html" as problem with context %}
+{% set practiceControlled = practiceIntegrity and practiceIntegrity.controlled %}
+{% set practiceEntryActive = practiceIntegrity and practiceIntegrity.entry %}
+{% set practiceStructuredIde = pdoc.problemKind == 'program_fill' or pdoc.problemKind == 'function' %}
 <div class="section side section--problem-sidebar">
 {% if page_name != 'problem_detail' and page_name != 'contest_detail_problem' %}
   <div class="section__header">
@@ -37,14 +40,26 @@
       </a></li>
     {% endif %}
     {% else %}
-      <li class="menu__item"><a class="menu__link" href="{{ url('problem_detail', pid=pdoc.pid|default(pdoc.docId)) }}">
+      <li class="menu__item"><a class="menu__link" href="{{ url('problem_detail', pid=pdoc.pid|default(pdoc.docId), query={practiceContainerKind:practiceIntegrity.entry.containerKind, practiceContainerId:practiceIntegrity.entry.containerId, practiceScopeKind:practiceIntegrity.entry.scopeKind, practiceScopeId:practiceIntegrity.entry.scopeId, practicePreview:practiceIntegrity.mode == 'preview'}) if practiceEntryActive else url('problem_detail', pid=pdoc.pid|default(pdoc.docId)) }}">
         <span class="icon icon-flag"></span> {{ _('View Problem') }}
       </a></li>
     {% endif %}
+    {% if practiceControlled and page_name == 'problem_detail' %}
+      <li class="menu__item scratchpad--hide"><span class="menu__link disabled">
+        <span class="icon icon-info"></span> {{ _('Authenticity training is active. Enter code directly in the editor.') }}
+      </span></li>
+    {% endif %}
+    {% if practiceIntegrity and practiceIntegrity.previewAvailable %}
+      <li class="menu__item scratchpad--hide"><a class="menu__link" href="{{ url('problem_detail', pid=pdoc.pid|default(pdoc.docId), query={practiceContainerKind:practiceIntegrity.entry.containerKind, practiceContainerId:practiceIntegrity.entry.containerId, practiceScopeKind:practiceIntegrity.entry.scopeKind, practiceScopeId:practiceIntegrity.entry.scopeId, practicePreview:practiceIntegrity.mode != 'preview'}) }}">
+        <span class="icon icon-flag"></span> {{ _('Exit student preview') if practiceIntegrity.mode == 'preview' else _('Enter student preview') }}
+      </a></li>
+    {% endif %}
     {% if canSubmitProblem %}
-      <li class="menu__item scratchpad--hide"><a class="menu__link{% if page_name == 'problem_submit' %} active{% endif %}" href="{{ url('problem_submit', pid=pdoc.pid|default(pdoc.docId)) }}">
+    {% if not practiceControlled or not practiceIntegrity.policy.removeIndependentSubmitForm or practiceStructuredIde %}
+      <li class="menu__item scratchpad--hide"><a class="menu__link{% if page_name == 'problem_submit' %} active{% endif %}" href="{{ url('problem_submit', pid=pdoc.pid|default(pdoc.docId), query={practiceContainerKind:practiceIntegrity.entry.containerKind, practiceContainerId:practiceIntegrity.entry.containerId, practiceScopeKind:practiceIntegrity.entry.scopeKind, practiceScopeId:practiceIntegrity.entry.scopeId, practicePreview:practiceIntegrity.mode == 'preview'}) if practiceEntryActive else url('problem_submit', pid=pdoc.pid|default(pdoc.docId)) }}">
         <span class="icon icon-send"></span> {{ _('Submit') }}
       </a></li>
+    {% endif %}
     {% elif not handler.user.hasPriv(PRIV.PRIV_USER_PROFILE) %}
       <li class="menu__item scratchpad--hide"><a class="menu__link{% if page_name == 'problem_submit' %} active{% endif %}" href="javascript:showSignInDialog();">
         <span class="icon icon-send"></span> {{ _('Login to Submit') }}

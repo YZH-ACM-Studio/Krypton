@@ -122,6 +122,7 @@ export function ObjectiveAnswerPanel({
   signedIn,
   previewOnly = false,
   reloadOnConflict = false,
+  practiceContextId,
 }: {
   questions: ObjectiveClientQuestion[];
   submitUrl: string;
@@ -129,6 +130,7 @@ export function ObjectiveAnswerPanel({
   signedIn: boolean;
   previewOnly?: boolean;
   reloadOnConflict?: boolean;
+  practiceContextId?: string;
 }) {
   const [answers, setAnswers] = useState<AnswerMap>(() => loadDraft(storageKey));
   const [submitting, setSubmitting] = useState(false);
@@ -188,6 +190,7 @@ export function ObjectiveAnswerPanel({
         body: JSON.stringify({
           lang: '_',
           code: questions.length === 1 && questions[0].kind === 'subjective' ? String(payload[questions[0].key] || '') : YAML.stringify(payload),
+          ...(practiceContextId ? { practiceContextId } : {}),
         }),
         credentials: 'same-origin',
       });

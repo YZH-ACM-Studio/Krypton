@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { resolveChapterId, withChapterQuery } from '../src/pages/course/chapter-query.ts';
 import { problemsForCourseMindmapNode } from '../src/pages/course/mindmap-state.ts';
+import { courseMindmapProblemHref } from '../src/pages/course/mindmap.tsx';
 
 const root = resolve(import.meta.dirname, '..');
 
@@ -120,11 +121,28 @@ describe('p3.8 course workspace', () => {
     expect(editor).to.include('已公开');
     expect(detail).to.match(/\/course\/\$\{tid\}\?view=mindmap/);
     expect(detail).to.include('<CourseMindmapView');
+    expect(detail).to.include('integrityControlled={data.integrityControlled === true}');
     expect(mindmap).to.include('collapsed={collapsed}');
     expect(mindmap).to.include('emphasizedIds={emphasizedIds}');
     expect(mindmap).to.match(/\?chapter=\$\{encodeURIComponent/);
     expect(mindmap).not.to.include('fetch(');
     expect(mindmap).not.to.include('loadNodeProblems');
+  });
+
+  it('keeps controlled course mindmap entries in an explicit chapter scope', () => {
+    const problem = {
+      domainId: 'system',
+      docId: 11,
+      pid: 'P11',
+      title: '模拟',
+      nodeIds: ['node-a'],
+      chapters: [{ id: 3, title: '第三章' }],
+    };
+    expect(courseMindmapProblemHref('66b800000000000000000021', problem, true)).to.equal(
+      '/p/P11?practiceContainerKind=course&practiceContainerId=66b800000000000000000021&practiceScopeKind=chapter&practiceScopeId=3',
+    );
+    expect(courseMindmapProblemHref('66b800000000000000000021', problem, false)).to.equal('/p/P11');
+    expect(() => courseMindmapProblemHref('66b800000000000000000021', { ...problem, chapters: [] }, true)).to.throw('has no chapter scope');
   });
 
   it('lists a problem only on nodes directly selected by that problem', () => {

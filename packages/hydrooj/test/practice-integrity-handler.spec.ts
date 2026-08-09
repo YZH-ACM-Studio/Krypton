@@ -59,6 +59,8 @@ let currentPolicyState: any;
 let latestRevision: any;
 let groupIds: ObjectId[] = [];
 let problemVisible = true;
+let problemAuthor = false;
+let problemMaintainer = false;
 let trainingHookError: Error | null = null;
 let saveError: Error | null = null;
 let publishError: Error | null = null;
@@ -71,6 +73,12 @@ const trainingStub = {
 };
 
 const problemStub = {
+    canAuthorProblem() {
+        return problemAuthor;
+    },
+    canMaintainProblem() {
+        return problemMaintainer;
+    },
     async getViewableAuthorized(domainId: string, pid: number, user: any, projection: string[]) {
         calls.problemViews.push({ domainId, pid, user, projection });
         return problemVisible ? { domainId, docId: pid } : null;
@@ -263,6 +271,8 @@ beforeEach(() => {
     for (const entries of Object.values(calls)) entries.length = 0;
     groupIds = [];
     problemVisible = true;
+    problemAuthor = false;
+    problemMaintainer = false;
     trainingHookError = null;
     saveError = null;
     publishError = null;
@@ -472,13 +482,22 @@ describe('practice integrity handlers', () => {
         expect(wrongPid).to.be.instanceOf(TestValidationError);
     });
 
-    it('allows only a manager to mint a preview context', async () => {
+    it('allows container managers and problem collaborators to mint an explicit student preview', async () => {
         const student = makeHandler('practice_context');
         expect(await capture(() => student.postIssue(contextIssueArgs({ preview: true })))).to.be.instanceOf(TestPermissionError);
 
         const admin = makeUser({ hasPriv: () => true });
         const preview = makeHandler('practice_context', admin);
         await preview.postIssue(contextIssueArgs({ preview: true }));
+        expect(calls.issue.at(-1)?.mode).to.equal('preview');
+
+        problemAuthor = true;
+        await makeHandler('practice_context').postIssue(contextIssueArgs({ preview: true }));
+        expect(calls.issue.at(-1)?.mode).to.equal('preview');
+
+        problemAuthor = false;
+        const verifier = makeUser({ _permitPids: new Set([42]) });
+        await makeHandler('practice_context', verifier).postIssue(contextIssueArgs({ preview: true }));
         expect(calls.issue.at(-1)?.mode).to.equal('preview');
     });
 });

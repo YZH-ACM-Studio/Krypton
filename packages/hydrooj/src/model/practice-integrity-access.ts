@@ -17,6 +17,12 @@ export interface PracticeAccessTarget {
     scopeId: number;
 }
 
+export function canPreviewPracticeIntegrity(user: User, pdoc: any, canManageContainer = false): boolean {
+    if (canManageContainer || user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) return true;
+    if (problem.canMaintainProblem(user, pdoc) || problem.canAuthorProblem(user, pdoc)) return true;
+    return (user as User & { _permitPids?: Set<number> })._permitPids?.has(Number(pdoc?.docId)) === true;
+}
+
 export function assertPracticeContainerKind(tdoc: any, containerKind: PracticeContainerKind): void {
     const matches = containerKind === 'course' ? tdoc?.kind === 'course' : tdoc?.kind === undefined || tdoc?.kind === 'training';
     if (!matches) throw new ValidationError('containerKind', null, localizedErrorText`真实性训练容器类型不匹配`);
@@ -74,8 +80,6 @@ export async function assertPracticeTargetAccess(input: {
     const canManage = canManagePracticeContainer(user, tdoc, target.containerKind);
     input.setRejectionReason?.('container-view-denied');
     if (!user.hasPerm(PERM.PERM_VIEW_TRAINING) && !canManage) throw new PermissionError(PERM.PERM_VIEW_TRAINING);
-    input.setRejectionReason?.('preview-denied');
-    if (mode === 'preview' && !canManage) throw new PermissionError(requiredPracticeManagePermission(user, tdoc, target.containerKind));
     input.setRejectionReason?.('container-extension-denied');
     if (target.containerKind === 'problemSet') await handler.ctx.parallel('training/get', tdoc, handler);
     input.setRejectionReason?.('course-group-denied');
@@ -84,6 +88,13 @@ export async function assertPracticeTargetAccess(input: {
         input.setRejectionReason?.('problem-view-denied');
         const visibleProblem = await problem.getViewableAuthorized(domainId, pid, user);
         if (!visibleProblem) throw new PermissionError(PERM.PERM_VIEW_PROBLEM);
+        input.setRejectionReason?.('preview-denied');
+        if (mode === 'preview' && !canPreviewPracticeIntegrity(user, visibleProblem, canManage)) {
+            throw new PermissionError(requiredPracticeManagePermission(user, tdoc, target.containerKind));
+        }
+    } else if (mode === 'preview' && !canManage) {
+        input.setRejectionReason?.('preview-denied');
+        throw new PermissionError(requiredPracticeManagePermission(user, tdoc, target.containerKind));
     }
     input.setRejectionReason?.('pid-outside-scope');
     const scope = (tdoc.dag || []).find((node: any) => Number(node._id) === target.scopeId);

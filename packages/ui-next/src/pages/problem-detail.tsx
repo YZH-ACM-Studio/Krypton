@@ -45,6 +45,12 @@ import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presente
 import { replaceRouteTokens } from '@/lib/format';
 import { isPendingJudgeStatus, isTerminalJudgeStatus } from '@/lib/pretest-results';
 import { shouldShowNoTestdataWarning } from '@/lib/problem-testcase-warning';
+import {
+  practiceDraftIdentity,
+  practiceProblemEntryUrl,
+  readPracticeIntegrityPageContext,
+  type PracticeIntegrityPageContext,
+} from '@/lib/practice-integrity';
 import { extractSamples } from '@/lib/samples';
 
 /**
@@ -158,6 +164,7 @@ interface ProblemDetailPageData {
   psdoc?: ProblemStatusDoc;
   solutionCount?: number;
   tdoc?: ContestDoc | null;
+  practiceIntegrity?: unknown;
 }
 
 /* ------------------------------------------------------------------ */
@@ -513,6 +520,38 @@ function InfoChip({ icon: Icon, label, value }: { icon: LucideIcon; label: strin
   );
 }
 
+function PracticeIntegrityNotice({ context, problemUrl }: { context: PracticeIntegrityPageContext | null; problemUrl: string }) {
+  if (!context || (!context.controlled && !context.bypassed)) return null;
+  const preview = context.controlled && context.mode === 'preview';
+  return (
+    <div
+      role="status"
+      className={cn(
+        'flex flex-wrap items-center gap-2 border-y px-3 py-2 text-xs',
+        context.bypassed
+          ? 'border-blue-500/25 bg-blue-500/10 text-blue-800 dark:text-blue-200'
+          : 'border-amber-500/25 bg-amber-500/10 text-amber-800 dark:text-amber-200',
+      )}
+    >
+      <span className="font-medium">
+        {context.bypassed
+          ? '你正在以题目协作者身份使用完整编辑能力。'
+          : preview
+            ? '学生预览：真实性限制已启用；本次提交不会计入真实性训练完成。'
+            : '真实性训练已启用；只有本页面 IDE 的合格提交会计入当前进度。'}
+      </span>
+      {context.previewAvailable ? (
+        <a
+          className="ml-auto rounded-sm font-medium underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          href={practiceProblemEntryUrl(problemUrl, context.entry, !preview)}
+        >
+          {preview ? '退出学生预览' : '进入学生预览'}
+        </a>
+      ) : null}
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /*  Limits table per language                                          */
 /* ------------------------------------------------------------------ */
@@ -750,6 +789,11 @@ export function ProblemDetailPage() {
   const bs = useBootstrap();
   const data = bs.page.data as ProblemDetailPageData;
   const pdoc: ProblemDoc = data.pdoc || {};
+  const practiceIntegrity = readPracticeIntegrityPageContext(data.practiceIntegrity);
+  const practiceControlled = practiceIntegrity?.controlled === true;
+  const practicePolicy = practiceControlled ? practiceIntegrity.policy! : null;
+  const practiceContextId = practiceControlled ? practiceIntegrity.contextId : undefined;
+  const practiceDraftScope = practiceIntegrity ? practiceDraftIdentity(practiceIntegrity) : null;
   const authorUdocs: ProblemAuthorView[] = Array.isArray(data.authorUdocs) ? data.authorUdocs : [];
   const dataContributorUdocs: ProblemAuthorView[] = Array.isArray(data.dataContributorUdocs) ? data.dataContributorUdocs : [];
   const canEditProblem = data.canEditProblem === true;
@@ -818,6 +862,9 @@ export function ProblemDetailPage() {
   // deliberately stores correction records without a contest id.
   const contestQS = tid ? `?tid=${tid}` : '';
   const submitUrl = `${problemUrl}/submit${contestQS}`;
+  const independentSubmitUrl = practiceIntegrity
+    ? practiceProblemEntryUrl(`${problemUrl}/submit`, practiceIntegrity.entry, practiceIntegrity.mode === 'preview')
+    : submitUrl;
   const problemCanPretest = config.type === 'default' || config.type === undefined || config.type == null;
   // 客观题结构化作答（PLAN P3.2 Rev.11）：服务端 parseConfig 对
   // type=objective 下发无答案的 questions 描述符，走面板作答提交。
@@ -827,8 +874,8 @@ export function ProblemDetailPage() {
     ['program_fill', 'function'].includes(config.type ?? '') && ['program_fill', 'function'].includes(String(pdoc.problemKind));
   const isSubjective = pdoc.problemKind === 'subjective';
   const canPreviewSubjective = !!data.canPreviewSubjective;
-  const objectiveDraftKey = `objective-draft:${bs.user?.id || 0}/${bs.domain?.id || 'default'}/${pdoc.docId || pid}${tid ? `@${tid}` : ''}`;
-  const ideCacheKey = `${bs.user?.id || 0}/${bs.domain?.id || 'default'}/${pid}`;
+  const objectiveDraftKey = `objective-draft:${bs.user?.id || 0}/${bs.domain?.id || 'default'}/${pdoc.docId || pid}${tid ? `@${tid}` : ''}${practiceDraftScope ? `@practice:${practiceDraftScope}` : ''}`;
+  const ideCacheKey = `${bs.user?.id || 0}/${bs.domain?.id || 'default'}/${pid}${practiceDraftScope ? `/practice/${practiceDraftScope}` : ''}`;
   const preferredLang = bs.locale?.startsWith('zh') ? 'zh' : 'en';
   // `samples` is still needed for the IDE/pretest panel even though the
   // problem-statement markdown now renders sample blocks inline (see
@@ -1040,6 +1087,8 @@ export function ProblemDetailPage() {
                   ) : null}
                 </div>
 
+                <PracticeIntegrityNotice context={practiceIntegrity} problemUrl={problemUrl} />
+
                 {showNoTestdataWarning ? <NoTestdataWarning /> : null}
 
                 {/* Info chips */}
@@ -1196,6 +1245,9 @@ export function ProblemDetailPage() {
                 langs={config.langs || []}
                 defaultLang={config.langs?.[0]}
                 submitUrl={submitUrl}
+                practiceContextId={practiceContextId}
+                prohibitExternalCodeInjection={practicePolicy?.prohibitExternalCodeInjection === true}
+                isolateDraftByLanguage={practiceControlled}
                 canPretest={problemCanPretest}
                 cacheKey={ideCacheKey}
                 samples={samples}
@@ -1235,6 +1287,7 @@ export function ProblemDetailPage() {
       <ProblemRejudgeDialog open={rejudgeOpen} onOpenChange={setRejudgeOpen} endpoint={problemUrl} pid={String(pid)} title={baseTitle} />
       {/* Contest mode banner — visible whenever we entered via a contest tid */}
       {inContest && contestUrl ? <ContestBanner tdoc={tdoc!} mode={mode} letter={contestLetter} contestUrl={contestUrl} /> : null}
+      <PracticeIntegrityNotice context={practiceIntegrity} problemUrl={problemUrl} />
 
       {showNoTestdataWarning ? <NoTestdataWarning /> : null}
 
@@ -1312,11 +1365,11 @@ export function ProblemDetailPage() {
               {teamCodeReadOnly ? '只读代码' : 'IDE 模式'}
             </Button>
           ) : null}
-          {canSubmit && !examMode?.enabled ? (
+          {canSubmit && !examMode?.enabled && (!practiceControlled || !practicePolicy?.removeIndependentSubmitForm || isStructuredAnswer) ? (
             <Button asChild size="sm" variant="outline">
-              <a href={submitUrl}>
+              <a href={independentSubmitUrl}>
                 <Send className="mr-1 size-3.5" />
-                提交
+                {practiceControlled && practicePolicy?.removeIndependentSubmitForm && isStructuredAnswer ? '作答' : '提交'}
               </a>
             </Button>
           ) : null}
@@ -1373,6 +1426,7 @@ export function ProblemDetailPage() {
               signedIn={!!bs.user?.signedIn}
               previewOnly={isSubjective && !inContest}
               reloadOnConflict={!!teamExamMode}
+              practiceContextId={practiceContextId}
             />
           ) : null}
           {showExternals && solutionCount > 0 ? (

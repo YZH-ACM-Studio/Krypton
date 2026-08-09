@@ -6,12 +6,23 @@ import { MiniTabs } from '@/components/ui/mini-tabs';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
+import { practiceProblemEntryUrl } from '@/lib/practice-integrity';
 import { ChapterOutline } from './chapter-outline';
 import { useChapterQuery } from './chapter-query';
 import { CourseMindmapView } from './mindmap';
 import type { CourseChapter, CourseFile, CourseMindmapData, CourseRecord } from './types';
 
-function ProblemList({ chapter, problems }: { chapter: CourseChapter; problems: Record<string, CourseRecord> }) {
+function ProblemList({
+  chapter,
+  problems,
+  courseId,
+  integrityControlled,
+}: {
+  chapter: CourseChapter;
+  problems: Record<string, CourseRecord>;
+  courseId: string;
+  integrityControlled: boolean;
+}) {
   if (!chapter.pids.length) return null;
   return (
     <section aria-labelledby="course-problems-title" className="space-y-2">
@@ -24,7 +35,16 @@ function ProblemList({ chapter, problems }: { chapter: CourseChapter; problems: 
           return (
             <a
               key={pid}
-              href={`/p/${problem.pid || pid}`}
+              href={
+                integrityControlled
+                  ? practiceProblemEntryUrl(`/p/${problem.pid || pid}`, {
+                      containerKind: 'course',
+                      containerId: courseId,
+                      scopeKind: 'chapter',
+                      scopeId: chapter._id,
+                    })
+                  : `/p/${problem.pid || pid}`
+              }
               className={cn(
                 'group flex min-h-11 items-center gap-3 px-1 py-2.5 transition-colors duration-200 hover:text-primary',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
@@ -88,6 +108,7 @@ export function CourseDetailPage() {
     files: CourseFile[];
     view: 'overview' | 'mindmap';
     courseMindmap: CourseMindmapData | null;
+    integrityControlled?: boolean;
   };
   const course = data.tdoc || {};
   const tid = String(course.docId || course._id);
@@ -161,7 +182,12 @@ export function CourseDetailPage() {
       />
 
       {activeView === 'mindmap' ? (
-        <CourseMindmapView tid={tid} data={data.courseMindmap || null} canManage={data.canManage} />
+        <CourseMindmapView
+          tid={tid}
+          data={data.courseMindmap || null}
+          canManage={data.canManage}
+          integrityControlled={data.integrityControlled === true}
+        />
       ) : !chapters.length ? (
         <section className="border-y border-border/70 py-16 text-center">
           <BookOpen className="mx-auto size-6 text-muted-foreground" />
@@ -217,7 +243,7 @@ export function CourseDetailPage() {
             ) : (
               <div data-course-slot="chapterContent" />
             )}
-            <ProblemList chapter={activeChapter} problems={data.pdict || {}} />
+            <ProblemList chapter={activeChapter} problems={data.pdict || {}} courseId={tid} integrityControlled={data.integrityControlled === true} />
             <ContestList chapter={activeChapter} contests={data.cdict || {}} />
             {data.canDownloadFiles && data.files?.length ? (
               <section data-course-slot="files" aria-labelledby="course-files-title" className="space-y-2">

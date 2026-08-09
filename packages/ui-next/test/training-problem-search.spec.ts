@@ -96,7 +96,8 @@ describe('p3.24 training problem search', () => {
     expect(source).to.include('searchTrainingProblems({ dag, pdict, psdict, nsdict, controlled: integrityControlled, query: problemQuery })');
     expect(source).to.include('aria-label="搜索当前训练中的题目"');
     expect(source).to.include('selectChapter(chapter.id)');
-    expect(source).to.include('replaceRouteTokens(bs.urls.problemDetail, { PID: String(row.docId) })');
+    expect(source).to.include('href={problemSearchEntryUrl(row)}');
+    expect(source).to.include('return practiceProblemEntryUrl(base');
   });
 
   it('uses scoped list progress for controlled sets and legacy progress otherwise', () => {

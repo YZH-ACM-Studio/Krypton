@@ -21,6 +21,7 @@ import { SimpleSelect } from '@/components/ui/select';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { useBootstrap } from '@/lib/bootstrap';
 import { replaceRouteTokens } from '@/lib/format';
+import { practiceDraftIdentity, practiceProblemEntryUrl, readPracticeIntegrityPageContext } from '@/lib/practice-integrity';
 import { parseRecordResponse, preferredPretestResultTab, type PretestResult, type PretestResultTab } from '@/lib/pretest-results';
 import { createEmptyStructuredRegionDraft, parseStructuredRegionDraft } from '@/lib/structured-region-draft';
 
@@ -55,6 +56,7 @@ interface SubmitPageData {
   pdoc?: SubmitProblemDocument;
   tdoc?: SubmitContestDocument | null;
   langRange?: Record<string, string>;
+  practiceIntegrity?: unknown;
 }
 
 export function ProblemSubmitPage() {
@@ -70,6 +72,14 @@ export function ProblemSubmitPage() {
   const tid = tdoc?.docId ? String(tdoc.docId) : null;
   const contestQS = tid ? `?tid=${tid}` : '';
   const submitUrl = `${problemUrl}/submit${contestQS}`;
+  const practiceIntegrity = readPracticeIntegrityPageContext(data.practiceIntegrity);
+  const practiceControlled = practiceIntegrity?.controlled === true;
+  const practicePolicy = practiceControlled ? practiceIntegrity.policy! : null;
+  const practiceContextId = practiceControlled ? practiceIntegrity.contextId : undefined;
+  const practiceDraftScope = practiceIntegrity ? practiceDraftIdentity(practiceIntegrity) : null;
+  const problemDetailUrl = practiceIntegrity
+    ? practiceProblemEntryUrl(problemUrl, practiceIntegrity.entry, practiceIntegrity.mode === 'preview')
+    : `${problemUrl}${contestQS}`;
   const isStructuredAnswer =
     ['program_fill', 'function'].includes(String(config.type)) && ['program_fill', 'function'].includes(String(pdoc.problemKind));
   const textProgramFill = config.type === 'program_fill' && config.mode === 'text';
@@ -87,8 +97,8 @@ export function ProblemSubmitPage() {
 
   // Code state — KryptonIDE in simple mode is controlled via value/onValueChange.
   const structureKey = isStructuredAnswer ? `:${Number(pdoc.structureRevision) || 0}` : '';
-  const cacheKey = `krypton:submit:${bs.user?.id || 0}/${bs.domain?.id || 'default'}/${pid}${tid ? `:${tid}` : ''}${structureKey}`;
-  const langKey = `krypton:submit-lang:${pid}${tid ? `:${tid}` : ''}`;
+  const baseCacheKey = `krypton:submit:${bs.user?.id || 0}/${bs.domain?.id || 'default'}/${pid}${tid ? `:${tid}` : ''}${structureKey}`;
+  const langKey = `krypton:submit-lang:${pid}${tid ? `:${tid}` : ''}${practiceDraftScope ? `:practice:${practiceDraftScope}` : ''}`;
   const availableLangs = useMemo(() => Object.keys(langRange), [langRange]);
   const [lang, setLang] = useState<string>(() => {
     if (isStructuredAnswer) return textProgramFill ? '_' : config.template?.lang || availableLangs[0] || '';
@@ -100,10 +110,11 @@ export function ProblemSubmitPage() {
     }
     return availableLangs[0] || 'cc.cc17';
   });
+  const cacheKey = practiceDraftScope ? `${baseCacheKey}:practice:${practiceDraftScope}:lang:${encodeURIComponent(lang)}` : baseCacheKey;
   const [code, setCode] = useState<string>(() => {
     try {
       const saved = localStorage.getItem(cacheKey);
-      if (saved) {
+      if (saved !== null) {
         if (!isStructuredAnswer) return saved;
         const restored = parseStructuredRegionDraft(saved, regionIds, singleLineRegion);
         if (restored) return JSON.stringify(restored);
@@ -113,6 +124,7 @@ export function ProblemSubmitPage() {
     }
     return isStructuredAnswer ? JSON.stringify(createEmptyStructuredRegionDraft(regionIds)) : '';
   });
+  const previousCacheKey = useRef(cacheKey);
   const regionValues = useMemo(() => {
     if (!isStructuredAnswer) return {};
     return parseStructuredRegionDraft(code, regionIds, singleLineRegion) || createEmptyStructuredRegionDraft(regionIds);
@@ -124,17 +136,61 @@ export function ProblemSubmitPage() {
 
   // Persist code (debounced) + lang (immediate)
   const cacheTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const skipPersistForKey = useRef<string | null>(null);
+  const latestDraft = useRef({ key: cacheKey, value: code });
+  latestDraft.current = { key: cacheKey, value: code };
+  useEffect(() => {
+    if (previousCacheKey.current === cacheKey) return;
+    const oldCacheKey = previousCacheKey.current;
+    previousCacheKey.current = cacheKey;
+    skipPersistForKey.current = cacheKey;
+    try {
+      localStorage.setItem(oldCacheKey, code);
+      const saved = localStorage.getItem(cacheKey);
+      if (saved === null) {
+        setCode(isStructuredAnswer ? JSON.stringify(createEmptyStructuredRegionDraft(regionIds)) : '');
+      } else if (!isStructuredAnswer) {
+        setCode(saved);
+      } else {
+        const restored = parseStructuredRegionDraft(saved, regionIds, singleLineRegion);
+        setCode(JSON.stringify(restored || createEmptyStructuredRegionDraft(regionIds)));
+      }
+    } catch {
+      setCode(isStructuredAnswer ? JSON.stringify(createEmptyStructuredRegionDraft(regionIds)) : '');
+    }
+  }, [cacheKey, code, isStructuredAnswer, regionIds, singleLineRegion]);
   useEffect(() => {
     clearTimeout(cacheTimer.current);
-    cacheTimer.current = setTimeout(() => {
+    if (skipPersistForKey.current === cacheKey) {
+      skipPersistForKey.current = null;
+      return;
+    }
+    const save = () => {
       try {
         localStorage.setItem(cacheKey, code);
       } catch {
         /* */
       }
-    }, 400);
+    };
+    if (practiceControlled) save();
+    else cacheTimer.current = setTimeout(save, 400);
     return () => clearTimeout(cacheTimer.current);
-  }, [code, cacheKey]);
+  }, [code, cacheKey, practiceControlled]);
+  useEffect(() => {
+    const flushDraft = () => {
+      clearTimeout(cacheTimer.current);
+      try {
+        localStorage.setItem(latestDraft.current.key, latestDraft.current.value);
+      } catch {
+        /* */
+      }
+    };
+    window.addEventListener('pagehide', flushDraft);
+    return () => {
+      window.removeEventListener('pagehide', flushDraft);
+      flushDraft();
+    };
+  }, []);
   useEffect(() => {
     try {
       localStorage.setItem(langKey, lang);
@@ -172,7 +228,13 @@ export function ProblemSubmitPage() {
       const response = await fetchHydroResponse(submitUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ lang, code, pretest: true, input: [selfTestInput] }),
+        body: JSON.stringify({
+          lang,
+          code,
+          pretest: true,
+          input: [selfTestInput],
+          ...(practiceContextId ? { practiceContextId } : {}),
+        }),
         credentials: 'same-origin',
         signal: abort.signal,
       });
@@ -212,7 +274,7 @@ export function ProblemSubmitPage() {
         setSelfTestRunning(false);
       }
     }
-  }, [bs.urls.recordDetail, code, compiledStructuredAnswer, contestQS, lang, pid, selfTestInput, selfTestRunning, submitUrl, tid]);
+  }, [bs.urls.recordDetail, code, compiledStructuredAnswer, contestQS, lang, pid, practiceContextId, selfTestInput, selfTestRunning, submitUrl, tid]);
 
   const handleSubmit = useCallback(async () => {
     if (submitting) return;
@@ -227,6 +289,7 @@ export function ProblemSubmitPage() {
       form.append('lang', lang);
       form.append('code', code);
       if (tid) form.append('tid', tid);
+      if (practiceContextId) form.append('practiceContextId', practiceContextId);
       const res = await fetchHydroResponse(submitUrl, {
         method: 'POST',
         body: form,
@@ -249,6 +312,7 @@ export function ProblemSubmitPage() {
       native.action = submitUrl;
       const fields: Record<string, string> = { lang, code };
       if (tid) fields.tid = tid;
+      if (practiceContextId) fields.practiceContextId = practiceContextId;
       for (const [k, v] of Object.entries(fields)) {
         const inp = document.createElement('input');
         inp.type = 'hidden';
@@ -263,7 +327,7 @@ export function ProblemSubmitPage() {
       setSubmitError(typeof message === 'string' && message ? message : '提交失败');
       setSubmitting(false);
     }
-  }, [code, lang, tid, submitUrl, submitting, bs.urls.recordDetail]);
+  }, [code, lang, tid, practiceContextId, submitUrl, submitting, bs.urls.recordDetail]);
 
   return (
     <motion.div className="space-y-4" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
@@ -288,7 +352,7 @@ export function ProblemSubmitPage() {
           </a>
         )}
         <ChevronRight className="size-3" />
-        <a href={`${problemUrl}${contestQS}`} className="hover:text-primary truncate max-w-[260px]">
+        <a href={problemDetailUrl} className="hover:text-primary truncate max-w-[260px]">
           {title}
         </a>
         <ChevronRight className="size-3" />
@@ -303,7 +367,7 @@ export function ProblemSubmitPage() {
         </div>
         <div className="flex items-center gap-2">
           <Button asChild variant="outline" size="sm">
-            <a href={`${problemUrl}${contestQS}`}>返回题面</a>
+            <a href={problemDetailUrl}>返回题面</a>
           </Button>
         </div>
       </div>
@@ -349,6 +413,7 @@ export function ProblemSubmitPage() {
               onChange={updateRegion}
               lang={config.template?.lang || lang}
               singleLine={singleLineRegion}
+              prohibitExternalCodeInjection={practicePolicy?.prohibitExternalCodeInjection === true}
             />
           </div>
         ) : (
@@ -359,6 +424,7 @@ export function ProblemSubmitPage() {
               defaultLang={lang}
               value={code}
               onValueChange={setCode}
+              prohibitExternalCodeInjection={practicePolicy?.prohibitExternalCodeInjection === true}
               minHeight={480}
               className="h-full"
             />

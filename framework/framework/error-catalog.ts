@@ -1980,6 +1980,17 @@ const CHINESE_ERROR_MESSAGE_ENGLISH_TRANSLATIONS: Readonly<Record<string, string
     '交卷成功，已生成 {0} 份评测记录。': 'Exam submitted. {0} evaluation record(s) were created.',
     图片上传失败: 'Image upload failed.',
     请填写驳回理由: 'Please enter a rejection reason.',
+    '真实性训练入口参数不完整，请返回课程或题集重新进入题目':
+        'The authenticity-training entry parameters are incomplete. Return to the course or problem set and open the problem again.',
+    '比赛或 VP 题目不能使用真实性训练入口': 'Contest or VP problems cannot use an authenticity-training entry.',
+    真实性训练容器类型无效: 'The authenticity-training container type is invalid.',
+    真实性训练范围类型无效: 'The authenticity-training scope type is invalid.',
+    '当前真实性训练只能使用题面内的 Krypton IDE 提交':
+        'This authenticity-training problem can only be submitted from the Krypton IDE on the problem page.',
+    '当前真实性训练禁止粘贴或拖入外部代码，请在编辑器中直接编写。':
+        'This authenticity-training context blocks pasted or dropped external code. Enter code directly in the editor.',
+    '当前真实性训练禁止粘贴或拖入外部代码，请直接填写作答区。':
+        'This authenticity-training context blocks pasted or dropped external code. Enter the answer directly in each response region.',
 });
 
 export const ERROR_MESSAGE_TRANSLATIONS: Readonly<Record<string, ErrorMessageTranslation>> = Object.freeze({

@@ -1177,6 +1177,12 @@ Your browser does not support WebAuthn or you are not in secure context.: 您的
 Your Device: 你的设备
 Your permission: 您的权限
 Your role: 您的角色
+Authenticity training is active. Enter code directly in the editor.: 真实性训练已启用，请在编辑器中直接编写代码。
+Enter student preview: 进入学生预览
+Exit student preview: 退出学生预览
+Authenticity training blocks pasted or dropped code. Enter code directly in the editor.: 真实性训练禁止粘贴或拖入外代码，请在编辑器中直接编写。
+This controlled structured problem must be answered in the Krypton interface. Reload this page in a modern browser; the fallback form is disabled.: 当前受控结构化题必须在 Krypton 界面作答。请使用现代浏览器重新加载；兼容表单已禁用。
+This authenticity training problem blocks external code injection. Reload this page in a modern browser; the fallback form is disabled.: 当前真实性训练题禁止外部代码注入。请使用现代浏览器重新加载；兼容表单已禁用。
 Some other opened tabs locked the database. Please close them.: 其他已打开的标签页锁定了本地数据库，请关闭这些标签页。
 Please close or refresh this tab to perform the upgrade.: 请关闭或刷新此标签页以完成升级。
 Relax and try to remember your password.: 放松一下，再仔细想想您的密码。

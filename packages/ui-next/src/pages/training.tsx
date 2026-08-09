@@ -10,8 +10,14 @@ import { Pagination } from '@/components/ui/pagination';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useBootstrap } from '@/lib/bootstrap';
 import { formatPlainTextSummary, replaceRouteTokens } from '@/lib/format';
+import { practiceProblemEntryUrl } from '@/lib/practice-integrity';
 import { useChapterQuery } from './course/chapter-query';
-import { resolveTrainingListProgress, searchTrainingProblems, type TrainingListContextualProgress } from './training-search';
+import {
+  resolveTrainingListProgress,
+  searchTrainingProblems,
+  type TrainingListContextualProgress,
+  type TrainingProblemSearchRow,
+} from './training-search';
 
 /** Section node of a training DAG (serialized hydrooj `TrainingNode`). */
 interface TrainingDagNode {
@@ -523,6 +529,16 @@ export function TrainingDetailPage() {
       : 0;
   const overallPct = totalProblems > 0 ? Math.round((doneProblems / totalProblems) * 100) : 0;
   const doneNids: number[] = Array.isArray(tsdoc.doneNids) ? tsdoc.doneNids : [];
+  const problemEntryUrl = (pid: string | number, scopeId: number) => {
+    const base = replaceRouteTokens(bs.urls.problemDetail, { PID: String(pid) });
+    if (!integrityControlled) return base;
+    return practiceProblemEntryUrl(base, {
+      containerKind: 'problemSet',
+      containerId: String(tdoc.docId),
+      scopeKind: 'stage',
+      scopeId,
+    });
+  };
 
   // First unsolved problem (for "continue" button)
   const continueLink = (() => {
@@ -532,7 +548,7 @@ export function TrainingDetailPage() {
       if (!ns.isOpen && !ns.isProgress) continue; // locked or done
       for (const pid of node.pids || []) {
         if (!ns.donePids?.map(Number).includes(Number(pid))) {
-          return replaceRouteTokens(bs.urls.problemDetail, { PID: String(pid) });
+          return problemEntryUrl(pid, node._id);
         }
       }
     }
@@ -559,6 +575,11 @@ export function TrainingDetailPage() {
     () => searchTrainingProblems({ dag, pdict, psdict, nsdict, controlled: integrityControlled, query: problemQuery }),
     [dag, integrityControlled, nsdict, pdict, problemQuery, psdict],
   );
+  const problemSearchEntryUrl = (row: TrainingProblemSearchRow) => {
+    const chapter = row.chapters.find((item) => !item.completed) || row.chapters[0];
+    if (!chapter) throw new TypeError(`training problem ${row.docId} has no source stage`);
+    return problemEntryUrl(row.docId, chapter.id);
+  };
 
   return (
     <motion.div className="space-y-5" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
@@ -693,7 +714,7 @@ export function TrainingDetailPage() {
                 {problemSearch.results.map((row) => (
                   <div key={row.docId} className="flex flex-col gap-2 px-3 py-2.5 sm:flex-row sm:items-center">
                     <a
-                      href={replaceRouteTokens(bs.urls.problemDetail, { PID: String(row.docId) })}
+                      href={problemSearchEntryUrl(row)}
                       className="min-w-0 flex-1 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       <div className="flex min-w-0 items-center gap-2">
@@ -809,7 +830,7 @@ export function TrainingDetailPage() {
                     return (
                       <a
                         key={String(pid)}
-                        href={replaceRouteTokens(bs.urls.problemDetail, { PID: String(pid) })}
+                        href={problemEntryUrl(pid, selected._id)}
                         className={`flex items-center justify-between rounded-md border px-3 py-2 transition-colors hover:bg-accent ${accepted ? 'border-green-200 bg-green-50/30 dark:border-green-900/40 dark:bg-green-950/15' : ''}`}
                       >
                         <div className="min-w-0 flex-1">

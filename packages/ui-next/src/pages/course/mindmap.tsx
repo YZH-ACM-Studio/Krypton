@@ -5,13 +5,37 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { cn } from '@/lib/cn';
+import { practiceProblemEntryUrl } from '@/lib/practice-integrity';
 import { mindmapProblemHref } from '../mindmap/api';
 import { MindmapCanvas } from '../mindmap/canvas';
 import type { MindmapNode } from '../mindmap/types';
 import { problemsForCourseMindmapNode } from './mindmap-state';
 import type { CourseMindmapData, CourseMindmapProblem } from './types';
 
-function CourseProblemPanel({ tid, selected, problems }: { tid: string; selected: MindmapNode | null; problems: CourseMindmapProblem[] }) {
+export function courseMindmapProblemHref(tid: string, problem: CourseMindmapProblem, integrityControlled: boolean): string {
+  const base = mindmapProblemHref(problem);
+  if (!integrityControlled) return base;
+  const chapter = problem.chapters[0];
+  if (!chapter) throw new TypeError(`controlled course mindmap problem ${problem.docId} has no chapter scope`);
+  return practiceProblemEntryUrl(base, {
+    containerKind: 'course',
+    containerId: tid,
+    scopeKind: 'chapter',
+    scopeId: chapter.id,
+  });
+}
+
+function CourseProblemPanel({
+  tid,
+  selected,
+  problems,
+  integrityControlled,
+}: {
+  tid: string;
+  selected: MindmapNode | null;
+  problems: CourseMindmapProblem[];
+  integrityControlled: boolean;
+}) {
   return (
     <Card className="flex min-h-[16rem] min-w-0 flex-col overflow-hidden rounded-2xl shadow-sm lg:min-h-0">
       <header className="border-b px-4 py-4">
@@ -35,7 +59,7 @@ function CourseProblemPanel({ tid, selected, problems }: { tid: string; selected
               {problems.map((problem) => (
                 <li key={problem.docId} className="px-4 py-3">
                   <a
-                    href={mindmapProblemHref(problem)}
+                    href={courseMindmapProblemHref(tid, problem, integrityControlled)}
                     className={cn(
                       'flex items-center gap-2 rounded-lg py-1 transition-colors duration-200 hover:text-primary',
                       'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
@@ -71,7 +95,17 @@ function CourseProblemPanel({ tid, selected, problems }: { tid: string; selected
   );
 }
 
-export function CourseMindmapView({ tid, data, canManage }: { tid: string; data: CourseMindmapData | null; canManage: boolean }) {
+export function CourseMindmapView({
+  tid,
+  data,
+  canManage,
+  integrityControlled,
+}: {
+  tid: string;
+  data: CourseMindmapData | null;
+  canManage: boolean;
+  integrityControlled: boolean;
+}) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const emphasizedIds = useMemo(() => new Set(data?.usedNodeIds || []), [data?.usedNodeIds]);
@@ -133,7 +167,7 @@ export function CourseMindmapView({ tid, data, canManage }: { tid: string; data:
             />
           </div>
         </div>
-        <CourseProblemPanel tid={tid} selected={selected} problems={problems} />
+        <CourseProblemPanel tid={tid} selected={selected} problems={problems} integrityControlled={integrityControlled} />
       </section>
     </ReactFlowProvider>
   );

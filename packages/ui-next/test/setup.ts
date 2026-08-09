@@ -70,4 +70,21 @@ if (hasDom) {
   if (!Element.prototype.releasePointerCapture) {
     Element.prototype.releasePointerCapture = function releasePointerCapture() {};
   }
+
+  // CodeMirror measures Range geometry after animation frames. jsdom exposes
+  // Range but omits the layout methods, so editor tests need an empty geometry.
+  if (!Range.prototype.getClientRects) {
+    Range.prototype.getClientRects = function getClientRects() {
+      return {
+        length: 0,
+        item: () => null,
+        [Symbol.iterator]: () => [][Symbol.iterator](),
+      } as DOMRectList;
+    };
+  }
+  if (!Range.prototype.getBoundingClientRect) {
+    Range.prototype.getBoundingClientRect = function getBoundingClientRect() {
+      return new DOMRect();
+    };
+  }
 }

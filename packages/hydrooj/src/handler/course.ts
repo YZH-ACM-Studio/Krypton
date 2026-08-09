@@ -447,6 +447,7 @@ class CourseDetailHandler extends Handler {
             files: activeView === 'overview' && canDownloadFiles ? sortFiles(tdoc.files || []) : [],
             view: activeView,
             courseMindmap,
+            integrityControlled: !!publishedIntegrity,
         };
     }
 

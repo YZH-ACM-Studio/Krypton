@@ -8,6 +8,31 @@ afterEach(() => {
 });
 
 describe('krypton IDE problem submission', () => {
+  it('attaches the opaque practice context to a controlled IDE submission', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ rid: '507f1f77bcf86cd799439014' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <KryptonIDE
+        langs={['cc.cc17']}
+        defaultCode="int main() { return 0; }"
+        submitUrl="/p/P1000/submit"
+        practiceContextId="66b800000000000000000029"
+        minHeight={120}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /^提交/ }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    const request = fetchMock.mock.calls[0];
+    expect(JSON.parse(String(request[1]?.body))).to.deep.include({ practiceContextId: '66b800000000000000000029' });
+  });
+
   it('renders CRLF and LF self-test output as matching', () => {
     render(
       <PretestResultInline
@@ -68,6 +93,58 @@ describe('krypton IDE problem submission', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(onRecordsChange.mock.calls.at(-1)?.[0]?.[0]).toMatchObject({ status: 2, score: 0, time: 3, memory: 128 });
+  });
+
+  it('keeps record polling mounted after an isolated draft language switch', async () => {
+    vi.useFakeTimers();
+    const store = new Map<string, string>();
+    store.set('krypton:code:integrity-language-switch:py.py3', 'print(1)');
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => void store.set(key, String(value)),
+      removeItem: (key: string) => void store.delete(key),
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ rid: '507f1f77bcf86cd799439019' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ rdoc: { status: 1, score: 100 } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <KryptonIDE
+        langs={['cc.cc17', 'py.py3']}
+        defaultLang="cc.cc17"
+        defaultCode=""
+        submitUrl="/p/P1000/submit"
+        cacheKey="integrity-language-switch"
+        isolateDraftByLanguage
+        minHeight={120}
+      />,
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /C\+\+17/ }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Python \(py3\).*py\.py3/ }));
+    });
+    fireEvent.click(screen.getByRole('button', { name: /^提交/ }));
+    await act(async () => undefined);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('stops polling when the judge returns a format-error terminal status', async () => {

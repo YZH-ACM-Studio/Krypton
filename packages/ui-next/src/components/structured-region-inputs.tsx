@@ -4,7 +4,7 @@ import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirro
 import { bracketMatching, defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { EditorState } from '@codemirror/state';
 import { EditorView, highlightActiveLine, keymap, lineNumbers } from '@codemirror/view';
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Input } from '@/components/ui/input';
 import { structuredCodeLanguageExtension } from '@/lib/structured-code-language';
 
@@ -14,12 +14,16 @@ function StructuredRegionCodeEditor({
   lang,
   readOnly,
   label,
+  prohibitExternalCodeInjection,
+  onExternalCodeInjection,
 }: {
   value: string;
   onChange: (value: string) => void;
   lang: string;
   readOnly: boolean;
   label: string;
+  prohibitExternalCodeInjection: boolean;
+  onExternalCodeInjection: () => void;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -44,6 +48,35 @@ function StructuredRegionCodeEditor({
         EditorView.editable.of(!readOnly),
         EditorView.lineWrapping,
         EditorView.contentAttributes.of({ 'aria-label': label }),
+        ...(prohibitExternalCodeInjection
+          ? [
+              EditorView.domEventHandlers({
+                paste(event) {
+                  event.preventDefault();
+                  onExternalCodeInjection();
+                  return true;
+                },
+                beforeinput(event) {
+                  if (event.inputType !== 'insertFromPaste' && event.inputType !== 'insertFromDrop') return false;
+                  event.preventDefault();
+                  onExternalCodeInjection();
+                  return true;
+                },
+                drop(event) {
+                  event.preventDefault();
+                  onExternalCodeInjection();
+                  return true;
+                },
+              }),
+              EditorState.changeFilter.of((transaction) => {
+                const prohibited =
+                  transaction.docChanged &&
+                  (transaction.isUserEvent('input.paste') || transaction.isUserEvent('input.drop') || transaction.isUserEvent('move.drop'));
+                if (prohibited) onExternalCodeInjection();
+                return !prohibited;
+              }),
+            ]
+          : []),
         EditorView.updateListener.of((update) => {
           if (update.docChanged && !syncingRef.current) onChangeRef.current(update.state.doc.toString());
         }),
@@ -66,7 +99,7 @@ function StructuredRegionCodeEditor({
       view.destroy();
       viewRef.current = null;
     };
-  }, [label, lang, readOnly]);
+  }, [label, lang, onExternalCodeInjection, prohibitExternalCodeInjection, readOnly]);
 
   useEffect(() => {
     const view = viewRef.current;
@@ -86,6 +119,7 @@ export function StructuredRegionInputs({
   lang = '',
   singleLine = false,
   readOnly = false,
+  prohibitExternalCodeInjection = false,
 }: {
   surface: ClientStructuredCodeSegment[];
   values: Record<string, string>;
@@ -93,8 +127,13 @@ export function StructuredRegionInputs({
   lang?: string;
   singleLine?: boolean;
   readOnly?: boolean;
+  prohibitExternalCodeInjection?: boolean;
 }) {
   const controls = useRef(new Map<string, HTMLInputElement>());
+  const [integrityError, setIntegrityError] = useState('');
+  const rejectExternalCodeInjection = useCallback(() => {
+    setIntegrityError('当前真实性训练禁止粘贴或拖入外部代码，请直接填写作答区。');
+  }, []);
   const regions = surface.filter((segment) => segment.type === 'region');
   const regionIds = regions.map((region) => region.id);
   if (!Array.isArray(surface)) throw new TypeError('structured code surface must be an array');
@@ -109,6 +148,14 @@ export function StructuredRegionInputs({
     if (!target) throw new Error(`structured code keyboard target ${targetId} is not mounted`);
     event.preventDefault();
     target.focus();
+  };
+
+  const rejectSingleLineInjection = (event: React.FormEvent<HTMLInputElement>) => {
+    if (!prohibitExternalCodeInjection) return;
+    const native = event.nativeEvent as InputEvent;
+    if (native.inputType !== 'insertFromPaste' && native.inputType !== 'insertFromDrop') return;
+    event.preventDefault();
+    rejectExternalCodeInjection();
   };
 
   return (
@@ -139,6 +186,17 @@ export function StructuredRegionInputs({
                     }}
                     value={values[segment.id] || ''}
                     onChange={(event) => onChange(segment.id, event.target.value.replace(/[\r\n]/g, ''))}
+                    onBeforeInput={rejectSingleLineInjection}
+                    onPaste={(event) => {
+                      if (!prohibitExternalCodeInjection) return;
+                      event.preventDefault();
+                      rejectExternalCodeInjection();
+                    }}
+                    onDrop={(event) => {
+                      if (!prohibitExternalCodeInjection) return;
+                      event.preventDefault();
+                      rejectExternalCodeInjection();
+                    }}
                     onKeyDown={(event) => moveFocus(event, segment.id)}
                     disabled={readOnly}
                     placeholder={segment.prompt || `填写第 ${regionIndex + 1} 空代码`}
@@ -153,6 +211,8 @@ export function StructuredRegionInputs({
                     lang={lang}
                     readOnly={readOnly}
                     label={`${label}代码编辑器`}
+                    prohibitExternalCodeInjection={prohibitExternalCodeInjection}
+                    onExternalCodeInjection={rejectExternalCodeInjection}
                   />
                 )}
               </label>
@@ -162,6 +222,11 @@ export function StructuredRegionInputs({
           <p className="px-4 py-5 font-sans text-sm text-muted-foreground">当前没有公开代码或作答区。</p>
         )}
       </div>
+      {integrityError ? (
+        <p role="alert" className="border-t border-amber-500/25 bg-amber-500/10 px-3 py-2 font-sans text-sm text-amber-700 dark:text-amber-300">
+          {integrityError}
+        </p>
+      ) : null}
     </div>
   );
 }

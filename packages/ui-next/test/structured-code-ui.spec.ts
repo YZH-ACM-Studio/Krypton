@@ -47,6 +47,11 @@ describe('p3.11 structured code UI contract', () => {
     expect(exam).to.include('服务端草稿尚未成功加载，禁止保存');
     expect(exam).to.include('已阻止作答、保存和交卷');
     expect(detail).to.include('!isObjective && !isStructuredAnswer');
+    expect(detail).to.include('!practicePolicy?.removeIndependentSubmitForm || isStructuredAnswer');
+    expect(detail).to.include("practiceControlled && practicePolicy?.removeIndependentSubmitForm && isStructuredAnswer ? '作答' : '提交'");
+    const fallback = read('packages/ui-default/templates/problem_submit.html');
+    expect(fallback).to.include('{% if controlledStructured %}');
+    expect(fallback).to.include('the fallback form is disabled');
   });
 
   it('offers a hidden physical clone with an explicit different target language', () => {
@@ -295,7 +300,8 @@ describe('p3.23 program-fill authoring and student contract', () => {
     expect(handler).to.include("'contest_detail_problem_submit'");
     expect(handler).to.include("'homework_detail_problem_submit'");
     expect(training).to.include('bs.urls.problemDetail');
-    expect(course).to.match(/href=\{`\/p\/\$\{problem\.pid \|\| pid\}`\}/);
+    expect(course).to.include('practiceProblemEntryUrl(');
+    expect(course).to.include('problem.pid || pid');
     expect(training).not.to.include('template.source');
     expect(course).not.to.include('template.source');
   });

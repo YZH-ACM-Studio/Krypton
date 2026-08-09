@@ -8,6 +8,17 @@
         <h1 class="section__title">{{ _('Submit to Judge') }}</h1>
       </div>
       <div class="section__body typo" name="submit_section">
+        {% set controlledStructured = practiceIntegrity and practiceIntegrity.controlled and (pdoc.problemKind == 'program_fill' or pdoc.problemKind == 'function') %}
+        {% set controlledExternalInjection = practiceIntegrity and practiceIntegrity.controlled and practiceIntegrity.policy.prohibitExternalCodeInjection %}
+        {% if controlledStructured or controlledExternalInjection %}
+          <div class="alert alert--warning">
+            {% if controlledStructured %}
+              {{ _('This controlled structured problem must be answered in the Krypton interface. Reload this page in a modern browser; the fallback form is disabled.') }}
+            {% else %}
+              {{ _('This authenticity training problem blocks external code injection. Reload this page in a modern browser; the fallback form is disabled.') }}
+            {% endif %}
+          </div>
+        {% else %}
         <form method="post" enctype="multipart/form-data">
           <div class="hasjs--hide">
             {{ form.form_select({
@@ -29,6 +40,7 @@
             <input type="submit" class="rounded primary button" value="{{ _('Submit') }}">
           </div></div>
         </form>
+        {% endif %}
       </div>
     </div>
   </div>

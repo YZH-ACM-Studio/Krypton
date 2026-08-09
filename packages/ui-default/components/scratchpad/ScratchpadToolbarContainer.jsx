@@ -41,6 +41,7 @@ const mapDispatchToProps = (dispatch) => ({
       code: props.editorCode,
       input: [props.pretestInput],
       pretest: true,
+      ...(UiContext.practiceContextId ? { practiceContextId: UiContext.practiceContextId } : {}),
     });
     dispatch({
       type: 'SCRATCHPAD_POST_PRETEST',
@@ -51,6 +52,7 @@ const mapDispatchToProps = (dispatch) => ({
     const req = request.post(UiContext.postSubmitUrl, {
       lang: props.editorLang,
       code: props.editorCode,
+      ...(UiContext.practiceContextId ? { practiceContextId: UiContext.practiceContextId } : {}),
     });
     dispatch({
       type: 'SCRATCHPAD_POST_SUBMIT',

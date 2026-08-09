@@ -6,7 +6,9 @@
   problemNumId: pdoc.docId,
   codeLang: handler.user.codeLang,
   codeTemplate: handler.user.codeTemplate,
-  pdoc: pdoc
+  pdoc: pdoc,
+  practiceIntegrity: practiceIntegrity|default(null),
+  practiceContextId: practiceIntegrity.contextId if practiceIntegrity and practiceIntegrity.controlled else null
 }) }}
 {% if tdoc %}
   {{ set(UiContext, 'tdoc', tdoc) }}
@@ -132,7 +134,7 @@
           <div class="section__tab-header-wrapper">
             <ul class="section__tab-header flex-row">
               {% for k in pdoc.content|contentLang %}
-              <a class="section__tab-header-item {{'tab--active' if (handler.request.query.lang or handler.user.viewLang or handler.session.viewLang or (pdoc.content|contentLang)[0] ) == k }}" data-lang="{{ k }}" href="./{{pdoc.pid|default(pdoc.docId)}}?lang={{k}}">
+              <a class="section__tab-header-item {{'tab--active' if (handler.request.query.lang or handler.user.viewLang or handler.session.viewLang or (pdoc.content|contentLang)[0] ) == k }}" data-lang="{{ k }}" href="{{ url('problem_detail', pid=pdoc.pid|default(pdoc.docId), query={lang:k, practiceContainerKind:practiceIntegrity.entry.containerKind, practiceContainerId:practiceIntegrity.entry.containerId, practiceScopeKind:practiceIntegrity.entry.scopeKind, practiceScopeId:practiceIntegrity.entry.scopeId, practicePreview:practiceIntegrity.mode == 'preview'}) if practiceIntegrity and practiceIntegrity.entry else url('problem_detail', pid=pdoc.pid|default(pdoc.docId), query={lang:k}) }}">
                 {{ handler.ctx.i18n.get('__langname', k) or _('Unknown language') }}
               </a>
               {% endfor %}

@@ -25,29 +25,7 @@ const collMount = db.collection('vjudge.mount');
 const logger = new Logger('vjudge');
 const syncing = {};
 
-function collectLifecycleError(errors: unknown[], error: unknown): void {
-    if (error instanceof AggregateError) {
-        for (const nested of error.errors) collectLifecycleError(errors, nested);
-        return;
-    }
-    if (!errors.includes(error)) errors.push(error);
-}
-
-function throwLifecycleErrors(results: PromiseSettledResult<unknown>[], message: string): void {
-    const errors: unknown[] = [];
-    for (const result of results) {
-        if (result.status === 'rejected') collectLifecycleError(errors, result.reason);
-    }
-    if (errors.length === 1) throw errors[0];
-    if (errors.length > 1) throw new AggregateError(errors, message);
-}
-
-async function settleLifecycle(operations: Promise<unknown>[], message: string): Promise<void> {
-    const results = await Promise.allSettled(operations);
-    throwLifecycleErrors(results, message);
-}
-
-export class AccountService {
+class AccountService {
     api: IBasicProvider;
     problemLists: Set<string>;
     syncing = false;
@@ -55,12 +33,6 @@ export class AccountService {
     stopped = false;
     working = false;
     error = '';
-    private readonly mainPromise: Promise<void>;
-    private loginInterval?: ReturnType<typeof setInterval>;
-    private loginPromise?: Promise<boolean>;
-    private consumer?: { destroy(): Promise<void> };
-    private syncPromise?: Promise<void>;
-    private stopPromise?: Promise<void>;
 
     constructor(
         public Provider: BasicProvider,
@@ -71,7 +43,7 @@ export class AccountService {
             await coll.updateOne({ _id: account._id }, { $set: data });
         });
         this.problemLists = new Set(this.api.entryProblemLists || ['main']).union(new Set(this.account.problemLists || []));
-        this.mainPromise = this.main().catch((e) => {
+        this.main().catch((e) => {
             logger.error(`Error occured in ${account.type}/${account.handle}`);
             this.working = false;
             this.error = e.message;
@@ -91,11 +63,11 @@ export class AccountService {
         const context = new JudgeResultCallbackContext(this.ctx, task);
         const next = (payload) => context.next(payload);
         const end = (payload) => context.end(payload);
+        await next({ status: STATUS.STATUS_FETCHED });
         try {
-            await next({ status: STATUS.STATUS_FETCHED });
             const langConfig = SettingModel.langs[task.lang];
             if (this.Provider.Langs && !langConfig?.validAs?.[this.account.type]) {
-                await end({ status: STATUS.STATUS_COMPILE_ERROR, message: `Language not supported: ${task.lang}` });
+                end({ status: STATUS.STATUS_COMPILE_ERROR, message: `Language not supported: ${task.lang}` });
                 return;
             }
             if (langConfig.validAs?.[this.account.type]) task.lang = langConfig.validAs[this.account.type];
@@ -106,10 +78,7 @@ export class AccountService {
                 else if (comment instanceof Array) task.code = `${comment[0]} ${msg} ${comment[1]}\n${task.code}`;
             }
             const rid = await this.api.submitProblem(task.target, task.lang, task.code, task, next, end);
-            if (!rid) {
-                await end({ status: STATUS.STATUS_SYSTEM_ERROR, message: 'Remote judge did not return a submission ID' });
-                return;
-            }
+            if (!rid) return;
             await next({ status: STATUS.STATUS_JUDGING, message: `ID = ${rid}` });
             const nextFunction = (data) => {
                 if (data.case) delete data.case.message;
@@ -117,15 +86,12 @@ export class AccountService {
                 return next(data);
             };
             await this.api.waitForSubmission(rid, task.config?.detail === false ? nextFunction : next, end);
-            await end({ status: STATUS.STATUS_SYSTEM_ERROR, message: 'Remote judge returned without a terminal result' });
         } catch (e) {
             if (process.env.DEV) {
                 logger.error(e);
                 if (e.response) console.error(e.response);
             }
-            await end({ status: STATUS.STATUS_SYSTEM_ERROR, message: e.message });
-        } finally {
-            await context.waitForOwnedTask();
+            end({ status: STATUS.STATUS_SYSTEM_ERROR, message: e.message });
         }
     }
 
@@ -177,19 +143,7 @@ export class AccountService {
         return page - 2;
     }
 
-    async login(): Promise<boolean> {
-        if (this.stopped) return false;
-        if (this.loginPromise) return this.loginPromise;
-        const operation = this.runLogin();
-        this.loginPromise = operation;
-        try {
-            return await operation;
-        } finally {
-            if (this.loginPromise === operation) this.loginPromise = undefined;
-        }
-    }
-
-    private async runLogin() {
+    async login() {
         const login = await this.api.ensureLogin();
         if (login === true) {
             logger.info(`${this.account.type}/${this.account.handle}: logged in`);
@@ -199,19 +153,8 @@ export class AccountService {
         return false;
     }
 
-    async handleSync(): Promise<void> {
-        if (this.stopped) return;
-        if (this.syncPromise) return this.syncPromise;
-        const operation = this.runSync();
-        this.syncPromise = operation;
-        try {
-            await operation;
-        } finally {
-            if (this.syncPromise === operation) this.syncPromise = undefined;
-        }
-    }
-
-    private async runSync() {
+    async handleSync() {
+        if (this.syncing) return;
         this.syncing = true;
         try {
             const mounts = await collMount.find({ mount: this.account.type.split('.')[0] }).toArray();
@@ -231,49 +174,26 @@ export class AccountService {
             this.error = e;
             logger.error('%s sync failed', this.account.handle);
             logger.error(e);
-        } finally {
-            this.syncing = false;
         }
+        this.syncing = false;
     }
 
-    stop() {
-        this.stopped = true;
-        this.stopPromise ||= this.stopOwnedResources();
-        return this.stopPromise;
-    }
-
-    private async stopOwnedResources() {
-        await this.mainPromise;
-        if (this.loginInterval) clearInterval(this.loginInterval);
-        const ownedOperations: Promise<unknown>[] = [];
-        if (this.consumer) ownedOperations.push(Promise.resolve().then(() => this.consumer!.destroy()));
-        if (this.loginPromise) ownedOperations.push(this.loginPromise);
-        if (this.syncPromise) ownedOperations.push(this.syncPromise);
-        const ownedResultsPromise = Promise.allSettled(ownedOperations);
-        try {
-            const ownedResults = await ownedResultsPromise;
-            const providerResults = await Promise.allSettled(this.api.stop ? [Promise.resolve().then(() => this.api.stop!())] : []);
-            throwLifecycleErrors(
-                [...ownedResults, ...providerResults],
-                `Remote judge cleanup failed for ${this.account.type}/${this.account.handle}`,
-            );
-        } finally {
-            this.working = false;
-        }
+    async stop() {
+        return this.api?.stop?.();
     }
 
     async main() {
         const res = await this.login();
-        if (!res || this.stopped) return;
-        this.loginInterval = setInterval(() => {
-            this.login().catch((error) => {
-                this.error = error instanceof Error ? error.message : String(error);
-                logger.error(error);
-            });
-        }, Time.hour);
-        this.consumer = TaskModel.consume({ type: 'remotejudge', subType: this.account.type.split('.')[0] }, this.judge.bind(this), false);
+        if (!res) return;
+        const interval = setInterval(() => this.login(), Time.hour);
+        const consumer = TaskModel.consume({ type: 'remotejudge', subType: this.account.type.split('.')[0] }, this.judge.bind(this), false);
         this.working = true;
-        void this.handleSync();
+        this.handleSync();
+        this.stop = async () => {
+            clearInterval(interval);
+            consumer.destroy();
+            this.stopped = true;
+        };
     }
 }
 
@@ -310,15 +230,9 @@ class VJudgeService extends Service {
                 services.push(service);
                 this.pool[`${account.type}/${account.handle}`] = service;
             }
-            return async () => {
-                try {
-                    await settleLifecycle(
-                        services.map((service) => Promise.resolve().then(() => service.stop())),
-                        `Remote judge provider cleanup failed for ${type}`,
-                    );
-                } finally {
-                    delete this.providers[type];
-                }
+            return () => {
+                for (const service of services) service.stop();
+                delete this.providers[type];
             };
         });
         // FIXME: potential race condition

@@ -163,7 +163,7 @@ async function capture(run: () => Promise<unknown>): Promise<Error | null> {
 }
 
 describe('contextual completion model', () => {
-    it('creates exact idempotency, progress, record, and context indexes', async () => {
+    it('creates only the exact idempotency and scoped progress indexes', async () => {
         const { service, completions } = makeService();
         await service.ensureIndexes();
         expect(completions.indexes).to.deep.equal([
@@ -175,8 +175,6 @@ describe('contextual completion model', () => {
                 key: { domainId: 1, uid: 1, containerKind: 1, containerId: 1, scopeKind: 1, scopeId: 1, pid: 1 },
                 options: { name: 'contextualCompletionProgress' },
             },
-            { key: { domainId: 1, rid: 1 }, options: { name: 'contextualCompletionRecord' } },
-            { key: { domainId: 1, contextId: 1 }, options: { name: 'contextualCompletionContext' } },
         ]);
     });
 

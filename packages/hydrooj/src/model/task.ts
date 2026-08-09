@@ -14,14 +14,6 @@ const coll = db.collection('task');
 const collEvent = db.collection('event');
 const argv = cac().parse();
 
-function collectProcessingError(errors: unknown[], error: unknown): void {
-    if (error instanceof AggregateError) {
-        for (const nested of error.errors) collectProcessingError(errors, nested);
-        return;
-    }
-    if (!errors.includes(error)) errors.push(error);
-}
-
 async function getFirst(query: Filter<Task>) {
     if (process.env.CI) return null;
     try {
@@ -43,11 +35,8 @@ async function getFirst(query: Filter<Task>) {
 export class Consumer {
     consuming: boolean;
     processing: Set<Task> = new Set();
-    running: Promise<void>;
+    running?: any;
     notify: (res?: any) => void;
-    private processingOperations = new Set<Promise<void>>();
-    private processingErrors: unknown[] = [];
-    private destroyPromise?: Promise<void>;
 
     constructor(
         public filter: any,
@@ -56,24 +45,8 @@ export class Consumer {
         private concurrency = 1,
     ) {
         this.consuming = true;
-        this.running = this.consume();
+        this.consume();
         bus.on('app/exit', this.destroy);
-    }
-
-    private stop() {
-        this.consuming = false;
-        this.notify?.();
-    }
-
-    private async waitForShutdown() {
-        await this.running;
-        while (this.processingOperations.size) {
-            await Promise.allSettled([...this.processingOperations]);
-        }
-        const errors: unknown[] = [];
-        for (const error of this.processingErrors) collectProcessingError(errors, error);
-        if (errors.length === 1) throw errors[0];
-        if (errors.length > 1) throw new AggregateError(errors, 'Multiple task callbacks failed during Consumer shutdown');
     }
 
     async consume() {
@@ -96,31 +69,26 @@ export class Consumer {
                     continue;
                 }
                 this.processing.add(res);
-                const operation = Promise.resolve().then(() => this.func(res));
-                this.processingOperations.add(operation);
-                operation
+                this.func(res)
                     .catch((err) => {
-                        this.processingErrors.push(err);
                         logger.error(err);
-                        if (this.destroyOnError) this.stop();
+                        if (this.destroyOnError) this.destroy();
                     })
                     .finally(() => {
-                        this.processingOperations.delete(operation);
                         this.processing.delete(res);
                         this.notify?.();
                     });
             } catch (err) {
                 logger.error(err);
-                if (this.destroyOnError) this.stop();
+                if (this.destroyOnError) this.destroy();
             }
         }
     }
 
-    destroy = () => {
-        this.stop();
-        this.destroyPromise ||= this.waitForShutdown();
-        return this.destroyPromise;
-    };
+    async destroy() {
+        this.consuming = false;
+        this.notify?.();
+    }
 
     setConcurrency(concurrency: number) {
         this.concurrency = concurrency;

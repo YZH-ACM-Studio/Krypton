@@ -1935,15 +1935,9 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
 
 export class ProblemSubmitHandler extends ProblemDetailHandler {
     private assertContestSubmissionContext(tid?: ObjectId) {
-        if (!this.tdoc && !tid) return;
-        if (
-            !this.tdoc ||
-            !tid ||
-            String(this.tdoc.docId) !== String(tid) ||
-            !Array.isArray(this.tdoc.pids) ||
-            !this.tdoc.pids.includes(this.pdoc.docId)
-        ) {
-            throw new ContestNotFoundError(this.pdoc.domainId, tid || this.tdoc?.docId);
+        if (!tid) return;
+        if (!this.tdoc || String(this.tdoc.docId) !== String(tid) || !Array.isArray(this.tdoc.pids) || !this.tdoc.pids.includes(this.pdoc.docId)) {
+            throw new ContestNotFoundError(this.pdoc.domainId, tid);
         }
     }
 
@@ -2168,7 +2162,6 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
                       input,
                       type: 'pretest',
                       contestContext: submissionScope.recordContestId,
-                      practiceContext,
                       vigilSessionKey: (global as any).Hydro?.model?.vigilguard?.clientSessionKeyFromSession?.(this.session),
                   }
                 : {

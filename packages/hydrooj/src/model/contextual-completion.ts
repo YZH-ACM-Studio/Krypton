@@ -121,8 +121,6 @@ export class ContextualCompletionService {
                     { domainId: 1, uid: 1, containerKind: 1, containerId: 1, scopeKind: 1, scopeId: 1, pid: 1 },
                     { name: 'contextualCompletionProgress' },
                 ),
-                this.completions.createIndex({ domainId: 1, rid: 1 }, { name: 'contextualCompletionRecord' }),
-                this.completions.createIndex({ domainId: 1, contextId: 1 }, { name: 'contextualCompletionContext' }),
             ])
                 .then(() => undefined)
                 .catch((error) => {
@@ -314,8 +312,7 @@ export class ContextualCompletionService {
 export const contextualCompletionColl = db.collection<ContextualCompletionDoc>('practice.contextualCompletions');
 export const contextualCompletionService = new ContextualCompletionService({ completions: contextualCompletionColl });
 
-export async function apply(ctx: Context): Promise<void> {
-    await contextualCompletionService.ensureIndexes();
+export function apply(ctx: Context): void {
     ctx.on('record/judge', async (rdoc: RecordDoc) => contextualCompletionService.recordJudge(rdoc));
     ctx.on('domain/delete', (domainId: string) => contextualCompletionColl.deleteMany({ domainId }));
 }

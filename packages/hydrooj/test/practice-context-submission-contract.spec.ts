@@ -29,9 +29,9 @@ describe('practice context submission contract', () => {
         expect(submitClass.match(/resolvePracticeContext\(practiceContextId, tid\)/g)).to.have.length(1);
     });
 
-    it('canonicalizes trusted references and rejects contest or non-judge Record callers', () => {
+    it('canonicalizes trusted references and rejects contest, pretest, or other non-judge Record callers', () => {
         const record = readFileSync(resolve(root, 'src/model/record.ts'), 'utf8');
-        expect(record).to.include("if (args.contest || args.contestContext || !['judge', 'pretest'].includes(args.type))");
+        expect(record).to.include("if (args.contest || args.contestContext || args.type !== 'judge')");
         expect(record).to.include('data.practiceContext = assertTrustedPracticeContextBinding(args.practiceContext, { domainId, uid, pid });');
     });
 
@@ -43,12 +43,11 @@ describe('practice context submission contract', () => {
         expect(completion).not.to.include("ctx.on('record/add'");
     });
 
-    it('settles all judge observers, rejects observer failures, and always clears the active task slot', () => {
+    it('does not replace the existing global judge lifecycle to create contextual completion', () => {
         const judge = readFileSync(resolve(root, 'src/handler/judge.ts'), 'utf8');
-        expect(judge).to.include("await parallelAllSettled('record/judge'");
-        expect(judge).to.include('this.reject(error);');
-        expect(judge).to.match(/try \{[\s\S]*await context\.waitForOwnedTask\(\);[\s\S]*\} finally \{[\s\S]*delete this\.tasks\[rid\]/);
-        expect(judge).to.include('await context.failOwnedTask(error);');
-        expect(judge).to.include("if (msg.key === 'end') await t.end(");
+        expect(judge).to.include("await app.parallel('record/judge', rdoc, updated, pdoc, context)");
+        expect(judge).not.to.include('waitForOwnedTask');
+        expect(judge).not.to.include('recoverUncommitted');
+        expect(judge).not.to.include('parallelAllSettled');
     });
 });

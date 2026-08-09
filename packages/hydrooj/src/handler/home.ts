@@ -113,11 +113,7 @@ export class HomeHandler extends Handler {
 
     async getTraining(domainId: string, limit = 10) {
         if (!this.user.hasPerm(PERM.PERM_VIEW_TRAINING)) return [[], {}];
-        const tdocs = await training
-            .getMulti(domainId, { kind: { $ne: 'course' } })
-            .sort({ pin: -1, _id: 1 })
-            .limit(limit)
-            .toArray();
+        const tdocs = await training.getMulti(domainId).sort({ pin: -1, _id: 1 }).limit(limit).toArray();
         const tsdict = await training.getListStatus(
             domainId,
             this.user._id,
@@ -126,9 +122,10 @@ export class HomeHandler extends Handler {
         if (this.user.hasPriv(PRIV.PRIV_USER_PROFILE)) {
             await Promise.all(
                 tdocs.map(async (tdoc) => {
-                    const revision = await practiceIntegrityService.getLatestPublished(domainId, 'problemSet', tdoc.docId);
+                    const containerKind = tdoc.kind === 'course' ? 'course' : 'problemSet';
+                    const revision = await practiceIntegrityService.getLatestPublished(domainId, containerKind, tdoc.docId);
                     if (!revision) return;
-                    const doneByScope = await contextualCompletionService.getCompletedByScope(domainId, this.user._id, 'problemSet', tdoc.docId);
+                    const doneByScope = await contextualCompletionService.getCompletedByScope(domainId, this.user._id, containerKind, tdoc.docId);
                     const key = tdoc.docId.toHexString();
                     tsdict[key] = {
                         ...tsdict[key],

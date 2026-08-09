@@ -21,30 +21,11 @@ import storage from '../model/storage';
 import system from '../model/system';
 import task, { Consumer } from '../model/task';
 import user from '../model/user';
-import bus, { parallelAllSettled } from '../service/bus';
+import bus from '../service/bus';
 import { updateJudge } from '../service/monitor';
 import { ConnectionHandler, Handler, post, subscribe, Types } from '../service/server';
 
 const logger = new Logger('judge');
-
-function collectFailure(failures: unknown[], failure: unknown): void {
-    if (failure instanceof AggregateError) {
-        for (const nested of failure.errors) collectFailure(failures, nested);
-        return;
-    }
-    if (!failures.includes(failure)) failures.push(failure);
-}
-
-function throwCollectedFailures(failures: unknown[], message: string): void {
-    if (failures.length === 1) throw failures[0];
-    if (failures.length > 1) throw new AggregateError(failures, message);
-}
-
-function collectRejected(failures: unknown[], results: PromiseSettledResult<unknown>[]): void {
-    for (const result of results) {
-        if (result.status === 'rejected') collectFailure(failures, result.reason);
-    }
-}
 
 function parseCaseResult(body: TestCase): Required<TestCase> {
     return {
@@ -91,13 +72,8 @@ function processPayload(body: Partial<JudgeResultBody>) {
 
 export class JudgeResultCallbackContext {
     private resolve: (_: any) => void;
-    private reject: (error: unknown) => void;
     private finishPromise: Promise<any>;
-    private operationPromise: Promise<void> = Promise.resolve();
-    private terminalPromise?: Promise<void>;
-    private terminalKind?: 'end' | 'nop' | 'reset';
-    private outcomeCommitted = false;
-    private requeuePromise?: Promise<void>;
+    private operationPromise = Promise.resolve(null);
     private relatedId = new ObjectId();
     private meta: { rejudge?: JudgeMeta['rejudge'] };
 
@@ -108,49 +84,9 @@ export class JudgeResultCallbackContext {
         public readonly task: Omit<Task, '_id'> & { type: string },
     ) {
         this.meta = (task.meta as JudgeMeta) || {};
-        this.finishPromise = new Promise((resolve, reject) => {
+        this.finishPromise = new Promise((resolve) => {
             this.resolve = resolve;
-            this.reject = reject;
         });
-        this.finishPromise.catch(() => undefined);
-    }
-
-    private trackOperation<T>(operation: Promise<T>): Promise<T> {
-        operation.catch((error) => {
-            this.reject(error);
-        });
-        return operation;
-    }
-
-    private claimTerminal(kind: 'end' | 'nop', operation: () => void | Promise<void>): Promise<void> {
-        if (this.terminalPromise) return this.terminalPromise;
-        const terminalPromise = this.trackOperation(this.operationPromise.then(operation));
-        this.operationPromise = terminalPromise;
-        this.terminalPromise = terminalPromise;
-        this.terminalKind = kind;
-        return terminalPromise;
-    }
-
-    private claimRequeue(): Promise<void> {
-        if (this.requeuePromise) return this.requeuePromise;
-        if (!this.terminalKind) this.terminalKind = 'reset';
-        const previousOperation = this.operationPromise;
-        const requeuePromise = this.trackOperation(
-            previousOperation
-                .catch(() => undefined)
-                .then(async () => {
-                    if (this.outcomeCommitted) return;
-                    const rdoc = await record.reset(this.task.domainId, this.task.rid, false);
-                    await task.add(this.task);
-                    this.outcomeCommitted = true;
-                    this.ctx.broadcast('record/change', rdoc);
-                    this.resolve(null);
-                }),
-        );
-        this.requeuePromise = requeuePromise;
-        this.operationPromise = requeuePromise;
-        if (this.terminalKind === 'reset') this.terminalPromise = requeuePromise;
-        return requeuePromise;
     }
 
     async _next(body: Partial<JudgeResultBody>) {
@@ -183,27 +119,16 @@ export class JudgeResultCallbackContext {
     }
 
     next(body: Partial<JudgeResultBody>) {
-        if (this.terminalPromise) return this.terminalPromise;
-        this.operationPromise = this.trackOperation(this.operationPromise.then(() => this._next(body)));
+        this.operationPromise = this.operationPromise.then(() => this._next(body));
         return this.operationPromise;
     }
 
     static async postJudge(rdoc: RecordDoc, context?: JudgeResultCallbackContext) {
         if (rdoc.contest?.toString().startsWith('0'.repeat(23))) return;
         const accept = rdoc.status === builtin.STATUS.STATUS_ACCEPTED;
-        const failures: unknown[] = [];
-        let updated = false;
-        try {
-            updated = await problem.updateStatus(rdoc.domainId, rdoc.pid, rdoc.uid, rdoc._id, rdoc.status, rdoc.score);
-        } catch (error) {
-            collectFailure(failures, error);
-        }
-        try {
-            if (rdoc.contest) await contest.updateStatus(rdoc.domainId, rdoc.contest, rdoc.uid, rdoc._id, rdoc.pid, rdoc);
-            else if (accept && updated) await domain.incUserInDomain(rdoc.domainId, rdoc.uid, 'nAccept', 1);
-        } catch (error) {
-            collectFailure(failures, error);
-        }
+        const updated = await problem.updateStatus(rdoc.domainId, rdoc.pid, rdoc.uid, rdoc._id, rdoc.status, rdoc.score);
+        if (rdoc.contest) await contest.updateStatus(rdoc.domainId, rdoc.contest, rdoc.uid, rdoc._id, rdoc.pid, rdoc);
+        else if (accept && updated) await domain.incUserInDomain(rdoc.domainId, rdoc.uid, 'nAccept', 1);
         const isNormalSubmission = ![
             STATUS.STATUS_ETC,
             STATUS.STATUS_HACK_SUCCESSFUL,
@@ -212,32 +137,19 @@ export class JudgeResultCallbackContext {
             STATUS.STATUS_SYSTEM_ERROR,
             STATUS.STATUS_CANCELED,
         ].includes(rdoc.status);
-        let pdoc;
-        try {
-            pdoc =
-                accept && updated
-                    ? await problem.inc(rdoc.domainId, rdoc.pid, 'nAccept', 1)
-                    : await problem.get(rdoc.domainId, rdoc.pid, undefined, true);
-        } catch (error) {
-            collectFailure(failures, error);
-        }
+        const pdoc =
+            accept && updated
+                ? await problem.inc(rdoc.domainId, rdoc.pid, 'nAccept', 1)
+                : await problem.get(rdoc.domainId, rdoc.pid, undefined, true);
         // STATUS_SHORT_TEXTS 无 WAITING 等键——含主观题的待阅记录不计入
         // 题目 stats，防止 `stats.undefined` 污染（对抗审查 MINOR）。
         if (pdoc && isNormalSubmission && builtin.STATUS_SHORT_TEXTS[rdoc.status]) {
-            collectRejected(
-                failures,
-                await Promise.allSettled([
-                    Promise.resolve().then(() => problem.inc(pdoc.domainId, pdoc.docId, `stats.${builtin.STATUS_SHORT_TEXTS[rdoc.status]}`, 1)),
-                    Promise.resolve().then(() => problem.inc(pdoc.domainId, pdoc.docId, `stats.s${Math.floor(rdoc.score)}`, 1)),
-                ]),
-            );
+            await Promise.all([
+                problem.inc(pdoc.domainId, pdoc.docId, `stats.${builtin.STATUS_SHORT_TEXTS[rdoc.status]}`, 1),
+                problem.inc(pdoc.domainId, pdoc.docId, `stats.s${Math.floor(rdoc.score)}`, 1),
+            ]);
         }
-        try {
-            await parallelAllSettled('record/judge', rdoc, updated, pdoc, context);
-        } catch (error) {
-            collectFailure(failures, error);
-        }
-        throwCollectedFailures(failures, `Multiple post-judge stages failed for Record ${rdoc._id}`);
+        await app.parallel('record/judge', rdoc, updated, pdoc, context);
     }
 
     async _end(body: Partial<JudgeResultBody>) {
@@ -258,24 +170,15 @@ export class JudgeResultCallbackContext {
                 },
                 { upsert: true },
             );
-            this.outcomeCommitted = true;
             this.resolve(null);
             return;
         }
 
         const rdoc = await record.update(this.task.domainId, new ObjectId(this.task.rid as string), $set, $push, $unset);
-        this.outcomeCommitted = true;
         if (rdoc) {
             body.key = 'end';
-            const failures: unknown[] = [];
-            collectRejected(
-                failures,
-                await Promise.allSettled([
-                    Promise.resolve().then(() => bus.broadcast('record/change', rdoc, null, null, body)),
-                    JudgeResultCallbackContext.postJudge(rdoc, this),
-                ]),
-            );
-            throwCollectedFailures(failures, `Multiple terminal judge stages failed for Record ${rdoc._id}`);
+            bus.broadcast('record/change', rdoc, null, null, body); // trigger a full update
+            await JudgeResultCallbackContext.postJudge(rdoc, this);
         }
         this.resolve(rdoc);
     }
@@ -288,63 +191,23 @@ export class JudgeResultCallbackContext {
         const rdoc = await record.update(domainId, rid, $set, $push, $unset);
         if (rdoc) {
             body.key = 'end';
-            const failures: unknown[] = [];
-            collectRejected(
-                failures,
-                await Promise.allSettled([
-                    Promise.resolve().then(() => app.broadcast('record/change', rdoc, null, null, body)),
-                    JudgeResultCallbackContext.postJudge(rdoc),
-                ]),
-            );
-            throwCollectedFailures(failures, `Multiple terminal judge stages failed for Record ${rdoc._id}`);
+            app.broadcast('record/change', rdoc, null, null, body); // trigger a full update
+            await JudgeResultCallbackContext.postJudge(rdoc);
         }
     }
 
     end(body?: Partial<JudgeResultBody>) {
-        return this.claimTerminal(
-            body ? 'end' : 'nop',
-            body
-                ? () => this._end(body)
-                : () => {
-                      this.outcomeCommitted = true;
-                      this.resolve(null);
-                  },
-        );
+        if (!body) this.resolve(null);
+        else this.operationPromise = this.operationPromise.then(() => this._end(body));
+        return this.operationPromise;
     }
 
     reset() {
-        if (this.terminalKind && this.terminalKind !== 'reset') return this.terminalPromise!;
-        return this.claimRequeue();
-    }
-
-    async recoverUncommitted() {
-        if (this.outcomeCommitted) return false;
-        if (this.terminalKind === 'end' || this.terminalKind === 'nop') {
-            await this.terminalPromise!.catch(() => undefined);
-            if (this.outcomeCommitted) return false;
-        }
-        await this.claimRequeue();
-        return true;
-    }
-
-    async failOwnedTask(error: unknown): Promise<never> {
-        try {
-            if (await this.recoverUncommitted()) {
-                logger.warn('Judge task requeued after failure before terminal commit rid=%s error=%o', this.task.rid, error);
-            }
-        } catch (recoveryError) {
-            if (recoveryError === error) throw error;
-            throw new AggregateError([error, recoveryError], `Judge task ${this.task.rid} failed before terminal commit and recovery failed`);
-        }
-        throw error;
-    }
-
-    async waitForOwnedTask(): Promise<void> {
-        try {
-            await this.finishPromise;
-        } catch (error) {
-            await this.failOwnedTask(error);
-        }
+        return this.operationPromise.then(async () => {
+            const rdoc = await record.reset(this.task.domainId, this.task.rid, false);
+            this.ctx.broadcast('record/change', rdoc);
+            return task.add(this.task);
+        });
     }
 
     then(onfulfilled?: (value: any) => void, onrejected?: (reason: any) => void) {
@@ -449,9 +312,6 @@ export class JudgeConnectionHandler extends ConnectionHandler {
     concurrency = 1;
     consumer: Consumer = null;
     tasks: Record<string, JudgeResultCallbackContext> = {};
-    private closing = false;
-    private taskOperations = new Set<Promise<void>>();
-    private cleanupPromise?: Promise<void>;
 
     async prepare() {
         logger.info('Judge daemon connected from ', this.request.ip);
@@ -463,58 +323,24 @@ export class JudgeConnectionHandler extends ConnectionHandler {
         this.send({ language: setting.langs });
     }
 
-    newTask(t: Task) {
-        const operation = this.runTask(t);
-        this.taskOperations.add(operation);
-        operation.then(
-            () => this.taskOperations.delete(operation),
-            () => this.taskOperations.delete(operation),
-        );
-        return operation;
-    }
-
-    private async runTask(t: Task) {
+    async newTask(t: Task) {
         const rid = t.rid.toHexString();
-        if (this.closing) {
-            logger.info('Requeue judge task before dispatch because connection is closing: %s', rid);
-            await task.add(t);
-            return;
-        }
+        const context = new JudgeResultCallbackContext(this.ctx, t);
         if (this.tasks[rid]) {
             for (let i = 1; i <= 300; i++) {
-                if (this.closing) {
-                    logger.info('Requeue waiting duplicate judge task because connection is closing: %s', rid);
-                    await task.add(t);
-                    return;
-                }
-                const active = this.tasks[rid];
-                if (!active) break;
+                if (!this.tasks[rid]) break;
                 if (i === 300) {
-                    active.end({ message: 'Wait for previous judge timeout', status: STATUS.STATUS_SYSTEM_ERROR });
-                    await active;
+                    context.end({ message: 'Wait for previous judge timeout', status: STATUS.STATUS_SYSTEM_ERROR });
                     return;
                 }
                 await sleep(1000);
             }
         }
-        if (this.closing) {
-            logger.info('Requeue judge task before activation because connection is closing: %s', rid);
-            await task.add(t);
-            return;
-        }
-        const context = new JudgeResultCallbackContext(this.ctx, t);
         this.tasks[rid] = context;
-        try {
-            try {
-                this.send({ task: t });
-                context.next({ status: STATUS.STATUS_FETCHED });
-            } catch (error) {
-                await context.failOwnedTask(error);
-            }
-            await context.waitForOwnedTask();
-        } finally {
-            if (this.tasks[rid] === context) delete this.tasks[rid];
-        }
+        this.send({ task: t });
+        this.tasks[rid].next({ status: STATUS.STATUS_FETCHED });
+        await this.tasks[rid];
+        delete this.tasks[rid];
     }
 
     async message(msg) {
@@ -529,8 +355,8 @@ export class JudgeConnectionHandler extends ConnectionHandler {
                 logger.warn('Unknown judge rid reported: %s', msg.rid);
                 return;
             }
-            if (msg.key === 'next') await t.next(msg);
-            if (msg.key === 'end') await t.end(msg.nop ? undefined : { judger: this.user._id, ...msg });
+            if (msg.key === 'next') t.next(msg);
+            if (msg.key === 'end') t.end(msg.nop ? undefined : { judger: this.user._id, ...msg });
         } else if (msg.key === 'status') {
             await updateJudge(msg.info);
         } else if (msg.key === 'config') {
@@ -557,25 +383,10 @@ export class JudgeConnectionHandler extends ConnectionHandler {
         }
     }
 
-    cleanup() {
-        if (this.cleanupPromise) return this.cleanupPromise;
-        this.closing = true;
-        this.cleanupPromise = this.runCleanup();
-        return this.cleanupPromise;
-    }
-
-    private async runCleanup() {
-        const consumerStop = this.consumer?.destroy();
+    async cleanup() {
+        this.consumer?.destroy();
         logger.info('Judge daemon disconnected from ', this.request.ip);
-        const operations: Promise<unknown>[] = [...Object.values(this.tasks).map((cb) => cb.reset()), ...this.taskOperations];
-        if (consumerStop) operations.push(consumerStop);
-        const results = await Promise.allSettled(operations);
-        while (this.taskOperations.size) {
-            results.push(...(await Promise.allSettled([...this.taskOperations])));
-        }
-        const failures: unknown[] = [];
-        collectRejected(failures, results);
-        throwCollectedFailures(failures, 'Multiple judge tasks failed while the connection was closing');
+        await Promise.all(Object.values(this.tasks).map((cb) => cb.reset()));
     }
 }
 

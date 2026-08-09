@@ -280,7 +280,7 @@ export default class RecordModel {
             data.dataWriteActiveContainerConfirmation = { ...args.dataWriteActiveContainerConfirmation };
         }
         if (args.practiceContext) {
-            if (args.contest || args.contestContext || !['judge', 'pretest'].includes(args.type)) throw new ValidationError('practiceContextId');
+            if (args.contest || args.contestContext || args.type !== 'judge') throw new ValidationError('practiceContextId');
             data.practiceContext = assertTrustedPracticeContextBinding(args.practiceContext, { domainId, uid, pid });
         }
         if (args.type === 'manual') {

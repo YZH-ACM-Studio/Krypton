@@ -49,15 +49,9 @@ export async function builtinModel(ctx: Context) {
     for (const t of models.filter((i) => i.endsWith('.ts'))) {
         const q = path.resolve(modelDir, t);
         const module = require(q);
-        if ('apply' in module) {
-            const fiber = await ctx.loader.reloadPlugin(q, '');
-            await fiber?.await();
-        }
+        if ('apply' in module) ctx.loader.reloadPlugin(q, '');
         const exports = unwrapExports(module);
-        if (isClass(exports) && !(Symbol.for('hydro.initialize') in exports)) {
-            const fiber = await ctx.loader.reloadPlugin(q, '');
-            await fiber?.await();
-        }
+        if (isClass(exports) && !(Symbol.for('hydro.initialize') in exports)) ctx.loader.reloadPlugin(q, '');
     }
 }
 

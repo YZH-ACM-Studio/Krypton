@@ -2162,6 +2162,30 @@ describe('P2.11 authoritative problem route domain', () => {
         expect(calls.recordAdd[0][6].practiceContext).to.include({ contextId: practiceContextResult._id, trusted: true });
     });
 
+    it('validates a controlled pretest context without persisting it on the pretest Record', async () => {
+        practiceContextResult = {
+            _id: new ObjectId('66b800000000000000000024'),
+            mode: 'student',
+            revisions: [
+                {
+                    containerKind: 'course',
+                    containerId: new ObjectId('66b800000000000000000025'),
+                    scopeKind: 'chapter',
+                    scopeId: 2,
+                    revision: 1,
+                },
+            ],
+        };
+        const submit = makeHandler(ProblemSubmitHandler, {});
+        submit.pdoc = { domainId: 'system', docId: 7, config: { type: 'default' } };
+
+        await submit.post('forged', 'cpp', 'code', true, ['1 2\n'], undefined, practiceContextResult._id.toHexString());
+
+        expect(calls.practiceContextAssertions).to.have.length(1);
+        expect(calls.recordAdd[0][6]).to.deep.include({ type: 'pretest', input: ['1 2\n'] });
+        expect(calls.recordAdd[0][6]).not.to.have.property('practiceContext');
+    });
+
     it('rejects a Contest or VP submission carrying a practice context before context lookup or Record creation', async () => {
         const submit = makeHandler(ProblemSubmitHandler, {});
         const tid = new ObjectId('66b800000000000000000022');

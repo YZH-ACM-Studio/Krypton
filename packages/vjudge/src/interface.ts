@@ -26,7 +26,7 @@ declare module 'hydrooj' {
         'vjudge.mount': VjudgeMount;
     }
 }
-type NextFunction = (body: Partial<JudgeResultBody>) => Promise<void> | void;
+type NextFunction = (body: Partial<JudgeResultBody>) => void;
 export interface IBasicProvider {
     ensureLogin: () => Promise<boolean | string>;
     getProblem: (

@@ -48,6 +48,91 @@ const CORE_ERROR_MESSAGE_TRANSLATIONS: Readonly<Record<string, ErrorMessageTrans
         en: 'Bulk contribution assignment did not fully complete (request ID: {0}). Failed items: {1}.',
         'zh-CN': '批量分配未全部完成（请求编号：{0}）。失败项：{1}。',
     },
+    '防 AI 标记 JSON 无效': { en: 'The anti-AI marker JSON is invalid.', 'zh-CN': '防 AI 标记 JSON 无效' },
+    '防 AI 标记无法保存': { en: 'The anti-AI markers cannot be saved.', 'zh-CN': '防 AI 标记无法保存' },
+    '旧题面的防 AI 标记不能猜测迁移到结构化区块；请取消转换，删除这些标记后再转换。': {
+        en: 'Anti-AI markers in the legacy statement cannot be guessed into structured sections. Cancel the conversion, remove the markers, and try again.',
+        'zh-CN': '旧题面的防 AI 标记不能猜测迁移到结构化区块；请取消转换，删除这些标记后再转换。',
+    },
+    '请先删除旧题面中的防 AI 标记，再转换为结构化题面。': {
+        en: 'Remove the anti-AI markers from the legacy statement before converting it to a structured statement.',
+        'zh-CN': '请先删除旧题面中的防 AI 标记，再转换为结构化题面。',
+    },
+    '防 AI 标记位置无效，请重新定位后再保存': {
+        en: 'An anti-AI marker position is invalid. Reposition it before saving.',
+        'zh-CN': '防 AI 标记位置无效，请重新定位后再保存',
+    },
+    '防 AI 标记 {0} 尚未填写注入文本。': {
+        en: 'Anti-AI marker {0} does not have injection text yet.',
+        'zh-CN': '防 AI 标记 {0} 尚未填写注入文本。',
+    },
+    '防 AI 标记 {0} 尚未重新定位。': {
+        en: 'Anti-AI marker {0} has not been repositioned yet.',
+        'zh-CN': '防 AI 标记 {0} 尚未重新定位。',
+    },
+    '还有 {0} 项配置需要处理，已定位到第一项。': {
+        en: '{0} configuration items still need attention. The first one has been selected.',
+        'zh-CN': '还有 {0} 项配置需要处理，已定位到第一项。',
+    },
+    加载提交状态失败: { en: 'Failed to load submission status.', 'zh-CN': '加载提交状态失败' },
+    删除题目失败: { en: 'Failed to delete the problem.', 'zh-CN': '删除题目失败' },
+    请选择当前域允许的评测语言: {
+        en: 'Select a judging language allowed in the current domain.',
+        'zh-CN': '请选择当前域允许的评测语言',
+    },
+    '题目尚未创建，不能上传题面图片': {
+        en: 'Create the problem before uploading statement images.',
+        'zh-CN': '题目尚未创建，不能上传题面图片',
+    },
+    自测记录加载失败: { en: 'Failed to load the self-test record.', 'zh-CN': '自测记录加载失败' },
+    自测提交响应不是有效对象: {
+        en: 'The self-test submission response is not a valid object.',
+        'zh-CN': '自测提交响应不是有效对象',
+    },
+    自测提交响应缺少记录编号: {
+        en: 'The self-test submission response is missing the record ID.',
+        'zh-CN': '自测提交响应缺少记录编号',
+    },
+    '自测等待超时，请稍后重试': {
+        en: 'The self-test timed out. Try again later.',
+        'zh-CN': '自测等待超时，请稍后重试',
+    },
+    '防 AI 标记只能通过题面授权写入口修改': {
+        en: 'Anti-AI markers can only be changed through the authorized statement editor.',
+        'zh-CN': '防 AI 标记只能通过题面授权写入口修改',
+    },
+    '防 AI 标记数据无效，已阻止题面编辑': {
+        en: 'The anti-AI marker data is invalid, so statement editing was blocked.',
+        'zh-CN': '防 AI 标记数据无效，已阻止题面编辑',
+    },
+    '防 AI 标记数据无效，请联系题目维护者': {
+        en: 'The anti-AI marker data is invalid. Contact the problem maintainer.',
+        'zh-CN': '防 AI 标记数据无效，请联系题目维护者',
+    },
+    '删除全部防 AI 标记必须提交空标记列表': {
+        en: 'Removing all anti-AI markers requires an explicit empty marker list.',
+        'zh-CN': '删除全部防 AI 标记必须提交空标记列表',
+    },
+    '题面包含防 AI 标记，必须从题面编辑器完成重新定位': {
+        en: 'This statement has anti-AI markers and must be remapped in the statement editor.',
+        'zh-CN': '题面包含防 AI 标记，必须从题面编辑器完成重新定位',
+    },
+    '题面包含防 AI 标记，编辑题面时必须同时提交重新定位结果': {
+        en: 'Editing this statement requires the remapped anti-AI markers in the same request.',
+        'zh-CN': '题面包含防 AI 标记，编辑题面时必须同时提交重新定位结果',
+    },
+    '写入钩子不能改变已验证的防 AI 标记': {
+        en: 'Write hooks cannot change validated anti-AI markers.',
+        'zh-CN': '写入钩子不能改变已验证的防 AI 标记',
+    },
+    '写入钩子不能新增或删除防 AI 标记': {
+        en: 'Write hooks cannot add or remove anti-AI markers.',
+        'zh-CN': '写入钩子不能新增或删除防 AI 标记',
+    },
+    '写入钩子不能绕过防 AI 标记重新定位': {
+        en: 'Write hooks cannot bypass anti-AI marker remapping.',
+        'zh-CN': '写入钩子不能绕过防 AI 标记重新定位',
+    },
     'Cannot rejudge a hack record.': { en: 'Cannot rejudge a hack record.', 'zh-CN': 'Hack 记录不能重新评测。' },
     'Cannot rejudge a pretest record.': {
         en: 'Cannot rejudge a pretest record.',

@@ -84,6 +84,7 @@ const NARROW_CAPABILITY_FIELDS: Partial<Record<ProblemWriteCapability, ReadonlyS
 const PID_NAMESPACE_EDIT_ALL_FIELDS = new Set([
     'title',
     'content',
+    'antiAiMarkers',
     'html',
     'difficulty',
     'tag',

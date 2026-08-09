@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { SimpleSelect } from '@/components/ui/select';
 import { useBootstrap } from '@/lib/bootstrap';
+import { readAntiAiMarkerDrafts, serializeAntiAiMarkerInput, type AntiAiMarkerDraft } from '@/lib/anti-ai-marker';
 import { cn } from '@/lib/cn';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { readProblemSaveSuccess } from '@/lib/problem-save-response';
@@ -24,6 +25,7 @@ import { sha256Text } from '@/lib/sha256';
 import { structuredCodeCompletionIssues, type StructuredAuthorStage, type StructuredCodeCompletionIssue } from '@/lib/structured-code-readiness';
 
 interface StructuredEditorProblemDoc {
+  antiAiMarkers?: unknown;
   pid?: string | number;
   docId?: string | number;
   title?: string;
@@ -279,6 +281,8 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
   const [deleting, setDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [error, setError] = useState('');
+  const persistedAntiAiMarkers = readAntiAiMarkerDrafts(pdoc.antiAiMarkers);
+  const [antiAiMarkers, setAntiAiMarkers] = useState<AntiAiMarkerDraft[]>(() => persistedAntiAiMarkers);
   const [selection, setSelection] = useState<AuthorLineSelection | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const stagePanelRef = useRef<HTMLDivElement>(null);
@@ -382,7 +386,7 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
       return [];
     }
   }, [publicRanges, regions, source, structureBlocked]);
-  const dirtyState = useFormDirtyState(formRef, JSON.stringify(structuredConfig));
+  const dirtyState = useFormDirtyState(formRef, JSON.stringify({ structuredConfig, antiAiMarkers }));
   const navigationGuard = useUnsavedChangesGuard(dirtyState.dirty || saving || cloning || deleting);
   const statementGuard = useProblemDataWriteGuard(data.statementWriteGuard, 'statement');
   const localRegionCounter = useRef(0);
@@ -530,6 +534,11 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
     setError('');
     try {
       const formData = new FormData(form);
+      const contentChanged = !isCreate && String(formData.get('content') || '') !== String(pdoc.content || '');
+      const markerChanged = JSON.stringify(antiAiMarkers) !== JSON.stringify(persistedAntiAiMarkers);
+      if (!isCreate && (markerChanged || (contentChanged && persistedAntiAiMarkers.length > 0))) {
+        formData.set('antiAiMarkers', JSON.stringify(serializeAntiAiMarkerInput(antiAiMarkers)));
+      }
       if (!draftCreation) {
         formData.set(
           'structuredConfig',
@@ -541,7 +550,7 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
       }
       if (!isCreate) formData.set('expectedStructureRevision', String(structureRevision));
       if (completing) formData.set('completeCodeEvaluationDraft', 'true');
-      const statementChanged = !isCreate && String(formData.get('content') || '') !== String(pdoc.content || '');
+      const statementChanged = !isCreate && (markerChanged || contentChanged);
       const confirmation = statementChanged ? await statementGuard.confirm('保存题面勘误', 'statement-edit') : true;
       if (!confirmation) {
         setError('此题正在比赛或考试中使用，当前角色不能修改题面。');
@@ -793,7 +802,14 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
               {!draftCreation ? (
                 <section className="min-w-0 space-y-2">
                   <h3 className="text-sm font-semibold">题面</h3>
-                  <MarkdownEditor name="content" value={pdoc.content || ''} minHeight={500} />
+                  <MarkdownEditor
+                    name="content"
+                    value={pdoc.content || ''}
+                    minHeight={500}
+                    antiAiPath="content"
+                    antiAiMarkers={antiAiMarkers}
+                    onAntiAiMarkersChange={setAntiAiMarkers}
+                  />
                 </section>
               ) : null}
             </div>

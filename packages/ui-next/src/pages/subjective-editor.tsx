@@ -12,11 +12,13 @@ import {
 import { useFormDirtyState, useUnsavedChangesGuard } from '@/components/unsaved-changes-guard';
 import { Button } from '@/components/ui/button';
 import { useBootstrap } from '@/lib/bootstrap';
+import { readAntiAiMarkerDrafts, serializeAntiAiMarkerInput, type AntiAiMarkerDraft } from '@/lib/anti-ai-marker';
 import { cn } from '@/lib/cn';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { readProblemSaveSuccess } from '@/lib/problem-save-response';
 
 interface SubjectiveProblemDocument extends StructuredProblemMetadataDocument {
+  antiAiMarkers?: unknown;
   content?: string;
   structureLockedAt?: string | Date;
   structureRevision?: number;
@@ -41,8 +43,10 @@ export function SubjectiveProblemEditorPage() {
   const [instructions, setInstructions] = useState(String(data.structuredConfig?.main?.gradingInstructions || ''));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const persistedAntiAiMarkers = readAntiAiMarkerDrafts(pdoc.antiAiMarkers);
+  const [antiAiMarkers, setAntiAiMarkers] = useState<AntiAiMarkerDraft[]>(() => persistedAntiAiMarkers);
   const formRef = useRef<HTMLFormElement>(null);
-  const dirtyState = useFormDirtyState(formRef, instructions);
+  const dirtyState = useFormDirtyState(formRef, JSON.stringify({ instructions, antiAiMarkers }));
   const navigationGuard = useUnsavedChangesGuard(dirtyState.dirty || saving);
   const statementGuard = useProblemDataWriteGuard(data.statementWriteGuard, 'statement');
 
@@ -55,7 +59,17 @@ export function SubjectiveProblemEditorPage() {
       return;
     }
     const formData = new FormData(form);
-    const statementChanged = !isCreate && String(formData.get('content') || '') !== String(pdoc.content || '');
+    const contentChanged = !isCreate && String(formData.get('content') || '') !== String(pdoc.content || '');
+    const markerChanged = JSON.stringify(antiAiMarkers) !== JSON.stringify(persistedAntiAiMarkers);
+    if (!isCreate && (markerChanged || (contentChanged && persistedAntiAiMarkers.length > 0))) {
+      try {
+        formData.set('antiAiMarkers', JSON.stringify(serializeAntiAiMarkerInput(antiAiMarkers)));
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : '防 AI 标记无法保存');
+        return;
+      }
+    }
+    const statementChanged = !isCreate && (markerChanged || contentChanged);
     const confirmation = statementChanged ? await statementGuard.confirm('保存题面勘误', 'statement-edit') : true;
     if (!confirmation) {
       setError('此题正在比赛或考试中使用，当前角色不能修改题面。');
@@ -136,7 +150,7 @@ export function SubjectiveProblemEditorPage() {
       >
         <input type="hidden" name="editorProblemKind" value={PROBLEM_KIND_TO_SLUG.subjective} />
         <input type="hidden" name="structuredConfig" value={JSON.stringify({ main: { gradingInstructions: instructions } })} />
-        {!isCreate ? <input type="hidden" name="expectedStructureRevision" value={pdoc.structureRevision} /> : null}
+        {!isCreate ? <input type="hidden" name="expectedStructureRevision" value={pdoc.structureRevision ?? 0} /> : null}
 
         <div className="min-w-0 space-y-6">
           <section className="space-y-3">
@@ -144,7 +158,14 @@ export function SubjectiveProblemEditorPage() {
               <h2 className="text-sm font-semibold">题面</h2>
               <p className="text-xs text-muted-foreground">学生作答内容原样保存，提交后进入人工待评。</p>
             </div>
-            <MarkdownEditor name="content" value={pdoc.content || ''} minHeight={320} />
+            <MarkdownEditor
+              name="content"
+              value={pdoc.content || ''}
+              minHeight={320}
+              antiAiPath={isCreate ? undefined : 'content'}
+              antiAiMarkers={antiAiMarkers}
+              onAntiAiMarkersChange={isCreate ? undefined : setAntiAiMarkers}
+            />
           </section>
           <fieldset disabled={locked} className={cn('space-y-2 border-t border-border/70 pt-5', locked && 'opacity-60')}>
             <h2 className="text-sm font-semibold">阅卷说明</h2>

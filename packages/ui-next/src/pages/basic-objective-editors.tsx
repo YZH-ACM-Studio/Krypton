@@ -13,11 +13,13 @@ import { useFormDirtyState, useUnsavedChangesGuard } from '@/components/unsaved-
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useBootstrap } from '@/lib/bootstrap';
+import { readAntiAiMarkerDrafts, serializeAntiAiMarkerInput, type AntiAiMarkerDraft } from '@/lib/anti-ai-marker';
 import { cn } from '@/lib/cn';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { readProblemSaveSuccess } from '@/lib/problem-save-response';
 
 interface ObjectiveProblemDocument extends StructuredProblemMetadataDocument {
+  antiAiMarkers?: unknown;
   content?: string;
   structureLockedAt?: string | Date;
   structureRevision?: number;
@@ -81,8 +83,10 @@ function ObjectiveEditorShell({
   const formRef = useRef<HTMLFormElement>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const persistedAntiAiMarkers = readAntiAiMarkerDrafts(pdoc.antiAiMarkers);
+  const [antiAiMarkers, setAntiAiMarkers] = useState<AntiAiMarkerDraft[]>(() => persistedAntiAiMarkers);
   const locked = !!pdoc.structureLockedAt;
-  const configKey = JSON.stringify(config);
+  const configKey = JSON.stringify({ config, antiAiMarkers });
   const dirtyState = useFormDirtyState(formRef, configKey);
   const navigationGuard = useUnsavedChangesGuard(dirtyState.dirty || saving);
   const statementGuard = useProblemDataWriteGuard(data.statementWriteGuard, 'statement');
@@ -101,7 +105,17 @@ function ObjectiveEditorShell({
       return;
     }
     const formData = new FormData(form);
-    const statementChanged = !isCreate && String(formData.get('content') || '') !== String(pdoc.content || '');
+    const contentChanged = !isCreate && String(formData.get('content') || '') !== String(pdoc.content || '');
+    const markerChanged = JSON.stringify(antiAiMarkers) !== JSON.stringify(persistedAntiAiMarkers);
+    if (!isCreate && (markerChanged || (contentChanged && persistedAntiAiMarkers.length > 0))) {
+      try {
+        formData.set('antiAiMarkers', JSON.stringify(serializeAntiAiMarkerInput(antiAiMarkers)));
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : '防 AI 标记无法保存');
+        return;
+      }
+    }
+    const statementChanged = !isCreate && (markerChanged || contentChanged);
     const confirmation = statementChanged ? await statementGuard.confirm('保存题面勘误', 'statement-edit') : true;
     if (!confirmation) {
       setError('此题正在比赛或考试中使用，当前角色不能修改题面。');
@@ -192,7 +206,7 @@ function ObjectiveEditorShell({
       >
         <input type="hidden" name="editorProblemKind" value={kind} />
         <input type="hidden" name="structuredConfig" value={JSON.stringify(config)} />
-        {!isCreate ? <input type="hidden" name="expectedStructureRevision" value={String(pdoc.structureRevision || '')} /> : null}
+        {!isCreate ? <input type="hidden" name="expectedStructureRevision" value={String(pdoc.structureRevision ?? 0)} /> : null}
 
         <div className="min-w-0 space-y-6">
           <section className="space-y-4" aria-labelledby="objective-statement-title">
@@ -202,7 +216,14 @@ function ObjectiveEditorShell({
               </h2>
               <p className="mt-0.5 text-xs text-muted-foreground">题面只保存在 content，不在选项配置中重复。</p>
             </div>
-            <MarkdownEditor name="content" value={pdoc.content || ''} minHeight={300} />
+            <MarkdownEditor
+              name="content"
+              value={pdoc.content || ''}
+              minHeight={300}
+              antiAiPath={isCreate ? undefined : 'content'}
+              antiAiMarkers={antiAiMarkers}
+              onAntiAiMarkersChange={isCreate ? undefined : setAntiAiMarkers}
+            />
           </section>
 
           <fieldset

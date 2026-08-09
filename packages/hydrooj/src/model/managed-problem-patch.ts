@@ -22,6 +22,7 @@ const MANAGED_CONTENT_FIELDS = new Set([
     'content',
     'statementFormat',
     'programmingStatement',
+    'antiAiMarkers',
     'config',
     'data',
     'additional_file',

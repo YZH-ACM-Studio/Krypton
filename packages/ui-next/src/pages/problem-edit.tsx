@@ -32,6 +32,7 @@ import { MultiSelect } from '@/components/ui/multi-select';
 import { SimpleSelect } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { useBootstrap } from '@/lib/bootstrap';
+import { readAntiAiMarkerDrafts, serializeAntiAiMarkerInput, type AntiAiMarkerDraft } from '@/lib/anti-ai-marker';
 import { replaceRouteTokens } from '@/lib/format';
 import { downloadProblemPackage } from '@/lib/problem-package';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
@@ -60,6 +61,7 @@ interface ProblemEditFile {
 }
 
 interface ProblemEditDocument {
+  antiAiMarkers?: unknown;
   authoringMode?: string;
   content?: ContentValue;
   data?: ProblemEditFile[];
@@ -830,6 +832,8 @@ export function ProblemEditPage() {
       ? rawContent
       : String(rawContent || '');
   const [draftContent, setDraftContent] = useState<ContentValue>(contentValue);
+  const persistedAntiAiMarkers = readAntiAiMarkerDrafts(pdoc.antiAiMarkers);
+  const [antiAiMarkers, setAntiAiMarkers] = useState<AntiAiMarkerDraft[]>(() => persistedAntiAiMarkers);
   const structuredExisting = !isCreate && pdoc.statementFormat === 'structured-v1';
   const legacyStatementPreview = data.legacyStatementPreview || null;
   const [convertingLegacy, setConvertingLegacy] = useState(data.legacyStatementConversionRequired === true);
@@ -923,6 +927,7 @@ export function ProblemEditPage() {
   const editorRevisionKey = JSON.stringify({
     draftContent,
     programmingStatement,
+    antiAiMarkers,
     convertingLegacy,
     conversionUnclassified,
     hiddenValue,
@@ -1186,6 +1191,11 @@ export function ProblemEditPage() {
     }
     const form = e.currentTarget;
     const fd = new FormData(form);
+    if (structuredSave && antiAiMarkers.some((marker) => !marker.anchor.path.startsWith('programmingStatement.'))) {
+      setSaveError('旧题面的防 AI 标记不能猜测迁移到结构化区块；请取消转换，删除这些标记后再转换。');
+      setSaveState('error');
+      return;
+    }
     if (isCreate) {
       fd.delete('content');
     } else if (structuredSave) {
@@ -1202,9 +1212,21 @@ export function ProblemEditPage() {
       }
     }
     const persistedContentText = typeof contentValue === 'string' ? contentValue : JSON.stringify(contentValue);
-    const statementChanged = structuredSave
+    const contentChanged = structuredSave
       ? JSON.stringify(programmingStatement) !== JSON.stringify(pdoc.programmingStatement || legacyStatementPreview?.statement)
       : contentText !== persistedContentText;
+    const markerChanged = JSON.stringify(antiAiMarkers) !== JSON.stringify(persistedAntiAiMarkers);
+    const statementChanged = markerChanged || contentChanged;
+    if (!isCreate && (markerChanged || (contentChanged && persistedAntiAiMarkers.length > 0))) {
+      try {
+        fd.set('antiAiMarkers', JSON.stringify(serializeAntiAiMarkerInput(antiAiMarkers)));
+        if (!pdoc.problemKind) fd.set('expectedStructureRevision', String(persistedStructureRevision ?? 0));
+      } catch (error) {
+        setSaveError(error instanceof Error ? error.message : '防 AI 标记无法保存');
+        setSaveState('error');
+        return;
+      }
+    }
     const confirmation = !isCreate && statementChanged ? await statementGuard.confirm('保存题面勘误', 'statement-edit') : true;
     if (!confirmation) {
       setSaveError('此题正在比赛或考试中使用，当前角色不能修改题面。');
@@ -1965,6 +1987,11 @@ export function ProblemEditPage() {
                           problemUrl={problemUrl}
                           limitsPreview={statementLimitsPreview}
                           authorizeImageUpload={authorizeStatementImageUpload}
+                          antiAiMarkers={antiAiMarkers}
+                          onAntiAiMarkersChange={(markers) => {
+                            setAntiAiMarkers(markers);
+                            markDirty();
+                          }}
                         />
                       </div>
                     ) : canEditContent ? (
@@ -1975,7 +2002,17 @@ export function ProblemEditPage() {
                               <p className="text-sm font-medium">当前为旧版自由 Markdown 题面</p>
                               <p className="mt-1 text-xs text-muted-foreground">普通勘误不强制转换；需要固定分区时可主动转换一次。</p>
                             </div>
-                            <Button type="button" variant="outline" onClick={() => setConvertingLegacy(true)}>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={() => {
+                                if (antiAiMarkers.length) {
+                                  setSaveError('请先删除旧题面中的防 AI 标记，再转换为结构化题面。');
+                                  return;
+                                }
+                                setConvertingLegacy(true);
+                              }}
+                            >
                               转为结构化题面
                             </Button>
                           </aside>
@@ -2002,6 +2039,12 @@ export function ProblemEditPage() {
                             const queryIndex = original.indexOf('?');
                             const query = queryIndex >= 0 ? original.slice(queryIndex) : '';
                             return `${problemUrl}/file/${encodeURIComponent(filename)}${query}`;
+                          }}
+                          antiAiPath="content"
+                          antiAiMarkers={antiAiMarkers}
+                          onAntiAiMarkersChange={(markers) => {
+                            setAntiAiMarkers(markers);
+                            markDirty();
                           }}
                         />
                       </div>

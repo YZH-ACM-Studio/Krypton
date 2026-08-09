@@ -50,6 +50,7 @@ import {
     ValidationError,
 } from '../error';
 import { DomainDoc, ProblemDataWriteConfirmation, ProblemDataWriteOperation, ProblemDoc, ProblemStatusDoc, RecordDoc, User } from '../interface';
+import { assertStoredAntiAiMarkers, isRawStatementContentInput } from '../lib/anti-ai-marker';
 import { canUsePostContestPractice, getContestSubmissionScope, resolvePostContestProblemMode } from '../lib/contest-correction';
 import { buildPersonalPracticeRecordQuery, buildPersonalPracticeStatusByPid, PersonalPracticeRecord } from '../lib/contest-problem-status';
 import { getProblemConfigErrorText, isProblemConfigFilename, parseProblemConfigObject, parseStructuredRegionSubmission } from '../lib/problem-config';
@@ -1859,6 +1860,7 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
                 : Promise.resolve(null),
         ]);
         const responsePdoc: ProblemDoc & { programmingStatementView?: ReturnType<typeof programmingStatementClientView> } = { ...this.pdoc };
+        delete responsePdoc.antiAiMarkers;
         if (responsePdoc.statementFormat === 'structured-v1') {
             try {
                 const view = programmingStatementClientView(responsePdoc.programmingStatement, responsePdoc.config);
@@ -1915,6 +1917,21 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
             else if (problem.canViewBy(this.pdoc, this.user)) mode = 'correction';
             else mode = 'none';
         }
+        let antiAiMarkerView: Awaited<ReturnType<typeof problem.getAntiAiMarkerClientView>>;
+        if (this.practicePageContext?.controlled && this.practicePageContext.policy?.antiAiCopyInjection) {
+            try {
+                antiAiMarkerView = await problem.getAntiAiMarkerClientView(this.pdoc.domainId, this.pdoc.docId, this.pdoc);
+            } catch (error) {
+                logger.error(
+                    'Anti AI marker serialization rejected domain=%s pid=%d uid=%d stage=detail-serialize result=denied error=%o',
+                    this.pdoc.domainId,
+                    this.pdoc.docId,
+                    this.user._id,
+                    error,
+                );
+                throw new ValidationError('antiAiMarkers', null, localizedErrorText`防 AI 标记数据无效，请联系题目维护者`);
+            }
+        }
         this.response.body = {
             pdoc: responsePdoc,
             udoc: this.udoc,
@@ -1929,6 +1946,7 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
             owner_udoc: tid && this.tdoc.owner !== this.pdoc.owner ? await user.getById(this.pdoc.domainId, this.tdoc.owner) : null,
             mode,
             postContestPracticeActive,
+            ...(antiAiMarkerView ? { antiAiMarkerView } : {}),
             canPreviewSubjective: effectiveProblemKind(this.pdoc) === SUBJECTIVE_KIND && problem.canMaintainProblem(this.user, this.pdoc),
             canSubmitProblem: this.canSubmitLoadedProblem,
             canRejudgeProblem: !tid && this.user.hasPerm(PERM.PERM_REJUDGE_PROBLEM),
@@ -2564,9 +2582,23 @@ export class ProblemEditHandler extends ProblemManageHandler {
             this.user,
             this.pdoc,
             'content',
-            [...problem.PROJECTION_MANAGED_EDITOR, 'config'] as any,
+            [...problem.PROJECTION_MANAGED_EDITOR, 'config', 'antiAiMarkers'] as any,
             true,
         );
+        if (rawPdoc.antiAiMarkers !== undefined) {
+            try {
+                this.response.body.pdoc.antiAiMarkers = assertStoredAntiAiMarkers(rawPdoc.antiAiMarkers, rawPdoc);
+            } catch (error) {
+                logger.error(
+                    'Anti AI marker authoring load rejected domain=%s pid=%d actor=%d stage=author-load result=denied error=%o',
+                    rawPdoc.domainId,
+                    rawPdoc.docId,
+                    this.user._id,
+                    error,
+                );
+                throw new ValidationError('antiAiMarkers', null, localizedErrorText`防 AI 标记数据无效，已阻止题面编辑`);
+            }
+        }
         if (problemKind === 'programming' && rawPdoc.statementFormat !== 'structured-v1') {
             this.response.body.legacyStatementPreview = previewLegacyProgrammingStatement(rawPdoc.content || '');
             this.response.body.legacyStatementConversionRequired =
@@ -2602,7 +2634,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
 
     @route('pid', Types.ProblemId)
     @post('title', Types.Title, true)
-    @post('content', Types.Content, true)
+    @post('content', Types.String, true, isRawStatementContentInput)
     @post('pid', Types.ProblemId, true, (i) => /^(?:[a-z0-9]{1,10}-)?[a-z][a-z0-9]*$/i.test(i))
     @post('hidden', Types.Boolean)
     @post('tag', Types.Content, true, null, parseCategory)
@@ -2610,13 +2642,14 @@ export class ProblemEditHandler extends ProblemManageHandler {
     @post('knowledgeNodeIds', Types.CommaSeperatedArray, true)
     @post('difficulty', Types.UnsignedInt, (i) => +i <= 10, true)
     @post('lockHidden', Types.Boolean, true)
-    @post('expectedStructureRevision', Types.PositiveInt, true)
+    @post('expectedStructureRevision', Types.UnsignedInt, true)
     @post('editorProblemKind', Types.String, true)
     @post('structuredConfig', Types.Content, true)
     @post('metadataOnly', Types.Boolean, true)
     @post('completeCodeEvaluationDraft', Types.Boolean, true)
     @post('activeContainerConfirmation', Types.String, true)
     @post('programmingStatement', Types.Content, true)
+    @post('antiAiMarkers', Types.String, true)
     @post('conversionFingerprint', Types.String, true)
     @post('conversionUnclassified', Types.Content, true)
     async post(
@@ -2638,6 +2671,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
         completeCodeEvaluationDraft = false,
         activeContainerConfirmation?: string,
         programmingStatementInput?: string,
+        antiAiMarkersInput?: string,
         conversionFingerprint?: string,
         parsedConversionUnclassified?: string,
     ) {
@@ -2661,6 +2695,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
                 'title',
                 'content',
                 'programmingStatement',
+                'antiAiMarkers',
                 'conversionFingerprint',
                 'conversionUnclassified',
                 'pid',
@@ -2786,6 +2821,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
             if (
                 !isDedicatedStructuredEditorKind(problemKind) ||
                 content !== undefined ||
+                antiAiMarkersInput !== undefined ||
                 newPid !== undefined ||
                 lockHidden !== undefined ||
                 expectedStructureRevision !== undefined ||
@@ -2839,6 +2875,14 @@ export class ProblemEditHandler extends ProblemManageHandler {
         else if (typeof newPid !== 'string') newPid = `P${newPid}`;
         if (newPid !== this.pdoc.pid && (await problem.get(domainId, newPid))) throw new ProblemAlreadyExistError(newPid);
         const $update: Partial<ProblemDoc> = content === undefined ? {} : { content, html: false };
+        if (Object.hasOwn(body, 'antiAiMarkers')) {
+            if (antiAiMarkersInput === undefined) throw new ValidationError('antiAiMarkers');
+            try {
+                $update.antiAiMarkers = JSON.parse(antiAiMarkersInput);
+            } catch {
+                throw new ValidationError('antiAiMarkers', null, localizedErrorText`防 AI 标记 JSON 无效`);
+            }
+        }
         if (!managed) {
             Object.assign($update, {
                 title,

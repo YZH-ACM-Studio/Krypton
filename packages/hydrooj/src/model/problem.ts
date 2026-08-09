@@ -28,6 +28,7 @@ import {
     ValidationError,
 } from '../error';
 import type { Document, ProblemDataWriteConfirmation, ProblemDataWriteOperation, ProblemDict, ProblemStatusDoc, User } from '../interface';
+import { antiAiMarkerClientView, assertStoredAntiAiMarkers, canonicalAntiAiMarkers, statementSourcesForAntiAiMarkers } from '../lib/anti-ai-marker';
 import { copyProblemStorageFiles } from '../lib/problem-clone';
 import { isProblemConfigFilename, parseProblemConfigObject } from '../lib/problem-config';
 import {
@@ -410,7 +411,16 @@ function isSubmissionLockedPatch($set: Record<string, unknown>, $unset: Record<s
 
 function isEditorialPatch($set: Record<string, unknown>, $unset: Record<string, unknown> = {}) {
     return [...Object.keys($set), ...Object.keys($unset)].some(
-        (field) => field === 'content' || field === 'programmingStatement' || field === 'additional_file',
+        (field) => field === 'content' || field === 'programmingStatement' || field === 'antiAiMarkers' || field === 'additional_file',
+    );
+}
+
+function statementPatchChangesCurrent(current: ProblemDoc, $set: Record<string, unknown>, $unset: Record<string, unknown>) {
+    return (
+        (Object.hasOwn($set, 'content') && !isEqual($set.content, current.content)) ||
+        (Object.hasOwn($set, 'programmingStatement') && !isEqual($set.programmingStatement, current.programmingStatement)) ||
+        (Object.hasOwn($unset, 'content') && current.content !== undefined) ||
+        (Object.hasOwn($unset, 'programmingStatement') && current.programmingStatement !== undefined)
     );
 }
 
@@ -3256,6 +3266,23 @@ export class ProblemModel {
         return res;
     }
 
+    static async getAntiAiMarkerClientView(
+        domainId: string,
+        pid: number,
+        expectedProblem: Pick<ProblemDoc, 'content' | 'statementFormat' | 'programmingStatement'>,
+    ) {
+        const pdoc = await document.coll.findOne(
+            { domainId, docType: document.TYPE_PROBLEM, docId: pid },
+            { projection: { content: 1, statementFormat: 1, programmingStatement: 1, antiAiMarkers: 1 } },
+        );
+        if (!pdoc?.antiAiMarkers) return undefined;
+        if (!isEqual([...statementSourcesForAntiAiMarkers(pdoc)], [...statementSourcesForAntiAiMarkers(expectedProblem)])) {
+            throw new TypeError('problem statement changed while serializing anti AI markers');
+        }
+        const view = antiAiMarkerClientView(pdoc.antiAiMarkers, pdoc);
+        return view.markers.length ? view : undefined;
+    }
+
     /**
      * Direct-problem read whose authorization is linearized against ACL
      * mutation locks and revisions. Container-authorized reads intentionally
@@ -3509,6 +3536,7 @@ export class ProblemModel {
                     content: 1,
                     statementFormat: 1,
                     programmingStatement: 1,
+                    antiAiMarkers: 1,
                     config: 1,
                     data: 1,
                     pid: 1,
@@ -3535,6 +3563,19 @@ export class ProblemModel {
                 ...Object.keys($unset),
             ]);
             throw new ValidationError('authoringMode', null, localizedErrorText`托管题必须使用授权写入口`);
+        }
+        const rawStatementTouched =
+            Object.hasOwn($set, 'content') ||
+            Object.hasOwn($set, 'programmingStatement') ||
+            Object.hasOwn($unset, 'content') ||
+            Object.hasOwn($unset, 'programmingStatement');
+        if (Object.hasOwn($set, 'antiAiMarkers') || Object.hasOwn($unset, 'antiAiMarkers')) {
+            throw new ValidationError('antiAiMarkers', null, localizedErrorText`防 AI 标记只能通过题面授权写入口修改`);
+        }
+        const currentAntiAiMarkers =
+            current.antiAiMarkers === undefined ? undefined : assertStoredAntiAiMarkers(current.antiAiMarkers, current as ProblemDoc);
+        if (rawStatementTouched && currentAntiAiMarkers?.markers.length) {
+            throw new ValidationError('antiAiMarkers', null, localizedErrorText`题面包含防 AI 标记，必须从题面编辑器完成重新定位`);
         }
         assertCodeEvaluationStatusTransition(current.codeEvaluationStatus, $set as Record<string, unknown>, $unset, 'raw-edit');
         const rawEditContext = { domainId, pid: _id, operation: 'raw-edit' };
@@ -4156,6 +4197,7 @@ export class ProblemModel {
                     html: 1,
                     statementFormat: 1,
                     programmingStatement: 1,
+                    antiAiMarkers: 1,
                     config: 1,
                     data: 1,
                     pid: 1,
@@ -4178,6 +4220,32 @@ export class ProblemModel {
         }
         $set = canonicalizeProgrammingStatementPatch(current as ProblemDoc, $set, $unset);
         const confirmedProgrammingStatement = captureProgrammingStatementWrite($set);
+        const statementTouched = statementPatchChangesCurrent(current as ProblemDoc, $set as Record<string, unknown>, $unset);
+        let antiAiMarkersTouched = Object.hasOwn($set, 'antiAiMarkers') || Object.hasOwn($unset, 'antiAiMarkers');
+        if (Object.hasOwn($unset, 'antiAiMarkers')) {
+            throw new ValidationError('antiAiMarkers', null, localizedErrorText`删除全部防 AI 标记必须提交空标记列表`);
+        }
+        const currentAntiAiMarkers =
+            current.antiAiMarkers === undefined ? undefined : assertStoredAntiAiMarkers(current.antiAiMarkers, current as ProblemDoc);
+        if (statementTouched && currentAntiAiMarkers?.markers.length && !antiAiMarkersTouched) {
+            throw new ValidationError('antiAiMarkers', null, localizedErrorText`题面包含防 AI 标记，编辑题面时必须同时提交重新定位结果`);
+        }
+        if (Object.hasOwn($set, 'antiAiMarkers')) {
+            try {
+                $set.antiAiMarkers = canonicalAntiAiMarkers($set.antiAiMarkers, { ...current, ...$set } as ProblemDoc, current.antiAiMarkers);
+            } catch (error) {
+                logger.warn(
+                    'Anti AI marker write rejected domain=%s pid=%d actor=%d operation=%s stage=canonicalize result=denied error=%o',
+                    domainId,
+                    _id,
+                    claim.actor,
+                    claim.operation,
+                    error,
+                );
+                throw new ValidationError('antiAiMarkers', null, localizedErrorText`防 AI 标记位置无效，请重新定位后再保存`);
+            }
+        }
+        const confirmedAntiAiMarkers = Object.hasOwn($set, 'antiAiMarkers') ? cloneDeep($set.antiAiMarkers) : undefined;
         let managedGuard: ReturnType<typeof managedProblemPatchCapability> | null = null;
         let confirmedManagedMindmapNodeIds: string[] | null = null;
         if (current.authoringMode === 'managed') {
@@ -4215,6 +4283,29 @@ export class ProblemModel {
         await bus.parallel('problem/before-edit', $set, $unset);
         assertProgrammingStatementWriteUnchanged(confirmedProgrammingStatement, $set, $unset);
         assertPublicProgrammingStatementReady(current as ProblemDoc, $set, $unset);
+        if (
+            confirmedAntiAiMarkers !== undefined &&
+            (!Object.hasOwn($set, 'antiAiMarkers') || Object.hasOwn($unset, 'antiAiMarkers') || !isEqual($set.antiAiMarkers, confirmedAntiAiMarkers))
+        ) {
+            throw new ValidationError('antiAiMarkers', null, localizedErrorText`写入钩子不能改变已验证的防 AI 标记`);
+        }
+        if (confirmedAntiAiMarkers === undefined && (Object.hasOwn($set, 'antiAiMarkers') || Object.hasOwn($unset, 'antiAiMarkers'))) {
+            throw new ValidationError('antiAiMarkers', null, localizedErrorText`写入钩子不能新增或删除防 AI 标记`);
+        }
+        const finalStatementTouched = statementPatchChangesCurrent(current as ProblemDoc, $set as Record<string, unknown>, $unset);
+        if (currentAntiAiMarkers?.markers.length && finalStatementTouched && !Object.hasOwn($set, 'antiAiMarkers')) {
+            throw new ValidationError('antiAiMarkers', null, localizedErrorText`写入钩子不能绕过防 AI 标记重新定位`);
+        }
+        if (Object.hasOwn($set, 'antiAiMarkers')) {
+            assertStoredAntiAiMarkers($set.antiAiMarkers, { ...current, ...$set } as ProblemDoc);
+            const markerDocumentUnchanged = currentAntiAiMarkers
+                ? isEqual($set.antiAiMarkers, currentAntiAiMarkers)
+                : $set.antiAiMarkers.markers.length === 0;
+            if (markerDocumentUnchanged) {
+                delete $set.antiAiMarkers;
+                antiAiMarkersTouched = false;
+            }
+        }
         const hookTagFields = [...Object.keys($set), ...Object.keys($unset)].filter((field) =>
             ['tag', 'knowledgeMapId', 'knowledgeNodeIds'].some((root) => field === root || field.startsWith(`${root}.`)),
         );
@@ -4330,7 +4421,23 @@ export class ProblemModel {
             }
         }
         let result: ProblemDoc | null;
-        if (current.problemKind !== undefined && structuralPatch && !options.skipStructureGuard) {
+        const legacyAntiAiBootstrap =
+            current.problemKind === undefined && antiAiMarkersTouched && !options.skipStructureGuard && current.structureRevision === undefined;
+        const legacyAntiAiRevisioned =
+            current.problemKind === undefined && antiAiMarkersTouched && !options.skipStructureGuard && current.structureRevision !== undefined;
+        if (legacyAntiAiBootstrap) {
+            if (options.expectedStructureRevision !== 0) throw new ProblemStructureConflictError(_id);
+            result = await commitProblemWriteClaimUpdate(claim, $set, $unset, managedGuard?.capability || claim.capability, {
+                expectedStructureRevisionAbsent: true,
+                expectedTag: options.expectedTag,
+            });
+        } else if (legacyAntiAiRevisioned) {
+            assertStructureRevision(options.expectedStructureRevision);
+            result = await commitProblemWriteClaimUpdate(claim, $set, $unset, managedGuard?.capability || claim.capability, {
+                expectedStructureRevision: options.expectedStructureRevision,
+                expectedTag: options.expectedTag,
+            });
+        } else if (current.problemKind !== undefined && structuralPatch && !options.skipStructureGuard) {
             if (options.requireExpectedStructureRevision) {
                 assertStructureRevision(options.expectedStructureRevision);
             }

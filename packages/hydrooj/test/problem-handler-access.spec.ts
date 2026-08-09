@@ -298,7 +298,9 @@ const problemStub = {
     },
     async getCapabilityAuthorized(...args: any[]) {
         calls.getCapabilityAuthorized.push(args);
-        return maintainableResults.shift() || null;
+        const result = maintainableResults.shift() || null;
+        if (result && Array.isArray(args[4]) && !args[4].includes('antiAiMarkers')) delete result.antiAiMarkers;
+        return result;
     },
     async getViewableAuthorized(...args: any[]) {
         calls.getViewableAuthorized.push(args);
@@ -2571,6 +2573,7 @@ describe('P2.13 managed programming edit boundary', () => {
             false,
             undefined,
             programmingStatement,
+            undefined,
             'legacy-fingerprint',
             undefined,
         );
@@ -3232,6 +3235,37 @@ describe('P2.17 programming tag HTTP boundaries', () => {
 });
 
 describe('P3.15 files workspace capability contract', () => {
+    it('does not expose raw anti-AI marker anchors to a data-only contributor', async () => {
+        const pdoc = {
+            domainId: 'system',
+            docId: 7,
+            pid: 'P3101',
+            title: 'Managed problem',
+            authoringMode: 'managed',
+            data: [],
+            additional_file: [],
+            antiAiMarkers: {
+                schemaVersion: 1,
+                markers: [
+                    {
+                        id: 'marker_0001',
+                        anchor: { path: 'content', offset: 1, affinity: 'after', before: 'a', after: 'b' },
+                        injectionText: 'hidden instruction',
+                        revision: 1,
+                    },
+                ],
+            },
+        };
+        const handler = makeHandler(ProblemConfigHandler, { canEditContent: false, canEditData: true });
+        handler.pdoc = pdoc;
+        maintainableResults = [{ ...pdoc }];
+
+        await handler.get();
+
+        expect(calls.getCapabilityAuthorized.at(-1)?.[4]).not.to.include('antiAiMarkers');
+        expect(handler.response.body.pdoc).not.to.have.property('antiAiMarkers');
+    });
+
     it('lets a data-only contributor pass the POST preflight through a fresh data-capability read', async () => {
         const pdoc = {
             domainId: 'system',
@@ -4775,7 +4809,15 @@ describe('P2.11 canonical ProblemDoc maintenance gate', () => {
         expect(calls.getCapabilityAuthorized[0][0]).to.equal('system');
         expect(calls.getCapabilityAuthorized[0][1]).to.equal(7);
         expect(calls.getCapabilityAuthorized[0][3]).to.equal('content');
-        expect(calls.getCapabilityAuthorized[0][4]).to.deep.equal(['domainId', 'docId', 'pid', 'sourceMeta', 'managedAuthoring', 'config']);
+        expect(calls.getCapabilityAuthorized[0][4]).to.deep.equal([
+            'domainId',
+            'docId',
+            'pid',
+            'sourceMeta',
+            'managedAuthoring',
+            'config',
+            'antiAiMarkers',
+        ]);
         expect(calls.getCapabilityAuthorized[0][5]).to.equal(true);
     });
 

@@ -31,6 +31,13 @@
 - 作者端源码变更只使用 CodeMirror change mapping 更新整行区间；整体删除、交叠或无法确定的映射必须显式失效并阻止保存，不得靠附近文本或旧 anchor 猜测恢复。
 - P3.21/P3.22/P3.23 是不可拆部署单元；生产唯一旧函数草稿只能经过备份、只读 plan、确认、精确迁移和 verify 后切换，不维护旧协议双读双写。
 
+## 防 AI 标记协议
+
+- `ProblemDoc.antiAiMarkers` 是隐藏复制提示的唯一 canonical 元数据；题面 Markdown/结构化题面正文不得写入真实零宽字符或隐藏文本。标记保存稳定 ID、题面字段路径、UTF-16 边界、亲和方向、短上下文和独立 revision。
+- 标记与题面必须通过同一授权写入口和 `structureRevision` CAS 保存。浏览器只做确定性的单次编辑映射；删除、替换跨过边界或上下文不一致时必须阻止保存，禁止按邻近文字猜测恢复。旧题第一次添加标记只允许显式 expected revision `0` 的单题 CAS，不做批量回填。
+- 作者端可读取完整标记并显式预览学生题面与复制结果；普通公开投影、比赛投影和学生题面不得包含内部上下文、亲和方向或 revision。学生端只有在当前真实性 Context 的 `antiAiCopyInjection` 生效时才能收到最小安全视图（ID、路径、位置、注入文本）。
+- P1.6 仅定义标记 schema、作者维护和安全 serializer；实际 copy/cut/selection 注入属于 P1.7。未启用策略的普通题目复制行为必须保持不变，打印/PDF、屏幕阅读器和正常视觉渲染不得出现隐藏文本。
+
 ## 结构化编程题面协议
 
 - 网页新建的编程题使用 `statementFormat:'structured-v1'` 与 `programmingStatement` schema v1；canonical 固定为 `zh-CN` 的背景、描述、输入、输出、样例和总提示，区块顺序不可配置，时空限制只读取实际评测配置。

@@ -8,6 +8,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { SimpleSelect } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import type { AntiAiMarkerDraft } from '@/lib/anti-ai-marker';
 
 export type StatementState = 'undecided' | 'present' | 'absent';
 
@@ -228,6 +229,8 @@ export function ProgrammingStatementEditor({
   problemUrl,
   limitsPreview,
   authorizeImageUpload,
+  antiAiMarkers = [],
+  onAntiAiMarkersChange,
 }: {
   value: ProgrammingStatementCanonical;
   onChange: (value: ProgrammingStatementCanonical) => void;
@@ -235,6 +238,8 @@ export function ProgrammingStatementEditor({
   problemUrl: string;
   limitsPreview?: ReactNode;
   authorizeImageUpload?: () => Promise<Record<string, string> | false>;
+  antiAiMarkers?: AntiAiMarkerDraft[];
+  onAntiAiMarkersChange?: (markers: AntiAiMarkerDraft[]) => void;
 }) {
   const [pendingAbsent, setPendingAbsent] = useState<TextSectionKey | 'examples' | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -255,7 +260,8 @@ export function ProgrammingStatementEditor({
 
   const setTextState = (key: TextSectionKey, state: StatementState) => {
     const current = value[key];
-    if (state === 'absent' && current.content) {
+    const markerPath = `programmingStatement.${key}`;
+    if (state === 'absent' && (current.content || antiAiMarkers.some((marker) => marker.anchor.path === markerPath))) {
       setPendingAbsent(key);
       return;
     }
@@ -270,8 +276,13 @@ export function ProgrammingStatementEditor({
   };
   const confirmAbsent = () => {
     if (!pendingAbsent) return;
-    if (pendingAbsent === 'examples') onChange({ ...value, examples: { state: 'absent', items: [] } });
-    else onChange({ ...value, [pendingAbsent]: { state: 'absent', content: '' } });
+    if (pendingAbsent === 'examples') {
+      onAntiAiMarkersChange?.(antiAiMarkers.filter((marker) => !marker.anchor.path.startsWith('programmingStatement.examples.')));
+      onChange({ ...value, examples: { state: 'absent', items: [] } });
+    } else {
+      onAntiAiMarkersChange?.(antiAiMarkers.filter((marker) => marker.anchor.path !== `programmingStatement.${pendingAbsent}`));
+      onChange({ ...value, [pendingAbsent]: { state: 'absent', content: '' } });
+    }
     setPendingAbsent(null);
   };
   const setTextContent = (key: TextSectionKey, content: string) => onChange({ ...value, [key]: { ...value[key], content } });
@@ -284,7 +295,30 @@ export function ProgrammingStatementEditor({
     if (next < 0 || next >= value.examples.items.length) return;
     const items = [...value.examples.items];
     [items[index], items[next]] = [items[next], items[index]];
+    const currentPath = `programmingStatement.examples.${index}.note`;
+    const nextPath = `programmingStatement.examples.${next}.note`;
+    onAntiAiMarkersChange?.(
+      antiAiMarkers.map((marker) => {
+        if (marker.anchor.path === currentPath) return { ...marker, anchor: { ...marker.anchor, path: nextPath } };
+        if (marker.anchor.path === nextPath) return { ...marker, anchor: { ...marker.anchor, path: currentPath } };
+        return marker;
+      }),
+    );
     onChange({ ...value, examples: { ...value.examples, items } });
+  };
+  const removeExample = (index: number) => {
+    const deletedPath = `programmingStatement.examples.${index}.note`;
+    if (antiAiMarkers.some((marker) => marker.anchor.path === deletedPath)) return;
+    const nextMarkers = antiAiMarkers.map((marker) => {
+      const match = /^programmingStatement\.examples\.(\d+)\.note$/.exec(marker.anchor.path);
+      if (!match || Number(match[1]) <= index) return marker;
+      return {
+        ...marker,
+        anchor: { ...marker.anchor, path: `programmingStatement.examples.${Number(match[1]) - 1}.note` },
+      };
+    });
+    onAntiAiMarkersChange?.(nextMarkers);
+    onChange({ ...value, examples: { ...value.examples, items: value.examples.items.filter((_, itemIndex) => itemIndex !== index) } });
   };
 
   const preview: ProgrammingStatementViewData = {
@@ -341,6 +375,9 @@ export function ProgrammingStatementEditor({
         <MarkdownEditor
           value={value.background.content}
           onChange={(content) => setTextContent('background', content)}
+          antiAiPath="programmingStatement.background"
+          antiAiMarkers={antiAiMarkers}
+          onAntiAiMarkersChange={onAntiAiMarkersChange}
           minHeight={220}
           pasteUpload={pasteUpload}
           previewFileUrl={previewFileUrl}
@@ -356,6 +393,9 @@ export function ProgrammingStatementEditor({
         <MarkdownEditor
           value={value.description.content}
           onChange={(content) => onChange({ ...value, description: { ...value.description, content } })}
+          antiAiPath="programmingStatement.description"
+          antiAiMarkers={antiAiMarkers}
+          onAntiAiMarkersChange={onAntiAiMarkersChange}
           minHeight={320}
           pasteUpload={pasteUpload}
           previewFileUrl={previewFileUrl}
@@ -365,6 +405,9 @@ export function ProgrammingStatementEditor({
         <MarkdownEditor
           value={value.input.content}
           onChange={(content) => setTextContent('input', content)}
+          antiAiPath="programmingStatement.input"
+          antiAiMarkers={antiAiMarkers}
+          onAntiAiMarkersChange={onAntiAiMarkersChange}
           minHeight={220}
           pasteUpload={pasteUpload}
           previewFileUrl={previewFileUrl}
@@ -374,6 +417,9 @@ export function ProgrammingStatementEditor({
         <MarkdownEditor
           value={value.output.content}
           onChange={(content) => setTextContent('output', content)}
+          antiAiPath="programmingStatement.output"
+          antiAiMarkers={antiAiMarkers}
+          onAntiAiMarkersChange={onAntiAiMarkersChange}
           minHeight={220}
           pasteUpload={pasteUpload}
           previewFileUrl={previewFileUrl}
@@ -410,11 +456,12 @@ export function ProgrammingStatementEditor({
                     type="button"
                     size="icon"
                     variant="ghost"
-                    onClick={() =>
-                      onChange({
-                        ...value,
-                        examples: { ...value.examples, items: value.examples.items.filter((_, itemIndex) => itemIndex !== index) },
-                      })
+                    onClick={() => removeExample(index)}
+                    disabled={antiAiMarkers.some((marker) => marker.anchor.path === `programmingStatement.examples.${index}.note`)}
+                    title={
+                      antiAiMarkers.some((marker) => marker.anchor.path === `programmingStatement.examples.${index}.note`)
+                        ? '请先删除该样例说明中的防 AI 标记'
+                        : undefined
                     }
                     aria-label={`删除样例 ${index + 1}`}
                   >
@@ -452,6 +499,9 @@ export function ProgrammingStatementEditor({
                 <MarkdownEditor
                   value={item.note}
                   onChange={(note) => updateExample(index, { note })}
+                  antiAiPath={`programmingStatement.examples.${index}.note`}
+                  antiAiMarkers={antiAiMarkers}
+                  onAntiAiMarkersChange={onAntiAiMarkersChange}
                   minHeight={160}
                   pasteUpload={pasteUpload}
                   previewFileUrl={previewFileUrl}
@@ -487,6 +537,9 @@ export function ProgrammingStatementEditor({
         <MarkdownEditor
           value={value.hints.content}
           onChange={(content) => setTextContent('hints', content)}
+          antiAiPath="programmingStatement.hints"
+          antiAiMarkers={antiAiMarkers}
+          onAntiAiMarkersChange={onAntiAiMarkersChange}
           minHeight={220}
           pasteUpload={pasteUpload}
           previewFileUrl={previewFileUrl}
@@ -500,7 +553,7 @@ export function ProgrammingStatementEditor({
           </DialogHeader>
           <div className="space-y-4 p-5">
             <p className="text-sm leading-6 text-muted-foreground">
-              切换为“明确没有”会永久清空{pendingAbsent ? SECTION_LABELS[pendingAbsent] : '该区块'}当前内容，保存后无法恢复。
+              切换为“明确没有”会永久清空{pendingAbsent ? SECTION_LABELS[pendingAbsent] : '该区块'}当前内容和防 AI 标记，保存后无法恢复。
             </p>
             <div className="flex justify-end gap-2">
               <Button type="button" variant="outline" onClick={() => setPendingAbsent(null)}>

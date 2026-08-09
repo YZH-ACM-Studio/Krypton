@@ -5,6 +5,7 @@ import { MarkdownEditor, type MarkdownEditorProps } from '../src/components/mark
 import { prepareProblemDataWrite, useProblemDataWriteGuard } from '../src/components/problem-data-write-guard';
 import { emptyProgrammingStatement } from '../src/components/programming-statement';
 import { BootstrapProvider, type KryptonBootstrap } from '../src/lib/bootstrap';
+import type { AntiAiMarkerDraft } from '../src/lib/anti-ai-marker';
 import { AdminAnnounceEditorPage } from '../src/pages/announcement';
 import { ProblemEditPage } from '../src/pages/problem-edit';
 
@@ -39,6 +40,32 @@ function GuardedProblemStatementPaste() {
       <output>{value}</output>
       {guard.notice}
       {guard.dialog}
+    </>
+  );
+}
+
+function MarkerProblemStatementPaste() {
+  const [value, setValue] = useState('尾部');
+  const [markers, setMarkers] = useState<AntiAiMarkerDraft[]>([
+    {
+      id: 'marker_0001',
+      anchor: { path: 'content', offset: 2, affinity: 'after' },
+      injectionText: '隐藏提示',
+      revision: 1,
+    },
+  ]);
+  return (
+    <>
+      <MarkdownEditor
+        value={value}
+        onChange={setValue}
+        antiAiPath="content"
+        antiAiMarkers={markers}
+        onAntiAiMarkersChange={setMarkers}
+        pasteUpload={{ endpoint: '/p/P1000/files', makeUrl: (filename) => `file://${filename}` }}
+      />
+      <output aria-label="marker-paste-source">{value}</output>
+      <output aria-label="marker-paste-state">{JSON.stringify(markers)}</output>
     </>
   );
 }
@@ -214,6 +241,43 @@ describe('markdown image paste uploads', () => {
   });
 
   it.each([
+    ['success', new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'Content-Type': 'application/json' } })],
+    [
+      'failure',
+      new Response(
+        JSON.stringify({
+          error: {
+            name: 'StorageError',
+            errorCode: 'StorageError',
+            code: 500,
+            status: 500,
+            params: [],
+            message: '存储服务拒绝了图片',
+          },
+        }),
+        { status: 500, headers: { 'Content-Type': 'application/json' } },
+      ),
+    ],
+  ])('remaps a later marker from the latest placeholder state after an async upload %s', async (_result, response) => {
+    let resolveUpload: (value: Response) => void = () => undefined;
+    const fetchMock = vi.fn(() => new Promise<Response>((resolve) => (resolveUpload = resolve)));
+    vi.stubGlobal('fetch', fetchMock);
+    render(<MarkerProblemStatementPaste />);
+    const editor = screen.getByPlaceholderText(/在此输入 Markdown 内容/) as HTMLTextAreaElement;
+    editor.setSelectionRange(0, 0);
+
+    fireEvent.paste(editor, { clipboardData: imageClipboard(new File(['png'], 'clipboard.png', { type: 'image/png' })) });
+    await waitFor(() => expect(screen.getByLabelText('marker-paste-source')).toHaveTextContent('uploading-'));
+    resolveUpload(response);
+
+    await waitFor(() => expect(screen.getByLabelText('marker-paste-source')).not.toHaveTextContent('uploading-'));
+    const source = screen.getByLabelText('marker-paste-source').textContent || '';
+    const markerState = JSON.parse(screen.getByLabelText('marker-paste-state').textContent || '[]') as AntiAiMarkerDraft[];
+    expect(markerState[0].anchor.offset).toBe(source.indexOf('尾部') + '尾部'.length);
+    expect(screen.getByTestId('anti-ai-marker-boundaries')).toHaveTextContent(`位置 ${markerState[0].anchor.offset}`);
+  });
+
+  it.each([
     ['legacy', 'legacy'],
     ['structured', 'structured-v1'],
   ] as const)('wires %s problem statements through the production files-upload confirmation', async (_label, statementFormat) => {
@@ -238,6 +302,57 @@ describe('markdown image paste uploads', () => {
     const uploadForm = fetchMock.mock.calls[1]?.[1]?.body as FormData;
     expect(uploadForm.get('operation')).toBe('upload_file');
     expect(uploadForm.get('activeContainerConfirmation')).toBe('paste-confirmation');
+  });
+
+  it('does not send marker state or a structure revision when a legacy marker problem only changes metadata', async () => {
+    const bootstrap = problemEditBootstrap('legacy');
+    const data = bootstrap.page.data as {
+      pdoc: Record<string, unknown>;
+      statementWriteGuard?: {
+        active: { id: string; title: string }[];
+        canOverride: boolean;
+        confirmationRequestIds: Record<string, string>;
+      };
+    };
+    data.pdoc.structureRevision = 7;
+    data.pdoc.antiAiMarkers = {
+      schemaVersion: 1,
+      markers: [
+        {
+          id: 'marker_0001',
+          anchor: { path: 'content', offset: 1, affinity: 'after', before: '题', after: '面' },
+          injectionText: '隐藏提示',
+          revision: 1,
+        },
+      ],
+    };
+    data.statementWriteGuard = {
+      active: [{ id: 'contest-1', title: '进行中的比赛' }],
+      canOverride: true,
+      confirmationRequestIds: {},
+    };
+    let requestBody: URLSearchParams | undefined;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: RequestInfo | URL, init?: RequestInit) => {
+        requestBody = init?.body as URLSearchParams;
+        return new Promise<Response>(() => undefined);
+      }),
+    );
+
+    render(
+      <BootstrapProvider bootstrap={bootstrap}>
+        <ProblemEditPage />
+      </BootstrapProvider>,
+    );
+    fireEvent.change(screen.getByLabelText('标题'), { target: { value: '只修改标题' } });
+    fireEvent.click(screen.getAllByRole('button', { name: '保存修改' })[0]);
+
+    await waitFor(() => expect(requestBody).toBeInstanceOf(URLSearchParams));
+    expect(requestBody?.get('title')).toBe('只修改标题');
+    expect(requestBody?.has('antiAiMarkers')).toBe(false);
+    expect(requestBody?.has('expectedStructureRevision')).toBe(false);
+    expect(screen.queryByRole('heading', { name: '确认修改赛中题面' })).not.toBeInTheDocument();
   });
 
   it('uses an inline-display URL for images pasted into announcements', async () => {

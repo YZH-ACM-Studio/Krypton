@@ -19,9 +19,11 @@ import rehypeHighlight from 'rehype-highlight';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import { cn } from '@/lib/cn';
+import { antiAiCopyPreview, createAntiAiMarker, remapAntiAiMarkers, type AntiAiMarkerDraft } from '@/lib/anti-ai-marker';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { splitMarkdownBySamples } from '@/lib/samples';
 import { SampleBlocks } from '@/components/sample-blocks';
+import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 
 /* ------------------------------------------------------------------ */
@@ -133,7 +135,7 @@ function parseContent(content: ContentValue): Record<string, string> {
       /* not JSON, treat as raw markdown */
     }
   }
-  return { default: trimmed };
+  return { default: content };
 }
 
 function pickInitialLang(langs: Record<string, string>, preferred?: string): string {
@@ -304,6 +306,10 @@ export interface MarkdownEditorProps {
   };
   /** Resolve file:// attachments inside the live preview without changing the saved markdown. */
   previewFileUrl?: FileUrlResolver;
+  /** Author-only anti-AI marker path. Omit outside problem statement editors. */
+  antiAiPath?: string;
+  antiAiMarkers?: AntiAiMarkerDraft[];
+  onAntiAiMarkersChange?: (markers: AntiAiMarkerDraft[]) => void;
 }
 
 export function MarkdownEditor({
@@ -315,6 +321,9 @@ export function MarkdownEditor({
   minHeight = 400,
   pasteUpload,
   previewFileUrl,
+  antiAiPath,
+  antiAiMarkers = [],
+  onAntiAiMarkersChange,
 }: MarkdownEditorProps) {
   const initialLangs = useMemo(() => parseContent(value), [value]);
   const [drafts, setDrafts] = useState(() => initialLangs);
@@ -324,12 +333,47 @@ export function MarkdownEditor({
   const [source, setSource] = useState(() => initialLangs[activeLang] || '');
   const [preview, setPreview] = useState('');
   const sourceRef = useRef(source);
+  const externalValueRef = useRef(value);
+  const antiAiMarkersRef = useRef(antiAiMarkers);
   const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
+  const [antiAiPreview, setAntiAiPreview] = useState<'student' | 'copy' | null>(null);
+  const [editingMarkerId, setEditingMarkerId] = useState<string | null>(null);
+  const activeAntiAiPath = antiAiPath ? (isMultiLang && activeLang !== 'default' ? `${antiAiPath}.${activeLang}` : antiAiPath) : undefined;
+  const activeAntiAiMarkers = activeAntiAiPath
+    ? antiAiMarkers.filter((marker) => marker.anchor.path === activeAntiAiPath).sort((left, right) => left.anchor.offset - right.anchor.offset)
+    : [];
+
+  useEffect(() => {
+    antiAiMarkersRef.current = antiAiMarkers;
+  }, [antiAiMarkers]);
+
+  // A parent may replace this editor's canonical section, for example when
+  // structured samples are reordered. Synchronize that external replacement
+  // without routing it through commitSource: it is already canonical and its
+  // marker paths were remapped by the parent in the same operation.
+  useEffect(() => {
+    if (externalValueRef.current === value) return;
+    externalValueRef.current = value;
+    const nextDrafts = parseContent(value);
+    const nextActiveLang = Object.hasOwn(nextDrafts, activeLang) ? activeLang : pickInitialLang(nextDrafts, preferredLang);
+    const nextSource = nextDrafts[nextActiveLang] || '';
+    sourceRef.current = nextSource;
+    setDrafts(nextDrafts);
+    setActiveLang(nextActiveLang);
+    setSource(nextSource);
+    setPreview(nextSource);
+  }, [activeLang, preferredLang, value]);
 
   const commitSource = useCallback(
     (nextSource: string) => {
+      const previousSource = sourceRef.current;
+      if (activeAntiAiPath && onAntiAiMarkersChange && previousSource !== nextSource) {
+        const nextMarkers = remapAntiAiMarkers(antiAiMarkersRef.current, activeAntiAiPath, previousSource, nextSource);
+        antiAiMarkersRef.current = nextMarkers;
+        onAntiAiMarkersChange(nextMarkers);
+      }
       sourceRef.current = nextSource;
       setSource(nextSource);
       if (isMultiLang) {
@@ -342,8 +386,34 @@ export function MarkdownEditor({
         onChange?.(nextSource);
       }
     },
-    [activeLang, isMultiLang, onChange],
+    [activeAntiAiPath, activeLang, isMultiLang, onAntiAiMarkersChange, onChange],
   );
+
+  const addAntiAiMarker = useCallback(() => {
+    if (!activeAntiAiPath || !onAntiAiMarkersChange) return;
+    const offset = editorRef.current?.selectionStart ?? sourceRef.current.length;
+    const marker = createAntiAiMarker(activeAntiAiPath, offset, '');
+    const nextMarkers = [...antiAiMarkersRef.current, marker];
+    antiAiMarkersRef.current = nextMarkers;
+    onAntiAiMarkersChange(nextMarkers);
+    setEditingMarkerId(marker.id);
+  }, [activeAntiAiPath, onAntiAiMarkersChange]);
+
+  const updateAntiAiMarker = useCallback(
+    (id: string, update: (marker: AntiAiMarkerDraft) => AntiAiMarkerDraft) => {
+      const nextMarkers = antiAiMarkersRef.current.map((marker) => (marker.id === id ? update(marker) : marker));
+      antiAiMarkersRef.current = nextMarkers;
+      onAntiAiMarkersChange?.(nextMarkers);
+    },
+    [onAntiAiMarkersChange],
+  );
+
+  const focusAntiAiMarker = useCallback((marker: AntiAiMarkerDraft) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    editor.focus();
+    editor.selectionStart = editor.selectionEnd = Math.min(marker.anchor.offset, editor.value.length);
+  }, []);
 
   // Debounced preview update
   useEffect(() => {
@@ -483,12 +553,125 @@ export function MarkdownEditor({
             setPreview(text);
           }}
         />
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span>左侧编辑</span>
-          <span className="text-border">|</span>
-          <span>右侧预览</span>
+        <div className="flex flex-wrap items-center justify-end gap-2 text-xs text-muted-foreground">
+          {activeAntiAiPath ? (
+            <>
+              <Button type="button" size="sm" variant="outline" onClick={addAntiAiMarker}>
+                在光标处插入防 AI 标记
+              </Button>
+              <Button type="button" size="sm" variant="ghost" onClick={() => setAntiAiPreview('student')}>
+                学生可见效果
+              </Button>
+              <Button type="button" size="sm" variant="ghost" onClick={() => setAntiAiPreview('copy')}>
+                复制结果
+              </Button>
+            </>
+          ) : (
+            <>
+              <span>左侧编辑</span>
+              <span className="text-border">|</span>
+              <span>右侧预览</span>
+            </>
+          )}
         </div>
       </div>
+
+      {activeAntiAiPath && activeAntiAiMarkers.length ? (
+        <div
+          className="space-y-2 rounded-lg border border-dashed border-amber-500/40 bg-amber-500/[0.04] p-3"
+          data-testid="anti-ai-marker-boundaries"
+        >
+          <p className="text-xs font-medium text-amber-800 dark:text-amber-300">当前区块的防 AI 边界</p>
+          {activeAntiAiMarkers.map((marker) => {
+            const contextStart = Math.max(0, marker.anchor.offset - 14);
+            const contextEnd = Math.min(source.length, marker.anchor.offset + 14);
+            return (
+              <div key={marker.id} className="rounded-md border bg-background/80 p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    className="rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:text-amber-200"
+                    onClick={() => focusAntiAiMarker(marker)}
+                  >
+                    防 AI · 位置 {marker.anchor.offset}
+                  </button>
+                  <code className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+                    {source.slice(contextStart, marker.anchor.offset)}│{source.slice(marker.anchor.offset, contextEnd)}
+                  </code>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      const offset = editorRef.current?.selectionStart ?? marker.anchor.offset;
+                      updateAntiAiMarker(marker.id, (current) => ({
+                        ...current,
+                        anchor: { ...current.anchor, offset },
+                        conflict: undefined,
+                      }));
+                    }}
+                  >
+                    移到光标
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setEditingMarkerId(editingMarkerId === marker.id ? null : marker.id)}
+                  >
+                    {editingMarkerId === marker.id ? '收起' : '编辑'}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="text-destructive"
+                    onClick={() => {
+                      const nextMarkers = antiAiMarkersRef.current.filter((item) => item.id !== marker.id);
+                      antiAiMarkersRef.current = nextMarkers;
+                      onAntiAiMarkersChange?.(nextMarkers);
+                    }}
+                  >
+                    删除
+                  </Button>
+                </div>
+                {marker.conflict ? <p className="mt-2 text-xs text-destructive">{marker.conflict}</p> : null}
+                {editingMarkerId === marker.id ? (
+                  <label className="mt-3 block space-y-1.5 text-xs font-medium">
+                    注入文本
+                    <textarea
+                      value={marker.injectionText}
+                      onChange={(event) => updateAntiAiMarker(marker.id, (current) => ({ ...current, injectionText: event.target.value }))}
+                      rows={4}
+                      className="w-full resize-y rounded-md border border-input bg-background px-3 py-2 font-mono text-sm font-normal"
+                    />
+                  </label>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+
+      {activeAntiAiPath && antiAiPreview ? (
+        <section className="rounded-lg border bg-muted/15 p-4" aria-label={antiAiPreview === 'student' ? '学生可见效果' : '复制结果预览'}>
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h4 className="text-sm font-semibold">
+              {antiAiPreview === 'student' ? '学生可见效果（不显示隐藏文本）' : '复制结果（显式展示注入文本）'}
+            </h4>
+            <Button type="button" size="sm" variant="ghost" onClick={() => setAntiAiPreview(null)}>
+              关闭
+            </Button>
+          </div>
+          {antiAiPreview === 'student' ? (
+            <PreviewWithSamples source={source} resolveFileUrl={previewFileUrl} />
+          ) : (
+            <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-md border bg-background p-3 text-xs">
+              {antiAiCopyPreview(source, activeAntiAiMarkers)}
+            </pre>
+          )}
+        </section>
+      ) : null}
 
       {/* Side-by-side panels. Both panes share the same height + scroll
           behavior so the editor doesn't look stunted next to a tall preview.

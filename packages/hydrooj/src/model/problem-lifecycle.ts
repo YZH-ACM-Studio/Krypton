@@ -24,6 +24,7 @@ export const PROBLEM_STRUCTURAL_FIELDS = new Set([
     'content',
     'statementFormat',
     'programmingStatement',
+    'antiAiMarkers',
     'config',
     'problemKind',
     'codeEvaluationStatus',

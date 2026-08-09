@@ -227,6 +227,8 @@ declare module './model/problem' {
         statementFormat?: import('./lib/programming-statement').ProgrammingStatementFormat;
         /** Canonical editable source for structured-v1 programming statements. */
         programmingStatement?: import('./lib/programming-statement').ProgrammingStatement;
+        /** Author-only canonical anti-AI marker anchors; never expose this raw shape to students. */
+        antiAiMarkers?: import('./lib/anti-ai-marker').AntiAiMarkerDocument;
         /** Canonical source identity for a managed programming problem. */
         sourceMeta?: {
             template:

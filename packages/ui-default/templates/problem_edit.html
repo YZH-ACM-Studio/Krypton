@@ -51,6 +51,11 @@
                value:pdoc['difficulty'] or ''
              }) }}
           </div>
+          {% if pdoc['antiAiMarkers'] and pdoc['antiAiMarkers']['markers']|length %}
+          <blockquote class="note warning">
+            此题题面包含防 AI 标记。旧版编辑器不能安全映射标记位置，请启用 JavaScript 后使用 Krypton 题面编辑器。
+          </blockquote>
+          {% else %}
           <div class="section__tab-container nojs--hide">
           <div class="section__tab-header-wrapper">
             <ul class="section__tab-header">
@@ -63,6 +68,7 @@
           </div>
           <div><textarea data-editor{% if page_name == 'problem_edit' %} autofocus{% endif %} class="textbox auto-resize nojs--hide"></textarea></div>
           <textarea name="content" class="textbox hasjs--hide" data-markdown-upload style="height: 500px">{% if pdoc %}{{ pdoc['content']|toString }}{% else %}{% include 'partials/problem_default.md' %}{% endif %}</textarea>
+          {% endif %}
           <div class="row"><div class="columns">
           {% if page_name == 'problem_edit' %}
             <button type="submit" class="rounded primary button">

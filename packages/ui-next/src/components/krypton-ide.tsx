@@ -46,6 +46,7 @@ import { json } from '@codemirror/lang-json';
 import { oneDark } from '@codemirror/theme-one-dark';
 
 import { cn } from '@/lib/cn';
+import { readAlternatePlainText } from '@/lib/clipboard-text';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import {
   distributePretestRecord,
@@ -809,6 +810,7 @@ export function KryptonIDE({
   const [fullscreen, setFullscreen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
+  const [pasteError, setPasteError] = useState('');
   const [config, setConfig] = useState<IdeConfig>(loadConfig);
   const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
   const [submitCooldown, setSubmitCooldown] = useState(0);
@@ -943,6 +945,37 @@ export function KryptonIDE({
       syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
       bracketMatching(),
       highlightSelectionMatches(),
+      ...(!isReadOnly
+        ? [
+            EditorView.domEventHandlers({
+              paste(event, view) {
+                const data = event.clipboardData;
+                if (!data) return false;
+                if (data.getData('text/plain')) {
+                  setPasteError('');
+                  return false;
+                }
+                const alternate = readAlternatePlainText(data);
+                if (!alternate) {
+                  if (data.getData('text/uri-list')) {
+                    setPasteError('');
+                    return false;
+                  }
+                  const types = Array.from(data.types);
+                  console.warn('[KryptonIDE] Clipboard paste rejected: no plain-text flavor', { types });
+                  setPasteError('剪贴板没有可读取的纯文本代码，请在来源 IDE 中重新复制后再试。');
+                  return true;
+                }
+                view.dispatch(view.state.replaceSelection(view.state.toText(alternate)), {
+                  userEvent: 'input.paste',
+                  scrollIntoView: true,
+                });
+                setPasteError('');
+                return true;
+              },
+            }),
+          ]
+        : []),
       ...(isReadOnly ? [] : [history(), dropCursor(), indentOnInput(), closeBrackets(), autocompletion(), rectangularSelection(), crosshairCursor()]),
       keymap.of(
         isReadOnly
@@ -1717,6 +1750,12 @@ export function KryptonIDE({
       {submitError ? (
         <div role="alert" className="shrink-0 border-b border-red-500/25 bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:text-red-400">
           {submitError}
+        </div>
+      ) : null}
+
+      {pasteError ? (
+        <div role="alert" className="shrink-0 border-b border-amber-500/25 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300">
+          {pasteError}
         </div>
       ) : null}
 

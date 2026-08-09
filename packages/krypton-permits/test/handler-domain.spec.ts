@@ -20,6 +20,7 @@ const calls = {
     manageCollaborators: [] as any[],
     manageContributions: [] as any[],
     manageMaintainers: [] as any[],
+    message: [] as any[],
     oplog: [] as any[],
     grant: [] as any[],
     revoke: [] as any[],
@@ -42,12 +43,14 @@ let manageCollaboratorResults: boolean[] = [];
 let manageContributionResults: boolean[] = [];
 let manageMaintainerResults: boolean[] = [];
 let permitRow: any = null;
+let permitRows: any[] | null = null;
 let permitFindOneResults: any[] = [];
 let rawProblemResults: any[] = [];
 let permitSourceRows: any[] = [];
 let rosterProvider: () => Promise<any[]> = async () => [];
 let contributionRows: any[] = [];
 let contributionAssignFailures: Array<Error | null> = [];
+let grantFailures: Array<Error | null> = [];
 let userGetResults: any[] = [];
 
 function rowsMatchingTargets(rows: any[], filter: any) {
@@ -82,7 +85,7 @@ const permitsColl = {
             active: true,
             role: 'verifier',
         };
-        const rows = rowsMatchingTargets([permitRow || defaultRow], filter);
+        const rows = rowsMatchingTargets(permitRows ?? [permitRow || defaultRow], filter);
         return {
             project() {
                 return {
@@ -113,6 +116,8 @@ const permitSourcesColl = {
 const permitsModel = {
     async grant(...args: any[]) {
         calls.grant.push(args);
+        const failure = grantFailures.shift();
+        if (failure) throw failure;
         return { active: true };
     },
     async grantBulkViaContest() {
@@ -287,9 +292,11 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     }
     if (request === 'hydrooj/src/model/message') {
         return {
+            __esModule: true,
             default: {
                 FLAG_UNREAD: 1,
-                async send() {
+                async send(...args: any[]) {
+                    calls.message.push(args);
                     return undefined;
                 },
             },
@@ -373,12 +380,14 @@ beforeEach(() => {
     manageContributionResults = [];
     manageMaintainerResults = [];
     permitRow = null;
+    permitRows = null;
     permitFindOneResults = [];
     rawProblemResults = [];
     permitSourceRows = [];
     rosterProvider = async () => [];
     contributionRows = [];
     contributionAssignFailures = [];
+    grantFailures = [];
     userGetResults = [];
 });
 
@@ -568,6 +577,147 @@ describe('permit handler authoritative domain boundary', () => {
             [42, 'tag'],
             [43, 'data'],
         ]);
+    });
+
+    it('bulk assigns canonical direct verifiers to both regular and managed problems', async () => {
+        const handler = makeHandler('problem_contribution_bulk');
+        const regular = { ...pdoc, structureRevision: 2 };
+        const managed = { ...pdoc, docId: 43, pid: 'P43', title: 'P43', structureRevision: 4, authoringMode: 'managed' };
+        rawProblemResults = [regular, managed, regular, managed];
+        permitRows = [];
+        manageMaintainerResults = [false, false];
+
+        await handler.post({ domainId: 'system' }, [42, 43], '{"42":2,"43":4}', 8, '', 'read-only review', 'batch-verifier', 'verifier');
+
+        expect(handler.response.body).to.deep.equal({
+            success: true,
+            requestId: 'batch-verifier',
+            results: [
+                { pid: 42, publicPid: '42', status: 'applied' },
+                { pid: 43, publicPid: 'P43', status: 'applied' },
+            ],
+            retryPids: [],
+        });
+        expect(calls.grant.map((args) => [args[1], args[2], args[3], args[4], args[5].note])).to.deep.equal([
+            [42, 8, 'verifier', 1, 'read-only review'],
+            [43, 8, 'verifier', 1, 'read-only review'],
+        ]);
+        expect(calls.writeClaim.map((entry) => [entry[1], entry[3], entry[4].capability])).to.deep.equal([
+            [42, 'permit-grant', 'collaborators'],
+            [43, 'permit-grant', 'collaborators'],
+        ]);
+        expect(calls.message).to.have.length(1);
+        expect(calls.message[0][2]).to.include('42 P42');
+        expect(calls.message[0][2]).to.include('P43 P43');
+    });
+
+    it('reports existing verifier and higher roles without writing or downgrading them', async () => {
+        const handler = makeHandler('problem_contribution_bulk');
+        const p42 = { ...pdoc, structureRevision: 1 };
+        const p43 = { ...pdoc, docId: 43, pid: 'P43', structureRevision: 1 };
+        const p44 = { ...pdoc, docId: 44, pid: 'P44', structureRevision: 1 };
+        const p45 = { ...pdoc, docId: 45, pid: 'P45', owner: 8, structureRevision: 1 };
+        rawProblemResults = [p42, p43, p44, p45, p42, p43, p44, p45];
+        permitRows = [{ domainId: 'system', pid: 42, uid: 8, active: true, role: 'verifier' }];
+        permitSourceRows = [
+            { domainId: 'system', pid: 43, uid: 8, active: true, role: 'author' },
+            { domainId: 'system', pid: 44, uid: 8, active: true, role: 'maintainer' },
+        ];
+
+        await handler.post({ domainId: 'system' }, [42, 43, 44, 45], '{"42":1,"43":1,"44":1,"45":1}', 8, '', '', 'batch-existing-roles', 'verifier');
+
+        expect(handler.response.body.results).to.deep.equal([
+            { pid: 42, publicPid: '42', status: 'already-present' },
+            { pid: 43, publicPid: 'P43', status: 'conflict-higher-role' },
+            { pid: 44, publicPid: 'P44', status: 'conflict-higher-role' },
+            { pid: 45, publicPid: 'P45', status: 'conflict-higher-role' },
+        ]);
+        expect(handler.response.body.retryPids).to.deep.equal([]);
+        expect(calls.grant).to.deep.equal([]);
+    });
+
+    it('returns an exact retry set when a verifier batch partially fails', async () => {
+        const handler = makeHandler('problem_contribution_bulk');
+        const p42 = { ...pdoc, structureRevision: 1 };
+        const p43 = { ...pdoc, docId: 43, pid: 'P43', structureRevision: 1 };
+        rawProblemResults = [p42, p43, p42, p43];
+        permitRows = [];
+        grantFailures = [null, new Error('database secret must not escape')];
+
+        await handler.post({ domainId: 'system' }, [42, 43], '{"42":1,"43":1}', 8, '', '', 'batch-verifier-partial', 'verifier');
+
+        expect(handler.response.status).to.equal(207);
+        expect(handler.response.body).to.deep.equal({
+            success: false,
+            requestId: 'batch-verifier-partial',
+            results: [
+                { pid: 42, publicPid: '42', status: 'applied' },
+                { pid: 43, publicPid: 'P43', status: 'failed' },
+            ],
+            retryPids: [43],
+        });
+        expect(JSON.stringify(handler.response.body)).not.to.include('database secret');
+        expect(calls.oplog.at(-1)).to.deep.equal([
+            handler,
+            'problem.permit.bulk-grant-summary',
+            {
+                targetUid: 8,
+                role: 'verifier',
+                action: 'summary',
+                batchRequestId: 'batch-verifier-partial',
+                results: [
+                    { pid: 42, publicPid: '42', status: 'applied' },
+                    { pid: 43, publicPid: 'P43', status: 'failed' },
+                ],
+                retryPids: [43],
+            },
+        ]);
+    });
+
+    it('retries the same verifier batch idempotently with the same derived mutation id', async () => {
+        const handler = makeHandler('problem_contribution_bulk');
+        const current = { ...pdoc, structureRevision: 3 };
+        rawProblemResults = [current, current, current, current];
+        permitRows = [];
+
+        await handler.post({ domainId: 'system' }, [42], '{"42":3}', 8, '', '', 'batch-verifier-retry', 'verifier');
+        expect(handler.response.body.results).to.deep.equal([{ pid: 42, publicPid: '42', status: 'applied' }]);
+
+        permitRows = [{ domainId: 'system', pid: 42, uid: 8, active: true, role: 'verifier' }];
+        await handler.post({ domainId: 'system' }, [42], '{"42":3}', 8, '', '', 'batch-verifier-retry', 'verifier');
+
+        expect(handler.response.body.results).to.deep.equal([{ pid: 42, publicPid: '42', status: 'already-present' }]);
+        expect(calls.grant).to.have.length(1);
+        expect(calls.writeClaim).to.have.length(2);
+        expect(calls.writeClaim[0][4].requestId).to.equal(calls.writeClaim[1][4].requestId);
+    });
+
+    it('preflights verifier authority for every selected problem before any write', async () => {
+        const handler = makeHandler('problem_contribution_bulk');
+        const regular = { ...pdoc, structureRevision: 2 };
+        const managed = { ...pdoc, docId: 43, pid: 'P43', structureRevision: 4, authoringMode: 'managed' };
+        rawProblemResults = [regular, managed];
+        manageMaintainerResults = [false];
+        manageCollaboratorResults = [false];
+
+        const denied = await capture(() =>
+            handler.post({ domainId: 'system' }, [42, 43], '{"42":2,"43":4}', 8, '', '', 'batch-verifier-denied', 'verifier'),
+        );
+
+        expect(denied?.name).to.equal('PermissionError');
+        expect(calls.grant).to.deep.equal([]);
+        expect(calls.writeClaim).to.deep.equal([]);
+    });
+
+    it('rejects an ambiguous verifier request that also carries contribution scopes', async () => {
+        const handler = makeHandler('problem_contribution_bulk');
+
+        const error = await capture(() => handler.post({ domainId: 'system' }, [42], '{"42":0}', 8, 'data', '', 'batch-verifier-mixed', 'verifier'));
+
+        expect(error).to.be.instanceOf(Error);
+        expect(calls.problemGet).to.deep.equal([]);
+        expect(calls.grant).to.deep.equal([]);
+        expect(calls.contributionAssign).to.deep.equal([]);
     });
 
     it('lets a contribution manager reopen an active completed task but never complete it for someone else', async () => {

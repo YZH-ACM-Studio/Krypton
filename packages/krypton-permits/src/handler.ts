@@ -73,6 +73,10 @@ function grantableProblemRoles(user: any, pdoc: any): PermitRole[] {
     return [];
 }
 
+function canBulkAssignVerifier(user: any, pdoc: any): boolean {
+    return ProblemModel.canManageProblemContributions(user, pdoc) && grantableProblemRoles(user, pdoc).includes('verifier');
+}
+
 function canRevokeProblemRole(user: any, pdoc: any, role: PermitRole): boolean {
     if (pdoc.authoringMode !== 'managed') return ProblemModel.canMaintainProblem(user, pdoc);
     if (role === 'maintainer') return ProblemModel.canManageProblemMaintainers(user, pdoc);
@@ -129,6 +133,20 @@ async function targetHasMaintainerSource(domainId: string, pid: number, targetUi
             .toArray(),
     ]);
     return [...canonical, ...sources].some((row) => row.role === 'maintainer');
+}
+
+async function activeProblemRoles(domainId: string, pid: number, uid: number): Promise<Set<PermitRole>> {
+    const [canonical, sources] = await Promise.all([
+        permitsColl
+            .find({ domainId, pid, uid: { $in: [uid] }, active: canonicalActiveFilter() })
+            .project({ role: 1 })
+            .toArray(),
+        permitSourcesColl
+            .find({ domainId, pid, uid: { $in: [uid] }, active: true })
+            .project({ role: 1 })
+            .toArray(),
+    ]);
+    return new Set([...canonical, ...sources].map((row) => row.role as PermitRole));
 }
 
 function canManageContestVerifiers(user: any, tdoc: any): boolean {
@@ -656,17 +674,19 @@ class ProblemContributionBulkHandler extends Handler {
     @param('pids', Types.NumericArray)
     @param('expectedRevisions', Types.String)
     @param('uid', Types.PositiveInt)
-    @param('scopes', Types.String)
+    @param('scopes', Types.String, true)
     @param('note', Types.String, true)
     @param('requestId', Types.String)
+    @param('role', Types.String, true)
     async post(
         args: { domainId?: unknown },
         pids: number[],
         expectedRevisionsRaw: string,
         uid: number,
-        scopesRaw: string,
+        scopesRaw: string | undefined,
         note: string,
         requestId: string,
+        role: string | undefined,
     ) {
         const domainId = authoritativeDomainId(this, args);
         const batchRequestId = requestId.trim();
@@ -677,7 +697,15 @@ class ProblemContributionBulkHandler extends Handler {
         if (new Set(pids).size !== pids.length || pids.some((pid) => !Number.isSafeInteger(pid) || pid <= 0)) {
             throw new ValidationError('pids', null, localizedErrorText`pids 必须是互不重复的正整数`);
         }
-        const scopes = parseContributionScopes(scopesRaw);
+        const requestedRole = role?.trim() || '';
+        if (requestedRole && requestedRole !== 'verifier') {
+            throw new ValidationError('role', null, localizedErrorText`role 只能是 verifier`);
+        }
+        const assigningVerifier = requestedRole === 'verifier';
+        if (assigningVerifier && scopesRaw?.trim()) {
+            throw new ValidationError('scopes', null, localizedErrorText`只读验题人分配不能同时携带贡献范围`);
+        }
+        const scopes = assigningVerifier ? [] : parseContributionScopes(scopesRaw || '');
         const expectedRevisions = parseExpectedContributionRevisions(expectedRevisionsRaw, pids);
         const target = await UserModel.getById(domainId, uid);
         if (!target) throw new ValidationError('uid', null, localizedErrorText`目标用户不存在`);
@@ -692,11 +720,21 @@ class ProblemContributionBulkHandler extends Handler {
             if (!Number.isSafeInteger(revision) || revision < 0 || revision !== expectedRevisions.get(pid)) {
                 throw new ValidationError('expectedRevisions', null, localizedErrorText`题目 ${pdoc.pid || pid} 已发生变化，请刷新后重试`);
             }
-            if (!ProblemModel.canManageProblemContributions(this.user, pdoc)) {
-                await auditContributionDenied(this, pdoc, uid, scopes.join(','), 'bulk-preflight', batchRequestId);
-                throw new PermissionError(localizedErrorText`无权分配题目 ${pdoc.pid || pid} 的贡献范围`);
+            const allowed = assigningVerifier ? canBulkAssignVerifier(this.user, pdoc) : ProblemModel.canManageProblemContributions(this.user, pdoc);
+            if (!allowed) {
+                await auditContributionDenied(this, pdoc, uid, assigningVerifier ? 'verifier' : scopes.join(','), 'bulk-preflight', batchRequestId);
+                throw new PermissionError(
+                    assigningVerifier
+                        ? localizedErrorText`无权分配题目 ${pdoc.pid || pid} 的只读验题人`
+                        : localizedErrorText`无权分配题目 ${pdoc.pid || pid} 的贡献范围`,
+                );
             }
             preflight.push({ pdoc, revision });
+        }
+
+        if (assigningVerifier) {
+            await this.assignVerifierBatch(domainId, preflight, uid, note, batchRequestId);
+            return;
         }
 
         const succeededPids: number[] = [];
@@ -837,6 +875,132 @@ class ProblemContributionBulkHandler extends Handler {
             failed: failed.map((failure) => ({ ...failure, message: transport.error.message })),
             error: transport.error,
         };
+    }
+
+    private async assignVerifierBatch(
+        domainId: string,
+        preflight: Array<{ pdoc: any; revision: number }>,
+        uid: number,
+        note: string,
+        batchRequestId: string,
+    ) {
+        type ResultStatus = 'applied' | 'already-present' | 'conflict-higher-role' | 'failed';
+        const results: Array<{ pid: number; publicPid: string; status: ResultStatus }> = [];
+        const applied: any[] = [];
+
+        for (const { pdoc, revision } of preflight) {
+            const mutationId = deriveAclRequestId(undefined, 'problem-verifier-bulk-grant', domainId, pdoc.docId, uid, batchRequestId);
+            let status: ResultStatus = 'failed';
+            try {
+                status = await ProblemModel.withAuthorizedWriteClaim<ResultStatus>(
+                    domainId,
+                    pdoc.docId,
+                    this.user,
+                    'permit-grant',
+                    async (claim) => {
+                        const current = await ProblemModel.get(domainId, pdoc.docId);
+                        if (!current) throw new Error(`problem ${domainId}/${pdoc.docId} disappeared during verifier batch`);
+                        if (Number(current.structureRevision ?? 0) !== revision) {
+                            throw new ValidationError(
+                                'expectedRevisions',
+                                null,
+                                localizedErrorText`题目 ${current.pid || current.docId} 在预检后发生变化`,
+                            );
+                        }
+                        if (!canBulkAssignVerifier(this.user, current)) {
+                            throw new PermissionError(localizedErrorText`题目 ${current.pid || current.docId} 的分配权限已变化`);
+                        }
+
+                        const roles = await activeProblemRoles(domainId, current.docId, uid);
+                        let result: ResultStatus;
+                        if (uid === current.owner || roles.has('author') || roles.has('maintainer')) {
+                            result = 'conflict-higher-role';
+                        } else if (roles.has('verifier')) {
+                            result = 'already-present';
+                        } else {
+                            result = 'applied';
+                        }
+
+                        await OplogModel.log(this as any, 'problem.permit.bulk-grant', {
+                            problemId: current.docId,
+                            targetUid: uid,
+                            role: 'verifier',
+                            action: 'grant',
+                            result: result === 'applied' ? 'attempt' : result,
+                            requestId: mutationId,
+                            batchRequestId,
+                        });
+                        if (result === 'applied') {
+                            await permitsModel.grant(domainId, current.docId, uid, 'verifier', this.user._id, {
+                                note,
+                                requestId: mutationId,
+                                writeClaimRequestId: claim.requestId,
+                            });
+                        }
+                        return result;
+                    },
+                    { requestId: mutationId, capability: 'collaborators' },
+                );
+                if (status === 'applied') applied.push(pdoc);
+                logger.info(
+                    'Problem verifier batch domain=%s pid=%d actor=%d target=%d status=%s requestId=%s batchRequestId=%s',
+                    domainId,
+                    pdoc.docId,
+                    this.user._id,
+                    uid,
+                    status,
+                    mutationId,
+                    batchRequestId,
+                );
+            } catch (error) {
+                status = 'failed';
+                logger.error(
+                    'Problem verifier batch failed domain=%s pid=%d actor=%d target=%d requestId=%s batchRequestId=%s error=%o',
+                    domainId,
+                    pdoc.docId,
+                    this.user._id,
+                    uid,
+                    mutationId,
+                    batchRequestId,
+                    error,
+                );
+            }
+            results.push({ pid: pdoc.docId, publicPid: String(pdoc.pid || pdoc.docId), status });
+        }
+
+        const retryPids = results.filter((result) => result.status === 'failed').map((result) => result.pid);
+        await OplogModel.log(this as any, 'problem.permit.bulk-grant-summary', {
+            targetUid: uid,
+            role: 'verifier',
+            action: 'summary',
+            batchRequestId,
+            results,
+            retryPids,
+        });
+
+        if (applied.length) {
+            const lines = applied.map((pdoc) => `- ${pdoc.pid || pdoc.docId} ${pdoc.title || '未命名题目'}`);
+            try {
+                await MessageModel.send(
+                    this.user._id,
+                    uid,
+                    `[krypton] ${this.user.uname} 为你分配了只读验题任务：\n${lines.join('\n')}${note ? `\n附言：${note}` : ''}`,
+                    MessageModel.FLAG_UNREAD,
+                );
+            } catch (error) {
+                logger.error(
+                    'verifier batch notification failed batchRequestId=%s domain=%s uid=%d pids=%o error=%o',
+                    batchRequestId,
+                    domainId,
+                    uid,
+                    applied.map((pdoc) => pdoc.docId),
+                    error,
+                );
+            }
+        }
+
+        if (retryPids.length) this.response.status = 207;
+        this.response.body = { success: retryPids.length === 0, requestId: batchRequestId, results, retryPids };
     }
 }
 

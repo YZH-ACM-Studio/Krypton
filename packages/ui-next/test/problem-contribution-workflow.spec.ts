@@ -64,6 +64,22 @@ describe('p2.25 contribution assignment and task UI', () => {
     expect(source).not.to.include('当前筛选结果全部');
   });
 
+  it('offers canonical read-only verifier assignment and renders every server result state', () => {
+    const source = read('packages/ui-next/src/pages/problems.tsx');
+    expect(source).to.include("form.set('role', 'verifier')");
+    expect(source).to.include("form.delete('scopes')");
+    expect(source).to.include('const result = parseBulkVerifierResponse(');
+    expect(source).to.include("['applied', '已新增']");
+    expect(source).to.include("['already-present', '已是只读验题人']");
+    expect(source).to.include("['conflict-higher-role', '已有更高角色，未降级']");
+    expect(source).to.include("['failed', '失败，可重试']");
+    expect(source).to.include('setSelectedContributionPids(new Set(result.retryPids))');
+    expect(source).to.include('record.requestId !== expectedRequestId');
+    expect(source).to.include("batchVerifierRole && batchVerifierResults?.retryPids.length ? '重试失败项'");
+    expect(source.match(/setBatchVerifierResults\(null\);/g)).to.have.length.greaterThanOrEqual(6);
+    expect(source).to.match(/onChange=\{\(next\) => \{\s+setBatchVerifierResults\(null\);\s+setBatchError\(''\);\s+setBatchMessage\(''\);/);
+  });
+
   it('keeps per-problem contribution management separate from legacy roles', () => {
     const source = read('packages/ui-next/src/pages/problem-edit.tsx');
     expect(source).to.include('capabilities.canManageContributions === true');

@@ -105,6 +105,79 @@ interface ProblemsPageData {
   canFilterOwner?: boolean;
 }
 
+const BULK_VERIFIER_STATUSES = new Set(['applied', 'already-present', 'conflict-higher-role', 'failed'] as const);
+
+type BulkVerifierStatus = 'applied' | 'already-present' | 'conflict-higher-role' | 'failed';
+
+interface BulkVerifierResult {
+  pid: number;
+  publicPid: string;
+  status: BulkVerifierStatus;
+}
+
+interface BulkVerifierResponse {
+  success: boolean;
+  requestId: string;
+  results: BulkVerifierResult[];
+  retryPids: number[];
+}
+
+export function parseBulkVerifierResponse(value: unknown, expectedPids: readonly number[], expectedRequestId: string): BulkVerifierResponse {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('批量只读验题人响应格式无效');
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.success !== 'boolean' ||
+    typeof record.requestId !== 'string' ||
+    record.requestId !== expectedRequestId ||
+    !Array.isArray(record.results) ||
+    !Array.isArray(record.retryPids)
+  ) {
+    throw new Error('批量只读验题人响应格式无效');
+  }
+
+  const results: BulkVerifierResult[] = [];
+  const seen = new Set<number>();
+  for (const item of record.results) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error('批量只读验题人响应格式无效');
+    const result = item as Record<string, unknown>;
+    if (
+      !Number.isSafeInteger(result.pid) ||
+      Number(result.pid) <= 0 ||
+      typeof result.publicPid !== 'string' ||
+      !result.publicPid ||
+      typeof result.status !== 'string' ||
+      !BULK_VERIFIER_STATUSES.has(result.status as BulkVerifierStatus) ||
+      seen.has(Number(result.pid))
+    ) {
+      throw new Error('批量只读验题人响应格式无效');
+    }
+    seen.add(Number(result.pid));
+    results.push({ pid: Number(result.pid), publicPid: result.publicPid, status: result.status as BulkVerifierStatus });
+  }
+
+  if (record.retryPids.some((pid) => typeof pid !== 'number' || !Number.isSafeInteger(pid) || pid <= 0)) {
+    throw new Error('批量只读验题人响应格式无效');
+  }
+  const retryPids = record.retryPids as number[];
+  const expected = [...new Set(expectedPids)].sort((a, b) => a - b);
+  const actual = results.map((result) => result.pid).sort((a, b) => a - b);
+  const failedPids = results.filter((result) => result.status === 'failed').map((result) => result.pid);
+  const sortedRetry = [...retryPids].sort((a, b) => a - b);
+  const sortedFailed = [...failedPids].sort((a, b) => a - b);
+  if (
+    record.success !== (failedPids.length === 0) ||
+    expected.length !== expectedPids.length ||
+    actual.length !== expected.length ||
+    actual.some((pid, index) => pid !== expected[index]) ||
+    sortedRetry.length !== sortedFailed.length ||
+    sortedRetry.some((pid, index) => pid !== sortedFailed[index])
+  ) {
+    throw new Error('批量只读验题人响应格式无效');
+  }
+
+  return { success: record.success, requestId: record.requestId, results, retryPids };
+}
+
 function buildUrlWithQuery(baseUrl: string, params: Record<string, unknown>) {
   const search = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {
@@ -308,6 +381,8 @@ export function ProblemsPage() {
   const [batchUser, setBatchUser] = useState<DomainUserOption[]>([]);
   const [batchDataScope, setBatchDataScope] = useState(true);
   const [batchTagScope, setBatchTagScope] = useState(false);
+  const [batchVerifierRole, setBatchVerifierRole] = useState(false);
+  const [batchVerifierResults, setBatchVerifierResults] = useState<BulkVerifierResponse | null>(null);
   const [batchBusy, setBatchBusy] = useState(false);
   const [batchMessage, setBatchMessage] = useState('');
   const [batchError, setBatchError] = useState('');
@@ -353,13 +428,14 @@ export function ProblemsPage() {
   async function submitContributionBatch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const selectedPdocs = pdocs.filter((pdoc) => selectedContributionPids.has(Number(pdoc.docId)));
-    if (!selectedPdocs.length || !batchUser[0] || (!batchDataScope && !batchTagScope)) {
-      setBatchError('请选择题目、目标用户和至少一项贡献范围');
+    if (!selectedPdocs.length || !batchUser[0] || (!batchVerifierRole && !batchDataScope && !batchTagScope)) {
+      setBatchError('请选择题目、目标用户和至少一种协作类型');
       return;
     }
     setBatchBusy(true);
     setBatchError('');
     setBatchMessage('');
+    setBatchVerifierResults(null);
     try {
       const form = new FormData(event.currentTarget);
       form.set('pids', selectedPdocs.map((pdoc) => pdoc.docId).join(','));
@@ -368,8 +444,15 @@ export function ProblemsPage() {
         JSON.stringify(Object.fromEntries(selectedPdocs.map((pdoc) => [pdoc.docId, Number(pdoc.structureRevision ?? 0)]))),
       );
       form.set('uid', String(batchUser[0]._id));
-      form.set('scopes', [batchDataScope ? 'data' : '', batchTagScope ? 'tag' : ''].filter(Boolean).join(','));
-      form.set('requestId', createRequestId());
+      if (batchVerifierRole) {
+        form.set('role', 'verifier');
+        form.delete('scopes');
+      } else {
+        form.delete('role');
+        form.set('scopes', [batchDataScope ? 'data' : '', batchTagScope ? 'tag' : ''].filter(Boolean).join(','));
+      }
+      const requestId = createRequestId();
+      form.set('requestId', requestId);
       const response = await fetchHydroResponse('/problem-contributions/bulk', {
         method: 'POST',
         body: form,
@@ -379,11 +462,27 @@ export function ProblemsPage() {
       if (!response.ok) {
         throw new Error(await readHydroResponseError(response, '批量分配失败'));
       }
+      if (batchVerifierRole) {
+        const result = parseBulkVerifierResponse(
+          await response.json(),
+          selectedPdocs.map((pdoc) => pdoc.docId),
+          requestId,
+        );
+        const applied = result.results.filter((item) => item.status === 'applied').length;
+        const alreadyPresent = result.results.filter((item) => item.status === 'already-present').length;
+        const higherRole = result.results.filter((item) => item.status === 'conflict-higher-role').length;
+        setBatchVerifierResults(result);
+        setSelectedContributionPids(new Set(result.retryPids));
+        setBatchMessage(`只读验题人分配结果：新增 ${applied}，已存在 ${alreadyPresent}，较高角色 ${higherRole}，失败 ${result.retryPids.length}。`);
+        if (result.retryPids.length) setBatchError(`有 ${result.retryPids.length} 道题失败，已只保留失败项供重试。请求 ID：${result.requestId}`);
+        return;
+      }
       setBatchMessage(`已为 ${batchUser[0].uname || `UID ${batchUser[0]._id}`} 分配 ${selectedPdocs.length} 道题。`);
       setSelectedContributionPids(new Set());
       setBatchUser([]);
       setBatchDataScope(true);
       setBatchTagScope(false);
+      setBatchVerifierRole(false);
       setBatchOpen(false);
     } catch (cause) {
       setBatchError(cause instanceof Error ? cause.message : '批量分配失败');
@@ -423,7 +522,16 @@ export function ProblemsPage() {
         </div>
         <div className="flex flex-wrap gap-2">
           {pdocs.some((pdoc) => canManageContributionsByDocId[String(pdoc.docId)]) ? (
-            <Button type="button" variant="outline" onClick={() => setBatchOpen(true)} disabled={selectedContributionPids.size === 0}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setBatchError('');
+                setBatchVerifierResults(null);
+                setBatchOpen(true);
+              }}
+              disabled={selectedContributionPids.size === 0}
+            >
               <Users className="size-4" />
               批量分配协作{selectedContributionPids.size ? ` · ${selectedContributionPids.size}` : ''}
             </Button>
@@ -725,7 +833,12 @@ export function ProblemsPage() {
               <label className="text-xs text-muted-foreground">目标用户</label>
               <MultiSelect<DomainUserOption>
                 value={batchUser}
-                onChange={(next) => setBatchUser(next.length ? [next[next.length - 1]] : [])}
+                onChange={(next) => {
+                  setBatchVerifierResults(null);
+                  setBatchError('');
+                  setBatchMessage('');
+                  setBatchUser(next.length ? [next[next.length - 1]] : []);
+                }}
                 loadOptions={async (searchQuery) => {
                   try {
                     return await loadDomainUsers(bs.domain?.id || 'system', searchQuery);
@@ -743,14 +856,51 @@ export function ProblemsPage() {
               />
             </div>
             <fieldset className="space-y-2">
-              <legend className="text-xs text-muted-foreground">贡献范围</legend>
+              <legend className="text-xs text-muted-foreground">协作类型</legend>
               <label className="flex items-center gap-2 text-sm">
-                <Checkbox checked={batchDataScope} onCheckedChange={setBatchDataScope} />
+                <Checkbox
+                  checked={batchDataScope}
+                  onCheckedChange={(checked) => {
+                    setBatchVerifierResults(null);
+                    setBatchError('');
+                    setBatchMessage('');
+                    setBatchDataScope(checked);
+                    if (checked) setBatchVerifierRole(false);
+                  }}
+                />
                 数据贡献者
               </label>
               <label className="flex items-center gap-2 text-sm">
-                <Checkbox checked={batchTagScope} onCheckedChange={setBatchTagScope} />
+                <Checkbox
+                  checked={batchTagScope}
+                  onCheckedChange={(checked) => {
+                    setBatchVerifierResults(null);
+                    setBatchError('');
+                    setBatchMessage('');
+                    setBatchTagScope(checked);
+                    if (checked) setBatchVerifierRole(false);
+                  }}
+                />
                 标签贡献者
+              </label>
+              <label className="flex items-start gap-2 text-sm">
+                <Checkbox
+                  checked={batchVerifierRole}
+                  onCheckedChange={(checked) => {
+                    setBatchVerifierResults(null);
+                    setBatchError('');
+                    setBatchMessage('');
+                    setBatchVerifierRole(checked);
+                    if (checked) {
+                      setBatchDataScope(false);
+                      setBatchTagScope(false);
+                    }
+                  }}
+                />
+                <span>
+                  <span className="block">只读验题人</span>
+                  <span className="block text-xs leading-5 text-muted-foreground">可查看题面、测试数据和提交记录，不能编辑题目。</span>
+                </span>
               </label>
             </fieldset>
             <div className="space-y-1.5">
@@ -759,12 +909,48 @@ export function ProblemsPage() {
               </label>
               <Input id="batch-contribution-note" name="note" placeholder="会进入任务箱和站内信" />
             </div>
+            {batchVerifierResults ? (
+              <div className="space-y-3 rounded-xl border border-border/70 bg-muted/30 p-3 text-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-medium">逐题结果</p>
+                  <p className="font-mono text-xs text-muted-foreground">{batchVerifierResults.requestId}</p>
+                </div>
+                {(
+                  [
+                    ['applied', '已新增'],
+                    ['already-present', '已是只读验题人'],
+                    ['conflict-higher-role', '已有更高角色，未降级'],
+                    ['failed', '失败，可重试'],
+                  ] as const
+                ).map(([status, label]) => {
+                  const items = batchVerifierResults.results.filter((item) => item.status === status);
+                  if (!items.length) return null;
+                  return (
+                    <div key={status} className="space-y-1">
+                      <p className="text-xs font-medium text-muted-foreground">
+                        {label} · {items.length}
+                      </p>
+                      <ul className="flex flex-wrap gap-1.5">
+                        {items.map((item) => (
+                          <li key={item.pid} className="rounded-md border border-border/70 bg-background px-2 py-1 font-mono text-xs">
+                            {item.publicPid}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
             <div className="flex justify-end gap-2 pt-2">
               <Button type="button" variant="ghost" disabled={batchBusy} onClick={() => setBatchOpen(false)}>
                 取消
               </Button>
-              <Button type="submit" disabled={batchBusy || !selectedContributionPids.size || !batchUser[0] || (!batchDataScope && !batchTagScope)}>
-                {batchBusy ? '分配中…' : '确认分配'}
+              <Button
+                type="submit"
+                disabled={batchBusy || !selectedContributionPids.size || !batchUser[0] || (!batchVerifierRole && !batchDataScope && !batchTagScope)}
+              >
+                {batchBusy ? '分配中…' : batchVerifierRole && batchVerifierResults?.retryPids.length ? '重试失败项' : '确认分配'}
               </Button>
             </div>
           </form>

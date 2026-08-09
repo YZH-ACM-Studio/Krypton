@@ -45,6 +45,7 @@ const session: Session = {
         return {
             next: (a) => reporter.next(a),
             end: (a) => reporter.end(a),
+            wait: () => reporter.waitForOwnedTask(),
         };
     },
     getLang(lang: string, doThrow = true) {
@@ -57,6 +58,24 @@ const session: Session = {
         return await JudgeHandler.processJudgeFileCallback(new ObjectId(target), filename, filepath);
     },
 };
+
+function collectCleanupError(errors: unknown[], error: unknown): void {
+    if (error instanceof AggregateError) {
+        for (const nested of error.errors) collectCleanupError(errors, nested);
+        return;
+    }
+    if (!errors.includes(error)) errors.push(error);
+}
+
+async function settleCleanup(operations: Promise<unknown>[], message: string): Promise<void> {
+    const results = await Promise.allSettled(operations);
+    const errors: unknown[] = [];
+    for (const result of results) {
+        if (result.status === 'rejected') collectCleanupError(errors, result.reason);
+    }
+    if (errors.length === 1) throw errors[0];
+    if (errors.length > 1) throw new AggregateError(errors, message);
+}
 
 export async function apply(ctx: HydroContext) {
     ctx.inject(['check'], (c) => {
@@ -79,7 +98,7 @@ export async function apply(ctx: HydroContext) {
             logger.debug('Record not found: %o', t);
             return;
         }
-        await new JudgeTask(session, JSON.parse(JSON.stringify(Object.assign(rdoc, t)))).handle().catch(logger.error);
+        await new JudgeTask(session, JSON.parse(JSON.stringify(Object.assign(rdoc, t)))).handle();
     };
     const parallelism = getConfig('parallelism');
     async function collectInfo() {
@@ -87,21 +106,38 @@ export async function apply(ctx: HydroContext) {
         const [compilers, size] = await Promise.all([compilerVersions(langs), stackSize()]);
         await coll.updateOne({ mid: info.mid, type: 'server' }, { $set: { compilers, stackSize: size } }, { upsert: true });
     }
+    const collectInfoOperations = new Set<Promise<void>>();
+    function trackCollectInfo() {
+        const operation = collectInfo();
+        collectInfoOperations.add(operation);
+        operation.then(
+            () => collectInfoOperations.delete(operation),
+            () => collectInfoOperations.delete(operation),
+        );
+        return operation;
+    }
+    await collectInfo();
     ctx.effect(() => {
         const taskConsumer = TaskModel.consume({ type: 'judge' }, handle, true, parallelism);
-        collectInfo();
         const dispose = ctx.on('system/setting', () => {
             taskConsumer.setConcurrency(getConfig('parallelism'));
-            collectInfo();
+            return trackCollectInfo();
         });
         return () => {
-            taskConsumer.destroy();
-            dispose();
+            let listenerCleanup: Promise<unknown>;
+            try {
+                listenerCleanup = Promise.resolve(dispose());
+            } catch (error) {
+                listenerCleanup = Promise.reject(error);
+            }
+            return settleCleanup(
+                [Promise.resolve().then(() => taskConsumer.destroy()), listenerCleanup, ...collectInfoOperations],
+                'Builtin judge cleanup failed',
+            );
         };
     });
     ctx.effect(() => {
         const generateConsumer = TaskModel.consume({ type: 'generate' }, handle);
         return () => generateConsumer.destroy();
     });
-    collectInfo();
 }

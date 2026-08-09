@@ -11,7 +11,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { useBootstrap } from '@/lib/bootstrap';
 import { formatPlainTextSummary, replaceRouteTokens } from '@/lib/format';
 import { useChapterQuery } from './course/chapter-query';
-import { searchTrainingProblems } from './training-search';
+import { resolveTrainingListProgress, searchTrainingProblems, type TrainingListContextualProgress } from './training-search';
 
 /** Section node of a training DAG (serialized hydrooj `TrainingNode`). */
 interface TrainingDagNode {
@@ -42,6 +42,7 @@ interface TrainingStatusDoc {
   enroll?: number;
   donePids?: number[];
   doneNids?: number[];
+  contextualProgress?: TrainingListContextualProgress;
 }
 
 /** Per-section status computed by the training detail handler (`nsdict`). */
@@ -51,6 +52,7 @@ interface TrainingNodeStatus {
   isProgress?: boolean;
   isOpen?: boolean;
   isInvalid?: boolean;
+  donePids?: number[];
 }
 
 /** Problem fields rendered in section problem lists (`pdict` values). */
@@ -88,6 +90,7 @@ interface TrainingListEntry {
   pct: number;
   sectionCount: number;
   sectionDone: number;
+  progress: ReturnType<typeof resolveTrainingListProgress>;
   enrolled: boolean;
   fullyDone: boolean;
 }
@@ -95,6 +98,8 @@ interface TrainingListEntry {
 interface TrainingPageData {
   members?: TrainingMember[];
   membersTruncated?: boolean;
+  completedProblemCount?: number;
+  integrityControlled?: boolean;
   missing?: unknown[];
   ndict?: Record<string, TrainingDagNode>;
   nsdict?: Record<string, TrainingNodeStatus>;
@@ -148,10 +153,11 @@ export function TrainingPage() {
       tdocs.map((t) => {
         const ts = tsdict[String(t.docId)] || {};
         const total = Array.isArray(t.dag) ? t.dag.reduce((n, s) => n + (Array.isArray(s.pids) ? s.pids.length : 0), 0) : 0;
-        const done = Array.isArray(ts.donePids) ? ts.donePids.length : 0;
+        const progress = resolveTrainingListProgress(ts, ts.contextualProgress);
+        const done = progress.completedProblemCount;
         const pct = total > 0 ? Math.round((done / total) * 100) : 0;
         const sectionCount = Array.isArray(t.dag) ? t.dag.length : 0;
-        const sectionDone = Array.isArray(ts.doneNids) ? ts.doneNids.length : 0;
+        const sectionDone = progress.doneNids.length;
         return {
           t,
           ts,
@@ -160,6 +166,7 @@ export function TrainingPage() {
           pct,
           sectionCount,
           sectionDone,
+          progress,
           enrolled: !!ts.enroll,
           fullyDone: total > 0 && done === total,
         };
@@ -347,8 +354,9 @@ function TrainingCard({ e, bs }: { e: TrainingListEntry; bs: ReturnType<typeof u
           {/* Mini DAG preview */}
           <DagThumbnail
             dag={t.dag || []}
-            doneNids={Array.isArray(ts.doneNids) ? ts.doneNids : []}
-            donePids={Array.isArray(ts.donePids) ? ts.donePids : []}
+            doneNids={e.progress.doneNids}
+            donePids={ts.contextualProgress ? [] : Array.isArray(ts.donePids) ? ts.donePids : []}
+            nsdictHint={e.progress.nsdict}
           />
 
           <div className="flex items-center justify-between text-xs text-muted-foreground">
@@ -504,10 +512,15 @@ export function TrainingDetailPage() {
   const ndict: Record<string, TrainingDagNode> = data.ndict || {};
   const nsdict: Record<string, TrainingNodeStatus> = data.nsdict || {};
   const enrolled = !!tsdoc.enroll;
+  const integrityControlled = data.integrityControlled === true;
   const dag = Array.isArray(tdoc.dag) ? tdoc.dag : [];
 
   const totalProblems = dag.reduce((n, s) => n + (Array.isArray(s.pids) ? s.pids.length : 0), 0);
-  const doneProblems = Array.isArray(tsdoc.donePids) ? tsdoc.donePids.length : 0;
+  const doneProblems = Number.isSafeInteger(data.completedProblemCount)
+    ? Number(data.completedProblemCount)
+    : Array.isArray(tsdoc.donePids)
+      ? tsdoc.donePids.length
+      : 0;
   const overallPct = totalProblems > 0 ? Math.round((doneProblems / totalProblems) * 100) : 0;
   const doneNids: number[] = Array.isArray(tsdoc.doneNids) ? tsdoc.doneNids : [];
 
@@ -518,8 +531,7 @@ export function TrainingDetailPage() {
       const ns = nsdict[node._id] || {};
       if (!ns.isOpen && !ns.isProgress) continue; // locked or done
       for (const pid of node.pids || []) {
-        const ps = psdict[String(pid)] || {};
-        if (ps.status !== 1) {
+        if (!ns.donePids?.map(Number).includes(Number(pid))) {
           return replaceRouteTokens(bs.urls.problemDetail, { PID: String(pid) });
         }
       }
@@ -543,7 +555,10 @@ export function TrainingDetailPage() {
   const isOwner = data.tdoc?.owner === bs.user?.id;
   const trainingUrl = replaceRouteTokens(bs.urls.trainingDetail, { TID: String(tdoc.docId) });
   const [problemQuery, setProblemQuery] = useState('');
-  const problemSearch = useMemo(() => searchTrainingProblems({ dag, pdict, psdict, query: problemQuery }), [dag, pdict, problemQuery, psdict]);
+  const problemSearch = useMemo(
+    () => searchTrainingProblems({ dag, pdict, psdict, nsdict, controlled: integrityControlled, query: problemQuery }),
+    [dag, integrityControlled, nsdict, pdict, problemQuery, psdict],
+  );
 
   return (
     <motion.div className="space-y-5" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
@@ -684,7 +699,9 @@ export function TrainingDetailPage() {
                       <div className="flex min-w-0 items-center gap-2">
                         {row.status === 'accepted' ? (
                           <CheckCircle2 className="size-4 shrink-0 text-green-600" />
-                        ) : row.status === 'attempted' ? (
+                        ) : row.status === 'previouslyAccepted' ? (
+                          <Award className="size-4 shrink-0 text-muted-foreground" />
+                        ) : row.status === 'attempted' || row.status === 'partiallyAccepted' ? (
                           <Clock className="size-4 shrink-0 text-amber-600" />
                         ) : (
                           <span className="size-4 shrink-0 rounded-full border border-muted-foreground/40" aria-hidden="true" />
@@ -695,10 +712,24 @@ export function TrainingDetailPage() {
                     </a>
                     <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">
                       <Badge
-                        variant={row.status === 'accepted' ? 'default' : row.status === 'attempted' ? 'secondary' : 'outline'}
+                        variant={
+                          row.status === 'accepted'
+                            ? 'default'
+                            : row.status === 'attempted' || row.status === 'partiallyAccepted'
+                              ? 'secondary'
+                              : 'outline'
+                        }
                         className="text-[10px]"
                       >
-                        {row.status === 'accepted' ? '已通过' : row.status === 'attempted' ? '尝试中' : '未尝试'}
+                        {row.status === 'accepted'
+                          ? '已完成当前题集'
+                          : row.status === 'partiallyAccepted'
+                            ? `已完成 ${row.completedChapterCount}/${row.chapters.length} 个阶段`
+                            : row.status === 'previouslyAccepted'
+                              ? '曾通过，不计当前题集'
+                              : row.status === 'attempted'
+                                ? '尝试中'
+                                : '未尝试'}
                       </Badge>
                       {row.chapters.map((chapter) => (
                         <button
@@ -708,6 +739,7 @@ export function TrainingDetailPage() {
                           className="max-w-44 truncate rounded-md border px-2 py-0.5 text-[10px] text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
                           title={`切换到章节：${chapter.title}`}
                         >
+                          {chapter.completed ? '✓ ' : ''}
                           {chapter.title}
                         </button>
                       ))}
@@ -770,8 +802,10 @@ export function TrainingDetailPage() {
                 <div className="space-y-1.5">
                   {(selected.pids || []).map((pid: string | number) => {
                     const p = pdict[String(pid)] || {};
-                    const ps = psdict[String(pid)] || {};
-                    const accepted = ps.status === 1;
+                    const accepted = selectedStatus.donePids?.map(Number).includes(Number(pid)) || false;
+                    const globalStatus = psdict[String(pid)]?.status;
+                    const attempted = !integrityControlled && !!globalStatus;
+                    const previouslyAccepted = integrityControlled && !accepted && globalStatus === 1;
                     return (
                       <a
                         key={String(pid)}
@@ -782,7 +816,9 @@ export function TrainingDetailPage() {
                           <div className="flex items-center gap-2">
                             {accepted ? (
                               <CheckCircle2 className="size-3.5 text-green-600 shrink-0" />
-                            ) : ps.status ? (
+                            ) : previouslyAccepted ? (
+                              <Award className="size-3.5 text-muted-foreground shrink-0" />
+                            ) : attempted ? (
                               <Clock className="size-3.5 text-amber-600 shrink-0" />
                             ) : null}
                             <span className="font-mono text-[10px] text-muted-foreground">{pid}</span>
@@ -815,7 +851,11 @@ export function TrainingDetailPage() {
                           <Badge variant="default" className="text-[10px]">
                             AC
                           </Badge>
-                        ) : ps.status ? (
+                        ) : previouslyAccepted ? (
+                          <Badge variant="outline" className="text-[10px]">
+                            曾通过，不计当前题集
+                          </Badge>
+                        ) : attempted ? (
                           <Badge variant="secondary" className="text-[10px]">
                             尝试中
                           </Badge>

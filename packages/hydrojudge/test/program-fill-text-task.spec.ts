@@ -90,6 +90,47 @@ describe('program-fill text task dispatch', () => {
         expect(fetchedFiles).to.equal(0);
         expect(result).to.deep.include({ status: STATUS.STATUS_ACCEPTED, score: 100 });
     });
+
+    it('does not finish an in-process task before its reporter settles', async () => {
+        const reporterFailure = new Error('terminal callback failed');
+        let waitCalls = 0;
+        const session = {
+            config: { detail: 'full' },
+            getReporter() {
+                return {
+                    next: () => undefined,
+                    end: () => undefined,
+                    wait: async () => {
+                        waitCalls += 1;
+                        throw reporterFailure;
+                    },
+                };
+            },
+        } as any;
+        const request = {
+            rid: 'owned-task',
+            lang: 'cc',
+            code: '',
+            data: [],
+            source: 'system/1',
+            meta: {},
+            input: '',
+            domainId: 'system',
+            uid: 2,
+        } as any;
+        const task = new JudgeTask(session, request);
+        task.doSubmission = async () => undefined;
+
+        let failure: unknown;
+        try {
+            await task.handle();
+        } catch (error) {
+            failure = error;
+        }
+
+        expect(failure).to.equal(reporterFailure);
+        expect(waitCalls).to.equal(1);
+    });
 });
 
 after(() => {

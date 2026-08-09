@@ -321,6 +321,8 @@ export type RecordDoc = {
     notify?: boolean;
     /** Short-lived, fact-bound admin confirmation carried to an async generation callback. */
     dataWriteActiveContainerConfirmation?: ProblemDataWriteConfirmation;
+    /** Server-validated practice context snapshot carried to the asynchronous judge callback. */
+    practiceContext?: import('./model/practice-integrity').TrustedPracticeContextReference;
 };
 
 export interface RecordHistoryDoc extends RecordJudgeInfo {
@@ -897,11 +899,13 @@ declare module './service/db' {
         'contest.teamStatuses': import('./model/contest-team-status').TeamContestStatusDoc;
         'practice.integrityRevisions': import('./model/practice-integrity').PracticeIntegrityRevisionDoc;
         'practice.contexts': import('./model/practice-integrity').PracticeContextDoc;
+        'practice.contextualCompletions': import('./model/contextual-completion').ContextualCompletionDoc;
         lock: LockDoc;
     }
 }
 
 export interface UserbindModelBridge {
+    findStudentByUserId(domainId: string, userId: number): Promise<{ groupIds?: ObjectId[] } | null>;
     findStudentsByUserIds(domainId: string, userIds: number[]): Promise<Record<string, { studentId: string; realName: string }>>;
     searchBoundStudents(
         domainId: string,
@@ -939,8 +943,16 @@ export interface Model {
     training: typeof import('./model/training');
     practiceIntegrity: Pick<
         typeof import('./model/practice-integrity'),
-        'canonicalPracticePolicy' | 'combinePracticePolicies' | 'practiceContextColl' | 'practiceIntegrityRevisionColl' | 'practiceIntegrityService'
+        | 'assertTrustedPracticeContextBinding'
+        | 'canonicalPracticePolicy'
+        | 'canonicalTrustedPracticeContextReference'
+        | 'combinePracticePolicies'
+        | 'practiceContextColl'
+        | 'practiceIntegrityRevisionColl'
+        | 'practiceIntegrityService'
+        | 'trustedPracticeContextReference'
     >;
+    contextualCompletion: Pick<typeof import('./model/contextual-completion'), 'contextualCompletionColl' | 'contextualCompletionService'>;
     user: typeof import('./model/user').default;
     oauth: typeof import('./model/oauth').default;
     storage: typeof import('./model/storage').default;

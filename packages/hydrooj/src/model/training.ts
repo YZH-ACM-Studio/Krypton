@@ -25,6 +25,55 @@ export async function getListStatus(domainId: string, uid: number, tids: ObjectI
     return r;
 }
 
+export interface ScopedTrainingProgress {
+    completedProblemCount: number;
+    totalProblemCount: number;
+    doneNids: number[];
+    done: boolean;
+    nsdict: Record<
+        number,
+        {
+            donePids: number[];
+            isDone: boolean;
+            isProgress: boolean | number;
+            isOpen: boolean;
+            isInvalid: boolean;
+        }
+    >;
+}
+
+export function buildScopedTrainingProgress(
+    tdoc: TrainingDoc,
+    contextualDoneByScope: ReadonlyMap<number, ReadonlySet<number>>,
+): ScopedTrainingProgress {
+    const doneNids = new Set<number>();
+    const nsdict: ScopedTrainingProgress['nsdict'] = {};
+    let completedProblemCount = 0;
+    let totalProblemCount = 0;
+    for (const node of tdoc.dag) {
+        const nodePids = new Set(node.pids);
+        totalProblemCount += nodePids.size;
+        const scopedDonePids = nodePids.intersection(new Set(contextualDoneByScope.get(node._id) || []));
+        completedProblemCount += scopedDonePids.size;
+        const nsdoc = {
+            donePids: Array.from(scopedDonePids),
+            isDone: isDone(node, doneNids, scopedDonePids),
+            isProgress: isProgress(node, doneNids, scopedDonePids, new Set<number>()),
+            isOpen: isOpen(node, doneNids, scopedDonePids, new Set<number>()),
+            isInvalid: isInvalid(node, doneNids),
+        };
+        if (nsdoc.isDone) doneNids.add(node._id);
+        nsdict[node._id] = nsdoc;
+    }
+    return {
+        completedProblemCount,
+        totalProblemCount,
+        doneNids: Array.from(doneNids),
+        done: tdoc.dag.length > 0 && doneNids.size === tdoc.dag.length,
+        nsdict,
+    };
+}
+
 export async function enroll(domainId: string, tid: ObjectId, uid: number) {
     try {
         await document.setIfNotStatus(domainId, document.TYPE_TRAINING, tid, uid, 'enroll', 1, 1, {});
@@ -394,6 +443,7 @@ export async function getList(domainId: string, tids: ObjectId[]) {
 }
 
 global.Hydro.model.training = {
+    buildScopedTrainingProgress,
     getPids,
     isDone,
     isProgress,

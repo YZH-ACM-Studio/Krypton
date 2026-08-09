@@ -105,13 +105,21 @@
                   {% set self_psdoc=selfPsdict[pid] %}
                   <tr data-pid="{{ pid }}">
                     {% if handler.user.hasPriv(PRIV.PRIV_USER_PROFILE) %}
-                      {% if psdoc['rid'] %}
+                      {% if integrityControlled %}
+                        {% if pid in nsdict[node['_id']]['donePids'] %}
+                          <td class="col--status record-status--border pass"><div class="col--status__text"><span class="icon record-status--icon pass"></span><span class="record-status--text pass">{{ _('AC' if should_compare else 'Accepted') }}</span></div></td>
+                        {% else %}
+                          <td class="col--status record-status--border"></td>
+                        {% endif %}
+                      {% elif psdoc['rid'] %}
                         {{ record.render_status_td(psdoc, rid_key='rid', short=should_compare) }}
                       {% else %}
                         <td class="col--status record-status--border"></td>
                       {% endif %}
                       {% if should_compare %}
-                        {% if self_psdoc['rid'] %}
+                        {% if integrityControlled and pid in nsdict[node['_id']]['selfDonePids'] %}
+                          <td class="col--status col--status--sm pass"><div class="col--status__text"><span class="icon record-status--icon pass"></span><span class="record-status--text pass">{{ _('AC') }}</span></div></td>
+                        {% elif not integrityControlled and self_psdoc['rid'] %}
                           {{ record.render_status_td(self_psdoc, rid_key='rid', short=true) }}
                         {% else %}
                           <td class="col--status col--status--sm"></td>

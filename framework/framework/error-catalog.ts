@@ -1376,6 +1376,13 @@ const CHINESE_ERROR_MESSAGE_ENGLISH_TRANSLATIONS: Readonly<Record<string, string
     真实性训练容器不存在: 'The practice-integrity container does not exist.',
     真实性训练容器类型不匹配: 'The practice-integrity container type does not match.',
     真实性训练范围与容器不匹配: 'The practice-integrity scope does not match the container.',
+    真实性训练上下文没有完成目标: 'The practice-integrity context has no completion target.',
+    '真实性训练上下文已过期，请返回课程或题集重新进入题目':
+        'The practice-integrity context expired. Return to the course or problem set and open the problem again.',
+    真实性训练上下文与当前提交不匹配: 'The practice-integrity context does not match this submission.',
+    '真实性训练上下文无效，请返回课程或题集重新进入题目':
+        'The practice-integrity context is invalid. Return to the course or problem set and open the problem again.',
+    '比赛或 VP 提交不能使用真实性训练上下文': 'Contest and virtual-participation submissions cannot use a practice-integrity context.',
     '真实性策略草稿已变化，请刷新后重试': 'The practice-integrity policy draft changed. Reload and try again.',
     题目不属于请求的真实性训练范围: 'The problem does not belong to the requested practice-integrity scope.',
     '请填写学号和姓名确认结束。': 'Enter your student ID and name to confirm finishing.',

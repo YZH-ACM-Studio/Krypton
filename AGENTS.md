@@ -66,11 +66,18 @@
 - 团队赛只封锁未处于批次待定版状态且属于 active `ContestTeam` 的成员；不得用不限范围、预绑定批次或运行时批次回查扩大受众。
 - Client 自动 attend 成功后必须立即精确失效 `(domainId, uid)` 封锁缓存并记录审计；团队定版、建队和成员变化必须在仍持有同一比赛轻量边界时同步失效对应域缓存，再执行邀请清理或 Vigil 网络调用。任何失效都要推进进程内 generation，禁止并发旧计算重新写回；退出 Client 不清除 attend，也不在窗口结束前恢复普通浏览器。不得为此新增数据库状态、后台任务或 Client/Vigil Server 协议。
 
+## 真实性训练可信完成协议
+
+- Course 与 ProblemSet 的真实性策略只认发布后不可变的 `practice.integrityRevisions`；短期 `PracticeContext` 必须绑定域、用户、题目、主容器/作用域及每个明确参与目标的容器、作用域和 revision。签发与提交都要重新读取 canonical revision 并校验当前题目/容器可见性和范围成员关系，客户端字段不得自证授权。
+- Record 只能保存由服务端 Context gate 生成、并自带 canonical domain/uid/pid 绑定的 `practiceContext` 短引用；Context 的过期、revision、容器/题目可见性和 scope 成员关系必须在 `record.add` 紧前重新校验，并且只使用该次校验返回的可信引用。已由 query 加载的比赛 `tdoc` 是提交容器的 authoritative 身份，body 中缺失、置空或不匹配的 `tid` 必须 fail closed，不能把比赛/VP 提交降级为普通提交。Record 创建和异步回写都必须把可信绑定与 Record 精确比对，禁止从请求字段拼接或把可信引用嫁接给其它用户/题目/域。普通、Contest、VP、历史 AC、预评测和管理员预览不得创建真实性完成事实；比赛 Record 与真实性 Context 的组合必须 fail closed。
+- 最终 AC 只在异步 `record/judge` 回写中按明确目标幂等写入 `practice.contextualCompletions`。唯一身份包含 domain、uid、容器、作用域、pid 和 revision；并发 duplicate-key 只有精确命中该身份才可视作幂等。一个 Context 包含多个目标时必须全部尝试并 settle 后汇总失败，不得因首个目标失败留下未尝试目标；重复回调/重测不得重复计数，取消或后续非 AC 不删除既有事实，未知状态必须显式报错并记录 rid/context/目标/revision/stage。终态 Record 写入后的广播、全局 ProblemStatus/统计和 `record/judge` observer 必须彼此独立执行并全部 settle 后汇总所有失败，任何一个副作用失败都不得阻止真实性完成 observer；内置 Judge、远程 Judge 和 WebSocket Judge 的任务所有者都必须等待同一回调 Context 真正 settle。内置 model 的异步 `apply` 也必须在 worker/consumer 就绪前完整等待，加载失败直接阻止 readiness。任务 promise 无论成功或失败都要落地并清理，禁止 observer 异常把评测永久卡在进行中；第一个 `end` 或断连 `reset` 必须同步占有唯一终态，后续终态和迟到进度只能复用该结果，不得再次落库、重置或重排队。Consumer 从队列取走的任务在终态可靠写入前发生发送、进度或终态写入失败时，必须精确 reset/requeue 一次；终态已经写入而 observer 失败时不得重排。Judge 连接一旦开始关闭，仍在等待重复 RID 或关闭期间刚完成取队列的未派发任务必须原样重排且不得重新占用 slot 或发送；Consumer shutdown 与连接清理必须等待这些动态进入 `newTask` 的任务完成重排，并汇总传播全部不同失败，不得只暴露第一项。
+- 启用已发布真实性策略的课程/题集进度只读 scoped `ContextualCompletion`，首页、列表、详情题目行、文件页和两套 UI 都不得回退全局 ProblemStatus/TrainingStatus；未配置策略的存量容器继续使用全局 AC。课程引用题集时同一可信 Context 可包含主课程与一个或多个明确题集目标；直接题集 Context 必须且只能包含自身目标，不得反向完成引用它的课程或携带其它容器。
+
 ## 真实性训练策略与可信上下文协议
 
 - `practice.integrityRevisions` 是 Course/题集真实性策略的 canonical 集合；策略只归属容器，不写入 Problem。每个容器最多一个带 `draftVersion` CAS 的草稿，发布后 revision 永久不可变，后续修改只能创建下一 revision。
 - 首版策略固定为禁外部代码注入、移除独立提交表单和防 AI 复制注入三个布尔项；Course 与题集的组合策略只取逻辑 OR，不支持逐题、逐章或逐阶段 override。
-- `practice.contexts` 是服务端签发的短期 `PracticeContext`；必须精确绑定 domain、uid、主容器、chapter/stage、pid、模式和全部参与的已发布 revision，每个容器恰好一个 revision，且至少包含主容器 revision。签发前必须通过容器可见性、题集 `training/get` 扩展和题目 canonical direct-view gate；URL 参数只能请求 Context，不能自证权限或真实性状态。
+- `practice.contexts` 是服务端签发的短期 `PracticeContext`；必须精确绑定 domain、uid、主容器、chapter/stage、pid、模式和全部参与的已发布 revision，每个容器恰好一个 revision。主容器是题集时目标集合必须且只能包含自身；主容器是课程时只允许主课程与显式题集目标，不允许第二个课程目标。签发前必须通过容器可见性、题集 `training/get` 扩展和题目 canonical direct-view gate；URL 参数只能请求 Context，不能自证权限或真实性状态。
 - Context 的 Mongo TTL 只负责清理；签发与每次读取都必须从 canonical revision 集合重取全部引用、验证不可变身份和三布尔策略并重算 OR。新签发还必须在写 Context 前重查每个参与容器的 latest published revision；已经签发的旧 Context 只校验其固定 revision，不因后续发布追溯失效。后续提交边界仍须显式校验过期、用户、容器、scope、pid、模式与适用 revision。无已发布策略的存量 Course/题集保持普通模式；受控入口缺失、伪造或过期 Context 时 fail closed，不得降级成普通提交。
 - 策略管理只允许容器 owner、既有容器管理权限持有者或管理员；预览 Context 必须标记 `mode:'preview'`，不得产生学生完成事实。日志只记录 contextId、uid、容器、pid、revision、stage 和拒绝原因，不记录剪贴板、代码或隐藏提示正文。
 

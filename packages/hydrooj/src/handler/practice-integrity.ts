@@ -1,8 +1,14 @@
 import { ObjectId } from 'mongodb';
 import { Logger } from '@hydrooj/utils';
 import { localizedErrorText, PermissionError, ValidationError } from '../error';
-import { PERM, PRIV } from '../model/builtin';
+import { PRIV } from '../model/builtin';
 import * as oplog from '../model/oplog';
+import {
+    assertPracticeTargetAccess,
+    canManagePracticeContainer,
+    loadPracticeContainer,
+    requiredPracticeManagePermission,
+} from '../model/practice-integrity-access';
 import {
     canonicalPracticePolicy,
     PracticeIntegrityConflictError,
@@ -11,8 +17,6 @@ import {
     type PracticeIntegrityRevisionDoc,
     type PracticeScopeKind,
 } from '../model/practice-integrity';
-import problem from '../model/problem';
-import * as training from '../model/training';
 import { Handler, param, Types } from '../service/server';
 
 const logger = new Logger('practice-integrity');
@@ -25,42 +29,6 @@ function canonicalContainerKind(value: string): PracticeContainerKind {
 function canonicalScopeKind(value: string): PracticeScopeKind {
     if (value !== 'chapter' && value !== 'stage') throw new ValidationError('scopeKind', null, localizedErrorText`无效的真实性训练范围`);
     return value;
-}
-
-function assertContainerKind(tdoc: any, containerKind: PracticeContainerKind): void {
-    const matches = containerKind === 'course' ? tdoc?.kind === 'course' : tdoc?.kind === undefined || tdoc?.kind === 'training';
-    if (!matches) throw new ValidationError('containerKind', null, localizedErrorText`真实性训练容器类型不匹配`);
-}
-
-function canManageContainer(user: any, tdoc: any, containerKind: PracticeContainerKind): boolean {
-    if (user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) return true;
-    if (containerKind === 'course') return user.own(tdoc) || user.hasPerm(PERM.PERM_EDIT_COURSE);
-    return user.hasPerm(PERM.PERM_EDIT_TRAINING) || (user.own(tdoc) && user.hasPerm(PERM.PERM_EDIT_TRAINING_SELF));
-}
-
-function requiredManagePermission(user: any, tdoc: any, containerKind: PracticeContainerKind) {
-    if (containerKind === 'course') return PERM.PERM_EDIT_COURSE;
-    return user.own(tdoc) ? PERM.PERM_EDIT_TRAINING_SELF : PERM.PERM_EDIT_TRAINING;
-}
-
-async function loadContainer(domainId: string, containerKind: PracticeContainerKind, containerId: ObjectId) {
-    const tdoc = await training.get(domainId, containerId);
-    if (!tdoc || String(tdoc.docId) !== containerId.toHexString()) {
-        throw new ValidationError('containerId', null, localizedErrorText`真实性训练容器不存在`);
-    }
-    assertContainerKind(tdoc, containerKind);
-    return tdoc;
-}
-
-async function assertCourseVisible(domainId: string, user: any, tdoc: any, canManage: boolean): Promise<void> {
-    if (canManage || !(tdoc.courseGroupIds || []).length) return;
-    const findStudent = (global as any).Hydro?.model?.userbind?.findStudentByUserId;
-    if (typeof findStudent !== 'function') throw new TypeError('userbind.findStudentByUserId is unavailable');
-    const student = await findStudent(domainId, user._id);
-    const groups = new Set((student?.groupIds || []).map((groupId: ObjectId) => String(groupId)));
-    if (!(tdoc.courseGroupIds || []).some((groupId: ObjectId) => groups.has(String(groupId)))) {
-        throw new PermissionError(PERM.PERM_VIEW_TRAINING);
-    }
 }
 
 function serializeRevision(revision: PracticeIntegrityRevisionDoc | null) {
@@ -111,9 +79,9 @@ class PracticeIntegrityPolicyHandler extends Handler {
     async get(_args: unknown, containerKindRaw: string, containerId: ObjectId) {
         const domainId = String(this.domain?._id);
         const containerKind = canonicalContainerKind(containerKindRaw);
-        const tdoc = await loadContainer(domainId, containerKind, containerId);
-        if (!canManageContainer(this.user, tdoc, containerKind)) {
-            throw new PermissionError(requiredManagePermission(this.user, tdoc, containerKind));
+        const tdoc = await loadPracticeContainer(domainId, containerKind, containerId);
+        if (!canManagePracticeContainer(this.user, tdoc, containerKind)) {
+            throw new PermissionError(requiredPracticeManagePermission(this.user, tdoc, containerKind));
         }
         const state = await practiceIntegrityService.getPolicyState(domainId, containerKind, containerId);
         this.response.body = { published: serializeRevision(state.published), draft: serializeRevision(state.draft) };
@@ -136,9 +104,9 @@ class PracticeIntegrityPolicyHandler extends Handler {
     ) {
         const domainId = String(this.domain?._id);
         const containerKind = canonicalContainerKind(containerKindRaw);
-        const tdoc = await loadContainer(domainId, containerKind, containerId);
-        if (!canManageContainer(this.user, tdoc, containerKind)) {
-            throw new PermissionError(requiredManagePermission(this.user, tdoc, containerKind));
+        const tdoc = await loadPracticeContainer(domainId, containerKind, containerId);
+        if (!canManagePracticeContainer(this.user, tdoc, containerKind)) {
+            throw new PermissionError(requiredPracticeManagePermission(this.user, tdoc, containerKind));
         }
         try {
             const draft = await practiceIntegrityService.saveDraft({
@@ -177,9 +145,9 @@ class PracticeIntegrityPolicyHandler extends Handler {
     async postPublish(_args: unknown, containerKindRaw: string, containerId: ObjectId, expectedDraftVersion: number) {
         const domainId = String(this.domain?._id);
         const containerKind = canonicalContainerKind(containerKindRaw);
-        const tdoc = await loadContainer(domainId, containerKind, containerId);
-        if (!canManageContainer(this.user, tdoc, containerKind)) {
-            throw new PermissionError(requiredManagePermission(this.user, tdoc, containerKind));
+        const tdoc = await loadPracticeContainer(domainId, containerKind, containerId);
+        if (!canManagePracticeContainer(this.user, tdoc, containerKind)) {
+            throw new PermissionError(requiredPracticeManagePermission(this.user, tdoc, containerKind));
         }
         try {
             const published = await practiceIntegrityService.publishDraft({
@@ -236,28 +204,18 @@ class PracticeContextHandler extends Handler {
             containerKind = canonicalContainerKind(containerKindRaw);
             rejectionReason = 'invalid-scope-kind';
             scopeKind = canonicalScopeKind(scopeKindRaw);
-            rejectionReason = 'container-unavailable';
-            const tdoc = await loadContainer(domainId, containerKind, containerId);
-            const canManage = canManageContainer(this.user, tdoc, containerKind);
-            rejectionReason = 'container-view-denied';
-            if (!this.user.hasPerm(PERM.PERM_VIEW_TRAINING) && !canManage) throw new PermissionError(PERM.PERM_VIEW_TRAINING);
-            rejectionReason = 'preview-denied';
-            if (preview && !canManage) throw new PermissionError(requiredManagePermission(this.user, tdoc, containerKind));
-            rejectionReason = 'container-extension-denied';
-            if (containerKind === 'problemSet') await this.ctx.parallel('training/get', tdoc, this);
-            rejectionReason = 'course-group-denied';
-            if (containerKind === 'course') await assertCourseVisible(domainId, this.user, tdoc, canManage);
-            const expectedScopeKind: PracticeScopeKind = containerKind === 'course' ? 'chapter' : 'stage';
-            rejectionReason = 'scope-container-mismatch';
-            if (scopeKind !== expectedScopeKind) throw new ValidationError('scopeKind', null, localizedErrorText`真实性训练范围与容器不匹配`);
-            rejectionReason = 'problem-view-denied';
-            const visibleProblem = await problem.getViewableAuthorized(domainId, pid, this.user);
-            if (!visibleProblem) throw new PermissionError(PERM.PERM_VIEW_PROBLEM);
-            const scope = (tdoc.dag || []).find((node: any) => Number(node._id) === scopeId);
-            rejectionReason = 'pid-outside-scope';
-            if (!scope || !(scope.pids || []).map(Number).includes(pid)) {
-                throw new ValidationError('pid', null, localizedErrorText`题目不属于请求的真实性训练范围`);
-            }
+            rejectionReason = 'context-access-denied';
+            await assertPracticeTargetAccess({
+                domainId,
+                user: this.user,
+                handler: this,
+                target: { containerKind, containerId, scopeKind, scopeId },
+                pid,
+                mode: preview ? 'preview' : 'student',
+                setRejectionReason: (reason) => {
+                    rejectionReason = reason;
+                },
+            });
             rejectionReason = 'policy-read-failed';
             const published = await practiceIntegrityService.getLatestPublished(domainId, containerKind, containerId);
             if (!published) {
@@ -283,7 +241,7 @@ class PracticeContextHandler extends Handler {
                 scopeId,
                 pid,
                 mode: preview ? 'preview' : 'student',
-                revisions: [published],
+                targets: [{ revision: published, scopeKind, scopeId }],
             });
             const contextId = context._id.toHexString();
             logger.info(
@@ -307,6 +265,8 @@ class PracticeContextHandler extends Handler {
                 revisions: context.revisions.map((revision) => ({
                     containerKind: revision.containerKind,
                     containerId: revision.containerId.toHexString(),
+                    scopeKind: revision.scopeKind,
+                    scopeId: revision.scopeId,
                     revision: revision.revision,
                 })),
             };

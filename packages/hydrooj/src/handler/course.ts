@@ -26,8 +26,10 @@ import {
 } from '../error';
 import { TrainingDoc, TrainingNode } from '../interface';
 import { PERM, PRIV, STATUS } from '../model/builtin';
+import { contextualCompletionService } from '../model/contextual-completion';
 import * as contest from '../model/contest';
 import * as oplog from '../model/oplog';
+import { practiceIntegrityService } from '../model/practice-integrity';
 import problem from '../model/problem';
 import { assertProblemBankSelection } from '../model/problem-access';
 import storage from '../model/storage';
@@ -382,14 +384,19 @@ class CourseDetailHandler extends Handler {
                           : [],
                   ])
                 : Promise.resolve([{}, {}, []] as const);
-        const [udoc, tsdoc, courseMindmap, [pdict, psdict, ctdocs]] = await Promise.all([
+        const [udoc, tsdoc, courseMindmap, publishedIntegrity, [pdict, psdict, ctdocs]] = await Promise.all([
             user.getById(domainId, tdoc.owner),
             this.user.hasPriv(PRIV.PRIV_USER_PROFILE) ? training.getStatus(domainId, tdoc.docId, this.user._id) : null,
             activeView === 'mindmap' && tdoc.mindmapId !== undefined && tdoc.mindmapId !== null
                 ? buildCourseMindmapView(domainId, tdoc, pids, this.user)
                 : null,
+            practiceIntegrityService.getLatestPublished(domainId, 'course', tdoc.docId),
             overviewData,
         ]);
+        const contextualDoneByScope =
+            activeView === 'overview' && publishedIntegrity && this.user.hasPriv(PRIV.PRIV_USER_PROFILE)
+                ? await contextualCompletionService.getCompletedByScope(domainId, this.user._id, 'course', tdoc.docId)
+                : null;
         const cdict: Record<string, any> = {};
         for (const c of ctdocs) cdict[String(c.docId)] = c;
         // 逐章节进度（线性，无先修）。
@@ -402,7 +409,8 @@ class CourseDetailHandler extends Handler {
             activeView === 'overview'
                 ? tdoc.dag.map((node) => {
                       const total = node.pids.length;
-                      const done = node.pids.filter((p) => donePids.has(p)).length;
+                      const completed = contextualDoneByScope ? contextualDoneByScope.get(node._id) || new Set<number>() : donePids;
+                      const done = node.pids.filter((p) => completed.has(p)).length;
                       return {
                           _id: node._id,
                           title: node.title,

@@ -157,6 +157,14 @@ const strictPolicy = {
     antiAiCopyInjection: true,
 };
 
+function contextTarget(revision: PracticeIntegrityRevisionDoc, scopeId = 4) {
+    return {
+        revision,
+        scopeKind: revision.containerKind === 'course' ? ('chapter' as const) : ('stage' as const),
+        scopeId,
+    };
+}
+
 describe('practice integrity canonical model', () => {
     it('creates the exact revision and context indexes', async () => {
         const { service, revisions, contexts } = makeService();
@@ -310,7 +318,7 @@ describe('practice integrity canonical model', () => {
     });
 
     it('binds a short-lived context to every identity and participating revision', async () => {
-        const { service } = makeService();
+        const { service, contexts } = makeService();
         const course = await service.saveDraft({
             domainId: 'system',
             containerKind: 'course',
@@ -355,7 +363,7 @@ describe('practice integrity canonical model', () => {
                 scopeId: 4,
                 pid: 42,
                 mode: 'student',
-                revisions: [revisions[1] as PracticeIntegrityRevisionDoc],
+                targets: [contextTarget(revisions[1] as PracticeIntegrityRevisionDoc)],
             }),
         );
         expect(missingPrimary).to.be.instanceOf(PracticeIntegrityContextError);
@@ -377,7 +385,7 @@ describe('practice integrity canonical model', () => {
                         pid: 42,
                         mode: 'student',
                         ...invalidPair,
-                        revisions: invalidPair.revisions as PracticeIntegrityRevisionDoc[],
+                        targets: (invalidPair.revisions as PracticeIntegrityRevisionDoc[]).map((revision) => contextTarget(revision)),
                     }),
                 ),
             ).to.be.instanceOf(PracticeIntegrityContextError);
@@ -391,14 +399,33 @@ describe('practice integrity canonical model', () => {
             scopeId: 4,
             pid: 42,
             mode: 'student',
-            revisions: revisions as PracticeIntegrityRevisionDoc[],
+            targets: (revisions as PracticeIntegrityRevisionDoc[]).map((revision) => contextTarget(revision)),
         });
         expect(context.revisions).to.have.length(2);
+        expect(context.revisions.map((target) => [target.containerKind, target.scopeKind, target.scopeId])).to.deep.equal([
+            ['course', 'chapter', 4],
+            ['problemSet', 'stage', 4],
+        ]);
         expect(context.policy).to.deep.equal({
             prohibitExternalCodeInjection: true,
             removeIndependentSubmitForm: true,
             antiAiCopyInjection: true,
         });
+        expect(
+            await capture(() =>
+                service.issueContext({
+                    domainId: 'system',
+                    uid: 8,
+                    containerKind: 'problemSet',
+                    containerId: problemSetId,
+                    scopeKind: 'stage',
+                    scopeId: 4,
+                    pid: 42,
+                    mode: 'student',
+                    targets: (revisions as PracticeIntegrityRevisionDoc[]).map((revision) => contextTarget(revision)),
+                }),
+            ),
+        ).to.be.instanceOf(PracticeIntegrityContextError);
         expect(
             await service.assertContext({
                 contextId: context._id.toHexString(),
@@ -412,6 +439,44 @@ describe('practice integrity canonical model', () => {
                 mode: 'student',
             }),
         ).to.deep.equal(context);
+        expect(
+            await service.assertSubmissionContext({
+                contextId: context._id.toHexString(),
+                domainId: 'system',
+                uid: 8,
+                pid: 42,
+            }),
+        ).to.deep.equal(context);
+        const storedContext = contexts.docs.find((candidate) => candidate._id.equals(context._id))!;
+        const originalPrimary = {
+            containerKind: storedContext.containerKind,
+            containerId: storedContext.containerId,
+            scopeKind: storedContext.scopeKind,
+        };
+        storedContext.containerKind = 'problemSet';
+        storedContext.containerId = problemSetId;
+        storedContext.scopeKind = 'stage';
+        expect(
+            await capture(() =>
+                service.assertSubmissionContext({
+                    contextId: context._id.toHexString(),
+                    domainId: 'system',
+                    uid: 8,
+                    pid: 42,
+                }),
+            ),
+        ).to.be.instanceOf(PracticeIntegrityContextError);
+        Object.assign(storedContext, originalPrimary);
+        expect(
+            await capture(() =>
+                service.assertSubmissionContext({
+                    contextId: context._id.toHexString(),
+                    domainId: 'system',
+                    uid: 9,
+                    pid: 42,
+                }),
+            ),
+        ).to.be.instanceOf(PracticeIntegrityContextError);
         for (const mismatch of [
             { uid: 9 },
             { pid: 43 },
@@ -450,7 +515,7 @@ describe('practice integrity canonical model', () => {
                     scopeId: 4,
                     pid: 42,
                     mode: 'student',
-                    revisions: [forged],
+                    targets: [contextTarget(forged)],
                 }),
             ),
         ).to.be.instanceOf(PracticeIntegrityContextError);
@@ -471,7 +536,7 @@ describe('practice integrity canonical model', () => {
                     scopeId: 4,
                     pid: 42,
                     mode: 'student',
-                    revisions: [revisions[0] as PracticeIntegrityRevisionDoc, sameContainerRevision],
+                    targets: [contextTarget(revisions[0] as PracticeIntegrityRevisionDoc), contextTarget(sameContainerRevision)],
                 }),
             ),
         ).to.be.instanceOf(PracticeIntegrityContextError);
@@ -542,7 +607,7 @@ describe('practice integrity canonical model', () => {
                     scopeId: 1,
                     pid: 42,
                     mode: 'student',
-                    revisions: [published],
+                    targets: [contextTarget(published, 1)],
                 }),
             ),
         ).to.be.instanceOf(PracticeIntegrityContextError);
@@ -557,7 +622,7 @@ describe('practice integrity canonical model', () => {
             scopeId: 1,
             pid: 42,
             mode: 'student',
-            revisions: [published],
+            targets: [contextTarget(published, 1)],
         });
         contexts.docs[0].scopeKind = 'stage';
         expect(
@@ -638,7 +703,7 @@ describe('practice integrity canonical model', () => {
             scopeId: 1,
             pid: 42,
             mode: 'student',
-            revisions: [first],
+            targets: [contextTarget(first, 1)],
         });
 
         const secondDraft = await service.saveDraft({
@@ -668,7 +733,7 @@ describe('practice integrity canonical model', () => {
                     scopeId: 1,
                     pid: 42,
                     mode: 'student',
-                    revisions: [first],
+                    targets: [contextTarget(first, 1)],
                 }),
             ),
         ).to.be.instanceOf(PracticeIntegrityContextError);
@@ -714,7 +779,7 @@ describe('practice integrity canonical model', () => {
             scopeId: 1,
             pid: 42,
             mode: 'preview',
-            revisions: [revision],
+            targets: [contextTarget(revision, 1)],
         });
         setNow(new Date('2026-08-09T08:16:00.000Z'));
         const error = await capture(() =>

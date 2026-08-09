@@ -32,7 +32,28 @@ export interface PracticeIntegrityRevisionRef {
     revisionId: ObjectId;
     containerKind: PracticeContainerKind;
     containerId: ObjectId;
+    scopeKind: PracticeScopeKind;
+    scopeId: number;
     revision: number;
+}
+
+export interface PracticeIntegrityContextTargetInput {
+    revision: PracticeIntegrityRevisionDoc;
+    scopeKind: PracticeScopeKind;
+    scopeId: number;
+}
+
+export interface TrustedPracticeContextReference {
+    contextId: ObjectId;
+    domainId: string;
+    uid: number;
+    pid: number;
+    mode: PracticeContextMode;
+    containerKind: PracticeContainerKind;
+    containerId: ObjectId;
+    scopeKind: PracticeScopeKind;
+    scopeId: number;
+    targets: PracticeIntegrityRevisionRef[];
 }
 
 export interface PracticeContextDoc {
@@ -125,7 +146,7 @@ interface IssueContextInput extends ContainerIdentity {
     scopeId: number;
     pid: number;
     mode: PracticeContextMode;
-    revisions: PracticeIntegrityRevisionDoc[];
+    targets: PracticeIntegrityContextTargetInput[];
 }
 
 interface AssertContextInput extends ContainerIdentity {
@@ -135,6 +156,13 @@ interface AssertContextInput extends ContainerIdentity {
     scopeId: number;
     pid: number;
     mode: PracticeContextMode;
+}
+
+interface AssertSubmissionContextInput {
+    contextId: string;
+    domainId: string;
+    uid: number;
+    pid: number;
 }
 
 function samePracticePolicy(left: PracticeIntegrityPolicy, right: PracticeIntegrityPolicy): boolean {
@@ -156,6 +184,41 @@ function assertPositiveInteger(value: number, field: string): void {
 
 function hasValidPracticeScope(containerKind: PracticeContainerKind, scopeKind: PracticeScopeKind): boolean {
     return (containerKind === 'course' && scopeKind === 'chapter') || (containerKind === 'problemSet' && scopeKind === 'stage');
+}
+
+function assertRevisionRef(ref: PracticeIntegrityRevisionRef): void {
+    if (
+        !(ref?.revisionId instanceof ObjectId) ||
+        !(ref.containerId instanceof ObjectId) ||
+        !['course', 'problemSet'].includes(ref.containerKind) ||
+        !['chapter', 'stage'].includes(ref.scopeKind) ||
+        !hasValidPracticeScope(ref.containerKind, ref.scopeKind) ||
+        !Number.isSafeInteger(ref.scopeId) ||
+        ref.scopeId <= 0 ||
+        !Number.isSafeInteger(ref.revision) ||
+        ref.revision <= 0
+    ) {
+        throw new PracticeIntegrityContextError('revision_integrity_mismatch');
+    }
+}
+
+function assertPracticeContextTargetTopology(
+    primary: ContainerIdentity & { scopeKind: PracticeScopeKind; scopeId: number },
+    refs: readonly PracticeIntegrityRevisionRef[],
+): void {
+    const isPrimary = (ref: PracticeIntegrityRevisionRef) =>
+        ref.containerKind === primary.containerKind &&
+        ref.containerId.equals(primary.containerId) &&
+        ref.scopeKind === primary.scopeKind &&
+        ref.scopeId === primary.scopeId;
+    if (!refs.some(isPrimary)) throw new PracticeIntegrityContextError('revision_integrity_mismatch');
+    if (primary.containerKind === 'problemSet') {
+        if (refs.length !== 1 || !isPrimary(refs[0])) throw new PracticeIntegrityContextError('revision_integrity_mismatch');
+        return;
+    }
+    if (refs.some((ref) => ref.containerKind === 'course' && !isPrimary(ref))) {
+        throw new PracticeIntegrityContextError('revision_integrity_mismatch');
+    }
 }
 
 function isExpectedDraftCreateConflict(error: unknown, draft: PracticeIntegrityRevisionDoc): boolean {
@@ -346,15 +409,7 @@ export class PracticeIntegrityService {
         const containers = new Set<string>();
         const revisions: PracticeIntegrityRevisionDoc[] = [];
         for (const ref of refs) {
-            if (
-                !(ref?.revisionId instanceof ObjectId) ||
-                !(ref.containerId instanceof ObjectId) ||
-                !['course', 'problemSet'].includes(ref.containerKind) ||
-                !Number.isSafeInteger(ref.revision) ||
-                ref.revision <= 0
-            ) {
-                throw new PracticeIntegrityContextError('revision_integrity_mismatch');
-            }
+            assertRevisionRef(ref);
             const revisionId = ref.revisionId.toHexString();
             const containerIdentity = `${ref.containerKind}:${ref.containerId.toHexString()}`;
             if (revisionIds.has(revisionId) || containers.has(containerIdentity)) {
@@ -382,12 +437,6 @@ export class PracticeIntegrityService {
             revisions.push({ ...revision, policy });
         }
         return { revisions, policy: combinePracticePolicies(revisions.map((revision) => revision.policy)) };
-    }
-
-    private assertPrimaryRevision(input: ContainerIdentity, revisions: readonly PracticeIntegrityRevisionDoc[]): void {
-        if (!revisions.some((revision) => revision.containerKind === input.containerKind && revision.containerId.equals(input.containerId))) {
-            throw new PracticeIntegrityContextError('revision_integrity_mismatch');
-        }
     }
 
     private async assertLatestPublished(revisions: readonly PracticeIntegrityRevisionDoc[]): Promise<void> {
@@ -430,14 +479,16 @@ export class PracticeIntegrityService {
         if (!hasValidPracticeScope(input.containerKind, input.scopeKind)) {
             throw new PracticeIntegrityContextError('scope_container_mismatch');
         }
-        const refs = input.revisions.map((revision) => ({
+        const refs = input.targets.map(({ revision, scopeKind, scopeId }) => ({
             revisionId: revision._id,
             containerKind: revision.containerKind,
             containerId: revision.containerId,
+            scopeKind,
+            scopeId,
             revision: revision.revision,
         }));
         const canonical = await this.resolveCanonicalRevisions(input.domainId, refs);
-        this.assertPrimaryRevision(input, canonical.revisions);
+        assertPracticeContextTargetTopology(input, refs);
         const issuedAt = this.now();
         await this.assertLatestPublished(canonical.revisions);
         const context: PracticeContextDoc = {
@@ -450,12 +501,7 @@ export class PracticeIntegrityService {
             scopeId: input.scopeId,
             pid: input.pid,
             mode: input.mode,
-            revisions: canonical.revisions.map((revision) => ({
-                revisionId: revision._id,
-                containerKind: revision.containerKind,
-                containerId: revision.containerId,
-                revision: revision.revision,
-            })),
+            revisions: refs.map((ref) => ({ ...ref })),
             policy: canonical.policy,
             issuedAt,
             expiresAt: new Date(issuedAt.getTime() + this.contextTtlMs),
@@ -497,7 +543,7 @@ export class PracticeIntegrityService {
         if (!matches) throw new PracticeIntegrityContextError('identity_mismatch');
         if (!Array.isArray(context.revisions)) throw new PracticeIntegrityContextError('revision_integrity_mismatch');
         const canonical = await this.resolveCanonicalRevisions(context.domainId, context.revisions);
-        this.assertPrimaryRevision(context, canonical.revisions);
+        assertPracticeContextTargetTopology(context, context.revisions);
         let storedPolicy: PracticeIntegrityPolicy;
         try {
             storedPolicy = canonicalPracticePolicy(context.policy);
@@ -509,6 +555,118 @@ export class PracticeIntegrityService {
         }
         return context;
     }
+
+    async assertSubmissionContext(input: AssertSubmissionContextInput): Promise<PracticeContextDoc> {
+        await this.ensureIndexes();
+        assertPositiveInteger(input.uid, 'uid');
+        assertPositiveInteger(input.pid, 'pid');
+        let contextId: ObjectId;
+        try {
+            contextId = new ObjectId(input.contextId);
+            if (contextId.toHexString() !== input.contextId.toLowerCase()) throw new Error('non-canonical context id');
+        } catch {
+            throw new PracticeIntegrityContextError('invalid_context_id');
+        }
+        const context = await this.contexts.findOne({ _id: contextId });
+        if (!context) throw new PracticeIntegrityContextError('context_not_found');
+        return await this.assertContext({
+            contextId: input.contextId,
+            domainId: input.domainId,
+            uid: input.uid,
+            containerKind: context.containerKind,
+            containerId: context.containerId,
+            scopeKind: context.scopeKind,
+            scopeId: context.scopeId,
+            pid: input.pid,
+            mode: context.mode,
+        });
+    }
+}
+
+export function trustedPracticeContextReference(context: PracticeContextDoc): TrustedPracticeContextReference {
+    return canonicalTrustedPracticeContextReference({
+        contextId: new ObjectId(context._id),
+        domainId: context.domainId,
+        uid: context.uid,
+        pid: context.pid,
+        mode: context.mode,
+        containerKind: context.containerKind,
+        containerId: new ObjectId(context.containerId),
+        scopeKind: context.scopeKind,
+        scopeId: context.scopeId,
+        targets: context.revisions.map((ref) => ({
+            ...ref,
+            revisionId: new ObjectId(ref.revisionId),
+            containerId: new ObjectId(ref.containerId),
+        })),
+    });
+}
+
+export function canonicalTrustedPracticeContextReference(value: unknown): TrustedPracticeContextReference {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        throw new PracticeIntegrityContextError('context_integrity_mismatch');
+    }
+    const reference = value as TrustedPracticeContextReference;
+    if (
+        !(reference.contextId instanceof ObjectId) ||
+        !(reference.containerId instanceof ObjectId) ||
+        typeof reference.domainId !== 'string' ||
+        !reference.domainId ||
+        !Number.isSafeInteger(reference.uid) ||
+        reference.uid <= 0 ||
+        !Number.isSafeInteger(reference.pid) ||
+        reference.pid <= 0 ||
+        !['student', 'preview'].includes(reference.mode) ||
+        !['course', 'problemSet'].includes(reference.containerKind) ||
+        !['chapter', 'stage'].includes(reference.scopeKind) ||
+        !hasValidPracticeScope(reference.containerKind, reference.scopeKind) ||
+        !Number.isSafeInteger(reference.scopeId) ||
+        reference.scopeId <= 0 ||
+        !Array.isArray(reference.targets) ||
+        !reference.targets.length
+    ) {
+        throw new PracticeIntegrityContextError('context_integrity_mismatch');
+    }
+    const containers = new Set<string>();
+    let primary = false;
+    const targets = reference.targets.map((target) => {
+        assertRevisionRef(target);
+        const containerIdentity = `${target.containerKind}:${target.containerId.toHexString()}`;
+        if (containers.has(containerIdentity)) throw new PracticeIntegrityContextError('revision_integrity_mismatch');
+        containers.add(containerIdentity);
+        if (
+            target.containerKind === reference.containerKind &&
+            target.containerId.equals(reference.containerId) &&
+            target.scopeKind === reference.scopeKind &&
+            target.scopeId === reference.scopeId
+        ) {
+            primary = true;
+        }
+        return {
+            ...target,
+            revisionId: new ObjectId(target.revisionId),
+            containerId: new ObjectId(target.containerId),
+        };
+    });
+    if (!primary) throw new PracticeIntegrityContextError('revision_integrity_mismatch');
+    assertPracticeContextTargetTopology(reference, targets);
+    return {
+        ...reference,
+        contextId: new ObjectId(reference.contextId),
+        containerId: new ObjectId(reference.containerId),
+        targets,
+    };
+}
+
+export function assertTrustedPracticeContextBinding(
+    value: unknown,
+    identity: { domainId: string; uid: number; pid: number },
+): TrustedPracticeContextReference {
+    const reference = canonicalTrustedPracticeContextReference(value);
+    if (reference.domainId !== identity.domainId || reference.uid !== identity.uid || reference.pid !== identity.pid) {
+        throw new PracticeIntegrityContextError('identity_mismatch');
+    }
+    return reference;
 }
 
 export const practiceIntegrityRevisionColl = db.collection<PracticeIntegrityRevisionDoc>('practice.integrityRevisions');
@@ -526,9 +684,12 @@ export async function apply(ctx: any): Promise<void> {
 }
 
 global.Hydro.model.practiceIntegrity = {
+    assertTrustedPracticeContextBinding,
     canonicalPracticePolicy,
     combinePracticePolicies,
     practiceIntegrityRevisionColl,
     practiceContextColl,
     practiceIntegrityService,
+    canonicalTrustedPracticeContextReference,
+    trustedPracticeContextReference,
 };

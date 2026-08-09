@@ -1,5 +1,6 @@
 import { expect } from 'chai';
 import { localizeErrorParameter, localizedErrorText } from '@hydrooj/framework';
+import { ObjectId } from 'mongodb';
 import { beforeEach, describe, it } from 'node:test';
 
 const Module = require('module');
@@ -82,11 +83,16 @@ const calls = {
     storageSigns: [] as any[],
     trainingQueries: [] as any[],
     mindmapSnapshots: [] as string[],
+    trainingStatusWrites: [] as any[],
 };
 let denySelection = false;
 let currentContainer: any;
 let currentTrainingStatus: any;
 let trainingRows: any[] = [];
+let trainingStatusRows: any[] = [];
+let problemStatuses: Record<string, any> = {};
+let publishedIntegrity: any = null;
+let contextualDoneByScope = new Map<number, Set<number>>();
 const problemDocs = new Map<number, any>();
 
 function problemDict(docs: any[]) {
@@ -111,7 +117,7 @@ const problemStub = {
         return problemDict(visible);
     },
     async getListStatus() {
-        return {};
+        return problemStatuses;
     },
     canViewBy(pdoc: any, user: any) {
         if (!user._problemAclLoaded || user._problemAclDomainId !== pdoc.domainId) return false;
@@ -159,10 +165,46 @@ function cursor(rows: any[] = []) {
 
 const trainingStub = {
     getPids,
-    isDone: () => false,
-    isProgress: () => false,
-    isOpen: () => true,
-    isInvalid: () => false,
+    buildScopedTrainingProgress(tdoc: any, doneByScope: Map<number, Set<number>>) {
+        let completedProblemCount = 0;
+        let totalProblemCount = 0;
+        const doneNids: number[] = [];
+        const nsdict: Record<number, any> = {};
+        for (const node of tdoc.dag) {
+            const pids = new Set<number>(node.pids);
+            const donePids = Array.from(pids).filter((pid) => doneByScope.get(node._id)?.has(pid));
+            completedProblemCount += donePids.length;
+            totalProblemCount += pids.size;
+            const requirementsMet = node.requireNids.every((nid: number) => doneNids.includes(nid));
+            const isDone = donePids.length === pids.size && requirementsMet;
+            if (isDone) doneNids.push(node._id);
+            nsdict[node._id] = {
+                donePids,
+                isDone,
+                isProgress: requirementsMet && donePids.length > 0 && donePids.length < pids.size,
+                isOpen: requirementsMet && donePids.length === 0,
+                isInvalid: !requirementsMet,
+            };
+        }
+        return {
+            completedProblemCount,
+            totalProblemCount,
+            doneNids,
+            done: tdoc.dag.length > 0 && doneNids.length === tdoc.dag.length,
+            nsdict,
+        };
+    },
+    isDone: (node: any, doneNids: Set<number>, donePids: Set<number>) =>
+        node.requireNids.every((nid: number) => doneNids.has(nid)) && node.pids.every((pid: number) => donePids.has(pid)),
+    isProgress: (node: any, doneNids: Set<number>, donePids: Set<number>, progPids: Set<number>) =>
+        node.requireNids.every((nid: number) => doneNids.has(nid)) &&
+        !node.pids.every((pid: number) => donePids.has(pid)) &&
+        node.pids.some((pid: number) => donePids.has(pid) || progPids.has(pid)),
+    isOpen: (node: any, doneNids: Set<number>, donePids: Set<number>, progPids: Set<number>) =>
+        node.requireNids.every((nid: number) => doneNids.has(nid)) &&
+        !node.pids.every((pid: number) => donePids.has(pid)) &&
+        !node.pids.some((pid: number) => donePids.has(pid) || progPids.has(pid)),
+    isInvalid: (node: any, doneNids: Set<number>) => !node.requireNids.every((nid: number) => doneNids.has(nid)),
     async get(domainId: string, tid: unknown) {
         calls.containerGets.push({ domainId, tid });
         return currentContainer;
@@ -174,7 +216,8 @@ const trainingStub = {
     async edit(...args: any[]) {
         calls.edit.push(args);
     },
-    async setStatus() {
+    async setStatus(...args: any[]) {
+        calls.trainingStatusWrites.push(args);
         return {};
     },
     async getStatus() {
@@ -185,7 +228,11 @@ const trainingStub = {
         return cursor(trainingRows);
     },
     getMultiStatus() {
-        return cursor();
+        return cursor(trainingStatusRows);
+    },
+    async getList(_domainId: string, tids: ObjectId[]) {
+        const wanted = new Set(tids.map(String));
+        return Object.fromEntries(trainingRows.filter((tdoc) => wanted.has(String(tdoc.docId))).map((tdoc) => [String(tdoc.docId), tdoc]));
     },
 };
 
@@ -195,6 +242,25 @@ const contestStub = {
     },
     getMulti() {
         return cursor();
+    },
+};
+
+const practiceIntegrityStub = {
+    practiceIntegrityService: {
+        async getLatestPublished() {
+            return publishedIntegrity;
+        },
+    },
+};
+
+const contextualCompletionStub = {
+    contextualCompletionService: {
+        async getCompletedByScope() {
+            return contextualDoneByScope;
+        },
+        async getCompletedCounts() {
+            return new Map<number, number>();
+        },
     },
 };
 
@@ -257,6 +323,7 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     if (fromHandler && request === '../error') return errors;
     if (fromHandler && request === '../model/builtin') return { PERM, PRIV, STATUS };
     if (fromHandler && request === '../model/contest') return contestStub;
+    if (fromHandler && request === '../model/contextual-completion') return contextualCompletionStub;
     if (fromHandler && request === '../model/document') return { getMultiStatus: () => cursor(), TYPE_PROBLEM: 10 };
     if (fromHandler && request === '../model/oplog') {
         return {
@@ -265,6 +332,7 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
             },
         };
     }
+    if (fromHandler && request === '../model/practice-integrity') return practiceIntegrityStub;
     if (fromHandler && request === '../model/problem') return problemStub;
     if (fromHandler && request === '../model/problem-access') return problemAccessStub;
     if (fromHandler && request === '../model/storage') return storageStub;
@@ -367,11 +435,16 @@ beforeEach(() => {
     calls.storageSigns.length = 0;
     calls.trainingQueries.length = 0;
     calls.mindmapSnapshots.length = 0;
+    calls.trainingStatusWrites.length = 0;
     denySelection = false;
     problemDocs.clear();
     currentContainer = null;
     currentTrainingStatus = null;
     trainingRows = [];
+    trainingStatusRows = [];
+    problemStatuses = {};
+    publishedIntegrity = null;
+    contextualDoneByScope = new Map();
     boundGroupIds = [];
     boundGroupError = null;
     publicMindmaps = [];
@@ -655,6 +728,235 @@ describe('P3.8 course workspace capabilities', () => {
         const allowed = makeHandler(courseRoutes.course_detail, allowedUser);
         await allowed.get('forged-domain', 'course');
         expect(allowed.response.body.canCreateQuiz).to.equal(true);
+    });
+});
+
+describe('P1.4 contextual practice progress', () => {
+    beforeEach(() => {
+        problemDocs.set(11, { domainId: 'system', docId: 11, pid: 'P11', title: 'Context AC', owner: 7, hidden: false });
+        problemDocs.set(12, { domainId: 'system', docId: 12, pid: 'P12', title: 'Global AC', owner: 7, hidden: false });
+        problemStatuses = { 11: { status: STATUS.STATUS_ACCEPTED }, 12: { status: STATUS.STATUS_ACCEPTED } };
+        publishedIntegrity = { revision: 1 };
+        contextualDoneByScope = new Map([[1, new Set([11])]]);
+    });
+
+    it('counts only scoped completion facts in a controlled course and keeps legacy courses on global AC', async () => {
+        currentContainer = {
+            domainId: 'system',
+            docId: 'course',
+            owner: 7,
+            kind: 'course',
+            title: 'Course',
+            content: '',
+            description: '',
+            courseGroupIds: [],
+            dag: [{ _id: 1, title: 'Chapter', content: '', requireNids: [], pids: [11, 12], tids: [] }],
+        };
+        const controlled = makeHandler(courseRoutes.course_detail);
+        await controlled.get('forged-domain', 'course');
+        expect(controlled.response.body.chapters[0]).to.include({ doneCount: 1, totalCount: 2, progress: 50 });
+
+        contextualDoneByScope = new Map();
+        const emptyControlled = makeHandler(courseRoutes.course_detail);
+        await emptyControlled.get('forged-domain', 'course');
+        expect(emptyControlled.response.body.chapters[0]).to.include({ doneCount: 0, totalCount: 2, progress: 0 });
+
+        publishedIntegrity = null;
+        const legacy = makeHandler(courseRoutes.course_detail);
+        await legacy.get('forged-domain', 'course');
+        expect(legacy.response.body.chapters[0]).to.include({ doneCount: 2, totalCount: 2, progress: 100 });
+    });
+
+    it('shows only scoped completion facts without overwriting legacy problem-set progress', async () => {
+        currentContainer = {
+            domainId: 'system',
+            docId: 'training',
+            owner: 7,
+            kind: 'training',
+            title: 'Problem set',
+            content: '',
+            description: '',
+            dag: [{ _id: 1, title: 'Stage', requireNids: [], pids: [11, 12] }],
+        };
+        const handler = makeHandler(trainingRoutes.training_detail);
+        await handler.get('forged-domain', 'training');
+        expect(handler.response.body.nsdict[1]).to.include({ progress: 50, isDone: false });
+        expect(handler.response.body.nsdict[1].donePids).to.deep.equal([11]);
+        expect(handler.response.body.integrityControlled).to.equal(true);
+        expect(handler.response.body).to.include({ completedProblemCount: 1, totalProblemCount: 2 });
+        expect(calls.trainingStatusWrites).to.deep.equal([]);
+    });
+
+    it('counts a repeated problem independently in each controlled detail scope', async () => {
+        currentContainer = {
+            domainId: 'system',
+            docId: 'training',
+            owner: 7,
+            kind: 'training',
+            title: 'Repeated problem set',
+            content: '',
+            description: '',
+            dag: [
+                { _id: 1, title: 'Stage one', requireNids: [], pids: [11] },
+                { _id: 2, title: 'Stage two', requireNids: [1], pids: [11] },
+            ],
+        };
+        contextualDoneByScope = new Map([[1, new Set([11])]]);
+
+        const handler = makeHandler(trainingRoutes.training_detail);
+        await handler.get('forged-domain', 'training');
+
+        expect(handler.response.body).to.include({ completedProblemCount: 1, totalProblemCount: 2 });
+        expect(handler.response.body.tsdoc).to.include({ done: false });
+        expect(handler.response.body.nsdict[1].donePids).to.deep.equal([11]);
+        expect(handler.response.body.nsdict[2].donePids).to.deep.equal([]);
+    });
+
+    it('does not treat an ordinary wrong answer or AC as attempted progress in a controlled problem set', async () => {
+        currentContainer = {
+            domainId: 'system',
+            docId: 'training',
+            owner: 7,
+            kind: 'training',
+            title: 'Problem set',
+            content: '',
+            description: '',
+            dag: [{ _id: 1, title: 'Stage', requireNids: [], pids: [11, 12] }],
+        };
+        problemStatuses = { 11: { status: 2 }, 12: { status: STATUS.STATUS_ACCEPTED } };
+        contextualDoneByScope = new Map();
+
+        const handler = makeHandler(trainingRoutes.training_detail);
+        await handler.get('forged-domain', 'training');
+
+        expect(handler.response.body.nsdict[1]).to.include({ progress: 0, isDone: false, isProgress: false, isOpen: true });
+        expect(handler.response.body.nsdict[1].donePids).to.deep.equal([]);
+    });
+
+    it('derives controlled list progress by scope without overwriting legacy status', async () => {
+        const tid = new ObjectId();
+        trainingRows = [
+            {
+                domainId: 'system',
+                docId: tid,
+                owner: 7,
+                kind: 'training',
+                title: 'Repeated problem set',
+                content: '',
+                description: '',
+                dag: [
+                    { _id: 1, title: 'Stage one', requireNids: [], pids: [11] },
+                    { _id: 2, title: 'Stage two', requireNids: [1], pids: [11] },
+                ],
+            },
+        ];
+        const legacyStatus = { docId: tid, uid: 42, enroll: 1, donePids: [11], doneNids: [1, 2], done: true };
+        trainingStatusRows = [legacyStatus];
+        contextualDoneByScope = new Map();
+
+        const empty = makeHandler(trainingRoutes.training_main);
+        await empty.get('forged-domain', 1, '');
+        expect(empty.response.body.tsdict[String(tid)]).to.include(legacyStatus);
+        expect(empty.response.body.tsdict[String(tid)].contextualProgress).to.deep.equal({
+            completedProblemCount: 0,
+            totalProblemCount: 2,
+            doneNids: [],
+            done: false,
+            nsdict: {
+                1: { donePids: [], isDone: false, isProgress: false, isOpen: true, isInvalid: false },
+                2: { donePids: [], isDone: false, isProgress: false, isOpen: false, isInvalid: true },
+            },
+        });
+
+        contextualDoneByScope = new Map([[1, new Set([11])]]);
+        const partial = makeHandler(trainingRoutes.training_main);
+        await partial.get('forged-domain', 1, '');
+        expect(partial.response.body.tsdict[String(tid)].contextualProgress).to.deep.include({
+            completedProblemCount: 1,
+            doneNids: [1],
+        });
+        expect(partial.response.body.tsdict[String(tid)].contextualProgress.nsdict[2].donePids).to.deep.equal([]);
+
+        contextualDoneByScope = new Map([
+            [1, new Set([11])],
+            [2, new Set([11])],
+        ]);
+        const complete = makeHandler(trainingRoutes.training_main);
+        await complete.get('forged-domain', 1, '');
+        expect(complete.response.body.tsdict[String(tid)].contextualProgress).to.deep.include({
+            completedProblemCount: 2,
+            totalProblemCount: 2,
+            doneNids: [1, 2],
+            done: true,
+        });
+    });
+
+    it('derives controlled progress for enrolled problem sets outside the current page', async () => {
+        const currentTid = new ObjectId();
+        const enrolledTid = new ObjectId();
+        trainingRows = [
+            {
+                domainId: 'system',
+                docId: currentTid,
+                owner: 7,
+                kind: 'training',
+                title: 'Current page',
+                content: '',
+                description: '',
+                dag: [{ _id: 1, title: 'Stage', requireNids: [], pids: [11] }],
+            },
+            {
+                domainId: 'system',
+                docId: enrolledTid,
+                owner: 7,
+                kind: 'training',
+                title: 'Enrolled outside page',
+                content: '',
+                description: '',
+                dag: [{ _id: 1, title: 'Stage', requireNids: [], pids: [11] }],
+            },
+        ];
+        trainingStatusRows = [
+            { docId: currentTid, uid: 42, enroll: 1, donePids: [11], doneNids: [1], done: true },
+            { docId: enrolledTid, uid: 42, enroll: 1, donePids: [11], doneNids: [1], done: true },
+        ];
+        contextualDoneByScope = new Map();
+        const handler = makeHandler(trainingRoutes.training_main);
+        handler.paginate = async (value: any) => {
+            const docs = await value.toArray();
+            return [[docs[0]], 1, 1];
+        };
+
+        await handler.get('forged-domain', 1, '');
+
+        expect(handler.response.body.tdict[String(enrolledTid)].title).to.equal('Enrolled outside page');
+        expect(handler.response.body.tsdict[String(enrolledTid)].contextualProgress).to.deep.include({
+            completedProblemCount: 0,
+            totalProblemCount: 1,
+            doneNids: [],
+            done: false,
+        });
+    });
+
+    it('keeps uncontrolled list progress on the existing global training status', async () => {
+        const tid = new ObjectId();
+        trainingRows = [
+            {
+                domainId: 'system',
+                docId: tid,
+                owner: 7,
+                kind: 'training',
+                title: 'Legacy problem set',
+                dag: [{ _id: 1, title: 'Stage', requireNids: [], pids: [11] }],
+            },
+        ];
+        trainingStatusRows = [{ docId: tid, uid: 42, enroll: 1, donePids: [11], doneNids: [1], done: true }];
+        publishedIntegrity = null;
+
+        const handler = makeHandler(trainingRoutes.training_main);
+        await handler.get('forged-domain', 1, '');
+        expect(handler.response.body.tsdict[String(tid)]).to.deep.equal(trainingStatusRows[0]);
+        expect(handler.response.body.tsdict[String(tid)].contextualProgress).to.equal(undefined);
     });
 });
 

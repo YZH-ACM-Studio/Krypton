@@ -6,6 +6,7 @@ import { Logger } from '@hydrooj/utils';
 import { Context } from '../context';
 import { localizedErrorText, ProblemConfigError, ProblemNotFoundError, ValidationError } from '../error';
 import { JudgeMeta, ProblemDataWriteConfirmation, RecordDoc } from '../interface';
+import { assertTrustedPracticeContextBinding, type TrustedPracticeContextReference } from './practice-integrity';
 import {
     parseProblemConfigObject,
     parseStructuredRegionSubmission,
@@ -247,6 +248,8 @@ export default class RecordModel {
             /** Hydro session key for the authoritative Vigil team-session gate. */
             vigilSessionKey?: string;
             dataWriteActiveContainerConfirmation?: ProblemDataWriteConfirmation;
+            /** Server-validated context snapshot; callers must never construct this from request fields. */
+            practiceContext?: TrustedPracticeContextReference;
         } = { type: 'judge' },
     ) {
         const data: RecordDoc = {
@@ -275,6 +278,10 @@ export default class RecordModel {
         if (args.notify) data.notify = true;
         if (args.dataWriteActiveContainerConfirmation) {
             data.dataWriteActiveContainerConfirmation = { ...args.dataWriteActiveContainerConfirmation };
+        }
+        if (args.practiceContext) {
+            if (args.contest || args.contestContext || !['judge', 'pretest'].includes(args.type)) throw new ValidationError('practiceContextId');
+            data.practiceContext = assertTrustedPracticeContextBinding(args.practiceContext, { domainId, uid, pid });
         }
         if (args.type === 'manual') {
             if (!args.contest) throw new ValidationError('contest');

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { searchTrainingProblems } from '../src/pages/training-search.ts';
+import { resolveTrainingListProgress, searchTrainingProblems } from '../src/pages/training-search.ts';
 
 const dag = [
   { _id: 1, title: '入门', pids: [101, 202, 999] },
@@ -17,6 +17,11 @@ const pdict = {
 const psdict = {
   101: { status: 1 },
   202: { status: 2 },
+};
+
+const nsdict = {
+  1: { donePids: [101] },
+  2: { donePids: [] },
 };
 
 describe('p3.24 training problem search', () => {
@@ -48,6 +53,37 @@ describe('p3.24 training problem search', () => {
     expect(searchTrainingProblems({ dag, pdict, psdict, query: '999' })).to.deep.equal({ total: 0, results: [] });
   });
 
+  it('keeps controlled scope completion separate from historical global status', () => {
+    const partial = searchTrainingProblems({ dag, pdict, psdict, nsdict, controlled: true, query: '1001' }).results[0];
+    expect(partial.status).to.equal('partiallyAccepted');
+    expect(partial.completedChapterCount).to.equal(1);
+    expect(partial.chapters).to.deep.equal([
+      { id: 1, title: '入门', completed: true },
+      { id: 2, title: '图论', completed: false },
+    ]);
+
+    const historical = searchTrainingProblems({
+      dag,
+      pdict,
+      psdict,
+      nsdict: { 1: { donePids: [] }, 2: { donePids: [] } },
+      controlled: true,
+      query: '1001',
+    }).results[0];
+    expect(historical.status).to.equal('previouslyAccepted');
+    expect(searchTrainingProblems({ dag, pdict, psdict, nsdict, controlled: true, query: 'rescue' }).results[0].status).to.equal('unattempted');
+
+    const complete = searchTrainingProblems({
+      dag,
+      pdict,
+      psdict,
+      nsdict: { 1: { donePids: [101] }, 2: { donePids: [101] } },
+      controlled: true,
+      query: '1001',
+    }).results[0];
+    expect(complete.status).to.equal('accepted');
+  });
+
   it('returns no rows for an empty query and applies a deterministic display limit', () => {
     expect(searchTrainingProblems({ dag, pdict, psdict, query: '   ' })).to.deep.equal({ total: 0, results: [] });
     const result = searchTrainingProblems({ dag, pdict, psdict, query: 'a', limit: 1 });
@@ -57,9 +93,34 @@ describe('p3.24 training problem search', () => {
 
   it('connects the search results to existing problem and chapter navigation', () => {
     const source = readFileSync(resolve(import.meta.dirname, '../src/pages/training.tsx'), 'utf8');
-    expect(source).to.include('searchTrainingProblems({ dag, pdict, psdict, query: problemQuery })');
+    expect(source).to.include('searchTrainingProblems({ dag, pdict, psdict, nsdict, controlled: integrityControlled, query: problemQuery })');
     expect(source).to.include('aria-label="搜索当前训练中的题目"');
     expect(source).to.include('selectChapter(chapter.id)');
     expect(source).to.include('replaceRouteTokens(bs.urls.problemDetail, { PID: String(row.docId) })');
+  });
+
+  it('uses scoped list progress for controlled sets and legacy progress otherwise', () => {
+    const status = { donePids: [101], doneNids: [1, 2] };
+    const controlled = resolveTrainingListProgress(status, {
+      completedProblemCount: 1,
+      doneNids: [1],
+      nsdict: {
+        1: { donePids: [101], isDone: true },
+        2: { donePids: [], isDone: false },
+      },
+    });
+    expect(controlled).to.deep.equal({
+      completedProblemCount: 1,
+      doneNids: [1],
+      nsdict: {
+        1: { donePids: [101], isDone: true },
+        2: { donePids: [], isDone: false },
+      },
+    });
+    expect(resolveTrainingListProgress(status)).to.deep.equal({
+      completedProblemCount: 1,
+      doneNids: [1, 2],
+      nsdict: undefined,
+    });
   });
 });

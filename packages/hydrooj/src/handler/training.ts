@@ -5,8 +5,10 @@ import { sortFiles } from '@hydrooj/utils/lib/utils';
 import { localizeErrorParameter, localizedErrorText, FileLimitExceededError, FileUploadError, NotFoundError, ValidationError } from '../error';
 import { Tdoc, TrainingDoc } from '../interface';
 import { PERM, PRIV, STATUS } from '../model/builtin';
+import { contextualCompletionService } from '../model/contextual-completion';
 import * as document from '../model/document';
 import * as oplog from '../model/oplog';
+import { practiceIntegrityService } from '../model/practice-integrity';
 import problem from '../model/problem';
 import { assertProblemBankSelection } from '../model/problem-access';
 import storage from '../model/storage';
@@ -97,6 +99,25 @@ class TrainingMainHandler extends Handler {
             }
         }
         for (const tdoc of tdocs) tdict[tdoc.docId.toHexString()] = tdoc;
+        if (this.user.hasPriv(PRIV.PRIV_USER_PROFILE)) {
+            await Promise.all(
+                (Object.values(tdict) as TrainingDoc[]).map(async (tdoc) => {
+                    const publishedIntegrity = await practiceIntegrityService.getLatestPublished(domainId, 'problemSet', tdoc.docId);
+                    if (!publishedIntegrity) return;
+                    const contextualDoneByScope = await contextualCompletionService.getCompletedByScope(
+                        domainId,
+                        this.user._id,
+                        'problemSet',
+                        tdoc.docId,
+                    );
+                    const key = tdoc.docId.toHexString();
+                    tsdict[key] = {
+                        ...tsdict[key],
+                        contextualProgress: training.buildScopedTrainingProgress(tdoc, contextualDoneByScope),
+                    };
+                }),
+            );
+        }
         this.response.template = 'training_main.html';
         this.response.body = {
             tdocs,
@@ -138,42 +159,65 @@ class TrainingDetailHandler extends Handler {
         ]);
         const missing = pids.filter((pid) => !pdict[pid]?.docId);
         const exist = pids.filter((pid) => pdict[pid]?.docId);
-        const [psdict, selfPsdict] = await Promise.all([
+        const [psdict, selfPsdict, publishedIntegrity] = await Promise.all([
             problem.getListStatus(domainId, uid, exist),
             shouldCompare ? problem.getListStatus(domainId, this.user._id, exist) : {},
+            practiceIntegrityService.getLatestPublished(domainId, 'problemSet', tdoc.docId),
         ]);
+        const [contextualDoneByScope, selfContextualDoneByScope] = publishedIntegrity
+            ? await Promise.all([
+                  contextualCompletionService.getCompletedByScope(domainId, uid, 'problemSet', tdoc.docId),
+                  shouldCompare
+                      ? contextualCompletionService.getCompletedByScope(domainId, this.user._id, 'problemSet', tdoc.docId)
+                      : Promise.resolve(null),
+              ])
+            : [null, null];
+        const totalProblemCount = tdoc.dag.reduce((total, node) => total + new Set(node.pids).size, 0);
         const donePids = new Set<number>();
         const progPids = new Set<number>();
         for (const pid in psdict) {
             if (!+pid) continue;
             const psdoc = psdict[pid];
-            if (psdoc.status) {
-                if (psdoc.status === STATUS.STATUS_ACCEPTED) donePids.add(+pid);
-                else progPids.add(+pid);
+            if (!publishedIntegrity && psdoc.status) {
+                if (psdoc.status === STATUS.STATUS_ACCEPTED) {
+                    donePids.add(+pid);
+                } else progPids.add(+pid);
             }
         }
         const nsdict = {};
         const ndict = {};
         const doneNids = new Set<number>();
+        let completedProblemCount = 0;
         for (const node of tdoc.dag) {
             ndict[node._id] = node;
-            const totalCount = node.pids.length;
-            const doneCount = new Set(node.pids).intersection(new Set(donePids)).size;
+            const nodePids = new Set(node.pids);
+            const totalCount = nodePids.size;
+            const scopedDonePids = contextualDoneByScope ? nodePids.intersection(contextualDoneByScope.get(node._id) || new Set<number>()) : donePids;
+            if (contextualDoneByScope) for (const pid of scopedDonePids) donePids.add(pid);
+            const doneCount = nodePids.intersection(new Set(scopedDonePids)).size;
+            completedProblemCount += doneCount;
             const nsdoc = {
                 progress: totalCount ? Math.floor(100 * (doneCount / totalCount)) : 100,
-                isDone: training.isDone(node, doneNids, donePids),
-                isProgress: training.isProgress(node, doneNids, donePids, progPids),
-                isOpen: training.isOpen(node, doneNids, donePids, progPids),
+                isDone: training.isDone(node, doneNids, scopedDonePids),
+                isProgress: training.isProgress(node, doneNids, scopedDonePids, progPids),
+                isOpen: training.isOpen(node, doneNids, scopedDonePids, progPids),
                 isInvalid: training.isInvalid(node, doneNids),
+                donePids: Array.from(scopedDonePids),
+                selfDonePids: selfContextualDoneByScope
+                    ? Array.from(nodePids.intersection(selfContextualDoneByScope.get(node._id) || new Set<number>()))
+                    : [],
             };
             if (nsdoc.isDone) doneNids.add(node._id);
             nsdict[node._id] = nsdoc;
         }
-        const tsdoc = await training.setStatus(domainId, tdoc.docId, uid, {
+        const computedStatus = {
             doneNids: Array.from(doneNids),
             donePids: Array.from(donePids),
             done: doneNids.size === tdoc.dag.length,
-        });
+        };
+        const tsdoc = publishedIntegrity
+            ? { ...(await training.getStatus(domainId, tdoc.docId, uid)), ...computedStatus }
+            : await training.setStatus(domainId, tdoc.docId, uid, computedStatus);
         const groups = this.user.hasPerm(PERM.PERM_EDIT_DOMAIN) ? await user.listGroup(domainId) : [];
         this.response.body = {
             tdoc,
@@ -188,6 +232,9 @@ class TrainingDetailHandler extends Handler {
             selfPsdict,
             groups,
             missing,
+            completedProblemCount,
+            totalProblemCount,
+            integrityControlled: !!publishedIntegrity,
         };
         this.response.body.tdoc.description = this.response.body.tdoc.description
             .replace(/\(file:\/\//g, `(./${tdoc.docId}/file/`)
@@ -206,12 +253,12 @@ class TrainingDetailHandler extends Handler {
                 .toArray();
             const memberUids = enrollDocs.map((x) => +x.uid);
             const ub = (global as any).Hydro?.model?.userbind;
-            const [memberUdict, students, ubGroups, acDocs] = await Promise.all([
+            const [memberUdict, students, ubGroups, acDocs, contextualCounts] = await Promise.all([
                 // getListForRender = 单条批量查询；getList 是 N 个 getById（对抗审查发现）
                 user.getListForRender(domainId, memberUids, false),
                 ub?.findStudentsByUserIds ? ub.findStudentsByUserIds(domainId, memberUids) : {},
                 ub?.listUserGroups ? ub.listUserGroups(domainId) : [],
-                memberUids.length && exist.length
+                !publishedIntegrity && memberUids.length && exist.length
                     ? document
                           .getMultiStatus(domainId, document.TYPE_PROBLEM, {
                               uid: { $in: memberUids },
@@ -221,6 +268,15 @@ class TrainingDetailHandler extends Handler {
                           .project({ uid: 1, docId: 1 })
                           .toArray()
                     : [],
+                publishedIntegrity
+                    ? contextualCompletionService.getCompletedCounts(
+                          domainId,
+                          memberUids,
+                          'problemSet',
+                          tdoc.docId,
+                          new Map(tdoc.dag.map((node) => [node._id, new Set(node.pids)])),
+                      )
+                    : new Map<number, number>(),
             ]);
             // limit 1000 截断不许静默（对抗审查发现）——前端据此提示。
             this.response.body.membersTruncated = enrollDocs.length >= 1000;
@@ -235,8 +291,8 @@ class TrainingDetailHandler extends Handler {
                     realName: s?.realName || '',
                     studentId: s?.studentId || '',
                     groups: (s?.groupIds || []).map((g: any) => groupNameById.get(String(g))).filter(Boolean),
-                    done: doneByUid.get(mUid) || 0,
-                    total: exist.length,
+                    done: publishedIntegrity ? contextualCounts.get(mUid) || 0 : doneByUid.get(mUid) || 0,
+                    total: publishedIntegrity ? tdoc.dag.reduce((total, node) => total + node.pids.length, 0) : exist.length,
                 };
             });
         }
@@ -336,9 +392,17 @@ export class TrainingFilesHandler extends Handler {
     @param('tid', Types.ObjectId)
     async get(domainId: string, tid: ObjectId) {
         if (!this.user.own(this.tdoc)) this.checkPerm(PERM.PERM_EDIT_TRAINING);
+        const tsdoc = await training.getStatus(domainId, this.tdoc.docId, this.user._id);
+        const publishedIntegrity = await practiceIntegrityService.getLatestPublished(domainId, 'problemSet', this.tdoc.docId);
+        const contextualProgress = publishedIntegrity
+            ? training.buildScopedTrainingProgress(
+                  this.tdoc,
+                  await contextualCompletionService.getCompletedByScope(domainId, this.user._id, 'problemSet', this.tdoc.docId),
+              )
+            : null;
         this.response.body = {
             tdoc: this.tdoc,
-            tsdoc: await training.getStatus(domainId, this.tdoc.docId, this.user._id),
+            tsdoc: contextualProgress ? { ...tsdoc, contextualProgress } : tsdoc,
             udoc: await user.getById(domainId, this.tdoc.owner),
             files: sortFiles(this.tdoc.files || []),
             urlForFile: (filename: string) => this.url('training_file_download', { tid, filename }),

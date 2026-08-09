@@ -38,7 +38,15 @@
                     </li>
                     <li>
                     {% if tsdict[tdoc.docId]['enroll'] %}
-                      {% if not tsdict[tdoc.docId]['done'] %}
+                      {% set contextual = tsdict[tdoc.docId]['contextualProgress'] %}
+                      {% if contextual %}
+                        {% set progress = 0 %}
+                        {% if contextual['totalProblemCount'] %}
+                          {% set progress = (100 * contextual['completedProblemCount'] / contextual['totalProblemCount'])|round|int %}
+                        {% endif %}
+                        <span class="icon training-status--icon {% if contextual['done'] %}done{% else %}progress{% endif %}"></span>
+                        <span class="training-status--text {% if contextual['done'] %}done{% else %}progress{% endif %}">{{ _('Completed') }} {{ progress }}%</span>
+                      {% elif not tsdict[tdoc.docId]['done'] %}
                         <span class="icon training-status--icon progress"></span>
                         <span class="training-status--text progress">{{ _('Completed') }} {{ (100 * tsdict[tdoc.docId]['donePids']|length / model.training.getPids(tdoc.dag)|length)|round|int }}%</span>
                       {% else %}
@@ -86,10 +94,18 @@
           <ol class="my secondary training__list">
             {%- for tid, tsdoc in tsdict -%}
               {% if tsdoc['enroll'] %}
-                {% set progress = (100 * (tsdoc['donePids']|length) / (model.training.getPids(tdict[tsdoc['docId']].dag)|length))|round|int %}
+                {% set contextual = tsdoc['contextualProgress'] %}
+                {% if contextual %}
+                  {% set progress = 0 %}
+                  {% if contextual['totalProblemCount'] %}
+                    {% set progress = (100 * contextual['completedProblemCount'] / contextual['totalProblemCount'])|round|int %}
+                  {% endif %}
+                {% else %}
+                  {% set progress = (100 * (tsdoc['donePids']|length) / (model.training.getPids(tdict[tsdoc['docId']].dag)|length))|round|int %}
+                {% endif %}
                 <li class="training__item"><div class="media">
                   <div class="media__left">
-                    <span class="icon training-status--icon {% if tsdoc['done'] %}done{% else %}progress{% endif %}"></span>
+                    <span class="icon training-status--icon {% if contextual and contextual['done'] or not contextual and tsdoc['done'] %}done{% else %}progress{% endif %}"></span>
                   </div>
                   <div class="media__body">
                     <h1 class="training__title"><a href="{{ url('training_detail', tid=tsdoc.docId) }}" data-emoji-enabled>{{ tdict[tsdoc['docId']]['title'] }}</a></h1>

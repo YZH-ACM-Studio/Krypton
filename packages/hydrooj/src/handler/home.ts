@@ -30,12 +30,14 @@ import { verifyTFA } from '../lib/verifyTFA';
 import BlackListModel from '../model/blacklist';
 import { PERM, PRIV } from '../model/builtin';
 import * as contest from '../model/contest';
+import { contextualCompletionService } from '../model/contextual-completion';
 import * as discussion from '../model/discussion';
 import domain from '../model/domain';
 import { buildHomeworkListAccessFilter, canBypassHomeworkAccess, getHomeworkUserGroupIds, participantGroupObjectIds } from '../model/homework-access';
 import message from '../model/message';
 import * as oplog from '../model/oplog';
 import ProblemModel from '../model/problem';
+import { practiceIntegrityService } from '../model/practice-integrity';
 import * as setting from '../model/setting';
 import storage from '../model/storage';
 import system from '../model/system';
@@ -111,12 +113,30 @@ export class HomeHandler extends Handler {
 
     async getTraining(domainId: string, limit = 10) {
         if (!this.user.hasPerm(PERM.PERM_VIEW_TRAINING)) return [[], {}];
-        const tdocs = await training.getMulti(domainId).sort({ pin: -1, _id: 1 }).limit(limit).toArray();
+        const tdocs = await training
+            .getMulti(domainId, { kind: { $ne: 'course' } })
+            .sort({ pin: -1, _id: 1 })
+            .limit(limit)
+            .toArray();
         const tsdict = await training.getListStatus(
             domainId,
             this.user._id,
             tdocs.map((tdoc) => tdoc.docId),
         );
+        if (this.user.hasPriv(PRIV.PRIV_USER_PROFILE)) {
+            await Promise.all(
+                tdocs.map(async (tdoc) => {
+                    const revision = await practiceIntegrityService.getLatestPublished(domainId, 'problemSet', tdoc.docId);
+                    if (!revision) return;
+                    const doneByScope = await contextualCompletionService.getCompletedByScope(domainId, this.user._id, 'problemSet', tdoc.docId);
+                    const key = tdoc.docId.toHexString();
+                    tsdict[key] = {
+                        ...tsdict[key],
+                        contextualProgress: training.buildScopedTrainingProgress(tdoc, doneByScope),
+                    };
+                }),
+            );
+        }
         return [tdocs, tsdict];
     }
 

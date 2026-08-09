@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { expect } from 'chai';
+import { ObjectId } from 'mongodb';
 import { localizeError, localizeErrorParameter, localizedErrorText } from '@hydrooj/framework';
 import { beforeEach, describe, it } from 'node:test';
 
@@ -84,6 +85,8 @@ const calls = {
     storageGet: [] as any[],
     storageGetMeta: [] as any[],
     storageSign: [] as any[],
+    practiceContextAssertions: [] as any[],
+    practiceContextAccess: [] as any[],
 };
 let getMultiResults: any[][] = [];
 let recordGetMultiResults: any[][] = [];
@@ -101,6 +104,7 @@ let managedPublishResult: any = null;
 let managedPublicationPreviewError: Error | null = null;
 let activeDataWriteContainers: any[] = [];
 let pendingContributionRows: any[] = [];
+let practiceContextResult: any;
 const createKinds: string[] = [];
 const knowledgeMapId = '64a000000000000000000001';
 const knowledgeMapTitle = '算法知识图谱';
@@ -621,6 +625,39 @@ const pidNamespaceStub = {
     setPidNamespaceMember: async () => ({}),
     deleteCustomPidNamespace: async () => undefined,
 };
+class TestPracticeIntegrityContextError extends Error {
+    constructor(public readonly reason: string) {
+        super(reason);
+    }
+}
+const practiceIntegrityStub = {
+    PracticeIntegrityContextError: TestPracticeIntegrityContextError,
+    practiceIntegrityService: {
+        async assertSubmissionContext(input: any) {
+            calls.practiceContextAssertions.push(input);
+            return practiceContextResult;
+        },
+    },
+    trustedPracticeContextReference(context: any) {
+        return {
+            contextId: context._id,
+            domainId: 'system',
+            uid: 42,
+            pid: 7,
+            containerKind: 'course',
+            containerId: context.revisions[0].containerId,
+            scopeKind: 'chapter',
+            scopeId: 2,
+            targets: context.revisions,
+            trusted: true,
+        };
+    },
+};
+const practiceIntegrityAccessStub = {
+    async assertPracticeContextAccess(input: any) {
+        calls.practiceContextAccess.push(input);
+    },
+};
 Module._load = function load(request: string, parent: NodeModule, isMain: boolean) {
     if (request === '../error') return errors;
     if (request === '../lib/problem-config') {
@@ -675,6 +712,8 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     if (request === '../model/oplog') return oplogStub;
     if (request === '../model/managed-problem-authoring') return managedAuthoringStub;
     if (request === '../model/problem-pid-namespace') return pidNamespaceStub;
+    if (request === '../model/practice-integrity') return practiceIntegrityStub;
+    if (request === '../model/practice-integrity-access') return practiceIntegrityAccessStub;
     if (request === '../model/discussion') return discussionStub;
     if (request === '../model/domain') return domainStub;
     if (request === '../model/manual-grade') {
@@ -797,6 +836,11 @@ beforeEach(() => {
     managedPublicationPreviewError = null;
     activeDataWriteContainers = [];
     pendingContributionRows = [];
+    practiceContextResult = {
+        _id: new ObjectId('66b800000000000000000020'),
+        mode: 'student',
+        revisions: [],
+    };
     contestOngoing = true;
     createKinds.length = 0;
     (global as any).Hydro.module.problemSearch = {};
@@ -2091,6 +2135,66 @@ describe('P2.11 authoritative problem route domain', () => {
         hack.rdoc = { _id: 'target', lang: 'cpp', code: 'code' };
         await hack.post('forged', '1 2', false, undefined);
         expect(calls.recordAdd[0][0]).to.equal('system');
+    });
+
+    it('validates an opaque practice context at the final submit entry and passes only the trusted snapshot to Record', async () => {
+        practiceContextResult = {
+            _id: new ObjectId('66b800000000000000000020'),
+            mode: 'student',
+            revisions: [
+                {
+                    containerKind: 'course',
+                    containerId: new ObjectId('66b800000000000000000021'),
+                    scopeKind: 'chapter',
+                    scopeId: 2,
+                    revision: 1,
+                },
+            ],
+        };
+        const submit = makeHandler(ProblemSubmitHandler, {});
+        submit.pdoc = { domainId: 'system', docId: 7, config: { type: 'default' } };
+        await submit.post('forged', 'cpp', 'code', false, [], undefined, practiceContextResult._id.toHexString());
+
+        expect(calls.practiceContextAssertions).to.deep.equal([
+            { contextId: practiceContextResult._id.toHexString(), domainId: 'system', uid: 42, pid: 7 },
+        ]);
+        expect(calls.practiceContextAccess[0]).to.include({ domainId: 'system', pid: 7, mode: 'student' });
+        expect(calls.recordAdd[0][6].practiceContext).to.include({ contextId: practiceContextResult._id, trusted: true });
+    });
+
+    it('rejects a Contest or VP submission carrying a practice context before context lookup or Record creation', async () => {
+        const submit = makeHandler(ProblemSubmitHandler, {});
+        const tid = new ObjectId('66b800000000000000000022');
+        submit.pdoc = { domainId: 'system', docId: 7, config: { type: 'default' } };
+        submit.tdoc = { docId: tid, pids: [7] };
+        const error = await captureFailure(() => submit.post('forged', 'cpp', 'code', false, [], tid, new ObjectId().toHexString()));
+        expect(error).to.be.instanceOf(Error);
+        expect(calls.practiceContextAssertions).to.deep.equal([]);
+        expect(calls.recordAdd).to.deep.equal([]);
+    });
+
+    it('does not let an empty body tid downgrade a query-loaded Contest submission into ordinary practice', async () => {
+        const submit = makeHandler(ProblemSubmitHandler, {});
+        const tid = new ObjectId('66b800000000000000000023');
+        submit.pdoc = { domainId: 'system', docId: 7, config: { type: 'default' } };
+        submit.tdoc = { docId: tid, rule: 'acm', pids: [7] };
+
+        const error = await captureFailure(() => submit.post('forged', 'cpp', 'code', false, [], undefined, new ObjectId().toHexString()));
+
+        expect(error).to.be.instanceOf(Error);
+        expect(calls.practiceContextAssertions).to.deep.equal([]);
+        expect(calls.recordAdd).to.deep.equal([]);
+    });
+
+    it('rejects a non-canonical practice context id before lookup or Record creation', async () => {
+        const submit = makeHandler(ProblemSubmitHandler, {});
+        submit.pdoc = { domainId: 'system', docId: 7, config: { type: 'default' } };
+
+        const error = await captureFailure(() => submit.post('forged', 'cpp', 'code', false, [], undefined, 'bad\ncontext'));
+
+        expect(error).to.be.instanceOf(GenericError);
+        expect(calls.practiceContextAssertions).to.deep.equal([]);
+        expect(calls.recordAdd).to.deep.equal([]);
     });
 
     it('moves the submit route permission into the problem-aware handler without weakening hacks', async () => {

@@ -118,12 +118,14 @@ const practiceIntegrityService = {
         return {
             _id: new ObjectId('66b700000000000000000012'),
             ...input,
-            policy: input.revisions[0].policy,
-            revisions: input.revisions.map((revision: any) => ({
-                revisionId: revision._id,
-                containerKind: revision.containerKind,
-                containerId: revision.containerId,
-                revision: revision.revision,
+            policy: input.targets[0].revision.policy,
+            revisions: input.targets.map((target: any) => ({
+                revisionId: target.revision._id,
+                containerKind: target.revision.containerKind,
+                containerId: target.revision.containerId,
+                scopeKind: target.scopeKind,
+                scopeId: target.scopeId,
+                revision: target.revision.revision,
             })),
             issuedAt: new Date('2026-08-09T08:00:00Z'),
             expiresAt: new Date('2026-08-09T08:15:00Z'),
@@ -154,6 +156,8 @@ const routes = new Map<string, any>();
 const originalLoad = Module._load;
 Module._load = function load(request: string, parent: NodeModule, isMain: boolean) {
     const fromHandler = parent?.filename?.endsWith('/packages/hydrooj/src/handler/practice-integrity.ts');
+    const fromPracticeAccess = parent?.filename?.endsWith('/packages/hydrooj/src/model/practice-integrity-access.ts');
+    const fromPracticeModule = fromHandler || fromPracticeAccess;
     if (fromHandler && request === '@hydrooj/utils') {
         return {
             Logger: class {
@@ -167,14 +171,14 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
             },
         };
     }
-    if (fromHandler && request === '../error') {
+    if (fromPracticeModule && request === '../error') {
         return {
             localizedErrorText,
             PermissionError: TestPermissionError,
             ValidationError: TestValidationError,
         };
     }
-    if (fromHandler && request === '../model/builtin') return { PERM, PRIV };
+    if ((fromHandler && request === '../model/builtin') || (fromPracticeAccess && request === './builtin')) return { PERM, PRIV };
     if (fromHandler && request === '../model/oplog') {
         return {
             async log(...args: any[]) {
@@ -189,8 +193,8 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
             practiceIntegrityService,
         };
     }
-    if (fromHandler && request === '../model/problem') return problemStub;
-    if (fromHandler && request === '../model/training') return trainingStub;
+    if ((fromHandler && request === '../model/problem') || (fromPracticeAccess && request === './problem')) return problemStub;
+    if ((fromHandler && request === '../model/training') || (fromPracticeAccess && request === './training')) return trainingStub;
     if (fromHandler && request === '../service/server') {
         return {
             Handler: HandlerStub,
@@ -460,7 +464,9 @@ describe('practice integrity handlers', () => {
             contextId: '66b700000000000000000012',
             expiresAt: '2026-08-09T08:15:00.000Z',
         });
-        expect(handler.response.body.revisions).to.deep.equal([{ containerKind: 'course', containerId: String(containerId), revision: 1 }]);
+        expect(handler.response.body.revisions).to.deep.equal([
+            { containerKind: 'course', containerId: String(containerId), scopeKind: 'chapter', scopeId: 3, revision: 1 },
+        ]);
 
         const wrongPid = await capture(() => handler.postIssue(contextIssueArgs({ pid: 43 })));
         expect(wrongPid).to.be.instanceOf(TestValidationError);

@@ -45,6 +45,10 @@ interface HomeContentDocument {
 interface HomeTrainingStatus {
   enroll?: boolean;
   donePids?: unknown[];
+  contextualProgress?: {
+    completedProblemCount?: number;
+    totalProblemCount?: number;
+  };
 }
 
 interface HomePageData {
@@ -98,8 +102,14 @@ function homeworkState(h: HomeContentDocument) {
   return '已结束';
 }
 
-function trainingProgress(t: HomeContentDocument, st: HomeTrainingStatus) {
+export function trainingProgress(t: HomeContentDocument, st: HomeTrainingStatus) {
   if (!st?.enroll) return null;
+  if (st.contextualProgress) {
+    const done = Number.isSafeInteger(st.contextualProgress.completedProblemCount) ? st.contextualProgress.completedProblemCount! : 0;
+    const total = Number.isSafeInteger(st.contextualProgress.totalProblemCount) ? st.contextualProgress.totalProblemCount! : 0;
+    if (!total) return 0;
+    return Math.round((done / total) * 100);
+  }
   const total = Array.isArray(t.dag) ? t.dag.reduce((n, s) => n + (Array.isArray(s.pids) ? s.pids.length : 0), 0) : 0;
   const done = Array.isArray(st.donePids) ? st.donePids.length : 0;
   if (!total) return 0;
@@ -155,14 +165,8 @@ export function KryptonHomePage() {
   // unpack sections
   const [contests] = readTuple(sections.get('contest'), [[], {}] as [HomeContentDocument[], Record<string, unknown>]);
   const [homework] = readTuple(sections.get('homework'), [[], {}] as [HomeContentDocument[], Record<string, unknown>]);
-  const [training, trStatus] = readTuple(
-    sections.get('training'),
-    [[], {}] as [HomeContentDocument[], Record<string, HomeTrainingStatus>],
-  );
-  const [discussions] = readTuple(
-    sections.get('discussion'),
-    [[], {}] as [HomeContentDocument[], Record<string, Record<string, unknown>>],
-  );
+  const [training, trStatus] = readTuple(sections.get('training'), [[], {}] as [HomeContentDocument[], Record<string, HomeTrainingStatus>]);
+  const [discussions] = readTuple(sections.get('discussion'), [[], {}] as [HomeContentDocument[], Record<string, Record<string, unknown>>]);
   const ranking = readList<number>(sections.get('ranking'));
   const [starred] = readTuple(sections.get('starred_problems'), [[], null] as [HomeContentDocument[], null]);
   const [recent] = readTuple(sections.get('recent_problems'), [[], null] as [HomeContentDocument[], null]);

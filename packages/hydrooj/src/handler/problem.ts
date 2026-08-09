@@ -68,6 +68,13 @@ import * as discussion from '../model/discussion';
 import domain from '../model/domain';
 import { markManualPending } from '../model/manual-grade';
 import * as oplog from '../model/oplog';
+import {
+    PracticeIntegrityContextError,
+    practiceIntegrityService,
+    trustedPracticeContextReference,
+    type TrustedPracticeContextReference,
+} from '../model/practice-integrity';
+import { assertPracticeContextAccess } from '../model/practice-integrity-access';
 import problem from '../model/problem';
 import {
     classifyLegacyProgrammingTags,
@@ -1928,9 +1935,79 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
 
 export class ProblemSubmitHandler extends ProblemDetailHandler {
     private assertContestSubmissionContext(tid?: ObjectId) {
-        if (!tid) return;
-        if (!this.tdoc || String(this.tdoc.docId) !== String(tid) || !Array.isArray(this.tdoc.pids) || !this.tdoc.pids.includes(this.pdoc.docId)) {
-            throw new ContestNotFoundError(this.pdoc.domainId, tid);
+        if (!this.tdoc && !tid) return;
+        if (
+            !this.tdoc ||
+            !tid ||
+            String(this.tdoc.docId) !== String(tid) ||
+            !Array.isArray(this.tdoc.pids) ||
+            !this.tdoc.pids.includes(this.pdoc.docId)
+        ) {
+            throw new ContestNotFoundError(this.pdoc.domainId, tid || this.tdoc?.docId);
+        }
+    }
+
+    private rejectPracticeContext(error: unknown): never {
+        if (!(error instanceof PracticeIntegrityContextError)) throw error;
+        if (error.reason === 'expired') {
+            throw new ValidationError('practiceContextId', null, localizedErrorText`真实性训练上下文已过期，请返回课程或题集重新进入题目`);
+        }
+        if (error.reason === 'identity_mismatch' || error.reason === 'scope_container_mismatch') {
+            throw new ValidationError('practiceContextId', null, localizedErrorText`真实性训练上下文与当前提交不匹配`);
+        }
+        throw new ValidationError('practiceContextId', null, localizedErrorText`真实性训练上下文无效，请返回课程或题集重新进入题目`);
+    }
+
+    private async resolvePracticeContext(practiceContextId: string, tid?: ObjectId): Promise<TrustedPracticeContextReference | undefined> {
+        if (!practiceContextId) return undefined;
+        if (tid || this.tdoc) throw new ValidationError('practiceContextId', null, localizedErrorText`比赛或 VP 提交不能使用真实性训练上下文`);
+        const domainId = this.pdoc.domainId;
+        const canonicalContextId = /^[0-9a-f]{24}$/i.test(practiceContextId) ? practiceContextId.toLowerCase() : 'invalid';
+        let rejectionReason = canonicalContextId === 'invalid' ? 'invalid-context-id' : 'context-read-failed';
+        try {
+            if (canonicalContextId === 'invalid') throw new PracticeIntegrityContextError('invalid_context_id');
+            const context = await practiceIntegrityService.assertSubmissionContext({
+                contextId: canonicalContextId,
+                domainId,
+                uid: this.user._id,
+                pid: this.pdoc.docId,
+            });
+            await assertPracticeContextAccess({
+                domainId,
+                user: this.user,
+                handler: this,
+                targets: context.revisions,
+                pid: this.pdoc.docId,
+                mode: context.mode,
+                setRejectionReason: (reason) => {
+                    rejectionReason = reason;
+                },
+            });
+            const reference = trustedPracticeContextReference(context);
+            logger.info(
+                'Practice context accepted for submission domain=%s contextId=%s uid=%d container=%s/%s scope=%s/%d pid=%d revisions=%o stage=submit-gate result=success',
+                domainId,
+                reference.contextId,
+                this.user._id,
+                reference.containerKind,
+                reference.containerId,
+                reference.scopeKind,
+                reference.scopeId,
+                this.pdoc.docId,
+                reference.targets.map((target) => `${target.containerKind}:${target.containerId}:${target.revision}`),
+            );
+            return reference;
+        } catch (error) {
+            const reason = error instanceof PracticeIntegrityContextError ? error.reason : rejectionReason;
+            logger.warn(
+                'Practice context rejected for submission domain=%s contextId=%s uid=%d pid=%d stage=submit-gate reason=%s result=rejected',
+                domainId,
+                canonicalContextId,
+                this.user._id,
+                this.pdoc.docId,
+                reason,
+            );
+            this.rejectPracticeContext(error);
         }
     }
 
@@ -1995,7 +2072,8 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
     @param('pretest', Types.Boolean)
     @param('input', Types.ArrayOf(Types.String, true), true)
     @param('tid', Types.ObjectId, true)
-    async post(_domainId: string, lang: string, code: string, pretest = false, input: string[] = [], tid?: ObjectId) {
+    @param('practiceContextId', Types.ShortString, true)
+    async post(_domainId: string, lang: string, code: string, pretest = false, input: string[] = [], tid?: ObjectId, practiceContextId = '') {
         this.assertContestSubmissionContext(tid);
         const domainId = this.pdoc.domainId;
         const config = this.pdoc.config;
@@ -2077,6 +2155,7 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
                 );
             }
         }
+        const practiceContext = await this.resolvePracticeContext(practiceContextId, tid);
         const rid = await record.add(
             domainId,
             this.pdoc.docId,
@@ -2089,12 +2168,14 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
                       input,
                       type: 'pretest',
                       contestContext: submissionScope.recordContestId,
+                      practiceContext,
                       vigilSessionKey: (global as any).Hydro?.model?.vigilguard?.clientSessionKeyFromSession?.(this.session),
                   }
                 : {
                       contest: submissionScope.recordContestId,
                       files,
                       type: isSubjective ? 'manual' : 'judge',
+                      practiceContext,
                       vigilSessionKey: (global as any).Hydro?.model?.vigilguard?.clientSessionKeyFromSession?.(this.session),
                   },
         );

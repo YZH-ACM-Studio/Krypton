@@ -1,13 +1,13 @@
 import { basename, join } from 'path';
 import { context, SpanStatusCode, trace } from '@opentelemetry/api';
-import { CompilableSource, FileInfo, JudgeMeta, JudgeResultBody, STATUS, TestCase } from '@hydrooj/common';
+import { CompilableSource, FileInfo, JudgeMeta, STATUS, TestCase } from '@hydrooj/common';
 import { findFileSync, fs } from '@hydrooj/utils';
 import readCases from './cases';
 import checkers from './checkers';
 import compile from './compile';
 import { getConfig } from './config';
 import { CompileError, FormatError } from './error';
-import { Execute, JudgeRequest, ParsedConfig, Session } from './interface';
+import { Execute, JudgeRequest, NextFunction, ParsedConfig, Session } from './interface';
 import judge from './judge';
 import { Logger } from './log';
 import { CopyIn, CopyInFile, get, PreparedFile, runQueued } from './sandbox';
@@ -32,8 +32,9 @@ export class JudgeTask {
     config: ParsedConfig;
     meta: JudgeMeta;
     files?: Record<string, string>;
-    next: (data: Partial<JudgeResultBody>) => void;
-    end: (data: Partial<JudgeResultBody>) => void;
+    next: NextFunction;
+    end: NextFunction;
+    wait?: () => Promise<void>;
     env: Record<string, string>;
     callbackCache?: TestCase[];
     compileCache: Record<string, Pick<Execute, 'execute' | 'copyIn' | typeof Symbol.asyncDispose>> = {};
@@ -115,9 +116,12 @@ export class JudgeTask {
             }
         } finally {
             this.finished = true;
-
-            for (const clean of this.clean) await clean()?.catch(() => null);
-            this.span.end();
+            try {
+                for (const clean of this.clean) await clean()?.catch(() => null);
+                await this.wait?.();
+            } finally {
+                this.span.end();
+            }
         }
     }
 

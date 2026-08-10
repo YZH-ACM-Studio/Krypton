@@ -81,6 +81,13 @@
 - 入网批次和终端吊销当前只允许 `PRIV_EDIT_SYSTEM`；换机必须创建容量为 1、显式绑定旧 endpoint 的 replacement 批次，Vigil 原子地停用旧凭据。日志可记录 endpoint/batch/claim/revision/stage/reason，但不得记录私钥、公钥签名、token、完整入网码或剪贴板/文件正文。
 - P1.8 只建立身份、入网、加密固定、签名命令格式和持久 replay gate；不提前实现 P1.9 的服务常驻控制连接、P1.10 的网络策略或 P1.11 的逐命令执行会话/ACK。P1.8–P1.12 是不可拆生产协议单元，独立本地提交不授权部署或连接真实 Windows 主机。
 
+## Endpoint Service 协议边界
+
+- Windows 常驻进程固定为 SCM 自启动的 `Krypton Endpoint Service`；沿用既有内部服务名以支持原位升级。Endpoint Service 独立持有逐机器长期身份、建立 `/api/ws/endpoints/:endpointId` 常驻连接并上报精确版本与 capability；学生 GUI 只能通过本机严格 schema IPC 请求既有 WebSocket 登录或截图上传所需的短期签名，不能直接打开长期私钥。GUI 与 Service 的短签名必须绑定不同的精确用途，禁止跨路由复用。
+- Endpoint 协议版本与最低 Service 版本在握手时 fail closed。Server 只能向终端已明确公布且版本精确匹配的 capability 下发命令；终端只通过编译期静态注册表分派严格 schema 命令，禁止动态 DLL、脚本、shell、任意程序启动或通用文件写入。模块尚未真实实现时不得发布空 capability；P1.9 只公布 `endpoint.status@1/ping`。
+- 凭据换机或吊销必须在同一 endpoint 边界内同步关闭旧 GUI 与 Endpoint Service 连接；每条已建立连接仍逐消息重查当前 credential revision。重复连接只保留最新连接，协议不兼容终端必须出现在只读运维列表中并带稳定原因。
+- Endpoint Service 的 TLS probe、WebSocket Upgrade 和 hello 协商必须异步且各自有硬截止；SPKI 匹配前不得生成或发送签名证明。双端协议只接受严格文本 JSON object，二进制、畸形或未知消息一律 fail closed。Endpoint Service 与 GUI 使用独立的持久防重放游标，日志只记录 endpointId、版本、capability、commandId 和 stage，不记录签名、入网码、token、代码或截图正文。P1.8–P1.12 是首个不可拆部署单元；完成单项本地实现不得提前连接或切换真实 Windows 主机。
+
 ## 真实性训练可信完成协议
 
 - Course 与 ProblemSet 的真实性策略只认发布后不可变的 `practice.integrityRevisions`；短期 `PracticeContext` 必须绑定域、用户、题目、主容器/作用域及每个明确参与目标的容器、作用域和 revision。签发与提交都要重新读取 canonical revision 并校验当前题目/容器可见性和范围成员关系，客户端字段不得自证授权。

@@ -48,7 +48,7 @@ Done without downtime by leveraging the accepted-list pattern (each side accepts
 2. **Add to Vigil's accepted list**: edit `KVS_ACCEPTED_OJ_TOKENS=T_OLD,T_NEW` → restart Vigil.
 3. **Verify**: confirm Vigil logs that both tokens are accepted (`logger.info('added token to oj accepted list ...')`).
 4. **Switch OJ outbound**: `system.set('serviceToken.oj.outbound', T_NEW)` → hydrooj picks up on next call (no restart needed; reads from system settings).
-5. **Verify**: confirm OJ → Vigil traffic uses new token (look for prefix in Vigil logs).
+5. **Verify**: confirm OJ → Vigil traffic succeeds on the expected channel. Token values and prefixes are never logged.
 6. **Remove old token from Vigil**: edit `KVS_ACCEPTED_OJ_TOKENS=T_NEW` → restart Vigil.
 
 Reverse direction (Vigil → OJ) is symmetric: add new token to OJ's `serviceToken.vigil.accepted`, switch Vigil's outbound (env var → restart), remove old.

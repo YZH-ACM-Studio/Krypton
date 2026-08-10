@@ -170,6 +170,15 @@ export async function notifyTeamRoleChangeOnVigil(payload: VigilTeamRoleChangePa
     );
 }
 
+export async function revokeEndpointOnVigilStrict(endpointId: string, actorUid: number, reason: string): Promise<void> {
+    await fetchWithRetry(`${baseUrl()}/api/integrations/oj/endpoints/${encodeURIComponent(endpointId)}/revoke`, {
+        method: 'POST',
+        body: { actorUid, reason },
+        retries: 1,
+    });
+    logger.info('revoked Endpoint credential endpoint=%s actor=%d', endpointId, actorUid);
+}
+
 export interface VigilTeamCodePresence {
     uid: number;
     online: boolean;

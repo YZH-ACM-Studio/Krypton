@@ -902,6 +902,7 @@ declare module './service/db' {
         'practice.integrityRevisions': import('./model/practice-integrity').PracticeIntegrityRevisionDoc;
         'practice.contexts': import('./model/practice-integrity').PracticeContextDoc;
         'practice.contextualCompletions': import('./model/contextual-completion').ContextualCompletionDoc;
+        'endpoint.enrollmentBatches': import('./model/endpoint-enrollment').EndpointEnrollmentBatchDoc;
         lock: LockDoc;
     }
 }
@@ -955,6 +956,7 @@ export interface Model {
         | 'trustedPracticeContextReference'
     >;
     contextualCompletion: Pick<typeof import('./model/contextual-completion'), 'contextualCompletionColl' | 'contextualCompletionService'>;
+    endpointEnrollment: Pick<typeof import('./model/endpoint-enrollment'), 'endpointEnrollmentBatchColl' | 'endpointEnrollmentBatchService'>;
     user: typeof import('./model/user').default;
     oauth: typeof import('./model/oauth').default;
     storage: typeof import('./model/storage').default;

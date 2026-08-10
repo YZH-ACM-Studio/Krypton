@@ -12,8 +12,8 @@
  *   `string[]`). During rotation: append the new token, deploy, rotate the issuer,
  *   then remove the old token. No outage.
  *
- * - **Logging.** First 8 chars of the presented token are logged on each call
- *   (success and failure). Full token never logged.
+ * - **Logging.** Logs contain only the channel and result. No token substring is
+ *   ever written on success, failure, creation, removal, or rotation.
  *
  * - **Constant-time compare.** Using `crypto.timingSafeEqual` to avoid leaking
  *   token length / prefix via timing side-channels.
@@ -51,14 +51,14 @@ export async function addAcceptedToken(channel: string, token: string): Promise<
     const list = getAcceptedTokens(channel);
     if (!list.includes(token)) list.push(token);
     await system.set(`serviceToken.${channel}.accepted`, list);
-    logger.info('added token to %s accepted list (prefix=%s)', channel, token.slice(0, 8));
+    logger.info('added token to %s accepted list', channel);
 }
 
 /** Remove a token from the accepted list. */
 export async function removeAcceptedToken(channel: string, token: string): Promise<void> {
     const list = getAcceptedTokens(channel).filter((t) => t !== token);
     await system.set(`serviceToken.${channel}.accepted`, list);
-    logger.info('removed token from %s accepted list (prefix=%s)', channel, token.slice(0, 8));
+    logger.info('removed token from %s accepted list', channel);
 }
 
 function safeEqual(a: string, b: string): boolean {
@@ -100,10 +100,10 @@ export function requireServiceToken(handler: Handler, channel: string): void {
     }
     const matched = accepted.find((accept) => safeEqual(accept, token));
     if (!matched) {
-        logger.warn('service-token check on channel "%s" rejected: token prefix=%s not in accepted list', channel, token.slice(0, 8));
+        logger.warn('service-token check on channel "%s" rejected: invalid token', channel);
         throw new ServiceTokenError('invalid');
     }
-    logger.debug('service-token check on channel "%s" passed (prefix=%s)', channel, token.slice(0, 8));
+    logger.debug('service-token check on channel "%s" passed', channel);
 }
 
 /**

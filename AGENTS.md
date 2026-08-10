@@ -73,6 +73,14 @@
 - 团队赛只封锁未处于批次待定版状态且属于 active `ContestTeam` 的成员；不得用不限范围、预绑定批次或运行时批次回查扩大受众。
 - Client 自动 attend 成功后必须立即精确失效 `(domainId, uid)` 封锁缓存并记录审计；团队定版、建队和成员变化必须在仍持有同一比赛轻量边界时同步失效对应域缓存，再执行邀请清理或 Vigil 网络调用。任何失效都要推进进程内 generation，禁止并发旧计算重新写回；退出 Client 不清除 attend，也不在窗口结束前恢复普通浏览器。不得为此新增数据库状态、后台任务或 Client/Vigil Server 协议。
 
+## Vigil 逐终端身份与命令协议
+
+- OJ 的 `endpoint.enrollmentBatches` 只保存入网批次、容量、过期、摘要和 claim/finalize 业务事实；完整入网码只在创建响应出现一次。Vigil Server 保存逐终端公钥、状态与换机链，Windows 私钥由 CNG 以 machine key 持久化且禁止导出；`machineId`/硬件摘要只作诊断，不是认证因子。
+- Endpoint WebSocket、截图上传和后续终端写入口只接受活动逐机凭据的短期签名证明；共享 `client_token`、空配置开放、裸 `ws://` 和只靠硬件指纹的兼容路径均禁止。客户端必须使用 `wss://` 并固定部署证书的 SPKI SHA-256；证书或固定值不匹配时 fail closed。
+- Server 下发的能力命令必须是版本化 ES256 envelope，精确绑定 endpoint、activity、command、revision、签发/过期时间和显式能力名称。客户端在执行前持久化每个 activity 的最高 revision；重放、过期、错 scope、未知 schema/命令或签名失败均不得执行。协议没有 shell、脚本、任意可执行文件或任意文件写入能力。
+- 入网批次和终端吊销当前只允许 `PRIV_EDIT_SYSTEM`；换机必须创建容量为 1、显式绑定旧 endpoint 的 replacement 批次，Vigil 原子地停用旧凭据。日志可记录 endpoint/batch/claim/revision/stage/reason，但不得记录私钥、公钥签名、token、完整入网码或剪贴板/文件正文。
+- P1.8 只建立身份、入网、加密固定、签名命令格式和持久 replay gate；不提前实现 P1.9 的服务常驻控制连接、P1.10 的网络策略或 P1.11 的逐命令执行会话/ACK。P1.8–P1.12 是不可拆生产协议单元，独立本地提交不授权部署或连接真实 Windows 主机。
+
 ## 真实性训练可信完成协议
 
 - Course 与 ProblemSet 的真实性策略只认发布后不可变的 `practice.integrityRevisions`；短期 `PracticeContext` 必须绑定域、用户、题目、主容器/作用域及每个明确参与目标的容器、作用域和 revision。签发与提交都要重新读取 canonical revision 并校验当前题目/容器可见性和范围成员关系，客户端字段不得自证授权。

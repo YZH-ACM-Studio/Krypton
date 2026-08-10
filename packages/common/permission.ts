@@ -113,6 +113,11 @@ export const PERM = {
     // not grant problem-bank enumeration or any other problem kind.
     PERM_CREATE_PROGRAMMING_DRAFT: 1n << 80n,
 
+    // Krypton: examination infrastructure. CREATE is the school-scoped
+    // teacher capability; MANAGE is the explicit cross-event domain role.
+    PERM_CREATE_EXAM_EVENT: 1n << 81n,
+    PERM_MANAGE_EXAM_INFRASTRUCTURE: 1n << 82n,
+
     // Placeholder
     PERM_ALL: -1n,
     PERM_BASIC: 0n,
@@ -221,7 +226,8 @@ PERM.PERM_TEACHER =
     PERM.PERM_REJUDGE_PROBLEM |
     PERM.PERM_CREATE_TASK |
     PERM.PERM_RANKBOARD_IMPORT |
-    PERM.PERM_USERBIND_MANAGE_STUDENTS;
+    PERM.PERM_USERBIND_MANAGE_STUDENTS |
+    PERM.PERM_CREATE_EXAM_EVENT;
 
 export const PRIV = {
     PRIV_NONE: 0,

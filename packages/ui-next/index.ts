@@ -6,6 +6,7 @@ import { serializer } from '@hydrooj/framework';
 import type { ViteDevServer } from 'vite';
 import { resolveAnnouncementManagementCapability } from './announcement-capabilities';
 import { resolveDomainPermissionManagementCapability } from './domain-permission-capabilities';
+import { resolveExamInfrastructureCapability } from './exam-infrastructure-capabilities';
 import { resolveRankboardCapabilities } from './rankboard-capabilities';
 import { resolveTaskManagementCapability } from './task-capabilities';
 import { resolveUiLocale } from './ui-locale';
@@ -275,6 +276,23 @@ function buildBootstrap(templateName: string, args: Record<string, any>, context
       );
     },
   });
+  const canManageExamInfrastructure = resolveExamInfrastructureCapability({
+    user: context.handler?.user,
+    editSystemPriv: PRIV.PRIV_EDIT_SYSTEM,
+    createExamEventPerm: PERM.PERM_CREATE_EXAM_EVENT,
+    manageExamInfrastructurePerm: PERM.PERM_MANAGE_EXAM_INFRASTRUCTURE,
+    onError(error) {
+      console.error(
+        '[ui-next] exam infrastructure capability resolution failed:',
+        {
+          domainId: String(domain?._id || ''),
+          uid: Number(context.handler?.user?._id || 0),
+          templateName,
+        },
+        error,
+      );
+    },
+  });
   const problemBankCapability = resolveProblemBankCapability(context.handler?.user, (error) => {
     console.error(
       '[ui-next] problem bank capability resolution failed; denying navigation:',
@@ -287,15 +305,16 @@ function buildBootstrap(templateName: string, args: Record<string, any>, context
     );
   });
   const proxyActorUid = Number(context.handler?.session?.sudoUid || 0);
-  const impersonation = proxyActorUid > 0
-    ? {
-        actorUid: proxyActorUid,
-        actorName: String(context.handler?.session?.sudoUname || `UID ${proxyActorUid}`),
-        targetUid: Number(currentUser._id || 0),
-        targetName: String(currentUser.uname || `UID ${currentUser._id || 0}`),
-        startedAt: context.handler?.session?.sudoStartedAt || null,
-      }
-    : null;
+  const impersonation =
+    proxyActorUid > 0
+      ? {
+          actorUid: proxyActorUid,
+          actorName: String(context.handler?.session?.sudoUname || `UID ${proxyActorUid}`),
+          targetUid: Number(currentUser._id || 0),
+          targetName: String(currentUser.uname || `UID ${currentUser._id || 0}`),
+          startedAt: context.handler?.session?.sudoStartedAt || null,
+        }
+      : null;
 
   return {
     appName: 'Krypton',
@@ -328,6 +347,7 @@ function buildBootstrap(templateName: string, args: Record<string, any>, context
       canManageAnnouncements,
       canManageTasks,
       canManageDomainPermissions,
+      canManageExamInfrastructure,
       impersonation,
     },
     domain: {

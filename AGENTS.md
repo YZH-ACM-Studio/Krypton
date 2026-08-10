@@ -102,6 +102,13 @@
 - Endpoint 的 `command_result` 必须回显签名命令的 `activityId` 与 `revision`，并与持久 commandId、endpoint、capability、command 和预期网络身份精确核对。相同终态 ACK 幂等；冲突、未知、未发送、过期或降级结果 fail closed。已经持久接受但 WFP 首次执行失败的 apply/release pending 仍保持 sent，不得误记 failed；Endpoint 通过现有心跳和重连 hello 持续上报实际网络状态，成功重试后由原命令精确收敛为 applied，超时仍进入 expired。Server 重启把遗留连接标为断开，但不把 sent 猜成成功；apply 只有完整活动授权与唯一未决命令精确一致时才可补记 applied；stop 还必须由受保护的持久状态回报最后成功 stop 的 commandId、command revision、activityId 和 policy revision，普通 inactive 或硬截止不得冒充 stop ACK。重连对账与终态写入必须原子或 CAS，过期及并发 ACK 只能形成无副作用的 no-op，失败注册不得留下在线会话。
 - 单站只使用现有数据库和 endpoint 级 asyncio 边界；不为 P1.11 引入消息队列、分布式调度或 Dashboard 共享 token 权限模型。P1.11 不提供独立网络锁管理入口、不创建 OJ 业务活动，也不复制 OJ canonical；这些仍属于 P1.12–P1.17。
 
+## 考试基础设施活动协议
+
+- `exam.events` 是 Krypton Contest 与纯外部考试共用的 OJ 业务根；`type:'krypton'` 可在草稿期不关联 Contest，但进入计划态前必须关联当前域内且操作者可管理的 Contest，`type:'external'` 禁止伪造空 Contest。Contest 不拥有或驱动 ExamEvent 生命周期。
+- ExamEvent 写入态只使用 `draft / scheduled / archived`；`active / ended` 由已计划活动的时间窗确定性派生，不通过后台任务改写。所有 mutation 使用 `revision` CAS，活动开始后 school/type/contest/time window 冻结，title 与 collaborator 仍可维护；归档是当前唯一移除路径，不开放绕过后续引用检查的硬删除。
+- 基础设施管理员是 `PRIV_EDIT_SYSTEM` 或显式 `PERM_MANAGE_EXAM_INFRASTRUCTURE` 持有者。普通教师必须持有 `PERM_CREATE_EXAM_EVENT`，并在每次请求重新满足 userbind canonical 学校范围、owner/collaborator 与关联 Contest 权限；URL、前端 capability、schoolId 或 collaborator 列表均不能自证授权。
+- 每个 revision 保存确定性的 `auditRef=exam-event:<eventId>:<revision>`，并由 OJ oplog 记录 actor、event、revision、变更字段和关联身份。P1.13 不创建网络策略、终端目标、Vigil execution session 或真实考试活动；这些只能由后续任务引用 eventId。
+
 ## 独立网络锁 MVP 控制协议
 
 - P1.12 的控制入口只挂在现有 OJ→Vigil service-token 边界，固定提供终端预检、显式活动 apply/update、实时 status 查询、匹配 revision 的 stop、活动命令事实读取和单命令读取；不复用 Dashboard token，不创建 ExamEvent、定时调度器或第二套网络锁状态。

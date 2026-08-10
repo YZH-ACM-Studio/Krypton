@@ -903,12 +903,15 @@ declare module './service/db' {
         'practice.contexts': import('./model/practice-integrity').PracticeContextDoc;
         'practice.contextualCompletions': import('./model/contextual-completion').ContextualCompletionDoc;
         'endpoint.enrollmentBatches': import('./model/endpoint-enrollment').EndpointEnrollmentBatchDoc;
+        'exam.events': import('./model/exam-event').ExamEventDoc;
         lock: LockDoc;
     }
 }
 
 export interface UserbindModelBridge {
-    findStudentByUserId(domainId: string, userId: number): Promise<{ groupIds?: ObjectId[] } | null>;
+    listSchools(domainId: string): Promise<Array<{ _id: ObjectId; domainId: string; name: string }>>;
+    getSchool(domainId: string, schoolId: ObjectId): Promise<{ _id: ObjectId; domainId: string; name: string } | null>;
+    findStudentByUserId(domainId: string, userId: number): Promise<{ schoolId?: ObjectId; groupIds?: ObjectId[] } | null>;
     findStudentsByUserIds(domainId: string, userIds: number[]): Promise<Record<string, { studentId: string; realName: string }>>;
     searchBoundStudents(
         domainId: string,
@@ -957,6 +960,7 @@ export interface Model {
     >;
     contextualCompletion: Pick<typeof import('./model/contextual-completion'), 'contextualCompletionColl' | 'contextualCompletionService'>;
     endpointEnrollment: Pick<typeof import('./model/endpoint-enrollment'), 'endpointEnrollmentBatchColl' | 'endpointEnrollmentBatchService'>;
+    examEvent: Pick<typeof import('./model/exam-event'), 'examEventColl' | 'examEventService'>;
     user: typeof import('./model/user').default;
     oauth: typeof import('./model/oauth').default;
     storage: typeof import('./model/storage').default;

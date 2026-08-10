@@ -102,6 +102,12 @@
 - Endpoint 的 `command_result` 必须回显签名命令的 `activityId` 与 `revision`，并与持久 commandId、endpoint、capability、command 和预期网络身份精确核对。相同终态 ACK 幂等；冲突、未知、未发送、过期或降级结果 fail closed。已经持久接受但 WFP 首次执行失败的 apply/release pending 仍保持 sent，不得误记 failed；Endpoint 通过现有心跳和重连 hello 持续上报实际网络状态，成功重试后由原命令精确收敛为 applied，超时仍进入 expired。Server 重启把遗留连接标为断开，但不把 sent 猜成成功；apply 只有完整活动授权与唯一未决命令精确一致时才可补记 applied；stop 还必须由受保护的持久状态回报最后成功 stop 的 commandId、command revision、activityId 和 policy revision，普通 inactive 或硬截止不得冒充 stop ACK。重连对账与终态写入必须原子或 CAS，过期及并发 ACK 只能形成无副作用的 no-op，失败注册不得留下在线会话。
 - 单站只使用现有数据库和 endpoint 级 asyncio 边界；不为 P1.11 引入消息队列、分布式调度或 Dashboard 共享 token 权限模型。P1.11 不提供独立网络锁管理入口、不创建 OJ 业务活动，也不复制 OJ canonical；这些仍属于 P1.12–P1.17。
 
+## 独立网络锁 MVP 控制协议
+
+- P1.12 的控制入口只挂在现有 OJ→Vigil service-token 边界，固定提供终端预检、显式活动 apply/update、实时 status 查询、匹配 revision 的 stop、活动命令事实读取和单命令读取；不复用 Dashboard token，不创建 ExamEvent、定时调度器或第二套网络锁状态。
+- 批量操作必须逐 endpoint 返回 P1.11 canonical command fact或明确的 pre-dispatch rejection；离线、能力缺失、旧协议、发送失败和部分成功不得折叠成整批成功。apply/update/stop 只驱动 `network.policy@1` 严格命令，status 使用 endpoint 控制 scope，不伪造活动 ACK。
+- 每次 protocol 2 heartbeat 和被接受的网络命令结果都要更新当前 execution session 的 reported network state；预检和活动视图只读该状态及 P1.11 持久命令，不读取学生 GUI、本机 IPC 或测试假 ACK。真实 Windows 闭环必须在用户明确指定的非生产测试机上验收，未获范围批准时不得连接或修改生产机房终端。
+
 ## 真实性训练可信完成协议
 
 - Course 与 ProblemSet 的真实性策略只认发布后不可变的 `practice.integrityRevisions`；短期 `PracticeContext` 必须绑定域、用户、题目、主容器/作用域及每个明确参与目标的容器、作用域和 revision。签发与提交都要重新读取 canonical revision 并校验当前题目/容器可见性和范围成员关系，客户端字段不得自证授权。

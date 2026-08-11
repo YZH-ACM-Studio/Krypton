@@ -907,6 +907,7 @@ declare module './service/db' {
         'exam.policyTemplates': import('./model/exam-network-config').ExamPolicyTemplateDoc;
         'exam.targetAssignments': import('./model/exam-network-config').ExamTargetAssignmentDoc;
         'exam.eventNetworkConfigs': import('./model/exam-network-config').ExamEventNetworkConfigDoc;
+        'exam.networkExecutions': import('./model/exam-network-execution').ExamNetworkExecutionDoc;
         lock: LockDoc;
     }
 }
@@ -970,10 +971,15 @@ export interface Model {
         | 'examTargetAssignmentColl'
         | 'examEventNetworkConfigColl'
         | 'examNetworkConfigService'
+        | 'loadExamTargetRevisionEndpointIds'
         | 'registerExamTargetResolver'
         | 'requireExamTargetResolver'
         | 'registerExamNetworkControlPlaneResolver'
         | 'requireExamNetworkControlPlaneResolver'
+    >;
+    examNetworkExecution: Pick<
+        typeof import('./model/exam-network-execution'),
+        'examNetworkExecutionColl' | 'examNetworkExecutionService'
     >;
     user: typeof import('./model/user').default;
     oauth: typeof import('./model/oauth').default;

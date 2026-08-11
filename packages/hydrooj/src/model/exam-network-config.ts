@@ -771,6 +771,22 @@ export const examTargetAssignmentColl = db.collection<ExamTargetAssignmentDoc>('
 export const examEventNetworkConfigColl = db.collection<ExamEventNetworkConfigDoc>('exam.eventNetworkConfigs');
 export const examNetworkConfigService = new ExamNetworkConfigService(examPolicyTemplateColl, examTargetAssignmentColl, examEventNetworkConfigColl);
 
+export async function loadExamTargetRevisionEndpointIds(
+    domainId: string,
+    reference: ExamNetworkRevisionRef,
+): Promise<string[]> {
+    assertDomainId(domainId);
+    assertObjectId(reference.id, 'targetRef.id');
+    assertRevision(reference.revision);
+    if (!/^[a-f0-9]{64}$/.test(reference.fingerprint)) throw new TypeError('targetRef.fingerprint is invalid');
+    const assignment = await examTargetAssignmentColl.findOne({ domainId, _id: reference.id });
+    const revision = assignment?.revisions.find((item) => item.revision === reference.revision);
+    if (!revision || revision.targetFingerprint !== reference.fingerprint) {
+        throw new ExamNetworkConfigError('target_revision_not_found');
+    }
+    return [...revision.endpointIds].sort();
+}
+
 let targetResolver: ExamTargetResolver | undefined;
 let controlPlaneResolver: ExamNetworkControlPlaneResolver | undefined;
 
@@ -818,6 +834,7 @@ global.Hydro.model.examNetworkConfig = {
     examTargetAssignmentColl,
     examEventNetworkConfigColl,
     examNetworkConfigService,
+    loadExamTargetRevisionEndpointIds,
     registerExamTargetResolver,
     requireExamTargetResolver,
     registerExamNetworkControlPlaneResolver,

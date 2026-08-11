@@ -21,7 +21,7 @@ export interface ExamNetworkAuditContext {
 
 export interface ExamNetworkAuditInput {
     eventId: ObjectId;
-    entityKind: 'config' | 'policyTemplate' | 'targetAssignment';
+    entityKind: 'config' | 'execution' | 'policyTemplate' | 'targetAssignment';
     entityId: ObjectId;
     auditRef: string;
     expectedRevision: number | null;

@@ -116,6 +116,13 @@
 - 基础设施管理员是 `PRIV_EDIT_SYSTEM` 或显式 `PERM_MANAGE_EXAM_INFRASTRUCTURE` 持有者。普通教师必须持有 `PERM_CREATE_EXAM_EVENT`，并在每次请求重新满足 userbind canonical 学校范围、owner/collaborator 与关联 Contest 权限；URL、前端 capability、schoolId 或 collaborator 列表均不能自证授权。
 - 每个 revision 保存确定性的 `auditRef=exam-event:<eventId>:<revision>`，并由 OJ oplog 记录 actor、event、revision、变更字段和关联身份。P1.13 不创建网络策略、终端目标、Vigil execution session 或真实考试活动；这些只能由后续任务引用 eventId。
 
+## OJ 与 Vigil 考试网络执行同步协议
+
+- OJ 的 `exam.networkExecutions` 只保存 ExamEvent 的期望执行 revision、固定 policy/target 引用、幂等 request identity 和 Vigil 返回的最小逐机投影；不得复制 Vigil 的签名 envelope、策略正文、终端结果正文或用投影改写 `exam.eventNetworkConfigs`。Vigil 继续以 P1.11 session/command 为唯一逐机执行事实，并只增加幂等请求到这些 commandId 的窄映射。
+- 每次 start/update/stop 必须先在 OJ 以 ExamEvent 轻量边界、当前权限和 revision CAS 持久化 intent，再通过既有 OJ service token 发送固定 requestId/idempotencyKey/executionRevision。HTTP 超时或响应丢失只能标记 unknown；相同 payload 可重试并复用同一 command facts，idempotency key 或 requestId 内容冲突必须 fail closed。
+- Vigil callback 与 OJ 主动 pull 使用同一严格最小投影 schema。OJ 仅接受精确 domain/event/execution/request/activity/policy/target identity，projection revision 单调；旧 execution callback 只作无副作用忽略，同 revision 不同 fingerprint 拒绝。callback 仍走 `/api/vigil/*` service-token 边界，不复用 Dashboard token；回调失败依靠同一持久 request pull 恢复，不引入 MQ、调度器或第二套 endpoint 状态。
+- P1.15 只接入 domain-owned explicit endpoint source；classroom/seat/exam-seat/userbind-group 在各自 canonical 系统完成前明确不可用。explicit endpoint 必须存在于当前域已 finalize 的 enrollment claim，Vigil credential 仍 active，并携带完整 `network.policy@1` 三命令能力；离线不伪装在线，也不阻止冻结已知能力的目标快照。
+
 ## 独立网络锁 MVP 控制协议
 
 - P1.12 的控制入口只挂在现有 OJ→Vigil service-token 边界，固定提供终端预检、显式活动 apply/update、实时 status 查询、匹配 revision 的 stop、活动命令事实读取和单命令读取；不复用 Dashboard token，不创建 ExamEvent、定时调度器或第二套网络锁状态。

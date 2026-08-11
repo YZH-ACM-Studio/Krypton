@@ -33,8 +33,12 @@ import * as document from '../model/document';
 import { buildVigilContestRoleResolution, type VigilContestRoleResolution } from '../model/vigil-contest-role';
 import system from '../model/system';
 import db from '../service/db';
-import { executeRecordingDelete, previewRecordingDelete } from '../service/vigil-bridge';
+import { executeRecordingDelete, previewRecordingDelete, parseVigilExamNetworkProjection } from '../service/vigil-bridge';
 import { ensureVigilContestParticipation } from '../lib/vigil-integration-attendance';
+import {
+    ExamNetworkExecutionError,
+    examNetworkExecutionService,
+} from '../model/exam-network-execution';
 
 function parseStringList(value: any): string[] {
     if (Array.isArray(value)) return value.map((item) => String(item).trim()).filter(Boolean);
@@ -298,6 +302,34 @@ class VigilApiHandler extends Handler {
     noCheckPermView = true;
     async prepare() {
         requireServiceToken(this, 'vigil');
+    }
+}
+
+class VigilExamNetworkProjectionHandler extends VigilApiHandler {
+    async post() {
+        let projection;
+        try {
+            projection = parseVigilExamNetworkProjection(this.request.body);
+        } catch (error) {
+            throw new ValidationError('projection', null, error instanceof Error ? error.message : 'invalid_projection');
+        }
+        try {
+            const applied = await examNetworkExecutionService.applyProjection(projection);
+            await OplogModel.log(this, 'exam.network.execution.callback', {
+                eventId: new ObjectId(projection.eventId),
+                executionId: new ObjectId(projection.executionId),
+                executionRevision: projection.executionRevision,
+                auditRef: applied.execution.auditRef,
+                requestId: projection.requestId,
+                projectionRevision: projection.projectionRevision,
+                changed: applied.changed,
+                stage: 'callback',
+            });
+            this.response.body = { ok: true, changed: applied.changed };
+        } catch (error) {
+            if (!(error instanceof ExamNetworkExecutionError)) throw error;
+            throw new ValidationError('projection', null, error.reason);
+        }
     }
 }
 
@@ -1275,6 +1307,7 @@ export async function apply(ctx: Context) {
     ctx.Route('vigil_resolve_contest_role', '/api/vigil/resolve-contest-role', VigilResolveContestRoleHandler);
     ctx.Route('vigil_notify_session_opened', '/api/vigil/notify-session-opened', VigilNotifySessionOpenedHandler);
     ctx.Route('vigil_notify_session_closed', '/api/vigil/notify-session-closed', VigilNotifySessionClosedHandler);
+    ctx.Route('vigil_exam_network_projection', '/api/vigil/exam-network/projection', VigilExamNetworkProjectionHandler);
     ctx.Route('vigil_student_finish', '/api/vigil/student-finish', VigilStudentFinishHandler);
     ctx.Route('vigil_reset_student_finish', '/api/vigil/reset-student-finish', VigilResetStudentFinishHandler);
     ctx.Route('vigil_exchange_access_token', '/api/vigil/exchange-access-token', VigilExchangeAccessTokenHandler);

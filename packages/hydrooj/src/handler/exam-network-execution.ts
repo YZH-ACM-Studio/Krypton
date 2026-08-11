@@ -1,0 +1,360 @@
+import { ObjectId } from 'mongodb';
+import { Context, Handler, OplogModel, param, PermissionError, Types, ValidationError } from 'hydrooj';
+import { PERM } from '../model/builtin';
+import { resolveExamTargetSources } from '../lib/exam-network-resolver';
+import { assertCanManageExamEvent, isExamInfrastructureAdmin } from '../model/exam-event-access';
+import { ExamEventDoc, examEventDisplayStatus, examEventService } from '../model/exam-event';
+import { withExamEventBoundary } from '../model/exam-event-boundary';
+import {
+    ExamNetworkAuditContext,
+    runAuditedExamNetworkMutation,
+} from '../model/exam-network-audit';
+import {
+    ExamNetworkConfigError,
+    ExamNetworkRevisionRef,
+    ExamPolicyRevision,
+    ExamTargetRevision,
+    examEventNetworkConfigColl,
+    examPolicyTemplateColl,
+    examTargetAssignmentColl,
+    registerExamNetworkControlPlaneResolver,
+    registerExamTargetResolver,
+} from '../model/exam-network-config';
+import {
+    ExamNetworkExecutionDoc,
+    ExamNetworkExecutionError,
+    examNetworkExecutionAuditRef,
+    examNetworkExecutionService,
+} from '../model/exam-network-execution';
+import {
+    classifyVigilBridgeFailure,
+    dispatchExamNetworkOnVigil,
+    getExamNetworkControlPlaneOnVigil,
+    getExamNetworkRequestOnVigil,
+    preflightExamNetworkOnVigil,
+    VigilExamNetworkRequestPayload,
+} from '../service/vigil-bridge';
+
+interface ResolvedExecutionConfig {
+    policyRef: ExamNetworkRevisionRef;
+    targetRef: ExamNetworkRevisionRef;
+    policy: ExamPolicyRevision;
+    target: ExamTargetRevision;
+}
+
+function auditContext(handler: Handler): ExamNetworkAuditContext {
+    return {
+        domainId: String(handler.domain._id),
+        actorUid: handler.user._id,
+        operateIp: handler.request.ip,
+        path: handler.request.path,
+        referer: handler.request.headers?.referer,
+        userAgent: handler.request.headers?.['user-agent'],
+    };
+}
+
+function serializeRef(value: ExamNetworkRevisionRef) {
+    return { id: value.id.toHexString(), revision: value.revision, fingerprint: value.fingerprint };
+}
+
+function serializeExecution(execution: ExamNetworkExecutionDoc | null) {
+    if (!execution) return null;
+    return {
+        executionId: execution._id.toHexString(),
+        eventId: execution.eventId.toHexString(),
+        schoolId: execution.schoolId.toHexString(),
+        activityId: execution.activityId,
+        revision: execution.revision,
+        networkPolicyRevision: execution.networkPolicyRevision,
+        desiredState: execution.desiredState,
+        policyRef: serializeRef(execution.policyRef),
+        targetRef: serializeRef(execution.targetRef),
+        startAt: execution.startAt.toISOString(),
+        hardEndAt: execution.hardEndAt.toISOString(),
+        operation: {
+            ...execution.operation,
+            requestedAt: execution.operation.requestedAt.toISOString(),
+            receivedAt: execution.operation.receivedAt?.toISOString() || null,
+            failedAt: execution.operation.failedAt?.toISOString() || null,
+            unknownAt: execution.operation.unknownAt?.toISOString() || null,
+            failureReason: execution.operation.failureReason || null,
+        },
+        projection: execution.projection
+            ? {
+                  ...execution.projection,
+                  receivedAt: execution.projection.receivedAt.toISOString(),
+              }
+            : null,
+        auditRef: execution.auditRef,
+        createdAt: execution.createdAt.toISOString(),
+        updatedAt: execution.updatedAt.toISOString(),
+    };
+}
+
+function assertExactBody(handler: Handler, allowed: string[]): void {
+    const body = handler.request.body;
+    if (!body || typeof body !== 'object' || Array.isArray(body)) throw new ValidationError('body');
+    const keys = Object.keys(body);
+    if (keys.some((key) => !allowed.includes(key))) throw new ValidationError('body');
+}
+
+async function resolveConfig(
+    domainId: string,
+    eventId: ObjectId,
+    refs?: { policyRef: ExamNetworkRevisionRef; targetRef: ExamNetworkRevisionRef },
+): Promise<ResolvedExecutionConfig> {
+    const config = await examEventNetworkConfigColl.findOne({ domainId, eventId });
+    const policyRef = refs?.policyRef || config?.policy;
+    const targetRef = refs?.targetRef || config?.target;
+    if (!config || !policyRef || !targetRef) throw new ExamNetworkExecutionError('network_configuration_incomplete');
+    const [template, assignment] = await Promise.all([
+        examPolicyTemplateColl.findOne({ domainId, _id: policyRef.id }),
+        examTargetAssignmentColl.findOne({ domainId, _id: targetRef.id, eventId }),
+    ]);
+    const policy = template?.revisions.find((revision) => revision.revision === policyRef.revision);
+    const target = assignment?.revisions.find((revision) => revision.revision === targetRef.revision);
+    if (!policy || policy.fingerprint !== policyRef.fingerprint) throw new ExamNetworkExecutionError('policy_revision_not_found');
+    if (!target || target.targetFingerprint !== targetRef.fingerprint) throw new ExamNetworkExecutionError('target_revision_not_found');
+    if (!target.endpointIds.length) throw new ExamNetworkExecutionError('empty_target');
+    return {
+        policyRef: { id: new ObjectId(policyRef.id), revision: policyRef.revision, fingerprint: policyRef.fingerprint },
+        targetRef: { id: new ObjectId(targetRef.id), revision: targetRef.revision, fingerprint: targetRef.fingerprint },
+        policy,
+        target,
+    };
+}
+
+function executionPayload(execution: ExamNetworkExecutionDoc, config: ResolvedExecutionConfig): VigilExamNetworkRequestPayload {
+    return {
+        requestId: execution.operation.requestId,
+        idempotencyKey: execution.operation.idempotencyKey,
+        domainId: execution.domainId,
+        eventId: execution.eventId.toHexString(),
+        executionId: execution._id.toHexString(),
+        executionRevision: execution.revision,
+        operation: execution.operation.kind,
+        activityId: execution.activityId,
+        networkPolicyRevision: execution.networkPolicyRevision,
+        policyRef: serializeRef(execution.policyRef),
+        targetRef: serializeRef(execution.targetRef),
+        endpointIds: [...config.target.endpointIds],
+        startAt: execution.startAt.toISOString(),
+        hardEndAt: execution.hardEndAt.toISOString(),
+        ...(execution.operation.kind === 'apply' ? { policy: config.policy.policy } : {}),
+    };
+}
+
+function translateExecutionError(error: unknown): never {
+    if (error instanceof ExamNetworkExecutionError || error instanceof ExamNetworkConfigError) {
+        throw new ValidationError('examNetworkExecution', null, error.reason);
+    }
+    throw error;
+}
+
+abstract class ExamNetworkExecutionBaseHandler extends Handler {
+    async prepare() {
+        if (!this.user || this.user._id < 1) throw new PermissionError(PERM.PERM_CREATE_EXAM_EVENT);
+        if (!isExamInfrastructureAdmin(this.user) && !this.user.hasPerm(PERM.PERM_CREATE_EXAM_EVENT)) {
+            throw new PermissionError(PERM.PERM_CREATE_EXAM_EVENT);
+        }
+        await Promise.all([examEventService.ensureIndexes(), examNetworkExecutionService.ensureIndexes()]);
+    }
+
+    protected async loadEvent(eventId: ObjectId): Promise<ExamEventDoc> {
+        const domainId = String(this.domain._id);
+        const event = await examEventService.get(domainId, eventId);
+        if (!event) throw new ValidationError('eventId');
+        await assertCanManageExamEvent(domainId, event, this.user);
+        return event;
+    }
+}
+
+class ExamNetworkExecutionHandler extends ExamNetworkExecutionBaseHandler {
+    @param('eventId', Types.ObjectId)
+    async get(_args: unknown, eventId: ObjectId) {
+        await this.loadEvent(eventId);
+        this.response.body = {
+            execution: serializeExecution(await examNetworkExecutionService.get(String(this.domain._id), eventId)),
+        };
+    }
+
+    @param('eventId', Types.ObjectId)
+    @param('action', Types.Range(['preflight', 'refresh', 'retry', 'start', 'stop']))
+    @param('expectedRevision', Types.UnsignedInt, true)
+    async post(
+        _args: unknown,
+        eventId: ObjectId,
+        action: 'preflight' | 'refresh' | 'retry' | 'start' | 'stop',
+        expectedRevision?: number,
+    ) {
+        assertExactBody(this, action === 'preflight' ? ['action'] : ['action', 'expectedRevision']);
+        const domainId = String(this.domain._id);
+        try {
+            const result = await withExamEventBoundary(domainId, eventId, async () => {
+                const event = await this.loadEvent(eventId);
+                if (
+                    (action === 'preflight' || action === 'start') &&
+                    (event.lifecycle !== 'scheduled' || examEventDisplayStatus(event) === 'ended')
+                ) {
+                    throw new ExamNetworkExecutionError('event_not_runnable');
+                }
+                const current = await examNetworkExecutionService.get(domainId, eventId);
+                if (action === 'preflight') {
+                    const configured = await resolveConfig(domainId, eventId);
+                    return {
+                        preflight: await preflightExamNetworkOnVigil(configured.target.endpointIds),
+                        execution: current,
+                    };
+                }
+                if (expectedRevision === undefined) throw new ExamNetworkExecutionError('expected_revision_required');
+                if (action !== 'start' && expectedRevision < 1) throw new ExamNetworkExecutionError('invalid_revision');
+                let execution: ExamNetworkExecutionDoc;
+                if (action === 'start') {
+                    const configured = await resolveConfig(domainId, eventId);
+                    const executionId = current?._id || new ObjectId();
+                    const targetRevision = expectedRevision + 1;
+                    execution = await runAuditedExamNetworkMutation(
+                        auditContext(this),
+                        'execution.apply',
+                        {
+                            eventId,
+                            entityKind: 'execution',
+                            entityId: executionId,
+                            auditRef: examNetworkExecutionAuditRef(executionId, targetRevision),
+                            expectedRevision,
+                            observedRevision: current?.revision || null,
+                            targetRevision,
+                            fingerprint: configured.policyRef.fingerprint,
+                            targetCount: configured.target.targetCount,
+                        },
+                        () =>
+                            examNetworkExecutionService.beginApply({
+                                executionId,
+                                domainId,
+                                eventId,
+                                schoolId: event.schoolId,
+                                expectedRevision,
+                                actorUid: this.user._id,
+                                policyRef: configured.policyRef,
+                                targetRef: configured.targetRef,
+                                startAt: event.startAt,
+                                hardEndAt: event.endAt,
+                            }),
+                        (created) => ({
+                            operation: created.operation.kind,
+                            requestId: created.operation.requestId,
+                            policyRef: serializeRef(created.policyRef),
+                            targetRef: serializeRef(created.targetRef),
+                        }),
+                    );
+                } else if (action === 'stop') {
+                    if (!current) throw new ExamNetworkExecutionError('execution_not_found');
+                    const targetRevision = expectedRevision + 1;
+                    execution = await runAuditedExamNetworkMutation(
+                        auditContext(this),
+                        'execution.stop',
+                        {
+                            eventId,
+                            entityKind: 'execution',
+                            entityId: current._id,
+                            auditRef: examNetworkExecutionAuditRef(current._id, targetRevision),
+                            expectedRevision,
+                            observedRevision: current.revision,
+                            targetRevision,
+                            fingerprint: current.policyRef.fingerprint,
+                        },
+                        () =>
+                            examNetworkExecutionService.beginStop({
+                                domainId,
+                                eventId,
+                                expectedRevision,
+                                actorUid: this.user._id,
+                            }),
+                        (stopped) => ({ operation: stopped.operation.kind, requestId: stopped.operation.requestId }),
+                    );
+                } else {
+                    if (!current) throw new ExamNetworkExecutionError('execution_not_found');
+                    if (current.revision !== expectedRevision) throw new ExamNetworkExecutionError('revision_conflict');
+                    execution = current;
+                }
+                let projection;
+                try {
+                    const payload = executionPayload(
+                        execution,
+                        await resolveConfig(domainId, eventId, {
+                            policyRef: execution.policyRef,
+                            targetRef: execution.targetRef,
+                        }),
+                    );
+                    projection =
+                        action === 'refresh'
+                            ? await getExamNetworkRequestOnVigil(payload)
+                            : await dispatchExamNetworkOnVigil(payload);
+                } catch (error) {
+                    if (error instanceof ExamNetworkConfigError || error instanceof ExamNetworkExecutionError) throw error;
+                    const failure = classifyVigilBridgeFailure(error);
+                    if (failure.deliveryUnknown) {
+                        await examNetworkExecutionService.markUnknown(
+                            domainId,
+                            eventId,
+                            execution.revision,
+                            execution.operation.requestId,
+                            failure.reason,
+                        );
+                    } else {
+                        await examNetworkExecutionService.markFailed(
+                            domainId,
+                            eventId,
+                            execution.revision,
+                            execution.operation.requestId,
+                            failure.reason,
+                        );
+                    }
+                    await OplogModel.log(this, `exam.network.execution.dispatch_${failure.deliveryUnknown ? 'unknown' : 'failed'}`, {
+                        eventId,
+                        executionId: execution._id,
+                        executionRevision: execution.revision,
+                        auditRef: execution.auditRef,
+                        requestId: execution.operation.requestId,
+                        operation: execution.operation.kind,
+                        stage: action,
+                        failureReason: failure.reason,
+                        errorName: failure.errorName,
+                        ...(failure.httpStatus === undefined ? {} : { httpStatus: failure.httpStatus }),
+                    });
+                    throw new ExamNetworkExecutionError(failure.reason);
+                }
+                const applied = await examNetworkExecutionService.applyProjection(projection);
+                await OplogModel.log(this, 'exam.network.execution.projection', {
+                    eventId,
+                    executionId: execution._id,
+                    executionRevision: execution.revision,
+                    auditRef: applied.execution.auditRef,
+                    requestId: execution.operation.requestId,
+                    projectionRevision: projection.projectionRevision,
+                    changed: applied.changed,
+                    stage: action,
+                });
+                return { execution: applied.execution };
+            });
+            this.response.body = {
+                ...(result.preflight ? { preflight: result.preflight } : {}),
+                execution: serializeExecution(result.execution),
+            };
+        } catch (error) {
+            translateExecutionError(error);
+        }
+    }
+}
+
+export async function apply(ctx: Context) {
+    ctx.effect(() => {
+        const disposeTarget = registerExamTargetResolver(resolveExamTargetSources);
+        const disposeControlPlane = registerExamNetworkControlPlaneResolver(getExamNetworkControlPlaneOnVigil);
+        return () => {
+            disposeControlPlane();
+            disposeTarget();
+        };
+    });
+    ctx.Route('exam_network_execution', '/api/admin/exam-events/:eventId/network-execution', ExamNetworkExecutionHandler);
+}

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BootstrapProvider, type KryptonBootstrap } from '../src/lib/bootstrap.tsx';
@@ -81,12 +81,38 @@ function projectionItem(index: number, overrides: Record<string, unknown> = {}) 
     endpointId: `endpoint-${String(index).padStart(3, '0')}`,
     commandId: `command-${index}`,
     command: 'apply_network_policy',
+    previousPolicyRevision: 1,
     expectedPolicyRevision: 2,
     appliedPolicyRevision: 2,
     status: 'applied',
     failureReason: null,
     online: true,
     networkPolicyState: { state: 'applied', policyRevision: 2 },
+    ...overrides,
+  };
+}
+
+function updatePreviewFixture(overrides: Record<string, unknown> = {}) {
+  return {
+    executionRevision: 3,
+    configRevision: 3,
+    fromPolicyRef: { id: '66b800000000000000000611', revision: 2, fingerprint: 'a'.repeat(64) },
+    toPolicyRef: { id: '66b800000000000000000611', revision: 3, fingerprint: 'c'.repeat(64) },
+    fromTargetRef: { id: '66b800000000000000000612', revision: 1, fingerprint: 'b'.repeat(64) },
+    toTargetRef: { id: '66b800000000000000000612', revision: 1, fingerprint: 'b'.repeat(64) },
+    previousNetworkPolicyRevision: 2,
+    expectedNetworkPolicyRevision: 3,
+    policyDiff: {
+      effect: 'loosening',
+      addedHosts: ['mirror.example.edu'],
+      removedHosts: [],
+      addedIps: [],
+      removedIps: [],
+      beforePorts: [443],
+      afterPorts: [],
+    },
+    targetDiff: { beforeCount: 1, afterCount: 1, addedEndpointIds: [], removedEndpointIds: [] },
+    requiresStop: false,
     ...overrides,
   };
 }
@@ -125,7 +151,7 @@ function detailFetch(execution: unknown, endpointIds: string[] = [], event = EVE
         },
       });
     }
-    if (url.endsWith('/network-execution')) return json({ execution });
+    if (url.endsWith('/network-execution')) return json({ execution, updatePreview: null });
     throw new Error(`unexpected request: ${url}`);
   });
 }
@@ -394,7 +420,7 @@ describe('exam infrastructure workspace', () => {
       if (url.startsWith('/api/admin/exam-policy-templates')) return json({ templates: [] });
       if (url.endsWith('/target-assignment')) return json({ assignment: null, config: null });
       if (url.endsWith('/network-config')) return json({ config: null });
-      if (url.endsWith('/network-execution')) return json({ execution: null });
+      if (url.endsWith('/network-execution')) return json({ execution: null, updatePreview: null });
       throw new Error(`unexpected request: ${url}`);
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -580,14 +606,290 @@ describe('exam infrastructure workspace', () => {
     expect(screen.getByRole('button', { name: '启动' })).toBeDisabled();
   });
 
-  it('does not expose the P1.17 hot-update action while a policy is active', async () => {
+  it('previews and explicitly confirms a policy hot update against the current config', async () => {
+    const execution = executionFixture([projectionItem(1)]);
+    const base = detailFetch(execution, ['endpoint-001']);
+    let submitted: Record<string, unknown> | null = null;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (!init?.method && url.endsWith('/network-config')) {
+          return json({
+            config: {
+              revision: 3,
+              policy: { id: '66b800000000000000000611', revision: 3, fingerprint: 'c'.repeat(64) },
+              target: { id: '66b800000000000000000612', revision: 1, fingerprint: 'b'.repeat(64) },
+            },
+          });
+        }
+        if (!init?.method && url.endsWith('/network-execution')) {
+          return json({ execution, updatePreview: updatePreviewFixture() });
+        }
+        if (init?.method === 'POST' && url.endsWith('/network-execution')) {
+          const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+          if (body.action === 'preflight') {
+            return json({
+              preflightConfig: {
+                revision: 3,
+                policy: { id: '66b800000000000000000611', revision: 3, fingerprint: 'c'.repeat(64) },
+                target: { id: '66b800000000000000000612', revision: 1, fingerprint: 'b'.repeat(64) },
+              },
+              preflight: [{ endpointId: 'endpoint-001', ready: true, reason: 'ready', online: true, compatible: true, serviceVersion: '0.3.0' }],
+            });
+          }
+          submitted = body;
+          return json({ execution });
+        }
+        return base(input);
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage({ eventId: EVENT.eventId });
+
+    const hotUpdate = await screen.findByRole('button', { name: '热更新策略' });
+    expect(hotUpdate).toBeDisabled();
+    expect(screen.getByText('配置已有新版本等待应用')).toBeInTheDocument();
+    expect(screen.getByText('放宽')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '终端预检' }));
+    await waitFor(() => expect(hotUpdate).toBeEnabled());
+    await user.click(hotUpdate);
+    const dialog = screen.getByRole('dialog', { name: '热更新网络策略？' });
+    expect(dialog).toHaveTextContent('2 → 3');
+    expect(dialog).toHaveTextContent('mirror.example.edu');
+    expect(dialog).toHaveTextContent('443 → 全部端口');
+    await user.click(screen.getByRole('button', { name: '确认热更新' }));
+    await waitFor(() => expect(submitted).toEqual({ action: 'start', expectedRevision: 3, expectedConfigRevision: 3 }));
+  });
+
+  it('requires a confirmed stop before applying a changed target snapshot', async () => {
+    const execution = executionFixture([projectionItem(1)]);
+    const base = detailFetch(execution, ['endpoint-001']);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith('/target-assignment')) {
+          return json({
+            assignment: {
+              assignmentId: '66b800000000000000000612',
+              revision: 2,
+              draft: { version: 2, sources: [{ kind: 'endpoint', ids: ['endpoint-002', 'endpoint-003', 'endpoint-004'] }] },
+              revisions: [
+                {
+                  revision: 2,
+                  sources: [{ kind: 'endpoint', ids: ['endpoint-002', 'endpoint-003', 'endpoint-004'] }],
+                  targetFingerprint: 'd'.repeat(64),
+                  endpointIds: ['endpoint-002', 'endpoint-003', 'endpoint-004'],
+                  targetCount: 3,
+                  publishedAt: '2026-08-11T02:30:00.000Z',
+                },
+              ],
+              latestPublishedRevision: 2,
+            },
+          });
+        }
+        if (url.endsWith('/network-config')) {
+          return json({
+            config: {
+              revision: 3,
+              policy: execution.policyRef,
+              target: { id: '66b800000000000000000612', revision: 2, fingerprint: 'd'.repeat(64) },
+            },
+          });
+        }
+        if (url.endsWith('/network-execution')) {
+          return json({
+            execution,
+            updatePreview: updatePreviewFixture({
+              configRevision: 3,
+              toPolicyRef: execution.policyRef,
+              toTargetRef: { id: '66b800000000000000000612', revision: 2, fingerprint: 'd'.repeat(64) },
+              policyDiff: {
+                effect: 'unchanged',
+                addedHosts: [],
+                removedHosts: [],
+                addedIps: [],
+                removedIps: [],
+                beforePorts: [443],
+                afterPorts: [443],
+              },
+              targetDiff: {
+                beforeCount: 1,
+                afterCount: 3,
+                addedEndpointIds: ['endpoint-002', 'endpoint-003', 'endpoint-004'],
+                removedEndpointIds: ['endpoint-001'],
+              },
+              requiresStop: true,
+            }),
+          });
+        }
+        return base(input);
+      }),
+    );
+    renderPage({ eventId: EVENT.eventId });
+
+    expect(await screen.findByText(/必须先停止当前目标并等待全部终端确认释放/)).toBeInTheDocument();
+    expect(screen.getAllByText(/endpoint-002/).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: '热更新策略' })).not.toBeInTheDocument();
+    expect(
+      screen.getByText((_content, element) => element?.tagName === 'P' && element.textContent?.includes('目标 1 → 3 台') === true),
+    ).toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: '停止' }));
+    const dialog = screen.getByRole('dialog', { name: '停止网络策略？' });
+    expect(within(dialog).getByText('目标终端数').parentElement).toHaveTextContent('1');
+  });
+
+  it('does not offer a full-target failure retry while the active configuration has drifted', async () => {
+    const execution = executionFixture([
+      projectionItem(1, {
+        appliedPolicyRevision: null,
+        status: 'offline',
+        failureReason: 'endpoint_offline',
+        online: false,
+        networkPolicyState: null,
+      }),
+    ]);
+    const base = detailFetch(execution, ['endpoint-001']);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith('/network-config')) {
+          return json({
+            config: {
+              revision: 3,
+              policy: { id: '66b800000000000000000611', revision: 3, fingerprint: 'c'.repeat(64) },
+              target: execution.targetRef,
+            },
+          });
+        }
+        if (url.endsWith('/network-execution')) {
+          return json({ execution, updatePreview: updatePreviewFixture() });
+        }
+        return base(input);
+      }),
+    );
+    renderPage({ eventId: EVENT.eventId });
+
+    expect(await screen.findByRole('button', { name: '热更新策略' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '整批重试失败项' })).not.toBeInTheDocument();
+  });
+
+  it('keeps an unresolved hot update on the original request identity', async () => {
+    const active = executionFixture([projectionItem(1)]);
+    const execution = {
+      ...active,
+      operation: { ...active.operation, status: 'unknown' as const, failureReason: 'vigil_delivery_unknown' },
+    };
+    const base = detailFetch(execution, ['endpoint-001']);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith('/network-config')) {
+          return json({
+            config: {
+              revision: 3,
+              policy: { id: '66b800000000000000000611', revision: 3, fingerprint: 'c'.repeat(64) },
+              target: execution.targetRef,
+            },
+          });
+        }
+        if (url.endsWith('/network-execution')) return json({ execution, updatePreview: updatePreviewFixture() });
+        return base(input);
+      }),
+    );
+    renderPage({ eventId: EVENT.eventId });
+
+    expect(await screen.findByRole('button', { name: '重试当前请求' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '热更新策略' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '热更新策略' })).toHaveAttribute('title', '请先重试当前请求或刷新到完整执行事实');
+  });
+
+  it('does not turn a transport-unknown endpoint fact into a new full-target retry', async () => {
+    const execution = executionFixture([
+      projectionItem(1, {
+        appliedPolicyRevision: null,
+        status: 'offline',
+        failureReason: 'endpoint_offline',
+        online: false,
+        networkPolicyState: null,
+      }),
+      projectionItem(2, {
+        appliedPolicyRevision: null,
+        status: 'failed',
+        failureReason: 'transport_send_failed_delivery_unknown',
+      }),
+    ]);
+    const base = detailFetch(execution, ['endpoint-001', 'endpoint-002']);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith('/network-config')) {
+          return json({
+            config: {
+              revision: 3,
+              policy: { id: '66b800000000000000000611', revision: 3, fingerprint: 'c'.repeat(64) },
+              target: execution.targetRef,
+            },
+          });
+        }
+        if (url.endsWith('/network-execution')) return json({ execution, updatePreview: updatePreviewFixture() });
+        return base(input);
+      }),
+    );
+    renderPage({ eventId: EVENT.eventId });
+
+    expect(await screen.findByRole('button', { name: '重试当前请求' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '整批重试失败项' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '热更新策略' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '停止' })).toBeEnabled();
+  });
+
+  it('shows old, expected and actual policy revisions for every endpoint fact', async () => {
     vi.stubGlobal('fetch', detailFetch(executionFixture([projectionItem(1)]), ['endpoint-001']));
     renderPage({ eventId: EVENT.eventId });
 
-    expect(await screen.findByRole('button', { name: '刷新事实' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '停止' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '更新策略' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '启动' })).not.toBeInTheDocument();
+    expect(await screen.findByText(/旧 1 \/ 期望 2 \/ 实际 2/)).toBeInTheDocument();
+  });
+
+  it('creates a new full-target retry intent for explicit endpoint failures', async () => {
+    const execution = executionFixture([
+      projectionItem(1),
+      projectionItem(2, {
+        previousPolicyRevision: null,
+        appliedPolicyRevision: null,
+        status: 'offline',
+        failureReason: 'endpoint_offline',
+        online: false,
+        networkPolicyState: null,
+      }),
+    ]);
+    const base = detailFetch(execution, ['endpoint-001', 'endpoint-002']);
+    let submitted: Record<string, unknown> | null = null;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === 'POST' && String(input).endsWith('/network-execution')) {
+          submitted = JSON.parse(String(init.body)) as Record<string, unknown>;
+          return json({ execution });
+        }
+        return base(input);
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage({ eventId: EVENT.eventId });
+
+    await user.click(await screen.findByRole('button', { name: '整批重试失败项' }));
+    const dialog = screen.getByRole('dialog', { name: '整批重新应用网络策略？' });
+    expect(dialog).toHaveTextContent('不是只给失败终端补发');
+    expect(dialog).toHaveTextContent('2 → 3');
+    expect(dialog).toHaveTextContent('endpoint-002');
+    await user.click(screen.getByRole('button', { name: '确认整批重试' }));
+    await waitFor(() => expect(submitted).toEqual({ action: 'retryFailed', expectedRevision: 3 }));
   });
 
   it('keeps a failed start confirmation open and shows the server error in place', async () => {
@@ -598,6 +900,16 @@ describe('exam infrastructure workspace', () => {
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         if (init?.method === 'POST') {
           submittedBody = JSON.parse(String(init.body)) as Record<string, unknown>;
+          if (submittedBody.action === 'preflight') {
+            return json({
+              preflightConfig: {
+                revision: 2,
+                policy: { id: '66b800000000000000000611', revision: 2, fingerprint: 'a'.repeat(64) },
+                target: { id: '66b800000000000000000612', revision: 1, fingerprint: 'b'.repeat(64) },
+              },
+              preflight: [{ endpointId: 'endpoint-001', ready: true, reason: 'ready', online: true, compatible: true, serviceVersion: '0.3.0' }],
+            });
+          }
           return new Response(
             JSON.stringify({
               error: {
@@ -618,6 +930,8 @@ describe('exam infrastructure workspace', () => {
     const user = userEvent.setup();
     renderPage({ eventId: EVENT.eventId });
 
+    await user.click(await screen.findByRole('button', { name: '终端预检' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '启动' })).toBeEnabled());
     await user.click(await screen.findByRole('button', { name: '启动' }));
     expect(screen.getByRole('heading', { name: '启动网络策略？' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '确认启动' }));

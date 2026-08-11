@@ -123,6 +123,13 @@
 - Vigil callback 与 OJ 主动 pull 使用同一严格最小投影 schema。OJ 仅接受精确 domain/event/execution/request/activity/policy/target identity，projection revision 单调；旧 execution callback 只作无副作用忽略，同 revision 不同 fingerprint 拒绝。callback 仍走 `/api/vigil/*` service-token 边界，不复用 Dashboard token；回调失败依靠同一持久 request pull 恢复，不引入 MQ、调度器或第二套 endpoint 状态。
 - P1.15 只接入 domain-owned explicit endpoint source；classroom/seat/exam-seat/userbind-group 在各自 canonical 系统完成前明确不可用。explicit endpoint 必须存在于当前域已 finalize 的 enrollment claim，Vigil credential 仍 active，并携带完整 `network.policy@1` 三命令能力；离线不伪装在线，也不阻止冻结已知能力的目标快照。
 
+## 考试网络策略热更新与重试协议
+
+- 活动中的热更新或历史 revision 回滚只允许变更 policy revision，必须保持同一不可变 target revision，并在执行前展示规则收紧/放宽、旧/期望/实际 Endpoint policy revision 与精确 endpoint 差异。target revision 变化必须先停止旧快照并取得全部旧目标的完整成功释放投影，再按新快照启动；禁止把移除终端留在不可见的旧锁中。
+- 传输未知或 dispatch 未完成只重试同一 requestId/idempotencyKey。只有完整投影中存在 `failed/offline/rejected/expired` 明确终态时，教师才可创建新的整批 retry execution：apply 对完整冻结目标使用更高 policy revision，stop 对完整冻结目标使用新的签名命令但保持 policy revision。不得把整批重发伪装成“只重试失败终端”，也不新增后台队列或自动解锁。
+- 已经 inactive 的 Endpoint 仅在受保护的最后 stop proof 与新命令的 activityId、policyRevision 精确一致时，才能幂等接受更高 command revision 的 stop 并更新证明；错活动、错 revision、无证明、硬截止/本机恢复释放或存在 legacy lease 时必须 fail closed。重复 stop 的 pending proof 必须按持久 pending → replay commit → inactive 顺序恢复，不能清除无关 legacy 网络规则。
+- 浏览器预检只作展示；每次 start/hot update 的 OJ 写入口必须在 ExamEvent 轻量边界内重读当前 config revision，并重新执行服务端预检。UI 预检身份必须绑定 config revision 与 policy/target 的 ID、revision、fingerprint，任一变化后立即失效。真实 Windows 验收只在用户明确批准的非生产机器执行，不得为了本地完成状态连接生产或机房终端。
+
 ## 独立网络锁 MVP 控制协议
 
 - P1.12 的控制入口只挂在现有 OJ→Vigil service-token 边界，固定提供终端预检、显式活动 apply/update、实时 status 查询、匹配 revision 的 stop、活动命令事实读取和单命令读取；不复用 Dashboard token，不创建 ExamEvent、定时调度器或第二套网络锁状态。

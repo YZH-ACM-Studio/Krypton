@@ -14,7 +14,7 @@ describe('exam network execution HTTP contracts', () => {
         expect(handler).to.include("'/api/admin/exam-events/:eventId/network-execution'");
         expect(handler).to.include('assertCanManageExamEvent(domainId, event, this.user)');
         expect(handler).to.include('withExamEventBoundary(domainId, eventId');
-        expect(handler).to.include("Types.Range(['preflight', 'refresh', 'retry', 'start', 'stop'])");
+        expect(handler).to.include("Types.Range(['preflight', 'refresh', 'retry', 'retryFailed', 'start', 'stop'])");
         expect(handler).to.include('preflightConfig: {');
         expect(handler).to.include('revision: configured.configRevision');
         expect(handler).to.not.include("@param('expectedRevision', Types.UnsignedInt, true)");
@@ -55,6 +55,9 @@ describe('exam network execution HTTP contracts', () => {
         expect(handler).to.include('examNetworkExecutionService.markFailed');
         expect(handler).to.include('classifyVigilBridgeFailure(error)');
         expect(model).to.include('projection_revision_conflict');
+        expect(handler).to.include('examNetworkExecutionService.beginRetry');
+        expect(handler).to.include("retryMode: 'full_target'");
+        expect(handler).to.include("throw new ExamNetworkExecutionError('retry_requires_current_config')");
     });
 
     it('accepts callbacks only through the existing Vigil service-token handler', () => {

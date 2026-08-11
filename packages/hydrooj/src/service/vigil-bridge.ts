@@ -283,6 +283,7 @@ export interface VigilExamNetworkProjectionItem {
     executionSessionId: string | null;
     commandRevision: number | null;
     command: 'apply_network_policy' | 'stop_network_policy';
+    previousPolicyRevision: number | null;
     expectedPolicyRevision: number | null;
     appliedPolicyRevision: number | null;
     status: VigilEndpointCommandStatus;
@@ -404,10 +405,7 @@ export async function preflightExamNetworkOnVigil(endpointIds: string[]): Promis
             capabilities: item.capabilities.map(parseEndpointCapability),
         } satisfies VigilEndpointPreflightItem;
     });
-    if (
-        new Set(items.map((item) => item.endpointId)).size !== items.length ||
-        items.some((item) => !endpointIds.includes(item.endpointId))
-    ) {
+    if (new Set(items.map((item) => item.endpointId)).size !== items.length || items.some((item) => !endpointIds.includes(item.endpointId))) {
         throw new VigilProtocolError('Vigil endpoint preflight did not match the requested endpoints.');
     }
     return items;
@@ -479,6 +477,7 @@ function parseExamNetworkProjectionItem(value: unknown): VigilExamNetworkProject
             'failureReason',
             'networkPolicyState',
             'online',
+            'previousPolicyRevision',
             'sentAt',
             'status',
             'updatedAt',
@@ -500,6 +499,7 @@ function parseExamNetworkProjectionItem(value: unknown): VigilExamNetworkProject
         executionSessionId: bridgeString(record.executionSessionId, 'Vigil exam network projection item was malformed.', true),
         commandRevision: bridgeInteger(record.commandRevision, 'Vigil exam network projection item was malformed.', true),
         command,
+        previousPolicyRevision: bridgeInteger(record.previousPolicyRevision, 'Vigil exam network projection item was malformed.', true),
         expectedPolicyRevision: bridgeInteger(record.expectedPolicyRevision, 'Vigil exam network projection item was malformed.', true),
         appliedPolicyRevision: bridgeInteger(record.appliedPolicyRevision, 'Vigil exam network projection item was malformed.', true),
         status: status as VigilEndpointCommandStatus,
@@ -571,10 +571,9 @@ export function parseVigilExamNetworkProjection(value: unknown): VigilExamNetwor
             (item) =>
                 item.command !== expectedCommand ||
                 (item.status === 'rejected'
-                    ? item.commandId !== null || item.commandRevision !== null || item.expectedPolicyRevision !== null
-                    : item.commandId === null ||
-                      item.commandRevision === null ||
-                      item.expectedPolicyRevision !== networkPolicyRevision) ||
+                    ? item.commandId !== null || item.commandRevision !== null || item.expectedPolicyRevision !== networkPolicyRevision
+                    : item.commandId === null || item.commandRevision === null || item.expectedPolicyRevision !== networkPolicyRevision) ||
+                (item.previousPolicyRevision !== null && (item.previousPolicyRevision < 1 || item.previousPolicyRevision > networkPolicyRevision)) ||
                 (item.appliedPolicyRevision !== null && item.appliedPolicyRevision !== networkPolicyRevision),
         ) ||
         new Set(items.map((item) => item.endpointId)).size !== items.length ||
@@ -604,10 +603,7 @@ export function parseVigilExamNetworkProjection(value: unknown): VigilExamNetwor
     };
 }
 
-function assertExamNetworkProjectionIdentity(
-    projection: VigilExamNetworkProjection,
-    expected: VigilExamNetworkRequestPayload,
-): void {
+function assertExamNetworkProjectionIdentity(projection: VigilExamNetworkProjection, expected: VigilExamNetworkRequestPayload): void {
     if (
         projection.requestId !== expected.requestId ||
         projection.idempotencyKey !== expected.idempotencyKey ||
@@ -653,10 +649,9 @@ export async function dispatchExamNetworkOnVigil(payload: VigilExamNetworkReques
 }
 
 export async function getExamNetworkRequestOnVigil(expected: VigilExamNetworkRequestPayload): Promise<VigilExamNetworkProjection> {
-    const response = await fetchWithRetry(
-        `${baseUrl()}/api/integrations/oj/exam-network/requests/${encodeURIComponent(expected.idempotencyKey)}`,
-        { retries: 1 },
-    );
+    const response = await fetchWithRetry(`${baseUrl()}/api/integrations/oj/exam-network/requests/${encodeURIComponent(expected.idempotencyKey)}`, {
+        retries: 1,
+    });
     const projection = parseVigilExamNetworkProjection(await readVigilJson(response));
     assertExamNetworkProjectionIdentity(projection, expected);
     return projection;
@@ -703,10 +698,7 @@ export interface RecordingDeleteScope {
     recordingId?: string;
 }
 
-export async function previewRecordingDelete(
-    scope: RecordingDeleteScope,
-    actor: { uid: number; uname: string },
-): Promise<any> {
+export async function previewRecordingDelete(scope: RecordingDeleteScope, actor: { uid: number; uname: string }): Promise<any> {
     const query = new URLSearchParams({
         cid: scope.cid,
         actorUid: String(actor.uid),

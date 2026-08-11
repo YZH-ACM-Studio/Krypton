@@ -116,14 +116,14 @@ const executionId = new ObjectId('66b800000000000000000805');
 const policyRef = { id: policyId, revision: 1, fingerprint: 'a'.repeat(64) };
 const targetRef = { id: targetId, revision: 1, fingerprint: 'b'.repeat(64) };
 
-function fixture() {
+function fixture(endpointIds = ['ep_one']) {
     const collection = new MemoryCollection();
     let now = new Date('2026-08-11T02:00:00.000Z');
     const service = new executionModule.ExamNetworkExecutionService(
         collection as never,
         () => new Date(now),
         () => executionId,
-        async () => ['ep_one'],
+        async () => endpointIds,
     );
     return { collection, service, setNow: (value: string) => (now = new Date(value)) };
 }
@@ -167,6 +167,7 @@ function projection(execution: ExamNetworkExecutionDoc, projectionRevision = 1):
                 executionSessionId: 'session_one',
                 commandRevision: 1,
                 command: execution.operation.kind === 'apply' ? 'apply_network_policy' : 'stop_network_policy',
+                previousPolicyRevision: null,
                 expectedPolicyRevision: execution.networkPolicyRevision,
                 appliedPolicyRevision: null,
                 status: 'sent',
@@ -255,13 +256,7 @@ describe('exam network execution canonical facts', () => {
         expect(failed.operation.status).to.equal('failed');
         expect(failed.operation.failureReason).to.equal('vigil_http_rejected');
         expect(failed.operation.unknownAt).to.equal(undefined);
-        const retriedUnknown = await service.markUnknown(
-            'system',
-            eventId,
-            1,
-            execution.operation.requestId,
-            'vigil_delivery_unknown',
-        );
+        const retriedUnknown = await service.markUnknown('system', eventId, 1, execution.operation.requestId, 'vigil_delivery_unknown');
         expect(retriedUnknown.operation.status).to.equal('unknown');
         expect(retriedUnknown.operation.failureReason).to.equal('vigil_delivery_unknown');
         expect(retriedUnknown.operation.failedAt).to.equal(undefined);
@@ -295,6 +290,44 @@ describe('exam network execution canonical facts', () => {
         expect(stale.execution.projection).to.equal(undefined);
     });
 
+    it('does not replace an unresolved request with a new policy intent', async () => {
+        const nextPolicyRef = { id: policyId, revision: 2, fingerprint: 'c'.repeat(64) };
+        const beginNext = (service: InstanceType<typeof executionModule.ExamNetworkExecutionService>, active: Awaited<ReturnType<typeof create>>) =>
+            service.beginApply({
+                executionId,
+                domainId: 'system',
+                eventId,
+                schoolId,
+                expectedRevision: 1,
+                actorUid: 1,
+                policyRef: nextPolicyRef,
+                targetRef,
+                startAt: active.startAt,
+                hardEndAt: active.hardEndAt,
+            });
+
+        const dispatchingFixture = fixture();
+        const dispatching = await create(dispatchingFixture.service);
+        expect(await reason(() => beginNext(dispatchingFixture.service, dispatching))).to.equal('current_request_unresolved');
+
+        const unknownFixture = fixture();
+        const unknown = await create(unknownFixture.service);
+        await unknownFixture.service.markUnknown('system', eventId, 1, unknown.operation.requestId, 'vigil_delivery_unknown');
+        expect(await reason(() => beginNext(unknownFixture.service, unknown))).to.equal('current_request_unresolved');
+
+        const failedFixture = fixture();
+        const failed = await create(failedFixture.service);
+        await failedFixture.service.markFailed('system', eventId, 1, failed.operation.requestId, 'vigil_http_rejected');
+        expect(await reason(() => beginNext(failedFixture.service, failed))).to.equal('current_request_unresolved');
+
+        const partialFixture = fixture();
+        const partial = await create(partialFixture.service);
+        const partialProjection = projection(partial);
+        partialProjection.dispatchStatus = 'dispatching';
+        await partialFixture.service.applyProjection(partialProjection);
+        expect(await reason(() => beginNext(partialFixture.service, partial))).to.equal('current_request_unresolved');
+    });
+
     it('stops the immutable target with a new execution revision', async () => {
         const { service } = fixture();
         const active = await create(service);
@@ -325,7 +358,7 @@ describe('exam network execution canonical facts', () => {
                     hardEndAt: active.hardEndAt,
                 }),
             ),
-        ).to.equal('target_release_unconfirmed');
+        ).to.equal('current_request_unresolved');
         const released = projection(stopped);
         released.items[0].status = 'applied';
         released.items[0].appliedPolicyRevision = stopped.networkPolicyRevision;
@@ -345,11 +378,197 @@ describe('exam network execution canonical facts', () => {
         });
         expect(restarted).to.include({ revision: 3, networkPolicyRevision: 2, desiredState: 'active' });
         expect(restarted.targetRef).to.deep.equal(nextTargetRef);
+
+        const blockedFixture = fixture();
+        await create(blockedFixture.service);
+        const blockedStop = await blockedFixture.service.beginStop({
+            domainId: 'system',
+            eventId,
+            expectedRevision: 1,
+            actorUid: 1,
+        });
+        const failedRelease = projection(blockedStop);
+        failedRelease.items[0].status = 'failed';
+        failedRelease.items[0].failureReason = 'network_platform_clear_failed';
+        failedRelease.summary = { failed: 1 };
+        await blockedFixture.service.applyProjection(failedRelease);
+        expect(
+            await reason(() =>
+                blockedFixture.service.beginApply({
+                    executionId,
+                    domainId: 'system',
+                    eventId,
+                    schoolId,
+                    expectedRevision: 2,
+                    actorUid: 1,
+                    policyRef,
+                    targetRef: nextTargetRef,
+                    startAt: active.startAt,
+                    hardEndAt: active.hardEndAt,
+                }),
+            ),
+        ).to.equal('target_release_unconfirmed');
+    });
+
+    it('reissues a failed apply for the full immutable target with a newer policy revision', async () => {
+        const { service } = fixture();
+        const active = await create(service);
+        const failed = projection(active);
+        failed.items[0].status = 'offline';
+        failed.items[0].failureReason = 'endpoint_offline';
+        failed.summary = { offline: 1 };
+        await service.applyProjection(failed);
+
+        const retried = await service.beginRetry({
+            domainId: 'system',
+            eventId,
+            expectedRevision: 1,
+            actorUid: 1,
+        });
+        expect(retried).to.include({ revision: 2, networkPolicyRevision: 2, desiredState: 'active' });
+        expect(retried.operation).to.include({
+            kind: 'apply',
+            requestId: `exam-network:${executionId}:2:apply`,
+            status: 'dispatching',
+        });
+        expect(retried.policyRef).to.deep.equal(active.policyRef);
+        expect(retried.targetRef).to.deep.equal(active.targetRef);
+        expect(retried.projection).to.equal(undefined);
+    });
+
+    it('reissues a partially failed stop without inventing a new policy revision', async () => {
+        const { service } = fixture();
+        await create(service);
+        const stopped = await service.beginStop({
+            domainId: 'system',
+            eventId,
+            expectedRevision: 1,
+            actorUid: 1,
+        });
+        const failed = projection(stopped);
+        failed.items[0].status = 'failed';
+        failed.items[0].failureReason = 'network_platform_clear_failed';
+        failed.summary = { failed: 1 };
+        await service.applyProjection(failed);
+
+        const retried = await service.beginRetry({
+            domainId: 'system',
+            eventId,
+            expectedRevision: 2,
+            actorUid: 1,
+        });
+        expect(retried).to.include({ revision: 3, networkPolicyRevision: 1, desiredState: 'stopped' });
+        expect(retried.operation).to.include({
+            kind: 'stop',
+            requestId: `exam-network:${executionId}:3:stop`,
+            status: 'dispatching',
+        });
+        expect(retried.projection).to.equal(undefined);
+    });
+
+    it('does not create a new retry intent while the current request is still pending or fully applied', async () => {
+        const { service } = fixture();
+        const active = await create(service);
+        await service.applyProjection(projection(active));
+        expect(await reason(() => service.beginRetry({ domainId: 'system', eventId, expectedRevision: 1, actorUid: 1 }))).to.equal(
+            'endpoint_retry_not_available',
+        );
+
+        const applied = projection(active, 2);
+        applied.items[0].status = 'applied';
+        applied.items[0].appliedPolicyRevision = 1;
+        applied.summary = { applied: 1 };
+        await service.applyProjection(applied);
+        expect(await reason(() => service.beginRetry({ domainId: 'system', eventId, expectedRevision: 1, actorUid: 1 }))).to.equal(
+            'endpoint_retry_not_available',
+        );
+    });
+
+    it('keeps delivery-unknown failures on the original request identity', async () => {
+        const { service } = fixture();
+        const active = await create(service);
+        const uncertain = projection(active);
+        uncertain.items[0].status = 'failed';
+        uncertain.items[0].failureReason = 'transport_send_failed_delivery_unknown';
+        uncertain.summary = { failed: 1 };
+        await service.applyProjection(uncertain);
+
+        expect(await reason(() => service.beginRetry({ domainId: 'system', eventId, expectedRevision: 1, actorUid: 1 }))).to.equal(
+            'endpoint_retry_not_available',
+        );
+        expect(
+            await reason(() =>
+                service.beginApply({
+                    executionId,
+                    domainId: 'system',
+                    eventId,
+                    schoolId,
+                    expectedRevision: 1,
+                    actorUid: 1,
+                    policyRef: { id: policyId, revision: 2, fingerprint: 'c'.repeat(64) },
+                    targetRef,
+                    startAt: active.startAt,
+                    hardEndAt: active.hardEndAt,
+                }),
+            ),
+        ).to.equal('current_request_unresolved');
+
+        const stopFixture = fixture();
+        const stopActive = await create(stopFixture.service);
+        const stopped = await stopFixture.service.beginStop({
+            domainId: 'system',
+            eventId,
+            expectedRevision: 1,
+            actorUid: 1,
+        });
+        const uncertainStop = projection(stopped);
+        uncertainStop.items[0].status = 'failed';
+        uncertainStop.items[0].failureReason = 'transport_send_failed_delivery_unknown';
+        uncertainStop.summary = { failed: 1 };
+        await stopFixture.service.applyProjection(uncertainStop);
+        expect(
+            await reason(() =>
+                stopFixture.service.beginApply({
+                    executionId,
+                    domainId: 'system',
+                    eventId,
+                    schoolId,
+                    expectedRevision: 2,
+                    actorUid: 1,
+                    policyRef,
+                    targetRef,
+                    startAt: stopActive.startAt,
+                    hardEndAt: stopActive.hardEndAt,
+                }),
+            ),
+        ).to.equal('current_request_unresolved');
+    });
+
+    it('does not let an explicit failure hide delivery-unknown during a full-target retry', async () => {
+        const { service } = fixture(['ep_one', 'ep_two']);
+        const active = await create(service);
+        const mixed = projection(active);
+        mixed.items[0].status = 'offline';
+        mixed.items[0].failureReason = 'endpoint_offline';
+        mixed.items.push({
+            ...mixed.items[0],
+            commandId: 'examnet_2',
+            endpointId: 'ep_two',
+            status: 'failed',
+            failureReason: 'transport_send_failed_delivery_unknown',
+        });
+        mixed.summary = { offline: 1, failed: 1 };
+        await service.applyProjection(mixed);
+
+        expect(await reason(() => service.beginRetry({ domainId: 'system', eventId, expectedRevision: 1, actorUid: 1 }))).to.equal(
+            'endpoint_retry_not_available',
+        );
     });
 
     it('rejects changing an active target snapshot or an unchanged policy', async () => {
         const { service } = fixture();
         const active = await create(service);
+        await service.applyProjection(projection(active));
         expect(
             await reason(() =>
                 service.beginApply({

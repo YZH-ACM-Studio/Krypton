@@ -226,6 +226,81 @@ describe('Exam network policy canonical schema', () => {
         });
         await policyModule.validateExamNetworkPolicyResolution(explicitlyCovered, async () => resolved, controlPlane);
     });
+
+    it('classifies policy changes by effective host, CIDR and all-port semantics', () => {
+        const base = policyModule.canonicalExamNetworkPolicy({
+            hosts: ['*.example.edu'],
+            ips: ['10.0.0.0/8'],
+            ports: [443],
+        });
+        expect(
+            policyModule.diffExamNetworkPolicies(
+                base,
+                policyModule.canonicalExamNetworkPolicy({
+                    hosts: ['judge.example.edu'],
+                    ips: ['10.1.0.0/16'],
+                    ports: [443],
+                }),
+            ).effect,
+        ).to.equal('tightening');
+        expect(
+            policyModule.diffExamNetworkPolicies(
+                base,
+                policyModule.canonicalExamNetworkPolicy({
+                    hosts: ['*.example.edu'],
+                    ips: ['10.0.0.0/8'],
+                    ports: [],
+                }),
+            ).effect,
+        ).to.equal('loosening');
+        expect(
+            policyModule.diffExamNetworkPolicies(
+                base,
+                policyModule.canonicalExamNetworkPolicy({
+                    hosts: ['judge.example.edu', 'mirror.example.net'],
+                    ips: ['10.1.0.0/16'],
+                    ports: [80, 443],
+                }),
+            ).effect,
+        ).to.equal('mixed');
+        expect(policyModule.diffExamNetworkPolicies(base, base)).to.deep.equal({
+            effect: 'unchanged',
+            addedHosts: [],
+            removedHosts: [],
+            addedIps: [],
+            removedIps: [],
+            beforePorts: [443],
+            afterPorts: [443],
+        });
+
+        const splitIpv4 = policyModule.canonicalExamNetworkPolicy({
+            hosts: ['*.example.edu'],
+            ips: ['10.0.0.0/9', '10.128.0.0/9'],
+            ports: [443],
+        });
+        expect(policyModule.diffExamNetworkPolicies(base, splitIpv4).effect).to.equal('unchanged');
+        expect(policyModule.diffExamNetworkPolicies(splitIpv4, base).effect).to.equal('unchanged');
+
+        const ipv6 = policyModule.canonicalExamNetworkPolicy({
+            hosts: ['*.example.edu'],
+            ips: ['2001:db8::/64'],
+            ports: [443],
+        });
+        const splitIpv6 = policyModule.canonicalExamNetworkPolicy({
+            hosts: ['*.example.edu'],
+            ips: ['2001:db8::/65', '2001:db8:0:0:8000::/65'],
+            ports: [443],
+        });
+        expect(policyModule.diffExamNetworkPolicies(ipv6, splitIpv6).effect).to.equal('unchanged');
+        expect(policyModule.diffExamNetworkPolicies(splitIpv6, ipv6).effect).to.equal('unchanged');
+
+        const ipv4WithGap = policyModule.canonicalExamNetworkPolicy({
+            hosts: ['*.example.edu'],
+            ips: ['10.0.0.0/9', '10.128.0.0/10'],
+            ports: [443],
+        });
+        expect(policyModule.diffExamNetworkPolicies(base, ipv4WithGap).effect).to.equal('tightening');
+    });
 });
 
 describe('Exam policy templates and immutable revisions', () => {
@@ -443,14 +518,23 @@ describe('Exam target snapshots and event revision references', () => {
             { endpoints: [{ ...endpoint('e1'), capabilities: [] }], expected: 'endpoint_capability_missing' },
             { endpoints: [endpoint('e1', schoolId, 2)], expected: 'endpoint_capability_incomplete' },
             ...networkPolicyCommands.map((missingCommand) => ({
-                endpoints: [endpoint('e1', schoolId, 1, networkPolicyCommands.filter((command) => command !== missingCommand))],
+                endpoints: [
+                    endpoint(
+                        'e1',
+                        schoolId,
+                        1,
+                        networkPolicyCommands.filter((command) => command !== missingCommand),
+                    ),
+                ],
                 expected: 'endpoint_capability_incomplete',
             })),
             {
-                endpoints: [{
-                    ...endpoint('e1'),
-                    capabilities: [{ name: 'network.policy', version: 1, commands: 'apply_network_policy' as never }],
-                }],
+                endpoints: [
+                    {
+                        ...endpoint('e1'),
+                        capabilities: [{ name: 'network.policy', version: 1, commands: 'apply_network_policy' as never }],
+                    },
+                ],
                 expected: 'endpoint_capability_incomplete',
             },
         ];
@@ -726,9 +810,7 @@ describe('Exam target snapshots and event revision references', () => {
             actorUid: 1,
             policy: { templateId: template._id, revision: published.revisions[0].revision },
         });
-        expect(await reason(() => configFixture.service.assertEventSchoolChangeAllowed('system', eventId))).to.equal(
-            'network_configuration_exists',
-        );
+        expect(await reason(() => configFixture.service.assertEventSchoolChangeAllowed('system', eventId))).to.equal('network_configuration_exists');
     });
 
     it('maps only the expected event unique-key race to a revision conflict', async () => {
@@ -924,7 +1006,9 @@ describe('Exam target resolver and audit boundaries', () => {
         });
         const targetFacts = auditModule.targetAssignmentAuditFacts('saveDraft', assignment);
         expect(targetFacts).to.include({ sourceCount: 2, publishedRevision: null });
-        expect(targetFacts).to.have.property('sourceFingerprint').that.matches(/^[a-f0-9]{64}$/);
+        expect(targetFacts)
+            .to.have.property('sourceFingerprint')
+            .that.matches(/^[a-f0-9]{64}$/);
         expect(targetFacts).not.to.have.property('targetCount');
         expect(targetFacts).not.to.have.property('fingerprint');
     });

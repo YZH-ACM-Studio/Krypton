@@ -140,12 +140,40 @@ interface ProjectionItem {
   endpointId: string;
   commandId: string | null;
   command: 'apply_network_policy' | 'stop_network_policy';
+  previousPolicyRevision: number | null;
   expectedPolicyRevision: number | null;
   appliedPolicyRevision: number | null;
   status: 'applied' | 'expired' | 'failed' | 'offline' | 'queued' | 'rejected' | 'sent';
   failureReason: string | null;
   online: boolean;
   networkPolicyState: { state: string; policyRevision?: number; reason?: string } | null;
+}
+
+interface NetworkUpdatePreview {
+  executionRevision: number;
+  configRevision: number;
+  fromPolicyRef: RevisionRef;
+  toPolicyRef: RevisionRef;
+  fromTargetRef: RevisionRef;
+  toTargetRef: RevisionRef;
+  previousNetworkPolicyRevision: number;
+  expectedNetworkPolicyRevision: number;
+  policyDiff: {
+    effect: 'loosening' | 'mixed' | 'tightening' | 'unchanged';
+    addedHosts: string[];
+    removedHosts: string[];
+    addedIps: string[];
+    removedIps: string[];
+    beforePorts: number[];
+    afterPorts: number[];
+  };
+  targetDiff: {
+    beforeCount: number;
+    afterCount: number;
+    addedEndpointIds: string[];
+    removedEndpointIds: string[];
+  };
+  requiresStop: boolean;
 }
 
 interface NetworkExecution {
@@ -205,6 +233,12 @@ const ENDPOINT_STATUS_LABELS: Record<ProjectionItem['status'], string> = {
   rejected: '已拒绝',
   sent: '已送达',
 };
+
+const DELIVERY_UNKNOWN_FAILURE_REASON = 'transport_send_failed_delivery_unknown';
+
+function isRetryableProjectionItem(item: ProjectionItem): boolean {
+  return ['expired', 'failed', 'offline', 'rejected'].includes(item.status) && item.failureReason !== DELIVERY_UNKNOWN_FAILURE_REASON;
+}
 
 function asRecord(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label}响应格式不正确`);
@@ -363,6 +397,7 @@ function parseProjectionItem(value: unknown): ProjectionItem {
     endpointId: asString(item.endpointId, '终端执行状态'),
     commandId: optionalString(item.commandId, '终端执行状态'),
     command,
+    previousPolicyRevision: item.previousPolicyRevision === null ? null : asNumber(item.previousPolicyRevision, '终端执行状态'),
     expectedPolicyRevision: item.expectedPolicyRevision === null ? null : asNumber(item.expectedPolicyRevision, '终端执行状态'),
     appliedPolicyRevision: item.appliedPolicyRevision === null ? null : asNumber(item.appliedPolicyRevision, '终端执行状态'),
     status: status as ProjectionItem['status'],
@@ -372,6 +407,52 @@ function parseProjectionItem(value: unknown): ProjectionItem {
       return item.online;
     })(),
     networkPolicyState,
+  };
+}
+
+function parseNetworkUpdatePreview(value: unknown): NetworkUpdatePreview | null {
+  if (value === null) return null;
+  const preview = asRecord(value, '热更新预览');
+  const policyDiff = asRecord(preview.policyDiff, '策略差异');
+  const targetDiff = asRecord(preview.targetDiff, '目标差异');
+  const effect = asString(policyDiff.effect, '策略差异');
+  if (!['loosening', 'mixed', 'tightening', 'unchanged'].includes(effect) || typeof preview.requiresStop !== 'boolean') {
+    throw new Error('热更新预览响应格式不正确');
+  }
+  const numberArray = (candidate: unknown, label: string): number[] => {
+    if (!Array.isArray(candidate) || candidate.some((item) => !Number.isSafeInteger(item))) throw new Error(`${label}响应格式不正确`);
+    return [...candidate] as number[];
+  };
+  const fromPolicyRef = parseRef(preview.fromPolicyRef);
+  const toPolicyRef = parseRef(preview.toPolicyRef);
+  const fromTargetRef = parseRef(preview.fromTargetRef);
+  const toTargetRef = parseRef(preview.toTargetRef);
+  if (!fromPolicyRef || !toPolicyRef || !fromTargetRef || !toTargetRef) throw new Error('热更新预览响应格式不正确');
+  return {
+    executionRevision: asNumber(preview.executionRevision, '热更新预览'),
+    configRevision: asNumber(preview.configRevision, '热更新预览'),
+    fromPolicyRef,
+    toPolicyRef,
+    fromTargetRef,
+    toTargetRef,
+    previousNetworkPolicyRevision: asNumber(preview.previousNetworkPolicyRevision, '热更新预览'),
+    expectedNetworkPolicyRevision: asNumber(preview.expectedNetworkPolicyRevision, '热更新预览'),
+    policyDiff: {
+      effect: effect as NetworkUpdatePreview['policyDiff']['effect'],
+      addedHosts: asStringArray(policyDiff.addedHosts, '策略差异'),
+      removedHosts: asStringArray(policyDiff.removedHosts, '策略差异'),
+      addedIps: asStringArray(policyDiff.addedIps, '策略差异'),
+      removedIps: asStringArray(policyDiff.removedIps, '策略差异'),
+      beforePorts: numberArray(policyDiff.beforePorts, '策略差异'),
+      afterPorts: numberArray(policyDiff.afterPorts, '策略差异'),
+    },
+    targetDiff: {
+      beforeCount: asNumber(targetDiff.beforeCount, '目标差异'),
+      afterCount: asNumber(targetDiff.afterCount, '目标差异'),
+      addedEndpointIds: asStringArray(targetDiff.addedEndpointIds, '目标差异'),
+      removedEndpointIds: asStringArray(targetDiff.removedEndpointIds, '目标差异'),
+    },
+    requiresStop: preview.requiresStop,
   };
 }
 
@@ -466,6 +547,54 @@ function networkConfigIdentity(config: NetworkConfig | null): string {
     config.target.revision,
     config.target.fingerprint,
   ].join(':');
+}
+
+function sameRevisionRef(left: RevisionRef | null, right: RevisionRef | null): boolean {
+  return Boolean(left && right && left.id === right.id && left.revision === right.revision && left.fingerprint === right.fingerprint);
+}
+
+function visibleNetworkUpdatePreview(
+  preview: NetworkUpdatePreview | null,
+  config: NetworkConfig | null,
+  execution: NetworkExecution | null,
+): NetworkUpdatePreview | null {
+  if (
+    !preview ||
+    !config?.policy ||
+    !config.target ||
+    !execution ||
+    preview.configRevision !== config.revision ||
+    preview.executionRevision !== execution.revision ||
+    !sameRevisionRef(preview.fromPolicyRef, execution.policyRef) ||
+    !sameRevisionRef(preview.toPolicyRef, config.policy) ||
+    !sameRevisionRef(preview.fromTargetRef, execution.targetRef) ||
+    !sameRevisionRef(preview.toTargetRef, config.target)
+  ) {
+    return null;
+  }
+  return preview;
+}
+
+function policyEffectLabel(effect: NetworkUpdatePreview['policyDiff']['effect']): string {
+  if (effect === 'loosening') return '放宽';
+  if (effect === 'tightening') return '收紧';
+  if (effect === 'mixed') return '同时收紧与放宽';
+  return '规则等价';
+}
+
+function formatPorts(ports: number[]): string {
+  return ports.length ? ports.join('、') : '全部端口';
+}
+
+function policyDiffFacts(diff: NetworkUpdatePreview['policyDiff']): Array<{ label: string; value: ReactNode }> {
+  const addedRules = [...diff.addedHosts.map((item) => `域名 ${item}`), ...diff.addedIps.map((item) => `IP ${item}`)];
+  const removedRules = [...diff.removedHosts.map((item) => `域名 ${item}`), ...diff.removedIps.map((item) => `IP ${item}`)];
+  return [
+    { label: '变化方向', value: policyEffectLabel(diff.effect) },
+    { label: '新增允许规则', value: addedRules.length ? addedRules.join('、') : '无' },
+    { label: '移除允许规则', value: removedRules.length ? removedRules.join('、') : '无' },
+    { label: '端口变化', value: `${formatPorts(diff.beforePorts)} → ${formatPorts(diff.afterPorts)}` },
+  ];
 }
 
 function policyExpansion(current: NetworkPolicy, previous: NetworkPolicy | null): string[] {
@@ -1457,6 +1586,7 @@ function ExecutionSection({
   config,
   assignment,
   execution,
+  updatePreview,
   reload,
   requestConfirm,
 }: {
@@ -1464,6 +1594,7 @@ function ExecutionSection({
   config: NetworkConfig | null;
   assignment: TargetAssignment | null;
   execution: NetworkExecution | null;
+  updatePreview: NetworkUpdatePreview | null;
   reload: () => Promise<void>;
   requestConfirm: (plan: ConfirmPlan) => void;
 }) {
@@ -1472,7 +1603,11 @@ function ExecutionSection({
   const visiblePreflight = preflight?.configIdentity === configIdentity ? preflight.items : null;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const call = async (action: 'preflight' | 'refresh' | 'retry' | 'start' | 'stop', rethrow = false, expectedConfigRevision?: number) => {
+  const call = async (
+    action: 'preflight' | 'refresh' | 'retry' | 'retryFailed' | 'start' | 'stop',
+    rethrow = false,
+    expectedConfigRevision?: number,
+  ) => {
     setBusy(true);
     setError(null);
     try {
@@ -1520,11 +1655,25 @@ function ExecutionSection({
     }
   };
   const target = assignment?.revisions.find((revision) => revision.revision === config?.target?.revision) || null;
+  const canonicalUpdatePreview = visibleNetworkUpdatePreview(updatePreview, config, execution);
   const failures =
     execution?.projection?.items.filter(
       (item) => item.status === 'failed' || item.status === 'offline' || item.status === 'rejected' || item.status === 'expired',
     ) || [];
+  const retryableFailures = failures.filter(isRetryableProjectionItem);
+  const hasDeliveryUnknownFailure = failures.some((item) => item.failureReason === DELIVERY_UNKNOWN_FAILURE_REASON);
+  const currentRequestUnresolved = Boolean(
+    execution && (execution.operation.status !== 'received' || execution.projection?.dispatchStatus !== 'complete' || hasDeliveryUnknownFailure),
+  );
   const runnable = event.lifecycle === 'scheduled' && event.status !== 'ended';
+  const updateIsRollback = Boolean(
+    canonicalUpdatePreview &&
+    canonicalUpdatePreview.fromPolicyRef.id === canonicalUpdatePreview.toPolicyRef.id &&
+    canonicalUpdatePreview.toPolicyRef.revision < canonicalUpdatePreview.fromPolicyRef.revision,
+  );
+  const preflightReadyCount = visiblePreflight?.filter((item) => item.ready).length || 0;
+  const updateTone =
+    canonicalUpdatePreview?.policyDiff.effect === 'loosening' || canonicalUpdatePreview?.policyDiff.effect === 'mixed' ? 'destructive' : 'default';
   return (
     <Card>
       <CardHeader>
@@ -1547,7 +1696,10 @@ function ExecutionSection({
               {execution?.desiredState !== 'active' ? (
                 <Button
                   size="sm"
-                  disabled={busy || !runnable}
+                  disabled={busy || !runnable || !visiblePreflight || currentRequestUnresolved}
+                  title={
+                    currentRequestUnresolved ? '请先重试当前请求或刷新到完整执行事实' : !visiblePreflight ? '请先对当前配置执行终端预检' : undefined
+                  }
                   onClick={() =>
                     requestConfirm({
                       title: '启动网络策略？',
@@ -1559,6 +1711,16 @@ function ExecutionSection({
                         { label: '目标终端数', value: target?.targetCount ?? '未知' },
                         { label: '硬截止', value: formatDate(event.endAt) },
                         { label: '目标变化', value: target ? `${target.endpointIds.length} 台固定快照` : '无法确认' },
+                        { label: '当前预检', value: `${preflightReadyCount}/${visiblePreflight?.length || 0} 台就绪` },
+                        ...(canonicalUpdatePreview
+                          ? [
+                              ...policyDiffFacts(canonicalUpdatePreview.policyDiff),
+                              {
+                                label: '终端变化',
+                                value: `${canonicalUpdatePreview.targetDiff.beforeCount} → ${canonicalUpdatePreview.targetDiff.afterCount} 台`,
+                              },
+                            ]
+                          : []),
                       ],
                       run: () => call('start', true, config.revision),
                     })
@@ -1574,10 +1736,49 @@ function ExecutionSection({
                   刷新事实
                 </Button>
               ) : null}
-              {(execution?.operation.status === 'failed' || execution?.operation.status === 'unknown') && event.lifecycle !== 'archived' ? (
+              {(currentRequestUnresolved || hasDeliveryUnknownFailure) && event.lifecycle !== 'archived' ? (
                 <Button size="sm" variant="outline" disabled={busy} onClick={() => void call('retry')}>
                   <RefreshCw className="size-4" />
-                  重试派发
+                  重试当前请求
+                </Button>
+              ) : null}
+              {execution?.projection?.dispatchStatus === 'complete' &&
+              retryableFailures.length > 0 &&
+              !hasDeliveryUnknownFailure &&
+              event.lifecycle !== 'archived' &&
+              (execution.desiredState !== 'active' || !canonicalUpdatePreview) ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() =>
+                    requestConfirm({
+                      title: execution.desiredState === 'active' ? '整批重新应用网络策略？' : '整批重新发送停止命令？',
+                      description:
+                        execution.desiredState === 'active'
+                          ? '为保持同一目标快照的 revision 一致，系统会给全部目标终端发送更高策略 revision；不是只给失败终端补发。'
+                          : '系统会给全部目标终端发送新的签名停止命令；已经确认释放的终端只更新精确停止证明，不会重新加锁。',
+                      confirmLabel: execution.desiredState === 'active' ? '确认整批重试' : '确认重新停止',
+                      tone: 'destructive',
+                      facts: [
+                        { label: '执行版本', value: `${execution.revision} → ${execution.revision + 1}` },
+                        {
+                          label: '终端策略 revision',
+                          value:
+                            execution.desiredState === 'active'
+                              ? `${execution.networkPolicyRevision} → ${execution.networkPolicyRevision + 1}`
+                              : `${execution.networkPolicyRevision}（不变）`,
+                        },
+                        { label: '整批目标', value: `${execution.projection?.items.length ?? 0} 台` },
+                        { label: '当前失败终端', value: retryableFailures.map((item) => item.endpointId).join('、') },
+                        { label: '硬截止', value: formatDate(execution.hardEndAt) },
+                      ],
+                      run: () => call('retryFailed', true),
+                    })
+                  }
+                >
+                  <RefreshCw className="size-4" />
+                  整批重试失败项
                 </Button>
               ) : null}
               {execution?.desiredState === 'active' ? (
@@ -1594,7 +1795,11 @@ function ExecutionSection({
                       facts: [
                         { label: '执行版本', value: `${execution.revision} → ${execution.revision + 1}` },
                         { label: '策略版本', value: `v${execution.networkPolicyRevision}` },
-                        { label: '目标终端数', value: target?.targetCount ?? execution.projection?.items.length ?? '未知' },
+                        {
+                          label: '目标终端数',
+                          value:
+                            canonicalUpdatePreview?.targetDiff.beforeCount ?? execution.projection?.items.length ?? target?.targetCount ?? '未知',
+                        },
                         { label: '当前失败终端', value: failures.length ? failures.map((item) => item.endpointId).join('、') : '无' },
                         { label: '硬截止', value: formatDate(execution.hardEndAt) },
                       ],
@@ -1607,6 +1812,89 @@ function ExecutionSection({
                 </Button>
               ) : null}
             </div>
+            {execution?.desiredState === 'active' && canonicalUpdatePreview ? (
+              <div
+                className={cn(
+                  'rounded-xl border p-4',
+                  canonicalUpdatePreview.requiresStop
+                    ? 'border-amber-500/30 bg-amber-500/5'
+                    : updateTone === 'destructive'
+                      ? 'border-destructive/30 bg-destructive/5'
+                      : 'border-primary/25 bg-primary/5',
+                )}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-medium">配置已有新版本等待应用</p>
+                      <Badge variant={updateTone === 'destructive' ? 'destructive' : 'outline'}>
+                        {policyEffectLabel(canonicalUpdatePreview.policyDiff.effect)}
+                      </Badge>
+                    </div>
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                      策略 v{canonicalUpdatePreview.fromPolicyRef.revision} → v{canonicalUpdatePreview.toPolicyRef.revision} · 目标{' '}
+                      {canonicalUpdatePreview.targetDiff.beforeCount} → {canonicalUpdatePreview.targetDiff.afterCount} 台
+                    </p>
+                  </div>
+                  {!canonicalUpdatePreview.requiresStop ? (
+                    <Button
+                      size="sm"
+                      variant={updateTone}
+                      disabled={busy || !runnable || !visiblePreflight || currentRequestUnresolved}
+                      title={
+                        currentRequestUnresolved ? '请先重试当前请求或刷新到完整执行事实' : !visiblePreflight ? '请先对新配置执行终端预检' : undefined
+                      }
+                      onClick={() =>
+                        requestConfirm({
+                          title: updateIsRollback ? '回滚并热更新网络策略？' : '热更新网络策略？',
+                          description:
+                            updateTone === 'destructive'
+                              ? '本次变更包含访问范围放宽。命令会逐机持久化，只有终端回报实际版本后才算应用成功。'
+                              : '目标快照不变；命令会逐机持久化，离线或失败终端不会被显示成已经更新。',
+                          confirmLabel: updateIsRollback ? '确认回滚' : '确认热更新',
+                          tone: updateTone,
+                          facts: [
+                            {
+                              label: '执行版本',
+                              value: `${canonicalUpdatePreview.executionRevision} → ${canonicalUpdatePreview.executionRevision + 1}`,
+                            },
+                            {
+                              label: '终端策略 revision',
+                              value: `${canonicalUpdatePreview.previousNetworkPolicyRevision} → ${canonicalUpdatePreview.expectedNetworkPolicyRevision}`,
+                            },
+                            ...policyDiffFacts(canonicalUpdatePreview.policyDiff),
+                            { label: '影响终端', value: `${canonicalUpdatePreview.targetDiff.afterCount} 台` },
+                            { label: '当前预检', value: `${preflightReadyCount}/${visiblePreflight?.length || 0} 台就绪` },
+                            { label: '硬截止', value: formatDate(execution.hardEndAt) },
+                          ],
+                          run: () => call('start', true, canonicalUpdatePreview.configRevision),
+                        })
+                      }
+                    >
+                      <RefreshCw className="size-4" />
+                      {updateIsRollback ? '回滚并热更新' : '热更新策略'}
+                    </Button>
+                  ) : null}
+                </div>
+                <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
+                  <Fact
+                    label="新增允许规则"
+                    value={[...canonicalUpdatePreview.policyDiff.addedHosts, ...canonicalUpdatePreview.policyDiff.addedIps].join('、') || '无'}
+                  />
+                  <Fact
+                    label="移除允许规则"
+                    value={[...canonicalUpdatePreview.policyDiff.removedHosts, ...canonicalUpdatePreview.policyDiff.removedIps].join('、') || '无'}
+                  />
+                  <Fact label="新增终端" value={canonicalUpdatePreview.targetDiff.addedEndpointIds.join('、') || '无'} />
+                  <Fact label="移除终端" value={canonicalUpdatePreview.targetDiff.removedEndpointIds.join('、') || '无'} />
+                </div>
+                {canonicalUpdatePreview.requiresStop ? (
+                  <p className="mt-3 rounded-lg border border-amber-500/25 bg-background/70 px-3 py-2 text-xs leading-5 text-amber-800 dark:text-amber-200">
+                    目标终端发生变化。为避免被移除的机器继续残留旧锁，必须先停止当前目标并等待全部终端确认释放，再按新快照启动。
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
             {visiblePreflight ? (
               <div className="rounded-xl border p-3">
                 <div className="mb-3 flex items-center justify-between">
@@ -1702,7 +1990,8 @@ function ExecutionFacts({ execution }: { execution: NetworkExecution }) {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-xs">
-                      期望 {item.expectedPolicyRevision ?? '—'} / 实际 {item.appliedPolicyRevision ?? item.networkPolicyState?.policyRevision ?? '—'}
+                      旧 {item.previousPolicyRevision ?? '—'} / 期望 {item.expectedPolicyRevision ?? '—'} / 实际{' '}
+                      {item.appliedPolicyRevision ?? item.networkPolicyState?.policyRevision ?? '—'}
                     </TableCell>
                     <TableCell className="max-w-64 text-xs text-muted-foreground">
                       {item.failureReason || item.networkPolicyState?.reason || '—'}
@@ -1727,6 +2016,7 @@ function EventDetailPage({ eventId }: { eventId: string }) {
   const [assignment, setAssignment] = useState<TargetAssignment | null>(null);
   const [config, setConfig] = useState<NetworkConfig | null>(null);
   const [execution, setExecution] = useState<NetworkExecution | null>(null);
+  const [updatePreview, setUpdatePreview] = useState<NetworkUpdatePreview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [plan, setPlan] = useState<ConfirmPlan | null>(null);
@@ -1754,6 +2044,7 @@ function EventDetailPage({ eventId }: { eventId: string }) {
     setAssignment(parseAssignment(targetPayload.assignment));
     setConfig(parseConfig(configPayload.config));
     setExecution(parseExecution(executionPayload.execution));
+    setUpdatePreview(parseNetworkUpdatePreview(executionPayload.updatePreview));
   }, [eventId]);
   useEffect(() => {
     let current = true;
@@ -1842,7 +2133,15 @@ function EventDetailPage({ eventId }: { eventId: string }) {
           reload={reload}
           requestConfirm={runPlan}
         />
-        <ExecutionSection event={event} config={config} assignment={assignment} execution={execution} reload={reload} requestConfirm={runPlan} />
+        <ExecutionSection
+          event={event}
+          config={config}
+          assignment={assignment}
+          execution={execution}
+          updatePreview={updatePreview}
+          reload={reload}
+          requestConfirm={runPlan}
+        />
       </div>
       <ConfirmActionDialog plan={plan} busy={confirmBusy} error={confirmError} onClose={closePlan} />
     </AdminPage>

@@ -1,18 +1,14 @@
 import { createHash } from 'node:crypto';
 import { Collection, ObjectId } from 'mongodb';
 import db from '../service/db';
-import type {
-    VigilExamNetworkProjection,
-    VigilExamNetworkProjectionItem,
-} from '../service/vigil-bridge';
-import {
-    ExamNetworkConfigError,
-    ExamNetworkRevisionRef,
-    loadExamTargetRevisionEndpointIds,
-} from './exam-network-config';
+import type { VigilExamNetworkProjection, VigilExamNetworkProjectionItem } from '../service/vigil-bridge';
+import { ExamNetworkConfigError, ExamNetworkRevisionRef, loadExamTargetRevisionEndpointIds } from './exam-network-config';
 
 export type ExamNetworkExecutionOperation = 'apply' | 'stop';
 export type ExamNetworkDispatchStatus = 'dispatching' | 'failed' | 'received' | 'unknown';
+
+const RETRYABLE_ENDPOINT_STATUSES = new Set(['expired', 'failed', 'offline', 'rejected']);
+const DELIVERY_UNKNOWN_FAILURE_REASON = 'transport_send_failed_delivery_unknown';
 
 export interface ExamNetworkOperationFact {
     kind: ExamNetworkExecutionOperation;
@@ -59,10 +55,7 @@ export interface ExamNetworkExecutionDoc {
     updatedBy: number;
 }
 
-type ExecutionCollection = Pick<
-    Collection<ExamNetworkExecutionDoc>,
-    'createIndex' | 'deleteMany' | 'findOne' | 'findOneAndUpdate' | 'insertOne'
->;
+type ExecutionCollection = Pick<Collection<ExamNetworkExecutionDoc>, 'createIndex' | 'deleteMany' | 'findOne' | 'findOneAndUpdate' | 'insertOne'>;
 
 type TargetEndpointResolver = (domainId: string, reference: ExamNetworkRevisionRef) => Promise<string[]>;
 
@@ -95,6 +88,18 @@ function cloneRef(value: ExamNetworkRevisionRef): ExamNetworkRevisionRef {
 
 function sameRef(left: ExamNetworkRevisionRef, right: ExamNetworkRevisionRef): boolean {
     return left.id.equals(right.id) && left.revision === right.revision && left.fingerprint === right.fingerprint;
+}
+
+function isCompleteExecutionRequest(current: ExamNetworkExecutionDoc): boolean {
+    return (
+        current.operation.status === 'received' &&
+        current.projection?.dispatchStatus === 'complete' &&
+        current.projection.items.every((item) => item.failureReason !== DELIVERY_UNKNOWN_FAILURE_REASON)
+    );
+}
+
+export function isRetryableExamNetworkProjectionItem(item: Pick<VigilExamNetworkProjectionItem, 'status' | 'failureReason'>): boolean {
+    return RETRYABLE_ENDPOINT_STATUSES.has(item.status) && item.failureReason !== DELIVERY_UNKNOWN_FAILURE_REASON;
 }
 
 function canonicalWindow(startAt: Date, hardEndAt: Date): { startAt: Date; hardEndAt: Date } {
@@ -237,6 +242,7 @@ export class ExamNetworkExecutionService {
         if (input.executionId && !current._id.equals(input.executionId)) throw new ExamNetworkExecutionError('execution_identity_mismatch');
         if (current.revision !== input.expectedRevision) throw new ExamNetworkExecutionError('revision_conflict');
         if (!current.schoolId.equals(input.schoolId)) throw new ExamNetworkExecutionError('event_school_mismatch');
+        if (!isCompleteExecutionRequest(current)) throw new ExamNetworkExecutionError('current_request_unresolved');
         const targetChanged = !sameRef(current.targetRef, targetRef);
         if (targetChanged) {
             if (current.desiredState === 'active') throw new ExamNetworkExecutionError('target_change_requires_stop');
@@ -248,7 +254,9 @@ export class ExamNetworkExecutionService {
                 current.projection.items.every((item) => item.status === 'applied');
             if (!releaseConfirmed) throw new ExamNetworkExecutionError('target_release_unconfirmed');
         }
-        if (sameRef(current.policyRef, policyRef) && current.desiredState === 'active') throw new ExamNetworkExecutionError('network_policy_unchanged');
+        if (sameRef(current.policyRef, policyRef) && current.desiredState === 'active') {
+            throw new ExamNetworkExecutionError('network_policy_unchanged');
+        }
         if (current.startAt.getTime() !== window.startAt.getTime() || current.hardEndAt.getTime() !== window.hardEndAt.getTime()) {
             throw new ExamNetworkExecutionError('activity_window_changed');
         }
@@ -283,12 +291,7 @@ export class ExamNetworkExecutionService {
         return updated;
     }
 
-    async beginStop(input: {
-        domainId: string;
-        eventId: ObjectId;
-        expectedRevision: number;
-        actorUid: number;
-    }): Promise<ExamNetworkExecutionDoc> {
+    async beginStop(input: { domainId: string; eventId: ObjectId; expectedRevision: number; actorUid: number }): Promise<ExamNetworkExecutionDoc> {
         assertIdentity(input.domainId, input.eventId);
         assertRevision(input.expectedRevision);
         assertUid(input.actorUid);
@@ -307,6 +310,58 @@ export class ExamNetworkExecutionService {
                     desiredState: 'stopped',
                     operation: {
                         kind: 'stop',
+                        ...identity,
+                        executionRevision: revision,
+                        status: 'dispatching',
+                        requestedAt: now,
+                        requestedBy: input.actorUid,
+                    },
+                    auditRef: examNetworkExecutionAuditRef(current._id, revision),
+                    updatedAt: now,
+                    updatedBy: input.actorUid,
+                },
+                $unset: { projection: '' as const },
+            },
+            { returnDocument: 'after' },
+        );
+        if (!updated) throw new ExamNetworkExecutionError('revision_conflict');
+        return updated;
+    }
+
+    async beginRetry(input: { domainId: string; eventId: ObjectId; expectedRevision: number; actorUid: number }): Promise<ExamNetworkExecutionDoc> {
+        assertIdentity(input.domainId, input.eventId);
+        assertRevision(input.expectedRevision);
+        assertUid(input.actorUid);
+        const current = await this.executions.findOne({ domainId: input.domainId, eventId: input.eventId });
+        if (!current) throw new ExamNetworkExecutionError('execution_not_found');
+        if (current.revision !== input.expectedRevision) throw new ExamNetworkExecutionError('revision_conflict');
+        if (
+            current.operation.status !== 'received' ||
+            current.projection?.dispatchStatus !== 'complete' ||
+            current.projection.items.some((item) => item.failureReason === DELIVERY_UNKNOWN_FAILURE_REASON) ||
+            !current.projection.items.some(isRetryableExamNetworkProjectionItem)
+        ) {
+            throw new ExamNetworkExecutionError('endpoint_retry_not_available');
+        }
+        const kind = current.desiredState === 'active' ? 'apply' : 'stop';
+        if (current.operation.kind !== kind) throw new ExamNetworkExecutionError('execution_state_mismatch');
+        const revision = current.revision + 1;
+        const networkPolicyRevision = kind === 'apply' ? current.networkPolicyRevision + 1 : current.networkPolicyRevision;
+        const now = this.now();
+        const identity = requestIdentity(current._id, revision, kind);
+        const updated = await this.executions.findOneAndUpdate(
+            {
+                domainId: input.domainId,
+                eventId: input.eventId,
+                revision: input.expectedRevision,
+                desiredState: current.desiredState,
+            },
+            {
+                $set: {
+                    revision,
+                    networkPolicyRevision,
+                    operation: {
+                        kind,
                         ...identity,
                         executionRevision: revision,
                         status: 'dispatching',

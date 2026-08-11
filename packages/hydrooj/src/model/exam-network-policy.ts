@@ -12,6 +12,18 @@ export interface ExamNetworkControlPlane {
     port: number;
 }
 
+export type ExamNetworkPolicyEffect = 'loosening' | 'mixed' | 'tightening' | 'unchanged';
+
+export interface ExamNetworkPolicyDiff {
+    effect: ExamNetworkPolicyEffect;
+    addedHosts: string[];
+    removedHosts: string[];
+    addedIps: string[];
+    removedIps: string[];
+    beforePorts: number[];
+    afterPorts: number[];
+}
+
 export class ExamNetworkPolicyError extends Error {
     constructor(public readonly reason: string) {
         super(reason);
@@ -41,14 +53,7 @@ function canonicalHost(value: unknown): string {
     if (
         base.length > 253 ||
         labels.length < 2 ||
-        labels.some(
-            (label) =>
-                !label ||
-                label.length > 63 ||
-                !/^[a-z0-9-]+$/.test(label) ||
-                label.startsWith('-') ||
-                label.endsWith('-'),
-        )
+        labels.some((label) => !label || label.length > 63 || !/^[a-z0-9-]+$/.test(label) || label.startsWith('-') || label.endsWith('-'))
     ) {
         throw new ExamNetworkPolicyError('invalid_host');
     }
@@ -117,6 +122,47 @@ function ipRange(value: string): { version: number; first: bigint; last: bigint 
     return { version, first, last: first + (hostBits ? (1n << hostBits) - 1n : 0n) };
 }
 
+function hostRuleCovers(outer: string, inner: string): boolean {
+    if (outer === inner) return true;
+    if (!outer.startsWith('*.')) return false;
+    const outerBase = outer.slice(2);
+    const innerBase = inner.startsWith('*.') ? inner.slice(2) : inner;
+    return innerBase.endsWith(`.${outerBase}`);
+}
+
+function mergedIpRanges(values: string[]): Array<{ version: number; first: bigint; last: bigint }> {
+    const ranges = values.map(ipRange).sort((left, right) => {
+        if (left.version !== right.version) return left.version - right.version;
+        if (left.first !== right.first) return left.first < right.first ? -1 : 1;
+        if (left.last !== right.last) return left.last < right.last ? -1 : 1;
+        return 0;
+    });
+    const merged: Array<{ version: number; first: bigint; last: bigint }> = [];
+    for (const range of ranges) {
+        const previous = merged.at(-1);
+        if (previous && previous.version === range.version && range.first <= previous.last + 1n) {
+            if (range.last > previous.last) previous.last = range.last;
+        } else {
+            merged.push({ ...range });
+        }
+    }
+    return merged;
+}
+
+function ipRulesCover(outer: string[], inner: string[]): boolean {
+    const outerRanges = mergedIpRanges(outer);
+    return mergedIpRanges(inner).every((range) =>
+        outerRanges.some((candidate) => candidate.version === range.version && candidate.first <= range.first && candidate.last >= range.last),
+    );
+}
+
+function portRulesCover(outer: number[], inner: number[]): boolean {
+    if (!outer.length) return true;
+    if (!inner.length) return false;
+    const allowed = new Set(outer);
+    return inner.every((port) => allowed.has(port));
+}
+
 function exactAddress(value: unknown): string {
     const address = canonicalIpOrCidr(value);
     if (address.includes('/')) throw new ExamNetworkPolicyError('invalid_resolved_address');
@@ -129,7 +175,9 @@ function rangeIdentity(value: string): string {
 }
 
 function hostMatchesPolicy(patterns: string[], host: string): boolean {
-    return patterns.some((pattern) => pattern === host || (pattern.startsWith('*.') && host.endsWith(pattern.slice(1)) && host.length > pattern.length - 1));
+    return patterns.some(
+        (pattern) => pattern === host || (pattern.startsWith('*.') && host.endsWith(pattern.slice(1)) && host.length > pattern.length - 1),
+    );
 }
 
 function canonicalControlPlane(value: ExamNetworkControlPlane): ExamNetworkControlPlane {
@@ -198,6 +246,28 @@ export function canonicalExamNetworkPolicy(value: unknown): ExamNetworkPolicy {
 
 export function examNetworkPolicyFingerprint(policy: ExamNetworkPolicy): string {
     return createHash('sha256').update(JSON.stringify(policy), 'utf8').digest('hex');
+}
+
+export function diffExamNetworkPolicies(beforeValue: ExamNetworkPolicy, afterValue: ExamNetworkPolicy): ExamNetworkPolicyDiff {
+    const before = canonicalExamNetworkPolicy(beforeValue);
+    const after = canonicalExamNetworkPolicy(afterValue);
+    const loosening =
+        after.hosts.some((rule) => !before.hosts.some((candidate) => hostRuleCovers(candidate, rule))) ||
+        !ipRulesCover(before.ips, after.ips) ||
+        !portRulesCover(before.ports, after.ports);
+    const tightening =
+        before.hosts.some((rule) => !after.hosts.some((candidate) => hostRuleCovers(candidate, rule))) ||
+        !ipRulesCover(after.ips, before.ips) ||
+        !portRulesCover(after.ports, before.ports);
+    return {
+        effect: loosening ? (tightening ? 'mixed' : 'loosening') : tightening ? 'tightening' : 'unchanged',
+        addedHosts: after.hosts.filter((rule) => !before.hosts.includes(rule)),
+        removedHosts: before.hosts.filter((rule) => !after.hosts.includes(rule)),
+        addedIps: after.ips.filter((rule) => !before.ips.includes(rule)),
+        removedIps: before.ips.filter((rule) => !after.ips.includes(rule)),
+        beforePorts: [...before.ports],
+        afterPorts: [...after.ports],
+    };
 }
 
 export async function validateExamNetworkPolicyResolution(

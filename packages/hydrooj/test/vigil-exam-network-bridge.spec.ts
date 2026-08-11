@@ -28,6 +28,7 @@ function validProjection() {
                 executionSessionId: 'session_one',
                 commandRevision: 1,
                 command: 'apply_network_policy',
+                previousPolicyRevision: null,
                 expectedPolicyRevision: 1,
                 appliedPolicyRevision: null,
                 status: 'sent',
@@ -94,37 +95,58 @@ async function withBridge<T>(fetcher: typeof fetch, run: (bridge: typeof import(
 
 describe('Vigil exam network bridge', () => {
     it('parses only the minimal execution projection and rejects unknown fields', async () => {
-        await withBridge(async () => new Response(JSON.stringify(validProjection()), { status: 200 }), async (bridge) => {
-            const projection = await bridge.getExamNetworkRequestOnVigil(validRequest());
-            expect(projection.items[0]).to.deep.equal({
-                commandId: 'examnet_1',
-                endpointId: 'ep_one',
-                executionSessionId: 'session_one',
-                commandRevision: 1,
-                command: 'apply_network_policy',
-                expectedPolicyRevision: 1,
-                appliedPolicyRevision: null,
-                status: 'sent',
-                failureReason: null,
-                online: true,
-                networkPolicyState: { state: 'inactive', reason: 'initialized', permitRuleCount: 0 },
-            });
-            const malformed = validProjection();
-            (malformed as Record<string, unknown>).dashboardToken = 'must-not-cross-service-scope';
-            let protocolError: unknown;
-            try {
-                bridge.parseVigilExamNetworkProjection(malformed);
-            } catch (error) {
-                protocolError = error;
-            }
-            expect(bridge.classifyVigilBridgeFailure(protocolError)).to.include({
-                deliveryUnknown: true,
-                reason: 'vigil_protocol_invalid',
-            });
-            const wrongCommand = validProjection();
-            wrongCommand.items[0].command = 'stop_network_policy';
-            expect(() => bridge.parseVigilExamNetworkProjection(wrongCommand)).to.throw('malformed');
-        });
+        await withBridge(
+            async () => new Response(JSON.stringify(validProjection()), { status: 200 }),
+            async (bridge) => {
+                const projection = await bridge.getExamNetworkRequestOnVigil(validRequest());
+                expect(projection.items[0]).to.deep.equal({
+                    commandId: 'examnet_1',
+                    endpointId: 'ep_one',
+                    executionSessionId: 'session_one',
+                    commandRevision: 1,
+                    command: 'apply_network_policy',
+                    previousPolicyRevision: null,
+                    expectedPolicyRevision: 1,
+                    appliedPolicyRevision: null,
+                    status: 'sent',
+                    failureReason: null,
+                    online: true,
+                    networkPolicyState: { state: 'inactive', reason: 'initialized', permitRuleCount: 0 },
+                });
+                const malformed = validProjection();
+                (malformed as Record<string, unknown>).dashboardToken = 'must-not-cross-service-scope';
+                let protocolError: unknown;
+                try {
+                    bridge.parseVigilExamNetworkProjection(malformed);
+                } catch (error) {
+                    protocolError = error;
+                }
+                expect(bridge.classifyVigilBridgeFailure(protocolError)).to.include({
+                    deliveryUnknown: true,
+                    reason: 'vigil_protocol_invalid',
+                });
+                const wrongCommand = validProjection();
+                wrongCommand.items[0].command = 'stop_network_policy';
+                expect(() => bridge.parseVigilExamNetworkProjection(wrongCommand)).to.throw('malformed');
+                const impossiblePreviousRevision = validProjection();
+                impossiblePreviousRevision.items[0].previousPolicyRevision = 2;
+                expect(() => bridge.parseVigilExamNetworkProjection(impossiblePreviousRevision)).to.throw('malformed');
+                const rejected = validProjection();
+                rejected.summary = { rejected: 1 } as unknown as typeof rejected.summary;
+                rejected.items[0] = {
+                    ...rejected.items[0],
+                    commandId: null,
+                    executionSessionId: null,
+                    commandRevision: null,
+                    expectedPolicyRevision: 1,
+                    status: 'rejected',
+                    failureReason: 'endpoint_offline',
+                };
+                expect(bridge.parseVigilExamNetworkProjection(rejected).items[0].expectedPolicyRevision).to.equal(1);
+                rejected.items[0].expectedPolicyRevision = null;
+                expect(() => bridge.parseVigilExamNetworkProjection(rejected)).to.throw('malformed');
+            },
+        );
     });
 
     it('retries the same idempotent request after a lost response', async () => {
@@ -190,35 +212,41 @@ describe('Vigil exam network bridge', () => {
     it('rejects a dispatch projection whose endpoint set differs from the request', async () => {
         const mismatched = validProjection();
         mismatched.items[0].endpointId = 'ep_other';
-        await withBridge(async () => new Response(JSON.stringify(mismatched), { status: 200 }), async (bridge) => {
-            let error: unknown;
-            try {
-                await bridge.dispatchExamNetworkOnVigil(validRequest());
-            } catch (caught) {
-                error = caught;
-            }
-            expect(bridge.classifyVigilBridgeFailure(error)).to.include({
-                deliveryUnknown: true,
-                reason: 'vigil_protocol_invalid',
-            });
-        });
+        await withBridge(
+            async () => new Response(JSON.stringify(mismatched), { status: 200 }),
+            async (bridge) => {
+                let error: unknown;
+                try {
+                    await bridge.dispatchExamNetworkOnVigil(validRequest());
+                } catch (caught) {
+                    error = caught;
+                }
+                expect(bridge.classifyVigilBridgeFailure(error)).to.include({
+                    deliveryUnknown: true,
+                    reason: 'vigil_protocol_invalid',
+                });
+            },
+        );
     });
 
     it('rejects a structurally valid projection whose request identity drifts', async () => {
         const mismatched = validProjection();
         mismatched.requestId = 'exam-network:other-execution:1:apply';
-        await withBridge(async () => new Response(JSON.stringify(mismatched), { status: 200 }), async (bridge) => {
-            let error: unknown;
-            try {
-                await bridge.dispatchExamNetworkOnVigil(validRequest());
-            } catch (caught) {
-                error = caught;
-            }
-            expect(bridge.classifyVigilBridgeFailure(error)).to.include({
-                deliveryUnknown: true,
-                reason: 'vigil_protocol_invalid',
-            });
-        });
+        await withBridge(
+            async () => new Response(JSON.stringify(mismatched), { status: 200 }),
+            async (bridge) => {
+                let error: unknown;
+                try {
+                    await bridge.dispatchExamNetworkOnVigil(validRequest());
+                } catch (caught) {
+                    error = caught;
+                }
+                expect(bridge.classifyVigilBridgeFailure(error)).to.include({
+                    deliveryUnknown: true,
+                    reason: 'vigil_protocol_invalid',
+                });
+            },
+        );
     });
 
     it('fails closed when preflight identity or capability shape drifts', async () => {

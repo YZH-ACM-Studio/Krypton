@@ -912,6 +912,8 @@ declare module './service/db' {
         'exam.targetAssignments': import('./model/exam-network-config').ExamTargetAssignmentDoc;
         'exam.eventNetworkConfigs': import('./model/exam-network-config').ExamEventNetworkConfigDoc;
         'exam.networkExecutions': import('./model/exam-network-execution').ExamNetworkExecutionDoc;
+        'exam.rosterRevisions': import('./model/exam-seat-plan').ExamRosterRevisionDoc;
+        'exam.seatPlans': import('./model/exam-seat-plan').ExamSeatPlanDoc;
         lock: LockDoc;
     }
 }
@@ -930,6 +932,33 @@ export interface UserbindModelBridge {
         domainId: string,
         groupIds: ObjectId[],
     ): Promise<Array<{ boundUserId: number | null; groupIds: ObjectId[]; studentId: string; realName: string }>>;
+    loadExamRosterUserbindSnapshot(
+        domainId: string,
+        schoolId: ObjectId,
+        selectedGroupIds: ObjectId[] | null,
+    ): Promise<{
+        domainId: string;
+        schoolId: ObjectId;
+        schoolName: string;
+        selectionKind: 'groups' | 'school';
+        selectedGroupIds: ObjectId[];
+        groups: Array<{
+            groupId: ObjectId;
+            schoolId: ObjectId;
+            name: string;
+            archivedAt: Date | null;
+            fingerprint: string;
+        }>;
+        students: Array<{
+            studentRecordId: ObjectId;
+            schoolId: ObjectId;
+            studentId: string;
+            realName: string;
+            groupIds: ObjectId[];
+            boundUserId: number | null;
+        }>;
+        fingerprint: string;
+    }>;
 }
 
 export interface Model {
@@ -986,10 +1015,8 @@ export interface Model {
         | 'registerExamNetworkControlPlaneResolver'
         | 'requireExamNetworkControlPlaneResolver'
     >;
-    examNetworkExecution: Pick<
-        typeof import('./model/exam-network-execution'),
-        'examNetworkExecutionColl' | 'examNetworkExecutionService'
-    >;
+    examNetworkExecution: Pick<typeof import('./model/exam-network-execution'), 'examNetworkExecutionColl' | 'examNetworkExecutionService'>;
+    examSeatPlan: Pick<typeof import('./model/exam-seat-plan'), 'examRosterRevisionColl' | 'examSeatPlanColl' | 'examSeatPlanService'>;
     user: typeof import('./model/user').default;
     oauth: typeof import('./model/oauth').default;
     storage: typeof import('./model/storage').default;

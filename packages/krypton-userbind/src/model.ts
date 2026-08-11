@@ -16,6 +16,7 @@ import {
 } from './group-export';
 import type { ListStudentsFilter } from './student-filter';
 import { escapeRegexLiteral, listStudentsFromCollection } from './student-filter';
+import { loadExamRosterUserbindSnapshotWithDependencies } from './exam-roster-source';
 import type {
     BindingRequest,
     BindToken,
@@ -900,6 +901,25 @@ export async function findBoundStudentsByGroupIds(domainId: string, groupIds: Ob
         .toArray();
 }
 
+export async function loadExamRosterUserbindSnapshot(domainId: string, schoolId: ObjectId, selectedGroupIds: ObjectId[] | null) {
+    return loadExamRosterUserbindSnapshotWithDependencies(
+        { domainId, schoolId, selectedGroupIds },
+        {
+            findSchool: (targetDomainId, targetSchoolId) => schoolsColl.findOne({ domainId: targetDomainId, _id: targetSchoolId }),
+            findGroups: (targetDomainId, groupIds) => userGroupsColl.find({ domainId: targetDomainId, _id: { $in: groupIds } }).toArray(),
+            findStudents: (targetDomainId, targetSchoolId, groupIds) =>
+                studentsColl
+                    .find({
+                        domainId: targetDomainId,
+                        schoolId: targetSchoolId,
+                        ...(groupIds === null ? {} : { groupIds: { $in: groupIds } }),
+                    })
+                    .sort({ _id: 1 })
+                    .toArray(),
+        },
+    );
+}
+
 /**
  * Update mutable student fields. Admin-only. Pass `enrollmentYear: null`
  * explicitly to clear it; `undefined` leaves it unchanged. `realName` and
@@ -1023,6 +1043,7 @@ export const userBindModel = {
     findStudentsByUserIds,
     searchBoundStudents,
     findBoundStudentsByGroupIds,
+    loadExamRosterUserbindSnapshot,
     updateStudent,
     deleteStudent,
     assignStudentsToGroup,

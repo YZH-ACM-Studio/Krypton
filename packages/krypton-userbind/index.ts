@@ -18,6 +18,7 @@ import { sweepPendingBindingNotifications } from './src/binding-notification';
 import './src/binding';
 import './src/migrate-domain';
 
+export * from './src/exam-roster-source';
 export { userBindModel } from './src/model';
 export * from './src/types';
 
@@ -43,9 +44,10 @@ export function apply(ctx: Context) {
     });
 
     if (!process.env.HYDRO_CLI) {
-        const sweepNotifications = () => sweepPendingBindingNotifications().catch((error) => {
-            console.error('[krypton-userbind] binding notification sweep failed:', error);
-        });
+        const sweepNotifications = () =>
+            sweepPendingBindingNotifications().catch((error) => {
+                console.error('[krypton-userbind] binding notification sweep failed:', error);
+            });
         ctx.on('app/started', sweepNotifications);
         ctx.effect(() => ctx.setInterval(sweepNotifications, 60_000));
     }

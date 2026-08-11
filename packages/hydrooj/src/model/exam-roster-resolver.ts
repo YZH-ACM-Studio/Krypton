@@ -1,0 +1,292 @@
+import { createHash } from 'node:crypto';
+import { ObjectId } from 'mongodb';
+import type { Tdoc } from '../interface';
+import { PRIV } from './builtin';
+import type { ExamEventDoc } from './exam-event';
+import { ExamRosterResolutionSource, ExamRosterUserState, ExamSeatPlanError, resolveStableExamRoster, ResolvedExamRoster } from './exam-seat-plan';
+import UserModel from './user';
+
+export type ExamRosterSelection = { kind: 'contestAudience' } | { kind: 'userbindGroups'; groupIds: ObjectId[] } | { kind: 'userbindSchool' };
+
+function sha256(value: unknown): string {
+    return createHash('sha256').update(JSON.stringify(value), 'utf8').digest('hex');
+}
+
+function requireUserbind() {
+    const userbind = global.Hydro.model.userbind;
+    if (!userbind || typeof userbind.loadExamRosterUserbindSnapshot !== 'function') {
+        throw new ExamSeatPlanError('userbind_roster_resolver_unavailable');
+    }
+    return userbind;
+}
+
+async function loadUserbindSnapshot(domainId: string, schoolId: ObjectId, groupIds: ObjectId[] | null) {
+    try {
+        return await requireUserbind().loadExamRosterUserbindSnapshot(domainId, schoolId, groupIds);
+    } catch (error) {
+        if (
+            error instanceof Error &&
+            error.name === 'ExamRosterUserbindSourceError' &&
+            typeof (error as Error & { reason?: unknown }).reason === 'string' &&
+            /^[a-z][a-z0-9_]{0,63}$/.test((error as Error & { reason: string }).reason)
+        ) {
+            throw new ExamSeatPlanError((error as Error & { reason: string }).reason);
+        }
+        throw error;
+    }
+}
+
+function canonicalObjectIds(values: unknown, field: string): ObjectId[] {
+    if (!Array.isArray(values) || values.some((value) => !(value instanceof ObjectId))) throw new ExamSeatPlanError(`${field}_invalid`);
+    const result = values.map((value) => new ObjectId(value)).sort((left, right) => left.toHexString().localeCompare(right.toHexString()));
+    if (new Set(result.map((value) => value.toHexString())).size !== result.length) throw new ExamSeatPlanError(`${field}_duplicate`);
+    return result;
+}
+
+function snapshotToSource(
+    snapshot: Awaited<ReturnType<NonNullable<typeof global.Hydro.model.userbind>['loadExamRosterUserbindSnapshot']>>,
+    kind: ExamRosterResolutionSource['kind'],
+    contestId: ObjectId | null,
+): ExamRosterResolutionSource {
+    return {
+        kind,
+        schoolId: new ObjectId(snapshot.schoolId),
+        selectedGroupIds: snapshot.selectedGroupIds.map((id) => new ObjectId(id)),
+        contestId: contestId ? new ObjectId(contestId) : null,
+        sourceFingerprint: snapshot.fingerprint,
+        groups: snapshot.groups.map((group) => ({
+            groupId: new ObjectId(group.groupId),
+            schoolId: new ObjectId(group.schoolId),
+            name: group.name,
+            archivedAt: group.archivedAt ? new Date(group.archivedAt) : null,
+            fingerprint: group.fingerprint,
+        })),
+        students: snapshot.students.map((student) => ({
+            studentRecordId: new ObjectId(student.studentRecordId),
+            schoolId: new ObjectId(student.schoolId),
+            studentId: student.studentId,
+            realName: student.realName,
+            groupIds: student.groupIds.map((groupId) => new ObjectId(groupId)),
+            boundUserId: student.boundUserId,
+        })),
+    };
+}
+
+function assertContestIdentity(event: ExamEventDoc, contest: Tdoc): void {
+    const contestId = contest.docId || contest._id;
+    if (contest.domainId !== event.domainId || !(contestId instanceof ObjectId) || !event.contestId?.equals(contestId)) {
+        throw new ExamSeatPlanError('contest_identity_mismatch');
+    }
+}
+
+function contestAudienceConfiguration(tdoc: Tdoc) {
+    if (tdoc.participantScopeMode !== undefined && !['none', 'schools', 'groups'].includes(tdoc.participantScopeMode)) {
+        throw new ExamSeatPlanError('contest_audience_invalid');
+    }
+    if (tdoc.participantSchoolIds !== undefined && !Array.isArray(tdoc.participantSchoolIds)) {
+        throw new ExamSeatPlanError('contest_audience_invalid');
+    }
+    if (tdoc.participantGroupIds !== undefined && !Array.isArray(tdoc.participantGroupIds)) {
+        throw new ExamSeatPlanError('contest_audience_invalid');
+    }
+    if (tdoc.assign !== undefined && !Array.isArray(tdoc.assign)) throw new ExamSeatPlanError('contest_audience_invalid');
+    const participantScopeMode = tdoc.participantScopeMode ?? 'none';
+    const participantSchoolIds = canonicalObjectIds(tdoc.participantSchoolIds ?? [], 'contest_school_scope');
+    const participantGroupIds = canonicalObjectIds(tdoc.participantGroupIds ?? [], 'contest_group_scope');
+    if (participantScopeMode === 'schools' && (!participantSchoolIds.length || participantGroupIds.length)) {
+        throw new ExamSeatPlanError('contest_audience_invalid');
+    }
+    if (participantScopeMode === 'groups' && (!participantGroupIds.length || participantSchoolIds.length)) {
+        throw new ExamSeatPlanError('contest_audience_invalid');
+    }
+    if (participantScopeMode === 'none' && (participantSchoolIds.length || participantGroupIds.length)) {
+        throw new ExamSeatPlanError('contest_audience_invalid');
+    }
+    const assign = [...(tdoc.assign ?? [])].map((name) => {
+        if (typeof name !== 'string' || !name.trim() || name !== name.trim() || name.length > 64) {
+            throw new ExamSeatPlanError('contest_assign_invalid');
+        }
+        return name;
+    });
+    assign.sort();
+    if (new Set(assign).size !== assign.length) throw new ExamSeatPlanError('contest_assign_duplicate');
+    return { participantScopeMode, participantSchoolIds, participantGroupIds, assign };
+}
+
+async function attendedUserIds(domainId: string, contestId: ObjectId): Promise<number[]> {
+    const statuses = await global.Hydro.model.contest.getMultiStatus(domainId, { docId: contestId, attend: 1 }).toArray();
+    if (statuses.some((status) => typeof status.uid !== 'number' || !Number.isSafeInteger(status.uid) || status.uid <= 1)) {
+        throw new ExamSeatPlanError('contest_attendance_invalid');
+    }
+    const uids = statuses.map((status) => status.uid as number).sort((left, right) => left - right);
+    if (new Set(uids).size !== uids.length) throw new ExamSeatPlanError('contest_attendance_duplicate');
+    return uids;
+}
+
+async function assignedUserIds(domainId: string, names: string[]): Promise<number[]> {
+    if (!names.length) return [];
+    const groups = await UserModel.collGroup.find({ domainId, name: { $in: names } }).toArray();
+    if (groups.length !== names.length || new Set(groups.map((group) => group.name)).size !== names.length) {
+        throw new ExamSeatPlanError('contest_assign_group_not_found');
+    }
+    const uids = groups.flatMap((group) => {
+        if (!Array.isArray(group.uids) || group.uids.some((uid) => !Number.isSafeInteger(uid) || uid < 1)) {
+            throw new ExamSeatPlanError('contest_assign_group_invalid');
+        }
+        return group.uids;
+    });
+    return Array.from(new Set(uids)).sort((left, right) => left - right);
+}
+
+async function contestAudienceSource(event: ExamEventDoc): Promise<ExamRosterResolutionSource> {
+    if (event.type !== 'krypton' || !event.contestId) throw new ExamSeatPlanError('contest_audience_unavailable');
+    const contest = await global.Hydro.model.contest.get(event.domainId, event.contestId);
+    assertContestIdentity(event, contest);
+    const config = contestAudienceConfiguration(contest);
+    if (contest._code !== undefined && typeof contest._code !== 'string') throw new ExamSeatPlanError('contest_audience_invalid');
+    if (contest.participationMode !== undefined && contest.participationMode !== 'individual' && contest.participationMode !== 'team') {
+        throw new ExamSeatPlanError('contest_audience_invalid');
+    }
+    const participationMode = contest.participationMode || 'individual';
+    let teamAudience: { memberUids: number[]; teamFacts: Array<{ teamId: string; revision: number; memberUids: number[] }> } | null = null;
+    if (participationMode === 'team') {
+        if (contest.rule !== 'acm') throw new ExamSeatPlanError('contest_audience_invalid');
+        if (contest.plannedTeamBatchId && !contest.teamBatchId) throw new ExamSeatPlanError('contest_team_roster_not_finalized');
+        const teams = await global.Hydro.model.contestTeam.listTeams(event.domainId, event.contestId);
+        const teamIds = new Set<string>();
+        const memberUids = new Set<number>();
+        const teamFacts = teams.map((team) => {
+            if (
+                !(team.teamId instanceof ObjectId) ||
+                typeof team.revision !== 'number' ||
+                !Number.isSafeInteger(team.revision) ||
+                team.revision < 1 ||
+                !Array.isArray(team.memberUids) ||
+                team.memberUids.length < 1 ||
+                team.memberUids.length > 3 ||
+                team.memberUids.some((uid) => typeof uid !== 'number' || !Number.isSafeInteger(uid) || uid <= 1) ||
+                new Set(team.memberUids).size !== team.memberUids.length
+            ) {
+                throw new ExamSeatPlanError('contest_team_roster_invalid');
+            }
+            const teamId = team.teamId.toHexString();
+            if (teamIds.has(teamId) || team.memberUids.some((uid) => memberUids.has(uid))) {
+                throw new ExamSeatPlanError('contest_team_roster_invalid');
+            }
+            teamIds.add(teamId);
+            team.memberUids.forEach((uid) => memberUids.add(uid));
+            return { teamId, revision: team.revision, memberUids: [...team.memberUids].sort((left, right) => left - right) };
+        });
+        teamFacts.sort((left, right) => left.teamId.localeCompare(right.teamId));
+        teamAudience = { memberUids: [...memberUids].sort((left, right) => left - right), teamFacts };
+    }
+    if (participationMode === 'individual' && config.participantScopeMode === 'schools') {
+        if (config.participantSchoolIds.some((schoolId) => !schoolId.equals(event.schoolId))) {
+            throw new ExamSeatPlanError('contest_audience_cross_school');
+        }
+    }
+    const selectedGroupIds = participationMode === 'individual' && config.participantScopeMode === 'groups' ? config.participantGroupIds : null;
+    const snapshot = await loadUserbindSnapshot(event.domainId, event.schoolId, selectedGroupIds);
+    let students = snapshot.students;
+    let audienceFacts: Record<string, unknown>;
+
+    if (participationMode === 'team') {
+        const { memberUids, teamFacts } = teamAudience!;
+        const recordsByUid = new Map(
+            snapshot.students.flatMap((student) => (student.boundUserId === null ? [] : [[student.boundUserId, student] as const])),
+        );
+        if (memberUids.some((uid) => !recordsByUid.has(uid))) throw new ExamSeatPlanError('contest_audience_userbind_missing');
+        students = snapshot.students.filter((student) => student.boundUserId !== null && memberUids.includes(student.boundUserId));
+        audienceFacts = {
+            participationMode: 'team',
+            participationRevision: contest.participationRevision || null,
+            teamBatchId: contest.teamBatchId?.toHexString() || null,
+            teams: teamFacts,
+        };
+    } else {
+        const hasExplicitScope = config.participantScopeMode !== 'none';
+        const needsAttendance = !!contest._code || (!hasExplicitScope && !config.assign.length);
+        const [attended, assigned] = await Promise.all([
+            needsAttendance ? attendedUserIds(event.domainId, event.contestId) : Promise.resolve([]),
+            assignedUserIds(event.domainId, config.assign),
+        ]);
+        const recordsByUid = new Map(
+            snapshot.students.flatMap((student) => (student.boundUserId === null ? [] : [[student.boundUserId, student] as const])),
+        );
+        if (!hasExplicitScope && [...attended, ...assigned].some((uid) => !recordsByUid.has(uid))) {
+            throw new ExamSeatPlanError('contest_audience_userbind_missing');
+        }
+        const relevantAttended = attended.filter((uid) => recordsByUid.has(uid));
+        const relevantAssigned = assigned.filter((uid) => recordsByUid.has(uid));
+        if (!hasExplicitScope || config.assign.length || needsAttendance) {
+            students = snapshot.students.filter((student) => {
+                if (student.boundUserId === null) return hasExplicitScope && !config.assign.length && !needsAttendance;
+                if (config.assign.length && !relevantAssigned.includes(student.boundUserId)) return false;
+                if (needsAttendance && !relevantAttended.includes(student.boundUserId)) return false;
+                return true;
+            });
+        }
+        audienceFacts = {
+            participationMode: 'individual',
+            participantScopeMode: config.participantScopeMode,
+            participantSchoolIds: config.participantSchoolIds.map((id) => id.toHexString()),
+            participantGroupIds: config.participantGroupIds.map((id) => id.toHexString()),
+            assign: config.assign,
+            inviteCodeRequired: !!contest._code,
+            attended: relevantAttended,
+            assigned: relevantAssigned,
+        };
+    }
+
+    const sourceFingerprint = sha256({
+        contestId: event.contestId.toHexString(),
+        userbindFingerprint: snapshot.fingerprint,
+        audienceFacts,
+        selectedStudentRecordIds: students.map((student) => student.studentRecordId.toHexString()).sort(),
+    });
+    return {
+        ...snapshotToSource({ ...snapshot, students }, 'contestAudience', event.contestId),
+        sourceFingerprint,
+    };
+}
+
+export async function loadExamRosterResolutionSource(event: ExamEventDoc, selection: ExamRosterSelection): Promise<ExamRosterResolutionSource> {
+    if (selection.kind === 'contestAudience') return contestAudienceSource(event);
+    const groupIds = selection.kind === 'userbindGroups' ? canonicalObjectIds(selection.groupIds, 'selected_group_ids') : null;
+    if (groupIds !== null && (!groupIds.length || groupIds.length > 100)) throw new ExamSeatPlanError('selected_group_ids_invalid');
+    const snapshot = await loadUserbindSnapshot(event.domainId, event.schoolId, groupIds);
+    return snapshotToSource(snapshot, selection.kind, null);
+}
+
+export async function loadExamRosterUserStates(uids: number[]): Promise<ExamRosterUserState[]> {
+    if (!Array.isArray(uids) || uids.some((uid) => !Number.isSafeInteger(uid) || uid < 1)) throw new ExamSeatPlanError('user_ids_invalid');
+    if (!uids.length) return [];
+    const users = await UserModel.coll
+        .find({ _id: { $in: uids } }, { projection: { _id: 1, priv: 1 } })
+        .sort({ _id: 1 })
+        .toArray();
+    return users.map((user) => {
+        if (
+            typeof user._id !== 'number' ||
+            !Number.isSafeInteger(user._id) ||
+            user._id < 1 ||
+            typeof user.priv !== 'number' ||
+            !Number.isSafeInteger(user.priv) ||
+            (user.priv | 0) !== user.priv
+        ) {
+            throw new ExamSeatPlanError('user_state_invalid');
+        }
+        return {
+            uid: user._id,
+            active: (user.priv & PRIV.PRIV_USER_PROFILE) === PRIV.PRIV_USER_PROFILE,
+        };
+    });
+}
+
+export function resolveExamRosterForEvent(event: ExamEventDoc, selection: ExamRosterSelection): Promise<ResolvedExamRoster> {
+    return resolveStableExamRoster({
+        schoolId: event.schoolId,
+        loadSource: () => loadExamRosterResolutionSource(event, selection),
+        loadUserStates: loadExamRosterUserStates,
+    });
+}

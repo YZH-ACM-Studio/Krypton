@@ -125,6 +125,13 @@
 - 基础设施管理员是 `PRIV_EDIT_SYSTEM` 或显式 `PERM_MANAGE_EXAM_INFRASTRUCTURE` 持有者。普通教师必须持有 `PERM_CREATE_EXAM_EVENT`，并在每次请求重新满足 userbind canonical 学校范围、owner/collaborator 与关联 Contest 权限；URL、前端 capability、schoolId 或 collaborator 列表均不能自证授权。
 - 每个 revision 保存确定性的 `auditRef=exam-event:<eventId>:<revision>`，并由 OJ oplog 记录 actor、event、revision、变更字段和关联身份。P1.13 不创建网络策略、终端目标、Vigil execution session 或真实考试活动；这些只能由后续任务引用 eventId。
 
+## 考试名单与候选座位快照协议
+
+- `exam.rosterRevisions` 只保存从 userbind 学校/用户组或 Krypton Contest audience 显式编译出的不可变名单 revision。每份 revision 固定 ExamEvent、学校、选择来源、group/source fingerprint、明确学生与绑定 UID、排除诊断和相对上一版的 UID 增删；刷新只能追加新 revision，不得改写旧名单、请求时回填或后台跟随 userbind。
+- 名单生成只允许当前仍可管理 ExamEvent、持有 `PERM_USERBIND_MANAGE_STUDENTS` 且仍具有对应学校与 Contest 权限的操作者（考试基础设施管理员可按既有全域权限旁路），并在同一 ExamEvent 轻量边界内重读事件和权限。userbind source 与 OJ 用户状态必须双读一致后才可落库；跨域、跨校、缺组、重复绑定、未绑定、用户缺失或停用必须明确拒绝或进入不可变排除诊断，禁止静默创建第二套学生事实。
+- `exam.seatPlans` 是不可变的候选范围 revision，只固定 event、可选 roster revision、同校 classroom/layout fingerprint 与排序后的 current `sourceSeatId`。Krypton ExamEvent 必须引用名单；纯外部考试可显式使用空名单。人数多于候选座位只记录诊断，本阶段不生成 UID→座位分配、随机 seed、人工调整、页面或后台任务。
+- 管理读取必须重新验证 roster、classroom、layout 与 seat 引用；事件学校一旦有 roster/seat-plan 事实就不得改变。操作日志只记录 event/revision、数量、诊断码与 fingerprint，不记录姓名、学号或成员明细。首次部署必须确认 PII 保存范围、两份 Mongo 集合及权限边界；本地完成不授权创建真实考试名单或座位计划。
+
 ## OJ 与 Vigil 考试网络执行同步协议
 
 - OJ 的 `exam.networkExecutions` 只保存 ExamEvent 的期望执行 revision、固定 policy/target 引用、幂等 request identity 和 Vigil 返回的最小逐机投影；不得复制 Vigil 的签名 envelope、策略正文、终端结果正文或用投影改写 `exam.eventNetworkConfigs`。Vigil 继续以 P1.11 session/command 为唯一逐机执行事实，并只增加幂等请求到这些 commandId 的窄映射。

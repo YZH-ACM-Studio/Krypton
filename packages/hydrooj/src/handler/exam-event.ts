@@ -1,5 +1,5 @@
 import { ObjectId } from 'mongodb';
-import { Context, Handler, param, PermissionError, Types, ValidationError } from 'hydrooj';
+import { Context, Handler, localizedErrorText, param, PermissionError, Types, ValidationError } from 'hydrooj';
 import { PERM } from '../model/builtin';
 import { AUDITED_EVENT_FIELDS, ExamEventAuditContext, runAuditedExamEventMutation } from '../model/exam-event-audit';
 import {
@@ -21,6 +21,7 @@ import {
 import { withExamEventBoundary } from '../model/exam-event-boundary';
 import { EXAM_EVENT_PATCH_FIELDS, parseExamEventUpdatePatch } from '../model/exam-event-request';
 import { examNetworkConfigService, ExamNetworkConfigError } from '../model/exam-network-config';
+import { ExamSeatPlanError, examSeatPlanService } from '../model/exam-seat-plan';
 
 function auditContext(handler: ExamEventBaseHandler): ExamEventAuditContext {
     return {
@@ -66,6 +67,9 @@ function serializeEvent(event: ExamEventDoc) {
 
 export function translateExamEventError(error: unknown): never {
     if (error instanceof ExamNetworkConfigError) throw new ValidationError('examEvent', null, error.reason);
+    if (error instanceof ExamSeatPlanError) {
+        throw new ValidationError('examEvent', null, localizedErrorText`Invalid request: ${error.reason}`);
+    }
     if (!(error instanceof ExamEventError)) throw error;
     throw new ValidationError('examEvent', null, error.reason);
 }
@@ -211,7 +215,10 @@ class ExamEventDetailHandler extends ExamEventBaseHandler {
                     const nextSchoolId = schoolId || current.schoolId;
                     await assertExamEventSchoolAccess(domainId, nextSchoolId, this.user);
                     if (schoolId && !schoolId.equals(current.schoolId)) {
-                        await examNetworkConfigService.assertEventSchoolChangeAllowed(domainId, eventId);
+                        await Promise.all([
+                            examNetworkConfigService.assertEventSchoolChangeAllowed(domainId, eventId),
+                            examSeatPlanService.assertEventSchoolChangeAllowed(domainId, eventId),
+                        ]);
                     }
                     const collaborators = collaboratorUids === undefined ? undefined : canonicalCollaboratorUids(current.ownerUid, collaboratorUids);
                     await assertExamEventCollaborators(

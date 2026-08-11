@@ -18,7 +18,9 @@ import {
     examEventService,
     ExamEventType,
 } from '../model/exam-event';
+import { withExamEventBoundary } from '../model/exam-event-boundary';
 import { EXAM_EVENT_PATCH_FIELDS, parseExamEventUpdatePatch } from '../model/exam-event-request';
+import { examNetworkConfigService, ExamNetworkConfigError } from '../model/exam-network-config';
 
 function auditContext(handler: ExamEventBaseHandler): ExamEventAuditContext {
     return {
@@ -63,6 +65,7 @@ function serializeEvent(event: ExamEventDoc) {
 }
 
 export function translateExamEventError(error: unknown): never {
+    if (error instanceof ExamNetworkConfigError) throw new ValidationError('examEvent', null, error.reason);
     if (!(error instanceof ExamEventError)) throw error;
     throw new ValidationError('examEvent', null, error.reason);
 }
@@ -186,61 +189,67 @@ class ExamEventDetailHandler extends ExamEventBaseHandler {
     @param('expectedRevision', Types.PositiveInt)
     async post(_args: unknown, eventId: ObjectId, action: 'update' | 'schedule' | 'archive', expectedRevision: number) {
         const domainId = String(this.domain._id);
-        const current = await this.load(eventId);
         try {
-            const body = this.request.body || {};
-            let requestedFields: string[];
-            let mutation: () => Promise<ExamEventDoc>;
-            if (action === 'archive') {
-                if (EXAM_EVENT_PATCH_FIELDS.some((field) => Object.hasOwn(body, field))) throw new ValidationError('action');
-                requestedFields = ['lifecycle'];
-                mutation = () => examEventService.archive(domainId, eventId, expectedRevision, this.user._id);
-            } else if (action === 'schedule') {
-                if (EXAM_EVENT_PATCH_FIELDS.some((field) => Object.hasOwn(body, field))) throw new ValidationError('action');
-                requestedFields = ['lifecycle'];
-                mutation = () => examEventService.schedule(domainId, eventId, expectedRevision, this.user._id);
-            } else {
-                const patch = parseExamEventUpdatePatch(body);
-                const { schoolId, title, type, contestId, startAt, endAt, collaboratorUids } = patch;
-                requestedFields = patch.requestedFields;
-                if (contestId) await assertExamEventContestAccess(domainId, contestId, this.user);
-                const nextSchoolId = schoolId || current.schoolId;
-                await assertExamEventSchoolAccess(domainId, nextSchoolId, this.user);
-                const collaborators = collaboratorUids === undefined ? undefined : canonicalCollaboratorUids(current.ownerUid, collaboratorUids);
-                await assertExamEventCollaborators(
-                    domainId,
-                    nextSchoolId,
-                    current.ownerUid,
-                    collaborators === undefined ? current.collaboratorUids : collaborators,
-                );
-                mutation = () =>
-                    examEventService.update({
+            const event = await withExamEventBoundary(domainId, eventId, async () => {
+                const current = await this.load(eventId);
+                const body = this.request.body || {};
+                let requestedFields: string[];
+                let mutation: () => Promise<ExamEventDoc>;
+                if (action === 'archive') {
+                    if (EXAM_EVENT_PATCH_FIELDS.some((field) => Object.hasOwn(body, field))) throw new ValidationError('action');
+                    requestedFields = ['lifecycle'];
+                    mutation = () => examEventService.archive(domainId, eventId, expectedRevision, this.user._id);
+                } else if (action === 'schedule') {
+                    if (EXAM_EVENT_PATCH_FIELDS.some((field) => Object.hasOwn(body, field))) throw new ValidationError('action');
+                    requestedFields = ['lifecycle'];
+                    mutation = () => examEventService.schedule(domainId, eventId, expectedRevision, this.user._id);
+                } else {
+                    const patch = parseExamEventUpdatePatch(body);
+                    const { schoolId, title, type, contestId, startAt, endAt, collaboratorUids } = patch;
+                    requestedFields = patch.requestedFields;
+                    if (contestId) await assertExamEventContestAccess(domainId, contestId, this.user);
+                    const nextSchoolId = schoolId || current.schoolId;
+                    await assertExamEventSchoolAccess(domainId, nextSchoolId, this.user);
+                    if (schoolId && !schoolId.equals(current.schoolId)) {
+                        await examNetworkConfigService.assertEventSchoolChangeAllowed(domainId, eventId);
+                    }
+                    const collaborators =
+                        collaboratorUids === undefined ? undefined : canonicalCollaboratorUids(current.ownerUid, collaboratorUids);
+                    await assertExamEventCollaborators(
                         domainId,
+                        nextSchoolId,
+                        current.ownerUid,
+                        collaborators === undefined ? current.collaboratorUids : collaborators,
+                    );
+                    mutation = () =>
+                        examEventService.update({
+                            domainId,
+                            eventId,
+                            expectedRevision,
+                            actorUid: this.user._id,
+                            ...(schoolId ? { schoolId } : {}),
+                            ...(title !== undefined ? { title } : {}),
+                            ...(type !== undefined ? { type } : {}),
+                            ...(contestId !== undefined ? { contestId } : {}),
+                            ...(startAt !== undefined ? { startAt } : {}),
+                            ...(endAt !== undefined ? { endAt } : {}),
+                            ...(collaborators !== undefined ? { collaboratorUids: collaborators } : {}),
+                        });
+                }
+                return await runAuditedExamEventMutation(
+                    auditContext(this),
+                    action,
+                    {
                         eventId,
                         expectedRevision,
-                        actorUid: this.user._id,
-                        ...(schoolId ? { schoolId } : {}),
-                        ...(title !== undefined ? { title } : {}),
-                        ...(type !== undefined ? { type } : {}),
-                        ...(contestId !== undefined ? { contestId } : {}),
-                        ...(startAt !== undefined ? { startAt } : {}),
-                        ...(endAt !== undefined ? { endAt } : {}),
-                        ...(collaborators !== undefined ? { collaboratorUids: collaborators } : {}),
-                    });
-            }
-            const event = await runAuditedExamEventMutation(
-                auditContext(this),
-                action,
-                {
-                    eventId,
-                    expectedRevision,
-                    observedRevision: current.revision,
-                    targetRevision: expectedRevision + 1,
-                    requestedFields,
-                    before: current,
-                },
-                mutation,
-            );
+                        observedRevision: current.revision,
+                        targetRevision: expectedRevision + 1,
+                        requestedFields,
+                        before: current,
+                    },
+                    mutation,
+                );
+            });
             this.response.body = { event: serializeEvent(event) };
         } catch (error) {
             translateExamEventError(error);

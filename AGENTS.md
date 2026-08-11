@@ -102,6 +102,13 @@
 - Endpoint 的 `command_result` 必须回显签名命令的 `activityId` 与 `revision`，并与持久 commandId、endpoint、capability、command 和预期网络身份精确核对。相同终态 ACK 幂等；冲突、未知、未发送、过期或降级结果 fail closed。已经持久接受但 WFP 首次执行失败的 apply/release pending 仍保持 sent，不得误记 failed；Endpoint 通过现有心跳和重连 hello 持续上报实际网络状态，成功重试后由原命令精确收敛为 applied，超时仍进入 expired。Server 重启把遗留连接标为断开，但不把 sent 猜成成功；apply 只有完整活动授权与唯一未决命令精确一致时才可补记 applied；stop 还必须由受保护的持久状态回报最后成功 stop 的 commandId、command revision、activityId 和 policy revision，普通 inactive 或硬截止不得冒充 stop ACK。重连对账与终态写入必须原子或 CAS，过期及并发 ACK 只能形成无副作用的 no-op，失败注册不得留下在线会话。
 - 单站只使用现有数据库和 endpoint 级 asyncio 边界；不为 P1.11 引入消息队列、分布式调度或 Dashboard 共享 token 权限模型。P1.11 不提供独立网络锁管理入口、不创建 OJ 业务活动，也不复制 OJ canonical；这些仍属于 P1.12–P1.17。
 
+## 考试网络策略与目标快照协议
+
+- `exam.policyTemplates` 是学校范围内可复用的策略草稿容器；草稿可改，发布后的内嵌 revision 不可改。每个 revision 只保存 canonical 域名、IP/CIDR、端口与 fingerprint；发布校验必须通过受信 resolver 取得本站 Endpoint Service 的实际控制面 host/port，并按终端相同的去重与端口展开语义把隐式 service-only 许可计入 4096 条规则上限。resolver 缺失或控制面无法解析时 fail closed。归档模板不得删除历史 revision，回滚只重新引用旧 revision，不生成反向 patch。
+- `exam.targetAssignments` 每个 ExamEvent 最多一份动态来源草稿。教室、endpoint、seat、考试座位和 userbind 用户组必须通过受信 resolver 在确认时重新解析；resolver 未注册、来源漂移、空目标、跨学校 endpoint、重复 endpoint，或缺少精确 `network.policy@1` 的 apply/status/stop 任一固定命令时一律 fail closed。发布只保存显式、排序后的 endpoint IDs、来源 fingerprint 和目标 fingerprint；后续组、座位或绑定变化不得改写旧 revision。
+- `exam.eventNetworkConfigs` 只保存当前活动引用的 policy revision 与 target revision。每次分配都重查 ExamEvent、学校、模板/目标归属和不可变 revision，并用 CAS 形成新的配置 revision；未来执行会话必须固定读取这两个引用，不能运行时回查动态来源。
+- ExamEvent 学校/生命周期 mutation 与 P1.14 的事件关联写入必须共享同一 `(domainId,eventId)` 单进程轻量边界，并在取得边界后重读事件、重查权限、学校和归档状态；不得仅靠跨集合先读后写维持不变量，也不为此引入 Mongo 事务或分布式锁。P1.14 只建立 OJ canonical schema、验证/确认边界和审计，不直接调用 Vigil、不发送终端命令，也不提供正式 WebUI。目标与控制面 resolver、执行同步由 P1.15 接入，工作台属于 P1.16；P1.13–P1.17 仍是不可拆生产部署单元。
+
 ## 考试基础设施活动协议
 
 - `exam.events` 是 Krypton Contest 与纯外部考试共用的 OJ 业务根；`type:'krypton'` 可在草稿期不关联 Contest，但进入计划态前必须关联当前域内且操作者可管理的 Contest，`type:'external'` 禁止伪造空 Contest。Contest 不拥有或驱动 ExamEvent 生命周期。

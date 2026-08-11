@@ -904,6 +904,9 @@ declare module './service/db' {
         'practice.contextualCompletions': import('./model/contextual-completion').ContextualCompletionDoc;
         'endpoint.enrollmentBatches': import('./model/endpoint-enrollment').EndpointEnrollmentBatchDoc;
         'exam.events': import('./model/exam-event').ExamEventDoc;
+        'exam.policyTemplates': import('./model/exam-network-config').ExamPolicyTemplateDoc;
+        'exam.targetAssignments': import('./model/exam-network-config').ExamTargetAssignmentDoc;
+        'exam.eventNetworkConfigs': import('./model/exam-network-config').ExamEventNetworkConfigDoc;
         lock: LockDoc;
     }
 }
@@ -961,6 +964,17 @@ export interface Model {
     contextualCompletion: Pick<typeof import('./model/contextual-completion'), 'contextualCompletionColl' | 'contextualCompletionService'>;
     endpointEnrollment: Pick<typeof import('./model/endpoint-enrollment'), 'endpointEnrollmentBatchColl' | 'endpointEnrollmentBatchService'>;
     examEvent: Pick<typeof import('./model/exam-event'), 'examEventColl' | 'examEventService'>;
+    examNetworkConfig: Pick<
+        typeof import('./model/exam-network-config'),
+        | 'examPolicyTemplateColl'
+        | 'examTargetAssignmentColl'
+        | 'examEventNetworkConfigColl'
+        | 'examNetworkConfigService'
+        | 'registerExamTargetResolver'
+        | 'requireExamTargetResolver'
+        | 'registerExamNetworkControlPlaneResolver'
+        | 'requireExamNetworkControlPlaneResolver'
+    >;
     user: typeof import('./model/user').default;
     oauth: typeof import('./model/oauth').default;
     storage: typeof import('./model/storage').default;

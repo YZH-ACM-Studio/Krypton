@@ -407,6 +407,16 @@ SystemSetting(
         'vigil.networkLockFailurePolicy',
         'Default network lockdown failure policy.',
     ),
+    Setting(
+        'setting_vigil',
+        'exam.preloginTicketKey',
+        '',
+        'password',
+        'exam.preloginTicketKey',
+        '64 lowercase hexadecimal characters used only to authenticate short-lived exam pre-login tickets.',
+        FLAG_HIDDEN | FLAG_SECRET,
+        (value) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value),
+    ),
     // problem.hideBank remains only for configuration compatibility.
     // @deprecated This setting is not an authorization switch. P2.11 always
     // enforces the server-side ProblemModel capability and Mongo scope.

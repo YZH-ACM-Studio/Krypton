@@ -36,6 +36,7 @@ export interface SystemKeys {
     'server.host': string;
     'server.port': number;
     'server.language': string;
+    'exam.preloginTicketKey': string;
     'limit.problem_files_max': number;
     'problem.categories': string;
     'session.keys': string[];
@@ -916,6 +917,8 @@ declare module './service/db' {
         'exam.seatPlans': import('./model/exam-seat-plan').ExamSeatPlanDoc;
         'exam.seatAssignments': import('./model/exam-seat-assignment').ExamSeatAssignmentRevisionDoc;
         'exam.seatAssignmentPublications': import('./model/exam-seat-assignment').ExamSeatAssignmentPublicationDoc;
+        'exam.preloginBatches': import('./model/exam-prelogin').ExamPreloginBatchDoc;
+        'exam.preloginTickets': import('./model/exam-prelogin').ExamPreloginTicketDoc;
         lock: LockDoc;
     }
 }
@@ -1027,6 +1030,7 @@ export interface Model {
         typeof import('./model/exam-seat-assignment'),
         'examSeatAssignmentColl' | 'examSeatAssignmentPublicationColl' | 'examSeatAssignmentService'
     >;
+    examPrelogin: Pick<typeof import('./model/exam-prelogin'), 'examPreloginBatchColl' | 'examPreloginTicketColl'>;
     user: typeof import('./model/user').default;
     oauth: typeof import('./model/oauth').default;
     storage: typeof import('./model/storage').default;

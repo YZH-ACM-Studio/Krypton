@@ -118,6 +118,14 @@
 - `classroom` 目标来源按当前 active bindings 展开；`seat` 来源 ID 固定为 `EndpointSeatBinding._id`。解析必须重查 domain/school、binding canonical、finalized endpoint ownership、Vigil credential/协议/能力，并在联系 Vigil 前拒绝重复 endpoint；发布后仍只使用冻结的 endpoint IDs。
 - P2.2/P2.3 与 OJ、Vigil Server、Endpoint Service 三端配对协议是不可拆部署单元。完成本地实现不授权连接真实机房、建立生产绑定或启用旧 Vigil SQLite seat-label 子系统。
 
+## 考试预登录票据协议
+
+- prepare 只读取已发布的固定座位分配 revision，并重查 ExamEvent、Contest 入口资格、当前 userbind、实体座位绑定和 Vigil Endpoint 在线/版本/能力/活动会话；只返回完整逐项诊断与 preparation fingerprint，不创建票据或命令。confirm 必须在同一 ExamEvent 轻量边界内重新计算并精确匹配 fingerprint；任一硬错误阻止整批投递。
+- `exam.preloginBatches`、`exam.preloginTickets` 与 Vigil 的持久 request/command/link 是响应丢失后的恢复事实。batch/request/ticket identity 必须确定且幂等；同 request 的重试只能收敛已有单调状态，已经兑换的 ticket 不得降回 issued。Vigil projection 必须按 revision 持久确认，未确认投影在启动后和固定周期内继续重发，不依赖终端再次重连或心跳。
+- 明文 `KPT1-*` 只允许经 OJ→Vigil service-token material 路由交给票据绑定的当前 Endpoint；Mongo、SQLite、日志和 oplog 只保存摘要或引用。票据精确绑定 event、assignment、publication、uid、student record、seat binding、endpoint 与 workspace，并在兑换前重查这些当前事实；过期、错机、错 batch、活动或资格漂移以及不同 request 的重复兑换均 fail closed。
+- 失败重试只接受当前 projection 中完整且精确的 `expired / failed / offline / rejected` 集合，保留其它成功 command facts。只有仍为 issued 的失败过期票据可 CAS 续期并把新摘要/期限精确同步给 Vigil；已兑换票据不得签发新会话，只能在 Vigil 重验原 command/link 与唯一 active session 后精确恢复。签名 launch payload 必须分别绑定 `ticketExpiresAt`、`commandExpiresAt` 与可空的 `resumeSessionId`；无精确恢复会话时两种期限必须相同且票据仍有效，过期票据不得借新的命令期限进入普通启动路径。初次 dispatch 在持久 request/link/command 前必须整批重查 active session；相同已 claim 请求的幂等读回不得被随后出现的会话改写。重试 requestId/idempotencyKey 内容冲突、投影漂移或非精确集合必须拒绝。
+- P2.6 只实现 OJ/Vigil 的两阶段预检、票据、持久投递投影与精确重试，不实现 Endpoint Service 拉起/兑换运行时、教师一键联调 UI、后台队列或自动重试。P2.6/P2.7/P2.9 的预登录链须兼容后同批部署和回滚；本地完成不授权连接真实 Windows 主机或生产环境。
+
 ## 考试基础设施活动协议
 
 - `exam.events` 是 Krypton Contest 与纯外部考试共用的 OJ 业务根；`type:'krypton'` 可在草稿期不关联 Contest，但进入计划态前必须关联当前域内且操作者可管理的 Contest，`type:'external'` 禁止伪造空 Contest。Contest 不拥有或驱动 ExamEvent 生命周期。

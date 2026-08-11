@@ -8,6 +8,13 @@
  * full Vigil-side endpoint surface.
  */
 import { Logger } from '@hydrooj/utils';
+import type {
+    ExamPreloginDispatchPayload,
+    ExamPreloginProjection,
+    ExamPreloginProjectionItem,
+    ExamPreloginRetryPayload,
+} from '../model/exam-prelogin';
+import type { ExamPreloginEndpointReadiness, ExamPreloginEndpointSubject } from '../model/exam-prelogin-resolver';
 import system from '../model/system';
 
 const logger = new Logger('vigil-bridge');
@@ -770,4 +777,163 @@ export async function verifyAccessTokenWithVigil(sessionId: string, accessToken:
 export function generateOneShotToken(): string {
     const { randomBytes } = require('node:crypto');
     return `t_oneshot_${randomBytes(24).toString('hex')}`;
+}
+
+export async function preflightExamPreloginOnVigil(subjects: ExamPreloginEndpointSubject[]): Promise<ExamPreloginEndpointReadiness[]> {
+    const endpointIds = subjects.map((subject) => subject.endpointId);
+    const response = await fetchWithRetry(`${baseUrl()}/api/integrations/oj/prelogin/preflight`, {
+        method: 'POST',
+        body: { items: subjects },
+        retries: 1,
+    });
+    const payload = exactBridgeRecord(await readVigilJson(response), ['items', 'ready'], 'Vigil prelogin preflight was malformed.');
+    if (typeof payload.ready !== 'boolean' || !Array.isArray(payload.items) || payload.items.length !== endpointIds.length) {
+        throw new VigilProtocolError('Vigil prelogin preflight was malformed.');
+    }
+    const items = payload.items.map((value) => {
+        const item = exactBridgeRecord(
+            value,
+            [
+                'activeSessionId',
+                'capabilities',
+                'compatible',
+                'endpointId',
+                'online',
+                'protocolVersion',
+                'reason',
+                'resumableSessionId',
+                'serviceVersion',
+            ],
+            'Vigil prelogin preflight item was malformed.',
+        );
+        if (
+            typeof item.online !== 'boolean' ||
+            (item.compatible !== null && typeof item.compatible !== 'boolean') ||
+            !Array.isArray(item.capabilities)
+        ) {
+            throw new VigilProtocolError('Vigil prelogin preflight item was malformed.');
+        }
+        bridgeString(item.reason, 'Vigil prelogin preflight item was malformed.');
+        return {
+            endpointId: bridgeString(item.endpointId, 'Vigil prelogin preflight item was malformed.')!,
+            online: item.online,
+            compatible: item.compatible as boolean | null,
+            serviceVersion: bridgeString(item.serviceVersion, 'Vigil prelogin preflight item was malformed.', true),
+            protocolVersion: bridgeInteger(item.protocolVersion, 'Vigil prelogin preflight item was malformed.', true),
+            capabilities: item.capabilities.map(parseEndpointCapability),
+            activeSessionId: bridgeString(item.activeSessionId, 'Vigil prelogin preflight item was malformed.', true),
+            resumableSessionId: bridgeString(item.resumableSessionId, 'Vigil prelogin preflight item was malformed.', true),
+        } satisfies ExamPreloginEndpointReadiness;
+    });
+    if (new Set(items.map((item) => item.endpointId)).size !== items.length || items.some((item) => !endpointIds.includes(item.endpointId))) {
+        throw new VigilProtocolError('Vigil prelogin preflight did not match the requested endpoints.');
+    }
+    return items;
+}
+
+function parseVigilExamPreloginProjectionItem(value: unknown): ExamPreloginProjectionItem {
+    const item = exactBridgeRecord(
+        value,
+        ['commandId', 'endpointId', 'failureReason', 'stage', 'status', 'ticketId'],
+        'Vigil prelogin projection item was malformed.',
+    );
+    const ticketId = bridgeString(item.ticketId, 'Vigil prelogin projection item was malformed.')!;
+    const status = bridgeString(item.status, 'Vigil prelogin projection item was malformed.')!;
+    const stage = bridgeString(item.stage, 'Vigil prelogin projection item was malformed.')!;
+    if (
+        !/^[a-f0-9]{24}$/.test(ticketId) ||
+        !['applied', 'expired', 'failed', 'offline', 'queued', 'rejected', 'sent'].includes(status) ||
+        !['dispatch', 'launch', 'page_ready', 'process_ready', 'redeemed'].includes(stage)
+    ) {
+        throw new VigilProtocolError('Vigil prelogin projection item was malformed.');
+    }
+    return {
+        ticketId,
+        endpointId: bridgeString(item.endpointId, 'Vigil prelogin projection item was malformed.')!,
+        commandId: bridgeString(item.commandId, 'Vigil prelogin projection item was malformed.', true),
+        status: status as ExamPreloginProjectionItem['status'],
+        stage: stage as ExamPreloginProjectionItem['stage'],
+        failureReason: bridgeString(item.failureReason, 'Vigil prelogin projection item was malformed.', true),
+    };
+}
+
+export function parseVigilExamPreloginProjection(value: unknown): ExamPreloginProjection {
+    const projection = exactBridgeRecord(
+        value,
+        ['batchId', 'dispatchStatus', 'items', 'projectionRevision', 'requestId', 'summary'],
+        'Vigil prelogin projection was malformed.',
+    );
+    const requestId = bridgeString(projection.requestId, 'Vigil prelogin projection was malformed.')!;
+    const batchId = bridgeString(projection.batchId, 'Vigil prelogin projection was malformed.')!;
+    const dispatchStatus = bridgeString(projection.dispatchStatus, 'Vigil prelogin projection was malformed.')!;
+    const projectionRevision = bridgeInteger(projection.projectionRevision, 'Vigil prelogin projection was malformed.')!;
+    if (
+        !/^[a-f0-9]{24}$/.test(batchId) ||
+        (dispatchStatus !== 'complete' && dispatchStatus !== 'dispatching') ||
+        projectionRevision < 1 ||
+        !Array.isArray(projection.items) ||
+        !projection.summary ||
+        typeof projection.summary !== 'object' ||
+        Array.isArray(projection.summary)
+    ) {
+        throw new VigilProtocolError('Vigil prelogin projection was malformed.');
+    }
+    const summary: Record<string, number> = {};
+    for (const [status, count] of Object.entries(projection.summary)) {
+        if (!/^[a-z][a-z_]{0,31}$/.test(status) || !Number.isSafeInteger(count) || Number(count) < 0) {
+            throw new VigilProtocolError('Vigil prelogin projection was malformed.');
+        }
+        summary[status] = Number(count);
+    }
+    const items = projection.items.map(parseVigilExamPreloginProjectionItem);
+    if (
+        new Set(items.map((item) => item.ticketId)).size !== items.length ||
+        new Set(items.map((item) => item.endpointId)).size !== items.length ||
+        Object.values(summary).reduce((total, count) => total + count, 0) !== items.length
+    ) {
+        throw new VigilProtocolError('Vigil prelogin projection was malformed.');
+    }
+    return {
+        requestId,
+        batchId,
+        dispatchStatus,
+        projectionRevision,
+        summary,
+        items,
+    };
+}
+
+export async function dispatchExamPreloginOnVigil(payload: ExamPreloginDispatchPayload): Promise<ExamPreloginProjection> {
+    const response = await fetchWithRetry(`${baseUrl()}/api/integrations/oj/prelogin/dispatch`, {
+        method: 'POST',
+        body: payload,
+    });
+    const projection = parseVigilExamPreloginProjection(await readVigilJson(response));
+    const expectedItems = new Map(payload.items.map((item) => [item.ticketId, item.endpointId]));
+    if (
+        projection.requestId !== payload.requestId ||
+        projection.batchId !== payload.batchId ||
+        projection.items.length !== payload.items.length ||
+        projection.items.some((item) => expectedItems.get(item.ticketId) !== item.endpointId)
+    ) {
+        throw new VigilProtocolError('Vigil prelogin projection did not match the request.');
+    }
+    return projection;
+}
+
+export async function retryExamPreloginOnVigil(payload: ExamPreloginRetryPayload): Promise<ExamPreloginProjection> {
+    const response = await fetchWithRetry(`${baseUrl()}/api/integrations/oj/prelogin/retry`, {
+        method: 'POST',
+        body: payload,
+    });
+    const projection = parseVigilExamPreloginProjection(await readVigilJson(response));
+    if (
+        projection.requestId !== payload.originalRequestId ||
+        projection.batchId !== payload.batchId ||
+        projection.projectionRevision <= payload.expectedProjectionRevision ||
+        payload.ticketIds.some((ticketId) => !projection.items.some((item) => item.ticketId === ticketId && item.commandId !== null))
+    ) {
+        throw new VigilProtocolError('Vigil prelogin retry projection did not match the request.');
+    }
+    return projection;
 }

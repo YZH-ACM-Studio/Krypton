@@ -97,7 +97,7 @@ describe('P2.2 endpoint seat binding HTTP boundary', () => {
                     request: {
                         headers: {},
                         ip: '127.0.0.1',
-                        json: { nested: { pairingCode: 'KSP1-BBBBBBBBBB' }, safe: 'visible' },
+                        json: { nested: { pairingCode: 'KSP1-BBBBBBBBBB', ticket: 'KPT1.secret' }, safe: 'visible' },
                         path: '/api/vigil/endpoint-seat-pairing/redeem',
                     },
                     user: null,
@@ -109,6 +109,7 @@ describe('P2.2 endpoint seat binding HTTP boundary', () => {
             expect(inserted[0].args).to.deep.equal({ requestId: 'endpoint_pairing_test_001' });
             expect(inserted[0].json).to.deep.equal({ nested: {}, safe: 'visible' });
             expect(JSON.stringify(inserted[0])).not.to.include('KSP1-');
+            expect(JSON.stringify(inserted[0])).not.to.include('KPT1.secret');
         } finally {
             if (previousDb) require.cache[dbPath] = previousDb;
             else delete require.cache[dbPath];

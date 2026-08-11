@@ -55,6 +55,7 @@ import { ExamContestPage } from '@/pages/exam-mode/contest';
 import { ExamModeHomePage } from '@/pages/exam-mode/index';
 import { ExamPaperPage } from '@/pages/exam-mode/paper';
 import { ContestWorkspacePage } from '@/pages/exam-mode/workspace';
+import { ExamEventPage, ExamInfrastructurePage } from '@/pages/exam-infrastructure';
 import { GenericPage } from '@/pages/generic';
 import { KryptonHomePage } from '@/pages/home';
 import { HomeworkDetailPage, HomeworkPage } from '@/pages/homework';
@@ -238,6 +239,8 @@ const PAGE_MAP: Record<string, PageComponent> = {
   'admin_stats.html': AdminStatsPage,
   'admin_accounts.html': AdminAccountsPage,
   'admin_account_detail.html': AdminAccountDetailPage,
+  'admin_exam_infrastructure.html': ExamInfrastructurePage,
+  'admin_exam_event.html': ExamEventPage,
 
   // Misc
   'status.html': StatusPage,

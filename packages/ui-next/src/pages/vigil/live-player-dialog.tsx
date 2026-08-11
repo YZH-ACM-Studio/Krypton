@@ -39,7 +39,7 @@ import { useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
 import mpegts from 'mpegts.js';
 import { Camera, Lock, MessageSquare, X, AlertTriangle } from 'lucide-react';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { buildFlvStreamUrl, buildHlsStreamUrl, type VigilStudentCard } from '@/lib/vigil-api';
 import { cn } from '@/lib/cn';
@@ -94,10 +94,10 @@ export function LivePlayerDialog({
       <DialogContent className="flex h-[85vh] w-[90vw] max-w-[1400px] flex-col overflow-hidden p-0">
         <div className="flex items-center justify-between border-b px-4 py-2.5">
           <div className="min-w-0">
-            <p className="truncate text-sm font-semibold">
+            <DialogTitle className="truncate text-sm font-semibold">
               直播 · {student.name}
               {student.studentId && <span className="ml-2 font-mono text-xs text-muted-foreground">{student.studentId}</span>}
-            </p>
+            </DialogTitle>
             <p className="truncate font-mono text-[10px] text-muted-foreground">{student.machineId}</p>
           </div>
           <div className="flex items-center gap-1">

@@ -5,10 +5,7 @@ import { resolveExamTargetSources } from '../lib/exam-network-resolver';
 import { assertCanManageExamEvent, isExamInfrastructureAdmin } from '../model/exam-event-access';
 import { ExamEventDoc, examEventDisplayStatus, examEventService } from '../model/exam-event';
 import { withExamEventBoundary } from '../model/exam-event-boundary';
-import {
-    ExamNetworkAuditContext,
-    runAuditedExamNetworkMutation,
-} from '../model/exam-network-audit';
+import { ExamNetworkAuditContext, runAuditedExamNetworkMutation } from '../model/exam-network-audit';
 import {
     ExamNetworkConfigError,
     ExamNetworkRevisionRef,
@@ -36,6 +33,7 @@ import {
 } from '../service/vigil-bridge';
 
 interface ResolvedExecutionConfig {
+    configRevision: number;
     policyRef: ExamNetworkRevisionRef;
     targetRef: ExamNetworkRevisionRef;
     policy: ExamPolicyRevision;
@@ -98,6 +96,14 @@ function assertExactBody(handler: Handler, allowed: string[]): void {
     if (keys.some((key) => !allowed.includes(key))) throw new ValidationError('body');
 }
 
+export function readUnsignedIntBody(handler: Handler, key: string): number | undefined {
+    const body = handler.request.body;
+    if (!body || typeof body !== 'object' || Array.isArray(body) || !Object.hasOwn(body, key)) return undefined;
+    const value = (body as Record<string, unknown>)[key];
+    if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) throw new ValidationError(key);
+    return value;
+}
+
 async function resolveConfig(
     domainId: string,
     eventId: ObjectId,
@@ -117,6 +123,7 @@ async function resolveConfig(
     if (!target || target.targetFingerprint !== targetRef.fingerprint) throw new ExamNetworkExecutionError('target_revision_not_found');
     if (!target.endpointIds.length) throw new ExamNetworkExecutionError('empty_target');
     return {
+        configRevision: config.revision,
         policyRef: { id: new ObjectId(policyRef.id), revision: policyRef.revision, fingerprint: policyRef.fingerprint },
         targetRef: { id: new ObjectId(targetRef.id), revision: targetRef.revision, fingerprint: targetRef.fingerprint },
         policy,
@@ -180,14 +187,17 @@ class ExamNetworkExecutionHandler extends ExamNetworkExecutionBaseHandler {
 
     @param('eventId', Types.ObjectId)
     @param('action', Types.Range(['preflight', 'refresh', 'retry', 'start', 'stop']))
-    @param('expectedRevision', Types.UnsignedInt, true)
-    async post(
-        _args: unknown,
-        eventId: ObjectId,
-        action: 'preflight' | 'refresh' | 'retry' | 'start' | 'stop',
-        expectedRevision?: number,
-    ) {
-        assertExactBody(this, action === 'preflight' ? ['action'] : ['action', 'expectedRevision']);
+    async post(_args: unknown, eventId: ObjectId, action: 'preflight' | 'refresh' | 'retry' | 'start' | 'stop') {
+        assertExactBody(
+            this,
+            action === 'preflight'
+                ? ['action']
+                : action === 'start'
+                  ? ['action', 'expectedRevision', 'expectedConfigRevision']
+                  : ['action', 'expectedRevision'],
+        );
+        const expectedRevision = readUnsignedIntBody(this, 'expectedRevision');
+        const expectedConfigRevision = readUnsignedIntBody(this, 'expectedConfigRevision');
         const domainId = String(this.domain._id);
         try {
             const result = await withExamEventBoundary(domainId, eventId, async () => {
@@ -203,6 +213,11 @@ class ExamNetworkExecutionHandler extends ExamNetworkExecutionBaseHandler {
                     const configured = await resolveConfig(domainId, eventId);
                     return {
                         preflight: await preflightExamNetworkOnVigil(configured.target.endpointIds),
+                        preflightConfig: {
+                            revision: configured.configRevision,
+                            policy: serializeRef(configured.policyRef),
+                            target: serializeRef(configured.targetRef),
+                        },
                         execution: current,
                     };
                 }
@@ -210,7 +225,13 @@ class ExamNetworkExecutionHandler extends ExamNetworkExecutionBaseHandler {
                 if (action !== 'start' && expectedRevision < 1) throw new ExamNetworkExecutionError('invalid_revision');
                 let execution: ExamNetworkExecutionDoc;
                 if (action === 'start') {
+                    if (expectedConfigRevision === undefined || expectedConfigRevision < 1) {
+                        throw new ExamNetworkExecutionError('expected_config_revision_required');
+                    }
                     const configured = await resolveConfig(domainId, eventId);
+                    if (configured.configRevision !== expectedConfigRevision) {
+                        throw new ExamNetworkExecutionError('config_revision_conflict');
+                    }
                     const executionId = current?._id || new ObjectId();
                     const targetRevision = expectedRevision + 1;
                     execution = await runAuditedExamNetworkMutation(
@@ -286,10 +307,7 @@ class ExamNetworkExecutionHandler extends ExamNetworkExecutionBaseHandler {
                             targetRef: execution.targetRef,
                         }),
                     );
-                    projection =
-                        action === 'refresh'
-                            ? await getExamNetworkRequestOnVigil(payload)
-                            : await dispatchExamNetworkOnVigil(payload);
+                    projection = action === 'refresh' ? await getExamNetworkRequestOnVigil(payload) : await dispatchExamNetworkOnVigil(payload);
                 } catch (error) {
                     if (error instanceof ExamNetworkConfigError || error instanceof ExamNetworkExecutionError) throw error;
                     const failure = classifyVigilBridgeFailure(error);
@@ -339,6 +357,7 @@ class ExamNetworkExecutionHandler extends ExamNetworkExecutionBaseHandler {
             });
             this.response.body = {
                 ...(result.preflight ? { preflight: result.preflight } : {}),
+                ...(result.preflightConfig ? { preflightConfig: result.preflightConfig } : {}),
                 execution: serializeExecution(result.execution),
             };
         } catch (error) {

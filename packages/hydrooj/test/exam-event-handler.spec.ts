@@ -23,6 +23,15 @@ describe('ExamEvent HTTP boundary contracts', () => {
         expect(source).to.match(/async post\(\s*_args: unknown,\s*eventId: ObjectId,/);
     });
 
+    it('exposes authenticated UI entry routes without creating a second write boundary', () => {
+        expect(source).to.include("'/admin/exam-infrastructure'");
+        expect(source).to.include("'/admin/exam-infrastructure/events/:eventId'");
+        expect(source).to.include("this.response.template = 'admin_exam_infrastructure.html'");
+        expect(source).to.include("this.response.template = 'admin_exam_event.html'");
+        expect(source).to.match(/class ExamInfrastructureDetailPageHandler[\s\S]*assertCanManageExamEvent/);
+        expect(source.match(/class ExamInfrastructure[\s\S]*?async post/g) || []).to.have.length(0);
+    });
+
     it('rechecks school, event ownership, collaborators, Contest and CAS on the server', () => {
         for (const contract of [
             'assertExamEventSchoolAccess',

@@ -213,8 +213,7 @@ class ExamEventDetailHandler extends ExamEventBaseHandler {
                     if (schoolId && !schoolId.equals(current.schoolId)) {
                         await examNetworkConfigService.assertEventSchoolChangeAllowed(domainId, eventId);
                     }
-                    const collaborators =
-                        collaboratorUids === undefined ? undefined : canonicalCollaboratorUids(current.ownerUid, collaboratorUids);
+                    const collaborators = collaboratorUids === undefined ? undefined : canonicalCollaboratorUids(current.ownerUid, collaboratorUids);
                     await assertExamEventCollaborators(
                         domainId,
                         nextSchoolId,
@@ -257,7 +256,28 @@ class ExamEventDetailHandler extends ExamEventBaseHandler {
     }
 }
 
+class ExamInfrastructurePageHandler extends ExamEventBaseHandler {
+    async get() {
+        this.response.template = 'admin_exam_infrastructure.html';
+        this.response.body = { eventId: null };
+    }
+}
+
+class ExamInfrastructureDetailPageHandler extends ExamEventBaseHandler {
+    @param('eventId', Types.ObjectId)
+    async get(_args: unknown, eventId: ObjectId) {
+        await examEventService.ensureIndexes();
+        const event = await examEventService.get(String(this.domain._id), eventId);
+        if (!event) throw new ValidationError('eventId');
+        await assertCanManageExamEvent(String(this.domain._id), event, this.user);
+        this.response.template = 'admin_exam_event.html';
+        this.response.body = { eventId: eventId.toHexString() };
+    }
+}
+
 export async function apply(ctx: Context) {
     ctx.Route('exam_event_collection', '/api/admin/exam-events', ExamEventCollectionHandler);
     ctx.Route('exam_event_detail', '/api/admin/exam-events/:eventId', ExamEventDetailHandler);
+    ctx.Route('exam_infrastructure_page', '/admin/exam-infrastructure', ExamInfrastructurePageHandler);
+    ctx.Route('exam_infrastructure_detail_page', '/admin/exam-infrastructure/events/:eventId', ExamInfrastructureDetailPageHandler);
 }

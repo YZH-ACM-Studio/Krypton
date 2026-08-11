@@ -6,6 +6,7 @@ import {
   ClipboardList,
   Clock,
   GraduationCap,
+  HardDriveDownload,
   Home,
   KeyRound,
   LayoutDashboard,
@@ -233,6 +234,14 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
             'admin_tasks_scores.html',
             'admin_tasks_settings.html',
           ],
+        });
+      }
+      if (bs.user.canManageExamInfrastructure) {
+        adminItems.push({
+          label: '考试基础设施',
+          href: '/admin/exam-infrastructure',
+          icon: HardDriveDownload,
+          templates: ['admin_exam_infrastructure.html', 'admin_exam_event.html'],
         });
       }
       if (bs.user.canImportRankboard || bs.user.canManageRankboard) {

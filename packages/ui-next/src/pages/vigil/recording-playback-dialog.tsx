@@ -13,7 +13,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, Download, Film, Pause, Play, Trash2, X } from 'lucide-react';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import {
   buildRecordingUrl,
@@ -87,100 +87,99 @@ export function RecordingPlaybackDialog({ open, onOpenChange, contestId, student
 
   const totalBytes = useMemo(() => candidates.reduce((s, c) => s + (c.size || 0), 0), [candidates]);
 
-  const downloadRecording = useCallback(async (recording: VigilRecording) => {
-    let downloadTarget: Window;
-    try {
-      downloadTarget = prepareBrowserDownload();
-    } catch (reason) {
-      setDownloadError(reason instanceof Error ? reason.message : '无法打开下载窗口');
-      return;
-    }
-    setDownloadingId(recording.recordingId);
-    setDownloadError(null);
-    try {
-      const url = await requestRecordingDownload(
-        contestId,
-        { recordingId: recording.recordingId },
-        { uid: bs.user.id, displayName: bs.user.name },
-      );
-      startBrowserDownload(url, downloadTarget);
-    } catch (reason) {
-      downloadTarget.close();
-      setDownloadError(reason instanceof Error ? reason.message : '申请录像下载失败');
-    } finally {
-      setDownloadingId(null);
-    }
-  }, [bs.user.id, bs.user.name, contestId]);
+  const downloadRecording = useCallback(
+    async (recording: VigilRecording) => {
+      let downloadTarget: Window;
+      try {
+        downloadTarget = prepareBrowserDownload();
+      } catch (reason) {
+        setDownloadError(reason instanceof Error ? reason.message : '无法打开下载窗口');
+        return;
+      }
+      setDownloadingId(recording.recordingId);
+      setDownloadError(null);
+      try {
+        const url = await requestRecordingDownload(contestId, { recordingId: recording.recordingId }, { uid: bs.user.id, displayName: bs.user.name });
+        startBrowserDownload(url, downloadTarget);
+      } catch (reason) {
+        downloadTarget.close();
+        setDownloadError(reason instanceof Error ? reason.message : '申请录像下载失败');
+      } finally {
+        setDownloadingId(null);
+      }
+    },
+    [bs.user.id, bs.user.name, contestId],
+  );
 
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[80vh] w-[80vw] max-w-[1200px] flex-col overflow-hidden p-0">
-        <div className="flex items-center justify-between border-b px-4 py-2.5">
-          <div className="min-w-0">
-            <p className="truncate text-sm font-semibold">
-              录屏回放 · {student.name}
-              {student.studentId && <span className="ml-2 font-mono text-xs text-muted-foreground">{student.studentId}</span>}
-            </p>
-          </div>
-          <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => onOpenChange(false)} title="关闭">
-            <X className="size-4" />
-          </Button>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3 border-b bg-muted/20 px-4 py-2">
-          <div className="inline-flex rounded-md border bg-background p-0.5">
-            <button
-              type="button"
-              className={`rounded-sm px-3 py-1 text-xs transition-colors ${
-                streamType === 'screen' ? 'bg-primary text-primary-foreground' : 'hover:bg-accent'
-              }`}
-              onClick={() => setStreamType('screen')}
-            >
-              屏幕
-            </button>
-            <button
-              type="button"
-              className={`rounded-sm px-3 py-1 text-xs transition-colors ${
-                streamType === 'camera' ? 'bg-primary text-primary-foreground' : 'hover:bg-accent'
-              }`}
-              onClick={() => setStreamType('camera')}
-            >
-              摄像头
-            </button>
+        <DialogContent className="flex h-[80vh] w-[80vw] max-w-[1200px] flex-col overflow-hidden p-0">
+          <div className="flex items-center justify-between border-b px-4 py-2.5">
+            <div className="min-w-0">
+              <DialogTitle className="truncate text-sm font-semibold">
+                录屏回放 · {student.name}
+                {student.studentId && <span className="ml-2 font-mono text-xs text-muted-foreground">{student.studentId}</span>}
+              </DialogTitle>
+            </div>
+            <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => onOpenChange(false)} title="关闭">
+              <X className="size-4" />
+            </Button>
           </div>
 
-          {candidates.length > 0 && (
-            <p className="ml-auto text-[11px] text-muted-foreground">
-              {candidates.length} 段 · 连续时间轴 · {formatBytes(totalBytes)}
-            </p>
-          )}
-          {downloadError ? <p className="w-full text-xs text-destructive">{downloadError}</p> : null}
-        </div>
+          <div className="flex flex-wrap items-center gap-3 border-b bg-muted/20 px-4 py-2">
+            <div className="inline-flex rounded-md border bg-background p-0.5">
+              <button
+                type="button"
+                className={`rounded-sm px-3 py-1 text-xs transition-colors ${
+                  streamType === 'screen' ? 'bg-primary text-primary-foreground' : 'hover:bg-accent'
+                }`}
+                onClick={() => setStreamType('screen')}
+              >
+                屏幕
+              </button>
+              <button
+                type="button"
+                className={`rounded-sm px-3 py-1 text-xs transition-colors ${
+                  streamType === 'camera' ? 'bg-primary text-primary-foreground' : 'hover:bg-accent'
+                }`}
+                onClick={() => setStreamType('camera')}
+              >
+                摄像头
+              </button>
+            </div>
 
-        <div className="relative flex-1 bg-black">
-          {loading ? (
-            <div className="flex h-full items-center justify-center text-xs text-white/60">加载录屏列表…</div>
-          ) : err ? (
-            <div className="flex h-full flex-col items-center justify-center gap-2 text-xs text-white/70">
-              <AlertCircle className="size-6 text-amber-400" />
-              <p>{err}</p>
-            </div>
-          ) : !candidates.length ? (
-            <div className="flex h-full flex-col items-center justify-center gap-2 text-xs text-white/70">
-              <Film className="size-8" />
-              <p>此学生在当前比赛暂无 {streamType === 'screen' ? '屏幕' : '摄像头'} 录屏。</p>
-            </div>
-          ) : (
-            <UnifiedTimelinePlayer
-              chunks={candidates}
-              downloadingId={downloadingId}
-              onDelete={setDeleteRecording}
-              onDownload={(recording) => void downloadRecording(recording)}
-            />
-          )}
-        </div>
-      </DialogContent>
+            {candidates.length > 0 && (
+              <p className="ml-auto text-[11px] text-muted-foreground">
+                {candidates.length} 段 · 连续时间轴 · {formatBytes(totalBytes)}
+              </p>
+            )}
+            {downloadError ? <p className="w-full text-xs text-destructive">{downloadError}</p> : null}
+          </div>
+
+          <div className="relative flex-1 bg-black">
+            {loading ? (
+              <div className="flex h-full items-center justify-center text-xs text-white/60">加载录屏列表…</div>
+            ) : err ? (
+              <div className="flex h-full flex-col items-center justify-center gap-2 text-xs text-white/70">
+                <AlertCircle className="size-6 text-amber-400" />
+                <p>{err}</p>
+              </div>
+            ) : !candidates.length ? (
+              <div className="flex h-full flex-col items-center justify-center gap-2 text-xs text-white/70">
+                <Film className="size-8" />
+                <p>此学生在当前比赛暂无 {streamType === 'screen' ? '屏幕' : '摄像头'} 录屏。</p>
+              </div>
+            ) : (
+              <UnifiedTimelinePlayer
+                chunks={candidates}
+                downloadingId={downloadingId}
+                onDelete={setDeleteRecording}
+                onDownload={(recording) => void downloadRecording(recording)}
+              />
+            )}
+          </div>
+        </DialogContent>
       </Dialog>
       {deleteRecording ? (
         <RecordingDeleteDialog
@@ -395,8 +394,7 @@ function UnifiedTimelinePlayer({
             className="inline-flex shrink-0 items-center gap-1 rounded border border-white/15 px-2 py-1 text-[11px] text-white/70 hover:border-white/30 hover:text-white disabled:opacity-40"
             title={`下载第 ${index + 1} 段录像`}
           >
-            <Download className="size-3" />
-            第 {index + 1} 段
+            <Download className="size-3" />第 {index + 1} 段
           </button>
         ))}
       </div>

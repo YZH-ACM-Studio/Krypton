@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { Collection, ObjectId } from 'mongodb';
 import db from '../service/db';
+import { settleDomainCleanupOperations } from './domain-lifecycle-boundary';
 import {
     canonicalExamNetworkPolicy,
     ExamNetworkControlPlane,
@@ -821,10 +822,10 @@ export function requireExamNetworkControlPlaneResolver(): ExamNetworkControlPlan
 export async function apply(ctx: any): Promise<void> {
     await examNetworkConfigService.ensureIndexes();
     ctx.on('domain/delete', async (domainId: string) => {
-        await Promise.all([
-            examPolicyTemplateColl.deleteMany({ domainId }),
-            examTargetAssignmentColl.deleteMany({ domainId }),
-            examEventNetworkConfigColl.deleteMany({ domainId }),
+        await settleDomainCleanupOperations(domainId, [
+            () => examPolicyTemplateColl.deleteMany({ domainId }),
+            () => examTargetAssignmentColl.deleteMany({ domainId }),
+            () => examEventNetworkConfigColl.deleteMany({ domainId }),
         ]);
     });
 }

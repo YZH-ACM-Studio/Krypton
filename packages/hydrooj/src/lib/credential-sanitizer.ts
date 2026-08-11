@@ -14,6 +14,7 @@ const CREDENTIAL_SECRET_KEYS = new Set([
     'tfa',
     'tfasecret',
     'code',
+    'pairingcode',
     'authnchallenge',
     'credentialid',
     'credentialpublickey',

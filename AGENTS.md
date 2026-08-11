@@ -109,6 +109,15 @@
 - `exam.eventNetworkConfigs` 只保存当前活动引用的 policy revision 与 target revision。每次分配都重查 ExamEvent、学校、模板/目标归属和不可变 revision，并用 CAS 形成新的配置 revision；未来执行会话必须固定读取这两个引用，不能运行时回查动态来源。
 - ExamEvent 学校/生命周期 mutation 与 P1.14 的事件关联写入必须共享同一 `(domainId,eventId)` 单进程轻量边界，并在取得边界后重读事件、重查权限、学校和归档状态；不得仅靠跨集合先读后写维持不变量，也不为此引入 Mongo 事务或分布式锁。P1.14 只建立 OJ canonical schema、验证/确认边界和审计，不直接调用 Vigil、不发送终端命令，也不提供正式 WebUI。目标与控制面 resolver、执行同步由 P1.15 接入，工作台属于 P1.16；P1.13–P1.17 仍是不可拆生产部署单元。
 
+## 教室终端与实体座位绑定协议
+
+- `exam.endpointSeatBindings` 是实体座位与 Endpoint 长期一对一关系的唯一 canonical；实体身份固定为 `(domainId,classroomId,sourceSeatId)`，label、坐标和装饰变化不得改变绑定。active 座位与 active endpoint 都有域内唯一约束；解绑保留原文档和完整单调历史，禁止删除历史或按主机名/label 猜测绑定。
+- 配对窗口按教室和全局单调 revision/CAS 管理；每次开窗创建新文档，旧 window、code digest、claim、decision 与 actor 事实永久保留以支持 ACK 丢失恢复，不得用“当前窗口”覆盖历史。不同实体座位 mutation 可并发，但同座位串行；开窗/关窗使用排他的教室 window transition phase，并等待该教室所有在途绑定、换机、取消与解绑完成。域删除在删除 domain 根之前建立排他 lifecycle gate，等待在途 mutation 并阻止新 mutation，直至全部 domain cleanup 完成；等待者随后必须重读教室、座位与 endpoint ownership。跨文档写入中断后只能从 binding 单调历史精确收敛对应 window，禁止把已完成绑定取消掉或覆盖首次审计；HTTP retry 只能记录显式 replay 事件并携带 canonical actor，不得冒充当前操作者完成了一次新 mutation。明文 `KSP1-*` 码只在管理员创建响应出现一次；Mongo 只保存 SHA-256 摘要与两位提示，日志、oplog、Vigil 和 Endpoint 均不得持久化或输出明文。码短 TTL、单 endpoint 认领；同一已认证 endpoint 持同一码只允许无副作用恢复既有结果，不能再次消费或改写首次审计，另一 endpoint 必须拒绝。
+- OJ 保存绑定、窗口、换机与解绑事实；Vigil 只在已认证且仍为当前连接的 Endpoint Service 与 OJ service-token 路由之间转发严格协议。座位配对要求 Service `>=0.4.0`，普通 GUI 只能经受信本机 IPC 请求当前 Service 发送，且在发送配对码前必须核对命名管道服务端为固定安装路径下的 LocalSystem Service；Service 同时核对调用方来自固定 GUI 路径。配对不是远程命令 capability。任一未知字段、错 requestId、旧版本、断线、超时或畸形 OJ 响应必须 fail closed；秘密不得进入日志。
+- 换机只接受 OJ 入网 canonical 中显式 `replacesEndpointId` 指向旧 endpoint 的新身份。确认前必须重读 binding/window/seat、展示旧/新 endpoint 与当前或未来活动引用并绑定 confirmation fingerprint；换绑和解绑不得修改已发布 target revision 或进行中 execution 的 endpoint 快照。
+- `classroom` 目标来源按当前 active bindings 展开；`seat` 来源 ID 固定为 `EndpointSeatBinding._id`。解析必须重查 domain/school、binding canonical、finalized endpoint ownership、Vigil credential/协议/能力，并在联系 Vigil 前拒绝重复 endpoint；发布后仍只使用冻结的 endpoint IDs。
+- P2.2/P2.3 与 OJ、Vigil Server、Endpoint Service 三端配对协议是不可拆部署单元。完成本地实现不授权连接真实机房、建立生产绑定或启用旧 Vigil SQLite seat-label 子系统。
+
 ## 考试基础设施活动协议
 
 - `exam.events` 是 Krypton Contest 与纯外部考试共用的 OJ 业务根；`type:'krypton'` 可在草稿期不关联 Contest，但进入计划态前必须关联当前域内且操作者可管理的 Contest，`type:'external'` 禁止伪造空 Contest。Contest 不拥有或驱动 ExamEvent 生命周期。
@@ -140,7 +149,7 @@
 
 - OJ 的教室事实只认 `exam.classrooms`；每个教室以 `sourceSystem + sourceClassroomId` 保留上游身份，并在同一文档内保存按 revision 递增的不可变布局快照。实体座位身份只认 `sourceSeatId`，label、坐标和几何变化不得触发按名称猜测重绑。
 - ClassSignin 数据只通过 `classroom:migrate-classsignin validate|plan|apply|verify` 在部署时执行一次。manifest 必须显式映射 source school 到当前域的 `userbind.schools`；运行时不得连接 ClassSignin，不注册长期导入/导出 API、WebUI、后台同步或第二套学生/班级/课程/签到数据。
-- 任何单条或列表读取都必须验证教室根、layout revision 与布局 item 的 exact canonical schema 及内容 fingerprint；自洽 hash 不得替代 discriminator、必填字段、数值边界、稳定身份和 grid/items 语义校验。Endpoint 绑定、考试目标、座位计划与分配引用必须先解析到同域 active 教室及真实 current seatId，悬空、跨域或错座位事实一律 fail closed。
+- 任何单条或列表读取都必须验证教室根、layout revision 与布局 item 的 exact canonical schema 及内容 fingerprint；自洽 hash 不得替代 discriminator、必填字段、数值边界、稳定身份和 grid/items 语义校验。Endpoint 绑定、永久保留的历史配对窗口、考试目标、座位计划与分配引用必须先解析到同域 active 教室及真实 current seatId，悬空、跨域或错座位事实一律 fail closed。
 - apply 必须在 Hydro 停止、完成全量及目标集合备份后，由站点或考试基础设施管理员携带精确 plan fingerprint 与确认 token 执行。相同 batch 重跑幂等；本地 WAL 领先只能从记录的精确 Mongo predecessor 继续，已记录逐教室结果不得在恢复时覆写，确定性 success audit/batch 的 ACK 丢失必须读回精确事实后收敛；若读回也暂时失败，只能保留 applied/原状态重试，绝不得降级或写出非法 WAL。时钟回拨必须在写入前拒绝。非目标漂移、完整文档 CAS 竞争、被终端绑定或考试事实引用的教室删除/seatId 移除必须整批 fail closed，verify 必须从 Mongo canonical 与持久 batch/audit 重新核验。
 
 ## 真实性训练可信完成协议

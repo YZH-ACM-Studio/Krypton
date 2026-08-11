@@ -28,6 +28,7 @@ import {
     MongoClassSigninClassroomMigrationRepository,
 } from '../src/model/classsignin-classroom-migration-adapter';
 import { ExamClassroomService } from '../src/model/exam-classroom-service';
+import type { EndpointSeatPairingWindowDoc } from '../src/model/endpoint-seat-binding';
 
 function sourceExport(layoutJson: string | null = null): string {
     return JSON.stringify({
@@ -1150,7 +1151,9 @@ describe('P2.1 one-time ClassSignin classroom migration', () => {
             const schoolId = new ObjectId('64a000000000000000000001');
             await database.collection('userbind.schools').insertOne({ _id: schoolId, domainId: 'system', name: '中国民航大学' });
             const repository = new MongoClassSigninClassroomMigrationRepository(database, {}, async () => true);
-            const source = validateClassSigninExport(sourceExport(null));
+            const source = validateClassSigninExport(
+                sourceExport(JSON.stringify([{ id: 'seat-1', label: '001', x: 10, y: 20, rotation: 0, status: 'empty', type: 'seat' }])),
+            );
             const manifest = manifestForSource(source, schoolId);
             const plan = buildClassSigninClassroomMigrationPlan(source, manifest, await repository.loadSnapshot());
             await applyClassSigninClassroomMigration({
@@ -1177,6 +1180,92 @@ describe('P2.1 one-time ClassSignin classroom migration', () => {
 
             const classroomCollection = database.collection<ExamClassroomDoc>('exam.classrooms');
             const classroom = (await classroomCollection.findOne({}))!;
+            const historicalBindingId = new ObjectId();
+            const pairingWindowId = new ObjectId();
+            await database.collection('exam.endpointSeatBindings').insertOne({
+                _id: historicalBindingId,
+                domainId: 'system',
+                schoolId,
+                classroomId: classroom._id,
+                sourceSeatId: 'seat-1',
+                status: 'unbound',
+                revision: 2,
+                history: [
+                    {
+                        revision: 1,
+                        action: 'bind',
+                        endpointId: 'ep_historical_123456',
+                        requestId: 'endpoint_historical_bind_001',
+                        actorUid: 7,
+                        at: new Date('2026-08-11T10:00:02.000Z'),
+                        pairingWindowId,
+                    },
+                    {
+                        revision: 2,
+                        action: 'unbind',
+                        previousEndpointId: 'ep_historical_123456',
+                        requestId: 'admin_historical_unbind_001',
+                        actorUid: 7,
+                        at: new Date('2026-08-11T10:00:03.000Z'),
+                        referenceFingerprint: 'a'.repeat(64),
+                    },
+                ],
+                createdBy: 7,
+                createdAt: new Date('2026-08-11T10:00:02.000Z'),
+                updatedBy: 7,
+                updatedAt: new Date('2026-08-11T10:00:03.000Z'),
+            });
+            const withoutSeat = validateClassSigninExport(sourceExport(JSON.stringify([])));
+            const withoutSeatPlan = buildClassSigninClassroomMigrationPlan(
+                withoutSeat,
+                manifestForSource(withoutSeat, schoolId),
+                await repository.loadSnapshot(),
+            );
+            expect(withoutSeatPlan.entries[0].action).to.equal('conflict');
+            expect(withoutSeatPlan.entries[0].conflicts).to.deep.equal(['referenced_seat_removed:seat-1']);
+            await database.collection('exam.endpointSeatBindings').deleteOne({ _id: historicalBindingId });
+
+            const retainedWindowId = new ObjectId();
+            const retainedWindowDocumentId = `endpoint-seat:${retainedWindowId.toHexString()}`;
+            const pairingWindowCollection = database.collection<EndpointSeatPairingWindowDoc>('exam.endpointSeatPairingWindows');
+            await pairingWindowCollection.insertOne({
+                _id: retainedWindowDocumentId,
+                windowId: retainedWindowId,
+                domainId: 'system',
+                schoolId,
+                classroomId: classroom._id,
+                status: 'closed',
+                revision: 2,
+                requestId: 'admin_historical_window_001',
+                expiresAt: new Date('2026-08-11T10:01:02.000Z'),
+                entries: [
+                    {
+                        sourceSeatId: 'seat-1',
+                        mode: 'bind',
+                        status: 'open',
+                        revision: 1,
+                        codeDigest: 'b'.repeat(64),
+                        codeHint: 'AA',
+                        expectedBindingRevision: 0,
+                    },
+                ],
+                createdBy: 7,
+                createdAt: new Date('2026-08-11T10:00:02.000Z'),
+                updatedActor: { kind: 'user', uid: 7 },
+                updatedAt: new Date('2026-08-11T10:00:32.000Z'),
+                closedBy: 7,
+                closedAt: new Date('2026-08-11T10:00:32.000Z'),
+                closedRequestId: 'admin_historical_close_001',
+            });
+            const retainedWindowPlan = buildClassSigninClassroomMigrationPlan(
+                withoutSeat,
+                manifestForSource(withoutSeat, schoolId),
+                await repository.loadSnapshot(),
+            );
+            expect(retainedWindowPlan.entries[0].action).to.equal('conflict');
+            expect(retainedWindowPlan.entries[0].conflicts).to.deep.equal(['referenced_seat_removed:seat-1']);
+            await pairingWindowCollection.deleteOne({ _id: retainedWindowDocumentId });
+
             const classroomService = new ExamClassroomService(classroomCollection);
             expect(await classroomService.list('system', schoolId).toArray()).to.have.length(1);
             await classroomCollection.updateOne({ _id: classroom._id }, { $set: { 'layoutRevisions.0.snapshot.schema': 'malformed-layout-v1' } });

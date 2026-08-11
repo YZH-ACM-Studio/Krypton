@@ -8,6 +8,7 @@ import { PERM, PRIV } from './builtin';
 import * as contest from './contest';
 import * as contestTeam from './contest-team';
 import { withContestTeamBoundary } from './contest-team-gate';
+import { settleDomainCleanupOperations } from './domain-lifecycle-boundary';
 import * as document from './document';
 import * as oplog from './oplog';
 import UserModel, { type User } from './user';
@@ -1747,7 +1748,11 @@ export async function apply(ctx: Context) {
         { key: { domainId: 1, contestId: 1, snapshotId: 1 }, name: 'contestTeamBatchSnapshotPrepare' },
     );
     ctx.on('domain/delete', async (domainId) => {
-        await Promise.all([batchColl.deleteMany({ domainId }), teamColl.deleteMany({ domainId }), inviteColl.deleteMany({ domainId })]);
+        await settleDomainCleanupOperations(domainId, [
+            () => batchColl.deleteMany({ domainId }),
+            () => teamColl.deleteMany({ domainId }),
+            () => inviteColl.deleteMany({ domainId }),
+        ]);
     });
 }
 

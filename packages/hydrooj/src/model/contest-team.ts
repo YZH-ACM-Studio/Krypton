@@ -8,6 +8,7 @@ import { notifyTeamRoleChangeOnVigil } from '../service/vigil-bridge';
 import { PERM, PRIV } from './builtin';
 import * as contest from './contest';
 import { withContestTeamBoundary } from './contest-team-gate';
+import { settleDomainCleanupOperations } from './domain-lifecycle-boundary';
 import * as oplog from './oplog';
 import UserModel, { type User } from './user';
 
@@ -1102,7 +1103,7 @@ export async function apply(ctx: Context) {
         { key: { domainId: 1, contestId: 1, teamId: 1, status: 1 }, name: 'contestTeamInviteTeamList' },
     );
     ctx.on('domain/delete', async (domainId) => {
-        await Promise.all([coll.deleteMany({ domainId }), inviteColl.deleteMany({ domainId })]);
+        await settleDomainCleanupOperations(domainId, [() => coll.deleteMany({ domainId }), () => inviteColl.deleteMany({ domainId })]);
     });
     ctx.on('contest/del', async (domainId, contestId) => {
         await withContestTeamBoundary(domainId, contestId, async () => {

@@ -4,11 +4,12 @@ import { Filter } from 'mongodb';
 import { Context } from '../context';
 import { DomainDoc } from '../interface';
 import { Logger } from '../logger';
-import bus from '../service/bus';
+import bus, { parallelAllSettled } from '../service/bus';
 import db from '../service/db';
 import { MaybeArray, NumberKeys } from '../typeutils';
 import { ArgMethod } from '../utils';
 import { BUILTIN_ROLES, PRIV } from './builtin';
+import { settleDeletedDomainOperations, withDomainLifecycleDeletion } from './domain-lifecycle-boundary';
 import UserModel, { deleteUserCache } from './user';
 
 const coll = db.collection('domain');
@@ -370,10 +371,15 @@ class DomainModel {
 
     @ArgMethod
     static async del(domainId: string) {
-        await coll.deleteOne({ _id: domainId });
-        await collUser.deleteMany({ domainId });
-        await bus.parallel('domain/delete', domainId);
-        bus.broadcast('domain/delete-cache', domainId.toLowerCase());
+        await withDomainLifecycleDeletion(domainId, async () => {
+            await coll.deleteOne({ _id: domainId });
+            await settleDeletedDomainOperations(
+                domainId,
+                () => collUser.deleteMany({ domainId }),
+                () => parallelAllSettled('domain/delete', domainId),
+                () => bus.broadcast('domain/delete-cache', domainId.toLowerCase()),
+            );
+        });
     }
 }
 

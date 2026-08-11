@@ -143,7 +143,12 @@ export interface ExamClassroomDoc {
     archivedBy?: number;
 }
 
-export type ExamClassroomReferenceKind = 'endpoint-seat-binding' | 'exam-target' | 'exam-seat-plan' | 'exam-seat-assignment';
+export type ExamClassroomReferenceKind =
+    | 'endpoint-seat-binding'
+    | 'endpoint-seat-pairing-window'
+    | 'exam-target'
+    | 'exam-seat-plan'
+    | 'exam-seat-assignment';
 
 export interface ExamClassroomReferenceFact {
     domainId: string;
@@ -1030,13 +1035,22 @@ function assertSnapshotReferenceIntegrity(snapshot: ClassSigninClassroomMigratio
         if (!(reference.classroomId instanceof ObjectId)) {
             fail(`${field}.classroomId is invalid`, 'CLASSSIGNIN_CLASSROOM_DATABASE_INVALID');
         }
-        if (!['endpoint-seat-binding', 'exam-target', 'exam-seat-plan', 'exam-seat-assignment'].includes(reference.kind)) {
+        if (
+            !['endpoint-seat-binding', 'endpoint-seat-pairing-window', 'exam-target', 'exam-seat-plan', 'exam-seat-assignment'].includes(
+                reference.kind,
+            )
+        ) {
             fail(`${field}.kind is invalid`, 'CLASSSIGNIN_CLASSROOM_DATABASE_INVALID');
         }
         const referenceId = storedCanonicalText(reference.referenceId, `${field}.referenceId`, 512);
         const hasSeatId = Object.hasOwn(reference, 'sourceSeatId');
         const sourceSeatId = hasSeatId ? storedCanonicalText(reference.sourceSeatId, `${field}.sourceSeatId`, 128) : undefined;
-        if ((reference.kind === 'endpoint-seat-binding' || reference.kind === 'exam-seat-assignment') && !sourceSeatId) {
+        if (
+            (reference.kind === 'endpoint-seat-binding' ||
+                reference.kind === 'endpoint-seat-pairing-window' ||
+                reference.kind === 'exam-seat-assignment') &&
+            !sourceSeatId
+        ) {
             fail(`${field} requires a seat identity`, 'CLASSSIGNIN_CLASSROOM_DATABASE_INVALID');
         }
         const classroom = classroomsById.get(reference.classroomId.toHexString());

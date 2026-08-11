@@ -13,6 +13,11 @@ class ConfigError extends Error {
 async function loadResolver(
     batches: unknown[],
     preflight: (endpointIds: string[]) => Promise<unknown[]>,
+    options: {
+        classrooms?: Map<string, unknown>;
+        bindings?: unknown[];
+        layouts?: Map<string, Array<{ sourceSeatId: string; [key: string]: unknown }>>;
+    } = {},
 ) {
     const resolverPath = require.resolve('../src/lib/exam-network-resolver.ts');
     const originalLoad = Module._load;
@@ -24,6 +29,30 @@ async function loadResolver(
             return {
                 endpointEnrollmentBatchColl: {
                     find: () => ({ toArray: async () => batches }),
+                },
+            };
+        }
+        if (parent?.filename === resolverPath && request === '../model/exam-classroom') {
+            return {
+                examClassroomService: {
+                    get: async (_domainId: string, classroomId: ObjectId) => options.classrooms?.get(classroomId.toHexString()) || null,
+                    layout: (classroom: { _id: ObjectId }) => ({
+                        snapshot: { seats: options.layouts?.get(classroom._id.toHexString()) || [] },
+                    }),
+                },
+            };
+        }
+        if (parent?.filename === resolverPath && request === '../model/endpoint-seat-binding') {
+            const bindings = (options.bindings || []) as Array<{
+                _id: ObjectId;
+                classroomId: ObjectId;
+            }>;
+            return {
+                endpointSeatBindingService: {
+                    listClassroomBindings: async (_domainId: string, classroomId: ObjectId) =>
+                        bindings.filter((binding) => binding.classroomId.equals(classroomId)),
+                    getBindingById: async (_domainId: string, bindingId: ObjectId) =>
+                        bindings.find((binding) => binding._id.equals(bindingId)) || null,
                 },
             };
         }
@@ -45,12 +74,12 @@ const eventId = new ObjectId('66b800000000000000000a01');
 const schoolId = new ObjectId('66b800000000000000000a02');
 const networkCommands = ['apply_network_policy', 'get_network_policy_status', 'stop_network_policy'];
 
-function input(kind: 'classroom' | 'endpoint' = 'endpoint') {
+function input(kind: 'classroom' | 'endpoint' | 'examSeat' | 'seat' = 'endpoint', ids = ['ep_one']) {
     return {
         domainId: 'system',
         eventId,
         schoolId,
-        sources: [{ kind, ids: ['ep_one'] }],
+        sources: [{ kind, ids }],
     };
 }
 
@@ -60,6 +89,7 @@ describe('exam endpoint target resolver', () => {
             [
                 {
                     _id: new ObjectId('66b800000000000000000a03'),
+                    domainId: 'system',
                     claims: [
                         {
                             claimId: 'claim_one',
@@ -94,6 +124,79 @@ describe('exam endpoint target resolver', () => {
         ]);
     });
 
+    it('rejects an ownership finalization from the future before contacting Vigil', async () => {
+        let calls = 0;
+        const resolver = await loadResolver(
+            [
+                {
+                    _id: new ObjectId('66b800000000000000000a04'),
+                    domainId: 'system',
+                    claims: [
+                        {
+                            claimId: 'claim_future',
+                            endpointId: 'ep_one',
+                            finalizedAt: new Date('2099-01-01T00:00:00.000Z'),
+                        },
+                    ],
+                },
+            ],
+            async () => {
+                calls += 1;
+                return [];
+            },
+        );
+        let reason: string | null = null;
+        try {
+            await resolver.resolveExamTargetSources(input());
+        } catch (error) {
+            reason = (error as ConfigError).reason;
+        }
+        expect(reason).to.equal('endpoint_not_owned');
+        expect(calls).to.equal(0);
+    });
+
+    it('rejects duplicate finalized ownership across domains before contacting Vigil', async () => {
+        let calls = 0;
+        const resolver = await loadResolver(
+            [
+                {
+                    _id: new ObjectId('66b800000000000000000a05'),
+                    domainId: 'system',
+                    claims: [
+                        {
+                            claimId: 'claim_system',
+                            endpointId: 'ep_one',
+                            finalizedAt: new Date('2026-08-11T01:00:00.000Z'),
+                        },
+                    ],
+                },
+                {
+                    _id: new ObjectId('66b800000000000000000a06'),
+                    domainId: 'other',
+                    claims: [
+                        {
+                            claimId: 'claim_other',
+                            endpointId: 'ep_one',
+                            finalizedAt: new Date('2026-08-11T01:00:00.000Z'),
+                        },
+                    ],
+                },
+            ],
+            async () => {
+                calls += 1;
+                return [];
+            },
+        );
+        let reason: string | null = null;
+        try {
+            await resolver.resolveExamTargetSources(input());
+        } catch (error) {
+            reason = (error as ConfigError).reason;
+        }
+        expect(reason).to.equal('endpoint_not_owned');
+        expect(calls).to.equal(0);
+    });
+
     it('fails before remote resolution for unavailable future source kinds', async () => {
         let calls = 0;
         const resolver = await loadResolver([], async () => {
@@ -102,7 +205,7 @@ describe('exam endpoint target resolver', () => {
         });
         let reason: string | null = null;
         try {
-            await resolver.resolveExamTargetSources(input('classroom'));
+            await resolver.resolveExamTargetSources(input('examSeat'));
         } catch (error) {
             reason = (error as ConfigError).reason;
         }
@@ -110,11 +213,207 @@ describe('exam endpoint target resolver', () => {
         expect(calls).to.equal(0);
     });
 
-    it('rejects unfinalized or inactive endpoint ownership', async () => {
+    it('resolves classroom and physical-seat sources from canonical active bindings', async () => {
+        const classroomId = new ObjectId('66b800000000000000000a10');
+        const bindingOneId = new ObjectId('66b800000000000000000a11');
+        const bindingTwoId = new ObjectId('66b800000000000000000a12');
+        const bindings = [
+            {
+                _id: bindingOneId,
+                domainId: 'system',
+                schoolId,
+                classroomId,
+                sourceSeatId: 'seat-1',
+                endpointId: 'ep_one',
+                status: 'active',
+                revision: 3,
+            },
+            {
+                _id: bindingTwoId,
+                domainId: 'system',
+                schoolId,
+                classroomId,
+                sourceSeatId: 'seat-2',
+                endpointId: 'ep_two',
+                status: 'active',
+                revision: 2,
+            },
+        ];
         const resolver = await loadResolver(
-            [{ _id: new ObjectId(), claims: [{ claimId: 'claim_one', endpointId: 'ep_one' }] }],
-            async () => [],
+            [
+                {
+                    _id: new ObjectId('66b800000000000000000a13'),
+                    domainId: 'system',
+                    claims: [
+                        { claimId: 'claim_one', endpointId: 'ep_one', finalizedAt: new Date('2026-08-11T01:00:00.000Z') },
+                        { claimId: 'claim_two', endpointId: 'ep_two', finalizedAt: new Date('2026-08-11T01:00:00.000Z') },
+                    ],
+                },
+            ],
+            async (endpointIds) =>
+                endpointIds.map((endpointId) => ({
+                    endpointId,
+                    credentialStatus: 'active',
+                    compatible: true,
+                    capabilities: [{ name: 'network.policy', version: 1, commands: networkCommands }],
+                })),
+            {
+                classrooms: new Map([[classroomId.toHexString(), { _id: classroomId, schoolId, layoutRevision: 99 }]]),
+                bindings,
+                layouts: new Map([
+                    [
+                        classroomId.toHexString(),
+                        [
+                            { sourceSeatId: 'seat-1', x: 1 },
+                            { sourceSeatId: 'seat-2', x: 2 },
+                        ],
+                    ],
+                ]),
+            },
         );
+        const classroom = await resolver.resolveExamTargetSources(input('classroom', [classroomId.toHexString()]));
+        expect(classroom.endpoints.map((item) => item.endpointId)).to.deep.equal(['ep_one', 'ep_two']);
+
+        const seat = await resolver.resolveExamTargetSources(input('seat', [bindingOneId.toHexString()]));
+        expect(seat.endpoints.map((item) => item.endpointId)).to.deep.equal(['ep_one']);
+        expect(seat.sourceFingerprint).to.match(/^[a-f0-9]{64}$/);
+    });
+
+    it('rejects duplicate endpoints across source kinds before Vigil preflight', async () => {
+        const classroomId = new ObjectId('66b800000000000000000a20');
+        const bindingId = new ObjectId('66b800000000000000000a21');
+        let calls = 0;
+        const resolver = await loadResolver(
+            [],
+            async () => {
+                calls += 1;
+                return [];
+            },
+            {
+                classrooms: new Map([[classroomId.toHexString(), { _id: classroomId, schoolId }]]),
+                layouts: new Map([[classroomId.toHexString(), [{ sourceSeatId: 'seat-1' }]]]),
+                bindings: [
+                    {
+                        _id: bindingId,
+                        domainId: 'system',
+                        schoolId,
+                        classroomId,
+                        sourceSeatId: 'seat-1',
+                        endpointId: 'ep_one',
+                        status: 'active',
+                        revision: 1,
+                    },
+                ],
+            },
+        );
+        let reason: string | null = null;
+        try {
+            await resolver.resolveExamTargetSources({
+                ...input(),
+                sources: [
+                    { kind: 'classroom', ids: [classroomId.toHexString()] },
+                    { kind: 'seat', ids: [bindingId.toHexString()] },
+                ],
+            });
+        } catch (error) {
+            reason = (error as ConfigError).reason;
+        }
+        expect(reason).to.equal('duplicate_endpoint');
+        expect(calls).to.equal(0);
+    });
+
+    it('rejects a binding whose physical seat is absent from the current canonical layout', async () => {
+        const classroomId = new ObjectId('66b800000000000000000a30');
+        const bindingId = new ObjectId('66b800000000000000000a31');
+        let calls = 0;
+        const resolver = await loadResolver(
+            [],
+            async () => {
+                calls += 1;
+                return [];
+            },
+            {
+                classrooms: new Map([[classroomId.toHexString(), { _id: classroomId, schoolId }]]),
+                layouts: new Map([[classroomId.toHexString(), [{ sourceSeatId: 'seat-present' }]]]),
+                bindings: [
+                    {
+                        _id: bindingId,
+                        domainId: 'system',
+                        schoolId,
+                        classroomId,
+                        sourceSeatId: 'seat-missing',
+                        endpointId: 'ep_one',
+                        status: 'active',
+                        revision: 1,
+                    },
+                ],
+            },
+        );
+        let reason: string | null = null;
+        try {
+            await resolver.resolveExamTargetSources(input('seat', [bindingId.toHexString()]));
+        } catch (error) {
+            reason = (error as ConfigError).reason;
+        }
+        expect(reason).to.equal('seat_binding_invalid');
+        expect(calls).to.equal(0);
+    });
+
+    it('keeps the target fingerprint stable across label and geometry-only layout changes', async () => {
+        const classroomId = new ObjectId('66b800000000000000000a40');
+        const bindingId = new ObjectId('66b800000000000000000a41');
+        const batches = [
+            {
+                _id: new ObjectId('66b800000000000000000a42'),
+                domainId: 'system',
+                claims: [
+                    {
+                        claimId: 'claim_one',
+                        endpointId: 'ep_one',
+                        finalizedAt: new Date('2026-08-11T01:00:00.000Z'),
+                    },
+                ],
+            },
+        ];
+        const preflight = async () => [
+            {
+                endpointId: 'ep_one',
+                credentialStatus: 'active',
+                compatible: true,
+                capabilities: [{ name: 'network.policy', version: 1, commands: networkCommands }],
+            },
+        ];
+        const common = {
+            classrooms: new Map([[classroomId.toHexString(), { _id: classroomId, schoolId }]]),
+            bindings: [
+                {
+                    _id: bindingId,
+                    domainId: 'system',
+                    schoolId,
+                    classroomId,
+                    sourceSeatId: 'seat-1',
+                    endpointId: 'ep_one',
+                    status: 'active',
+                    revision: 3,
+                },
+            ],
+        };
+        const before = await loadResolver(batches, preflight, {
+            ...common,
+            layouts: new Map([[classroomId.toHexString(), [{ sourceSeatId: 'seat-1', label: 'A1', x: 10, y: 20 }]]]),
+        });
+        const after = await loadResolver(batches, preflight, {
+            ...common,
+            layouts: new Map([[classroomId.toHexString(), [{ sourceSeatId: 'seat-1', label: '新标签', x: 90, y: 40 }]]]),
+        });
+        const source = input('seat', [bindingId.toHexString()]);
+        expect((await after.resolveExamTargetSources(source)).sourceFingerprint).to.equal(
+            (await before.resolveExamTargetSources(source)).sourceFingerprint,
+        );
+    });
+
+    it('rejects unfinalized or inactive endpoint ownership', async () => {
+        const resolver = await loadResolver([{ _id: new ObjectId(), claims: [{ claimId: 'claim_one', endpointId: 'ep_one' }] }], async () => []);
         let reason: string | null = null;
         try {
             await resolver.resolveExamTargetSources(input());

@@ -1,5 +1,6 @@
 import { Collection, ObjectId } from 'mongodb';
 import db from '../service/db';
+import { settleDomainCleanupOperations } from './domain-lifecycle-boundary';
 
 export type PracticeContainerKind = 'course' | 'problemSet';
 export type PracticeScopeKind = 'chapter' | 'stage';
@@ -679,7 +680,10 @@ export const practiceIntegrityService = new PracticeIntegrityService({
 export async function apply(ctx: any): Promise<void> {
     await practiceIntegrityService.ensureIndexes();
     ctx.on('domain/delete', async (domainId: string) => {
-        await Promise.all([practiceIntegrityRevisionColl.deleteMany({ domainId }), practiceContextColl.deleteMany({ domainId })]);
+        await settleDomainCleanupOperations(domainId, [
+            () => practiceIntegrityRevisionColl.deleteMany({ domainId }),
+            () => practiceContextColl.deleteMany({ domainId }),
+        ]);
     });
 }
 

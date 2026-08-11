@@ -7,6 +7,7 @@ import { parseProblemConfigObject } from '../lib/problem-config';
 import db from '../service/db';
 import * as contest from './contest';
 import * as contestTeam from './contest-team';
+import { settleDomainCleanupOperations } from './domain-lifecycle-boundary';
 import ProblemModel, { type ProblemDoc } from './problem';
 import * as setting from './setting';
 import type { User } from './user';
@@ -311,9 +312,9 @@ export async function apply(ctx: Context) {
         },
     );
     ctx.on('domain/delete', async (domainId) => {
-        await Promise.all([
-            coll.deleteMany({ domainId }),
-            counterColl.deleteMany({ _id: { $regex: `^${domainId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:` } }),
+        await settleDomainCleanupOperations(domainId, [
+            () => coll.deleteMany({ domainId }),
+            () => counterColl.deleteMany({ _id: { $regex: `^${domainId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:` } }),
         ]);
     });
     ctx.on('contest/del', async (domainId, contestId) => {

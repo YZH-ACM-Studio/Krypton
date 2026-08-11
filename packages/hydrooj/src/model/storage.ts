@@ -5,6 +5,7 @@ import { nanoid } from 'nanoid';
 import type { Readable } from 'stream';
 import { Context } from '../context';
 import { FileNode } from '../interface';
+import { allSettledOrThrow } from '../lib/all-settled';
 import mime from '../lib/mime';
 import db from '../service/db';
 import storage from '../service/storage';
@@ -64,10 +65,13 @@ export class StorageModel {
         // and we want to delete path=B, the result should be
         // _id: A, path: D, meta: P
         // _id: B, path: C, link: A, meta: R
-        await Promise.all([
-            StorageModel.coll.updateOne({ _id: fileA._id }, { $set: omit(fileB, ['_id', 'link']) }),
-            StorageModel.coll.updateOne({ _id: fileB._id }, { $set: omit(fileA, ['_id', 'link']) }),
-        ]);
+        await allSettledOrThrow(
+            [
+                () => StorageModel.coll.updateOne({ _id: fileA._id }, { $set: omit(fileB, ['_id', 'link']) }),
+                () => StorageModel.coll.updateOne({ _id: fileB._id }, { $set: omit(fileA, ['_id', 'link']) }),
+            ],
+            `Storage link swap failed for ${fileA._id} and ${fileB._id}`,
+        );
     }
 
     static async del(path: string[], operator = 1) {

@@ -193,10 +193,11 @@ export class MongoClassSigninClassroomMigrationRepository implements ClassSignin
     }
 
     async loadSnapshot(): Promise<ClassSigninClassroomMigrationSnapshot> {
-        const [schools, classrooms, bindings, targets, seatPlans, seatAssignments] = await Promise.all([
+        const [schools, classrooms, bindings, pairingWindows, targets, seatPlans, seatAssignments] = await Promise.all([
             this.collection('userbind.schools').find({}).toArray(),
             this.collection<ExamClassroomDoc>('exam.classrooms').find({}).toArray(),
-            this.collection('exam.endpointSeatBindings').find({ status: 'active' }).toArray(),
+            this.collection('exam.endpointSeatBindings').find({}).toArray(),
+            this.collection('exam.endpointSeatPairingWindows').find({}).toArray(),
             this.collection('exam.targetAssignments').find({}).toArray(),
             this.collection('exam.seatPlans').find({}).toArray(),
             this.collection('exam.seatAssignments').find({}).toArray(),
@@ -210,6 +211,32 @@ export class MongoClassSigninClassroomMigrationRepository implements ClassSignin
                 sourceSeatId: requiredText(binding.sourceSeatId, 'endpoint seat binding sourceSeatId'),
                 referenceId: `endpoint-seat-binding:${String(binding._id)}`,
             });
+        }
+        for (const window of pairingWindows) {
+            const domainId = requiredText(window.domainId, 'endpoint seat pairing window domainId');
+            const classroomId = requiredObjectId(window.classroomId, 'endpoint seat pairing window classroomId');
+            const windowId = requiredText(window._id, 'endpoint seat pairing window ID');
+            if (!Array.isArray(window.entries) || !window.entries.length) {
+                fail('endpoint seat pairing window entries are invalid', 'CLASSSIGNIN_CLASSROOM_DATABASE_INVALID');
+            }
+            const sourceSeatIds = new Set<string>();
+            for (const raw of window.entries) {
+                if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+                    fail('endpoint seat pairing window entry is invalid', 'CLASSSIGNIN_CLASSROOM_DATABASE_INVALID');
+                }
+                const sourceSeatId = requiredText((raw as Record<string, unknown>).sourceSeatId, 'endpoint seat pairing window sourceSeatId');
+                if (sourceSeatIds.has(sourceSeatId)) {
+                    fail('endpoint seat pairing window has duplicate seats', 'CLASSSIGNIN_CLASSROOM_DATABASE_INVALID');
+                }
+                sourceSeatIds.add(sourceSeatId);
+                pushReference(references, {
+                    domainId,
+                    classroomId,
+                    kind: 'endpoint-seat-pairing-window',
+                    sourceSeatId,
+                    referenceId: `endpoint-seat-pairing-window:${windowId}`,
+                });
+            }
         }
         for (const target of targets) {
             const draft = target.draft;

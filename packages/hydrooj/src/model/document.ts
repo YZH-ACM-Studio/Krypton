@@ -16,6 +16,7 @@ import bus from '../service/bus';
 import db from '../service/db';
 import { ArrayKeys, MaybeArray, NumberKeys, Projection } from '../typeutils';
 import { buildProjection } from '../utils';
+import { settleDomainCleanupOperations } from './domain-lifecycle-boundary';
 
 type DocID = ObjectId | string | number;
 type NormalArrayKeys<O, P = any> = Exclude<ArrayKeys<O, P>, symbol>;
@@ -466,7 +467,9 @@ export async function revSetStatus<T extends keyof DocStatusType>(
 }
 
 export async function apply(ctx: Context) {
-    ctx.on('domain/delete', (domainId) => Promise.all([coll.deleteMany({ domainId }), collStatus.deleteMany({ domainId })]));
+    ctx.on('domain/delete', (domainId) =>
+        settleDomainCleanupOperations(domainId, [() => coll.deleteMany({ domainId }), () => collStatus.deleteMany({ domainId })]),
+    );
     await ctx.db.clearIndexes(coll, ['tag', 'hidden']);
     const onlyFor = (docType: number) => ({ partialFilterExpression: { docType } });
     await ctx.db.ensureIndexes(

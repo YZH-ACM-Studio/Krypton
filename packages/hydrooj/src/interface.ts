@@ -906,6 +906,8 @@ declare module './service/db' {
         'exam.events': import('./model/exam-event').ExamEventDoc;
         'exam.classrooms': import('./lib/classsignin-classroom-migration').ExamClassroomDoc;
         'exam.classroomImportBatches': import('./lib/classsignin-classroom-migration').ClassSigninClassroomMigrationBatchDoc;
+        'exam.endpointSeatBindings': import('./model/endpoint-seat-binding').EndpointSeatBindingDoc;
+        'exam.endpointSeatPairingWindows': import('./model/endpoint-seat-binding').EndpointSeatPairingWindowDoc;
         'exam.policyTemplates': import('./model/exam-network-config').ExamPolicyTemplateDoc;
         'exam.targetAssignments': import('./model/exam-network-config').ExamTargetAssignmentDoc;
         'exam.eventNetworkConfigs': import('./model/exam-network-config').ExamEventNetworkConfigDoc;
@@ -966,6 +968,10 @@ export interface Model {
     >;
     contextualCompletion: Pick<typeof import('./model/contextual-completion'), 'contextualCompletionColl' | 'contextualCompletionService'>;
     endpointEnrollment: Pick<typeof import('./model/endpoint-enrollment'), 'endpointEnrollmentBatchColl' | 'endpointEnrollmentBatchService'>;
+    endpointSeatBinding: Pick<
+        typeof import('./model/endpoint-seat-binding'),
+        'endpointSeatBindingColl' | 'endpointSeatPairingWindowColl' | 'endpointSeatBindingService'
+    >;
     examEvent: Pick<typeof import('./model/exam-event'), 'examEventColl' | 'examEventService'>;
     examClassroom: Pick<typeof import('./model/exam-classroom'), 'examClassroomColl' | 'examClassroomMigrationBatchColl' | 'examClassroomService'>;
     examNetworkConfig: Pick<

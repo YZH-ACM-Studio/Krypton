@@ -209,6 +209,49 @@ describe('exam infrastructure workspace', () => {
     expect(screen.getByText('外部考试')).toBeInTheDocument();
   });
 
+  it('opens the canonical classroom workspace from the infrastructure page without a second navigation system', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/api/admin/exam-infrastructure/classrooms') {
+        return json({
+          classrooms: [
+            {
+              classroomId: '66b800000000000000000701',
+              schoolId: EVENT.schoolId,
+              name: '北实 201 机房',
+              layoutRevision: 3,
+              seatCount: 120,
+            },
+          ],
+        });
+      }
+      return json({ events: [EVENT], schools: [{ schoolId: EVENT.schoolId, name: '计算机学院' }] });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    renderPage({ eventId: null });
+
+    await user.click(await screen.findByRole('button', { name: '教室终端' }));
+    const link = await screen.findByRole('link', { name: /北实 201 机房/ });
+    expect(link).toHaveAttribute('href', '/admin/exam-infrastructure/classrooms/66b800000000000000000701');
+    expect(screen.getByText('120 座 · layout r3')).toBeInTheDocument();
+  });
+
+  it('loads an empty classroom collection once instead of polling the launcher', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/api/admin/exam-infrastructure/classrooms') return json({ classrooms: [] });
+      return json({ events: [EVENT], schools: [] });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
+    renderPage({ eventId: null });
+
+    await user.click(await screen.findByRole('button', { name: '教室终端' }));
+    expect(await screen.findByText('还没有已导入教室')).toBeInTheDocument();
+    await new Promise((resolve) => window.setTimeout(resolve, 50));
+
+    expect(fetchMock.mock.calls.filter(([input]) => String(input) === '/api/admin/exam-infrastructure/classrooms')).toHaveLength(1);
+  });
+
   it('does not present a load failure as an empty activity list', async () => {
     vi.stubGlobal(
       'fetch',

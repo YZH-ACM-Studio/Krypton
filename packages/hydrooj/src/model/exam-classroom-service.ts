@@ -47,6 +47,19 @@ export class ExamClassroomService {
             });
     }
 
+    listDomain(domainId: string, includeArchived = false, limit = 500) {
+        if (!domainId || domainId.length > 64) throw new TypeError('domainId is invalid');
+        if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) throw new TypeError('limit is invalid');
+        return this.classrooms
+            .find({ domainId, ...(includeArchived ? {} : { status: 'active' }) })
+            .sort({ name: 1, _id: 1 })
+            .limit(limit)
+            .map((classroom) => {
+                assertExamClassroomIntegrity(classroom);
+                return classroom;
+            });
+    }
+
     layout(classroom: ExamClassroomDoc, revision = classroom.layoutRevision): ExamClassroomLayoutRevision {
         assertExamClassroomIntegrity(classroom);
         if (!Number.isSafeInteger(revision) || revision < 1) throw new TypeError('layout revision is invalid');

@@ -31,6 +31,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
+import { ClassroomLauncher } from '@/pages/exam-classroom';
 
 type EventStatus = 'draft' | 'scheduled' | 'active' | 'ended' | 'archived';
 type EventType = 'krypton' | 'external';
@@ -825,10 +826,13 @@ function EventListPage() {
       description="统一管理 Krypton 比赛与外部考试的网络策略、目标终端和真实执行结果。"
       actions={
         !loading && !error ? (
-          <Button onClick={() => setCreating(true)}>
-            <Plus className="size-4" />
-            新建活动
-          </Button>
+          <>
+            <ClassroomLauncher schools={schools} />
+            <Button onClick={() => setCreating(true)}>
+              <Plus className="size-4" />
+              新建活动
+            </Button>
+          </>
         ) : undefined
       }
     >

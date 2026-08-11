@@ -1,9 +1,11 @@
 import { Logger } from '@hydrooj/utils';
 import { ObjectId } from 'mongodb';
 import { Context, Handler, OplogModel, param, PermissionError, requireServiceToken, Types, ValidationError } from 'hydrooj';
+import type { ExamClassroomDoc } from '../lib/classsignin-classroom-migration';
 import { PERM } from '../model/builtin';
 import { examClassroomService } from '../model/exam-classroom';
 import { isExamInfrastructureAdmin } from '../model/exam-event-access';
+import { preflightExamNetworkOnVigil } from '../service/vigil-bridge';
 import {
     EndpointSeatBindingDoc,
     EndpointSeatBindingError,
@@ -132,6 +134,20 @@ function serializeRedemption(result: EndpointSeatPairingRedemption) {
     };
 }
 
+function serializeLayout(classroom: ExamClassroomDoc) {
+    const layout = examClassroomService.layout(classroom, classroom.layoutRevision).snapshot;
+    return {
+        schemaVersion: layout.schemaVersion,
+        sourceFormat: layout.sourceFormat,
+        coordinateSystem: layout.coordinateSystem,
+        rows: layout.rows || null,
+        cols: layout.cols || null,
+        fingerprint: layout.fingerprint,
+        seats: layout.seats.map((seat) => ({ ...seat })),
+        decorations: layout.decorations.map((decoration) => ({ ...decoration })),
+    };
+}
+
 function errorStatus(reason: string): number {
     if (reason.endsWith('_invalid') || reason === 'pairing_code_invalid' || reason === 'request_invalid') return 400;
     if (reason === 'pairing_code_expired') return 410;
@@ -164,20 +180,65 @@ class EndpointSeatClassroomStateHandler extends EndpointSeatAdminHandler {
     @param('classroomId', Types.ObjectId)
     async get(_args: unknown, classroomId: ObjectId) {
         const classroom = await this.classroom(classroomId);
-        const [bindings, window] = await Promise.all([
-            endpointSeatBindingService.listClassroomBindings(String(this.domain._id), classroomId),
-            endpointSeatBindingService.getPairingWindow(String(this.domain._id), classroomId),
-        ]);
+        const state = await endpointSeatBindingService.getClassroomState(String(this.domain._id), classroomId);
+        const endpointIds = state.bindings
+            .filter((binding) => binding.status === 'active' && binding.endpointId)
+            .map((binding) => binding.endpointId!)
+            .sort();
+        let endpointPreflight: {
+            state: 'available' | 'not-required' | 'unavailable';
+            items: Awaited<ReturnType<typeof preflightExamNetworkOnVigil>>;
+        };
+        if (!endpointIds.length) endpointPreflight = { state: 'not-required', items: [] };
+        else {
+            try {
+                endpointPreflight = { state: 'available', items: await preflightExamNetworkOnVigil(endpointIds) };
+            } catch (error) {
+                logger.warn(
+                    'Endpoint seat live status unavailable classroom=%s stage=preflight reason=%s',
+                    classroomId.toHexString(),
+                    error instanceof Error ? error.message : 'unknown_error',
+                );
+                endpointPreflight = { state: 'unavailable', items: [] };
+            }
+        }
         this.response.body = {
             classroom: {
                 classroomId: classroom._id.toHexString(),
                 schoolId: classroom.schoolId.toHexString(),
                 name: classroom.name,
                 layoutRevision: classroom.layoutRevision,
+                layout: serializeLayout(classroom),
             },
-            bindings: bindings.map(serializeBinding),
-            pairingWindow: window ? serializeWindow(window) : null,
+            bindings: state.bindings.map(serializeBinding),
+            pairingWindow: state.pairingWindow ? serializeWindow(state.pairingWindow) : null,
+            references: state.references.map(serializeReference),
+            endpointPreflight,
         };
+    }
+}
+
+class EndpointSeatClassroomCollectionHandler extends EndpointSeatAdminHandler {
+    async get() {
+        const classrooms = await examClassroomService.listDomain(String(this.domain._id), false, 500).toArray();
+        this.response.body = {
+            classrooms: classrooms.map((classroom) => ({
+                classroomId: classroom._id.toHexString(),
+                schoolId: classroom.schoolId.toHexString(),
+                name: classroom.name,
+                layoutRevision: classroom.layoutRevision,
+                seatCount: examClassroomService.layout(classroom, classroom.layoutRevision).snapshot.seats.length,
+            })),
+        };
+    }
+}
+
+class EndpointSeatClassroomPageHandler extends EndpointSeatAdminHandler {
+    @param('classroomId', Types.ObjectId)
+    async get(_args: unknown, classroomId: ObjectId) {
+        await this.classroom(classroomId);
+        this.response.template = 'admin_exam_classroom.html';
+        this.response.body = { classroomId: classroomId.toHexString() };
     }
 }
 
@@ -421,6 +482,7 @@ class VigilEndpointSeatPairingRedeemHandler extends Handler {
 }
 
 export async function apply(ctx: Context) {
+    ctx.Route('endpoint_seat_classroom_collection', '/api/admin/exam-infrastructure/classrooms', EndpointSeatClassroomCollectionHandler);
     ctx.Route(
         'endpoint_seat_classroom_state',
         '/api/admin/exam-infrastructure/classrooms/:classroomId/seat-bindings',
@@ -436,5 +498,6 @@ export async function apply(ctx: Context) {
         '/api/admin/exam-infrastructure/classrooms/:classroomId/seat-bindings/:sourceSeatId',
         EndpointSeatBindingDetailHandler,
     );
+    ctx.Route('endpoint_seat_classroom_page', '/admin/exam-infrastructure/classrooms/:classroomId', EndpointSeatClassroomPageHandler);
     ctx.Route('vigil_endpoint_seat_pairing_redeem', '/api/vigil/endpoint-seat-pairing/redeem', VigilEndpointSeatPairingRedeemHandler);
 }

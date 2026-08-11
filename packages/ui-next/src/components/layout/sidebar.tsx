@@ -241,7 +241,7 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
           label: '考试基础设施',
           href: '/admin/exam-infrastructure',
           icon: HardDriveDownload,
-          templates: ['admin_exam_infrastructure.html', 'admin_exam_event.html'],
+          templates: ['admin_exam_infrastructure.html', 'admin_exam_event.html', 'admin_exam_classroom.html'],
         });
       }
       if (bs.user.canImportRankboard || bs.user.canManageRankboard) {

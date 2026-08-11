@@ -9,11 +9,7 @@ import type {
     EndpointSeatPairingWindowDoc,
     EndpointSeatReferenceFact,
 } from '../src/model/endpoint-seat-binding';
-import {
-    settleDeletedDomainOperations,
-    withDomainLifecycleDeletion,
-    withDomainLifecycleMutation,
-} from '../src/model/domain-lifecycle-boundary';
+import { settleDeletedDomainOperations, withDomainLifecycleDeletion, withDomainLifecycleMutation } from '../src/model/domain-lifecycle-boundary';
 
 (global as unknown as { Hydro: { model: Record<string, unknown> } }).Hydro = { model: {} };
 const dbPath = require.resolve('../src/service/db.ts');
@@ -60,6 +56,7 @@ const domains = new Set<string>();
 const seats = new Map<string, SeatLocation>();
 const endpoints = new Map<string, { domainId: string; replacesEndpointId?: string }>();
 let references: EndpointSeatReferenceFact[] = [];
+let referenceResolutionCalls: Array<{ domainId: string; endpointIds: string[] }> = [];
 let beforeResolveReferences: (() => Promise<void>) | undefined;
 let beforeLoadEndpointOwnership: (() => Promise<void>) | undefined;
 
@@ -104,6 +101,7 @@ function makeService(windowStore: Collection<EndpointSeatPairingWindowDoc> = win
             return endpoints.get(endpointId) || null;
         },
         resolveActivityReferences: async (domainId, endpointIds) => {
+            referenceResolutionCalls.push({ domainId, endpointIds: [...endpointIds] });
             await beforeResolveReferences?.();
             return references.filter((reference) => reference.domainId === domainId && endpointIds.includes(reference.endpointId));
         },
@@ -181,6 +179,7 @@ beforeEach(async () => {
     seats.clear();
     endpoints.clear();
     references = [];
+    referenceResolutionCalls = [];
     beforeResolveReferences = undefined;
     beforeLoadEndpointOwnership = undefined;
     addSeat('seat-1');
@@ -233,6 +232,47 @@ describe('P2.2 endpoint seat binding canonical and pairing state machine', () =>
             }),
             'pairing_code_used',
         );
+    });
+
+    it('builds one classroom read model and resolves all active endpoint references in one batch', async () => {
+        own('ep_read_model_one_01');
+        own('ep_read_model_two_02');
+        const service = makeService();
+        await service.ensureIndexes();
+        const opened = await openWindow(service, ['seat-1', 'seat-2']);
+        await service.redeemPairingCode({
+            endpointId: 'ep_read_model_one_01',
+            pairingCode: opened.codes[0].code,
+            requestId: 'endpoint_read_model_0001',
+        });
+        await service.redeemPairingCode({
+            endpointId: 'ep_read_model_two_02',
+            pairingCode: opened.codes[1].code,
+            requestId: 'endpoint_read_model_0002',
+        });
+        references = [
+            {
+                kind: 'network-config',
+                domainId: 'system',
+                endpointId: 'ep_read_model_two_02',
+                eventId: new ObjectId('66b900000000000000000041'),
+                eventTitle: '教室读模型考试',
+                eventState: 'future',
+                startAt: new Date('2026-08-12T01:00:00.000Z'),
+                endAt: new Date('2026-08-12T03:00:00.000Z'),
+                targetId: new ObjectId('66b900000000000000000042'),
+                targetRevision: 1,
+                targetFingerprint: 'c'.repeat(64),
+            },
+        ];
+        referenceResolutionCalls = [];
+
+        const state = await service.getClassroomState('system', classroomOne);
+
+        expect(state.bindings.map((binding) => binding.sourceSeatId)).to.deep.equal(['seat-1', 'seat-2']);
+        expect(state.pairingWindow?.windowId).to.deep.equal(opened.window.windowId);
+        expect(state.references).to.deep.equal(references);
+        expect(referenceResolutionCalls).to.deep.equal([{ domainId: 'system', endpointIds: ['ep_read_model_one_01', 'ep_read_model_two_02'] }]);
     });
 
     it('allows exactly one winner when two authenticated endpoints race for one code', async () => {

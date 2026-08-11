@@ -1268,8 +1268,10 @@ describe('P2.1 one-time ClassSignin classroom migration', () => {
 
             const classroomService = new ExamClassroomService(classroomCollection);
             expect(await classroomService.list('system', schoolId).toArray()).to.have.length(1);
+            expect(await classroomService.listDomain('system').toArray()).to.have.length(1);
             await classroomCollection.updateOne({ _id: classroom._id }, { $set: { 'layoutRevisions.0.snapshot.schema': 'malformed-layout-v1' } });
             await rejectCode(classroomService.list('system', schoolId).toArray(), 'CLASSSIGNIN_CLASSROOM_DATABASE_INVALID');
+            await rejectCode(classroomService.listDomain('system').toArray(), 'CLASSSIGNIN_CLASSROOM_DATABASE_INVALID');
             await classroomCollection.replaceOne({ _id: classroom._id }, classroom);
             expect(await repository.writeClassroom(null, classroom)).to.equal('no-op');
             await rejectCode(repository.writeClassroom(null, { ...classroom, _id: new ObjectId() }), 'CLASSSIGNIN_CLASSROOM_CAS_CONFLICT');

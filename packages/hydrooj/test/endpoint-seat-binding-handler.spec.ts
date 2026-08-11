@@ -20,6 +20,8 @@ describe('P2.2 endpoint seat binding HTTP boundary', () => {
         expect(routeRegistration('endpoint_seat_classroom_state')).to.include(
             "'/api/admin/exam-infrastructure/classrooms/:classroomId/seat-bindings'",
         );
+        expect(routeRegistration('endpoint_seat_classroom_collection')).to.include("'/api/admin/exam-infrastructure/classrooms'");
+        expect(routeRegistration('endpoint_seat_classroom_page')).to.include("'/admin/exam-infrastructure/classrooms/:classroomId'");
         expect(routeRegistration('endpoint_seat_pairing_window')).to.include(
             "'/api/admin/exam-infrastructure/classrooms/:classroomId/seat-pairing-window'",
         );
@@ -30,6 +32,7 @@ describe('P2.2 endpoint seat binding HTTP boundary', () => {
         expect(source).to.include('isExamInfrastructureAdmin(this.user)');
         expect(source).to.include("requireServiceToken(this, 'vigil')");
         expect(source).to.include('await endpointSeatBindingService.ensureIndexes()');
+        expect(source).to.include("this.response.template = 'admin_exam_classroom.html'");
     });
 
     it('makes every administrator mutation carry explicit request and CAS identities', () => {
@@ -129,5 +132,13 @@ describe('P2.2 endpoint seat binding HTTP boundary', () => {
         expect(source).not.to.include('/api/admin/vigil/seats');
         expect(source).not.to.include('seat_label');
         expect(source).not.to.include('machine_id');
+    });
+
+    it('serves one pure read model with canonical layout, references, and explicit Vigil availability', () => {
+        expect(source).to.include('endpointSeatBindingService.getClassroomState');
+        expect(source).to.include('layout: serializeLayout(classroom)');
+        expect(source).to.include('references: state.references.map(serializeReference)');
+        expect(source).to.include("state: 'unavailable'");
+        expect(source).not.to.include('setInterval');
     });
 });

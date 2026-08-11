@@ -254,6 +254,12 @@ export interface EndpointSeatUnbindPreview {
     confirmationFingerprint: string;
 }
 
+export interface EndpointSeatClassroomState {
+    bindings: EndpointSeatBindingDoc[];
+    pairingWindow: EndpointSeatPairingWindowDoc | null;
+    references: EndpointSeatReferenceFact[];
+}
+
 const ENDPOINT_PATTERN = /^ep_[A-Za-z0-9_-]{12,80}$/;
 const REQUEST_PATTERN = /^[A-Za-z0-9_-]{16,96}$/;
 const CODE_PATTERN = /^KSP1-[0-9A-F]{10}$/;
@@ -1750,6 +1756,25 @@ export class EndpointSeatBindingService {
         canonicalDomainId(domainId);
         assertObjectId(classroomId, 'classroom_id');
         return this.loadWindow(domainId, classroomId);
+    }
+
+    async getClassroomState(domainId: string, classroomId: ObjectId): Promise<EndpointSeatClassroomState> {
+        const [bindings, pairingWindow] = await Promise.all([
+            this.listClassroomBindings(domainId, classroomId),
+            this.getPairingWindow(domainId, classroomId),
+        ]);
+        const active = bindings.filter(
+            (binding): binding is EndpointSeatBindingDoc & { endpointId: string } => binding.status === 'active' && Boolean(binding.endpointId),
+        );
+        if (!active.length) return { bindings, pairingWindow, references: [] };
+        const schoolIds = new Set(active.map((binding) => binding.schoolId.toHexString()));
+        if (schoolIds.size !== 1) throw new EndpointSeatBindingError('reference_state_invalid');
+        const endpointIds = active.map((binding) => binding.endpointId).sort();
+        const references = canonicalReferences(await this.resolveActivityReferences(domainId, endpointIds, active[0].schoolId, this.now()));
+        if (references.some((reference) => reference.domainId !== domainId || !endpointIds.includes(reference.endpointId))) {
+            throw new EndpointSeatBindingError('reference_state_invalid');
+        }
+        return { bindings, pairingWindow, references };
     }
 }
 

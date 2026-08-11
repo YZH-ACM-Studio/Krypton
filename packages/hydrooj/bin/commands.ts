@@ -22,6 +22,7 @@ async function main() {
     require('../src/commands/mindmap-migrate-multi').register(cli);
     require('../src/commands/function-3049-migration').register(cli);
     require('../src/commands/problem-pid-namespace-migration').register(cli);
+    require('../src/commands/classsignin-classroom-migration').register(cli);
     cli.help();
     cli.parse(process.argv, { run: false });
     if (argv.options.help || argv.options.h) return;

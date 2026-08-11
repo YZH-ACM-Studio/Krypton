@@ -136,6 +136,13 @@
 - 批量操作必须逐 endpoint 返回 P1.11 canonical command fact或明确的 pre-dispatch rejection；离线、能力缺失、旧协议、发送失败和部分成功不得折叠成整批成功。apply/update/stop 只驱动 `network.policy@1` 严格命令，status 使用 endpoint 控制 scope，不伪造活动 ACK。
 - 每次 protocol 2 heartbeat 和被接受的网络命令结果都要更新当前 execution session 的 reported network state；预检和活动视图只读该状态及 P1.11 持久命令，不读取学生 GUI、本机 IPC 或测试假 ACK。真实 Windows 闭环必须在用户明确指定的非生产测试机上验收，未获范围批准时不得连接或修改生产机房终端。
 
+## 教室与座位布局 canonical
+
+- OJ 的教室事实只认 `exam.classrooms`；每个教室以 `sourceSystem + sourceClassroomId` 保留上游身份，并在同一文档内保存按 revision 递增的不可变布局快照。实体座位身份只认 `sourceSeatId`，label、坐标和几何变化不得触发按名称猜测重绑。
+- ClassSignin 数据只通过 `classroom:migrate-classsignin validate|plan|apply|verify` 在部署时执行一次。manifest 必须显式映射 source school 到当前域的 `userbind.schools`；运行时不得连接 ClassSignin，不注册长期导入/导出 API、WebUI、后台同步或第二套学生/班级/课程/签到数据。
+- 任何单条或列表读取都必须验证教室根、layout revision 与布局 item 的 exact canonical schema 及内容 fingerprint；自洽 hash 不得替代 discriminator、必填字段、数值边界、稳定身份和 grid/items 语义校验。Endpoint 绑定、考试目标、座位计划与分配引用必须先解析到同域 active 教室及真实 current seatId，悬空、跨域或错座位事实一律 fail closed。
+- apply 必须在 Hydro 停止、完成全量及目标集合备份后，由站点或考试基础设施管理员携带精确 plan fingerprint 与确认 token 执行。相同 batch 重跑幂等；本地 WAL 领先只能从记录的精确 Mongo predecessor 继续，已记录逐教室结果不得在恢复时覆写，确定性 success audit/batch 的 ACK 丢失必须读回精确事实后收敛；若读回也暂时失败，只能保留 applied/原状态重试，绝不得降级或写出非法 WAL。时钟回拨必须在写入前拒绝。非目标漂移、完整文档 CAS 竞争、被终端绑定或考试事实引用的教室删除/seatId 移除必须整批 fail closed，verify 必须从 Mongo canonical 与持久 batch/audit 重新核验。
+
 ## 真实性训练可信完成协议
 
 - Course 与 ProblemSet 的真实性策略只认发布后不可变的 `practice.integrityRevisions`；短期 `PracticeContext` 必须绑定域、用户、题目、主容器/作用域及每个明确参与目标的容器、作用域和 revision。签发与提交都要重新读取 canonical revision 并校验当前题目/容器可见性和范围成员关系，客户端字段不得自证授权。

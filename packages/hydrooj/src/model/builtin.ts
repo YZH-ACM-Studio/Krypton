@@ -14,6 +14,9 @@ import {
     USER_GENDER_RANGE,
     USER_GENDERS,
 } from '@hydrooj/common';
+import { BUILTIN_ROLES } from './builtin-roles';
+
+export { BUILTIN_ROLES } from './builtin-roles';
 
 export * from '@hydrooj/common/permission';
 export * from '@hydrooj/common/status';
@@ -108,13 +111,6 @@ for (const p of PERMS) {
 
 // people whose rank is less than 1% will get Level 10
 export const LEVELS = [100, 90, 70, 55, 40, 30, 20, 10, 5, 2, 1];
-
-export const BUILTIN_ROLES = {
-    guest: PERM.PERM_BASIC,
-    default: PERM.PERM_DEFAULT,
-    teacher: PERM.PERM_TEACHER,
-    root: PERM.PERM_ALL,
-};
 
 export const DEFAULT_NODES = {
     探索: [

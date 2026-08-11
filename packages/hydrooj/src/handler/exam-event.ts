@@ -21,6 +21,7 @@ import {
 import { withExamEventBoundary } from '../model/exam-event-boundary';
 import { EXAM_EVENT_PATCH_FIELDS, parseExamEventUpdatePatch } from '../model/exam-event-request';
 import { examNetworkConfigService, ExamNetworkConfigError } from '../model/exam-network-config';
+import { examSeatAssignmentService } from '../model/exam-seat-assignment';
 import { ExamSeatPlanError, examSeatPlanService } from '../model/exam-seat-plan';
 
 function auditContext(handler: ExamEventBaseHandler): ExamEventAuditContext {
@@ -218,6 +219,7 @@ class ExamEventDetailHandler extends ExamEventBaseHandler {
                         await Promise.all([
                             examNetworkConfigService.assertEventSchoolChangeAllowed(domainId, eventId),
                             examSeatPlanService.assertEventSchoolChangeAllowed(domainId, eventId),
+                            examSeatAssignmentService.assertEventSchoolChangeAllowed(domainId, eventId),
                         ]);
                     }
                     const collaborators = collaboratorUids === undefined ? undefined : canonicalCollaboratorUids(current.ownerUid, collaboratorUids);

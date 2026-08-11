@@ -129,8 +129,10 @@
 
 - `exam.rosterRevisions` 只保存从 userbind 学校/用户组或 Krypton Contest audience 显式编译出的不可变名单 revision。每份 revision 固定 ExamEvent、学校、选择来源、group/source fingerprint、明确学生与绑定 UID、排除诊断和相对上一版的 UID 增删；刷新只能追加新 revision，不得改写旧名单、请求时回填或后台跟随 userbind。
 - 名单生成只允许当前仍可管理 ExamEvent、持有 `PERM_USERBIND_MANAGE_STUDENTS` 且仍具有对应学校与 Contest 权限的操作者（考试基础设施管理员可按既有全域权限旁路），并在同一 ExamEvent 轻量边界内重读事件和权限。userbind source 与 OJ 用户状态必须双读一致后才可落库；跨域、跨校、缺组、重复绑定、未绑定、用户缺失或停用必须明确拒绝或进入不可变排除诊断，禁止静默创建第二套学生事实。
-- `exam.seatPlans` 是不可变的候选范围 revision，只固定 event、可选 roster revision、同校 classroom/layout fingerprint 与排序后的 current `sourceSeatId`。Krypton ExamEvent 必须引用名单；纯外部考试可显式使用空名单。人数多于候选座位只记录诊断，本阶段不生成 UID→座位分配、随机 seed、人工调整、页面或后台任务。
-- 管理读取必须重新验证 roster、classroom、layout 与 seat 引用；事件学校一旦有 roster/seat-plan 事实就不得改变。操作日志只记录 event/revision、数量、诊断码与 fingerprint，不记录姓名、学号或成员明细。首次部署必须确认 PII 保存范围、两份 Mongo 集合及权限边界；本地完成不授权创建真实考试名单或座位计划。
+- `exam.seatPlans` 是不可变的候选范围 revision，只固定 event、可选 roster revision、同校 classroom/layout fingerprint 与排序后的 current `sourceSeatId`。Krypton ExamEvent 必须引用名单；纯外部考试可显式使用空名单。人数多于候选座位只记录诊断，候选范围本身不包含 UID→座位映射。
+- `exam.seatAssignments` 是不可变的正式分配 revision，必须固定 roster/seat-plan/layout fingerprint、排序后的候选与可用座位、规范化约束、服务端 CSPRNG seed、算法版本和最终 UID→`sourceSeatId` 双射。相同输入、seed 与算法必须得到相同结果；禁用、未绑定、未知状态、座位不足或约束冲突必须返回完整诊断且不落半份 revision。随机 seed 只在显式首次生成或“重新随机”时更换，重新随机保留锁定项；人工换位和锁定只能追加新 revision，不得修改长期 Endpoint 绑定。
+- `exam.seatAssignmentPublications` 只保存每个 ExamEvent 当前发布 revision 的完整 CAS 指针。发布前必须在 ExamEvent 边界内重读事件、名单、计划、当前 layout 与 active binding，并用保存的 seed/约束重建同一映射；已发布 revision 不原地改写，后续调整与重新发布继续追加 assignment/publication revision。
+- 管理读取必须重新验证 roster、classroom、layout 与 seat 引用；事件学校一旦有 roster/seat-plan/assignment 事实就不得改变。操作日志只记录 event/revision、数量、诊断码与 fingerprint，不记录姓名、学号或成员明细。首次部署必须确认 PII 保存范围、四份 Mongo 集合及权限边界；加载代码不自动生成或发布真实考试分配。
 
 ## OJ 与 Vigil 考试网络执行同步协议
 

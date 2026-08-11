@@ -57,6 +57,7 @@ import { ExamPaperPage } from '@/pages/exam-mode/paper';
 import { ContestWorkspacePage } from '@/pages/exam-mode/workspace';
 import { ExamClassroomPage } from '@/pages/exam-classroom';
 import { ExamEventPage, ExamInfrastructurePage } from '@/pages/exam-infrastructure';
+import { ExamSeatPlanPage } from '@/pages/exam-seat-plan';
 import { GenericPage } from '@/pages/generic';
 import { KryptonHomePage } from '@/pages/home';
 import { HomeworkDetailPage, HomeworkPage } from '@/pages/homework';
@@ -243,6 +244,7 @@ const PAGE_MAP: Record<string, PageComponent> = {
   'admin_exam_infrastructure.html': ExamInfrastructurePage,
   'admin_exam_event.html': ExamEventPage,
   'admin_exam_classroom.html': ExamClassroomPage,
+  'admin_exam_seats.html': ExamSeatPlanPage,
 
   // Misc
   'status.html': StatusPage,

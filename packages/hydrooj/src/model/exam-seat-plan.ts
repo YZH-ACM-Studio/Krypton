@@ -441,7 +441,7 @@ function exclusionFingerprintFact(exclusion: ExamRosterExclusion) {
     };
 }
 
-function rosterDocumentFingerprint(doc: Omit<ExamRosterRevisionDoc, 'fingerprint'>): string {
+export function rosterDocumentFingerprint(doc: Omit<ExamRosterRevisionDoc, 'fingerprint'>): string {
     return sha256({
         rosterId: doc._id.toHexString(),
         domainId: doc.domainId,
@@ -461,7 +461,7 @@ function rosterDocumentFingerprint(doc: Omit<ExamRosterRevisionDoc, 'fingerprint
     });
 }
 
-function planDocumentFingerprint(doc: Omit<ExamSeatPlanDoc, 'fingerprint'>): string {
+export function planDocumentFingerprint(doc: Omit<ExamSeatPlanDoc, 'fingerprint'>): string {
     return sha256({
         seatPlanId: doc._id.toHexString(),
         domainId: doc.domainId,
@@ -653,6 +653,15 @@ export class ExamSeatPlanService {
         const roster = await this.rosters.findOne({ domainId, eventId, revision });
         if (roster) assertExamRosterRevisionIntegrity(roster);
         return roster;
+    }
+
+    async getSeatPlanRevision(domainId: string, eventId: ObjectId, revision: number): Promise<ExamSeatPlanDoc | null> {
+        assertDomainId(domainId);
+        assertObjectId(eventId, 'eventId');
+        assertRevision(revision);
+        const plan = await this.seatPlans.findOne({ domainId, eventId, revision });
+        if (plan) assertExamSeatPlanIntegrity(plan);
+        return plan;
     }
 
     async assertEventSchoolChangeAllowed(domainId: string, eventId: ObjectId): Promise<void> {

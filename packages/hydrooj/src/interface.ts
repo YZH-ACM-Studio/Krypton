@@ -914,12 +914,18 @@ declare module './service/db' {
         'exam.networkExecutions': import('./model/exam-network-execution').ExamNetworkExecutionDoc;
         'exam.rosterRevisions': import('./model/exam-seat-plan').ExamRosterRevisionDoc;
         'exam.seatPlans': import('./model/exam-seat-plan').ExamSeatPlanDoc;
+        'exam.seatAssignments': import('./model/exam-seat-assignment').ExamSeatAssignmentRevisionDoc;
+        'exam.seatAssignmentPublications': import('./model/exam-seat-assignment').ExamSeatAssignmentPublicationDoc;
         lock: LockDoc;
     }
 }
 
 export interface UserbindModelBridge {
     listSchools(domainId: string): Promise<Array<{ _id: ObjectId; domainId: string; name: string }>>;
+    listUserGroups(
+        domainId: string,
+        schoolId?: ObjectId,
+    ): Promise<Array<{ _id: ObjectId; domainId: string; schoolId: ObjectId; name: string; archivedAt?: Date | null }>>;
     getSchool(domainId: string, schoolId: ObjectId): Promise<{ _id: ObjectId; domainId: string; name: string } | null>;
     findStudentByUserId(domainId: string, userId: number): Promise<{ schoolId?: ObjectId; groupIds?: ObjectId[] } | null>;
     findStudentsByUserIds(domainId: string, userIds: number[]): Promise<Record<string, { studentId: string; realName: string }>>;
@@ -1017,6 +1023,10 @@ export interface Model {
     >;
     examNetworkExecution: Pick<typeof import('./model/exam-network-execution'), 'examNetworkExecutionColl' | 'examNetworkExecutionService'>;
     examSeatPlan: Pick<typeof import('./model/exam-seat-plan'), 'examRosterRevisionColl' | 'examSeatPlanColl' | 'examSeatPlanService'>;
+    examSeatAssignment: Pick<
+        typeof import('./model/exam-seat-assignment'),
+        'examSeatAssignmentColl' | 'examSeatAssignmentPublicationColl' | 'examSeatAssignmentService'
+    >;
     user: typeof import('./model/user').default;
     oauth: typeof import('./model/oauth').default;
     storage: typeof import('./model/storage').default;

@@ -2120,6 +2120,17 @@ function EventDetailPage({ eventId }: { eventId: string }) {
       description={`活动版本 ${event.revision} · 配置版本 ${config?.revision || 0} · 所有写入仍由服务端 CAS 与权限边界确认。`}
     >
       <div className="space-y-4 pb-10">
+        <Card>
+          <CardContent className="flex flex-wrap items-center justify-between gap-3 pt-6">
+            <div>
+              <p className="font-medium">考试名单与座位</p>
+              <p className="text-sm text-muted-foreground">查看固定名单、可复现分配、人工调整与发布 revision。</p>
+            </div>
+            <Button asChild variant="outline">
+              <a href={`/admin/exam-infrastructure/events/${event.eventId}/seats`}>打开座位工作台</a>
+            </Button>
+          </CardContent>
+        </Card>
         <BasicEventSection event={event} schools={schools} reload={reload} requestConfirm={runPlan} />
         <PolicySection
           eventId={eventId}

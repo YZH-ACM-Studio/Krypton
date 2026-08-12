@@ -124,7 +124,11 @@
 - `exam.preloginBatches`、`exam.preloginTickets` 与 Vigil 的持久 request/command/link 是响应丢失后的恢复事实。batch/request/ticket identity 必须确定且幂等；同 request 的重试只能收敛已有单调状态，已经兑换的 ticket 不得降回 issued。Vigil projection 必须按 revision 持久确认，未确认投影在启动后和固定周期内继续重发，不依赖终端再次重连或心跳。
 - 明文 `KPT1-*` 只允许经 OJ→Vigil service-token material 路由交给票据绑定的当前 Endpoint；Mongo、SQLite、日志和 oplog 只保存摘要或引用。票据精确绑定 event、assignment、publication、uid、student record、seat binding、endpoint 与 workspace，并在兑换前重查这些当前事实；过期、错机、错 batch、活动或资格漂移以及不同 request 的重复兑换均 fail closed。
 - 失败重试只接受当前 projection 中完整且精确的 `expired / failed / offline / rejected` 集合，保留其它成功 command facts。只有仍为 issued 的失败过期票据可 CAS 续期并把新摘要/期限精确同步给 Vigil；已兑换票据不得签发新会话，只能在 Vigil 重验原 command/link 与唯一 active session 后精确恢复。签名 launch payload 必须分别绑定 `ticketExpiresAt`、`commandExpiresAt` 与可空的 `resumeSessionId`；无精确恢复会话时两种期限必须相同且票据仍有效，过期票据不得借新的命令期限进入普通启动路径。初次 dispatch 在持久 request/link/command 前必须整批重查 active session；相同已 claim 请求的幂等读回不得被随后出现的会话改写。重试 requestId/idempotencyKey 内容冲突、投影漂移或非精确集合必须拒绝。
-- P2.6 只实现 OJ/Vigil 的两阶段预检、票据、持久投递投影与精确重试，不实现 Endpoint Service 拉起/兑换运行时、教师一键联调 UI、后台队列或自动重试。P2.6/P2.7/P2.9 的预登录链须兼容后同批部署和回滚；本地完成不授权连接真实 Windows 主机或生产环境。
+- `exam.prelogin@1/launch_prelogin` 必须先通过签名 envelope、endpoint/activity/ticket scope、双 expiry 与 exact payload 校验并持久提交 Service replay cursor，才允许启动固定安装目录内的 `KryptonVigilClient.exe`。启动只面向当前活动控制台用户，参数只能携带非秘密 ticketId 引用；无桌面 session、固定程序缺失或启动失败必须形成明确终态，不得循环拉起。
+- 完整 `KPT1-*` 只可短暂存在于 OJ→Vigil→Endpoint Service 内存；不得进入 Service→GUI IPC、Client 命令行、普通用户文件或日志。Service 为断线精确重发可保留票据到收到确定的兑换响应，并须在兑换成功、明确失败或终态清理时清除。Service→GUI 的预登录 IPC 只传 ticketId 引用或兑换后的安全 launch/session，并同时验证固定程序路径与活动控制台；GUI 同时验证固定 LocalSystem Service。已运行 Client 的同用户接管通道也只传 ticketId 引用并复验两端程序身份。
+- `launch / process_ready / redeemed / page_ready` 必须按固定 revision 持久化后逐阶段 ACK；最终成功还必须绑定 exact command、ticket、session，并验证浏览器最终主文档与严格校验过的 launch URL 同一 HTTPS origin、精确命中签名命令所绑定的 canonical workspace path。连接重建只重发当前 exact stage/result；跨 WebSocket 的成功 ACK 只允许在 Server 已持久保存相同 page-ready/session 事实时收敛。Service 崩溃不得猜测成功：仍为 issued 的失败过期票据只按 P2.6 规则续期，已经兑换的恢复才必须使用同 ticket 对应的唯一 active session。
+- ExamSession 创建与普通登录共用 endpoint + `(contest,uid)` 轻量边界，并在边界内重读 active session；预登录还必须重验当前 Contest role 与 batch/ticket/request identity。迟到的本机 IPC 失败不得把已兑换或 page-ready 事实降级；只有已持久失败的同 ticket 项可被更高 command revision 替换，成功项和在途项不得被重启。
+- P2.6 只建立 OJ/Vigil 的两阶段预检、票据、持久投递投影与精确重试；P2.7 只补 Endpoint Service/Client 拉起、兑换、分阶段 ACK 与精确恢复，不包含 P2.8 检测或 P2.9 教师联调 UI。P2.6/P2.7/P2.9 的预登录链须兼容后同批部署和回滚；本地完成不授权连接真实 Windows 主机或生产环境。
 
 ## 考试基础设施活动协议
 

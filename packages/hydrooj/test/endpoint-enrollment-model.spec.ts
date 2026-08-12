@@ -248,6 +248,38 @@ describe('endpoint enrollment batch canonical model', () => {
         expect(mismatch?.reason).to.equal('claim_mismatch');
     });
 
+    it('rejects a second claim for the same physical machine in one deployment batch', async () => {
+        const { service, batches } = makeService();
+        await service.createBatch({
+            domainId: 'system',
+            actorUid: 1,
+            expiresAt: new Date('2026-08-10T06:00:00.000Z'),
+            maxEnrollments: 3,
+        });
+        await service.consume({
+            enrollmentCode: fixedCode,
+            claimId: 'claim_first_boot_1234',
+            publicKeyFingerprint,
+            machineFingerprint,
+            hostname: 'LAB-PC-01',
+        });
+
+        const restoredCloneAttempt = await capture(() =>
+            service.consume({
+                enrollmentCode: fixedCode,
+                claimId: 'claim_after_restore_1',
+                publicKeyFingerprint: '3'.repeat(64),
+                machineFingerprint,
+                hostname: 'LAB-PC-01',
+            }),
+        );
+
+        expect(restoredCloneAttempt).to.be.instanceOf(EndpointEnrollmentError);
+        expect(restoredCloneAttempt?.reason).to.equal('machine_already_claimed');
+        expect(batches.docs[0].usedCount).to.equal(1);
+        expect(batches.docs[0].claims).to.have.length(1);
+    });
+
     it('rejects expired, exhausted and revoked batches with stable reasons', async () => {
         const expired = makeService();
         await expired.service.createBatch({
@@ -274,7 +306,17 @@ describe('endpoint enrollment batch canonical model', () => {
             maxEnrollments: 1,
         });
         await exhausted.service.consume({ ...base, claimId: 'claim_first_12345678' });
-        expect((await capture(() => exhausted.service.consume({ ...base, claimId: 'claim_second_1234567' })))?.reason).to.equal('exhausted');
+        expect(
+            (
+                await capture(() =>
+                    exhausted.service.consume({
+                        ...base,
+                        claimId: 'claim_second_1234567',
+                        machineFingerprint: '4'.repeat(64),
+                    }),
+                )
+            )?.reason,
+        ).to.equal('exhausted');
 
         const revoked = makeService();
         const { batch } = await revoked.service.createBatch({

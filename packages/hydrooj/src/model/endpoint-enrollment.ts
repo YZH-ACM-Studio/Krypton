@@ -246,6 +246,11 @@ export class EndpointEnrollmentBatchService {
             assertClaimRetryAllowed(existingOwner, existingClaim, now);
             return consumed(existingOwner, existingClaim);
         }
+        const existingMachine = await this.batches.findOne({
+            codeDigest: input.codeDigest,
+            'claims.machineFingerprint': input.machineFingerprint,
+        });
+        if (existingMachine) throw new EndpointEnrollmentError('machine_already_claimed');
 
         const claim: EndpointEnrollmentClaim = {
             claimId: input.claimId,
@@ -262,6 +267,7 @@ export class EndpointEnrollmentBatchService {
                     status: 'active',
                     expiresAt: { $gt: now },
                     'claims.claimId': { $ne: input.claimId },
+                    'claims.machineFingerprint': { $ne: input.machineFingerprint },
                     $expr: { $lt: ['$usedCount', '$maxEnrollments'] },
                 },
                 {
@@ -294,6 +300,9 @@ export class EndpointEnrollmentBatchService {
             if (!claimMatches(existing, input)) throw new EndpointEnrollmentError('claim_mismatch');
             assertClaimRetryAllowed(batch, existing, now);
             return consumed(batch, existing);
+        }
+        if (batch.claims.some((candidate) => candidate.machineFingerprint === input.machineFingerprint)) {
+            throw new EndpointEnrollmentError('machine_already_claimed');
         }
         if (batch.status === 'revoked') throw new EndpointEnrollmentError('revoked');
         if (batch.expiresAt <= now) throw new EndpointEnrollmentError('expired');

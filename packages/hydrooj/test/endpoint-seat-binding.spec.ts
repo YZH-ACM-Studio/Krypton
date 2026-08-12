@@ -77,13 +77,16 @@ function own(endpointId: string, domainId = 'system', replacesEndpointId?: strin
     endpoints.set(endpointId, { domainId, ...(replacesEndpointId ? { replacesEndpointId } : {}) });
 }
 
-function makeService(windowStore: Collection<EndpointSeatPairingWindowDoc> = windows): EndpointSeatBindingServiceType {
+function makeService(
+    windowStore: Collection<EndpointSeatPairingWindowDoc> = windows,
+    codeFactory: () => string = () => (++codeCounter).toString(10).padStart(8, '0'),
+): EndpointSeatBindingServiceType {
     return new EndpointSeatBindingService({
         bindings,
         windows: windowStore,
         domainExists: async (domainId) => domains.has(domainId),
         now: () => new Date(now),
-        codeFactory: () => `KSP1-${(++codeCounter).toString(16).padStart(10, '0').toUpperCase()}`,
+        codeFactory,
         idFactory: () => new ObjectId(),
         windowIdFactory: () => new ObjectId(),
         loadClassroomSeats: async (domainId, classroomId) => {
@@ -194,10 +197,10 @@ describe('P2.2 endpoint seat binding canonical and pairing state machine', () =>
         await service.ensureIndexes();
         const opened = await openWindow(service, ['seat-1']);
         expect(opened.codes).to.have.length(1);
-        expect(opened.codes[0].code).to.match(/^KSP1-[0-9A-F]{10}$/);
+        expect(opened.codes[0].code).to.match(/^\d{8}$/);
         const storedWindow = await windows.findOne({ _id: opened.window._id });
         expect(storedWindow).not.to.equal(null);
-        expect(JSON.stringify(storedWindow)).not.to.include(opened.codes[0].code);
+        expect(Object.keys(storedWindow!.entries[0])).not.to.include('code');
         expect(storedWindow!.entries[0].codeDigest).to.equal(createHash('sha256').update(opened.codes[0].code).digest('hex'));
 
         const first = await service.redeemPairingCode({
@@ -215,6 +218,7 @@ describe('P2.2 endpoint seat binding canonical and pairing state machine', () =>
         const binding = await bindings.findOne({ domainId: 'system', classroomId: classroomOne, sourceSeatId: 'seat-1' });
         expect(binding).to.include({ status: 'active', endpointId: 'ep_first_1234567890', revision: 1 });
         expect(binding!.history).to.have.length(1);
+        expect(await service.getActiveBindingForEndpoint('ep_first_1234567890')).to.deep.equal(binding);
         assertEndpointSeatBindingIntegrity(binding!);
         assertEndpointSeatPairingWindowIntegrity((await windows.findOne({ _id: opened.window._id }))!);
         const transportRetry = await service.redeemPairingCode({
@@ -551,6 +555,15 @@ describe('P2.2 endpoint seat binding canonical and pairing state machine', () =>
         expect(await windows.countDocuments({ domainId: 'system', classroomId: classroomOne })).to.equal(0);
     });
 
+    it('regenerates an in-window collision so every displayed eight-digit code is unique', async () => {
+        const candidates = ['11111111', '11111111', '22222222'];
+        const service = makeService(windows, () => candidates.shift() || '33333333');
+        await service.ensureIndexes();
+        const opened = await openWindow(service, ['seat-1', 'seat-2']);
+        expect(opened.codes.map(({ code }) => code)).to.deep.equal(['11111111', '22222222']);
+        expect(new Set(opened.codes.map(({ code }) => code)).size).to.equal(2);
+    });
+
     it('rejects non-canonical pairing-code text without consuming the code', async () => {
         own('ep_canonical_code_123');
         const service = makeService();
@@ -559,7 +572,7 @@ describe('P2.2 endpoint seat binding canonical and pairing state machine', () =>
         await rejectReason(
             service.redeemPairingCode({
                 endpointId: 'ep_canonical_code_123',
-                pairingCode: opened.codes[0].code.toLowerCase(),
+                pairingCode: `${opened.codes[0].code.slice(0, 4)}-${opened.codes[0].code.slice(4)}`,
                 requestId: 'endpoint_bad_code_request_1',
             }),
             'pairing_code_invalid',

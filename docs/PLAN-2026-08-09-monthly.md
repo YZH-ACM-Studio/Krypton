@@ -420,11 +420,11 @@ _Locked via eight-batch Grill — motricseven + Codex，2026-08-09。老师所�
 
 **类型与目标**：`feature/schema/protocol`。在没有稳定 Windows 主机名的固定机房中，以低操作成本建立实体 seatId 与 endpointId 的长期一对一绑定。
 
-**Canonical**：`EndpointSeatBinding` 保存 domain/school/classroom/seatId、endpointId、revision、状态、created/updated actor/time 和换机审计；唯一约束保证同一域内一个有效实体座位只绑定一个 endpoint、一个 endpoint 只占一个实体座位，与具体活动无关。管理员在教室页面开启短时识别窗口，座位显示一次性配对码；终端输入/展示该码后 Server 将已认证 endpoint 与 seat 绑定，码有短 TTL、单次使用和教室 scope。
+**Canonical**：`EndpointSeatBinding` 保存 domain/school/classroom/seatId、endpointId、revision、状态、created/updated actor/time 和换机审计；唯一约束保证同一域内一个有效实体座位只绑定一个 endpoint、一个 endpoint 只占一个实体座位，与具体活动无关。管理员在教室页面为未绑定座位开启短时识别窗口，页面显示 `XXXX-XXXX`，终端只输入对应 8 位数字；Server 将当前已认证 endpoint 与 seat 绑定。码在本次窗口内唯一、短 TTL、单 endpoint 认领且限速，明文只在创建响应和当前管理员页面内存出现。
 
 **生命周期**：label/坐标变化不影响绑定；硬件身份变化进入显式换机，旧 endpoint 保留历史。重绑前展示旧/新端点和引用的未来活动；进行中活动引用的是目标快照，不被重绑静默修改。冲突、过期、跨校、重复兑换和未认证 endpoint 明确拒绝。
 
-**实现/验证**：OJ 管理绑定业务事实，Vigil 只提供 endpoint 认证/在线执行事实；配对协议带 requestId 和审计。覆盖并发抢码、一机两座、一座两机、终端离线、换机和导入布局漂移。依赖 P1.9/P2.1，§4.9 + §4.5 + §4.4；真实机房绑定前必须再次确认目标范围。
+**实现/验证**：OJ 管理绑定业务事实，Vigil 只提供 endpoint 认证/在线执行事实；配对协议带 requestId 和审计。GUI 每次显式启动都重新查询当前 binding：bound 才进入原学号/姓名界面，unbound 只显示座位码输入，查询失败则停止；Vigil 在普通登录、预登录兑换和任何实际创建/恢复/人工批准 ExamSession 的写边界再次向 OJ 重查，未绑定客户端即使绕过 GUI或等待审批后被解绑也不能建立考试会话。开机不自动弹 GUI，本机不缓存 seatId；GUI 的 client-safe endpoint 身份每次从固定路径 LocalSystem Service 的严格 IPC 取得，共享 `config.kvs` 不参与身份信任。覆盖并发抢码、一机两座、一座两机、终端离线、换机、Ghost 还原后的同 endpoint 恢复和导入布局漂移。依赖 P1.9/P2.1，§4.9 + §4.5 + §4.4；真实机房绑定前必须再次确认目标范围。
 
 ### P2.3 终端座位：可视化绑定工作台 ⚠️
 

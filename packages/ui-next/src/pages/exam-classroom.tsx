@@ -843,14 +843,15 @@ function StatusLegend() {
 }
 
 function PairingCode({ code, hint }: { code: string | null; hint: string }) {
+  const displayCode = code ? `${code.slice(0, 4)}-${code.slice(4)}` : null;
   return (
     <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/8 px-3 py-3">
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs font-medium text-cyan-900 dark:text-cyan-100">当前一次性配对码</span>
         <Badge variant="outline">尾号 {hint}</Badge>
       </div>
-      {code ? (
-        <p className="mt-2 select-all break-all font-mono text-lg font-semibold tracking-[0.09em] text-cyan-950 dark:text-cyan-50">{code}</p>
+      {displayCode ? (
+        <p className="mt-2 select-all break-all font-mono text-lg font-semibold tracking-[0.09em] text-cyan-950 dark:text-cyan-50">{displayCode}</p>
       ) : (
         <p className="mt-2 text-xs leading-5 text-muted-foreground">页面刷新后不会恢复明文码；请关闭当前窗口并重新生成。</p>
       )}
@@ -1203,7 +1204,9 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
     const bySeat = new Map<string, string>();
     for (const value of payload.codes) {
       const code = asRecord(value, '配对码');
-      bySeat.set(asString(code.sourceSeatId, '配对码'), asString(code.code, '配对码'));
+      const canonicalCode = asString(code.code, '配对码');
+      if (!/^[0-9]{8}$/.test(canonicalCode)) throw new Error('配对窗口响应格式不正确');
+      bySeat.set(asString(code.sourceSeatId, '配对码'), canonicalCode);
     }
     if (bySeat.size !== sourceSeatIds.length || sourceSeatIds.some((sourceSeatId) => !bySeat.has(sourceSeatId))) {
       throw new Error('配对窗口响应格式不正确');

@@ -481,6 +481,42 @@ class VigilEndpointSeatPairingRedeemHandler extends Handler {
     }
 }
 
+class VigilEndpointSeatBindingStatusHandler extends Handler {
+    noCheckPermView = true;
+
+    async prepare() {
+        requireServiceToken(this, 'vigil');
+        await endpointSeatBindingService.ensureIndexes();
+    }
+
+    @param('endpointId', Types.String)
+    @param('requestId', Types.String)
+    async post(_args: unknown, endpointId: string, requestId: string) {
+        exactBody(this.request.body, ['endpointId', 'requestId']);
+        if (!/^[A-Za-z0-9_-]{16,96}$/.test(requestId)) throw new ValidationError('requestId');
+        try {
+            const binding = await endpointSeatBindingService.getActiveBindingForEndpoint(endpointId);
+            if (!binding) {
+                this.response.body = { status: 'unbound', requestId };
+                return;
+            }
+            this.response.body = {
+                status: 'bound',
+                bindingId: binding._id.toHexString(),
+                classroomId: binding.classroomId.toHexString(),
+                sourceSeatId: binding.sourceSeatId,
+                bindingRevision: binding.revision,
+                requestId,
+            };
+        } catch (error) {
+            if (!(error instanceof EndpointSeatBindingError)) throw error;
+            logger.warn('Endpoint seat binding status rejected stage=status reason=%s', error.reason);
+            this.response.status = errorStatus(error.reason);
+            this.response.body = { error: error.reason, requestId };
+        }
+    }
+}
+
 export async function apply(ctx: Context) {
     ctx.Route('endpoint_seat_classroom_collection', '/api/admin/exam-infrastructure/classrooms', EndpointSeatClassroomCollectionHandler);
     ctx.Route(
@@ -500,4 +536,5 @@ export async function apply(ctx: Context) {
     );
     ctx.Route('endpoint_seat_classroom_page', '/admin/exam-infrastructure/classrooms/:classroomId', EndpointSeatClassroomPageHandler);
     ctx.Route('vigil_endpoint_seat_pairing_redeem', '/api/vigil/endpoint-seat-pairing/redeem', VigilEndpointSeatPairingRedeemHandler);
+    ctx.Route('vigil_endpoint_seat_binding_status', '/api/vigil/endpoint-seat-binding/status', VigilEndpointSeatBindingStatusHandler);
 }

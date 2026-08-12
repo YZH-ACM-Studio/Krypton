@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomInt } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { BSON, Collection, Filter, ObjectId } from 'mongodb';
 import { Context } from '../context';
@@ -262,12 +262,13 @@ export interface EndpointSeatClassroomState {
 
 const ENDPOINT_PATTERN = /^ep_[A-Za-z0-9_-]{12,80}$/;
 const REQUEST_PATTERN = /^[A-Za-z0-9_-]{16,96}$/;
-const CODE_PATTERN = /^KSP1-[0-9A-F]{10}$/;
+const CODE_PATTERN = /^\d{8}$/;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const MAX_WINDOW_LIFETIME_MS = 10 * 60 * 1000;
 const MIN_WINDOW_LIFETIME_MS = 10 * 1000;
 const MAX_WINDOW_SEATS = 500;
 const MAX_CAS_ATTEMPTS = 16;
+const MAX_CODE_GENERATION_ATTEMPTS = 32;
 
 export class EndpointSeatBindingError extends Error {
     constructor(
@@ -762,7 +763,7 @@ export class EndpointSeatBindingService {
         this.loadEndpointOwnership = options.loadEndpointOwnership;
         this.resolveActivityReferences = options.resolveActivityReferences;
         this.now = options.now || (() => new Date());
-        this.codeFactory = options.codeFactory || (() => `KSP1-${randomBytes(5).toString('hex').toUpperCase()}`);
+        this.codeFactory = options.codeFactory || (() => randomInt(100_000_000).toString(10).padStart(8, '0'));
         this.idFactory = options.idFactory || (() => new ObjectId());
         this.windowIdFactory = options.windowIdFactory || (() => new ObjectId());
     }
@@ -1045,9 +1046,17 @@ export class EndpointSeatBindingService {
             } else if (binding?.status === 'active') {
                 throw new EndpointSeatBindingError('seat_already_bound');
             }
-            const code = canonicalCode(this.codeFactory());
-            const codeDigest = sha256(code);
-            if (digests.has(codeDigest)) throw new EndpointSeatBindingError('pairing_code_collision');
+            let code = '';
+            let codeDigest = '';
+            for (let attempt = 0; attempt < MAX_CODE_GENERATION_ATTEMPTS; attempt++) {
+                const candidate = canonicalCode(this.codeFactory());
+                const candidateDigest = sha256(candidate);
+                if (digests.has(candidateDigest)) continue;
+                code = candidate;
+                codeDigest = candidateDigest;
+                break;
+            }
+            if (!code || !codeDigest) throw new EndpointSeatBindingError('pairing_code_collision');
             digests.add(codeDigest);
             codes.push({ sourceSeatId, code });
             entries.push({
@@ -1750,6 +1759,14 @@ export class EndpointSeatBindingService {
             await this.assertBindingReference(binding);
         }
         return binding;
+    }
+
+    async getActiveBindingForEndpoint(endpointId: string): Promise<EndpointSeatBindingDoc | null> {
+        const observedAt = this.now();
+        assertDate(observedAt, 'now');
+        const ownership = await this.requireOwnership(endpointId, observedAt);
+        const binding = await this.loadActiveEndpointBinding(ownership.domainId, endpointId);
+        return binding ? cloneBinding(binding) : null;
     }
 
     async getPairingWindow(domainId: string, classroomId: ObjectId): Promise<EndpointSeatPairingWindowDoc | null> {

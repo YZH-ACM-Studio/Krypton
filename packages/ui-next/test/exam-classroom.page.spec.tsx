@@ -209,7 +209,7 @@ describe('exam classroom endpoint binding workspace', () => {
         expect(body.expiresAt).toEqual(expect.any(String));
         opened = true;
         failNextReload = true;
-        return json({ pairingWindow: openWindow, codes: [{ sourceSeatId: 'seat-3', code: 'KSP1-01234567EF' }] });
+        return json({ pairingWindow: openWindow, codes: [{ sourceSeatId: 'seat-3', code: '01234567' }] });
       }
       if (failNextReload) {
         failNextReload = false;
@@ -273,7 +273,7 @@ describe('exam classroom endpoint binding workspace', () => {
 
     await user.click(await screen.findByRole('button', { name: '为此座位生成配对码' }));
 
-    expect(await screen.findByText('KSP1-01234567EF')).toBeInTheDocument();
+    expect(await screen.findByText('0123-4567')).toBeInTheDocument();
     expect(screen.getByRole('alert')).toHaveTextContent('教室状态暂时无法刷新');
     expect(fetchMock.mock.calls.filter((call) => (call[1] as RequestInit | undefined)?.method === 'POST')).toHaveLength(1);
 

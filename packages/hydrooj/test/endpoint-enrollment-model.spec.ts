@@ -216,6 +216,25 @@ describe('endpoint enrollment batch canonical model', () => {
             }),
         );
         expect(tooLong?.reason).to.equal('invalid_expiry');
+
+        const { service: capacityService } = makeService();
+        const fullLabBatch = await capacityService.createBatch({
+            domainId: 'system',
+            actorUid: 1,
+            expiresAt: new Date('2026-08-10T06:00:00.000Z'),
+            maxEnrollments: 1000,
+        });
+        expect(fullLabBatch.batch.maxEnrollments).to.equal(1000);
+
+        const overCapacity = await capture(() =>
+            capacityService.createBatch({
+                domainId: 'system',
+                actorUid: 1,
+                expiresAt: new Date('2026-08-10T06:00:00.000Z'),
+                maxEnrollments: 1001,
+            }),
+        );
+        expect(overCapacity?.reason).to.equal('invalid_capacity');
     });
 
     it('consumes capacity atomically and makes an identical claim idempotent', async () => {

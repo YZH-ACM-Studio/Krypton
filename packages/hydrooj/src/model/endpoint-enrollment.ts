@@ -87,6 +87,7 @@ const CLAIM_PATTERN = /^[A-Za-z0-9_-]{16,96}$/;
 const ENDPOINT_PATTERN = /^ep_[A-Za-z0-9_-]{12,80}$/;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const MAX_BATCH_LIFETIME_MS = 24 * 60 * 60 * 1000;
+const MAX_BATCH_ENROLLMENTS = 1000;
 
 export class EndpointEnrollmentError extends Error {
     constructor(public readonly reason: string) {
@@ -201,7 +202,11 @@ export class EndpointEnrollmentBatchService {
         ) {
             throw new EndpointEnrollmentError('invalid_expiry');
         }
-        if (!Number.isSafeInteger(input.maxEnrollments) || input.maxEnrollments < 1 || input.maxEnrollments > 500) {
+        if (
+            !Number.isSafeInteger(input.maxEnrollments) ||
+            input.maxEnrollments < 1 ||
+            input.maxEnrollments > MAX_BATCH_ENROLLMENTS
+        ) {
             throw new EndpointEnrollmentError('invalid_capacity');
         }
         const replacesEndpointId = input.replacesEndpointId ? canonicalEndpointId(input.replacesEndpointId, 'replacesEndpointId') : undefined;

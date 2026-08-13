@@ -1055,11 +1055,7 @@ class AdminTasksCandidatesHandler extends Handler {
         return out;
     }
 
-    @param('tid', Types.ObjectId)
-    @param('operation', Types.String)
-    @param('aids', Types.String)
-    @param('note', Types.String, true)
-    async post({ domainId }: { domainId: string }, tid: ObjectId, operation: string, aidsCsv: string, note: string) {
+    private async applyOperation(domainId: string, tid: ObjectId, operation: 'admit' | 'unadmit' | 'confirm', aidsCsv: string, note: string) {
         const task = await taskModel.getTask(domainId, tid);
         if (!task) throw taskNotFound();
         if (!canModifyTask(this.user as any, task)) {
@@ -1078,8 +1074,6 @@ class AdminTasksCandidatesHandler extends Handler {
                     await taskModel.unadmitAssignment(domainId, aid, this.user._id, note || '');
                 } else if (operation === 'confirm') {
                     await taskModel.confirmAssignment(domainId, aid, this.user._id, note || '');
-                } else {
-                    throw new ValidationError('operation', null, localizedErrorText`未知操作`);
                 }
                 ok++;
             } catch (e: any) {
@@ -1095,6 +1089,27 @@ class AdminTasksCandidatesHandler extends Handler {
             return;
         }
         this.response.redirect = this.url('admin_tasks_candidates', { tid });
+    }
+
+    @param('tid', Types.ObjectId)
+    @param('aids', Types.String)
+    @param('note', Types.String, true)
+    async postAdmit({ domainId }: { domainId: string }, tid: ObjectId, aidsCsv: string, note: string) {
+        await this.applyOperation(domainId, tid, 'admit', aidsCsv, note);
+    }
+
+    @param('tid', Types.ObjectId)
+    @param('aids', Types.String)
+    @param('note', Types.String, true)
+    async postUnadmit({ domainId }: { domainId: string }, tid: ObjectId, aidsCsv: string, note: string) {
+        await this.applyOperation(domainId, tid, 'unadmit', aidsCsv, note);
+    }
+
+    @param('tid', Types.ObjectId)
+    @param('aids', Types.String)
+    @param('note', Types.String, true)
+    async postConfirm({ domainId }: { domainId: string }, tid: ObjectId, aidsCsv: string, note: string) {
+        await this.applyOperation(domainId, tid, 'confirm', aidsCsv, note);
     }
 }
 

@@ -62,6 +62,7 @@ import {
   type TaskGraphNode,
   type TaskPointResult,
 } from '@/components/task-graph';
+import { TaskYearSetInput } from '@/components/task-year-set-input';
 
 // ─── Shared task-management workspace ─────────────────────────────────────
 
@@ -648,18 +649,7 @@ export function AdminTasksEditPage() {
               />
               {accessType === 'grade' && (
                 <FormField label="允许的入学年" className="mt-3">
-                  <Input
-                    value={accessYears.join(' ')}
-                    onChange={(e) =>
-                      setAccessYears(
-                        e.target.value
-                          .split(/[\s,，]+/)
-                          .map((s) => Number.parseInt(s.trim(), 10))
-                          .filter((n) => Number.isInteger(n) && n >= 1900 && n <= 2099),
-                      )
-                    }
-                    placeholder="例如：2023 2024"
-                  />
+                  <TaskYearSetInput value={accessYears} onChange={setAccessYears} inputLabel="允许的入学年" scopeKey="task-access-grade" />
                 </FormField>
               )}
               {accessType === 'school' && (
@@ -917,8 +907,9 @@ function NodeEditor(props: NodeEditorProps) {
         <NodeParamInput
           key={p.name}
           spec={p}
-          value={props.node.params?.[p.name] ?? ''}
+          value={props.node.params?.[p.name]}
           onChange={(v) => props.onChangeParam(p.name, v)}
+          scopeKey={`${props.node.id}:${p.name}`}
           contests={props.contests}
           homeworks={props.homeworks}
           trainings={props.trainings}
@@ -947,6 +938,7 @@ interface NodeParamInputProps {
   trainings: TrainingRef[];
   schools: SchoolRef[];
   userGroups: GroupRef[];
+  scopeKey: string;
 }
 
 function canonicalTagSelectOptions(options: NonNullable<PresetSummary['params'][number]['options']>): SimpleSelectOption[] {
@@ -964,7 +956,7 @@ function canonicalTagSelectOptions(options: NonNullable<PresetSummary['params'][
   return result;
 }
 
-function NodeParamInput({ spec, value, onChange, contests, homeworks, trainings, schools, userGroups }: NodeParamInputProps) {
+function NodeParamInput({ spec, value, onChange, contests, homeworks, trainings, schools, userGroups, scopeKey }: NodeParamInputProps) {
   const scalarValue = typeof value === 'string' ? value : typeof value === 'number' ? String(value) : '';
   if (spec.type === 'select' || spec.type === 'pat_level' || spec.type === 'pat_season' || spec.type === 'gplt_level') {
     return (
@@ -1066,21 +1058,9 @@ function NodeParamInput({ spec, value, onChange, contests, homeworks, trainings,
     );
   }
   if (spec.type === 'years') {
-    const years = Array.isArray(value) ? value : [];
     return (
       <FormField label={spec.label} hint={spec.helper} required={spec.required}>
-        <Input
-          value={years.map(String).join(' ')}
-          onChange={(e) =>
-            onChange(
-              e.target.value
-                .split(/[\s,，]+/)
-                .map((s) => Number.parseInt(s.trim(), 10))
-                .filter((n) => Number.isInteger(n) && n >= 1900 && n <= 2099),
-            )
-          }
-          placeholder="例如 2023 2024"
-        />
+        <TaskYearSetInput value={value} onChange={onChange} inputLabel={spec.label} scopeKey={scopeKey} />
       </FormField>
     );
   }

@@ -1404,7 +1404,7 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
 
   if (loading && !state) {
     return (
-      <AdminPage bypassPrivGate title="教室终端工作台">
+      <AdminPage bypassPrivGate hideSidebar title="教室终端工作台">
         <div className="flex min-h-72 items-center justify-center">
           <CircleDashed className="size-7 animate-spin text-muted-foreground" aria-label="正在加载" />
         </div>
@@ -1414,7 +1414,7 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
 
   if (!state) {
     return (
-      <AdminPage bypassPrivGate title="教室终端工作台">
+      <AdminPage bypassPrivGate hideSidebar title="教室终端工作台">
         <Notice error={error || '教室终端状态不可用'} />
         <Button className="mt-4" variant="outline" onClick={() => void load()}>
           <RefreshCw className="size-4" aria-hidden="true" />
@@ -1440,6 +1440,7 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
   return (
     <AdminPage
       bypassPrivGate
+      hideSidebar
       contentClassName="max-w-none"
       title={
         <div>

@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BootstrapProvider, type KryptonBootstrap } from '../src/lib/bootstrap.tsx';
+import { clearAdminNavRegistry, registerAdminNavSection } from '../src/lib/admin-nav-registry.ts';
 import { ExamClassroomPage } from '../src/pages/exam-classroom.tsx';
 
 const CLASSROOM_ID = '66b800000000000000000701';
@@ -122,6 +123,7 @@ function stateFixture(overrides: Record<string, unknown> = {}) {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  clearAdminNavRegistry();
   window.history.replaceState({}, '', '/');
 });
 
@@ -133,6 +135,21 @@ describe('exam classroom endpoint binding workspace', () => {
 
     expect(screen.getByText('你没有管理考试基础设施的权限。')).toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('renders the classroom workspace without the admin sidebar', async () => {
+    registerAdminNavSection({
+      key: 'test-admin',
+      label: '管理测试',
+      order: 1,
+      items: [{ key: 'test-admin-item', label: '不应显示的管理侧栏', href: '/admin/test' }],
+    });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json(stateFixture())));
+
+    renderPage();
+
+    expect(await screen.findByRole('heading', { name: '北实 201 机房' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: '不应显示的管理侧栏' })).not.toBeInTheDocument();
   });
 
   it('renders canonical coordinates, live states, references, and restores the selected deep link', async () => {

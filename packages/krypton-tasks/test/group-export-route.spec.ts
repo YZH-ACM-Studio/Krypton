@@ -11,23 +11,35 @@ const PRIV_EDIT_SYSTEM = 1;
 const groupId = new ObjectId();
 const schoolId = new ObjectId();
 const calls = {
+    admitArgs: null as any,
     assignmentFilter: null as unknown,
+    confirmArgs: null as any,
     createArgs: null as any,
     groups: new Set<string>(),
     studentMemberships: 0,
     userMemberships: 0,
     oplog: [] as Array<{ event: string; payload: any }>,
+    unadmitArgs: null as any,
 };
 let assignmentUserIds = [7, 42, 7];
 let rejectCrossSchool = false;
 
 const taskModel = {
+    async admitAssignment(...args: any[]) {
+        calls.admitArgs = args;
+    },
     async getTask() {
         return { _id: new ObjectId(), title: '任务', graph: { nodes: [], edges: [] } };
     },
     async getTaskAssignments(_domainId: string, _tid: unknown, filter: unknown) {
         calls.assignmentFilter = filter;
         return assignmentUserIds.map((userId) => ({ userId }));
+    },
+    async confirmAssignment(...args: any[]) {
+        calls.confirmArgs = args;
+    },
+    async unadmitAssignment(...args: any[]) {
+        calls.unadmitArgs = args;
     },
 };
 
@@ -120,7 +132,7 @@ function adminUser() {
     };
 }
 
-async function dispatch(body: Record<string, any>, referer = '') {
+async function dispatchRoute(routeName: string, routeSuffix: string, body: Record<string, any>, referer = '') {
     const tid = new ObjectId();
     const request = {
         method: 'post',
@@ -133,8 +145,8 @@ async function dispatch(body: Record<string, any>, referer = '') {
         files: {},
         query: {},
         querystring: '',
-        path: `/admin/tasks/${tid.toHexString()}/stats`,
-        originalPath: `/admin/tasks/${tid.toHexString()}/stats`,
+        path: `/admin/tasks/${tid.toHexString()}/${routeSuffix}`,
+        originalPath: `/admin/tasks/${tid.toHexString()}/${routeSuffix}`,
         params: { tid },
         referer,
         json: false,
@@ -204,20 +216,60 @@ async function dispatch(body: Record<string, any>, referer = '') {
             };
         },
     };
-    const HandlerClass = routes.get('admin_tasks_stats');
+    const HandlerClass = routes.get(routeName);
     await (framework.WebService.prototype as any).handleHttp.call(service, koaContext, HandlerClass, () => {}, savedContext);
     return response;
 }
 
+async function dispatch(body: Record<string, any>, referer = '') {
+    return dispatchRoute('admin_tasks_stats', 'stats', body, referer);
+}
+
+async function dispatchCandidates(body: Record<string, any>) {
+    return dispatchRoute('admin_tasks_candidates', 'candidates', body);
+}
+
 beforeEach(() => {
+    calls.admitArgs = null;
     calls.assignmentFilter = null;
+    calls.confirmArgs = null;
     calls.createArgs = null;
     calls.groups.clear();
     calls.studentMemberships = 0;
     calls.userMemberships = 0;
     calls.oplog.length = 0;
+    calls.unadmitArgs = null;
     assignmentUserIds = [7, 42, 7];
     rejectCrossSchool = false;
+});
+
+describe('task candidate admission HTTP route', () => {
+    it('dispatches operation=confirm to the confirmation write exactly once', async () => {
+        const aid = new ObjectId();
+        const response = await dispatchCandidates({ operation: 'confirm', aids: aid.toHexString(), note: '现场确认' });
+
+        expect(response.status, JSON.stringify(response.body, null, 2)).to.equal(200);
+        expect(calls.confirmArgs).to.not.equal(null);
+        expect(calls.confirmArgs[0]).to.equal('system');
+        expect(calls.confirmArgs[1].toHexString()).to.equal(aid.toHexString());
+        expect(calls.confirmArgs[2]).to.equal(2);
+        expect(calls.confirmArgs[3]).to.equal('现场确认');
+        expect(calls.oplog).to.have.lengthOf(1);
+    });
+
+    it('keeps the admit and unadmit form operations dispatchable', async () => {
+        const admittedAid = new ObjectId();
+        const unadmittedAid = new ObjectId();
+
+        const admitted = await dispatchCandidates({ operation: 'admit', aids: admittedAid.toHexString(), note: '' });
+        const unadmitted = await dispatchCandidates({ operation: 'unadmit', aids: unadmittedAid.toHexString(), note: '' });
+
+        expect(admitted.status, JSON.stringify(admitted.body, null, 2)).to.equal(200);
+        expect(unadmitted.status, JSON.stringify(unadmitted.body, null, 2)).to.equal(200);
+        expect(calls.admitArgs[1].toHexString()).to.equal(admittedAid.toHexString());
+        expect(calls.unadmitArgs[1].toHexString()).to.equal(unadmittedAid.toHexString());
+        expect(calls.oplog).to.have.lengthOf(2);
+    });
 });
 
 describe('P1.6 task group export HTTP route', () => {

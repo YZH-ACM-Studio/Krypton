@@ -777,7 +777,7 @@ const enrollmentYearPreset: TaskPointPreset = {
             type: 'years',
             label: '允许的入学年份',
             required: true,
-            helper: '多个年份用逗号或空格分隔，例如「2023 2024」',
+            helper: '逐个输入四位年份并点击“添加年份”，已添加年份可单独移除',
         },
     ],
     async checker(ctx, params) {

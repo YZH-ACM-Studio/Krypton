@@ -581,7 +581,7 @@ class ExamSeatAssignmentPageHandler extends ExamSeatAssignmentBaseHandler {
     async get(_args: unknown, eventId: ObjectId) {
         await this.event(eventId);
         this.response.template = 'admin_exam_seats.html';
-        this.response.body = { eventId: eventId.toHexString() };
+        this.response.body = { eventId: eventId.toHexString(), canManage: true };
     }
 }
 

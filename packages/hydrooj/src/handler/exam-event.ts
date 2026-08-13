@@ -23,6 +23,7 @@ import { EXAM_EVENT_PATCH_FIELDS, parseExamEventUpdatePatch } from '../model/exa
 import { examNetworkConfigService, ExamNetworkConfigError } from '../model/exam-network-config';
 import { examSeatAssignmentService } from '../model/exam-seat-assignment';
 import { ExamSeatPlanError, examSeatPlanService } from '../model/exam-seat-plan';
+import { getExamPreloginService } from '../service/exam-prelogin';
 
 function auditContext(handler: ExamEventBaseHandler): ExamEventAuditContext {
     return {
@@ -63,6 +64,54 @@ function serializeEvent(event: ExamEventDoc) {
         updatedBy: event.updatedBy,
         archivedAt: event.archivedAt?.toISOString() || null,
         archivedBy: event.archivedBy || null,
+    };
+}
+
+async function loadPreparationSummary(domainId: string, eventId: ObjectId) {
+    const [publication, batch] = await Promise.all([
+        examSeatAssignmentService.getPublication(domainId, eventId),
+        getExamPreloginService().getLatestBatch(domainId, eventId),
+    ]);
+    let assignment = null;
+    if (publication) {
+        const published = await examSeatAssignmentService.getRevision(domainId, eventId, publication.assignment.revision);
+        if (
+            !published ||
+            !published._id.equals(publication.assignment.assignmentId) ||
+            published.fingerprint !== publication.assignment.fingerprint
+        ) {
+            throw new ExamEventError('assignment_publication_reference_drift');
+        }
+        assignment = {
+            id: published._id.toHexString(),
+            revision: published.revision,
+            fingerprint: published.fingerprint,
+            roster: {
+                id: published.roster.rosterId.toHexString(),
+                revision: published.roster.revision,
+                fingerprint: published.roster.fingerprint,
+            },
+        };
+    }
+    return {
+        assignment,
+        publicationRevision: publication?.revision || 0,
+        batch: batch
+            ? {
+                  id: batch._id.toHexString(),
+                  revision: batch.revision,
+                  projectionRevision: batch.projection?.projectionRevision || null,
+                  state: batch.state,
+                  ticketCount: batch.ticketIds.length,
+                  workflow: batch.workflow
+                      ? {
+                            executionRevision: batch.workflow.executionRevision,
+                            policyRevision: batch.workflow.policy.revision,
+                            targetRevision: batch.workflow.target.revision,
+                        }
+                      : null,
+              }
+            : null,
     };
 }
 
@@ -182,10 +231,12 @@ class ExamEventDetailHandler extends ExamEventBaseHandler {
     @param('eventId', Types.ObjectId)
     async get(_args: unknown, eventId: ObjectId) {
         const event = await this.load(eventId);
+        const domainId = String(this.domain._id);
         this.response.body = {
             event: serializeEvent(event),
-            schools: await availableSchools(String(this.domain._id), this.user),
+            schools: await availableSchools(domainId, this.user),
             capability: { canManageAll: isExamInfrastructureAdmin(this.user) },
+            preparation: await loadPreparationSummary(domainId, eventId),
         };
     }
 

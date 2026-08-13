@@ -13,6 +13,13 @@ function configuredTicketKey(): string {
     return value;
 }
 
+export function isExamPreloginWorkflowWriterEnabled(): boolean {
+    const value = system.get('exam.preloginWorkflowWriterEnabled');
+    if (value === undefined || value === null || value === false) return false;
+    if (value !== true) throw new ExamPreloginError('workflow_writer_setting_invalid');
+    return true;
+}
+
 /**
  * Lazily initializes the P2.6 service after system settings are loaded.
  * A live key change is rejected because it would invalidate already-issued

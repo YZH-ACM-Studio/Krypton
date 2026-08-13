@@ -177,3 +177,88 @@ test('prelogin projection rejects unknown fields and secret-shaped payloads', as
         },
     );
 });
+
+test('monitoring preflight sends only the server-derived endpoint set and projects client-safe warnings', async () => {
+    await withBridge(
+        async (input, init) => {
+            assert.equal(String(input), 'https://vigil.example.edu/api/integrations/oj/monitoring/preflight');
+            assert.deepEqual(JSON.parse(String(init?.body)), { endpointIds: ['ep_one'] });
+            return new Response(
+                JSON.stringify({
+                    ready: true,
+                    items: [
+                        {
+                            endpointId: 'ep_one',
+                            ready: true,
+                            reason: 'ready',
+                            credentialStatus: 'active',
+                            online: true,
+                            compatible: true,
+                            serviceVersion: '0.5.0',
+                            protocolVersion: 2,
+                            capabilities: [
+                                {
+                                    name: 'exam.monitoring',
+                                    version: 1,
+                                    commands: ['start_monitoring', 'stop_monitoring', 'get_monitoring_status'],
+                                },
+                            ],
+                            monitoringState: { state: 'active', privateRawEvidence: 'must-not-cross' },
+                            warnings: [
+                                {
+                                    kind: 'usb_storage_detected',
+                                    storage: { deviceCategory: 'removable_storage', identifierDigest: `sha256_${'1'.repeat(64)}` },
+                                },
+                                { kind: 'detector_failed', detector: 'process', reason: 'process_snapshot_failed_5' },
+                            ],
+                        },
+                    ],
+                }),
+                { status: 200 },
+            );
+        },
+        async (bridge) => {
+            const result = await bridge.preflightExamMonitoringOnVigil(['ep_one']);
+            assert.deepEqual(result[0].warnings, [
+                { kind: 'usb_storage_detected', detector: null, reason: null },
+                { kind: 'detector_failed', detector: 'process', reason: 'process_snapshot_failed_5' },
+            ]);
+            assert.doesNotMatch(JSON.stringify(result), /privateRawEvidence|identifierDigest/);
+        },
+    );
+});
+
+test('monitoring preflight rejects endpoint identity drift and malformed warning envelopes', async () => {
+    const response = (endpointId: string, warnings: unknown[]) => ({
+        ready: true,
+        items: [
+            {
+                endpointId,
+                ready: true,
+                reason: 'ready',
+                credentialStatus: 'active',
+                online: true,
+                compatible: true,
+                serviceVersion: '0.5.0',
+                protocolVersion: 2,
+                capabilities: [
+                    {
+                        name: 'exam.monitoring',
+                        version: 1,
+                        commands: ['start_monitoring', 'stop_monitoring', 'get_monitoring_status'],
+                    },
+                ],
+                monitoringState: { state: 'active' },
+                warnings,
+            },
+        ],
+    });
+    await withBridge(
+        async () => new Response(JSON.stringify(response('ep_other', [])), { status: 200 }),
+        async (bridge) => assert.rejects(bridge.preflightExamMonitoringOnVigil(['ep_one']), /match|malformed/i),
+    );
+    await withBridge(
+        async () => new Response(JSON.stringify(response('ep_one', [{ kind: 'monitoring_failed', reason: 'failed', extra: true }])), { status: 200 }),
+        async (bridge) => assert.rejects(bridge.preflightExamMonitoringOnVigil(['ep_one']), /malformed/i),
+    );
+});

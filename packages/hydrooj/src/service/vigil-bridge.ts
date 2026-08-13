@@ -258,6 +258,26 @@ export interface VigilEndpointPreflightItem {
     capabilities: VigilEndpointCapability[];
 }
 
+export type VigilMonitoringWarningKind =
+    | 'detector_degraded'
+    | 'detector_failed'
+    | 'detector_unsupported'
+    | 'forbidden_process_detected'
+    | 'forbidden_window_detected'
+    | 'monitoring_failed'
+    | 'monitoring_unavailable'
+    | 'usb_storage_detected';
+
+export interface VigilMonitoringWarning {
+    kind: VigilMonitoringWarningKind;
+    detector: 'foreground' | 'process' | 'usb' | null;
+    reason: string | null;
+}
+
+export interface VigilMonitoringPreflightItem extends VigilEndpointPreflightItem {
+    warnings: VigilMonitoringWarning[];
+}
+
 export interface VigilExamNetworkRevisionRef {
     id: string;
     revision: number;
@@ -416,6 +436,139 @@ export async function preflightExamNetworkOnVigil(endpointIds: string[]): Promis
         throw new VigilProtocolError('Vigil endpoint preflight did not match the requested endpoints.');
     }
     return items;
+}
+
+function parseMonitoringWarning(value: unknown): VigilMonitoringWarning {
+    const base = bridgeRecord(value, 'Vigil monitoring warning was malformed.');
+    const kind = bridgeString(base.kind, 'Vigil monitoring warning was malformed.') as VigilMonitoringWarningKind;
+    if (kind === 'monitoring_failed' || kind === 'monitoring_unavailable') {
+        const warning = exactBridgeRecord(value, ['kind', 'reason'], 'Vigil monitoring warning was malformed.');
+        return { kind, detector: null, reason: bridgeString(warning.reason, 'Vigil monitoring warning was malformed.', true) };
+    }
+    if (kind === 'detector_degraded' || kind === 'detector_failed' || kind === 'detector_unsupported') {
+        const warning = exactBridgeRecord(value, ['detector', 'kind', 'reason'], 'Vigil monitoring warning was malformed.');
+        const detector = bridgeString(warning.detector, 'Vigil monitoring warning was malformed.');
+        if (detector !== 'foreground' && detector !== 'process' && detector !== 'usb') {
+            throw new VigilProtocolError('Vigil monitoring warning was malformed.');
+        }
+        return { kind, detector, reason: bridgeString(warning.reason, 'Vigil monitoring warning was malformed.', true) };
+    }
+    const evidenceKey =
+        kind === 'usb_storage_detected'
+            ? 'storage'
+            : kind === 'forbidden_process_detected'
+              ? 'process'
+              : kind === 'forbidden_window_detected'
+                ? 'window'
+                : null;
+    if (!evidenceKey) throw new VigilProtocolError('Vigil monitoring warning was malformed.');
+    const warning = exactBridgeRecord(value, ['kind', evidenceKey], 'Vigil monitoring warning was malformed.');
+    bridgeRecord(warning[evidenceKey], 'Vigil monitoring warning was malformed.');
+    return { kind, detector: null, reason: null };
+}
+
+export async function preflightExamMonitoringOnVigil(endpointIds: string[]): Promise<VigilMonitoringPreflightItem[]> {
+    if (
+        !Array.isArray(endpointIds) ||
+        !endpointIds.length ||
+        endpointIds.length > 500 ||
+        new Set(endpointIds).size !== endpointIds.length ||
+        endpointIds.some((endpointId) => typeof endpointId !== 'string' || !endpointId || endpointId !== endpointId.trim() || endpointId.length > 128)
+    ) {
+        throw new TypeError('Monitoring endpoint identities were invalid.');
+    }
+    const response = await fetchWithRetry(`${baseUrl()}/api/integrations/oj/monitoring/preflight`, {
+        method: 'POST',
+        body: { endpointIds },
+        retries: 1,
+    });
+    const payload = exactBridgeRecord(await readVigilJson(response), ['items', 'ready'], 'Vigil monitoring preflight was malformed.');
+    if (typeof payload.ready !== 'boolean' || !Array.isArray(payload.items) || payload.items.length !== endpointIds.length) {
+        throw new VigilProtocolError('Vigil monitoring preflight was malformed.');
+    }
+    const requiredCommands = new Set(['get_monitoring_status', 'start_monitoring', 'stop_monitoring']);
+    const items = payload.items.map((value) => {
+        const item = exactBridgeRecord(
+            value,
+            [
+                'capabilities',
+                'compatible',
+                'credentialStatus',
+                'endpointId',
+                'monitoringState',
+                'online',
+                'protocolVersion',
+                'ready',
+                'reason',
+                'serviceVersion',
+                'warnings',
+            ],
+            'Vigil monitoring preflight item was malformed.',
+        );
+        if (
+            typeof item.ready !== 'boolean' ||
+            typeof item.online !== 'boolean' ||
+            (item.compatible !== null && typeof item.compatible !== 'boolean') ||
+            !Array.isArray(item.capabilities) ||
+            !Array.isArray(item.warnings) ||
+            (item.monitoringState !== null &&
+                (!item.monitoringState || typeof item.monitoringState !== 'object' || Array.isArray(item.monitoringState)))
+        ) {
+            throw new VigilProtocolError('Vigil monitoring preflight item was malformed.');
+        }
+        const parsed = {
+            endpointId: bridgeString(item.endpointId, 'Vigil monitoring preflight item was malformed.')!,
+            ready: item.ready,
+            reason: bridgeString(item.reason, 'Vigil monitoring preflight item was malformed.')!,
+            credentialStatus: bridgeString(item.credentialStatus, 'Vigil monitoring preflight item was malformed.', true),
+            online: item.online,
+            compatible: item.compatible as boolean | null,
+            serviceVersion: bridgeString(item.serviceVersion, 'Vigil monitoring preflight item was malformed.', true),
+            protocolVersion: bridgeInteger(item.protocolVersion, 'Vigil monitoring preflight item was malformed.', true),
+            capabilities: item.capabilities.map(parseEndpointCapability),
+            warnings: item.warnings.map(parseMonitoringWarning),
+        } satisfies VigilMonitoringPreflightItem;
+        const capabilityNames = parsed.capabilities.map((capability) => capability.name);
+        if (new Set(capabilityNames).size !== capabilityNames.length) {
+            throw new VigilProtocolError('Vigil monitoring preflight item was malformed.');
+        }
+        const monitoringCapability = parsed.capabilities.find((capability) => capability.name === 'exam.monitoring');
+        const capabilityReady =
+            monitoringCapability?.version === 1 &&
+            requiredCommands.size === new Set(monitoringCapability.commands).size &&
+            [...requiredCommands].every((command) => monitoringCapability.commands.includes(command));
+        const monitoringState =
+            item.monitoringState === null ? null : bridgeRecord(item.monitoringState, 'Vigil monitoring preflight item was malformed.');
+        const monitoringStateValue = monitoringState ? bridgeString(monitoringState.state, 'Vigil monitoring preflight item was malformed.') : null;
+        if (
+            monitoringStateValue !== null &&
+            !['active', 'apply_pending', 'failed', 'inactive', 'scheduled', 'stop_pending'].includes(monitoringStateValue)
+        ) {
+            throw new VigilProtocolError('Vigil monitoring preflight item was malformed.');
+        }
+        const derivedReady =
+            parsed.credentialStatus === 'active' &&
+            parsed.online &&
+            parsed.compatible === true &&
+            parsed.serviceVersion !== null &&
+            parsed.protocolVersion === 2 &&
+            capabilityReady &&
+            monitoringStateValue !== null &&
+            monitoringStateValue !== 'failed';
+        if (parsed.ready !== derivedReady || (derivedReady ? parsed.reason !== 'ready' : parsed.reason === 'ready')) {
+            throw new VigilProtocolError('Vigil monitoring preflight readiness was inconsistent.');
+        }
+        return parsed;
+    });
+    const byEndpoint = new Map(items.map((item) => [item.endpointId, item]));
+    if (byEndpoint.size !== endpointIds.length || endpointIds.some((endpointId) => !byEndpoint.has(endpointId))) {
+        throw new VigilProtocolError('Vigil monitoring preflight did not match the requested endpoints.');
+    }
+    const ordered = endpointIds.map((endpointId) => byEndpoint.get(endpointId)!);
+    if (payload.ready !== ordered.every((item) => item.ready)) {
+        throw new VigilProtocolError('Vigil monitoring preflight summary was malformed.');
+    }
+    return ordered;
 }
 
 export async function getExamNetworkControlPlaneOnVigil(): Promise<{ host: string; port: number }> {

@@ -417,6 +417,14 @@ SystemSetting(
         FLAG_HIDDEN | FLAG_SECRET,
         (value) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value),
     ),
+    Setting(
+        'setting_vigil',
+        'exam.preloginWorkflowWriterEnabled',
+        false,
+        'boolean',
+        'exam.preloginWorkflowWriterEnabled',
+        'Enable P2.9 workflow-bearing pre-login batches only after the compatibility-reader deployment gate has passed.',
+    ),
     // problem.hideBank remains only for configuration compatibility.
     // @deprecated This setting is not an authorization switch. P2.11 always
     // enforces the server-side ProblemModel capability and Mongo scope.

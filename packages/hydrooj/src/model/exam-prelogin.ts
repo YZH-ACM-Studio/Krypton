@@ -89,6 +89,16 @@ export interface ExamPreloginProjection {
     items: ExamPreloginProjectionItem[];
 }
 
+export interface ExamPreloginWorkflowBinding {
+    fingerprint: string;
+    executionRevision: number;
+    policy: { id: ObjectId; revision: number; fingerprint: string };
+    target: { id: ObjectId; revision: number; fingerprint: string };
+    targetCount: number;
+    startAt: Date;
+    hardEndAt: Date;
+}
+
 export interface ExamPreloginBatchDoc {
     _id: ObjectId;
     domainId: string;
@@ -98,6 +108,8 @@ export interface ExamPreloginBatchDoc {
     publicationRevision: number;
     requestId: string;
     preparationFingerprint: string;
+    /** Absent only on canonical P2.6/P2.7 batches created before P2.9. */
+    workflow?: ExamPreloginWorkflowBinding;
     state: 'dispatching' | 'dispatched';
     revision: number;
     ticketIds: ObjectId[];
@@ -169,9 +181,16 @@ export interface ExamPreloginRetryPayload {
     }>;
 }
 
+interface PreloginFindCursor<T> {
+    limit(limit: number): PreloginFindCursor<T>;
+    sort(spec: Record<string, 1 | -1>): PreloginFindCursor<T>;
+    toArray(): Promise<T[]>;
+}
+
 interface PreloginCollection<T extends { _id: ObjectId }> {
     createIndex(keys: Record<string, 1 | -1>, options?: Record<string, unknown>): PromiseLike<unknown>;
     deleteMany(filter: Record<string, unknown>): PromiseLike<unknown>;
+    find(filter: Record<string, unknown>): PreloginFindCursor<T>;
     findOne(filter: Record<string, unknown>): Promise<T | null>;
     insertOne(doc: T): PromiseLike<unknown>;
     replaceOne(expected: T, target: T): PromiseLike<{ matchedCount: number }>;
@@ -474,6 +493,7 @@ function batchFingerprint(doc: Omit<ExamPreloginBatchDoc, 'fingerprint'>): strin
         publicationRevision: doc.publicationRevision,
         requestId: doc.requestId,
         preparationFingerprint: doc.preparationFingerprint,
+        ...(doc.workflow ? { workflow: workflowBindingFact(doc.workflow) } : {}),
         state: doc.state,
         revision: doc.revision,
         ticketIds: doc.ticketIds.map((id) => id.toHexString()),
@@ -482,6 +502,51 @@ function batchFingerprint(doc: Omit<ExamPreloginBatchDoc, 'fingerprint'>): strin
         createdBy: doc.createdBy,
         updatedAt: doc.updatedAt.toISOString(),
     });
+}
+
+function workflowBindingFact(workflow: ExamPreloginWorkflowBinding): Record<string, unknown> {
+    return {
+        fingerprint: workflow.fingerprint,
+        executionRevision: workflow.executionRevision,
+        policy: {
+            id: workflow.policy.id.toHexString(),
+            revision: workflow.policy.revision,
+            fingerprint: workflow.policy.fingerprint,
+        },
+        target: {
+            id: workflow.target.id.toHexString(),
+            revision: workflow.target.revision,
+            fingerprint: workflow.target.fingerprint,
+        },
+        targetCount: workflow.targetCount,
+        startAt: workflow.startAt.toISOString(),
+        hardEndAt: workflow.hardEndAt.toISOString(),
+    };
+}
+
+function assertWorkflowBindingIntegrity(workflow: ExamPreloginWorkflowBinding): void {
+    exactObject(
+        workflow,
+        ['executionRevision', 'fingerprint', 'hardEndAt', 'policy', 'startAt', 'target', 'targetCount'],
+        'workflow_binding_invalid',
+    );
+    assertFingerprint(workflow.fingerprint, 'workflow_fingerprint');
+    assertRevision(workflow.executionRevision, 'workflow_execution_revision');
+    for (const [field, value] of [
+        ['policy', workflow.policy],
+        ['target', workflow.target],
+    ] as const) {
+        const reference = exactObject(value, ['fingerprint', 'id', 'revision'], 'workflow_binding_invalid');
+        assertObjectId(reference.id, `${field}_id`);
+        assertRevision(reference.revision, `${field}_revision`);
+        assertFingerprint(reference.fingerprint, `${field}_fingerprint`);
+    }
+    if (!Number.isSafeInteger(workflow.targetCount) || workflow.targetCount < 1 || workflow.targetCount > 500) {
+        throw new ExamPreloginError('workflow_target_count_invalid');
+    }
+    canonicalDate(workflow.startAt, 'workflow_start_at');
+    canonicalDate(workflow.hardEndAt, 'workflow_hard_end_at');
+    if (workflow.hardEndAt <= workflow.startAt) throw new ExamPreloginError('workflow_window_invalid');
 }
 
 function ticketMacFact(doc: Omit<ExamPreloginTicketDoc, 'fingerprint' | 'ticketDigest'>): Record<string, unknown> {
@@ -532,6 +597,7 @@ function sameTicketIssueFacts(left: ExamPreloginTicketDoc, right: ExamPreloginTi
 }
 
 function assertBatchIntegrity(doc: ExamPreloginBatchDoc): void {
+    const hasWorkflow = Object.hasOwn(doc, 'workflow');
     exactObject(
         doc,
         [
@@ -551,6 +617,7 @@ function assertBatchIntegrity(doc: ExamPreloginBatchDoc): void {
             'state',
             'ticketIds',
             'updatedAt',
+            ...(hasWorkflow ? ['workflow'] : []),
         ],
         'batch_schema_invalid',
     );
@@ -565,6 +632,10 @@ function assertBatchIntegrity(doc: ExamPreloginBatchDoc): void {
     assertRevision(doc.publicationRevision, 'publication_revision');
     canonicalRequestId(doc.requestId);
     assertFingerprint(doc.preparationFingerprint, 'preparation_fingerprint');
+    if (hasWorkflow) {
+        if (!doc.workflow) throw new ExamPreloginError('workflow_binding_invalid');
+        assertWorkflowBindingIntegrity(doc.workflow);
+    }
     if (doc.state !== 'dispatching' && doc.state !== 'dispatched') throw new ExamPreloginError('batch_state_invalid');
     assertRevision(doc.revision);
     if (!Array.isArray(doc.ticketIds) || !doc.ticketIds.length || doc.ticketIds.some((id) => !(id instanceof ObjectId))) {
@@ -776,6 +847,20 @@ export class ExamPreloginService {
     ensureIndexes(): Promise<void> {
         this.indexesPromise ||= Promise.all([
             this.batches.createIndex({ domainId: 1, requestId: 1 }, { name: 'examPreloginRequest', unique: true }),
+            this.batches.createIndex(
+                {
+                    domainId: 1,
+                    eventId: 1,
+                    'assignment.assignmentId': 1,
+                    'assignment.revision': 1,
+                    publicationRevision: 1,
+                },
+                {
+                    name: 'examPreloginPublishedAssignment',
+                    unique: true,
+                    partialFilterExpression: { workflow: { $type: 'object' } },
+                },
+            ),
             this.batches.createIndex({ domainId: 1, eventId: 1, createdAt: -1 }, { name: 'examPreloginEvent' }),
             this.tickets.createIndex({ batchId: 1, endpointId: 1 }, { name: 'examPreloginBatchEndpoint', unique: true }),
             this.tickets.createIndex({ domainId: 1, eventId: 1, state: 1, expiresAt: 1 }, { name: 'examPreloginEventState' }),
@@ -785,26 +870,48 @@ export class ExamPreloginService {
 
     async confirm(input: {
         preparation: ExamPreloginPreparation;
+        workflow: ExamPreloginWorkflowBinding;
         requestId: string;
         actorUid: number;
     }): Promise<{ batch: ExamPreloginBatchDoc; projection: ExamPreloginProjection }> {
         assertExamPreloginPreparationIntegrity(input.preparation);
+        assertWorkflowBindingIntegrity(input.workflow);
         const requestId = canonicalRequestId(input.requestId);
         assertActorUid(input.actorUid);
         if (input.preparation.hardErrorCount || input.preparation.items.some((item) => !item.ready)) {
             throw new ExamPreloginError('preparation_blocked');
         }
-        const boundary = `${input.preparation.domainId}\0${requestId}`;
-        return withRequestBoundary(boundary, () => this.confirmWhileGuarded(input.preparation, requestId, input.actorUid));
+        const boundary = [
+            input.preparation.domainId,
+            'assignment',
+            input.preparation.eventId.toHexString(),
+            input.preparation.assignment.assignmentId.toHexString(),
+            input.preparation.assignment.revision,
+            input.preparation.publicationRevision,
+        ].join('\0');
+        return withRequestBoundary(boundary, () => this.confirmWhileGuarded(input.preparation, input.workflow, requestId, input.actorUid));
     }
 
     private async confirmWhileGuarded(
         preparation: ExamPreloginPreparation,
+        workflow: ExamPreloginWorkflowBinding,
         requestId: string,
         actorUid: number,
     ): Promise<{ batch: ExamPreloginBatchDoc; projection: ExamPreloginProjection }> {
         const batchId = deterministicObjectId(`exam-prelogin-batch\0${preparation.domainId}\0${requestId}`);
-        let batch = await this.batches.findOne({ _id: batchId });
+        const assignmentIdentity = {
+            domainId: preparation.domainId,
+            eventId: preparation.eventId,
+            'assignment.assignmentId': preparation.assignment.assignmentId,
+            'assignment.revision': preparation.assignment.revision,
+            publicationRevision: preparation.publicationRevision,
+        };
+        let batch = await this.batches.findOne(assignmentIdentity);
+        if (batch && batch.requestId !== requestId) {
+            assertBatchIntegrity(batch);
+            throw new ExamPreloginError('assignment_already_confirmed');
+        }
+        batch ||= await this.batches.findOne({ _id: batchId });
         if (batch) {
             assertBatchIntegrity(batch);
             if (
@@ -815,7 +922,9 @@ export class ExamPreloginService {
                 batch.assignment.revision !== preparation.assignment.revision ||
                 batch.assignment.fingerprint !== preparation.assignment.fingerprint ||
                 batch.publicationRevision !== preparation.publicationRevision ||
-                batch.preparationFingerprint !== preparation.fingerprint
+                batch.preparationFingerprint !== preparation.fingerprint ||
+                !batch.workflow ||
+                canonicalHash(workflowBindingFact(batch.workflow)) !== canonicalHash(workflowBindingFact(workflow))
             ) {
                 throw new ExamPreloginError('request_id_conflict');
             }
@@ -837,6 +946,15 @@ export class ExamPreloginService {
                 publicationRevision: preparation.publicationRevision,
                 requestId,
                 preparationFingerprint: preparation.fingerprint,
+                workflow: {
+                    fingerprint: workflow.fingerprint,
+                    executionRevision: workflow.executionRevision,
+                    policy: { ...workflow.policy, id: new ObjectId(workflow.policy.id) },
+                    target: { ...workflow.target, id: new ObjectId(workflow.target.id) },
+                    targetCount: workflow.targetCount,
+                    startAt: new Date(workflow.startAt),
+                    hardEndAt: new Date(workflow.hardEndAt),
+                },
                 state: 'dispatching',
                 revision: 1,
                 ticketIds,
@@ -852,9 +970,10 @@ export class ExamPreloginService {
                 batch = target;
             } catch (error) {
                 if (!duplicateKey(error)) throw error;
-                batch = await this.batches.findOne({ _id: batchId });
+                batch = (await this.batches.findOne(assignmentIdentity)) || (await this.batches.findOne({ _id: batchId }));
                 if (!batch) throw new ExamPreloginError('batch_insert_ack_unknown');
                 assertBatchIntegrity(batch);
+                if (batch.requestId !== requestId) throw new ExamPreloginError('assignment_already_confirmed');
             }
         }
 
@@ -863,6 +982,40 @@ export class ExamPreloginService {
             return { batch, projection: batch.projection };
         }
         const ticketDocs = await this.ensureTickets(batch, preparation);
+        return this.dispatchAndFinalize(batch, ticketDocs);
+    }
+
+    async resumeDispatching(batch: ExamPreloginBatchDoc): Promise<{ batch: ExamPreloginBatchDoc; projection: ExamPreloginProjection }> {
+        assertBatchIntegrity(batch);
+        const boundary = [
+            batch.domainId,
+            'assignment',
+            batch.eventId.toHexString(),
+            batch.assignment.assignmentId.toHexString(),
+            batch.assignment.revision,
+            batch.publicationRevision,
+        ].join('\0');
+        return withRequestBoundary(boundary, async () => {
+            const current = await this.batches.findOne({ _id: batch._id });
+            if (!current) throw new ExamPreloginError('batch_not_found');
+            assertBatchIntegrity(current);
+            if (current.requestId !== batch.requestId || current.fingerprint !== batch.fingerprint) {
+                throw new ExamPreloginError('batch_cas_conflict');
+            }
+            if (current.state === 'dispatched') {
+                if (!current.projection) throw new ExamPreloginError('batch_projection_invalid');
+                return { batch: current, projection: current.projection };
+            }
+            const tickets = await this.listBatchTickets(current);
+            if (tickets.length !== current.ticketIds.length) throw new ExamPreloginError('dispatch_recovery_incomplete');
+            return this.dispatchAndFinalize(current, tickets);
+        });
+    }
+
+    private async dispatchAndFinalize(
+        batch: ExamPreloginBatchDoc,
+        ticketDocs: ExamPreloginTicketDoc[],
+    ): Promise<{ batch: ExamPreloginBatchDoc; projection: ExamPreloginProjection }> {
         const payload = this.dispatchPayload(batch, ticketDocs);
         const rawProjection = await this.dependencies.dispatch(payload);
         const projection = canonicalProjection(rawProjection, batch);
@@ -1050,6 +1203,58 @@ export class ExamPreloginService {
         const batch = await this.batches.findOne({ domainId, eventId, _id: batchId });
         if (batch) assertBatchIntegrity(batch);
         return batch;
+    }
+
+    async getBatchByRequest(domainId: string, eventId: ObjectId, requestId: string): Promise<ExamPreloginBatchDoc | null> {
+        const canonicalDomainId = canonicalText(domainId, 'domain_id', 64);
+        assertObjectId(eventId, 'event_id');
+        const canonicalId = canonicalRequestId(requestId);
+        const batch = await this.batches.findOne({ domainId: canonicalDomainId, eventId, requestId: canonicalId });
+        if (batch) assertBatchIntegrity(batch);
+        return batch;
+    }
+
+    async getLatestBatch(domainId: string, eventId: ObjectId): Promise<ExamPreloginBatchDoc | null> {
+        const canonicalDomainId = canonicalText(domainId, 'domain_id', 64);
+        assertObjectId(eventId, 'event_id');
+        const batches = await this.batches.find({ domainId: canonicalDomainId, eventId }).sort({ createdAt: -1, _id: -1 }).limit(1).toArray();
+        const batch = batches[0] || null;
+        if (batch) assertBatchIntegrity(batch);
+        return batch;
+    }
+
+    async listBatches(domainId: string, eventId: ObjectId, limit = 20): Promise<ExamPreloginBatchDoc[]> {
+        const canonicalDomainId = canonicalText(domainId, 'domain_id', 64);
+        assertObjectId(eventId, 'event_id');
+        if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new ExamPreloginError('batch_list_limit_invalid');
+        const batches = await this.batches.find({ domainId: canonicalDomainId, eventId }).sort({ createdAt: -1, _id: -1 }).limit(limit).toArray();
+        batches.forEach(assertBatchIntegrity);
+        return batches;
+    }
+
+    async listBatchTickets(batch: ExamPreloginBatchDoc): Promise<ExamPreloginTicketDoc[]> {
+        assertBatchIntegrity(batch);
+        const ticketOrder = new Map(batch.ticketIds.map((ticketId, index) => [ticketId.toHexString(), index]));
+        const tickets = await this.tickets.find({ batchId: batch._id }).toArray();
+        const seen = new Set<string>();
+        for (const ticket of tickets) {
+            assertTicketIntegrity(ticket);
+            const ticketId = ticket._id.toHexString();
+            if (
+                seen.has(ticketId) ||
+                !ticketOrder.has(ticketId) ||
+                !ticket.batchId.equals(batch._id) ||
+                ticket.domainId !== batch.domainId ||
+                !ticket.eventId.equals(batch.eventId)
+            ) {
+                throw new ExamPreloginError('batch_ticket_ids_invalid');
+            }
+            seen.add(ticketId);
+        }
+        if (batch.state === 'dispatched' && tickets.length !== batch.ticketIds.length) {
+            throw new ExamPreloginError('batch_ticket_ids_invalid');
+        }
+        return tickets.sort((left, right) => ticketOrder.get(left._id.toHexString())! - ticketOrder.get(right._id.toHexString())!);
     }
 
     async getBatchById(batchId: ObjectId): Promise<ExamPreloginBatchDoc | null> {
@@ -1285,6 +1490,20 @@ export const examPreloginTicketColl = db.collection<ExamPreloginTicketDoc>('exam
 export async function apply(ctx: any): Promise<void> {
     await Promise.all([
         examPreloginBatchColl.createIndex({ domainId: 1, requestId: 1 }, { name: 'examPreloginRequest', unique: true }),
+        examPreloginBatchColl.createIndex(
+            {
+                domainId: 1,
+                eventId: 1,
+                'assignment.assignmentId': 1,
+                'assignment.revision': 1,
+                publicationRevision: 1,
+            },
+            {
+                name: 'examPreloginPublishedAssignment',
+                unique: true,
+                partialFilterExpression: { workflow: { $type: 'object' } },
+            },
+        ),
         examPreloginBatchColl.createIndex({ domainId: 1, eventId: 1, createdAt: -1 }, { name: 'examPreloginEvent' }),
         examPreloginTicketColl.createIndex({ batchId: 1, endpointId: 1 }, { name: 'examPreloginBatchEndpoint', unique: true }),
         examPreloginTicketColl.createIndex({ domainId: 1, eventId: 1, state: 1, expiresAt: 1 }, { name: 'examPreloginEventState' }),

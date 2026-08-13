@@ -27,6 +27,12 @@ const EVENT = {
   archivedBy: null,
 };
 
+const PREPARATION_SUMMARY = {
+  assignment: null,
+  publicationRevision: 0,
+  batch: null,
+};
+
 function bootstrap(data: Record<string, unknown>, allowed = true): KryptonBootstrap {
   return {
     appName: 'Krypton',
@@ -117,10 +123,12 @@ function updatePreviewFixture(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function detailFetch(execution: unknown, endpointIds: string[] = [], event = EVENT) {
+function detailFetch(execution: unknown, endpointIds: string[] = [], event = EVENT, preparation: unknown = PREPARATION_SUMMARY) {
   return vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
-    if (url === `/api/admin/exam-events/${EVENT.eventId}`) return json({ event, schools: [{ schoolId: EVENT.schoolId, name: '计算机学院' }] });
+    if (url === `/api/admin/exam-events/${EVENT.eventId}`) {
+      return json({ event, schools: [{ schoolId: EVENT.schoolId, name: '计算机学院' }], preparation });
+    }
     if (url.startsWith('/api/admin/exam-policy-templates')) return json({ templates: [] });
     if (url.endsWith('/target-assignment')) {
       return json({
@@ -158,6 +166,7 @@ function detailFetch(execution: unknown, endpointIds: string[] = [], event = EVE
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  window.history.replaceState(null, '', '/');
 });
 
 describe('exam infrastructure workspace', () => {
@@ -278,15 +287,81 @@ describe('exam infrastructure workspace', () => {
     expect(screen.queryByRole('button', { name: /新建活动|创建第一个活动/ })).not.toBeInTheDocument();
   });
 
-  it('only exposes the endpoint target source supported by the current canonical', async () => {
+  it('exposes the existing endpoint, classroom and published-assignment target sources without inventing another canonical', async () => {
     vi.stubGlobal('fetch', detailFetch(null));
     renderPage({ eventId: EVENT.eventId });
 
-    expect(await screen.findByLabelText('指定终端')).toBeInTheDocument();
-    for (const unavailable of ['教室', '实体座位', '考试座位', '用户组']) {
+    const sourceKind = await screen.findByLabelText('目标来源');
+    expect(within(sourceKind).getByRole('option', { name: '指定终端' })).toBeInTheDocument();
+    expect(within(sourceKind).getByRole('option', { name: '整间教室' })).toBeInTheDocument();
+    expect(within(sourceKind).getByRole('option', { name: '已发布考试座位分配' })).toBeInTheDocument();
+    for (const unavailable of ['实体座位', '用户组']) {
       expect(screen.queryByLabelText(unavailable)).not.toBeInTheDocument();
     }
-    expect(screen.getByText(/当前不作为可提交的目标来源/)).toBeInTheDocument();
+  });
+
+  it('preserves an existing mixed target draft read-only and can preview it without destructive normalization', async () => {
+    const mixedSources = [
+      { kind: 'classroom', ids: ['66b800000000000000000701', '66b800000000000000000702'] },
+      { kind: 'endpoint', ids: ['endpoint-001'] },
+    ];
+    const load = detailFetch(null);
+    const posts: Record<string, unknown>[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (!init?.method && url.endsWith('/target-assignment')) {
+          return json({
+            assignment: {
+              assignmentId: '66b800000000000000000612',
+              revision: 4,
+              draft: { version: 1, sources: mixedSources },
+              revisions: [],
+              latestPublishedRevision: null,
+            },
+          });
+        }
+        if (init?.method === 'POST' && url.endsWith('/target-assignment')) {
+          const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+          posts.push(body);
+          return json({
+            preview: {
+              previewFingerprint: 'c'.repeat(64),
+              endpointIds: ['endpoint-001', 'endpoint-002'],
+              targetCount: 2,
+              addedEndpointIds: [],
+              removedEndpointIds: [],
+            },
+          });
+        }
+        return load(input);
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage({ eventId: EVENT.eventId });
+
+    expect(await screen.findByLabelText('目标来源')).toHaveValue('existing');
+    expect(screen.getByText('现有来源保持不变')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '保存来源' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: '重新解析' }));
+    expect(await screen.findByText('解析到 2 台终端')).toBeInTheDocument();
+    expect(posts).toEqual([{ eventId: EVENT.eventId, action: 'preview', expectedRevision: 4 }]);
+  });
+
+  it('prefills the published assignment target from the seat workflow without mutating it', async () => {
+    const assignmentId = '66b800000000000000000699';
+    window.history.replaceState(
+      null,
+      '',
+      `/admin/exam-infrastructure/events/${EVENT.eventId}?examSeatAssignmentId=${assignmentId}#target-assignment`,
+    );
+    vi.stubGlobal('fetch', detailFetch(null));
+    renderPage({ eventId: EVENT.eventId });
+
+    expect(await screen.findByLabelText('目标来源')).toHaveValue('examSeat');
+    expect(screen.getByLabelText('Assignment ID')).toHaveValue(assignmentId);
+    expect(screen.getByRole('button', { name: '保存来源' })).toBeEnabled();
   });
 
   it('invalidates a target preview as soon as the endpoint draft changes', async () => {
@@ -458,7 +533,7 @@ describe('exam infrastructure workspace', () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === `/api/admin/exam-events/${EVENT.eventId}`) {
-        return json({ event: EVENT, schools: [{ schoolId: EVENT.schoolId, name: '计算机学院' }] });
+        return json({ event: EVENT, schools: [{ schoolId: EVENT.schoolId, name: '计算机学院' }], preparation: PREPARATION_SUMMARY });
       }
       if (url.startsWith('/api/admin/exam-policy-templates')) return json({ templates: [] });
       if (url.endsWith('/target-assignment')) return json({ assignment: null, config: null });
@@ -474,6 +549,41 @@ describe('exam infrastructure workspace', () => {
     expect(headings).toEqual(['1. 基本信息', '2. 网络策略', '3. 目标终端', '4. 预检、启停与结果']);
     expect(screen.getByText(/“已送达”不等于“已应用”/)).toBeInTheDocument();
     expect(screen.getByText('网络配置尚未完成')).toBeInTheDocument();
+  });
+
+  it('shows the canonical preparation revisions on the event detail', async () => {
+    const preparation = {
+      assignment: {
+        id: '66b800000000000000000620',
+        revision: 5,
+        fingerprint: 'c'.repeat(64),
+        roster: { id: '66b800000000000000000621', revision: 4, fingerprint: 'd'.repeat(64) },
+      },
+      publicationRevision: 3,
+      batch: {
+        id: '66b800000000000000000622',
+        revision: 2,
+        projectionRevision: 7,
+        state: 'dispatched',
+        ticketCount: 98,
+        workflow: { executionRevision: 9, policyRevision: 6, targetRevision: 8 },
+      },
+    };
+    vi.stubGlobal('fetch', detailFetch(null, [], EVENT, preparation));
+    renderPage({ eventId: EVENT.eventId });
+
+    const card = (await screen.findByText('考试名单与座位')).closest('[data-slot="card"]');
+    expect(card).not.toBeNull();
+    expect(within(card as HTMLElement).getByText('名单 r4')).toBeInTheDocument();
+    expect(within(card as HTMLElement).getByText('分配 r5')).toBeInTheDocument();
+    expect(within(card as HTMLElement).getByText('发布 r3')).toBeInTheDocument();
+    expect(within(card as HTMLElement).getByText('策略 r2')).toBeInTheDocument();
+    expect(within(card as HTMLElement).getByText('目标 r1')).toBeInTheDocument();
+    expect(within(card as HTMLElement).getByText('票据批次 r2')).toBeInTheDocument();
+    expect(within(card as HTMLElement).getByText('投影 r7')).toBeInTheDocument();
+    expect(within(card as HTMLElement).getByText('确认执行 r9')).toBeInTheDocument();
+    expect(within(card as HTMLElement).getByText('批次策略 r6')).toBeInTheDocument();
+    expect(within(card as HTMLElement).getByText('批次目标 r8')).toBeInTheDocument();
   });
 
   it('renders the full 500-endpoint canonical projection without collapsing rows', async () => {

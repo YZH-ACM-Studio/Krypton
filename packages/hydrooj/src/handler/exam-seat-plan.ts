@@ -186,6 +186,8 @@ class ExamSeatPlanCollectionHandler extends ExamSeatPlanBaseHandler {
                 lifecycle: event.lifecycle,
                 schoolId: event.schoolId.toHexString(),
                 contestId: event.contestId?.toHexString() || null,
+                startAt: event.startAt.toISOString(),
+                endAt: event.endAt.toISOString(),
             },
             rosterRevisions: rosters.map((roster) => serializeRoster(roster, event.revision)),
             seatPlans: plans.map((plan) => serializePlan(plan, event.revision)),

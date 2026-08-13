@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import { ObjectId } from 'mongodb';
-import type { ExamPreloginBatchDoc, ExamPreloginPreparation, ExamPreloginTicketDoc, ExamPreloginRetryPayload } from '../src/model/exam-prelogin';
+import type {
+    ExamPreloginBatchDoc,
+    ExamPreloginPreparation,
+    ExamPreloginRetryPayload,
+    ExamPreloginTicketDoc,
+    ExamPreloginWorkflowBinding,
+} from '../src/model/exam-prelogin';
 
 function cloneValue<T>(value: T): T {
     if (value instanceof ObjectId) return new ObjectId(value) as T;
@@ -31,6 +38,42 @@ function same(left: unknown, right: unknown): boolean {
     return left === right;
 }
 
+function pathValue(value: unknown, path: string): unknown {
+    return path.split('.').reduce<unknown>((current, key) => {
+        if (!current || typeof current !== 'object' || Array.isArray(current)) return undefined;
+        return (current as Record<string, unknown>)[key];
+    }, value);
+}
+
+function legacyBatchFingerprint(doc: Omit<ExamPreloginBatchDoc, 'fingerprint'>): string {
+    return createHash('sha256')
+        .update(
+            JSON.stringify({
+                _id: doc._id.toHexString(),
+                domainId: doc.domainId,
+                eventId: doc.eventId.toHexString(),
+                eventRevision: doc.eventRevision,
+                assignment: {
+                    assignmentId: doc.assignment.assignmentId.toHexString(),
+                    revision: doc.assignment.revision,
+                    fingerprint: doc.assignment.fingerprint,
+                },
+                publicationRevision: doc.publicationRevision,
+                requestId: doc.requestId,
+                preparationFingerprint: doc.preparationFingerprint,
+                state: doc.state,
+                revision: doc.revision,
+                ticketIds: doc.ticketIds.map((id) => id.toHexString()),
+                projection: doc.projection,
+                createdAt: doc.createdAt.toISOString(),
+                createdBy: doc.createdBy,
+                updatedAt: doc.updatedAt.toISOString(),
+            }),
+            'utf8',
+        )
+        .digest('hex');
+}
+
 class MemoryCollection<T extends { _id: ObjectId }> {
     docs: T[] = [];
 
@@ -42,12 +85,54 @@ class MemoryCollection<T extends { _id: ObjectId }> {
         return (
             this.docs.find((doc) =>
                 Object.entries(filter).every(([key, value]) => {
-                    const actual = (doc as unknown as Record<string, unknown>)[key];
+                    const actual = pathValue(doc, key);
                     if (actual instanceof ObjectId && value instanceof ObjectId) return actual.equals(value);
                     return actual === value;
                 }),
             ) || null
         );
+    }
+
+    find(filter: Record<string, unknown>) {
+        let rows = this.docs.filter((doc) =>
+            Object.entries(filter).every(([key, value]) => {
+                const actual = pathValue(doc, key);
+                if (actual instanceof ObjectId && value instanceof ObjectId) return actual.equals(value);
+                return actual === value;
+            }),
+        );
+        const cursor = {
+            sort: (spec: Record<string, 1 | -1>) => {
+                rows = [...rows].sort((left, right) => {
+                    for (const [key, direction] of Object.entries(spec)) {
+                        const leftValue = (left as unknown as Record<string, unknown>)[key];
+                        const rightValue = (right as unknown as Record<string, unknown>)[key];
+                        const leftComparable =
+                            leftValue instanceof Date
+                                ? leftValue.toISOString()
+                                : leftValue instanceof ObjectId
+                                  ? leftValue.toHexString()
+                                  : String(leftValue);
+                        const rightComparable =
+                            rightValue instanceof Date
+                                ? rightValue.toISOString()
+                                : rightValue instanceof ObjectId
+                                  ? rightValue.toHexString()
+                                  : String(rightValue);
+                        if (leftComparable === rightComparable) continue;
+                        return (leftComparable! < rightComparable! ? -1 : 1) * direction;
+                    }
+                    return 0;
+                });
+                return cursor;
+            },
+            limit: (limit: number) => {
+                rows = rows.slice(0, limit);
+                return cursor;
+            },
+            toArray: async () => rows,
+        };
+        return cursor;
     }
 
     async insertOne(doc: T) {
@@ -71,7 +156,7 @@ class MemoryCollection<T extends { _id: ObjectId }> {
         this.docs = this.docs.filter(
             (doc) =>
                 !Object.entries(filter).every(([key, value]) => {
-                    const actual = (doc as unknown as Record<string, unknown>)[key];
+                    const actual = pathValue(doc, key);
                     if (actual instanceof ObjectId && value instanceof ObjectId) return actual.equals(value);
                     return actual === value;
                 }),
@@ -104,6 +189,23 @@ const studentRecordId = new ObjectId('64b000000000000000000003');
 const bindingId = new ObjectId('64b000000000000000000004');
 const secondStudentRecordId = new ObjectId('64b000000000000000000006');
 const secondBindingId = new ObjectId('64b000000000000000000007');
+
+function workflowBinding(overrides: Partial<ExamPreloginWorkflowBinding> = {}): ExamPreloginWorkflowBinding {
+    return {
+        fingerprint: 'f'.repeat(64),
+        executionRevision: 8,
+        policy: { id: new ObjectId('64b000000000000000000008'), revision: 2, fingerprint: 'b'.repeat(64) },
+        target: { id: new ObjectId('64b000000000000000000009'), revision: 3, fingerprint: 'c'.repeat(64) },
+        targetCount: 2,
+        startAt: new Date('2026-08-12T00:30:00.000Z'),
+        hardEndAt: new Date('2026-08-12T03:00:00.000Z'),
+        ...overrides,
+    };
+}
+
+function confirmInput(preparationValue: ExamPreloginPreparation, requestId: string, actorUid = 7) {
+    return { preparation: preparationValue, workflow: workflowBinding(), requestId, actorUid };
+}
 
 function preparation(overrides: Partial<ExamPreloginPreparation> = {}): ExamPreloginPreparation {
     const base: Omit<ExamPreloginPreparation, 'fingerprint'> = {
@@ -202,7 +304,7 @@ function service(
 test('confirm persists only ticket digests and replays one request without duplicate dispatch identity', async () => {
     const dispatches: unknown[] = [];
     const { value, batches, tickets } = service(dispatches);
-    const input = { preparation: preparation(), requestId: 'prelogin_request_1', actorUid: 7 };
+    const input = confirmInput(preparation(), 'prelogin_request_1');
 
     const first = await value.confirm(input);
     const replay = await value.confirm(input);
@@ -215,11 +317,71 @@ test('confirm persists only ticket digests and replays one request without dupli
     const persisted = JSON.stringify({ batches: batches.docs, tickets: tickets.docs, dispatches });
     assert.doesNotMatch(persisted, /KPT1\./);
     assert.equal(first.batch.state, 'dispatched');
+    await assert.rejects(
+        value.confirm({ ...input, workflow: workflowBinding({ executionRevision: 9 }) }),
+        (error: unknown) => error instanceof ExamPreloginError && error.reason === 'request_id_conflict',
+    );
+    await assert.rejects(
+        value.confirm({ ...input, requestId: 'prelogin_request_2' }),
+        (error: unknown) => error instanceof ExamPreloginError && error.reason === 'assignment_already_confirmed',
+    );
+    assert.equal(dispatches.length, 1);
+});
+
+test('manager recovery resolves a batch by request id and returns its safe ticket identities in batch order', async () => {
+    const { value } = service();
+    const confirmed = await value.confirm(confirmInput(twoStudentPreparation(), 'prelogin_recovery_request'));
+
+    const recovered = await value.getBatchByRequest('system', eventId, 'prelogin_recovery_request');
+    assert.equal(recovered?._id.toHexString(), confirmed.batch._id.toHexString());
+    assert.equal(await value.getBatchByRequest('system', eventId, 'prelogin_missing_request'), null);
+
+    const subjects = await value.listBatchTickets(confirmed.batch);
+    assert.deepEqual(
+        subjects.map((ticket) => ({
+            ticketId: ticket._id.toHexString(),
+            uid: ticket.uid,
+            sourceSeatId: ticket.sourceSeatId,
+            endpointId: ticket.endpointId,
+        })),
+        [
+            { ticketId: confirmed.batch.ticketIds[0].toHexString(), uid: 42, sourceSeatId: 'seat-1', endpointId: 'ep_one' },
+            { ticketId: confirmed.batch.ticketIds[1].toHexString(), uid: 43, sourceSeatId: 'seat-2', endpointId: 'ep_two' },
+        ],
+    );
+    assert.doesNotMatch(JSON.stringify(subjects), /KPT1\./);
+    assert.equal((await value.getLatestBatch('system', eventId))?._id.toHexString(), confirmed.batch._id.toHexString());
+});
+
+test('batch history is stable and preserves strict legacy batches without a workflow field', async () => {
+    const clock = { now: new Date(now) };
+    const { value, batches } = service([], clock);
+    const first = await value.confirm(confirmInput(preparation(), 'prelogin_history_request_1'));
+    const legacy = cloneValue(first.batch);
+    delete legacy.workflow;
+    const { fingerprint: _fingerprint, ...legacyWithoutFingerprint } = legacy;
+    legacy.fingerprint = legacyBatchFingerprint(legacyWithoutFingerprint);
+    batches.docs[0] = cloneValue(legacy);
+
+    assert.equal((await value.getBatch('system', eventId, legacy._id))?.workflow, undefined);
+    clock.now = new Date(clock.now.getTime() + 1000);
+    const secondPreparation = preparation({
+        assignment: { assignmentId: new ObjectId('64b00000000000000000000a'), revision: 3, fingerprint: 'd'.repeat(64) },
+        publicationRevision: 2,
+    });
+    const second = await value.confirm(confirmInput(secondPreparation, 'prelogin_history_request_2'));
+    const history = await value.listBatches('system', eventId);
+
+    assert.deepEqual(
+        history.map((batch) => batch._id.toHexString()),
+        [second.batch._id.toHexString(), legacy._id.toHexString()],
+    );
+    assert.equal(history[1].workflow, undefined);
 });
 
 test('root administrator uid 1 may confirm a prepared batch', async () => {
     const { value } = service();
-    const result = await value.confirm({ preparation: preparation(), requestId: 'prelogin_root_request', actorUid: 1 });
+    const result = await value.confirm(confirmInput(preparation(), 'prelogin_root_request', 1));
     assert.equal(result.batch.createdBy, 1);
 });
 
@@ -245,7 +407,7 @@ test('confirm converges after dispatch response loss even when the endpoint alre
             })),
         };
     });
-    const input = { preparation: preparation(), requestId: 'prelogin_response_loss_1', actorUid: 7 };
+    const input = confirmInput(preparation(), 'prelogin_response_loss_1');
 
     await assert.rejects(value.confirm(input), /dispatch_response_lost/);
     const material = await value.materialize({
@@ -282,7 +444,7 @@ test('confirm blocks the whole batch before persistence when preparation contain
     });
 
     await assert.rejects(
-        value.confirm({ preparation: blocked, requestId: 'prelogin_request_2', actorUid: 7 }),
+        value.confirm(confirmInput(blocked, 'prelogin_request_2')),
         (error: unknown) => error instanceof ExamPreloginError && error.reason === 'preparation_blocked',
     );
     assert.equal(batches.docs.length, 0);
@@ -292,7 +454,7 @@ test('confirm blocks the whole batch before persistence when preparation contain
 test('ticket material is endpoint-bound and redemption is one-shot but response-loss replay is idempotent', async () => {
     const clock = { now: new Date(now) };
     const { value, tickets } = service([], clock);
-    const confirmed = await value.confirm({ preparation: preparation(), requestId: 'prelogin_request_3', actorUid: 7 });
+    const confirmed = await value.confirm(confirmInput(preparation(), 'prelogin_request_3'));
     const ticketId = confirmed.batch.ticketIds[0];
 
     await assert.rejects(
@@ -363,7 +525,7 @@ test('ticket material is endpoint-bound and redemption is one-shot but response-
 test('ticket expiry and current-fact drift fail before redemption mutation', async () => {
     const clock = { now: new Date(now) };
     const { value, tickets } = service([], clock);
-    const confirmed = await value.confirm({ preparation: preparation(), requestId: 'prelogin_request_4', actorUid: 7 });
+    const confirmed = await value.confirm(confirmInput(preparation(), 'prelogin_request_4'));
     const ticketId = confirmed.batch.ticketIds[0];
     const material = await value.materialize({ batchId: confirmed.batch._id, ticketId, endpointId: 'ep_one' });
     const before = cloneValue(tickets.docs[0]);
@@ -397,7 +559,7 @@ test('ticket expiry and current-fact drift fail before redemption mutation', asy
 
 test('stored batch and ticket documents reject unknown canonical fields', async () => {
     const first = service();
-    const confirmed = await first.value.confirm({ preparation: preparation(), requestId: 'prelogin_request_5', actorUid: 7 });
+    const confirmed = await first.value.confirm(confirmInput(preparation(), 'prelogin_request_5'));
     Object.assign(first.batches.docs[0], { unknownBatchFact: true });
     await assert.rejects(
         first.value.getBatch('system', eventId, confirmed.batch._id),
@@ -405,7 +567,7 @@ test('stored batch and ticket documents reject unknown canonical fields', async 
     );
 
     const second = service();
-    const issued = await second.value.confirm({ preparation: preparation(), requestId: 'prelogin_request_6', actorUid: 7 });
+    const issued = await second.value.confirm(confirmInput(preparation(), 'prelogin_request_6'));
     Object.assign(second.tickets.docs[0], { unknownTicketFact: true });
     await assert.rejects(
         second.value.materialize({ batchId: issued.batch._id, ticketId: issued.batch.ticketIds[0], endpointId: 'ep_one' }),
@@ -415,7 +577,7 @@ test('stored batch and ticket documents reject unknown canonical fields', async 
 
 test('projection callbacks advance monotonically and same revision conflicts fail closed', async () => {
     const { value } = service();
-    const confirmed = await value.confirm({ preparation: preparation(), requestId: 'prelogin_request_7', actorUid: 7 });
+    const confirmed = await value.confirm(confirmInput(preparation(), 'prelogin_request_7'));
     const next = {
         ...confirmed.projection,
         dispatchStatus: 'complete' as const,
@@ -464,9 +626,7 @@ test('retry derives the exact terminal failure set and preserves successful comm
         };
     });
     const confirmed = await value.confirm({
-        preparation: twoStudentPreparation(),
-        requestId: 'prelogin_request_retry_base',
-        actorUid: 7,
+        ...confirmInput(twoStudentPreparation(), 'prelogin_request_retry_base'),
     });
     failedProjection = {
         ...confirmed.projection,
@@ -526,7 +686,7 @@ test('retry renews only an expired failed ticket and sends its exact new digest 
             })),
         };
     });
-    const confirmed = await value.confirm({ preparation: preparation(), requestId: 'prelogin_renewal_base', actorUid: 7 });
+    const confirmed = await value.confirm(confirmInput(preparation(), 'prelogin_renewal_base'));
     expiredProjection = {
         ...confirmed.projection,
         projectionRevision: 2,
@@ -581,7 +741,7 @@ test('retry resumes the exact redeemed session without renewing the expired tick
             })),
         };
     });
-    const confirmed = await value.confirm({ preparation: preparation(), requestId: 'prelogin_resume_base', actorUid: 7 });
+    const confirmed = await value.confirm(confirmInput(preparation(), 'prelogin_resume_base'));
     const ticketId = confirmed.batch.ticketIds[0];
     const material = await value.materialize({ batchId: confirmed.batch._id, ticketId, endpointId: 'ep_one' });
     await value.redeem({

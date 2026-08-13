@@ -37,6 +37,7 @@ export interface SystemKeys {
     'server.port': number;
     'server.language': string;
     'exam.preloginTicketKey': string;
+    'exam.preloginWorkflowWriterEnabled': boolean;
     'limit.problem_files_max': number;
     'problem.categories': string;
     'session.keys': string[];

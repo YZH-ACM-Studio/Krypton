@@ -12,6 +12,7 @@ describe('P2.5 seat assignment HTTP boundary', () => {
         expect(source).to.include("'admin_exam_seats.html'");
         expect(source).to.include("'/api/admin/exam-events/:eventId/seat-assignments'");
         expect(source).to.include("'/api/admin/exam-events/:eventId/seat-assignment-classrooms/:classroomId'");
+        expect(source).to.include('canManage: true');
         expect(source).not.to.match(/ticket|prelogin|dispatchExam/i);
     });
 

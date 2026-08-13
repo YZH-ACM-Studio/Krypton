@@ -130,6 +130,15 @@
 - ExamSession 创建与普通登录共用 endpoint + `(contest,uid)` 轻量边界，并在边界内重读 active session；预登录还必须重验当前 Contest role 与 batch/ticket/request identity。迟到的本机 IPC 失败不得把已兑换或 page-ready 事实降级；只有已持久失败的同 ticket 项可被更高 command revision 替换，成功项和在途项不得被重启。
 - P2.6 只建立 OJ/Vigil 的两阶段预检、票据、持久投递投影与精确重试；P2.7 只补 Endpoint Service/Client 拉起、兑换、分阶段 ACK 与精确恢复，不包含 P2.8 检测或 P2.9 教师联调 UI。P2.6/P2.7/P2.9 的预登录链须兼容后同批部署和回滚；本地完成不授权连接真实 Windows 主机或生产环境。
 
+## 一键考试准备整合协议
+
+- P2.9 复用 `/admin/exam-infrastructure/events/:eventId/seats` 与现有 ExamEvent、名单、分配、网络执行、监测预检和预登录 canonical；不得新增第二套 workflow 集合、后台编排器、队列或自动发布。教师按显式步骤生成并发布座位分配、配置目标、启动网络、运行终端预检、确认预登录，只能精确重试当前投影中的失败项。
+- Krypton 预登录 workflow 必须由服务端从已发布 assignment 派生 endpoint，并同时固定 preparation fingerprint、当前 active network execution revision、policy/target 完整引用、硬截止、目标覆盖和 P2.8 hard readiness。预登录 endpoint 必须全部包含在冻结 target 中，网络执行必须在硬截止前对完整目标真实 `applied`；USB/进程/检测器 warning 只展示且不进入 drift fingerprint，离线、版本/能力不兼容、目标缺失或检测不可用属于硬错误。
+- confirm 必须在 ExamEvent 轻量边界内重新计算并精确匹配 workflow fingerprint，之后把确认时的 execution/policy/target/window 引用写入既有 `exam.preloginBatches` canonical。已完成的同 requestId POST 只按持久批次身份读回，不因后来事实漂移重复投递或重复记录 mutation；不同 payload 复用 requestId 必须拒绝。批次列表和恢复必须显示当时固定引用，不能拿当前 config 冒充历史确认事实。
+- 页面在发送 confirm 前把 requestId 写入 URL；响应未知先按同 requestId 查询，换页优先恢复 URL 指向批次，否则只读取按 `createdAt` 确定的最新批次。首轮 dispatch complete 不等于完成，仍须轮询到每项 `applied/page_ready` 或明确 `expired/failed/offline/rejected`；成功、失败、在途和未处理必须分开显示。同一发布 assignment 已有批次时不得创建第二个 requestId，只能查看结果或按原 projection revision 与完整失败 ticket 集精确重试。
+- 外部考试没有受信 Contest workspace 时明确显示预登录不适用；仍可用教室或指定终端目标执行网络控制，不得创建空 batch、伪造名单/workspace 或把无名单解释成成功。500 人保持一个 canonical batch、一次服务端预检和 O(n) Map join，前端不得私自分块。
+- P2.9 的 `workflow` 字段采用同一制品的兼容 reader 与受控 writer 分阶段启用：新制品先以 `exam.preloginWorkflowWriterEnabled=false` 部署并读取全部旧批次，确认不存在无 workflow 的遗留 `dispatching` 批次后才可显式启用 writer。任一 workflow 批次写入后，允许关闭 writer，但二进制回滚下限永久提升为能严格读取可选 workflow 的兼容 reader；禁止直接回到不认识该字段的 P2.6/P2.7 旧制品。该门禁只解决存储形状兼容，不得绕过运行时 readiness 或作为长期产品开关。
+
 ## 考试基础设施活动协议
 
 - `exam.events` 是 Krypton Contest 与纯外部考试共用的 OJ 业务根；`type:'krypton'` 可在草稿期不关联 Contest，但进入计划态前必须关联当前域内且操作者可管理的 Contest，`type:'external'` 禁止伪造空 Contest。Contest 不拥有或驱动 ExamEvent 生命周期。

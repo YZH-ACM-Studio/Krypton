@@ -11,6 +11,9 @@ describe('P2.6 exam pre-login HTTP boundaries', () => {
         expect(source).to.include("'/api/admin/exam-events/:eventId/prelogin/prepare'");
         expect(source).to.include("'/api/admin/exam-events/:eventId/prelogin/confirm'");
         expect(source).to.include("'/api/admin/exam-events/:eventId/prelogin-batches/:batchId'");
+        expect(source).to.include("'/api/admin/exam-events/:eventId/prelogin-batches'");
+        expect(source).to.include("'/api/admin/exam-events/:eventId/prelogin-latest'");
+        expect(source).to.include("'/api/admin/exam-events/:eventId/prelogin-requests/:requestId'");
         expect(source).to.include("'/api/admin/exam-events/:eventId/prelogin-batches/:batchId/retry'");
         expect(source).to.include("'/api/vigil/exam-prelogin/material'");
         expect(source).to.include("'/api/vigil/exam-prelogin/redeem'");
@@ -18,19 +21,27 @@ describe('P2.6 exam pre-login HTTP boundaries', () => {
         expect(source).to.include("requireServiceToken(this, 'vigil')");
     });
 
-    it('recomputes the immutable preparation inside the event boundary before dispatch', () => {
+    it('recomputes the immutable preparation and P2.9 workflow inside the event boundary before dispatch', () => {
         const source = readFileSync(sourcePath, 'utf8');
         expect(source).to.include('withExamEventBoundary(domainId, eventId');
-        expect(source).to.include('loadExamPreloginPreparation(current, assignmentRevision, preflightExamPreloginOnVigil)');
-        expect(source).to.include('preparation.fingerprint !== preparationFingerprint');
+        expect(source).to.include('getBatchByRequest(domainId, eventId, requestId)');
+        expect(source).to.include("existing?.state === 'dispatched'");
+        expect(source).to.include('loadExamPreloginWorkflow(current, assignmentRevision)');
+        expect(source).to.include('currentWorkflow.preparation.fingerprint !== preparationFingerprint');
+        expect(source).to.include('currentWorkflow.fingerprint !== workflowFingerprint');
+        expect(source).to.include('currentWorkflow.hardErrorCount > 0');
         expect(source).to.include('assertCanManageExamEvent(domainId, event, this.user)');
-        expect(source).to.include('getExamPreloginService().confirm');
+        expect(source).to.include('service.confirm');
+        expect(source).to.include('service.resumeDispatching(existing)');
+        expect(source).to.include('validateExamPreloginRetryWorkflow');
     });
 
     it('accepts exact request schemas and never writes ticket material to logs or oplog', () => {
         const source = readFileSync(sourcePath, 'utf8');
         expect(source).to.include("exactBody(this.request.body, ['assignmentRevision'])");
-        expect(source).to.include("exactBody(this.request.body, ['assignmentRevision', 'preparationFingerprint', 'requestId'])");
+        expect(source).to.include(
+            "exactBody(this.request.body, ['assignmentRevision', 'preparationFingerprint', 'requestId', 'workflowFingerprint'])",
+        );
         expect(source).to.include("exactBody(this.request.body, ['expectedProjectionRevision', 'requestId', 'ticketIds'])");
         expect(source).to.include("exactBody(this.request.body, ['batchId', 'endpointId', 'ticketId'])");
         expect(source).to.include("exactBody(this.request.body, ['batchId', 'endpointId', 'requestId', 'ticket'])");

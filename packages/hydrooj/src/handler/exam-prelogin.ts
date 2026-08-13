@@ -5,16 +5,19 @@ import { PERM } from '../model/builtin';
 import { assertCanManageExamEvent, isExamInfrastructureAdmin } from '../model/exam-event-access';
 import { ExamEventDoc, examEventService } from '../model/exam-event';
 import { withExamEventBoundary } from '../model/exam-event-boundary';
-import { loadExamPreloginPreparation, validateExamPreloginTicketCurrent, validateExamPreloginTicketsCurrent } from '../model/exam-prelogin-loader';
+import { ExamNetworkConfigError } from '../model/exam-network-config';
+import { validateExamPreloginTicketCurrent, validateExamPreloginTicketsCurrent } from '../model/exam-prelogin-loader';
+import { ExamPreloginWorkflowSnapshot, loadExamPreloginWorkflow, validateExamPreloginRetryWorkflow } from '../model/exam-prelogin-workflow';
 import {
     ExamPreloginBatchDoc,
     ExamPreloginError,
     ExamPreloginPreparation,
     ExamPreloginProjection,
     ExamPreloginTicketDoc,
+    ExamPreloginWorkflowBinding,
 } from '../model/exam-prelogin';
 import { examSeatAssignmentService } from '../model/exam-seat-assignment';
-import { getExamPreloginService } from '../service/exam-prelogin';
+import { getExamPreloginService, isExamPreloginWorkflowWriterEnabled } from '../service/exam-prelogin';
 import { parseVigilExamPreloginProjection, preflightExamPreloginOnVigil } from '../service/vigil-bridge';
 
 const logger = new Logger('exam-prelogin');
@@ -47,13 +50,83 @@ function assertCanonicalEvent(event: ExamEventDoc, domainId: string, eventId: Ob
 }
 
 function translate(error: unknown): never {
-    if (error instanceof ExamPreloginError) {
+    if (error instanceof ExamPreloginError || error instanceof ExamNetworkConfigError) {
         throw new ValidationError('examPrelogin', null, localizedErrorText`Invalid request: ${error.reason}`);
     }
     if (error instanceof TypeError) {
         throw new ValidationError('examPrelogin', null, localizedErrorText`Invalid request: ${error.message}`);
     }
     throw error;
+}
+
+function serializeRevisionRef(reference: ExamPreloginWorkflowSnapshot['network']['policy']) {
+    return { id: reference.id.toHexString(), revision: reference.revision, fingerprint: reference.fingerprint };
+}
+
+function workflowBinding(workflow: ExamPreloginWorkflowSnapshot): ExamPreloginWorkflowBinding {
+    return {
+        fingerprint: workflow.fingerprint,
+        executionRevision: workflow.network.executionRevision,
+        policy: { ...workflow.network.policy, id: new ObjectId(workflow.network.policy.id) },
+        target: { ...workflow.network.target, id: new ObjectId(workflow.network.target.id) },
+        targetCount: workflow.network.targetCount,
+        startAt: new Date(workflow.network.startAt),
+        hardEndAt: new Date(workflow.network.hardEndAt),
+    };
+}
+
+function serializeWorkflowBinding(binding: ExamPreloginWorkflowBinding) {
+    return {
+        fingerprint: binding.fingerprint,
+        executionRevision: binding.executionRevision,
+        policy: serializeRevisionRef(binding.policy),
+        target: serializeRevisionRef(binding.target),
+        targetCount: binding.targetCount,
+        startAt: binding.startAt.toISOString(),
+        hardEndAt: binding.hardEndAt.toISOString(),
+    };
+}
+
+function serializeWorkflow(workflow: ExamPreloginWorkflowSnapshot) {
+    return {
+        schemaVersion: workflow.schemaVersion,
+        network: {
+            source: workflow.network.source,
+            configRevision: workflow.network.configRevision,
+            executionRevision: workflow.network.executionRevision,
+            policy: serializeRevisionRef(workflow.network.policy),
+            target: serializeRevisionRef(workflow.network.target),
+            targetCount: workflow.network.targetCount,
+            startAt: workflow.network.startAt.toISOString(),
+            hardEndAt: workflow.network.hardEndAt.toISOString(),
+            ready: workflow.network.ready,
+            reason: workflow.network.reason,
+            appliedCount: workflow.network.appliedCount,
+            failedCount: workflow.network.failedCount,
+            pendingCount: workflow.network.pendingCount,
+            preloginEndpointCount: workflow.network.preloginEndpointCount,
+            coveredPreloginCount: workflow.network.coveredPreloginCount,
+            missingPreloginEndpointIds: [...workflow.network.missingPreloginEndpointIds],
+        },
+        monitoring: {
+            ready: workflow.monitoring.ready,
+            items: workflow.monitoring.items.map((item) => ({
+                endpointId: item.endpointId,
+                ready: item.ready,
+                reason: item.reason,
+                credentialStatus: item.credentialStatus,
+                online: item.online,
+                compatible: item.compatible,
+                serviceVersion: item.serviceVersion,
+                protocolVersion: item.protocolVersion,
+                capabilities: item.capabilities.map((capability) => ({ ...capability, commands: [...capability.commands] })),
+                warnings: item.warnings.map((warning) => ({ ...warning })),
+            })),
+        },
+        hardErrorCount: workflow.hardErrorCount,
+        warningCount: workflow.warningCount,
+        fingerprint: workflow.fingerprint,
+    };
 }
 
 function serializePreparation(preparation: ExamPreloginPreparation) {
@@ -98,7 +171,8 @@ function serializeProjection(projection: ExamPreloginProjection | null) {
     };
 }
 
-function serializeBatch(batch: ExamPreloginBatchDoc) {
+async function serializeBatch(batch: ExamPreloginBatchDoc) {
+    const tickets = await getExamPreloginService().listBatchTickets(batch);
     const retryableTicketIds = (batch.projection?.items || [])
         .filter((item) => item.status === 'expired' || item.status === 'failed' || item.status === 'offline' || item.status === 'rejected')
         .map((item) => item.ticketId)
@@ -115,9 +189,22 @@ function serializeBatch(batch: ExamPreloginBatchDoc) {
         publicationRevision: batch.publicationRevision,
         requestId: batch.requestId,
         preparationFingerprint: batch.preparationFingerprint,
+        workflow: batch.workflow ? serializeWorkflowBinding(batch.workflow) : null,
         state: batch.state,
         revision: batch.revision,
         ticketCount: batch.ticketIds.length,
+        subjects: tickets.map((ticket) => ({
+            ticketId: ticket._id.toHexString(),
+            uid: ticket.uid,
+            studentRecordId: ticket.studentRecordId.toHexString(),
+            sourceSeatId: ticket.sourceSeatId,
+            bindingId: ticket.bindingId.toHexString(),
+            bindingRevision: ticket.bindingRevision,
+            endpointId: ticket.endpointId,
+            expiresAt: ticket.expiresAt.toISOString(),
+            state: ticket.state,
+            redeemedAt: ticket.redeemedAt?.toISOString() || null,
+        })),
         projection: serializeProjection(batch.projection),
         retryableTicketIds,
         createdAt: batch.createdAt.toISOString(),
@@ -177,8 +264,12 @@ class ExamPreloginPrepareHandler extends ExamPreloginManagerHandler {
         exactBody(this.request.body, ['assignmentRevision']);
         try {
             const event = await this.event(eventId);
-            const preparation = await loadExamPreloginPreparation(event, assignmentRevision, preflightExamPreloginOnVigil);
-            this.response.body = { preparation: serializePreparation(preparation) };
+            const workflow = await loadExamPreloginWorkflow(event, assignmentRevision);
+            this.response.body = {
+                preparation: serializePreparation(workflow.preparation),
+                workflow: serializeWorkflow(workflow),
+                workflowWriterEnabled: isExamPreloginWorkflowWriterEnabled(),
+            };
         } catch (error) {
             translate(error);
         }
@@ -189,35 +280,115 @@ class ExamPreloginConfirmHandler extends ExamPreloginManagerHandler {
     @param('eventId', Types.ObjectId)
     @param('assignmentRevision', Types.PositiveInt)
     @param('preparationFingerprint', Types.String)
+    @param('workflowFingerprint', Types.String)
     @param('requestId', Types.String)
-    async post(_args: unknown, eventId: ObjectId, assignmentRevision: number, preparationFingerprint: string, requestId: string) {
-        exactBody(this.request.body, ['assignmentRevision', 'preparationFingerprint', 'requestId']);
+    async post(
+        _args: unknown,
+        eventId: ObjectId,
+        assignmentRevision: number,
+        preparationFingerprint: string,
+        workflowFingerprint: string,
+        requestId: string,
+    ) {
+        exactBody(this.request.body, ['assignmentRevision', 'preparationFingerprint', 'requestId', 'workflowFingerprint']);
         const domainId = String(this.domain._id);
         try {
-            const result = await withExamEventBoundary(domainId, eventId, async () => {
+            const { mode, result, workflow } = await withExamEventBoundary(domainId, eventId, async () => {
                 const current = await this.event(eventId);
-                const preparation = await loadExamPreloginPreparation(current, assignmentRevision, preflightExamPreloginOnVigil);
-                if (preparation.fingerprint !== preparationFingerprint) throw new ExamPreloginError('preparation_fingerprint_changed');
-                return getExamPreloginService().confirm({ preparation, requestId, actorUid: this.user._id });
+                const service = getExamPreloginService();
+                const existing = await service.getBatchByRequest(domainId, eventId, requestId);
+                if (existing?.state === 'dispatched') {
+                    if (
+                        existing.assignment.revision !== assignmentRevision ||
+                        existing.preparationFingerprint !== preparationFingerprint ||
+                        !existing.workflow ||
+                        existing.workflow.fingerprint !== workflowFingerprint ||
+                        !existing.projection
+                    ) {
+                        throw new ExamPreloginError('request_id_conflict');
+                    }
+                    return { mode: 'replayed' as const, result: { batch: existing, projection: existing.projection }, workflow: null };
+                }
+                if (existing?.state === 'dispatching') {
+                    if (
+                        existing.assignment.revision !== assignmentRevision ||
+                        existing.preparationFingerprint !== preparationFingerprint ||
+                        !existing.workflow ||
+                        existing.workflow.fingerprint !== workflowFingerprint
+                    ) {
+                        throw new ExamPreloginError('request_id_conflict');
+                    }
+                    const tickets = await service.listBatchTickets(existing);
+                    if (tickets.length === existing.ticketIds.length) {
+                        return { mode: 'recovered' as const, result: await service.resumeDispatching(existing), workflow: null };
+                    }
+                }
+                if (!existing && !isExamPreloginWorkflowWriterEnabled()) throw new ExamPreloginError('workflow_writer_disabled');
+                const currentWorkflow = await loadExamPreloginWorkflow(current, assignmentRevision);
+                if (currentWorkflow.preparation.fingerprint !== preparationFingerprint) {
+                    throw new ExamPreloginError('preparation_fingerprint_changed');
+                }
+                if (currentWorkflow.fingerprint !== workflowFingerprint) throw new ExamPreloginError('workflow_fingerprint_changed');
+                if (currentWorkflow.network.source !== 'execution' || !currentWorkflow.network.ready) {
+                    throw new ExamPreloginError('network_execution_not_ready');
+                }
+                if (currentWorkflow.hardErrorCount > 0) throw new ExamPreloginError('workflow_not_ready');
+                return {
+                    mode: 'created' as const,
+                    result: await service.confirm({
+                        preparation: currentWorkflow.preparation,
+                        workflow: workflowBinding(currentWorkflow),
+                        requestId,
+                        actorUid: this.user._id,
+                    }),
+                    workflow: currentWorkflow,
+                };
             });
-            await OplogModel.log(this, 'exam.prelogin.confirm', {
-                eventId,
-                batchId: result.batch._id,
-                assignmentRevision,
-                requestId,
-                preparationFingerprint,
-                ticketCount: result.batch.ticketIds.length,
-                projectionRevision: result.projection.projectionRevision,
-            });
-            logger.info(
-                'Exam pre-login dispatch accepted event=%s batch=%s request=%s items=%d projectionRevision=%d',
-                eventId.toHexString(),
-                result.batch._id.toHexString(),
-                requestId,
-                result.batch.ticketIds.length,
-                result.projection.projectionRevision,
-            );
-            this.response.body = { batch: serializeBatch(result.batch) };
+            if (mode === 'created' && workflow) {
+                await OplogModel.log(this, 'exam.prelogin.confirm', {
+                    eventId,
+                    batchId: result.batch._id,
+                    assignmentRevision,
+                    requestId,
+                    preparationFingerprint,
+                    workflowFingerprint,
+                    network: {
+                        source: workflow.network.source,
+                        configRevision: workflow.network.configRevision,
+                        executionRevision: workflow.network.executionRevision,
+                        policy: serializeRevisionRef(workflow.network.policy),
+                        target: serializeRevisionRef(workflow.network.target),
+                        hardEndAt: workflow.network.hardEndAt,
+                    },
+                    ticketCount: result.batch.ticketIds.length,
+                    projectionRevision: result.projection.projectionRevision,
+                });
+                logger.info(
+                    'Exam pre-login dispatch accepted event=%s batch=%s request=%s items=%d projectionRevision=%d',
+                    eventId.toHexString(),
+                    result.batch._id.toHexString(),
+                    requestId,
+                    result.batch.ticketIds.length,
+                    result.projection.projectionRevision,
+                );
+            } else if (mode === 'recovered') {
+                await OplogModel.log(this, 'exam.prelogin.confirm.recovery', {
+                    eventId,
+                    batchId: result.batch._id,
+                    requestId,
+                    canonicalActorUid: result.batch.createdBy,
+                    recoveryActorUid: this.user._id,
+                    projectionRevision: result.projection.projectionRevision,
+                });
+                logger.info(
+                    'Exam pre-login dispatch recovered event=%s batch=%s request=%s projectionRevision=%d',
+                    eventId.toHexString(),
+                    result.batch._id.toHexString(),
+                    requestId,
+                    result.projection.projectionRevision,
+                );
+            }
+            this.response.body = { batch: await serializeBatch(result.batch) };
         } catch (error) {
             translate(error);
         }
@@ -232,7 +403,47 @@ class ExamPreloginBatchHandler extends ExamPreloginManagerHandler {
             await this.event(eventId);
             const batch = await getExamPreloginService().getBatch(String(this.domain._id), eventId, batchId);
             if (!batch) throw new ValidationError('batchId');
-            this.response.body = { batch: serializeBatch(batch) };
+            this.response.body = { batch: await serializeBatch(batch) };
+        } catch (error) {
+            translate(error);
+        }
+    }
+}
+
+class ExamPreloginRequestHandler extends ExamPreloginManagerHandler {
+    @param('eventId', Types.ObjectId)
+    @param('requestId', Types.String)
+    async get(_args: unknown, eventId: ObjectId, requestId: string) {
+        try {
+            await this.event(eventId);
+            const batch = await getExamPreloginService().getBatchByRequest(String(this.domain._id), eventId, requestId);
+            this.response.body = { batch: batch ? await serializeBatch(batch) : null };
+        } catch (error) {
+            translate(error);
+        }
+    }
+}
+
+class ExamPreloginLatestHandler extends ExamPreloginManagerHandler {
+    @param('eventId', Types.ObjectId)
+    async get(_args: unknown, eventId: ObjectId) {
+        try {
+            await this.event(eventId);
+            const batch = await getExamPreloginService().getLatestBatch(String(this.domain._id), eventId);
+            this.response.body = { batch: batch ? await serializeBatch(batch) : null };
+        } catch (error) {
+            translate(error);
+        }
+    }
+}
+
+class ExamPreloginBatchCollectionHandler extends ExamPreloginManagerHandler {
+    @param('eventId', Types.ObjectId)
+    async get(_args: unknown, eventId: ObjectId) {
+        try {
+            await this.event(eventId);
+            const batches = await getExamPreloginService().listBatches(String(this.domain._id), eventId);
+            this.response.body = { batches: await Promise.all(batches.map(serializeBatch)) };
         } catch (error) {
             translate(error);
         }
@@ -262,7 +473,16 @@ class ExamPreloginRetryHandler extends ExamPreloginManagerHandler {
                     requestId,
                     actorUid: this.user._id,
                     ticketIds,
-                    validateCurrent: (tickets) => validateExamPreloginTicketsCurrent(current, tickets, preflightExamPreloginOnVigil),
+                    validateCurrent: async (tickets) => {
+                        if (batch.workflow) {
+                            await validateExamPreloginRetryWorkflow(
+                                current,
+                                batch.workflow,
+                                tickets.map((ticket) => ticket.endpointId),
+                            );
+                        }
+                        return validateExamPreloginTicketsCurrent(current, tickets, preflightExamPreloginOnVigil);
+                    },
                 });
             });
             await OplogModel.log(this, 'exam.prelogin.retry', {
@@ -281,7 +501,7 @@ class ExamPreloginRetryHandler extends ExamPreloginManagerHandler {
                 result.ticketIds.length,
                 result.projection.projectionRevision,
             );
-            this.response.body = { batch: serializeBatch(result.batch) };
+            this.response.body = { batch: await serializeBatch(result.batch) };
         } catch (error) {
             translate(error);
         }
@@ -383,6 +603,9 @@ export async function apply(ctx: Context) {
     ctx.Route('exam_prelogin_prepare', '/api/admin/exam-events/:eventId/prelogin/prepare', ExamPreloginPrepareHandler);
     ctx.Route('exam_prelogin_confirm', '/api/admin/exam-events/:eventId/prelogin/confirm', ExamPreloginConfirmHandler);
     ctx.Route('exam_prelogin_batch', '/api/admin/exam-events/:eventId/prelogin-batches/:batchId', ExamPreloginBatchHandler);
+    ctx.Route('exam_prelogin_batches', '/api/admin/exam-events/:eventId/prelogin-batches', ExamPreloginBatchCollectionHandler);
+    ctx.Route('exam_prelogin_latest', '/api/admin/exam-events/:eventId/prelogin-latest', ExamPreloginLatestHandler);
+    ctx.Route('exam_prelogin_request', '/api/admin/exam-events/:eventId/prelogin-requests/:requestId', ExamPreloginRequestHandler);
     ctx.Route('exam_prelogin_retry', '/api/admin/exam-events/:eventId/prelogin-batches/:batchId/retry', ExamPreloginRetryHandler);
     ctx.Route('vigil_exam_prelogin_material', '/api/vigil/exam-prelogin/material', VigilExamPreloginMaterialHandler);
     ctx.Route('vigil_exam_prelogin_redeem', '/api/vigil/exam-prelogin/redeem', VigilExamPreloginRedeemHandler);

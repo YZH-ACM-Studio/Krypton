@@ -58,6 +58,14 @@ interface SchoolView {
   name: string;
 }
 
+interface ClassroomSummary {
+  classroomId: string;
+  schoolId: string;
+  name: string;
+  layoutRevision: number;
+  seatCount: number;
+}
+
 interface NetworkPolicy {
   hosts: string[];
   ips: string[];
@@ -113,6 +121,28 @@ interface NetworkConfig {
   revision: number;
   policy: RevisionRef | null;
   target: RevisionRef | null;
+}
+
+interface ExamPreparationSummary {
+  assignment: {
+    id: string;
+    revision: number;
+    fingerprint: string;
+    roster: RevisionRef;
+  } | null;
+  publicationRevision: number;
+  batch: {
+    id: string;
+    revision: number;
+    projectionRevision: number | null;
+    state: 'dispatching' | 'dispatched';
+    ticketCount: number;
+    workflow: {
+      executionRevision: number;
+      policyRevision: number;
+      targetRevision: number;
+    } | null;
+  } | null;
 }
 
 interface TargetPreview {
@@ -376,6 +406,44 @@ function parseConfig(value: unknown): NetworkConfig | null {
   if (value === null) return null;
   const config = asRecord(value, '网络配置');
   return { revision: asNumber(config.revision, '网络配置'), policy: parseRef(config.policy), target: parseRef(config.target) };
+}
+
+function parsePreparationSummary(value: unknown): ExamPreparationSummary {
+  const summary = asRecord(value, '考试准备摘要');
+  let assignment: ExamPreparationSummary['assignment'] = null;
+  if (summary.assignment !== null) {
+    const rawAssignment = asRecord(summary.assignment, '发布座位分配');
+    const roster = parseRef(rawAssignment.roster);
+    if (!roster) throw new Error('发布座位分配响应格式不正确');
+    assignment = {
+      id: asString(rawAssignment.id, '发布座位分配'),
+      revision: asNumber(rawAssignment.revision, '发布座位分配'),
+      fingerprint: asString(rawAssignment.fingerprint, '发布座位分配'),
+      roster,
+    };
+  }
+  let batch: ExamPreparationSummary['batch'] = null;
+  if (summary.batch !== null) {
+    const rawBatch = asRecord(summary.batch, '预登录批次');
+    const state = asString(rawBatch.state, '预登录批次');
+    if (state !== 'dispatching' && state !== 'dispatched') throw new Error('预登录批次响应格式不正确');
+    const rawWorkflow = rawBatch.workflow === null ? null : asRecord(rawBatch.workflow, '预登录批次网络版本');
+    batch = {
+      id: asString(rawBatch.id, '预登录批次'),
+      revision: asNumber(rawBatch.revision, '预登录批次'),
+      projectionRevision: rawBatch.projectionRevision === null ? null : asNumber(rawBatch.projectionRevision, '预登录批次'),
+      state,
+      ticketCount: asNumber(rawBatch.ticketCount, '预登录批次'),
+      workflow: rawWorkflow
+        ? {
+            executionRevision: asNumber(rawWorkflow.executionRevision, '预登录批次网络版本'),
+            policyRevision: asNumber(rawWorkflow.policyRevision, '预登录批次网络版本'),
+            targetRevision: asNumber(rawWorkflow.targetRevision, '预登录批次网络版本'),
+          }
+        : null,
+    };
+  }
+  return { assignment, publicationRevision: asNumber(summary.publicationRevision, '考试准备摘要'), batch };
 }
 
 function parseProjectionItem(value: unknown): ProjectionItem {
@@ -1364,6 +1432,7 @@ function PolicySection({
 
 function TargetSection({
   eventId,
+  schoolId,
   assignment,
   config,
   readOnly,
@@ -1371,26 +1440,75 @@ function TargetSection({
   requestConfirm,
 }: {
   eventId: string;
+  schoolId: string;
   assignment: TargetAssignment | null;
   config: NetworkConfig | null;
   readOnly: boolean;
   reload: () => Promise<void>;
   requestConfirm: (plan: ConfirmPlan) => void;
 }) {
+  type EditableSourceKind = 'classroom' | 'endpoint' | 'examSeat';
+  type SourceMode = EditableSourceKind | 'existing';
+  const requestedAssignmentId = () => new URL(window.location.href).searchParams.get('examSeatAssignmentId')?.trim() || '';
+  const initialSourceKind = (): SourceMode => {
+    if (requestedAssignmentId()) return 'examSeat';
+    const saved = assignment?.draft.sources || [];
+    if (!saved.length) return 'endpoint';
+    if (saved.length !== 1) return 'existing';
+    const [source] = saved;
+    if (source.kind === 'endpoint') return 'endpoint';
+    if (source.kind === 'classroom' && source.ids.length === 1) return 'classroom';
+    if (source.kind === 'examSeat' && source.ids.length === 1) return 'examSeat';
+    return 'existing';
+  };
   const initialEndpoints = () => assignment?.draft.sources.find((source) => source.kind === 'endpoint')?.ids.join('\n') || '';
+  const initialClassroomId = () => assignment?.draft.sources.find((source) => source.kind === 'classroom')?.ids[0] || '';
+  const initialAssignmentId = () => requestedAssignmentId() || assignment?.draft.sources.find((source) => source.kind === 'examSeat')?.ids[0] || '';
+  const [sourceKind, setSourceKind] = useState<SourceMode>(initialSourceKind);
   const [endpointIds, setEndpointIds] = useState(initialEndpoints);
+  const [classroomId, setClassroomId] = useState(initialClassroomId);
+  const [examSeatAssignmentId, setExamSeatAssignmentId] = useState(initialAssignmentId);
+  const [classrooms, setClassrooms] = useState<ClassroomSummary[]>([]);
+  const [classroomsLoaded, setClassroomsLoaded] = useState(false);
   const [preview, setPreview] = useState<TargetPreview | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
+    setSourceKind(initialSourceKind());
     setEndpointIds(initialEndpoints());
+    setClassroomId(initialClassroomId());
+    setExamSeatAssignmentId(initialAssignmentId());
   }, [assignment?.revision]);
+  useEffect(() => {
+    if (sourceKind !== 'classroom' || classroomsLoaded) return;
+    setClassroomsLoaded(true);
+    void apiObject('/api/admin/exam-infrastructure/classrooms', undefined, '加载教室列表失败')
+      .then((payload) => {
+        if (!Array.isArray(payload.classrooms)) throw new Error('教室列表响应格式不正确');
+        setClassrooms(
+          payload.classrooms.map((value) => {
+            const classroom = asRecord(value, '教室列表');
+            return {
+              classroomId: asString(classroom.classroomId, '教室列表'),
+              schoolId: asString(classroom.schoolId, '教室列表'),
+              name: asString(classroom.name, '教室列表'),
+              layoutRevision: asNumber(classroom.layoutRevision, '教室列表'),
+              seatCount: asNumber(classroom.seatCount, '教室列表'),
+            };
+          }),
+        );
+      })
+      .catch((cause) => setError(cause instanceof Error ? cause.message : '加载教室列表失败'));
+  }, [classroomsLoaded, sourceKind]);
   const sources = (): SourceGroup[] => {
+    if (sourceKind === 'existing') return assignment?.draft.sources.map((source) => ({ kind: source.kind, ids: [...source.ids] })) || [];
+    if (sourceKind === 'examSeat') return examSeatAssignmentId ? [{ kind: 'examSeat', ids: [examSeatAssignmentId] }] : [];
+    if (sourceKind === 'classroom') return classroomId ? [{ kind: 'classroom', ids: [classroomId] }] : [];
     const ids = splitValues(endpointIds);
     return ids.length ? [{ kind: 'endpoint', ids }] : [];
   };
-  const savedEndpointIds = [...(assignment?.draft.sources.find((source) => source.kind === 'endpoint')?.ids || [])].sort();
-  const targetDirty = JSON.stringify([...splitValues(endpointIds)].sort()) !== JSON.stringify(savedEndpointIds);
+  const savedSources = assignment?.draft.sources || [];
+  const targetDirty = JSON.stringify(sources()) !== JSON.stringify(savedSources);
   const save = async () => {
     setBusy(true);
     setError(null);
@@ -1469,7 +1587,7 @@ function TargetSection({
     }
   };
   return (
-    <Card>
+    <Card id="target-assignment">
       <CardHeader>
         <CardTitle role="heading" aria-level={3}>
           3. 目标终端
@@ -1479,23 +1597,96 @@ function TargetSection({
       <CardContent className="space-y-4">
         <MutationNotice error={error} />
         {readOnly ? <p className="rounded-xl border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">活动已归档，目标快照仅供查看。</p> : null}
-        <FormField label="指定终端" htmlFor="target-endpoint" hint="每行一个已完成入网的 Endpoint ID">
-          <Textarea
-            id="target-endpoint"
-            value={endpointIds}
+        <FormField label="目标来源" htmlFor="target-source-kind" hint="考试座位引用已发布 assignment；外部无名单考试继续使用教室或指定终端来源。">
+          <select
+            id="target-source-kind"
+            value={sourceKind}
             disabled={readOnly}
             onChange={(event) => {
-              setEndpointIds(event.target.value);
+              setSourceKind(event.target.value as SourceMode);
               setPreview(null);
             }}
-            rows={4}
-          />
+            className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+          >
+            <option value="endpoint">指定终端</option>
+            <option value="classroom">整间教室</option>
+            <option value="examSeat">已发布考试座位分配</option>
+            {initialSourceKind() === 'existing' ? <option value="existing">保留现有来源（只读）</option> : null}
+          </select>
         </FormField>
-        <p className="rounded-xl border bg-muted/20 px-3 py-2 text-xs leading-5 text-muted-foreground">
-          教室、实体座位、考试座位和用户组需等待对应 canonical 上线；当前不作为可提交的目标来源。
-        </p>
+        {sourceKind === 'endpoint' ? (
+          <FormField label="指定终端" htmlFor="target-endpoint" hint="每行一个已完成入网的 Endpoint ID">
+            <Textarea
+              id="target-endpoint"
+              value={endpointIds}
+              disabled={readOnly}
+              onChange={(event) => {
+                setEndpointIds(event.target.value);
+                setPreview(null);
+              }}
+              rows={4}
+            />
+          </FormField>
+        ) : sourceKind === 'classroom' ? (
+          <FormField label="教室" htmlFor="target-classroom" hint="只列出当前活动学校下的已导入教室；发布时服务端重验当前 active bindings。">
+            <select
+              id="target-classroom"
+              value={classroomId}
+              disabled={readOnly}
+              onChange={(event) => {
+                setClassroomId(event.target.value);
+                setPreview(null);
+              }}
+              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+            >
+              <option value="">选择教室</option>
+              {classrooms
+                .filter((classroom) => classroom.schoolId === schoolId)
+                .map((classroom) => (
+                  <option key={classroom.classroomId} value={classroom.classroomId}>
+                    {classroom.name} · {classroom.seatCount} 座 · 布局 r{classroom.layoutRevision}
+                  </option>
+                ))}
+            </select>
+          </FormField>
+        ) : sourceKind === 'examSeat' ? (
+          <FormField
+            label="Assignment ID"
+            htmlFor="target-exam-seat-assignment"
+            hint="从座位工作台发布后复制 assignment ID；发布目标时服务端会重验 publication、布局和绑定。"
+          >
+            <Input
+              id="target-exam-seat-assignment"
+              value={examSeatAssignmentId}
+              disabled={readOnly}
+              onChange={(event) => {
+                setExamSeatAssignmentId(event.target.value.trim());
+                setPreview(null);
+              }}
+            />
+          </FormField>
+        ) : (
+          <div className="rounded-md border bg-muted/20 p-3 text-sm">
+            <p className="font-medium">现有来源保持不变</p>
+            <p className="mt-1 text-muted-foreground">
+              当前草稿包含多个来源组或旧的实体座位/用户组来源，本页不会把它们静默改写。可直接重新解析，或明确切换到上方支持的来源类型后保存。
+            </p>
+            <ul className="mt-2 list-inside list-disc font-mono text-xs text-muted-foreground">
+              {savedSources.map((source, index) => (
+                <li key={`${source.kind}-${index}`}>
+                  {SOURCE_LABELS[source.kind]} · {source.ids.length} 项
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         <div className="flex flex-wrap items-center gap-2">
-          <Button size="sm" variant="outline" disabled={readOnly || busy || (Boolean(assignment) && !targetDirty)} onClick={() => void save()}>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={readOnly || busy || sourceKind === 'existing' || (Boolean(assignment) && !targetDirty)}
+            onClick={() => void save()}
+          >
             <Save className="size-4" />
             保存来源
           </Button>
@@ -2020,6 +2211,7 @@ function EventDetailPage({ eventId }: { eventId: string }) {
   const [assignment, setAssignment] = useState<TargetAssignment | null>(null);
   const [config, setConfig] = useState<NetworkConfig | null>(null);
   const [execution, setExecution] = useState<NetworkExecution | null>(null);
+  const [preparation, setPreparation] = useState<ExamPreparationSummary | null>(null);
   const [updatePreview, setUpdatePreview] = useState<NetworkUpdatePreview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -2029,6 +2221,7 @@ function EventDetailPage({ eventId }: { eventId: string }) {
   const reload = useCallback(async () => {
     const detail = await apiObject(`/api/admin/exam-events/${eventId}`, undefined, '加载考试活动失败');
     const parsedEvent = parseEvent(detail.event);
+    const parsedPreparation = parsePreparationSummary(detail.preparation);
     if (!Array.isArray(detail.schools)) throw new Error('学校响应格式不正确');
     const [policyPayload, targetPayload, configPayload, executionPayload] = await Promise.all([
       apiObject(`/api/admin/exam-policy-templates?eventId=${encodeURIComponent(eventId)}`, undefined, '加载策略失败'),
@@ -2038,6 +2231,7 @@ function EventDetailPage({ eventId }: { eventId: string }) {
     ]);
     if (!Array.isArray(policyPayload.templates)) throw new Error('策略响应格式不正确');
     setEvent(parsedEvent);
+    setPreparation(parsedPreparation);
     setSchools(
       detail.schools.map((item) => {
         const school = asRecord(item, '学校');
@@ -2125,6 +2319,19 @@ function EventDetailPage({ eventId }: { eventId: string }) {
             <div>
               <p className="font-medium">考试名单与座位</p>
               <p className="text-sm text-muted-foreground">查看固定名单、可复现分配、人工调整与发布 revision。</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Badge variant="outline">名单 r{preparation?.assignment?.roster.revision || 0}</Badge>
+                <Badge variant="outline">分配 r{preparation?.assignment?.revision || 0}</Badge>
+                <Badge variant="outline">发布 r{preparation?.publicationRevision || 0}</Badge>
+                <Badge variant="outline">策略 r{config?.policy?.revision || 0}</Badge>
+                <Badge variant="outline">目标 r{config?.target?.revision || 0}</Badge>
+                <Badge variant="outline">票据批次 r{preparation?.batch?.revision || 0}</Badge>
+                <Badge variant="outline">投影 r{preparation?.batch?.projectionRevision || 0}</Badge>
+                {preparation?.batch?.workflow ? <Badge variant="outline">确认执行 r{preparation.batch.workflow.executionRevision}</Badge> : null}
+                {preparation?.batch?.workflow ? <Badge variant="outline">批次策略 r{preparation.batch.workflow.policyRevision}</Badge> : null}
+                {preparation?.batch?.workflow ? <Badge variant="outline">批次目标 r{preparation.batch.workflow.targetRevision}</Badge> : null}
+                {preparation?.batch && !preparation.batch.workflow ? <Badge variant="outline">P2.9 前历史批次</Badge> : null}
+              </div>
             </div>
             <Button asChild variant="outline">
               <a href={`/admin/exam-infrastructure/events/${event.eventId}/seats`}>打开座位工作台</a>
@@ -2142,6 +2349,7 @@ function EventDetailPage({ eventId }: { eventId: string }) {
         />
         <TargetSection
           eventId={eventId}
+          schoolId={event.schoolId}
           assignment={assignment}
           config={config}
           readOnly={event.lifecycle === 'archived'}

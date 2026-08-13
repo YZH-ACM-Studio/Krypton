@@ -4,26 +4,35 @@ import { ExamNetworkConfigError, ExamTargetResolution, ExamTargetResolverInput }
 import { endpointEnrollmentBatchColl } from '../model/endpoint-enrollment';
 import { endpointSeatBindingService } from '../model/endpoint-seat-binding';
 import { examClassroomService } from '../model/exam-classroom';
+import { examSeatAssignmentService } from '../model/exam-seat-assignment';
 import { preflightExamNetworkOnVigil } from '../service/vigil-bridge';
 
 function fingerprint(value: unknown): string {
     return createHash('sha256').update(JSON.stringify(value), 'utf8').digest('hex');
 }
 
+function canonicalCompare(left: string, right: string): number {
+    return left < right ? -1 : left > right ? 1 : 0;
+}
+
 export async function resolveExamTargetSources(input: ExamTargetResolverInput): Promise<ExamTargetResolution> {
-    if (input.sources.some((source) => !['classroom', 'endpoint', 'seat'].includes(source.kind))) {
+    if (input.sources.some((source) => !['classroom', 'endpoint', 'examSeat', 'seat'].includes(source.kind))) {
         throw new ExamNetworkConfigError('target_source_not_available');
     }
     const observedAt = new Date();
 
     const sourceFacts: Array<{
-        kind: 'classroom' | 'endpoint' | 'seat';
+        kind: 'classroom' | 'endpoint' | 'examSeat' | 'seat';
         sourceId: string;
         endpointId: string;
         bindingId?: string;
         bindingRevision?: number;
         classroomId?: string;
         sourceSeatId?: string;
+        assignmentRevision?: number;
+        assignmentFingerprint?: string;
+        publicationRevision?: number;
+        boundUserId?: number;
     }> = [];
     for (const source of input.sources) {
         if (source.kind === 'endpoint') {
@@ -61,6 +70,67 @@ export async function resolveExamTargetSources(input: ExamTargetResolverInput): 
                 }
                 continue;
             }
+            if (source.kind === 'examSeat') {
+                const assignmentId = new ObjectId(sourceId);
+                const publication = await examSeatAssignmentService.getPublication(input.domainId, input.eventId);
+                if (!publication || !publication.assignment.assignmentId.equals(assignmentId)) {
+                    throw new ExamNetworkConfigError('exam_seat_assignment_not_published');
+                }
+                const assignment = await examSeatAssignmentService.getRevision(input.domainId, input.eventId, publication.assignment.revision);
+                if (
+                    !assignment ||
+                    !assignment._id.equals(assignmentId) ||
+                    assignment.fingerprint !== publication.assignment.fingerprint ||
+                    !assignment.schoolId.equals(input.schoolId)
+                ) {
+                    throw new ExamNetworkConfigError('exam_seat_assignment_changed');
+                }
+                const classroom = await examClassroomService.get(input.domainId, assignment.classroomId);
+                if (!classroom || !classroom.schoolId.equals(input.schoolId)) {
+                    throw new ExamNetworkConfigError('seat_binding_invalid');
+                }
+                if (classroom.layoutRevision !== assignment.layoutRevision) {
+                    throw new ExamNetworkConfigError('exam_seat_layout_changed');
+                }
+                const layout = examClassroomService.layout(classroom, assignment.layoutRevision).snapshot;
+                if (layout.fingerprint !== assignment.layoutFingerprint) {
+                    throw new ExamNetworkConfigError('exam_seat_layout_changed');
+                }
+                const currentSeatIds = new Set(layout.seats.map((seat) => seat.sourceSeatId));
+                const bindings = await endpointSeatBindingService.listClassroomBindings(input.domainId, assignment.classroomId);
+                const activeBindings = bindings.filter((binding) => binding.status === 'active' && binding.endpointId);
+                if (new Set(activeBindings.map((binding) => binding.sourceSeatId)).size !== activeBindings.length) {
+                    throw new ExamNetworkConfigError('seat_binding_invalid');
+                }
+                const bindingBySeat = new Map(activeBindings.map((binding) => [binding.sourceSeatId, binding]));
+                for (const mapping of assignment.assignments) {
+                    const binding = bindingBySeat.get(mapping.sourceSeatId);
+                    if (
+                        !currentSeatIds.has(mapping.sourceSeatId) ||
+                        !binding ||
+                        !binding.endpointId ||
+                        binding.domainId !== input.domainId ||
+                        !binding.schoolId.equals(input.schoolId) ||
+                        !binding.classroomId.equals(assignment.classroomId)
+                    ) {
+                        throw new ExamNetworkConfigError('seat_binding_not_active');
+                    }
+                    sourceFacts.push({
+                        kind: 'examSeat',
+                        sourceId,
+                        endpointId: binding.endpointId,
+                        bindingId: binding._id.toHexString(),
+                        bindingRevision: binding.revision,
+                        classroomId: assignment.classroomId.toHexString(),
+                        sourceSeatId: mapping.sourceSeatId,
+                        assignmentRevision: assignment.revision,
+                        assignmentFingerprint: assignment.fingerprint,
+                        publicationRevision: publication.revision,
+                        boundUserId: mapping.boundUserId,
+                    });
+                }
+                continue;
+            }
             const binding = await endpointSeatBindingService.getBindingById(input.domainId, new ObjectId(sourceId));
             if (!binding || binding.status !== 'active' || !binding.endpointId) {
                 throw new ExamNetworkConfigError('seat_binding_not_active');
@@ -88,9 +158,9 @@ export async function resolveExamTargetSources(input: ExamTargetResolverInput): 
         }
     }
     sourceFacts.sort((left, right) =>
-        `${left.kind}\0${left.sourceId}\0${left.endpointId}`.localeCompare(`${right.kind}\0${right.sourceId}\0${right.endpointId}`),
+        canonicalCompare(`${left.kind}\0${left.sourceId}\0${left.endpointId}`, `${right.kind}\0${right.sourceId}\0${right.endpointId}`),
     );
-    const endpointIds = sourceFacts.map((fact) => fact.endpointId).sort();
+    const endpointIds = sourceFacts.map((fact) => fact.endpointId).sort(canonicalCompare);
     if (!endpointIds.length) throw new ExamNetworkConfigError('empty_target');
     if (new Set(endpointIds).size !== endpointIds.length) {
         throw new ExamNetworkConfigError('duplicate_endpoint');
@@ -107,7 +177,7 @@ export async function resolveExamTargetSources(input: ExamTargetResolverInput): 
                 finalizedAt: claim.finalizedAt,
             })),
     );
-    ownershipFacts.sort((left, right) => left.endpointId.localeCompare(right.endpointId));
+    ownershipFacts.sort((left, right) => canonicalCompare(left.endpointId, right.endpointId));
     if (
         ownershipFacts.length !== endpointIds.length ||
         new Set(ownershipFacts.map((fact) => fact.endpointId)).size !== endpointIds.length ||

@@ -239,7 +239,17 @@ export type VigilStudentStatus =
   | 'ended';
 
 /** Severity bands shared by the events / event_added stream / proctor UI. */
-export type VigilEventSeverity = 'info' | 'warning' | 'error' | 'critical';
+export type VigilEventSeverity = 'info' | 'low' | 'medium' | 'warning' | 'high' | 'error' | 'critical';
+
+export function isVigilAnomalySeverity(severity: VigilEventSeverity): boolean {
+  return (
+    severity === 'medium' ||
+    severity === 'warning' ||
+    severity === 'high' ||
+    severity === 'error' ||
+    severity === 'critical'
+  );
+}
 
 export interface VigilStudentCard {
   /** Stable per-machine identity used everywhere else in this API. */

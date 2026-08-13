@@ -33,6 +33,16 @@ const EVENT_TYPE_ZH: Record<string, string> = {
   'telemetry.media_snapshot': '媒体设备遥测',
   'telemetry.monitor_snapshot': '监控遥测',
 
+  // Endpoint Service activity monitoring (P2.8)
+  'monitoring.usb_storage_detected': '检测到可移动存储设备',
+  'monitoring.usb_storage_removed': '可移动存储设备已移除',
+  'monitoring.forbidden_process_detected': '检测到禁用进程',
+  'monitoring.forbidden_process_cleared': '禁用进程已退出',
+  'monitoring.forbidden_window_detected': '检测到可疑前台窗口',
+  'monitoring.forbidden_window_cleared': '可疑前台窗口已离开',
+  'monitoring.monitoring_detector_failed': '终端检测器不可用',
+  'monitoring.monitoring_detector_recovered': '终端检测器已恢复',
+
   // Client lifecycle
   'client.connected': '客户端已连接',
   'client.disconnected': '客户端已断开',

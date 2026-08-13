@@ -10,6 +10,8 @@ describe('vigil event-type translation', () => {
     expect(translateEventType('telemetry.screenshot_failed')).to.equal('截屏失败');
     expect(translateEventType('network.blocked_navigation')).to.equal('已拦截导航');
     expect(translateEventType('ffmpeg_missing')).to.equal('ffmpeg 缺失');
+    expect(translateEventType('monitoring.forbidden_process_detected')).to.equal('检测到禁用进程');
+    expect(translateEventType('monitoring.monitoring_detector_failed')).to.equal('终端检测器不可用');
   });
 
   it('maps both spellings of the disconnect event to the same label', () => {

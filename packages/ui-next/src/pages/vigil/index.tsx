@@ -75,6 +75,7 @@ import {
   type VigilStudentCard as VigilStudentCardData,
   type VigilStudentListResponse,
   type VigilStudentStatus,
+  isVigilAnomalySeverity,
 } from '@/lib/vigil-api';
 import { useVigilSocket, type ContestSubscription, type VigilEventMessage } from '@/hooks/use-vigil-socket';
 import { useProctorCommands, notifyCommandResult } from '@/hooks/use-proctor-commands';
@@ -996,7 +997,7 @@ export function AdminVigilExamDetailPage() {
           setNewEventVersion((v) => v + 1);
         }
         // Severity >= warning → bump the student's local eventCount badge.
-        if (msg.severity === 'warning' || msg.severity === 'error' || msg.severity === 'critical') {
+        if (isVigilAnomalySeverity(msg.severity)) {
           setStudentResp((prev) => {
             if (!prev) return prev;
             const idx = prev.items.findIndex((s) => s.machineId === msg.machineId);

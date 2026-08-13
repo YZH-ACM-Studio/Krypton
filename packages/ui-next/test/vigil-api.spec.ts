@@ -10,6 +10,7 @@ import {
   getCachedVigilBaseUrl,
   invalidateExamSession,
   invalidateVigilTokenCache,
+  isVigilAnomalySeverity,
   listContestAudit,
   listContestStudents,
   prepareBrowserDownload,
@@ -96,6 +97,16 @@ async function captureError(p: Promise<unknown>): Promise<unknown> {
 
 beforeEach(() => {
   invalidateVigilTokenCache();
+});
+
+describe('vigil event severity', () => {
+  it('counts process and detector alerts without treating informational events as anomalies', () => {
+    expect(isVigilAnomalySeverity('high')).to.equal(true);
+    expect(isVigilAnomalySeverity('medium')).to.equal(true);
+    expect(isVigilAnomalySeverity('warning')).to.equal(true);
+    expect(isVigilAnomalySeverity('info')).to.equal(false);
+    expect(isVigilAnomalySeverity('low')).to.equal(false);
+  });
 });
 
 describe('vigil dashboard token', () => {

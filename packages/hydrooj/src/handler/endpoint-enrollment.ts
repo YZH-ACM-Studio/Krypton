@@ -1,10 +1,23 @@
 import { Logger } from '@hydrooj/utils';
 import { ObjectId } from 'mongodb';
 import { Context, Handler, OplogModel, param, PRIV, requireServiceToken, Types, ValidationError } from 'hydrooj';
-import { EndpointEnrollmentBatchDoc, EndpointEnrollmentError, endpointEnrollmentBatchService } from '../model/endpoint-enrollment';
+import {
+    EndpointEnrollmentBatchDoc,
+    EndpointEnrollmentError,
+    endpointEnrollmentBatchService,
+    endpointRegistrationService,
+} from '../model/endpoint-enrollment';
 import { revokeEndpointOnVigilStrict } from '../service/vigil-bridge';
 
 const logger = new Logger('endpoint-enrollment');
+
+function exactBody(value: unknown, keys: string[]): void {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ValidationError('body');
+    const body = value as Record<string, unknown>;
+    if (Object.keys(body).length !== keys.length || keys.some((key) => !Object.hasOwn(body, key))) {
+        throw new ValidationError('body');
+    }
+}
 
 function serializeBatch(batch: EndpointEnrollmentBatchDoc) {
     return {
@@ -141,13 +154,33 @@ abstract class VigilEndpointEnrollmentHandler extends Handler {
 
     async prepare() {
         requireServiceToken(this, 'vigil');
-        await endpointEnrollmentBatchService.ensureIndexes();
+        await Promise.all([endpointEnrollmentBatchService.ensureIndexes(), endpointRegistrationService.ensureIndexes()]);
     }
 
     protected reject(error: EndpointEnrollmentError, stage: string, claimId: string) {
         logger.warn('Endpoint enrollment rejected stage=%s claim=%s reason=%s', stage, claimId, error.reason);
         this.response.status = enrollmentErrorStatus(error.reason);
         this.response.body = { error: error.reason };
+    }
+}
+
+class VigilEndpointRegistrationEnsureHandler extends VigilEndpointEnrollmentHandler {
+    @param('endpointId', Types.String)
+    @param('machineFingerprint', Types.String)
+    async post(_args: unknown, endpointId: string, machineFingerprint: string) {
+        exactBody(this.request.body, ['endpointId', 'machineFingerprint']);
+        try {
+            const registration = await endpointRegistrationService.ensure({ endpointId, machineFingerprint });
+            this.response.body = {
+                domainId: registration.domainId,
+                endpointId: registration.endpointId,
+                machineFingerprint: registration.machineFingerprint,
+                revision: registration.revision,
+            };
+        } catch (error) {
+            if (!(error instanceof EndpointEnrollmentError)) throw error;
+            this.reject(error, 'automatic_registration', endpointId);
+        }
     }
 }
 
@@ -225,4 +258,5 @@ export async function apply(ctx: Context) {
     );
     ctx.Route('vigil_endpoint_enrollment_consume', '/api/vigil/endpoint-enrollment/consume', VigilEndpointEnrollmentConsumeHandler);
     ctx.Route('vigil_endpoint_enrollment_finalize', '/api/vigil/endpoint-enrollment/finalize', VigilEndpointEnrollmentFinalizeHandler);
+    ctx.Route('vigil_endpoint_registration_ensure', '/api/vigil/endpoint-registrations/ensure', VigilEndpointRegistrationEnsureHandler);
 }

@@ -905,6 +905,7 @@ declare module './service/db' {
         'practice.contexts': import('./model/practice-integrity').PracticeContextDoc;
         'practice.contextualCompletions': import('./model/contextual-completion').ContextualCompletionDoc;
         'endpoint.enrollmentBatches': import('./model/endpoint-enrollment').EndpointEnrollmentBatchDoc;
+        'endpoint.registrations': import('./model/endpoint-enrollment').EndpointRegistrationDoc;
         'exam.events': import('./model/exam-event').ExamEventDoc;
         'exam.classrooms': import('./lib/classsignin-classroom-migration').ExamClassroomDoc;
         'exam.classroomImportBatches': import('./lib/classsignin-classroom-migration').ClassSigninClassroomMigrationBatchDoc;
@@ -1006,7 +1007,10 @@ export interface Model {
         | 'trustedPracticeContextReference'
     >;
     contextualCompletion: Pick<typeof import('./model/contextual-completion'), 'contextualCompletionColl' | 'contextualCompletionService'>;
-    endpointEnrollment: Pick<typeof import('./model/endpoint-enrollment'), 'endpointEnrollmentBatchColl' | 'endpointEnrollmentBatchService'>;
+    endpointEnrollment: Pick<
+        typeof import('./model/endpoint-enrollment'),
+        'endpointEnrollmentBatchColl' | 'endpointEnrollmentBatchService' | 'endpointRegistrationColl' | 'endpointRegistrationService'
+    >;
     endpointSeatBinding: Pick<
         typeof import('./model/endpoint-seat-binding'),
         'endpointSeatBindingColl' | 'endpointSeatPairingWindowColl' | 'endpointSeatBindingService'

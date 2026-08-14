@@ -29,9 +29,16 @@ describe('endpoint enrollment HTTP boundary', () => {
 
     it('requires the Vigil service channel for consume and finalize', () => {
         expect(source).to.include("requireServiceToken(this, 'vigil')");
-        expect(source).to.include('await endpointEnrollmentBatchService.ensureIndexes()');
+        expect(source).to.include('endpointEnrollmentBatchService.ensureIndexes()');
         expect(source).to.include("'/api/vigil/endpoint-enrollment/consume'");
         expect(source).to.include("'/api/vigil/endpoint-enrollment/finalize'");
+    });
+
+    it('allows Vigil to ensure only deterministic machine registrations', () => {
+        expect(source).to.include("'/api/vigil/endpoint-registrations/ensure'");
+        expect(source).to.include('endpointRegistrationService.ensure({ endpointId, machineFingerprint })');
+        expect(source).to.include("exactBody(this.request.body, ['endpointId', 'machineFingerprint'])");
+        expect(source).to.include("requireServiceToken(this, 'vigil')");
     });
 
     it('keeps the raw decorator argument separate from canonical parameters', () => {

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { ObjectId } from 'mongodb';
 import { ExamNetworkConfigError, ExamTargetResolution, ExamTargetResolverInput } from '../model/exam-network-config';
-import { endpointEnrollmentBatchColl } from '../model/endpoint-enrollment';
+import { endpointEnrollmentBatchColl, endpointIdForMachineFingerprint, endpointRegistrationColl } from '../model/endpoint-enrollment';
 import { endpointSeatBindingService } from '../model/endpoint-seat-binding';
 import { examClassroomService } from '../model/exam-classroom';
 import { examSeatAssignmentService } from '../model/exam-seat-assignment';
@@ -165,8 +165,11 @@ export async function resolveExamTargetSources(input: ExamTargetResolverInput): 
     if (new Set(endpointIds).size !== endpointIds.length) {
         throw new ExamNetworkConfigError('duplicate_endpoint');
     }
-    const batches = await endpointEnrollmentBatchColl.find({ 'claims.endpointId': { $in: endpointIds } }).toArray();
-    const ownershipFacts = batches.flatMap((batch) =>
+    const [batches, registrations] = await Promise.all([
+        endpointEnrollmentBatchColl.find({ 'claims.endpointId': { $in: endpointIds } }).toArray(),
+        endpointRegistrationColl.find({ endpointId: { $in: endpointIds } }).toArray(),
+    ]);
+    const legacyOwnershipFacts = batches.flatMap((batch) =>
         batch.claims
             .filter((claim) => claim.endpointId && endpointIds.includes(claim.endpointId))
             .map((claim) => ({
@@ -177,6 +180,15 @@ export async function resolveExamTargetSources(input: ExamTargetResolverInput): 
                 finalizedAt: claim.finalizedAt,
             })),
     );
+    const automaticOwnershipFacts = registrations.map((registration) => ({
+        endpointId: registration.endpointId,
+        domainId: registration.domainId,
+        registrationId: registration._id.toHexString(),
+        machineFingerprint: registration.machineFingerprint,
+        finalizedAt: registration.registeredAt,
+        revision: registration.revision,
+    }));
+    const ownershipFacts = [...legacyOwnershipFacts, ...automaticOwnershipFacts];
     ownershipFacts.sort((left, right) => canonicalCompare(left.endpointId, right.endpointId));
     if (
         ownershipFacts.length !== endpointIds.length ||
@@ -186,7 +198,11 @@ export async function resolveExamTargetSources(input: ExamTargetResolverInput): 
                 !(fact.finalizedAt instanceof Date) ||
                 !Number.isFinite(fact.finalizedAt.getTime()) ||
                 fact.finalizedAt > observedAt ||
-                fact.domainId !== input.domainId,
+                fact.domainId !== input.domainId ||
+                ('registrationId' in fact &&
+                    (fact.revision !== 1 ||
+                        !/^[a-f0-9]{64}$/.test(fact.machineFingerprint) ||
+                        endpointIdForMachineFingerprint(fact.machineFingerprint) !== fact.endpointId)),
         )
     ) {
         throw new ExamNetworkConfigError('endpoint_not_owned');

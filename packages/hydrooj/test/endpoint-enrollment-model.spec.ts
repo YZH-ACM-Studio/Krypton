@@ -2,7 +2,11 @@ import { createHash } from 'node:crypto';
 import { describe, it } from 'node:test';
 import { expect } from 'chai';
 import { ObjectId } from 'mongodb';
-import type { EndpointEnrollmentBatchDoc, EndpointEnrollmentError as EndpointEnrollmentErrorType } from '../src/model/endpoint-enrollment';
+import type {
+    EndpointEnrollmentBatchDoc,
+    EndpointEnrollmentError as EndpointEnrollmentErrorType,
+    EndpointRegistrationDoc,
+} from '../src/model/endpoint-enrollment';
 
 function sameValue(left: unknown, right: unknown): boolean {
     if (left instanceof ObjectId || right instanceof ObjectId) return String(left) === String(right);
@@ -142,16 +146,60 @@ class MemoryCollection {
     }
 }
 
+class MemoryRegistrationCollection {
+    docs: EndpointRegistrationDoc[] = [];
+    indexes: Array<{ key: Record<string, number>; options: Record<string, unknown> }> = [];
+
+    async createIndex(key: Record<string, number>, options: Record<string, unknown> = {}) {
+        this.indexes.push({ key, options });
+        return String(options.name || 'index');
+    }
+
+    async findOne(filter: Record<string, unknown>) {
+        return (
+            this.docs.find((doc) => Object.entries(filter).every(([key, value]) => sameValue(doc[key as keyof EndpointRegistrationDoc], value))) ||
+            null
+        );
+    }
+
+    async insertOne(doc: EndpointRegistrationDoc) {
+        const duplicate = this.docs.find(
+            (candidate) => candidate.endpointId === doc.endpointId || candidate.machineFingerprint === doc.machineFingerprint,
+        );
+        if (duplicate) {
+            const endpointDuplicate = duplicate.endpointId === doc.endpointId;
+            const key = endpointDuplicate ? 'endpointId' : 'machineFingerprint';
+            throw Object.assign(new Error('duplicate key'), {
+                code: 11000,
+                keyPattern: { [key]: 1 },
+                keyValue: { [key]: doc[key] },
+            });
+        }
+        this.docs.push({ ...doc, _id: new ObjectId(doc._id), registeredAt: new Date(doc.registeredAt) });
+        return { insertedId: doc._id };
+    }
+
+    async deleteMany(filter: Record<string, unknown>) {
+        this.docs = this.docs.filter(
+            (doc) => !Object.entries(filter).every(([key, value]) => sameValue(doc[key as keyof EndpointRegistrationDoc], value)),
+        );
+        return { acknowledged: true };
+    }
+}
+
 const dbPath = require.resolve('../src/service/db.ts');
 const previousDbCache = require.cache[dbPath];
 const productionCollection = new MemoryCollection();
+const productionRegistrationCollection = new MemoryRegistrationCollection();
 require.cache[dbPath] = {
     id: dbPath,
     filename: dbPath,
     loaded: true,
     exports: {
         __esModule: true,
-        default: { collection: () => productionCollection },
+        default: {
+            collection: (name: string) => (name === 'endpoint.registrations' ? productionRegistrationCollection : productionCollection),
+        },
     },
 } as NodeModule;
 (global as unknown as { Hydro: { model: Record<string, unknown> } }).Hydro = { model: {} };
@@ -159,7 +207,7 @@ const enrollmentModule = require('../src/model/endpoint-enrollment.ts') as typeo
 if (previousDbCache) require.cache[dbPath] = previousDbCache;
 else delete require.cache[dbPath];
 
-const { EndpointEnrollmentBatchService, EndpointEnrollmentError } = enrollmentModule;
+const { EndpointEnrollmentBatchService, EndpointEnrollmentError, EndpointRegistrationService } = enrollmentModule;
 
 const fixedCode = `KVE1-${'A'.repeat(32)}`;
 const publicKeyFingerprint = '1'.repeat(64);
@@ -423,5 +471,49 @@ describe('endpoint enrollment batch canonical model', () => {
             }),
         );
         expect(invalid?.reason).to.equal('replacement_capacity');
+    });
+});
+
+describe('automatic endpoint registration canonical model', () => {
+    it('derives endpoint identity from the full fingerprint and is idempotent', async () => {
+        const registrations = new MemoryRegistrationCollection();
+        const service = new EndpointRegistrationService({
+            registrations: registrations as never,
+            now: () => new Date('2026-08-14T01:02:03.000Z'),
+            idFactory: () => new ObjectId('66b800000000000000000099'),
+        });
+        await service.ensureIndexes();
+        expect(registrations.indexes).to.deep.equal([
+            { key: { endpointId: 1 }, options: { name: 'endpointRegistrationEndpoint', unique: true } },
+            { key: { machineFingerprint: 1 }, options: { name: 'endpointRegistrationMachine', unique: true } },
+        ]);
+
+        const input = {
+            endpointId: 'ep_IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI',
+            machineFingerprint: '2'.repeat(64),
+        };
+        const first = await service.ensure(input);
+        const second = await service.ensure(input);
+        expect(second).to.deep.equal(first);
+        expect(registrations.docs).to.have.length(1);
+        expect(first).to.deep.include({
+            domainId: 'system',
+            endpointId: input.endpointId,
+            machineFingerprint: input.machineFingerprint,
+            revision: 1,
+        });
+    });
+
+    it('rejects an endpoint id that was not derived from the machine fingerprint', async () => {
+        const registrations = new MemoryRegistrationCollection();
+        const service = new EndpointRegistrationService({ registrations: registrations as never });
+        const error = await capture(() =>
+            service.ensure({
+                endpointId: 'ep_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+                machineFingerprint: '2'.repeat(64),
+            }),
+        );
+        expect(error?.reason).to.equal('endpoint_identity_mismatch');
+        expect(registrations.docs).to.have.length(0);
     });
 });

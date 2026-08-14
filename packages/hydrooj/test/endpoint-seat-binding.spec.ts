@@ -54,7 +54,7 @@ let now = fixedNow;
 let codeCounter = 0;
 const domains = new Set<string>();
 const seats = new Map<string, SeatLocation>();
-const endpoints = new Map<string, { domainId: string; replacesEndpointId?: string }>();
+const endpoints = new Map<string, { domainId: string; replacesEndpointId?: string; automaticRegistration?: true }>();
 let references: EndpointSeatReferenceFact[] = [];
 let referenceResolutionCalls: Array<{ domainId: string; endpointIds: string[] }> = [];
 let beforeResolveReferences: (() => Promise<void>) | undefined;
@@ -75,6 +75,10 @@ function addSeat(sourceSeatId: string, classroomId = classroomOne, schoolId = sc
 
 function own(endpointId: string, domainId = 'system', replacesEndpointId?: string): void {
     endpoints.set(endpointId, { domainId, ...(replacesEndpointId ? { replacesEndpointId } : {}) });
+}
+
+function ownAutomatic(endpointId: string, domainId = 'system'): void {
+    endpoints.set(endpointId, { domainId, automaticRegistration: true });
 }
 
 function makeService(
@@ -929,6 +933,55 @@ describe('P2.2 endpoint seat binding canonical and pairing state machine', () =>
             endpointId: 'ep_new_machine_123456',
         });
         expect(references).to.have.length(2);
+    });
+
+    it('lets an automatically registered machine use the existing administrator-confirmed replacement flow', async () => {
+        own('ep_auto_replace_old_1234');
+        ownAutomatic('ep_auto_replace_new_1234');
+        const service = makeService();
+        await service.ensureIndexes();
+        const initial = await openWindow(service, ['seat-1']);
+        await service.redeemPairingCode({
+            endpointId: 'ep_auto_replace_old_1234',
+            pairingCode: initial.codes[0].code,
+            requestId: 'endpoint_auto_initial_0001',
+        });
+        const firstWindow = (await windows.findOne({ _id: initial.window._id }))!;
+        now = new Date(firstWindow.expiresAt.getTime() + 1);
+        const replacement = await openWindow(service, ['seat-1'], ['seat-1'], classroomOne, firstWindow.revision);
+        const claimed = await service.redeemPairingCode({
+            endpointId: 'ep_auto_replace_new_1234',
+            pairingCode: replacement.codes[0].code,
+            requestId: 'endpoint_auto_replace_0001',
+        });
+        expect(claimed.status).to.equal('replacement_confirmation_required');
+        const preview = await service.previewReplacement({
+            domainId: 'system',
+            classroomId: classroomOne,
+            windowId: replacement.window.windowId,
+            sourceSeatId: 'seat-1',
+        });
+        expect(preview).to.include({
+            oldEndpointId: 'ep_auto_replace_old_1234',
+            newEndpointId: 'ep_auto_replace_new_1234',
+        });
+        const bound = await service.confirmReplacement({
+            domainId: 'system',
+            classroomId: classroomOne,
+            windowId: replacement.window.windowId,
+            sourceSeatId: 'seat-1',
+            expectedEntryRevision: claimed.entryRevision,
+            expectedBindingRevision: 1,
+            confirmationFingerprint: preview.confirmationFingerprint,
+            actorUid: 7,
+            requestId: 'admin_auto_replace_0001',
+        });
+        expect(bound.endpointId).to.equal('ep_auto_replace_new_1234');
+        expect(bound.history[1]).to.include({
+            action: 'replace',
+            previousEndpointId: 'ep_auto_replace_old_1234',
+            endpointId: 'ep_auto_replace_new_1234',
+        });
     });
 
     it('requires a fresh reference fingerprint for unbind and preserves the entire endpoint history', async () => {

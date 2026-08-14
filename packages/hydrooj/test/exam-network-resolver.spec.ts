@@ -19,6 +19,7 @@ async function loadResolver(
         bindings?: unknown[];
         layouts?: Map<string, Array<{ sourceSeatId: string; [key: string]: unknown }>>;
         publication?: unknown;
+        registrations?: unknown[];
     } = {},
 ) {
     const resolverPath = require.resolve('../src/lib/exam-network-resolver.ts');
@@ -32,6 +33,10 @@ async function loadResolver(
                 endpointEnrollmentBatchColl: {
                     find: () => ({ toArray: async () => batches }),
                 },
+                endpointRegistrationColl: {
+                    find: () => ({ toArray: async () => options.registrations || [] }),
+                },
+                endpointIdForMachineFingerprint: (fingerprint: string) => `ep_${Buffer.from(fingerprint, 'hex').toString('base64url')}`,
             };
         }
         if (parent?.filename === resolverPath && request === '../model/exam-classroom') {
@@ -152,6 +157,36 @@ describe('exam endpoint target resolver', () => {
                 capabilities: [{ name: 'network.policy', version: 1, commands: networkCommands }],
             },
         ]);
+    });
+
+    it('resolves an automatically registered endpoint without a legacy enrollment batch', async () => {
+        const endpointId = 'ep_IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI';
+        const resolver = await loadResolver(
+            [],
+            async () => [
+                {
+                    endpointId,
+                    credentialStatus: 'active',
+                    compatible: true,
+                    capabilities: [{ name: 'network.policy', version: 1, commands: networkCommands }],
+                },
+            ],
+            {
+                registrations: [
+                    {
+                        _id: new ObjectId('66b800000000000000000a39'),
+                        domainId: 'system',
+                        endpointId,
+                        machineFingerprint: '2'.repeat(64),
+                        registeredAt: new Date('2026-08-11T01:00:00.000Z'),
+                        revision: 1,
+                    },
+                ],
+            },
+        );
+
+        const result = await resolver.resolveExamTargetSources(input('endpoint', [endpointId]));
+        expect(result.endpoints.map((item) => item.endpointId)).to.deep.equal([endpointId]);
     });
 
     it('rejects an ownership finalization from the future before contacting Vigil', async () => {

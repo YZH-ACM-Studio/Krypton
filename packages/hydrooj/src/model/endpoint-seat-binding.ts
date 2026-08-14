@@ -1,10 +1,10 @@
 import { createHash, randomInt } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { BSON, Collection, Filter, ObjectId } from 'mongodb';
-import { Context } from '../context';
+import type { Context } from '../context';
 import db from '../service/db';
 import { ExamClassroomService, examClassroomService } from './exam-classroom';
-import { endpointEnrollmentBatchColl } from './endpoint-enrollment';
+import { endpointEnrollmentBatchColl, endpointIdForMachineFingerprint, endpointRegistrationColl } from './endpoint-enrollment';
 import { examEventColl } from './exam-event';
 import { ExamEventNetworkConfigDoc, ExamTargetAssignmentDoc, examEventNetworkConfigColl, examTargetAssignmentColl } from './exam-network-config';
 import { ExamNetworkExecutionDoc, examNetworkExecutionColl } from './exam-network-execution';
@@ -144,10 +144,15 @@ interface EndpointSeatClassroomLocation {
 interface EndpointOwnership {
     domainId: string;
     replacesEndpointId?: string;
+    automaticRegistration?: true;
 }
 
 type BindingCollection = Pick<Collection<EndpointSeatBindingDoc>, 'createIndex' | 'deleteMany' | 'find' | 'findOne' | 'insertOne' | 'replaceOne'>;
 type WindowCollection = Pick<Collection<EndpointSeatPairingWindowDoc>, 'createIndex' | 'deleteMany' | 'findOne' | 'insertOne' | 'replaceOne'>;
+
+function permitsEndpointReplacement(ownership: EndpointOwnership, currentEndpointId: string): boolean {
+    return ownership.replacesEndpointId === currentEndpointId || ownership.automaticRegistration === true;
+}
 
 interface EndpointSeatBindingServiceOptions {
     bindings: BindingCollection;
@@ -1232,7 +1237,9 @@ export class EndpointSeatBindingService {
                 if ((binding?.revision || 0) !== entry.expectedBindingRevision) throw new EndpointSeatBindingError('binding_revision_conflict');
                 if (entry.mode === 'replace') {
                     if (!binding || binding.status !== 'active') throw new EndpointSeatBindingError('seat_not_bound');
-                    if (ownership.replacesEndpointId !== binding.endpointId) throw new EndpointSeatBindingError('endpoint_not_replacement');
+                    if (!permitsEndpointReplacement(ownership, binding.endpointId)) {
+                        throw new EndpointSeatBindingError('endpoint_not_replacement');
+                    }
                 } else if (binding?.status === 'active') {
                     throw new EndpointSeatBindingError('seat_already_bound');
                 }
@@ -1497,7 +1504,7 @@ export class EndpointSeatBindingService {
         }
         const ownership = await this.requireOwnership(entry.claimedEndpointId);
         if (ownership.domainId !== input.domainId) throw new EndpointSeatBindingError('endpoint_domain_mismatch');
-        if (ownership.replacesEndpointId !== binding.endpointId) throw new EndpointSeatBindingError('endpoint_not_replacement');
+        if (!permitsEndpointReplacement(ownership, binding.endpointId)) throw new EndpointSeatBindingError('endpoint_not_replacement');
         const references = await this.referencesFor(binding, [binding.endpointId, entry.claimedEndpointId]);
         const fingerprint = confirmationFingerprint({
             action: 'replace',
@@ -1811,11 +1818,36 @@ async function loadProductionClassroomSeats(
 }
 
 async function loadProductionEndpointOwnership(endpointId: string, observedAt: Date): Promise<EndpointOwnership | null> {
-    const batches = await endpointEnrollmentBatchColl.find({ 'claims.endpointId': endpointId }).toArray();
-    const facts = batches.flatMap((batch) => batch.claims.filter((claim) => claim.endpointId === endpointId).map((claim) => ({ batch, claim })));
+    const [batches, registrations] = await Promise.all([
+        endpointEnrollmentBatchColl.find({ 'claims.endpointId': endpointId }).toArray(),
+        endpointRegistrationColl.find({ endpointId }).toArray(),
+    ]);
+    const facts = [
+        ...batches.flatMap((batch) =>
+            batch.claims.filter((claim) => claim.endpointId === endpointId).map((claim) => ({ kind: 'legacy' as const, batch, claim })),
+        ),
+        ...registrations.map((registration) => ({ kind: 'automatic' as const, registration })),
+    ];
     if (!facts.length) return null;
     if (facts.length !== 1) throw new EndpointSeatBindingError('endpoint_ownership_invalid');
-    const { batch, claim } = facts[0];
+    const fact = facts[0];
+    if (fact.kind === 'automatic') {
+        const { registration } = fact;
+        if (
+            registration.domainId !== 'system' ||
+            registration.endpointId !== endpointId ||
+            registration.revision !== 1 ||
+            !/^[a-f0-9]{64}$/.test(registration.machineFingerprint) ||
+            endpointIdForMachineFingerprint(registration.machineFingerprint) !== endpointId ||
+            !(registration.registeredAt instanceof Date) ||
+            !Number.isFinite(registration.registeredAt.getTime()) ||
+            registration.registeredAt > observedAt
+        ) {
+            throw new EndpointSeatBindingError('endpoint_ownership_invalid');
+        }
+        return { domainId: registration.domainId, automaticRegistration: true };
+    }
+    const { batch, claim } = fact;
     if (!(claim.finalizedAt instanceof Date) || !Number.isFinite(claim.finalizedAt.getTime()) || claim.finalizedAt > observedAt) {
         throw new EndpointSeatBindingError('endpoint_ownership_invalid');
     }

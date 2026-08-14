@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { Collection, ObjectId } from 'mongodb';
 import db from '../service/db';
+import { settleDomainCleanupOperations } from './domain-lifecycle-boundary';
 
 export type EndpointEnrollmentBatchStatus = 'active' | 'revoked';
 
@@ -34,16 +35,33 @@ export interface EndpointEnrollmentBatchDoc {
     revision: number;
 }
 
+export interface EndpointRegistrationDoc {
+    _id: ObjectId;
+    domainId: 'system';
+    endpointId: string;
+    machineFingerprint: string;
+    registeredAt: Date;
+    revision: number;
+}
+
 type BatchCollection = Pick<
     Collection<EndpointEnrollmentBatchDoc>,
     'createIndex' | 'deleteMany' | 'find' | 'findOne' | 'findOneAndUpdate' | 'insertOne' | 'updateOne'
 >;
+
+type RegistrationCollection = Pick<Collection<EndpointRegistrationDoc>, 'createIndex' | 'deleteMany' | 'findOne' | 'insertOne'>;
 
 interface EndpointEnrollmentBatchServiceOptions {
     batches: BatchCollection;
     now?: () => Date;
     idFactory?: () => ObjectId;
     codeFactory?: () => string;
+}
+
+interface EndpointRegistrationServiceOptions {
+    registrations: RegistrationCollection;
+    now?: () => Date;
+    idFactory?: () => ObjectId;
 }
 
 interface CreateBatchInput {
@@ -114,6 +132,12 @@ function canonicalEndpointId(value: string, field = 'endpointId'): string {
     const endpointId = value.trim();
     if (!ENDPOINT_PATTERN.test(endpointId)) throw new TypeError(`${field} is invalid`);
     return endpointId;
+}
+
+export function endpointIdForMachineFingerprint(machineFingerprint: string): string {
+    const canonical = machineFingerprint.trim().toLowerCase();
+    if (!SHA256_PATTERN.test(canonical)) throw new EndpointEnrollmentError('invalid_machine_fingerprint');
+    return `ep_${Buffer.from(canonical, 'hex').toString('base64url')}`;
 }
 
 function canonicalClaimInput(input: ConsumeEnrollmentInput): ConsumeEnrollmentInput & { codeDigest: string } {
@@ -202,11 +226,7 @@ export class EndpointEnrollmentBatchService {
         ) {
             throw new EndpointEnrollmentError('invalid_expiry');
         }
-        if (
-            !Number.isSafeInteger(input.maxEnrollments) ||
-            input.maxEnrollments < 1 ||
-            input.maxEnrollments > MAX_BATCH_ENROLLMENTS
-        ) {
+        if (!Number.isSafeInteger(input.maxEnrollments) || input.maxEnrollments < 1 || input.maxEnrollments > MAX_BATCH_ENROLLMENTS) {
             throw new EndpointEnrollmentError('invalid_capacity');
         }
         const replacesEndpointId = input.replacesEndpointId ? canonicalEndpointId(input.replacesEndpointId, 'replacesEndpointId') : undefined;
@@ -387,17 +407,98 @@ export class EndpointEnrollmentBatchService {
     }
 }
 
+export class EndpointRegistrationService {
+    private readonly registrations: RegistrationCollection;
+    private readonly now: () => Date;
+    private readonly idFactory: () => ObjectId;
+    private indexesPromise?: Promise<void>;
+
+    constructor(options: EndpointRegistrationServiceOptions) {
+        this.registrations = options.registrations;
+        this.now = options.now || (() => new Date());
+        this.idFactory = options.idFactory || (() => new ObjectId());
+    }
+
+    ensureIndexes(): Promise<void> {
+        this.indexesPromise ||= Promise.all([
+            this.registrations.createIndex({ endpointId: 1 }, { name: 'endpointRegistrationEndpoint', unique: true }),
+            this.registrations.createIndex({ machineFingerprint: 1 }, { name: 'endpointRegistrationMachine', unique: true }),
+        ]).then(() => undefined);
+        return this.indexesPromise;
+    }
+
+    private async readExact(endpointId: string, machineFingerprint: string): Promise<EndpointRegistrationDoc | null> {
+        const [byEndpoint, byMachine] = await Promise.all([
+            this.registrations.findOne({ endpointId }),
+            this.registrations.findOne({ machineFingerprint }),
+        ]);
+        if (!byEndpoint && !byMachine) return null;
+        if (
+            !byEndpoint ||
+            !byMachine ||
+            !byEndpoint._id.equals(byMachine._id) ||
+            byEndpoint.domainId !== 'system' ||
+            byEndpoint.endpointId !== endpointId ||
+            byEndpoint.machineFingerprint !== machineFingerprint ||
+            !(byEndpoint.registeredAt instanceof Date) ||
+            !Number.isFinite(byEndpoint.registeredAt.getTime()) ||
+            byEndpoint.revision !== 1
+        ) {
+            throw new EndpointEnrollmentError('registration_conflict');
+        }
+        return byEndpoint;
+    }
+
+    async ensure(input: { endpointId: string; machineFingerprint: string }): Promise<EndpointRegistrationDoc> {
+        const machineFingerprint = input.machineFingerprint.trim().toLowerCase();
+        const endpointId = canonicalEndpointId(input.endpointId);
+        if (endpointId !== endpointIdForMachineFingerprint(machineFingerprint)) {
+            throw new EndpointEnrollmentError('endpoint_identity_mismatch');
+        }
+        const existing = await this.readExact(endpointId, machineFingerprint);
+        if (existing) return existing;
+        const registeredAt = this.now();
+        if (!(registeredAt instanceof Date) || !Number.isFinite(registeredAt.getTime())) throw new TypeError('now is invalid');
+        const registration: EndpointRegistrationDoc = {
+            _id: this.idFactory(),
+            domainId: 'system',
+            endpointId,
+            machineFingerprint,
+            registeredAt,
+            revision: 1,
+        };
+        try {
+            await this.registrations.insertOne(registration);
+            return registration;
+        } catch (error) {
+            if (!isExactDuplicate(error, 'endpointId', endpointId) && !isExactDuplicate(error, 'machineFingerprint', machineFingerprint)) {
+                throw error;
+            }
+            const raced = await this.readExact(endpointId, machineFingerprint);
+            if (raced) return raced;
+            throw new EndpointEnrollmentError('registration_conflict');
+        }
+    }
+}
+
 export const endpointEnrollmentBatchColl = db.collection<EndpointEnrollmentBatchDoc>('endpoint.enrollmentBatches');
 export const endpointEnrollmentBatchService = new EndpointEnrollmentBatchService({ batches: endpointEnrollmentBatchColl });
+export const endpointRegistrationColl = db.collection<EndpointRegistrationDoc>('endpoint.registrations');
+export const endpointRegistrationService = new EndpointRegistrationService({ registrations: endpointRegistrationColl });
 
 export async function apply(ctx: any): Promise<void> {
-    await endpointEnrollmentBatchService.ensureIndexes();
+    await Promise.all([endpointEnrollmentBatchService.ensureIndexes(), endpointRegistrationService.ensureIndexes()]);
     ctx.on('domain/delete', async (domainId: string) => {
-        await endpointEnrollmentBatchColl.deleteMany({ domainId });
+        await settleDomainCleanupOperations(domainId, [
+            () => endpointEnrollmentBatchColl.deleteMany({ domainId }),
+            () => (domainId === 'system' ? endpointRegistrationColl.deleteMany({ domainId: 'system' }) : Promise.resolve()),
+        ]);
     });
 }
 
 global.Hydro.model.endpointEnrollment = {
     endpointEnrollmentBatchColl,
     endpointEnrollmentBatchService,
+    endpointRegistrationColl,
+    endpointRegistrationService,
 };

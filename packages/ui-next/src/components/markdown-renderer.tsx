@@ -27,6 +27,7 @@ import {
   type AntiAiMarkerDraft,
 } from '@/lib/anti-ai-marker';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
+import { createRequestId } from '@/lib/request-id';
 import { splitMarkdownBySamples, splitMarkdownBySamplesPositioned, type PositionedMarkdownChunk } from '@/lib/samples';
 import { SampleBlocks, type SampleAntiAiMarker } from '@/components/sample-blocks';
 import { Button } from '@/components/ui/button';
@@ -362,10 +363,7 @@ function imageExtension(type: string): string {
 }
 
 function makeUploadToken(): string {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
-    return crypto.randomUUID().replace(/-/g, '');
-  }
-  return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+  return createRequestId().replaceAll('-', '');
 }
 
 export interface MarkdownEditorProps {

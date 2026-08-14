@@ -165,6 +165,32 @@ describe('markdown image paste uploads', () => {
     vi.unstubAllGlobals();
   });
 
+  it('uploads on HTTP origins where crypto.randomUUID exists but is not callable', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('crypto', {
+      randomUUID: undefined,
+      getRandomValues: (bytes: Uint8Array) => {
+        bytes.set([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
+        return bytes;
+      },
+    });
+
+    render(<MarkerProblemStatementPaste />);
+    fireEvent.paste(screen.getByPlaceholderText(/在此输入 Markdown 内容/), {
+      clipboardData: imageClipboard(new File(['png'], 'clipboard.png', { type: 'image/png' })),
+    });
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    const form = fetchMock.mock.calls[0]?.[1]?.body as FormData;
+    expect(form.get('filename')).toBe('000102030405460788090a0b0c0d0e0f.png');
+  });
+
   it('gets a fresh active-contest confirmation before uploading a problem statement image', async () => {
     const fetchMock = activeContestFetch();
     vi.stubGlobal('fetch', fetchMock);

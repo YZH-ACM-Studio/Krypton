@@ -42,6 +42,7 @@ import { Input } from '@/components/ui/input';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
+import { createRequestId } from '@/lib/request-id';
 
 type SeatStatus = 'conflict' | 'identity-change' | 'offline' | 'online' | 'unbound' | 'unknown';
 type BindingStatus = 'active' | 'unbound';
@@ -475,7 +476,7 @@ function postJson(path: string, body: Record<string, unknown>, fallback: string)
 }
 
 function requestId(prefix: string): string {
-  return `${prefix}_${crypto.randomUUID().replaceAll('-', '')}`;
+  return `${prefix}_${createRequestId().replaceAll('-', '')}`;
 }
 
 function formatDate(value: string): string {
@@ -543,11 +544,17 @@ function deriveSeatViews(state: ClassroomState, now: number): SeatView[] {
     const endpoint = activeBinding?.endpointId || null;
     const item = endpoint ? preflight.get(endpoint) || null : null;
     const references = endpoint ? state.references.filter((reference) => reference.endpointId === endpoint) : [];
+    const pendingEntry = entry && (entry.status === 'open' || entry.status === 'claimed') ? entry : null;
+    const completedBindingConflict = Boolean(
+      entry?.status === 'bound' &&
+      (!activeBinding || entry.claimedEndpointId !== activeBinding.endpointId || entry.bindingRevision !== activeBinding.revision),
+    );
     const modeConflict = Boolean(
-      entry &&
-      ((entry.mode === 'bind' && activeBinding) ||
-        (entry.mode === 'replace' && !activeBinding) ||
-        (entry.status === 'claimed' && !entry.claimedEndpointId)),
+      completedBindingConflict ||
+      (pendingEntry &&
+        ((pendingEntry.mode === 'bind' && activeBinding) ||
+          (pendingEntry.mode === 'replace' && !activeBinding) ||
+          (pendingEntry.status === 'claimed' && !pendingEntry.claimedEndpointId))),
     );
     const healthConflict = Boolean(
       activeBinding &&
@@ -1101,6 +1108,9 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
   const views = useMemo(() => (state ? deriveSeatViews(state, clock) : []), [clock, state]);
   const selected = views.find((view) => view.seat.sourceSeatId === selectedSeatId) || null;
   const currentWindow = state ? activeWindow(state.pairingWindow, clock) : null;
+  const currentWindowCompleted = Boolean(
+    currentWindow && currentWindow.entries.every((entry) => entry.status === 'bound' || entry.status === 'cancelled'),
+  );
 
   useEffect(() => {
     if (!state?.classroom.layout.seats.length) return;
@@ -1506,14 +1516,16 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
           <div>
             <p className="flex items-center gap-2 text-sm font-medium text-cyan-950 dark:text-cyan-50">
               <Activity className="size-4" aria-hidden="true" />
-              配对窗口进行中 · r{currentWindow.revision}
+              {currentWindowCompleted ? '配对已完成' : '配对窗口进行中'} · r{currentWindow.revision}
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
-              {currentWindow.entries.length} 个座位 · {formatDate(currentWindow.expiresAt)} 到期 · 页面仅在窗口期间轮询响应
+              {currentWindowCompleted
+                ? `${currentWindow.entries.length} 个座位均已处理；关闭窗口后可继续为下一座位生成配对码。`
+                : `${currentWindow.entries.length} 个座位 · ${formatDate(currentWindow.expiresAt)} 到期 · 页面仅在窗口期间轮询响应`}
             </p>
           </div>
           <Button variant="outline" disabled={busy} onClick={closeWindow}>
-            关闭窗口
+            {currentWindowCompleted ? '关闭并继续下一台' : '关闭窗口'}
           </Button>
           {recentSeatId ? (
             <Button

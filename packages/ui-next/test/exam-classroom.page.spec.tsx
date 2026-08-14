@@ -183,6 +183,12 @@ describe('exam classroom endpoint binding workspace', () => {
   });
 
   it('keeps a newly generated pairing code in page memory and sends the exact P2.2 CAS identity', async () => {
+    vi.stubGlobal('crypto', {
+      getRandomValues(bytes: Uint8Array) {
+        bytes.fill(0x2a);
+        return bytes;
+      },
+    });
     window.history.replaceState({}, '', `/admin/exam-infrastructure/classrooms/${CLASSROOM_ID}?seat=seat-3`);
     const expiresAt = new Date(Date.now() + 5 * 60_000).toISOString();
     const openWindow = {
@@ -212,6 +218,7 @@ describe('exam classroom endpoint binding workspace', () => {
     const afterOpen = stateFixture({ pairingWindow: openWindow });
     let opened = false;
     let completed = false;
+    let drifted = false;
     let failNextReload = false;
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === 'POST') {
@@ -256,7 +263,7 @@ describe('exam classroom endpoint binding workspace', () => {
                   ...openWindow.entries[0],
                   status: 'bound',
                   revision: 3,
-                  claimedEndpointId: 'ep_newly_bound_003',
+                  claimedEndpointId: drifted ? 'ep_drifted_00000003' : 'ep_newly_bound_003',
                   claimedAt: '2026-08-11T01:01:00.000Z',
                   bindingRevision: 1,
                   completedAt: '2026-08-11T01:01:01.000Z',
@@ -298,6 +305,16 @@ describe('exam classroom endpoint binding workspace', () => {
     await user.click(screen.getByRole('button', { name: '刷新状态' }));
     expect(await screen.findByRole('button', { name: '撤销刚完成的绑定' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '定位最近响应' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /很长的座位显示名称 A-03，已绑定 · 在线/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /很长的座位显示名称 A-03，冲突/ })).not.toBeInTheDocument();
+    expect(screen.getByText('配对已完成 · r3')).toBeInTheDocument();
+    expect(screen.queryByText('配对窗口进行中 · r3')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '关闭并继续下一台' })).toBeInTheDocument();
+    expect(await screen.findByText(/很长的座位显示名称 A-03 已绑定/)).toBeInTheDocument();
+
+    drifted = true;
+    await user.click(screen.getByRole('button', { name: '刷新状态' }));
+    expect(await screen.findByRole('button', { name: /很长的座位显示名称 A-03，冲突/ })).toBeInTheDocument();
   });
 
   it('labels bound seats as unknown instead of offline when Vigil is unavailable', async () => {

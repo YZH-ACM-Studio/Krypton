@@ -33,7 +33,17 @@ describe('P2.6 exam pre-login HTTP boundaries', () => {
         expect(source).to.include('assertCanManageExamEvent(domainId, event, this.user)');
         expect(source).to.include('service.confirm');
         expect(source).to.include('service.resumeDispatching(existing)');
+        expect(source).to.include('loadExamPreloginDispatchRecovery(current, existing)');
+        expect(source).to.include('service.resumeDispatching(existing, recovery)');
         expect(source).to.include('validateExamPreloginRetryWorkflow');
+    });
+
+    it('exposes the P2.14 compatibility gate and applies it only before a new v2 batch is written', () => {
+        const source = readFileSync(sourcePath, 'utf8');
+        expect(source).to.include('v2WriterEnabled: isExamPreloginV2WriterEnabled()');
+        expect(source).to.include('!existing && isExamSeatAssignmentV2(currentAssignment) && !isExamPreloginV2WriterEnabled()');
+        expect(source).to.include("throw new ExamPreloginError('prelogin_v2_writer_disabled')");
+        expect(source.indexOf("existing?.state === 'dispatched'")).to.be.lessThan(source.indexOf('prelogin_v2_writer_disabled'));
     });
 
     it('accepts exact request schemas and never writes ticket material to logs or oplog', () => {

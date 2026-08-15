@@ -184,20 +184,19 @@ export class ExamEventService {
         return this.events.findOne({ domainId, _id: eventId });
     }
 
-    list(domainId: string, schoolIds?: ObjectId[], limit = 200, actorUid?: number) {
+    list(domainId: string, schoolIds?: ObjectId[], limit = 200, actorUid?: number, contestId?: ObjectId) {
         assertDomainId(domainId);
         if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) throw new TypeError('limit is invalid');
         if (schoolIds && schoolIds.some((schoolId) => !(schoolId instanceof ObjectId))) throw new TypeError('schoolIds are invalid');
         if (actorUid !== undefined) assertUid(actorUid, 'actorUid');
+        if (contestId !== undefined && !(contestId instanceof ObjectId)) throw new TypeError('contestId is invalid');
         const filter: Filter<ExamEventDoc> = {
             domainId,
             ...(schoolIds ? { schoolId: { $in: schoolIds } } : {}),
             ...(actorUid !== undefined ? { $or: [{ ownerUid: actorUid }, { collaboratorUids: actorUid }] } : {}),
+            ...(contestId ? { contestId } : {}),
         };
-        return this.events
-            .find(filter)
-            .sort({ updatedAt: -1 })
-            .limit(limit);
+        return this.events.find(filter).sort({ updatedAt: -1 }).limit(limit);
     }
 
     async update(input: UpdateExamEventInput): Promise<ExamEventDoc> {

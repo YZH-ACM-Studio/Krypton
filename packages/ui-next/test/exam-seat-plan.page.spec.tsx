@@ -23,7 +23,7 @@ const PLAN_RESPONSE = {
       rosterId: '66b800000000000000000804',
       revision: 2,
       fingerprint: 'a'.repeat(64),
-      source: { kind: 'userbindGroups' },
+      source: { kind: 'contestAudience' },
       entries: [
         { studentId: '20260001', realName: '张三', boundUserId: 21 },
         { studentId: '20260002', realName: '李四', boundUserId: 22 },
@@ -110,6 +110,7 @@ const ASSIGNMENT_RESPONSE = {
       { endpointId: 'endpoint-02', ready: false, online: false, reason: 'offline' },
     ],
   },
+  publishedRosterDrift: null,
   latestSeatPlanState: 'current',
   rosterGroups: [{ groupId: '66b800000000000000000821', name: '2026 级一班' }],
   classrooms: [{ classroomId: '66b800000000000000000806', name: '北实 201', layoutRevision: 7, seatCount: 2 }],
@@ -560,8 +561,8 @@ describe('p2.5 exam seat assignment workspace', () => {
     expect(screen.getAllByRole('button', { name: /选择.*换位/ })).toHaveLength(2);
     expect(screen.queryByRole('button', { name: '随机分配' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '发布跨教室版本 2' })).toBeEnabled();
-    expect(screen.getByText(/P2.14 统一接入/)).toBeInTheDocument();
-    expect(screen.getByText('分配解释与教室座位图')).toBeInTheDocument();
+    expect(screen.getByText('步骤 6–7：终端预检、网络启动与显式预启动')).toBeInTheDocument();
+    expect(screen.getByText('步骤 4：检查解释并人工调整')).toBeInTheDocument();
     expect(screen.getByText('在线未知 1')).toBeInTheDocument();
     expect(screen.getByText('朝向未设置 1')).toBeInTheDocument();
     expect(screen.getAllByText(`同名教室 · ${firstClassroomId}`).length).toBeGreaterThan(0);
@@ -702,7 +703,8 @@ describe('p2.5 exam seat assignment workspace', () => {
     renderPage();
     expect(await screen.findByText('候选教室布局已变化；请在上方按当前布局创建新计划后再生成。')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '随机分配' })).not.toBeInTheDocument();
-    await user.click(screen.getByRole('checkbox', { name: '2026 级一班' }));
+    expect(screen.getByRole('combobox', { name: '名单来源' })).toHaveValue('contestAudience');
+    expect(screen.queryByRole('checkbox', { name: '2026 级一班' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '生成或刷新名单' })).toBeEnabled();
     await user.click(screen.getByRole('checkbox', { name: '选择教室北实 201' }));
     expect(screen.getByRole('button', { name: '创建跨教室候选计划' })).toBeEnabled();
@@ -921,13 +923,96 @@ describe('p2.5 exam seat assignment workspace', () => {
 
     expect(await screen.findByText(/第一版不提供自动排座/)).toBeInTheDocument();
     expect(screen.getByRole('combobox', { name: '名单来源' })).toBeDisabled();
-    expect(screen.getByRole('checkbox', { name: '2026 级一班' })).toBeDisabled();
+    expect(screen.queryByRole('checkbox', { name: '2026 级一班' })).not.toBeInTheDocument();
     expect(screen.getByRole('checkbox', { name: '选择教室北实 201' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '生成或刷新名单' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '创建跨教室候选计划' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '生成尽力型跨教室分配' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '发布跨教室版本 2' })).toBeDisabled();
   });
+
+  it('keeps a historical Krypton v2 assignment based on a userbind subset strictly read-only', async () => {
+    const fixture = singleClassroomV2Fixture();
+    const historicalRoster = {
+      ...PLAN_RESPONSE.rosterRevisions[0],
+      source: { kind: 'userbindGroups' as const },
+    };
+    const published = { ...fixture.v2Assignment, published: true };
+    const planResponse = { ...fixture.planResponse, rosterRevisions: [historicalRoster] };
+    const assignmentResponse = {
+      ...fixture.assignmentResponse,
+      assignments: [published],
+      publication: {
+        revision: 1,
+        assignmentId: published.assignmentId,
+        assignmentRevision: published.revision,
+        assignmentFingerprint: published.fingerprint,
+        updatedAt: '2026-08-15T00:00:00.000Z',
+        updatedBy: 2,
+      },
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith('/seat-plans')) return json(planResponse);
+        if (url.endsWith('/seat-assignments')) return json(assignmentResponse);
+        if (url.endsWith('/prelogin-latest')) return json({ batch: null });
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+    renderPage();
+
+    expect(await screen.findByText(/历史 v2 计划或分配使用了 userbind 子名单/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '生成尽力型跨教室分配' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '保留锁定项重新分配' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '发布跨教室版本 2' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '1. 保存当前分配为目标' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '运行终端预检' })).toBeDisabled();
+  });
+
+  it.each(['fixed', 'public'] as const)(
+    'preserves legacy v1 userbind target, preflight and retry compatibility for a %s Contest audience',
+    async (contestAudienceState) => {
+      const historicalRoster = {
+        ...PLAN_RESPONSE.rosterRevisions[0],
+        source: { kind: 'userbindGroups' as const },
+      };
+      const planResponse = {
+        ...PLAN_RESPONSE,
+        event: { ...PLAN_RESPONSE.event, contestAudienceState },
+        rosterRevisions: [historicalRoster],
+      };
+      const batch = preloginBatch([{ status: 'failed', stage: 'launch' }]);
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = String(input);
+          if (init?.method === 'POST' && url.endsWith('/prelogin/prepare')) {
+            return json({
+              preparation: preloginPreparation(),
+              workflow: preloginWorkflow(),
+              v2WriterEnabled: true,
+              workflowWriterEnabled: true,
+            });
+          }
+          if (url.endsWith('/seat-plans')) return json(planResponse);
+          if (url.endsWith('/seat-assignments')) return json(PUBLISHED_ASSIGNMENT_RESPONSE);
+          if (url.endsWith('/prelogin-latest')) return json({ batch });
+          throw new Error(`unexpected request: ${url}`);
+        }),
+      );
+      const user = userEvent.setup();
+      renderPage();
+
+      expect(await screen.findByRole('button', { name: '1. 保存当前分配为目标' })).toBeEnabled();
+      expect(screen.getByRole('button', { name: '运行终端预检' })).toBeEnabled();
+      expect(await screen.findByRole('button', { name: '只重试 1 个失败项' })).toBeEnabled();
+      expect(screen.queryByText(/当前发布分配使用历史 userbind 子名单，仅供审计/)).not.toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: '运行终端预检' }));
+      expect(await screen.findByText('确认范围')).toBeInTheDocument();
+    },
+  );
 
   it('expands a split-team warning into member identities and physical destinations', async () => {
     const fixture = singleClassroomV2Fixture();
@@ -1027,11 +1112,10 @@ describe('p2.5 exam seat assignment workspace', () => {
     const user = userEvent.setup();
     renderPage();
 
-    await user.click(await screen.findByRole('checkbox', { name: '2026 级一班' }));
+    expect(await screen.findByRole('combobox', { name: '名单来源' })).toHaveValue('contestAudience');
+    expect(screen.queryByRole('checkbox', { name: '2026 级一班' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '生成或刷新名单' }));
-    await waitFor(() =>
-      expect(bodies[0]?.body).toEqual({ action: 'createRoster', sourceKind: 'userbindGroups', groupIds: ['66b800000000000000000821'] }),
-    );
+    await waitFor(() => expect(bodies[0]?.body).toEqual({ action: 'createRoster', sourceKind: 'contestAudience', groupIds: [] }));
 
     await user.click(screen.getByRole('checkbox', { name: '选择教室北实 201' }));
     await user.click(screen.getByRole('button', { name: '创建跨教室候选计划' }));
@@ -1392,7 +1476,7 @@ describe('p2.5 exam seat assignment workspace', () => {
       if (init?.method === 'POST') {
         const body = JSON.parse(String(init.body)) as Record<string, unknown>;
         posts.push({ body, url, urlState: window.location.search });
-        if (url.endsWith('/prelogin/prepare')) return json({ preparation, workflow, workflowWriterEnabled: true });
+        if (url.endsWith('/prelogin/prepare')) return json({ preparation, workflow, v2WriterEnabled: true, workflowWriterEnabled: true });
         if (url.endsWith('/prelogin/confirm')) {
           const batch = preloginBatch([
             { status: 'sent', stage: 'launch' },
@@ -1415,8 +1499,8 @@ describe('p2.5 exam seat assignment workspace', () => {
     await user.click(await screen.findByRole('button', { name: '运行终端预检' }));
     expect(await screen.findByText('告警：usb_storage_detected')).toBeInTheDocument();
     expect(screen.getByText('硬错误 0')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '确认预登录' })).toBeEnabled();
-    await user.click(screen.getByRole('button', { name: '确认预登录' }));
+    expect(screen.getByRole('button', { name: '步骤 7：一键预启动全部终端' })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: '步骤 7：一键预启动全部终端' }));
     expect(await screen.findByText('逐终端结果')).toBeInTheDocument();
 
     expect(posts[0]?.url.endsWith('/prelogin/prepare')).toBe(true);
@@ -1428,6 +1512,158 @@ describe('p2.5 exam seat assignment workspace', () => {
       requestId: '00010203-0405-4607-8809-0a0b0c0d0e0f',
     });
     expect(posts[1]?.urlState).toContain('requestId=00010203-0405-4607-8809-0a0b0c0d0e0f');
+  });
+
+  it('shows structured v2 seats and keeps prestart closed until the P2.14 writer gate is enabled', async () => {
+    const fixture = singleClassroomV2Fixture();
+    const published = { ...fixture.v2Assignment, published: true };
+    const assignmentResponse = {
+      ...fixture.assignmentResponse,
+      assignments: [published],
+      publication: {
+        revision: 4,
+        assignmentId: published.assignmentId,
+        assignmentRevision: published.revision,
+        assignmentFingerprint: published.fingerprint,
+      },
+    };
+    const preparation = {
+      ...preloginPreparation(),
+      assignment: { assignmentId: published.assignmentId, revision: published.revision, fingerprint: published.fingerprint },
+      publicationRevision: 4,
+      items: preloginPreparation().items.map((item, index) => ({
+        ...item,
+        endpointId: fixture.seatFacts[index].endpointId,
+        diagnostics: index === 0 ? [{ code: 'seat_facing_changed', severity: 'warning' }] : [],
+      })),
+    };
+    const workflow = preloginWorkflow();
+    workflow.monitoring.items = workflow.monitoring.items.map((item, index) => ({
+      ...item,
+      endpointId: fixture.seatFacts[index].endpointId,
+    }));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (init?.method === 'POST' && url.endsWith('/prelogin/prepare')) {
+          return json({ preparation, workflow, v2WriterEnabled: false, workflowWriterEnabled: true });
+        }
+        if (url.endsWith('/seat-plans')) return json(fixture.planResponse);
+        if (url.endsWith('/seat-assignments')) return json(assignmentResponse);
+        if (url.endsWith('/prelogin-latest')) return json({ batch: null });
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(await screen.findByText(/建议在开赛前 10–15 分钟/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '运行终端预检' }));
+    expect(await screen.findByText(/跨教室预登录当前处于兼容读取阶段/)).toBeInTheDocument();
+    expect(screen.getByText('北实 201 / seat-01')).toBeInTheDocument();
+    expect(screen.getByText('告警：seat_facing_changed')).toHaveClass('text-amber-700');
+    expect(screen.getByRole('button', { name: '步骤 7：一键预启动全部终端' })).toBeDisabled();
+  });
+
+  it('lists exact participant and team changes against the published v2 assignment', async () => {
+    const fixture = singleClassroomV2Fixture();
+    const published = { ...fixture.v2Assignment, published: true };
+    const assignmentResponse = {
+      ...fixture.assignmentResponse,
+      assignments: [published],
+      publication: {
+        revision: 4,
+        assignmentId: published.assignmentId,
+        assignmentRevision: published.revision,
+        assignmentFingerprint: published.fingerprint,
+      },
+      publishedRosterDrift: {
+        changed: true,
+        sourceChangedWithoutParticipantDiff: false,
+        items: [
+          {
+            boundUserId: 21,
+            studentId: '20260001',
+            realName: '张三',
+            kind: 'team_changed',
+            previousTeamId: '66b800000000000000000901',
+            previousTeamRole: 'member',
+            currentTeamId: '66b800000000000000000902',
+            currentTeamRole: 'captain',
+          },
+          {
+            boundUserId: 23,
+            studentId: '20260003',
+            realName: '王五',
+            kind: 'added',
+            previousTeamId: null,
+            previousTeamRole: null,
+            currentTeamId: null,
+            currentTeamRole: null,
+          },
+        ],
+      },
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith('/seat-plans')) return json(fixture.planResponse);
+        if (url.endsWith('/seat-assignments')) return json(assignmentResponse);
+        if (url.endsWith('/prelogin-latest')) return json({ batch: null });
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+    renderPage();
+
+    expect(await screen.findByText(/当前参赛名单或团队关系已不同于已发布分配/)).toBeInTheDocument();
+    expect(screen.getByText(/团队或角色变化：20260001 · 张三/)).toBeInTheDocument();
+    expect(screen.getByText('新增参赛者：20260003 · 王五')).toBeInTheDocument();
+  });
+
+  it('re-reads and displays exact roster drift when a long-open preflight is rejected', async () => {
+    let drifted = false;
+    const driftedAssignmentResponse = {
+      ...PUBLISHED_ASSIGNMENT_RESPONSE,
+      publishedRosterDrift: {
+        changed: true,
+        sourceChangedWithoutParticipantDiff: false,
+        items: [
+          {
+            boundUserId: 23,
+            studentId: '20260003',
+            realName: '王五',
+            kind: 'added',
+            previousTeamId: null,
+            previousTeamRole: null,
+            currentTeamId: null,
+            currentTeamRole: null,
+          },
+        ],
+      },
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (init?.method === 'POST' && url.endsWith('/prelogin/prepare')) {
+          drifted = true;
+          throw new TypeError('assignment_reference_changed:roster');
+        }
+        if (url.endsWith('/seat-plans')) return json(PLAN_RESPONSE);
+        if (url.endsWith('/seat-assignments')) return json(drifted ? driftedAssignmentResponse : PUBLISHED_ASSIGNMENT_RESPONSE);
+        if (url.endsWith('/prelogin-latest')) return json({ batch: null });
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: '运行终端预检' }));
+    expect(await screen.findByText(/当前参赛名单或团队关系已不同于已发布分配/)).toBeInTheDocument();
+    expect(screen.getByText('新增参赛者：20260003 · 王五')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '步骤 7：一键预启动全部终端' })).toBeDisabled();
   });
 
   it('builds and assigns the current published assignment target on the same page with the real config CAS revision', async () => {
@@ -1488,13 +1724,14 @@ describe('p2.5 exam seat assignment workspace', () => {
           }
           if (url.endsWith('/network-config') && body.action === 'assignTarget') return json({ config: {} });
           if (url.endsWith('/prelogin/prepare')) {
-            return json({ preparation: preloginPreparation(), workflow: preloginWorkflow(), workflowWriterEnabled: true });
+            return json({ preparation: preloginPreparation(), workflow: preloginWorkflow(), v2WriterEnabled: true, workflowWriterEnabled: true });
           }
         }
         if (url.endsWith('/seat-plans')) return json(PLAN_RESPONSE);
         if (url.endsWith('/seat-assignments')) return json(PUBLISHED_ASSIGNMENT_RESPONSE);
         if (url.endsWith('/prelogin-latest')) return json({ batch: null });
         if (url.endsWith('/target-assignment')) return json(targetPayload());
+        if (url.startsWith('/api/admin/exam-policy-templates?')) return json({ templates: [] });
         if (url.endsWith('/network-config')) {
           return json({
             config: {
@@ -1536,13 +1773,121 @@ describe('p2.5 exam seat assignment workspace', () => {
     });
   });
 
+  it('assigns a published policy and explicitly schedules a fresh event on the same page', async () => {
+    const targetAssignmentId = '66b8000000000000000008d0';
+    const firstPolicyId = '66b800000000000000000851';
+    const selectedPolicyId = '66b800000000000000000853';
+    const sources = [{ kind: 'examSeat', ids: [PUBLISHED_ASSIGNMENT.assignmentId] }];
+    let scheduled = false;
+    let configRevision = 5;
+    let policy: { id: string; revision: number; fingerprint: string } | null = null;
+    const posts: Array<{ body: Record<string, unknown>; url: string }> = [];
+    const planResponse = () => ({
+      ...PLAN_RESPONSE,
+      event: {
+        ...PLAN_RESPONSE.event,
+        revision: scheduled ? 4 : 3,
+        lifecycle: scheduled ? 'scheduled' : 'draft',
+      },
+    });
+    const targetPayload = {
+      assignment: {
+        assignmentId: targetAssignmentId,
+        revision: 2,
+        draft: { version: 1, sources },
+        revisions: [
+          {
+            revision: 1,
+            sources,
+            targetFingerprint: '9'.repeat(64),
+            endpointIds: ['endpoint-01', 'endpoint-02'],
+            targetCount: 2,
+            publishedAt: '2026-08-13T02:00:00.000Z',
+          },
+        ],
+        latestPublishedRevision: 1,
+      },
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (init?.method === 'POST') {
+          const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+          posts.push({ body, url });
+          if (url.endsWith('/network-config') && body.action === 'assignPolicy') {
+            configRevision = 6;
+            policy = { id: selectedPolicyId, revision: 3, fingerprint: '3'.repeat(64) };
+            return json({ config: {} });
+          }
+          if (url === `/api/admin/exam-events/${EVENT_ID}` && body.action === 'schedule') {
+            scheduled = true;
+            return json({ event: {} });
+          }
+        }
+        if (url.endsWith('/seat-plans')) return json(planResponse());
+        if (url.endsWith('/seat-assignments')) return json(PUBLISHED_ASSIGNMENT_RESPONSE);
+        if (url.endsWith('/prelogin-latest')) return json({ batch: null });
+        if (url.endsWith('/target-assignment')) return json(targetPayload);
+        if (url.endsWith('/network-config')) {
+          return json({
+            config: {
+              revision: configRevision,
+              policy,
+              target: { id: targetAssignmentId, revision: 1, fingerprint: '9'.repeat(64) },
+            },
+          });
+        }
+        if (url.startsWith('/api/admin/exam-policy-templates?')) {
+          return json({
+            templates: [
+              {
+                templateId: firstPolicyId,
+                name: '基础策略',
+                status: 'active',
+                revisions: [{ revision: 2, fingerprint: '1'.repeat(64) }],
+              },
+              {
+                templateId: selectedPolicyId,
+                name: '严格封锁',
+                status: 'active',
+                revisions: [{ revision: 3, fingerprint: '3'.repeat(64) }],
+              },
+            ],
+          });
+        }
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: /读取当前策略与目标事实/ }));
+    await user.selectOptions(screen.getByRole('combobox', { name: '已发布网络策略版本' }), `${selectedPolicyId}:3`);
+    await user.click(screen.getByRole('button', { name: '分配所选策略' }));
+    await waitFor(() => expect(screen.getByText('当前策略 r3')).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: /将考试活动显式计划为待开始/ }));
+    await waitFor(() => expect(screen.getByText('活动 已计划')).toBeInTheDocument());
+
+    expect(posts.find((entry) => entry.body.action === 'assignPolicy')?.body).toEqual({
+      action: 'assignPolicy',
+      expectedRevision: 5,
+      templateId: selectedPolicyId,
+      revision: 3,
+    });
+    expect(posts.find((entry) => entry.body.action === 'schedule')?.body).toEqual({
+      action: 'schedule',
+      expectedRevision: 3,
+    });
+  });
+
   it('keeps confirmation disabled while the compatibility reader is deployed with the workflow writer off', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
         if (init?.method === 'POST' && url.endsWith('/prelogin/prepare')) {
-          return json({ preparation: preloginPreparation(), workflow: preloginWorkflow(), workflowWriterEnabled: false });
+          return json({ preparation: preloginPreparation(), workflow: preloginWorkflow(), v2WriterEnabled: true, workflowWriterEnabled: false });
         }
         if (url.endsWith('/seat-plans')) return json(PLAN_RESPONSE);
         if (url.endsWith('/seat-assignments')) return json(PUBLISHED_ASSIGNMENT_RESPONSE);
@@ -1555,7 +1900,7 @@ describe('p2.5 exam seat assignment workspace', () => {
 
     await user.click(await screen.findByRole('button', { name: '运行终端预检' }));
     expect(await screen.findByText(/当前处于 P2\.9 兼容读取阶段/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '确认预登录' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '步骤 7：一键预启动全部终端' })).toBeDisabled();
   });
 
   it('starts the fixed network execution on the same page before enabling prelogin confirmation', async () => {
@@ -1571,7 +1916,7 @@ describe('p2.5 exam seat assignment workspace', () => {
         posts.push({ body, url });
         if (url.endsWith('/prelogin/prepare')) {
           prepareCalls += 1;
-          return json({ preparation, workflow: prepareCalls === 1 ? configured : active, workflowWriterEnabled: true });
+          return json({ preparation, workflow: prepareCalls === 1 ? configured : active, v2WriterEnabled: true, workflowWriterEnabled: true });
         }
         if (url.endsWith('/network-execution')) return json({ execution: {} });
       }
@@ -1586,13 +1931,62 @@ describe('p2.5 exam seat assignment workspace', () => {
 
     await user.click(await screen.findByRole('button', { name: '运行终端预检' }));
     expect(await screen.findByText(/尚未启动/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '确认预登录' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '步骤 7：一键预启动全部终端' })).toBeDisabled();
     await user.click(screen.getByRole('button', { name: '启动网络策略' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: '确认预登录' })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: '步骤 7：一键预启动全部终端' })).toBeEnabled());
     expect(posts.find((entry) => entry.url.endsWith('/network-execution'))?.body).toEqual({
       action: 'start',
       expectedRevision: 0,
       expectedConfigRevision: 6,
+    });
+    expect(prepareCalls).toBe(2);
+  });
+
+  it('retries a pending network execution on the same page and then re-reads readiness', async () => {
+    const preparation = preloginPreparation();
+    const pending = preloginWorkflow();
+    pending.network.ready = false;
+    pending.network.reason = 'network_execution_pending';
+    pending.network.appliedCount = 0;
+    pending.network.pendingCount = 2;
+    pending.hardErrorCount = 1;
+    const active = preloginWorkflow();
+    let prepareCalls = 0;
+    const posts: Array<{ body: Record<string, unknown>; url: string }> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (init?.method === 'POST') {
+          const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+          posts.push({ body, url });
+          if (url.endsWith('/prelogin/prepare')) {
+            prepareCalls += 1;
+            return json({
+              preparation,
+              workflow: prepareCalls === 1 ? pending : active,
+              v2WriterEnabled: true,
+              workflowWriterEnabled: true,
+            });
+          }
+          if (url.endsWith('/network-execution')) return json({ execution: {} });
+        }
+        if (url.endsWith('/seat-plans')) return json(PLAN_RESPONSE);
+        if (url.endsWith('/seat-assignments')) return json(PUBLISHED_ASSIGNMENT_RESPONSE);
+        if (url.endsWith('/prelogin-latest')) return json({ batch: null });
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: '运行终端预检' }));
+    await user.click(await screen.findByRole('button', { name: '重试当前网络请求' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '步骤 7：一键预启动全部终端' })).toBeEnabled());
+
+    expect(posts.find((entry) => entry.url.endsWith('/network-execution'))?.body).toEqual({
+      action: 'retry',
+      expectedRevision: 7,
     });
     expect(prepareCalls).toBe(2);
   });
@@ -1611,7 +2005,9 @@ describe('p2.5 exam seat assignment workspace', () => {
     vi.stubGlobal('crypto', { randomUUID: () => request });
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (init?.method === 'POST' && url.endsWith('/prelogin/prepare')) return json({ preparation, workflow, workflowWriterEnabled: true });
+      if (init?.method === 'POST' && url.endsWith('/prelogin/prepare')) {
+        return json({ preparation, workflow, v2WriterEnabled: true, workflowWriterEnabled: true });
+      }
       if (init?.method === 'POST' && url.endsWith('/prelogin/confirm')) {
         confirmCalls += 1;
         throw new TypeError('response lost');
@@ -1627,12 +2023,64 @@ describe('p2.5 exam seat assignment workspace', () => {
     renderPage();
 
     await user.click(await screen.findByRole('button', { name: '运行终端预检' }));
-    await user.click(await screen.findByRole('button', { name: '确认预登录' }));
+    await user.click(await screen.findByRole('button', { name: '步骤 7：一键预启动全部终端' }));
     expect(await screen.findByText('逐终端结果')).toBeInTheDocument();
     expect(confirmCalls).toBe(1);
     expect(window.location.search).toContain(`batchId=${batch.batchId}`);
     expect(window.location.search).not.toContain('requestId=');
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('retains an unresolved confirm request and locks history until the same request converges', async () => {
+    const preparation = preloginPreparation();
+    const workflow = preloginWorkflow();
+    const historical = preloginBatch([{ status: 'applied', stage: 'page_ready' }]);
+    historical.batchId = '66b8000000000000000008ed';
+    historical.requestId = '55555555-5555-4555-8555-555555555555';
+    if (historical.projection) {
+      historical.projection.batchId = historical.batchId;
+      historical.projection.requestId = historical.requestId;
+    }
+    const request = '77777777-7777-4777-8777-777777777777';
+    const confirmBodies: Record<string, unknown>[] = [];
+    vi.stubGlobal('crypto', { randomUUID: () => request });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (init?.method === 'POST' && url.endsWith('/prelogin/prepare')) {
+          return json({ preparation, workflow, v2WriterEnabled: true, workflowWriterEnabled: true });
+        }
+        if (init?.method === 'POST' && url.endsWith('/prelogin/confirm')) {
+          confirmBodies.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+          throw new TypeError('confirm response lost');
+        }
+        if (url.endsWith(`/prelogin-requests/${request}`)) return json({ batch: null });
+        if (url.endsWith('/seat-plans')) return json(PLAN_RESPONSE);
+        if (url.endsWith('/seat-assignments')) return json(PUBLISHED_ASSIGNMENT_RESPONSE);
+        if (url.endsWith('/prelogin-latest')) return json({ batch: null });
+        if (url.endsWith('/prelogin-batches')) return json({ batches: [historical] });
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: '查看历史批次' }));
+    const historicalButton = (await screen.findByText(historical.requestId)).closest('button');
+    if (!historicalButton) throw new Error('historical batch button missing');
+    expect(historicalButton).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: '运行终端预检' }));
+    await user.click(screen.getByRole('button', { name: '步骤 7：一键预启动全部终端' }));
+
+    expect(await screen.findByText('确认请求结果尚未收敛；原 requestId 已保留，继续同一确认请求前暂不可切换历史批次。')).toBeInTheDocument();
+    expect(historicalButton).toBeDisabled();
+    expect(window.location.search).toContain(`requestId=${request}`);
+    await user.click(screen.getByRole('button', { name: '步骤 7：一键预启动全部终端' }));
+    await waitFor(() => expect(confirmBodies).toHaveLength(2));
+    expect(confirmBodies[0]?.requestId).toBe(request);
+    expect(confirmBodies[1]?.requestId).toBe(request);
+    expect(window.location.search).toContain(`requestId=${request}`);
   });
 
   it('separates final success, retryable failure and in-flight subjects and retries only the exact failure set', async () => {
@@ -1735,6 +2183,45 @@ describe('p2.5 exam seat assignment workspace', () => {
     expect(screen.getByText('失败 0')).toBeInTheDocument();
   });
 
+  it('keeps historical batch selection locked while an exact failed-retry request is unresolved', async () => {
+    const initial = preloginBatch([{ status: 'failed', stage: 'launch' }]);
+    const historical = preloginBatch([{ status: 'applied', stage: 'page_ready' }]);
+    historical.batchId = '66b8000000000000000008ef';
+    historical.requestId = '55555555-5555-4555-8555-555555555555';
+    if (historical.projection) {
+      historical.projection.batchId = historical.batchId;
+      historical.projection.requestId = historical.requestId;
+    }
+    vi.stubGlobal('crypto', { randomUUID: () => '66666666-6666-4666-8666-666666666666' });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (init?.method === 'POST' && url.endsWith(`/prelogin-batches/${initial.batchId}/retry`)) {
+          throw new TypeError('retry response lost');
+        }
+        if (url.endsWith('/seat-plans')) return json(PLAN_RESPONSE);
+        if (url.endsWith('/seat-assignments')) return json(PUBLISHED_ASSIGNMENT_RESPONSE);
+        if (url.endsWith('/prelogin-latest')) return json({ batch: initial });
+        if (url.endsWith('/prelogin-batches')) return json({ batches: [historical, initial] });
+        if (url.endsWith(`/prelogin-batches/${initial.batchId}`)) return json({ batch: initial });
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: '查看历史批次' }));
+    const historicalButton = (await screen.findByText(historical.requestId)).closest('button');
+    if (!historicalButton) throw new Error('historical batch button missing');
+    expect(historicalButton).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: '只重试 1 个失败项' }));
+    expect(await screen.findByText(/结果未知，已保留同一失败重试请求/)).toBeInTheDocument();
+    expect(historicalButton).toBeDisabled();
+    expect(window.location.search).toContain('retryRequestId=66666666-6666-4666-8666-666666666666');
+    expect(screen.getByText(`batch ${initial.batchId}`)).toBeInTheDocument();
+  });
+
   it('ignores an old batch poll after the teacher selects a different historical batch', async () => {
     const first = preloginBatch([{ status: 'sent', stage: 'launch' }]);
     const firstLate = preloginBatch([{ status: 'applied', stage: 'page_ready' }]);
@@ -1820,7 +2307,7 @@ describe('p2.5 exam seat assignment workspace', () => {
         if (url.endsWith('/seat-assignments')) return json(PUBLISHED_ASSIGNMENT_RESPONSE);
         if (url.endsWith('/prelogin-latest')) return json({ batch: existing });
         if (init?.method === 'POST' && url.endsWith('/prelogin/prepare')) {
-          return json({ preparation: preloginPreparation(1), workflow: preloginWorkflow(1), workflowWriterEnabled: true });
+          return json({ preparation: preloginPreparation(1), workflow: preloginWorkflow(1), v2WriterEnabled: true, workflowWriterEnabled: true });
         }
         if (init?.method === 'POST' && url.endsWith('/prelogin/confirm')) {
           confirmPosts += 1;
@@ -1834,7 +2321,7 @@ describe('p2.5 exam seat assignment workspace', () => {
 
     expect(await screen.findByText('成功 1')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '运行终端预检' }));
-    const confirm = await screen.findByRole('button', { name: '确认预登录' });
+    const confirm = await screen.findByRole('button', { name: '步骤 7：一键预启动全部终端' });
     expect(confirm).toBeDisabled();
     await user.click(confirm);
     expect(confirmPosts).toBe(0);

@@ -27,6 +27,23 @@ interface RosterRevision {
   entries: RosterEntry[];
 }
 
+interface PublishedRosterDriftItem {
+  boundUserId: number;
+  studentId: string;
+  realName: string;
+  kind: 'added' | 'removed' | 'identity_changed' | 'team_changed';
+  previousTeamId: string | null;
+  previousTeamRole: 'captain' | 'member' | null;
+  currentTeamId: string | null;
+  currentTeamRole: 'captain' | 'member' | null;
+}
+
+interface PublishedRosterDrift {
+  changed: boolean;
+  sourceChangedWithoutParticipantDiff: boolean;
+  items: PublishedRosterDriftItem[];
+}
+
 interface SeatPlanRosterRef {
   rosterId: string;
   revision: number;
@@ -208,6 +225,7 @@ interface AssignmentWorkspace {
   source: { schemaVersion: 1 | 2; seatPlanRevision: number; seats: PhysicalSeat[] } | null;
   endpointState: 'available' | 'not-required' | 'unavailable';
   endpointItems: EndpointPreflightItem[];
+  publishedRosterDrift: PublishedRosterDrift | null;
   latestSeatPlanState: 'current' | 'layout-drift' | 'not-ready';
   rosterGroups: Array<{ groupId: string; name: string }>;
   classrooms: Array<{ classroomId: string; name: string; layoutRevision: number; seatCount: number }>;
@@ -273,6 +291,7 @@ type PreloginDiagnosticCode =
   | 'endpoint_incompatible'
   | 'endpoint_offline'
   | 'external_workspace_unavailable'
+  | 'seat_facing_changed'
   | 'seat_binding_changed'
   | 'user_binding_changed';
 
@@ -370,11 +389,23 @@ interface PreloginTargetDraft {
 }
 
 interface PreloginTargetPreview {
+  publicationIdentity: string;
   fingerprint: string;
   targetCount: number;
   endpointIds: string[];
   addedEndpointIds: string[];
   removedEndpointIds: string[];
+}
+
+interface PreloginPolicyOption {
+  templateId: string;
+  name: string;
+  revision: number;
+  fingerprint: string;
+}
+
+function preloginPublicationIdentity(assignment: AssignmentRevision, publicationRevision: number): string {
+  return `${assignment.assignmentId}\0${assignment.revision}\0${assignment.fingerprint}\0${publicationRevision}`;
 }
 
 function preloginBatchReachedTerminalState(batch: PreloginBatch): boolean {
@@ -527,6 +558,39 @@ function parseRoster(value: unknown): RosterRevision {
         studentId: text(entry.studentId, '名单学生'),
         realName: text(entry.realName, '名单学生'),
         boundUserId: integer(entry.boundUserId, '名单学生'),
+      };
+    }),
+  };
+}
+
+function nullableTeamRole(value: unknown, context: string): 'captain' | 'member' | null {
+  if (value === null) return null;
+  const role = text(value, context);
+  if (role !== 'captain' && role !== 'member') throw new Error(`${context}响应格式不正确`);
+  return role;
+}
+
+function parsePublishedRosterDrift(value: unknown): PublishedRosterDrift | null {
+  if (value === null) return null;
+  const row = record(value, '发布名单漂移');
+  return {
+    changed: boolean(row.changed, '发布名单漂移'),
+    sourceChangedWithoutParticipantDiff: boolean(row.sourceChangedWithoutParticipantDiff, '发布名单漂移'),
+    items: array(row.items, '发布名单漂移').map((item) => {
+      const change = record(item, '发布名单漂移人员');
+      const kind = text(change.kind, '发布名单漂移人员');
+      if (kind !== 'added' && kind !== 'removed' && kind !== 'identity_changed' && kind !== 'team_changed') {
+        throw new Error('发布名单漂移人员响应格式不正确');
+      }
+      return {
+        boundUserId: positiveInteger(change.boundUserId, '发布名单漂移人员'),
+        studentId: text(change.studentId, '发布名单漂移人员'),
+        realName: text(change.realName, '发布名单漂移人员'),
+        kind,
+        previousTeamId: change.previousTeamId === null ? null : objectId(change.previousTeamId, '发布名单漂移人员'),
+        previousTeamRole: nullableTeamRole(change.previousTeamRole, '发布名单漂移人员'),
+        currentTeamId: change.currentTeamId === null ? null : objectId(change.currentTeamId, '发布名单漂移人员'),
+        currentTeamRole: nullableTeamRole(change.currentTeamRole, '发布名单漂移人员'),
       };
     }),
   };
@@ -881,6 +945,7 @@ const preloginDiagnosticCodes = new Set<PreloginDiagnosticCode>([
   'endpoint_incompatible',
   'endpoint_offline',
   'external_workspace_unavailable',
+  'seat_facing_changed',
   'seat_binding_changed',
   'user_binding_changed',
 ]);
@@ -1134,6 +1199,16 @@ function diagnosticText(diagnostic: AssignmentDiagnostic): string {
   return `约束冲突：${diagnostic.reasons?.join('、') || diagnostic.code}`;
 }
 
+function rosterDriftText(item: PublishedRosterDriftItem): string {
+  const person = `${item.studentId || `UID ${item.boundUserId}`} · ${item.realName || `UID ${item.boundUserId}`}`;
+  if (item.kind === 'added') return `新增参赛者：${person}`;
+  if (item.kind === 'removed') return `移除参赛者：${person}`;
+  if (item.kind === 'identity_changed') return `学生身份资料变化：${person}`;
+  const previous = item.previousTeamId ? `${item.previousTeamId} / ${item.previousTeamRole === 'captain' ? '队长' : '队员'}` : '非团队成员';
+  const current = item.currentTeamId ? `${item.currentTeamId} / ${item.currentTeamRole === 'captain' ? '队长' : '队员'}` : '非团队成员';
+  return `团队或角色变化：${person}（${previous} → ${current}）`;
+}
+
 const facingLabel: Record<AssignmentV2SeatFact['facing'], string> = {
   down: '↓',
   left: '←',
@@ -1306,7 +1381,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
   const [workspaceFresh, setWorkspaceFresh] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [actionDiagnostics, setActionDiagnostics] = useState<AssignmentDiagnostic[]>([]);
-  const [sourceKind, setSourceKind] = useState<'contestAudience' | 'userbindGroups' | 'userbindSchool'>('userbindGroups');
+  const [sourceKind, setSourceKind] = useState<'contestAudience' | 'userbindGroups' | 'userbindSchool'>('contestAudience');
   const [selectedGroupIds, setSelectedGroupIds] = useState<Set<string>>(new Set());
   const [selectedV2ClassroomIds, setSelectedV2ClassroomIds] = useState<Set<string>>(new Set());
   const [v2Strategy, setV2Strategy] = useState<'maximizeSpacing' | 'minimizeClassrooms'>('minimizeClassrooms');
@@ -1316,6 +1391,8 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
   const [preparationBusy, setPreparationBusy] = useState(false);
   const [preloginPreparation, setPreloginPreparation] = useState<PreloginPreparation | null>(null);
   const [preloginWorkflow, setPreloginWorkflow] = useState<PreloginWorkflow | null>(null);
+  const [preloginFactsFresh, setPreloginFactsFresh] = useState(false);
+  const [preloginV2WriterEnabled, setPreloginV2WriterEnabled] = useState(false);
   const [preloginWorkflowWriterEnabled, setPreloginWorkflowWriterEnabled] = useState(false);
   const [preloginBatch, setPreloginBatch] = useState<PreloginBatch | null>(null);
   const preloginBatchRef = useRef<PreloginBatch | null>(null);
@@ -1323,10 +1400,16 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
   const [preloginBatchHistory, setPreloginBatchHistory] = useState<PreloginBatch[]>([]);
   const [preloginTargetDraft, setPreloginTargetDraft] = useState<PreloginTargetDraft | null>(null);
   const [preloginTargetPreview, setPreloginTargetPreview] = useState<PreloginTargetPreview | null>(null);
+  const [preloginTargetFactsFresh, setPreloginTargetFactsFresh] = useState(false);
   const [preloginNetworkConfigRevision, setPreloginNetworkConfigRevision] = useState(0);
+  const [preloginNetworkPolicyRef, setPreloginNetworkPolicyRef] = useState<RevisionRef | null>(null);
+  const [preloginNetworkTargetRef, setPreloginNetworkTargetRef] = useState<RevisionRef | null>(null);
+  const [preloginPolicyOptions, setPreloginPolicyOptions] = useState<PreloginPolicyOption[]>([]);
+  const [selectedPreloginPolicy, setSelectedPreloginPolicy] = useState('');
   const [preloginBusy, setPreloginBusy] = useState(false);
   const [preloginError, setPreloginError] = useState<string | null>(null);
   const workspaceLoadGenerationRef = useRef(0);
+  const preloginPublicationIdentityRef = useRef<string | null>(null);
 
   const load = useCallback(async () => {
     const generation = ++workspaceLoadGenerationRef.current;
@@ -1387,6 +1470,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
         : null,
       endpointState: state,
       endpointItems: array(preflight.items, '终端预检').map(parsePreflightItem),
+      publishedRosterDrift: parsePublishedRosterDrift(assignmentsPayload.publishedRosterDrift),
       latestSeatPlanState,
       rosterGroups: array(assignmentsPayload.rosterGroups, '名单用户组').map(parseRosterGroup),
       classrooms: array(assignmentsPayload.classrooms, '候选教室').map(parseClassroomSummary),
@@ -1432,7 +1516,20 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
     ) {
       throw new Error('座位计划名单与当前显示版本不一致');
     }
+    const nextPublishedAssignment = next.assignments.find((assignment) => assignment.published) || null;
+    const nextPublicationIdentity = nextPublishedAssignment ? preloginPublicationIdentity(nextPublishedAssignment, next.publicationRevision) : null;
+    if (preloginPublicationIdentityRef.current !== nextPublicationIdentity) {
+      preloginPublicationIdentityRef.current = nextPublicationIdentity;
+      setPreloginPreparation(null);
+      setPreloginWorkflow(null);
+      setPreloginFactsFresh(false);
+      setPreloginTargetPreview(null);
+      setPreloginTargetFactsFresh(false);
+      setPreloginV2WriterEnabled(false);
+      setPreloginWorkflowWriterEnabled(false);
+    }
     setWorkspace(next);
+    setSourceKind((current) => (next.eventType === 'krypton' ? 'contestAudience' : current === 'contestAudience' ? 'userbindGroups' : current));
     const latest = next.assignments[0];
     setDraft(latest?.schemaVersion === 1 ? latest.assignments.map((row) => ({ ...row })) : []);
     setV2Draft(latest?.schemaVersion === 2 ? latest.assignments.map((row) => ({ boundUserId: row.boundUserId, seat: { ...row.seat } })) : []);
@@ -1450,13 +1547,14 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
     load().catch((reason: unknown) => setError(reason instanceof Error ? reason.message : String(reason)));
   }, [load]);
 
-  const refreshWorkspace = useCallback(async () => {
+  const refreshWorkspace = useCallback(async (): Promise<boolean> => {
     setError(null);
     setWorkspaceFresh(false);
     try {
-      await load();
+      return await load();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
+      return false;
     }
   }, [load]);
 
@@ -1683,19 +1781,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
   const latestPlanV2 = latestPlan?.schemaVersion === 2 ? latestPlan : null;
   const latestV1 = latest?.schemaVersion === 1 ? latest : null;
   const latestPlanCurrent = workspace?.latestSeatPlanState === 'current';
-  const mutationBusy = busy || preparationBusy;
-  const automaticSeatingAllowed = workspace?.eventType !== 'krypton' || workspace.contestAudienceState === 'fixed';
-  const assignmentIsCurrentV2 = Boolean(
-    automaticSeatingAllowed &&
-    workspaceFresh &&
-    latestV2 &&
-    latestPlanV2 &&
-    latestPlanCurrent &&
-    latestV2.seatPlan.seatPlanId === latestPlanV2.seatPlanId &&
-    latestV2.seatPlan.revision === latestPlanV2.revision &&
-    latestV2.seatPlan.fingerprint === latestPlanV2.fingerprint,
-  );
-  const canMutateV2Draft = assignmentIsCurrentV2 && !mutationBusy;
+  const mutationBusy = busy || preparationBusy || preloginBusy;
   const rosterRef = latest?.roster || latestPlan?.roster || null;
   const roster = rosterRef
     ? workspace?.rosterRevisions.find(
@@ -1710,6 +1796,22 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
           item.fingerprint === latestPlan.roster.fingerprint,
       ) || null
     : null;
+  const automaticSeatingAllowed = workspace?.eventType !== 'krypton' || workspace.contestAudienceState === 'fixed';
+  const latestAssignmentUsesCanonicalRoster = workspace?.eventType !== 'krypton' || !latestV2 || roster?.source.kind === 'contestAudience';
+  const latestPlanUsesCanonicalRoster = workspace?.eventType !== 'krypton' || !latestPlanV2 || planRoster?.source.kind === 'contestAudience';
+  const currentV2UsesCanonicalRoster = latestAssignmentUsesCanonicalRoster && latestPlanUsesCanonicalRoster;
+  const assignmentIsCurrentV2 = Boolean(
+    automaticSeatingAllowed &&
+    currentV2UsesCanonicalRoster &&
+    workspaceFresh &&
+    latestV2 &&
+    latestPlanV2 &&
+    latestPlanCurrent &&
+    latestV2.seatPlan.seatPlanId === latestPlanV2.seatPlanId &&
+    latestV2.seatPlan.revision === latestPlanV2.revision &&
+    latestV2.seatPlan.fingerprint === latestPlanV2.fingerprint,
+  );
+  const canMutateV2Draft = assignmentIsCurrentV2 && !mutationBusy;
   const seats = workspace?.source?.seats || [];
   const seatByIdentity = useMemo(() => new Map(seats.map((seat) => [seatIdentityKey(seat), seat])), [seats]);
   const v1SeatById = useMemo(() => new Map(seats.map((seat) => [seat.sourceSeatId, seat])), [seats]);
@@ -1854,7 +1956,8 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
   };
   const selectedStudent = selectedUid === null ? null : rowsByUid.get(selectedUid) || null;
   const newestRoster = workspace?.rosterRevisions[0] || null;
-  const latestRosterForPlan = automaticSeatingAllowed ? newestRoster : null;
+  const latestRosterForPlan =
+    automaticSeatingAllowed && (workspace?.eventType !== 'krypton' || newestRoster?.source.kind === 'contestAudience') ? newestRoster : null;
   const splitTeams = useMemo(
     () =>
       (latestV2?.explanation.splitTeamIds || []).map((teamId) => ({
@@ -1869,49 +1972,166 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
     workspace?.assignments.find((assignment): assignment is AssignmentV1Revision => assignment.published && assignment.schemaVersion === 1) || null;
   const publishedV2Assignment =
     workspace?.assignments.find((assignment): assignment is AssignmentV2Revision => assignment.published && assignment.schemaVersion === 2) || null;
-  const publishedRoster = publishedAssignment
+  const publishedPreparationAssignment = publishedV2Assignment || publishedAssignment;
+  const currentPreloginPublicationIdentity =
+    publishedPreparationAssignment && workspace ? preloginPublicationIdentity(publishedPreparationAssignment, workspace.publicationRevision) : null;
+  const publishedRoster = publishedPreparationAssignment
     ? workspace?.rosterRevisions.find(
         (item) =>
-          item.rosterId === publishedAssignment.roster.rosterId &&
-          item.revision === publishedAssignment.roster.revision &&
-          item.fingerprint === publishedAssignment.roster.fingerprint,
+          item.rosterId === publishedPreparationAssignment.roster.rosterId &&
+          item.revision === publishedPreparationAssignment.roster.revision &&
+          item.fingerprint === publishedPreparationAssignment.roster.fingerprint,
       ) || null
     : null;
-  const currentPublicationAlreadyConfirmed = Boolean(
-    preloginBatch?.state === 'dispatched' &&
-    publishedAssignment &&
-    preloginBatch.assignment.assignmentId === publishedAssignment.assignmentId &&
-    preloginBatch.assignment.revision === publishedAssignment.revision &&
-    preloginBatch.assignment.fingerprint === publishedAssignment.fingerprint &&
-    preloginBatch.publicationRevision === workspace?.publicationRevision,
+  const publishedAssignmentUsesCanonicalRoster = Boolean(
+    workspace?.eventType !== 'krypton' ||
+    publishedPreparationAssignment?.schemaVersion === 1 ||
+    (publishedPreparationAssignment && publishedRoster?.source.kind === 'contestAudience'),
   );
+  const publishedAssignmentAudienceReady = Boolean(publishedPreparationAssignment?.schemaVersion === 1 || automaticSeatingAllowed);
+  const publishedV2SeatByUid = new Map((publishedV2Assignment?.assignments || []).map((mapping) => [mapping.boundUserId, mapping.seat]));
+  const preloginFactsCurrent = Boolean(
+    workspaceFresh &&
+    preloginFactsFresh &&
+    publishedAssignmentAudienceReady &&
+    preloginPreparation &&
+    publishedPreparationAssignment &&
+    publishedAssignmentUsesCanonicalRoster &&
+    workspace &&
+    !workspace.publishedRosterDrift?.changed &&
+    preloginPreparation.eventRevision === workspace.eventRevision &&
+    preloginPreparation.assignment.assignmentId === publishedPreparationAssignment.assignmentId &&
+    preloginPreparation.assignment.revision === publishedPreparationAssignment.revision &&
+    preloginPreparation.assignment.fingerprint === publishedPreparationAssignment.fingerprint &&
+    preloginPreparation.publicationRevision === workspace.publicationRevision &&
+    preloginPublicationIdentityRef.current === currentPreloginPublicationIdentity,
+  );
+  const preloginBatchMatchesCurrentPublication = Boolean(
+    workspaceFresh &&
+    publishedAssignmentAudienceReady &&
+    preloginBatch &&
+    publishedPreparationAssignment &&
+    publishedAssignmentUsesCanonicalRoster &&
+    workspace &&
+    !workspace.publishedRosterDrift?.changed &&
+    preloginBatch.eventRevision === workspace.eventRevision &&
+    preloginBatch.assignment.assignmentId === publishedPreparationAssignment.assignmentId &&
+    preloginBatch.assignment.revision === publishedPreparationAssignment.revision &&
+    preloginBatch.assignment.fingerprint === publishedPreparationAssignment.fingerprint &&
+    preloginBatch.publicationRevision === workspace.publicationRevision,
+  );
+  const preloginBatchAssignment = preloginBatch
+    ? workspace?.assignments.find(
+        (assignment) =>
+          assignment.assignmentId === preloginBatch.assignment.assignmentId &&
+          assignment.revision === preloginBatch.assignment.revision &&
+          assignment.fingerprint === preloginBatch.assignment.fingerprint,
+      ) || null
+    : null;
+  const preloginBatchSeatByUid = new Map(
+    preloginBatchAssignment?.schemaVersion === 2
+      ? preloginBatchAssignment.assignments.map((mapping) => [mapping.boundUserId, mapping.seat] as const)
+      : [],
+  );
+  const preloginBatchRoster = preloginBatchAssignment
+    ? workspace?.rosterRevisions.find(
+        (candidate) =>
+          candidate.rosterId === preloginBatchAssignment.roster.rosterId &&
+          candidate.revision === preloginBatchAssignment.roster.revision &&
+          candidate.fingerprint === preloginBatchAssignment.roster.fingerprint,
+      ) || null
+    : null;
+  const preloginBatchRosterByUid = new Map((preloginBatchRoster?.entries || []).map((entry) => [entry.boundUserId, entry]));
+  const currentPublicationAlreadyConfirmed = Boolean(preloginBatch?.state === 'dispatched' && preloginBatchMatchesCurrentPublication);
 
   const loadPreloginFacts = useCallback(async () => {
-    if (!publishedAssignment || workspace?.eventType !== 'krypton') throw new Error('当前考试不支持预登录');
-    const payload = await post(`${path}/prelogin/prepare`, { assignmentRevision: publishedAssignment.revision });
+    if (!publishedPreparationAssignment || workspace?.eventType !== 'krypton') throw new Error('当前考试不支持预登录');
+    setPreloginFactsFresh(false);
+    const expectedPublicationIdentity = preloginPublicationIdentity(publishedPreparationAssignment, workspace.publicationRevision);
+    const payload = await post(`${path}/prelogin/prepare`, { assignmentRevision: publishedPreparationAssignment.revision });
     const preparation = parsePreloginPreparation(payload.preparation, eventId);
     const workflow = parsePreloginWorkflow(payload.workflow);
+    const v2WriterEnabled = boolean(payload.v2WriterEnabled, '跨教室预登录兼容写入门禁');
     const writerEnabled = boolean(payload.workflowWriterEnabled, '预登录兼容写入门禁');
     if (
-      preparation.assignment.assignmentId !== publishedAssignment.assignmentId ||
-      preparation.assignment.revision !== publishedAssignment.revision ||
-      preparation.assignment.fingerprint !== publishedAssignment.fingerprint ||
-      preparation.publicationRevision !== workspace.publicationRevision
+      preparation.eventRevision !== workspace.eventRevision ||
+      preparation.assignment.assignmentId !== publishedPreparationAssignment.assignmentId ||
+      preparation.assignment.revision !== publishedPreparationAssignment.revision ||
+      preparation.assignment.fingerprint !== publishedPreparationAssignment.fingerprint ||
+      preparation.publicationRevision !== workspace.publicationRevision ||
+      preloginPublicationIdentityRef.current !== expectedPublicationIdentity
     ) {
       throw new Error('预登录预检与当前发布分配不一致');
     }
     setPreloginPreparation(preparation);
     setPreloginWorkflow(workflow);
+    setPreloginV2WriterEnabled(v2WriterEnabled);
     setPreloginWorkflowWriterEnabled(writerEnabled);
+    setPreloginFactsFresh(true);
     return { preparation, workflow };
-  }, [eventId, path, publishedAssignment, workspace]);
+  }, [eventId, path, publishedPreparationAssignment, workspace]);
 
   const loadPreloginTargetDraft = useCallback(async (): Promise<PreloginTargetDraft | null> => {
-    const [payload, configPayload] = await Promise.all([apiObject(`${path}/target-assignment`), apiObject(`${path}/network-config`)]);
+    setPreloginTargetFactsFresh(false);
+    setPreloginTargetPreview(null);
+    const [payload, configPayload, policyPayload] = await Promise.all([
+      apiObject(`${path}/target-assignment`),
+      apiObject(`${path}/network-config`),
+      apiObject(`/api/admin/exam-policy-templates?eventId=${encodeURIComponent(eventId)}`),
+    ]);
+    let policyRef: RevisionRef | null = null;
+    let targetRef: RevisionRef | null = null;
     if (configPayload.config === null) setPreloginNetworkConfigRevision(0);
-    else setPreloginNetworkConfigRevision(nonNegativeInteger(record(configPayload.config, '预登录网络配置').revision, '预登录网络配置'));
+    else {
+      const config = record(configPayload.config, '预登录网络配置');
+      setPreloginNetworkConfigRevision(nonNegativeInteger(config.revision, '预登录网络配置'));
+      const parseConfigRef = (value: unknown, label: string): RevisionRef | null => {
+        if (value === null) return null;
+        const reference = record(value, label);
+        return {
+          id: objectId(reference.id, label),
+          revision: positiveInteger(reference.revision, label),
+          fingerprint: fingerprint(reference.fingerprint, label),
+        };
+      };
+      policyRef = parseConfigRef(config.policy, '预登录网络策略引用');
+      targetRef = parseConfigRef(config.target, '预登录网络目标引用');
+    }
+    setPreloginNetworkPolicyRef(policyRef);
+    setPreloginNetworkTargetRef(targetRef);
+    const policyOptions = array(policyPayload.templates, '网络策略模板')
+      .flatMap((value): PreloginPolicyOption[] => {
+        const template = record(value, '网络策略模板');
+        if (text(template.status, '网络策略模板') !== 'active') return [];
+        const templateId = objectId(template.templateId, '网络策略模板');
+        const name = text(template.name, '网络策略模板');
+        return array(template.revisions, '网络策略版本').map((revisionValue) => {
+          const revision = record(revisionValue, '网络策略版本');
+          return {
+            templateId,
+            name,
+            revision: positiveInteger(revision.revision, '网络策略版本'),
+            fingerprint: fingerprint(revision.fingerprint, '网络策略版本'),
+          };
+        });
+      })
+      .sort(
+        (left, right) => left.name.localeCompare(right.name) || left.revision - right.revision || left.templateId.localeCompare(right.templateId),
+      );
+    setPreloginPolicyOptions(policyOptions);
+    const assignedPolicyKey = policyRef ? `${policyRef.id}:${policyRef.revision}` : '';
+    setSelectedPreloginPolicy((current) =>
+      policyOptions.some((option) => `${option.templateId}:${option.revision}` === current)
+        ? current
+        : policyOptions.some((option) => `${option.templateId}:${option.revision}` === assignedPolicyKey)
+          ? assignedPolicyKey
+          : policyOptions.length === 1
+            ? `${policyOptions[0].templateId}:${policyOptions[0].revision}`
+            : '',
+    );
     if (payload.assignment === null) {
       setPreloginTargetDraft(null);
+      setPreloginTargetFactsFresh(true);
       return null;
     }
     const assignment = record(payload.assignment, '预登录目标草稿');
@@ -1945,39 +2165,148 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
       latestPublishedSourceAssignmentId,
     };
     setPreloginTargetDraft(next);
+    setPreloginTargetFactsFresh(true);
     return next;
-  }, [path]);
+  }, [eventId, path]);
 
-  const savePublishedAssignmentAsTarget = useCallback(async () => {
-    if (!publishedAssignment) return;
+  const refreshPreloginTargetFacts = useCallback(async () => {
     setPreloginBusy(true);
     setPreloginError(null);
     try {
-      const current = preloginTargetDraft || (await loadPreloginTargetDraft());
-      if (current?.sourceAssignmentId === publishedAssignment.assignmentId) return;
-      await post(`${path}/target-assignment`, {
-        action: 'saveDraft',
-        expectedRevision: current?.revision || 0,
-        sources: [{ kind: 'examSeat', ids: [publishedAssignment.assignmentId] }],
-      });
-      setPreloginTargetPreview(null);
       await loadPreloginTargetDraft();
     } catch (reason) {
       setPreloginError(reason instanceof Error ? reason.message : String(reason));
     } finally {
       setPreloginBusy(false);
     }
-  }, [loadPreloginTargetDraft, path, preloginTargetDraft, publishedAssignment]);
+  }, [loadPreloginTargetDraft]);
 
-  const previewPreloginTarget = useCallback(async () => {
-    if (!preloginTargetDraft) return;
+  const assignPreloginPolicy = useCallback(async () => {
+    if (!publishedAssignmentUsesCanonicalRoster || !preloginTargetFactsFresh || !selectedPreloginPolicy) return;
+    const selected = preloginPolicyOptions.find((option) => `${option.templateId}:${option.revision}` === selectedPreloginPolicy);
+    if (!selected) return;
     setPreloginBusy(true);
     setPreloginError(null);
+    setPreloginFactsFresh(false);
+    try {
+      await post(`${path}/network-config`, {
+        action: 'assignPolicy',
+        expectedRevision: preloginNetworkConfigRevision,
+        templateId: selected.templateId,
+        revision: selected.revision,
+      });
+      await loadPreloginTargetDraft();
+    } catch (reason) {
+      const operationError = reason instanceof Error ? reason.message : String(reason);
+      try {
+        await loadPreloginTargetDraft();
+        setPreloginError(`${operationError}；策略分配结果未知，已重读当前网络配置，请核对后继续。`);
+      } catch (recoveryReason) {
+        const recoveryError = recoveryReason instanceof Error ? recoveryReason.message : String(recoveryReason);
+        setPreloginError(`${operationError}；策略分配结果未知且网络配置重读失败：${recoveryError}`);
+      }
+    } finally {
+      setPreloginBusy(false);
+    }
+  }, [
+    loadPreloginTargetDraft,
+    path,
+    preloginNetworkConfigRevision,
+    preloginPolicyOptions,
+    preloginTargetFactsFresh,
+    publishedAssignmentUsesCanonicalRoster,
+    selectedPreloginPolicy,
+  ]);
+
+  const scheduleExamEvent = useCallback(async () => {
+    if (
+      !workspace ||
+      !publishedAssignmentUsesCanonicalRoster ||
+      workspace.eventLifecycle !== 'draft' ||
+      !workspaceFresh ||
+      !preloginTargetFactsFresh ||
+      !preloginNetworkPolicyRef ||
+      !preloginNetworkTargetRef
+    ) {
+      return;
+    }
+    setPreloginBusy(true);
+    setPreloginError(null);
+    setPreloginFactsFresh(false);
+    try {
+      await post(path, { action: 'schedule', expectedRevision: workspace.eventRevision });
+      if (!(await refreshWorkspace())) {
+        setPreloginError('活动计划已提交，但当前考试活动重读失败；所有后续写入已暂停，请先使用“重读教室事实”。');
+      }
+    } catch (reason) {
+      const operationError = reason instanceof Error ? reason.message : String(reason);
+      const recovered = await refreshWorkspace();
+      setPreloginError(
+        recovered
+          ? `${operationError}；计划结果未知，已重读当前考试活动，请核对生命周期后继续。`
+          : `${operationError}；计划结果未知且当前考试活动重读失败，请先使用“重读教室事实”。`,
+      );
+    } finally {
+      setPreloginBusy(false);
+    }
+  }, [
+    path,
+    preloginNetworkPolicyRef,
+    preloginNetworkTargetRef,
+    preloginTargetFactsFresh,
+    publishedAssignmentUsesCanonicalRoster,
+    refreshWorkspace,
+    workspace,
+    workspaceFresh,
+  ]);
+
+  const savePublishedAssignmentAsTarget = useCallback(async () => {
+    if (!publishedPreparationAssignment || !publishedAssignmentUsesCanonicalRoster) return;
+    setPreloginBusy(true);
+    setPreloginError(null);
+    try {
+      const current = preloginTargetFactsFresh ? preloginTargetDraft : await loadPreloginTargetDraft();
+      if (current?.sourceAssignmentId === publishedPreparationAssignment.assignmentId) return;
+      await post(`${path}/target-assignment`, {
+        action: 'saveDraft',
+        expectedRevision: current?.revision || 0,
+        sources: [{ kind: 'examSeat', ids: [publishedPreparationAssignment.assignmentId] }],
+      });
+      setPreloginTargetPreview(null);
+      await loadPreloginTargetDraft();
+    } catch (reason) {
+      setPreloginTargetPreview(null);
+      const operationError = reason instanceof Error ? reason.message : String(reason);
+      try {
+        await loadPreloginTargetDraft();
+        setPreloginError(`${operationError}；保存结果未知，已重读当前目标草稿，请核对后继续。`);
+      } catch (recoveryReason) {
+        const recoveryError = recoveryReason instanceof Error ? recoveryReason.message : String(recoveryReason);
+        setPreloginError(`${operationError}；保存结果未知且目标草稿重读失败：${recoveryError}`);
+      }
+    } finally {
+      setPreloginBusy(false);
+    }
+  }, [
+    loadPreloginTargetDraft,
+    path,
+    preloginTargetDraft,
+    preloginTargetFactsFresh,
+    publishedAssignmentUsesCanonicalRoster,
+    publishedPreparationAssignment,
+  ]);
+
+  const previewPreloginTarget = useCallback(async () => {
+    if (!publishedAssignmentUsesCanonicalRoster || !preloginTargetFactsFresh || !preloginTargetDraft || !currentPreloginPublicationIdentity) return;
+    setPreloginBusy(true);
+    setPreloginError(null);
+    setPreloginTargetPreview(null);
     try {
       const payload = await post(`${path}/target-assignment`, { action: 'preview', expectedRevision: preloginTargetDraft.revision });
       const preview = record(payload.preview, '目标预览');
       const endpointIds = array(preview.endpointIds, '目标预览').map((value) => text(value, '目标预览'));
       setPreloginTargetPreview({
+        publicationIdentity: currentPreloginPublicationIdentity,
         fingerprint: fingerprint(preview.previewFingerprint, '目标预览'),
         targetCount: positiveInteger(preview.targetCount, '目标预览'),
         endpointIds,
@@ -1985,16 +2314,38 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
         removedEndpointIds: array(preview.removedEndpointIds, '目标预览').map((value) => text(value, '目标预览')),
       });
     } catch (reason) {
-      setPreloginError(reason instanceof Error ? reason.message : String(reason));
+      const operationError = reason instanceof Error ? reason.message : String(reason);
+      const refreshed = await refreshWorkspace();
+      setPreloginError(
+        refreshed
+          ? `${operationError}；目标解析失败后已重读当前名单与发布分配，请按页面漂移明细处理后重试。`
+          : `${operationError}；目标解析失败且当前名单重读失败，请先使用“重读教室事实”。`,
+      );
     } finally {
       setPreloginBusy(false);
     }
-  }, [path, preloginTargetDraft]);
+  }, [
+    currentPreloginPublicationIdentity,
+    path,
+    preloginTargetDraft,
+    preloginTargetFactsFresh,
+    publishedAssignmentUsesCanonicalRoster,
+    refreshWorkspace,
+  ]);
 
   const publishPreloginTarget = useCallback(async () => {
-    if (!preloginTargetDraft || !preloginTargetPreview) return;
+    if (
+      !preloginTargetDraft ||
+      !publishedAssignmentUsesCanonicalRoster ||
+      !preloginTargetFactsFresh ||
+      !preloginTargetPreview ||
+      preloginTargetPreview.publicationIdentity !== currentPreloginPublicationIdentity
+    ) {
+      return;
+    }
     setPreloginBusy(true);
     setPreloginError(null);
+    setPreloginFactsFresh(false);
     try {
       await post(`${path}/target-assignment`, {
         action: 'publish',
@@ -2004,16 +2355,33 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
       setPreloginTargetPreview(null);
       await loadPreloginTargetDraft();
     } catch (reason) {
-      setPreloginError(reason instanceof Error ? reason.message : String(reason));
+      setPreloginTargetPreview(null);
+      const operationError = reason instanceof Error ? reason.message : String(reason);
+      try {
+        await loadPreloginTargetDraft();
+        setPreloginError(`${operationError}；发布结果未知，已重读当前目标版本，请核对后继续。`);
+      } catch (recoveryReason) {
+        const recoveryError = recoveryReason instanceof Error ? recoveryReason.message : String(recoveryReason);
+        setPreloginError(`${operationError}；发布结果未知且目标版本重读失败：${recoveryError}`);
+      }
     } finally {
       setPreloginBusy(false);
     }
-  }, [loadPreloginTargetDraft, path, preloginTargetDraft, preloginTargetPreview]);
+  }, [
+    currentPreloginPublicationIdentity,
+    loadPreloginTargetDraft,
+    path,
+    preloginTargetDraft,
+    preloginTargetFactsFresh,
+    preloginTargetPreview,
+    publishedAssignmentUsesCanonicalRoster,
+  ]);
 
   const assignPreloginTarget = useCallback(async () => {
-    if (!preloginTargetDraft?.latestPublishedRevision) return;
+    if (!publishedAssignmentUsesCanonicalRoster || !preloginTargetFactsFresh || !preloginTargetDraft?.latestPublishedRevision) return;
     setPreloginBusy(true);
     setPreloginError(null);
+    setPreloginFactsFresh(false);
     try {
       await post(`${path}/network-config`, {
         action: 'assignTarget',
@@ -2021,30 +2389,59 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
         assignmentId: preloginTargetDraft.assignmentId,
         revision: preloginTargetDraft.latestPublishedRevision,
       });
-      await loadPreloginFacts();
+      await loadPreloginTargetDraft();
     } catch (reason) {
-      setPreloginError(reason instanceof Error ? reason.message : String(reason));
+      const operationError = reason instanceof Error ? reason.message : String(reason);
+      try {
+        await loadPreloginTargetDraft();
+        setPreloginError(`${operationError}；分配结果未知，已重读当前网络配置，请核对后继续。`);
+      } catch (recoveryReason) {
+        const recoveryError = recoveryReason instanceof Error ? recoveryReason.message : String(recoveryReason);
+        setPreloginError(`${operationError}；分配结果未知且当前网络配置重读失败：${recoveryError}`);
+      }
     } finally {
       setPreloginBusy(false);
     }
-  }, [loadPreloginFacts, path, preloginNetworkConfigRevision, preloginTargetDraft]);
+  }, [
+    loadPreloginTargetDraft,
+    path,
+    preloginNetworkConfigRevision,
+    preloginTargetDraft,
+    preloginTargetFactsFresh,
+    publishedAssignmentUsesCanonicalRoster,
+  ]);
 
   const preparePrelogin = useCallback(async () => {
+    if (!publishedAssignmentUsesCanonicalRoster) return;
     setPreloginBusy(true);
     setPreloginError(null);
     try {
       await loadPreloginFacts();
     } catch (reason) {
-      setPreloginError(reason instanceof Error ? reason.message : String(reason));
+      const operationError = reason instanceof Error ? reason.message : String(reason);
+      const refreshed = await refreshWorkspace();
+      setPreloginError(
+        refreshed
+          ? `${operationError}；终端预检失败后已重读当前名单与考试活动，请按页面漂移明细处理后重试。`
+          : `${operationError}；终端预检失败且当前名单重读失败，请先使用“重读教室事实”。`,
+      );
     } finally {
       setPreloginBusy(false);
     }
-  }, [loadPreloginFacts]);
+  }, [loadPreloginFacts, publishedAssignmentUsesCanonicalRoster, refreshWorkspace]);
 
   const startPreloginNetwork = useCallback(async () => {
-    if (!preloginWorkflow || preloginWorkflow.network.source !== 'config' || preloginWorkflow.network.configRevision === null) return;
+    if (
+      !preloginFactsCurrent ||
+      !preloginWorkflow ||
+      preloginWorkflow.network.source !== 'config' ||
+      preloginWorkflow.network.configRevision === null
+    ) {
+      return;
+    }
     setPreloginBusy(true);
     setPreloginError(null);
+    setPreloginFactsFresh(false);
     try {
       await post(`${path}/network-execution`, {
         action: 'start',
@@ -2056,21 +2453,71 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
         throw new Error('网络策略尚未在全部目标终端完成应用；请查看逐终端网络执行事实。');
       }
     } catch (reason) {
-      setPreloginError(reason instanceof Error ? reason.message : String(reason));
+      const operationError = reason instanceof Error ? reason.message : String(reason);
+      try {
+        await loadPreloginFacts();
+        setPreloginError(`${operationError}；启动结果未知，已重读当前网络执行事实，请核对后继续。`);
+      } catch (recoveryReason) {
+        const recoveryError = recoveryReason instanceof Error ? recoveryReason.message : String(recoveryReason);
+        const refreshed = await refreshWorkspace();
+        setPreloginError(
+          refreshed
+            ? `${operationError}；当前网络执行事实重读失败（${recoveryError}），已重读名单与考试活动，请核对后继续。`
+            : `${operationError}；启动结果未知且网络执行、名单事实均重读失败：${recoveryError}`,
+        );
+      }
     } finally {
       setPreloginBusy(false);
     }
-  }, [loadPreloginFacts, path, preloginWorkflow]);
+  }, [loadPreloginFacts, path, preloginFactsCurrent, preloginWorkflow, refreshWorkspace]);
+
+  const retryPreloginNetwork = useCallback(async () => {
+    if (
+      !preloginFactsCurrent ||
+      !preloginWorkflow ||
+      preloginWorkflow.network.source !== 'execution' ||
+      preloginWorkflow.network.ready ||
+      (preloginWorkflow.network.reason !== 'network_execution_pending' && preloginWorkflow.network.reason !== 'network_execution_failed')
+    ) {
+      return;
+    }
+    const action = preloginWorkflow.network.reason === 'network_execution_pending' ? 'retry' : 'retryFailed';
+    setPreloginBusy(true);
+    setPreloginError(null);
+    setPreloginFactsFresh(false);
+    try {
+      await post(`${path}/network-execution`, { action, expectedRevision: preloginWorkflow.network.executionRevision });
+      await loadPreloginFacts();
+    } catch (reason) {
+      const operationError = reason instanceof Error ? reason.message : String(reason);
+      try {
+        await loadPreloginFacts();
+        setPreloginError(`${operationError}；网络重试结果未知，已重读当前执行事实，请核对后继续。`);
+      } catch (recoveryReason) {
+        const recoveryError = recoveryReason instanceof Error ? recoveryReason.message : String(recoveryReason);
+        const refreshed = await refreshWorkspace();
+        setPreloginError(
+          refreshed
+            ? `${operationError}；当前执行事实重读失败（${recoveryError}），已重读名单与考试活动，请核对后继续。`
+            : `${operationError}；网络重试结果未知且执行、名单事实均重读失败：${recoveryError}`,
+        );
+      }
+    } finally {
+      setPreloginBusy(false);
+    }
+  }, [loadPreloginFacts, path, preloginFactsCurrent, preloginWorkflow, refreshWorkspace]);
 
   const confirmPrelogin = useCallback(async () => {
     if (
-      !publishedAssignment ||
+      !publishedPreparationAssignment ||
+      !preloginFactsCurrent ||
       !preloginPreparation ||
       !preloginWorkflow ||
       preloginWorkflow.network.source !== 'execution' ||
       !preloginWorkflow.network.ready ||
       preloginWorkflow.hardErrorCount > 0 ||
       !preloginWorkflowWriterEnabled ||
+      (publishedPreparationAssignment.schemaVersion === 2 && !preloginV2WriterEnabled) ||
       currentPublicationAlreadyConfirmed
     ) {
       return;
@@ -2087,7 +2534,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
     };
     try {
       const payload = await post(`${path}/prelogin/confirm`, {
-        assignmentRevision: publishedAssignment.revision,
+        assignmentRevision: publishedPreparationAssignment.revision,
         preparationFingerprint: preloginPreparation.fingerprint,
         workflowFingerprint: preloginWorkflow.fingerprint,
         requestId: canonicalRequestId,
@@ -2126,16 +2573,18 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
     acceptPreloginBatch,
     eventId,
     path,
+    preloginFactsCurrent,
     preloginPreparation,
     preloginWorkflow,
+    preloginV2WriterEnabled,
     preloginWorkflowWriterEnabled,
-    publishedAssignment,
+    publishedPreparationAssignment,
     resumeDispatchingPrelogin,
     writePreloginUrl,
   ]);
 
   const retryFailedPrelogin = useCallback(async () => {
-    if (!preloginBatch?.projection) return;
+    if (!preloginBatch?.projection || !preloginBatchMatchesCurrentPublication) return;
     setPreloginBusy(true);
     setPreloginError(null);
     let canonicalRequestId: string | null = null;
@@ -2181,7 +2630,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
     } finally {
       setPreloginBusy(false);
     }
-  }, [acceptPreloginBatch, eventId, loadPreloginBatch, path, preloginBatch, writePreloginUrl]);
+  }, [acceptPreloginBatch, eventId, loadPreloginBatch, path, preloginBatch, preloginBatchMatchesCurrentPublication, writePreloginUrl]);
 
   const projectionByTicket = useMemo(() => new Map((preloginBatch?.projection?.items || []).map((item) => [item.ticketId, item])), [preloginBatch]);
   const preloginResultCounts = useMemo(() => {
@@ -2205,6 +2654,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
     const url = new URL(window.location.href);
     return Boolean(url.searchParams.get('retryRequestId') && url.searchParams.get('retryProjectionRevision'));
   }, [preloginBatch, preloginError]);
+  const pendingConfirmIdentity = new URL(window.location.href).searchParams.has('requestId');
   return (
     <AdminPage
       bypassPrivGate
@@ -2225,32 +2675,54 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
             {error}
           </div>
         ) : null}
+        {workspace?.publishedRosterDrift?.changed ? (
+          <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+            <p className="font-medium">当前参赛名单或团队关系已不同于已发布分配；新的预登录会整批阻止，请重新冻结名单并生成、检查和发布新版本。</p>
+            <div className="mt-2 space-y-1">
+              {workspace.publishedRosterDrift.items.map((item) => (
+                <p key={`${item.kind}-${item.boundUserId}`}>{rosterDriftText(item)}</p>
+              ))}
+              {workspace.publishedRosterDrift.sourceChangedWithoutParticipantDiff ? (
+                <p>名单来源范围或团队 revision 已变化，但成员与角色集合未变化；仍需重新冻结后确认新 revision。</p>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+        {workspace?.eventType === 'krypton' && !currentV2UsesCanonicalRoster ? (
+          <div role="alert" className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-800 dark:text-amber-200">
+            历史 v2 计划或分配使用了 userbind
+            子名单；凡仍引用该子名单的版本只读保留，不能继续生成、调整、发布或预登录。请先按当前比赛受众冻结新名单，再创建候选计划。
+          </div>
+        ) : null}
         <Card>
           <CardHeader>
-            <CardTitle>准备名单与候选座位</CardTitle>
+            <CardTitle>步骤 1–2：冻结名单与候选教室</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-sm text-muted-foreground">这里只追加不可变名单与候选范围；不会自动生成、发布或修改长期终端绑定。</p>
             <div className="grid gap-3 lg:grid-cols-2">
               <div className="space-y-2 rounded-md border p-3">
                 <label className="text-sm font-medium" htmlFor="seat-roster-source">
-                  名单来源
+                  步骤 1：名单来源
                 </label>
                 <select
                   id="seat-roster-source"
                   aria-label="名单来源"
                   value={sourceKind}
-                  disabled={mutationBusy || dirty || !workspaceFresh || !automaticSeatingAllowed}
+                  disabled={mutationBusy || dirty || !workspaceFresh || !automaticSeatingAllowed || workspace?.eventType === 'krypton'}
                   onChange={(event) => setSourceKind(event.target.value as 'contestAudience' | 'userbindGroups' | 'userbindSchool')}
                   className="w-full rounded-md border bg-background px-2 py-2 text-sm"
                 >
-                  <option value="userbindGroups">指定 userbind 用户组</option>
-                  <option value="userbindSchool">当前学校全部学生</option>
                   {workspace?.eventType === 'krypton' ? (
                     <option value="contestAudience" disabled={workspace.contestAudienceState !== 'fixed'}>
                       {workspace.contestAudienceState === 'public' ? '关联比赛受众（公开比赛不支持自动排座）' : '关联比赛受众'}
                     </option>
-                  ) : null}
+                  ) : (
+                    <>
+                      <option value="userbindGroups">指定 userbind 用户组</option>
+                      <option value="userbindSchool">当前学校全部学生</option>
+                    </>
+                  )}
                 </select>
                 {workspace?.contestAudienceState === 'public' ? (
                   <p className="text-sm text-amber-700">
@@ -2303,7 +2775,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
               </div>
               <div className="space-y-3 rounded-md border p-3">
                 <div>
-                  <p className="text-sm font-medium">候选教室</p>
+                  <p className="text-sm font-medium">步骤 2：候选教室</p>
                   <p className="text-xs text-muted-foreground">可跨教室多选；计划会冻结当前布局、朝向和禁用配置版本。</p>
                 </div>
                 <div className="max-h-56 space-y-1 overflow-auto rounded-md bg-muted/30 p-2">
@@ -2380,9 +2852,12 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle>生成与发布</CardTitle>
+            <CardTitle>步骤 3–5：生成、检查调整与发布</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-wrap items-center gap-2">
+            <p className="w-full text-sm text-muted-foreground">
+              步骤 3 选择策略并生成尽力型结果；步骤 4 在下方座位图或学生清单中换位、锁定并保存；步骤 5 明确发布最终 revision。
+            </p>
             {!workspaceFresh ? (
               <p className="w-full rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-sm text-amber-800 dark:text-amber-200">
                 页面事实尚未完成重读；所有写入、发布和导出均已暂停。请点击“重读教室事实”。
@@ -2413,7 +2888,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                   <select
                     aria-label="跨教室分配策略"
                     value={v2Strategy}
-                    disabled={mutationBusy || dirty || !workspaceFresh || !automaticSeatingAllowed}
+                    disabled={mutationBusy || dirty || !workspaceFresh || !automaticSeatingAllowed || !latestPlanUsesCanonicalRoster}
                     onChange={(event) => setV2Strategy(event.target.value as AssignmentV2Revision['constraints']['strategy'])}
                     className="rounded-md border bg-background px-2 py-2 text-sm"
                   >
@@ -2423,7 +2898,14 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                 </label>
                 <Button
                   disabled={
-                    mutationBusy || dirty || !workspaceFresh || !automaticSeatingAllowed || !latestPlanV2.roster || !latestPlanCurrent || !planRoster
+                    mutationBusy ||
+                    dirty ||
+                    !workspaceFresh ||
+                    !automaticSeatingAllowed ||
+                    !latestPlanUsesCanonicalRoster ||
+                    !latestPlanV2.roster ||
+                    !latestPlanCurrent ||
+                    !planRoster
                   }
                   onClick={() =>
                     execute({
@@ -2508,7 +2990,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
             <CardHeader>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <CardTitle>分配解释与教室座位图</CardTitle>
+                  <CardTitle>步骤 4：检查解释并人工调整</CardTitle>
                   <p className="mt-1 text-sm text-muted-foreground">只展示已冻结的客观事实：教室用量、风险边、拆队、跳过座位和 Endpoint 状态。</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -2664,7 +3146,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
 
         <Card>
           <CardHeader>
-            <CardTitle>终端预检与预登录</CardTitle>
+            <CardTitle>步骤 6–7：终端预检、网络启动与显式预启动</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             {workspace?.eventType === 'external' ? (
@@ -2677,35 +3159,108 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                   <a href={`/admin/exam-infrastructure/events/${eventId}`}>返回网络策略与目标</a>
                 </Button>
               </div>
-            ) : publishedV2Assignment ? (
-              <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-800 dark:text-amber-200">
-                已发布跨教室座位分配 r{publishedV2Assignment.revision}。本页已完成跨教室生成、调整和发布；终端预检、网络目标与预登录保持禁用，留待
-                P2.14 统一接入。
-              </div>
-            ) : !publishedAssignment ? (
+            ) : !publishedPreparationAssignment ? (
               <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-800 dark:text-amber-200">
                 请先发布一份座位分配；终端预检不会使用最新未发布草稿。
               </div>
             ) : (
               <>
+                <p className="rounded-md border border-sky-500/30 bg-sky-500/5 p-3 text-sm text-sky-800 dark:text-sky-200">
+                  建议在开赛前 10–15 分钟运行预检并启动网络；系统不会定时唤起、不会 Wake-on-LAN，也不会自动点击最后一步。
+                </p>
                 <div className="flex flex-wrap gap-2">
-                  <Badge variant="outline">名单 r{publishedAssignment.roster.revision}</Badge>
-                  <Badge variant="outline">分配 r{publishedAssignment.revision}</Badge>
+                  <Badge variant="outline">名单 r{publishedPreparationAssignment.roster.revision}</Badge>
+                  <Badge variant="outline">分配 r{publishedPreparationAssignment.revision}</Badge>
                   <Badge variant="outline">发布 r{workspace?.publicationRevision || 0}</Badge>
                   {preloginWorkflow ? <Badge variant="outline">策略 r{preloginWorkflow.network.policy.revision}</Badge> : null}
                   {preloginWorkflow ? <Badge variant="outline">目标 r{preloginWorkflow.network.target.revision}</Badge> : null}
                   {preloginBatch ? <Badge variant="outline">批次 r{preloginBatch.revision}</Badge> : null}
                   {preloginBatch?.projection ? <Badge variant="outline">投影 r{preloginBatch.projection.projectionRevision}</Badge> : null}
                 </div>
-                <p className="font-mono text-xs text-muted-foreground">发布 assignment {publishedAssignment.assignmentId}</p>
+                <p className="font-mono text-xs text-muted-foreground">发布 assignment {publishedPreparationAssignment.assignmentId}</p>
                 <div className="rounded-md border bg-muted/20 p-3">
-                  <p className="text-sm font-medium">同页配置预登录目标</p>
+                  <p className="text-sm font-medium">步骤 6：固定终端范围并启动网络</p>
                   <p className="mt-1 text-xs text-muted-foreground">每一步仍需显式点击；不会自动发布目标或启动网络。</p>
+                  {!publishedAssignmentUsesCanonicalRoster ? (
+                    <p className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-xs text-amber-800 dark:text-amber-200">
+                      当前发布分配使用历史 userbind 子名单，仅供审计；请发布基于 canonical 比赛名单的新分配后再配置终端、网络和预登录。
+                    </p>
+                  ) : null}
+                  <div className="mt-3 rounded-md border bg-background p-3">
+                    <p className="text-sm font-medium">网络策略与活动状态</p>
+                    {!preloginTargetFactsFresh ? (
+                      <Button
+                        className="mt-2"
+                        size="sm"
+                        variant="outline"
+                        disabled={mutationBusy || dirty || !workspaceFresh || !publishedAssignmentUsesCanonicalRoster}
+                        onClick={() => void refreshPreloginTargetFacts()}
+                      >
+                        <RefreshCw className="size-4" /> 读取当前策略与目标事实
+                      </Button>
+                    ) : (
+                      <div className="mt-2 space-y-2">
+                        <div className="flex flex-wrap gap-2 text-xs">
+                          <Badge variant="outline">当前策略 {preloginNetworkPolicyRef ? `r${preloginNetworkPolicyRef.revision}` : '未分配'}</Badge>
+                          <Badge variant="outline">当前目标 {preloginNetworkTargetRef ? `r${preloginNetworkTargetRef.revision}` : '未分配'}</Badge>
+                          <Badge variant="outline">
+                            活动 {workspace?.eventLifecycle === 'draft' ? '草稿' : workspace?.eventLifecycle === 'scheduled' ? '已计划' : '已归档'}
+                          </Badge>
+                        </div>
+                        {preloginPolicyOptions.length ? (
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                            <label className="flex-1 text-sm">
+                              <span className="mb-1 block font-medium">已发布网络策略版本</span>
+                              <select
+                                aria-label="已发布网络策略版本"
+                                value={selectedPreloginPolicy}
+                                onChange={(event) => setSelectedPreloginPolicy(event.target.value)}
+                                className="h-9 w-full rounded-md border bg-background px-3"
+                              >
+                                <option value="">请选择策略</option>
+                                {preloginPolicyOptions.map((option) => (
+                                  <option key={`${option.templateId}:${option.revision}`} value={`${option.templateId}:${option.revision}`}>
+                                    {option.name} · r{option.revision}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={
+                                mutationBusy ||
+                                dirty ||
+                                !workspaceFresh ||
+                                !publishedAssignmentUsesCanonicalRoster ||
+                                !selectedPreloginPolicy ||
+                                selectedPreloginPolicy ===
+                                  (preloginNetworkPolicyRef ? `${preloginNetworkPolicyRef.id}:${preloginNetworkPolicyRef.revision}` : '')
+                              }
+                              onClick={() => void assignPreloginPolicy()}
+                            >
+                              分配所选策略
+                            </Button>
+                          </div>
+                        ) : (
+                          <p className="text-xs text-amber-700 dark:text-amber-300">
+                            当前学校没有可选的已发布网络策略；请先在考试基础设施中发布策略版本。
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
                   <div className="mt-3 flex flex-wrap gap-2">
                     <Button
                       size="sm"
                       variant="outline"
-                      disabled={preloginBusy || dirty || preloginTargetDraft?.sourceAssignmentId === publishedAssignment.assignmentId}
+                      disabled={
+                        mutationBusy ||
+                        dirty ||
+                        !workspaceFresh ||
+                        !publishedAssignmentUsesCanonicalRoster ||
+                        (preloginTargetFactsFresh && preloginTargetDraft?.sourceAssignmentId === publishedPreparationAssignment.assignmentId)
+                      }
                       onClick={() => void savePublishedAssignmentAsTarget()}
                     >
                       1. 保存当前分配为目标
@@ -2713,7 +3268,14 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                     <Button
                       size="sm"
                       variant="outline"
-                      disabled={preloginBusy || dirty || preloginTargetDraft?.sourceAssignmentId !== publishedAssignment.assignmentId}
+                      disabled={
+                        mutationBusy ||
+                        dirty ||
+                        !workspaceFresh ||
+                        !publishedAssignmentUsesCanonicalRoster ||
+                        !preloginTargetFactsFresh ||
+                        preloginTargetDraft?.sourceAssignmentId !== publishedPreparationAssignment.assignmentId
+                      }
                       onClick={() => void previewPreloginTarget()}
                     >
                       2. 重新解析目标
@@ -2721,7 +3283,15 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                     <Button
                       size="sm"
                       variant="outline"
-                      disabled={preloginBusy || dirty || !preloginTargetPreview}
+                      disabled={
+                        mutationBusy ||
+                        dirty ||
+                        !workspaceFresh ||
+                        !publishedAssignmentUsesCanonicalRoster ||
+                        !preloginTargetFactsFresh ||
+                        !preloginTargetPreview ||
+                        preloginTargetPreview.publicationIdentity !== currentPreloginPublicationIdentity
+                      }
                       onClick={() => void publishPreloginTarget()}
                     >
                       3. 发布目标快照
@@ -2730,10 +3300,13 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                       size="sm"
                       variant="outline"
                       disabled={
-                        preloginBusy ||
+                        mutationBusy ||
                         dirty ||
+                        !workspaceFresh ||
+                        !publishedAssignmentUsesCanonicalRoster ||
+                        !preloginTargetFactsFresh ||
                         !preloginTargetDraft?.latestPublishedRevision ||
-                        preloginTargetDraft.latestPublishedSourceAssignmentId !== publishedAssignment.assignmentId
+                        preloginTargetDraft.latestPublishedSourceAssignmentId !== publishedPreparationAssignment.assignmentId
                       }
                       onClick={() => void assignPreloginTarget()}
                     >
@@ -2752,36 +3325,78 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                       </details>
                     </div>
                   ) : null}
+                  {workspace?.eventLifecycle === 'draft' ? (
+                    <Button
+                      className="mt-3"
+                      size="sm"
+                      disabled={
+                        mutationBusy ||
+                        dirty ||
+                        !workspaceFresh ||
+                        !publishedAssignmentUsesCanonicalRoster ||
+                        !preloginTargetFactsFresh ||
+                        !preloginNetworkPolicyRef ||
+                        !preloginNetworkTargetRef
+                      }
+                      onClick={() => void scheduleExamEvent()}
+                    >
+                      <Play className="size-4" /> 将考试活动显式计划为待开始
+                    </Button>
+                  ) : null}
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <Button variant="outline" disabled={preloginBusy || dirty} onClick={() => void preparePrelogin()}>
+                  <Button
+                    variant="outline"
+                    disabled={
+                      mutationBusy || dirty || !workspaceFresh || !publishedAssignmentUsesCanonicalRoster || workspace?.eventLifecycle !== 'scheduled'
+                    }
+                    onClick={() => void preparePrelogin()}
+                  >
                     {preloginBusy ? <RefreshCw className="size-4 animate-spin" /> : <AlertTriangle className="size-4" />} 运行终端预检
                   </Button>
-                  {preloginWorkflow?.network.source === 'config' ? (
-                    <Button disabled={preloginBusy || dirty} onClick={() => void startPreloginNetwork()}>
+                  {preloginFactsCurrent && preloginWorkflow?.network.source === 'config' ? (
+                    <Button disabled={mutationBusy || dirty} onClick={() => void startPreloginNetwork()}>
                       <Play className="size-4" /> 启动网络策略
+                    </Button>
+                  ) : null}
+                  {preloginFactsCurrent &&
+                  preloginWorkflow?.network.source === 'execution' &&
+                  !preloginWorkflow.network.ready &&
+                  (preloginWorkflow.network.reason === 'network_execution_pending' ||
+                    preloginWorkflow.network.reason === 'network_execution_failed') ? (
+                    <Button variant="outline" disabled={mutationBusy || dirty} onClick={() => void retryPreloginNetwork()}>
+                      <RefreshCw className="size-4" />
+                      {preloginWorkflow.network.reason === 'network_execution_pending' ? '重试当前网络请求' : '整批重试失败网络命令'}
                     </Button>
                   ) : null}
                   <Button
                     disabled={
-                      preloginBusy ||
+                      mutationBusy ||
                       dirty ||
+                      !preloginFactsCurrent ||
                       !preloginPreparation ||
                       !preloginWorkflow ||
                       preloginWorkflow.network.source !== 'execution' ||
                       !preloginWorkflow.network.ready ||
                       preloginWorkflow.hardErrorCount > 0 ||
                       !preloginWorkflowWriterEnabled ||
+                      (publishedPreparationAssignment.schemaVersion === 2 && !preloginV2WriterEnabled) ||
                       currentPublicationAlreadyConfirmed
                     }
                     onClick={() => void confirmPrelogin()}
                   >
-                    <Play className="size-4" /> 确认预登录
+                    <Play className="size-4" /> 步骤 7：一键预启动全部终端
                   </Button>
                 </div>
-                {preloginPreparation && !preloginWorkflowWriterEnabled ? (
+                {preloginFactsCurrent && preloginPreparation && !preloginWorkflowWriterEnabled ? (
                   <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-800 dark:text-amber-200">
                     当前处于 P2.9 兼容读取阶段，确认写入尚未启用。请先完成旧批次兼容验证，再由管理员启用 exam.preloginWorkflowWriterEnabled。
+                  </p>
+                ) : null}
+                {preloginFactsCurrent && preloginPreparation && publishedPreparationAssignment.schemaVersion === 2 && !preloginV2WriterEnabled ? (
+                  <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-800 dark:text-amber-200">
+                    跨教室预登录当前处于兼容读取阶段。部署并验证 P2.14 reader 后，由管理员一次性启用
+                    exam.preloginV2WriterEnabled；启用后最低回滚版本为 P2.14 compatible reader。
                   </p>
                 ) : null}
                 {preloginError ? (
@@ -2789,7 +3404,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                     {preloginError}
                   </p>
                 ) : null}
-                {preloginWorkflow && preloginPreparation ? (
+                {preloginFactsCurrent && preloginWorkflow && preloginPreparation ? (
                   <div className="space-y-3 rounded-md border p-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div>
@@ -2833,7 +3448,9 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                           {preloginPreparation.items.map((item) => {
                             const student = publishedRosterByUid.get(item.uid);
                             const monitoring = item.endpointId ? monitoringByEndpoint.get(item.endpointId) : null;
-                            const diagnosticCodes = item.diagnostics.map((diagnostic) => diagnostic.code);
+                            const publishedSeat = publishedV2SeatByUid.get(item.uid);
+                            const hardDiagnostics = item.diagnostics.filter((diagnostic) => diagnostic.severity === 'error');
+                            const warningDiagnostics = item.diagnostics.filter((diagnostic) => diagnostic.severity === 'warning');
                             return (
                               <TableRow key={item.uid}>
                                 <TableCell>
@@ -2841,7 +3458,11 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                                   <div className="text-xs text-muted-foreground">{student?.realName || item.studentRecordId}</div>
                                 </TableCell>
                                 <TableCell>
-                                  <div>{item.sourceSeatId}</div>
+                                  <div>
+                                    {publishedSeat
+                                      ? `${classroomDisplayById.get(publishedSeat.classroomId) || publishedSeat.classroomId} / ${publishedSeat.sourceSeatId}`
+                                      : item.sourceSeatId}
+                                  </div>
                                   <div className="font-mono text-xs text-muted-foreground">{item.endpointId || '未绑定'}</div>
                                 </TableCell>
                                 <TableCell>
@@ -2854,7 +3475,16 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                                   <Badge variant={item.ready && monitoring?.ready !== false ? 'default' : 'destructive'}>
                                     {item.ready && monitoring?.ready !== false ? '可投递' : '阻塞'}
                                   </Badge>
-                                  {diagnosticCodes.length ? <div className="mt-1 text-xs text-destructive">{diagnosticCodes.join('、')}</div> : null}
+                                  {hardDiagnostics.length ? (
+                                    <div className="mt-1 text-xs text-destructive">
+                                      {hardDiagnostics.map((diagnostic) => diagnostic.code).join('、')}
+                                    </div>
+                                  ) : null}
+                                  {warningDiagnostics.length ? (
+                                    <div className="mt-1 text-xs text-amber-700">
+                                      告警：{warningDiagnostics.map((diagnostic) => diagnostic.code).join('、')}
+                                    </div>
+                                  ) : null}
                                   {monitoring?.warnings.length ? (
                                     <div className="mt-1 text-xs text-amber-700">
                                       告警：{monitoring.warnings.map((warning) => warning.kind).join('、')}
@@ -2896,9 +3526,19 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                         <Badge variant="outline">未处理 {preloginResultCounts.unprocessed}</Badge>
                       </div>
                     </div>
+                    {!preloginBatchMatchesCurrentPublication ? (
+                      <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-xs text-amber-800 dark:text-amber-200">
+                        这是历史发布版本的批次，仅供审计；不能对当前发布版本执行失败重试。
+                      </p>
+                    ) : null}
                     <Button
                       variant="outline"
-                      disabled={preloginBusy || !preloginBatch.projection || (!preloginBatch.retryableTicketIds.length && !pendingRetryIdentity)}
+                      disabled={
+                        mutationBusy ||
+                        !preloginBatchMatchesCurrentPublication ||
+                        !preloginBatch.projection ||
+                        (!preloginBatch.retryableTicketIds.length && !pendingRetryIdentity)
+                      }
                       onClick={() => void retryFailedPrelogin()}
                     >
                       <RefreshCw className="size-4" />
@@ -2916,14 +3556,21 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                         </TableHeader>
                         <TableBody>
                           {preloginBatch.subjects.map((subject) => {
-                            const student = publishedRosterByUid.get(subject.uid);
+                            const student = preloginBatchRosterByUid.get(subject.uid);
+                            const structuredSeat = preloginBatchSeatByUid.get(subject.uid);
                             const result = projectionByTicket.get(subject.ticketId);
                             const succeeded = result?.status === 'applied' && result.stage === 'page_ready';
                             return (
                               <TableRow key={subject.ticketId}>
                                 <TableCell>{student ? `${student.studentId} · ${student.realName}` : `UID ${subject.uid}`}</TableCell>
                                 <TableCell>
-                                  <div>{subject.sourceSeatId}</div>
+                                  <div>
+                                    {structuredSeat
+                                      ? `${classroomDisplayById.get(structuredSeat.classroomId) || structuredSeat.classroomId} / ${structuredSeat.sourceSeatId}`
+                                      : preloginBatchAssignment?.schemaVersion === 1
+                                        ? subject.sourceSeatId
+                                        : `${subject.sourceSeatId}（历史教室不可定位）`}
+                                  </div>
                                   <div className="font-mono text-xs text-muted-foreground">{subject.endpointId}</div>
                                 </TableCell>
                                 <TableCell>{result?.stage || 'dispatch'}</TableCell>
@@ -2941,9 +3588,14 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                     </div>
                   </div>
                 ) : null}
-                <Button size="sm" variant="ghost" disabled={preloginBusy} onClick={() => void loadPreloginBatchHistory()}>
+                <Button size="sm" variant="ghost" disabled={mutationBusy} onClick={() => void loadPreloginBatchHistory()}>
                   查看历史批次
                 </Button>
+                {pendingConfirmIdentity ? (
+                  <p className="text-xs text-amber-700 dark:text-amber-300">
+                    确认请求结果尚未收敛；原 requestId 已保留，继续同一确认请求前暂不可切换历史批次。
+                  </p>
+                ) : null}
                 {preloginBatchHistory.length ? (
                   <div className="space-y-2 rounded-md border p-3">
                     <p className="font-medium">历史预登录批次</p>
@@ -2951,7 +3603,8 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                       <button
                         key={batch.batchId}
                         type="button"
-                        className="flex w-full flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-left text-sm hover:bg-muted/30"
+                        disabled={mutationBusy || pendingRetryIdentity || pendingConfirmIdentity}
+                        className="flex w-full flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-left text-sm hover:bg-muted/30 disabled:cursor-not-allowed disabled:opacity-50"
                         onClick={() => {
                           selectPreloginBatch(batch);
                           writePreloginUrl({ batchId: batch.batchId, requestId: null });
@@ -2977,7 +3630,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
 
         <Card>
           <CardHeader>
-            <CardTitle>学生与实体座位</CardTitle>
+            <CardTitle>步骤 4 补充：学生与实体座位清单</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             {workspace?.endpointState === 'unavailable' ? (

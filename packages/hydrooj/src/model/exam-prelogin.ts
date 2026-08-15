@@ -14,6 +14,7 @@ export type ExamPreloginDiagnosticCode =
     | 'endpoint_incompatible'
     | 'endpoint_offline'
     | 'external_workspace_unavailable'
+    | 'seat_facing_changed'
     | 'seat_binding_changed'
     | 'user_binding_changed';
 
@@ -97,6 +98,22 @@ export interface ExamPreloginWorkflowBinding {
     targetCount: number;
     startAt: Date;
     hardEndAt: Date;
+}
+
+export interface ExamPreloginDispatchRecoveryItem {
+    ticketId: ObjectId;
+    uid: number;
+    studentRecordId: ObjectId;
+    sourceSeatId: string;
+    bindingId: ObjectId;
+    bindingRevision: number;
+    endpointId: string;
+}
+
+export interface ExamPreloginDispatchRecovery {
+    schemaVersion: 1;
+    workspace: ExamPreloginWorkspace;
+    items: ExamPreloginDispatchRecoveryItem[];
 }
 
 export interface ExamPreloginBatchDoc {
@@ -215,6 +232,12 @@ function deterministicObjectId(identity: string): ObjectId {
     return new ObjectId(sha256(identity).slice(0, 24));
 }
 
+export function examPreloginTicketId(batchId: ObjectId, endpointId: string): ObjectId {
+    assertObjectId(batchId, 'batch_id');
+    const canonicalEndpointId = canonicalText(endpointId, 'endpoint_id');
+    return deterministicObjectId(`exam-prelogin-ticket\0${batchId.toHexString()}\0${canonicalEndpointId}`);
+}
+
 function duplicateKey(error: unknown): boolean {
     return !!error && typeof error === 'object' && (error as { code?: unknown }).code === 11000;
 }
@@ -323,6 +346,7 @@ const diagnosticCodes = new Set<ExamPreloginDiagnosticCode>([
     'endpoint_incompatible',
     'endpoint_offline',
     'external_workspace_unavailable',
+    'seat_facing_changed',
     'seat_binding_changed',
     'user_binding_changed',
 ]);
@@ -337,6 +361,24 @@ function canonicalDiagnostic(value: unknown): ExamPreloginDiagnostic {
 }
 
 function preparationFact(preparation: Omit<ExamPreloginPreparation, 'fingerprint'>): unknown {
+    const itemFacts = preparation.items.map((item) => ({
+        uid: item.uid,
+        studentRecordId: item.studentRecordId.toHexString(),
+        sourceSeatId: item.sourceSeatId,
+        bindingId: item.bindingId?.toHexString() ?? null,
+        bindingRevision: item.bindingRevision,
+        endpointId: item.endpointId,
+        ready: item.ready,
+        // Facing is an optimization-quality observation. It remains visible in
+        // the immutable preparation projection but cannot invalidate a ticket
+        // whose identity, binding, endpoint and hard readiness are unchanged.
+        diagnostics: item.diagnostics.filter((diagnostic) => diagnostic.code !== 'seat_facing_changed'),
+        endpoint: item.endpoint,
+    }));
+    const authorizationWarningCount = itemFacts.reduce(
+        (count, item) => count + item.diagnostics.filter((diagnostic) => diagnostic.severity === 'warning').length,
+        0,
+    );
     return {
         schemaVersion: preparation.schemaVersion,
         domainId: preparation.domainId,
@@ -349,19 +391,9 @@ function preparationFact(preparation: Omit<ExamPreloginPreparation, 'fingerprint
         },
         publicationRevision: preparation.publicationRevision,
         workspace: preparation.workspace,
-        items: preparation.items.map((item) => ({
-            uid: item.uid,
-            studentRecordId: item.studentRecordId.toHexString(),
-            sourceSeatId: item.sourceSeatId,
-            bindingId: item.bindingId?.toHexString() ?? null,
-            bindingRevision: item.bindingRevision,
-            endpointId: item.endpointId,
-            ready: item.ready,
-            diagnostics: item.diagnostics,
-            endpoint: item.endpoint,
-        })),
+        items: itemFacts,
         hardErrorCount: preparation.hardErrorCount,
-        warningCount: preparation.warningCount,
+        warningCount: authorizationWarningCount,
     };
 }
 
@@ -442,7 +474,6 @@ export function assertExamPreloginPreparationIntegrity(value: unknown): asserts 
     if (
         new Set(items.map((item) => item.uid)).size !== items.length ||
         new Set(items.map((item) => item.studentRecordId.toHexString())).size !== items.length ||
-        new Set(items.map((item) => item.sourceSeatId)).size !== items.length ||
         new Set(items.flatMap((item) => (item.bindingId ? [item.bindingId.toHexString()] : []))).size !==
             items.filter((item) => item.bindingId !== null).length ||
         new Set(items.flatMap((item) => (item.endpointId ? [item.endpointId] : []))).size !== items.filter((item) => item.endpointId !== null).length
@@ -502,6 +533,65 @@ function batchFingerprint(doc: Omit<ExamPreloginBatchDoc, 'fingerprint'>): strin
         createdBy: doc.createdBy,
         updatedAt: doc.updatedAt.toISOString(),
     });
+}
+
+export function createExamPreloginDispatchRecovery(preparation: ExamPreloginPreparation, ticketIds: ObjectId[]): ExamPreloginDispatchRecovery {
+    if (!preparation.workspace || preparation.items.length !== ticketIds.length) {
+        throw new ExamPreloginError('dispatch_recovery_invalid');
+    }
+    const recovery: ExamPreloginDispatchRecovery = {
+        schemaVersion: 1,
+        workspace: preparation.workspace,
+        items: preparation.items.map((item, index) => {
+            if (!item.bindingId || item.bindingRevision === null || !item.endpointId || !item.ready) {
+                throw new ExamPreloginError('preparation_item_not_dispatchable');
+            }
+            return {
+                ticketId: ticketIds[index],
+                uid: item.uid,
+                studentRecordId: item.studentRecordId,
+                sourceSeatId: item.sourceSeatId,
+                bindingId: item.bindingId,
+                bindingRevision: item.bindingRevision,
+                endpointId: item.endpointId,
+            };
+        }),
+    };
+    assertDispatchRecoveryIntegrity(recovery, ticketIds);
+    return recovery;
+}
+
+function assertDispatchRecoveryIntegrity(recovery: unknown, ticketIds: ObjectId[]): asserts recovery is ExamPreloginDispatchRecovery {
+    const record = exactObject(recovery, ['items', 'schemaVersion', 'workspace'], 'dispatch_recovery_invalid');
+    if (record.schemaVersion !== 1 || !Array.isArray(record.items) || record.items.length !== ticketIds.length) {
+        throw new ExamPreloginError('dispatch_recovery_invalid');
+    }
+    canonicalWorkspace(record.workspace);
+    const items = record.items.map((rawItem, index) => {
+        const item = exactObject(
+            rawItem,
+            ['bindingId', 'bindingRevision', 'endpointId', 'sourceSeatId', 'studentRecordId', 'ticketId', 'uid'],
+            'dispatch_recovery_invalid',
+        );
+        assertObjectId(item.ticketId, 'ticket_id');
+        if (!item.ticketId.equals(ticketIds[index])) throw new ExamPreloginError('dispatch_recovery_invalid');
+        assertUid(item.uid);
+        assertObjectId(item.studentRecordId, 'student_record_id');
+        canonicalText(item.sourceSeatId, 'source_seat_id');
+        assertObjectId(item.bindingId, 'binding_id');
+        assertRevision(item.bindingRevision, 'binding_revision');
+        canonicalText(item.endpointId, 'endpoint_id');
+        return item;
+    });
+    for (const values of [
+        items.map((item) => (item.ticketId as ObjectId).toHexString()),
+        items.map((item) => item.uid),
+        items.map((item) => (item.studentRecordId as ObjectId).toHexString()),
+        items.map((item) => (item.bindingId as ObjectId).toHexString()),
+        items.map((item) => item.endpointId),
+    ]) {
+        if (new Set(values).size !== values.length) throw new ExamPreloginError('dispatch_recovery_invalid');
+    }
 }
 
 function workflowBindingFact(workflow: ExamPreloginWorkflowBinding): Record<string, unknown> {
@@ -930,9 +1020,7 @@ export class ExamPreloginService {
             }
         } else {
             const createdAt = canonicalDate(this.now(), 'now');
-            const ticketIds = preparation.items.map((item) =>
-                deterministicObjectId(`exam-prelogin-ticket\0${batchId.toHexString()}\0${item.endpointId}`),
-            );
+            const ticketIds = preparation.items.map((item) => examPreloginTicketId(batchId, item.endpointId!));
             const canonical: Omit<ExamPreloginBatchDoc, 'fingerprint'> = {
                 _id: batchId,
                 domainId: preparation.domainId,
@@ -985,7 +1073,10 @@ export class ExamPreloginService {
         return this.dispatchAndFinalize(batch, ticketDocs);
     }
 
-    async resumeDispatching(batch: ExamPreloginBatchDoc): Promise<{ batch: ExamPreloginBatchDoc; projection: ExamPreloginProjection }> {
+    async resumeDispatching(
+        batch: ExamPreloginBatchDoc,
+        recovery?: ExamPreloginDispatchRecovery,
+    ): Promise<{ batch: ExamPreloginBatchDoc; projection: ExamPreloginProjection }> {
         assertBatchIntegrity(batch);
         const boundary = [
             batch.domainId,
@@ -1006,7 +1097,13 @@ export class ExamPreloginService {
                 if (!current.projection) throw new ExamPreloginError('batch_projection_invalid');
                 return { batch: current, projection: current.projection };
             }
-            const tickets = await this.listBatchTickets(current);
+            const existingTickets = await this.listBatchTickets(current);
+            const tickets =
+                existingTickets.length === current.ticketIds.length
+                    ? existingTickets
+                    : recovery
+                      ? await this.ensureRecoveryTickets(current, recovery)
+                      : existingTickets;
             if (tickets.length !== current.ticketIds.length) throw new ExamPreloginError('dispatch_recovery_incomplete');
             return this.dispatchAndFinalize(current, tickets);
         });
@@ -1021,8 +1118,9 @@ export class ExamPreloginService {
         const projection = canonicalProjection(rawProjection, batch);
         const updatedAt = canonicalDate(this.now(), 'now');
         if (updatedAt < batch.updatedAt) throw new ExamPreloginError('clock_rollback');
+        const { fingerprint: _fingerprint, ...dispatchingBatch } = batch;
         const canonical: Omit<ExamPreloginBatchDoc, 'fingerprint'> = {
-            ...batch,
+            ...dispatchingBatch,
             state: 'dispatched',
             revision: batch.revision + 1,
             projection,
@@ -1044,16 +1142,15 @@ export class ExamPreloginService {
     }
 
     private async ensureTickets(batch: ExamPreloginBatchDoc, preparation: ExamPreloginPreparation): Promise<ExamPreloginTicketDoc[]> {
-        if (batch.ticketIds.length !== preparation.items.length) throw new ExamPreloginError('batch_ticket_ids_invalid');
-        if (!preparation.workspace) throw new ExamPreloginError('workspace_unavailable');
-        const workspace = preparation.workspace;
+        return this.ensureRecoveryTickets(batch, createExamPreloginDispatchRecovery(preparation, batch.ticketIds));
+    }
+
+    private async ensureRecoveryTickets(batch: ExamPreloginBatchDoc, recovery: ExamPreloginDispatchRecovery): Promise<ExamPreloginTicketDoc[]> {
+        assertDispatchRecoveryIntegrity(recovery, batch.ticketIds);
+        const workspace = recovery.workspace;
         const result: ExamPreloginTicketDoc[] = [];
-        for (let index = 0; index < preparation.items.length; index++) {
-            const item = preparation.items[index];
-            const ticketId = batch.ticketIds[index];
-            if (!item.bindingId || item.bindingRevision === null || !item.endpointId || !item.ready) {
-                throw new ExamPreloginError('preparation_item_not_dispatchable');
-            }
+        for (const item of recovery.items) {
+            const ticketId = item.ticketId;
             const existing = await this.tickets.findOne({ _id: ticketId });
             const nonce = createHmac('sha256', Buffer.from(this.dependencies.ticketKey, 'hex'))
                 .update(`nonce\0${ticketId.toHexString()}\0${batch.requestId}`, 'utf8')

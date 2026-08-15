@@ -6,7 +6,11 @@ import { assertCanManageExamEvent, isExamInfrastructureAdmin } from '../model/ex
 import { ExamEventDoc, examEventService } from '../model/exam-event';
 import { withExamEventBoundary } from '../model/exam-event-boundary';
 import { ExamNetworkConfigError } from '../model/exam-network-config';
-import { validateExamPreloginTicketCurrent, validateExamPreloginTicketsCurrent } from '../model/exam-prelogin-loader';
+import {
+    loadExamPreloginDispatchRecovery,
+    validateExamPreloginTicketCurrent,
+    validateExamPreloginTicketsCurrent,
+} from '../model/exam-prelogin-loader';
 import { ExamPreloginWorkflowSnapshot, loadExamPreloginWorkflow, validateExamPreloginRetryWorkflow } from '../model/exam-prelogin-workflow';
 import {
     ExamPreloginBatchDoc,
@@ -16,8 +20,9 @@ import {
     ExamPreloginTicketDoc,
     ExamPreloginWorkflowBinding,
 } from '../model/exam-prelogin';
-import { examSeatAssignmentService } from '../model/exam-seat-assignment';
-import { getExamPreloginService, isExamPreloginWorkflowWriterEnabled } from '../service/exam-prelogin';
+import { examSeatAssignmentService, isExamSeatAssignmentV2 } from '../model/exam-seat-assignment';
+import { ExamSeatAssignmentReadinessError } from '../model/exam-seat-assignment-readiness';
+import { getExamPreloginService, isExamPreloginV2WriterEnabled, isExamPreloginWorkflowWriterEnabled } from '../service/exam-prelogin';
 import { parseVigilExamPreloginProjection, preflightExamPreloginOnVigil } from '../service/vigil-bridge';
 
 const logger = new Logger('exam-prelogin');
@@ -50,6 +55,21 @@ function assertCanonicalEvent(event: ExamEventDoc, domainId: string, eventId: Ob
 }
 
 function translate(error: unknown): never {
+    if (error instanceof ExamSeatAssignmentReadinessError) {
+        logger.warn(
+            'Exam prelogin readiness rejected event=%s assignment=%s stage=%s reason=%s classroom=%s seat=%s uid=%s',
+            error.eventId,
+            error.assignmentId,
+            error.stage,
+            error.reason,
+            error.detail.classroomId ?? '-',
+            error.detail.sourceSeatId ?? '-',
+            error.detail.uid ?? '-',
+        );
+        const location = [error.detail.classroomId, error.detail.sourceSeatId].filter(Boolean).join('/');
+        const detail = [error.stage, location || null, error.detail.uid ? `uid=${error.detail.uid}` : null].filter(Boolean).join(':');
+        throw new ValidationError('examPrelogin', null, localizedErrorText`Invalid request: ${error.reason}:${detail}`);
+    }
     if (error instanceof ExamPreloginError || error instanceof ExamNetworkConfigError) {
         throw new ValidationError('examPrelogin', null, localizedErrorText`Invalid request: ${error.reason}`);
     }
@@ -268,6 +288,7 @@ class ExamPreloginPrepareHandler extends ExamPreloginManagerHandler {
             this.response.body = {
                 preparation: serializePreparation(workflow.preparation),
                 workflow: serializeWorkflow(workflow),
+                v2WriterEnabled: isExamPreloginV2WriterEnabled(),
                 workflowWriterEnabled: isExamPreloginWorkflowWriterEnabled(),
             };
         } catch (error) {
@@ -322,9 +343,18 @@ class ExamPreloginConfirmHandler extends ExamPreloginManagerHandler {
                     if (tickets.length === existing.ticketIds.length) {
                         return { mode: 'recovered' as const, result: await service.resumeDispatching(existing), workflow: null };
                     }
+                    const recovery = await loadExamPreloginDispatchRecovery(current, existing);
+                    if (recovery) {
+                        return { mode: 'recovered' as const, result: await service.resumeDispatching(existing, recovery), workflow: null };
+                    }
                 }
                 if (!existing && !isExamPreloginWorkflowWriterEnabled()) throw new ExamPreloginError('workflow_writer_disabled');
                 const currentWorkflow = await loadExamPreloginWorkflow(current, assignmentRevision);
+                const currentAssignment = await examSeatAssignmentService.getRevision(domainId, eventId, assignmentRevision);
+                if (!currentAssignment) throw new ExamPreloginError('assignment_not_found');
+                if (!existing && isExamSeatAssignmentV2(currentAssignment) && !isExamPreloginV2WriterEnabled()) {
+                    throw new ExamPreloginError('prelogin_v2_writer_disabled');
+                }
                 if (currentWorkflow.preparation.fingerprint !== preparationFingerprint) {
                     throw new ExamPreloginError('preparation_fingerprint_changed');
                 }

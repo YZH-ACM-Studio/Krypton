@@ -151,11 +151,14 @@ abstract class ExamEventBaseHandler extends Handler {
 }
 
 class ExamEventCollectionHandler extends ExamEventBaseHandler {
-    async get() {
+    @param('contestId', Types.ObjectId, true)
+    async get(_args: unknown, contestId?: ObjectId) {
         const domainId = String(this.domain._id);
         const admin = isExamInfrastructureAdmin(this.user);
         const schoolIds = admin ? undefined : await resolveExamEventSchoolScope(domainId, this.user);
-        const visible = await examEventService.list(domainId, schoolIds, 200, admin ? undefined : this.user._id).toArray();
+        const visible = await examEventService
+            .list(domainId, schoolIds, contestId ? 500 : 200, admin ? undefined : this.user._id, contestId)
+            .toArray();
         await Promise.all(visible.map((event) => assertCanManageExamEvent(domainId, event, this.user)));
         this.response.body = {
             events: visible.map(serializeEvent),

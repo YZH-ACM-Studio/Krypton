@@ -419,6 +419,14 @@ SystemSetting(
     ),
     Setting(
         'setting_vigil',
+        'exam.preloginV2WriterEnabled',
+        false,
+        'boolean',
+        'exam.preloginV2WriterEnabled',
+        'Enable new v2 multi-classroom pre-login batches only after the P2.14 compatible reader has been deployed and verified.',
+    ),
+    Setting(
+        'setting_vigil',
         'exam.preloginWorkflowWriterEnabled',
         false,
         'boolean',

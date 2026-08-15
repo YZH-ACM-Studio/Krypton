@@ -25,6 +25,7 @@ import { assertCanManageExamEvent, isExamInfrastructureAdmin } from '../model/ex
 import { withExamEventBoundary } from '../model/exam-event-boundary';
 import { endpointSeatBindingService } from '../model/endpoint-seat-binding';
 import { examSeatOperationalProfileService } from '../model/exam-seat-operational-profile';
+import { inspectCurrentExamSeatAssignmentV2Roster } from '../model/exam-seat-assignment-readiness';
 import { assertExamContestAudienceRosterCurrent, getExamContestAudienceState, resolveExamRosterForEvent } from '../model/exam-roster-resolver';
 import {
     ExamRosterRevisionDoc,
@@ -444,6 +445,9 @@ abstract class ExamSeatAssignmentBaseHandler extends Handler {
         ) {
             throw new ExamSeatAssignmentError('assignment_roster_missing');
         }
+        if (event.type === 'krypton' && roster.source.kind !== 'contestAudience') {
+            throw new ExamSeatAssignmentError('assignment_roster_source_changed');
+        }
         await assertExamContestAudienceRosterCurrent(event, roster);
         const seatFactsByClassroom = await Promise.all(
             seatPlan.classrooms.map(async (classroomRef) => {
@@ -689,6 +693,7 @@ class ExamSeatAssignmentCollectionHandler extends ExamSeatAssignmentBaseHandler 
             assertExamSeatAssignmentIntegrity(assignment);
             await this.assertStoredReferences(event, assignment);
         }
+        let publishedAssignment: ExamSeatAssignmentRevisionDoc | null = null;
         if (publication) {
             const published = await examSeatAssignmentService.getRevision(domainId, eventId, publication.assignment.revision);
             if (
@@ -699,7 +704,12 @@ class ExamSeatAssignmentCollectionHandler extends ExamSeatAssignmentBaseHandler 
                 throw new ExamSeatAssignmentError('assignment_publication_reference_drift');
             }
             if (!assignments.some((assignment) => assignment._id.equals(published._id))) await this.assertStoredReferences(event, published);
+            publishedAssignment = published;
         }
+        const publishedRosterDrift =
+            publishedAssignment && isExamSeatAssignmentV2(publishedAssignment)
+                ? await inspectCurrentExamSeatAssignmentV2Roster(event, publishedAssignment)
+                : null;
         let latestSeatPlanState: 'current' | 'layout-drift' | 'not-ready' = 'not-ready';
         let latestPlanSource: AssignmentSource | null = null;
         if (seatPlans[0]?.roster) {
@@ -770,6 +780,7 @@ class ExamSeatAssignmentCollectionHandler extends ExamSeatAssignmentBaseHandler 
                 : null,
             source: currentSource,
             endpointPreflight,
+            publishedRosterDrift,
             latestSeatPlanState,
             rosterGroups,
             classrooms: classrooms

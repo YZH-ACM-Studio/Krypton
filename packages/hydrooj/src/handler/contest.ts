@@ -57,6 +57,21 @@ import { Handler, param, post, Type, Types } from '../service/server';
 
 const logger = new Logger('contest-handler');
 
+async function listContestScopeGroups(domainId: string, required: boolean): Promise<any[]> {
+    const userbind = (global as any).Hydro?.model?.userbind;
+    if (typeof userbind?.listUserGroups !== 'function') {
+        if (required) throw new TypeError('userbind.listUserGroups is unavailable');
+        return [];
+    }
+    try {
+        return await userbind.listUserGroups(domainId);
+    } catch (error) {
+        logger.error('Contest group catalog lookup failed domain=%s error=%o', domainId, error);
+        if (required) throw error;
+        return [];
+    }
+}
+
 function serializedContestEdit(_target: unknown, _key: string, descriptor: PropertyDescriptor) {
     const original = descriptor.value;
     descriptor.value = async function contestEditBoundary(this: ContestEditHandler, ...args: any[]) {
@@ -903,14 +918,16 @@ export class ContestEditHandler extends Handler {
         // have to make a second roundtrip. Both lists are admin-only
         // metadata; we already gate on PERM_EDIT_CONTEST / CREATE.
         let scopeSchools: any[] = [];
-        let scopeGroups: any[] = [];
         try {
             const userbind = (global as any).Hydro?.model?.userbind;
             if (userbind?.listSchools) scopeSchools = await userbind.listSchools(authoritativeDomainId);
-            if (userbind?.listUserGroups) scopeGroups = await userbind.listUserGroups(authoritativeDomainId);
         } catch {
             /* best-effort */
         }
+        const scopeGroups = await listContestScopeGroups(
+            authoritativeDomainId,
+            Boolean(this.tdoc && (this.tdoc.participationMode || 'individual') !== 'team' && this.tdoc.participantScopeMode === 'groups'),
+        );
 
         this.response.body = {
             rules,
@@ -1038,6 +1055,7 @@ export class ContestEditHandler extends Handler {
         teamModeClearConfirmation = '',
         plannedTeamBatchId: ObjectId = null,
     ) {
+        const creatingContest = !tid;
         const authoritativeDomainId = String(this.domain?._id);
         problem.assertProblemAclDomain(this.user, authoritativeDomainId);
         if (!Object.keys(contest.RULES).includes(rule) || contest.RULES[rule].hidden) throw new ValidationError('rule');
@@ -1363,7 +1381,7 @@ export class ContestEditHandler extends Handler {
             });
         }
         this.response.body = { tid };
-        this.response.redirect = this.url('contest_detail', { tid });
+        this.response.redirect = this.url(creatingContest ? 'contest_edit' : 'contest_detail', { tid });
     }
 
     @param('tid', Types.ObjectId)
@@ -1597,6 +1615,10 @@ export class ContestManagementHandler extends ContestManagementBaseHandler {
         } catch (error) {
             logger.error('Contest management statistics failed domain=%s contest=%s error=%o', authoritativeDomainId, tid, error);
         }
+        const scopeGroups =
+            contest.getParticipationMode(this.tdoc) !== 'team' && this.tdoc.participantScopeMode === 'groups'
+                ? await listContestScopeGroups(authoritativeDomainId, true)
+                : [];
         this.response.body = {
             tdoc: this.tdoc,
             tsdoc: this.tsdoc,
@@ -1604,6 +1626,7 @@ export class ContestManagementHandler extends ContestManagementBaseHandler {
             pdict: await problem.getList(authoritativeDomainId, this.tdoc.pids, true, true, [...problem.PROJECTION_CONTEST_LIST, 'tag']),
             files: sortFiles(this.tdoc.files || []),
             privateFiles: sortFiles(this.tdoc.privateFiles || []),
+            scopeGroups,
             urlForFile: (filename: string, type: string) => this.url('contest_file_download', { tid, filename, type }),
             submissionStats,
         };

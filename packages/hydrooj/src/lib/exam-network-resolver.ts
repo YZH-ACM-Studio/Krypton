@@ -1,11 +1,16 @@
 import { createHash } from 'node:crypto';
+import { Logger } from '@hydrooj/utils';
 import { ObjectId } from 'mongodb';
 import { ExamNetworkConfigError, ExamTargetResolution, ExamTargetResolverInput } from '../model/exam-network-config';
 import { endpointEnrollmentBatchColl, endpointIdForMachineFingerprint, endpointRegistrationColl } from '../model/endpoint-enrollment';
 import { endpointSeatBindingService } from '../model/endpoint-seat-binding';
 import { examClassroomService } from '../model/exam-classroom';
+import { examEventService } from '../model/exam-event';
 import { examSeatAssignmentService, isExamSeatAssignmentV2 } from '../model/exam-seat-assignment';
+import { ExamSeatAssignmentReadinessError, loadCurrentExamSeatAssignmentV2Facts } from '../model/exam-seat-assignment-readiness';
 import { preflightExamNetworkOnVigil } from '../service/vigil-bridge';
+
+const logger = new Logger('exam-network-resolver');
 
 function fingerprint(value: unknown): string {
     return createHash('sha256').update(JSON.stringify(value), 'utf8').digest('hex');
@@ -86,7 +91,52 @@ export async function resolveExamTargetSources(input: ExamTargetResolverInput): 
                     throw new ExamNetworkConfigError('exam_seat_assignment_changed');
                 }
                 if (isExamSeatAssignmentV2(assignment)) {
-                    throw new ExamNetworkConfigError('exam_seat_assignment_v2_not_enabled');
+                    const event = await examEventService.get(input.domainId, input.eventId);
+                    if (!event || !event.schoolId.equals(input.schoolId)) {
+                        throw new ExamNetworkConfigError('exam_seat_assignment_changed');
+                    }
+                    let current;
+                    try {
+                        current = await loadCurrentExamSeatAssignmentV2Facts(event, assignment);
+                    } catch (error) {
+                        if (error instanceof ExamSeatAssignmentReadinessError) {
+                            logger.warn(
+                                'Exam seat target readiness rejected event=%s assignment=%s stage=%s reason=%s classroom=%s seat=%s uid=%s',
+                                error.eventId,
+                                error.assignmentId,
+                                error.stage,
+                                error.reason,
+                                error.detail.classroomId ?? '-',
+                                error.detail.sourceSeatId ?? '-',
+                                error.detail.uid ?? '-',
+                            );
+                            throw new ExamNetworkConfigError('exam_seat_assignment_changed', {
+                                assignmentId: error.assignmentId,
+                                classroomId: error.detail.classroomId,
+                                eventId: error.eventId,
+                                sourceSeatId: error.detail.sourceSeatId,
+                                stage: error.stage,
+                                uid: error.detail.uid,
+                            });
+                        }
+                        throw error;
+                    }
+                    for (const mapping of current.mappings) {
+                        sourceFacts.push({
+                            kind: 'examSeat',
+                            sourceId,
+                            endpointId: mapping.endpointId,
+                            bindingId: mapping.bindingId.toHexString(),
+                            bindingRevision: mapping.bindingRevision,
+                            classroomId: mapping.classroomId.toHexString(),
+                            sourceSeatId: mapping.sourceSeatId,
+                            assignmentRevision: assignment.revision,
+                            assignmentFingerprint: assignment.fingerprint,
+                            publicationRevision: publication.revision,
+                            boundUserId: mapping.uid,
+                        });
+                    }
+                    continue;
                 }
                 const classroom = await examClassroomService.get(input.domainId, assignment.classroomId);
                 if (!classroom || !classroom.schoolId.equals(input.schoolId)) {

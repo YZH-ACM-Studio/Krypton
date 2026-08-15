@@ -360,3 +360,161 @@ export async function assertExamContestAudienceRosterCurrent(event: ExamEventDoc
         throw new ExamSeatPlanError('roster_source_changed');
     }
 }
+
+function storedRosterSelection(roster: ExamRosterRevisionDoc): ExamRosterSelection {
+    return roster.source.kind === 'contestAudience'
+        ? { kind: 'contestAudience' }
+        : roster.source.kind === 'userbindGroups'
+          ? { kind: 'userbindGroups', groupIds: roster.source.selectedGroupIds.map((groupId) => new ObjectId(groupId)) }
+          : { kind: 'userbindSchool' };
+}
+
+export async function resolveCurrentExamRoster(event: ExamEventDoc, roster: ExamRosterRevisionDoc): Promise<ResolvedExamRoster> {
+    if (roster.domainId !== event.domainId || !roster.eventId.equals(event._id) || !roster.schoolId.equals(event.schoolId)) {
+        throw new ExamSeatPlanError('roster_source_changed');
+    }
+    const current = await resolveExamRosterForEvent(event, storedRosterSelection(roster));
+    if (current.source.kind !== roster.source.kind) throw new ExamSeatPlanError('roster_source_changed');
+    return current;
+}
+
+export interface ExamRosterFrozenParticipant {
+    boundUserId: number;
+    studentRecordId: ObjectId;
+    studentId: string;
+    teamId: string | null;
+    teamRole: 'captain' | 'member' | null;
+}
+
+export interface ExamRosterDriftItem {
+    boundUserId: number;
+    studentId: string;
+    realName: string;
+    kind: 'added' | 'removed' | 'identity_changed' | 'team_changed';
+    previousTeamId: string | null;
+    previousTeamRole: 'captain' | 'member' | null;
+    currentTeamId: string | null;
+    currentTeamRole: 'captain' | 'member' | null;
+}
+
+export interface ExamRosterDrift {
+    changed: boolean;
+    sourceChangedWithoutParticipantDiff: boolean;
+    items: ExamRosterDriftItem[];
+}
+
+function resolvedRosterIdentity(roster: ResolvedExamRoster): string {
+    return sha256({
+        sourceFingerprint: roster.source.sourceFingerprint,
+        entries: rosterEntriesFingerprint(roster.entries),
+        exclusions: rosterExclusionsFingerprint(roster.exclusions),
+    });
+}
+
+async function currentTeamFacts(
+    event: ExamEventDoc,
+    roster: ExamRosterRevisionDoc,
+): Promise<{ roster: ResolvedExamRoster; teams: Map<number, { teamId: string; teamRole: 'captain' | 'member' }> }> {
+    const before = await resolveCurrentExamRoster(event, roster);
+    const teams = new Map<number, { teamId: string; teamRole: 'captain' | 'member' }>();
+    if (event.type !== 'krypton' || !event.contestId) return { roster: before, teams };
+    const context = await contestAudienceContext(event);
+    if (!context || context.participationMode !== 'team') return { roster: before, teams };
+    if (roster.source.kind !== 'contestAudience') throw new ExamSeatPlanError('roster_source_changed');
+    const contestTeams = await global.Hydro.model.contestTeam.listTeams(event.domainId, event.contestId);
+    const teamIds = new Set<string>();
+    for (const team of contestTeams) {
+        if (
+            !(team.teamId instanceof ObjectId) ||
+            !Number.isSafeInteger(team.revision) ||
+            team.revision < 1 ||
+            !Number.isSafeInteger(team.captainUid) ||
+            !Array.isArray(team.memberUids) ||
+            team.memberUids.length < 1 ||
+            team.memberUids.length > 3 ||
+            !team.memberUids.includes(team.captainUid) ||
+            team.memberUids.some((uid) => !Number.isSafeInteger(uid) || uid <= 1)
+        ) {
+            throw new ExamSeatPlanError('contest_team_roster_invalid');
+        }
+        const teamId = team.teamId.toHexString();
+        if (teamIds.has(teamId)) throw new ExamSeatPlanError('contest_team_roster_invalid');
+        teamIds.add(teamId);
+        for (const uid of team.memberUids) {
+            if (teams.has(uid)) throw new ExamSeatPlanError('contest_team_roster_invalid');
+            teams.set(uid, { teamId, teamRole: uid === team.captainUid ? 'captain' : 'member' });
+        }
+    }
+    const after = await resolveCurrentExamRoster(event, roster);
+    if (resolvedRosterIdentity(before) !== resolvedRosterIdentity(after)) throw new ExamSeatPlanError('roster_source_changed');
+    if (teams.size !== after.entries.length || after.entries.some((entry) => !teams.has(entry.boundUserId))) {
+        throw new ExamSeatPlanError('contest_team_roster_invalid');
+    }
+    return { roster: after, teams };
+}
+
+export async function inspectExamRosterDrift(
+    event: ExamEventDoc,
+    roster: ExamRosterRevisionDoc,
+    frozenParticipants: ExamRosterFrozenParticipant[],
+): Promise<ExamRosterDrift> {
+    const { roster: current, teams } = await currentTeamFacts(event, roster);
+    const frozenEntries = new Map(roster.entries.map((entry) => [entry.boundUserId, entry]));
+    const currentEntries = new Map(current.entries.map((entry) => [entry.boundUserId, entry]));
+    const frozenByUid = new Map(frozenParticipants.map((participant) => [participant.boundUserId, participant]));
+    if (frozenByUid.size !== frozenParticipants.length || frozenByUid.size !== frozenEntries.size) {
+        throw new ExamSeatPlanError('roster_source_changed');
+    }
+    const items: ExamRosterDriftItem[] = [];
+    const uids = Array.from(new Set([...frozenEntries.keys(), ...currentEntries.keys()])).sort((left, right) => left - right);
+    for (const uid of uids) {
+        const frozenEntry = frozenEntries.get(uid);
+        const currentEntry = currentEntries.get(uid);
+        const frozenParticipant = frozenByUid.get(uid);
+        const currentTeam = teams.get(uid) || null;
+        const previousTeamId = frozenParticipant?.teamId || null;
+        const previousTeamRole = frozenParticipant?.teamRole || null;
+        const currentTeamId = currentTeam?.teamId || null;
+        const currentTeamRole = currentTeam?.teamRole || null;
+        const common = {
+            boundUserId: uid,
+            studentId: currentEntry?.studentId || frozenEntry?.studentId || frozenParticipant?.studentId || '',
+            realName: currentEntry?.realName || frozenEntry?.realName || '',
+            previousTeamId,
+            previousTeamRole,
+            currentTeamId,
+            currentTeamRole,
+        };
+        if (!frozenEntry || !frozenParticipant) items.push({ ...common, kind: 'added' });
+        else if (!currentEntry) items.push({ ...common, kind: 'removed' });
+        else if (
+            !currentEntry.studentRecordId.equals(frozenEntry.studentRecordId) ||
+            currentEntry.studentId !== frozenEntry.studentId ||
+            currentEntry.realName !== frozenEntry.realName
+        ) {
+            items.push({ ...common, kind: 'identity_changed' });
+        } else if (previousTeamId !== currentTeamId || previousTeamRole !== currentTeamRole) {
+            items.push({ ...common, kind: 'team_changed' });
+        }
+    }
+    const sourceChanged =
+        current.source.sourceFingerprint !== roster.source.sourceFingerprint ||
+        rosterEntriesFingerprint(current.entries) !== rosterEntriesFingerprint(roster.entries) ||
+        rosterExclusionsFingerprint(current.exclusions) !== rosterExclusionsFingerprint(roster.exclusions);
+    return {
+        changed: sourceChanged || items.length > 0,
+        sourceChangedWithoutParticipantDiff: sourceChanged && items.length === 0,
+        items,
+    };
+}
+
+export async function assertExamRosterCurrent(event: ExamEventDoc, roster: ExamRosterRevisionDoc): Promise<void> {
+    const current = await resolveCurrentExamRoster(event, roster);
+    if (
+        current.source.sourceFingerprint !== roster.source.sourceFingerprint ||
+        rosterEntriesFingerprint(current.entries) !== rosterEntriesFingerprint(roster.entries) ||
+        rosterExclusionsFingerprint(current.exclusions) !== rosterExclusionsFingerprint(roster.exclusions)
+    ) {
+        throw new ExamSeatPlanError('roster_source_changed');
+    }
+}

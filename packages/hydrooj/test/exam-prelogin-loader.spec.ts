@@ -20,6 +20,10 @@ let attended = true;
 let groupNames: string[] = [];
 let assignmentSchemaVersion: 1 | 2 = 1;
 let seatPlanSchemaVersion: 1 | 2 = 1;
+let v2FacingChanged = false;
+let v2ReadinessChanged = false;
+let bulkReadinessCalls = 0;
+let ticketReadinessCalls = 0;
 
 function stub(modulePath: string, exports: Record<string, unknown>): void {
     const resolved = require.resolve(modulePath);
@@ -62,6 +66,7 @@ stub('../src/model/exam-classroom.ts', {
 stub('../src/model/exam-seat-assignment.ts', {
     __esModule: true,
     assertExamSeatAssignmentIntegrity: () => undefined,
+    examSeatIdentityKey: (seat: { classroomId: ObjectId; sourceSeatId: string }) => `${seat.classroomId.toHexString()}\0${seat.sourceSeatId}`,
     isExamSeatAssignmentV2: (assignment: { schemaVersion?: number }) => assignment.schemaVersion === 2,
     examSeatAssignmentService: {
         getRevision: async () => ({
@@ -76,13 +81,65 @@ stub('../src/model/exam-seat-assignment.ts', {
             layoutRevision: 2,
             layoutFingerprint: fingerprint,
             candidateSeatIds: ['seat-1'],
-            assignments: [{ boundUserId: 42, sourceSeatId: 'seat-1' }],
+            ...(assignmentSchemaVersion === 2
+                ? {
+                      participants: [{ boundUserId: 42, studentRecordId }],
+                      seatFacts: [
+                          {
+                              classroomId,
+                              sourceSeatId: 'seat-1',
+                              enabled: true,
+                              bindingId,
+                              bindingRevision: 3,
+                              endpointId: 'ep_one',
+                          },
+                      ],
+                      assignments: [{ boundUserId: 42, seat: { classroomId, sourceSeatId: 'seat-1' } }],
+                  }
+                : { assignments: [{ boundUserId: 42, sourceSeatId: 'seat-1' }] }),
             fingerprint,
         }),
         getPublication: async () => ({
             revision: 1,
             assignment: { assignmentId, revision: 2, fingerprint },
         }),
+    },
+});
+stub('../src/model/exam-seat-assignment-readiness.ts', {
+    __esModule: true,
+    loadCurrentExamSeatAssignmentV2Facts: async () => {
+        bulkReadinessCalls++;
+        if (v2ReadinessChanged) throw new TypeError('exam_prelogin_assignment_reference_changed');
+        return {
+            mappings: [
+                {
+                    uid: 42,
+                    studentRecordId,
+                    classroomId,
+                    sourceSeatId: 'seat-1',
+                    seatKey: `${classroomId.toHexString()}\0seat-1`,
+                    bindingId,
+                    bindingRevision: 3,
+                    endpointId: 'ep_one',
+                    facingChanged: v2FacingChanged,
+                },
+            ],
+        };
+    },
+    loadCurrentExamSeatAssignmentV2TicketFact: async () => {
+        ticketReadinessCalls++;
+        if (v2ReadinessChanged) throw new TypeError('exam_prelogin_assignment_reference_changed');
+        return {
+            uid: 42,
+            studentRecordId,
+            classroomId,
+            sourceSeatId: 'seat-1',
+            seatKey: `${classroomId.toHexString()}\0seat-1`,
+            bindingId,
+            bindingRevision: 3,
+            endpointId: 'ep_one',
+            facingChanged: v2FacingChanged,
+        };
     },
 });
 stub('../src/model/exam-seat-plan.ts', {
@@ -103,6 +160,7 @@ stub('../src/model/exam-seat-plan.ts', {
         getRosterRevision: async () => ({
             _id: rosterId,
             fingerprint,
+            source: { kind: 'contestAudience', contestId },
             entries: [{ boundUserId: 42, studentRecordId }],
         }),
     },
@@ -139,8 +197,9 @@ stub('../src/model/user.ts', {
     },
 };
 
-const { loadExamPreloginPreparation, validateExamPreloginTicketsCurrent } =
+const { loadExamPreloginDispatchRecovery, loadExamPreloginPreparation, validateExamPreloginTicketCurrent, validateExamPreloginTicketsCurrent } =
     require('../src/model/exam-prelogin-loader.ts') as typeof import('../src/model/exam-prelogin-loader');
+const { examPreloginTicketId } = require('../src/model/exam-prelogin.ts') as typeof import('../src/model/exam-prelogin');
 
 function event() {
     return {
@@ -183,12 +242,124 @@ beforeEach(() => {
     groupNames = [];
     assignmentSchemaVersion = 1;
     seatPlanSchemaVersion = 1;
+    v2FacingChanged = false;
+    v2ReadinessChanged = false;
+    bulkReadinessCalls = 0;
+    ticketReadinessCalls = 0;
 });
 
-test('P2.11 reader accepts v2 history but pre-login remains disabled until P2.14', async () => {
+test('v2 pre-login preserves the structured seat identity and reports facing drift as a warning', async () => {
     assignmentSchemaVersion = 2;
-    await assert.rejects(prepare(), /exam_prelogin_assignment_v2_not_enabled/);
+    v2FacingChanged = true;
+    const result = await prepare();
 
+    assert.equal(result.items[0].ready, true);
+    assert.deepEqual(result.items[0].diagnostics, [{ code: 'seat_facing_changed', severity: 'warning' }]);
+    assert.equal(result.items[0].sourceSeatId, 'seat-1');
+    assert.equal(result.items[0].bindingId?.toHexString(), bindingId.toHexString());
+});
+
+test('v2 pre-login blocks the whole preparation when current assignment facts drift', async () => {
+    assignmentSchemaVersion = 2;
+    v2ReadinessChanged = true;
+    await assert.rejects(prepare(), /exam_prelogin_assignment_reference_changed/);
+});
+
+test('v2 redemption rechecks only the exact ticket endpoint instead of repeating the whole batch preflight', async () => {
+    assignmentSchemaVersion = 2;
+    const batchId = new ObjectId('64b20000000000000000000b');
+    const ticketId = examPreloginTicketId(batchId, 'ep_one');
+    const ticket: import('../src/model/exam-prelogin').ExamPreloginTicketDoc = {
+        _id: ticketId,
+        batchId,
+        domainId,
+        eventId,
+        eventRevision: 3,
+        assignment: { assignmentId, revision: 2, fingerprint },
+        publicationRevision: 1,
+        uid: 42,
+        studentRecordId,
+        sourceSeatId: 'seat-1',
+        bindingId,
+        bindingRevision: 3,
+        endpointId: 'ep_one',
+        workspace: { kind: 'contest', contestId: contestId.toHexString(), path: `/exam-mode/${contestId.toHexString()}` },
+        nonce: 'b'.repeat(32),
+        ticketDigest: 'c'.repeat(64),
+        issuedAt: new Date('2026-08-12T00:55:00.000Z'),
+        expiresAt: new Date('2026-08-12T01:05:00.000Z'),
+        state: 'issued',
+        redemptionRequestId: null,
+        redeemedAt: null,
+        fingerprint: 'd'.repeat(64),
+    };
+    await validateExamPreloginTicketCurrent(
+        event(),
+        ticket,
+        fingerprint,
+        async (subjects) => {
+            assert.deepEqual(subjects, [{ endpointId: 'ep_one', uid: 42, contestId: contestId.toHexString() }]);
+            return [
+                {
+                    endpointId: 'ep_one',
+                    online: true,
+                    compatible: true,
+                    serviceVersion: '0.5.0',
+                    protocolVersion: 2,
+                    capabilities: [{ name: 'exam.prelogin', version: 1, commands: ['launch_prelogin'] }],
+                    activeSessionId: null,
+                    resumableSessionId: null,
+                },
+            ];
+        },
+        new Date('2026-08-12T01:00:00.000Z'),
+    );
+
+    assert.equal(ticketReadinessCalls, 1);
+    assert.equal(bulkReadinessCalls, 0);
+});
+
+test('partial v2 ticket recovery rebuilds only immutable assignment and roster facts', async () => {
+    assignmentSchemaVersion = 2;
+    v2ReadinessChanged = true;
+    const batchId = new ObjectId('64b20000000000000000000b');
+    const ticketId = examPreloginTicketId(batchId, 'ep_one');
+    const currentEvent = { ...event(), contestId: new ObjectId('64b20000000000000000000c'), revision: 9 };
+    const recovery = await loadExamPreloginDispatchRecovery(currentEvent, {
+        _id: batchId,
+        domainId,
+        eventId,
+        eventRevision: 3,
+        assignment: { assignmentId, revision: 2, fingerprint },
+        publicationRevision: 1,
+        requestId: 'prelogin_partial_recovery',
+        preparationFingerprint: fingerprint,
+        workflow: {
+            fingerprint,
+            executionRevision: 1,
+            policy: { id: new ObjectId(), revision: 1, fingerprint },
+            target: { id: new ObjectId(), revision: 1, fingerprint },
+            targetCount: 1,
+            startAt: new Date('2026-08-12T00:30:00.000Z'),
+            hardEndAt: new Date('2026-08-12T03:00:00.000Z'),
+        },
+        state: 'dispatching',
+        revision: 1,
+        ticketIds: [ticketId],
+        projection: null,
+        createdAt: new Date('2026-08-12T01:00:00.000Z'),
+        createdBy: 7,
+        updatedAt: new Date('2026-08-12T01:00:00.000Z'),
+        fingerprint,
+    });
+
+    assert.equal(recovery?.workspace.contestId, contestId.toHexString());
+    assert.equal(recovery?.items[0].ticketId.toHexString(), ticketId.toHexString());
+    assert.equal(recovery?.items[0].bindingId.toHexString(), bindingId.toHexString());
+    assert.equal(recovery?.items[0].endpointId, 'ep_one');
+});
+
+test('v1 pre-login rejects a v2 seat plan reference', async () => {
     assignmentSchemaVersion = 1;
     seatPlanSchemaVersion = 2;
     await assert.rejects(prepare(), /exam_prelogin_assignment_reference_changed/);

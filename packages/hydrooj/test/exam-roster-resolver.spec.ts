@@ -224,6 +224,74 @@ describe('P2.4 Contest audience compilation', () => {
         expect(source.students.map((student) => student.boundUserId)).to.deep.equal([201, 202]);
     });
 
+    it('reports the exact members whose finalized team or role changed after a frozen roster', async () => {
+        userStateRows = [
+            { _id: 201, priv: 4 },
+            { _id: 202, priv: 4 },
+        ];
+        mutableModel().userbind = {
+            loadExamRosterUserbindSnapshot: async (_domainId: string, _schoolId: ObjectId, groupIds: ObjectId[] | null) =>
+                snapshot(groupIds, [
+                    { uid: 201, record: 1 },
+                    { uid: 202, record: 2 },
+                ]),
+        };
+        mutableModel().contest = {
+            get: async () => ({
+                _id: contestId,
+                docId: contestId,
+                domainId,
+                participantScopeMode: 'none',
+                participantGroupIds: [],
+                participantSchoolIds: [],
+                participationMode: 'team',
+                rule: 'acm',
+                participationRevision: 4,
+                teamBatchId: new ObjectId('66bb00000000000000000005'),
+                assign: [],
+            }),
+            getMultiStatus: () => cursor([]),
+        };
+        const originalTeamId = new ObjectId('66bb00000000000000000006');
+        const replacementTeamId = new ObjectId('66bb00000000000000000007');
+        let currentTeams = [{ teamId: originalTeamId, revision: 1, captainUid: 201, memberUids: [201, 202] }];
+        mutableModel().contestTeam = { listTeams: async () => currentTeams };
+        const frozen = await resolverModule.resolveExamRosterForEvent(event(), { kind: 'contestAudience' });
+        const roster = {
+            _id: new ObjectId('66bb00000000000000000008'),
+            domainId,
+            eventId,
+            schoolId,
+            source: frozen.source,
+            entries: frozen.entries,
+            exclusions: frozen.exclusions,
+        } as import('../src/model/exam-seat-plan').ExamRosterRevisionDoc;
+        currentTeams = [{ teamId: replacementTeamId, revision: 2, captainUid: 202, memberUids: [201, 202] }];
+
+        const drift = await resolverModule.inspectExamRosterDrift(event(), roster, [
+            {
+                boundUserId: 201,
+                studentRecordId: frozen.entries[0].studentRecordId,
+                studentId: frozen.entries[0].studentId,
+                teamId: originalTeamId.toHexString(),
+                teamRole: 'captain',
+            },
+            {
+                boundUserId: 202,
+                studentRecordId: frozen.entries[1].studentRecordId,
+                studentId: frozen.entries[1].studentId,
+                teamId: originalTeamId.toHexString(),
+                teamRole: 'member',
+            },
+        ]);
+
+        expect(drift.changed).to.equal(true);
+        expect(drift.items.map((item) => [item.boundUserId, item.kind, item.currentTeamRole])).to.deep.equal([
+            [201, 'team_changed', 'member'],
+            [202, 'team_changed', 'captain'],
+        ]);
+    });
+
     it('rejects an empty active team before reading userbind PII', async () => {
         let userbindReads = 0;
         mutableModel().userbind = {

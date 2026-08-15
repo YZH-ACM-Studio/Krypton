@@ -20,6 +20,13 @@ export function isExamPreloginWorkflowWriterEnabled(): boolean {
     return true;
 }
 
+export function isExamPreloginV2WriterEnabled(): boolean {
+    const value = system.get('exam.preloginV2WriterEnabled');
+    if (value === undefined || value === null || value === false) return false;
+    if (value !== true) throw new ExamPreloginError('prelogin_v2_writer_setting_invalid');
+    return true;
+}
+
 /**
  * Lazily initializes the P2.6 service after system settings are loaded.
  * A live key change is rejected because it would invalidate already-issued

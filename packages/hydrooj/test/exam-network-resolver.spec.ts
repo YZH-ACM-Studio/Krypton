@@ -10,6 +10,18 @@ class ConfigError extends Error {
     }
 }
 
+class ReadinessError extends TypeError {
+    readonly reason = 'assignment_reference_changed';
+    readonly eventId = '66c000000000000000000001';
+    readonly assignmentId = '66c000000000000000000002';
+    readonly stage = 'binding';
+    readonly detail = {};
+
+    constructor() {
+        super('assignment_reference_changed');
+    }
+}
+
 async function loadResolver(
     batches: unknown[],
     preflight: (endpointIds: string[]) => Promise<unknown[]>,
@@ -20,6 +32,22 @@ async function loadResolver(
         layouts?: Map<string, Array<{ sourceSeatId: string; [key: string]: unknown }>>;
         publication?: unknown;
         registrations?: unknown[];
+        event?: unknown;
+        v2Readiness?:
+            | ReadinessError
+            | {
+                  mappings: Array<{
+                      uid: number;
+                      studentRecordId: ObjectId;
+                      classroomId: ObjectId;
+                      sourceSeatId: string;
+                      seatKey: string;
+                      bindingId: ObjectId;
+                      bindingRevision: number;
+                      endpointId: string;
+                      facingChanged: boolean;
+                  }>;
+              };
     } = {},
 ) {
     const resolverPath = require.resolve('../src/lib/exam-network-resolver.ts');
@@ -72,6 +100,27 @@ async function loadResolver(
                 examSeatAssignmentService: {
                     getPublication: async () => options.publication || null,
                     getRevision: async () => options.assignment || null,
+                },
+            };
+        }
+        if (parent?.filename === resolverPath && request === '../model/exam-event') {
+            return {
+                examEventService: {
+                    get: async () =>
+                        options.event || {
+                            _id: eventId,
+                            domainId: 'system',
+                            schoolId,
+                        },
+                },
+            };
+        }
+        if (parent?.filename === resolverPath && request === '../model/exam-seat-assignment-readiness') {
+            return {
+                ExamSeatAssignmentReadinessError: ReadinessError,
+                loadCurrentExamSeatAssignmentV2Facts: async () => {
+                    if (options.v2Readiness instanceof ReadinessError) throw options.v2Readiness;
+                    return options.v2Readiness || { mappings: [] };
                 },
             };
         }
@@ -355,7 +404,76 @@ describe('exam endpoint target resolver', () => {
         expect(result.endpoints.map((item) => item.endpointId)).to.deep.equal(['ep_one', 'ep_two']);
     });
 
-    it('keeps published v2 assignments read-only until the P2.14 network writer is enabled', async () => {
+    it('resolves a current published v2 assignment with repeated seat ids across classrooms', async () => {
+        const assignmentId = new ObjectId('66b800000000000000000a31');
+        const classroomOneId = new ObjectId('66b800000000000000000a32');
+        const classroomTwoId = new ObjectId('66b800000000000000000a33');
+        const assignmentFingerprint = 'f'.repeat(64);
+        const resolver = await loadResolver(
+            [
+                {
+                    _id: new ObjectId('66b800000000000000000a34'),
+                    domainId: 'system',
+                    claims: [
+                        { claimId: 'claim_v2_one', endpointId: 'ep_v2_one', finalizedAt: new Date('2026-08-11T01:00:00.000Z') },
+                        { claimId: 'claim_v2_two', endpointId: 'ep_v2_two', finalizedAt: new Date('2026-08-11T01:00:00.000Z') },
+                    ],
+                },
+            ],
+            async (endpointIds) =>
+                endpointIds.map((endpointId) => ({
+                    endpointId,
+                    credentialStatus: 'active',
+                    compatible: true,
+                    capabilities: [{ name: 'network.policy', version: 1, commands: networkCommands }],
+                })),
+            {
+                publication: {
+                    revision: 1,
+                    assignment: { assignmentId, revision: 2, fingerprint: assignmentFingerprint },
+                },
+                assignment: {
+                    _id: assignmentId,
+                    schemaVersion: 2,
+                    domainId: 'system',
+                    eventId,
+                    schoolId,
+                    revision: 2,
+                    fingerprint: assignmentFingerprint,
+                },
+                v2Readiness: {
+                    mappings: [
+                        {
+                            uid: 42,
+                            studentRecordId: new ObjectId('66b800000000000000000a35'),
+                            classroomId: classroomOneId,
+                            sourceSeatId: 'seat-1',
+                            seatKey: `${classroomOneId.toHexString()}\0seat-1`,
+                            bindingId: new ObjectId('66b800000000000000000a36'),
+                            bindingRevision: 2,
+                            endpointId: 'ep_v2_one',
+                            facingChanged: false,
+                        },
+                        {
+                            uid: 43,
+                            studentRecordId: new ObjectId('66b800000000000000000a37'),
+                            classroomId: classroomTwoId,
+                            sourceSeatId: 'seat-1',
+                            seatKey: `${classroomTwoId.toHexString()}\0seat-1`,
+                            bindingId: new ObjectId('66b800000000000000000a38'),
+                            bindingRevision: 3,
+                            endpointId: 'ep_v2_two',
+                            facingChanged: false,
+                        },
+                    ],
+                },
+            },
+        );
+        const result = await resolver.resolveExamTargetSources(input('examSeat', [assignmentId.toHexString()]));
+        expect(result.endpoints.map((item) => item.endpointId)).to.deep.equal(['ep_v2_one', 'ep_v2_two']);
+    });
+
+    it('rejects v2 assignment drift before contacting Vigil', async () => {
         const assignmentId = new ObjectId('66b800000000000000000a31');
         const assignmentFingerprint = 'f'.repeat(64);
         let preflightCalls = 0;
@@ -379,6 +497,7 @@ describe('exam endpoint target resolver', () => {
                     revision: 2,
                     fingerprint: assignmentFingerprint,
                 },
+                v2Readiness: new ReadinessError(),
             },
         );
         let reason: string | null = null;
@@ -387,7 +506,7 @@ describe('exam endpoint target resolver', () => {
         } catch (error) {
             reason = (error as ConfigError).reason;
         }
-        expect(reason).to.equal('exam_seat_assignment_v2_not_enabled');
+        expect(reason).to.equal('exam_seat_assignment_changed');
         expect(preflightCalls).to.equal(0);
     });
 

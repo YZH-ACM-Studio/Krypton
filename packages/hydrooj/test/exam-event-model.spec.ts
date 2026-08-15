@@ -187,6 +187,18 @@ describe('ExamEvent canonical model', () => {
         expect(rows.map((event) => event._id.toHexString())).to.deep.equal([own._id.toHexString()]);
     });
 
+    it('filters a Contest association in Mongo instead of relying on a capped recent-event page', async () => {
+        const { service } = fixture();
+        const wantedContestId = new ObjectId('66b800000000000000000212');
+        const otherContestId = new ObjectId('66b800000000000000000213');
+        const wanted = await service.create({ ...createInput(), type: 'krypton', contestId: wantedContestId });
+        await service.create({ ...createInput(), type: 'krypton', contestId: otherContestId });
+
+        const rows = await service.list('system', undefined, 500, undefined, wantedContestId).toArray();
+
+        expect(rows.map((event) => event._id.toHexString())).to.deep.equal([wanted._id.toHexString()]);
+    });
+
     it('preserves update field presence, including explicit Contest clearing, and rejects empty patches', () => {
         const clear = requestModule.parseExamEventUpdatePatch({ contestId: null, type: 'external', collaboratorUids: [] });
         expect(clear.requestedFields).to.deep.equal(['type', 'contestId', 'collaboratorUids']);
@@ -262,9 +274,7 @@ describe('ExamEvent canonical model', () => {
         const krypton = await service.create({ ...createInput(), type: 'krypton', contestId });
         await service.schedule('system', krypton._id, 1, 2);
         expect(
-            await reason(() =>
-                service.update({ domainId: 'system', eventId: krypton._id, expectedRevision: 2, actorUid: 2, contestId: null }),
-            ),
+            await reason(() => service.update({ domainId: 'system', eventId: krypton._id, expectedRevision: 2, actorUid: 2, contestId: null })),
         ).to.equal('contest_required');
 
         const external = await service.create(createInput());

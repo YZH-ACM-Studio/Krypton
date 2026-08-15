@@ -74,11 +74,7 @@ export interface ExamTargetResolverInput {
 export type ExamTargetResolver = (input: ExamTargetResolverInput) => Promise<ExamTargetResolution>;
 export type ExamNetworkControlPlaneResolver = () => Promise<ExamNetworkControlPlane>;
 
-const REQUIRED_NETWORK_POLICY_COMMANDS = [
-    'apply_network_policy',
-    'get_network_policy_status',
-    'stop_network_policy',
-] as const;
+const REQUIRED_NETWORK_POLICY_COMMANDS = ['apply_network_policy', 'get_network_policy_status', 'stop_network_policy'] as const;
 
 export interface ExamTargetRevision {
     revision: number;
@@ -139,7 +135,17 @@ type TargetCollection = Pick<Collection<ExamTargetAssignmentDoc>, 'createIndex' 
 type ConfigCollection = Pick<Collection<ExamEventNetworkConfigDoc>, 'createIndex' | 'deleteMany' | 'findOne' | 'findOneAndUpdate' | 'insertOne'>;
 
 export class ExamNetworkConfigError extends Error {
-    constructor(public readonly reason: string) {
+    constructor(
+        public readonly reason: string,
+        public readonly detail: {
+            assignmentId?: string;
+            classroomId?: string;
+            eventId?: string;
+            sourceSeatId?: string;
+            stage?: string;
+            uid?: number;
+        } | null = null,
+    ) {
         super(reason);
         this.name = 'ExamNetworkConfigError';
     }
@@ -584,10 +590,10 @@ export class ExamNetworkConfigService {
             const capability = endpoint.capabilities.find((item) => item?.name === 'network.policy');
             if (!capability) throw new ExamNetworkConfigError('endpoint_capability_missing');
             if (
-                capability.version !== 1
-                || !Array.isArray(capability.commands)
-                || !capability.commands.every((command) => typeof command === 'string' && command.length > 0)
-                || !REQUIRED_NETWORK_POLICY_COMMANDS.every((command) => capability.commands.includes(command))
+                capability.version !== 1 ||
+                !Array.isArray(capability.commands) ||
+                !capability.commands.every((command) => typeof command === 'string' && command.length > 0) ||
+                !REQUIRED_NETWORK_POLICY_COMMANDS.every((command) => capability.commands.includes(command))
             ) {
                 throw new ExamNetworkConfigError('endpoint_capability_incomplete');
             }
@@ -772,10 +778,7 @@ export const examTargetAssignmentColl = db.collection<ExamTargetAssignmentDoc>('
 export const examEventNetworkConfigColl = db.collection<ExamEventNetworkConfigDoc>('exam.eventNetworkConfigs');
 export const examNetworkConfigService = new ExamNetworkConfigService(examPolicyTemplateColl, examTargetAssignmentColl, examEventNetworkConfigColl);
 
-export async function loadExamTargetRevisionEndpointIds(
-    domainId: string,
-    reference: ExamNetworkRevisionRef,
-): Promise<string[]> {
+export async function loadExamTargetRevisionEndpointIds(domainId: string, reference: ExamNetworkRevisionRef): Promise<string[]> {
     assertDomainId(domainId);
     assertObjectId(reference.id, 'targetRef.id');
     assertRevision(reference.revision);

@@ -180,7 +180,7 @@ require.cache[dbPath] = {
 const moduleUnderTest = require('../src/model/exam-prelogin.ts') as typeof import('../src/model/exam-prelogin');
 if (previousDbCache) require.cache[dbPath] = previousDbCache;
 else delete require.cache[dbPath];
-const { ExamPreloginError, ExamPreloginService, createExamPreloginPreparation } = moduleUnderTest;
+const { createExamPreloginDispatchRecovery, ExamPreloginError, ExamPreloginService, createExamPreloginPreparation } = moduleUnderTest;
 
 const now = new Date('2026-08-12T01:00:00.000Z');
 const eventId = new ObjectId('64b000000000000000000001');
@@ -301,6 +301,31 @@ function service(
     };
 }
 
+test('facing-only presentation warnings do not invalidate the preparation authorization fingerprint', () => {
+    const original = preparation();
+    const { fingerprint: _originalFingerprint, ...facts } = original;
+    const facingChanged = createExamPreloginPreparation({
+        ...facts,
+        items: facts.items.map((item) => ({
+            ...item,
+            diagnostics: [{ code: 'seat_facing_changed' as const, severity: 'warning' as const }],
+        })),
+        warningCount: 1,
+    });
+    const hardChanged = createExamPreloginPreparation({
+        ...facts,
+        items: facts.items.map((item) => ({
+            ...item,
+            ready: false,
+            diagnostics: [{ code: 'assignment_reference_changed' as const, severity: 'error' as const }],
+        })),
+        hardErrorCount: 1,
+    });
+
+    assert.equal(facingChanged.fingerprint, original.fingerprint);
+    assert.notEqual(hardChanged.fingerprint, original.fingerprint);
+});
+
 test('confirm persists only ticket digests and replays one request without duplicate dispatch identity', async () => {
     const dispatches: unknown[] = [];
     const { value, batches, tickets } = service(dispatches);
@@ -325,6 +350,32 @@ test('confirm persists only ticket digests and replays one request without dupli
         value.confirm({ ...input, requestId: 'prelogin_request_2' }),
         (error: unknown) => error instanceof ExamPreloginError && error.reason === 'assignment_already_confirmed',
     );
+    assert.equal(dispatches.length, 1);
+});
+
+test('immutable v2 recovery facts complete partially persisted tickets after a crash', async () => {
+    const dispatches: unknown[] = [];
+    const { value, batches, tickets } = service(dispatches);
+    const originalInsert = tickets.insertOne.bind(tickets);
+    let insertAttempt = 0;
+    tickets.insertOne = async (doc) => {
+        insertAttempt++;
+        if (insertAttempt === 2) throw new Error('simulated_ticket_insert_crash');
+        return originalInsert(doc);
+    };
+
+    const input = confirmInput(twoStudentPreparation(), 'prelogin_partial_ticket_claim');
+    await assert.rejects(value.confirm(input), /simulated_ticket_insert_crash/);
+    assert.equal(batches.docs[0].state, 'dispatching');
+    assert.equal(Object.hasOwn(batches.docs[0], 'dispatchClaim'), false);
+    assert.equal(tickets.docs.length, 1);
+
+    tickets.insertOne = originalInsert;
+    const recovery = createExamPreloginDispatchRecovery(input.preparation, batches.docs[0].ticketIds);
+    const recovered = await value.resumeDispatching(batches.docs[0], recovery);
+
+    assert.equal(recovered.batch.state, 'dispatched');
+    assert.equal(tickets.docs.length, 2);
     assert.equal(dispatches.length, 1);
 });
 

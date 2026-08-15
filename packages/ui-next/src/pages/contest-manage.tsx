@@ -3,7 +3,7 @@
  * clarification, print.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import {
   AlertTriangle,
@@ -416,8 +416,88 @@ interface ContestManagePageData {
   files?: ContestFileInfo[];
   pdict?: Record<string, ProblemBrief>;
   privateFiles?: ContestFileInfo[];
+  scopeGroups?: ScopeGroupPayload[];
   submissionStats?: ContestSubmissionStats | null;
   tdoc?: ContestDoc;
+}
+
+interface ContestExamEventSummary {
+  eventId: string;
+  schoolId: string;
+  title: string;
+  type: 'external' | 'krypton';
+  contestId: string | null;
+  startAt: string;
+  endAt: string;
+}
+
+interface ContestExamSchoolSummary {
+  schoolId: string;
+  name: string;
+}
+
+function responseRecord(value: unknown, label: string): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError(`${label}响应格式不正确`);
+  return value as Record<string, unknown>;
+}
+
+function responseText(value: unknown, label: string): string {
+  if (typeof value !== 'string' || !value) throw new TypeError(`${label}响应格式不正确`);
+  return value;
+}
+
+function responseObjectId(value: unknown, label: string): string {
+  const result = responseText(value, label);
+  if (!/^[a-f0-9]{24}$/i.test(result)) throw new TypeError(`${label}响应格式不正确`);
+  return result;
+}
+
+function parseContestExamEvent(value: unknown): ContestExamEventSummary {
+  const event = responseRecord(value, '考试活动');
+  const type = responseText(event.type, '考试活动');
+  if (type !== 'external' && type !== 'krypton') throw new TypeError('考试活动响应格式不正确');
+  const linkedContestId = event.contestId === null ? null : responseObjectId(event.contestId, '考试活动');
+  const startAt = responseText(event.startAt, '考试活动');
+  const endAt = responseText(event.endAt, '考试活动');
+  if (!Number.isFinite(new Date(startAt).getTime()) || !Number.isFinite(new Date(endAt).getTime())) {
+    throw new TypeError('考试活动响应格式不正确');
+  }
+  return {
+    eventId: responseObjectId(event.eventId, '考试活动'),
+    schoolId: responseObjectId(event.schoolId, '考试活动'),
+    title: responseText(event.title, '考试活动'),
+    type,
+    contestId: linkedContestId,
+    startAt,
+    endAt,
+  };
+}
+
+function parseContestExamSchool(value: unknown): ContestExamSchoolSummary {
+  const school = responseRecord(value, '学校');
+  return { schoolId: responseObjectId(school.schoolId, '学校'), name: responseText(school.name, '学校') };
+}
+
+async function readContestExamResponse(response: Response, fallback: string): Promise<Record<string, unknown>> {
+  if (!response.ok) throw new Error(await readHydroResponseError(response, fallback));
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch (cause) {
+    throw new Error(`${fallback}：响应不是有效 JSON`, { cause });
+  }
+  return responseRecord(payload, fallback);
+}
+
+function hasFixedAutomaticSeatAudience(tdoc: ContestDoc): boolean {
+  const mode = tdoc.participationMode || 'individual';
+  if (mode === 'team') return tdoc.rule === 'acm' && (!tdoc.plannedTeamBatchId || Boolean(tdoc.teamBatchId));
+  if (mode !== 'individual' || tdoc._code || tdoc.code) return false;
+  const scope = tdoc.participantScopeMode || 'none';
+  if (scope !== 'none' && scope !== 'schools' && scope !== 'groups') return false;
+  if (scope === 'schools') return Array.isArray(tdoc.participantSchoolIds) && tdoc.participantSchoolIds.length === 1;
+  if (scope === 'groups') return Array.isArray(tdoc.participantGroupIds) && tdoc.participantGroupIds.length > 0;
+  return Boolean(Array.isArray(tdoc.assign) && tdoc.assign.length);
 }
 
 interface ContestProblemListPageData extends ContestExamModePageData {
@@ -559,6 +639,7 @@ export function ContestEditPage() {
   const tdoc: ContestDoc = data.tdoc || {};
   const rules: Record<string, string> = data.rules || {};
   const isEdit = data.page_name === 'contest_edit';
+  const editableContestId = tdoc.docId || tdoc._id;
   const canAutoHideProblems = !!data.canAutoHideProblems;
   const defaultRated = isEdit ? !!tdoc.rated : true;
   const defaultAutoHide = isEdit ? !!tdoc.autoHide : canAutoHideProblems;
@@ -1459,6 +1540,9 @@ export function ContestEditPage() {
             </form>
           </CardContent>
         </Card>
+        {isEdit && typeof editableContestId === 'string' ? (
+          <ContestExamSeatEntry tdoc={tdoc} contestId={editableContestId} scopeGroups={data.scopeGroups || []} />
+        ) : null}
         <Dialog open={modeClearOpen} onOpenChange={setModeClearOpen}>
           <TeamDialogContent
             titleId="clear-contest-teams-dialog-title"
@@ -1633,6 +1717,270 @@ interface ContestSubmissionStats {
   byHour: SubmissionHourStat[];
 }
 
+export function ContestExamSeatEntry({
+  tdoc,
+  contestId: linkedContestId,
+  scopeGroups = [],
+  onNavigate = (url: string) => window.location.assign(url),
+}: {
+  tdoc: ContestDoc;
+  contestId: string;
+  scopeGroups?: ScopeGroupPayload[];
+  onNavigate?: (url: string) => void;
+}) {
+  const [events, setEvents] = useState<ContestExamEventSummary[]>([]);
+  const [schools, setSchools] = useState<ContestExamSchoolSummary[]>([]);
+  const [selectedEventId, setSelectedEventId] = useState('');
+  const [selectedSchoolId, setSelectedSchoolId] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [linkedEventsFresh, setLinkedEventsFresh] = useState(false);
+  const [ineligibleEventCount, setIneligibleEventCount] = useState(0);
+  const [creating, setCreating] = useState(false);
+  const [creationOutcomeUnknown, setCreationOutcomeUnknown] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const structurallyFixedAudience = hasFixedAutomaticSeatAudience(tdoc);
+  const beginAt = toDate(tdoc.beginAt);
+  const endAt = toDate(tdoc.endAt);
+  const validWindow = Boolean(beginAt && endAt && beginAt < endAt);
+  const schoolScopeId =
+    tdoc.participationMode !== 'team' && tdoc.participantScopeMode === 'schools' && tdoc.participantSchoolIds?.length === 1
+      ? tdoc.participantSchoolIds[0]
+      : null;
+  const selectedGroupIds =
+    tdoc.participationMode !== 'team' && tdoc.participantScopeMode === 'groups' && Array.isArray(tdoc.participantGroupIds)
+      ? tdoc.participantGroupIds
+      : [];
+  const selectedGroupSchoolIds = selectedGroupIds.map((groupId) => {
+    const group = scopeGroups.find((candidate) => typeof candidate._id === 'string' && candidate._id === groupId);
+    return group && typeof group.schoolId === 'string' && /^[a-f0-9]{24}$/i.test(group.schoolId) ? group.schoolId : null;
+  });
+  const resolvedGroupSchoolIds = new Set(selectedGroupSchoolIds.filter((schoolId): schoolId is string => schoolId !== null));
+  const groupScopeUnsupported = Boolean(selectedGroupIds.length && (selectedGroupSchoolIds.includes(null) || resolvedGroupSchoolIds.size !== 1));
+  const groupScopeSchoolId = selectedGroupIds.length && !groupScopeUnsupported ? [...resolvedGroupSchoolIds][0] : null;
+  const fixedSchoolId = schoolScopeId || groupScopeSchoolId;
+  const fixedAudience = structurallyFixedAudience && !groupScopeUnsupported;
+  const schoolNameById = useMemo(() => new Map(schools.map((school) => [school.schoolId, school.name])), [schools]);
+  const eventIdentityLabel = (event: ContestExamEventSummary) =>
+    `${schoolNameById.get(event.schoolId) || '未知学校'} (${event.schoolId}) · Event ${event.eventId}`;
+
+  const loadLinkedEvents = useCallback(async (): Promise<ContestExamEventSummary[]> => {
+    setLinkedEventsFresh(false);
+    const response = await fetchHydroResponse(
+      `/api/admin/exam-events?contestId=${encodeURIComponent(linkedContestId)}`,
+      { credentials: 'include', headers: { Accept: 'application/json' } },
+      '加载比赛考试活动失败',
+    );
+    const payload = await readContestExamResponse(response, '加载比赛考试活动失败');
+    if (!Array.isArray(payload.events) || !Array.isArray(payload.schools)) throw new Error('考试活动响应格式不正确');
+    const linkedEvents = payload.events.map(parseContestExamEvent).filter((event) => event.type === 'krypton' && event.contestId === linkedContestId);
+    const nextEvents = fixedSchoolId ? linkedEvents.filter((event) => event.schoolId === fixedSchoolId) : linkedEvents;
+    const nextSchools = payload.schools.map(parseContestExamSchool);
+    if (new Set(nextEvents.map((event) => event.eventId)).size !== nextEvents.length) throw new Error('考试活动响应包含重复活动');
+    if (new Set(nextSchools.map((school) => school.schoolId)).size !== nextSchools.length) throw new Error('学校响应包含重复学校');
+    const eligibleSchools = fixedSchoolId ? nextSchools.filter((school) => school.schoolId === fixedSchoolId) : nextSchools;
+    setIneligibleEventCount(linkedEvents.length - nextEvents.length);
+    setEvents(nextEvents);
+    setSchools(eligibleSchools);
+    setSelectedEventId(nextEvents.length === 1 ? nextEvents[0].eventId : '');
+    setSelectedSchoolId(
+      fixedSchoolId && eligibleSchools.length === 1 ? fixedSchoolId : eligibleSchools.length === 1 ? eligibleSchools[0].schoolId : '',
+    );
+    setLinkedEventsFresh(true);
+    return nextEvents;
+  }, [fixedSchoolId, linkedContestId]);
+
+  const refreshLinkedEvents = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const currentEvents = await loadLinkedEvents();
+      if (currentEvents.length) setCreationOutcomeUnknown(false);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '加载比赛考试活动失败');
+    } finally {
+      setLoading(false);
+    }
+  }, [loadLinkedEvents]);
+
+  useEffect(() => {
+    setCreationOutcomeUnknown(false);
+    void refreshLinkedEvents();
+  }, [refreshLinkedEvents]);
+
+  const openEvent = (eventId: string) => {
+    if (!/^[a-f0-9]{24}$/i.test(eventId)) throw new Error('考试活动标识无效');
+    onNavigate(`/admin/exam-infrastructure/events/${eventId}/seats`);
+  };
+
+  const createEvent = async () => {
+    if (!fixedAudience || !linkedEventsFresh || creationOutcomeUnknown || !selectedSchoolId || !beginAt || !endAt || !validWindow) return;
+    setCreating(true);
+    setError(null);
+    try {
+      const response = await fetchHydroResponse(
+        '/api/admin/exam-events',
+        {
+          method: 'POST',
+          credentials: 'include',
+          headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            schoolId: selectedSchoolId,
+            title: tdoc.title || '未命名比赛',
+            type: 'krypton',
+            contestId: linkedContestId,
+            startAt: beginAt.toISOString(),
+            endAt: endAt.toISOString(),
+            collaboratorUids: [],
+          }),
+        },
+        '创建比赛考试活动失败',
+      );
+      const payload = await readContestExamResponse(response, '创建比赛考试活动失败');
+      const created = parseContestExamEvent(payload.event);
+      if (created.type !== 'krypton' || created.contestId !== linkedContestId || created.schoolId !== selectedSchoolId) {
+        throw new Error('创建结果与当前比赛不一致');
+      }
+      openEvent(created.eventId);
+    } catch (cause) {
+      const operationError = cause instanceof Error ? cause.message : '创建比赛考试活动失败';
+      setCreationOutcomeUnknown(true);
+      try {
+        const currentEvents = await loadLinkedEvents();
+        if (currentEvents.length) setCreationOutcomeUnknown(false);
+        setError(
+          currentEvents.length
+            ? `${operationError}；创建结果未知，已重读到 ${currentEvents.length} 个关联活动，请从当前列表继续。`
+            : `${operationError}；创建结果仍未知，当前读取尚未看到关联活动。为避免重复创建，请稍后再次重读。`,
+        );
+      } catch (recoveryCause) {
+        const recoveryError = recoveryCause instanceof Error ? recoveryCause.message : '加载比赛考试活动失败';
+        setError(`${operationError}；创建结果未知且关联活动重读失败：${recoveryError}`);
+      }
+      setCreating(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <LayoutDashboard className="size-4" />
+          机房座位与赛前预启动
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-sm text-muted-foreground">
+          从当前比赛创建或进入考试活动，再按名单、候选教室、自动分配、人工调整、发布、终端预检和显式预启动的顺序完成赛前准备。
+        </p>
+        {groupScopeUnsupported ? (
+          <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-800 dark:text-amber-200">
+            当前参赛组无法从组目录唯一归属到同一学校；第一版不创建或进入自动排座活动。请修正为同校组范围，或按学校拆分比赛。
+          </p>
+        ) : !fixedAudience ? (
+          <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-800 dark:text-amber-200">
+            完全公开、仅邀请码或尚未定版的团队比赛名单仍会变化，第一版不提供自动排座。请先在比赛设置中固定参赛范围或完成团队定版。
+          </p>
+        ) : null}
+        {ineligibleEventCount ? (
+          <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-800 dark:text-amber-200">
+            已忽略 {ineligibleEventCount} 个学校与当前固定参赛范围不一致的历史考试活动。
+          </p>
+        ) : null}
+        {error ? (
+          <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+            {error}
+          </p>
+        ) : null}
+        {loading ? (
+          <p className="flex items-center gap-2 text-sm text-muted-foreground">
+            <RefreshCw className="size-4 animate-spin" /> 加载考试活动…
+          </p>
+        ) : !linkedEventsFresh || creationOutcomeUnknown ? (
+          <Button type="button" variant="outline" onClick={() => void refreshLinkedEvents()}>
+            <RefreshCw className="size-4" /> {creationOutcomeUnknown ? '再次重读关联活动' : '重新读取关联活动'}
+          </Button>
+        ) : !fixedAudience ? null : events.length === 1 ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/20 p-3">
+            <div>
+              <p className="text-sm font-medium">{events[0].title}</p>
+              <p className="text-xs text-muted-foreground">
+                {formatDateTime(events[0].startAt, 'zh-CN')} → {formatDateTime(events[0].endAt, 'zh-CN')}
+              </p>
+              <p className="text-xs text-muted-foreground">{eventIdentityLabel(events[0])}</p>
+            </div>
+            <Button type="button" onClick={() => openEvent(events[0].eventId)}>
+              进入座位工作台
+            </Button>
+          </div>
+        ) : events.length > 1 ? (
+          <div className="flex flex-col gap-2 rounded-md border p-3 sm:flex-row sm:items-end">
+            <label className="flex-1 text-sm">
+              <span className="mb-1 block font-medium">选择考试活动</span>
+              <select
+                aria-label="选择考试活动"
+                value={selectedEventId}
+                onChange={(event) => setSelectedEventId(event.target.value)}
+                className="h-10 w-full rounded-md border bg-background px-3"
+              >
+                <option value="">请选择</option>
+                {events.map((event) => (
+                  <option key={event.eventId} value={event.eventId}>
+                    {event.title} · {eventIdentityLabel(event)} · {formatDateTime(event.startAt, 'zh-CN')}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <Button type="button" disabled={!selectedEventId} onClick={() => openEvent(selectedEventId)}>
+              进入所选活动
+            </Button>
+          </div>
+        ) : fixedAudience ? (
+          <div className="space-y-3 rounded-md border p-3">
+            <div className="grid gap-2 text-sm sm:grid-cols-3">
+              <div>
+                <p className="text-xs text-muted-foreground">活动名称</p>
+                <p className="font-medium">{tdoc.title || '未命名比赛'}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">开始</p>
+                <p>{beginAt ? formatDateTime(beginAt, 'zh-CN') : '时间无效'}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">结束</p>
+                <p>{endAt ? formatDateTime(endAt, 'zh-CN') : '时间无效'}</p>
+              </div>
+            </div>
+            <label className="block text-sm">
+              <span className="mb-1 block font-medium">学校</span>
+              <select
+                aria-label="考试活动学校"
+                value={selectedSchoolId}
+                onChange={(event) => setSelectedSchoolId(event.target.value)}
+                className="h-10 w-full rounded-md border bg-background px-3"
+              >
+                <option value="">请选择学校</option>
+                {schools.map((school) => (
+                  <option key={school.schoolId} value={school.schoolId}>
+                    {school.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <Button
+              type="button"
+              disabled={creating || !linkedEventsFresh || creationOutcomeUnknown || !selectedSchoolId || !validWindow}
+              onClick={() => void createEvent()}
+            >
+              {creating ? <RefreshCw className="size-4 animate-spin" /> : <LayoutDashboard className="size-4" />}
+              创建考试活动并安排座位
+            </Button>
+          </div>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
 export function ContestManagePage() {
   const bs = useBootstrap();
   const data = bs.page.data as ContestManagePageData;
@@ -1774,6 +2122,7 @@ export function ContestManagePage() {
 
       <ContestManagementChrome tdoc={tdoc} active="overview">
         <div className="space-y-4">
+          {typeof tid === 'string' ? <ContestExamSeatEntry tdoc={tdoc} contestId={tid} scopeGroups={data.scopeGroups || []} /> : null}
           <MiniTabs<'score' | 'stats' | 'public' | 'private'>
             value={activeManageTab}
             onValueChange={setActiveManageTab}

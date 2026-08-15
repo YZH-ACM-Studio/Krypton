@@ -3,9 +3,10 @@ import * as contestModel from './contest';
 import * as contestTeam from './contest-team';
 import { PERM } from './builtin';
 import { examClassroomService } from './exam-classroom';
-import { ExamPreloginPreparation } from './exam-prelogin';
+import { examPreloginTicketId, ExamPreloginBatchDoc, ExamPreloginDispatchRecovery, ExamPreloginPreparation } from './exam-prelogin';
 import { compileExamPreloginPreparation, ExamPreloginEndpointPreflight } from './exam-prelogin-resolver';
-import { assertExamSeatAssignmentIntegrity, examSeatAssignmentService, isExamSeatAssignmentV2 } from './exam-seat-assignment';
+import { loadCurrentExamSeatAssignmentV2Facts, loadCurrentExamSeatAssignmentV2TicketFact } from './exam-seat-assignment-readiness';
+import { assertExamSeatAssignmentIntegrity, examSeatAssignmentService, examSeatIdentityKey, isExamSeatAssignmentV2 } from './exam-seat-assignment';
 import type { ExamPreloginTicketDoc } from './exam-prelogin';
 import type { ExamEventDoc } from './exam-event';
 import { endpointSeatBindingService } from './endpoint-seat-binding';
@@ -117,7 +118,6 @@ export async function loadExamPreloginPreparation(
     ]);
     if (!assignment) throw new TypeError('exam_prelogin_assignment_not_found');
     assertExamSeatAssignmentIntegrity(assignment);
-    if (isExamSeatAssignmentV2(assignment)) throw new TypeError('exam_prelogin_assignment_v2_not_enabled');
     if (
         !publication ||
         !publication.assignment.assignmentId.equals(assignment._id) ||
@@ -126,45 +126,99 @@ export async function loadExamPreloginPreparation(
     ) {
         throw new TypeError('exam_prelogin_assignment_not_published');
     }
-    const [seatPlan, roster, classroom, bindings] = await Promise.all([
-        examSeatPlanService.getSeatPlanRevision(event.domainId, event._id, assignment.seatPlan.revision),
-        examSeatPlanService.getRosterRevision(event.domainId, event._id, assignment.roster.revision),
-        examClassroomService.get(event.domainId, assignment.classroomId),
-        endpointSeatBindingService.listClassroomBindings(event.domainId, assignment.classroomId),
-    ]);
-    if (!seatPlan || !roster || !classroom) throw new TypeError('exam_prelogin_assignment_reference_changed');
-    assertExamSeatPlanIntegrity(seatPlan);
-    if (isExamSeatPlanV2(seatPlan)) throw new TypeError('exam_prelogin_assignment_reference_changed');
-    assertExamRosterRevisionIntegrity(roster);
-    const rosterUids = roster.entries.map((entry) => entry.boundUserId).sort((left, right) => left - right);
-    const assignmentUids = assignment.assignments.map((entry) => entry.boundUserId).sort((left, right) => left - right);
-    if (
-        !assignment.schoolId.equals(event.schoolId) ||
-        assignment.eventRevision > event.revision ||
-        !seatPlan._id.equals(assignment.seatPlan.seatPlanId) ||
-        seatPlan.fingerprint !== assignment.seatPlan.fingerprint ||
-        !roster._id.equals(assignment.roster.rosterId) ||
-        roster.fingerprint !== assignment.roster.fingerprint ||
-        !seatPlan.classroomId.equals(assignment.classroomId) ||
-        seatPlan.layoutRevision !== assignment.layoutRevision ||
-        seatPlan.layoutFingerprint !== assignment.layoutFingerprint ||
-        !sameStrings(seatPlan.candidateSeatIds, assignment.candidateSeatIds) ||
-        !sameStrings(rosterUids.map(String), assignmentUids.map(String)) ||
-        !classroom.schoolId.equals(event.schoolId) ||
-        classroom.layoutRevision !== assignment.layoutRevision
-    ) {
-        throw new TypeError('exam_prelogin_assignment_reference_changed');
+    let assignments: Array<{
+        uid: number;
+        studentRecordId: ObjectId;
+        sourceSeatId: string;
+        seatKey: string;
+        diagnostics: Array<{ code: 'seat_facing_changed'; severity: 'warning' }>;
+    }>;
+    let activeBindings: Array<{
+        seatKey: string;
+        sourceSeatId: string;
+        bindingId: ObjectId;
+        bindingRevision: number;
+        endpointId: string;
+        schoolId: ObjectId;
+    }>;
+    if (isExamSeatAssignmentV2(assignment)) {
+        const current = await loadCurrentExamSeatAssignmentV2Facts(event, assignment);
+        assignments = current.mappings.map((mapping) => ({
+            uid: mapping.uid,
+            studentRecordId: mapping.studentRecordId,
+            sourceSeatId: mapping.sourceSeatId,
+            seatKey: mapping.seatKey,
+            diagnostics: mapping.facingChanged ? [{ code: 'seat_facing_changed', severity: 'warning' }] : [],
+        }));
+        activeBindings = current.mappings.map((mapping) => ({
+            seatKey: mapping.seatKey,
+            sourceSeatId: mapping.sourceSeatId,
+            bindingId: mapping.bindingId,
+            bindingRevision: mapping.bindingRevision,
+            endpointId: mapping.endpointId,
+            schoolId: new ObjectId(event.schoolId),
+        }));
+    } else {
+        const [seatPlan, roster, classroom, bindings] = await Promise.all([
+            examSeatPlanService.getSeatPlanRevision(event.domainId, event._id, assignment.seatPlan.revision),
+            examSeatPlanService.getRosterRevision(event.domainId, event._id, assignment.roster.revision),
+            examClassroomService.get(event.domainId, assignment.classroomId),
+            endpointSeatBindingService.listClassroomBindings(event.domainId, assignment.classroomId),
+        ]);
+        if (!seatPlan || !roster || !classroom) throw new TypeError('exam_prelogin_assignment_reference_changed');
+        assertExamSeatPlanIntegrity(seatPlan);
+        if (isExamSeatPlanV2(seatPlan)) throw new TypeError('exam_prelogin_assignment_reference_changed');
+        assertExamRosterRevisionIntegrity(roster);
+        const rosterUids = roster.entries.map((entry) => entry.boundUserId).sort((left, right) => left - right);
+        const assignmentUids = assignment.assignments.map((entry) => entry.boundUserId).sort((left, right) => left - right);
+        if (
+            !assignment.schoolId.equals(event.schoolId) ||
+            assignment.eventRevision > event.revision ||
+            !seatPlan._id.equals(assignment.seatPlan.seatPlanId) ||
+            seatPlan.fingerprint !== assignment.seatPlan.fingerprint ||
+            !roster._id.equals(assignment.roster.rosterId) ||
+            roster.fingerprint !== assignment.roster.fingerprint ||
+            !seatPlan.classroomId.equals(assignment.classroomId) ||
+            seatPlan.layoutRevision !== assignment.layoutRevision ||
+            seatPlan.layoutFingerprint !== assignment.layoutFingerprint ||
+            !sameStrings(seatPlan.candidateSeatIds, assignment.candidateSeatIds) ||
+            !sameStrings(rosterUids.map(String), assignmentUids.map(String)) ||
+            !classroom.schoolId.equals(event.schoolId) ||
+            classroom.layoutRevision !== assignment.layoutRevision
+        ) {
+            throw new TypeError('exam_prelogin_assignment_reference_changed');
+        }
+        const currentLayout = examClassroomService.layout(classroom, classroom.layoutRevision).snapshot;
+        if (currentLayout.fingerprint !== assignment.layoutFingerprint) throw new TypeError('exam_prelogin_assignment_reference_changed');
+        const rosterByUid = new Map(roster.entries.map((entry) => [entry.boundUserId, entry]));
+        assignments = assignment.assignments.map((entry) => {
+            const rosterEntry = rosterByUid.get(entry.boundUserId);
+            if (!rosterEntry) throw new TypeError('exam_prelogin_assignment_reference_changed');
+            return {
+                uid: entry.boundUserId,
+                studentRecordId: rosterEntry.studentRecordId,
+                sourceSeatId: entry.sourceSeatId,
+                seatKey: entry.sourceSeatId,
+                diagnostics: [],
+            };
+        });
+        activeBindings = bindings.flatMap((binding) =>
+            binding.status === 'active' && binding.endpointId
+                ? [
+                      {
+                          seatKey: binding.sourceSeatId,
+                          sourceSeatId: binding.sourceSeatId,
+                          bindingId: binding._id,
+                          bindingRevision: binding.revision,
+                          endpointId: binding.endpointId,
+                          schoolId: binding.schoolId,
+                      },
+                  ]
+                : [],
+        );
     }
-    const currentLayout = examClassroomService.layout(classroom, classroom.layoutRevision).snapshot;
-    if (currentLayout.fingerprint !== assignment.layoutFingerprint) throw new TypeError('exam_prelogin_assignment_reference_changed');
-    const rosterByUid = new Map(roster.entries.map((entry) => [entry.boundUserId, entry]));
     const userbind = global.Hydro.model.userbind;
     if (!userbind || typeof userbind.findStudentByUserId !== 'function') throw new TypeError('userbind student resolver is unavailable');
-    const assignments = assignment.assignments.map((entry) => {
-        const rosterEntry = rosterByUid.get(entry.boundUserId);
-        if (!rosterEntry) throw new TypeError('exam_prelogin_assignment_reference_changed');
-        return { uid: entry.boundUserId, studentRecordId: rosterEntry.studentRecordId, sourceSeatId: entry.sourceSeatId };
-    });
     const [studentRows, eligibilityRows] = await Promise.all([
         Promise.all(
             assignments.map(async (entry) => {
@@ -183,23 +237,10 @@ export async function loadExamPreloginPreparation(
         ),
         Promise.all(assignments.map((entry) => contestEligibility(event, entry.uid, observedAt))),
     ]);
-    const activeBindings = bindings.flatMap((binding) =>
-        binding.status === 'active' && binding.endpointId
-            ? [
-                  {
-                      sourceSeatId: binding.sourceSeatId,
-                      bindingId: binding._id,
-                      bindingRevision: binding.revision,
-                      endpointId: binding.endpointId,
-                      schoolId: binding.schoolId,
-                  },
-              ]
-            : [],
-    );
-    const bindingsBySeat = new Map(activeBindings.map((binding) => [binding.sourceSeatId, binding]));
+    const bindingsBySeat = new Map(activeBindings.map((binding) => [binding.seatKey, binding]));
     const subjects = assignments
         .flatMap((assignmentEntry) => {
-            const binding = bindingsBySeat.get(assignmentEntry.sourceSeatId);
+            const binding = bindingsBySeat.get(assignmentEntry.seatKey);
             return binding
                 ? [
                       {
@@ -252,6 +293,76 @@ export async function loadExamPreloginPreparation(
     });
 }
 
+/**
+ * Reconstructs only the frozen issue facts needed to finish a v2 batch whose
+ * durable batch identity exists but whose ticket inserts were interrupted. It never
+ * reads current readiness, bindings, roster membership or publication state.
+ */
+export async function loadExamPreloginDispatchRecovery(
+    event: ExamEventDoc,
+    batch: ExamPreloginBatchDoc,
+): Promise<ExamPreloginDispatchRecovery | null> {
+    if (batch.domainId !== event.domainId || !batch.eventId.equals(event._id) || batch.state !== 'dispatching' || !batch.workflow) {
+        throw new TypeError('exam_prelogin_dispatch_recovery_invalid');
+    }
+    const assignment = await examSeatAssignmentService.getRevision(batch.domainId, batch.eventId, batch.assignment.revision);
+    if (!assignment) throw new TypeError('exam_prelogin_dispatch_recovery_invalid');
+    assertExamSeatAssignmentIntegrity(assignment);
+    if (!isExamSeatAssignmentV2(assignment)) return null;
+    if (
+        !assignment._id.equals(batch.assignment.assignmentId) ||
+        assignment.fingerprint !== batch.assignment.fingerprint ||
+        assignment.eventRevision > batch.eventRevision
+    ) {
+        throw new TypeError('exam_prelogin_dispatch_recovery_invalid');
+    }
+    const roster = await examSeatPlanService.getRosterRevision(batch.domainId, batch.eventId, assignment.roster.revision);
+    if (!roster) throw new TypeError('exam_prelogin_dispatch_recovery_invalid');
+    assertExamRosterRevisionIntegrity(roster);
+    if (
+        !roster._id.equals(assignment.roster.rosterId) ||
+        roster.fingerprint !== assignment.roster.fingerprint ||
+        roster.source.kind !== 'contestAudience'
+    ) {
+        throw new TypeError('exam_prelogin_dispatch_recovery_invalid');
+    }
+    const participants = new Map(assignment.participants.map((participant) => [participant.boundUserId, participant]));
+    const seatFacts = new Map(assignment.seatFacts.map((seat) => [examSeatIdentityKey(seat), seat]));
+    const mappings = [...assignment.assignments].sort((left, right) => left.boundUserId - right.boundUserId);
+    if (mappings.length !== batch.ticketIds.length) throw new TypeError('exam_prelogin_dispatch_recovery_invalid');
+    const items = mappings.map((mapping, index) => {
+        const participant = participants.get(mapping.boundUserId);
+        const seat = seatFacts.get(examSeatIdentityKey(mapping.seat));
+        if (
+            !participant ||
+            !seat ||
+            !seat.enabled ||
+            !seat.bindingId ||
+            seat.bindingRevision === null ||
+            !seat.endpointId ||
+            !examPreloginTicketId(batch._id, seat.endpointId).equals(batch.ticketIds[index])
+        ) {
+            throw new TypeError('exam_prelogin_dispatch_recovery_invalid');
+        }
+        return {
+            ticketId: new ObjectId(batch.ticketIds[index]),
+            uid: mapping.boundUserId,
+            studentRecordId: new ObjectId(participant.studentRecordId),
+            sourceSeatId: mapping.seat.sourceSeatId,
+            bindingId: new ObjectId(seat.bindingId),
+            bindingRevision: seat.bindingRevision,
+            endpointId: seat.endpointId,
+        };
+    });
+    const contestId = roster.source.contestId?.toHexString();
+    if (!contestId) throw new TypeError('exam_prelogin_dispatch_recovery_invalid');
+    return {
+        schemaVersion: 1,
+        workspace: { kind: 'contest', contestId, path: `/exam-mode/${contestId}` },
+        items,
+    };
+}
+
 export async function validateExamPreloginTicketCurrent(
     event: ExamEventDoc,
     ticket: ExamPreloginTicketDoc,
@@ -266,6 +377,117 @@ export async function validateExamPreloginTicketCurrent(
         !/^[a-f0-9]{64}$/.test(expectedPreparationFingerprint)
     ) {
         throw new TypeError('exam_prelogin_activity_changed');
+    }
+    const [assignment, publication] = await Promise.all([
+        examSeatAssignmentService.getRevision(event.domainId, event._id, ticket.assignment.revision),
+        examSeatAssignmentService.getPublication(event.domainId, event._id),
+    ]);
+    if (!assignment) throw new TypeError('exam_prelogin_activity_changed');
+    assertExamSeatAssignmentIntegrity(assignment);
+    if (
+        !assignment._id.equals(ticket.assignment.assignmentId) ||
+        assignment.revision !== ticket.assignment.revision ||
+        assignment.fingerprint !== ticket.assignment.fingerprint ||
+        !publication ||
+        publication.revision !== ticket.publicationRevision ||
+        !publication.assignment.assignmentId.equals(ticket.assignment.assignmentId) ||
+        publication.assignment.revision !== ticket.assignment.revision ||
+        publication.assignment.fingerprint !== ticket.assignment.fingerprint
+    ) {
+        throw new TypeError('exam_prelogin_activity_changed');
+    }
+    if (isExamSeatAssignmentV2(assignment)) {
+        const workspace =
+            event.type === 'krypton' && event.contestId
+                ? ({ kind: 'contest', contestId: event.contestId.toHexString(), path: `/exam-mode/${event.contestId.toHexString()}` } as const)
+                : null;
+        if (!workspace || JSON.stringify(workspace) !== JSON.stringify(ticket.workspace)) {
+            throw new TypeError('exam_prelogin_activity_changed');
+        }
+        const current = await loadCurrentExamSeatAssignmentV2TicketFact(event, assignment, ticket.uid);
+        if (
+            !current.studentRecordId.equals(ticket.studentRecordId) ||
+            current.sourceSeatId !== ticket.sourceSeatId ||
+            !current.bindingId.equals(ticket.bindingId) ||
+            current.bindingRevision !== ticket.bindingRevision ||
+            current.endpointId !== ticket.endpointId
+        ) {
+            throw new TypeError('exam_prelogin_activity_changed');
+        }
+        const userbind = global.Hydro.model.userbind;
+        if (!userbind || typeof userbind.findStudentByUserId !== 'function') throw new TypeError('userbind student resolver is unavailable');
+        const [student, eligibility, readiness] = await Promise.all([
+            userbind.findStudentByUserId(event.domainId, ticket.uid) as Promise<{
+                _id?: unknown;
+                schoolId?: unknown;
+                boundUserId?: unknown;
+            } | null>,
+            contestEligibility(event, ticket.uid, observedAt),
+            preflightEndpoints([{ endpointId: ticket.endpointId, uid: ticket.uid, contestId: event.contestId?.toHexString() || null }]),
+        ]);
+        if (readiness.length !== 1 || readiness[0].endpointId !== ticket.endpointId) {
+            throw new TypeError('exam_prelogin_endpoint_preflight_identity_mismatch');
+        }
+        const preparation = compileExamPreloginPreparation({
+            domainId: event.domainId,
+            eventId: event._id,
+            eventRevision: event.revision,
+            eventType: event.type,
+            eventLifecycle: event.lifecycle,
+            eventEndAt: event.endAt,
+            schoolId: event.schoolId,
+            assignment: { assignmentId: assignment._id, revision: assignment.revision, fingerprint: assignment.fingerprint },
+            publicationRevision: publication.revision,
+            workspace,
+            assignments: [
+                {
+                    uid: ticket.uid,
+                    studentRecordId: current.studentRecordId,
+                    sourceSeatId: current.sourceSeatId,
+                    seatKey: current.seatKey,
+                    diagnostics: current.facingChanged ? [{ code: 'seat_facing_changed', severity: 'warning' }] : [],
+                },
+            ],
+            students: [
+                {
+                    uid: ticket.uid,
+                    studentRecordId: student?.boundUserId === ticket.uid && student._id instanceof ObjectId ? student._id : null,
+                    schoolId: student?.boundUserId === ticket.uid && student.schoolId instanceof ObjectId ? student.schoolId : null,
+                },
+            ],
+            bindings: [
+                {
+                    sourceSeatId: current.sourceSeatId,
+                    seatKey: current.seatKey,
+                    bindingId: current.bindingId,
+                    bindingRevision: current.bindingRevision,
+                    endpointId: current.endpointId,
+                    schoolId: new ObjectId(event.schoolId),
+                },
+            ],
+            contestEligibility: [eligibility],
+            endpointFacts: readiness.map((item) => ({
+                endpointId: item.endpointId,
+                online: item.online,
+                serviceVersion: item.serviceVersion,
+                protocolVersion: item.protocolVersion,
+                capabilities: item.capabilities,
+                activeSessionId: item.activeSessionId,
+            })),
+            observedAt,
+        });
+        const item = preparation.items[0];
+        if (
+            !item.ready ||
+            !item.studentRecordId.equals(ticket.studentRecordId) ||
+            item.sourceSeatId !== ticket.sourceSeatId ||
+            !item.bindingId?.equals(ticket.bindingId) ||
+            item.bindingRevision !== ticket.bindingRevision ||
+            item.endpointId !== ticket.endpointId
+        ) {
+            throw new TypeError('exam_prelogin_activity_changed');
+        }
+        return;
     }
     const preparation = await loadExamPreloginPreparation(event, ticket.assignment.revision, preflightEndpoints, observedAt);
     if (

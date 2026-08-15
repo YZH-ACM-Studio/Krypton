@@ -19,10 +19,17 @@ export interface ExamPreloginPreparationFacts {
     assignment: { assignmentId: ObjectId; revision: number; fingerprint: string };
     publicationRevision: number;
     workspace: ExamPreloginWorkspace | null;
-    assignments: Array<{ uid: number; studentRecordId: ObjectId; sourceSeatId: string }>;
+    assignments: Array<{
+        uid: number;
+        studentRecordId: ObjectId;
+        sourceSeatId: string;
+        seatKey?: string;
+        diagnostics?: ExamPreloginDiagnostic[];
+    }>;
     students: Array<{ uid: number; studentRecordId: ObjectId | null; schoolId: ObjectId | null }>;
     bindings: Array<{
         sourceSeatId: string;
+        seatKey?: string;
         bindingId: ObjectId;
         bindingRevision: number;
         endpointId: string;
@@ -123,7 +130,7 @@ export function compileExamPreloginPreparation(facts: ExamPreloginPreparationFac
         throw new TypeError('exam prelogin facts are invalid');
     }
     const studentsByUid = new Map(facts.students.map((student) => [student.uid, student]));
-    const bindingsBySeat = new Map(facts.bindings.map((binding) => [binding.sourceSeatId, binding]));
+    const bindingsBySeat = new Map(facts.bindings.map((binding) => [binding.seatKey || binding.sourceSeatId, binding]));
     const eligibilityByUid = new Map(facts.contestEligibility.map((eligibility) => [eligibility.uid, eligibility]));
     const endpointsById = new Map(facts.endpointFacts.map((endpoint) => [endpoint.endpointId, endpoint]));
     if (
@@ -154,7 +161,7 @@ export function compileExamPreloginPreparation(facts: ExamPreloginPreparationFac
             ) {
                 throw new TypeError('exam prelogin assignment fact is invalid');
             }
-            const diagnostics = [...globalDiagnostics];
+            const diagnostics = [...globalDiagnostics, ...(assignment.diagnostics || [])];
             const student = studentsByUid.get(assignment.uid);
             if (
                 !student ||
@@ -165,7 +172,7 @@ export function compileExamPreloginPreparation(facts: ExamPreloginPreparationFac
             ) {
                 diagnostics.push(diagnostic('user_binding_changed'));
             }
-            const binding = bindingsBySeat.get(assignment.sourceSeatId);
+            const binding = bindingsBySeat.get(assignment.seatKey || assignment.sourceSeatId);
             const validBinding =
                 binding &&
                 binding.bindingId instanceof ObjectId &&

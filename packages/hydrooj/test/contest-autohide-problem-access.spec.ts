@@ -180,7 +180,7 @@ const userStub = {
 
 const problemAccessStub = {
     async assertProblemBankSelection(domainId: string, pids: number[], user: any, existingPids: number[]) {
-        calls.selections.push({ domainId, pids: [...pids], user, existingPids: [...existingPids] });
+        calls.selections.push({ domainId, pids: [...pids], user, existingPids: [...(existingPids || [])] });
     },
 };
 
@@ -378,6 +378,8 @@ beforeEach(() => {
         title: 'Contest',
         content: '',
         pids: [11],
+        beginAt: new Date('2099-01-01T00:00:00Z'),
+        endAt: new Date('2099-01-01T02:00:00Z'),
         assign: [],
         privateFiles: [],
         files: [],
@@ -397,6 +399,30 @@ beforeEach(() => {
     scheduleTasks = [];
     nextScheduleId = 1;
     failScheduleAdd = false;
+});
+
+describe('contest create landing route', () => {
+    it('opens the editor after creation so the exam seating entry remains visible', async () => {
+        const handler = makeHandler();
+        handler.tdoc = undefined;
+        handler.url = (name: string, params: { tid: string }) => `${name}:${params.tid}`;
+
+        await handler.postUpdate('forged-domain', null, '2099-01-01', '08:00', 2, 'Contest', 'Body', 'acm', '', false, '', false);
+
+        expect(calls.events).to.include('contest.add');
+        expect(handler.response.body).to.deep.equal({ tid: 'new-contest' });
+        expect(handler.response.redirect).to.equal('contest_edit:new-contest');
+    });
+
+    it('keeps an ordinary edit on the contest detail route', async () => {
+        const handler = makeHandler();
+        handler.url = (name: string, params: { tid: string }) => `${name}:${params.tid}`;
+
+        await update(handler, '11,22', '2099-01-01', false);
+
+        expect(calls.events).to.include('contest.edit');
+        expect(handler.response.redirect).to.equal('contest_detail:contest');
+    });
 });
 
 describe('contest status recalculation ordering', () => {

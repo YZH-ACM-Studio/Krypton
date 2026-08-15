@@ -107,6 +107,84 @@ test('compile preparation returns a complete diagnostic for an unbound physical 
     assert.match(result.fingerprint, /^[a-f0-9]{64}$/);
 });
 
+test('compile preparation distinguishes repeated source seat ids by their structured classroom key', () => {
+    const secondStudentRecordId = new ObjectId('64b100000000000000000007');
+    const secondBindingId = new ObjectId('64b100000000000000000008');
+    const result = compileExamPreloginPreparation(
+        facts({
+            assignments: [
+                {
+                    uid: 42,
+                    studentRecordId,
+                    sourceSeatId: 'seat-1',
+                    seatKey: 'classroom-a\0seat-1',
+                    diagnostics: [{ code: 'seat_facing_changed', severity: 'warning' }],
+                },
+                { uid: 43, studentRecordId: secondStudentRecordId, sourceSeatId: 'seat-1', seatKey: 'classroom-b\0seat-1' },
+            ],
+            students: [
+                { uid: 42, studentRecordId, schoolId },
+                { uid: 43, studentRecordId: secondStudentRecordId, schoolId },
+            ],
+            bindings: [
+                {
+                    sourceSeatId: 'seat-1',
+                    seatKey: 'classroom-a\0seat-1',
+                    bindingId,
+                    bindingRevision: 4,
+                    endpointId: 'ep_one',
+                    schoolId,
+                },
+                {
+                    sourceSeatId: 'seat-1',
+                    seatKey: 'classroom-b\0seat-1',
+                    bindingId: secondBindingId,
+                    bindingRevision: 2,
+                    endpointId: 'ep_two',
+                    schoolId,
+                },
+            ],
+            contestEligibility: [
+                { uid: 42, eligible: true },
+                { uid: 43, eligible: true },
+            ],
+            endpointFacts: [
+                {
+                    endpointId: 'ep_one',
+                    online: true,
+                    serviceVersion: '0.6.0',
+                    protocolVersion: 2,
+                    capabilities: [{ name: 'exam.prelogin', version: 1, commands: ['launch_prelogin'] }],
+                    activeSessionId: null,
+                },
+                {
+                    endpointId: 'ep_two',
+                    online: true,
+                    serviceVersion: '0.6.0',
+                    protocolVersion: 2,
+                    capabilities: [{ name: 'exam.prelogin', version: 1, commands: ['launch_prelogin'] }],
+                    activeSessionId: null,
+                },
+            ],
+        }),
+    );
+
+    assert.deepEqual(
+        result.items.map((item) => ({ uid: item.uid, sourceSeatId: item.sourceSeatId, endpointId: item.endpointId, diagnostics: item.diagnostics })),
+        [
+            {
+                uid: 42,
+                sourceSeatId: 'seat-1',
+                endpointId: 'ep_one',
+                diagnostics: [{ code: 'seat_facing_changed', severity: 'warning' }],
+            },
+            { uid: 43, sourceSeatId: 'seat-1', endpointId: 'ep_two', diagnostics: [] },
+        ],
+    );
+    assert.equal(result.hardErrorCount, 0);
+    assert.equal(result.warningCount, 1);
+});
+
 test('external events and ended events fail closed as preparation diagnostics', () => {
     const result = compileExamPreloginPreparation(
         facts({

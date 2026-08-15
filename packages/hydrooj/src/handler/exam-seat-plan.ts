@@ -289,6 +289,9 @@ class ExamSeatPlanCollectionHandler extends ExamSeatPlanBaseHandler {
                 const roster = await withExamEventBoundary(domainId, eventId, async () => {
                     const current = await this.event(eventId);
                     this.assertWritableEvent(current);
+                    if (current.type === 'krypton' && sourceKind !== 'contestAudience') {
+                        throw new ExamSeatPlanError('contest_audience_roster_required');
+                    }
                     const resolved = await resolveExamRosterForEvent(current, selection);
                     return examSeatPlanService.createRosterRevision({
                         domainId,
@@ -339,6 +342,9 @@ class ExamSeatPlanCollectionHandler extends ExamSeatPlanBaseHandler {
                     }
                     const roster = rosterRevision ? await examSeatPlanService.getRosterRevision(domainId, eventId, rosterRevision) : null;
                     if (rosterRevision && !roster) throw new ExamSeatPlanError('roster_not_found');
+                    if (current.type === 'krypton' && roster?.source.kind !== 'contestAudience') {
+                        throw new ExamSeatPlanError('contest_audience_roster_required');
+                    }
                     if (roster) await assertExamContestAudienceRosterCurrent(current, roster);
                     const classroomRefs = await Promise.all(
                         classroomIds.map(async (selectedClassroomId) => {

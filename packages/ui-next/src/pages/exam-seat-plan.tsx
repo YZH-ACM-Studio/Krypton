@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, ArrowLeft, Download, GripVertical, LockKeyhole, Play, RefreshCw, Save, Shuffle, Upload } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Download, GripVertical, LockKeyhole, Play, RefreshCw, Save, Shuffle, Upload, ZoomIn, ZoomOut } from 'lucide-react';
 import { AdminPage } from '@/components/admin/admin-page';
 import { ForbiddenPanel } from '@/components/admin/forbidden';
 import { Badge } from '@/components/ui/badge';
@@ -23,6 +23,7 @@ interface RosterRevision {
   rosterId: string;
   revision: number;
   fingerprint: string;
+  source: { kind: 'contestAudience' | 'userbindGroups' | 'userbindSchool' };
   entries: RosterEntry[];
 }
 
@@ -74,6 +75,7 @@ interface AssignmentMapping {
 interface AssignmentDiagnostic {
   code: string;
   sourceSeatIds?: string[];
+  seats?: Array<{ seat: SeatIdentity; reason: 'disabled' | 'layout_status' | 'unbound' }>;
   requiredSeatCount?: number;
   availableSeatCount?: number;
   reasons?: string[];
@@ -196,6 +198,7 @@ interface AssignmentWorkspace {
   eventRevision: number;
   eventType: 'krypton' | 'external';
   eventLifecycle: 'draft' | 'scheduled' | 'archived';
+  contestAudienceState: 'fixed' | 'not-applicable' | 'public';
   startAt: string;
   endAt: string;
   rosterRevisions: RosterRevision[];
@@ -492,6 +495,14 @@ function parseDiagnostic(value: unknown): AssignmentDiagnostic {
   const row = record(value, '诊断');
   const diagnostic: AssignmentDiagnostic = { code: text(row.code, '诊断') };
   if (row.sourceSeatIds !== undefined) diagnostic.sourceSeatIds = array(row.sourceSeatIds, '诊断').map((item) => text(item, '诊断'));
+  if (row.seats !== undefined) {
+    diagnostic.seats = array(row.seats, '诊断').map((item) => {
+      const skipped = record(item, '座位跳过诊断');
+      const reason = text(skipped.reason, '座位跳过诊断');
+      if (reason !== 'disabled' && reason !== 'layout_status' && reason !== 'unbound') throw new Error('座位跳过诊断响应格式不正确');
+      return { seat: parseSeatIdentity(skipped.seat, '座位跳过诊断'), reason };
+    });
+  }
   if (row.requiredSeatCount !== undefined) diagnostic.requiredSeatCount = integer(row.requiredSeatCount, '诊断');
   if (row.availableSeatCount !== undefined) diagnostic.availableSeatCount = integer(row.availableSeatCount, '诊断');
   if (row.reasons !== undefined) diagnostic.reasons = array(row.reasons, '诊断').map((item) => text(item, '诊断'));
@@ -500,10 +511,16 @@ function parseDiagnostic(value: unknown): AssignmentDiagnostic {
 
 function parseRoster(value: unknown): RosterRevision {
   const row = record(value, '名单版本');
+  const source = record(row.source, '名单来源');
+  const sourceKind = text(source.kind, '名单来源');
+  if (sourceKind !== 'contestAudience' && sourceKind !== 'userbindGroups' && sourceKind !== 'userbindSchool') {
+    throw new Error('名单来源响应格式不正确');
+  }
   return {
     rosterId: text(row.rosterId, '名单版本'),
     revision: integer(row.revision, '名单版本'),
     fingerprint: text(row.fingerprint, '名单版本'),
+    source: { kind: sourceKind },
     entries: array(row.entries, '名单版本').map((item) => {
       const entry = record(item, '名单学生');
       return {
@@ -1100,6 +1117,10 @@ function seatIdentityKey(seat: SeatIdentity): string {
   return `${seat.classroomId}\u0000${seat.sourceSeatId}`;
 }
 
+function riskEdgeKey(edge: AssignmentV2RiskEdge): string {
+  return `${seatIdentityKey(edge.left)}\u0001${seatIdentityKey(edge.right)}`;
+}
+
 function diagnosticText(diagnostic: AssignmentDiagnostic): string {
   if (diagnostic.code === 'insufficient_seats') {
     return `可用座位不足：需要 ${diagnostic.requiredSeatCount || 0}，当前 ${diagnostic.availableSeatCount || 0}`;
@@ -1107,24 +1128,191 @@ function diagnosticText(diagnostic: AssignmentDiagnostic): string {
   if (diagnostic.code === 'seat_disabled') return `已排除禁用座位：${diagnostic.sourceSeatIds?.join('、') || '-'}`;
   if (diagnostic.code === 'seat_unbound') return `已排除未绑定终端的座位：${diagnostic.sourceSeatIds?.join('、') || '-'}`;
   if (diagnostic.code === 'seat_status_invalid') return `座位状态异常：${diagnostic.sourceSeatIds?.join('、') || '-'}`;
+  if (diagnostic.code === 'seat_skipped') {
+    return `已跳过不可分配座位：${diagnostic.seats?.map((item) => `${item.seat.classroomId}/${item.seat.sourceSeatId}（${item.reason}）`).join('、') || '-'}`;
+  }
   return `约束冲突：${diagnostic.reasons?.join('、') || diagnostic.code}`;
+}
+
+const facingLabel: Record<AssignmentV2SeatFact['facing'], string> = {
+  down: '↓',
+  left: '←',
+  right: '→',
+  unset: '·',
+  up: '↑',
+};
+
+const facingAccessibleLabel: Record<AssignmentV2SeatFact['facing'], string> = {
+  down: '朝下',
+  left: '朝左',
+  right: '朝右',
+  unset: '朝向未设置',
+  up: '朝上',
+};
+
+const skippedReasonLabel: Record<AssignmentV2Explanation['skippedSeats'][number]['reason'], string> = {
+  disabled: '已禁用',
+  layout_status: '布局状态不可用',
+  unbound: '未绑定 Endpoint',
+};
+
+const riskReasonLabel: Record<AssignmentV2RiskEdge['reason'], string> = {
+  perpendicular_facing: '垂直朝向',
+  same_facing: '同向',
+  unset_facing: '朝向未设置',
+};
+
+function ClassroomSeatMap({
+  classroomId,
+  classroomName,
+  editable,
+  highRiskKeys,
+  mediumRiskKeys,
+  mappings,
+  onSelect,
+  rowsByUid,
+  seats,
+  selectedUid,
+  showRiskLines,
+  zoom,
+}: {
+  classroomId: string;
+  classroomName: string;
+  editable: boolean;
+  highRiskKeys: Set<string>;
+  mediumRiskKeys: Set<string>;
+  mappings: AssignmentV2Mapping[];
+  onSelect: (uid: number) => void;
+  rowsByUid: Map<number, AssignmentCsvRow>;
+  seats: AssignmentV2SeatFact[];
+  selectedUid: number | null;
+  showRiskLines: boolean;
+  zoom: number;
+}) {
+  const roomSeats = seats.filter((seat) => seat.classroomId === classroomId);
+  if (!roomSeats.length) return null;
+  const xs = roomSeats.map((seat) => seat.x);
+  const ys = roomSeats.map((seat) => seat.y);
+  const minX = Math.min(...xs);
+  const minY = Math.min(...ys);
+  const width = Math.max(1, Math.max(...xs) - minX);
+  const height = Math.max(1, Math.max(...ys) - minY);
+  const mapWidth = Math.round(760 * zoom);
+  const mapHeight = Math.round(420 * zoom);
+  const positionBySeat = new Map(
+    roomSeats.map((seat) => [
+      seatIdentityKey(seat),
+      {
+        left: 36 + ((seat.x - minX) / width) * (mapWidth - 132),
+        top: 36 + ((seat.y - minY) / height) * (mapHeight - 100),
+      },
+    ]),
+  );
+  const occupantBySeat = new Map(mappings.map((mapping) => [seatIdentityKey(mapping.seat), mapping.boundUserId]));
+  const highRiskSeatKeys = new Set<string>();
+  for (const edgeKey of highRiskKeys) {
+    const [leftKey, rightKey] = edgeKey.split('\u0001');
+    highRiskSeatKeys.add(leftKey);
+    highRiskSeatKeys.add(rightKey);
+  }
+  const mediumRiskSeatKeys = new Set<string>();
+  for (const edgeKey of mediumRiskKeys) {
+    const [leftKey, rightKey] = edgeKey.split('\u0001');
+    mediumRiskSeatKeys.add(leftKey);
+    mediumRiskSeatKeys.add(rightKey);
+  }
+  return (
+    <section className="space-y-2" aria-label={`${classroomName}座位图`}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h4 className="font-medium">{classroomName}</h4>
+        <span className="text-xs text-muted-foreground">{roomSeats.length} 个候选座位</span>
+      </div>
+      <div className="max-w-full overflow-auto rounded-md border bg-muted/20" tabIndex={0} aria-label={`${classroomName}座位图，可滚动平移`}>
+        <div className="relative" style={{ height: mapHeight, minHeight: 260, width: mapWidth }}>
+          {showRiskLines ? (
+            <svg className="pointer-events-none absolute inset-0 size-full" aria-hidden="true">
+              {[...highRiskKeys, ...mediumRiskKeys].map((edgeKey) => {
+                const [leftKey, rightKey] = edgeKey.split('\u0001');
+                const left = positionBySeat.get(leftKey);
+                const right = positionBySeat.get(rightKey);
+                if (!left || !right) return null;
+                const high = highRiskKeys.has(edgeKey);
+                return (
+                  <line
+                    key={edgeKey}
+                    x1={left.left + 42}
+                    y1={left.top + 20}
+                    x2={right.left + 42}
+                    y2={right.top + 20}
+                    stroke={high ? 'rgb(220 38 38)' : 'rgb(217 119 6)'}
+                    strokeOpacity={high ? 0.7 : 0.5}
+                    strokeWidth={high ? 2 : 1.5}
+                  />
+                );
+              })}
+            </svg>
+          ) : null}
+          {roomSeats.map((seat) => {
+            const key = seatIdentityKey(seat);
+            const position = positionBySeat.get(key)!;
+            const uid = occupantBySeat.get(key) || null;
+            const row = uid === null ? null : rowsByUid.get(uid) || null;
+            const hasHighRisk = highRiskSeatKeys.has(key);
+            const hasMediumRisk = !hasHighRisk && mediumRiskSeatKeys.has(key);
+            return (
+              <button
+                key={key}
+                type="button"
+                disabled={uid === null || !editable}
+                aria-label={`${classroomName} ${seat.label || seat.sourceSeatId}，${facingAccessibleLabel[seat.facing]}${
+                  row ? `，${row.studentId} ${row.realName}` : '，未分配'
+                }${hasHighRisk ? '，高风险' : hasMediumRisk ? '，中风险' : ''}`}
+                onClick={() => uid !== null && onSelect(uid)}
+                className={`absolute w-[84px] rounded-md border px-1 py-1 text-center text-[11px] shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                  uid !== null && selectedUid === uid
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : hasHighRisk
+                      ? 'border-red-600 bg-red-50 text-red-950 dark:bg-red-950/40 dark:text-red-100'
+                      : hasMediumRisk
+                        ? 'border-amber-600 bg-amber-50 text-amber-950 dark:bg-amber-950/40 dark:text-amber-100'
+                        : uid === null
+                          ? 'border-dashed bg-background text-muted-foreground'
+                          : 'bg-background'
+                }`}
+                style={{ left: position.left, top: position.top }}
+              >
+                <span className="block truncate font-medium">
+                  {facingLabel[seat.facing]} {seat.label || seat.sourceSeatId}
+                </span>
+                <span className="block truncate">{row ? `${row.studentId} ${row.realName}` : '空座'}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </section>
+  );
 }
 
 function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
   const path = `/api/admin/exam-events/${eventId}`;
   const [workspace, setWorkspace] = useState<AssignmentWorkspace | null>(null);
   const [draft, setDraft] = useState<AssignmentMapping[]>([]);
+  const [v2Draft, setV2Draft] = useState<AssignmentV2Mapping[]>([]);
   const [locked, setLocked] = useState<Set<number>>(new Set());
   const [selectedUid, setSelectedUid] = useState<number | null>(null);
   const [search, setSearch] = useState('');
   const [busy, setBusy] = useState(false);
+  const [workspaceFresh, setWorkspaceFresh] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [actionDiagnostics, setActionDiagnostics] = useState<AssignmentDiagnostic[]>([]);
   const [sourceKind, setSourceKind] = useState<'contestAudience' | 'userbindGroups' | 'userbindSchool'>('userbindGroups');
   const [selectedGroupIds, setSelectedGroupIds] = useState<Set<string>>(new Set());
-  const [selectedClassroomId, setSelectedClassroomId] = useState('');
-  const [preparationSeats, setPreparationSeats] = useState<PhysicalSeat[]>([]);
-  const [selectedCandidateSeatIds, setSelectedCandidateSeatIds] = useState<Set<string>>(new Set());
+  const [selectedV2ClassroomIds, setSelectedV2ClassroomIds] = useState<Set<string>>(new Set());
+  const [v2Strategy, setV2Strategy] = useState<'maximizeSpacing' | 'minimizeClassrooms'>('minimizeClassrooms');
+  const [mapZoom, setMapZoom] = useState(1);
+  const [showRiskLines, setShowRiskLines] = useState(false);
+  const [riskDetail, setRiskDetail] = useState<'high' | 'medium' | null>(null);
   const [preparationBusy, setPreparationBusy] = useState(false);
   const [preloginPreparation, setPreloginPreparation] = useState<PreloginPreparation | null>(null);
   const [preloginWorkflow, setPreloginWorkflow] = useState<PreloginWorkflow | null>(null);
@@ -1138,9 +1326,21 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
   const [preloginNetworkConfigRevision, setPreloginNetworkConfigRevision] = useState(0);
   const [preloginBusy, setPreloginBusy] = useState(false);
   const [preloginError, setPreloginError] = useState<string | null>(null);
+  const workspaceLoadGenerationRef = useRef(0);
 
   const load = useCallback(async () => {
-    const [plansPayload, assignmentsPayload] = await Promise.all([apiObject(`${path}/seat-plans`), apiObject(`${path}/seat-assignments`)]);
+    const generation = ++workspaceLoadGenerationRef.current;
+    setWorkspaceFresh(false);
+    let payloads: [Record<string, unknown>, Record<string, unknown>];
+    try {
+      payloads = await Promise.all([apiObject(`${path}/seat-plans`), apiObject(`${path}/seat-assignments`)]);
+    } catch (reason) {
+      if (generation !== workspaceLoadGenerationRef.current) return false;
+      setWorkspaceFresh(false);
+      throw reason;
+    }
+    if (generation !== workspaceLoadGenerationRef.current) return false;
+    const [plansPayload, assignmentsPayload] = payloads;
     const publication = assignmentsPayload.publication === null ? null : record(assignmentsPayload.publication, '发布版本');
     const source = assignmentsPayload.source === null ? null : record(assignmentsPayload.source, '分配来源');
     const preflight = record(assignmentsPayload.endpointPreflight, '终端预检');
@@ -1157,10 +1357,15 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
     if (eventLifecycle !== 'draft' && eventLifecycle !== 'scheduled' && eventLifecycle !== 'archived') {
       throw new Error('考试活动响应格式不正确');
     }
+    const contestAudienceState = text(event.contestAudienceState, '考试活动');
+    if (contestAudienceState !== 'fixed' && contestAudienceState !== 'not-applicable' && contestAudienceState !== 'public') {
+      throw new Error('考试活动响应格式不正确');
+    }
     const next: AssignmentWorkspace = {
       eventRevision: positiveInteger(event.revision, '考试活动'),
       eventType,
       eventLifecycle,
+      contestAudienceState,
       startAt: isoDate(event.startAt, '考试活动'),
       endAt: isoDate(event.endAt, '考试活动'),
       rosterRevisions: array(plansPayload.rosterRevisions, '名单版本').map(parseRoster),
@@ -1217,7 +1422,6 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
     }
     const displayedPlan = next.seatPlans[0];
     if (
-      !displayedAssignment &&
       displayedPlan?.roster &&
       !next.rosterRevisions.some(
         (item) =>
@@ -1231,13 +1435,29 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
     setWorkspace(next);
     const latest = next.assignments[0];
     setDraft(latest?.schemaVersion === 1 ? latest.assignments.map((row) => ({ ...row })) : []);
-    setLocked(new Set(latest?.schemaVersion === 1 ? latest.constraints.lockedAssignments.map((row) => row.boundUserId) : []));
+    setV2Draft(latest?.schemaVersion === 2 ? latest.assignments.map((row) => ({ boundUserId: row.boundUserId, seat: { ...row.seat } })) : []);
+    setLocked(new Set(latest ? latest.constraints.lockedAssignments.map((row) => row.boundUserId) : []));
+    if (latest?.schemaVersion === 2) setV2Strategy(latest.constraints.strategy);
+    const currentPlan = next.seatPlans[0];
+    if (currentPlan?.schemaVersion === 2) setSelectedV2ClassroomIds(new Set(currentPlan.classrooms.map((classroom) => classroom.classroomId)));
     setSelectedUid(null);
     setActionDiagnostics([]);
+    setWorkspaceFresh(true);
+    return true;
   }, [path]);
 
   useEffect(() => {
     load().catch((reason: unknown) => setError(reason instanceof Error ? reason.message : String(reason)));
+  }, [load]);
+
+  const refreshWorkspace = useCallback(async () => {
+    setError(null);
+    setWorkspaceFresh(false);
+    try {
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    }
   }, [load]);
 
   const writePreloginUrl = useCallback(
@@ -1417,6 +1637,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
   const execute = useCallback(
     async (body: Record<string, unknown>) => {
       setBusy(true);
+      setWorkspaceFresh(false);
       setError(null);
       setActionDiagnostics([]);
       try {
@@ -1424,6 +1645,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
         if (Object.hasOwn(result, 'assignment')) {
           if (result.assignment === null) {
             setActionDiagnostics(array(result.diagnostics, '分配诊断').map(parseDiagnostic));
+            setWorkspaceFresh(true);
             return;
           }
           parseAssignment(result.assignment);
@@ -1441,6 +1663,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
   const executeSeatPlan = useCallback(
     async (body: Record<string, unknown>) => {
       setPreparationBusy(true);
+      setWorkspaceFresh(false);
       setError(null);
       try {
         await post(`${path}/seat-plans`, body);
@@ -1454,46 +1677,37 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
     [load, path],
   );
 
-  const loadPreparationClassroom = useCallback(
-    async (classroomId: string) => {
-      setSelectedClassroomId(classroomId);
-      setPreparationSeats([]);
-      setSelectedCandidateSeatIds(new Set());
-      if (!classroomId) return;
-      setPreparationBusy(true);
-      setError(null);
-      try {
-        const payload = await apiObject(
-          `/api/admin/exam-events/${encodeURIComponent(eventId)}/seat-assignment-classrooms/${encodeURIComponent(classroomId)}`,
-        );
-        if (text(payload.classroomId, '教室座位') !== classroomId) throw new Error('教室座位响应身份不一致');
-        const summary = workspace?.classrooms.find((classroom) => classroom.classroomId === classroomId);
-        if (!summary || integer(payload.layoutRevision, '教室座位') !== summary.layoutRevision) throw new Error('教室布局已变化，请刷新后重试');
-        text(payload.layoutFingerprint, '教室座位');
-        const seats = array(payload.seats, '教室座位').map((item) => parseSeat(item, classroomId));
-        setPreparationSeats(seats);
-        setSelectedCandidateSeatIds(
-          new Set(seats.filter((seat) => (seat.status === 'active' || seat.status === 'empty') && seat.bindingId).map((seat) => seat.sourceSeatId)),
-        );
-      } catch (reason) {
-        setError(reason instanceof Error ? reason.message : String(reason));
-      } finally {
-        setPreparationBusy(false);
-      }
-    },
-    [eventId, workspace],
-  );
-
   const latest = workspace?.assignments[0] || null;
   const latestPlan = workspace?.seatPlans[0] || null;
-  const v2ReadOnly = latest?.schemaVersion === 2 || latestPlan?.schemaVersion === 2;
-  const latestV1 = !v2ReadOnly && latest?.schemaVersion === 1 ? latest : null;
-  const latestPlanV1 = !v2ReadOnly && latestPlan?.schemaVersion === 1 ? latestPlan : null;
+  const latestV2 = latest?.schemaVersion === 2 ? latest : null;
+  const latestPlanV2 = latestPlan?.schemaVersion === 2 ? latestPlan : null;
+  const latestV1 = latest?.schemaVersion === 1 ? latest : null;
   const latestPlanCurrent = workspace?.latestSeatPlanState === 'current';
+  const mutationBusy = busy || preparationBusy;
+  const automaticSeatingAllowed = workspace?.eventType !== 'krypton' || workspace.contestAudienceState === 'fixed';
+  const assignmentIsCurrentV2 = Boolean(
+    automaticSeatingAllowed &&
+    workspaceFresh &&
+    latestV2 &&
+    latestPlanV2 &&
+    latestPlanCurrent &&
+    latestV2.seatPlan.seatPlanId === latestPlanV2.seatPlanId &&
+    latestV2.seatPlan.revision === latestPlanV2.revision &&
+    latestV2.seatPlan.fingerprint === latestPlanV2.fingerprint,
+  );
+  const canMutateV2Draft = assignmentIsCurrentV2 && !mutationBusy;
   const rosterRef = latest?.roster || latestPlan?.roster || null;
   const roster = rosterRef
     ? workspace?.rosterRevisions.find(
         (item) => item.rosterId === rosterRef.rosterId && item.revision === rosterRef.revision && item.fingerprint === rosterRef.fingerprint,
+      ) || null
+    : null;
+  const planRoster = latestPlan?.roster
+    ? workspace?.rosterRevisions.find(
+        (item) =>
+          item.rosterId === latestPlan.roster?.rosterId &&
+          item.revision === latestPlan.roster.revision &&
+          item.fingerprint === latestPlan.roster.fingerprint,
       ) || null
     : null;
   const seats = workspace?.source?.seats || [];
@@ -1515,8 +1729,9 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
     if (latest.schemaVersion === 2) {
       const rosterByUid = new Map(roster.entries.map((entry) => [entry.boundUserId, entry]));
       const seatByKey = new Map(latest.seatFacts.map((seat) => [seatIdentityKey(seat), seat]));
-      return latest.assignments.map((mapping) => {
-        const participant = latest.participants.find((item) => item.boundUserId === mapping.boundUserId);
+      const participantByUid = new Map(latest.participants.map((participant) => [participant.boundUserId, participant]));
+      return v2Draft.map((mapping) => {
+        const participant = participantByUid.get(mapping.boundUserId);
         const rosterEntry = rosterByUid.get(mapping.boundUserId);
         const seat = seatByKey.get(seatIdentityKey(mapping.seat));
         return {
@@ -1542,38 +1757,61 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
         endpointId: seat?.endpointId || '',
       };
     });
-  }, [draft, latest, latestPlan, roster, v1SeatById]);
+  }, [draft, latest, latestPlan, roster, v1SeatById, v2Draft]);
+  const rowsByUid = useMemo(() => new Map(rows.map((row) => [row.boundUserId, row])), [rows]);
+  const classroomDisplayById = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const classroom of workspace?.classrooms || []) counts.set(classroom.name, (counts.get(classroom.name) || 0) + 1);
+    return new Map(
+      (workspace?.classrooms || []).map((classroom) => [
+        classroom.classroomId,
+        counts.get(classroom.name) === 1 ? classroom.name : `${classroom.name} · ${classroom.classroomId}`,
+      ]),
+    );
+  }, [workspace]);
+  const latestV2SeatByKey = useMemo(() => new Map((latestV2?.seatFacts || []).map((seat) => [seatIdentityKey(seat), seat])), [latestV2]);
+  const v2OccupantBySeatKey = useMemo(() => new Map(v2Draft.map((mapping) => [seatIdentityKey(mapping.seat), mapping.boundUserId])), [v2Draft]);
+  const highRiskKeys = useMemo(() => new Set((latestV2?.explanation.highRiskEdges || []).map(riskEdgeKey)), [latestV2]);
+  const mediumRiskKeys = useMemo(() => new Set((latestV2?.explanation.mediumRiskEdges || []).map(riskEdgeKey)), [latestV2]);
 
-  const swap = (firstUid: number, secondUid: number) => {
-    if (firstUid === secondUid) return;
-    setDraft((current) => {
+  const swapV2 = (firstUid: number, secondUid: number) => {
+    if (!canMutateV2Draft || firstUid === secondUid) return;
+    setV2Draft((current) => {
       const first = current.find((row) => row.boundUserId === firstUid);
       const second = current.find((row) => row.boundUserId === secondUid);
       if (!first || !second) return current;
       return current.map((row) => {
-        if (row.boundUserId === firstUid) return { ...row, sourceSeatId: second.sourceSeatId };
-        if (row.boundUserId === secondUid) return { ...row, sourceSeatId: first.sourceSeatId };
+        if (row.boundUserId === firstUid) return { ...row, seat: { ...second.seat } };
+        if (row.boundUserId === secondUid) return { ...row, seat: { ...first.seat } };
         return row;
       });
     });
   };
 
   const selectForSwap = (uid: number) => {
+    if (!canMutateV2Draft) return;
     if (selectedUid === null) setSelectedUid(uid);
     else {
-      swap(selectedUid, uid);
+      swapV2(selectedUid, uid);
       setSelectedUid(null);
     }
   };
 
-  const assignSeat = (uid: number, sourceSeatId: string) => {
-    const occupant = draft.find((row) => row.sourceSeatId === sourceSeatId);
-    if (occupant && occupant.boundUserId !== uid) {
-      swap(uid, occupant.boundUserId);
+  const assignSeatV2 = (uid: number, seatKey: string) => {
+    if (!canMutateV2Draft) return;
+    const candidate = latestV2SeatByKey.get(seatKey);
+    if (!candidate) return;
+    const occupantUid = v2OccupantBySeatKey.get(seatKey);
+    if (occupantUid !== undefined && occupantUid !== uid) {
+      swapV2(uid, occupantUid);
       return;
     }
-    if (!occupant) {
-      setDraft((current) => current.map((row) => (row.boundUserId === uid ? { ...row, sourceSeatId } : row)));
+    if (occupantUid === undefined) {
+      setV2Draft((current) =>
+        current.map((row) =>
+          row.boundUserId === uid ? { ...row, seat: { classroomId: candidate.classroomId, sourceSeatId: candidate.sourceSeatId } } : row,
+        ),
+      );
     }
   };
 
@@ -1592,17 +1830,41 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
   const filteredRows = rows.filter((row) =>
     `${row.studentId} ${row.realName} ${row.classroomId} ${row.seatLabel} ${row.sourceSeatId}`.toLowerCase().includes(search.toLowerCase()),
   );
-  const canonicalLockedUids = latestV1?.constraints.lockedAssignments.map((row) => row.boundUserId).sort((a, b) => a - b) || [];
+  const canonicalV2LockedUids = latestV2?.constraints.lockedAssignments.map((row) => row.boundUserId).sort((a, b) => a - b) || [];
   const currentLockedUids = [...locked].sort((a, b) => a - b);
   const dirty = Boolean(
-    latestV1 &&
-    (JSON.stringify(draft) !== JSON.stringify(latestV1.assignments) || JSON.stringify(currentLockedUids) !== JSON.stringify(canonicalLockedUids)),
+    latestV2 &&
+    (JSON.stringify(v2Draft) !== JSON.stringify(latestV2.assignments) || JSON.stringify(currentLockedUids) !== JSON.stringify(canonicalV2LockedUids)),
   );
   const diagnostics = actionDiagnostics.length ? actionDiagnostics : latestV1?.diagnostics || latestPlan?.diagnostics || [];
-  const eligibleSeats = latestV1 ? seats.filter((seat) => latestV1.eligibleSeatIds.includes(seat.sourceSeatId)) : [];
-  const selectedStudent = selectedUid === null ? null : rows.find((row) => row.boundUserId === selectedUid) || null;
-  const latestRosterForPlan = workspace?.rosterRevisions[0] || null;
-  const selectedClassroom = workspace?.classrooms.find((classroom) => classroom.classroomId === selectedClassroomId) || null;
+  const eligibleV2Seats = latestV2
+    ? latestV2.seatFacts.filter(
+        (seat) => seat.enabled && (seat.layoutStatus === 'active' || seat.layoutStatus === 'empty') && seat.bindingId && seat.endpointId,
+      )
+    : [];
+  const knownOfflineV2Seats = latestV2
+    ? latestV2.explanation.offlineSeats.filter((seat) => latestV2SeatByKey.get(seatIdentityKey(seat))?.endpointOnline === false)
+    : [];
+  const unknownOnlineV2Seats = latestV2
+    ? latestV2.explanation.offlineSeats.filter((seat) => latestV2SeatByKey.get(seatIdentityKey(seat))?.endpointOnline === null)
+    : [];
+  const describeV2Seat = (identity: SeatIdentity): string => {
+    const seat = latestV2SeatByKey.get(seatIdentityKey(identity));
+    return `${classroomDisplayById.get(identity.classroomId) || identity.classroomId} / ${seat?.label || identity.sourceSeatId}`;
+  };
+  const selectedStudent = selectedUid === null ? null : rowsByUid.get(selectedUid) || null;
+  const newestRoster = workspace?.rosterRevisions[0] || null;
+  const latestRosterForPlan = automaticSeatingAllowed ? newestRoster : null;
+  const splitTeams = useMemo(
+    () =>
+      (latestV2?.explanation.splitTeamIds || []).map((teamId) => ({
+        teamId,
+        members: (latestV2?.participants || [])
+          .filter((participant) => participant.teamId === teamId)
+          .map((participant) => ({ participant, row: rowsByUid.get(participant.boundUserId) || null })),
+      })),
+    [latestV2, rowsByUid],
+  );
   const publishedAssignment =
     workspace?.assignments.find((assignment): assignment is AssignmentV1Revision => assignment.published && assignment.schemaVersion === 1) || null;
   const publishedV2Assignment =
@@ -1943,7 +2205,6 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
     const url = new URL(window.location.href);
     return Boolean(url.searchParams.get('retryRequestId') && url.searchParams.get('retryProjectionRevision'));
   }, [preloginBatch, preloginError]);
-
   return (
     <AdminPage
       bypassPrivGate
@@ -1979,19 +2240,30 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                   id="seat-roster-source"
                   aria-label="名单来源"
                   value={sourceKind}
+                  disabled={mutationBusy || dirty || !workspaceFresh || !automaticSeatingAllowed}
                   onChange={(event) => setSourceKind(event.target.value as 'contestAudience' | 'userbindGroups' | 'userbindSchool')}
                   className="w-full rounded-md border bg-background px-2 py-2 text-sm"
                 >
                   <option value="userbindGroups">指定 userbind 用户组</option>
                   <option value="userbindSchool">当前学校全部学生</option>
-                  {workspace?.eventType === 'krypton' ? <option value="contestAudience">关联比赛受众</option> : null}
+                  {workspace?.eventType === 'krypton' ? (
+                    <option value="contestAudience" disabled={workspace.contestAudienceState !== 'fixed'}>
+                      {workspace.contestAudienceState === 'public' ? '关联比赛受众（公开比赛不支持自动排座）' : '关联比赛受众'}
+                    </option>
+                  ) : null}
                 </select>
+                {workspace?.contestAudienceState === 'public' ? (
+                  <p className="text-sm text-amber-700">
+                    这是一场参赛名单持续变化的完全公开或邀请码比赛，第一版不提供自动排座，也不会用学校、用户组或某一刻的 attend 用户绕过该限制。
+                  </p>
+                ) : null}
                 {sourceKind === 'userbindGroups' ? (
                   <div className="max-h-40 space-y-1 overflow-auto rounded-md bg-muted/30 p-2">
                     {workspace?.rosterGroups.map((group) => (
                       <label key={group.groupId} className="flex items-center gap-2 text-sm">
                         <input
                           type="checkbox"
+                          disabled={mutationBusy || dirty || !workspaceFresh || !automaticSeatingAllowed}
                           checked={selectedGroupIds.has(group.groupId)}
                           onChange={(event) =>
                             setSelectedGroupIds((current) => {
@@ -2010,7 +2282,14 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                 ) : null}
                 <Button
                   variant="outline"
-                  disabled={preparationBusy || busy || dirty || (sourceKind === 'userbindGroups' && !selectedGroupIds.size)}
+                  disabled={
+                    mutationBusy ||
+                    dirty ||
+                    !workspaceFresh ||
+                    !automaticSeatingAllowed ||
+                    (sourceKind === 'contestAudience' && workspace?.contestAudienceState !== 'fixed') ||
+                    (sourceKind === 'userbindGroups' && !selectedGroupIds.size)
+                  }
                   onClick={() =>
                     executeSeatPlan({
                       action: 'createRoster',
@@ -2022,74 +2301,79 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                   生成或刷新名单
                 </Button>
               </div>
-              <div className="space-y-2 rounded-md border p-3">
-                <label className="text-sm font-medium" htmlFor="seat-plan-classroom">
-                  候选教室
-                </label>
-                <select
-                  id="seat-plan-classroom"
-                  aria-label="候选教室"
-                  value={selectedClassroomId}
-                  onChange={(event) => void loadPreparationClassroom(event.target.value)}
-                  className="w-full rounded-md border bg-background px-2 py-2 text-sm"
-                >
-                  <option value="">请选择同校教室</option>
+              <div className="space-y-3 rounded-md border p-3">
+                <div>
+                  <p className="text-sm font-medium">候选教室</p>
+                  <p className="text-xs text-muted-foreground">可跨教室多选；计划会冻结当前布局、朝向和禁用配置版本。</p>
+                </div>
+                <div className="max-h-56 space-y-1 overflow-auto rounded-md bg-muted/30 p-2">
                   {workspace?.classrooms.map((classroom) => (
-                    <option key={classroom.classroomId} value={classroom.classroomId}>
-                      {classroom.name} · layout r{classroom.layoutRevision} · {classroom.seatCount} 座
-                    </option>
+                    <div key={classroom.classroomId} className="flex items-center justify-between gap-2 rounded px-1 py-1 text-sm">
+                      <label className="flex min-w-0 items-center gap-2">
+                        <input
+                          type="checkbox"
+                          aria-label={`选择教室${classroomDisplayById.get(classroom.classroomId) || classroom.classroomId}`}
+                          disabled={mutationBusy || dirty || !workspaceFresh || !automaticSeatingAllowed}
+                          checked={selectedV2ClassroomIds.has(classroom.classroomId)}
+                          onChange={(event) =>
+                            setSelectedV2ClassroomIds((current) => {
+                              const next = new Set(current);
+                              if (event.target.checked) next.add(classroom.classroomId);
+                              else next.delete(classroom.classroomId);
+                              return next;
+                            })
+                          }
+                        />
+                        <span className="truncate">
+                          {classroomDisplayById.get(classroom.classroomId) || classroom.classroomId} · layout r{classroom.layoutRevision} ·{' '}
+                          {classroom.seatCount} 座
+                        </span>
+                      </label>
+                      <a
+                        href={`/admin/exam-infrastructure/classrooms/${classroom.classroomId}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="shrink-0 text-xs text-primary underline-offset-4 hover:underline"
+                      >
+                        朝向 / 禁用设置
+                      </a>
+                    </div>
                   ))}
-                </select>
-                {preparationSeats.length ? (
-                  <div className="max-h-40 grid gap-1 overflow-auto rounded-md bg-muted/30 p-2 sm:grid-cols-2">
-                    {preparationSeats.map((seat) => {
-                      const available = (seat.status === 'active' || seat.status === 'empty') && Boolean(seat.bindingId);
-                      return (
-                        <label key={seat.sourceSeatId} className="flex items-center gap-2 text-sm">
-                          <input
-                            type="checkbox"
-                            disabled={!available}
-                            checked={selectedCandidateSeatIds.has(seat.sourceSeatId)}
-                            onChange={(event) =>
-                              setSelectedCandidateSeatIds((current) => {
-                                const next = new Set(current);
-                                if (event.target.checked) next.add(seat.sourceSeatId);
-                                else next.delete(seat.sourceSeatId);
-                                return next;
-                              })
-                            }
-                          />
-                          {seat.label} · {seat.sourceSeatId} {!available ? '（不可用）' : ''}
-                        </label>
-                      );
-                    })}
-                  </div>
-                ) : null}
+                  {!workspace?.classrooms.length ? <p className="text-sm text-muted-foreground">当前学校没有可用教室。</p> : null}
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  disabled={mutationBusy || (dirty && workspaceFresh)}
+                  onClick={() => {
+                    if (dirty && !window.confirm('这会放弃当前未保存的人工调整，并从服务端重新读取最终状态。是否继续？')) return;
+                    void refreshWorkspace();
+                  }}
+                >
+                  <RefreshCw className="size-4" /> {dirty && !workspaceFresh ? '放弃未保存调整并重读' : '重读教室事实'}
+                </Button>
                 <Button
                   variant="outline"
                   disabled={
-                    preparationBusy ||
-                    busy ||
-                    dirty ||
-                    latestPlan?.schemaVersion === 2 ||
-                    !latestRosterForPlan ||
-                    !selectedClassroom ||
-                    !selectedCandidateSeatIds.size
+                    mutationBusy || dirty || !workspaceFresh || !automaticSeatingAllowed || !latestRosterForPlan || !selectedV2ClassroomIds.size
                   }
                   onClick={() =>
-                    selectedClassroom &&
                     latestRosterForPlan &&
                     executeSeatPlan({
-                      action: 'createSeatPlan',
+                      action: 'createSeatPlanV2',
                       rosterRevision: latestRosterForPlan.revision,
-                      classroomId: selectedClassroom.classroomId,
-                      layoutRevision: selectedClassroom.layoutRevision,
-                      candidateSeatIds: [...selectedCandidateSeatIds].sort(),
+                      classroomIds: [...selectedV2ClassroomIds].sort(),
+                      expectedPreviousRevision: latestPlan?.revision || 0,
                     })
                   }
                 >
-                  创建候选座位计划
+                  创建跨教室候选计划
                 </Button>
+                {latest?.schemaVersion === 1 || latestPlan?.schemaVersion === 1 ? (
+                  <p className="rounded-md border bg-muted/20 p-2 text-sm text-muted-foreground">
+                    v1 历史只读；新的候选计划和分配统一使用跨教室 v2。
+                  </p>
+                ) : null}
               </div>
             </div>
           </CardContent>
@@ -2099,63 +2383,99 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
             <CardTitle>生成与发布</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-wrap items-center gap-2">
-            {v2ReadOnly ? (
-              <p className="w-full rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-800 dark:text-amber-200">
-                当前为跨教室座位协议 v2。本阶段仅开放历史查看与导出；生成、人工调整、发布和预登录将在后续阶段统一启用。
+            {!workspaceFresh ? (
+              <p className="w-full rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-sm text-amber-800 dark:text-amber-200">
+                页面事实尚未完成重读；所有写入、发布和导出均已暂停。请点击“重读教室事实”。
               </p>
             ) : null}
             {workspace?.latestSeatPlanState === 'layout-drift' ? (
               <p className="w-full text-sm text-amber-700">候选教室布局已变化；请在上方按当前布局创建新计划后再生成。</p>
             ) : null}
-            <Button
-              disabled={busy || dirty || !latestPlanV1?.roster || !latestPlanCurrent}
-              onClick={() => latestPlanV1 && execute({ action: 'generate', mode: 'random', seatPlanRevision: latestPlanV1.revision })}
-            >
-              <Shuffle className="size-4" /> 随机分配
-            </Button>
-            <Button
-              variant="outline"
-              disabled={busy || dirty || !latestPlanV1?.roster || !latestPlanCurrent}
-              onClick={() => latestPlanV1 && execute({ action: 'generate', mode: 'studentId', seatPlanRevision: latestPlanV1.revision })}
-            >
-              按学号分配
-            </Button>
-            <Button
-              variant="outline"
-              disabled={busy || dirty || !latestV1}
-              onClick={() => latestV1 && execute({ action: 'rerandomize', baseAssignmentRevision: latestV1.revision })}
-            >
-              <RefreshCw className="size-4" /> 重新随机未锁定座位
-            </Button>
-            <Button
-              variant="outline"
-              disabled={busy || !latestV1 || !dirty}
-              onClick={() =>
-                latestV1 &&
-                execute({
-                  action: 'adjust',
-                  baseAssignmentRevision: latestV1.revision,
-                  lockedUids: [...locked].sort((a, b) => a - b),
-                  mappings: draft,
-                })
-              }
-            >
-              <Save className="size-4" /> 保存人工调整
-            </Button>
-            <Button
-              disabled={busy || dirty || !latestV1}
-              onClick={() =>
-                latestV1 &&
-                execute({
-                  action: 'publish',
-                  assignmentRevision: latestV1.revision,
-                  expectedPublicationRevision: workspace?.publicationRevision || 0,
-                })
-              }
-            >
-              <Upload className="size-4" /> {latestV1 ? `发布版本 ${latestV1.revision}` : '发布'}
-            </Button>
-            <Button variant="ghost" disabled={!latest || dirty} onClick={exportCurrent}>
+            {latestPlanV2?.roster && planRoster ? (
+              <details className="w-full rounded-md border p-3 text-sm">
+                <summary className="cursor-pointer font-medium">
+                  当前候选计划冻结名单 r{planRoster.revision} · {planRoster.entries.length} 人（生成前请核对）
+                </summary>
+                <div className="mt-2 max-h-40 space-y-1 overflow-auto text-muted-foreground">
+                  {planRoster.entries.map((entry) => (
+                    <p key={entry.boundUserId}>
+                      {entry.studentId} · {entry.realName} · UID {entry.boundUserId}
+                    </p>
+                  ))}
+                  {!planRoster.entries.length ? <p>名单为空。</p> : null}
+                </div>
+              </details>
+            ) : null}
+            {latestPlanV2 ? (
+              <>
+                <label className="flex items-center gap-2 text-sm">
+                  <span>分配策略</span>
+                  <select
+                    aria-label="跨教室分配策略"
+                    value={v2Strategy}
+                    disabled={mutationBusy || dirty || !workspaceFresh || !automaticSeatingAllowed}
+                    onChange={(event) => setV2Strategy(event.target.value as AssignmentV2Revision['constraints']['strategy'])}
+                    className="rounded-md border bg-background px-2 py-2 text-sm"
+                  >
+                    <option value="minimizeClassrooms">少用教室</option>
+                    <option value="maximizeSpacing">优先隔开</option>
+                  </select>
+                </label>
+                <Button
+                  disabled={
+                    mutationBusy || dirty || !workspaceFresh || !automaticSeatingAllowed || !latestPlanV2.roster || !latestPlanCurrent || !planRoster
+                  }
+                  onClick={() =>
+                    execute({
+                      action: 'generateV2',
+                      expectedPreviousRevision: latest?.revision || 0,
+                      strategy: v2Strategy,
+                      seatPlanRevision: latestPlanV2.revision,
+                    })
+                  }
+                >
+                  <Shuffle className="size-4" /> 生成尽力型跨教室分配
+                </Button>
+                <Button
+                  variant="outline"
+                  disabled={mutationBusy || dirty || !assignmentIsCurrentV2}
+                  onClick={() => latestV2 && execute({ action: 'rerandomizeV2', baseAssignmentRevision: latestV2.revision })}
+                >
+                  <RefreshCw className="size-4" /> 保留锁定项重新分配
+                </Button>
+                <Button
+                  variant="outline"
+                  disabled={mutationBusy || !assignmentIsCurrentV2 || !dirty}
+                  onClick={() =>
+                    latestV2 &&
+                    execute({
+                      action: 'adjustV2',
+                      baseAssignmentRevision: latestV2.revision,
+                      lockedUids: [...locked].sort((a, b) => a - b),
+                      mappings: v2Draft,
+                    })
+                  }
+                >
+                  <Save className="size-4" /> 保存跨教室人工调整
+                </Button>
+                <Button
+                  disabled={mutationBusy || dirty || !assignmentIsCurrentV2}
+                  onClick={() =>
+                    latestV2 &&
+                    execute({
+                      action: 'publish',
+                      assignmentRevision: latestV2.revision,
+                      expectedPublicationRevision: workspace?.publicationRevision || 0,
+                    })
+                  }
+                >
+                  <Upload className="size-4" /> {latestV2 ? `发布跨教室版本 ${latestV2.revision}` : '发布'}
+                </Button>
+              </>
+            ) : (
+              <p className="text-sm text-muted-foreground">请先在上方创建跨教室 v2 候选计划；v1 历史只读。</p>
+            )}
+            <Button variant="ghost" disabled={!latest || dirty || mutationBusy || !workspaceFresh} onClick={exportCurrent}>
               <Download className="size-4" /> 导出当前页面 CSV
             </Button>
             {latest ? (
@@ -2183,6 +2503,165 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
           </Card>
         ) : null}
 
+        {latestV2 ? (
+          <Card>
+            <CardHeader>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <CardTitle>分配解释与教室座位图</CardTitle>
+                  <p className="mt-1 text-sm text-muted-foreground">只展示已冻结的客观事实：教室用量、风险边、拆队、跳过座位和 Endpoint 状态。</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    aria-label="缩小座位图"
+                    disabled={mapZoom <= 0.6}
+                    onClick={() => setMapZoom((current) => Math.max(0.6, Number((current - 0.2).toFixed(1))))}
+                  >
+                    <ZoomOut className="size-4" />
+                  </Button>
+                  <span className="min-w-12 text-center text-sm">{Math.round(mapZoom * 100)}%</span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    aria-label="放大座位图"
+                    disabled={mapZoom >= 1.8}
+                    onClick={() => setMapZoom((current) => Math.min(1.8, Number((current + 0.2).toFixed(1))))}
+                  >
+                    <ZoomIn className="size-4" />
+                  </Button>
+                  <Button type="button" size="sm" variant={showRiskLines ? 'default' : 'outline'} onClick={() => setShowRiskLines((value) => !value)}>
+                    {showRiskLines ? '隐藏风险连线' : '显示风险连线'}
+                  </Button>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {dirty ? (
+                <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-sm text-amber-800 dark:text-amber-200">
+                  座位图已显示人工换位；风险边和解释仍属于已保存版本，保存后服务端会重新计算。
+                </p>
+              ) : null}
+              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                {latestV2.explanation.classrooms.map((classroom) => (
+                  <div key={classroom.classroomId} className="rounded-md border p-3 text-sm">
+                    <p className="font-medium">{classroomDisplayById.get(classroom.classroomId) || classroom.classroomId}</p>
+                    <p className="mt-1 text-muted-foreground">
+                      已分配 {classroom.assignedCount} / 可用 {classroom.eligibleSeatCount}
+                    </p>
+                  </div>
+                ))}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={riskDetail === 'high' ? 'destructive' : 'outline'}
+                  onClick={() => setRiskDetail((value) => (value === 'high' ? null : 'high'))}
+                >
+                  高风险边 {latestV2.explanation.highRiskEdges.length}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={riskDetail === 'medium' ? 'default' : 'outline'}
+                  onClick={() => setRiskDetail((value) => (value === 'medium' ? null : 'medium'))}
+                >
+                  中风险边 {latestV2.explanation.mediumRiskEdges.length}
+                </Button>
+                <Badge variant={latestV2.explanation.splitTeamIds.length ? 'destructive' : 'outline'}>
+                  拆分队伍 {latestV2.explanation.splitTeamIds.length}
+                </Badge>
+                <Badge variant="outline">跳过座位 {latestV2.explanation.skippedSeats.length}</Badge>
+                <Badge variant={knownOfflineV2Seats.length ? 'destructive' : 'outline'}>离线 Endpoint {knownOfflineV2Seats.length}</Badge>
+                <Badge variant={unknownOnlineV2Seats.length ? 'secondary' : 'outline'}>在线未知 {unknownOnlineV2Seats.length}</Badge>
+                <Badge variant={latestV2.explanation.unsetFacingSeats.length ? 'secondary' : 'outline'}>
+                  朝向未设置 {latestV2.explanation.unsetFacingSeats.length}
+                </Badge>
+              </div>
+              {riskDetail ? (
+                <div className="max-h-56 space-y-1 overflow-auto rounded-md border p-3 text-sm" aria-live="polite">
+                  {(riskDetail === 'high' ? latestV2.explanation.highRiskEdges : latestV2.explanation.mediumRiskEdges).map((edge) => (
+                    <p key={riskEdgeKey(edge)}>
+                      {describeV2Seat(edge.left)} ↔ {describeV2Seat(edge.right)} · {riskReasonLabel[edge.reason]} · 距离 {edge.distance}
+                    </p>
+                  ))}
+                  {!(riskDetail === 'high' ? latestV2.explanation.highRiskEdges : latestV2.explanation.mediumRiskEdges).length ? (
+                    <p className="text-muted-foreground">无该级别风险边。</p>
+                  ) : null}
+                </div>
+              ) : null}
+              <div className="grid gap-3 lg:grid-cols-2">
+                <details className="rounded-md border p-3 text-sm">
+                  <summary className="cursor-pointer font-medium">拆队和跳过明细</summary>
+                  <div className="mt-2 space-y-2 text-muted-foreground">
+                    {splitTeams.map((team) => (
+                      <div key={team.teamId} className="rounded border p-2">
+                        <p className="font-medium text-foreground">队伍 {team.teamId}</p>
+                        {team.members.map(({ participant, row }) => (
+                          <p key={participant.boundUserId}>
+                            {participant.teamRole === 'captain' ? '队长' : '队员'} · {row?.studentId || participant.studentId}{' '}
+                            {row?.realName || '姓名未知'} →{' '}
+                            {row
+                              ? `${classroomDisplayById.get(row.classroomId) || row.classroomId} / ${row.seatLabel || row.sourceSeatId}`
+                              : '座位未知'}
+                          </p>
+                        ))}
+                      </div>
+                    ))}
+                    {!splitTeams.length ? <p>没有被拆分的队伍。</p> : null}
+                    {latestV2.explanation.skippedSeats.map((item) => (
+                      <p key={seatIdentityKey(item.seat)}>
+                        {describeV2Seat(item.seat)} · {skippedReasonLabel[item.reason]}
+                      </p>
+                    ))}
+                    {!latestV2.explanation.skippedSeats.length ? <p>没有被跳过的座位。</p> : null}
+                  </div>
+                </details>
+                <details className="rounded-md border p-3 text-sm">
+                  <summary className="cursor-pointer font-medium">Endpoint 与朝向 warning 明细</summary>
+                  <div className="mt-2 space-y-1 text-muted-foreground">
+                    {knownOfflineV2Seats.map((seat) => (
+                      <p key={`offline-${seatIdentityKey(seat)}`}>{describeV2Seat(seat)} · Endpoint 离线</p>
+                    ))}
+                    {unknownOnlineV2Seats.map((seat) => (
+                      <p key={`unknown-${seatIdentityKey(seat)}`}>{describeV2Seat(seat)} · Endpoint 在线状态未知</p>
+                    ))}
+                    {latestV2.explanation.unsetFacingSeats.map((seat) => (
+                      <p key={`facing-${seatIdentityKey(seat)}`}>{describeV2Seat(seat)} · 朝向未设置</p>
+                    ))}
+                    {!knownOfflineV2Seats.length && !unknownOnlineV2Seats.length && !latestV2.explanation.unsetFacingSeats.length ? (
+                      <p>没有 Endpoint 或朝向 warning。</p>
+                    ) : null}
+                  </div>
+                </details>
+              </div>
+              <div className="space-y-5">
+                {latestV2.classrooms.map((classroom) => (
+                  <ClassroomSeatMap
+                    key={classroom.classroomId}
+                    classroomId={classroom.classroomId}
+                    classroomName={classroomDisplayById.get(classroom.classroomId) || classroom.classroomId}
+                    editable={canMutateV2Draft}
+                    highRiskKeys={highRiskKeys}
+                    mediumRiskKeys={mediumRiskKeys}
+                    mappings={v2Draft}
+                    onSelect={selectForSwap}
+                    rowsByUid={rowsByUid}
+                    seats={latestV2.seatFacts}
+                    selectedUid={selectedUid}
+                    showRiskLines={showRiskLines}
+                    zoom={mapZoom}
+                  />
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        ) : null}
+
         <Card>
           <CardHeader>
             <CardTitle>终端预检与预登录</CardTitle>
@@ -2200,8 +2679,8 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
               </div>
             ) : publishedV2Assignment ? (
               <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-800 dark:text-amber-200">
-                已发布跨教室座位分配 r{publishedV2Assignment.revision}。P2.11 仅保证 v2 历史可读；终端预检、网络目标和预登录将在 P2.14
-                接入前保持禁用。
+                已发布跨教室座位分配 r{publishedV2Assignment.revision}。本页已完成跨教室生成、调整和发布；终端预检、网络目标与预登录保持禁用，留待
+                P2.14 统一接入。
               </div>
             ) : !publishedAssignment ? (
               <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-800 dark:text-amber-200">
@@ -2510,21 +2989,23 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
               value={search}
               onChange={(event) => setSearch(event.target.value)}
             />
-            {selectedStudent && latestV1 ? (
+            {selectedStudent && canMutateV2Draft ? (
               <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/20 p-2">
                 <span className="text-sm">为 {selectedStudent.realName} 指定座位</span>
                 <select
                   aria-label={`为${selectedStudent.realName}指定座位`}
-                  value={selectedStudent.sourceSeatId}
+                  value={seatIdentityKey(selectedStudent)}
+                  disabled={!canMutateV2Draft}
                   onChange={(event) => {
-                    assignSeat(selectedStudent.boundUserId, event.target.value);
+                    assignSeatV2(selectedStudent.boundUserId, event.target.value);
                     setSelectedUid(null);
                   }}
                   className="rounded-md border bg-background px-2 py-1 text-sm"
                 >
-                  {eligibleSeats.map((candidate) => (
-                    <option key={candidate.sourceSeatId} value={candidate.sourceSeatId}>
-                      {candidate.label} · {candidate.sourceSeatId}
+                  {eligibleV2Seats.map((candidate) => (
+                    <option key={seatIdentityKey(candidate)} value={seatIdentityKey(candidate)}>
+                      {classroomDisplayById.get(candidate.classroomId) || candidate.classroomId} · {candidate.label || candidate.sourceSeatId} ·{' '}
+                      {candidate.sourceSeatId}
                     </option>
                   ))}
                 </select>
@@ -2542,17 +3023,19 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
               </TableHeader>
               <TableBody>
                 {filteredRows.map((row) => {
-                  const seat = seatByIdentity.get(seatIdentityKey({ classroomId: row.classroomId, sourceSeatId: row.sourceSeatId }));
+                  const seatKey = seatIdentityKey({ classroomId: row.classroomId, sourceSeatId: row.sourceSeatId });
+                  const seat = seatByIdentity.get(seatKey);
+                  const v2Seat = latestV2SeatByKey.get(seatKey);
                   const endpoint = row.endpointId ? preflightByEndpoint.get(row.endpointId) : null;
                   return (
                     <TableRow
                       key={row.boundUserId}
-                      draggable={Boolean(latestV1)}
-                      onDragStart={() => latestV1 && setSelectedUid(row.boundUserId)}
-                      onDragOver={(event) => latestV1 && event.preventDefault()}
+                      draggable={canMutateV2Draft}
+                      onDragStart={() => canMutateV2Draft && setSelectedUid(row.boundUserId)}
+                      onDragOver={(event) => canMutateV2Draft && event.preventDefault()}
                       onDrop={() => {
-                        if (!latestV1 || selectedUid === null) return;
-                        swap(selectedUid, row.boundUserId);
+                        if (!canMutateV2Draft || selectedUid === null) return;
+                        swapV2(selectedUid, row.boundUserId);
                         setSelectedUid(null);
                       }}
                     >
@@ -2563,13 +3046,15 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                       <TableCell>
                         <div className="font-medium">{row.seatLabel || '未分配'}</div>
                         <div className="text-xs text-muted-foreground">
-                          {row.classroomId ? `${row.classroomId} · ` : ''}
+                          {row.classroomId ? `${classroomDisplayById.get(row.classroomId) || row.classroomId} · ` : ''}
                           {row.sourceSeatId || '-'}
                         </div>
                       </TableCell>
                       <TableCell>
                         <div>{row.endpointId || '未绑定'}</div>
-                        <div className="text-xs text-muted-foreground">{seat?.bindingRevision ? `绑定 r${seat.bindingRevision}` : '-'}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {seat?.bindingRevision || v2Seat?.bindingRevision ? `绑定 r${seat?.bindingRevision || v2Seat?.bindingRevision}` : '-'}
+                        </div>
                       </TableCell>
                       <TableCell>
                         {endpoint ? (
@@ -2579,13 +3064,14 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                         )}
                       </TableCell>
                       <TableCell>
-                        {latestV1 ? (
+                        {assignmentIsCurrentV2 ? (
                           <div className="flex flex-wrap items-center gap-2">
                             <Button
                               type="button"
                               size="sm"
                               variant={selectedUid === row.boundUserId ? 'default' : 'outline'}
                               aria-label={`选择${row.realName}换位`}
+                              disabled={!canMutateV2Draft}
                               onClick={() => selectForSwap(row.boundUserId)}
                             >
                               <GripVertical className="size-4" /> 换位
@@ -2595,6 +3081,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                                 type="checkbox"
                                 aria-label={`锁定${row.realName}`}
                                 checked={locked.has(row.boundUserId)}
+                                disabled={!canMutateV2Draft}
                                 onChange={(event) =>
                                   setLocked((current) => {
                                     const next = new Set(current);
@@ -2607,8 +3094,12 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                               <LockKeyhole className="size-3.5" /> 锁定
                             </label>
                           </div>
+                        ) : latestV1 ? (
+                          <Badge variant="outline">v1 历史只读</Badge>
+                        ) : latestV2 ? (
+                          <Badge variant="outline">当前分配未引用最新计划</Badge>
                         ) : (
-                          <Badge variant="outline">v2 历史只读</Badge>
+                          <Badge variant="outline">尚未生成分配</Badge>
                         )}
                       </TableCell>
                     </TableRow>

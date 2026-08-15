@@ -3,7 +3,14 @@ import { ObjectId } from 'mongodb';
 import type { Tdoc } from '../interface';
 import { PRIV } from './builtin';
 import type { ExamEventDoc } from './exam-event';
-import { ExamRosterResolutionSource, ExamRosterUserState, ExamSeatPlanError, resolveStableExamRoster, ResolvedExamRoster } from './exam-seat-plan';
+import {
+    ExamRosterResolutionSource,
+    ExamRosterRevisionDoc,
+    ExamRosterUserState,
+    ExamSeatPlanError,
+    resolveStableExamRoster,
+    ResolvedExamRoster,
+} from './exam-seat-plan';
 import UserModel from './user';
 
 export type ExamRosterSelection = { kind: 'contestAudience' } | { kind: 'userbindGroups'; groupIds: ObjectId[] } | { kind: 'userbindSchool' };
@@ -113,6 +120,34 @@ function contestAudienceConfiguration(tdoc: Tdoc) {
     return { participantScopeMode, participantSchoolIds, participantGroupIds, assign };
 }
 
+export type ExamContestAudienceState = 'fixed' | 'not-applicable' | 'public';
+
+async function contestAudienceContext(event: ExamEventDoc) {
+    if (event.type !== 'krypton' || !event.contestId) return null;
+    const contest = await global.Hydro.model.contest.get(event.domainId, event.contestId);
+    assertContestIdentity(event, contest);
+    const config = contestAudienceConfiguration(contest);
+    if (contest._code !== undefined && typeof contest._code !== 'string') throw new ExamSeatPlanError('contest_audience_invalid');
+    if (contest.participationMode !== undefined && contest.participationMode !== 'individual' && contest.participationMode !== 'team') {
+        throw new ExamSeatPlanError('contest_audience_invalid');
+    }
+    const participationMode = contest.participationMode || 'individual';
+    if (participationMode === 'team') {
+        if (contest.rule !== 'acm') throw new ExamSeatPlanError('contest_audience_invalid');
+        if (contest.plannedTeamBatchId && !contest.teamBatchId) throw new ExamSeatPlanError('contest_team_roster_not_finalized');
+        return { config, contest, participationMode, state: 'fixed' as const };
+    }
+    // An invite code controls entry, but it does not freeze who may join later.
+    // Only an explicit audience scope can be used as a stable automatic-seat roster.
+    const state = !contest._code && (config.participantScopeMode !== 'none' || config.assign.length) ? 'fixed' : 'public';
+    return { config, contest, participationMode, state } as const;
+}
+
+export async function getExamContestAudienceState(event: ExamEventDoc): Promise<ExamContestAudienceState> {
+    const context = await contestAudienceContext(event);
+    return context?.state || 'not-applicable';
+}
+
 async function attendedUserIds(domainId: string, contestId: ObjectId): Promise<number[]> {
     const statuses = await global.Hydro.model.contest.getMultiStatus(domainId, { docId: contestId, attend: 1 }).toArray();
     if (statuses.some((status) => typeof status.uid !== 'number' || !Number.isSafeInteger(status.uid) || status.uid <= 1)) {
@@ -140,18 +175,12 @@ async function assignedUserIds(domainId: string, names: string[]): Promise<numbe
 
 async function contestAudienceSource(event: ExamEventDoc): Promise<ExamRosterResolutionSource> {
     if (event.type !== 'krypton' || !event.contestId) throw new ExamSeatPlanError('contest_audience_unavailable');
-    const contest = await global.Hydro.model.contest.get(event.domainId, event.contestId);
-    assertContestIdentity(event, contest);
-    const config = contestAudienceConfiguration(contest);
-    if (contest._code !== undefined && typeof contest._code !== 'string') throw new ExamSeatPlanError('contest_audience_invalid');
-    if (contest.participationMode !== undefined && contest.participationMode !== 'individual' && contest.participationMode !== 'team') {
-        throw new ExamSeatPlanError('contest_audience_invalid');
-    }
-    const participationMode = contest.participationMode || 'individual';
+    const context = await contestAudienceContext(event);
+    if (!context) throw new ExamSeatPlanError('contest_audience_unavailable');
+    if (context.state === 'public') throw new ExamSeatPlanError('contest_audience_not_fixed');
+    const { config, contest, participationMode } = context;
     let teamAudience: { memberUids: number[]; teamFacts: Array<{ teamId: string; revision: number; memberUids: number[] }> } | null = null;
     if (participationMode === 'team') {
-        if (contest.rule !== 'acm') throw new ExamSeatPlanError('contest_audience_invalid');
-        if (contest.plannedTeamBatchId && !contest.teamBatchId) throw new ExamSeatPlanError('contest_team_roster_not_finalized');
         const teams = await global.Hydro.model.contestTeam.listTeams(event.domainId, event.contestId);
         const teamIds = new Set<string>();
         const memberUids = new Set<number>();
@@ -289,4 +318,45 @@ export function resolveExamRosterForEvent(event: ExamEventDoc, selection: ExamRo
         loadSource: () => loadExamRosterResolutionSource(event, selection),
         loadUserStates: loadExamRosterUserStates,
     });
+}
+
+function rosterEntriesFingerprint(entries: ExamRosterRevisionDoc['entries']): string {
+    return sha256(
+        entries.map((entry) => ({
+            studentRecordId: entry.studentRecordId.toHexString(),
+            schoolId: entry.schoolId.toHexString(),
+            studentId: entry.studentId,
+            realName: entry.realName,
+            boundUserId: entry.boundUserId,
+            sourceGroupIds: entry.sourceGroupIds.map((id) => id.toHexString()),
+        })),
+    );
+}
+
+function rosterExclusionsFingerprint(exclusions: ExamRosterRevisionDoc['exclusions']): string {
+    return sha256(
+        exclusions.map((entry) => ({
+            studentRecordId: entry.studentRecordId.toHexString(),
+            schoolId: entry.schoolId.toHexString(),
+            studentId: entry.studentId,
+            realName: entry.realName,
+            boundUserId: entry.boundUserId,
+            reason: entry.reason,
+        })),
+    );
+}
+
+export async function assertExamContestAudienceRosterCurrent(event: ExamEventDoc, roster: ExamRosterRevisionDoc): Promise<void> {
+    if (roster.source.kind !== 'contestAudience') return;
+    if (event.type !== 'krypton' || !event.contestId || !roster.source.contestId?.equals(event.contestId)) {
+        throw new ExamSeatPlanError('roster_contest_changed');
+    }
+    const current = await resolveExamRosterForEvent(event, { kind: 'contestAudience' });
+    if (
+        current.source.sourceFingerprint !== roster.source.sourceFingerprint ||
+        rosterEntriesFingerprint(current.entries) !== rosterEntriesFingerprint(roster.entries) ||
+        rosterExclusionsFingerprint(current.exclusions) !== rosterExclusionsFingerprint(roster.exclusions)
+    ) {
+        throw new ExamSeatPlanError('roster_source_changed');
+    }
 }

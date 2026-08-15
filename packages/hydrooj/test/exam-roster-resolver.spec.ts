@@ -123,7 +123,7 @@ beforeEach(() => {
 });
 
 describe('P2.4 Contest audience compilation', () => {
-    it('compiles an explicit group plus invite attendance to explicit users and ignores attendees outside that scope', async () => {
+    it('compiles an explicit group without an invite code as a fixed audience', async () => {
         mutableModel().contest = {
             get: async () => ({
                 _id: contestId,
@@ -134,7 +134,6 @@ describe('P2.4 Contest audience compilation', () => {
                 participantSchoolIds: [],
                 participationMode: 'individual',
                 assign: [],
-                _code: 'never-persist-this',
             }),
             getMultiStatus: () =>
                 cursor([
@@ -147,6 +146,40 @@ describe('P2.4 Contest audience compilation', () => {
         expect(source.kind).to.equal('contestAudience');
         expect(source.students.map((student) => student.boundUserId)).to.deep.equal([101]);
         expect(source.sourceFingerprint).to.match(/^[a-f0-9]{64}$/);
+    });
+
+    it('rejects an invite-code audience because later attendees can still change it', async () => {
+        let userbindReads = 0;
+        mutableModel().userbind = {
+            loadExamRosterUserbindSnapshot: async () => {
+                userbindReads++;
+                return snapshot([groupId], [{ uid: 101, record: 1 }]);
+            },
+        };
+        mutableModel().contest = {
+            get: async () => ({
+                _id: contestId,
+                docId: contestId,
+                domainId,
+                participantScopeMode: 'groups',
+                participantGroupIds: [groupId],
+                participantSchoolIds: [],
+                participationMode: 'individual',
+                assign: [],
+                _code: 'never-persist-this',
+            }),
+            getMultiStatus: () => cursor([{ uid: 101, attend: 1 }]),
+        };
+
+        expect(await resolverModule.getExamContestAudienceState(event())).to.equal('public');
+        let reason: string | null = null;
+        try {
+            await resolverModule.loadExamRosterResolutionSource(event(), { kind: 'contestAudience' });
+        } catch (error) {
+            reason = (error as { reason?: string }).reason || null;
+        }
+        expect(reason).to.equal('contest_audience_not_fixed');
+        expect(userbindReads).to.equal(0);
     });
 
     it('uses only finalized active team members and does not reapply individual group scope', async () => {
@@ -401,7 +434,15 @@ describe('P2.4 Contest audience compilation', () => {
         expect(reason).to.equal('contest_audience_userbind_missing');
     });
 
-    it('rejects malformed Contest attendance identities instead of silently dropping members', async () => {
+    it('rejects a fully public Contest before reading mutable attendance or userbind facts', async () => {
+        let attendanceReads = 0;
+        let userbindReads = 0;
+        mutableModel().userbind = {
+            loadExamRosterUserbindSnapshot: async () => {
+                userbindReads++;
+                return snapshot(null, []);
+            },
+        };
         mutableModel().contest = {
             get: async () => ({
                 _id: contestId,
@@ -413,7 +454,10 @@ describe('P2.4 Contest audience compilation', () => {
                 participationMode: 'individual',
                 assign: [],
             }),
-            getMultiStatus: () => cursor([{ uid: '101', attend: 1 }]),
+            getMultiStatus: () => {
+                attendanceReads++;
+                return cursor([{ uid: '101', attend: 1 }]);
+            },
         };
         let reason: string | null = null;
         try {
@@ -421,7 +465,9 @@ describe('P2.4 Contest audience compilation', () => {
         } catch (error) {
             reason = (error as { reason?: string }).reason || null;
         }
-        expect(reason).to.equal('contest_attendance_invalid');
+        expect(reason).to.equal('contest_audience_not_fixed');
+        expect(attendanceReads).to.equal(0);
+        expect(userbindReads).to.equal(0);
     });
 
     it('propagates cross-school group rejection without converting it to an empty roster', async () => {

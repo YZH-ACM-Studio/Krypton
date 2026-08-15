@@ -7,7 +7,12 @@ import { examSeatOperationalProfileService } from '../model/exam-seat-operationa
 import { assertCanManageExamEvent, isExamInfrastructureAdmin } from '../model/exam-event-access';
 import { withExamEventBoundary } from '../model/exam-event-boundary';
 import { ExamEventDoc, examEventService } from '../model/exam-event';
-import { ExamRosterSelection, resolveExamRosterForEvent } from '../model/exam-roster-resolver';
+import {
+    ExamRosterSelection,
+    assertExamContestAudienceRosterCurrent,
+    getExamContestAudienceState,
+    resolveExamRosterForEvent,
+} from '../model/exam-roster-resolver';
 import {
     assertExamRosterRevisionIntegrity,
     assertExamSeatPlanIntegrity,
@@ -163,9 +168,10 @@ class ExamSeatPlanCollectionHandler extends ExamSeatPlanBaseHandler {
     @param('eventId', Types.ObjectId)
     async get(_args: unknown, eventId: ObjectId) {
         const event = await this.event(eventId);
-        const [rosters, plans] = await Promise.all([
+        const [rosters, plans, contestAudienceState] = await Promise.all([
             examSeatPlanService.listRosterRevisions(event.domainId, eventId).toArray(),
             examSeatPlanService.listSeatPlans(event.domainId, eventId).toArray(),
+            getExamContestAudienceState(event),
         ]);
         for (const roster of rosters) {
             assertExamRosterRevisionIntegrity(roster);
@@ -236,6 +242,7 @@ class ExamSeatPlanCollectionHandler extends ExamSeatPlanBaseHandler {
                 lifecycle: event.lifecycle,
                 schoolId: event.schoolId.toHexString(),
                 contestId: event.contestId?.toHexString() || null,
+                contestAudienceState,
                 startAt: event.startAt.toISOString(),
                 endAt: event.endAt.toISOString(),
             },
@@ -245,23 +252,27 @@ class ExamSeatPlanCollectionHandler extends ExamSeatPlanBaseHandler {
     }
 
     @param('eventId', Types.ObjectId)
-    @param('action', Types.Range(['createRoster', 'createSeatPlan']))
+    @param('action', Types.Range(['createRoster', 'createSeatPlan', 'createSeatPlanV2']))
     @param('sourceKind', Types.Range(['contestAudience', 'userbindGroups', 'userbindSchool']), true)
     @param('groupIds', Types.ArrayOf(Types.ObjectId), true)
     @param('rosterRevision', Types.UnsignedInt, true)
     @param('classroomId', Types.ObjectId, true)
     @param('layoutRevision', Types.PositiveInt, true)
     @param('candidateSeatIds', Types.ArrayOf(Types.String), true)
+    @param('classroomIds', Types.ArrayOf(Types.ObjectId), true)
+    @param('expectedPreviousRevision', Types.UnsignedInt, true)
     async post(
         _args: unknown,
         eventId: ObjectId,
-        action: 'createRoster' | 'createSeatPlan',
+        action: 'createRoster' | 'createSeatPlan' | 'createSeatPlanV2',
         sourceKind?: 'contestAudience' | 'userbindGroups' | 'userbindSchool',
         groupIds: ObjectId[] = [],
         rosterRevision = 0,
-        classroomId?: ObjectId,
-        layoutRevision?: number,
-        candidateSeatIds: string[] = [],
+        _classroomId?: ObjectId,
+        _layoutRevision?: number,
+        _candidateSeatIds: string[] = [],
+        classroomIds: ObjectId[] = [],
+        expectedPreviousRevision = 0,
     ) {
         const domainId = String(this.domain._id);
         try {
@@ -311,59 +322,87 @@ class ExamSeatPlanCollectionHandler extends ExamSeatPlanBaseHandler {
                 return;
             }
 
-            exactBody(this.request.body, ['action', 'candidateSeatIds', 'classroomId', 'layoutRevision', 'rosterRevision']);
-            if (!classroomId || !layoutRevision) throw new ValidationError('classroomId');
-            const plan = await withExamEventBoundary(domainId, eventId, async () => {
-                const current = await this.event(eventId);
-                this.assertWritableEvent(current);
-                const classroom = await examClassroomService.get(domainId, classroomId);
-                if (!classroom || !classroom.schoolId.equals(current.schoolId)) throw new ExamSeatPlanError('classroom_school_mismatch');
-                if (classroom.layoutRevision !== layoutRevision) throw new ExamSeatPlanError('layout_revision_changed');
-                const layout = examClassroomService.layout(classroom, layoutRevision).snapshot;
-                const seatIds = new Set(layout.seats.map((seat) => seat.sourceSeatId));
-                if (candidateSeatIds.some((seatId) => !seatIds.has(seatId))) throw new ExamSeatPlanError('candidate_seat_missing');
-                const roster = rosterRevision ? await examSeatPlanService.getRosterRevision(domainId, eventId, rosterRevision) : null;
-                if (rosterRevision && !roster) throw new ExamSeatPlanError('roster_not_found');
-                if (roster?.source.kind === 'contestAudience' && (!current.contestId || !roster.source.contestId?.equals(current.contestId))) {
-                    throw new ExamSeatPlanError('roster_contest_changed');
+            if (action === 'createSeatPlanV2') {
+                exactBody(this.request.body, ['action', 'classroomIds', 'expectedPreviousRevision', 'rosterRevision']);
+                if (
+                    !classroomIds.length ||
+                    classroomIds.length > 100 ||
+                    new Set(classroomIds.map((id) => id.toHexString())).size !== classroomIds.length
+                ) {
+                    throw new ValidationError('classroomIds');
                 }
-                return examSeatPlanService.createSeatPlan({
-                    domainId,
-                    eventId,
-                    eventRevision: current.revision,
-                    schoolId: current.schoolId,
-                    actorUid: this.user._id,
-                    roster,
-                    classroomId,
-                    layoutRevision,
-                    layoutFingerprint: layout.fingerprint,
-                    candidateSeatIds,
-                    requireRoster: current.type === 'krypton',
+                const plan = await withExamEventBoundary(domainId, eventId, async () => {
+                    const current = await this.event(eventId);
+                    this.assertWritableEvent(current);
+                    if (current.type === 'krypton' && (await getExamContestAudienceState(current)) !== 'fixed') {
+                        throw new ExamSeatPlanError('contest_audience_not_fixed');
+                    }
+                    const roster = rosterRevision ? await examSeatPlanService.getRosterRevision(domainId, eventId, rosterRevision) : null;
+                    if (rosterRevision && !roster) throw new ExamSeatPlanError('roster_not_found');
+                    if (roster) await assertExamContestAudienceRosterCurrent(current, roster);
+                    const classroomRefs = await Promise.all(
+                        classroomIds.map(async (selectedClassroomId) => {
+                            const classroom = await examClassroomService.get(domainId, selectedClassroomId);
+                            if (!classroom || !classroom.schoolId.equals(current.schoolId)) {
+                                throw new ExamSeatPlanError('classroom_school_mismatch');
+                            }
+                            const layout = examClassroomService.layout(classroom, classroom.layoutRevision).snapshot;
+                            const profile = await examSeatOperationalProfileService.getCurrent(domainId, selectedClassroomId);
+                            if (
+                                !profile.schoolId.equals(current.schoolId) ||
+                                profile.layoutRevision !== classroom.layoutRevision ||
+                                profile.layoutFingerprint !== layout.fingerprint
+                            ) {
+                                throw new ExamSeatPlanError('seat_plan_profile_missing');
+                            }
+                            return {
+                                classroomId: new ObjectId(selectedClassroomId),
+                                layoutRevision: classroom.layoutRevision,
+                                layoutFingerprint: layout.fingerprint,
+                                profileRevision: profile.revision,
+                                profileFingerprint: profile.fingerprint,
+                                candidateSeatIds: layout.seats.map((seat) => seat.sourceSeatId),
+                            };
+                        }),
+                    );
+                    return examSeatPlanService.createSeatPlanV2({
+                        domainId,
+                        eventId,
+                        eventRevision: current.revision,
+                        schoolId: current.schoolId,
+                        actorUid: this.user._id,
+                        expectedPreviousRevision,
+                        roster,
+                        classrooms: classroomRefs,
+                        requireRoster: current.type === 'krypton',
+                    });
                 });
-            });
-            await OplogModel.log(this, 'exam.seat_plan.create', {
-                eventId,
-                eventRevision: plan.eventRevision,
-                seatPlanId: plan._id,
-                seatPlanRevision: plan.revision,
-                rosterRevision: plan.roster?.revision || null,
-                classroomId: plan.classroomId,
-                layoutRevision: plan.layoutRevision,
-                candidateSeatCount: plan.candidateSeatIds.length,
-                diagnosticCodes: plan.diagnostics.map((diagnostic) => diagnostic.code),
-                fingerprint: plan.fingerprint,
-            });
-            logger.info(
-                'Exam seat plan created event=%s eventRevision=%d planRevision=%d rosterRevision=%s candidates=%d diagnostics=%s fingerprint=%s',
-                eventId.toHexString(),
-                plan.eventRevision,
-                plan.revision,
-                plan.roster?.revision || '-',
-                plan.candidateSeatIds.length,
-                plan.diagnostics.map((diagnostic) => diagnostic.code).join(',') || '-',
-                plan.fingerprint,
-            );
-            this.response.body = { seatPlan: serializePlan(plan, plan.eventRevision) };
+                await OplogModel.log(this, 'exam.seat_plan.create', {
+                    eventId,
+                    eventRevision: plan.eventRevision,
+                    seatPlanId: plan._id,
+                    seatPlanRevision: plan.revision,
+                    rosterRevision: plan.roster?.revision || null,
+                    classroomIds: plan.classrooms.map((classroom) => classroom.classroomId),
+                    candidateSeatCount: plan.classrooms.reduce((count, classroom) => count + classroom.candidateSeatIds.length, 0),
+                    diagnosticCodes: plan.diagnostics.map((diagnostic) => diagnostic.code),
+                    fingerprint: plan.fingerprint,
+                });
+                logger.info(
+                    'Exam seat plan v2 created event=%s eventRevision=%d planRevision=%d rosterRevision=%s classrooms=%d candidates=%d diagnostics=%s fingerprint=%s',
+                    eventId.toHexString(),
+                    plan.eventRevision,
+                    plan.revision,
+                    plan.roster?.revision || '-',
+                    plan.classrooms.length,
+                    plan.classrooms.reduce((count, classroom) => count + classroom.candidateSeatIds.length, 0),
+                    plan.diagnostics.map((diagnostic) => diagnostic.code).join(',') || '-',
+                    plan.fingerprint,
+                );
+                this.response.body = { seatPlan: serializePlan(plan, plan.eventRevision) };
+                return;
+            }
+            throw new ExamSeatPlanError('seat_plan_v2_writer_required');
         } catch (error) {
             translate(error);
         }

@@ -33,11 +33,26 @@ describe('P2.4 roster and seat-plan HTTP boundary', () => {
         expect(source).to.include("event.lifecycle === 'archived'");
     });
 
-    it('accepts only exact action-specific bodies and validates current classroom/layout/seat references', () => {
+    it('accepts only exact v2 action bodies and keeps the legacy v1 writer fail closed', () => {
         expect(source).to.include("exactBody(this.request.body, ['action', 'groupIds', 'sourceKind'])");
-        expect(source).to.include("exactBody(this.request.body, ['action', 'candidateSeatIds', 'classroomId', 'layoutRevision', 'rosterRevision'])");
-        expect(source).to.include('classroom.layoutRevision !== layoutRevision');
-        expect(source).to.include("throw new ExamSeatPlanError('candidate_seat_missing')");
+        expect(source).to.include("exactBody(this.request.body, ['action', 'classroomIds', 'expectedPreviousRevision', 'rosterRevision'])");
+        expect(source).not.to.include(
+            "exactBody(this.request.body, ['action', 'candidateSeatIds', 'classroomId', 'layoutRevision', 'rosterRevision'])",
+        );
+        expect(source).to.include("throw new ExamSeatPlanError('seat_plan_v2_writer_required')");
+    });
+
+    it('creates v2 plans from an exact classroom set and the current layout/profile facts under CAS', () => {
+        expect(source).to.include("exactBody(this.request.body, ['action', 'classroomIds', 'expectedPreviousRevision', 'rosterRevision'])");
+        expect(source).to.include('new Set(classroomIds.map((id) => id.toHexString())).size !== classroomIds.length');
+        expect(source).to.include('examSeatOperationalProfileService.getCurrent(domainId, selectedClassroomId)');
+        expect(source).to.include('profile.layoutRevision !== classroom.layoutRevision');
+        expect(source).to.include('profile.layoutFingerprint !== layout.fingerprint');
+        expect(source).to.include("(await getExamContestAudienceState(current)) !== 'fixed'");
+        expect(source).to.include("throw new ExamSeatPlanError('contest_audience_not_fixed')");
+        expect(source).to.include('await assertExamContestAudienceRosterCurrent(current, roster)');
+        expect(source).to.include('expectedPreviousRevision,');
+        expect(source).to.include('examSeatPlanService.createSeatPlanV2');
         expect(source).to.include("requireRoster: current.type === 'krypton'");
     });
 

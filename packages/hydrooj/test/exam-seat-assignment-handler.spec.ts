@@ -23,22 +23,25 @@ describe('P2.5 seat assignment HTTP boundary', () => {
         expect(source).to.include('this.assertWritableEvent(current)');
     });
 
-    it('uses exact action bodies and keeps rerandomization seed ownership on the server', () => {
-        expect(source).to.include("exactBody(this.request.body, ['action', 'mode', 'seatPlanRevision'])");
-        expect(source).to.include("exactBody(this.request.body, ['action', 'baseAssignmentRevision', 'lockedUids', 'mappings'])");
-        expect(source).to.include("exactBody(this.request.body, ['action', 'baseAssignmentRevision'])");
+    it('keeps legacy v1 writes disabled and owns all v2 rerandomization seeds on the server', () => {
+        expect(source).not.to.include("exactBody(this.request.body, ['action', 'mode', 'seatPlanRevision'])");
         expect(source).to.include("exactBody(this.request.body, ['action', 'assignmentRevision', 'expectedPublicationRevision'])");
         expect(source).to.include('examSeatAssignmentService.newSeed()');
-        expect(source).to.include("nextMode = 'random'");
-        expect(source).to.include('seed: latest?.seed || examSeatAssignmentService.newSeed()');
-        expect(source).to.include('latest.seatPlan.seatPlanId.equals(source.seatPlan._id)');
-        expect(source).to.include('let inheritedLocks: ExamSeatAssignmentMapping[] = []');
-        expect(source).to.include('lockedAssignments: inheritedLocks');
-        expect(source).to.include('await this.assertV1WriterEnabled(domainId, eventId)');
-        expect(source).to.include('examSeatPlanService.latestSeatPlanRevision(domainId, eventId)');
-        expect(source).to.include('latestSeatPlan && isExamSeatPlanV2(latestSeatPlan)');
         expect(source).to.include("throw new ExamSeatAssignmentError('assignment_v2_writer_required')");
         expect(source).not.to.include("@param('seed'");
+    });
+
+    it('uses exact v2 actions for deterministic generation, cross-room adjustment and locked rerandomization', () => {
+        expect(source).to.include("exactBody(this.request.body, ['action', 'expectedPreviousRevision', 'seatPlanRevision', 'strategy'])");
+        expect(source).to.include("exactBody(this.request.body, ['action', 'baseAssignmentRevision', 'lockedUids', 'mappings'])");
+        expect(source).to.include("action === 'generateV2' || action === 'adjustV2' || action === 'rerandomizeV2'");
+        expect(source).to.include('manualAssignments = requestV2Mappings(mappings)');
+        expect(source).to.include('lockedAssignments = base.constraints.lockedAssignments');
+        expect(source).to.include('strategy: base.constraints.strategy');
+        expect(source).to.include('examSeatAssignmentService.createRevisionV2');
+        expect(source).to.include('(latest?.revision || 0) !== expectedPreviousRevision');
+        expect(source).to.include('!latestPlan._id.equals(base.seatPlan.seatPlanId)');
+        expect(source).to.include("throw new ExamSeatAssignmentError('seat_plan_v2_not_current')");
     });
 
     it('revalidates immutable roster/plan, current layout and active seat bindings before any revision write', () => {
@@ -51,7 +54,28 @@ describe('P2.5 seat assignment HTTP boundary', () => {
         expect(source).to.include('seatPlanMatchesAssignmentRoster(seatPlan, assignment)');
         expect(source).to.include('seatFactMatchesBindingHistory(domainId, event.schoolId, fact, binding || null)');
         expect(source).to.include("binding.status === 'active'");
-        expect(source).to.include('examSeatAssignmentService.createRevision');
+        expect(source).to.include('examSeatAssignmentService.createRevisionV2');
+    });
+
+    it('freezes v2 team, profile, binding and live-status facts without making liveness a hard allocation gate', () => {
+        expect(source).to.include("resolveExamRosterForEvent(event, { kind: 'contestAudience' })");
+        expect(source).to.include('listContestTeams(event.domainId, event.contestId)');
+        expect(source.indexOf('const currentRosterBeforeTeams = await resolveExamRosterForEvent')).to.be.lessThan(
+            source.indexOf('const teams = await listContestTeams'),
+        );
+        expect(source.indexOf('const teams = await listContestTeams')).to.be.lessThan(
+            source.indexOf('const currentRosterAfterTeams = await resolveExamRosterForEvent'),
+        );
+        expect(source).to.include("(await getExamContestAudienceState(event)) !== 'fixed'");
+        expect(source).to.include('await assertExamContestAudienceRosterCurrent(event, roster)');
+        expect(source).to.include('examSeatOperationalProfileService.getCurrent(domainId, classroomRef.classroomId)');
+        expect(source).to.include('endpointSeatBindingService.listClassroomBindings(domainId, classroomRef.classroomId)');
+        expect(source).to.include("throw new ExamSeatAssignmentError('assignment_endpoint_duplicate')");
+        expect(source).to.include('endpointOnline: fact.endpointId');
+        expect(source).to.include('onlineByEndpoint.get(fact.endpointId) ?? null');
+        expect(source).to.include('Exam seat assignment v2 live status unavailable');
+        expect(source).to.include('const failure = classifyVigilBridgeFailure(error)');
+        expect(source).to.include('failure.httpStatus ??');
     });
 
     it('reuses the existing userbind read model for the fresh-event preparation step', () => {
@@ -78,5 +102,13 @@ describe('P2.5 seat assignment HTTP boundary', () => {
         expect(eventSource).to.include('examSeatAssignmentService.assertEventSchoolChangeAllowed(domainId, eventId)');
         const loggerCalls = source.match(/logger\.info\([\s\S]*?\);/g) || [];
         expect(loggerCalls.join('\n')).not.to.match(/realName|studentId/);
+    });
+
+    it('publishes only the strict latest v2 assignment for the strict latest v2 plan', () => {
+        expect(source).to.include('examSeatAssignmentService.latestRevision(domainId, eventId)');
+        expect(source).to.include('examSeatPlanService.latestSeatPlanRevision(domainId, eventId)');
+        expect(source).to.include('!latestAssignment._id.equals(assignment._id)');
+        expect(source).to.include('!latestPlan._id.equals(assignment.seatPlan.seatPlanId)');
+        expect(source).to.include("throw new ExamSeatAssignmentError('assignment_v2_not_current')");
     });
 });

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BootstrapProvider, type KryptonBootstrap } from '../src/lib/bootstrap.tsx';
@@ -11,6 +11,7 @@ const PLAN_RESPONSE = {
     eventId: EVENT_ID,
     revision: 3,
     type: 'krypton',
+    contestAudienceState: 'fixed',
     lifecycle: 'scheduled',
     schoolId: '66b800000000000000000802',
     contestId: '66b800000000000000000803',
@@ -22,6 +23,7 @@ const PLAN_RESPONSE = {
       rosterId: '66b800000000000000000804',
       revision: 2,
       fingerprint: 'a'.repeat(64),
+      source: { kind: 'userbindGroups' },
       entries: [
         { studentId: '20260001', realName: '张三', boundUserId: 21 },
         { studentId: '20260002', realName: '李四', boundUserId: 22 },
@@ -313,6 +315,101 @@ function fetchFixture(
   });
 }
 
+function singleClassroomV2Fixture(extraSeat = false) {
+  const classroomId = PLAN_RESPONSE.seatPlans[0].classroomId;
+  const candidateSeatIds = extraSeat ? ['seat-01', 'seat-02', 'seat-03'] : ['seat-01', 'seat-02'];
+  const classroom = {
+    classroomId,
+    layoutRevision: 7,
+    layoutFingerprint: 'b'.repeat(64),
+    profileRevision: 1,
+    profileFingerprint: 'e'.repeat(64),
+    candidateSeatIds,
+  };
+  const seatFacts = candidateSeatIds.map((sourceSeatId, index) => ({
+    classroomId,
+    sourceSeatId,
+    label: `A0${index + 1}`,
+    x: index,
+    y: 0,
+    width: 1,
+    height: 1,
+    rotation: 0,
+    layoutStatus: index === 2 ? 'empty' : 'active',
+    enabled: true,
+    facing: index === 0 ? ('right' as const) : ('left' as const),
+    disabledReason: null,
+    bindingId: objectIdFromIndex(0x8d0 + index),
+    bindingRevision: 1,
+    endpointId: `endpoint-v2-${index + 1}`,
+    endpointOnline: true,
+  }));
+  const v2Plan = {
+    schemaVersion: 2 as const,
+    seatPlanId: '66b800000000000000000955',
+    revision: 5,
+    roster: PLAN_RESPONSE.seatPlans[0].roster,
+    classrooms: [classroom],
+    fingerprint: '8'.repeat(64),
+    diagnostics: [],
+  };
+  const v2Assignment = {
+    schemaVersion: 2 as const,
+    assignmentId: '66b800000000000000000957',
+    revision: 2,
+    seatPlan: { seatPlanId: v2Plan.seatPlanId, revision: v2Plan.revision, fingerprint: v2Plan.fingerprint },
+    roster: PLAN_RESPONSE.seatPlans[0].roster,
+    classrooms: [classroom],
+    participants: PLAN_RESPONSE.rosterRevisions[0].entries.map((entry, index) => ({
+      boundUserId: entry.boundUserId,
+      studentRecordId: objectIdFromIndex(0x8e0 + index),
+      studentId: entry.studentId,
+      teamId: null,
+      teamRole: null,
+    })),
+    seatFacts,
+    constraints: { strategy: 'maximizeSpacing' as const, lockedAssignments: [], manualAssignments: [] },
+    assignments: PLAN_RESPONSE.rosterRevisions[0].entries.map((entry, index) => ({
+      boundUserId: entry.boundUserId,
+      seat: { classroomId, sourceSeatId: candidateSeatIds[index] },
+    })),
+    explanation: {
+      classrooms: [{ classroomId, assignedCount: 2, eligibleSeatCount: candidateSeatIds.length }],
+      highRiskEdges: [],
+      mediumRiskEdges: [],
+      splitTeamIds: [],
+      skippedSeats: [],
+      offlineSeats: [],
+      unsetFacingSeats: [],
+    },
+    fingerprint: '9'.repeat(64),
+    published: false,
+  };
+  const planResponse = { ...PLAN_RESPONSE, seatPlans: [v2Plan] };
+  const assignmentResponse = {
+    ...ASSIGNMENT_RESPONSE,
+    assignments: [v2Assignment],
+    source: {
+      schemaVersion: 2,
+      seatPlanRevision: v2Plan.revision,
+      seats: seatFacts.map((seat) => ({
+        classroomId: seat.classroomId,
+        sourceSeatId: seat.sourceSeatId,
+        label: seat.label,
+        status: seat.layoutStatus,
+        bindingId: seat.bindingId,
+        bindingRevision: seat.bindingRevision,
+        endpointId: seat.endpointId,
+      })),
+    },
+    endpointPreflight: {
+      state: 'available',
+      items: seatFacts.map((seat) => ({ endpointId: seat.endpointId, ready: true, online: true, reason: 'ready' })),
+    },
+  };
+  return { assignmentResponse, planResponse, seatFacts, v2Assignment, v2Plan };
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
   window.history.replaceState(null, '', '/');
@@ -338,7 +435,9 @@ describe('p2.5 exam seat assignment workspace', () => {
     expect(screen.getByText('离线')).toBeInTheDocument();
   });
 
-  it('reads a cross-classroom v2 revision without colliding identical source seat ids or enabling v1 mutations', async () => {
+  it('operates a cross-classroom v2 revision without colliding identical source seat ids or reopening v1 mutations', async () => {
+    const user = userEvent.setup();
+    const postBodies: Record<string, unknown>[] = [];
     const firstClassroomId = '66b800000000000000000806';
     const secondClassroomId = '66b800000000000000000816';
     const classrooms = [firstClassroomId, secondClassroomId].map((classroomId, index) => ({
@@ -360,12 +459,12 @@ describe('p2.5 exam seat assignment workspace', () => {
       rotation: 0,
       layoutStatus: 'active',
       enabled: true,
-      facing: index === 0 ? 'right' : 'left',
+      facing: index === 0 ? 'right' : 'unset',
       disabledReason: null,
       bindingId: objectIdFromIndex(0x8a0 + index),
       bindingRevision: index + 1,
       endpointId: `endpoint-v2-${index + 1}`,
-      endpointOnline: true,
+      endpointOnline: index === 0 ? true : null,
     }));
     const v2Plan = {
       schemaVersion: 2,
@@ -402,8 +501,8 @@ describe('p2.5 exam seat assignment workspace', () => {
         mediumRiskEdges: [],
         splitTeamIds: [],
         skippedSeats: [],
-        offlineSeats: [],
-        unsetFacingSeats: [],
+        offlineSeats: [{ classroomId: secondClassroomId, sourceSeatId: 'shared-seat' }],
+        unsetFacingSeats: [{ classroomId: secondClassroomId, sourceSeatId: 'shared-seat' }],
       },
       fingerprint: '9'.repeat(64),
       published: true,
@@ -412,6 +511,10 @@ describe('p2.5 exam seat assignment workspace', () => {
     const assignments = {
       ...ASSIGNMENT_RESPONSE,
       assignments: [v2Assignment],
+      classrooms: [
+        { classroomId: firstClassroomId, name: '同名教室', layoutRevision: 7, seatCount: 1 },
+        { classroomId: secondClassroomId, name: '同名教室', layoutRevision: 8, seatCount: 1 },
+      ],
       publication: {
         revision: 4,
         assignmentId: v2Assignment.assignmentId,
@@ -438,8 +541,12 @@ describe('p2.5 exam seat assignment workspace', () => {
     };
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (input: RequestInfo | URL) => {
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
+        if (init?.method === 'POST') {
+          postBodies.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+          return json({ assignment: v2Assignment, diagnostics: [] });
+        }
         if (url.endsWith('/seat-plans')) return json(plans);
         if (url.endsWith('/seat-assignments')) return json(assignments);
         if (url.endsWith('/prelogin-latest')) return json({ batch: null });
@@ -450,10 +557,38 @@ describe('p2.5 exam seat assignment workspace', () => {
 
     expect(await screen.findByText('A-shared')).toBeInTheDocument();
     expect(screen.getByText('B-shared')).toBeInTheDocument();
-    expect(screen.getAllByText('v2 历史只读')).toHaveLength(2);
-    expect(screen.getByRole('button', { name: '随机分配' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '发布' })).toBeDisabled();
-    expect(screen.getByText(/P2.11 仅保证 v2 历史可读/)).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /选择.*换位/ })).toHaveLength(2);
+    expect(screen.queryByRole('button', { name: '随机分配' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '发布跨教室版本 2' })).toBeEnabled();
+    expect(screen.getByText(/P2.14 统一接入/)).toBeInTheDocument();
+    expect(screen.getByText('分配解释与教室座位图')).toBeInTheDocument();
+    expect(screen.getByText('在线未知 1')).toBeInTheDocument();
+    expect(screen.getByText('朝向未设置 1')).toBeInTheDocument();
+    expect(screen.getAllByText(`同名教室 · ${firstClassroomId}`).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(`同名教室 · ${secondClassroomId}`).length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: new RegExp(`同名教室 · ${firstClassroomId} A-shared，朝右`) })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: new RegExp(`同名教室 · ${secondClassroomId} B-shared，朝向未设置`) })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '缩小座位图' })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: '选择张三换位' }));
+    const selector = screen.getByRole('combobox', { name: '为张三指定座位' });
+    expect(screen.getAllByRole('combobox', { name: /指定座位/ })).toHaveLength(1);
+    await user.selectOptions(selector, `${secondClassroomId}\u0000shared-seat`);
+    await user.click(screen.getByRole('checkbox', { name: '锁定张三' }));
+    expect(screen.getByText('人工调整未保存')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '发布跨教室版本 2' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '导出当前页面 CSV' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '创建跨教室候选计划' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: '保存跨教室人工调整' }));
+    await waitFor(() => expect(postBodies).toHaveLength(1));
+    expect(postBodies[0]).toEqual({
+      action: 'adjustV2',
+      baseAssignmentRevision: 2,
+      lockedUids: [21],
+      mappings: [
+        { boundUserId: 21, seat: { classroomId: secondClassroomId, sourceSeatId: 'shared-seat' } },
+        { boundUserId: 22, seat: { classroomId: firstClassroomId, sourceSeatId: 'shared-seat' } },
+      ],
+    });
     expect(
       assignmentCsvV2(
         seatFacts.map((seat, index) => ({
@@ -468,7 +603,9 @@ describe('p2.5 exam seat assignment workspace', () => {
     ).toContain(`${secondClassroomId},B-shared,shared-seat,endpoint-v2-2,2`);
   });
 
-  it('keeps every v1 mutation disabled when a v2 plan is newer than the displayed v1 assignment', async () => {
+  it('keeps every v1 mutation closed and offers only v2 generation when a v2 plan is newer than the displayed v1 assignment', async () => {
+    const user = userEvent.setup();
+    const postBodies: Record<string, unknown>[] = [];
     const legacyPlan = PLAN_RESPONSE.seatPlans[0];
     const v2Plan = {
       schemaVersion: 2,
@@ -490,8 +627,12 @@ describe('p2.5 exam seat assignment workspace', () => {
     };
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (input: RequestInfo | URL) => {
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
+        if (init?.method === 'POST') {
+          postBodies.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+          return json({ assignment: null, diagnostics: [{ code: 'insufficient_seats', requiredSeatCount: 2, availableSeatCount: 1 }] });
+        }
         if (url.endsWith('/seat-plans')) return json({ ...PLAN_RESPONSE, seatPlans: [v2Plan, legacyPlan] });
         if (url.endsWith('/seat-assignments')) return json(ASSIGNMENT_RESPONSE);
         if (url.endsWith('/prelogin-latest')) return json({ batch: null });
@@ -500,11 +641,17 @@ describe('p2.5 exam seat assignment workspace', () => {
     );
     renderPage();
 
-    expect(await screen.findByText(/当前为跨教室座位协议 v2/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '随机分配' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '按学号分配' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '重新随机未锁定座位' })).toBeDisabled();
+    expect(await screen.findByRole('button', { name: '生成尽力型跨教室分配' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: '随机分配' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '按学号分配' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '重新随机未锁定座位' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '发布' })).toBeDisabled();
+    await user.selectOptions(screen.getByRole('combobox', { name: '跨教室分配策略' }), 'maximizeSpacing');
+    await user.click(screen.getByRole('button', { name: '生成尽力型跨教室分配' }));
+    await waitFor(() =>
+      expect(postBodies).toEqual([{ action: 'generateV2', expectedPreviousRevision: 1, seatPlanRevision: 5, strategy: 'maximizeSpacing' }]),
+    );
+    expect(screen.getByText('可用座位不足：需要 2，当前 1')).toBeInTheDocument();
   });
 
   it('keeps a displayed assignment tied to its exact roster and historical seat-plan source', async () => {
@@ -554,94 +701,265 @@ describe('p2.5 exam seat assignment workspace', () => {
     const user = userEvent.setup();
     renderPage();
     expect(await screen.findByText('候选教室布局已变化；请在上方按当前布局创建新计划后再生成。')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '随机分配' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: '随机分配' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('checkbox', { name: '2026 级一班' }));
     expect(screen.getByRole('button', { name: '生成或刷新名单' })).toBeEnabled();
-    expect(screen.getByRole('combobox', { name: '候选教室' })).toBeEnabled();
+    await user.click(screen.getByRole('checkbox', { name: '选择教室北实 201' }));
+    expect(screen.getByRole('button', { name: '创建跨教室候选计划' })).toBeEnabled();
   });
 
-  it('uses explicit generation, swaps two rows, locks one row and persists a new adjustment revision', async () => {
+  it('keeps a v1 assignment strictly historical and emits no legacy mutation', async () => {
     const bodies: Record<string, unknown>[] = [];
     vi.stubGlobal('fetch', fetchFixture(bodies));
-    const user = userEvent.setup();
     renderPage();
 
-    await user.click(await screen.findByRole('button', { name: '按学号分配' }));
-    expect(bodies[0]).toEqual({ action: 'generate', mode: 'studentId', seatPlanRevision: 4 });
-
-    await user.click(screen.getByRole('button', { name: '选择张三换位' }));
-    await user.click(screen.getByRole('button', { name: '选择李四换位' }));
-    await user.click(screen.getByRole('checkbox', { name: '锁定张三' }));
-    await user.click(screen.getByRole('button', { name: '保存人工调整' }));
-    expect(bodies[1]).toEqual({
-      action: 'adjust',
-      baseAssignmentRevision: 1,
-      lockedUids: [21],
-      mappings: [
-        { boundUserId: 21, sourceSeatId: 'seat-02' },
-        { boundUserId: 22, sourceSeatId: 'seat-01' },
-      ],
-    });
+    expect(await screen.findAllByText('v1 历史只读')).toHaveLength(2);
+    expect(screen.queryByRole('button', { name: /换位/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: /锁定/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /随机分配|按学号分配|保存人工调整|重新随机/ })).not.toBeInTheDocument();
+    expect(bodies).toEqual([]);
   });
 
   it('assigns a student to an unoccupied eligible seat without exposing excluded candidates', async () => {
     const bodies: Record<string, unknown>[] = [];
-    const thirdSeat = {
-      sourceSeatId: 'seat-03',
-      label: 'A03',
-      x: 2,
-      y: 0,
-      rotation: 0,
-      status: 'empty',
-      bindingId: '66b800000000000000000813',
-      bindingRevision: 1,
-      endpointId: 'endpoint-03',
-    };
-    const excludedSeat = { ...thirdSeat, sourceSeatId: 'seat-04', label: 'A04', bindingId: null, bindingRevision: null, endpointId: null };
-    const response = {
-      ...ASSIGNMENT_RESPONSE,
-      assignments: [{ ...ASSIGNMENT, eligibleSeatIds: ['seat-01', 'seat-02', 'seat-03'] }],
-      source: { ...ASSIGNMENT_RESPONSE.source, seats: [...ASSIGNMENT_RESPONSE.source.seats, thirdSeat, excludedSeat] },
-    };
-    vi.stubGlobal('fetch', fetchFixture(bodies, response));
+    const fixture = singleClassroomV2Fixture(true);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (init?.method === 'POST') {
+          bodies.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+          return json({ assignment: fixture.v2Assignment, diagnostics: [] });
+        }
+        if (url.endsWith('/seat-plans')) return json(fixture.planResponse);
+        if (url.endsWith('/seat-assignments')) return json(fixture.assignmentResponse);
+        if (url.endsWith('/prelogin-latest')) return json({ batch: null });
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
     const user = userEvent.setup();
     renderPage();
 
+    const emptySeat = await screen.findByRole('button', { name: /A03，朝左，未分配/ });
+    expect(emptySeat).toHaveClass('border-dashed');
+    expect(emptySeat).not.toHaveClass('bg-primary');
     await user.click(await screen.findByRole('button', { name: '选择张三换位' }));
     const select = screen.getByRole('combobox', { name: '为张三指定座位' });
     expect(screen.queryByRole('option', { name: /A04/ })).not.toBeInTheDocument();
-    await user.selectOptions(select, 'seat-03');
-    await user.click(screen.getByRole('button', { name: '保存人工调整' }));
+    await user.selectOptions(select, `${PLAN_RESPONSE.seatPlans[0].classroomId}\u0000seat-03`);
+    await user.click(screen.getByRole('button', { name: '保存跨教室人工调整' }));
     expect(bodies[0]).toMatchObject({
-      action: 'adjust',
+      action: 'adjustV2',
       mappings: [
-        { boundUserId: 21, sourceSeatId: 'seat-03' },
-        { boundUserId: 22, sourceSeatId: 'seat-02' },
+        { boundUserId: 21, seat: { classroomId: PLAN_RESPONSE.seatPlans[0].classroomId, sourceSeatId: 'seat-03' } },
+        { boundUserId: 22, seat: { classroomId: PLAN_RESPONSE.seatPlans[0].classroomId, sourceSeatId: 'seat-02' } },
       ],
     });
   });
 
   it('keeps a local mapping or lock change explicitly dirty until a new revision is saved', async () => {
-    vi.stubGlobal('fetch', fetchFixture());
+    const fixture = singleClassroomV2Fixture();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith('/seat-plans')) return json(fixture.planResponse);
+        if (url.endsWith('/seat-assignments')) return json(fixture.assignmentResponse);
+        if (url.endsWith('/prelogin-latest')) return json({ batch: null });
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
     const user = userEvent.setup();
     renderPage();
-    await user.click(await screen.findByRole('checkbox', { name: '2026 级一班' }));
-    await user.selectOptions(screen.getByRole('combobox', { name: '候选教室' }), PLAN_RESPONSE.seatPlans[0].classroomId);
-    expect(await screen.findByRole('checkbox', { name: /A01 · seat-01/ })).toBeChecked();
-    expect(screen.getByRole('button', { name: '生成或刷新名单' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: '创建候选座位计划' })).toBeEnabled();
     await user.click(await screen.findByRole('button', { name: '选择张三换位' }));
     await user.click(screen.getByRole('button', { name: '选择李四换位' }));
     expect(screen.getByText('人工调整未保存')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '发布版本 1' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '重新随机未锁定座位' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '发布跨教室版本 2' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '保留锁定项重新分配' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '导出当前页面 CSV' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '保存人工调整' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '保存跨教室人工调整' })).toBeEnabled();
     expect(screen.getByRole('button', { name: '生成或刷新名单' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '创建候选座位计划' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '创建跨教室候选计划' })).toBeDisabled();
+  });
+
+  it('fails closed during an explicit refresh and restores editing only after both canonical reads settle', async () => {
+    const fixture = singleClassroomV2Fixture();
+    let planReads = 0;
+    let assignmentReads = 0;
+    let resolvePlans!: (response: Response) => void;
+    let resolveAssignments!: (response: Response) => void;
+    const pendingPlans = new Promise<Response>((resolve) => {
+      resolvePlans = resolve;
+    });
+    const pendingAssignments = new Promise<Response>((resolve) => {
+      resolveAssignments = resolve;
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith('/seat-plans')) {
+          planReads++;
+          return planReads === 1 ? json(fixture.planResponse) : pendingPlans;
+        }
+        if (url.endsWith('/seat-assignments')) {
+          assignmentReads++;
+          return assignmentReads === 1 ? json(fixture.assignmentResponse) : pendingAssignments;
+        }
+        if (url.endsWith('/prelogin-latest')) return json({ batch: null });
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(await screen.findByRole('button', { name: '选择张三换位' })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: '重读教室事实' }));
+    expect(await screen.findByText(/页面事实尚未完成重读/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '选择张三换位' })).not.toBeInTheDocument();
+    expect(screen.getAllByText('当前分配未引用最新计划')).toHaveLength(2);
+    expect(screen.getByRole('button', { name: '导出当前页面 CSV' })).toBeDisabled();
+
+    resolvePlans(json(fixture.planResponse));
+    resolveAssignments(json(fixture.assignmentResponse));
+    await waitFor(() => expect(screen.getByRole('button', { name: '选择张三换位' })).toBeEnabled());
+    expect(screen.getByRole('button', { name: '导出当前页面 CSV' })).toBeEnabled();
+  });
+
+  it('offers an explicit discard-and-reload recovery after an adjustment response is lost', async () => {
+    const fixture = singleClassroomV2Fixture();
+    vi.stubGlobal(
+      'confirm',
+      vi.fn(() => true),
+    );
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (init?.method === 'POST') throw new TypeError('adjust response lost');
+        if (url.endsWith('/seat-plans')) return json(fixture.planResponse);
+        if (url.endsWith('/seat-assignments')) return json(fixture.assignmentResponse);
+        if (url.endsWith('/prelogin-latest')) return json({ batch: null });
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: '选择张三换位' }));
+    await user.click(screen.getByRole('button', { name: '选择李四换位' }));
+    await user.click(screen.getByRole('button', { name: '保存跨教室人工调整' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('座位分配操作失败');
+    expect(screen.getByText('人工调整未保存')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '放弃未保存调整并重读' })).toBeEnabled();
+
+    await user.click(screen.getByRole('button', { name: '放弃未保存调整并重读' }));
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+    expect(screen.queryByText('人工调整未保存')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '选择张三换位' })).toBeEnabled();
+  });
+
+  it('keeps an older v2 assignment read-only when a newer v2 plan is already canonical', async () => {
+    const fixture = singleClassroomV2Fixture();
+    const newerRoster = {
+      ...PLAN_RESPONSE.rosterRevisions[0],
+      rosterId: '66b800000000000000000959',
+      revision: 3,
+      fingerprint: '6'.repeat(64),
+      entries: [{ studentId: '20269999', realName: '新名单学生', boundUserId: 99 }],
+    };
+    const newerPlan = {
+      ...fixture.v2Plan,
+      seatPlanId: '66b800000000000000000958',
+      revision: fixture.v2Plan.revision + 1,
+      fingerprint: '7'.repeat(64),
+      roster: { rosterId: newerRoster.rosterId, revision: newerRoster.revision, fingerprint: newerRoster.fingerprint },
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith('/seat-plans')) {
+          return json({
+            ...fixture.planResponse,
+            rosterRevisions: [newerRoster, ...PLAN_RESPONSE.rosterRevisions],
+            seatPlans: [newerPlan, fixture.v2Plan],
+          });
+        }
+        if (url.endsWith('/seat-assignments')) return json(fixture.assignmentResponse);
+        if (url.endsWith('/prelogin-latest')) return json({ batch: null });
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+    renderPage();
+
+    expect(await screen.findAllByText('当前分配未引用最新计划')).toHaveLength(2);
+    expect(screen.queryByRole('button', { name: /选择.*换位/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '发布跨教室版本 2' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '保留锁定项重新分配' })).toBeDisabled();
+    expect(screen.getByText('当前候选计划冻结名单 r3 · 1 人（生成前请核对）')).toBeInTheDocument();
+    const table = screen.getByRole('table');
+    expect(within(table).getByText('张三')).toBeInTheDocument();
+    expect(within(table).queryByText('新名单学生')).not.toBeInTheDocument();
+  });
+
+  it('disables every automatic-seating path for a public or invite-code Krypton contest', async () => {
+    const fixture = singleClassroomV2Fixture();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith('/seat-plans')) {
+          return json({ ...fixture.planResponse, event: { ...fixture.planResponse.event, contestAudienceState: 'public' } });
+        }
+        if (url.endsWith('/seat-assignments')) return json(fixture.assignmentResponse);
+        if (url.endsWith('/prelogin-latest')) return json({ batch: null });
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+    renderPage();
+
+    expect(await screen.findByText(/第一版不提供自动排座/)).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: '名单来源' })).toBeDisabled();
+    expect(screen.getByRole('checkbox', { name: '2026 级一班' })).toBeDisabled();
+    expect(screen.getByRole('checkbox', { name: '选择教室北实 201' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '生成或刷新名单' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '创建跨教室候选计划' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '生成尽力型跨教室分配' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '发布跨教室版本 2' })).toBeDisabled();
+  });
+
+  it('expands a split-team warning into member identities and physical destinations', async () => {
+    const fixture = singleClassroomV2Fixture();
+    const teamId = '66b800000000000000000960';
+    const assignment = {
+      ...fixture.v2Assignment,
+      participants: fixture.v2Assignment.participants.map((participant, index) => ({
+        ...participant,
+        teamId,
+        teamRole: index === 0 ? 'captain' : 'member',
+      })),
+      explanation: { ...fixture.v2Assignment.explanation, splitTeamIds: [teamId] },
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith('/seat-plans')) return json(fixture.planResponse);
+        if (url.endsWith('/seat-assignments')) return json({ ...fixture.assignmentResponse, assignments: [assignment] });
+        if (url.endsWith('/prelogin-latest')) return json({ batch: null });
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+    renderPage();
+
+    expect(await screen.findByText(`队伍 ${teamId}`)).toBeInTheDocument();
+    expect(screen.getByText(/队长 · 20260001 张三 → 北实 201 \/ A01/)).toBeInTheDocument();
+    expect(screen.getByText(/队员 · 20260002 李四 → 北实 201 \/ A02/)).toBeInTheDocument();
   });
 
   it('shows the complete blocked diagnostics returned by the action without inventing a revision', async () => {
+    const fixture = singleClassroomV2Fixture();
     const blocked = {
       assignment: null,
       diagnostics: [
@@ -650,17 +968,30 @@ describe('p2.5 exam seat assignment workspace', () => {
         { code: 'insufficient_seats', requiredSeatCount: 2, availableSeatCount: 0 },
       ],
     };
-    vi.stubGlobal('fetch', fetchFixture([], ASSIGNMENT_RESPONSE, blocked));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (init?.method === 'POST') return json(blocked);
+        if (url.endsWith('/seat-plans')) return json(fixture.planResponse);
+        if (url.endsWith('/seat-assignments')) {
+          return json({ ...fixture.assignmentResponse, assignments: [], source: null, endpointPreflight: { state: 'not-required', items: [] } });
+        }
+        if (url.endsWith('/prelogin-latest')) return json({ batch: null });
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
     const user = userEvent.setup();
     renderPage();
-    await user.click(await screen.findByRole('button', { name: '随机分配' }));
+    await user.click(await screen.findByRole('button', { name: '生成尽力型跨教室分配' }));
     expect(await screen.findByText('已排除禁用座位：seat-01')).toBeInTheDocument();
     expect(screen.getByText('已排除未绑定终端的座位：seat-02')).toBeInTheDocument();
     expect(screen.getByText('可用座位不足：需要 2，当前 0')).toBeInTheDocument();
   });
 
   it('prepares a fresh event through the event-authorized roster and classroom boundaries before generation', async () => {
-    let plans = { ...PLAN_RESPONSE, rosterRevisions: [] as typeof PLAN_RESPONSE.rosterRevisions, seatPlans: [] as typeof PLAN_RESPONSE.seatPlans };
+    const fixture = singleClassroomV2Fixture();
+    let plans: Record<string, unknown> = { ...PLAN_RESPONSE, rosterRevisions: [], seatPlans: [] };
     let assignments: Record<string, unknown> = {
       ...ASSIGNMENT_RESPONSE,
       assignments: [] as typeof ASSIGNMENT_RESPONSE.assignments,
@@ -677,28 +1008,19 @@ describe('p2.5 exam seat assignment workspace', () => {
           plans = { ...plans, rosterRevisions: PLAN_RESPONSE.rosterRevisions };
           return json({ rosterRevision: 2 });
         }
-        if (url.endsWith('/seat-plans') && body.action === 'createSeatPlan') {
-          plans = { ...plans, seatPlans: PLAN_RESPONSE.seatPlans };
-          assignments = { ...assignments, source: ASSIGNMENT_RESPONSE.source };
-          return json({ seatPlanRevision: 4 });
+        if (url.endsWith('/seat-plans') && body.action === 'createSeatPlanV2') {
+          plans = { ...plans, seatPlans: [fixture.v2Plan] };
+          return json({ seatPlan: fixture.v2Plan });
         }
-        if (url.endsWith('/seat-assignments') && body.action === 'generate') {
-          assignments = { ...ASSIGNMENT_RESPONSE };
-          return json({ assignment: ASSIGNMENT, diagnostics: [] });
+        if (url.endsWith('/seat-assignments') && body.action === 'generateV2') {
+          assignments = fixture.assignmentResponse;
+          return json({ assignment: fixture.v2Assignment, diagnostics: [] });
         }
         throw new Error(`unexpected POST: ${url}`);
       }
       if (url.endsWith('/seat-plans')) return json(plans);
       if (url.endsWith('/seat-assignments')) return json(assignments);
       if (url.endsWith('/prelogin-latest')) return json({ batch: null });
-      if (url.endsWith(`/seat-assignment-classrooms/${PLAN_RESPONSE.seatPlans[0].classroomId}`)) {
-        return json({
-          classroomId: PLAN_RESPONSE.seatPlans[0].classroomId,
-          layoutRevision: 7,
-          layoutFingerprint: 'b'.repeat(64),
-          seats: ASSIGNMENT_RESPONSE.source.seats,
-        });
-      }
       throw new Error(`unexpected request: ${url}`);
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -711,61 +1033,193 @@ describe('p2.5 exam seat assignment workspace', () => {
       expect(bodies[0]?.body).toEqual({ action: 'createRoster', sourceKind: 'userbindGroups', groupIds: ['66b800000000000000000821'] }),
     );
 
-    await user.selectOptions(screen.getByRole('combobox', { name: '候选教室' }), PLAN_RESPONSE.seatPlans[0].classroomId);
-    expect(await screen.findByRole('checkbox', { name: /A01 · seat-01/ })).toBeChecked();
-    await user.click(screen.getByRole('button', { name: '创建候选座位计划' }));
+    await user.click(screen.getByRole('checkbox', { name: '选择教室北实 201' }));
+    await user.click(screen.getByRole('button', { name: '创建跨教室候选计划' }));
     await waitFor(() =>
       expect(bodies[1]?.body).toEqual({
-        action: 'createSeatPlan',
+        action: 'createSeatPlanV2',
+        classroomIds: [PLAN_RESPONSE.seatPlans[0].classroomId],
+        expectedPreviousRevision: 0,
         rosterRevision: 2,
-        classroomId: PLAN_RESPONSE.seatPlans[0].classroomId,
-        layoutRevision: 7,
-        candidateSeatIds: ['seat-01', 'seat-02'],
       }),
     );
 
-    await user.click(screen.getByRole('button', { name: '随机分配' }));
-    await waitFor(() => expect(bodies[2]?.body).toEqual({ action: 'generate', mode: 'random', seatPlanRevision: 4 }));
-    expect(bodies.some((entry) => entry.url.includes('/exam-infrastructure/classrooms/'))).toBe(false);
-    expect(fetchMock).toHaveBeenCalledWith(
-      `/api/admin/exam-events/${EVENT_ID}/seat-assignment-classrooms/${PLAN_RESPONSE.seatPlans[0].classroomId}`,
-      expect.anything(),
+    await user.click(screen.getByRole('button', { name: '生成尽力型跨教室分配' }));
+    await waitFor(() =>
+      expect(bodies[2]?.body).toEqual({ action: 'generateV2', expectedPreviousRevision: 0, seatPlanRevision: 5, strategy: 'minimizeClassrooms' }),
     );
+    expect(bodies.some((entry) => entry.url.includes('/exam-infrastructure/classrooms/'))).toBe(false);
   });
 
-  it('renders 500 assignments with one shared seat selector instead of one full selector per row', async () => {
+  it('creates the primary multi-classroom plan from selected classrooms with the latest plan CAS', async () => {
+    const classroomId = PLAN_RESPONSE.seatPlans[0].classroomId;
+    const v2Plan = {
+      schemaVersion: 2,
+      seatPlanId: '66b800000000000000000909',
+      revision: 1,
+      roster: PLAN_RESPONSE.seatPlans[0].roster,
+      classrooms: [
+        {
+          classroomId,
+          layoutRevision: 7,
+          layoutFingerprint: 'b'.repeat(64),
+          profileRevision: 1,
+          profileFingerprint: 'e'.repeat(64),
+          candidateSeatIds: ['seat-01', 'seat-02'],
+        },
+      ],
+      fingerprint: 'f'.repeat(64),
+      diagnostics: [],
+    };
+    let plans = { ...PLAN_RESPONSE, seatPlans: [] as Array<typeof v2Plan> };
+    const assignments = {
+      ...ASSIGNMENT_RESPONSE,
+      assignments: [] as typeof ASSIGNMENT_RESPONSE.assignments,
+      source: null,
+      endpointPreflight: { state: 'not-required', items: [] },
+    };
+    const bodies: Record<string, unknown>[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (init?.method === 'POST') {
+          const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+          bodies.push(body);
+          if (body.action !== 'createSeatPlanV2') throw new Error(`unexpected action: ${String(body.action)}`);
+          plans = { ...plans, seatPlans: [v2Plan] };
+          return json({ seatPlan: v2Plan });
+        }
+        if (url.endsWith('/seat-plans')) return json(plans);
+        if (url.endsWith('/seat-assignments')) return json(assignments);
+        if (url.endsWith('/prelogin-latest')) return json({ batch: null });
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole('checkbox', { name: '选择教室北实 201' }));
+    await user.click(screen.getByRole('button', { name: '创建跨教室候选计划' }));
+    await waitFor(() =>
+      expect(bodies).toEqual([
+        {
+          action: 'createSeatPlanV2',
+          classroomIds: [classroomId],
+          expectedPreviousRevision: 0,
+          rosterRevision: 2,
+        },
+      ]),
+    );
+    expect(await screen.findByRole('button', { name: '生成尽力型跨教室分配' })).toBeEnabled();
+  });
+
+  it('renders 500 v2 assignments and map seats with one shared selector instead of one full selector per row', async () => {
     const count = 500;
+    const classroomId = PLAN_RESPONSE.seatPlans[0].classroomId;
     const entries = Array.from({ length: count }, (_, index) => ({
       studentId: `2026${String(index).padStart(4, '0')}`,
       realName: `学生${index}`,
       boundUserId: index + 2,
     }));
     const seatIds = entries.map((_, index) => `seat-${String(index).padStart(3, '0')}`);
+    const classroom = {
+      classroomId,
+      layoutRevision: 7,
+      layoutFingerprint: 'b'.repeat(64),
+      profileRevision: 1,
+      profileFingerprint: 'e'.repeat(64),
+      candidateSeatIds: seatIds,
+    };
+    const seatFacts = seatIds.map((sourceSeatId, index) => ({
+      classroomId,
+      sourceSeatId,
+      label: `S${index}`,
+      x: index % 25,
+      y: Math.floor(index / 25),
+      width: null,
+      height: null,
+      rotation: 0,
+      layoutStatus: 'active',
+      enabled: true,
+      facing: 'unset',
+      disabledReason: null,
+      bindingId: objectIdFromIndex(0x1000 + index),
+      bindingRevision: 1,
+      endpointId: `endpoint-${index}`,
+      endpointOnline: true,
+    }));
+    const v2Plan = {
+      schemaVersion: 2,
+      seatPlanId: '66b800000000000000000a05',
+      revision: 5,
+      roster: PLAN_RESPONSE.seatPlans[0].roster,
+      classrooms: [classroom],
+      fingerprint: '7'.repeat(64),
+      diagnostics: [],
+    };
+    const mappings = entries.map((entry, index) => ({
+      boundUserId: entry.boundUserId,
+      seat: { classroomId, sourceSeatId: seatIds[index] },
+    }));
+    const v2Assignment = {
+      schemaVersion: 2,
+      assignmentId: '66b800000000000000000a07',
+      revision: 1,
+      seatPlan: { seatPlanId: v2Plan.seatPlanId, revision: v2Plan.revision, fingerprint: v2Plan.fingerprint },
+      roster: PLAN_RESPONSE.seatPlans[0].roster,
+      classrooms: [classroom],
+      participants: entries.map((entry, index) => ({
+        boundUserId: entry.boundUserId,
+        studentRecordId: objectIdFromIndex(0x2000 + index),
+        studentId: entry.studentId,
+        teamId: null,
+        teamRole: null,
+      })),
+      seatFacts,
+      constraints: { strategy: 'maximizeSpacing', lockedAssignments: [], manualAssignments: [] },
+      assignments: mappings,
+      explanation: {
+        classrooms: [{ classroomId, assignedCount: count, eligibleSeatCount: count }],
+        highRiskEdges: [],
+        mediumRiskEdges: [],
+        splitTeamIds: [],
+        skippedSeats: [],
+        offlineSeats: [],
+        unsetFacingSeats: seatIds.map((sourceSeatId) => ({ classroomId, sourceSeatId })),
+      },
+      fingerprint: '6'.repeat(64),
+      published: false,
+    };
     const plans = {
       ...PLAN_RESPONSE,
       rosterRevisions: [{ ...PLAN_RESPONSE.rosterRevisions[0], entries }],
-      seatPlans: [{ ...PLAN_RESPONSE.seatPlans[0], candidateSeatIds: seatIds }],
+      seatPlans: [v2Plan],
     };
     const response = {
       ...ASSIGNMENT_RESPONSE,
-      assignments: [
-        {
-          ...ASSIGNMENT,
-          eligibleSeatIds: seatIds,
-          assignments: entries.map((entry, index) => ({ boundUserId: entry.boundUserId, sourceSeatId: seatIds[index] })),
-        },
-      ],
+      assignments: [v2Assignment],
       source: {
-        ...ASSIGNMENT_RESPONSE.source,
-        seats: seatIds.map((sourceSeatId, index) => ({
-          sourceSeatId,
-          label: `S${index}`,
-          status: 'active',
-          bindingId: `binding-${index}`,
-          bindingRevision: 1,
-          endpointId: `endpoint-${index}`,
+        schemaVersion: 2,
+        seatPlanRevision: v2Plan.revision,
+        seats: seatFacts.map((seat) => ({
+          classroomId: seat.classroomId,
+          sourceSeatId: seat.sourceSeatId,
+          label: seat.label,
+          status: seat.layoutStatus,
+          bindingId: seat.bindingId,
+          bindingRevision: seat.bindingRevision,
+          endpointId: seat.endpointId,
         })),
       },
+      classrooms: [
+        {
+          classroomId,
+          name: '北实 201',
+          layoutRevision: 7,
+          seatCount: count,
+        },
+      ],
       endpointPreflight: { state: 'not-required', items: [] },
     };
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -777,10 +1231,148 @@ describe('p2.5 exam seat assignment workspace', () => {
     vi.stubGlobal('fetch', fetchMock);
     const user = userEvent.setup();
     renderPage();
+    const map = await screen.findByRole('region', { name: '北实 201座位图' });
+    expect(within(map).getAllByRole('button')).toHaveLength(count);
     await user.click(await screen.findByRole('button', { name: '选择学生0换位' }));
     const selector = screen.getByRole('combobox', { name: '为学生0指定座位' });
     expect(within(selector).getAllByRole('option')).toHaveLength(count);
     expect(screen.getAllByRole('combobox', { name: /为.+指定座位/ })).toHaveLength(1);
+  });
+
+  it('shows exact frozen risk edges on demand and draws them only after explicit opt-in', async () => {
+    const classroomId = PLAN_RESPONSE.seatPlans[0].classroomId;
+    const classroom = {
+      classroomId,
+      layoutRevision: 7,
+      layoutFingerprint: 'b'.repeat(64),
+      profileRevision: 1,
+      profileFingerprint: 'e'.repeat(64),
+      candidateSeatIds: ['seat-01', 'seat-02'],
+    };
+    const seatFacts = [
+      {
+        classroomId,
+        sourceSeatId: 'seat-01',
+        label: 'A01',
+        x: 0,
+        y: 0,
+        width: 1,
+        height: 1,
+        rotation: 0,
+        layoutStatus: 'active',
+        enabled: true,
+        facing: 'right',
+        disabledReason: null,
+        bindingId: objectIdFromIndex(0x3010),
+        bindingRevision: 1,
+        endpointId: 'endpoint-risk-1',
+        endpointOnline: true,
+      },
+      {
+        classroomId,
+        sourceSeatId: 'seat-02',
+        label: 'A02',
+        x: 1,
+        y: 0,
+        width: 1,
+        height: 1,
+        rotation: 0,
+        layoutStatus: 'active',
+        enabled: true,
+        facing: 'right',
+        disabledReason: null,
+        bindingId: objectIdFromIndex(0x3011),
+        bindingRevision: 1,
+        endpointId: 'endpoint-risk-2',
+        endpointOnline: true,
+      },
+    ];
+    const riskEdge = {
+      left: { classroomId, sourceSeatId: 'seat-01' },
+      right: { classroomId, sourceSeatId: 'seat-02' },
+      distance: 1,
+      reason: 'same_facing',
+    };
+    const v2Plan = {
+      schemaVersion: 2,
+      seatPlanId: '66b800000000000000000b05',
+      revision: 5,
+      roster: PLAN_RESPONSE.seatPlans[0].roster,
+      classrooms: [classroom],
+      fingerprint: '5'.repeat(64),
+      diagnostics: [],
+    };
+    const v2Assignment = {
+      schemaVersion: 2,
+      assignmentId: '66b800000000000000000b07',
+      revision: 1,
+      seatPlan: { seatPlanId: v2Plan.seatPlanId, revision: v2Plan.revision, fingerprint: v2Plan.fingerprint },
+      roster: PLAN_RESPONSE.seatPlans[0].roster,
+      classrooms: [classroom],
+      participants: PLAN_RESPONSE.rosterRevisions[0].entries.map((entry, index) => ({
+        boundUserId: entry.boundUserId,
+        studentRecordId: objectIdFromIndex(0x3020 + index),
+        studentId: entry.studentId,
+        teamId: null,
+        teamRole: null,
+      })),
+      seatFacts,
+      constraints: { strategy: 'maximizeSpacing', lockedAssignments: [], manualAssignments: [] },
+      assignments: PLAN_RESPONSE.rosterRevisions[0].entries.map((entry, index) => ({
+        boundUserId: entry.boundUserId,
+        seat: { classroomId, sourceSeatId: `seat-0${index + 1}` },
+      })),
+      explanation: {
+        classrooms: [{ classroomId, assignedCount: 2, eligibleSeatCount: 2 }],
+        highRiskEdges: [riskEdge],
+        mediumRiskEdges: [],
+        splitTeamIds: [],
+        skippedSeats: [],
+        offlineSeats: [],
+        unsetFacingSeats: [],
+      },
+      fingerprint: '4'.repeat(64),
+      published: false,
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith('/seat-plans')) return json({ ...PLAN_RESPONSE, seatPlans: [v2Plan] });
+        if (url.endsWith('/seat-assignments')) {
+          return json({
+            ...ASSIGNMENT_RESPONSE,
+            assignments: [v2Assignment],
+            source: {
+              schemaVersion: 2,
+              seatPlanRevision: v2Plan.revision,
+              seats: seatFacts.map((seat) => ({
+                classroomId: seat.classroomId,
+                sourceSeatId: seat.sourceSeatId,
+                label: seat.label,
+                status: seat.layoutStatus,
+                bindingId: seat.bindingId,
+                bindingRevision: seat.bindingRevision,
+                endpointId: seat.endpointId,
+              })),
+            },
+          });
+        }
+        if (url.endsWith('/prelogin-latest')) return json({ batch: null });
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(await screen.findByRole('button', { name: '高风险边 1' })).toBeInTheDocument();
+    const map = screen.getByRole('region', { name: '北实 201座位图' });
+    expect(map.querySelectorAll('line')).toHaveLength(0);
+    await user.click(screen.getByRole('button', { name: '高风险边 1' }));
+    expect(screen.getByText('北实 201 / A01 ↔ 北实 201 / A02 · 同向 · 距离 1')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '显示风险连线' }));
+    expect(map.querySelectorAll('line')).toHaveLength(1);
+    expect(screen.getByRole('button', { name: /北实 201 A01，朝右，20260001 张三，高风险/ })).toBeInTheDocument();
   });
 
   it('preflights the published assignment and confirms with the exact workflow identity on insecure HTTP', async () => {
@@ -1303,7 +1895,10 @@ describe('p2.5 exam seat assignment workspace', () => {
   });
 
   it('keeps external exams usable while marking prelogin explicitly not applicable', async () => {
-    const externalPlan = { ...PLAN_RESPONSE, event: { ...PLAN_RESPONSE.event, type: 'external' } };
+    const externalPlan = {
+      ...PLAN_RESPONSE,
+      event: { ...PLAN_RESPONSE.event, type: 'external', contestAudienceState: 'not-applicable' },
+    };
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (init?.method === 'POST' && url.includes('/prelogin/')) throw new Error('external exam must not call prelogin');
@@ -1321,17 +1916,15 @@ describe('p2.5 exam seat assignment workspace', () => {
     ).toBe(false);
   });
 
-  it('rerandomizes only on an explicit action, publishes with CAS and exports the displayed mapping', async () => {
+  it('keeps legacy writers absent while preserving historical CSV export formatting', async () => {
     const bodies: Record<string, unknown>[] = [];
     vi.stubGlobal('fetch', fetchFixture(bodies));
-    const user = userEvent.setup();
     renderPage();
     await screen.findByText('20260001');
 
-    fireEvent.click(screen.getByRole('button', { name: '重新随机未锁定座位' }));
-    await waitFor(() => expect(bodies[0]).toEqual({ action: 'rerandomize', baseAssignmentRevision: 1 }));
-    await user.click(screen.getByRole('button', { name: '发布版本 1' }));
-    expect(bodies[1]).toEqual({ action: 'publish', assignmentRevision: 1, expectedPublicationRevision: 0 });
+    expect(screen.queryByRole('button', { name: '重新随机未锁定座位' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '发布版本 1' })).not.toBeInTheDocument();
+    expect(bodies).toEqual([]);
 
     expect(
       assignmentCsv(

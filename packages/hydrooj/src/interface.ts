@@ -909,6 +909,7 @@ declare module './service/db' {
         'exam.events': import('./model/exam-event').ExamEventDoc;
         'exam.classrooms': import('./lib/classsignin-classroom-migration').ExamClassroomDoc;
         'exam.classroomImportBatches': import('./lib/classsignin-classroom-migration').ClassSigninClassroomMigrationBatchDoc;
+        'exam.seatOperationalProfiles': import('./model/exam-seat-operational-profile').ExamSeatOperationalProfileDoc;
         'exam.endpointSeatBindings': import('./model/endpoint-seat-binding').EndpointSeatBindingDoc;
         'exam.endpointSeatPairingWindows': import('./model/endpoint-seat-binding').EndpointSeatPairingWindowDoc;
         'exam.policyTemplates': import('./model/exam-network-config').ExamPolicyTemplateDoc;
@@ -1017,6 +1018,10 @@ export interface Model {
     >;
     examEvent: Pick<typeof import('./model/exam-event'), 'examEventColl' | 'examEventService'>;
     examClassroom: Pick<typeof import('./model/exam-classroom'), 'examClassroomColl' | 'examClassroomMigrationBatchColl' | 'examClassroomService'>;
+    examSeatOperationalProfile: Pick<
+        typeof import('./model/exam-seat-operational-profile'),
+        'examSeatOperationalProfileColl' | 'examSeatOperationalProfileService'
+    >;
     examNetworkConfig: Pick<
         typeof import('./model/exam-network-config'),
         | 'examPolicyTemplateColl'

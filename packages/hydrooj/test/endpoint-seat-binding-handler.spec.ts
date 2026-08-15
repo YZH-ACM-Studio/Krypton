@@ -28,11 +28,18 @@ describe('P2.2 endpoint seat binding HTTP boundary', () => {
         expect(routeRegistration('endpoint_seat_binding_detail')).to.include(
             "'/api/admin/exam-infrastructure/classrooms/:classroomId/seat-bindings/:sourceSeatId'",
         );
+        expect(routeRegistration('endpoint_seat_operational_profile')).to.include(
+            "'/api/admin/exam-infrastructure/classrooms/:classroomId/seat-operational-profile'",
+        );
+        expect(routeRegistration('endpoint_seat_operational_profile_revision')).to.include(
+            "'/api/admin/exam-infrastructure/classrooms/:classroomId/seat-operational-profiles/:layoutRevision/:revision'",
+        );
         expect(routeRegistration('vigil_endpoint_seat_pairing_redeem')).to.include("'/api/vigil/endpoint-seat-pairing/redeem'");
         expect(routeRegistration('vigil_endpoint_seat_binding_status')).to.include("'/api/vigil/endpoint-seat-binding/status'");
         expect(source).to.include('isExamInfrastructureAdmin(this.user)');
         expect(source).to.include("requireServiceToken(this, 'vigil')");
         expect(source).to.include('await endpointSeatBindingService.ensureIndexes()');
+        expect(source).to.include('examSeatOperationalProfileService.ensureIndexes()');
         expect(source).to.include("this.response.template = 'admin_exam_classroom.html'");
     });
 
@@ -43,6 +50,19 @@ describe('P2.2 endpoint seat binding HTTP boundary', () => {
         expect(source.match(/@param\('requestId', Types\.String\)/g)?.length).to.be.greaterThanOrEqual(2);
         expect(source).to.include("Types.Range(['open', 'close'])");
         expect(source).to.include("Types.Range(['previewUnbind', 'unbind', 'previewReplacement', 'confirmReplacement', 'cancelPairing'])");
+    });
+
+    it('writes P2.10 only as a complete current-layout snapshot and keeps exact old revisions readable', () => {
+        expect(source).to.include("exactBody(this.request.body, ['entries', 'expectedRevision', 'layoutFingerprint', 'layoutRevision'])");
+        expect(source).to.include('examSeatOperationalProfileService.replaceCurrent({');
+        expect(source).to.include('expectedRevision,');
+        expect(source).to.include('layoutFingerprint,');
+        expect(source).to.include('actorUid: this.user._id');
+        expect(source).to.include('examSeatOperationalProfileService.getRevision(');
+        expect(source).to.include("OplogModel.log(this, 'exam.seat_operational_profile.create'");
+        expect(source).to.include('Seat operational profile mutation rejected domainId=%s classroomId=%s');
+        expect(source).to.include('layoutRevision=%d expectedRevision=%d actorUid=%d reason=%s');
+        expect(source).not.to.include('seatOperationalProfileService.updateMany');
     });
 
     it('never serializes stored code digests or records the one-time code in logs or oplog', () => {
@@ -140,6 +160,7 @@ describe('P2.2 endpoint seat binding HTTP boundary', () => {
         expect(source).to.include('endpointSeatBindingService.getClassroomState');
         expect(source).to.include('layout: serializeLayout(classroom)');
         expect(source).to.include('references: state.references.map(serializeReference)');
+        expect(source).to.include('seatOperationalProfile: serializeSeatOperationalProfile(seatOperationalProfile)');
         expect(source).to.include("state: 'unavailable'");
         expect(source).not.to.include('setInterval');
     });

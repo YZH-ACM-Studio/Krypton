@@ -5,6 +5,12 @@ import type { ExamClassroomDoc } from '../lib/classsignin-classroom-migration';
 import { PERM } from '../model/builtin';
 import { examClassroomService } from '../model/exam-classroom';
 import { isExamInfrastructureAdmin } from '../model/exam-event-access';
+import {
+    ExamSeatOperationalProfileDoc,
+    ExamSeatOperationalProfileError,
+    ExamSeatOperationalProfileView,
+    examSeatOperationalProfileService,
+} from '../model/exam-seat-operational-profile';
 import { preflightExamNetworkOnVigil } from '../service/vigil-bridge';
 import {
     EndpointSeatBindingDoc,
@@ -148,6 +154,24 @@ function serializeLayout(classroom: ExamClassroomDoc) {
     };
 }
 
+function serializeSeatOperationalProfile(profile: ExamSeatOperationalProfileDoc | ExamSeatOperationalProfileView) {
+    return {
+        schemaVersion: profile.schemaVersion,
+        domainId: profile.domainId,
+        schoolId: profile.schoolId.toHexString(),
+        classroomId: profile.classroomId.toHexString(),
+        layoutRevision: profile.layoutRevision,
+        layoutFingerprint: profile.layoutFingerprint,
+        revision: profile.revision,
+        previousRevision: profile.previousRevision,
+        entries: profile.entries.map((entry) => ({ ...entry })),
+        fingerprint: profile.fingerprint,
+        persisted: 'persisted' in profile ? profile.persisted : true,
+        createdAt: profile.createdAt?.toISOString() || null,
+        createdBy: profile.createdBy,
+    };
+}
+
 function errorStatus(reason: string): number {
     if (reason.endsWith('_invalid') || reason === 'pairing_code_invalid' || reason === 'request_invalid') return 400;
     if (reason === 'pairing_code_expired') return 410;
@@ -163,14 +187,23 @@ function translate(error: unknown): never {
     throw new ValidationError('endpointSeatBinding', null, error.reason);
 }
 
+function translateSeatOperationalProfile(error: unknown): never {
+    if (!(error instanceof ExamSeatOperationalProfileError)) throw error;
+    throw new ValidationError('seatOperationalProfile', null, error.reason);
+}
+
 abstract class EndpointSeatAdminHandler extends Handler {
     async prepare() {
         if (!this.user || !isExamInfrastructureAdmin(this.user)) throw new PermissionError(PERM.PERM_MANAGE_EXAM_INFRASTRUCTURE);
-        await Promise.all([endpointSeatBindingService.ensureIndexes(), examClassroomService.ensureIndexes()]);
+        await Promise.all([
+            endpointSeatBindingService.ensureIndexes(),
+            examClassroomService.ensureIndexes(),
+            examSeatOperationalProfileService.ensureIndexes(),
+        ]);
     }
 
-    protected async classroom(classroomId: ObjectId) {
-        const classroom = await examClassroomService.get(String(this.domain._id), classroomId);
+    protected async classroom(classroomId: ObjectId, includeArchived = false) {
+        const classroom = await examClassroomService.get(String(this.domain._id), classroomId, includeArchived);
         if (!classroom) throw new ValidationError('classroomId');
         return classroom;
     }
@@ -180,7 +213,10 @@ class EndpointSeatClassroomStateHandler extends EndpointSeatAdminHandler {
     @param('classroomId', Types.ObjectId)
     async get(_args: unknown, classroomId: ObjectId) {
         const classroom = await this.classroom(classroomId);
-        const state = await endpointSeatBindingService.getClassroomState(String(this.domain._id), classroomId);
+        const [state, seatOperationalProfile] = await Promise.all([
+            endpointSeatBindingService.getClassroomState(String(this.domain._id), classroomId),
+            examSeatOperationalProfileService.getCurrent(String(this.domain._id), classroomId),
+        ]);
         const endpointIds = state.bindings
             .filter((binding) => binding.status === 'active' && binding.endpointId)
             .map((binding) => binding.endpointId!)
@@ -214,7 +250,82 @@ class EndpointSeatClassroomStateHandler extends EndpointSeatAdminHandler {
             pairingWindow: state.pairingWindow ? serializeWindow(state.pairingWindow) : null,
             references: state.references.map(serializeReference),
             endpointPreflight,
+            seatOperationalProfile: serializeSeatOperationalProfile(seatOperationalProfile),
         };
+    }
+}
+
+class EndpointSeatOperationalProfileHandler extends EndpointSeatAdminHandler {
+    @param('classroomId', Types.ObjectId)
+    async get(_args: unknown, classroomId: ObjectId) {
+        await this.classroom(classroomId);
+        try {
+            const profile = await examSeatOperationalProfileService.getCurrent(String(this.domain._id), classroomId);
+            this.response.body = { profile: serializeSeatOperationalProfile(profile) };
+        } catch (error) {
+            translateSeatOperationalProfile(error);
+        }
+    }
+
+    @param('classroomId', Types.ObjectId)
+    @param('expectedRevision', Types.UnsignedInt)
+    @param('layoutRevision', Types.PositiveInt)
+    @param('layoutFingerprint', Types.String)
+    @param('entries', Types.Any)
+    async post(_args: unknown, classroomId: ObjectId, expectedRevision: number, layoutRevision: number, layoutFingerprint: string, entries: unknown) {
+        await this.classroom(classroomId);
+        exactBody(this.request.body, ['entries', 'expectedRevision', 'layoutFingerprint', 'layoutRevision']);
+        try {
+            const profile = await examSeatOperationalProfileService.replaceCurrent({
+                domainId: String(this.domain._id),
+                classroomId,
+                layoutRevision,
+                layoutFingerprint,
+                expectedRevision,
+                actorUid: this.user._id,
+                entries,
+            });
+            await OplogModel.log(this, 'exam.seat_operational_profile.create', {
+                classroomId,
+                schoolId: profile.schoolId,
+                layoutRevision: profile.layoutRevision,
+                revision: profile.revision,
+                previousRevision: profile.previousRevision,
+                seatCount: profile.entries.length,
+                disabledSeatCount: profile.entries.filter((entry) => !entry.enabled).length,
+                fingerprint: profile.fingerprint,
+            });
+            this.response.body = { profile: serializeSeatOperationalProfile(profile) };
+        } catch (error) {
+            if (error instanceof ExamSeatOperationalProfileError) {
+                logger.warn(
+                    'Seat operational profile mutation rejected domainId=%s classroomId=%s layoutRevision=%d expectedRevision=%d actorUid=%d reason=%s',
+                    String(this.domain._id),
+                    classroomId.toHexString(),
+                    layoutRevision,
+                    expectedRevision,
+                    this.user._id,
+                    error.reason,
+                );
+            }
+            translateSeatOperationalProfile(error);
+        }
+    }
+}
+
+class EndpointSeatOperationalProfileRevisionHandler extends EndpointSeatAdminHandler {
+    @param('classroomId', Types.ObjectId)
+    @param('layoutRevision', Types.PositiveInt)
+    @param('revision', Types.UnsignedInt)
+    async get(_args: unknown, classroomId: ObjectId, layoutRevision: number, revision: number) {
+        await this.classroom(classroomId, true);
+        try {
+            const profile = await examSeatOperationalProfileService.getRevision(String(this.domain._id), classroomId, layoutRevision, revision);
+            if (!profile) throw new ValidationError('revision');
+            this.response.body = { profile: serializeSeatOperationalProfile(profile) };
+        } catch (error) {
+            translateSeatOperationalProfile(error);
+        }
     }
 }
 
@@ -528,6 +639,16 @@ export async function apply(ctx: Context) {
         'endpoint_seat_pairing_window',
         '/api/admin/exam-infrastructure/classrooms/:classroomId/seat-pairing-window',
         EndpointSeatPairingWindowHandler,
+    );
+    ctx.Route(
+        'endpoint_seat_operational_profile',
+        '/api/admin/exam-infrastructure/classrooms/:classroomId/seat-operational-profile',
+        EndpointSeatOperationalProfileHandler,
+    );
+    ctx.Route(
+        'endpoint_seat_operational_profile_revision',
+        '/api/admin/exam-infrastructure/classrooms/:classroomId/seat-operational-profiles/:layoutRevision/:revision',
+        EndpointSeatOperationalProfileRevisionHandler,
     );
     ctx.Route(
         'endpoint_seat_binding_detail',

@@ -10,7 +10,11 @@ import {
 import {
   Activity,
   AlertTriangle,
+  ArrowDown,
   ArrowLeft,
+  ArrowRight,
+  ArrowUp,
+  Ban,
   CheckCircle2,
   CircleDashed,
   CloudOff,
@@ -22,6 +26,7 @@ import {
   MonitorCheck,
   MonitorCog,
   MonitorOff,
+  MousePointer2,
   RefreshCw,
   RotateCcw,
   Search,
@@ -48,6 +53,8 @@ type SeatStatus = 'conflict' | 'identity-change' | 'offline' | 'online' | 'unbou
 type BindingStatus = 'active' | 'unbound';
 type PairingEntryStatus = 'bound' | 'cancelled' | 'claimed' | 'open';
 type PairingMode = 'bind' | 'replace';
+type SeatFacing = 'down' | 'left' | 'right' | 'unset' | 'up';
+type SeatDisabledReason = 'client_incompatible' | 'computer_failure' | 'manual_reserve' | 'physical_seat_unavailable';
 
 interface LayoutSeat {
   sourceSeatId: string;
@@ -162,12 +169,37 @@ interface EndpointPreflight {
   items: EndpointPreflightItem[];
 }
 
+interface SeatOperationalEntry {
+  sourceSeatId: string;
+  enabled: boolean;
+  facing: SeatFacing;
+  disabledReason: SeatDisabledReason | null;
+  note: string | null;
+}
+
+interface SeatOperationalProfile {
+  schemaVersion: 1;
+  domainId: string;
+  schoolId: string;
+  classroomId: string;
+  layoutRevision: number;
+  layoutFingerprint: string;
+  revision: number;
+  previousRevision: number | null;
+  entries: SeatOperationalEntry[];
+  fingerprint: string;
+  persisted: boolean;
+  createdAt: string | null;
+  createdBy: number | null;
+}
+
 interface ClassroomState {
   classroom: ClassroomView;
   bindings: SeatBinding[];
   pairingWindow: PairingWindow | null;
   references: SeatReference[];
   endpointPreflight: EndpointPreflight;
+  seatOperationalProfile: SeatOperationalProfile;
 }
 
 interface ClassroomSummary {
@@ -185,6 +217,7 @@ interface SeatView {
   preflight: EndpointPreflightItem | null;
   references: SeatReference[];
   status: SeatStatus;
+  operational: SeatOperationalEntry;
 }
 
 interface CodeState {
@@ -223,6 +256,29 @@ const STATUS_STYLES: Record<SeatStatus, string> = {
   online: 'border-emerald-500/70 bg-emerald-500/12 text-emerald-800 dark:text-emerald-100',
   unbound: 'border-dashed border-muted-foreground/45 bg-background/85 text-foreground',
   unknown: 'border-zinc-400/70 bg-zinc-500/10 text-zinc-700 dark:text-zinc-200',
+};
+
+const FACING_LABELS: Record<SeatFacing, string> = {
+  unset: '未设置',
+  up: '上',
+  right: '右',
+  down: '下',
+  left: '左',
+};
+
+const FACING_MARKS: Record<SeatFacing, string> = {
+  unset: '未',
+  up: '↑',
+  right: '→',
+  down: '↓',
+  left: '←',
+};
+
+const DISABLED_REASON_LABELS: Record<SeatDisabledReason, string> = {
+  computer_failure: '电脑故障',
+  client_incompatible: '客户端不兼容',
+  physical_seat_unavailable: '实体座位不可用',
+  manual_reserve: '人工保留',
 };
 
 function asRecord(value: unknown, label: string): Record<string, unknown> {
@@ -426,8 +482,77 @@ function parsePreflightItem(value: unknown): EndpointPreflightItem {
   };
 }
 
+function parseSeatOperationalEntry(value: unknown): SeatOperationalEntry {
+  const entry = asRecord(value, '座位运行配置');
+  const facing = asString(entry.facing, '座位运行配置');
+  if (typeof entry.enabled !== 'boolean' || !['down', 'left', 'right', 'unset', 'up'].includes(facing)) {
+    throw new Error('座位运行配置响应格式不正确');
+  }
+  const disabledReason = optionalString(entry.disabledReason, '座位运行配置');
+  const note = optionalString(entry.note, '座位运行配置');
+  if (
+    (entry.enabled && (disabledReason !== null || note !== null)) ||
+    (!entry.enabled &&
+      (disabledReason === null ||
+        !['client_incompatible', 'computer_failure', 'manual_reserve', 'physical_seat_unavailable'].includes(disabledReason)))
+  ) {
+    throw new Error('座位运行配置响应格式不正确');
+  }
+  return {
+    sourceSeatId: asString(entry.sourceSeatId, '座位运行配置'),
+    enabled: entry.enabled,
+    facing: facing as SeatFacing,
+    disabledReason: disabledReason as SeatDisabledReason | null,
+    note,
+  };
+}
+
+function parseSeatOperationalProfile(value: unknown, classroom: ClassroomView): SeatOperationalProfile {
+  const profile = asRecord(value, '座位运行配置');
+  if (profile.schemaVersion !== 1 || typeof profile.persisted !== 'boolean' || !Array.isArray(profile.entries)) {
+    throw new Error('座位运行配置响应格式不正确');
+  }
+  const revision = asInteger(profile.revision, '座位运行配置');
+  const previousRevision = optionalInteger(profile.previousRevision, '座位运行配置');
+  const createdAt = optionalString(profile.createdAt, '座位运行配置');
+  const createdBy = optionalInteger(profile.createdBy, '座位运行配置');
+  const entries = profile.entries.map(parseSeatOperationalEntry);
+  const seatIds = classroom.layout.seats.map((seat) => seat.sourceSeatId).sort();
+  const profileSeatIds = entries.map((entry) => entry.sourceSeatId).sort();
+  if (
+    revision < 0 ||
+    (revision === 0 && (profile.persisted || previousRevision !== null || createdAt !== null || createdBy !== null)) ||
+    (revision > 0 && (!profile.persisted || createdAt === null || createdBy === null)) ||
+    asString(profile.classroomId, '座位运行配置') !== classroom.classroomId ||
+    asString(profile.schoolId, '座位运行配置') !== classroom.schoolId ||
+    asInteger(profile.layoutRevision, '座位运行配置') !== classroom.layoutRevision ||
+    asString(profile.layoutFingerprint, '座位运行配置') !== classroom.layout.fingerprint ||
+    seatIds.length !== profileSeatIds.length ||
+    seatIds.some((seatId, index) => seatId !== profileSeatIds[index]) ||
+    !/^[a-f0-9]{64}$/.test(asString(profile.fingerprint, '座位运行配置'))
+  ) {
+    throw new Error('座位运行配置响应格式不正确');
+  }
+  return {
+    schemaVersion: 1,
+    domainId: asString(profile.domainId, '座位运行配置'),
+    schoolId: classroom.schoolId,
+    classroomId: classroom.classroomId,
+    layoutRevision: classroom.layoutRevision,
+    layoutFingerprint: classroom.layout.fingerprint,
+    revision,
+    previousRevision,
+    entries,
+    fingerprint: asString(profile.fingerprint, '座位运行配置'),
+    persisted: profile.persisted,
+    createdAt,
+    createdBy,
+  };
+}
+
 function parseState(value: unknown): ClassroomState {
   const state = asRecord(value, '教室工作台');
+  const classroom = parseClassroom(state.classroom);
   const preflight = asRecord(state.endpointPreflight, '终端状态');
   const preflightState = asString(preflight.state, '终端状态');
   if (!['available', 'not-required', 'unavailable'].includes(preflightState) || !Array.isArray(preflight.items)) {
@@ -435,7 +560,7 @@ function parseState(value: unknown): ClassroomState {
   }
   if (!Array.isArray(state.bindings) || !Array.isArray(state.references)) throw new Error('教室工作台响应格式不正确');
   return {
-    classroom: parseClassroom(state.classroom),
+    classroom,
     bindings: state.bindings.map(parseBinding),
     pairingWindow: parsePairingWindow(state.pairingWindow),
     references: state.references.map(parseReference),
@@ -443,6 +568,7 @@ function parseState(value: unknown): ClassroomState {
       state: preflightState as EndpointPreflight['state'],
       items: preflight.items.map(parsePreflightItem),
     },
+    seatOperationalProfile: parseSeatOperationalProfile(state.seatOperationalProfile, classroom),
   };
 }
 
@@ -534,10 +660,13 @@ function activeWindow(window: PairingWindow | null, now: number): PairingWindow 
 
 function deriveSeatViews(state: ClassroomState, now: number): SeatView[] {
   const bindings = new Map(state.bindings.map((binding) => [binding.sourceSeatId, binding]));
+  const operationalEntries = new Map(state.seatOperationalProfile.entries.map((entry) => [entry.sourceSeatId, entry]));
   const preflight = new Map(state.endpointPreflight.items.map((item) => [item.endpointId, item]));
   const window = activeWindow(state.pairingWindow, now);
   const entries = new Map(window?.entries.map((entry) => [entry.sourceSeatId, entry]) || []);
   return state.classroom.layout.seats.map((seat) => {
+    const operational = operationalEntries.get(seat.sourceSeatId);
+    if (!operational) throw new Error('座位运行配置响应缺少实体座位');
     const binding = bindings.get(seat.sourceSeatId) || null;
     const entry = entries.get(seat.sourceSeatId) || null;
     const activeBinding = binding?.status === 'active' && binding.endpointId ? binding : null;
@@ -571,12 +700,17 @@ function deriveSeatViews(state: ClassroomState, now: number): SeatView[] {
     else if (!activeBinding) status = 'unbound';
     else if (state.endpointPreflight.state !== 'available') status = 'unknown';
     else status = item?.online ? 'online' : 'offline';
-    return { seat, binding, entry, preflight: item, references, status };
+    return { seat, binding, entry, preflight: item, references, status, operational };
   });
 }
 
 function seatAccessibleName(view: SeatView): string {
   const facts = [view.seat.label || view.seat.sourceSeatId, STATUS_LABELS[view.status]];
+  facts.push(
+    view.operational.enabled
+      ? `朝向${FACING_LABELS[view.operational.facing]}`
+      : `已禁用，${DISABLED_REASON_LABELS[view.operational.disabledReason!]}`,
+  );
   if (view.binding?.endpointId) facts.push(compactEndpoint(view.binding.endpointId));
   if (view.references.length) facts.push(`被 ${view.references.length} 个活动引用`);
   return facts.join('，');
@@ -663,21 +797,30 @@ function SeatCanvas({
   layout,
   views,
   selectedSeatId,
+  operationalSelection,
   recentSeatId,
   zoom,
   onSelect,
+  onOperationalSelectionChange,
 }: {
   layout: ClassroomLayout;
   views: SeatView[];
   selectedSeatId: string | null;
+  operationalSelection: Set<string> | null;
   recentSeatId: string | null;
   zoom: number;
   onSelect: (sourceSeatId: string) => void;
+  onOperationalSelectionChange: (sourceSeatIds: Set<string>) => void;
 }) {
   const geometry = useMemo(() => buildGeometry(layout), [layout]);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const seatRefs = useRef(new Map<string, HTMLButtonElement>());
-  const drag = useRef<{ pointerId: number; scrollLeft: number; scrollTop: number; x: number; y: number } | null>(null);
+  const drag = useRef<
+    | { kind: 'pan'; pointerId: number; scrollLeft: number; scrollTop: number; x: number; y: number }
+    | { kind: 'select'; pointerId: number; startX: number; startY: number; currentX: number; currentY: number; base: Set<string> }
+    | null
+  >(null);
+  const [selectionRectangle, setSelectionRectangle] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
 
   const focusSeat = (sourceSeatId: string) => {
     const target = seatRefs.current.get(sourceSeatId);
@@ -706,25 +849,72 @@ function SeatCanvas({
 
   const beginPan = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0 || !(event.target instanceof Element) || event.target.closest('[data-seat-id]')) return;
-    drag.current = {
-      pointerId: event.pointerId,
-      scrollLeft: event.currentTarget.scrollLeft,
-      scrollTop: event.currentTarget.scrollTop,
-      x: event.clientX,
-      y: event.clientY,
-    };
+    if (operationalSelection !== null) {
+      const bounds = event.currentTarget.getBoundingClientRect();
+      const x = event.clientX - bounds.left + event.currentTarget.scrollLeft;
+      const y = event.clientY - bounds.top + event.currentTarget.scrollTop;
+      drag.current = {
+        kind: 'select',
+        pointerId: event.pointerId,
+        startX: x,
+        startY: y,
+        currentX: x,
+        currentY: y,
+        base: event.shiftKey || event.metaKey || event.ctrlKey ? new Set(operationalSelection) : new Set(),
+      };
+      setSelectionRectangle({ left: x, top: y, width: 0, height: 0 });
+    } else {
+      drag.current = {
+        kind: 'pan',
+        pointerId: event.pointerId,
+        scrollLeft: event.currentTarget.scrollLeft,
+        scrollTop: event.currentTarget.scrollTop,
+        x: event.clientX,
+        y: event.clientY,
+      };
+    }
     event.currentTarget.setPointerCapture(event.pointerId);
   };
 
   const movePan = (event: ReactPointerEvent<HTMLDivElement>) => {
     const active = drag.current;
     if (!active || active.pointerId !== event.pointerId) return;
-    event.currentTarget.scrollLeft = active.scrollLeft - (event.clientX - active.x);
-    event.currentTarget.scrollTop = active.scrollTop - (event.clientY - active.y);
+    if (active.kind === 'pan') {
+      event.currentTarget.scrollLeft = active.scrollLeft - (event.clientX - active.x);
+      event.currentTarget.scrollTop = active.scrollTop - (event.clientY - active.y);
+      return;
+    }
+    const bounds = event.currentTarget.getBoundingClientRect();
+    active.currentX = event.clientX - bounds.left + event.currentTarget.scrollLeft;
+    active.currentY = event.clientY - bounds.top + event.currentTarget.scrollTop;
+    setSelectionRectangle({
+      left: Math.min(active.startX, active.currentX),
+      top: Math.min(active.startY, active.currentY),
+      width: Math.abs(active.currentX - active.startX),
+      height: Math.abs(active.currentY - active.startY),
+    });
   };
 
   const endPan = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (drag.current?.pointerId !== event.pointerId) return;
+    const active = drag.current;
+    if (active?.pointerId !== event.pointerId) return;
+    if (active.kind === 'select') {
+      const left = Math.min(active.startX, active.currentX);
+      const right = Math.max(active.startX, active.currentX);
+      const top = Math.min(active.startY, active.currentY);
+      const bottom = Math.max(active.startY, active.currentY);
+      const next = new Set(active.base);
+      for (const view of views) {
+        const item = geometry.item(view.seat);
+        const seatLeft = item.left * zoom;
+        const seatTop = item.top * zoom;
+        const seatRight = seatLeft + Math.max(48, item.width * zoom);
+        const seatBottom = seatTop + Math.max(40, item.height * zoom);
+        if (seatRight >= left && seatLeft <= right && seatBottom >= top && seatTop <= bottom) next.add(view.seat.sourceSeatId);
+      }
+      onOperationalSelectionChange(next);
+      setSelectionRectangle(null);
+    }
     drag.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
@@ -743,8 +933,11 @@ function SeatCanvas({
     <div
       ref={viewportRef}
       role="group"
-      aria-label="教室实体座位布局，可用方向键移动焦点"
-      className="relative min-h-[30rem] max-h-[66dvh] cursor-grab overflow-auto rounded-2xl border bg-slate-50/70 shadow-inner active:cursor-grabbing [overscroll-behavior:contain] dark:bg-slate-950/45"
+      aria-label={operationalSelection === null ? '教室实体座位布局，可用方向键移动焦点' : '教室实体座位布局，拖动空白区域可框选座位'}
+      className={cn(
+        'relative min-h-[30rem] max-h-[66dvh] overflow-auto rounded-2xl border bg-slate-50/70 shadow-inner [overscroll-behavior:contain] dark:bg-slate-950/45',
+        operationalSelection === null ? 'cursor-grab active:cursor-grabbing' : 'cursor-crosshair',
+      )}
       onPointerDown={beginPan}
       onPointerMove={movePan}
       onPointerUp={endPan}
@@ -778,9 +971,13 @@ function SeatCanvas({
             </div>
           );
         })}
+        {selectionRectangle ? (
+          <div aria-hidden="true" className="pointer-events-none absolute z-40 border border-primary bg-primary/10" style={selectionRectangle} />
+        ) : null}
         {views.map((view, index) => {
           const item = geometry.item(view.seat);
           const selected = selectedSeatId === view.seat.sourceSeatId;
+          const operationallySelected = operationalSelection?.has(view.seat.sourceSeatId) || false;
           const recentlyResponded = recentSeatId === view.seat.sourceSeatId;
           return (
             <button
@@ -791,13 +988,16 @@ function SeatCanvas({
               }}
               type="button"
               data-seat-id={view.seat.sourceSeatId}
-              aria-label={seatAccessibleName(view)}
+              aria-label={`${seatAccessibleName(view)}${operationallySelected ? '，已选入运行配置批量操作' : ''}`}
               aria-pressed={selected}
               tabIndex={selected || (!selectedSeatId && index === 0) ? 0 : -1}
               className={cn(
                 'group absolute flex min-h-10 min-w-12 flex-col items-start justify-between overflow-hidden rounded-xl border-2 px-2 py-1.5 text-left shadow-sm transition-[border-color,box-shadow,transform] hover:z-20 hover:-translate-y-0.5 hover:shadow-md focus-visible:z-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
                 STATUS_STYLES[view.status],
                 selected && 'z-20 ring-2 ring-primary ring-offset-2',
+                operationallySelected && 'z-30 outline outline-4 outline-violet-500/70 outline-offset-2',
+                !view.operational.enabled &&
+                  'bg-[repeating-linear-gradient(135deg,transparent,transparent_6px,rgb(239_68_68/0.12)_6px,rgb(239_68_68/0.12)_12px)]',
                 recentlyResponded && 'z-20 shadow-[0_0_0_5px_rgb(14_165_233/0.22)]',
               )}
               style={{
@@ -807,12 +1007,27 @@ function SeatCanvas({
                 height: Math.max(40, item.height * zoom),
                 transform: `rotate(${view.seat.rotation}deg)`,
               }}
-              onClick={() => onSelect(view.seat.sourceSeatId)}
+              onClick={() => {
+                onSelect(view.seat.sourceSeatId);
+                if (operationalSelection === null) return;
+                const next = new Set(operationalSelection);
+                if (next.has(view.seat.sourceSeatId)) next.delete(view.seat.sourceSeatId);
+                else next.add(view.seat.sourceSeatId);
+                onOperationalSelectionChange(next);
+              }}
               onKeyDown={(event) => handleSeatKey(event, view)}
             >
               <span className="flex w-full items-center justify-between gap-1 text-[0.65rem] font-semibold leading-none">
                 <span className="truncate">{view.seat.label || view.seat.sourceSeatId}</span>
                 <span className="flex shrink-0 items-center gap-1">
+                  <span
+                    title={`业务朝向：${FACING_LABELS[view.operational.facing]}`}
+                    className="inline-flex size-4 items-center justify-center rounded border border-current/25 bg-background/80 text-[0.6rem] font-bold leading-none"
+                    style={{ transform: `rotate(${-view.seat.rotation}deg)` }}
+                    aria-hidden="true"
+                  >
+                    {FACING_MARKS[view.operational.facing]}
+                  </span>
                   {view.references.length ? <Link2 className="size-3" aria-hidden="true" /> : null}
                   <StatusIcon status={view.status} />
                 </span>
@@ -846,6 +1061,136 @@ function StatusLegend() {
         活动引用
       </span>
     </div>
+  );
+}
+
+function FacingIcon({ facing }: { facing: SeatFacing }) {
+  if (facing === 'up') return <ArrowUp className="size-4" aria-hidden="true" />;
+  if (facing === 'right') return <ArrowRight className="size-4" aria-hidden="true" />;
+  if (facing === 'down') return <ArrowDown className="size-4" aria-hidden="true" />;
+  if (facing === 'left') return <ArrowLeft className="size-4" aria-hidden="true" />;
+  return <CircleDashed className="size-4" aria-hidden="true" />;
+}
+
+function SeatOperationalProfileEditor({
+  profile,
+  selectedSeatIds,
+  visibleSeatIds,
+  busy,
+  disabledReason,
+  note,
+  onDisabledReasonChange,
+  onNoteChange,
+  onSelectVisible,
+  onClear,
+  onFacing,
+  onDisable,
+  onRestore,
+  onClose,
+}: {
+  profile: SeatOperationalProfile;
+  selectedSeatIds: Set<string>;
+  visibleSeatIds: string[];
+  busy: boolean;
+  disabledReason: SeatDisabledReason;
+  note: string;
+  onDisabledReasonChange: (reason: SeatDisabledReason) => void;
+  onNoteChange: (note: string) => void;
+  onSelectVisible: () => void;
+  onClear: () => void;
+  onFacing: (facing: SeatFacing) => void;
+  onDisable: () => void;
+  onRestore: () => void;
+  onClose: () => void;
+}) {
+  const selectedEntries = profile.entries.filter((entry) => selectedSeatIds.has(entry.sourceSeatId));
+  const canRestore = selectedEntries.some((entry) => !entry.enabled);
+  return (
+    <section className="space-y-4 rounded-2xl border border-violet-500/30 bg-violet-500/5 p-4" aria-label="座位运行配置编辑器">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="flex items-center gap-2 text-sm font-semibold">
+            <MousePointer2 className="size-4" aria-hidden="true" />
+            批量设置座位运行配置
+          </p>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+            已选 {selectedSeatIds.size} 个座位。点击座位切换选择，或在布局空白处拖动框选；不会修改布局几何或终端绑定。
+          </p>
+          <p className="mt-1 font-mono text-[0.65rem] text-muted-foreground">
+            当前 revision {profile.revision}
+            {profile.persisted && profile.createdAt && profile.createdBy
+              ? ` · ${formatDate(profile.createdAt)} · UID ${profile.createdBy}`
+              : ' · 当前布局使用未持久化默认值'}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" size="sm" disabled={busy || !visibleSeatIds.length} onClick={onSelectVisible}>
+            选择当前结果
+          </Button>
+          <Button variant="outline" size="sm" disabled={busy || !selectedSeatIds.size} onClick={onClear}>
+            清空选择
+          </Button>
+          <Button variant="ghost" size="sm" disabled={busy} onClick={onClose}>
+            完成
+          </Button>
+        </div>
+      </div>
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,1fr)]">
+        <fieldset disabled={busy || !selectedSeatIds.size} className="space-y-2">
+          <legend className="text-xs font-medium">朝向</legend>
+          <div className="flex flex-wrap gap-2">
+            {(['unset', 'up', 'right', 'down', 'left'] as const).map((facing) => (
+              <Button key={facing} type="button" size="sm" variant="outline" onClick={() => onFacing(facing)}>
+                <FacingIcon facing={facing} />
+                {FACING_LABELS[facing]}
+              </Button>
+            ))}
+          </div>
+        </fieldset>
+        <div className="space-y-2">
+          <p className="text-xs font-medium">可用状态</p>
+          <div className="grid gap-2 sm:grid-cols-[minmax(0,11rem)_minmax(0,1fr)]">
+            <label>
+              <span className="sr-only">禁用原因</span>
+              <select
+                aria-label="禁用原因"
+                value={disabledReason}
+                onChange={(event) => onDisabledReasonChange(event.target.value as SeatDisabledReason)}
+                disabled={busy}
+                className="h-9 w-full rounded-md border bg-background px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {Object.entries(DISABLED_REASON_LABELS).map(([reason, label]) => (
+                  <option key={reason} value={reason}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span className="sr-only">禁用备注（可选）</span>
+              <Input
+                aria-label="禁用备注（可选）"
+                value={note}
+                maxLength={240}
+                onChange={(event) => onNoteChange(event.target.value)}
+                placeholder="可选备注，最多 240 字"
+                disabled={busy}
+              />
+            </label>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" size="sm" variant="destructive" disabled={busy || !selectedSeatIds.size} onClick={onDisable}>
+              <Ban className="size-4" aria-hidden="true" />
+              禁用所选
+            </Button>
+            <Button type="button" size="sm" variant="outline" disabled={busy || !canRestore} onClick={onRestore}>
+              <CheckCircle2 className="size-4" aria-hidden="true" />
+              恢复所选
+            </Button>
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -926,6 +1271,17 @@ function SeatDetail({
             <p className="text-muted-foreground">布局状态</p>
             <p className="mt-1 font-medium">{view.seat.status}</p>
           </div>
+        </div>
+        <div className="space-y-2 rounded-xl border px-3 py-3 text-xs">
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-medium">考试运行配置</span>
+            <Badge variant={view.operational.enabled ? 'secondary' : 'destructive'}>{view.operational.enabled ? '可用' : '已禁用'}</Badge>
+          </div>
+          <p className="text-muted-foreground">朝向：{FACING_LABELS[view.operational.facing]}</p>
+          {!view.operational.enabled && view.operational.disabledReason ? (
+            <p>原因：{DISABLED_REASON_LABELS[view.operational.disabledReason]}</p>
+          ) : null}
+          {view.operational.note ? <p className="break-words text-muted-foreground">备注：{view.operational.note}</p> : null}
         </div>
         {activeBinding ? (
           <div className="space-y-2 rounded-xl border px-3 py-3">
@@ -1067,6 +1423,9 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
   const [planBusy, setPlanBusy] = useState(false);
   const [planError, setPlanError] = useState<string | null>(null);
   const [lastUndoable, setLastUndoable] = useState<{ revision: number; sourceSeatId: string } | null>(null);
+  const [operationalSelection, setOperationalSelection] = useState<Set<string> | null>(null);
+  const [disabledReason, setDisabledReason] = useState<SeatDisabledReason>('computer_failure');
+  const [disabledNote, setDisabledNote] = useState('');
   const loadSequence = useRef(0);
   const previousBindings = useRef<Map<string, number> | null>(null);
 
@@ -1117,6 +1476,16 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
     const valid = state.classroom.layout.seats.some((seat) => seat.sourceSeatId === selectedSeatId);
     if (!valid) setSelectedSeatId(state.classroom.layout.seats[0].sourceSeatId);
   }, [selectedSeatId, setSelectedSeatId, state]);
+
+  useEffect(() => {
+    if (!state || operationalSelection === null) return;
+    const validSeatIds = new Set(state.classroom.layout.seats.map((seat) => seat.sourceSeatId));
+    setOperationalSelection((current) => {
+      if (current === null) return null;
+      const next = new Set([...current].filter((seatId) => validSeatIds.has(seatId)));
+      return next.size === current.size ? current : next;
+    });
+  }, [operationalSelection, state]);
 
   useEffect(() => {
     if (!currentWindow) {
@@ -1193,6 +1562,33 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
     } finally {
       setBusy(false);
     }
+  };
+
+  const saveOperationalEntries = async (
+    sourceSeatIds: Set<string>,
+    update: (entry: SeatOperationalEntry) => SeatOperationalEntry,
+    success: string,
+  ) => {
+    if (!state || !sourceSeatIds.size) return;
+    const profile = state.seatOperationalProfile;
+    const entries = profile.entries.map((entry) => (sourceSeatIds.has(entry.sourceSeatId) ? update(entry) : entry));
+    if (JSON.stringify(entries) === JSON.stringify(profile.entries)) {
+      setError(null);
+      setMessage('所选座位已经是该运行配置，无需新增 revision。');
+      return;
+    }
+    await mutate(async () => {
+      await postJson(
+        `/api/admin/exam-infrastructure/classrooms/${encodeURIComponent(classroomId)}/seat-operational-profile`,
+        {
+          entries,
+          expectedRevision: profile.revision,
+          layoutFingerprint: profile.layoutFingerprint,
+          layoutRevision: profile.layoutRevision,
+        },
+        '保存座位运行配置失败',
+      );
+    }, success);
   };
 
   const createPairingWindow = async (sourceSeatIds: string[], replacementSeatIds: string[]) => {
@@ -1464,11 +1860,15 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-xl font-semibold tracking-tight">{state.classroom.name}</h1>
             <Badge variant="outline">布局 r{state.classroom.layoutRevision}</Badge>
+            <Badge variant="outline">
+              运行配置 r{state.seatOperationalProfile.revision}
+              {state.seatOperationalProfile.persisted ? '' : ' · 默认'}
+            </Badge>
             <Badge variant="secondary">{state.classroom.layout.seats.length} 座</Badge>
           </div>
         </div>
       }
-      description="按导入坐标呈现实体座位；这里不修改 sourceSeatId、label 或几何，所有绑定写入继续使用 P2.2 CAS。"
+      description="按导入坐标呈现实体座位；运行配置只维护可用状态与明确朝向，不修改 sourceSeatId、label、几何或长期绑定。"
       actions={
         <>
           {undoView ? (
@@ -1505,6 +1905,10 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
             <span className="text-red-300">CONFLICT {summary.conflict}</span>
           </div>
           <span className="font-mono text-[0.65rem] text-slate-400">LAYOUT {state.classroom.layout.fingerprint.slice(0, 12)}</span>
+          <span className="font-mono text-[0.65rem] text-slate-400">
+            PROFILE {state.seatOperationalProfile.fingerprint.slice(0, 12)}
+            {state.seatOperationalProfile.createdBy ? ` · UID ${state.seatOperationalProfile.createdBy}` : ''}
+          </span>
         </div>
       </section>
 
@@ -1581,6 +1985,14 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
                 <LocateFixed className="size-4" />
               </Button>
               <Button
+                variant={operationalSelection === null ? 'outline' : 'secondary'}
+                disabled={busy}
+                onClick={() => setOperationalSelection((current) => (current === null ? new Set(selectedSeatId ? [selectedSeatId] : []) : null))}
+              >
+                <MousePointer2 className="size-4" aria-hidden="true" />
+                {operationalSelection === null ? '批量设置运行配置' : '退出批量设置'}
+              </Button>
+              <Button
                 disabled={busy || Boolean(currentWindow) || !unbound.length}
                 onClick={() =>
                   setPlan({
@@ -1617,15 +2029,58 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
               </Button>
             </div>
           </div>
+          {operationalSelection !== null ? (
+            <SeatOperationalProfileEditor
+              profile={state.seatOperationalProfile}
+              selectedSeatIds={operationalSelection}
+              visibleSeatIds={visibleViews.map((view) => view.seat.sourceSeatId)}
+              busy={busy}
+              disabledReason={disabledReason}
+              note={disabledNote}
+              onDisabledReasonChange={setDisabledReason}
+              onNoteChange={setDisabledNote}
+              onSelectVisible={() => setOperationalSelection(new Set(visibleViews.map((view) => view.seat.sourceSeatId)))}
+              onClear={() => setOperationalSelection(new Set())}
+              onFacing={(facing) =>
+                void saveOperationalEntries(
+                  operationalSelection,
+                  (entry) => ({ ...entry, facing }),
+                  `${operationalSelection.size} 个座位的朝向已保存。`,
+                )
+              }
+              onDisable={() =>
+                void saveOperationalEntries(
+                  operationalSelection,
+                  (entry) => ({
+                    ...entry,
+                    enabled: false,
+                    disabledReason,
+                    note: disabledNote.trim() || null,
+                  }),
+                  `${operationalSelection.size} 个座位已标记为不可用于考试。`,
+                )
+              }
+              onRestore={() =>
+                void saveOperationalEntries(
+                  operationalSelection,
+                  (entry) => ({ ...entry, enabled: true, disabledReason: null, note: null }),
+                  `${operationalSelection.size} 个座位已恢复可用。`,
+                )
+              }
+              onClose={() => setOperationalSelection(null)}
+            />
+          ) : null}
           <StatusLegend />
           {visibleViews.length || !state.classroom.layout.seats.length ? (
             <SeatCanvas
               layout={state.classroom.layout}
               views={visibleViews}
               selectedSeatId={canvasSelectedSeatId}
+              operationalSelection={operationalSelection}
               recentSeatId={recentSeatId}
               zoom={zoom}
               onSelect={setSelectedSeatId}
+              onOperationalSelectionChange={setOperationalSelection}
             />
           ) : (
             <div className="flex min-h-72 flex-col items-center justify-center rounded-2xl border border-dashed text-center">

@@ -117,6 +117,25 @@ function stateFixture(overrides: Record<string, unknown> = {}) {
         },
       ],
     },
+    seatOperationalProfile: {
+      schemaVersion: 1,
+      domainId: 'system',
+      schoolId: SCHOOL_ID,
+      classroomId: CLASSROOM_ID,
+      layoutRevision: 3,
+      layoutFingerprint: 'a'.repeat(64),
+      revision: 0,
+      previousRevision: null,
+      entries: [
+        { sourceSeatId: 'seat-1', enabled: true, facing: 'unset', disabledReason: null, note: null },
+        { sourceSeatId: 'seat-2', enabled: true, facing: 'unset', disabledReason: null, note: null },
+        { sourceSeatId: 'seat-3', enabled: true, facing: 'unset', disabledReason: null, note: null },
+      ],
+      fingerprint: 'f'.repeat(64),
+      persisted: false,
+      createdAt: null,
+      createdBy: null,
+    },
     ...overrides,
   };
 }
@@ -164,6 +183,163 @@ describe('exam classroom endpoint binding workspace', () => {
     expect(screen.getByText('布局 r3')).toBeInTheDocument();
     expect(screen.getByText('ONLINE 1')).toBeInTheDocument();
     expect(screen.getByText('OFFLINE 1')).toBeInTheDocument();
+    expect(screen.getByText('运行配置 r0 · 默认')).toBeInTheDocument();
+    expect(screen.getByText('朝向：未设置')).toBeInTheDocument();
+  });
+
+  it('shows mixed business-facing marks on the map without inheriting visual seat rotation', async () => {
+    const mixed = stateFixture();
+    mixed.classroom.layout.seats[0].rotation = 90;
+    mixed.seatOperationalProfile.entries = [
+      { sourceSeatId: 'seat-1', enabled: true, facing: 'left', disabledReason: null, note: null },
+      { sourceSeatId: 'seat-2', enabled: true, facing: 'right', disabledReason: null, note: null },
+      { sourceSeatId: 'seat-3', enabled: true, facing: 'unset', disabledReason: null, note: null },
+    ];
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json(mixed)));
+    renderPage();
+
+    const left = await screen.findByTitle('业务朝向：左');
+    expect(left).toHaveTextContent('←');
+    expect(left).toHaveStyle({ transform: 'rotate(-90deg)' });
+    expect(screen.getByTitle('业务朝向：右')).toHaveTextContent('→');
+    expect(screen.getByTitle('业务朝向：未设置')).toHaveTextContent('未');
+  });
+
+  it('batch-selects seats and writes one complete current-layout facing revision', async () => {
+    const user = userEvent.setup();
+    const updatedProfile = {
+      ...stateFixture().seatOperationalProfile,
+      revision: 1,
+      persisted: true,
+      createdAt: '2026-08-15T10:00:00.000Z',
+      createdBy: 2,
+      fingerprint: 'e'.repeat(64),
+      entries: [
+        { sourceSeatId: 'seat-1', enabled: true, facing: 'left', disabledReason: null, note: null },
+        { sourceSeatId: 'seat-2', enabled: true, facing: 'left', disabledReason: null, note: null },
+        { sourceSeatId: 'seat-3', enabled: true, facing: 'left', disabledReason: null, note: null },
+      ],
+    };
+    let saved = false;
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        expect(body).toEqual({
+          expectedRevision: 0,
+          layoutRevision: 3,
+          layoutFingerprint: 'a'.repeat(64),
+          entries: updatedProfile.entries,
+        });
+        saved = true;
+        return json({ profile: updatedProfile });
+      }
+      return json(stateFixture(saved ? { seatOperationalProfile: updatedProfile } : {}));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    renderPage();
+
+    await screen.findByRole('button', { name: '批量设置运行配置' });
+    await user.click(screen.getByRole('button', { name: '批量设置运行配置' }));
+    await user.click(screen.getByRole('button', { name: '选择当前结果' }));
+    await user.click(screen.getByRole('button', { name: '左' }));
+
+    await waitFor(() => expect(saved).toBe(true));
+    expect(await screen.findByText('运行配置 r1')).toBeInTheDocument();
+    expect(screen.getByText('3 个座位的朝向已保存。')).toBeInTheDocument();
+  });
+
+  it('selects only seats intersecting a blank-area drag rectangle', async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json(stateFixture())));
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: '批量设置运行配置' }));
+    const canvas = screen.getByRole('group', { name: '教室实体座位布局，拖动空白区域可框选座位' });
+    Object.defineProperties(canvas, {
+      getBoundingClientRect: {
+        value: () => ({ bottom: 600, height: 600, left: 0, right: 800, top: 0, width: 800, x: 0, y: 0, toJSON: () => ({}) }),
+      },
+      hasPointerCapture: { value: () => true },
+      releasePointerCapture: { value: vi.fn() },
+      setPointerCapture: { value: vi.fn() },
+    });
+
+    fireEvent.pointerDown(canvas, { button: 0, clientX: 40, clientY: 40, pointerId: 7 });
+    fireEvent.pointerMove(canvas, { clientX: 190, clientY: 110, pointerId: 7 });
+    fireEvent.pointerUp(canvas, { clientX: 190, clientY: 110, pointerId: 7 });
+
+    expect(screen.getByText(/已选 2 个座位/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /A-01.*已选入运行配置批量操作/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /A-02.*已选入运行配置批量操作/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /很长的座位显示名称 A-03，未绑定，朝向未设置$/ })).toBeInTheDocument();
+  });
+
+  it('records a fixed disable reason and optional note, then explicitly restores the seat', async () => {
+    const user = userEvent.setup();
+    const disabledProfile = {
+      ...stateFixture().seatOperationalProfile,
+      revision: 1,
+      persisted: true,
+      createdAt: '2026-08-15T10:00:00.000Z',
+      createdBy: 2,
+      fingerprint: 'd'.repeat(64),
+      entries: [
+        { sourceSeatId: 'seat-1', enabled: false, facing: 'unset', disabledReason: 'computer_failure', note: '无法开机' },
+        { sourceSeatId: 'seat-2', enabled: true, facing: 'unset', disabledReason: null, note: null },
+        { sourceSeatId: 'seat-3', enabled: true, facing: 'unset', disabledReason: null, note: null },
+      ],
+    };
+    const restoredProfile = {
+      ...disabledProfile,
+      revision: 2,
+      previousRevision: 1,
+      fingerprint: 'c'.repeat(64),
+      entries: stateFixture().seatOperationalProfile.entries,
+    };
+    let revision = 0;
+    const writes: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === 'POST') {
+          const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+          writes.push(body);
+          revision += 1;
+          return json({ profile: revision === 1 ? disabledProfile : restoredProfile });
+        }
+        return json(
+          stateFixture({
+            seatOperationalProfile: revision === 0 ? stateFixture().seatOperationalProfile : revision === 1 ? disabledProfile : restoredProfile,
+          }),
+        );
+      }),
+    );
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: '批量设置运行配置' }));
+    await user.type(screen.getByRole('textbox', { name: '禁用备注（可选）' }), '无法开机');
+    await user.click(screen.getByRole('button', { name: '禁用所选' }));
+    await waitFor(() => expect(writes).toHaveLength(1));
+    expect((writes[0].entries as Array<Record<string, unknown>>)[0]).toEqual({
+      sourceSeatId: 'seat-1',
+      enabled: false,
+      facing: 'unset',
+      disabledReason: 'computer_failure',
+      note: '无法开机',
+    });
+    expect(writes[0].expectedRevision).toBe(0);
+    expect(await screen.findByText('原因：电脑故障')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '恢复所选' }));
+    await waitFor(() => expect(writes).toHaveLength(2));
+    expect((writes[1].entries as Array<Record<string, unknown>>)[0]).toEqual({
+      sourceSeatId: 'seat-1',
+      enabled: true,
+      facing: 'unset',
+      disabledReason: null,
+      note: null,
+    });
+    expect(writes[1].expectedRevision).toBe(1);
   });
 
   it('uses spatial arrow-key navigation with a single roving tab stop', async () => {
@@ -412,6 +588,18 @@ describe('exam classroom endpoint binding workspace', () => {
           bindings: [],
           references: [],
           endpointPreflight: { state: 'not-required', items: [] },
+          seatOperationalProfile: {
+            ...stateFixture().seatOperationalProfile,
+            layoutRevision: 1,
+            layoutFingerprint: 'b'.repeat(64),
+            entries: seats.map((item) => ({
+              sourceSeatId: item.sourceSeatId,
+              enabled: true,
+              facing: 'unset',
+              disabledReason: null,
+              note: null,
+            })),
+          },
         }),
       ),
     );

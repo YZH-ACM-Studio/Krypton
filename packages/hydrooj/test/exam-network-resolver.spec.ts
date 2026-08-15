@@ -68,6 +68,7 @@ async function loadResolver(
         }
         if (parent?.filename === resolverPath && request === '../model/exam-seat-assignment') {
             return {
+                isExamSeatAssignmentV2: (assignment: { schemaVersion?: number }) => assignment.schemaVersion === 2,
                 examSeatAssignmentService: {
                     getPublication: async () => options.publication || null,
                     getRevision: async () => options.assignment || null,
@@ -352,6 +353,42 @@ describe('exam endpoint target resolver', () => {
         const result = await resolver.resolveExamTargetSources(input('examSeat', [assignmentId.toHexString()]));
         expect(result.sourceFingerprint).to.match(/^[a-f0-9]{64}$/);
         expect(result.endpoints.map((item) => item.endpointId)).to.deep.equal(['ep_one', 'ep_two']);
+    });
+
+    it('keeps published v2 assignments read-only until the P2.14 network writer is enabled', async () => {
+        const assignmentId = new ObjectId('66b800000000000000000a31');
+        const assignmentFingerprint = 'f'.repeat(64);
+        let preflightCalls = 0;
+        const resolver = await loadResolver(
+            [],
+            async () => {
+                preflightCalls += 1;
+                return [];
+            },
+            {
+                publication: {
+                    revision: 1,
+                    assignment: { assignmentId, revision: 2, fingerprint: assignmentFingerprint },
+                },
+                assignment: {
+                    _id: assignmentId,
+                    schemaVersion: 2,
+                    domainId: 'system',
+                    eventId,
+                    schoolId,
+                    revision: 2,
+                    fingerprint: assignmentFingerprint,
+                },
+            },
+        );
+        let reason: string | null = null;
+        try {
+            await resolver.resolveExamTargetSources(input('examSeat', [assignmentId.toHexString()]));
+        } catch (error) {
+            reason = (error as ConfigError).reason;
+        }
+        expect(reason).to.equal('exam_seat_assignment_v2_not_enabled');
+        expect(preflightCalls).to.equal(0);
     });
 
     it('resolves classroom and physical-seat sources from canonical active bindings', async () => {

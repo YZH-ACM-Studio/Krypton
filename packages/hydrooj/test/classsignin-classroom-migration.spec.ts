@@ -1266,6 +1266,32 @@ describe('P2.1 one-time ClassSignin classroom migration', () => {
             expect(retainedWindowPlan.entries[0].conflicts).to.deep.equal(['referenced_seat_removed:seat-1']);
             await pairingWindowCollection.deleteOne({ _id: retainedWindowDocumentId });
 
+            const historicalV2SeatPlanId = new ObjectId();
+            const historicalV2AssignmentId = new ObjectId();
+            await database.collection('exam.seatPlans').insertOne({
+                _id: historicalV2SeatPlanId,
+                schemaVersion: 2,
+                domainId: 'system',
+                revision: 2,
+                classrooms: [{ classroomId: classroom._id, candidateSeatIds: ['seat-1'] }],
+            });
+            await database.collection('exam.seatAssignments').insertOne({
+                _id: historicalV2AssignmentId,
+                schemaVersion: 2,
+                domainId: 'system',
+                revision: 2,
+                assignments: [{ boundUserId: 101, seat: { classroomId: classroom._id, sourceSeatId: 'seat-1' } }],
+            });
+            const retainedV2Plan = buildClassSigninClassroomMigrationPlan(
+                withoutSeat,
+                manifestForSource(withoutSeat, schoolId),
+                await repository.loadSnapshot(),
+            );
+            expect(retainedV2Plan.entries[0].action).to.equal('conflict');
+            expect(retainedV2Plan.entries[0].conflicts).to.deep.equal(['referenced_seat_removed:seat-1']);
+            await database.collection('exam.seatPlans').deleteOne({ _id: historicalV2SeatPlanId });
+            await database.collection('exam.seatAssignments').deleteOne({ _id: historicalV2AssignmentId });
+
             const classroomService = new ExamClassroomService(classroomCollection);
             expect(await classroomService.list('system', schoolId).toArray()).to.have.length(1);
             expect(await classroomService.listDomain('system').toArray()).to.have.length(1);

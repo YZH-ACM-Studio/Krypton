@@ -101,8 +101,9 @@ export interface ExamSeatPlanDiagnostic {
     availableSeatCount: number;
 }
 
-export interface ExamSeatPlanDoc {
+export interface ExamSeatPlanV1Doc {
     _id: ObjectId;
+    schemaVersion?: never;
     domainId: string;
     eventId: ObjectId;
     eventRevision: number;
@@ -118,6 +119,38 @@ export interface ExamSeatPlanDoc {
     fingerprint: string;
     createdAt: Date;
     createdBy: number;
+}
+
+export interface ExamSeatPlanClassroomRef {
+    classroomId: ObjectId;
+    layoutRevision: number;
+    layoutFingerprint: string;
+    profileRevision: number;
+    profileFingerprint: string;
+    candidateSeatIds: string[];
+}
+
+export interface ExamSeatPlanV2Doc {
+    _id: ObjectId;
+    schemaVersion: 2;
+    domainId: string;
+    eventId: ObjectId;
+    eventRevision: number;
+    schoolId: ObjectId;
+    revision: number;
+    auditRef: string;
+    roster: ExamSeatPlanRosterRef | null;
+    classrooms: ExamSeatPlanClassroomRef[];
+    diagnostics: ExamSeatPlanDiagnostic[];
+    fingerprint: string;
+    createdAt: Date;
+    createdBy: number;
+}
+
+export type ExamSeatPlanDoc = ExamSeatPlanV1Doc | ExamSeatPlanV2Doc;
+
+export function isExamSeatPlanV2(plan: ExamSeatPlanDoc): plan is ExamSeatPlanV2Doc {
+    return plan.schemaVersion === 2;
 }
 
 type RevisionCollection<T extends { _id: ObjectId }> = Pick<Collection<T>, 'createIndex' | 'deleteMany' | 'find' | 'findOne' | 'insertOne'>;
@@ -461,7 +494,38 @@ export function rosterDocumentFingerprint(doc: Omit<ExamRosterRevisionDoc, 'fing
     });
 }
 
-export function planDocumentFingerprint(doc: Omit<ExamSeatPlanDoc, 'fingerprint'>): string {
+export type ExamSeatPlanWithoutFingerprint = Omit<ExamSeatPlanV1Doc, 'fingerprint'> | Omit<ExamSeatPlanV2Doc, 'fingerprint'>;
+
+export function planDocumentFingerprint(doc: ExamSeatPlanWithoutFingerprint): string {
+    const common = {
+        seatPlanId: doc._id.toHexString(),
+        domainId: doc.domainId,
+        eventId: doc.eventId.toHexString(),
+        eventRevision: doc.eventRevision,
+        schoolId: doc.schoolId.toHexString(),
+        revision: doc.revision,
+        roster: doc.roster
+            ? { rosterId: doc.roster.rosterId.toHexString(), revision: doc.roster.revision, fingerprint: doc.roster.fingerprint }
+            : null,
+        diagnostics: doc.diagnostics,
+        auditRef: doc.auditRef,
+        createdAt: doc.createdAt.toISOString(),
+        createdBy: doc.createdBy,
+    };
+    if ('classrooms' in doc) {
+        return sha256({
+            schemaVersion: 2,
+            ...common,
+            classrooms: doc.classrooms.map((classroom) => ({
+                classroomId: classroom.classroomId.toHexString(),
+                layoutRevision: classroom.layoutRevision,
+                layoutFingerprint: classroom.layoutFingerprint,
+                profileRevision: classroom.profileRevision,
+                profileFingerprint: classroom.profileFingerprint,
+                candidateSeatIds: classroom.candidateSeatIds,
+            })),
+        });
+    }
     return sha256({
         seatPlanId: doc._id.toHexString(),
         domainId: doc.domainId,
@@ -582,7 +646,7 @@ export class ExamSeatPlanService {
         layoutFingerprint: string;
         candidateSeatIds: string[];
         requireRoster: boolean;
-    }): Promise<ExamSeatPlanDoc> {
+    }): Promise<ExamSeatPlanV1Doc> {
         assertDomainId(input.domainId);
         assertObjectId(input.eventId, 'eventId');
         assertRevision(input.eventRevision);
@@ -607,6 +671,7 @@ export class ExamSeatPlanService {
         if (new Set(candidateSeatIds).size !== candidateSeatIds.length) throw new ExamSeatPlanError('candidate_seat_duplicate');
         const previous = await this.latestSeatPlan(input.domainId, input.eventId);
         if (previous) assertExamSeatPlanIntegrity(previous);
+        if (previous && isExamSeatPlanV2(previous)) throw new ExamSeatPlanError('seat_plan_v2_writer_required');
         const revision = (previous?.revision || 0) + 1;
         const requiredSeatCount = input.roster?.entries.length || 0;
         const diagnostics: ExamSeatPlanDiagnostic[] =
@@ -635,7 +700,7 @@ export class ExamSeatPlanService {
             createdAt: this.now(),
             createdBy: input.actorUid,
         };
-        const doc: ExamSeatPlanDoc = { ...canonicalDoc, fingerprint: planDocumentFingerprint(canonicalDoc) };
+        const doc: ExamSeatPlanV1Doc = { ...canonicalDoc, fingerprint: planDocumentFingerprint(canonicalDoc) };
         assertExamSeatPlanIntegrity(doc);
         try {
             await this.seatPlans.insertOne(doc);
@@ -660,6 +725,14 @@ export class ExamSeatPlanService {
         assertObjectId(eventId, 'eventId');
         assertRevision(revision);
         const plan = await this.seatPlans.findOne({ domainId, eventId, revision });
+        if (plan) assertExamSeatPlanIntegrity(plan);
+        return plan;
+    }
+
+    async latestSeatPlanRevision(domainId: string, eventId: ObjectId): Promise<ExamSeatPlanDoc | null> {
+        assertDomainId(domainId);
+        assertObjectId(eventId, 'eventId');
+        const plan = await this.latestSeatPlan(domainId, eventId);
         if (plan) assertExamSeatPlanIntegrity(plan);
         return plan;
     }
@@ -840,7 +913,7 @@ export function assertExamRosterRevisionIntegrity(value: unknown): asserts value
     if (doc.fingerprint !== expectedFingerprint) throw new ExamSeatPlanError('roster_fingerprint_mismatch');
 }
 
-export function assertExamSeatPlanIntegrity(value: unknown): asserts value is ExamSeatPlanDoc {
+function assertExamSeatPlanV1Integrity(value: unknown): asserts value is ExamSeatPlanV1Doc {
     const doc = exactObject(
         value,
         [
@@ -929,6 +1002,136 @@ export function assertExamSeatPlanIntegrity(value: unknown): asserts value is Ex
         createdBy: doc.createdBy,
     });
     if (doc.fingerprint !== expectedFingerprint) throw new ExamSeatPlanError('seat_plan_fingerprint_mismatch');
+}
+
+function canonicalSeatPlanClassroomRef(value: unknown): ExamSeatPlanClassroomRef {
+    const classroom = exactObject(
+        value,
+        ['candidateSeatIds', 'classroomId', 'layoutFingerprint', 'layoutRevision', 'profileFingerprint', 'profileRevision'],
+        'seat_plan_classroom_invalid',
+    );
+    assertObjectId(classroom.classroomId, 'classroomId');
+    assertRevision(classroom.layoutRevision);
+    if (!Number.isSafeInteger(classroom.profileRevision) || Number(classroom.profileRevision) < 0) {
+        throw new ExamSeatPlanError('seat_plan_profile_revision_invalid');
+    }
+    assertFingerprint(classroom.layoutFingerprint, 'layout_fingerprint');
+    assertFingerprint(classroom.profileFingerprint, 'seat_profile_fingerprint');
+    if (!Array.isArray(classroom.candidateSeatIds) || !classroom.candidateSeatIds.length || classroom.candidateSeatIds.length > 500) {
+        throw new ExamSeatPlanError('candidate_seats_invalid');
+    }
+    const candidateSeatIds = classroom.candidateSeatIds.map((seatId) => canonicalText(seatId, 'candidate_seat_id', 128));
+    if (
+        new Set(candidateSeatIds).size !== candidateSeatIds.length ||
+        [...candidateSeatIds].sort().some((seatId, index) => seatId !== candidateSeatIds[index])
+    ) {
+        throw new ExamSeatPlanError('candidate_seats_invalid');
+    }
+    return {
+        classroomId: new ObjectId(classroom.classroomId),
+        layoutRevision: classroom.layoutRevision,
+        layoutFingerprint: classroom.layoutFingerprint,
+        profileRevision: Number(classroom.profileRevision),
+        profileFingerprint: classroom.profileFingerprint,
+        candidateSeatIds,
+    };
+}
+
+function assertExamSeatPlanV2Integrity(value: unknown): asserts value is ExamSeatPlanV2Doc {
+    const doc = exactObject(
+        value,
+        [
+            '_id',
+            'auditRef',
+            'classrooms',
+            'createdAt',
+            'createdBy',
+            'diagnostics',
+            'domainId',
+            'eventId',
+            'eventRevision',
+            'fingerprint',
+            'revision',
+            'roster',
+            'schemaVersion',
+            'schoolId',
+        ],
+        'seat_plan_document_invalid',
+    );
+    if (doc.schemaVersion !== 2) throw new ExamSeatPlanError('seat_plan_schema_version_invalid');
+    assertObjectId(doc._id, 'seatPlanId');
+    assertObjectId(doc.eventId, 'eventId');
+    assertRevision(doc.eventRevision);
+    assertObjectId(doc.schoolId, 'schoolId');
+    assertDomainId(doc.domainId);
+    assertRevision(doc.revision);
+    assertUid(doc.createdBy, 'createdBy');
+    const createdAt = canonicalDate(doc.createdAt, 'created_at');
+    if (doc.auditRef !== examSeatPlanAuditRef(doc.eventId, doc.revision)) throw new ExamSeatPlanError('seat_plan_audit_ref_invalid');
+    assertFingerprint(doc.fingerprint, 'seat_plan_fingerprint');
+    let roster: ExamSeatPlanRosterRef | null = null;
+    if (doc.roster !== null) {
+        const ref = exactObject(doc.roster, ['fingerprint', 'revision', 'rosterId'], 'seat_plan_roster_invalid');
+        assertObjectId(ref.rosterId, 'rosterId');
+        assertRevision(ref.revision);
+        assertFingerprint(ref.fingerprint, 'roster_fingerprint');
+        roster = { rosterId: new ObjectId(ref.rosterId), revision: ref.revision, fingerprint: ref.fingerprint };
+    }
+    if (!Array.isArray(doc.classrooms) || !doc.classrooms.length || doc.classrooms.length > 100) {
+        throw new ExamSeatPlanError('seat_plan_classrooms_invalid');
+    }
+    const classrooms = doc.classrooms.map(canonicalSeatPlanClassroomRef);
+    const classroomIds = classrooms.map((classroom) => classroom.classroomId.toHexString());
+    if (new Set(classroomIds).size !== classroomIds.length) throw new ExamSeatPlanError('seat_plan_classroom_duplicate');
+    const seatKeys = classrooms.flatMap((classroom) =>
+        classroom.candidateSeatIds.map((sourceSeatId) => `${classroom.classroomId.toHexString()}\u0000${sourceSeatId}`),
+    );
+    if (!seatKeys.length || seatKeys.length > 500 || new Set(seatKeys).size !== seatKeys.length) {
+        throw new ExamSeatPlanError('candidate_seats_invalid');
+    }
+    if (!Array.isArray(doc.diagnostics) || doc.diagnostics.length > 1) throw new ExamSeatPlanError('seat_plan_diagnostics_invalid');
+    const diagnostics = doc.diagnostics.map((item) => {
+        const diagnostic = exactObject(item, ['availableSeatCount', 'code', 'requiredSeatCount'], 'seat_plan_diagnostic_invalid');
+        if (
+            diagnostic.code !== 'insufficient_seats' ||
+            !Number.isSafeInteger(diagnostic.requiredSeatCount) ||
+            !Number.isSafeInteger(diagnostic.availableSeatCount) ||
+            Number(diagnostic.requiredSeatCount) <= Number(diagnostic.availableSeatCount) ||
+            Number(diagnostic.availableSeatCount) !== seatKeys.length
+        ) {
+            throw new ExamSeatPlanError('seat_plan_diagnostic_invalid');
+        }
+        return {
+            code: 'insufficient_seats' as const,
+            requiredSeatCount: Number(diagnostic.requiredSeatCount),
+            availableSeatCount: Number(diagnostic.availableSeatCount),
+        };
+    });
+    if (diagnostics.length && !roster) throw new ExamSeatPlanError('seat_plan_diagnostic_invalid');
+    const canonical: Omit<ExamSeatPlanV2Doc, 'fingerprint'> = {
+        _id: new ObjectId(doc._id),
+        schemaVersion: 2,
+        domainId: doc.domainId,
+        eventId: new ObjectId(doc.eventId),
+        eventRevision: doc.eventRevision,
+        schoolId: new ObjectId(doc.schoolId),
+        revision: doc.revision,
+        auditRef: doc.auditRef,
+        roster,
+        classrooms,
+        diagnostics,
+        createdAt,
+        createdBy: doc.createdBy,
+    };
+    if (doc.fingerprint !== planDocumentFingerprint(canonical)) throw new ExamSeatPlanError('seat_plan_fingerprint_mismatch');
+}
+
+export function assertExamSeatPlanIntegrity(value: unknown): asserts value is ExamSeatPlanDoc {
+    if (value && typeof value === 'object' && !Array.isArray(value) && Object.hasOwn(value, 'schemaVersion')) {
+        assertExamSeatPlanV2Integrity(value);
+        return;
+    }
+    assertExamSeatPlanV1Integrity(value);
 }
 
 export const examRosterRevisionColl = db.collection<ExamRosterRevisionDoc>('exam.rosterRevisions');

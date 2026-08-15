@@ -18,6 +18,8 @@ let assign: string[] = [];
 let inviteCode = '';
 let attended = true;
 let groupNames: string[] = [];
+let assignmentSchemaVersion: 1 | 2 = 1;
+let seatPlanSchemaVersion: 1 | 2 = 1;
 
 function stub(modulePath: string, exports: Record<string, unknown>): void {
     const resolved = require.resolve(modulePath);
@@ -60,9 +62,11 @@ stub('../src/model/exam-classroom.ts', {
 stub('../src/model/exam-seat-assignment.ts', {
     __esModule: true,
     assertExamSeatAssignmentIntegrity: () => undefined,
+    isExamSeatAssignmentV2: (assignment: { schemaVersion?: number }) => assignment.schemaVersion === 2,
     examSeatAssignmentService: {
         getRevision: async () => ({
             _id: assignmentId,
+            ...(assignmentSchemaVersion === 2 ? { schemaVersion: 2 } : {}),
             revision: 2,
             schoolId,
             eventRevision: 3,
@@ -85,9 +89,11 @@ stub('../src/model/exam-seat-plan.ts', {
     __esModule: true,
     assertExamRosterRevisionIntegrity: () => undefined,
     assertExamSeatPlanIntegrity: () => undefined,
+    isExamSeatPlanV2: (seatPlan: { schemaVersion?: number }) => seatPlan.schemaVersion === 2,
     examSeatPlanService: {
         getSeatPlanRevision: async () => ({
             _id: seatPlanId,
+            ...(seatPlanSchemaVersion === 2 ? { schemaVersion: 2 } : {}),
             fingerprint,
             classroomId,
             layoutRevision: 2,
@@ -175,6 +181,17 @@ beforeEach(() => {
     inviteCode = '';
     attended = true;
     groupNames = [];
+    assignmentSchemaVersion = 1;
+    seatPlanSchemaVersion = 1;
+});
+
+test('P2.11 reader accepts v2 history but pre-login remains disabled until P2.14', async () => {
+    assignmentSchemaVersion = 2;
+    await assert.rejects(prepare(), /exam_prelogin_assignment_v2_not_enabled/);
+
+    assignmentSchemaVersion = 1;
+    seatPlanSchemaVersion = 2;
+    await assert.rejects(prepare(), /exam_prelogin_assignment_reference_changed/);
 });
 
 test('pre-login rechecks legacy contest assignment groups', async () => {

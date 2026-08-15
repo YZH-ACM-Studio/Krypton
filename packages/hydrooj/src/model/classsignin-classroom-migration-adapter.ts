@@ -257,44 +257,80 @@ export class MongoClassSigninClassroomMigrationRepository implements ClassSignin
             }
         }
         for (const seatPlan of seatPlans) {
-            const classroomId = requiredObjectId(seatPlan.classroomId, 'exam seat plan classroomId');
-            if (!Array.isArray(seatPlan.candidateSeatIds)) {
-                fail('exam seat plan candidateSeatIds are invalid', 'CLASSSIGNIN_CLASSROOM_DATABASE_INVALID');
-            }
-            const candidateSeatIds = seatPlan.candidateSeatIds;
-            if (!candidateSeatIds.length) {
-                pushReference(references, {
-                    domainId: requiredText(seatPlan.domainId, 'exam seat plan domainId'),
-                    classroomId,
-                    kind: 'exam-seat-plan',
-                    referenceId: `exam-seat-plan:${String(seatPlan._id)}:${String(seatPlan.revision)}`,
-                });
-            }
-            for (const sourceSeatId of candidateSeatIds) {
-                pushReference(references, {
-                    domainId: requiredText(seatPlan.domainId, 'exam seat plan domainId'),
-                    classroomId,
-                    kind: 'exam-seat-plan',
-                    sourceSeatId: requiredText(sourceSeatId, 'exam seat plan sourceSeatId'),
-                    referenceId: `exam-seat-plan:${String(seatPlan._id)}:${String(seatPlan.revision)}`,
-                });
+            const domainId = requiredText(seatPlan.domainId, 'exam seat plan domainId');
+            const referenceId = `exam-seat-plan:${String(seatPlan._id)}:${String(seatPlan.revision)}`;
+            const classroomRows = Object.hasOwn(seatPlan, 'schemaVersion')
+                ? (() => {
+                      if (seatPlan.schemaVersion !== 2 || !Array.isArray(seatPlan.classrooms) || !seatPlan.classrooms.length) {
+                          fail('exam seat plan v2 classrooms are invalid', 'CLASSSIGNIN_CLASSROOM_DATABASE_INVALID');
+                      }
+                      return seatPlan.classrooms.map((raw) => {
+                          if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+                              fail('exam seat plan v2 classroom is invalid', 'CLASSSIGNIN_CLASSROOM_DATABASE_INVALID');
+                          }
+                          const row = raw as Record<string, unknown>;
+                          if (!Array.isArray(row.candidateSeatIds) || !row.candidateSeatIds.length) {
+                              fail('exam seat plan v2 candidateSeatIds are invalid', 'CLASSSIGNIN_CLASSROOM_DATABASE_INVALID');
+                          }
+                          return {
+                              classroomId: requiredObjectId(row.classroomId, 'exam seat plan v2 classroomId'),
+                              candidateSeatIds: row.candidateSeatIds,
+                          };
+                      });
+                  })()
+                : (() => {
+                      if (!Array.isArray(seatPlan.candidateSeatIds)) {
+                          fail('exam seat plan candidateSeatIds are invalid', 'CLASSSIGNIN_CLASSROOM_DATABASE_INVALID');
+                      }
+                      return [
+                          {
+                              classroomId: requiredObjectId(seatPlan.classroomId, 'exam seat plan classroomId'),
+                              candidateSeatIds: seatPlan.candidateSeatIds,
+                          },
+                      ];
+                  })();
+            for (const classroom of classroomRows) {
+                if (!classroom.candidateSeatIds.length) {
+                    pushReference(references, { domainId, classroomId: classroom.classroomId, kind: 'exam-seat-plan', referenceId });
+                }
+                for (const sourceSeatId of classroom.candidateSeatIds) {
+                    pushReference(references, {
+                        domainId,
+                        classroomId: classroom.classroomId,
+                        kind: 'exam-seat-plan',
+                        sourceSeatId: requiredText(sourceSeatId, 'exam seat plan sourceSeatId'),
+                        referenceId,
+                    });
+                }
             }
         }
         for (const assignment of seatAssignments) {
-            const classroomId = requiredObjectId(assignment.classroomId, 'exam seat assignment classroomId');
             if (!Array.isArray(assignment.assignments)) {
                 fail('exam seat assignment has invalid assignments', 'CLASSSIGNIN_CLASSROOM_DATABASE_INVALID');
             }
+            const v2 = Object.hasOwn(assignment, 'schemaVersion');
+            if (v2 && assignment.schemaVersion !== 2) {
+                fail('exam seat assignment schemaVersion is invalid', 'CLASSSIGNIN_CLASSROOM_DATABASE_INVALID');
+            }
+            const v1ClassroomId = v2 ? null : requiredObjectId(assignment.classroomId, 'exam seat assignment classroomId');
             for (const raw of assignment.assignments) {
                 if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
                     fail('exam seat assignment row is invalid', 'CLASSSIGNIN_CLASSROOM_DATABASE_INVALID');
                 }
                 const row = raw as Record<string, unknown>;
+                const seat = v2
+                    ? (() => {
+                          if (!row.seat || typeof row.seat !== 'object' || Array.isArray(row.seat)) {
+                              fail('exam seat assignment v2 seat is invalid', 'CLASSSIGNIN_CLASSROOM_DATABASE_INVALID');
+                          }
+                          return row.seat as Record<string, unknown>;
+                      })()
+                    : row;
                 pushReference(references, {
                     domainId: requiredText(assignment.domainId, 'exam seat assignment domainId'),
-                    classroomId,
+                    classroomId: v2 ? requiredObjectId(seat.classroomId, 'exam seat assignment v2 classroomId') : v1ClassroomId!,
                     kind: 'exam-seat-assignment',
-                    sourceSeatId: requiredText(row.sourceSeatId, 'exam seat assignment sourceSeatId'),
+                    sourceSeatId: requiredText(seat.sourceSeatId, 'exam seat assignment sourceSeatId'),
                     referenceId: `exam-seat-assignment:${String(assignment._id)}:${String(assignment.revision)}`,
                 });
             }

@@ -28,7 +28,7 @@ function same(left: unknown, right: unknown): boolean {
     return left === right;
 }
 
-class MemoryCollection<T extends Record<string, unknown>> {
+class MemoryCollection<T extends object> {
     docs: T[] = [];
 
     createIndex() {
@@ -37,12 +37,12 @@ class MemoryCollection<T extends Record<string, unknown>> {
 
     async insertOne(doc: T) {
         this.docs.push(cloneValue(doc));
-        return { insertedId: doc._id };
+        return { acknowledged: true, insertedId: (doc as { _id?: unknown })._id };
     }
 
     async deleteMany(filter: Record<string, unknown>) {
         this.docs = this.docs.filter((doc) => !this.matches(doc, filter));
-        return { deletedCount: 0 };
+        return { acknowledged: true, deletedCount: 0 };
     }
 
     async findOne(filter: Record<string, unknown>) {
@@ -52,9 +52,9 @@ class MemoryCollection<T extends Record<string, unknown>> {
 
     async replaceOne(filter: Record<string, unknown>, replacement: T) {
         const index = this.docs.findIndex((doc) => this.matches(doc, filter));
-        if (index < 0) return { matchedCount: 0, modifiedCount: 0 };
+        if (index < 0) return { acknowledged: true, matchedCount: 0, modifiedCount: 0, upsertedCount: 0, upsertedId: null };
         this.docs[index] = cloneValue(replacement);
-        return { matchedCount: 1, modifiedCount: 1 };
+        return { acknowledged: true, matchedCount: 1, modifiedCount: 1, upsertedCount: 0, upsertedId: null };
     }
 
     find(filter: Record<string, unknown>) {
@@ -62,7 +62,10 @@ class MemoryCollection<T extends Record<string, unknown>> {
         const cursor = {
             sort: (spec: Record<string, number>) => {
                 const [field, direction] = Object.entries(spec)[0];
-                rows = [...rows].sort((left, right) => direction * (Number(left[field]) - Number(right[field])));
+                rows = [...rows].sort(
+                    (left, right) =>
+                        direction * (Number((left as Record<string, unknown>)[field]) - Number((right as Record<string, unknown>)[field])),
+                );
                 return cursor;
             },
             limit: (count: number) => {
@@ -75,7 +78,7 @@ class MemoryCollection<T extends Record<string, unknown>> {
     }
 
     private matches(doc: T, filter: Record<string, unknown>): boolean {
-        return Object.entries(filter).every(([field, expected]) => same(doc[field], expected));
+        return Object.entries(filter).every(([field, expected]) => same((doc as Record<string, unknown>)[field], expected));
     }
 }
 
@@ -109,16 +112,16 @@ const classroomId = new ObjectId('66bc00000000000000000003');
 const rosterId = new ObjectId('66bc00000000000000000004');
 const seatPlanId = new ObjectId('66bc00000000000000000005');
 
-function roster(count: number): import('../src/model/exam-seat-plan').ExamRosterRevisionDoc {
+function roster(count: number, revision = 1, id = rosterId): import('../src/model/exam-seat-plan').ExamRosterRevisionDoc {
     const createdAt = new Date('2026-08-12T00:10:00.000Z');
     const base = {
-        _id: rosterId,
+        _id: id,
         domainId: 'system',
         eventId,
         eventRevision: 3,
         schoolId,
-        revision: 1,
-        auditRef: `exam-roster:${eventId}:1`,
+        revision,
+        auditRef: `exam-roster:${eventId}:${revision}`,
         source: {
             kind: 'userbindSchool' as const,
             schoolId,
@@ -136,7 +139,7 @@ function roster(count: number): import('../src/model/exam-seat-plan').ExamRoster
             sourceGroupIds: [],
         })),
         exclusions: [],
-        previousRevision: null,
+        previousRevision: revision === 1 ? null : revision - 1,
         diff: { addedBoundUserIds: Array.from({ length: count }, (_, index) => index + 101), removedBoundUserIds: [] },
         counts: { total: count, included: count, excluded: 0 },
         createdAt,
@@ -145,7 +148,7 @@ function roster(count: number): import('../src/model/exam-seat-plan').ExamRoster
     return { ...base, fingerprint: seatPlanModule.rosterDocumentFingerprint(base) };
 }
 
-function plan(count: number, rosterDoc = roster(count)): import('../src/model/exam-seat-plan').ExamSeatPlanDoc {
+function plan(count: number, rosterDoc = roster(count)): import('../src/model/exam-seat-plan').ExamSeatPlanV1Doc {
     const createdAt = new Date('2026-08-12T00:11:00.000Z');
     const base = {
         _id: seatPlanId,
@@ -155,7 +158,7 @@ function plan(count: number, rosterDoc = roster(count)): import('../src/model/ex
         schoolId,
         revision: 1,
         auditRef: `exam-seat-plan:${eventId}:1`,
-        roster: { rosterId, revision: 1, fingerprint: rosterDoc.fingerprint },
+        roster: { rosterId: rosterDoc._id, revision: rosterDoc.revision, fingerprint: rosterDoc.fingerprint },
         classroomId,
         layoutRevision: 4,
         layoutFingerprint: 'b'.repeat(64),
@@ -165,6 +168,112 @@ function plan(count: number, rosterDoc = roster(count)): import('../src/model/ex
         createdBy: 2,
     };
     return { ...base, fingerprint: seatPlanModule.planDocumentFingerprint(base) };
+}
+
+function v2Plan(rosterDoc = roster(2)): import('../src/model/exam-seat-plan').ExamSeatPlanV2Doc {
+    const otherClassroomId = new ObjectId('66bc00000000000000000006');
+    const base: Omit<import('../src/model/exam-seat-plan').ExamSeatPlanV2Doc, 'fingerprint'> = {
+        _id: new ObjectId('66bc00000000000000000007'),
+        schemaVersion: 2,
+        domainId: 'system',
+        eventId,
+        eventRevision: 3,
+        schoolId,
+        revision: 2,
+        auditRef: `exam-seat-plan:${eventId}:2`,
+        roster: { rosterId: rosterDoc._id, revision: rosterDoc.revision, fingerprint: rosterDoc.fingerprint },
+        classrooms: [
+            {
+                classroomId,
+                layoutRevision: 4,
+                layoutFingerprint: 'b'.repeat(64),
+                profileRevision: 0,
+                profileFingerprint: 'c'.repeat(64),
+                candidateSeatIds: ['seat-001'],
+            },
+            {
+                classroomId: otherClassroomId,
+                layoutRevision: 5,
+                layoutFingerprint: 'd'.repeat(64),
+                profileRevision: 2,
+                profileFingerprint: 'e'.repeat(64),
+                candidateSeatIds: ['seat-001'],
+            },
+        ],
+        diagnostics: [],
+        createdAt: new Date('2026-08-12T00:12:00.000Z'),
+        createdBy: 2,
+    };
+    return { ...base, fingerprint: seatPlanModule.planDocumentFingerprint(base) };
+}
+
+function v2Assignment(rosterDoc = roster(2)): import('../src/model/exam-seat-assignment').ExamSeatAssignmentV2Doc {
+    const seatPlan = v2Plan(rosterDoc);
+    const participants = rosterDoc.entries.map((entry) => ({
+        boundUserId: entry.boundUserId,
+        studentRecordId: entry.studentRecordId,
+        studentId: entry.studentId,
+        teamId: null,
+        teamRole: null,
+    }));
+    const frozenSeats = seatPlan.classrooms.map((classroom, index) => ({
+        classroomId: classroom.classroomId,
+        sourceSeatId: 'seat-001',
+        label: `${index + 1}-1`,
+        x: index * 100,
+        y: 0,
+        width: null,
+        height: null,
+        rotation: 0,
+        layoutStatus: 'empty',
+        enabled: true,
+        facing: 'unset' as const,
+        disabledReason: null,
+        bindingId: new ObjectId(`66bc0000000000000000001${index}`),
+        bindingRevision: 1,
+        endpointId: `ep_room_${index + 1}`,
+        endpointOnline: index === 0,
+    }));
+    const assignments = participants.map((participant, index) => ({
+        boundUserId: participant.boundUserId,
+        seat: { classroomId: frozenSeats[index].classroomId, sourceSeatId: frozenSeats[index].sourceSeatId },
+    }));
+    const base: Omit<import('../src/model/exam-seat-assignment').ExamSeatAssignmentV2Doc, 'fingerprint'> = {
+        _id: new ObjectId('66bc00000000000000000008'),
+        schemaVersion: 2,
+        domainId: 'system',
+        eventId,
+        eventRevision: 3,
+        schoolId,
+        revision: 2,
+        auditRef: `exam-seat-assignment:${eventId}:2`,
+        seatPlan: { seatPlanId: seatPlan._id, revision: seatPlan.revision, fingerprint: seatPlan.fingerprint },
+        roster: { rosterId, revision: 1, fingerprint: rosterDoc.fingerprint },
+        classrooms: seatPlan.classrooms,
+        participants,
+        seatFacts: frozenSeats,
+        constraints: { strategy: 'minimizeClassrooms', lockedAssignments: [], manualAssignments: [] },
+        seed: seedA,
+        algorithmVersion: 'spatial-best-effort-v1',
+        assignments,
+        explanation: {
+            classrooms: seatPlan.classrooms.map((classroom) => ({
+                classroomId: classroom.classroomId,
+                assignedCount: assignments.filter((assignment) => assignment.seat.classroomId.equals(classroom.classroomId)).length,
+                eligibleSeatCount: 1,
+            })),
+            highRiskEdges: [],
+            mediumRiskEdges: [],
+            splitTeamIds: [],
+            skippedSeats: [],
+            offlineSeats: [{ classroomId: frozenSeats[1].classroomId, sourceSeatId: frozenSeats[1].sourceSeatId }],
+            unsetFacingSeats: frozenSeats.map((seat) => ({ classroomId: seat.classroomId, sourceSeatId: seat.sourceSeatId })),
+        },
+        previousRevision: 1,
+        createdAt: new Date('2026-08-12T00:13:00.000Z'),
+        createdBy: 2,
+    };
+    return { ...base, fingerprint: moduleUnderTest.assignmentDocumentFingerprint(base) };
 }
 
 function seatFacts(count: number, overrides: Record<string, Partial<import('../src/model/exam-seat-assignment').ExamAssignmentSeatFact>> = {}) {
@@ -535,5 +644,204 @@ describe('P2.5 immutable revisions and publication CAS', () => {
         ).to.equal('assignment_clock_rollback');
         expect(revisions.docs).to.have.lengthOf(1);
         expect(publications.docs).to.have.lengthOf(0);
+    });
+});
+
+describe('P2.11 reader-first v1/v2 compatibility', () => {
+    it('preserves the exact legacy v1 fingerprint bytes from the pre-P2.11 reader', async () => {
+        const rosterDoc = roster(2);
+        const legacyPlan = plan(2, rosterDoc);
+        expect(legacyPlan.fingerprint).to.equal('9315b7ab11376d62eac725c2a9e37947e9b7b458a9df4ad1022e7d5df0318e0d');
+
+        const service = new moduleUnderTest.ExamSeatAssignmentService(
+            new MemoryCollection<import('../src/model/exam-seat-assignment').ExamSeatAssignmentRevisionDoc>() as never,
+            new MemoryCollection<import('../src/model/exam-seat-assignment').ExamSeatAssignmentPublicationDoc>() as never,
+            () => new Date('2026-08-12T00:13:00.000Z'),
+            () => new ObjectId('66bc00000000000000000009'),
+        );
+        const result = await service.createRevision({
+            domainId: 'system',
+            eventId,
+            eventRevision: 3,
+            schoolId,
+            actorUid: 2,
+            expectedPreviousRevision: 0,
+            roster: rosterDoc,
+            seatPlan: legacyPlan,
+            seatFacts: seatFacts(2),
+            mode: 'random',
+            seed: seedA,
+            lockedAssignments: [],
+            manualAssignments: [],
+        });
+        expect(result.assignment?.fingerprint).to.equal('3225361eb2a2fe1ede8260df8bd5009cdb00aff438d6f1a223f840a5a5f11300');
+    });
+
+    it('accepts two classrooms that reuse the same sourceSeatId because the structured identities differ', () => {
+        const rosterDoc = roster(2);
+        const planDoc = v2Plan(rosterDoc);
+        const assignment = v2Assignment(rosterDoc);
+        expect(() => seatPlanModule.assertExamSeatPlanIntegrity(planDoc)).not.to.throw();
+        expect(() => moduleUnderTest.assertExamSeatAssignmentIntegrity(assignment)).not.to.throw();
+        expect(seatPlanModule.isExamSeatPlanV2(planDoc)).to.equal(true);
+        expect(moduleUnderTest.isExamSeatAssignmentV2(assignment)).to.equal(true);
+        expect(assignment.assignments.map((row) => row.seat.sourceSeatId)).to.deep.equal(['seat-001', 'seat-001']);
+        expect(new Set(assignment.assignments.map((row) => moduleUnderTest.examSeatIdentityKey(row.seat))).size).to.equal(2);
+    });
+
+    it('rejects duplicate classrooms, non-canonical seat order, endpoint reuse, and binding reuse in a v2 document', () => {
+        const duplicateClassroom = cloneValue(v2Plan());
+        duplicateClassroom.classrooms[1].classroomId = duplicateClassroom.classrooms[0].classroomId;
+        expect(() => seatPlanModule.assertExamSeatPlanIntegrity(duplicateClassroom)).to.throw('seat_plan_classroom_duplicate');
+
+        const nonCanonicalSeats = cloneValue(v2Plan());
+        nonCanonicalSeats.classrooms[0].candidateSeatIds = ['seat-002', 'seat-001'];
+        expect(() => seatPlanModule.assertExamSeatPlanIntegrity(nonCanonicalSeats)).to.throw('candidate_seats_invalid');
+
+        const duplicateEndpoint = cloneValue(v2Assignment());
+        duplicateEndpoint.seatFacts[1].endpointId = duplicateEndpoint.seatFacts[0].endpointId;
+        expect(() => moduleUnderTest.assertExamSeatAssignmentIntegrity(duplicateEndpoint)).to.throw('assignment_endpoint_duplicate');
+
+        const duplicateBinding = cloneValue(v2Assignment());
+        duplicateBinding.seatFacts[1].bindingId = duplicateBinding.seatFacts[0].bindingId;
+        expect(() => moduleUnderTest.assertExamSeatAssignmentIntegrity(duplicateBinding)).to.throw('assignment_binding_duplicate');
+    });
+
+    it('keeps zero-person assignments readable and preserves an unknown online observation for a bound seat', () => {
+        const empty = v2Assignment(roster(0));
+        expect(() => moduleUnderTest.assertExamSeatAssignmentIntegrity(empty)).not.to.throw();
+        expect(empty.participants).to.have.lengthOf(0);
+        expect(empty.assignments).to.have.lengthOf(0);
+
+        const unknownOnline = cloneValue(v2Assignment());
+        unknownOnline.seatFacts[0].endpointOnline = null;
+        unknownOnline.fingerprint = moduleUnderTest.assignmentDocumentFingerprint(unknownOnline);
+        expect(() => moduleUnderTest.assertExamSeatAssignmentIntegrity(unknownOnline)).not.to.throw();
+    });
+
+    it('requires the stored v2 plan and assignment to name the same immutable roster', () => {
+        const rosterA = roster(2);
+        const rosterB = roster(2, 2, new ObjectId('66bc0000000000000000000a'));
+        const planA = v2Plan(rosterA);
+        const assignmentB = v2Assignment(rosterB);
+        assignmentB.seatPlan = { seatPlanId: planA._id, revision: planA.revision, fingerprint: planA.fingerprint };
+        assignmentB.fingerprint = moduleUnderTest.assignmentDocumentFingerprint(assignmentB);
+
+        expect(() => seatPlanModule.assertExamSeatPlanIntegrity(planA)).not.to.throw();
+        expect(() => moduleUnderTest.assertExamSeatAssignmentIntegrity(assignmentB)).not.to.throw();
+        expect(moduleUnderTest.seatPlanMatchesAssignmentRoster(planA, assignmentB)).to.equal(false);
+    });
+
+    it('derives a frozen endpoint only from the exact retained binding history revision', () => {
+        const assignment = v2Assignment();
+        const fact = assignment.seatFacts[0];
+        const boundAt = new Date('2026-08-12T00:05:00.000Z');
+        const unboundAt = new Date('2026-08-12T00:06:00.000Z');
+        const binding: import('../src/model/endpoint-seat-binding').EndpointSeatBindingDoc = {
+            _id: fact.bindingId!,
+            domainId: 'system',
+            schoolId,
+            classroomId: fact.classroomId,
+            sourceSeatId: fact.sourceSeatId,
+            status: 'unbound',
+            revision: 2,
+            history: [
+                {
+                    revision: 1,
+                    action: 'bind',
+                    endpointId: fact.endpointId!,
+                    requestId: 'request_bind_0001',
+                    actorUid: 2,
+                    at: boundAt,
+                    pairingWindowId: new ObjectId('66bc0000000000000000000b'),
+                },
+                {
+                    revision: 2,
+                    action: 'unbind',
+                    previousEndpointId: fact.endpointId!,
+                    requestId: 'request_unbind_01',
+                    actorUid: 2,
+                    at: unboundAt,
+                    referenceFingerprint: 'f'.repeat(64),
+                },
+            ],
+            createdBy: 2,
+            createdAt: boundAt,
+            updatedBy: 2,
+            updatedAt: unboundAt,
+        };
+        expect(moduleUnderTest.seatFactMatchesBindingHistory('system', schoolId, fact, binding)).to.equal(true);
+
+        const wrongSchool = { ...binding, schoolId: new ObjectId('66bc0000000000000000000c') };
+        expect(moduleUnderTest.seatFactMatchesBindingHistory('system', schoolId, fact, wrongSchool)).to.equal(false);
+
+        const wrongEndpoint = { ...fact, endpointId: 'ep_wrong_endpoint' };
+        expect(moduleUnderTest.seatFactMatchesBindingHistory('system', schoolId, wrongEndpoint, binding)).to.equal(false);
+    });
+
+    it('validates v2 participant, constraint, and explanation references without assuming a manual prefix', () => {
+        const manualSubset = cloneValue(v2Assignment());
+        manualSubset.constraints.manualAssignments = [manualSubset.assignments[1]];
+        manualSubset.fingerprint = moduleUnderTest.assignmentDocumentFingerprint(manualSubset);
+        expect(() => moduleUnderTest.assertExamSeatAssignmentIntegrity(manualSubset)).not.to.throw();
+
+        const duplicateStudentRecord = cloneValue(v2Assignment());
+        duplicateStudentRecord.participants[1].studentRecordId = duplicateStudentRecord.participants[0].studentRecordId;
+        expect(() => moduleUnderTest.assertExamSeatAssignmentIntegrity(duplicateStudentRecord)).to.throw('assignment_participants_invalid');
+
+        const duplicateLock = cloneValue(v2Assignment());
+        duplicateLock.constraints.lockedAssignments = [duplicateLock.assignments[0], duplicateLock.assignments[0]];
+        expect(() => moduleUnderTest.assertExamSeatAssignmentIntegrity(duplicateLock)).to.throw('assignment_mapping_invalid');
+
+        const foreignExplanationSeat = cloneValue(v2Assignment());
+        foreignExplanationSeat.explanation.offlineSeats = [
+            { classroomId: foreignExplanationSeat.classrooms[0].classroomId, sourceSeatId: 'not-in-frozen-facts' },
+        ];
+        expect(() => moduleUnderTest.assertExamSeatAssignmentIntegrity(foreignExplanationSeat)).to.throw('assignment_explanation_invalid');
+    });
+
+    it('keeps v1 bytes valid and refuses to append a v1 revision after v2 history exists', async () => {
+        const rosterDoc = roster(2);
+        const v1 = plan(2, rosterDoc);
+        expect(Object.hasOwn(v1, 'schemaVersion')).to.equal(false);
+        expect(() => seatPlanModule.assertExamSeatPlanIntegrity(v1)).not.to.throw();
+        const revisions = new MemoryCollection<import('../src/model/exam-seat-assignment').ExamSeatAssignmentRevisionDoc>();
+        const publications = new MemoryCollection<import('../src/model/exam-seat-assignment').ExamSeatAssignmentPublicationDoc>();
+        revisions.docs.push(v2Assignment(rosterDoc));
+        const service = new moduleUnderTest.ExamSeatAssignmentService(
+            revisions as never,
+            publications as never,
+            () => new Date('2026-08-12T00:14:00.000Z'),
+        );
+        expect(
+            await failureReason(() =>
+                service.createRevision({
+                    domainId: 'system',
+                    eventId,
+                    eventRevision: 3,
+                    schoolId,
+                    actorUid: 2,
+                    expectedPreviousRevision: 2,
+                    roster: rosterDoc,
+                    seatPlan: v1,
+                    seatFacts: seatFacts(2),
+                    mode: 'random',
+                    seed: seedA,
+                    lockedAssignments: [],
+                    manualAssignments: [],
+                }),
+            ),
+        ).to.equal('assignment_v2_writer_required');
+        expect(revisions.docs).to.have.lengthOf(1);
+    });
+
+    it('strictly validates an unknown latest seat-plan schema before a legacy writer can classify it', async () => {
+        const rosters = new MemoryCollection<import('../src/model/exam-seat-plan').ExamRosterRevisionDoc>();
+        const plans = new MemoryCollection<import('../src/model/exam-seat-plan').ExamSeatPlanDoc>();
+        const unknown = { ...plan(2), revision: 2, schemaVersion: 3 };
+        plans.docs.push(unknown as never);
+        const service = new seatPlanModule.ExamSeatPlanService(rosters as never, plans as never);
+
+        expect(await failureReason(() => service.latestSeatPlanRevision('system', eventId))).to.equal('seat_plan_document_invalid');
     });
 });

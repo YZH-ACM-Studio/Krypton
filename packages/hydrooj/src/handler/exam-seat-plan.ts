@@ -3,6 +3,7 @@ import { ObjectId } from 'mongodb';
 import { Context, Handler, localizedErrorText, OplogModel, param, PermissionError, Types, ValidationError } from 'hydrooj';
 import { PERM } from '../model/builtin';
 import { examClassroomService } from '../model/exam-classroom';
+import { examSeatOperationalProfileService } from '../model/exam-seat-operational-profile';
 import { assertCanManageExamEvent, isExamInfrastructureAdmin } from '../model/exam-event-access';
 import { withExamEventBoundary } from '../model/exam-event-boundary';
 import { ExamEventDoc, examEventService } from '../model/exam-event';
@@ -14,6 +15,7 @@ import {
     ExamSeatPlanDoc,
     ExamSeatPlanError,
     examSeatPlanService,
+    isExamSeatPlanV2,
 } from '../model/exam-seat-plan';
 
 const logger = new Logger('exam-seat-plan');
@@ -82,8 +84,9 @@ function serializeRoster(roster: ExamRosterRevisionDoc, currentEventRevision: nu
 }
 
 function serializePlan(plan: ExamSeatPlanDoc, currentEventRevision: number) {
-    return {
+    const common = {
         seatPlanId: plan._id.toHexString(),
+        schemaVersion: isExamSeatPlanV2(plan) ? 2 : 1,
         eventId: plan.eventId.toHexString(),
         eventRevision: plan.eventRevision,
         staleEventRevision: plan.eventRevision !== currentEventRevision,
@@ -93,14 +96,30 @@ function serializePlan(plan: ExamSeatPlanDoc, currentEventRevision: number) {
         roster: plan.roster
             ? { rosterId: plan.roster.rosterId.toHexString(), revision: plan.roster.revision, fingerprint: plan.roster.fingerprint }
             : null,
-        classroomId: plan.classroomId.toHexString(),
-        layoutRevision: plan.layoutRevision,
-        layoutFingerprint: plan.layoutFingerprint,
-        candidateSeatIds: [...plan.candidateSeatIds],
         diagnostics: plan.diagnostics.map((diagnostic) => ({ ...diagnostic })),
         fingerprint: plan.fingerprint,
         createdAt: plan.createdAt.toISOString(),
         createdBy: plan.createdBy,
+    };
+    if (isExamSeatPlanV2(plan)) {
+        return {
+            ...common,
+            classrooms: plan.classrooms.map((classroom) => ({
+                classroomId: classroom.classroomId.toHexString(),
+                layoutRevision: classroom.layoutRevision,
+                layoutFingerprint: classroom.layoutFingerprint,
+                profileRevision: classroom.profileRevision,
+                profileFingerprint: classroom.profileFingerprint,
+                candidateSeatIds: [...classroom.candidateSeatIds],
+            })),
+        };
+    }
+    return {
+        ...common,
+        classroomId: plan.classroomId.toHexString(),
+        layoutRevision: plan.layoutRevision,
+        layoutFingerprint: plan.layoutFingerprint,
+        candidateSeatIds: [...plan.candidateSeatIds],
     };
 }
 
@@ -113,7 +132,12 @@ abstract class ExamSeatPlanBaseHandler extends Handler {
                 throw new PermissionError(PERM.PERM_USERBIND_MANAGE_STUDENTS);
             }
         }
-        await Promise.all([examEventService.ensureIndexes(), examClassroomService.ensureIndexes(), examSeatPlanService.ensureIndexes()]);
+        await Promise.all([
+            examEventService.ensureIndexes(),
+            examClassroomService.ensureIndexes(),
+            examSeatPlanService.ensureIndexes(),
+            examSeatOperationalProfileService.ensureIndexes(),
+        ]);
     }
 
     protected async event(eventId: ObjectId): Promise<ExamEventDoc> {
@@ -150,24 +174,50 @@ class ExamSeatPlanCollectionHandler extends ExamSeatPlanBaseHandler {
         for (const plan of plans) {
             assertExamSeatPlanIntegrity(plan);
             if (!plan.schoolId.equals(event.schoolId)) throw new ExamSeatPlanError('seat_plan_school_mismatch');
-            const classroom = await examClassroomService.get(event.domainId, plan.classroomId, true);
-            if (!classroom || !classroom.schoolId.equals(plan.schoolId)) throw new ExamSeatPlanError('seat_plan_classroom_missing');
-            const layout = examClassroomService.layout(classroom, plan.layoutRevision).snapshot;
-            if (layout.fingerprint !== plan.layoutFingerprint) throw new ExamSeatPlanError('seat_plan_layout_drift');
-            const seatIds = new Set(layout.seats.map((seat) => seat.sourceSeatId));
-            if (plan.candidateSeatIds.some((seatId) => !seatIds.has(seatId))) throw new ExamSeatPlanError('seat_plan_seat_missing');
+            const classroomRefs = isExamSeatPlanV2(plan)
+                ? plan.classrooms
+                : [
+                      {
+                          classroomId: plan.classroomId,
+                          layoutRevision: plan.layoutRevision,
+                          layoutFingerprint: plan.layoutFingerprint,
+                          profileRevision: null,
+                          profileFingerprint: null,
+                          candidateSeatIds: plan.candidateSeatIds,
+                      },
+                  ];
+            for (const classroomRef of classroomRefs) {
+                const classroom = await examClassroomService.get(event.domainId, classroomRef.classroomId, true);
+                if (!classroom || !classroom.schoolId.equals(plan.schoolId)) throw new ExamSeatPlanError('seat_plan_classroom_missing');
+                const layout = examClassroomService.layout(classroom, classroomRef.layoutRevision).snapshot;
+                if (layout.fingerprint !== classroomRef.layoutFingerprint) throw new ExamSeatPlanError('seat_plan_layout_drift');
+                const seatIds = new Set(layout.seats.map((seat) => seat.sourceSeatId));
+                if (classroomRef.candidateSeatIds.some((seatId) => !seatIds.has(seatId))) throw new ExamSeatPlanError('seat_plan_seat_missing');
+                if (classroomRef.profileRevision !== null) {
+                    const profile = await examSeatOperationalProfileService.getRevision(
+                        event.domainId,
+                        classroomRef.classroomId,
+                        classroomRef.layoutRevision,
+                        classroomRef.profileRevision,
+                    );
+                    if (!profile || profile.fingerprint !== classroomRef.profileFingerprint || !profile.schoolId.equals(plan.schoolId)) {
+                        throw new ExamSeatPlanError('seat_plan_profile_missing');
+                    }
+                }
+            }
+            const candidateCount = classroomRefs.reduce((sum, classroom) => sum + classroom.candidateSeatIds.length, 0);
             if (plan.roster) {
                 const roster = await examSeatPlanService.getRosterRevision(event.domainId, eventId, plan.roster.revision);
                 if (!roster || !roster._id.equals(plan.roster.rosterId) || roster.fingerprint !== plan.roster.fingerprint) {
                     throw new ExamSeatPlanError('seat_plan_roster_missing');
                 }
                 const expectedDiagnostics =
-                    roster.entries.length > plan.candidateSeatIds.length
+                    roster.entries.length > candidateCount
                         ? [
                               {
                                   code: 'insufficient_seats',
                                   requiredSeatCount: roster.entries.length,
-                                  availableSeatCount: plan.candidateSeatIds.length,
+                                  availableSeatCount: candidateCount,
                               },
                           ]
                         : [];

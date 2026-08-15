@@ -4,7 +4,7 @@ import { ExamNetworkConfigError, ExamTargetResolution, ExamTargetResolverInput }
 import { endpointEnrollmentBatchColl, endpointIdForMachineFingerprint, endpointRegistrationColl } from '../model/endpoint-enrollment';
 import { endpointSeatBindingService } from '../model/endpoint-seat-binding';
 import { examClassroomService } from '../model/exam-classroom';
-import { examSeatAssignmentService } from '../model/exam-seat-assignment';
+import { examSeatAssignmentService, isExamSeatAssignmentV2 } from '../model/exam-seat-assignment';
 import { preflightExamNetworkOnVigil } from '../service/vigil-bridge';
 
 function fingerprint(value: unknown): string {
@@ -84,6 +84,9 @@ export async function resolveExamTargetSources(input: ExamTargetResolverInput): 
                     !assignment.schoolId.equals(input.schoolId)
                 ) {
                     throw new ExamNetworkConfigError('exam_seat_assignment_changed');
+                }
+                if (isExamSeatAssignmentV2(assignment)) {
+                    throw new ExamNetworkConfigError('exam_seat_assignment_v2_not_enabled');
                 }
                 const classroom = await examClassroomService.get(input.domainId, assignment.classroomId);
                 if (!classroom || !classroom.schoolId.equals(input.schoolId)) {

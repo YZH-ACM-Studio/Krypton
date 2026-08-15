@@ -5,11 +5,11 @@ import { PERM } from './builtin';
 import { examClassroomService } from './exam-classroom';
 import { ExamPreloginPreparation } from './exam-prelogin';
 import { compileExamPreloginPreparation, ExamPreloginEndpointPreflight } from './exam-prelogin-resolver';
-import { assertExamSeatAssignmentIntegrity, examSeatAssignmentService } from './exam-seat-assignment';
+import { assertExamSeatAssignmentIntegrity, examSeatAssignmentService, isExamSeatAssignmentV2 } from './exam-seat-assignment';
 import type { ExamPreloginTicketDoc } from './exam-prelogin';
 import type { ExamEventDoc } from './exam-event';
 import { endpointSeatBindingService } from './endpoint-seat-binding';
-import { assertExamRosterRevisionIntegrity, assertExamSeatPlanIntegrity, examSeatPlanService } from './exam-seat-plan';
+import { assertExamRosterRevisionIntegrity, assertExamSeatPlanIntegrity, examSeatPlanService, isExamSeatPlanV2 } from './exam-seat-plan';
 import UserModel from './user';
 
 function compareText(left: string, right: string): number {
@@ -117,6 +117,7 @@ export async function loadExamPreloginPreparation(
     ]);
     if (!assignment) throw new TypeError('exam_prelogin_assignment_not_found');
     assertExamSeatAssignmentIntegrity(assignment);
+    if (isExamSeatAssignmentV2(assignment)) throw new TypeError('exam_prelogin_assignment_v2_not_enabled');
     if (
         !publication ||
         !publication.assignment.assignmentId.equals(assignment._id) ||
@@ -133,6 +134,7 @@ export async function loadExamPreloginPreparation(
     ]);
     if (!seatPlan || !roster || !classroom) throw new TypeError('exam_prelogin_assignment_reference_changed');
     assertExamSeatPlanIntegrity(seatPlan);
+    if (isExamSeatPlanV2(seatPlan)) throw new TypeError('exam_prelogin_assignment_reference_changed');
     assertExamRosterRevisionIntegrity(roster);
     const rosterUids = roster.entries.map((entry) => entry.boundUserId).sort((left, right) => left - right);
     const assignmentUids = assignment.assignments.map((entry) => entry.boundUserId).sort((left, right) => left - right);

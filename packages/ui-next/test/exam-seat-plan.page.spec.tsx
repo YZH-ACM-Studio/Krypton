@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BootstrapProvider, type KryptonBootstrap } from '../src/lib/bootstrap.tsx';
-import { ExamSeatPlanPage, assignmentCsv } from '../src/pages/exam-seat-plan.tsx';
+import { ExamSeatPlanPage, assignmentCsv, assignmentCsvV2 } from '../src/pages/exam-seat-plan.tsx';
 
 const EVENT_ID = '66b800000000000000000801';
 const objectIdFromIndex = (index: number) => index.toString(16).padStart(24, '0');
@@ -30,6 +30,7 @@ const PLAN_RESPONSE = {
   ],
   seatPlans: [
     {
+      schemaVersion: 1,
       seatPlanId: '66b800000000000000000805',
       revision: 4,
       roster: { rosterId: '66b800000000000000000804', revision: 2, fingerprint: 'a'.repeat(64) },
@@ -44,10 +45,15 @@ const PLAN_RESPONSE = {
 };
 
 const ASSIGNMENT = {
+  schemaVersion: 1,
   assignmentId: '66b800000000000000000807',
   revision: 1,
   seatPlan: { seatPlanId: '66b800000000000000000805', revision: 4, fingerprint: 'c'.repeat(64) },
   roster: { rosterId: '66b800000000000000000804', revision: 2, fingerprint: 'a'.repeat(64) },
+  classroomId: '66b800000000000000000806',
+  layoutRevision: 7,
+  layoutFingerprint: 'b'.repeat(64),
+  candidateSeatIds: ['seat-01', 'seat-02'],
   constraints: { mode: 'random', lockedAssignments: [], manualAssignments: [] },
   eligibleSeatIds: ['seat-01', 'seat-02'],
   assignments: [
@@ -63,12 +69,14 @@ const ASSIGNMENT_RESPONSE = {
   assignments: [ASSIGNMENT],
   publication: null,
   source: {
+    schemaVersion: 1,
     seatPlanRevision: 4,
     classroomId: '66b800000000000000000806',
     layoutRevision: 7,
     layoutFingerprint: 'b'.repeat(64),
     seats: [
       {
+        classroomId: '66b800000000000000000806',
         sourceSeatId: 'seat-01',
         label: 'A01',
         x: 0,
@@ -80,6 +88,7 @@ const ASSIGNMENT_RESPONSE = {
         endpointId: 'endpoint-01',
       },
       {
+        classroomId: '66b800000000000000000806',
         sourceSeatId: 'seat-02',
         label: 'A02',
         x: 1,
@@ -327,6 +336,175 @@ describe('p2.5 exam seat assignment workspace', () => {
     expect(screen.getByText('endpoint-01')).toBeInTheDocument();
     expect(screen.getByText('在线')).toBeInTheDocument();
     expect(screen.getByText('离线')).toBeInTheDocument();
+  });
+
+  it('reads a cross-classroom v2 revision without colliding identical source seat ids or enabling v1 mutations', async () => {
+    const firstClassroomId = '66b800000000000000000806';
+    const secondClassroomId = '66b800000000000000000816';
+    const classrooms = [firstClassroomId, secondClassroomId].map((classroomId, index) => ({
+      classroomId,
+      layoutRevision: 7 + index,
+      layoutFingerprint: String(index + 1).repeat(64),
+      profileRevision: 1,
+      profileFingerprint: String(index + 3).repeat(64),
+      candidateSeatIds: ['shared-seat'],
+    }));
+    const seatFacts = classrooms.map((classroom, index) => ({
+      classroomId: classroom.classroomId,
+      sourceSeatId: 'shared-seat',
+      label: index === 0 ? 'A-shared' : 'B-shared',
+      x: index,
+      y: 0,
+      width: null,
+      height: null,
+      rotation: 0,
+      layoutStatus: 'active',
+      enabled: true,
+      facing: index === 0 ? 'right' : 'left',
+      disabledReason: null,
+      bindingId: objectIdFromIndex(0x8a0 + index),
+      bindingRevision: index + 1,
+      endpointId: `endpoint-v2-${index + 1}`,
+      endpointOnline: true,
+    }));
+    const v2Plan = {
+      schemaVersion: 2,
+      seatPlanId: '66b800000000000000000905',
+      revision: 5,
+      roster: PLAN_RESPONSE.seatPlans[0].roster,
+      classrooms,
+      fingerprint: '8'.repeat(64),
+      diagnostics: [],
+    };
+    const v2Assignment = {
+      schemaVersion: 2,
+      assignmentId: '66b800000000000000000907',
+      revision: 2,
+      seatPlan: { seatPlanId: v2Plan.seatPlanId, revision: v2Plan.revision, fingerprint: v2Plan.fingerprint },
+      roster: PLAN_RESPONSE.seatPlans[0].roster,
+      classrooms,
+      participants: PLAN_RESPONSE.rosterRevisions[0].entries.map((entry, index) => ({
+        boundUserId: entry.boundUserId,
+        studentRecordId: objectIdFromIndex(0x8b0 + index),
+        studentId: entry.studentId,
+        teamId: null,
+        teamRole: null,
+      })),
+      seatFacts,
+      constraints: { strategy: 'maximizeSpacing', lockedAssignments: [], manualAssignments: [] },
+      assignments: PLAN_RESPONSE.rosterRevisions[0].entries.map((entry, index) => ({
+        boundUserId: entry.boundUserId,
+        seat: { classroomId: classrooms[index].classroomId, sourceSeatId: 'shared-seat' },
+      })),
+      explanation: {
+        classrooms: classrooms.map((classroom) => ({ classroomId: classroom.classroomId, assignedCount: 1, eligibleSeatCount: 1 })),
+        highRiskEdges: [],
+        mediumRiskEdges: [],
+        splitTeamIds: [],
+        skippedSeats: [],
+        offlineSeats: [],
+        unsetFacingSeats: [],
+      },
+      fingerprint: '9'.repeat(64),
+      published: true,
+    };
+    const plans = { ...PLAN_RESPONSE, seatPlans: [v2Plan] };
+    const assignments = {
+      ...ASSIGNMENT_RESPONSE,
+      assignments: [v2Assignment],
+      publication: {
+        revision: 4,
+        assignmentId: v2Assignment.assignmentId,
+        assignmentRevision: v2Assignment.revision,
+        assignmentFingerprint: v2Assignment.fingerprint,
+      },
+      source: {
+        schemaVersion: 2,
+        seatPlanRevision: v2Plan.revision,
+        seats: seatFacts.map((seat) => ({
+          classroomId: seat.classroomId,
+          sourceSeatId: seat.sourceSeatId,
+          label: seat.label,
+          status: seat.layoutStatus,
+          bindingId: seat.bindingId,
+          bindingRevision: seat.bindingRevision,
+          endpointId: seat.endpointId,
+        })),
+      },
+      endpointPreflight: {
+        state: 'available',
+        items: seatFacts.map((seat) => ({ endpointId: seat.endpointId, ready: true, online: true, reason: 'ready' })),
+      },
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith('/seat-plans')) return json(plans);
+        if (url.endsWith('/seat-assignments')) return json(assignments);
+        if (url.endsWith('/prelogin-latest')) return json({ batch: null });
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+    renderPage();
+
+    expect(await screen.findByText('A-shared')).toBeInTheDocument();
+    expect(screen.getByText('B-shared')).toBeInTheDocument();
+    expect(screen.getAllByText('v2 历史只读')).toHaveLength(2);
+    expect(screen.getByRole('button', { name: '随机分配' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '发布' })).toBeDisabled();
+    expect(screen.getByText(/P2.11 仅保证 v2 历史可读/)).toBeInTheDocument();
+    expect(
+      assignmentCsvV2(
+        seatFacts.map((seat, index) => ({
+          ...PLAN_RESPONSE.rosterRevisions[0].entries[index],
+          classroomId: seat.classroomId,
+          sourceSeatId: seat.sourceSeatId,
+          seatLabel: seat.label,
+          endpointId: seat.endpointId,
+        })),
+        2,
+      ),
+    ).toContain(`${secondClassroomId},B-shared,shared-seat,endpoint-v2-2,2`);
+  });
+
+  it('keeps every v1 mutation disabled when a v2 plan is newer than the displayed v1 assignment', async () => {
+    const legacyPlan = PLAN_RESPONSE.seatPlans[0];
+    const v2Plan = {
+      schemaVersion: 2,
+      seatPlanId: '66b800000000000000000908',
+      revision: legacyPlan.revision + 1,
+      roster: legacyPlan.roster,
+      classrooms: [
+        {
+          classroomId: legacyPlan.classroomId,
+          layoutRevision: legacyPlan.layoutRevision,
+          layoutFingerprint: legacyPlan.layoutFingerprint,
+          profileRevision: 1,
+          profileFingerprint: 'e'.repeat(64),
+          candidateSeatIds: legacyPlan.candidateSeatIds,
+        },
+      ],
+      fingerprint: 'f'.repeat(64),
+      diagnostics: [],
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith('/seat-plans')) return json({ ...PLAN_RESPONSE, seatPlans: [v2Plan, legacyPlan] });
+        if (url.endsWith('/seat-assignments')) return json(ASSIGNMENT_RESPONSE);
+        if (url.endsWith('/prelogin-latest')) return json({ batch: null });
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+    renderPage();
+
+    expect(await screen.findByText(/当前为跨教室座位协议 v2/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '随机分配' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '按学号分配' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '重新随机未锁定座位' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '发布' })).toBeDisabled();
   });
 
   it('keeps a displayed assignment tied to its exact roster and historical seat-plan source', async () => {
@@ -1158,15 +1336,41 @@ describe('p2.5 exam seat assignment workspace', () => {
     expect(
       assignmentCsv(
         [
-          { boundUserId: 21, studentId: '20260001', realName: '张三', sourceSeatId: 'seat-01', seatLabel: 'A01', endpointId: 'endpoint-01' },
-          { boundUserId: 22, studentId: '20260002', realName: '李四', sourceSeatId: 'seat-02', seatLabel: 'A02', endpointId: 'endpoint-02' },
+          {
+            boundUserId: 21,
+            studentId: '20260001',
+            realName: '张三',
+            classroomId: '66b800000000000000000806',
+            sourceSeatId: 'seat-01',
+            seatLabel: 'A01',
+            endpointId: 'endpoint-01',
+          },
+          {
+            boundUserId: 22,
+            studentId: '20260002',
+            realName: '李四',
+            classroomId: '66b800000000000000000806',
+            sourceSeatId: 'seat-02',
+            seatLabel: 'A02',
+            endpointId: 'endpoint-02',
+          },
         ],
         1,
       ),
     ).toContain('20260001,张三,A01,seat-01,endpoint-01,1');
     expect(
       assignmentCsv(
-        [{ boundUserId: 21, studentId: '=HYPERLINK("https://evil")', realName: '+cmd', sourceSeatId: '@seat', seatLabel: '-1', endpointId: '\tbad' }],
+        [
+          {
+            boundUserId: 21,
+            studentId: '=HYPERLINK("https://evil")',
+            realName: '+cmd',
+            classroomId: '66b800000000000000000806',
+            sourceSeatId: '@seat',
+            seatLabel: '-1',
+            endpointId: '\tbad',
+          },
+        ],
         1,
       ),
     ).toContain("'=HYPERLINK");

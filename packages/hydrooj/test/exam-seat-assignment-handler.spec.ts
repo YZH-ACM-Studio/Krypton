@@ -32,7 +32,12 @@ describe('P2.5 seat assignment HTTP boundary', () => {
         expect(source).to.include("nextMode = 'random'");
         expect(source).to.include('seed: latest?.seed || examSeatAssignmentService.newSeed()');
         expect(source).to.include('latest.seatPlan.seatPlanId.equals(source.seatPlan._id)');
-        expect(source).to.include('lockedAssignments: sameSeatPlan ? latest.constraints.lockedAssignments : []');
+        expect(source).to.include('let inheritedLocks: ExamSeatAssignmentMapping[] = []');
+        expect(source).to.include('lockedAssignments: inheritedLocks');
+        expect(source).to.include('await this.assertV1WriterEnabled(domainId, eventId)');
+        expect(source).to.include('examSeatPlanService.latestSeatPlanRevision(domainId, eventId)');
+        expect(source).to.include('latestSeatPlan && isExamSeatPlanV2(latestSeatPlan)');
+        expect(source).to.include("throw new ExamSeatAssignmentError('assignment_v2_writer_required')");
         expect(source).not.to.include("@param('seed'");
     });
 
@@ -43,6 +48,8 @@ describe('P2.5 seat assignment HTTP boundary', () => {
         expect(source).to.include('classroom.layoutRevision !== seatPlan.layoutRevision');
         expect(source).to.include('layout.fingerprint !== seatPlan.layoutFingerprint');
         expect(source).to.include('endpointSeatBindingService.listClassroomBindings');
+        expect(source).to.include('seatPlanMatchesAssignmentRoster(seatPlan, assignment)');
+        expect(source).to.include('seatFactMatchesBindingHistory(domainId, event.schoolId, fact, binding || null)');
         expect(source).to.include("binding.status === 'active'");
         expect(source).to.include('examSeatAssignmentService.createRevision');
     });
@@ -57,11 +64,14 @@ describe('P2.5 seat assignment HTTP boundary', () => {
     });
 
     it('renders an existing assignment from its exact historical seat-plan source instead of a newer draft plan', () => {
+        expect(source).to.include('isExamSeatAssignmentV2(assignments[0])');
+        expect(source).to.include('this.displaySourceFromV2(assignments[0])');
         expect(source).to.include('this.source(event, assignments[0].seatPlan.revision, false)');
-        expect(source).to.include('latestPlanSource = await this.source(event, seatPlans[0].revision, false)');
+        expect(source).to.include('if (isExamSeatPlanV2(latestPlan))');
+        expect(source).to.include('latestPlanSource = await this.source(event, latestPlan.revision, false)');
         expect(source).to.include("? 'current'");
         expect(source).to.include(": 'layout-drift'");
-        expect(source).to.include('else currentSource = latestPlanSource');
+        expect(source).to.include('else if (latestPlanSource) currentSource = this.displaySourceFromV1(latestPlanSource)');
     });
 
     it('blocks event school changes after assignment facts and logs only stable IDs/counts/fingerprints', () => {

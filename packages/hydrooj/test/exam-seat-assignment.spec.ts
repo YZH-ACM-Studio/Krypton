@@ -1,5 +1,6 @@
 import { expect } from 'chai';
-import { ObjectId } from 'mongodb';
+import { createHash } from 'node:crypto';
+import { BSON, ObjectId } from 'mongodb';
 import { describe, it } from 'node:test';
 
 function cloneValue<T>(value: T): T {
@@ -103,6 +104,7 @@ require.cache[dbPath] = {
 (global as unknown as { Hydro: { model: Record<string, unknown> } }).Hydro = { model: {} };
 const seatPlanModule = require('../src/model/exam-seat-plan.ts') as typeof import('../src/model/exam-seat-plan');
 const moduleUnderTest = require('../src/model/exam-seat-assignment.ts') as typeof import('../src/model/exam-seat-assignment');
+const spatialModule = require('../src/model/exam-seat-spatial-allocation.ts') as typeof import('../src/model/exam-seat-spatial-allocation');
 if (previousDbCache) require.cache[dbPath] = previousDbCache;
 else delete require.cache[dbPath];
 
@@ -274,6 +276,107 @@ function v2Assignment(rosterDoc = roster(2)): import('../src/model/exam-seat-ass
         createdBy: 2,
     };
     return { ...base, fingerprint: moduleUnderTest.assignmentDocumentFingerprint(base) };
+}
+
+function spatialPlan(
+    roomSeatCounts: number[],
+    rosterDoc: import('../src/model/exam-seat-plan').ExamRosterRevisionDoc,
+): import('../src/model/exam-seat-plan').ExamSeatPlanV2Doc {
+    const classrooms = roomSeatCounts.map((count, roomIndex) => ({
+        classroomId: new ObjectId(`66bc0000000000000001${(roomIndex + 1).toString(16).padStart(4, '0')}`),
+        layoutRevision: 1,
+        layoutFingerprint: (roomIndex + 1).toString(16).repeat(64).slice(0, 64),
+        profileRevision: 0,
+        profileFingerprint: (roomIndex + 9).toString(16).repeat(64).slice(0, 64),
+        candidateSeatIds: Array.from({ length: count }, (_, index) => `seat-${String(index + 1).padStart(3, '0')}`),
+    }));
+    const availableSeatCount = roomSeatCounts.reduce((sum, count) => sum + count, 0);
+    const base: Omit<import('../src/model/exam-seat-plan').ExamSeatPlanV2Doc, 'fingerprint'> = {
+        _id: new ObjectId('66bc00000000000000000030'),
+        schemaVersion: 2,
+        domainId: 'system',
+        eventId,
+        eventRevision: 3,
+        schoolId,
+        revision: 2,
+        auditRef: `exam-seat-plan:${eventId}:2`,
+        roster: { rosterId: rosterDoc._id, revision: rosterDoc.revision, fingerprint: rosterDoc.fingerprint },
+        classrooms,
+        diagnostics:
+            rosterDoc.entries.length > availableSeatCount
+                ? [{ code: 'insufficient_seats', requiredSeatCount: rosterDoc.entries.length, availableSeatCount }]
+                : [],
+        createdAt: new Date('2026-08-12T00:12:00.000Z'),
+        createdBy: 2,
+    };
+    return { ...base, fingerprint: seatPlanModule.planDocumentFingerprint(base) };
+}
+
+function spatialParticipants(
+    rosterDoc: import('../src/model/exam-seat-plan').ExamRosterRevisionDoc,
+    teamByUid: Map<number, { teamId: string; teamRole: 'captain' | 'member' }> = new Map(),
+): import('../src/model/exam-seat-assignment').ExamSeatAssignmentParticipantFact[] {
+    return rosterDoc.entries.map((entry) => ({
+        boundUserId: entry.boundUserId,
+        studentRecordId: entry.studentRecordId,
+        studentId: entry.studentId,
+        ...(teamByUid.get(entry.boundUserId) || { teamId: null, teamRole: null }),
+    }));
+}
+
+function spatialTeamParticipants(
+    rosterDoc: import('../src/model/exam-seat-plan').ExamRosterRevisionDoc,
+    teamSizes: number[],
+): import('../src/model/exam-seat-assignment').ExamSeatAssignmentParticipantFact[] {
+    const teamByUid = new Map<number, { teamId: string; teamRole: 'captain' | 'member' }>();
+    let entryIndex = 0;
+    for (let teamIndex = 0; teamIndex < teamSizes.length; teamIndex++) {
+        for (let memberIndex = 0; memberIndex < teamSizes[teamIndex]; memberIndex++) {
+            const entry = rosterDoc.entries[entryIndex++];
+            if (!entry) throw new Error('team fixture exceeds its roster');
+            teamByUid.set(entry.boundUserId, {
+                teamId: `team-${String.fromCharCode(97 + teamIndex)}`,
+                teamRole: memberIndex === 0 ? 'captain' : 'member',
+            });
+        }
+    }
+    if (entryIndex !== rosterDoc.entries.length) throw new Error('team fixture does not cover its roster');
+    return spatialParticipants(rosterDoc, teamByUid);
+}
+
+function spatialSeatFacts(
+    seatPlan: import('../src/model/exam-seat-plan').ExamSeatPlanV2Doc,
+    change: (
+        seat: import('../src/model/exam-seat-assignment').ExamSeatAssignmentV2SeatFact,
+        roomIndex: number,
+        seatIndex: number,
+    ) => Partial<import('../src/model/exam-seat-assignment').ExamSeatAssignmentV2SeatFact> = () => ({}),
+): import('../src/model/exam-seat-assignment').ExamSeatAssignmentV2SeatFact[] {
+    let factIndex = 0;
+    return seatPlan.classrooms.flatMap((classroom, roomIndex) =>
+        classroom.candidateSeatIds.map((sourceSeatId, seatIndex) => {
+            const base: import('../src/model/exam-seat-assignment').ExamSeatAssignmentV2SeatFact = {
+                classroomId: classroom.classroomId,
+                sourceSeatId,
+                label: `${roomIndex + 1}-${seatIndex + 1}`,
+                x: seatIndex % 25,
+                y: Math.floor(seatIndex / 25),
+                width: null,
+                height: null,
+                rotation: 0,
+                layoutStatus: 'empty',
+                enabled: true,
+                facing: 'unset',
+                disabledReason: null,
+                bindingId: new ObjectId(`66bc0000000000000002${factIndex.toString(16).padStart(4, '0')}`),
+                bindingRevision: 1,
+                endpointId: `ep_spatial_${String(factIndex).padStart(4, '0')}`,
+                endpointOnline: true,
+            };
+            factIndex += 1;
+            return { ...base, ...change(base, roomIndex, seatIndex) };
+        }),
+    );
 }
 
 function seatFacts(count: number, overrides: Record<string, Partial<import('../src/model/exam-seat-assignment').ExamAssignmentSeatFact>> = {}) {
@@ -843,5 +946,679 @@ describe('P2.11 reader-first v1/v2 compatibility', () => {
         const service = new seatPlanModule.ExamSeatPlanService(rosters as never, plans as never);
 
         expect(await failureReason(() => service.latestSeatPlanRevision('system', eventId))).to.equal('seat_plan_document_invalid');
+    });
+});
+
+describe('P2.12 deterministic spatial best-effort allocation', () => {
+    it('covers zero, one, and five hundred participants without dropping anyone', () => {
+        for (const count of [0, 1, 500]) {
+            const rosterDoc = roster(count);
+            const seatPlan = spatialPlan([Math.max(1, count)], rosterDoc);
+            const result = moduleUnderTest.buildExamSeatAssignmentV2({
+                roster: rosterDoc,
+                seatPlan,
+                participants: spatialParticipants(rosterDoc),
+                seatFacts: spatialSeatFacts(seatPlan),
+                strategy: 'minimizeClassrooms',
+                seed: seedA,
+                lockedAssignments: [],
+                manualAssignments: [],
+            });
+            expect(result.ok).to.equal(true);
+            expect(result.ok && result.assignments).to.have.lengthOf(count);
+            expect(result.ok && new Set(result.assignments.map((mapping) => mapping.boundUserId)).size).to.equal(count);
+            if (count === 500 && result.ok) {
+                expect(result.explanation.highRiskEdges.length + result.explanation.mediumRiskEdges.length).to.be.at.most(4_000);
+                expect(BSON.calculateObjectSize(result)).to.be.lessThan(16 * 1024 * 1024);
+            }
+        }
+    });
+
+    it('is byte-for-byte reproducible for one seed and uses the seed to break symmetric choices', () => {
+        const rosterDoc = roster(20);
+        const seatPlan = spatialPlan([10, 10], rosterDoc);
+        const input = {
+            roster: rosterDoc,
+            seatPlan,
+            participants: spatialParticipants(rosterDoc),
+            seatFacts: spatialSeatFacts(seatPlan),
+            strategy: 'maximizeSpacing' as const,
+            lockedAssignments: [],
+            manualAssignments: [],
+        };
+        const first = moduleUnderTest.buildExamSeatAssignmentV2({ ...input, seed: seedA });
+        const retry = moduleUnderTest.buildExamSeatAssignmentV2({ ...input, seed: seedA });
+        const rerandomized = moduleUnderTest.buildExamSeatAssignmentV2({ ...input, seed: seedB });
+        expect(first).to.deep.equal(retry);
+        expect(first.ok && rerandomized.ok && rerandomized.assignments).not.to.deep.equal(first.ok && first.assignments);
+    });
+
+    it('keeps the spatial-best-effort-v1 mapping and explanation golden stable', () => {
+        const rosterDoc = roster(7);
+        const seatPlan = spatialPlan([4, 4], rosterDoc);
+        const result = moduleUnderTest.buildExamSeatAssignmentV2({
+            roster: rosterDoc,
+            seatPlan,
+            participants: spatialTeamParticipants(rosterDoc, [3, 2, 2]),
+            seatFacts: spatialSeatFacts(seatPlan, (_seat, roomIndex, seatIndex) => ({
+                facing: (['left', 'right', 'up', 'down', 'unset'] as const)[(roomIndex * 4 + seatIndex) % 5],
+            })),
+            strategy: 'maximizeSpacing',
+            seed: '0123456789abcdef'.repeat(4),
+            lockedAssignments: [
+                { boundUserId: 101, seat: { classroomId: seatPlan.classrooms[0].classroomId, sourceSeatId: 'seat-001' } },
+            ],
+            manualAssignments: [],
+        });
+        expect(result.ok).to.equal(true);
+        expect(
+            result.ok &&
+                result.assignments.map(
+                    (mapping) =>
+                        `${mapping.boundUserId}@${mapping.seat.classroomId.toHexString()}/${mapping.seat.sourceSeatId}`,
+                ),
+        ).to.deep.equal([
+            '101@66bc00000000000000010001/seat-001',
+            '102@66bc00000000000000010001/seat-002',
+            '103@66bc00000000000000010001/seat-003',
+            '104@66bc00000000000000010002/seat-002',
+            '105@66bc00000000000000010002/seat-001',
+            '106@66bc00000000000000010002/seat-004',
+            '107@66bc00000000000000010002/seat-003',
+        ]);
+        expect(
+            result.ok && createHash('sha256').update(JSON.stringify(result.explanation), 'utf8').digest('hex'),
+        ).to.equal('90dc79e44cddbffe9758481b530a4e1945ad980a09277e095c88df5ad8b0b39c');
+    });
+
+    it('still assigns a full 99-of-99 room and explains unavoidable risk instead of rejecting it', () => {
+        const rosterDoc = roster(99);
+        const seatPlan = spatialPlan([99], rosterDoc);
+        const result = moduleUnderTest.buildExamSeatAssignmentV2({
+            roster: rosterDoc,
+            seatPlan,
+            participants: spatialParticipants(rosterDoc),
+            seatFacts: spatialSeatFacts(seatPlan),
+            strategy: 'minimizeClassrooms',
+            seed: seedA,
+            lockedAssignments: [],
+            manualAssignments: [],
+        });
+        expect(result.ok).to.equal(true);
+        expect(result.ok && result.assignments).to.have.lengthOf(99);
+        expect(result.ok && result.explanation.highRiskEdges.length).to.be.greaterThan(0);
+    });
+
+    it('skips disabled, invalid-layout, and unbound seats while retaining offline and unknown-online bound seats', () => {
+        const rosterDoc = roster(3);
+        const seatPlan = spatialPlan([6], rosterDoc);
+        const facts = spatialSeatFacts(seatPlan, (_seat, _roomIndex, seatIndex) => {
+            if (seatIndex === 0) return { enabled: false, disabledReason: 'computer_failure' };
+            if (seatIndex === 1) return { layoutStatus: 'decorative' };
+            if (seatIndex === 2) {
+                return { bindingId: null, bindingRevision: null, endpointId: null, endpointOnline: null };
+            }
+            if (seatIndex === 3) return { endpointOnline: false };
+            if (seatIndex === 4) return { endpointOnline: null };
+            return {};
+        });
+        const result = moduleUnderTest.buildExamSeatAssignmentV2({
+            roster: rosterDoc,
+            seatPlan,
+            participants: spatialParticipants(rosterDoc),
+            seatFacts: facts,
+            strategy: 'minimizeClassrooms',
+            seed: seedA,
+            lockedAssignments: [],
+            manualAssignments: [],
+        });
+        expect(result.ok).to.equal(true);
+        expect(result.ok && result.assignments).to.have.lengthOf(3);
+        expect(result.ok && result.explanation.skippedSeats.map((item) => item.reason)).to.deep.equal([
+            'disabled',
+            'layout_status',
+            'unbound',
+        ]);
+        expect(result.ok && result.explanation.offlineSeats).to.have.lengthOf(2);
+        expect(result.ok && result.seatFacts.find((seat) => seat.sourceSeatId === 'seat-005')?.endpointOnline).to.equal(null);
+    });
+
+    it('rejects coercible arrays and objects instead of accepting them as canonical enum strings', () => {
+        const rosterDoc = roster(1);
+        const seatPlan = spatialPlan([1], rosterDoc);
+        const malformedFacing = spatialSeatFacts(seatPlan);
+        (malformedFacing[0] as unknown as { facing: unknown }).facing = ['up'];
+        expect(() =>
+            moduleUnderTest.buildExamSeatAssignmentV2({
+                roster: rosterDoc,
+                seatPlan,
+                participants: spatialParticipants(rosterDoc),
+                seatFacts: malformedFacing,
+                strategy: 'minimizeClassrooms',
+                seed: seedA,
+                lockedAssignments: [],
+                manualAssignments: [],
+            }),
+        ).to.throw('assignment_seat_fact_invalid');
+
+        const malformedDisabledReason = spatialSeatFacts(seatPlan, () => ({ enabled: false, disabledReason: 'manual_reserve' }));
+        (malformedDisabledReason[0] as unknown as { disabledReason: unknown }).disabledReason = ['manual_reserve'];
+        expect(() =>
+            moduleUnderTest.buildExamSeatAssignmentV2({
+                roster: rosterDoc,
+                seatPlan,
+                participants: spatialParticipants(rosterDoc),
+                seatFacts: malformedDisabledReason,
+                strategy: 'minimizeClassrooms',
+                seed: seedA,
+                lockedAssignments: [],
+                manualAssignments: [],
+            }),
+        ).to.throw('assignment_seat_fact_invalid');
+
+        const malformedRiskReason = cloneValue(v2Assignment());
+        malformedRiskReason.explanation.highRiskEdges = [
+            {
+                left: malformedRiskReason.assignments[0].seat,
+                right: malformedRiskReason.assignments[1].seat,
+                distance: 1,
+                reason: ['unset_facing'] as unknown as 'unset_facing',
+            },
+        ];
+        expect(() => moduleUnderTest.assertExamSeatAssignmentIntegrity(malformedRiskReason)).to.throw('assignment_risk_edge_invalid');
+
+        const malformedSkippedReason = cloneValue(v2Assignment());
+        malformedSkippedReason.explanation.skippedSeats = [
+            {
+                seat: malformedSkippedReason.seatFacts[0],
+                reason: { toString: () => 'disabled' } as unknown as 'disabled',
+            },
+        ];
+        expect(() => moduleUnderTest.assertExamSeatAssignmentIntegrity(malformedSkippedReason)).to.throw(
+            'assignment_explanation_invalid',
+        );
+    });
+
+    it('classifies unset and same facing as high risk, perpendicular as medium, and opposite as safe', () => {
+        const cases = [
+            { facing: ['unset', 'right'] as const, high: 'unset_facing', medium: null },
+            { facing: ['right', 'right'] as const, high: 'same_facing', medium: null },
+            { facing: ['up', 'right'] as const, high: null, medium: 'perpendicular_facing' },
+            { facing: ['left', 'right'] as const, high: null, medium: null },
+        ];
+        for (const testCase of cases) {
+            const rosterDoc = roster(2);
+            const seatPlan = spatialPlan([2], rosterDoc);
+            const result = moduleUnderTest.buildExamSeatAssignmentV2({
+                roster: rosterDoc,
+                seatPlan,
+                participants: spatialParticipants(rosterDoc),
+                seatFacts: spatialSeatFacts(seatPlan, (_seat, _roomIndex, seatIndex) => ({ facing: testCase.facing[seatIndex] })),
+                strategy: 'minimizeClassrooms',
+                seed: seedA,
+                lockedAssignments: [],
+                manualAssignments: [],
+            });
+            expect(result.ok).to.equal(true);
+            expect(result.ok && result.explanation.highRiskEdges[0]?.reason).to.equal(testCase.high || undefined);
+            expect(result.ok && result.explanation.mediumRiskEdges[0]?.reason).to.equal(testCase.medium || undefined);
+        }
+    });
+
+    it('uses the fewest allowed rooms by default and spreads across more rooms when spacing is preferred', () => {
+        const rosterDoc = roster(2);
+        const seatPlan = spatialPlan([2, 2], rosterDoc);
+        const input = {
+            roster: rosterDoc,
+            seatPlan,
+            participants: spatialParticipants(rosterDoc),
+            seatFacts: spatialSeatFacts(seatPlan),
+            seed: seedA,
+            lockedAssignments: [],
+            manualAssignments: [],
+        };
+        const compact = moduleUnderTest.buildExamSeatAssignmentV2({ ...input, strategy: 'minimizeClassrooms' });
+        const spaced = moduleUnderTest.buildExamSeatAssignmentV2({ ...input, strategy: 'maximizeSpacing' });
+        expect(compact.ok && new Set(compact.assignments.map((mapping) => mapping.seat.classroomId.toHexString())).size).to.equal(1);
+        expect(spaced.ok && new Set(spaced.assignments.map((mapping) => mapping.seat.classroomId.toHexString())).size).to.equal(2);
+    });
+
+    it('compares spatial risk between bounded alternatives that use the same minimum room count', () => {
+        const rosterDoc = roster(2);
+        const seatPlan = spatialPlan([2, 2], rosterDoc);
+        const result = moduleUnderTest.buildExamSeatAssignmentV2({
+            roster: rosterDoc,
+            seatPlan,
+            participants: spatialParticipants(rosterDoc),
+            seatFacts: spatialSeatFacts(seatPlan, (_seat, roomIndex, seatIndex) => ({
+                facing: roomIndex === 0 ? 'unset' : seatIndex === 0 ? 'left' : 'right',
+            })),
+            strategy: 'minimizeClassrooms',
+            seed: '0'.repeat(64),
+            lockedAssignments: [],
+            manualAssignments: [],
+        });
+        expect(result.ok).to.equal(true);
+        expect(result.ok && new Set(result.assignments.map((mapping) => mapping.seat.classroomId.toHexString()))).to.deep.equal(
+            new Set([seatPlan.classrooms[1].classroomId.toHexString()]),
+        );
+        expect(result.ok && result.explanation.highRiskEdges).to.have.lengthOf(0);
+        expect(result.ok && result.explanation.mediumRiskEdges).to.have.lengthOf(0);
+    });
+
+    it('preserves valid locked and manual rows for every seed while filling the remaining participants', () => {
+        const rosterDoc = roster(4);
+        const seatPlan = spatialPlan([4], rosterDoc);
+        const spatialFacts = spatialSeatFacts(seatPlan);
+        const locked = { boundUserId: 101, seat: { classroomId: seatPlan.classrooms[0].classroomId, sourceSeatId: 'seat-001' } };
+        const manual = { boundUserId: 102, seat: { classroomId: seatPlan.classrooms[0].classroomId, sourceSeatId: 'seat-004' } };
+        for (const seed of [seedA, seedB]) {
+            const result = moduleUnderTest.buildExamSeatAssignmentV2({
+                roster: rosterDoc,
+                seatPlan,
+                participants: spatialParticipants(rosterDoc),
+                seatFacts: spatialFacts,
+                strategy: 'minimizeClassrooms',
+                seed,
+                lockedAssignments: [locked],
+                manualAssignments: [manual],
+            });
+            expect(result.ok).to.equal(true);
+            expect(result.ok && result.assignments.find((mapping) => mapping.boundUserId === 101)).to.deep.equal(locked);
+            expect(result.ok && result.assignments.find((mapping) => mapping.boundUserId === 102)).to.deep.equal(manual);
+            expect(result.ok && result.assignments).to.have.lengthOf(4);
+        }
+    });
+
+    it('clusters each team before isolating other teams and reports a lock-forced split', () => {
+        const rosterDoc = roster(6);
+        const seatPlan = spatialPlan([4, 4], rosterDoc);
+        const teamByUid = new Map<number, { teamId: string; teamRole: 'captain' | 'member' }>([
+            [101, { teamId: 'team-a', teamRole: 'captain' }],
+            [102, { teamId: 'team-a', teamRole: 'member' }],
+            [103, { teamId: 'team-a', teamRole: 'member' }],
+            [104, { teamId: 'team-b', teamRole: 'captain' }],
+            [105, { teamId: 'team-b', teamRole: 'member' }],
+            [106, { teamId: 'team-b', teamRole: 'member' }],
+        ]);
+        const participants = spatialParticipants(rosterDoc, teamByUid);
+        const spatialFacts = spatialSeatFacts(seatPlan);
+        const clustered = moduleUnderTest.buildExamSeatAssignmentV2({
+            roster: rosterDoc,
+            seatPlan,
+            participants,
+            seatFacts: spatialFacts,
+            strategy: 'maximizeSpacing',
+            seed: seedA,
+            lockedAssignments: [],
+            manualAssignments: [],
+        });
+        expect(clustered.ok).to.equal(true);
+        for (const teamId of ['team-a', 'team-b']) {
+            const uids = new Set(participants.filter((participant) => participant.teamId === teamId).map((participant) => participant.boundUserId));
+            expect(
+                clustered.ok &&
+                    new Set(
+                        clustered.assignments
+                            .filter((mapping) => uids.has(mapping.boundUserId))
+                            .map((mapping) => mapping.seat.classroomId.toHexString()),
+                    ).size,
+            ).to.equal(1);
+        }
+        expect(clustered.ok && clustered.explanation.splitTeamIds).to.deep.equal([]);
+
+        const forcedSplit = moduleUnderTest.buildExamSeatAssignmentV2({
+            roster: rosterDoc,
+            seatPlan,
+            participants,
+            seatFacts: spatialFacts,
+            strategy: 'maximizeSpacing',
+            seed: seedA,
+            lockedAssignments: [
+                { boundUserId: 101, seat: { classroomId: seatPlan.classrooms[0].classroomId, sourceSeatId: 'seat-001' } },
+                { boundUserId: 102, seat: { classroomId: seatPlan.classrooms[1].classroomId, sourceSeatId: 'seat-001' } },
+            ],
+            manualAssignments: [],
+        });
+        expect(forcedSplit.ok).to.equal(true);
+        expect(forcedSplit.ok && forcedSplit.explanation.splitTeamIds).to.deep.equal(['team-a']);
+    });
+
+    it('uses a feasible whole-team room packing before seat-level greed can fragment teams', () => {
+        for (const testCase of [
+            { capacities: [4, 3], teamSizes: [3, 2, 2], seed: 'b'.repeat(64) },
+            { capacities: [6, 4], teamSizes: [3, 3, 2, 2], seed: '0'.repeat(64) },
+        ]) {
+            const rosterDoc = roster(testCase.teamSizes.reduce((sum, size) => sum + size, 0));
+            const seatPlan = spatialPlan(testCase.capacities, rosterDoc);
+            const result = moduleUnderTest.buildExamSeatAssignmentV2({
+                roster: rosterDoc,
+                seatPlan,
+                participants: spatialTeamParticipants(rosterDoc, testCase.teamSizes),
+                seatFacts: spatialSeatFacts(seatPlan),
+                strategy: 'maximizeSpacing',
+                seed: testCase.seed,
+                lockedAssignments: [],
+                manualAssignments: [],
+            });
+            expect(result.ok).to.equal(true);
+            expect(result.ok && result.explanation.splitTeamIds).to.deep.equal([]);
+        }
+    });
+
+    it('keeps the maximum possible number of teams whole when some split is unavoidable', () => {
+        const rosterDoc = roster(8);
+        const seatPlan = spatialPlan([2, 2, 4], rosterDoc);
+        const result = moduleUnderTest.buildExamSeatAssignmentV2({
+            roster: rosterDoc,
+            seatPlan,
+            participants: spatialTeamParticipants(rosterDoc, [2, 3, 3]),
+            seatFacts: spatialSeatFacts(seatPlan),
+            strategy: 'maximizeSpacing',
+            seed: '01'.repeat(32),
+            lockedAssignments: [],
+            manualAssignments: [],
+        });
+        expect(result.ok).to.equal(true);
+        expect(result.ok && result.explanation.splitTeamIds).to.have.lengthOf(1);
+    });
+
+    it('packs partially fixed teams by completed-team count instead of team identifier order', () => {
+        const rosterDoc = roster(7);
+        const seatPlan = spatialPlan([5, 2], rosterDoc);
+        const result = moduleUnderTest.buildExamSeatAssignmentV2({
+            roster: rosterDoc,
+            seatPlan,
+            participants: spatialTeamParticipants(rosterDoc, [3, 2, 2]),
+            seatFacts: spatialSeatFacts(seatPlan),
+            strategy: 'maximizeSpacing',
+            seed: seedA,
+            lockedAssignments: [
+                { boundUserId: 101, seat: { classroomId: seatPlan.classrooms[0].classroomId, sourceSeatId: 'seat-001' } },
+                { boundUserId: 104, seat: { classroomId: seatPlan.classrooms[0].classroomId, sourceSeatId: 'seat-002' } },
+                { boundUserId: 106, seat: { classroomId: seatPlan.classrooms[0].classroomId, sourceSeatId: 'seat-003' } },
+            ],
+            manualAssignments: [],
+        });
+        expect(result.ok).to.equal(true);
+        expect(result.ok && result.explanation.splitTeamIds).to.deep.equal(['team-a']);
+    });
+
+    it('keeps different intact teams in separate rooms when maximize-spacing has room to do so', () => {
+        const rosterDoc = roster(4);
+        const seatPlan = spatialPlan([4, 4], rosterDoc);
+        const result = moduleUnderTest.buildExamSeatAssignmentV2({
+            roster: rosterDoc,
+            seatPlan,
+            participants: spatialTeamParticipants(rosterDoc, [2, 2]),
+            seatFacts: spatialSeatFacts(seatPlan),
+            strategy: 'maximizeSpacing',
+            seed: seedA,
+            lockedAssignments: [],
+            manualAssignments: [],
+        });
+        expect(result.ok).to.equal(true);
+        expect(result.ok && result.explanation.splitTeamIds).to.deep.equal([]);
+        expect(
+            result.ok &&
+                new Set(result.assignments.map((assignment) => assignment.seat.classroomId.toHexString())).size,
+        ).to.equal(2);
+        expect(result.ok && result.explanation.highRiskEdges).to.have.lengthOf(0);
+    });
+
+    it('persists the complete bounded local-neighbor risk graph for dense layouts', () => {
+        const rosterDoc = roster(20);
+        const seatPlan = spatialPlan([20], rosterDoc);
+        const manualAssignments = rosterDoc.entries.map((entry, index) => ({
+            boundUserId: entry.boundUserId,
+            seat: { classroomId: seatPlan.classrooms[0].classroomId, sourceSeatId: `seat-${String(index + 1).padStart(3, '0')}` },
+        }));
+        const result = moduleUnderTest.buildExamSeatAssignmentV2({
+            roster: rosterDoc,
+            seatPlan,
+            participants: spatialParticipants(rosterDoc),
+            seatFacts: spatialSeatFacts(seatPlan, () => ({ x: 0, y: 0, facing: 'unset' })),
+            strategy: 'maximizeSpacing',
+            seed: seedA,
+            lockedAssignments: [],
+            manualAssignments,
+        });
+        expect(result.ok).to.equal(true);
+        expect(result.ok && result.explanation.highRiskEdges).to.have.lengthOf(124);
+    });
+
+    it('uses irregular geometry and seat size to avoid a nearby pair across the candidate layout', () => {
+        const rosterDoc = roster(2);
+        const seatPlan = spatialPlan([4], rosterDoc);
+        const coordinates = [0, 1, 10, 11];
+        const result = moduleUnderTest.buildExamSeatAssignmentV2({
+            roster: rosterDoc,
+            seatPlan,
+            participants: spatialParticipants(rosterDoc),
+            seatFacts: spatialSeatFacts(seatPlan, (_seat, _roomIndex, seatIndex) => ({
+                x: coordinates[seatIndex],
+                width: seatIndex % 2 === 0 ? 0.5 : 1,
+                height: 1,
+                facing: 'unset',
+            })),
+            strategy: 'maximizeSpacing',
+            seed: seedA,
+            lockedAssignments: [],
+            manualAssignments: [],
+        });
+        expect(result.ok).to.equal(true);
+        expect(result.ok && result.explanation.highRiskEdges).to.have.lengthOf(0);
+    });
+
+    it('uses seat footprint scale so a wide aisle lowers risk even in a two-seat room', () => {
+        const rosterDoc = roster(2);
+        const seatPlan = spatialPlan([2], rosterDoc);
+        const buildAtDistance = (distance: number) =>
+            moduleUnderTest.buildExamSeatAssignmentV2({
+                roster: rosterDoc,
+                seatPlan,
+                participants: spatialParticipants(rosterDoc),
+                seatFacts: spatialSeatFacts(seatPlan, (_seat, _roomIndex, seatIndex) => ({
+                    x: seatIndex * distance,
+                    width: 1,
+                    height: 1,
+                    facing: 'unset',
+                })),
+                strategy: 'minimizeClassrooms',
+                seed: seedA,
+                lockedAssignments: [],
+                manualAssignments: [],
+            });
+        const adjacent = buildAtDistance(1);
+        const acrossWideAisle = buildAtDistance(100);
+        expect(adjacent.ok && adjacent.explanation.highRiskEdges).to.have.lengthOf(1);
+        expect(acrossWideAisle.ok && acrossWideAisle.explanation.highRiskEdges).to.have.lengthOf(0);
+    });
+
+    it('returns only capacity and fixed-constraint hard failures without persisting a partial mapping', () => {
+        const rosterDoc = roster(3);
+        const shortPlan = spatialPlan([2], rosterDoc);
+        const shortage = moduleUnderTest.buildExamSeatAssignmentV2({
+            roster: rosterDoc,
+            seatPlan: shortPlan,
+            participants: spatialParticipants(rosterDoc),
+            seatFacts: spatialSeatFacts(shortPlan),
+            strategy: 'minimizeClassrooms',
+            seed: seedA,
+            lockedAssignments: [],
+            manualAssignments: [],
+        });
+        expect(shortage.ok).to.equal(false);
+        expect(!shortage.ok && shortage.diagnostics).to.deep.equal([
+            { code: 'insufficient_seats', requiredSeatCount: 3, availableSeatCount: 2 },
+        ]);
+
+        const enoughPlan = spatialPlan([3], rosterDoc);
+        const facts = spatialSeatFacts(enoughPlan, (_seat, _roomIndex, seatIndex) =>
+            seatIndex === 0 ? { enabled: false, disabledReason: 'manual_reserve' } : {},
+        );
+        const invalidLock = moduleUnderTest.buildExamSeatAssignmentV2({
+            roster: rosterDoc,
+            seatPlan: enoughPlan,
+            participants: spatialParticipants(rosterDoc),
+            seatFacts: facts,
+            strategy: 'minimizeClassrooms',
+            seed: seedA,
+            lockedAssignments: [
+                { boundUserId: 101, seat: { classroomId: enoughPlan.classrooms[0].classroomId, sourceSeatId: 'seat-001' } },
+            ],
+            manualAssignments: [],
+        });
+        expect(invalidLock.ok).to.equal(false);
+        expect(!invalidLock.ok && invalidLock.diagnostics).to.deep.equal([
+            {
+                code: 'seat_skipped',
+                seats: [
+                    {
+                        seat: { classroomId: enoughPlan.classrooms[0].classroomId, sourceSeatId: 'seat-001' },
+                        reason: 'disabled',
+                    },
+                ],
+            },
+            { code: 'insufficient_seats', requiredSeatCount: 3, availableSeatCount: 2 },
+            { code: 'constraint_conflict', reasons: ['locked_seat_unavailable'] },
+        ]);
+    });
+
+    it('writes immutable v2 revisions with CAS and rejects a false mapping or explanation at publication', async () => {
+        const rosterDoc = roster(4);
+        const rosters = new MemoryCollection<import('../src/model/exam-seat-plan').ExamRosterRevisionDoc>();
+        const plans = new MemoryCollection<import('../src/model/exam-seat-plan').ExamSeatPlanDoc>();
+        rosters.docs.push(rosterDoc);
+        plans.docs.push(plan(4, rosterDoc));
+        const planTemplate = spatialPlan([3, 3], rosterDoc);
+        const planService = new seatPlanModule.ExamSeatPlanService(
+            rosters as never,
+            plans as never,
+            () => new Date('2026-08-12T00:13:00.000Z'),
+            () => new ObjectId('66bc00000000000000000031'),
+        );
+        const seatPlan = await planService.createSeatPlanV2({
+            domainId: 'system',
+            eventId,
+            eventRevision: 3,
+            schoolId,
+            actorUid: 2,
+            expectedPreviousRevision: 1,
+            roster: rosterDoc,
+            classrooms: [...planTemplate.classrooms].reverse(),
+            requireRoster: true,
+        });
+        expect(seatPlan.revision).to.equal(2);
+        expect(seatPlan.classrooms.map((classroom) => classroom.classroomId.toHexString())).to.deep.equal(
+            [...seatPlan.classrooms.map((classroom) => classroom.classroomId.toHexString())].sort(),
+        );
+        expect(
+            await failureReason(() =>
+                planService.createSeatPlanV2({
+                    domainId: 'system',
+                    eventId,
+                    eventRevision: 3,
+                    schoolId,
+                    actorUid: 2,
+                    expectedPreviousRevision: 1,
+                    roster: rosterDoc,
+                    classrooms: planTemplate.classrooms,
+                    requireRoster: true,
+                }),
+            ),
+        ).to.equal('seat_plan_revision_conflict');
+
+        const revisions = new MemoryCollection<import('../src/model/exam-seat-assignment').ExamSeatAssignmentRevisionDoc>();
+        const publications = new MemoryCollection<import('../src/model/exam-seat-assignment').ExamSeatAssignmentPublicationDoc>();
+        const service = new moduleUnderTest.ExamSeatAssignmentService(
+            revisions as never,
+            publications as never,
+            () => new Date('2026-08-12T00:14:00.000Z'),
+            () => new ObjectId('66bc00000000000000000032'),
+        );
+        const assignmentSeatFacts = spatialSeatFacts(seatPlan, (_seat, roomIndex, seatIndex) =>
+            roomIndex === 0 && seatIndex === 0 ? { enabled: false, disabledReason: 'manual_reserve' } : {},
+        );
+        const created = await service.createRevisionV2({
+            domainId: 'system',
+            eventId,
+            eventRevision: 3,
+            schoolId,
+            actorUid: 2,
+            expectedPreviousRevision: 0,
+            roster: rosterDoc,
+            seatPlan,
+            participants: spatialParticipants(rosterDoc),
+            seatFacts: assignmentSeatFacts,
+            strategy: 'maximizeSpacing',
+            seed: seedA,
+            lockedAssignments: [],
+            manualAssignments: [],
+        });
+        expect(created.assignment?.schemaVersion).to.equal(2);
+        expect(created.assignment?.assignments).to.have.lengthOf(4);
+        expect(revisions.docs).to.have.lengthOf(1);
+        expect(
+            await failureReason(() =>
+                service.createRevisionV2({
+                    domainId: 'system',
+                    eventId,
+                    eventRevision: 3,
+                    schoolId,
+                    actorUid: 2,
+                    expectedPreviousRevision: 0,
+                    roster: rosterDoc,
+                    seatPlan,
+                    participants: spatialParticipants(rosterDoc),
+                    seatFacts: assignmentSeatFacts,
+                    strategy: 'maximizeSpacing',
+                    seed: seedA,
+                    lockedAssignments: [],
+                    manualAssignments: [],
+                }),
+            ),
+        ).to.equal('assignment_revision_conflict');
+
+        const forgedExplanation = cloneValue(created.assignment!);
+        forgedExplanation.explanation.skippedSeats = [];
+        forgedExplanation.fingerprint = moduleUnderTest.assignmentDocumentFingerprint(forgedExplanation);
+        revisions.docs[0] = forgedExplanation;
+        expect(
+            await failureReason(() =>
+                service.publishRevision({
+                    domainId: 'system',
+                    eventId,
+                    assignmentRevision: 1,
+                    expectedPublicationRevision: 0,
+                    actorUid: 2,
+                }),
+            ),
+        ).to.equal('assignment_algorithm_result_mismatch');
+
+        const forgedMapping = cloneValue(created.assignment!);
+        [forgedMapping.assignments[0].seat, forgedMapping.assignments[1].seat] = [
+            forgedMapping.assignments[1].seat,
+            forgedMapping.assignments[0].seat,
+        ];
+        forgedMapping.explanation = spatialModule.explainExamSeatSpatialAllocation({
+            classrooms: forgedMapping.classrooms,
+            participants: forgedMapping.participants,
+            seatFacts: forgedMapping.seatFacts,
+            assignments: forgedMapping.assignments,
+        });
+        forgedMapping.fingerprint = moduleUnderTest.assignmentDocumentFingerprint(forgedMapping);
+        revisions.docs[0] = forgedMapping;
+        expect(
+            await failureReason(() =>
+                service.publishRevision({
+                    domainId: 'system',
+                    eventId,
+                    assignmentRevision: 1,
+                    expectedPublicationRevision: 0,
+                    actorUid: 2,
+                }),
+            ),
+        ).to.equal('assignment_algorithm_result_mismatch');
     });
 });

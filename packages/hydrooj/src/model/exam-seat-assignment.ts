@@ -11,10 +11,13 @@ import {
     ExamSeatPlanClassroomRef,
     ExamSeatPlanV1Doc,
     ExamSeatPlanV2Doc,
+    isExamSeatPlanV2,
 } from './exam-seat-plan';
+import { allocateExamSeatsSpatially } from './exam-seat-spatial-allocation';
 
 export const EXAM_SEAT_ASSIGNMENT_ALGORITHM = 'hmac-sha256-fisher-yates-v1' as const;
 export const EXAM_SEAT_ASSIGNMENT_V2_ALGORITHM = 'spatial-best-effort-v1' as const;
+const EXAM_SEAT_ASSIGNMENT_V2_READER_MAX_RISK_EDGES = 10_000;
 
 export type ExamSeatAssignmentMode = 'random' | 'studentId';
 
@@ -35,6 +38,13 @@ export type ExamSeatAssignmentDiagnostic =
     | { code: 'seat_disabled' | 'seat_status_invalid' | 'seat_unbound'; sourceSeatIds: string[] }
     | { code: 'insufficient_seats'; requiredSeatCount: number; availableSeatCount: number }
     | { code: 'constraint_conflict'; reasons: string[] };
+
+export type ExamSeatAssignmentV2Diagnostic =
+    | ExamSeatAssignmentDiagnostic
+    | {
+          code: 'seat_skipped';
+          seats: Array<{ seat: ExamSeatIdentity; reason: 'disabled' | 'layout_status' | 'unbound' }>;
+      };
 
 export interface ExamSeatAssignmentConstraints {
     mode: ExamSeatAssignmentMode;
@@ -219,6 +229,18 @@ export type ExamSeatAssignmentBuildResult =
           constraints: ExamSeatAssignmentConstraints;
           diagnostics: ExamSeatAssignmentDiagnostic[];
           eligibleSeatIds: string[];
+      };
+
+export type ExamSeatAssignmentV2BuildResult =
+    | { ok: false; diagnostics: ExamSeatAssignmentV2Diagnostic[] }
+    | {
+          ok: true;
+          participants: ExamSeatAssignmentParticipantFact[];
+          seatFacts: ExamSeatAssignmentV2SeatFact[];
+          constraints: ExamSeatAssignmentV2Doc['constraints'];
+          assignments: ExamSeatAssignmentV2Mapping[];
+          explanation: ExamSeatAssignmentV2Explanation;
+          diagnostics: ExamSeatAssignmentV2Diagnostic[];
       };
 
 type AssignmentCollection<T extends { _id: ObjectId }> = Pick<
@@ -535,29 +557,7 @@ export function assignmentDocumentFingerprint(doc: ExamSeatAssignmentWithoutFing
                 manualAssignments: doc.constraints.manualAssignments.map(v2MappingFingerprintFact),
             },
             assignments: doc.assignments.map(v2MappingFingerprintFact),
-            explanation: {
-                classrooms: doc.explanation.classrooms.map((classroom) => ({
-                    classroomId: classroom.classroomId.toHexString(),
-                    assignedCount: classroom.assignedCount,
-                    eligibleSeatCount: classroom.eligibleSeatCount,
-                })),
-                highRiskEdges: doc.explanation.highRiskEdges.map((edge) => ({
-                    left: seatIdentityFingerprintFact(edge.left),
-                    right: seatIdentityFingerprintFact(edge.right),
-                    distance: edge.distance,
-                    reason: edge.reason,
-                })),
-                mediumRiskEdges: doc.explanation.mediumRiskEdges.map((edge) => ({
-                    left: seatIdentityFingerprintFact(edge.left),
-                    right: seatIdentityFingerprintFact(edge.right),
-                    distance: edge.distance,
-                    reason: edge.reason,
-                })),
-                splitTeamIds: doc.explanation.splitTeamIds,
-                skippedSeats: doc.explanation.skippedSeats.map((item) => ({ seat: seatIdentityFingerprintFact(item.seat), reason: item.reason })),
-                offlineSeats: doc.explanation.offlineSeats.map(seatIdentityFingerprintFact),
-                unsetFacingSeats: doc.explanation.unsetFacingSeats.map(seatIdentityFingerprintFact),
-            },
+            explanation: explanationFingerprintFact(doc.explanation),
         });
     }
     return sha256({
@@ -878,6 +878,10 @@ function finiteNumber(value: unknown, field: string, minimum = -1_000_000, maxim
     return value;
 }
 
+function isStringEnum<T extends string>(value: unknown, allowed: readonly T[]): value is T {
+    return typeof value === 'string' && allowed.includes(value as T);
+}
+
 function canonicalV2SeatFact(value: unknown): ExamSeatAssignmentV2SeatFact {
     const seat = exactObject(
         value,
@@ -902,17 +906,27 @@ function canonicalV2SeatFact(value: unknown): ExamSeatAssignmentV2SeatFact {
         'assignment_seat_fact_invalid',
     );
     const identity = canonicalSeatIdentity({ classroomId: seat.classroomId, sourceSeatId: seat.sourceSeatId });
-    if (typeof seat.enabled !== 'boolean' || !['down', 'left', 'right', 'unset', 'up'].includes(String(seat.facing))) {
+    if (
+        typeof seat.enabled !== 'boolean' ||
+        !isStringEnum<ExamSeatFacing>(seat.facing, ['down', 'left', 'right', 'unset', 'up'])
+    ) {
         throw new ExamSeatAssignmentError('assignment_seat_fact_invalid');
     }
     let disabledReason: ExamSeatDisabledReason | null = null;
     if (seat.enabled) {
         if (seat.disabledReason !== null) throw new ExamSeatAssignmentError('assignment_seat_fact_invalid');
     } else {
-        if (!['client_incompatible', 'computer_failure', 'manual_reserve', 'physical_seat_unavailable'].includes(String(seat.disabledReason))) {
+        if (
+            !isStringEnum<ExamSeatDisabledReason>(seat.disabledReason, [
+                'client_incompatible',
+                'computer_failure',
+                'manual_reserve',
+                'physical_seat_unavailable',
+            ])
+        ) {
             throw new ExamSeatAssignmentError('assignment_seat_fact_invalid');
         }
-        disabledReason = seat.disabledReason as ExamSeatDisabledReason;
+        disabledReason = seat.disabledReason;
     }
     const nullBinding = seat.bindingId === null && seat.bindingRevision === null && seat.endpointId === null && seat.endpointOnline === null;
     const completeBinding =
@@ -935,7 +949,7 @@ function canonicalV2SeatFact(value: unknown): ExamSeatAssignmentV2SeatFact {
         rotation: finiteNumber(seat.rotation, 'seat_rotation', -360, 360),
         layoutStatus: canonicalText(seat.layoutStatus, 'seat_status', 64),
         enabled: seat.enabled,
-        facing: seat.facing as ExamSeatFacing,
+        facing: seat.facing,
         disabledReason,
         bindingId: seat.bindingId === null ? null : new ObjectId(seat.bindingId as ObjectId),
         bindingRevision: seat.bindingRevision as number | null,
@@ -946,13 +960,19 @@ function canonicalV2SeatFact(value: unknown): ExamSeatAssignmentV2SeatFact {
 
 function canonicalRiskEdge(value: unknown): ExamSeatAssignmentRiskEdge {
     const edge = exactObject(value, ['distance', 'left', 'reason', 'right'], 'assignment_risk_edge_invalid');
-    if (!['perpendicular_facing', 'same_facing', 'unset_facing'].includes(String(edge.reason))) {
+    if (
+        !isStringEnum<ExamSeatAssignmentRiskEdge['reason']>(edge.reason, [
+            'perpendicular_facing',
+            'same_facing',
+            'unset_facing',
+        ])
+    ) {
         throw new ExamSeatAssignmentError('assignment_risk_edge_invalid');
     }
     const left = canonicalSeatIdentity(edge.left);
     const right = canonicalSeatIdentity(edge.right);
     if (canonicalCompare(seatIdentityKey(left), seatIdentityKey(right)) >= 0) throw new ExamSeatAssignmentError('assignment_risk_edge_invalid');
-    return { left, right, distance: finiteNumber(edge.distance, 'risk_distance', 0), reason: edge.reason as ExamSeatAssignmentRiskEdge['reason'] };
+    return { left, right, distance: finiteNumber(edge.distance, 'risk_distance', 0), reason: edge.reason };
 }
 
 function canonicalExplanation(value: unknown, classrooms: ExamSeatPlanClassroomRef[]): ExamSeatAssignmentV2Explanation {
@@ -985,7 +1005,9 @@ function canonicalExplanation(value: unknown, classrooms: ExamSeatPlanClassroomR
         throw new ExamSeatAssignmentError('assignment_explanation_invalid');
     }
     const edgeList = (input: unknown, field: string): ExamSeatAssignmentRiskEdge[] => {
-        if (!Array.isArray(input) || input.length > 10_000) throw new ExamSeatAssignmentError('assignment_explanation_invalid');
+        if (!Array.isArray(input) || input.length > EXAM_SEAT_ASSIGNMENT_V2_READER_MAX_RISK_EDGES) {
+            throw new ExamSeatAssignmentError('assignment_explanation_invalid');
+        }
         const edges = input.map(canonicalRiskEdge);
         const keys = edges.map((edge) => `${seatIdentityKey(edge.left)}\u0001${seatIdentityKey(edge.right)}\u0001${edge.reason}`);
         if (new Set(keys).size !== keys.length || [...keys].sort(canonicalCompare).some((key, index) => key !== keys[index])) {
@@ -1017,10 +1039,10 @@ function canonicalExplanation(value: unknown, classrooms: ExamSeatPlanClassroomR
     }
     const skippedSeats = explanation.skippedSeats.map((item) => {
         const row = exactObject(item, ['reason', 'seat'], 'assignment_explanation_invalid');
-        if (!['disabled', 'layout_status', 'unbound'].includes(String(row.reason))) {
+        if (!isStringEnum(row.reason, ['disabled', 'layout_status', 'unbound'] as const)) {
             throw new ExamSeatAssignmentError('assignment_explanation_invalid');
         }
-        return { seat: canonicalSeatIdentity(row.seat), reason: row.reason as 'disabled' | 'layout_status' | 'unbound' };
+        return { seat: canonicalSeatIdentity(row.seat), reason: row.reason };
     });
     const skippedKeys = skippedSeats.map((item) => seatIdentityKey(item.seat));
     if (
@@ -1037,6 +1059,213 @@ function canonicalExplanation(value: unknown, classrooms: ExamSeatPlanClassroomR
         skippedSeats,
         offlineSeats: seatList(explanation.offlineSeats, 'assignment_offline_seats'),
         unsetFacingSeats: seatList(explanation.unsetFacingSeats, 'assignment_unset_facing_seats'),
+    };
+}
+
+function v2MappingConflictReasons(rows: ExamSeatAssignmentV2Mapping[]): string[] {
+    const reasons: string[] = [];
+    if (new Set(rows.map((row) => row.boundUserId)).size !== rows.length) reasons.push('duplicate_uid');
+    if (new Set(rows.map((row) => seatIdentityKey(row.seat))).size !== rows.length) reasons.push('duplicate_seat');
+    return reasons;
+}
+
+function mergeFixedV2Mappings(
+    lockedAssignments: ExamSeatAssignmentV2Mapping[],
+    manualAssignments: ExamSeatAssignmentV2Mapping[],
+): ExamSeatAssignmentV2Mapping[] {
+    const fixed = new Map<number, ExamSeatAssignmentV2Mapping>();
+    for (const mapping of [...lockedAssignments, ...manualAssignments]) fixed.set(mapping.boundUserId, mapping);
+    return [...fixed.values()].sort((left, right) => left.boundUserId - right.boundUserId);
+}
+
+function explanationFingerprintFact(explanation: ExamSeatAssignmentV2Explanation) {
+    return {
+        classrooms: explanation.classrooms.map((classroom) => ({
+            classroomId: classroom.classroomId.toHexString(),
+            assignedCount: classroom.assignedCount,
+            eligibleSeatCount: classroom.eligibleSeatCount,
+        })),
+        highRiskEdges: explanation.highRiskEdges.map((edge) => ({
+            left: seatIdentityFingerprintFact(edge.left),
+            right: seatIdentityFingerprintFact(edge.right),
+            distance: edge.distance,
+            reason: edge.reason,
+        })),
+        mediumRiskEdges: explanation.mediumRiskEdges.map((edge) => ({
+            left: seatIdentityFingerprintFact(edge.left),
+            right: seatIdentityFingerprintFact(edge.right),
+            distance: edge.distance,
+            reason: edge.reason,
+        })),
+        splitTeamIds: explanation.splitTeamIds,
+        skippedSeats: explanation.skippedSeats.map((item) => ({ seat: seatIdentityFingerprintFact(item.seat), reason: item.reason })),
+        offlineSeats: explanation.offlineSeats.map(seatIdentityFingerprintFact),
+        unsetFacingSeats: explanation.unsetFacingSeats.map(seatIdentityFingerprintFact),
+    };
+}
+
+export function buildExamSeatAssignmentV2(input: {
+    roster: ExamRosterRevisionDoc;
+    seatPlan: ExamSeatPlanV2Doc;
+    participants: ExamSeatAssignmentParticipantFact[];
+    seatFacts: ExamSeatAssignmentV2SeatFact[];
+    strategy: ExamSeatAssignmentStrategy;
+    seed: string;
+    lockedAssignments: ExamSeatAssignmentV2Mapping[];
+    manualAssignments: ExamSeatAssignmentV2Mapping[];
+}): ExamSeatAssignmentV2BuildResult {
+    assertExamRosterRevisionIntegrity(input.roster);
+    assertExamSeatPlanIntegrity(input.seatPlan);
+    if (!isExamSeatPlanV2(input.seatPlan)) throw new ExamSeatAssignmentError('assignment_v2_plan_required');
+    if (
+        !input.seatPlan.roster ||
+        !input.seatPlan.roster.rosterId.equals(input.roster._id) ||
+        input.seatPlan.roster.revision !== input.roster.revision ||
+        input.seatPlan.roster.fingerprint !== input.roster.fingerprint
+    ) {
+        throw new ExamSeatAssignmentError('assignment_roster_plan_mismatch');
+    }
+    if (input.strategy !== 'maximizeSpacing' && input.strategy !== 'minimizeClassrooms') {
+        throw new ExamSeatAssignmentError('assignment_strategy_invalid');
+    }
+    const seed = canonicalSeed(input.seed);
+    if (!Array.isArray(input.participants) || input.participants.length > 500) {
+        throw new ExamSeatAssignmentError('assignment_participants_invalid');
+    }
+    const participants = input.participants.map(canonicalParticipant).sort((left, right) => left.boundUserId - right.boundUserId);
+    if (
+        participants.length !== input.roster.entries.length ||
+        participants.some((participant, index) => {
+            const entry = input.roster.entries[index];
+            return (
+                !entry ||
+                participant.boundUserId !== entry.boundUserId ||
+                !participant.studentRecordId.equals(entry.studentRecordId) ||
+                participant.studentId !== entry.studentId
+            );
+        }) ||
+        new Set(participants.map((participant) => participant.boundUserId)).size !== participants.length ||
+        new Set(participants.map((participant) => participant.studentRecordId.toHexString())).size !== participants.length
+    ) {
+        throw new ExamSeatAssignmentError('assignment_participant_roster_mismatch');
+    }
+    const teams = new Map<string, ExamSeatAssignmentParticipantFact[]>();
+    for (const participant of participants) {
+        if (participant.teamId === null) continue;
+        const members = teams.get(participant.teamId) || [];
+        members.push(participant);
+        teams.set(participant.teamId, members);
+    }
+    if (
+        [...teams.values()].some(
+            (members) => members.length > 3 || members.filter((member) => member.teamRole === 'captain').length !== 1,
+        )
+    ) {
+        throw new ExamSeatAssignmentError('assignment_team_invalid');
+    }
+
+    const classrooms = input.seatPlan.classrooms.map(canonicalV2Classroom);
+    const expectedSeatKeys = classrooms.flatMap((classroom) =>
+        classroom.candidateSeatIds.map((sourceSeatId) => seatIdentityKey({ classroomId: classroom.classroomId, sourceSeatId })),
+    );
+    if (!Array.isArray(input.seatFacts) || input.seatFacts.length !== expectedSeatKeys.length) {
+        throw new ExamSeatAssignmentError('assignment_seat_facts_invalid');
+    }
+    const seatFacts = input.seatFacts.map(canonicalV2SeatFact);
+    const seatKeys = seatFacts.map(seatIdentityKey);
+    const endpointIds = seatFacts.flatMap((seat) => (seat.endpointId === null ? [] : [seat.endpointId]));
+    const bindingIds = seatFacts.flatMap((seat) => (seat.bindingId === null ? [] : [seat.bindingId.toHexString()]));
+    if (
+        expectedSeatKeys.some((key, index) => key !== seatKeys[index]) ||
+        new Set(seatKeys).size !== seatKeys.length ||
+        new Set(endpointIds).size !== endpointIds.length ||
+        new Set(bindingIds).size !== bindingIds.length
+    ) {
+        throw new ExamSeatAssignmentError('assignment_seat_facts_invalid');
+    }
+
+    const lockedAssignments = canonicalV2Mappings(input.lockedAssignments, 'locked_assignments');
+    const manualAssignments = canonicalV2Mappings(input.manualAssignments, 'manual_assignments');
+    const participantUids = new Set(participants.map((participant) => participant.boundUserId));
+    const eligibleSeats = new Set(
+        seatFacts
+            .filter(
+                (seat) =>
+                    seat.enabled &&
+                    ['active', 'empty'].includes(seat.layoutStatus) &&
+                    seat.bindingId !== null &&
+                    seat.endpointId !== null,
+            )
+            .map(seatIdentityKey),
+    );
+    const constraintReasons = [
+        ...v2MappingConflictReasons(lockedAssignments),
+        ...v2MappingConflictReasons(manualAssignments),
+    ];
+    if (lockedAssignments.some((mapping) => !participantUids.has(mapping.boundUserId))) constraintReasons.push('locked_uid_missing');
+    if (lockedAssignments.some((mapping) => !eligibleSeats.has(seatIdentityKey(mapping.seat)))) {
+        constraintReasons.push('locked_seat_unavailable');
+    }
+    if (manualAssignments.some((mapping) => !participantUids.has(mapping.boundUserId))) constraintReasons.push('manual_uid_missing');
+    if (manualAssignments.some((mapping) => !eligibleSeats.has(seatIdentityKey(mapping.seat)))) {
+        constraintReasons.push('manual_seat_unavailable');
+    }
+    const lockedByUid = new Map(lockedAssignments.map((mapping) => [mapping.boundUserId, mapping]));
+    if (
+        manualAssignments.some((mapping) => {
+            const locked = lockedByUid.get(mapping.boundUserId);
+            return locked && !sameV2Mapping(locked, mapping);
+        })
+    ) {
+        constraintReasons.push('locked_manual_mismatch');
+    }
+    const fixedAssignments = mergeFixedV2Mappings(lockedAssignments, manualAssignments);
+    if (new Set(fixedAssignments.map((mapping) => seatIdentityKey(mapping.seat))).size !== fixedAssignments.length) {
+        constraintReasons.push('duplicate_fixed_seat');
+    }
+    const skippedSeats = seatFacts
+        .flatMap((seat) => {
+            if (
+                seat.enabled &&
+                ['active', 'empty'].includes(seat.layoutStatus) &&
+                seat.bindingId !== null &&
+                seat.endpointId !== null
+            ) {
+                return [];
+            }
+            const reason = !seat.enabled ? 'disabled' : !['active', 'empty'].includes(seat.layoutStatus) ? 'layout_status' : 'unbound';
+            return [{ seat: { classroomId: seat.classroomId, sourceSeatId: seat.sourceSeatId }, reason }] as Array<{
+                seat: ExamSeatIdentity;
+                reason: 'disabled' | 'layout_status' | 'unbound';
+            }>;
+        })
+        .sort((left, right) => canonicalCompare(seatIdentityKey(left.seat), seatIdentityKey(right.seat)));
+    const diagnostics: ExamSeatAssignmentV2Diagnostic[] = [];
+    if (participants.length > eligibleSeats.size) {
+        diagnostics.push({ code: 'insufficient_seats', requiredSeatCount: participants.length, availableSeatCount: eligibleSeats.size });
+    }
+    const reasons = [...new Set(constraintReasons)].sort(canonicalCompare);
+    if (reasons.length) diagnostics.push({ code: 'constraint_conflict', reasons });
+    if (diagnostics.length) {
+        return { ok: false, diagnostics: skippedSeats.length ? [{ code: 'seat_skipped', seats: skippedSeats }, ...diagnostics] : diagnostics };
+    }
+
+    const allocation = allocateExamSeatsSpatially({
+        classrooms,
+        participants,
+        seatFacts,
+        strategy: input.strategy,
+        seed,
+        fixedAssignments,
+    });
+    return {
+        ok: true,
+        participants,
+        seatFacts,
+        constraints: { strategy: input.strategy, lockedAssignments, manualAssignments },
+        assignments: allocation.assignments,
+        explanation: allocation.explanation,
+        diagnostics,
     };
 }
 
@@ -1115,6 +1344,20 @@ function assertExamSeatAssignmentV2Integrity(value: unknown): asserts value is E
         )
     ) {
         throw new ExamSeatAssignmentError('assignment_participants_invalid');
+    }
+    const participantTeams = new Map<string, ExamSeatAssignmentParticipantFact[]>();
+    for (const participant of participants) {
+        if (participant.teamId === null) continue;
+        const members = participantTeams.get(participant.teamId) || [];
+        members.push(participant);
+        participantTeams.set(participant.teamId, members);
+    }
+    if (
+        [...participantTeams.values()].some(
+            (members) => members.length > 3 || members.filter((member) => member.teamRole === 'captain').length !== 1,
+        )
+    ) {
+        throw new ExamSeatAssignmentError('assignment_team_invalid');
     }
     if (!Array.isArray(doc.seatFacts) || doc.seatFacts.length !== expectedSeatKeys.length) {
         throw new ExamSeatAssignmentError('assignment_seat_facts_invalid');
@@ -1236,6 +1479,28 @@ export function assertExamSeatAssignmentIntegrity(value: unknown): asserts value
         return;
     }
     assertExamSeatAssignmentV1Integrity(value);
+}
+
+export function assertExamSeatAssignmentV2AlgorithmResult(assignment: ExamSeatAssignmentV2Doc): void {
+    const rebuilt = allocateExamSeatsSpatially({
+        classrooms: assignment.classrooms,
+        participants: assignment.participants,
+        seatFacts: assignment.seatFacts,
+        strategy: assignment.constraints.strategy,
+        seed: assignment.seed,
+        fixedAssignments: mergeFixedV2Mappings(
+            assignment.constraints.lockedAssignments,
+            assignment.constraints.manualAssignments,
+        ),
+    });
+    if (
+        rebuilt.assignments.length !== assignment.assignments.length ||
+        rebuilt.assignments.some((mapping, index) => !sameV2Mapping(mapping, assignment.assignments[index])) ||
+        JSON.stringify(explanationFingerprintFact(rebuilt.explanation)) !==
+            JSON.stringify(explanationFingerprintFact(assignment.explanation))
+    ) {
+        throw new ExamSeatAssignmentError('assignment_algorithm_result_mismatch');
+    }
 }
 
 function sameMapping(left: ExamSeatAssignmentMapping, right: ExamSeatAssignmentMapping | undefined): boolean {
@@ -1387,6 +1652,98 @@ export class ExamSeatAssignmentService {
         return { assignment, diagnostics: built.diagnostics };
     }
 
+    async createRevisionV2(input: {
+        domainId: string;
+        eventId: ObjectId;
+        eventRevision: number;
+        schoolId: ObjectId;
+        actorUid: number;
+        expectedPreviousRevision: number;
+        roster: ExamRosterRevisionDoc;
+        seatPlan: ExamSeatPlanV2Doc;
+        participants: ExamSeatAssignmentParticipantFact[];
+        seatFacts: ExamSeatAssignmentV2SeatFact[];
+        strategy: ExamSeatAssignmentStrategy;
+        seed: string;
+        lockedAssignments: ExamSeatAssignmentV2Mapping[];
+        manualAssignments: ExamSeatAssignmentV2Mapping[];
+    }): Promise<{ assignment: ExamSeatAssignmentV2Doc | null; diagnostics: ExamSeatAssignmentV2Diagnostic[] }> {
+        assertDomainId(input.domainId);
+        assertObjectId(input.eventId, 'eventId');
+        assertRevision(input.eventRevision, 'eventRevision');
+        assertObjectId(input.schoolId, 'schoolId');
+        assertUid(input.actorUid, 'actorUid');
+        if (!Number.isSafeInteger(input.expectedPreviousRevision) || input.expectedPreviousRevision < 0) {
+            throw new TypeError('expectedPreviousRevision is invalid');
+        }
+        assertExamRosterRevisionIntegrity(input.roster);
+        assertExamSeatPlanIntegrity(input.seatPlan);
+        if (!isExamSeatPlanV2(input.seatPlan)) throw new ExamSeatAssignmentError('assignment_v2_plan_required');
+        if (
+            input.roster.domainId !== input.domainId ||
+            input.seatPlan.domainId !== input.domainId ||
+            !input.roster.eventId.equals(input.eventId) ||
+            !input.seatPlan.eventId.equals(input.eventId) ||
+            !input.roster.schoolId.equals(input.schoolId) ||
+            !input.seatPlan.schoolId.equals(input.schoolId)
+        ) {
+            throw new ExamSeatAssignmentError('assignment_identity_mismatch');
+        }
+        const built = buildExamSeatAssignmentV2(input);
+        if (!built.ok) return { assignment: null, diagnostics: built.diagnostics };
+        const previous = await this.latestRevision(input.domainId, input.eventId);
+        if (previous) assertExamSeatAssignmentIntegrity(previous);
+        if ((previous?.revision || 0) !== input.expectedPreviousRevision) {
+            throw new ExamSeatAssignmentError('assignment_revision_conflict');
+        }
+        if (previous && (!previous.schoolId.equals(input.schoolId) || previous.eventRevision > input.eventRevision)) {
+            throw new ExamSeatAssignmentError('assignment_history_identity_mismatch');
+        }
+        const createdAt = canonicalDate(this.now(), 'now');
+        const earliestCreatedAt = Math.max(input.roster.createdAt.getTime(), input.seatPlan.createdAt.getTime(), previous?.createdAt.getTime() || 0);
+        if (createdAt.getTime() < earliestCreatedAt) throw new ExamSeatAssignmentError('assignment_clock_rollback');
+        const revision = (previous?.revision || 0) + 1;
+        const canonical: Omit<ExamSeatAssignmentV2Doc, 'fingerprint'> = {
+            _id: this.idFactory(),
+            schemaVersion: 2,
+            domainId: input.domainId,
+            eventId: new ObjectId(input.eventId),
+            eventRevision: input.eventRevision,
+            schoolId: new ObjectId(input.schoolId),
+            revision,
+            auditRef: examSeatAssignmentAuditRef(input.eventId, revision),
+            seatPlan: { seatPlanId: new ObjectId(input.seatPlan._id), revision: input.seatPlan.revision, fingerprint: input.seatPlan.fingerprint },
+            roster: { rosterId: new ObjectId(input.roster._id), revision: input.roster.revision, fingerprint: input.roster.fingerprint },
+            classrooms: input.seatPlan.classrooms.map((classroom) => ({
+                classroomId: new ObjectId(classroom.classroomId),
+                layoutRevision: classroom.layoutRevision,
+                layoutFingerprint: classroom.layoutFingerprint,
+                profileRevision: classroom.profileRevision,
+                profileFingerprint: classroom.profileFingerprint,
+                candidateSeatIds: [...classroom.candidateSeatIds],
+            })),
+            participants: built.participants,
+            seatFacts: built.seatFacts,
+            constraints: built.constraints,
+            seed: canonicalSeed(input.seed),
+            algorithmVersion: EXAM_SEAT_ASSIGNMENT_V2_ALGORITHM,
+            assignments: built.assignments,
+            explanation: built.explanation,
+            previousRevision: previous?.revision || null,
+            createdAt,
+            createdBy: input.actorUid,
+        };
+        const assignment: ExamSeatAssignmentV2Doc = { ...canonical, fingerprint: assignmentDocumentFingerprint(canonical) };
+        assertExamSeatAssignmentIntegrity(assignment);
+        try {
+            await this.assignments.insertOne(assignment);
+        } catch (error) {
+            if (duplicateKey(error)) throw new ExamSeatAssignmentError('assignment_revision_conflict');
+            throw error;
+        }
+        return { assignment, diagnostics: built.diagnostics };
+    }
+
     async publishRevision(input: {
         domainId: string;
         eventId: ObjectId;
@@ -1403,6 +1760,7 @@ export class ExamSeatAssignmentService {
         assertUid(input.actorUid, 'actorUid');
         const assignment = await this.getRevision(input.domainId, input.eventId, input.assignmentRevision);
         if (!assignment) throw new ExamSeatAssignmentError('assignment_not_found');
+        if (isExamSeatAssignmentV2(assignment)) assertExamSeatAssignmentV2AlgorithmResult(assignment);
         const current = await this.getPublication(input.domainId, input.eventId);
         if ((current?.revision || 0) !== input.expectedPublicationRevision) {
             throw new ExamSeatAssignmentError('assignment_publication_conflict');

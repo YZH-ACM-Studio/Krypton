@@ -9,22 +9,27 @@
  * Wraps `onOpenChange` in a React context so the internal X-button on
  * SheetContent and any consumer-rendered close affordances can dismiss
  * without an explicit prop. API mirrors shadcn's Sheet.
+ *
+ * Chrome: overlay matches Dialog; the panel owns overflow-hidden; SheetBody
+ * is the single scroll owner (ScrollArea).
  */
-import { createContext, useContext, useEffect, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useId, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/cn';
+import { ScrollArea, type ScrollAreaProps } from '@/components/ui/scroll-area';
 
 type SheetSide = 'left' | 'right' | 'top' | 'bottom';
 
 interface SheetContextValue {
   onOpenChange: (open: boolean) => void;
+  titleId: string;
 }
 const SheetContext = createContext<SheetContextValue | null>(null);
 
 function useSheetContext(): SheetContextValue {
   const v = useContext(SheetContext);
-  if (!v) throw new Error('SheetContent / SheetHeader must be rendered inside <Sheet>.');
+  if (!v) throw new Error('SheetContent / SheetHeader / SheetBody must be rendered inside <Sheet>.');
   return v;
 }
 
@@ -35,6 +40,7 @@ interface SheetProps {
 }
 
 export function Sheet({ open, onOpenChange, children }: SheetProps) {
+  const titleId = useId();
   useEffect(() => {
     if (!open) return;
     const prev = document.body.style.overflow;
@@ -52,7 +58,7 @@ export function Sheet({ open, onOpenChange, children }: SheetProps) {
   if (!open) return null;
 
   return createPortal(
-    <SheetContext.Provider value={{ onOpenChange }}>
+    <SheetContext.Provider value={{ onOpenChange, titleId }}>
       <div className="fixed inset-0 z-200">
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={() => onOpenChange(false)} />
         <div className="relative h-full w-full" onClick={(e) => e.stopPropagation()}>
@@ -78,8 +84,13 @@ export function SheetContent({ side = 'right', className, children, ...props }: 
   };
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={ctx.titleId}
+      data-krypton-sheet=""
+      data-side={side}
       className={cn(
-        'fixed bg-background shadow-2xl flex flex-col overflow-hidden',
+        'fixed flex flex-col overflow-hidden overscroll-contain bg-background shadow-2xl',
         sideClasses[side],
         // Default sizing — consumers can override via className.
         side === 'right' || side === 'left' ? 'w-[400px] max-w-[calc(100vw-2rem)]' : 'h-[400px] max-h-[calc(100vh-2rem)]',
@@ -90,10 +101,11 @@ export function SheetContent({ side = 'right', className, children, ...props }: 
       <button
         type="button"
         onClick={() => ctx.onOpenChange(false)}
-        className="absolute right-3 top-3 z-10 rounded-sm p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        className="absolute right-3 top-3 z-10 rounded-sm p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
+        aria-label="关闭"
         title="关闭"
       >
-        <X className="size-4" />
+        <X className="size-4" aria-hidden="true" />
       </button>
       {children}
     </div>
@@ -105,5 +117,23 @@ export function SheetHeader({ className, ...props }: React.HTMLAttributes<HTMLDi
 }
 
 export function SheetTitle({ className, ...props }: React.HTMLAttributes<HTMLHeadingElement>) {
-  return <h2 className={cn('text-base font-semibold pr-8', className)} {...props} />;
+  const ctx = useSheetContext();
+  return <h2 id={ctx.titleId} className={cn('pr-8 text-base font-semibold', className)} {...props} />;
+}
+
+/**
+ * Single scroll owner for drawer body. SheetContent stays overflow-hidden so
+ * headers and footers do not compete with a second native scrollbar.
+ */
+export function SheetBody({ className, viewportClassName, children, ...props }: ScrollAreaProps) {
+  return (
+    <ScrollArea
+      {...props}
+      data-scroll-owner="sheet"
+      className={cn('min-h-0 flex-1', className)}
+      viewportClassName={cn('overscroll-contain', viewportClassName)}
+    >
+      {children}
+    </ScrollArea>
+  );
 }

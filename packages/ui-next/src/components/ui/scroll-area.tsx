@@ -85,14 +85,14 @@ export const ScrollBar = React.forwardRef<HTMLDivElement, React.ComponentPropsWi
         ref={ref}
         orientation={orientation}
         className={cn(
-          'flex touch-none select-none transition-colors',
+          'flex touch-none select-none transition-colors motion-reduce:transition-none',
           orientation === 'vertical' ? 'h-full w-2.5 border-l border-l-transparent p-px' : 'h-2.5 w-full flex-col border-t border-t-transparent p-px',
           className,
         )}
         {...props}
       >
         <RScrollArea.ScrollAreaThumb
-          className={cn('relative flex-1 rounded-full bg-muted-foreground/30 transition-colors', 'hover:bg-muted-foreground/55')}
+          className={cn('relative flex-1 rounded-full bg-muted-foreground/30 transition-colors hover:bg-muted-foreground/55 motion-reduce:transition-none')}
         />
       </RScrollArea.ScrollAreaScrollbar>
     );

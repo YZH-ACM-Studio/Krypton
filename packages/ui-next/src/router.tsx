@@ -242,7 +242,7 @@ function DefaultAppShell() {
             so on short pages it stretches to the viewport height (sticking
             the footer to the bottom), and on tall pages it grows naturally
             (footer ends up below scrolled content). */}
-        <ScrollArea className="min-w-0 flex-1" viewportClassName="[&>div]:!flex [&>div]:!flex-col [&>div]:!min-h-full">
+        <ScrollArea data-scroll-owner="page" className="min-w-0 flex-1" viewportClassName="[&>div]:!flex [&>div]:!flex-col [&>div]:!min-h-full">
           <main className="flex min-w-0 flex-1 flex-col">
             <div className="min-w-0 flex-1 p-3 sm:p-6 xl:p-8 2xl:px-10">
               <Outlet />

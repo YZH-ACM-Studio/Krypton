@@ -194,7 +194,7 @@ export function DialogContent({ className, onClose, children, ...props }: React.
           type="button"
           aria-label="关闭"
           onClick={onClose}
-          className="absolute right-3 top-3 z-10 rounded-sm p-1 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+          className="absolute right-3 top-3 z-10 rounded-sm p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
           title="关闭"
         >
           <X className="size-4" aria-hidden="true" />
@@ -222,5 +222,5 @@ export function DialogTitle({ className, ...props }: React.HTMLAttributes<HTMLHe
  * dialog has a max-height rather than a fixed height.
  */
 export function DialogBody({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn('min-h-0 flex-1 overflow-y-auto overscroll-contain', className)} {...props} />;
+  return <div className={cn('min-h-0 flex-1 overflow-y-auto overscroll-contain krypton-scrollbar', className)} {...props} data-scroll-owner="dialog" />;
 }

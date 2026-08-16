@@ -141,7 +141,27 @@
 @layer utilities {
   .krypton-scrollbar {
     scrollbar-width: thin;
-    scrollbar-color: hsl(from var(--muted-foreground) h s l / 0.35) transparent;
+    scrollbar-color: hsl(from var(--muted-foreground) h s l / 0.3) transparent;
+  }
+
+  .krypton-scrollbar::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  .krypton-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .krypton-scrollbar::-webkit-scrollbar-thumb {
+    border-radius: 9999px;
+    border: 1px solid transparent;
+    background-clip: content-box;
+    background-color: hsl(from var(--muted-foreground) h s l / 0.3);
+  }
+
+  .krypton-scrollbar::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(from var(--muted-foreground) h s l / 0.55);
   }
 
   .krypton-table-shell {

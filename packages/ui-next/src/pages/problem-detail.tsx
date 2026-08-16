@@ -35,6 +35,7 @@ import { ProgrammingStatementView, structuredStatementSamples, type ProgrammingS
 import { TeamCodeSendDialog, type TeamCodeBuffer } from '@/components/team-code-snapshots';
 import { readTeamExamModeContext } from '@/components/team-exam-mode';
 import { Badge } from '@/components/ui/badge';
+import { CompetitiveCompanionBridge } from '@/components/competitive-companion-bridge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -52,6 +53,7 @@ import {
   readPracticeIntegrityPageContext,
   type PracticeIntegrityPageContext,
 } from '@/lib/practice-integrity';
+import { companionProblemName } from '@/lib/competitive-companion';
 import { extractSamples } from '@/lib/samples';
 import { readAntiAiMarkerClientView } from '@/lib/anti-ai-marker';
 
@@ -943,6 +945,12 @@ export function ProblemDetailPage() {
     () => (structuredStatement ? structuredStatementSamples(structuredStatement) : extractSamples(content)),
     [content, structuredStatement],
   );
+  const companionTimeMs = parseConfigTimeMS(config.time) ?? parseConfigTimeMS(config.timeMin) ?? 1000;
+  const companionMemoryMb = Math.max(1, Math.floor(parseConfigMemoryMB(config.memory) ?? parseConfigMemoryMB(config.memoryMin) ?? 256));
+  const companionName = companionProblemName(String(pid), baseTitle);
+  const companionGroup = inContest && tdoc?.title ? `Krypton - ${tdoc.title}` : 'Krypton';
+  const companionUrl = typeof window === 'undefined' ? problemUrl : window.location.href;
+  const showCompanion = !examMode?.enabled;
   const renderStatement = (includeLegacyLimits: boolean) => {
     const statement = structuredStatement ? (
       <ProgrammingStatementView
@@ -1422,7 +1430,17 @@ export function ProblemDetailPage() {
             </div>
           ) : null}
         </div>
-        <div className="flex shrink-0 gap-2">
+        <div className="flex shrink-0 flex-wrap items-start justify-end gap-2">
+          {showCompanion ? (
+            <CompetitiveCompanionBridge
+              name={companionName}
+              group={companionGroup}
+              url={companionUrl}
+              timeLimitMs={companionTimeMs}
+              memoryLimitMb={companionMemoryMb}
+              tests={samples}
+            />
+          ) : null}
           {/* 客观题在下方面板作答，IDE 模式无意义 */}
           {canSubmit && !isObjective && !isStructuredAnswer ? (
             <Button

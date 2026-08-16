@@ -1321,7 +1321,7 @@ describe('p2.5 exam seat assignment workspace', () => {
     const selector = screen.getByRole('combobox', { name: '为学生0指定座位' });
     expect(within(selector).getAllByRole('option')).toHaveLength(count);
     expect(screen.getAllByRole('combobox', { name: /为.+指定座位/ })).toHaveLength(1);
-  }, 20_000);
+  });
 
   it('shows exact frozen risk edges on demand and draws them only after explicit opt-in', async () => {
     const classroomId = PLAN_RESPONSE.seatPlans[0].classroomId;

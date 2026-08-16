@@ -67,7 +67,7 @@ describe('competitive companion payload', () => {
   });
 
   it('posts text/plain JSON to CPH and companion ports without a CORS preflight', async () => {
-    const fetchImpl = vi.fn(async () => ({ ok: true }));
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => ({ ok: true }));
     const task = buildCompanionTask({
       name: 'A',
       url: 'http://oj.test/p/A',
@@ -78,8 +78,13 @@ describe('competitive companion payload', () => {
     const accepted = await sendCompanionTask(task, fetchImpl as unknown as typeof fetch);
     expect(accepted).to.equal(14);
     expect(fetchImpl.mock.calls.length).to.equal(14);
-    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
-    expect(url).to.equal(companionPostUrl('127.0.0.1', 27121));
+    const firstCall = fetchImpl.mock.calls[0];
+    expect(firstCall).not.to.equal(undefined);
+    if (!firstCall) throw new Error('companion fetch was not called');
+    const [url, init] = firstCall;
+    expect(init).not.to.equal(undefined);
+    if (!init) throw new Error('companion fetch request options were missing');
+    expect(String(url)).to.equal(companionPostUrl('127.0.0.1', 27121));
     expect(init.method).to.equal('POST');
     expect(init.mode).to.equal('no-cors');
     expect(String(init.headers && (init.headers as Record<string, string>)['Content-Type'])).to.match(/^text\/plain/);

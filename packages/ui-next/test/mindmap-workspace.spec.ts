@@ -199,10 +199,15 @@ describe('p2.16 and P2.28 mindmap workspace contracts', () => {
       new Response(
         JSON.stringify({
           error: {
+            name: 'MindmapConflictError',
+            errorCode: 'MindmapConflictError',
+            code: 409,
+            status: 409,
             params: [
               '移动会改变继承标签',
               { reason: 'inherited-tags-change', problems: [{ domainId: 'course-a', docId: 7, pid: 'C7', title: '受影响题目', hidden: true }] },
             ],
+            message: '移动会改变继承标签。',
           },
         }),
         { status: 409, headers: { 'content-type': 'application/json' } },
@@ -216,6 +221,7 @@ describe('p2.16 and P2.28 mindmap workspace contracts', () => {
       }
       expect(failure).to.be.instanceOf(MindmapApiError);
       expect((failure as InstanceType<typeof MindmapApiError>).status).to.equal(409);
+      expect((failure as InstanceType<typeof MindmapApiError>).message).to.equal('移动会改变继承标签。');
       expect((failure as InstanceType<typeof MindmapApiError>).details).to.deep.equal({
         reason: 'inherited-tags-change',
         problems: [{ domainId: 'course-a', docId: 7, pid: 'C7', title: '受影响题目', hidden: true }],

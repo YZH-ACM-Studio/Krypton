@@ -73,7 +73,7 @@ describe('p3.8 course workspace', () => {
     expect(handler).to.include("@post('filename', Types.Filename)");
     expect(handler).to.include('listedCourseFile(tdoc, filename)');
     expect(training).to.include('assertNotCourse(tdoc)');
-    expect(training).to.include("throw new NotFoundError('file')");
+    expect(training).to.include('throw new NotFoundError(localizedErrorText`file`)');
     expect(editor).to.include('<FileUploader');
     expect(editor).to.include('uploadConcurrency={1}');
     expect(uploader).to.include('limit: uploadConcurrency');
@@ -168,5 +168,18 @@ describe('p3.8 course workspace', () => {
     expect(problemsForCourseMindmapNode(problems, 'node-b').map((problem) => problem.docId)).to.deep.equal([11]);
     expect(problemsForCourseMindmapNode(problems, 'ancestor')).to.deep.equal([]);
     expect(problemsForCourseMindmapNode(problems, null)).to.deep.equal([]);
+  });
+
+  it('keeps mobile outline drawers on shared Sheet with the same titles', () => {
+    const detail = readFileSync(resolve(root, 'src/pages/course/detail.tsx'), 'utf8');
+    const editor = readFileSync(resolve(root, 'src/pages/course/editor.tsx'), 'utf8');
+    expect(detail).to.match(/import\s*\{[^}]*\bSheet\b[^}]*\}\s*from\s*'@\/components\/ui\/sheet'/);
+    expect(detail).to.include('<SheetTitle>课程目录</SheetTitle>');
+    expect(detail).to.include('<SheetBody');
+    expect(detail).not.to.match(/<SheetContent[^>]*overflow-y-auto/);
+    expect(editor).to.match(/import\s*\{[^}]*\bSheet\b[^}]*\}\s*from\s*'@\/components\/ui\/sheet'/);
+    expect(editor).to.include('<SheetTitle>章节目录</SheetTitle>');
+    expect(editor).to.include('<SheetBody');
+    expect(editor).not.to.match(/<SheetContent[^>]*overflow-y-auto/);
   });
 });

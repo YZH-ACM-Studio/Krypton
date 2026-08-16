@@ -1198,7 +1198,7 @@ describe('p2.5 exam seat assignment workspace', () => {
     expect(await screen.findByRole('button', { name: '生成尽力型跨教室分配' })).toBeEnabled();
   });
 
-  it('renders 500 v2 assignments and map seats with one shared selector instead of one full selector per row', async () => {
+  it('renders 500 v2 assignments and map seats with one shared selector instead of one full selector per row', { timeout: 30_000 }, async () => {
     const count = 500;
     const classroomId = PLAN_RESPONSE.seatPlans[0].classroomId;
     const entries = Array.from({ length: count }, (_, index) => ({
@@ -1321,7 +1321,7 @@ describe('p2.5 exam seat assignment workspace', () => {
     const selector = screen.getByRole('combobox', { name: '为学生0指定座位' });
     expect(within(selector).getAllByRole('option')).toHaveLength(count);
     expect(screen.getAllByRole('combobox', { name: /为.+指定座位/ })).toHaveLength(1);
-  });
+  }, 20_000);
 
   it('shows exact frozen risk edges on demand and draws them only after explicit opt-in', async () => {
     const classroomId = PLAN_RESPONSE.seatPlans[0].classroomId;

@@ -56,14 +56,14 @@ export default defineConfig({
         'public/**',
       ],
       // Ratcheted floor, calibrated to measured coverage (2026-08-16: lines
-      // 35.32 / statements 34.47 / functions 29.2 / branches 27.34 across
-      // 1062 tests). Raise these as coverage grows; they must always stay just
+      // 36.31 / statements 35.4 / functions 30.05 / branches 28.02 across
+      // 1092 tests). Raise these as coverage grows; they must always stay just
       // below reality so `test:coverage` is green and regressions fail.
       thresholds: {
-        lines: 34,
-        functions: 28,
-        branches: 26,
-        statements: 33,
+        lines: 36,
+        functions: 30,
+        branches: 28,
+        statements: 35,
       },
     },
   },

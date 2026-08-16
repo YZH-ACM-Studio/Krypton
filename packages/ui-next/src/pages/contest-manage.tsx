@@ -42,6 +42,7 @@ import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { ContestCompanionBridge } from '@/components/competitive-companion-bridge';
 import { ContestParticipationField } from '@/components/contest-participation-field';
 import { MarkdownEditor, MarkdownView } from '@/components/markdown-renderer';
 import { TEAM_DIALOG_BUTTON_CLASS, TeamDialogBody, TeamDialogContent, TeamDialogFooter } from '@/components/team-dialog';
@@ -59,6 +60,7 @@ import {
 } from '@/lib/multi-select-presets';
 import { useBootstrap, type GenericUserDoc } from '@/lib/bootstrap';
 import { getContestProblemStatus, getPersonalPracticeStatus, type PersonalPracticeStatusSnapshot } from '@/lib/contest-exam-display';
+import { companionContestEligibility, contestProblemLetter } from '@/lib/competitive-companion';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { formatDateTime, formatRelativeTime, makeInitials, replaceRouteTokens } from '@/lib/format';
 import { isSystemAdmin } from '@/lib/perms';
@@ -155,14 +157,7 @@ function getUser(udict: Record<string, GenericUserDoc>, uid: string | number | u
 
 function getAlphabeticId(index: number) {
   if (index < 0) return '?';
-  let n = index + 1;
-  let result = '';
-  while (n > 0) {
-    n -= 1;
-    result = String.fromCharCode(65 + (n % 26)) + result;
-    n = Math.floor(n / 26);
-  }
-  return result;
+  return contestProblemLetter(index);
 }
 
 function formatSize(bytes: number) {
@@ -2344,19 +2339,36 @@ export function ContestProblemListPage() {
   const liveStatsUnit = data.liveStatsParticipantUnit === 'team' ? '队' : '人';
   const teamMode = tdoc.participationMode === 'team';
   const [workspaceTab, setWorkspaceTab] = useState<'problems' | 'submissions' | 'clarifications'>('problems');
+  const companionEligibility = companionContestEligibility({
+    rule: tdoc.rule,
+    participationMode: tdoc.participationMode,
+    examModeEnabled: inExamMode,
+    problemCount: pids.length,
+  });
+  const companionProblems = pids.map((pid, idx) => ({
+    letter: contestProblemLetter(idx),
+    title: (pdict[String(pid)] || {}).title || `P${pid}`,
+    href: contestProblemUrl(bs, tdoc, pid),
+  }));
 
   return (
     <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-      <div className="flex items-center gap-3">
+      <div className="flex items-start gap-3">
         <Button asChild variant="ghost" size="icon">
           <a href={contestUrl}>
             <ArrowLeft className="size-4" />
           </a>
         </Button>
-        <div>
+        <div className="min-w-0 flex-1">
           <h1 className="text-xl font-semibold">比赛题目</h1>
           <p className="text-sm text-muted-foreground">{tdoc.title}</p>
         </div>
+        <ContestCompanionBridge
+          eligibility={companionEligibility}
+          contestTitle={tdoc.title || '比赛'}
+          origin={typeof window === 'undefined' ? 'http://127.0.0.1' : window.location.origin}
+          problems={companionProblems}
+        />
       </div>
 
       <MiniTabs

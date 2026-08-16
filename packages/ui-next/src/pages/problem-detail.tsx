@@ -104,6 +104,7 @@ interface ContestDoc {
   docId?: string | number;
   title?: string;
   rule?: string;
+  participationMode?: string;
   beginAt?: string | Date;
   endAt?: string | Date;
   pids?: unknown[];
@@ -951,6 +952,13 @@ export function ProblemDetailPage() {
   const companionGroup = inContest && tdoc?.title ? `Krypton - ${tdoc.title}` : 'Krypton';
   const companionUrl = typeof window === 'undefined' ? problemUrl : window.location.href;
   const showCompanion = !examMode?.enabled;
+  const canSubmitBack =
+    showCompanion &&
+    canSubmit &&
+    !isObjective &&
+    !isStructuredAnswer &&
+    !isSubjective &&
+    tdoc?.participationMode !== 'team';
   const renderStatement = (includeLegacyLimits: boolean) => {
     const statement = structuredStatement ? (
       <ProgrammingStatementView
@@ -1439,6 +1447,12 @@ export function ProblemDetailPage() {
               timeLimitMs={companionTimeMs}
               memoryLimitMb={companionMemoryMb}
               tests={samples}
+              canSubmitBack={canSubmitBack}
+              submitUrl={submitUrl}
+              allowedLangs={config.langs || []}
+              tid={tid || undefined}
+              practiceContextId={practiceContextId}
+              recordDetailUrl={(rid) => replaceRouteTokens(recordDetailRoute, { RID: rid })}
             />
           ) : null}
           {/* 客观题在下方面板作答，IDE 模式无意义 */}

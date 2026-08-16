@@ -67,7 +67,7 @@ describe('competitive companion payload', () => {
   });
 
   it('posts text/plain JSON to CPH and companion ports without a CORS preflight', async () => {
-    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => ({ ok: true }));
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response(null, { status: 200 }));
     const task = buildCompanionTask({
       name: 'A',
       url: 'http://oj.test/p/A',
@@ -75,7 +75,7 @@ describe('competitive companion payload', () => {
       memoryLimitMb: 256,
       tests: [],
     });
-    const accepted = await sendCompanionTask(task, fetchImpl as unknown as typeof fetch);
+    const accepted = await sendCompanionTask(task, fetchImpl);
     expect(accepted).to.equal(14);
     expect(fetchImpl.mock.calls.length).to.equal(14);
     const firstCall = fetchImpl.mock.calls[0];

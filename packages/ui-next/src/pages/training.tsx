@@ -1021,7 +1021,7 @@ function TrainingMembersCard({ members, trainingTitle, truncated }: { members: T
         </div>
       </CardHeader>
       <CardContent className="p-0">
-        <div className="max-h-[28rem] overflow-auto">
+        <ScrollArea className="max-h-[28rem]" orientation="both">
           <table className="w-full text-sm">
             <thead className="sticky top-0 bg-card">
               <tr className="border-b text-left text-xs text-muted-foreground">
@@ -1055,7 +1055,7 @@ function TrainingMembersCard({ members, trainingTitle, truncated }: { members: T
               )}
             </tbody>
           </table>
-        </div>
+        </ScrollArea>
       </CardContent>
     </Card>
   );

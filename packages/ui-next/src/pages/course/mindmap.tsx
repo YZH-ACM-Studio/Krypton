@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/cn';
 import { practiceProblemEntryUrl } from '@/lib/practice-integrity';
 import { mindmapProblemHref } from '../mindmap/api';
@@ -53,7 +54,7 @@ function CourseProblemPanel({
         )}
       </header>
       {selected ? (
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <ScrollArea className="min-h-0 flex-1">
           {problems.length ? (
             <ul className="divide-y divide-border/70">
               {problems.map((problem) => (
@@ -62,7 +63,7 @@ function CourseProblemPanel({
                     href={courseMindmapProblemHref(tid, problem, integrityControlled)}
                     className={cn(
                       'flex items-center gap-2 rounded-lg py-1 transition-colors duration-200 hover:text-primary',
-                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary motion-reduce:transition-none',
                     )}
                   >
                     <span className="font-mono text-[11px] text-muted-foreground">{problem.pid}</span>
@@ -89,7 +90,7 @@ function CourseProblemPanel({
           ) : (
             <p className="px-5 py-10 text-center text-sm text-muted-foreground">本课程没有直接归属于该节点的可见题目。</p>
           )}
-        </div>
+        </ScrollArea>
       ) : null}
     </Card>
   );

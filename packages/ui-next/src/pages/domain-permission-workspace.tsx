@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { SimpleSelect } from '@/components/ui/select';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
@@ -341,7 +342,8 @@ export function DomainPermissionWorkspace({ domainName, endpoint, initialRoles, 
               <p className="text-sm font-semibold">角色</p>
               <p className="mt-0.5 text-xs text-muted-foreground">{roles.length} 个角色</p>
             </div>
-            <div className="max-h-[calc(100dvh-15rem)] space-y-1 overflow-y-auto p-2">
+            <ScrollArea className="max-h-[calc(100dvh-15rem)]">
+            <div className="space-y-1 p-2">
               {roles.map((role) => {
                 const roleMask = parseDomainRoleMask(roleMasks[role.id], role.id);
                 const permissionCount = permissionKeysFromMask(roleMask, allPermissions).size;
@@ -376,6 +378,7 @@ export function DomainPermissionWorkspace({ domainName, endpoint, initialRoles, 
                 );
               })}
             </div>
+            </ScrollArea>
           </aside>
 
           <main className="min-w-0">

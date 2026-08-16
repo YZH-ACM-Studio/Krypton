@@ -5,7 +5,7 @@ import { SampleCopyButton } from '@/components/sample-blocks';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { SimpleSelect } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import type { AntiAiMarkerClientMarker, AntiAiMarkerDraft } from '@/lib/anti-ai-marker';
@@ -600,13 +600,13 @@ export function ProgrammingStatementEditor({
       </Dialog>
 
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
-        <DialogContent className="max-h-[88vh] w-full overflow-y-auto sm:w-[900px]" onClose={() => setPreviewOpen(false)}>
+        <DialogContent className="max-h-[88vh] w-full sm:w-[900px]" onClose={() => setPreviewOpen(false)}>
           <DialogHeader>
             <DialogTitle>完整题面预览</DialogTitle>
           </DialogHeader>
-          <div className="p-6">
+          <DialogBody className="p-6">
             <ProgrammingStatementView statement={preview} limits={limitsPreview || <p className="text-sm text-amber-600">评测限制尚未完成。</p>} />
-          </div>
+          </DialogBody>
         </DialogContent>
       </Dialog>
     </div>

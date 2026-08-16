@@ -19,9 +19,8 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 import { Camera, ChevronRight, Download, FileText, Film, Lock, MessageSquare, Monitor, type LucideIcon } from 'lucide-react';
-import { Sheet, SheetContent, SheetHeader } from '@/components/ui/sheet';
+import { Sheet, SheetBody, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 // Vigil server returns naive UTC strings (no Z suffix). Use VigilDateTime
 // — a thin wrapper that normalises to UTC before handing to <DateTime/> —
@@ -180,13 +179,13 @@ export function StudentDetailSheet({ open, onOpenChange, contestId, student, rec
         <SheetContent side="right" className="flex w-[620px] max-w-[100vw] flex-col p-0">
           <SheetHeader className="px-6 py-4">
             <div className="flex items-baseline gap-2 pr-8">
-              <h2 className="truncate text-lg font-semibold">{student.name}</h2>
+              <SheetTitle className="truncate pr-0 text-lg">{student.name}</SheetTitle>
               {student.studentId && <span className="font-mono text-sm text-muted-foreground">{student.studentId}</span>}
             </div>
             <p className="font-mono text-[11px] text-muted-foreground">{student.machineId}</p>
           </SheetHeader>
 
-          <ScrollArea className="flex-1 min-h-0">
+          <SheetBody>
             <div className="space-y-4 px-6 py-4">
               {/* Status card */}
               <div className="space-y-2 rounded-md border bg-muted/20 p-3">
@@ -277,6 +276,7 @@ export function StudentDetailSheet({ open, onOpenChange, contestId, student, rec
                           className={cn(
                             'group flex w-full items-start gap-3 rounded-md border border-transparent bg-card/30 px-3 py-2.5 text-left text-xs transition-colors',
                             'hover:border-border hover:bg-accent/50',
+                            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none',
                           )}
                         >
                           <SeverityDot severity={e.severity} />
@@ -298,7 +298,7 @@ export function StudentDetailSheet({ open, onOpenChange, contestId, student, rec
                               {e.summary && <span className="break-words">· {e.summary}</span>}
                             </div>
                           </div>
-                          <ChevronRight className="mt-1 size-3.5 shrink-0 text-muted-foreground/60 transition-transform group-hover:translate-x-0.5" />
+                          <ChevronRight className="mt-1 size-3.5 shrink-0 text-muted-foreground/60 transition-transform group-hover:translate-x-0.5 motion-reduce:transition-none" aria-hidden="true" />
                         </button>
                       </li>
                     ))}
@@ -306,7 +306,7 @@ export function StudentDetailSheet({ open, onOpenChange, contestId, student, rec
                 )}
               </div>
             </div>
-          </ScrollArea>
+          </SheetBody>
         </SheetContent>
       </Sheet>
 

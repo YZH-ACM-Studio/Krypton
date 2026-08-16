@@ -1212,7 +1212,7 @@ export function ProblemDetailPage() {
                         收起
                       </button>
                     </div>
-                    <div className="flex-1 overflow-auto">
+                    <ScrollArea className="min-h-0 flex-1" orientation="both">
                       {ideRecordsLoading && ideRecords.length === 0 ? (
                         <div className="flex h-full items-center justify-center gap-2 text-xs text-muted-foreground">
                           <Loader2 className="size-3.5 animate-spin" />
@@ -1277,7 +1277,7 @@ export function ProblemDetailPage() {
                           </tbody>
                         </table>
                       )}
-                    </div>
+                    </ScrollArea>
                   </div>
                 </>
               )}

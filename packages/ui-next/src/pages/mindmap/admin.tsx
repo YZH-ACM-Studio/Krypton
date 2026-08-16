@@ -3,7 +3,7 @@ import { AlertCircle, Check, ChevronLeft, Circle, Eye, EyeOff, Loader2, Network,
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { MiniTabs } from '@/components/ui/mini-tabs';
 import { SimpleSelect } from '@/components/ui/select';
@@ -589,7 +589,7 @@ function CreateNodeDialog({
           <DialogTitle>{request?.kind === 'child' ? '新增子节点' : '新增同级节点'}</DialogTitle>
           <p className="mt-1 text-xs text-muted-foreground">将添加到「{request?.parent.topic}」下方，保存后立即进入树结构。</p>
         </DialogHeader>
-        <div className="space-y-4 p-5">
+        <DialogBody className="space-y-4 p-5">
           <div>
             <label htmlFor="create-mindmap-topic" className="text-xs font-medium">
               名称
@@ -626,7 +626,7 @@ function CreateNodeDialog({
               contentClassName="[&_[role=option]]:min-h-10"
             />
           </div>
-        </div>
+        </DialogBody>
         <div className="flex justify-end gap-2 border-t px-5 py-4">
           <Button className="min-h-10" variant="outline" onClick={close} disabled={busy}>
             取消
@@ -673,7 +673,7 @@ function DeleteNodeDialog({
         <DialogHeader>
           <DialogTitle>删除「{node?.topic}」？</DialogTitle>
         </DialogHeader>
-        <div className="space-y-3 p-5 text-sm">
+        <DialogBody className="space-y-3 p-5 text-sm">
           {blocked ? (
             <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 text-amber-900 dark:text-amber-100">
               当前不能删除：{childCount > 0 ? `仍有 ${childCount} 个子节点` : ''}
@@ -683,7 +683,7 @@ function DeleteNodeDialog({
           ) : (
             <p className="leading-6 text-muted-foreground">该操作只删除这个叶子节点，不会删除任何题目。删除后无法在界面中撤销。</p>
           )}
-        </div>
+        </DialogBody>
         <div className="flex justify-end gap-2 border-t px-5 py-4">
           <Button className="min-h-10" variant="outline" onClick={onClose} disabled={busy}>
             取消
@@ -725,7 +725,7 @@ function CreateMapDialog({
           <DialogTitle>新建知识导图</DialogTitle>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">新导图默认隐藏，创建后可逐步整理节点，再单独公开。</p>
         </DialogHeader>
-        <div className="space-y-4 overflow-y-auto p-5">
+        <DialogBody className="space-y-4 p-5">
           <div>
             <label htmlFor="create-map-title" className="text-xs font-medium">
               导图名称
@@ -762,7 +762,7 @@ function CreateMapDialog({
               className="mt-1.5 min-h-10"
             />
           </div>
-        </div>
+        </DialogBody>
         <div className="flex justify-end gap-2 border-t px-5 py-4">
           <Button className="min-h-10" variant="outline" onClick={close} disabled={busy}>
             取消
@@ -821,7 +821,7 @@ function MapSettingsDialog({
           <DialogTitle>导图设置</DialogTitle>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">公开状态控制学生可见性；根节点名称直接在右侧节点检查器中编辑。</p>
         </DialogHeader>
-        <div className="space-y-4 overflow-y-auto p-5">
+        <DialogBody className="space-y-4 p-5">
           <div>
             <label htmlFor="map-settings-title" className="text-xs font-medium">
               导图名称
@@ -877,7 +877,7 @@ function MapSettingsDialog({
               <Trash2 className="size-4" /> 删除
             </Button>
           </div>
-        </div>
+        </DialogBody>
         <div className="flex justify-end gap-2 border-t px-5 py-4">
           <Button className="min-h-10" variant="outline" onClick={onClose} disabled={busy}>
             取消
@@ -933,7 +933,7 @@ function DeleteMapDialog({
         <DialogHeader>
           <DialogTitle>删除「{map?.title}」？</DialogTitle>
         </DialogHeader>
-        <div className="space-y-3 p-5 text-sm">
+        <DialogBody className="space-y-3 p-5 text-sm">
           {blocked ? (
             <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 text-amber-900 dark:text-amber-100">
               <p className="font-medium">当前不能删除</p>
@@ -946,7 +946,7 @@ function DeleteMapDialog({
           ) : (
             <p className="leading-6 text-muted-foreground">将永久删除这张隐藏导图及其根节点。该操作无法撤销，也不会删除任何题目或课程。</p>
           )}
-        </div>
+        </DialogBody>
         <div className="flex justify-end gap-2 border-t px-5 py-4">
           <Button className="min-h-10" variant="outline" onClick={onClose} disabled={busy}>
             取消
@@ -967,9 +967,9 @@ function UnsavedMapActionDialog({ action, onClose, onDiscard }: { action: Pendin
         <DialogHeader>
           <DialogTitle>放弃未保存的节点修改？</DialogTitle>
         </DialogHeader>
-        <div className="p-5 text-sm leading-6 text-muted-foreground">
+        <DialogBody className="p-5 text-sm leading-6 text-muted-foreground">
           {action?.kind === 'switch' ? '切换导图' : '新建导图'}会清除右侧检查器中尚未保存的内容。已保存的导图和节点不会受影响。
-        </div>
+        </DialogBody>
         <div className="flex justify-end gap-2 border-t px-5 py-4">
           <Button className="min-h-10" variant="outline" onClick={onClose}>
             留在当前导图

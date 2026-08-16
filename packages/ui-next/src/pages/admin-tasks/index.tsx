@@ -46,11 +46,11 @@ import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { FormField, FormRow, FormSection } from '@/components/ui/form';
 import { DateTime } from '@/components/ui/datetime';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { MiniTabs } from '@/components/ui/mini-tabs';
 import { TableAction, TableActions } from '@/components/ui/table-actions';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { Sheet, SheetBody, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { SimpleSelect, type SimpleSelectOption } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
@@ -1404,7 +1404,7 @@ export function AdminTasksStatsPage() {
           if (!o) setDrillIn(null);
         }}
       >
-        <SheetContent side="right" className="w-[640px] sm:max-w-[640px]">
+        <SheetContent side="right" className="w-[640px] sm:max-w-[640px] p-0">
           <SheetHeader>
             <SheetTitle>{drillIn ? drillUser?.uname || `uid:${drillIn.userId}` : '—'}</SheetTitle>
             {drillStudent ? (
@@ -1414,7 +1414,7 @@ export function AdminTasksStatsPage() {
             ) : null}
           </SheetHeader>
           {drillIn && (
-            <ScrollArea className="min-h-0 flex-1">
+            <SheetBody>
               <div className="space-y-4 px-6 py-5">
                 <div className="flex items-center gap-2">
                   <StatusBadge status={drillIn.status} />
@@ -1441,7 +1441,7 @@ export function AdminTasksStatsPage() {
                   })}
                 </div>
               </div>
-            </ScrollArea>
+            </SheetBody>
           )}
         </SheetContent>
       </Sheet>
@@ -1452,15 +1452,18 @@ export function AdminTasksStatsPage() {
             <DialogHeader>
               <DialogTitle>导出任务成员为用户组</DialogTitle>
             </DialogHeader>
-            <form method="post" action={`/admin/tasks/${data.task._id}/stats`} className="space-y-4">
-              <input type="hidden" name="operation" value="export_group" />
-              <FormField label="用户组名称" required>
-                <Input name="name" defaultValue={data.exportUserGroupDefaultName} required autoFocus />
-              </FormField>
-              <p className="text-sm leading-6 text-muted-foreground">
-                将任务的全部非取消成员（去重后 {data.exportUserGroupMemberCount} 人）创建为一个同校用户组。存在未绑定或跨校成员时不会写入任何数据。
-              </p>
-              <div className="flex justify-end gap-2">
+            <form method="post" action={`/admin/tasks/${data.task._id}/stats`}>
+              <DialogBody className="space-y-4 px-6 py-5">
+                <input type="hidden" name="operation" value="export_group" />
+                <FormField label="用户组名称" required>
+                  <Input name="name" defaultValue={data.exportUserGroupDefaultName} required autoFocus />
+                </FormField>
+                <p className="text-sm leading-6 text-muted-foreground">
+                  将任务的全部非取消成员（去重后 {data.exportUserGroupMemberCount} 人）创建为一个同校用户组。存在未绑定或跨校成员时不会写入任何数据。
+                </p>
+                {data.exportUserGroupMemberCount === 0 && <p className="text-sm text-destructive">任务没有可导出的非取消成员。</p>}
+              </DialogBody>
+              <div className="flex shrink-0 justify-end gap-2 border-t bg-muted/20 px-6 py-3">
                 <Button type="button" variant="outline" onClick={() => setGroupExportOpen(false)}>
                   取消
                 </Button>
@@ -1468,7 +1471,6 @@ export function AdminTasksStatsPage() {
                   创建用户组
                 </Button>
               </div>
-              {data.exportUserGroupMemberCount === 0 && <p className="text-sm text-destructive">任务没有可导出的非取消成员。</p>}
             </form>
           </DialogContent>
         </Dialog>
@@ -1696,12 +1698,12 @@ export function AdminTasksCandidatesPage() {
           if (!o) setDrillIn(null);
         }}
       >
-        <SheetContent side="right" className="w-[680px] sm:max-w-[680px]">
+        <SheetContent side="right" className="w-[680px] sm:max-w-[680px] p-0">
           <SheetHeader>
             <SheetTitle>{drillIn ? data.udict[drillIn.userId]?.uname || `uid:${drillIn.userId}` : '—'}</SheetTitle>
           </SheetHeader>
           {drillIn && (
-            <ScrollArea className="min-h-0 flex-1">
+            <SheetBody>
               <div className="space-y-4 px-6 py-5">
                 <div className="flex items-center gap-2">
                   <StatusBadge status={drillIn.status} />
@@ -1747,7 +1749,7 @@ export function AdminTasksCandidatesPage() {
                   )}
                 </div>
               </div>
-            </ScrollArea>
+            </SheetBody>
           )}
         </SheetContent>
       </Sheet>

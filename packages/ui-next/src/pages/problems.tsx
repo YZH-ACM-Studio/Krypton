@@ -13,7 +13,7 @@ import { Input } from '@/components/ui/input';
 import { MultiSelect } from '@/components/ui/multi-select';
 import { Pagination } from '@/components/ui/pagination';
 import { SimpleSelect } from '@/components/ui/select';
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { Sheet, SheetBody, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { useBootstrap } from '@/lib/bootstrap';
 import { replaceRouteTokens } from '@/lib/format';
 import { managedSourceFieldViews, type ManagedSourceMetaView, type ManagedSourceTemplateOption } from '@/lib/managed-problem-source';
@@ -582,11 +582,11 @@ export function ProblemsPage() {
       </section>
 
       <Sheet open={mobileFiltersOpen} onOpenChange={setMobileFiltersOpen}>
-        <SheetContent side="bottom" className="max-h-[88vh] overflow-y-auto">
+        <SheetContent side="bottom" className="max-h-[88vh]">
           <SheetHeader>
             <SheetTitle>筛选题库</SheetTitle>
           </SheetHeader>
-          <div className="p-5">
+          <SheetBody className="p-5">
             <FilterForm
               action={bs.urls.problems}
               query={query}
@@ -599,7 +599,7 @@ export function ProblemsPage() {
               canReviewManaged={!!data.canReviewManaged}
               compact
             />
-          </div>
+          </SheetBody>
         </SheetContent>
       </Sheet>
 

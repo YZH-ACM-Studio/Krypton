@@ -46,11 +46,11 @@ export function TeamDialogContent({
       aria-labelledby={titleId}
       aria-describedby={descriptionId}
       className={cn(
-        'animate-in fade-in-0 zoom-in-95 rounded-[28px] border-0 bg-background/95 shadow-[0_32px_90px_-34px_rgba(0,0,0,0.72),0_14px_36px_-22px_rgba(0,0,0,0.52)] ring-1 ring-foreground/10 backdrop-blur-xl duration-200 motion-reduce:animate-none sm:w-[32rem]',
+        'animate-in fade-in-0 zoom-in-95 overflow-hidden rounded-[28px] border-0 bg-background/95 shadow-[0_32px_90px_-34px_rgba(0,0,0,0.72),0_14px_36px_-22px_rgba(0,0,0,0.52)] ring-1 ring-foreground/10 backdrop-blur-xl duration-200 motion-reduce:animate-none sm:w-[32rem]',
         className,
       )}
     >
-      <div className="flex items-start gap-4 px-6 pb-5 pt-6 sm:px-7 sm:pt-7">
+      <div className="flex shrink-0 items-start gap-4 px-6 pb-5 pt-6 sm:px-7 sm:pt-7">
         <div
           className={cn(
             'grid size-12 shrink-0 place-items-center rounded-2xl shadow-sm ring-1',
@@ -74,7 +74,7 @@ export function TeamDialogContent({
           onClick={onClose}
           className="grid size-10 shrink-0 place-items-center rounded-full bg-muted/65 text-muted-foreground ring-1 ring-foreground/10 transition-[scale,background-color,color] duration-150 ease-out hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96] motion-reduce:transition-none"
         >
-          <X className="size-4" />
+          <X className="size-4" aria-hidden="true" />
         </button>
       </div>
       {children}
@@ -83,7 +83,7 @@ export function TeamDialogContent({
 }
 
 export function TeamDialogBody({ className, children }: { className?: string; children: ReactNode }) {
-  return <div className={cn('min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain px-6 pb-6 pt-1 sm:px-7', className)}>{children}</div>;
+  return <div className={cn('min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain krypton-scrollbar px-6 pb-6 pt-1 sm:px-7', className)}>{children}</div>;
 }
 
 export function TeamDialogFooter({ className, children }: { className?: string; children: ReactNode }) {

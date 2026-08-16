@@ -25,6 +25,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { SimpleSelect } from '@/components/ui/select';
 import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useBootstrap, type GenericUserDoc } from '@/lib/bootstrap';
@@ -1409,7 +1410,7 @@ export function RecordDetailPage() {
                     其他 <strong className="font-semibold tabular-nums text-muted-foreground">{caseSummary.other}</strong>
                   </span>
                 </div>
-                <div className="max-h-[min(65vh,680px)] overflow-y-auto">
+                <ScrollArea className="max-h-[min(65vh,680px)]" viewportLayout="block">
                   <Table density="compact">
                     <TableHeader>
                       <TableRow>
@@ -1471,7 +1472,7 @@ export function RecordDetailPage() {
                       })}
                     </TableBody>
                   </Table>
-                </div>
+                </ScrollArea>
                 <div className="flex flex-col gap-2 border-t bg-muted/10 px-4 py-3 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
                   <span className="tabular-nums">
                     显示 {casePageData.start}–{casePageData.end} / {casePageData.total}

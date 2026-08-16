@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { MarkdownView } from '@/components/markdown-renderer';
 import { Button } from '@/components/ui/button';
 import { MiniTabs } from '@/components/ui/mini-tabs';
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { Sheet, SheetBody, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 import { practiceProblemEntryUrl } from '@/lib/practice-integrity';
@@ -47,7 +47,7 @@ function ProblemList({
               }
               className={cn(
                 'group flex min-h-11 items-center gap-3 px-1 py-2.5 transition-colors duration-200 hover:text-primary',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary motion-reduce:transition-none',
               )}
             >
               <span className="w-7 shrink-0 text-xs tabular-nums text-muted-foreground">{index + 1}</span>
@@ -78,7 +78,7 @@ function ContestList({ chapter, contests }: { chapter: CourseChapter; contests: 
               href={href}
               className={cn(
                 'flex min-h-11 items-center gap-3 px-1 py-2.5 transition-colors duration-200 hover:text-primary',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary motion-reduce:transition-none',
               )}
             >
               <Trophy className="size-4 shrink-0 text-muted-foreground" />
@@ -258,6 +258,7 @@ export function CourseDetailPage() {
                       className={cn(
                         'flex min-h-11 items-center gap-3 px-1 py-2.5 text-sm transition-colors duration-200',
                         'hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+                        'motion-reduce:transition-none',
                       )}
                     >
                       <FileText className="size-4 shrink-0 text-muted-foreground" />
@@ -298,9 +299,9 @@ export function CourseDetailPage() {
           <SheetHeader>
             <SheetTitle>课程目录</SheetTitle>
           </SheetHeader>
-          <div className="overflow-y-auto p-4">
+          <SheetBody className="p-4">
             <ChapterOutline chapters={chapters} activeId={activeChapter?._id || null} onSelect={selectFromMobile} />
-          </div>
+          </SheetBody>
         </SheetContent>
       </Sheet>
     </main>

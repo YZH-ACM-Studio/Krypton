@@ -5,8 +5,9 @@ import { ProblemPicker } from '@/components/problem-picker';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { SimpleSelect } from '@/components/ui/select';
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { Sheet, SheetBody, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { FileUploader } from '@/components/uploader';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
@@ -389,35 +390,40 @@ export function CourseEditPage() {
               </h2>
               <p className="mt-0.5 text-xs text-muted-foreground">不选择时对全域用户开放。</p>
             </div>
-            <div className="max-h-52 space-y-1 overflow-y-auto border-y border-border/70 py-2">
-              {activeGroups.length ? (
-                activeGroups.map((group) => (
-                  <label
-                    key={group._id}
-                    className="flex min-h-11 items-center gap-2 rounded-md px-2 text-xs transition-colors duration-200 hover:bg-muted/60"
-                  >
-                    <Checkbox
-                      checked={selectedGroups.has(group._id)}
-                      onChange={() => {
-                        setSelectedGroups((current) => {
-                          const next = new Set(current);
-                          if (next.has(group._id)) next.delete(group._id);
-                          else next.add(group._id);
-                          return next;
-                        });
-                        markDirty();
-                      }}
-                    />
-                    <span>
-                      {group.name}
-                      {group.archivedAt ? '（已归档）' : ''}
-                    </span>
-                  </label>
-                ))
-              ) : (
-                <p className="px-2 py-3 text-xs text-muted-foreground">暂无班级。</p>
-              )}
-            </div>
+            <ScrollArea className="max-h-52 border-y border-border/70">
+              <div className="space-y-1 py-2">
+                {activeGroups.length ? (
+                  activeGroups.map((group) => (
+                    <label
+                      key={group._id}
+                      className={cn(
+                        'flex min-h-11 items-center gap-2 rounded-md px-2 text-xs transition-colors duration-200 hover:bg-muted/60',
+                        'motion-reduce:transition-none',
+                      )}
+                    >
+                      <Checkbox
+                        checked={selectedGroups.has(group._id)}
+                        onChange={() => {
+                          setSelectedGroups((current) => {
+                            const next = new Set(current);
+                            if (next.has(group._id)) next.delete(group._id);
+                            else next.add(group._id);
+                            return next;
+                          });
+                          markDirty();
+                        }}
+                      />
+                      <span>
+                        {group.name}
+                        {group.archivedAt ? '（已归档）' : ''}
+                      </span>
+                    </label>
+                  ))
+                ) : (
+                  <p className="px-2 py-3 text-xs text-muted-foreground">暂无班级。</p>
+                )}
+              </div>
+            </ScrollArea>
           </section>
 
           <section data-course-slot="files" className="space-y-3" aria-labelledby="course-files-editor-title">
@@ -490,7 +496,7 @@ export function CourseEditPage() {
               添加
             </Button>
           </SheetHeader>
-          <div className="overflow-y-auto p-4">
+          <SheetBody className="p-4">
             <ChapterOutline
               chapters={chapters}
               activeId={activeChapter._id}
@@ -498,7 +504,7 @@ export function CourseEditPage() {
               onMove={moveChapter}
               onRemove={removeChapter}
             />
-          </div>
+          </SheetBody>
         </SheetContent>
       </Sheet>
     </main>

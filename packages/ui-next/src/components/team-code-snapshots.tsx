@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { TEAM_DIALOG_BUTTON_CLASS, TeamDialogBody, TeamDialogContent, TeamDialogFooter } from '@/components/team-dialog';
 import { Dialog } from '@/components/ui/dialog';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { toast } from '@/components/ui/toast';
 import { cn } from '@/lib/cn';
@@ -362,52 +363,54 @@ export function TeamCodeSnapshotDrawer({
           <p className="mt-1 text-xs text-muted-foreground">最近的定向代码版本保存在 OJ；这里只读展示，不提供运行、提交或下载。</p>
         </SheetHeader>
         <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[19rem_minmax(0,1fr)]">
-          <div className="min-h-0 overflow-y-auto border-b bg-muted/15 p-3 md:border-b-0 md:border-r">
-            {loading && snapshots.length === 0 ? (
-              <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
-                <Loader2 className="size-4 animate-spin" />
-                加载快照
-              </div>
-            ) : snapshots.length ? (
-              <div className="space-y-2">
-                {snapshots.map((snapshot) => {
-                  const state = stateLabel(snapshot.state);
-                  const StateIcon = state.icon;
-                  return (
-                    <button
-                      key={snapshot.snapshotId}
-                      type="button"
-                      onClick={() => void loadDetail(snapshot.snapshotId)}
-                      className={cn(
-                        'w-full rounded-xl border p-3 text-left transition-colors',
-                        selectedId === snapshot.snapshotId ? 'border-primary/50 bg-primary/5' : 'bg-background hover:bg-muted/40',
-                      )}
-                    >
-                      <div className="flex items-start gap-2">
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-sm font-medium">
-                            {snapshot.pid} · {snapshot.title}
+          <ScrollArea className="h-full min-h-0 border-b bg-muted/15 md:border-b-0 md:border-r" viewportClassName="overscroll-contain">
+            <div className="p-3">
+              {loading && snapshots.length === 0 ? (
+                <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
+                  <Loader2 className="size-4 animate-spin" />
+                  加载快照
+                </div>
+              ) : snapshots.length ? (
+                <div className="space-y-2">
+                  {snapshots.map((snapshot) => {
+                    const state = stateLabel(snapshot.state);
+                    const StateIcon = state.icon;
+                    return (
+                      <button
+                        key={snapshot.snapshotId}
+                        type="button"
+                        onClick={() => void loadDetail(snapshot.snapshotId)}
+                        className={cn(
+                          'w-full rounded-xl border p-3 text-left transition-colors motion-reduce:transition-none',
+                          selectedId === snapshot.snapshotId ? 'border-primary/50 bg-primary/5' : 'bg-background hover:bg-muted/40',
+                        )}
+                      >
+                        <div className="flex items-start gap-2">
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-medium">
+                              {snapshot.pid} · {snapshot.title}
+                            </span>
+                            <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                              #{snapshot.sequence} · {snapshot.sender.displayName} → {snapshot.target.displayName}
+                            </span>
                           </span>
-                          <span className="mt-0.5 block truncate text-xs text-muted-foreground">
-                            #{snapshot.sequence} · {snapshot.sender.displayName} → {snapshot.target.displayName}
+                          <span className={cn('flex shrink-0 items-center gap-1 text-[11px]', state.className)}>
+                            <StateIcon className="size-3" />
+                            {state.label}
                           </span>
-                        </span>
-                        <span className={cn('flex shrink-0 items-center gap-1 text-[11px]', state.className)}>
-                          <StateIcon className="size-3" />
-                          {state.label}
-                        </span>
-                      </div>
-                      <p className="mt-2 text-[11px] text-muted-foreground">
-                        {formatDateTime(snapshot.createdAt, locale)} · {snapshot.language}
-                      </p>
-                    </button>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="rounded-xl border border-dashed py-12 text-center text-sm text-muted-foreground">还没有代码快照。</div>
-            )}
-          </div>
+                        </div>
+                        <p className="mt-2 text-[11px] text-muted-foreground">
+                          {formatDateTime(snapshot.createdAt, locale)} · {snapshot.language}
+                        </p>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="rounded-xl border border-dashed py-12 text-center text-sm text-muted-foreground">还没有代码快照。</div>
+              )}
+            </div>
+          </ScrollArea>
 
           <div className="flex min-h-[18rem] min-w-0 flex-col overflow-hidden">
             {detail ? (

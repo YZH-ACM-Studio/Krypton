@@ -12,6 +12,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
 import { useBootstrap } from '@/lib/bootstrap';
@@ -289,7 +290,7 @@ export function RealPassManagePage() {
               批量预览 · 共 {preview.summary.total} 行：命中 {preview.summary.ok} · 未找到 {preview.summary.unmatched} · 冲突{' '}
               {preview.summary.conflict} · 格式错误 {preview.summary.invalid} · 重复 {preview.summary.duplicate}
             </h2>
-            <div className="max-h-80 overflow-y-auto">
+            <ScrollArea className="max-h-80" viewportLayout="block">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -324,7 +325,7 @@ export function RealPassManagePage() {
                   })}
                 </TableBody>
               </Table>
-            </div>
+            </ScrollArea>
           </CardContent>
         </Card>
       ) : null}

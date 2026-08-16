@@ -367,7 +367,7 @@ class ExamSeatPlanCollectionHandler extends ExamSeatPlanBaseHandler {
                                 layoutFingerprint: layout.fingerprint,
                                 profileRevision: profile.revision,
                                 profileFingerprint: profile.fingerprint,
-                                candidateSeatIds: layout.seats.map((seat) => seat.sourceSeatId),
+                                candidateSeatIds: layout.seats.map((seat) => seat.sourceSeatId).sort(),
                             };
                         }),
                     );

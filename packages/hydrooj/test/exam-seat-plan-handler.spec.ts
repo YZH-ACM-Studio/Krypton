@@ -54,6 +54,7 @@ describe('P2.4 roster and seat-plan HTTP boundary', () => {
         expect(source).to.include('expectedPreviousRevision,');
         expect(source).to.include('examSeatPlanService.createSeatPlanV2');
         expect(source).to.include("requireRoster: current.type === 'krypton'");
+        expect(source).to.match(/candidateSeatIds:\s*layout\.seats\.map\(\(seat\) => seat\.sourceSeatId\)\.sort\(\)/);
     });
 
     it('records revision, counts, diagnostics and fingerprints without student PII in operational logs', () => {

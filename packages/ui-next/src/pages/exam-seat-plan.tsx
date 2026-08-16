@@ -2705,25 +2705,28 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                 <label className="text-sm font-medium" htmlFor="seat-roster-source">
                   步骤 1：名单来源
                 </label>
-                <select
-                  id="seat-roster-source"
-                  aria-label="名单来源"
-                  value={sourceKind}
-                  disabled={mutationBusy || dirty || !workspaceFresh || !automaticSeatingAllowed || workspace?.eventType === 'krypton'}
-                  onChange={(event) => setSourceKind(event.target.value as 'contestAudience' | 'userbindGroups' | 'userbindSchool')}
-                  className="w-full rounded-md border bg-background px-2 py-2 text-sm"
-                >
-                  {workspace?.eventType === 'krypton' ? (
-                    <option value="contestAudience" disabled={workspace.contestAudienceState !== 'fixed'}>
-                      {workspace.contestAudienceState === 'public' ? '关联比赛受众（公开比赛不支持自动排座）' : '关联比赛受众'}
-                    </option>
-                  ) : (
-                    <>
-                      <option value="userbindGroups">指定 userbind 用户组</option>
-                      <option value="userbindSchool">当前学校全部学生</option>
-                    </>
-                  )}
-                </select>
+                {workspace?.eventType === 'krypton' ? (
+                  <output id="seat-roster-source" className="block w-full rounded-md border bg-muted/30 px-3 py-2 text-sm">
+                    <span className="block font-medium">关联比赛受众</span>
+                    <span className="block text-xs text-muted-foreground">
+                      {workspace.contestAudienceState === 'public'
+                        ? '公开或邀请码比赛不支持自动排座。'
+                        : '名单来源由当前比赛的固定参赛范围自动确定，无需选择。'}
+                    </span>
+                  </output>
+                ) : (
+                  <select
+                    id="seat-roster-source"
+                    aria-label="名单来源"
+                    value={sourceKind}
+                    disabled={mutationBusy || dirty || !workspaceFresh || !automaticSeatingAllowed}
+                    onChange={(event) => setSourceKind(event.target.value as 'userbindGroups' | 'userbindSchool')}
+                    className="w-full rounded-md border bg-background px-2 py-2 text-sm"
+                  >
+                    <option value="userbindGroups">指定 userbind 用户组</option>
+                    <option value="userbindSchool">当前学校全部学生</option>
+                  </select>
+                )}
                 {workspace?.contestAudienceState === 'public' ? (
                   <p className="text-sm text-amber-700">
                     这是一场参赛名单持续变化的完全公开或邀请码比赛，第一版不提供自动排座，也不会用学校、用户组或某一刻的 attend 用户绕过该限制。

@@ -703,7 +703,8 @@ describe('p2.5 exam seat assignment workspace', () => {
     renderPage();
     expect(await screen.findByText('候选教室布局已变化；请在上方按当前布局创建新计划后再生成。')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '随机分配' })).not.toBeInTheDocument();
-    expect(screen.getByRole('combobox', { name: '名单来源' })).toHaveValue('contestAudience');
+    expect(screen.queryByRole('combobox', { name: '名单来源' })).not.toBeInTheDocument();
+    expect(screen.getByText('名单来源由当前比赛的固定参赛范围自动确定，无需选择。')).toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: '2026 级一班' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '生成或刷新名单' })).toBeEnabled();
     await user.click(screen.getByRole('checkbox', { name: '选择教室北实 201' }));
@@ -922,7 +923,8 @@ describe('p2.5 exam seat assignment workspace', () => {
     renderPage();
 
     expect(await screen.findByText(/第一版不提供自动排座/)).toBeInTheDocument();
-    expect(screen.getByRole('combobox', { name: '名单来源' })).toBeDisabled();
+    expect(screen.queryByRole('combobox', { name: '名单来源' })).not.toBeInTheDocument();
+    expect(screen.getByText('公开或邀请码比赛不支持自动排座。')).toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: '2026 级一班' })).not.toBeInTheDocument();
     expect(screen.getByRole('checkbox', { name: '选择教室北实 201' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '生成或刷新名单' })).toBeDisabled();
@@ -1112,7 +1114,8 @@ describe('p2.5 exam seat assignment workspace', () => {
     const user = userEvent.setup();
     renderPage();
 
-    expect(await screen.findByRole('combobox', { name: '名单来源' })).toHaveValue('contestAudience');
+    expect(await screen.findByText('名单来源由当前比赛的固定参赛范围自动确定，无需选择。')).toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: '名单来源' })).not.toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: '2026 级一班' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '生成或刷新名单' }));
     await waitFor(() => expect(bodies[0]?.body).toEqual({ action: 'createRoster', sourceKind: 'contestAudience', groupIds: [] }));
@@ -2397,6 +2400,7 @@ describe('p2.5 exam seat assignment workspace', () => {
     vi.stubGlobal('fetch', fetchMock);
     renderPage();
     expect(await screen.findByText('预登录不适用')).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: '名单来源' })).toHaveValue('userbindGroups');
     expect(screen.getByText(/外部考试没有受信 Contest 工作台/)).toBeInTheDocument();
     expect(
       fetchMock.mock.calls.some(([input, init]) => String(input).includes('/prelogin/') && (init as RequestInit | undefined)?.method === 'POST'),

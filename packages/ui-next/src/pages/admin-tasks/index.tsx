@@ -1515,6 +1515,13 @@ export function AdminTasksCandidatesPage() {
     });
   }, [data.assignments, data.udict, data.studentByUid, query, schoolFilter, statusFilter]);
 
+  const selectedStatus = useMemo<AssignmentStatus | 'mixed'>(() => {
+    const selectedAssignments = data.assignments.filter((assignment) => selected.has(assignment._id));
+    if (selectedAssignments.length !== selected.size) return 'mixed';
+    const statuses = new Set(selectedAssignments.map((assignment) => assignment.status));
+    return statuses.size === 1 ? selectedAssignments[0].status : 'mixed';
+  }, [data.assignments, selected]);
+
   const allVisibleSelected = visible.length > 0 && visible.every((a) => selected.has(a._id));
   function toggleAllVisible() {
     setSelected((prev) => {
@@ -1589,16 +1596,24 @@ export function AdminTasksCandidatesPage() {
       {selected.size > 0 && (
         <Card className="border-primary/50 bg-primary/5">
           <CardContent className="flex flex-wrap items-center gap-2 py-2">
-            <BulkActionForm taskId={data.task._id} operation="admit" aids={Array.from(selected)} label="批量录取" variant="default" />
-            <BulkActionForm taskId={data.task._id} operation="unadmit" aids={Array.from(selected)} label="撤销录取" variant="outline" />
-            <BulkActionForm
-              taskId={data.task._id}
-              operation="confirm"
-              aids={Array.from(selected)}
-              label="确认录取并生效"
-              variant="default"
-              confirm={`确定让这 ${selected.size} 人进入 completed 状态？此操作不可逆，将触发留校 +1 等副作用。`}
-            />
+            {selectedStatus === 'qualified' && (
+              <BulkActionForm taskId={data.task._id} operation="admit" aids={Array.from(selected)} label="批量录取" variant="default" />
+            )}
+            {selectedStatus === 'admitted' && (
+              <>
+                <BulkActionForm taskId={data.task._id} operation="unadmit" aids={Array.from(selected)} label="撤销录取" variant="outline" />
+                <BulkActionForm
+                  taskId={data.task._id}
+                  operation="confirm"
+                  aids={Array.from(selected)}
+                  label="确认录取并生效"
+                  variant="default"
+                  confirm={`确定让这 ${selected.size} 人进入 completed 状态？此操作不可逆，将触发留校 +1 等副作用。`}
+                />
+              </>
+            )}
+            {selectedStatus === 'mixed' && <p className="text-sm text-destructive">所选人员状态不一致，请按状态分批操作。</p>}
+            {selectedStatus === 'completed' && <p className="text-sm text-muted-foreground">已完成记录不可再次执行录取操作。</p>}
             <Button type="button" size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
               <X className="mr-1 size-3.5" />
               清空选择

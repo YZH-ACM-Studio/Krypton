@@ -18,7 +18,8 @@
  *      don't clear it. Admin must explicitly cancel the assignment to undo.
  *   - `assignTask` upgrades an existing self-claim to admin-locked when called
  *      with assignedBy !== 0 (admin assign); it does NOT downgrade.
- *   - Cancellation refuses to operate on `completed` assignments.
+ *   - Cancellation only CASes active, transition-free assignments; it cannot
+ *      overwrite a concurrent admission or terminal confirmation.
  */
 import { localizeError, localizedErrorText, NotFoundError, ObjectId, PermissionError } from 'hydrooj';
 import type { LocalizedErrorText } from 'hydrooj';
@@ -32,6 +33,8 @@ import type {
     GpltLevel,
     GpltScoreDoc,
     StayEventDoc,
+    TaskAssignmentTransition,
+    TaskAssignmentTransitionOperation,
     TaskAssignmentDoc,
     TaskDoc,
     TaskGraph,
@@ -49,6 +52,23 @@ function assignmentNotFound() {
 
 function taskPointNotFound() {
     return localizeError(new NotFoundError('任务点不存在'), '任务点不存在');
+}
+
+export type TaskAssignmentTransitionFailureReason = 'assignment_not_found' | 'task_not_found' | 'admission_mode_invalid' | 'assignment_state_changed';
+
+export class TaskAssignmentTransitionError extends Error {
+    readonly name = 'TaskAssignmentTransitionError';
+
+    constructor(
+        readonly reason: TaskAssignmentTransitionFailureReason,
+        message: string,
+    ) {
+        super(message);
+    }
+}
+
+function assignmentTransitionError(reason: TaskAssignmentTransitionFailureReason, message: string) {
+    return new TaskAssignmentTransitionError(reason, message);
 }
 
 // ============ Tasks CRUD ============
@@ -187,9 +207,21 @@ async function cancelAssignment(domainId: string, assignmentId: ObjectId, actorU
     if (!a) throw assignmentNotFound();
     if (a.userId !== actorUid) throw new PermissionError(localizedErrorText`无权操作`);
     if (!a.canCancel) throw new Error('该任务由管理员分配，无法取消');
-    if (a.status === 'completed') throw new Error('已完成的任务无法取消');
-    await assignmentsColl.updateOne({ _id: assignmentId }, { $set: { status: 'cancelled' } });
-    await tasksColl.updateOne({ _id: a.taskId }, { $inc: { currentAssignments: -1 } });
+    if (!['pending', 'qualified', 'admitted'].includes(a.status)) throw new Error('该状态的任务无法取消');
+    const result = await assignmentsColl.updateOne(
+        {
+            _id: assignmentId,
+            domainId,
+            taskId: a.taskId,
+            userId: actorUid,
+            canCancel: true,
+            status: a.status,
+            $or: [{ admissionTransition: null }, { 'admissionTransition.state': 'complete' }],
+        },
+        { $set: { status: 'cancelled' } },
+    );
+    if (result.matchedCount !== 1) throw new Error('任务状态已变化，请刷新后重试');
+    await tasksColl.updateOne({ _id: a.taskId, domainId }, { $inc: { currentAssignments: -1 } });
 }
 
 async function getUserAssignments(domainId: string, userId: number, filter: any = {}): Promise<TaskAssignmentDoc[]> {
@@ -325,7 +357,7 @@ async function checkTaskCompletion(
             update.completedAt = new Date();
             update.confirmedAt = new Date();
             update.confirmedBy = 0; // 0 = system (auto mode)
-            await maybeAwardStayEvent(task, a);
+            await maybeAwardStayEvent(task.countsAsStay === true, a);
         } else {
             // quota: enter the candidate pool.
             update.status = 'qualified';
@@ -347,16 +379,16 @@ async function checkTaskCompletion(
  * does NOT award — by design, the two-stage flow gives admins a window to
  * revoke before any side-effect fires.
  */
-async function maybeAwardStayEvent(task: TaskDoc, assignment: TaskAssignmentDoc): Promise<void> {
-    if (!task.countsAsStay) return;
+async function maybeAwardStayEvent(countsAsStay: boolean, assignment: TaskAssignmentDoc, occurredAt = new Date()): Promise<void> {
+    if (!countsAsStay) return;
     const source = `task:${assignment._id.toHexString()}`;
     const doc: StayEventDoc = {
         _id: new ObjectId(),
         domainId: assignment.domainId,
         userId: assignment.userId,
-        year: new Date().getFullYear(),
+        year: occurredAt.getFullYear(),
         source,
-        createdAt: new Date(),
+        createdAt: occurredAt,
         createdBy: 0,
     };
     try {
@@ -370,6 +402,7 @@ async function maybeAwardStayEvent(task: TaskDoc, assignment: TaskAssignmentDoc)
 // ============ Admission state machine (quota mode) ============
 
 async function writeAudit(row: {
+    id?: ObjectId;
     domainId: string;
     assignmentId: ObjectId | null;
     taskId: ObjectId;
@@ -379,9 +412,10 @@ async function writeAudit(row: {
     before?: any;
     after?: any;
     reason?: string;
+    createdAt?: Date;
 }): Promise<void> {
     const audit: AuditLogDoc = {
-        _id: new ObjectId(),
+        _id: row.id || new ObjectId(),
         domainId: row.domainId,
         assignmentId: row.assignmentId,
         taskId: row.taskId,
@@ -391,122 +425,238 @@ async function writeAudit(row: {
         ...(row.before !== undefined ? { before: row.before } : {}),
         ...(row.after !== undefined ? { after: row.after } : {}),
         reason: row.reason || '',
-        createdAt: new Date(),
+        createdAt: row.createdAt || new Date(),
     };
-    await auditColl.insertOne(audit);
+    try {
+        await auditColl.insertOne(audit);
+    } catch (error: unknown) {
+        if (!row.id || typeof error !== 'object' || error === null || !('code' in error) || error.code !== 11000) throw error;
+        const existing = await auditColl.findOne({ _id: row.id });
+        const sameAssignment =
+            existing?.assignmentId === null
+                ? audit.assignmentId === null
+                : audit.assignmentId !== null && existing?.assignmentId instanceof ObjectId && existing.assignmentId.equals(audit.assignmentId);
+        if (
+            !existing ||
+            existing.domainId !== audit.domainId ||
+            !existing.taskId.equals(audit.taskId) ||
+            !sameAssignment ||
+            existing.eventType !== audit.eventType ||
+            existing.adminUid !== audit.adminUid ||
+            existing.reason !== audit.reason ||
+            existing.createdAt.getTime() !== audit.createdAt.getTime() ||
+            JSON.stringify(existing.before ?? null) !== JSON.stringify(audit.before ?? null) ||
+            JSON.stringify(existing.after ?? null) !== JSON.stringify(audit.after ?? null)
+        ) {
+            throw error;
+        }
+    }
 }
 
-/**
- * Admin admit (quota mode only). qualified → admitted.
- * Does NOT trigger side effects (stay event) — wait for confirm.
- */
-async function admitAssignment(domainId: string, assignmentId: ObjectId, adminUid: number, note = ''): Promise<void> {
-    const a = await assignmentsColl.findOne({ _id: assignmentId, domainId });
-    if (!a) throw assignmentNotFound();
-    const task = await getTask(domainId, a.taskId);
-    if (!task) throw taskNotFound();
+function storedAdmissionTransition(assignment: TaskAssignmentDoc): TaskAssignmentTransition | null {
+    const transition = assignment.admissionTransition;
+    if (transition == null) return null;
+    if (
+        !(transition.id instanceof ObjectId) ||
+        !['admit', 'unadmit', 'confirm'].includes(transition.operation) ||
+        !['pending', 'complete'].includes(transition.state) ||
+        !Number.isSafeInteger(transition.actorUid) ||
+        transition.actorUid < 0 ||
+        typeof transition.note !== 'string' ||
+        !(transition.startedAt instanceof Date) ||
+        !Number.isFinite(transition.startedAt.getTime()) ||
+        typeof transition.countsAsStay !== 'boolean'
+    ) {
+        throw new Error(`Invalid task admission transition: ${assignment._id.toHexString()}`);
+    }
+    return transition;
+}
+
+function admissionTransitionStatuses(operation: TaskAssignmentTransitionOperation) {
+    if (operation === 'admit') return { from: 'qualified' as const, to: 'admitted' as const };
+    if (operation === 'unadmit') return { from: 'admitted' as const, to: 'qualified' as const };
+    return { from: 'admitted' as const, to: 'completed' as const };
+}
+
+function transitionFinalFields(transition: TaskAssignmentTransition): Record<string, unknown> {
+    if (transition.operation === 'admit') {
+        return {
+            status: 'admitted',
+            admittedAt: transition.startedAt,
+            admittedBy: transition.actorUid,
+            admissionNote: transition.note,
+        };
+    }
+    if (transition.operation === 'unadmit') {
+        return { status: 'qualified', admittedAt: null, admittedBy: 0, admissionNote: '' };
+    }
+    return {
+        status: 'completed',
+        completedAt: transition.startedAt,
+        confirmedAt: transition.startedAt,
+        confirmedBy: transition.actorUid,
+    };
+}
+
+async function transitionAlreadyCommitted(
+    domainId: string,
+    taskId: ObjectId,
+    assignmentId: ObjectId,
+    transition: TaskAssignmentTransition,
+): Promise<boolean> {
+    const current = await assignmentsColl.findOne({ _id: assignmentId, domainId, taskId });
+    if (!current) return false;
+    const stored = storedAdmissionTransition(current);
+    return (
+        current.status === admissionTransitionStatuses(transition.operation).to &&
+        stored?.state === 'complete' &&
+        stored.operation === transition.operation &&
+        stored.id.equals(transition.id)
+    );
+}
+
+async function finishAdmissionTransition(assignment: TaskAssignmentDoc, transition: TaskAssignmentTransition): Promise<void> {
+    const statuses = admissionTransitionStatuses(transition.operation);
+    if (transition.operation === 'confirm') {
+        await maybeAwardStayEvent(transition.countsAsStay, assignment, transition.startedAt);
+    }
+    await writeAudit({
+        id: transition.id,
+        domainId: assignment.domainId,
+        assignmentId: assignment._id,
+        taskId: assignment.taskId,
+        eventType: transition.operation,
+        adminUid: transition.actorUid,
+        reason: transition.note,
+        before: transition.operation === 'unadmit' ? { status: statuses.from, admittedBy: assignment.admittedBy } : { status: statuses.from },
+        after:
+            transition.operation === 'admit'
+                ? { status: statuses.to, admittedBy: transition.actorUid }
+                : transition.operation === 'confirm'
+                  ? { status: statuses.to, confirmedBy: transition.actorUid }
+                  : { status: statuses.to },
+        createdAt: transition.startedAt,
+    });
+
+    let result;
+    try {
+        result = await assignmentsColl.updateOne(
+            {
+                _id: assignment._id,
+                domainId: assignment.domainId,
+                taskId: assignment.taskId,
+                status: statuses.from,
+                'admissionTransition.id': transition.id,
+                'admissionTransition.operation': transition.operation,
+                'admissionTransition.state': 'pending',
+            },
+            {
+                $set: {
+                    ...transitionFinalFields(transition),
+                    admissionTransition: { ...transition, state: 'complete' },
+                },
+            },
+        );
+    } catch (error) {
+        if (await transitionAlreadyCommitted(assignment.domainId, assignment.taskId, assignment._id, transition)) return;
+        throw error;
+    }
+    if (result.matchedCount === 1) return;
+    if (await transitionAlreadyCommitted(assignment.domainId, assignment.taskId, assignment._id, transition)) return;
+    throw assignmentTransitionError('assignment_state_changed', '候选状态已变化，请刷新候选池后重试');
+}
+
+async function runAdmissionTransition(
+    domainId: string,
+    taskId: ObjectId,
+    assignmentId: ObjectId,
+    operation: TaskAssignmentTransitionOperation,
+    adminUid: number,
+    note: string,
+): Promise<void> {
+    const assignment = await assignmentsColl.findOne({ _id: assignmentId, domainId, taskId });
+    if (!assignment) throw assignmentTransitionError('assignment_not_found', '任务分配不存在或不属于当前任务');
+    const statuses = admissionTransitionStatuses(operation);
+    const existingTransition = storedAdmissionTransition(assignment);
+
+    if (existingTransition?.state === 'pending') {
+        await finishAdmissionTransition(assignment, existingTransition);
+        if (existingTransition.operation === operation) return;
+        throw assignmentTransitionError('assignment_state_changed', '候选状态已变化，请刷新候选池后重试');
+    }
+    if (
+        operation === 'confirm' &&
+        existingTransition?.state === 'complete' &&
+        existingTransition.operation === operation &&
+        assignment.status === statuses.to
+    ) {
+        return;
+    }
+
+    const task = await getTask(domainId, taskId);
+    if (!task) throw assignmentTransitionError('task_not_found', '任务不存在');
     if (task.admissionMode !== 'quota') {
-        throw new Error('该任务非配额模式，无需 admit');
+        const messages: Record<TaskAssignmentTransitionOperation, string> = {
+            admit: '该任务非配额模式，无需录取',
+            unadmit: '该任务非配额模式，无需撤销录取',
+            confirm: '该任务非配额模式，无需确认录取',
+        };
+        throw assignmentTransitionError('admission_mode_invalid', messages[operation]);
     }
-    if (a.status !== 'qualified') {
-        throw new Error(`只能 admit 状态为 qualified 的分配（当前 ${a.status}）`);
+    if (assignment.status !== statuses.from) {
+        const verbs: Record<TaskAssignmentTransitionOperation, string> = { admit: '录取', unadmit: '撤销', confirm: '确认' };
+        throw assignmentTransitionError(
+            'assignment_state_changed',
+            `只能${verbs[operation]}状态为 ${statuses.from} 的分配（当前 ${assignment.status}）`,
+        );
     }
-    await assignmentsColl.updateOne(
-        { _id: assignmentId },
-        {
-            $set: {
-                status: 'admitted',
-                admittedAt: new Date(),
-                admittedBy: adminUid,
-                admissionNote: note,
+
+    const transition: TaskAssignmentTransition = {
+        id: new ObjectId(),
+        operation,
+        state: 'pending',
+        actorUid: adminUid,
+        note,
+        startedAt: new Date(),
+        countsAsStay: task.countsAsStay === true,
+    };
+    let claimResult;
+    try {
+        claimResult = await assignmentsColl.updateOne(
+            {
+                _id: assignmentId,
+                domainId,
+                taskId,
+                status: statuses.from,
+                $or: [{ admissionTransition: null }, { 'admissionTransition.state': 'complete' }],
             },
-        },
-    );
-    await writeAudit({
-        domainId,
-        assignmentId,
-        taskId: a.taskId,
-        eventType: 'admit',
-        adminUid,
-        reason: note,
-        before: { status: 'qualified' },
-        after: { status: 'admitted', admittedBy: adminUid },
-    });
+            { $set: { admissionTransition: transition } },
+        );
+    } catch (error) {
+        const claimed = await assignmentsColl.findOne({ _id: assignmentId, domainId, taskId, 'admissionTransition.id': transition.id });
+        if (!claimed) throw error;
+        await finishAdmissionTransition(claimed, transition);
+        return;
+    }
+    if (claimResult.matchedCount !== 1) {
+        throw assignmentTransitionError('assignment_state_changed', '候选状态已变化，请刷新候选池后重试');
+    }
+    await finishAdmissionTransition({ ...assignment, admissionTransition: transition }, transition);
 }
 
-/**
- * Admin unadmit (quota mode only). admitted → qualified.
- * No stay event has been written yet (those wait for confirm), so this is
- * cleanly reversible.
- */
-async function unadmitAssignment(domainId: string, assignmentId: ObjectId, adminUid: number, reason = ''): Promise<void> {
-    const a = await assignmentsColl.findOne({ _id: assignmentId, domainId });
-    if (!a) throw assignmentNotFound();
-    if (a.status !== 'admitted') {
-        throw new Error(`只能 unadmit 状态为 admitted 的分配（当前 ${a.status}）`);
-    }
-    await assignmentsColl.updateOne(
-        { _id: assignmentId },
-        {
-            $set: {
-                status: 'qualified',
-                admittedAt: null,
-                admittedBy: 0,
-                admissionNote: '',
-            },
-        },
-    );
-    await writeAudit({
-        domainId,
-        assignmentId,
-        taskId: a.taskId,
-        eventType: 'unadmit',
-        adminUid,
-        reason,
-        before: { status: 'admitted', admittedBy: a.admittedBy },
-        after: { status: 'qualified' },
-    });
+/** Admin admit (quota mode only). qualified → admitted with a durable audit claim. */
+async function admitAssignment(domainId: string, taskId: ObjectId, assignmentId: ObjectId, adminUid: number, note = ''): Promise<void> {
+    await runAdmissionTransition(domainId, taskId, assignmentId, 'admit', adminUid, note);
 }
 
-/**
- * Admin confirm (quota mode only). admitted → completed.
- * TERMINAL. Triggers stay event (idempotent). Cannot be undone (admin must
- * manually delete the stay event row if a true correction is needed).
- */
-async function confirmAssignment(domainId: string, assignmentId: ObjectId, adminUid: number, reason = ''): Promise<void> {
-    const a = await assignmentsColl.findOne({ _id: assignmentId, domainId });
-    if (!a) throw assignmentNotFound();
-    const task = await getTask(domainId, a.taskId);
-    if (!task) throw taskNotFound();
-    if (task.admissionMode !== 'quota') {
-        throw new Error('该任务非配额模式，无需 confirm');
-    }
-    if (a.status !== 'admitted') {
-        throw new Error(`只能 confirm 状态为 admitted 的分配（当前 ${a.status}）`);
-    }
-    const now = new Date();
-    await assignmentsColl.updateOne(
-        { _id: assignmentId },
-        {
-            $set: {
-                status: 'completed',
-                completedAt: now,
-                confirmedAt: now,
-                confirmedBy: adminUid,
-            },
-        },
-    );
-    await maybeAwardStayEvent(task, a);
-    await writeAudit({
-        domainId,
-        assignmentId,
-        taskId: a.taskId,
-        eventType: 'confirm',
-        adminUid,
-        reason,
-        before: { status: 'admitted' },
-        after: { status: 'completed', confirmedBy: adminUid },
-    });
+/** Admin unadmit (quota mode only). admitted → qualified with a durable audit claim. */
+async function unadmitAssignment(domainId: string, taskId: ObjectId, assignmentId: ObjectId, adminUid: number, reason = ''): Promise<void> {
+    await runAdmissionTransition(domainId, taskId, assignmentId, 'unadmit', adminUid, reason);
+}
+
+/** Admin confirm (quota mode only). admitted → completed after its idempotent side effects and audit are durable. */
+async function confirmAssignment(domainId: string, taskId: ObjectId, assignmentId: ObjectId, adminUid: number, reason = ''): Promise<void> {
+    await runAdmissionTransition(domainId, taskId, assignmentId, 'confirm', adminUid, reason);
 }
 
 // ============ Admin overrides ============
@@ -546,7 +696,7 @@ async function overridePointCompletion(
             update.completedAt = new Date();
             update.confirmedAt = new Date();
             update.confirmedBy = 0;
-            await maybeAwardStayEvent(task, a);
+            await maybeAwardStayEvent(task.countsAsStay === true, a);
         } else {
             update.status = 'qualified';
             update.qualifiedAt = new Date();

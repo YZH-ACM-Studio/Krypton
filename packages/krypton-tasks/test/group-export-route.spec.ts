@@ -23,6 +23,16 @@ const calls = {
 };
 let assignmentUserIds = [7, 42, 7];
 let rejectCrossSchool = false;
+let confirmFailure: Error | null = null;
+
+class TaskAssignmentTransitionError extends Error {
+    constructor(
+        readonly reason: string,
+        message: string,
+    ) {
+        super(message);
+    }
+}
 
 const taskModel = {
     async admitAssignment(...args: any[]) {
@@ -37,6 +47,7 @@ const taskModel = {
     },
     async confirmAssignment(...args: any[]) {
         calls.confirmArgs = args;
+        if (confirmFailure) throw confirmFailure;
     },
     async unadmitAssignment(...args: any[]) {
         calls.unadmitArgs = args;
@@ -102,7 +113,7 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
             };
         }
         if (request === './db') return { cspScoreColl: {}, gpltScoreColl: {}, patScoreColl: {} };
-        if (request === './model') return { taskModel };
+        if (request === './model') return { taskModel, TaskAssignmentTransitionError };
         if (request === './presets') return { presetSummaries: () => [] };
         if (request === './types') return { emptyTaskGraph: () => ({ nodes: [], edges: [] }) };
     }
@@ -132,14 +143,20 @@ function adminUser() {
     };
 }
 
-async function dispatchRoute(routeName: string, routeSuffix: string, body: Record<string, any>, referer = '') {
+async function dispatchRoute(
+    routeName: string,
+    routeSuffix: string,
+    body: Record<string, any>,
+    referer = '',
+    extraHeaders: Record<string, string> = {},
+) {
     const tid = new ObjectId();
     const request = {
         method: 'post',
         host: 'example.test',
         hostname: 'example.test',
         ip: '127.0.0.1',
-        headers: referer ? { referer } : {},
+        headers: { ...extraHeaders, ...(referer ? { referer } : {}) },
         cookies: {},
         body,
         files: {},
@@ -225,8 +242,8 @@ async function dispatch(body: Record<string, any>, referer = '') {
     return dispatchRoute('admin_tasks_stats', 'stats', body, referer);
 }
 
-async function dispatchCandidates(body: Record<string, any>) {
-    return dispatchRoute('admin_tasks_candidates', 'candidates', body);
+async function dispatchCandidates(body: Record<string, any>, acceptJson = false) {
+    return dispatchRoute('admin_tasks_candidates', 'candidates', body, '', acceptJson ? { accept: 'application/json' } : {});
 }
 
 beforeEach(() => {
@@ -241,6 +258,7 @@ beforeEach(() => {
     calls.unadmitArgs = null;
     assignmentUserIds = [7, 42, 7];
     rejectCrossSchool = false;
+    confirmFailure = null;
 });
 
 describe('task candidate admission HTTP route', () => {
@@ -251,9 +269,9 @@ describe('task candidate admission HTTP route', () => {
         expect(response.status, JSON.stringify(response.body, null, 2)).to.equal(200);
         expect(calls.confirmArgs).to.not.equal(null);
         expect(calls.confirmArgs[0]).to.equal('system');
-        expect(calls.confirmArgs[1].toHexString()).to.equal(aid.toHexString());
-        expect(calls.confirmArgs[2]).to.equal(2);
-        expect(calls.confirmArgs[3]).to.equal('现场确认');
+        expect(calls.confirmArgs[2].toHexString()).to.equal(aid.toHexString());
+        expect(calls.confirmArgs[3]).to.equal(2);
+        expect(calls.confirmArgs[4]).to.equal('现场确认');
         expect(calls.oplog).to.have.lengthOf(1);
     });
 
@@ -266,9 +284,55 @@ describe('task candidate admission HTTP route', () => {
 
         expect(admitted.status, JSON.stringify(admitted.body, null, 2)).to.equal(200);
         expect(unadmitted.status, JSON.stringify(unadmitted.body, null, 2)).to.equal(200);
-        expect(calls.admitArgs[1].toHexString()).to.equal(admittedAid.toHexString());
-        expect(calls.unadmitArgs[1].toHexString()).to.equal(unadmittedAid.toHexString());
+        expect(calls.admitArgs[2].toHexString()).to.equal(admittedAid.toHexString());
+        expect(calls.unadmitArgs[2].toHexString()).to.equal(unadmittedAid.toHexString());
         expect(calls.oplog).to.have.lengthOf(2);
+    });
+
+    it('surfaces a rejected confirmation instead of silently redirecting', async () => {
+        const aid = new ObjectId();
+        confirmFailure = new TaskAssignmentTransitionError('assignment_state_changed', '只能确认状态为 admitted 的分配（当前 qualified）');
+
+        const response = await dispatchCandidates({ operation: 'confirm', aids: aid.toHexString(), note: '' });
+
+        expect(response.status).to.equal(403);
+        expect(response.redirect).to.equal(undefined);
+        expect(response.body.error.name).to.equal('ValidationError');
+        expect(response.body.error.params[2]).to.include('当前 qualified');
+        expect(calls.oplog).to.have.lengthOf(1);
+        expect(calls.oplog[0].payload).to.deep.include({ count: 0, errors: 1 });
+        expect(calls.oplog[0].payload.failureReasons).to.deep.equal({ assignment_state_changed: 1 });
+    });
+
+    it('rethrows an unexpected write failure without exposing it as a row conflict', async () => {
+        const aid = new ObjectId();
+        confirmFailure = new Error('unexpected database failure');
+
+        const response = await dispatchCandidates({ operation: 'confirm', aids: aid.toHexString(), note: '' });
+
+        expect(response.status).to.equal(500);
+        expect(response.redirect).to.equal(undefined);
+        expect(calls.oplog).to.have.lengthOf(0);
+    });
+
+    it('returns a conflict envelope for a rejected JSON batch', async () => {
+        const aid = new ObjectId();
+        confirmFailure = new TaskAssignmentTransitionError('assignment_state_changed', '候选状态已变化，请刷新候选池后重试');
+
+        const response = await dispatchCandidates({ operation: 'confirm', aids: aid.toHexString(), note: '' }, true);
+
+        expect(response.status).to.equal(409);
+        expect(response.body).to.deep.equal({
+            success: false,
+            ok: 0,
+            errors: [
+                {
+                    aid: aid.toHexString(),
+                    code: 'assignment_state_changed',
+                    reason: '候选状态已变化，请刷新候选池后重试',
+                },
+            ],
+        });
     });
 });
 

@@ -170,6 +170,26 @@ export interface TaskPointResult {
  */
 export type AssignmentStatus = 'pending' | 'qualified' | 'admitted' | 'completed' | 'cancelled';
 
+export type TaskAssignmentTransitionOperation = 'admit' | 'unadmit' | 'confirm';
+
+/**
+ * Durable admission transition claim. The public assignment status remains at
+ * the source state until every side effect and audit row has been persisted.
+ * A pending claim lets the next request resume after a crash; a completed
+ * terminal confirmation lets an HTTP retry converge without a second request
+ * collection or background worker.
+ */
+export interface TaskAssignmentTransition {
+    id: ObjectId;
+    operation: TaskAssignmentTransitionOperation;
+    state: 'pending' | 'complete';
+    actorUid: number;
+    note: string;
+    startedAt: Date;
+    /** Frozen at claim time so a retry does not adopt later task configuration. */
+    countsAsStay: boolean;
+}
+
 export interface TaskAssignmentDoc {
     _id: ObjectId;
     domainId: string;
@@ -201,6 +221,8 @@ export interface TaskAssignmentDoc {
     confirmedAt: Date | null;
     /** Admin uid who confirmed. */
     confirmedBy: number;
+    /** Latest durable admission transition; absent on documents written before this protocol. */
+    admissionTransition?: TaskAssignmentTransition | null;
 }
 
 // ============ Audit ============

@@ -51,7 +51,7 @@ import type { LocalizedErrorText } from 'hydrooj';
 import { userBindModel } from '@hydrooj/krypton-userbind';
 import { canCreateTask, canManageAllTasks, canModifyTask } from './auth';
 import { cspScoreColl, gpltScoreColl, patScoreColl } from './db';
-import { taskModel } from './model';
+import { taskModel, TaskAssignmentTransitionError } from './model';
 import { listTagAcCountOptions, presetSummaries, validateTagAcCountGraph } from './presets';
 import { buildTaskStatsCsv, defaultTaskGroupName } from './stats-export';
 import type { AdmissionMode, GpltLevel, PatLevel, PatSeason, TaskAccess, TaskDoc, TaskGraph, TaskGraphEdge, TaskGraphNode } from './types';
@@ -981,9 +981,9 @@ export class AdminTasksStatsHandler extends Handler {
  *   - unadmit  : admitted  → qualified         (bulk, no side effects)
  *   - confirm  : admitted  → completed         (bulk, triggers stay event)
  *
- * Each operation accepts a comma-separated `aids` form field. Errors are
- * swallowed per-row and reported in aggregate (so a stale row doesn't
- * abort the entire batch).
+ * Each operation accepts a comma-separated `aids` form field. Expected stale
+ * state conflicts are reported in aggregate; unexpected storage or side-effect
+ * failures immediately fail the request instead of being disguised as row errors.
  */
 class AdminTasksCandidatesHandler extends Handler {
     async prepare() {
@@ -1065,28 +1065,40 @@ class AdminTasksCandidatesHandler extends Handler {
         if (!aids.length) throw new ValidationError('aids', null, localizedErrorText`未选中任何分配`);
 
         let ok = 0;
-        const errors: Array<{ aid: string; reason: string }> = [];
+        const errors: Array<{ aid: string; code: string; reason: string }> = [];
         for (const aid of aids) {
             try {
                 if (operation === 'admit') {
-                    await taskModel.admitAssignment(domainId, aid, this.user._id, note || '');
+                    await taskModel.admitAssignment(domainId, tid, aid, this.user._id, note || '');
                 } else if (operation === 'unadmit') {
-                    await taskModel.unadmitAssignment(domainId, aid, this.user._id, note || '');
+                    await taskModel.unadmitAssignment(domainId, tid, aid, this.user._id, note || '');
                 } else if (operation === 'confirm') {
-                    await taskModel.confirmAssignment(domainId, aid, this.user._id, note || '');
+                    await taskModel.confirmAssignment(domainId, tid, aid, this.user._id, note || '');
                 }
                 ok++;
-            } catch (e: any) {
-                errors.push({ aid: aid.toHexString(), reason: e?.message || String(e) });
+            } catch (error: unknown) {
+                if (!(error instanceof TaskAssignmentTransitionError)) throw error;
+                errors.push({ aid: aid.toHexString(), code: error.reason, reason: error.message });
             }
         }
-        await OplogModel.log(this, `tasks.${operation}_batch`, { tid, count: ok, errors: errors.length });
+        const failureReasons: Record<string, number> = {};
+        for (const error of errors) failureReasons[error.code] = (failureReasons[error.code] || 0) + 1;
+        await OplogModel.log(this, `tasks.${operation}_batch`, {
+            tid,
+            count: ok,
+            errors: errors.length,
+            ...(errors.length ? { failureReasons } : {}),
+        });
 
         // For form-style POST, redirect back; for fetch with Accept: json,
         // return JSON.
         if (this.request.headers.accept?.includes('application/json')) {
-            this.response.body = { success: true, ok, errors };
+            if (errors.length) this.response.status = 409;
+            this.response.body = { success: errors.length === 0, ok, errors };
             return;
+        }
+        if (errors.length) {
+            throw new ValidationError('aids', null, localizedErrorText`候选池批量操作完成 ${ok} 项，失败 ${errors.length} 项：${errors[0].reason}`);
         }
         this.response.redirect = this.url('admin_tasks_candidates', { tid });
     }

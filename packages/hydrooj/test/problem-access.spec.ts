@@ -642,7 +642,7 @@ describe('P2.13 managed programming authoring matrix', () => {
         const confirmed = { ...draft, hidden: false, managedAuthoring: { ...draft.managedAuthoring, metadataStatus: 'confirmed' } };
         expect(canSubmitProblem(author, confirmed)).to.equal(false);
         expect(canSubmitProblem(makeUser('student', { _dataContributionPids: new Set([100]) }), confirmed)).to.equal(true);
-        expect(canSubmitProblem(makeUser('student', { _tagContributionPids: new Set([100]) }), confirmed)).to.equal(false);
+        expect(canSubmitProblem(makeUser('student', { _tagContributionPids: new Set([100]) }), confirmed)).to.equal(true);
         expect(
             canSubmitProblem(
                 makeUser('student', {

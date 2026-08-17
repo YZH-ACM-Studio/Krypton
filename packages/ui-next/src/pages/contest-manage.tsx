@@ -1755,8 +1755,9 @@ export function ContestExamSeatEntry({
   const fixedSchoolId = schoolScopeId || groupScopeSchoolId;
   const fixedAudience = structurallyFixedAudience && !groupScopeUnsupported;
   const schoolNameById = useMemo(() => new Map(schools.map((school) => [school.schoolId, school.name])), [schools]);
-  const eventIdentityLabel = (event: ContestExamEventSummary) =>
-    `${schoolNameById.get(event.schoolId) || '未知学校'} (${event.schoolId}) · Event ${event.eventId}`;
+  const schoolLabel = (schoolId: string) => schoolNameById.get(schoolId) || '未知学校';
+  const eventChoiceLabel = (event: ContestExamEventSummary) =>
+    `${event.title} · ${schoolLabel(event.schoolId)} · ${formatDateTime(event.startAt, 'zh-CN')} → ${formatDateTime(event.endAt, 'zh-CN')}`;
 
   const loadLinkedEvents = useCallback(async (): Promise<ContestExamEventSummary[]> => {
     setLinkedEventsFresh(false);
@@ -1901,7 +1902,7 @@ export function ContestExamSeatEntry({
               <p className="text-xs text-muted-foreground">
                 {formatDateTime(events[0].startAt, 'zh-CN')} → {formatDateTime(events[0].endAt, 'zh-CN')}
               </p>
-              <p className="text-xs text-muted-foreground">{eventIdentityLabel(events[0])}</p>
+              <p className="text-xs text-muted-foreground">{schoolLabel(events[0].schoolId)}</p>
             </div>
             <Button type="button" onClick={() => openEvent(events[0].eventId)}>
               进入座位工作台
@@ -1911,19 +1912,19 @@ export function ContestExamSeatEntry({
           <div className="flex flex-col gap-2 rounded-md border p-3 sm:flex-row sm:items-end">
             <label className="flex-1 text-sm">
               <span className="mb-1 block font-medium">选择考试活动</span>
-              <select
-                aria-label="选择考试活动"
+              <SimpleSelect
+                ariaLabel="选择考试活动"
                 value={selectedEventId}
-                onChange={(event) => setSelectedEventId(event.target.value)}
-                className="h-10 w-full rounded-md border bg-background px-3"
-              >
-                <option value="">请选择</option>
-                {events.map((event) => (
-                  <option key={event.eventId} value={event.eventId}>
-                    {event.title} · {eventIdentityLabel(event)} · {formatDateTime(event.startAt, 'zh-CN')}
-                  </option>
-                ))}
-              </select>
+                onValueChange={setSelectedEventId}
+                placeholder="请选择"
+                options={[
+                  { value: '', label: '请选择' },
+                  ...events.map((event) => ({
+                    value: event.eventId,
+                    label: eventChoiceLabel(event),
+                  })),
+                ]}
+              />
             </label>
             <Button type="button" disabled={!selectedEventId} onClick={() => openEvent(selectedEventId)}>
               进入所选活动
@@ -1947,19 +1948,19 @@ export function ContestExamSeatEntry({
             </div>
             <label className="block text-sm">
               <span className="mb-1 block font-medium">学校</span>
-              <select
-                aria-label="考试活动学校"
+              <SimpleSelect
+                ariaLabel="考试活动学校"
                 value={selectedSchoolId}
-                onChange={(event) => setSelectedSchoolId(event.target.value)}
-                className="h-10 w-full rounded-md border bg-background px-3"
-              >
-                <option value="">请选择学校</option>
-                {schools.map((school) => (
-                  <option key={school.schoolId} value={school.schoolId}>
-                    {school.name}
-                  </option>
-                ))}
-              </select>
+                onValueChange={setSelectedSchoolId}
+                placeholder="请选择学校"
+                options={[
+                  { value: '', label: '请选择学校' },
+                  ...schools.map((school) => ({
+                    value: school.schoolId,
+                    label: school.name,
+                  })),
+                ]}
+              />
             </label>
             <Button
               type="button"

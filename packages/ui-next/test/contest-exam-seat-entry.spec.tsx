@@ -123,7 +123,7 @@ describe('contest exam seat entry', () => {
     render(<ContestExamSeatEntry tdoc={fixedContest()} contestId={CONTEST_ID} onNavigate={navigate} />);
 
     expect(await screen.findByText('2026 校赛')).toBeInTheDocument();
-    expect(screen.getByRole('combobox', { name: '考试活动学校' })).toHaveValue(SCHOOL_ONE.schoolId);
+    expect(screen.getByRole('combobox', { name: '考试活动学校' })).toHaveTextContent(SCHOOL_ONE.name);
     await user.click(screen.getByRole('button', { name: '创建考试活动并安排座位' }));
 
     await waitFor(() => expect(posts).toHaveLength(1));
@@ -150,7 +150,8 @@ describe('contest exam seat entry', () => {
     );
     render(<ContestExamSeatEntry tdoc={fixedContest()} contestId={CONTEST_ID} onNavigate={navigate} />);
 
-    expect(await screen.findByText(`${SCHOOL_ONE.name} (${SCHOOL_ONE.schoolId}) · Event ${linked.eventId}`)).toBeInTheDocument();
+    expect(await screen.findByText('机房场次 A')).toBeInTheDocument();
+    expect(screen.getByText(SCHOOL_ONE.name)).toBeInTheDocument();
     await user.click(await screen.findByRole('button', { name: '进入座位工作台' }));
     expect(navigate).toHaveBeenCalledWith(`/admin/exam-infrastructure/events/${linked.eventId}/seats`);
   });
@@ -174,17 +175,9 @@ describe('contest exam seat entry', () => {
 
     const enter = await screen.findByRole('button', { name: '进入所选活动' });
     expect(enter).toBeDisabled();
-    expect(
-      screen.getByRole('option', {
-        name: new RegExp(`同名机房场次.*${SCHOOL_ONE.schoolId}.*Event ${first.eventId}`),
-      }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('option', {
-        name: new RegExp(`同名机房场次.*${SCHOOL_TWO.schoolId}.*Event ${second.eventId}`),
-      }),
-    ).toBeInTheDocument();
-    await user.selectOptions(screen.getByRole('combobox', { name: '选择考试活动' }), second.eventId);
+    await user.click(screen.getByRole('combobox', { name: '选择考试活动' }));
+    expect(await screen.findByRole('option', { name: /同名机房场次 · 北校区 · .* → / })).toBeInTheDocument();
+    await user.click(screen.getByRole('option', { name: /同名机房场次 · 南校区 · .* → / }));
     await user.click(enter);
     expect(navigate).toHaveBeenCalledWith(`/admin/exam-infrastructure/events/${second.eventId}/seats`);
   });
@@ -286,7 +279,7 @@ describe('contest exam seat entry', () => {
     render(<ContestExamSeatEntry tdoc={fixedContest()} contestId={CONTEST_ID} />);
 
     expect(await screen.findByText(/已忽略 1 个学校与当前固定参赛范围不一致/)).toBeInTheDocument();
-    expect(screen.getByRole('combobox', { name: '考试活动学校' })).toHaveValue(SCHOOL_ONE.schoolId);
+    expect(screen.getByRole('combobox', { name: '考试活动学校' })).toHaveTextContent(SCHOOL_ONE.name);
     expect(screen.getByRole('button', { name: '创建考试活动并安排座位' })).toBeEnabled();
   });
 
@@ -310,7 +303,7 @@ describe('contest exam seat entry', () => {
     );
 
     expect(await screen.findByText(/已忽略 1 个学校与当前固定参赛范围不一致/)).toBeInTheDocument();
-    expect(screen.getByRole('combobox', { name: '考试活动学校' })).toHaveValue(SCHOOL_ONE.schoolId);
+    expect(screen.getByRole('combobox', { name: '考试活动学校' })).toHaveTextContent(SCHOOL_ONE.name);
     expect(screen.getByRole('button', { name: '创建考试活动并安排座位' })).toBeEnabled();
   });
 

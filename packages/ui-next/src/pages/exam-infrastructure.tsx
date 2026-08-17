@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import {
   AlertTriangle,
   Archive,
@@ -20,12 +20,15 @@ import {
 } from 'lucide-react';
 import { AdminPage } from '@/components/admin/admin-page';
 import { ForbiddenPanel } from '@/components/admin/forbidden';
+import { DomainUserSearchOption, domainUserSearchLabel, loadDomainUsers, type DomainUserOption } from '@/components/domain-user-search';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { FormField, FormRow } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
+import { MultiSelect } from '@/components/ui/multi-select';
+import { SimpleSelect } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
@@ -36,6 +39,19 @@ import { ClassroomLauncher } from '@/pages/exam-classroom';
 type EventStatus = 'draft' | 'scheduled' | 'active' | 'ended' | 'archived';
 type EventType = 'krypton' | 'external';
 type SourceKind = 'classroom' | 'endpoint' | 'examSeat' | 'seat' | 'userbindGroup';
+type EventPanel = 'basics' | 'policy' | 'targets' | 'run';
+
+interface ContestOption {
+  contestId: string;
+  title: string;
+  beginAt: string;
+  endAt: string;
+}
+
+interface BoundEndpointOption {
+  endpointId: string;
+  label: string;
+}
 
 interface ExamEventView {
   eventId: string;
@@ -230,12 +246,18 @@ interface NetworkExecution {
   } | null;
 }
 
+interface ConfirmFact {
+  label: string;
+  value: ReactNode;
+}
+
 interface ConfirmPlan {
   title: string;
   description: string;
   confirmLabel: string;
   tone?: 'default' | 'destructive';
-  facts: Array<{ label: string; value: ReactNode }>;
+  facts: ConfirmFact[];
+  details?: ConfirmFact[];
   run: () => Promise<void>;
 }
 
@@ -266,6 +288,13 @@ const ENDPOINT_STATUS_LABELS: Record<ProjectionItem['status'], string> = {
 };
 
 const DELIVERY_UNKNOWN_FAILURE_REASON = 'transport_send_failed_delivery_unknown';
+
+const EVENT_PANELS: Array<{ id: EventPanel; label: string }> = [
+  { id: 'basics', label: '基本信息' },
+  { id: 'policy', label: '网络策略' },
+  { id: 'targets', label: '目标终端' },
+  { id: 'run', label: '预检与执行' },
+];
 
 function isRetryableProjectionItem(item: ProjectionItem): boolean {
   return ['expired', 'failed', 'offline', 'rejected'].includes(item.status) && item.failureReason !== DELIVERY_UNKNOWN_FAILURE_REASON;
@@ -693,6 +722,74 @@ function formatDate(value: string): string {
   return new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short', hour12: false }).format(date);
 }
 
+function parseContestOption(value: unknown, contestId?: string): ContestOption {
+  const contest = asRecord(value, '比赛');
+  const title = asString(contest.title, '比赛').trim();
+  if (!title) throw new Error('比赛响应格式不正确');
+  return {
+    contestId: contestId || asString(contest.docId, '比赛'),
+    title,
+    beginAt: asString(contest.beginAt, '比赛'),
+    endAt: asString(contest.endAt, '比赛'),
+  };
+}
+
+async function searchContests(query: string): Promise<ContestOption[]> {
+  const payload = await apiObject(`/contest?q=${encodeURIComponent(query)}`, undefined, '搜索比赛失败');
+  if (!Array.isArray(payload.tdocs)) throw new Error('比赛响应格式不正确');
+  return payload.tdocs.map((item) => parseContestOption(item));
+}
+
+async function loadContestOption(contestId: string): Promise<ContestOption> {
+  const payload = await apiObject(`/contest/${encodeURIComponent(contestId)}`, undefined, '加载比赛失败');
+  return parseContestOption(payload.tdoc, contestId);
+}
+
+function collaboratorsFromUids(uids: number[]): DomainUserOption[] {
+  return uids.map((uid) => ({ _id: uid }));
+}
+
+async function hydrateCollaborators(domainId: string, uids: number[]): Promise<DomainUserOption[]> {
+  return Promise.all(
+    uids.map(async (uid) => {
+      try {
+        const users = await loadDomainUsers(domainId, String(uid));
+        const match = users.find((user) => user._id === uid);
+        if (match && (match.displayName || match.uname)) return match;
+      } catch {
+        // Chip falls back to an explicit unavailable label; do not invent a name.
+      }
+      return { _id: uid };
+    }),
+  );
+}
+
+function collaboratorChipLabel(user: DomainUserOption): string {
+  return user.displayName || user.uname || '协作者（名称不可用）';
+}
+
+function contestTitleFact(contestId: string | null, option: ContestOption | null, unavailable: boolean): string {
+  if (!contestId) return '纯外部考试';
+  if (option?.title) return option.title;
+  return unavailable ? '比赛标题不可用' : '加载比赛…';
+}
+
+function readEventPanel(): EventPanel {
+  const url = new URL(window.location.href);
+  const panel = url.searchParams.get('panel');
+  if (panel === 'basics' || panel === 'policy' || panel === 'targets' || panel === 'run') return panel;
+  if (url.hash === '#target-assignment' || url.searchParams.get('examSeatAssignmentId')) return 'targets';
+  return 'basics';
+}
+
+function writeEventPanel(panel: EventPanel) {
+  const url = new URL(window.location.href);
+  if (panel === 'basics') url.searchParams.delete('panel');
+  else url.searchParams.set('panel', panel);
+  url.hash = '';
+  window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}`);
+}
+
 function statusBadge(status: EventStatus) {
   const variant = status === 'active' ? 'default' : status === 'archived' || status === 'ended' ? 'secondary' : 'outline';
   return <Badge variant={variant}>{STATUS_LABELS[status]}</Badge>;
@@ -743,6 +840,19 @@ function ConfirmActionDialog({ plan, busy, error, onClose }: { plan: ConfirmPlan
                 <span className="break-words text-sm">{fact.value}</span>
               </div>
             ))}
+            {plan.details?.length ? (
+              <details className="rounded-lg border bg-muted/10 px-3 py-2">
+                <summary className="cursor-pointer text-xs font-medium text-muted-foreground">详细标识</summary>
+                <div className="mt-2 space-y-2">
+                  {plan.details.map((fact) => (
+                    <div key={fact.label} className="grid gap-1 sm:grid-cols-[140px_1fr]">
+                      <span className="text-xs font-medium text-muted-foreground">{fact.label}</span>
+                      <span className="break-words font-mono text-xs">{fact.value}</span>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            ) : null}
           </DialogBody>
           <div className="flex justify-end gap-2 border-t px-6 py-4">
             <Button type="button" variant="outline" disabled={busy} autoFocus onClick={onClose}>
@@ -759,10 +869,177 @@ function ConfirmActionDialog({ plan, busy, error, onClose }: { plan: ConfirmPlan
   );
 }
 
+function EventStepNav({ panel, onChange }: { panel: EventPanel; onChange: (panel: EventPanel) => void }) {
+  return (
+    <nav
+      aria-label="考试活动步骤"
+      className="mb-6 grid auto-cols-[minmax(11rem,1fr)] grid-flow-col overflow-x-auto border-y border-border/70"
+    >
+      {EVENT_PANELS.map((stage, index) => (
+        <Button
+          key={stage.id}
+          type="button"
+          variant="ghost"
+          className={cn(
+            "relative min-h-14 justify-start gap-3 rounded-none px-3 text-left after:absolute after:inset-x-3 after:bottom-0 after:h-0.5 after:content-['']",
+            panel === stage.id
+              ? 'text-foreground after:bg-primary hover:bg-muted/40'
+              : 'text-muted-foreground after:bg-transparent hover:text-foreground',
+          )}
+          aria-current={panel === stage.id ? 'step' : undefined}
+          onClick={() => onChange(stage.id)}
+        >
+          <span
+            aria-hidden="true"
+            className={cn(
+              'grid size-7 shrink-0 place-items-center rounded-full border text-xs tabular-nums',
+              panel === stage.id ? 'border-foreground bg-foreground text-background' : 'border-border bg-background',
+            )}
+          >
+            {index + 1}
+          </span>
+          <span className="whitespace-nowrap text-sm font-medium">{stage.label}</span>
+        </Button>
+      ))}
+    </nav>
+  );
+}
+
+function ContestSearchSelect({
+  name,
+  value,
+  disabled,
+  onChange,
+}: {
+  name: string;
+  value: string;
+  disabled?: boolean;
+  onChange: (contestId: string, option: ContestOption | null) => void;
+}) {
+  const [known, setKnown] = useState<ContestOption | null>(null);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [titleState, setTitleState] = useState<'idle' | 'loading' | 'unavailable'>('idle');
+  useEffect(() => {
+    if (!value) {
+      setKnown(null);
+      setTitleState('idle');
+      return;
+    }
+    if (known?.contestId === value) {
+      setTitleState('idle');
+      return;
+    }
+    let current = true;
+    setTitleState('loading');
+    void loadContestOption(value)
+      .then((option) => {
+        if (!current) return;
+        setKnown(option);
+        setTitleState('idle');
+      })
+      .catch(() => {
+        if (!current) return;
+        setKnown(null);
+        setTitleState('unavailable');
+      });
+    return () => {
+      current = false;
+    };
+  }, [known, value]);
+  const current =
+    known && known.contestId === value
+      ? known
+      : value
+        ? {
+            contestId: value,
+            title: titleState === 'unavailable' ? '比赛标题不可用' : '加载比赛…',
+            beginAt: '',
+            endAt: '',
+          }
+        : null;
+  return (
+    <div className="space-y-2">
+      <MutationNotice error={searchError} />
+      <div role="group" aria-label="Krypton 比赛" aria-disabled={disabled || undefined}>
+        <MultiSelect<ContestOption>
+          value={current ? [current] : []}
+          onChange={(items) => {
+            const next = items[0] || null;
+            setKnown(next);
+            setSearchError(null);
+            setTitleState('idle');
+            onChange(next?.contestId || '', next);
+          }}
+          loadOptions={async (query) => {
+            setSearchError(null);
+            try {
+              return await searchContests(query);
+            } catch (cause) {
+              const message = cause instanceof Error ? cause.message : '搜索比赛失败';
+              setSearchError(message);
+              throw cause;
+            }
+          }}
+          getKey={(item) => item.contestId}
+          getLabel={(item) => item.title}
+          getDescription={(item) => (item.beginAt && item.endAt ? `${formatDate(item.beginAt)} → ${formatDate(item.endAt)}` : '')}
+          renderChip={(item) => (
+            <span>
+              {item.title}
+              {item.beginAt && item.endAt ? (
+                <span className="ml-1 text-[11px] text-muted-foreground">
+                  {formatDate(item.beginAt)} → {formatDate(item.endAt)}
+                </span>
+              ) : null}
+            </span>
+          )}
+          name={name}
+          maxItems={1}
+          disabled={disabled}
+          placeholder="搜索比赛标题"
+          emptyText={searchError || '没有匹配的比赛'}
+        />
+      </div>
+    </div>
+  );
+}
+
+function CollaboratorSelect({
+  domainId,
+  value,
+  onChange,
+  disabled,
+}: {
+  domainId: string;
+  value: DomainUserOption[];
+  onChange: (users: DomainUserOption[]) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div role="group" aria-label="协作者" aria-disabled={disabled || undefined}>
+      <MultiSelect<DomainUserOption>
+        value={value}
+        onChange={onChange}
+        loadOptions={(query) => loadDomainUsers(domainId, query)}
+        getKey={(item) => String(item._id)}
+        getLabel={domainUserSearchLabel}
+        renderChip={(item) => <span>{collaboratorChipLabel(item)}</span>}
+        renderOption={(item) => <DomainUserSearchOption user={item} />}
+        disabled={disabled}
+        placeholder="搜索 UID / OJ 用户 / 学号 / 姓名"
+        emptyText="没有匹配的用户"
+      />
+    </div>
+  );
+}
+
 function EventCreateDialog({ open, schools, onClose }: { open: boolean; schools: SchoolView[]; onClose: () => void }) {
+  const bs = useBootstrap();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [type, setType] = useState<EventType>('external');
+  const [contestId, setContestId] = useState('');
+  const [collaborators, setCollaborators] = useState<DomainUserOption[]>([]);
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setBusy(true);
@@ -775,10 +1052,9 @@ function EventCreateDialog({ open, schools, onClose }: { open: boolean; schools:
         type,
         startAt: new Date(String(form.get('startAt') || '')).toISOString(),
         endAt: new Date(String(form.get('endAt') || '')).toISOString(),
-        collaboratorUids: splitValues(String(form.get('collaboratorUids') || '')).map(Number),
+        collaboratorUids: collaborators.map((user) => user._id),
       };
-      const contestId = String(form.get('contestId') || '').trim();
-      if (contestId) body.contestId = contestId;
+      if (type === 'krypton' && contestId.trim()) body.contestId = contestId.trim();
       const payload = await postJson('/api/admin/exam-events', body, '创建考试活动失败');
       const created = parseEvent(payload.event);
       window.location.assign(`/admin/exam-infrastructure/events/${created.eventId}`);
@@ -787,9 +1063,17 @@ function EventCreateDialog({ open, schools, onClose }: { open: boolean; schools:
       setBusy(false);
     }
   };
+  const close = () => {
+    if (busy) return;
+    setType('external');
+    setContestId('');
+    setCollaborators([]);
+    setError(null);
+    onClose();
+  };
   return (
-    <Dialog open={open} onOpenChange={(next) => !next && !busy && onClose()}>
-      <DialogContent className="w-[min(720px,calc(100vw-1.5rem))]" onClose={busy ? undefined : onClose}>
+    <Dialog open={open} onOpenChange={(next) => !next && close()}>
+      <DialogContent className="w-[min(720px,calc(100vw-1.5rem))]" onClose={busy ? undefined : close}>
         <form onSubmit={(event) => void submit(event)}>
           <DialogHeader>
             <DialogTitle>新建考试活动</DialogTitle>
@@ -802,39 +1086,37 @@ function EventCreateDialog({ open, schools, onClose }: { open: boolean; schools:
                 <Input id="new-exam-title" name="title" required maxLength={120} autoFocus />
               </FormField>
               <FormField label="学校" htmlFor="new-exam-school" required>
-                <select
+                <SimpleSelect
                   id="new-exam-school"
                   name="schoolId"
                   required
-                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                >
-                  <option value="">请选择学校</option>
-                  {schools.map((school) => (
-                    <option key={school.schoolId} value={school.schoolId}>
-                      {school.name}
-                    </option>
-                  ))}
-                </select>
+                  ariaLabel="学校"
+                  defaultValue=""
+                  placeholder="请选择学校"
+                  options={[{ value: '', label: '请选择学校' }, ...schools.map((school) => ({ value: school.schoolId, label: school.name }))]}
+                />
               </FormField>
               <FormField label="考试类型" htmlFor="new-exam-type" required>
-                <select
+                <SimpleSelect
                   id="new-exam-type"
+                  ariaLabel="考试类型"
                   value={type}
-                  onChange={(event) => setType(event.target.value as EventType)}
-                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                >
-                  <option value="external">外部考试</option>
-                  <option value="krypton">Krypton 比赛</option>
-                </select>
+                  onValueChange={(next) => {
+                    const resolved = next as EventType;
+                    setType(resolved);
+                    if (resolved === 'external') setContestId('');
+                  }}
+                  options={[
+                    { value: 'external', label: '外部考试' },
+                    { value: 'krypton', label: 'Krypton 比赛' },
+                  ]}
+                />
               </FormField>
-              <FormField
-                label="Contest ID"
-                htmlFor="new-exam-contest"
-                required={type === 'krypton'}
-                hint="外部考试必须留空；Krypton 活动可先建草稿再关联。"
-              >
-                <Input id="new-exam-contest" name="contestId" disabled={type === 'external'} placeholder="24 位 Contest ObjectId" />
-              </FormField>
+              {type === 'krypton' ? (
+                <FormField label="Krypton 比赛" required hint="按标题搜索并选择比赛；可先建草稿再关联。">
+                  <ContestSearchSelect name="contestId" value={contestId} onChange={(next) => setContestId(next)} />
+                </FormField>
+              ) : null}
               <FormField label="开始时间" htmlFor="new-exam-start" required>
                 <Input id="new-exam-start" name="startAt" type="datetime-local" required />
               </FormField>
@@ -842,12 +1124,12 @@ function EventCreateDialog({ open, schools, onClose }: { open: boolean; schools:
                 <Input id="new-exam-end" name="endAt" type="datetime-local" required />
               </FormField>
             </FormRow>
-            <FormField label="协作者 UID" htmlFor="new-exam-collaborators" hint="可选；用逗号或换行分隔，服务端会重新校验学校范围。">
-              <Textarea id="new-exam-collaborators" name="collaboratorUids" rows={2} />
+            <FormField label="协作者" hint="可选；服务端会重新校验学校范围。">
+              <CollaboratorSelect domainId={bs.domain.id} value={collaborators} onChange={setCollaborators} />
             </FormField>
           </DialogBody>
           <div className="flex justify-end gap-2 border-t px-6 py-4">
-            <Button type="button" variant="outline" disabled={busy} onClick={onClose}>
+            <Button type="button" variant="outline" disabled={busy} onClick={close}>
               取消
             </Button>
             <Button type="submit" disabled={busy}>
@@ -926,6 +1208,9 @@ function EventListPage() {
                     <Badge variant="outline">{event.type === 'krypton' ? 'Krypton' : '外部考试'}</Badge>
                   </div>
                   <p className="mt-2 text-sm text-muted-foreground">
+                    {schools.find((school) => school.schoolId === event.schoolId)?.name || '学校未登记'}
+                  </p>
+                  <p className="mt-1 text-sm text-muted-foreground">
                     {formatDate(event.startAt)} → {formatDate(event.endAt)}
                   </p>
                 </div>
@@ -968,10 +1253,49 @@ function BasicEventSection({
   reload: () => Promise<void>;
   requestConfirm: (plan: ConfirmPlan) => void;
 }) {
+  const bs = useBootstrap();
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [type, setType] = useState<EventType>(event.type);
+  const [contestId, setContestId] = useState(event.contestId || '');
+  const [collaborators, setCollaborators] = useState<DomainUserOption[]>(() => collaboratorsFromUids(event.collaboratorUids));
+  const [linkedContest, setLinkedContest] = useState<ContestOption | null>(null);
+  const [linkedContestUnavailable, setLinkedContestUnavailable] = useState(false);
+  const hydrateSeq = useRef(0);
   const criticalEditable = event.lifecycle !== 'archived' && event.status !== 'active' && event.status !== 'ended';
+  useEffect(() => {
+    if (!event.contestId) {
+      setLinkedContest(null);
+      setLinkedContestUnavailable(false);
+      return;
+    }
+    let current = true;
+    void loadContestOption(event.contestId)
+      .then((option) => {
+        if (!current) return;
+        setLinkedContest(option);
+        setLinkedContestUnavailable(false);
+      })
+      .catch(() => {
+        if (!current) return;
+        setLinkedContest(null);
+        setLinkedContestUnavailable(true);
+      });
+    return () => {
+      current = false;
+    };
+  }, [event.contestId]);
+  const openEditor = () => {
+    const seq = ++hydrateSeq.current;
+    setType(event.type);
+    setContestId(event.contestId || '');
+    setCollaborators(collaboratorsFromUids(event.collaboratorUids));
+    setEditing(true);
+    void hydrateCollaborators(bs.domain.id, event.collaboratorUids).then((next) => {
+      if (seq === hydrateSeq.current) setCollaborators(next);
+    });
+  };
   const mutate = async (action: 'schedule' | 'archive') => {
     setBusy(true);
     setError(null);
@@ -996,14 +1320,13 @@ function BasicEventSection({
       action: 'update',
       expectedRevision: event.revision,
       title: String(form.get('title') || ''),
-      collaboratorUids: splitValues(String(form.get('collaboratorUids') || '')).map(Number),
+      collaboratorUids: collaborators.map((user) => user._id),
     };
     if (criticalEditable) {
-      const type = String(form.get('type')) as EventType;
       Object.assign(body, {
         schoolId: String(form.get('schoolId') || ''),
         type,
-        contestId: type === 'krypton' ? String(form.get('contestId') || '').trim() || null : null,
+        contestId: type === 'krypton' ? contestId.trim() || null : null,
         startAt: new Date(String(form.get('startAt') || '')).toISOString(),
         endAt: new Date(String(form.get('endAt') || '')).toISOString(),
       });
@@ -1023,14 +1346,14 @@ function BasicEventSection({
       <CardHeader className="flex-row items-start justify-between gap-3">
         <div>
           <CardTitle role="heading" aria-level={3}>
-            1. 基本信息
+            基本信息
           </CardTitle>
           <p className="mt-1 text-sm text-muted-foreground">活动时间窗和类型是后续策略执行的边界。</p>
         </div>
         {event.lifecycle === 'archived' ? (
           <Badge variant="secondary">只读归档</Badge>
         ) : (
-          <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
+          <Button variant="outline" size="sm" onClick={openEditor}>
             编辑
           </Button>
         )}
@@ -1055,8 +1378,9 @@ function BasicEventSection({
                   facts: [
                     { label: '活动版本', value: `${event.revision} → ${event.revision + 1}` },
                     { label: '考试时段', value: `${formatDate(event.startAt)} → ${formatDate(event.endAt)}` },
-                    { label: 'Contest', value: event.contestId || '纯外部考试' },
+                    { label: 'Contest', value: contestTitleFact(event.contestId, linkedContest, linkedContestUnavailable) },
                   ],
+                  details: event.contestId ? [{ label: 'Contest ID', value: event.contestId }] : undefined,
                   run: () => mutate('schedule'),
                 })
               }
@@ -1068,7 +1392,7 @@ function BasicEventSection({
           {event.lifecycle !== 'archived' ? (
             <Button
               size="sm"
-              variant="outline"
+              variant="destructive"
               onClick={() =>
                 requestConfirm({
                   title: '归档此活动？',
@@ -1092,7 +1416,7 @@ function BasicEventSection({
       </CardContent>
       <Dialog open={editing} onOpenChange={(open) => !open && !busy && setEditing(false)}>
         <DialogContent className="w-[min(760px,calc(100vw-1.5rem))]" onClose={busy ? undefined : () => setEditing(false)}>
-          <form onSubmit={(formEvent) => void save(formEvent)}>
+          <form key={`${event.revision}-${event.schoolId}-${editing ? 'open' : 'closed'}`} onSubmit={(formEvent) => void save(formEvent)}>
             <DialogHeader>
               <DialogTitle>编辑基本信息</DialogTitle>
             </DialogHeader>
@@ -1108,35 +1432,42 @@ function BasicEventSection({
                   <Input id="edit-exam-title" name="title" defaultValue={event.title} required maxLength={120} autoFocus />
                 </FormField>
                 <FormField label="学校" htmlFor="edit-exam-school" required>
-                  <select
+                  <SimpleSelect
                     id="edit-exam-school"
                     name="schoolId"
+                    ariaLabel="学校"
                     defaultValue={event.schoolId}
                     disabled={!criticalEditable}
-                    className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                  >
-                    {schools.map((school) => (
-                      <option key={school.schoolId} value={school.schoolId}>
-                        {school.name}
-                      </option>
-                    ))}
-                  </select>
+                    options={schools.map((school) => ({ value: school.schoolId, label: school.name }))}
+                  />
                 </FormField>
                 <FormField label="考试类型" htmlFor="edit-exam-type" required>
-                  <select
+                  <SimpleSelect
                     id="edit-exam-type"
-                    name="type"
-                    defaultValue={event.type}
+                    ariaLabel="考试类型"
+                    value={type}
                     disabled={!criticalEditable}
-                    className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                  >
-                    <option value="external">外部考试</option>
-                    <option value="krypton">Krypton 比赛</option>
-                  </select>
+                    onValueChange={(next) => {
+                      const resolved = next as EventType;
+                      setType(resolved);
+                      if (resolved === 'external') setContestId('');
+                    }}
+                    options={[
+                      { value: 'external', label: '外部考试' },
+                      { value: 'krypton', label: 'Krypton 比赛' },
+                    ]}
+                  />
                 </FormField>
-                <FormField label="Contest ID" htmlFor="edit-exam-contest">
-                  <Input id="edit-exam-contest" name="contestId" defaultValue={event.contestId || ''} disabled={!criticalEditable} />
-                </FormField>
+                {type === 'krypton' ? (
+                  <FormField label="Krypton 比赛">
+                    <ContestSearchSelect
+                      name="contestId"
+                      value={contestId}
+                      disabled={!criticalEditable}
+                      onChange={(next) => setContestId(next)}
+                    />
+                  </FormField>
+                ) : null}
                 <FormField label="开始时间" htmlFor="edit-exam-start" required>
                   <Input
                     id="edit-exam-start"
@@ -1158,8 +1489,8 @@ function BasicEventSection({
                   />
                 </FormField>
               </FormRow>
-              <FormField label="协作者 UID" htmlFor="edit-exam-collaborators">
-                <Textarea id="edit-exam-collaborators" name="collaboratorUids" defaultValue={event.collaboratorUids.join(', ')} rows={2} />
+              <FormField label="协作者">
+                <CollaboratorSelect domainId={bs.domain.id} value={collaborators} onChange={setCollaborators} />
               </FormField>
             </DialogBody>
             <div className="flex justify-end gap-2 border-t px-6 py-4">
@@ -1303,7 +1634,7 @@ function PolicySection({
     <Card>
       <CardHeader>
         <CardTitle role="heading" aria-level={3}>
-          2. 网络策略
+          网络策略
         </CardTitle>
         <p className="mt-1 text-sm text-muted-foreground">草稿可反复保存；发布后版本不可变，活动只引用明确版本。</p>
       </CardHeader>
@@ -1312,22 +1643,19 @@ function PolicySection({
         {readOnly ? <p className="rounded-xl border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">活动已归档，策略版本仅供查看。</p> : null}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
           <FormField label="策略模板" htmlFor="policy-template" className="flex-1">
-            <select
+            <SimpleSelect
               id="policy-template"
+              ariaLabel="策略模板"
               value={selected?.templateId || '__new__'}
               disabled={readOnly}
-              onChange={(event) => setSelectedId(event.target.value)}
-              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-            >
-              <option value="__new__">新建策略</option>
-              {templates
-                .filter((template) => template.status === 'active')
-                .map((template) => (
-                  <option key={template.templateId} value={template.templateId}>
-                    {template.name}
-                  </option>
-                ))}
-            </select>
+              onValueChange={setSelectedId}
+              options={[
+                { value: '__new__', label: '新建策略' },
+                ...templates
+                  .filter((template) => template.status === 'active')
+                  .map((template) => ({ value: template.templateId, label: template.name })),
+              ]}
+            />
           </FormField>
           <Badge variant="outline">当前分配 v{config?.policy?.revision || '—'}</Badge>
         </div>
@@ -1430,10 +1758,60 @@ function PolicySection({
   );
 }
 
+function parseBoundEndpoints(payload: Record<string, unknown>): BoundEndpointOption[] {
+  const classroom = asRecord(payload.classroom, '教室工作台');
+  const layout = asRecord(classroom.layout, '教室布局');
+  if (!Array.isArray(layout.seats) || !Array.isArray(payload.bindings)) throw new Error('教室工作台响应格式不正确');
+  const seats = new Map<string, string>();
+  for (const item of layout.seats) {
+    const seat = asRecord(item, '座位布局');
+    seats.set(asString(seat.sourceSeatId, '座位布局'), asString(seat.label, '座位布局'));
+  }
+  const name = asString(classroom.name, '教室');
+  if (!name) throw new Error('教室工作台响应格式不正确');
+  const endpoints: BoundEndpointOption[] = [];
+  const seen = new Set<string>();
+  for (const item of payload.bindings) {
+    const binding = asRecord(item, '终端绑定');
+    const status = asString(binding.status, '终端绑定');
+    if (status !== 'active') continue;
+    const endpointId = optionalString(binding.endpointId, '终端绑定');
+    if (!endpointId) continue;
+    const sourceSeatId = asString(binding.sourceSeatId, '终端绑定');
+    const label = seats.get(sourceSeatId);
+    if (label === undefined) throw new Error('教室工作台响应格式不正确');
+    if (seen.has(endpointId)) throw new Error('教室工作台响应格式不正确');
+    seen.add(endpointId);
+    endpoints.push({ endpointId, label: `${name} / ${label}` });
+  }
+  return endpoints;
+}
+
+function publishedSeatAssignmentOptions(
+  preparation: ExamPreparationSummary | null,
+  assignment: TargetAssignment | null,
+  requestedId: string,
+): Array<{ id: string; label: string }> {
+  const options = new Map<string, string>();
+  if (preparation?.assignment) {
+    options.set(preparation.assignment.id, `已发布分配 r${preparation.assignment.revision}`);
+  }
+  if (requestedId && !options.has(requestedId)) options.set(requestedId, '已发布分配');
+  const sources = [...(assignment?.draft.sources || []), ...(assignment?.revisions.flatMap((revision) => revision.sources) || [])];
+  for (const source of sources) {
+    if (source.kind !== 'examSeat') continue;
+    for (const id of source.ids) {
+      if (!options.has(id)) options.set(id, '已发布分配');
+    }
+  }
+  return [...options.entries()].map(([id, label]) => ({ id, label }));
+}
+
 function TargetSection({
   eventId,
   schoolId,
   assignment,
+  preparation,
   config,
   readOnly,
   reload,
@@ -1442,6 +1820,7 @@ function TargetSection({
   eventId: string;
   schoolId: string;
   assignment: TargetAssignment | null;
+  preparation: ExamPreparationSummary | null;
   config: NetworkConfig | null;
   readOnly: boolean;
   reload: () => Promise<void>;
@@ -1450,6 +1829,7 @@ function TargetSection({
   type EditableSourceKind = 'classroom' | 'endpoint' | 'examSeat';
   type SourceMode = EditableSourceKind | 'existing';
   const requestedAssignmentId = () => new URL(window.location.href).searchParams.get('examSeatAssignmentId')?.trim() || '';
+  const seatAssignmentOptions = () => publishedSeatAssignmentOptions(preparation, assignment, requestedAssignmentId());
   const initialSourceKind = (): SourceMode => {
     if (requestedAssignmentId()) return 'examSeat';
     const saved = assignment?.draft.sources || [];
@@ -1461,54 +1841,99 @@ function TargetSection({
     if (source.kind === 'examSeat' && source.ids.length === 1) return 'examSeat';
     return 'existing';
   };
-  const initialEndpoints = () => assignment?.draft.sources.find((source) => source.kind === 'endpoint')?.ids.join('\n') || '';
   const initialClassroomId = () => assignment?.draft.sources.find((source) => source.kind === 'classroom')?.ids[0] || '';
-  const initialAssignmentId = () => requestedAssignmentId() || assignment?.draft.sources.find((source) => source.kind === 'examSeat')?.ids[0] || '';
+  const initialAssignmentId = () => {
+    const requested = requestedAssignmentId();
+    if (requested) return requested;
+    const fromDraft = assignment?.draft.sources.find((source) => source.kind === 'examSeat')?.ids[0] || '';
+    if (fromDraft) return fromDraft;
+    const published = seatAssignmentOptions();
+    return published.length === 1 ? published[0].id : '';
+  };
+  const draftEndpointIds = () => assignment?.draft.sources.find((source) => source.kind === 'endpoint')?.ids || [];
   const [sourceKind, setSourceKind] = useState<SourceMode>(initialSourceKind);
-  const [endpointIds, setEndpointIds] = useState(initialEndpoints);
+  const [selectedEndpointIds, setSelectedEndpointIds] = useState<string[]>(draftEndpointIds);
   const [classroomId, setClassroomId] = useState(initialClassroomId);
   const [examSeatAssignmentId, setExamSeatAssignmentId] = useState(initialAssignmentId);
   const [classrooms, setClassrooms] = useState<ClassroomSummary[]>([]);
-  const [classroomsLoaded, setClassroomsLoaded] = useState(false);
+  const [boundEndpoints, setBoundEndpoints] = useState<BoundEndpointOption[]>([]);
+  const [bindingsLoaded, setBindingsLoaded] = useState(false);
+  const [bindingError, setBindingError] = useState<string | null>(null);
   const [preview, setPreview] = useState<TargetPreview | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     setSourceKind(initialSourceKind());
-    setEndpointIds(initialEndpoints());
+    setSelectedEndpointIds(draftEndpointIds());
     setClassroomId(initialClassroomId());
     setExamSeatAssignmentId(initialAssignmentId());
-  }, [assignment?.revision]);
+  }, [assignment?.revision, preparation?.assignment?.id, preparation?.assignment?.revision]);
   useEffect(() => {
-    if (sourceKind !== 'classroom' || classroomsLoaded) return;
-    setClassroomsLoaded(true);
+    let current = true;
+    setBindingsLoaded(false);
+    setBindingError(null);
     void apiObject('/api/admin/exam-infrastructure/classrooms', undefined, '加载教室列表失败')
-      .then((payload) => {
+      .then(async (payload) => {
         if (!Array.isArray(payload.classrooms)) throw new Error('教室列表响应格式不正确');
-        setClassrooms(
-          payload.classrooms.map((value) => {
-            const classroom = asRecord(value, '教室列表');
-            return {
-              classroomId: asString(classroom.classroomId, '教室列表'),
-              schoolId: asString(classroom.schoolId, '教室列表'),
-              name: asString(classroom.name, '教室列表'),
-              layoutRevision: asNumber(classroom.layoutRevision, '教室列表'),
-              seatCount: asNumber(classroom.seatCount, '教室列表'),
-            };
-          }),
+        const parsed = payload.classrooms.map((value) => {
+          const classroom = asRecord(value, '教室列表');
+          return {
+            classroomId: asString(classroom.classroomId, '教室列表'),
+            schoolId: asString(classroom.schoolId, '教室列表'),
+            name: asString(classroom.name, '教室列表'),
+            layoutRevision: asNumber(classroom.layoutRevision, '教室列表'),
+            seatCount: asNumber(classroom.seatCount, '教室列表'),
+          };
+        });
+        if (!current) return;
+        setClassrooms(parsed);
+        const schoolRooms = parsed.filter((classroom) => classroom.schoolId === schoolId);
+        const states = await Promise.all(
+          schoolRooms.map((room) =>
+            apiObject(
+              `/api/admin/exam-infrastructure/classrooms/${encodeURIComponent(room.classroomId)}/seat-bindings`,
+              undefined,
+              '加载座位绑定失败',
+            ).then(parseBoundEndpoints),
+          ),
         );
+        if (!current) return;
+        setBoundEndpoints(states.flat());
+        setBindingsLoaded(true);
       })
-      .catch((cause) => setError(cause instanceof Error ? cause.message : '加载教室列表失败'));
-  }, [classroomsLoaded, sourceKind]);
+      .catch((cause) => {
+        if (!current) return;
+        setBoundEndpoints([]);
+        setBindingError(cause instanceof Error ? cause.message : '加载教室列表失败');
+        setBindingsLoaded(true);
+      });
+    return () => {
+      current = false;
+    };
+  }, [schoolId]);
+  const selectedEndpoints = selectedEndpointIds
+    .map((endpointId) => boundEndpoints.find((item) => item.endpointId === endpointId))
+    .filter((item): item is BoundEndpointOption => Boolean(item));
+  const unresolvedEndpointIds =
+    bindingsLoaded && sourceKind === 'endpoint'
+      ? selectedEndpointIds.filter((endpointId) => !boundEndpoints.some((item) => item.endpointId === endpointId))
+      : [];
+  const unresolvedError =
+    sourceKind === 'endpoint' && bindingsLoaded && !bindingError && unresolvedEndpointIds.length
+      ? '无法解析指定终端的教室或座位'
+      : null;
   const sources = (): SourceGroup[] => {
     if (sourceKind === 'existing') return assignment?.draft.sources.map((source) => ({ kind: source.kind, ids: [...source.ids] })) || [];
     if (sourceKind === 'examSeat') return examSeatAssignmentId ? [{ kind: 'examSeat', ids: [examSeatAssignmentId] }] : [];
     if (sourceKind === 'classroom') return classroomId ? [{ kind: 'classroom', ids: [classroomId] }] : [];
-    const ids = splitValues(endpointIds);
-    return ids.length ? [{ kind: 'endpoint', ids }] : [];
+    return selectedEndpointIds.length ? [{ kind: 'endpoint', ids: [...selectedEndpointIds] }] : [];
   };
   const savedSources = assignment?.draft.sources || [];
   const targetDirty = JSON.stringify(sources()) !== JSON.stringify(savedSources);
+  const endpointDraftBlocked = sourceKind === 'endpoint' && (Boolean(bindingError) || unresolvedEndpointIds.length > 0);
+  const saveVariant = targetDirty && !preview ? 'default' : 'outline';
+  const previewVariant = !targetDirty && !preview ? 'default' : 'outline';
+  const targetNotice = error || bindingError || unresolvedError;
   const save = async () => {
     setBusy(true);
     setError(null);
@@ -1590,79 +2015,96 @@ function TargetSection({
     <Card id="target-assignment">
       <CardHeader>
         <CardTitle role="heading" aria-level={3}>
-          3. 目标终端
+          目标终端
         </CardTitle>
         <p className="mt-1 text-sm text-muted-foreground">保存动态来源后必须重新预览；发布只冻结显式 endpoint 快照。</p>
       </CardHeader>
       <CardContent className="space-y-4">
-        <MutationNotice error={error} />
+        <MutationNotice error={targetNotice} />
         {readOnly ? <p className="rounded-xl border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">活动已归档，目标快照仅供查看。</p> : null}
         <FormField label="目标来源" htmlFor="target-source-kind" hint="考试座位引用已发布 assignment；外部无名单考试继续使用教室或指定终端来源。">
-          <select
+          <SimpleSelect
             id="target-source-kind"
+            ariaLabel="目标来源"
             value={sourceKind}
             disabled={readOnly}
-            onChange={(event) => {
-              setSourceKind(event.target.value as SourceMode);
+            onValueChange={(next) => {
+              const resolved = next as SourceMode;
+              setSourceKind(resolved);
               setPreview(null);
+              if (resolved === 'examSeat') {
+                const options = seatAssignmentOptions();
+                if (options.length === 1 && !examSeatAssignmentId) setExamSeatAssignmentId(options[0].id);
+              }
             }}
-            className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-          >
-            <option value="endpoint">指定终端</option>
-            <option value="classroom">整间教室</option>
-            <option value="examSeat">已发布考试座位分配</option>
-            {initialSourceKind() === 'existing' ? <option value="existing">保留现有来源（只读）</option> : null}
-          </select>
+            options={[
+              { value: 'endpoint', label: '指定终端' },
+              { value: 'classroom', label: '整间教室' },
+              { value: 'examSeat', label: '已发布考试座位分配' },
+              ...(initialSourceKind() === 'existing' ? [{ value: 'existing', label: '保留现有来源（只读）' }] : []),
+            ]}
+          />
         </FormField>
         {sourceKind === 'endpoint' ? (
-          <FormField label="指定终端" htmlFor="target-endpoint" hint="每行一个已完成入网的 Endpoint ID">
-            <Textarea
-              id="target-endpoint"
-              value={endpointIds}
-              disabled={readOnly}
-              onChange={(event) => {
-                setEndpointIds(event.target.value);
-                setPreview(null);
-              }}
-              rows={4}
-            />
+          <FormField label="指定终端" hint="只列出当前学校教室里已经绑定的活动终端。">
+            <div role="group" aria-label="指定终端" aria-disabled={readOnly || undefined}>
+              <MultiSelect<BoundEndpointOption>
+                value={selectedEndpoints}
+                onChange={(next) => {
+                  setSelectedEndpointIds(next.map((item) => item.endpointId));
+                  setPreview(null);
+                }}
+                options={boundEndpoints}
+                getKey={(item) => item.endpointId}
+                getLabel={(item) => item.label}
+                disabled={readOnly}
+                placeholder="搜索已绑定终端"
+                emptyText="没有已绑定的活动终端"
+              />
+            </div>
           </FormField>
         ) : sourceKind === 'classroom' ? (
           <FormField label="教室" htmlFor="target-classroom" hint="只列出当前活动学校下的已导入教室；发布时服务端重验当前 active bindings。">
-            <select
+            <SimpleSelect
               id="target-classroom"
+              ariaLabel="教室"
               value={classroomId}
               disabled={readOnly}
-              onChange={(event) => {
-                setClassroomId(event.target.value);
+              onValueChange={(next) => {
+                setClassroomId(next);
                 setPreview(null);
               }}
-              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-            >
-              <option value="">选择教室</option>
-              {classrooms
-                .filter((classroom) => classroom.schoolId === schoolId)
-                .map((classroom) => (
-                  <option key={classroom.classroomId} value={classroom.classroomId}>
-                    {classroom.name} · {classroom.seatCount} 座 · 布局 r{classroom.layoutRevision}
-                  </option>
-                ))}
-            </select>
+              options={[
+                { value: '', label: '选择教室' },
+                ...classrooms
+                  .filter((classroom) => classroom.schoolId === schoolId)
+                  .map((classroom) => ({
+                    value: classroom.classroomId,
+                    label: `${classroom.name} · ${classroom.seatCount} 座`,
+                  })),
+              ]}
+            />
           </FormField>
         ) : sourceKind === 'examSeat' ? (
           <FormField
-            label="Assignment ID"
+            label="已发布分配"
             htmlFor="target-exam-seat-assignment"
-            hint="从座位工作台发布后复制 assignment ID；发布目标时服务端会重验 publication、布局和绑定。"
+            hint="从座位工作台已发布的分配中选择；发布目标时服务端会重验 publication、布局和绑定。"
           >
-            <Input
+            <SimpleSelect
               id="target-exam-seat-assignment"
+              ariaLabel="已发布分配"
               value={examSeatAssignmentId}
               disabled={readOnly}
-              onChange={(event) => {
-                setExamSeatAssignmentId(event.target.value.trim());
+              onValueChange={(next) => {
+                setExamSeatAssignmentId(next);
                 setPreview(null);
               }}
+              placeholder="选择已发布分配"
+              options={[
+                { value: '', label: '选择已发布分配' },
+                ...seatAssignmentOptions().map((item) => ({ value: item.id, label: item.label })),
+              ]}
             />
           </FormField>
         ) : (
@@ -1683,8 +2125,8 @@ function TargetSection({
         <div className="flex flex-wrap items-center gap-2">
           <Button
             size="sm"
-            variant="outline"
-            disabled={readOnly || busy || sourceKind === 'existing' || (Boolean(assignment) && !targetDirty)}
+            variant={saveVariant}
+            disabled={readOnly || busy || sourceKind === 'existing' || endpointDraftBlocked || (Boolean(assignment) && !targetDirty)}
             onClick={() => void save()}
           >
             <Save className="size-4" />
@@ -1692,6 +2134,7 @@ function TargetSection({
           </Button>
           <Button
             size="sm"
+            variant={previewVariant}
             disabled={readOnly || busy || !assignment || targetDirty}
             title={targetDirty ? '请先保存来源，再解析服务端 canonical 草稿' : undefined}
             onClick={() => void previewTargets()}
@@ -1720,10 +2163,14 @@ function TargetSection({
                     facts: [
                       { label: '目标草稿版本', value: `${assignment?.revision || 0} → ${(assignment?.revision || 0) + 1}` },
                       { label: '发布目标版本', value: `v${(assignment?.latestPublishedRevision || 0) + 1}` },
-                      { label: '目标终端数', value: preview.targetCount },
-                      { label: '新增终端', value: preview.addedEndpointIds.length ? preview.addedEndpointIds.join('、') : '无' },
-                      { label: '移除终端', value: preview.removedEndpointIds.length ? preview.removedEndpointIds.join('、') : '无' },
+                      { label: '目标终端数', value: `${preview.targetCount} 台` },
+                      { label: '新增终端', value: `${preview.addedEndpointIds.length} 台` },
+                      { label: '移除终端', value: `${preview.removedEndpointIds.length} 台` },
                       { label: '分配影响', value: '不会自动启动或修改当前执行' },
+                    ],
+                    details: [
+                      { label: '新增终端 ID', value: preview.addedEndpointIds.length ? preview.addedEndpointIds.join('、') : '无' },
+                      { label: '移除终端 ID', value: preview.removedEndpointIds.length ? preview.removedEndpointIds.join('、') : '无' },
                     ],
                     run: publish,
                   })
@@ -1869,11 +2316,20 @@ function ExecutionSection({
   const preflightReadyCount = visiblePreflight?.filter((item) => item.ready).length || 0;
   const updateTone =
     canonicalUpdatePreview?.policyDiff.effect === 'loosening' || canonicalUpdatePreview?.policyDiff.effect === 'mixed' ? 'destructive' : 'default';
+  const showStart = execution?.desiredState !== 'active';
+  const showRetryFailed = Boolean(
+    execution?.projection?.dispatchStatus === 'complete' &&
+      retryableFailures.length > 0 &&
+      !hasDeliveryUnknownFailure &&
+      event.lifecycle !== 'archived' &&
+      (execution.desiredState !== 'active' || !canonicalUpdatePreview),
+  );
+  const primaryAction = !execution ? 'start' : showRetryFailed ? 'retryFailed' : showStart ? 'start' : null;
   return (
     <Card>
       <CardHeader>
         <CardTitle role="heading" aria-level={3}>
-          4. 预检、启停与结果
+          预检与执行
         </CardTitle>
         <p className="mt-1 text-sm text-muted-foreground">“已送达”不等于“已应用”；此处只展示 Vigil 返回并由 OJ 持久化的逐机事实。</p>
       </CardHeader>
@@ -1888,9 +2344,10 @@ function ExecutionSection({
                 <ShieldCheck className="size-4" />
                 终端预检
               </Button>
-              {execution?.desiredState !== 'active' ? (
+              {showStart ? (
                 <Button
                   size="sm"
+                  variant={primaryAction === 'start' ? 'default' : 'outline'}
                   disabled={busy || !runnable || !visiblePreflight || currentRequestUnresolved}
                   title={
                     currentRequestUnresolved ? '请先重试当前请求或刷新到完整执行事实' : !visiblePreflight ? '请先对当前配置执行终端预检' : undefined
@@ -1937,14 +2394,10 @@ function ExecutionSection({
                   重试当前请求
                 </Button>
               ) : null}
-              {execution?.projection?.dispatchStatus === 'complete' &&
-              retryableFailures.length > 0 &&
-              !hasDeliveryUnknownFailure &&
-              event.lifecycle !== 'archived' &&
-              (execution.desiredState !== 'active' || !canonicalUpdatePreview) ? (
+              {showRetryFailed && execution ? (
                 <Button
                   size="sm"
-                  variant="outline"
+                  variant={primaryAction === 'retryFailed' ? 'default' : 'outline'}
                   disabled={busy}
                   onClick={() =>
                     requestConfirm({
@@ -2218,6 +2671,11 @@ function EventDetailPage({ eventId }: { eventId: string }) {
   const [plan, setPlan] = useState<ConfirmPlan | null>(null);
   const [confirmBusy, setConfirmBusy] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
+  const [panel, setPanel] = useState<EventPanel>(readEventPanel);
+  const goToPanel = (next: EventPanel) => {
+    setPanel(next);
+    writeEventPanel(next);
+  };
   const reload = useCallback(async () => {
     const detail = await apiObject(`/api/admin/exam-events/${eventId}`, undefined, '加载考试活动失败');
     const parsedEvent = parseEvent(detail.event);
@@ -2314,57 +2772,71 @@ function EventDetailPage({ eventId }: { eventId: string }) {
       description={`活动版本 ${event.revision} · 配置版本 ${config?.revision || 0} · 所有写入仍由服务端 CAS 与权限边界确认。`}
     >
       <div className="space-y-4 pb-10">
+        <EventStepNav panel={panel} onChange={goToPanel} />
         <Card>
           <CardContent className="flex flex-wrap items-center justify-between gap-3 pt-6">
-            <div>
-              <p className="font-medium">考试名单与座位</p>
-              <p className="text-sm text-muted-foreground">查看固定名单、可复现分配、人工调整与发布 revision。</p>
-              <div className="mt-2 flex flex-wrap gap-2">
-                <Badge variant="outline">名单 r{preparation?.assignment?.roster.revision || 0}</Badge>
-                <Badge variant="outline">分配 r{preparation?.assignment?.revision || 0}</Badge>
-                <Badge variant="outline">发布 r{preparation?.publicationRevision || 0}</Badge>
-                <Badge variant="outline">策略 r{config?.policy?.revision || 0}</Badge>
-                <Badge variant="outline">目标 r{config?.target?.revision || 0}</Badge>
-                <Badge variant="outline">票据批次 r{preparation?.batch?.revision || 0}</Badge>
-                <Badge variant="outline">投影 r{preparation?.batch?.projectionRevision || 0}</Badge>
-                {preparation?.batch?.workflow ? <Badge variant="outline">确认执行 r{preparation.batch.workflow.executionRevision}</Badge> : null}
-                {preparation?.batch?.workflow ? <Badge variant="outline">批次策略 r{preparation.batch.workflow.policyRevision}</Badge> : null}
-                {preparation?.batch?.workflow ? <Badge variant="outline">批次目标 r{preparation.batch.workflow.targetRevision}</Badge> : null}
-                {preparation?.batch && !preparation.batch.workflow ? <Badge variant="outline">P2.9 前历史批次</Badge> : null}
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="font-medium">考试名单与座位</p>
+                {statusBadge(event.status)}
               </div>
+              <p className="text-sm text-muted-foreground">查看固定名单、可复现分配、人工调整与发布 revision。</p>
+              <details className="mt-2">
+                <summary className="cursor-pointer text-xs text-muted-foreground">修订与批次</summary>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <Badge variant="outline">名单 r{preparation?.assignment?.roster.revision || 0}</Badge>
+                  <Badge variant="outline">分配 r{preparation?.assignment?.revision || 0}</Badge>
+                  <Badge variant="outline">发布 r{preparation?.publicationRevision || 0}</Badge>
+                  <Badge variant="outline">策略 r{config?.policy?.revision || 0}</Badge>
+                  <Badge variant="outline">目标 r{config?.target?.revision || 0}</Badge>
+                  <Badge variant="outline">票据批次 r{preparation?.batch?.revision || 0}</Badge>
+                  <Badge variant="outline">投影 r{preparation?.batch?.projectionRevision || 0}</Badge>
+                  {preparation?.batch?.workflow ? <Badge variant="outline">确认执行 r{preparation.batch.workflow.executionRevision}</Badge> : null}
+                  {preparation?.batch?.workflow ? <Badge variant="outline">批次策略 r{preparation.batch.workflow.policyRevision}</Badge> : null}
+                  {preparation?.batch?.workflow ? <Badge variant="outline">批次目标 r{preparation.batch.workflow.targetRevision}</Badge> : null}
+                  {preparation?.batch && !preparation.batch.workflow ? <Badge variant="outline">P2.9 前历史批次</Badge> : null}
+                </div>
+              </details>
             </div>
             <Button asChild variant="outline">
               <a href={`/admin/exam-infrastructure/events/${event.eventId}/seats`}>打开座位工作台</a>
             </Button>
           </CardContent>
         </Card>
-        <BasicEventSection event={event} schools={schools} reload={reload} requestConfirm={runPlan} />
-        <PolicySection
-          eventId={eventId}
-          templates={templates}
-          config={config}
-          readOnly={event.lifecycle === 'archived'}
-          reload={reload}
-          requestConfirm={runPlan}
-        />
-        <TargetSection
-          eventId={eventId}
-          schoolId={event.schoolId}
-          assignment={assignment}
-          config={config}
-          readOnly={event.lifecycle === 'archived'}
-          reload={reload}
-          requestConfirm={runPlan}
-        />
-        <ExecutionSection
-          event={event}
-          config={config}
-          assignment={assignment}
-          execution={execution}
-          updatePreview={updatePreview}
-          reload={reload}
-          requestConfirm={runPlan}
-        />
+        {panel === 'basics' ? <BasicEventSection event={event} schools={schools} reload={reload} requestConfirm={runPlan} /> : null}
+        {panel === 'policy' ? (
+          <PolicySection
+            eventId={eventId}
+            templates={templates}
+            config={config}
+            readOnly={event.lifecycle === 'archived'}
+            reload={reload}
+            requestConfirm={runPlan}
+          />
+        ) : null}
+        {panel === 'targets' ? (
+          <TargetSection
+            eventId={eventId}
+            schoolId={event.schoolId}
+            assignment={assignment}
+            preparation={preparation}
+            config={config}
+            readOnly={event.lifecycle === 'archived'}
+            reload={reload}
+            requestConfirm={runPlan}
+          />
+        ) : null}
+        {panel === 'run' ? (
+          <ExecutionSection
+            event={event}
+            config={config}
+            assignment={assignment}
+            execution={execution}
+            updatePreview={updatePreview}
+            reload={reload}
+            requestConfirm={runPlan}
+          />
+        ) : null}
       </div>
       <ConfirmActionDialog plan={plan} busy={confirmBusy} error={confirmError} onClose={closePlan} />
     </AdminPage>

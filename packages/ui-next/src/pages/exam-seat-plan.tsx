@@ -1,13 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AlertTriangle, ArrowLeft, Download, GripVertical, LockKeyhole, Play, RefreshCw, Save, Shuffle, Upload, ZoomIn, ZoomOut } from 'lucide-react';
 import { AdminPage } from '@/components/admin/admin-page';
 import { ForbiddenPanel } from '@/components/admin/forbidden';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
+import { SimpleSelect } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useBootstrap } from '@/lib/bootstrap';
+import { cn } from '@/lib/cn';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { createRequestId } from '@/lib/request-id';
 
@@ -1237,6 +1240,63 @@ const riskReasonLabel: Record<AssignmentV2RiskEdge['reason'], string> = {
   unset_facing: '朝向未设置',
 };
 
+type SeatPlanStepId = 'adjust' | 'classrooms' | 'generate' | 'launch' | 'lock' | 'network' | 'preflight' | 'publish' | 'roster';
+
+type SeatPlanStepDef = { id: SeatPlanStepId; ariaLabel: string; label: string };
+
+const KRYPTON_SEAT_PLAN_STEPS: SeatPlanStepDef[] = [
+  { id: 'roster', label: '名单', ariaLabel: '冻结名单' },
+  { id: 'classrooms', label: '教室', ariaLabel: '选择教室' },
+  { id: 'generate', label: '生成', ariaLabel: '生成分配' },
+  { id: 'adjust', label: '调整', ariaLabel: '检查调整' },
+  { id: 'publish', label: '发布', ariaLabel: '发布分配' },
+  { id: 'network', label: '网络', ariaLabel: '配置网络' },
+  { id: 'preflight', label: '预检', ariaLabel: '终端预检' },
+  { id: 'lock', label: '启网', ariaLabel: '启动网络' },
+  { id: 'launch', label: '预启动', ariaLabel: '预启动终端' },
+];
+
+const EXTERNAL_SEAT_PLAN_STEPS: SeatPlanStepDef[] = [
+  ...KRYPTON_SEAT_PLAN_STEPS.slice(0, 5),
+  KRYPTON_SEAT_PLAN_STEPS[KRYPTON_SEAT_PLAN_STEPS.length - 1],
+];
+
+const SEAT_PLAN_STEP_IDS = new Set<string>(KRYPTON_SEAT_PLAN_STEPS.map((step) => step.id));
+
+function readSeatPlanStepFromUrl(): SeatPlanStepId | null {
+  const raw = new URL(window.location.href).searchParams.get('step');
+  return raw && SEAT_PLAN_STEP_IDS.has(raw) ? (raw as SeatPlanStepId) : null;
+}
+
+function seatSelectValue(seat: SeatIdentity): string {
+  return `${seat.classroomId}::${seat.sourceSeatId}`;
+}
+
+function seatKeyFromSelectValue(value: string): string {
+  const separator = value.indexOf('::');
+  if (separator < 0) return value;
+  return `${value.slice(0, separator)}\u0000${value.slice(separator + 2)}`;
+}
+
+type NetworkSetupStage = 'assign' | 'facts' | 'preview' | 'publish' | 'save';
+
+const networkSetupStageLabel: Record<NetworkSetupStage, string> = {
+  facts: '读取当前策略与目标事实',
+  save: '保存当前分配为目标',
+  preview: '重新解析目标',
+  publish: '发布目标快照',
+  assign: '分配到活动',
+};
+
+function StepFooter({ left, right }: { left?: ReactNode; right?: ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
+      <div className="flex flex-wrap items-center gap-2">{left}</div>
+      <div className="flex flex-wrap items-center justify-end gap-2">{right}</div>
+    </div>
+  );
+}
+
 function ClassroomSeatMap({
   classroomId,
   classroomName,
@@ -1408,8 +1468,11 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
   const [selectedPreloginPolicy, setSelectedPreloginPolicy] = useState('');
   const [preloginBusy, setPreloginBusy] = useState(false);
   const [preloginError, setPreloginError] = useState<string | null>(null);
+  const [activeStep, setActiveStep] = useState<SeatPlanStepId | null>(readSeatPlanStepFromUrl);
+  const [networkSetupFailedAt, setNetworkSetupFailedAt] = useState<NetworkSetupStage | null>(null);
   const workspaceLoadGenerationRef = useRef(0);
   const preloginPublicationIdentityRef = useRef<string | null>(null);
+  const preloginNetworkConfigRevisionRef = useRef(0);
 
   const load = useCallback(async () => {
     const generation = ++workspaceLoadGenerationRef.current;
@@ -1559,13 +1622,20 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
   }, [load]);
 
   const writePreloginUrl = useCallback(
-    (state: { batchId?: string | null; requestId?: string | null; retryProjectionRevision?: number | null; retryRequestId?: string | null }) => {
+    (state: {
+      batchId?: string | null;
+      requestId?: string | null;
+      retryProjectionRevision?: number | null;
+      retryRequestId?: string | null;
+      step?: string | null;
+    }) => {
       const url = new URL(window.location.href);
       const values: Array<[string, string | null | undefined]> = [
         ['batchId', state.batchId],
         ['requestId', state.requestId],
         ['retryProjectionRevision', state.retryProjectionRevision === undefined ? undefined : state.retryProjectionRevision?.toString() || null],
         ['retryRequestId', state.retryRequestId],
+        ['step', state.step],
       ];
       for (const [key, value] of values) {
         if (value) url.searchParams.set(key, value);
@@ -1754,7 +1824,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
   }, [loadPreloginBatch, preloginBatch]);
 
   const execute = useCallback(
-    async (body: Record<string, unknown>) => {
+    async (body: Record<string, unknown>): Promise<'blocked' | 'error' | 'ok'> => {
       setBusy(true);
       setWorkspaceFresh(false);
       setError(null);
@@ -1765,13 +1835,15 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
           if (result.assignment === null) {
             setActionDiagnostics(array(result.diagnostics, '分配诊断').map(parseDiagnostic));
             setWorkspaceFresh(true);
-            return;
+            return 'blocked';
           }
           parseAssignment(result.assignment);
         }
         await load();
+        return 'ok';
       } catch (reason) {
         setError(reason instanceof Error ? reason.message : String(reason));
+        return 'error';
       } finally {
         setBusy(false);
       }
@@ -1780,15 +1852,17 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
   );
 
   const executeSeatPlan = useCallback(
-    async (body: Record<string, unknown>) => {
+    async (body: Record<string, unknown>): Promise<boolean> => {
       setPreparationBusy(true);
       setWorkspaceFresh(false);
       setError(null);
       try {
         await post(`${path}/seat-plans`, body);
         await load();
+        return true;
       } catch (reason) {
         setError(reason instanceof Error ? reason.message : String(reason));
+        return false;
       } finally {
         setPreparationBusy(false);
       }
@@ -2102,10 +2176,14 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
     ]);
     let policyRef: RevisionRef | null = null;
     let targetRef: RevisionRef | null = null;
-    if (configPayload.config === null) setPreloginNetworkConfigRevision(0);
-    else {
+    if (configPayload.config === null) {
+      preloginNetworkConfigRevisionRef.current = 0;
+      setPreloginNetworkConfigRevision(0);
+    } else {
       const config = record(configPayload.config, '预登录网络配置');
-      setPreloginNetworkConfigRevision(nonNegativeInteger(config.revision, '预登录网络配置'));
+      const nextRevision = nonNegativeInteger(config.revision, '预登录网络配置');
+      preloginNetworkConfigRevisionRef.current = nextRevision;
+      setPreloginNetworkConfigRevision(nextRevision);
       const parseConfigRef = (value: unknown, label: string): RevisionRef | null => {
         if (value === null) return null;
         const reference = record(value, label);
@@ -2432,6 +2510,88 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
     publishedAssignmentUsesCanonicalRoster,
   ]);
 
+  const configurePublishedAssignmentAsNetworkTarget = useCallback(async () => {
+    if (!publishedPreparationAssignment || !publishedAssignmentUsesCanonicalRoster) return;
+    setPreloginBusy(true);
+    setPreloginError(null);
+    setNetworkSetupFailedAt(null);
+    let stage: NetworkSetupStage = 'facts';
+    try {
+      const current = preloginTargetFactsFresh ? preloginTargetDraft : await loadPreloginTargetDraft();
+      stage = 'save';
+      let draft = current;
+      if (draft?.sourceAssignmentId !== publishedPreparationAssignment.assignmentId) {
+        await post(`${path}/target-assignment`, {
+          action: 'saveDraft',
+          expectedRevision: draft?.revision || 0,
+          sources: [{ kind: 'examSeat', ids: [publishedPreparationAssignment.assignmentId] }],
+        });
+        setPreloginTargetPreview(null);
+        draft = await loadPreloginTargetDraft();
+      }
+      if (!draft) throw new Error('目标草稿未形成');
+      if (!currentPreloginPublicationIdentity) throw new Error('当前没有可配置的已发布分配');
+      stage = 'preview';
+      const previewPayload = await post(`${path}/target-assignment`, { action: 'preview', expectedRevision: draft.revision });
+      const preview = record(previewPayload.preview, '目标预览');
+      const endpointIds = array(preview.endpointIds, '目标预览').map((value) => text(value, '目标预览'));
+      const previewState: PreloginTargetPreview = {
+        publicationIdentity: currentPreloginPublicationIdentity,
+        fingerprint: fingerprint(preview.previewFingerprint, '目标预览'),
+        targetCount: positiveInteger(preview.targetCount, '目标预览'),
+        endpointIds,
+        addedEndpointIds: array(preview.addedEndpointIds, '目标预览').map((value) => text(value, '目标预览')),
+        removedEndpointIds: array(preview.removedEndpointIds, '目标预览').map((value) => text(value, '目标预览')),
+      };
+      setPreloginTargetPreview(previewState);
+      stage = 'publish';
+      await post(`${path}/target-assignment`, {
+        action: 'publish',
+        expectedRevision: draft.revision,
+        confirmationFingerprint: previewState.fingerprint,
+      });
+      setPreloginTargetPreview(previewState);
+      draft = await loadPreloginTargetDraft();
+      if (!draft?.latestPublishedRevision) throw new Error('目标快照发布后未形成可分配版本');
+      stage = 'assign';
+      setPreloginFactsFresh(false);
+      await post(`${path}/network-config`, {
+        action: 'assignTarget',
+        expectedRevision: preloginNetworkConfigRevisionRef.current,
+        assignmentId: draft.assignmentId,
+        revision: draft.latestPublishedRevision,
+      });
+      await loadPreloginTargetDraft();
+      setPreloginTargetPreview(previewState);
+    } catch (reason) {
+      setNetworkSetupFailedAt(stage);
+      const operationError = reason instanceof Error ? reason.message : String(reason);
+      try {
+        await loadPreloginTargetDraft();
+        const refreshed = await refreshWorkspace();
+        setPreloginError(
+          refreshed
+            ? `${operationError}；已停在「${networkSetupStageLabel[stage]}」，已重读当前目标与名单事实，可用下方原步骤重试。`
+            : `${operationError}；已停在「${networkSetupStageLabel[stage]}」，目标已重读但名单重读失败，请先使用“重读教室事实”。`,
+        );
+      } catch (recoveryReason) {
+        const recoveryError = recoveryReason instanceof Error ? recoveryReason.message : String(recoveryReason);
+        setPreloginError(`${operationError}；已停在「${networkSetupStageLabel[stage]}」，目标重读失败：${recoveryError}`);
+      }
+    } finally {
+      setPreloginBusy(false);
+    }
+  }, [
+    currentPreloginPublicationIdentity,
+    loadPreloginTargetDraft,
+    path,
+    preloginTargetDraft,
+    preloginTargetFactsFresh,
+    publishedAssignmentUsesCanonicalRoster,
+    publishedPreparationAssignment,
+    refreshWorkspace,
+  ]);
+
   const preparePrelogin = useCallback(async () => {
     if (!publishedAssignmentUsesCanonicalRoster) return;
     setPreloginBusy(true);
@@ -2473,6 +2633,8 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
       if (refreshed.workflow.network.source !== 'execution' || !refreshed.workflow.network.ready) {
         throw new Error('网络策略尚未在全部目标终端完成应用；请查看逐终端网络执行事实。');
       }
+      setActiveStep('launch');
+      writePreloginUrl({ step: 'launch' });
     } catch (reason) {
       const operationError = reason instanceof Error ? reason.message : String(reason);
       try {
@@ -2490,7 +2652,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
     } finally {
       setPreloginBusy(false);
     }
-  }, [loadPreloginFacts, path, preloginFactsCurrent, preloginWorkflow, refreshWorkspace]);
+  }, [loadPreloginFacts, path, preloginFactsCurrent, preloginWorkflow, refreshWorkspace, writePreloginUrl]);
 
   const retryPreloginNetwork = useCallback(async () => {
     if (
@@ -2508,7 +2670,11 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
     setPreloginFactsFresh(false);
     try {
       await post(`${path}/network-execution`, { action, expectedRevision: preloginWorkflow.network.executionRevision });
-      await loadPreloginFacts();
+      const refreshed = await loadPreloginFacts();
+      if (refreshed.workflow.network.source === 'execution' && refreshed.workflow.network.ready) {
+        setActiveStep('launch');
+        writePreloginUrl({ step: 'launch' });
+      }
     } catch (reason) {
       const operationError = reason instanceof Error ? reason.message : String(reason);
       try {
@@ -2526,7 +2692,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
     } finally {
       setPreloginBusy(false);
     }
-  }, [loadPreloginFacts, path, preloginFactsCurrent, preloginWorkflow, refreshWorkspace]);
+  }, [loadPreloginFacts, path, preloginFactsCurrent, preloginWorkflow, refreshWorkspace, writePreloginUrl]);
 
   const confirmPrelogin = useCallback(async () => {
     if (
@@ -2676,6 +2842,130 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
     return Boolean(url.searchParams.get('retryRequestId') && url.searchParams.get('retryProjectionRevision'));
   }, [preloginBatch, preloginError]);
   const pendingConfirmIdentity = new URL(window.location.href).searchParams.has('requestId');
+  const steps = workspace?.eventType === 'external' ? EXTERNAL_SEAT_PLAN_STEPS : KRYPTON_SEAT_PLAN_STEPS;
+  const hasRoster = Boolean(workspace?.rosterRevisions.length);
+  const hasPlan = Boolean(workspace?.seatPlans.length);
+  const hasAssignment = Boolean(latest);
+  const publicContestBlocksSeating = workspace?.contestAudienceState === 'public';
+  const latestPlanReferencesNewestRoster = Boolean(
+    newestRoster &&
+    latestPlan?.roster &&
+    latestPlan.roster.rosterId === newestRoster.rosterId &&
+    latestPlan.roster.revision === newestRoster.revision &&
+    latestPlan.roster.fingerprint === newestRoster.fingerprint,
+  );
+  const latestPlanHasClassrooms = Boolean(
+    latestPlan && (latestPlan.schemaVersion === 2 ? latestPlan.classrooms.length > 0 : latestPlan.classroomId),
+  );
+  const assignmentReferencesLatestPlan = Boolean(
+    latest &&
+    latestPlan &&
+    latest.seatPlan.seatPlanId === latestPlan.seatPlanId &&
+    latest.seatPlan.revision === latestPlan.revision &&
+    latest.seatPlan.fingerprint === latestPlan.fingerprint,
+  );
+  const publishedTargetAlreadyAssigned =
+    preloginTargetFactsFresh &&
+    preloginTargetDraft?.sourceAssignmentId === publishedPreparationAssignment?.assignmentId &&
+    preloginTargetDraft.latestPublishedSourceAssignmentId === publishedPreparationAssignment?.assignmentId &&
+    Boolean(preloginNetworkTargetRef);
+  const latestMatchesPublication = Boolean(
+    latest &&
+    publishedPreparationAssignment &&
+    latest.assignmentId === publishedPreparationAssignment.assignmentId &&
+    latest.revision === publishedPreparationAssignment.revision &&
+    latest.fingerprint === publishedPreparationAssignment.fingerprint,
+  );
+  const stepCompleted: Record<SeatPlanStepId, boolean> = {
+    roster: hasRoster && !publicContestBlocksSeating,
+    classrooms: latestPlanReferencesNewestRoster && latestPlanHasClassrooms,
+    generate: assignmentReferencesLatestPlan,
+    adjust: hasAssignment && !dirty,
+    publish: Boolean(latest?.published || latestMatchesPublication),
+    network: Boolean(
+      preloginNetworkPolicyRef && publishedTargetAlreadyAssigned && workspace?.eventLifecycle !== 'draft',
+    ),
+    preflight: Boolean(preloginFactsCurrent && preloginPreparation),
+    lock: Boolean(preloginWorkflow?.network.ready),
+    launch: Boolean(preloginBatch || pendingConfirmIdentity),
+  };
+  const firstIncompleteStep = ((): SeatPlanStepId => {
+    if (publicContestBlocksSeating || !stepCompleted.roster) return 'roster';
+    if (!stepCompleted.classrooms) return 'classrooms';
+    if (!stepCompleted.generate) return 'generate';
+    if (!stepCompleted.adjust) return 'adjust';
+    if (!stepCompleted.publish) return 'publish';
+    if (workspace?.eventType === 'external') return 'launch';
+    if (!stepCompleted.network) return 'network';
+    if (!stepCompleted.preflight) return 'preflight';
+    if (!stepCompleted.lock) return 'lock';
+    return 'launch';
+  })();
+  const canVisitStep = (step: SeatPlanStepId): boolean => {
+    if (!workspace) return step === 'roster';
+    if (publicContestBlocksSeating) return step === 'roster';
+    if (workspace.eventType === 'external' && (step === 'network' || step === 'preflight' || step === 'lock')) return false;
+    const stepIndex = steps.findIndex((item) => item.id === step);
+    const firstIndex = steps.findIndex((item) => item.id === firstIncompleteStep);
+    if (stepIndex >= 0 && firstIndex >= 0 && stepIndex <= firstIndex) return true;
+    if (step === 'generate' && hasPlan && hasRoster) return true;
+    if ((step === 'adjust' || step === 'publish') && hasAssignment && hasRoster) return true;
+    return false;
+  };
+  const displayStep = activeStep && canVisitStep(activeStep) ? activeStep : workspace ? firstIncompleteStep : 'roster';
+  const goToStep = (step: SeatPlanStepId) => {
+    setActiveStep(step);
+    writePreloginUrl({ step });
+  };
+  useEffect(() => {
+    if (!workspace) return;
+    if (activeStep && canVisitStep(activeStep)) return;
+    setActiveStep(firstIncompleteStep);
+    writePreloginUrl({ step: firstIncompleteStep });
+  }, [activeStep, firstIncompleteStep, workspace, writePreloginUrl]);
+  const displayStepIndex = steps.findIndex((step) => step.id === displayStep);
+  const nextStep = displayStepIndex >= 0 ? steps[displayStepIndex + 1] : undefined;
+  const nextStepReady = Boolean(nextStep && stepCompleted[displayStep] && canVisitStep(nextStep.id));
+  const nextStepButton = nextStepReady ? (
+    <Button type="button" onClick={() => nextStep && goToStep(nextStep.id)}>
+      下一步
+    </Button>
+  ) : null;
+  const rereadButton = (
+    <Button
+      type="button"
+      variant="ghost"
+      disabled={mutationBusy || (dirty && workspaceFresh)}
+      onClick={() => {
+        if (dirty && !window.confirm('这会放弃当前未保存的人工调整，并从服务端重新读取最终状态。是否继续？')) return;
+        void refreshWorkspace();
+      }}
+    >
+      <RefreshCw className="size-4" /> {dirty && !workspaceFresh ? '放弃未保存调整并重读' : '重读教室事实'}
+    </Button>
+  );
+  const rosterCreateDisabled =
+    mutationBusy ||
+    dirty ||
+    !workspaceFresh ||
+    !automaticSeatingAllowed ||
+    (sourceKind === 'contestAudience' && workspace?.contestAudienceState !== 'fixed') ||
+    (sourceKind === 'userbindGroups' && !selectedGroupIds.size);
+  const createPlanDisabled =
+    mutationBusy || dirty || !workspaceFresh || !automaticSeatingAllowed || !latestRosterForPlan || !selectedV2ClassroomIds.size;
+  const generateDisabled =
+    mutationBusy ||
+    dirty ||
+    !workspaceFresh ||
+    !automaticSeatingAllowed ||
+    !latestPlanUsesCanonicalRoster ||
+    !latestPlanV2?.roster ||
+    !latestPlanCurrent ||
+    !planRoster;
+  const publishDisabled = mutationBusy || dirty || !assignmentIsCurrentV2;
+  const networkMutationDisabled = mutationBusy || dirty || !workspaceFresh || !publishedAssignmentUsesCanonicalRoster;
+  const selectedPolicyAlreadyAssigned =
+    selectedPreloginPolicy === (preloginNetworkPolicyRef ? `${preloginNetworkPolicyRef.id}:${preloginNetworkPolicyRef.revision}` : '');
   return (
     <AdminPage
       bypassPrivGate
@@ -2709,22 +2999,96 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
             </div>
           </div>
         ) : null}
+        {workspace?.contestAudienceState === 'public' ? (
+          <p className="text-sm text-amber-700">
+            这是一场参赛名单持续变化的完全公开或邀请码比赛，第一版不提供自动排座，也不会用学校、用户组或某一刻的 attend 用户绕过该限制。
+          </p>
+        ) : null}
         {workspace?.eventType === 'krypton' && !currentV2UsesCanonicalRoster ? (
           <div role="alert" className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-800 dark:text-amber-200">
             历史 v2 计划或分配使用了 userbind
             子名单；凡仍引用该子名单的版本只读保留，不能继续生成、调整、发布或预登录。请先按当前比赛受众冻结新名单，再创建候选计划。
           </div>
         ) : null}
-        <Card>
-          <CardHeader>
-            <CardTitle>步骤 1–2：冻结名单与候选教室</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <p className="text-sm text-muted-foreground">这里只追加不可变名单与候选范围；不会自动生成、发布或修改长期终端绑定。</p>
-            <div className="grid gap-3 lg:grid-cols-2">
-              <div className="space-y-2 rounded-md border p-3">
+        {!workspaceFresh && workspace ? (
+          <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-sm text-amber-800 dark:text-amber-200">
+            页面事实尚未完成重读；所有写入、发布和导出均已暂停。请点击“重读教室事实”。
+          </p>
+        ) : null}
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span>
+            名单{' '}
+            {newestRoster ? (
+              <>
+                r{newestRoster.revision} · {newestRoster.entries.length} 人
+              </>
+            ) : (
+              '未冻结'
+            )}
+          </span>
+          <span className="text-muted-foreground">/</span>
+          <span>
+            分配 {latest ? `r${latest.revision}` : '尚未生成'}
+            {latest?.published ? ' · 已发布' : latest ? ' · 未发布' : ''}
+          </span>
+          <span className="text-muted-foreground">/</span>
+          <span>发布 {workspace?.publicationRevision ? `r${workspace.publicationRevision}` : '未发布'}</span>
+          {dirty ? <Badge variant="destructive">人工调整未保存</Badge> : null}
+        </div>
+        <details className="rounded-md border p-3 text-xs text-muted-foreground">
+          <summary className="cursor-pointer text-sm text-foreground">技术身份与 fingerprint</summary>
+          <div className="mt-2 space-y-1 font-mono">
+            {publishedPreparationAssignment ? <p>发布 assignment {publishedPreparationAssignment.assignmentId}</p> : null}
+            {latest ? <p>当前 assignment {latest.assignmentId}</p> : null}
+            {newestRoster ? <p>名单 fingerprint {newestRoster.fingerprint}</p> : null}
+            {latest ? <p>分配 fingerprint {latest.fingerprint}</p> : null}
+            {latestPlan ? <p>计划 fingerprint {latestPlan.fingerprint}</p> : null}
+          </div>
+        </details>
+        <nav
+          aria-label="考试座位步骤"
+          className="grid auto-cols-[minmax(9rem,1fr)] grid-flow-col overflow-x-auto border-y border-border/70"
+        >
+          {steps.map((step, index) => (
+            <Button
+              key={step.id}
+              type="button"
+              variant="ghost"
+              aria-label={step.ariaLabel}
+              aria-current={displayStep === step.id ? 'step' : undefined}
+              disabled={!canVisitStep(step.id)}
+              className={cn(
+                "relative min-h-14 justify-start gap-3 rounded-none px-3 text-left after:absolute after:inset-x-3 after:bottom-0 after:h-0.5 after:content-['']",
+                displayStep === step.id
+                  ? 'text-foreground after:bg-primary hover:bg-muted/40'
+                  : 'text-muted-foreground after:bg-transparent hover:text-foreground',
+              )}
+              onClick={() => goToStep(step.id)}
+            >
+              <span
+                aria-hidden="true"
+                className={cn(
+                  'grid size-7 shrink-0 place-items-center rounded-full border text-xs tabular-nums',
+                  displayStep === step.id ? 'border-foreground bg-foreground text-background' : 'border-border bg-background',
+                )}
+              >
+                {index + 1}
+              </span>
+              <span className="whitespace-nowrap text-sm font-medium">{step.label}</span>
+            </Button>
+          ))}
+        </nav>
+
+        {displayStep === 'roster' ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>冻结名单</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-muted-foreground">这里只追加不可变名单；不会自动生成、发布或修改长期终端绑定。</p>
+              <div className="space-y-2">
                 <label className="text-sm font-medium" htmlFor="seat-roster-source">
-                  步骤 1：名单来源
+                  名单来源
                 </label>
                 {workspace?.eventType === 'krypton' ? (
                   <output id="seat-roster-source" className="block w-full rounded-md border bg-muted/30 px-3 py-2 text-sm">
@@ -2736,17 +3100,17 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                     </span>
                   </output>
                 ) : (
-                  <select
+                  <SimpleSelect
                     id="seat-roster-source"
-                    aria-label="名单来源"
+                    ariaLabel="名单来源"
                     value={sourceKind}
                     disabled={mutationBusy || dirty || !workspaceFresh || !automaticSeatingAllowed}
-                    onChange={(event) => setSourceKind(event.target.value as 'userbindGroups' | 'userbindSchool')}
-                    className="w-full rounded-md border bg-background px-2 py-2 text-sm"
-                  >
-                    <option value="userbindGroups">指定 userbind 用户组</option>
-                    <option value="userbindSchool">当前学校全部学生</option>
-                  </select>
+                    onValueChange={(value) => setSourceKind(value as 'userbindGroups' | 'userbindSchool')}
+                    options={[
+                      { value: 'userbindGroups', label: '指定 userbind 用户组' },
+                      { value: 'userbindSchool', label: '当前学校全部学生' },
+                    ]}
+                  />
                 )}
                 {workspace?.contestAudienceState === 'public' ? (
                   <p className="text-sm text-amber-700">
@@ -2757,14 +3121,13 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                   <div className="max-h-40 space-y-1 overflow-auto rounded-md bg-muted/30 p-2">
                     {workspace?.rosterGroups.map((group) => (
                       <label key={group.groupId} className="flex items-center gap-2 text-sm">
-                        <input
-                          type="checkbox"
+                        <Checkbox
                           disabled={mutationBusy || dirty || !workspaceFresh || !automaticSeatingAllowed}
                           checked={selectedGroupIds.has(group.groupId)}
-                          onChange={(event) =>
+                          onCheckedChange={(checked) =>
                             setSelectedGroupIds((current) => {
                               const next = new Set(current);
-                              if (event.target.checked) next.add(group.groupId);
+                              if (checked) next.add(group.groupId);
                               else next.delete(group.groupId);
                               return next;
                             })
@@ -2776,623 +3139,1145 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                     {!workspace?.rosterGroups.length ? <p className="text-sm text-muted-foreground">当前学校没有可用用户组。</p> : null}
                   </div>
                 ) : null}
-                <Button
-                  variant="outline"
-                  disabled={
-                    mutationBusy ||
-                    dirty ||
-                    !workspaceFresh ||
-                    !automaticSeatingAllowed ||
-                    (sourceKind === 'contestAudience' && workspace?.contestAudienceState !== 'fixed') ||
-                    (sourceKind === 'userbindGroups' && !selectedGroupIds.size)
-                  }
-                  onClick={() =>
-                    executeSeatPlan({
-                      action: 'createRoster',
-                      sourceKind,
-                      groupIds: sourceKind === 'userbindGroups' ? [...selectedGroupIds].sort() : [],
-                    })
-                  }
-                >
-                  生成或刷新名单
-                </Button>
               </div>
-              <div className="space-y-3 rounded-md border p-3">
-                <div>
-                  <p className="text-sm font-medium">步骤 2：候选教室</p>
-                  <p className="text-xs text-muted-foreground">可跨教室多选；计划会冻结当前布局、朝向和禁用配置版本。</p>
-                </div>
-                <div className="max-h-56 space-y-1 overflow-auto rounded-md bg-muted/30 p-2">
-                  {workspace?.classrooms.map((classroom) => (
-                    <div key={classroom.classroomId} className="flex items-center justify-between gap-2 rounded px-1 py-1 text-sm">
-                      <label className="flex min-w-0 items-center gap-2">
-                        <input
-                          type="checkbox"
-                          aria-label={`选择教室${classroomDisplayById.get(classroom.classroomId) || classroom.classroomId}`}
-                          disabled={mutationBusy || dirty || !workspaceFresh || !automaticSeatingAllowed}
-                          checked={selectedV2ClassroomIds.has(classroom.classroomId)}
-                          onChange={(event) =>
-                            setSelectedV2ClassroomIds((current) => {
-                              const next = new Set(current);
-                              if (event.target.checked) next.add(classroom.classroomId);
-                              else next.delete(classroom.classroomId);
-                              return next;
-                            })
-                          }
-                        />
-                        <span className="truncate">
-                          {classroomDisplayById.get(classroom.classroomId) || classroom.classroomId} · layout r{classroom.layoutRevision} ·{' '}
-                          {classroom.seatCount} 座
-                        </span>
-                      </label>
-                      <a
-                        href={`/admin/exam-infrastructure/classrooms/${classroom.classroomId}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="shrink-0 text-xs text-primary underline-offset-4 hover:underline"
-                      >
-                        朝向 / 禁用设置
-                      </a>
-                    </div>
-                  ))}
-                  {!workspace?.classrooms.length ? <p className="text-sm text-muted-foreground">当前学校没有可用教室。</p> : null}
-                </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  disabled={mutationBusy || (dirty && workspaceFresh)}
-                  onClick={() => {
-                    if (dirty && !window.confirm('这会放弃当前未保存的人工调整，并从服务端重新读取最终状态。是否继续？')) return;
-                    void refreshWorkspace();
-                  }}
-                >
-                  <RefreshCw className="size-4" /> {dirty && !workspaceFresh ? '放弃未保存调整并重读' : '重读教室事实'}
-                </Button>
-                <Button
-                  variant="outline"
-                  disabled={
-                    mutationBusy || dirty || !workspaceFresh || !automaticSeatingAllowed || !latestRosterForPlan || !selectedV2ClassroomIds.size
-                  }
-                  onClick={() =>
-                    latestRosterForPlan &&
-                    executeSeatPlan({
-                      action: 'createSeatPlanV2',
-                      rosterRevision: latestRosterForPlan.revision,
-                      classroomIds: [...selectedV2ClassroomIds].sort(),
-                      expectedPreviousRevision: latestPlan?.revision || 0,
-                    })
-                  }
-                >
-                  创建跨教室候选计划
-                </Button>
-                {latest?.schemaVersion === 1 || latestPlan?.schemaVersion === 1 ? (
-                  <p className="rounded-md border bg-muted/20 p-2 text-sm text-muted-foreground">
-                    v1 历史只读；新的候选计划和分配统一使用跨教室 v2。
-                  </p>
-                ) : null}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>步骤 3–5：生成、检查调整与发布</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-wrap items-center gap-2">
-            <p className="w-full text-sm text-muted-foreground">
-              步骤 3 选择策略并生成尽力型结果；步骤 4 在下方座位图或学生清单中换位、锁定并保存；步骤 5 明确发布最终 revision。
-            </p>
-            {!workspaceFresh ? (
-              <p className="w-full rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-sm text-amber-800 dark:text-amber-200">
-                页面事实尚未完成重读；所有写入、发布和导出均已暂停。请点击“重读教室事实”。
-              </p>
-            ) : null}
-            {workspace?.latestSeatPlanState === 'layout-drift' ? (
-              <p className="w-full text-sm text-amber-700">候选教室布局已变化；请在上方按当前布局创建新计划后再生成。</p>
-            ) : null}
-            {latestPlanV2?.roster && planRoster ? (
-              <details className="w-full rounded-md border p-3 text-sm">
-                <summary className="cursor-pointer font-medium">
-                  当前候选计划冻结名单 r{planRoster.revision} · {planRoster.entries.length} 人（生成前请核对）
-                </summary>
-                <div className="mt-2 max-h-40 space-y-1 overflow-auto text-muted-foreground">
-                  {planRoster.entries.map((entry) => (
-                    <p key={entry.boundUserId}>
-                      {entry.studentId} · {entry.realName} · UID {entry.boundUserId}
-                    </p>
-                  ))}
-                  {!planRoster.entries.length ? <p>名单为空。</p> : null}
-                </div>
-              </details>
-            ) : null}
-            {latestPlanV2 ? (
-              <>
-                <label className="flex items-center gap-2 text-sm">
-                  <span>分配策略</span>
-                  <select
-                    aria-label="跨教室分配策略"
-                    value={v2Strategy}
-                    disabled={mutationBusy || dirty || !workspaceFresh || !automaticSeatingAllowed || !latestPlanUsesCanonicalRoster}
-                    onChange={(event) => setV2Strategy(event.target.value as AssignmentV2Revision['constraints']['strategy'])}
-                    className="rounded-md border bg-background px-2 py-2 text-sm"
-                  >
-                    <option value="minimizeClassrooms">少用教室</option>
-                    <option value="maximizeSpacing">优先隔开</option>
-                  </select>
-                </label>
-                <Button
-                  disabled={
-                    mutationBusy ||
-                    dirty ||
-                    !workspaceFresh ||
-                    !automaticSeatingAllowed ||
-                    !latestPlanUsesCanonicalRoster ||
-                    !latestPlanV2.roster ||
-                    !latestPlanCurrent ||
-                    !planRoster
-                  }
-                  onClick={() =>
-                    execute({
-                      action: 'generateV2',
-                      expectedPreviousRevision: latest?.revision || 0,
-                      strategy: v2Strategy,
-                      seatPlanRevision: latestPlanV2.revision,
-                    })
-                  }
-                >
-                  <Shuffle className="size-4" /> 生成尽力型跨教室分配
-                </Button>
-                <Button
-                  variant="outline"
-                  disabled={mutationBusy || dirty || !assignmentIsCurrentV2}
-                  onClick={() => latestV2 && execute({ action: 'rerandomizeV2', baseAssignmentRevision: latestV2.revision })}
-                >
-                  <RefreshCw className="size-4" /> 保留锁定项重新分配
-                </Button>
-                <Button
-                  variant="outline"
-                  disabled={mutationBusy || !assignmentIsCurrentV2 || !dirty}
-                  onClick={() =>
-                    latestV2 &&
-                    execute({
-                      action: 'adjustV2',
-                      baseAssignmentRevision: latestV2.revision,
-                      lockedUids: [...locked].sort((a, b) => a - b),
-                      mappings: v2Draft,
-                    })
-                  }
-                >
-                  <Save className="size-4" /> 保存跨教室人工调整
-                </Button>
-                <Button
-                  disabled={mutationBusy || dirty || !assignmentIsCurrentV2}
-                  onClick={() =>
-                    latestV2 &&
-                    execute({
-                      action: 'publish',
-                      assignmentRevision: latestV2.revision,
-                      expectedPublicationRevision: workspace?.publicationRevision || 0,
-                    })
-                  }
-                >
-                  <Upload className="size-4" /> {latestV2 ? `发布跨教室版本 ${latestV2.revision}` : '发布'}
-                </Button>
-              </>
-            ) : (
-              <p className="text-sm text-muted-foreground">请先在上方创建跨教室 v2 候选计划；v1 历史只读。</p>
-            )}
-            <Button variant="ghost" disabled={!latest || dirty || mutationBusy || !workspaceFresh} onClick={exportCurrent}>
-              <Download className="size-4" /> 导出当前页面 CSV
-            </Button>
-            {latest ? (
-              <Badge variant={latest.published ? 'default' : 'outline'}>
-                分配版本 {latest.revision}
-                {latest.published ? ' · 已发布' : ' · 未发布'}
-              </Badge>
-            ) : (
-              <Badge variant="outline">尚未生成</Badge>
-            )}
-            {dirty ? <Badge variant="destructive">人工调整未保存</Badge> : null}
-          </CardContent>
-        </Card>
-
-        {diagnostics.length ? (
-          <Card>
-            <CardHeader>
-              <CardTitle>完整诊断</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-1 text-sm">
-              {diagnostics.map((item, index) => (
-                <p key={`${item.code}-${index}`}>{diagnosticText(item)}</p>
-              ))}
+              <StepFooter
+                left={rereadButton}
+                right={
+                  <>
+                    <Button
+                      variant={hasRoster ? 'outline' : 'default'}
+                      disabled={rosterCreateDisabled}
+                      onClick={async () => {
+                        if (
+                          await executeSeatPlan({
+                            action: 'createRoster',
+                            sourceKind,
+                            groupIds: sourceKind === 'userbindGroups' ? [...selectedGroupIds].sort() : [],
+                          })
+                        ) {
+                          goToStep('classrooms');
+                        }
+                      }}
+                    >
+                      生成或刷新名单
+                    </Button>
+                    {nextStepButton}
+                  </>
+                }
+              />
             </CardContent>
           </Card>
         ) : null}
 
-        {latestV2 ? (
+        {displayStep === 'classrooms' ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>选择教室</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-muted-foreground">可跨教室多选；计划会冻结当前布局、朝向和禁用配置版本。</p>
+              <p className="text-sm text-muted-foreground">
+                朝向、禁用和终端绑定在教室工作台维护；没有权限时请找基础设施管理员。
+              </p>
+              {workspace?.latestSeatPlanState === 'layout-drift' ? (
+                <p className="text-sm text-amber-700">候选教室布局已变化；请在上方按当前布局创建新计划后再生成。</p>
+              ) : null}
+              {latest?.schemaVersion === 1 || latestPlan?.schemaVersion === 1 ? (
+                <p className="rounded-md border bg-muted/20 p-2 text-sm text-muted-foreground">v1 历史只读；新的候选计划和分配统一使用跨教室 v2。</p>
+              ) : null}
+              <div className="max-h-56 space-y-1 overflow-auto rounded-md bg-muted/30 p-2">
+                {workspace?.classrooms.map((classroom) => (
+                  <div key={classroom.classroomId} className="flex items-center justify-between gap-2 rounded px-1 py-1 text-sm">
+                    <label className="flex min-w-0 items-center gap-2">
+                      <Checkbox
+                        aria-label={`选择教室${classroomDisplayById.get(classroom.classroomId) || classroom.classroomId}`}
+                        disabled={mutationBusy || dirty || !workspaceFresh || !automaticSeatingAllowed}
+                        checked={selectedV2ClassroomIds.has(classroom.classroomId)}
+                        onCheckedChange={(checked) =>
+                          setSelectedV2ClassroomIds((current) => {
+                            const next = new Set(current);
+                            if (checked) next.add(classroom.classroomId);
+                            else next.delete(classroom.classroomId);
+                            return next;
+                          })
+                        }
+                      />
+                      <span className="truncate">
+                        {classroomDisplayById.get(classroom.classroomId) || classroom.classroomId} · layout r{classroom.layoutRevision} ·{' '}
+                        {classroom.seatCount} 座
+                      </span>
+                    </label>
+                    <a
+                      href={`/admin/exam-infrastructure/classrooms/${classroom.classroomId}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="shrink-0 text-xs text-primary underline-offset-4 hover:underline"
+                    >
+                      朝向 / 禁用设置
+                    </a>
+                  </div>
+                ))}
+                {!workspace?.classrooms.length ? <p className="text-sm text-muted-foreground">当前学校没有可用教室。</p> : null}
+              </div>
+              <StepFooter
+                left={rereadButton}
+                right={
+                  <>
+                    <Button
+                      variant={hasPlan ? 'outline' : 'default'}
+                      disabled={createPlanDisabled}
+                      onClick={async () => {
+                        if (
+                          latestRosterForPlan &&
+                          (await executeSeatPlan({
+                            action: 'createSeatPlanV2',
+                            rosterRevision: latestRosterForPlan.revision,
+                            classroomIds: [...selectedV2ClassroomIds].sort(),
+                            expectedPreviousRevision: latestPlan?.revision || 0,
+                          }))
+                        ) {
+                          goToStep('generate');
+                        }
+                      }}
+                    >
+                      创建跨教室候选计划
+                    </Button>
+                    {nextStepButton}
+                  </>
+                }
+              />
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {displayStep === 'generate' ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>生成分配</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {workspace?.latestSeatPlanState === 'layout-drift' ? (
+                <p className="text-sm text-amber-700">候选教室布局已变化；请在上方按当前布局创建新计划后再生成。</p>
+              ) : null}
+              {planRoster ? (
+                <details className="rounded-md border p-3 text-sm" open>
+                  <summary className="cursor-pointer font-medium">
+                    当前候选计划冻结名单 r{planRoster.revision} · {planRoster.entries.length} 人（生成前请核对）
+                  </summary>
+                  <div className="mt-2 max-h-40 space-y-1 overflow-auto text-muted-foreground">
+                    {planRoster.entries.map((entry) => (
+                      <p key={entry.boundUserId}>
+                        {entry.studentId} · <span>{entry.realName}</span> · UID {entry.boundUserId}
+                      </p>
+                    ))}
+                    {!planRoster.entries.length ? <p>名单为空。</p> : null}
+                  </div>
+                </details>
+              ) : (
+                <p className="text-sm text-muted-foreground">请先创建跨教室 v2 候选计划；v1 历史只读。</p>
+              )}
+              {latestPlanV2 ? (
+                <div className="max-w-md space-y-2">
+                  <label className="text-sm font-medium" htmlFor="seat-v2-strategy">
+                    分配策略
+                  </label>
+                  <SimpleSelect
+                    id="seat-v2-strategy"
+                    ariaLabel="跨教室分配策略"
+                    value={v2Strategy}
+                    disabled={mutationBusy || dirty || !workspaceFresh || !automaticSeatingAllowed || !latestPlanUsesCanonicalRoster}
+                    onValueChange={(value) => setV2Strategy(value as AssignmentV2Revision['constraints']['strategy'])}
+                    options={[
+                      { value: 'minimizeClassrooms', label: '少用教室' },
+                      { value: 'maximizeSpacing', label: '优先隔开' },
+                    ]}
+                  />
+                </div>
+              ) : null}
+              {diagnostics.length ? (
+                <div className="space-y-1 rounded-md border p-3 text-sm">
+                  <p className="font-medium">完整诊断</p>
+                  {diagnostics.map((item, index) => (
+                    <p key={`${item.code}-${index}`}>{diagnosticText(item)}</p>
+                  ))}
+                </div>
+              ) : null}
+              <StepFooter
+                left={rereadButton}
+                right={
+                  latestPlanV2 ? (
+                    <>
+                      <Button
+                        variant={hasAssignment ? 'outline' : 'default'}
+                        disabled={generateDisabled}
+                        onClick={async () => {
+                          if (
+                            (await execute({
+                              action: 'generateV2',
+                              expectedPreviousRevision: latest?.revision || 0,
+                              strategy: v2Strategy,
+                              seatPlanRevision: latestPlanV2.revision,
+                            })) === 'ok'
+                          ) {
+                            goToStep('adjust');
+                          }
+                        }}
+                      >
+                        <Shuffle className="size-4" /> 生成尽力型跨教室分配
+                      </Button>
+                      {nextStepButton}
+                    </>
+                  ) : null
+                }
+              />
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {displayStep === 'adjust' ? (
           <Card>
             <CardHeader>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <CardTitle>步骤 4：检查解释并人工调整</CardTitle>
+                  <CardTitle>检查解释并人工调整</CardTitle>
                   <p className="mt-1 text-sm text-muted-foreground">只展示已冻结的客观事实：教室用量、风险边、拆队、跳过座位和 Endpoint 状态。</p>
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    aria-label="缩小座位图"
-                    disabled={mapZoom <= 0.6}
-                    onClick={() => setMapZoom((current) => Math.max(0.6, Number((current - 0.2).toFixed(1))))}
-                  >
-                    <ZoomOut className="size-4" />
-                  </Button>
-                  <span className="min-w-12 text-center text-sm">{Math.round(mapZoom * 100)}%</span>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    aria-label="放大座位图"
-                    disabled={mapZoom >= 1.8}
-                    onClick={() => setMapZoom((current) => Math.min(1.8, Number((current + 0.2).toFixed(1))))}
-                  >
-                    <ZoomIn className="size-4" />
-                  </Button>
-                  <Button type="button" size="sm" variant={showRiskLines ? 'default' : 'outline'} onClick={() => setShowRiskLines((value) => !value)}>
-                    {showRiskLines ? '隐藏风险连线' : '显示风险连线'}
-                  </Button>
-                </div>
+                {latestV2 ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      aria-label="缩小座位图"
+                      disabled={mapZoom <= 0.6}
+                      onClick={() => setMapZoom((current) => Math.max(0.6, Number((current - 0.2).toFixed(1))))}
+                    >
+                      <ZoomOut className="size-4" />
+                    </Button>
+                    <span className="min-w-12 text-center text-sm">{Math.round(mapZoom * 100)}%</span>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      aria-label="放大座位图"
+                      disabled={mapZoom >= 1.8}
+                      onClick={() => setMapZoom((current) => Math.min(1.8, Number((current + 0.2).toFixed(1))))}
+                    >
+                      <ZoomIn className="size-4" />
+                    </Button>
+                    <Button type="button" size="sm" variant={showRiskLines ? 'default' : 'outline'} onClick={() => setShowRiskLines((value) => !value)}>
+                      {showRiskLines ? '隐藏风险连线' : '显示风险连线'}
+                    </Button>
+                  </div>
+                ) : null}
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
-              {dirty ? (
-                <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-sm text-amber-800 dark:text-amber-200">
-                  座位图已显示人工换位；风险边和解释仍属于已保存版本，保存后服务端会重新计算。
-                </p>
-              ) : null}
-              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                {latestV2.explanation.classrooms.map((classroom) => (
-                  <div key={classroom.classroomId} className="rounded-md border p-3 text-sm">
-                    <p className="font-medium">{classroomDisplayById.get(classroom.classroomId) || classroom.classroomId}</p>
-                    <p className="mt-1 text-muted-foreground">
-                      已分配 {classroom.assignedCount} / 可用 {classroom.eligibleSeatCount}
+              {latestV2 ? (
+                <>
+                  {dirty ? (
+                    <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-sm text-amber-800 dark:text-amber-200">
+                      座位图已显示人工换位；风险边和解释仍属于已保存版本，保存后服务端会重新计算。
                     </p>
-                  </div>
-                ))}
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={riskDetail === 'high' ? 'destructive' : 'outline'}
-                  onClick={() => setRiskDetail((value) => (value === 'high' ? null : 'high'))}
-                >
-                  高风险边 {latestV2.explanation.highRiskEdges.length}
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={riskDetail === 'medium' ? 'default' : 'outline'}
-                  onClick={() => setRiskDetail((value) => (value === 'medium' ? null : 'medium'))}
-                >
-                  中风险边 {latestV2.explanation.mediumRiskEdges.length}
-                </Button>
-                <Badge variant={latestV2.explanation.splitTeamIds.length ? 'destructive' : 'outline'}>
-                  拆分队伍 {latestV2.explanation.splitTeamIds.length}
-                </Badge>
-                <Badge variant="outline">跳过座位 {latestV2.explanation.skippedSeats.length}</Badge>
-                <Badge variant={knownOfflineV2Seats.length ? 'destructive' : 'outline'}>离线 Endpoint {knownOfflineV2Seats.length}</Badge>
-                <Badge variant={unknownOnlineV2Seats.length ? 'secondary' : 'outline'}>在线未知 {unknownOnlineV2Seats.length}</Badge>
-                <Badge variant={latestV2.explanation.unsetFacingSeats.length ? 'secondary' : 'outline'}>
-                  朝向未设置 {latestV2.explanation.unsetFacingSeats.length}
-                </Badge>
-              </div>
-              {riskDetail ? (
-                <div className="max-h-56 space-y-1 overflow-auto rounded-md border p-3 text-sm" aria-live="polite">
-                  {(riskDetail === 'high' ? latestV2.explanation.highRiskEdges : latestV2.explanation.mediumRiskEdges).map((edge) => (
-                    <p key={riskEdgeKey(edge)}>
-                      {describeV2Seat(edge.left)} ↔ {describeV2Seat(edge.right)} · {riskReasonLabel[edge.reason]} · 距离 {edge.distance}
-                    </p>
-                  ))}
-                  {!(riskDetail === 'high' ? latestV2.explanation.highRiskEdges : latestV2.explanation.mediumRiskEdges).length ? (
-                    <p className="text-muted-foreground">无该级别风险边。</p>
                   ) : null}
-                </div>
-              ) : null}
-              <div className="grid gap-3 lg:grid-cols-2">
-                <details className="rounded-md border p-3 text-sm">
-                  <summary className="cursor-pointer font-medium">拆队和跳过明细</summary>
-                  <div className="mt-2 space-y-2 text-muted-foreground">
-                    {splitTeams.map((team) => (
-                      <div key={team.teamId} className="rounded border p-2">
-                        <p className="font-medium text-foreground">队伍 {team.teamId}</p>
-                        {team.members.map(({ participant, row }) => (
-                          <p key={participant.boundUserId}>
-                            {participant.teamRole === 'captain' ? '队长' : '队员'} · {row?.studentId || participant.studentId}{' '}
-                            {row?.realName || '姓名未知'} →{' '}
-                            {row
-                              ? `${classroomDisplayById.get(row.classroomId) || row.classroomId} / ${row.seatLabel || row.sourceSeatId}`
-                              : '座位未知'}
-                          </p>
-                        ))}
+                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                    {latestV2.explanation.classrooms.map((classroom) => (
+                      <div key={classroom.classroomId} className="rounded-md border p-3 text-sm">
+                        <p className="font-medium">{classroomDisplayById.get(classroom.classroomId) || classroom.classroomId}</p>
+                        <p className="mt-1 text-muted-foreground">
+                          已分配 {classroom.assignedCount} / 可用 {classroom.eligibleSeatCount}
+                        </p>
                       </div>
                     ))}
-                    {!splitTeams.length ? <p>没有被拆分的队伍。</p> : null}
-                    {latestV2.explanation.skippedSeats.map((item) => (
-                      <p key={seatIdentityKey(item.seat)}>
-                        {describeV2Seat(item.seat)} · {skippedReasonLabel[item.reason]}
-                      </p>
-                    ))}
-                    {!latestV2.explanation.skippedSeats.length ? <p>没有被跳过的座位。</p> : null}
                   </div>
-                </details>
-                <details className="rounded-md border p-3 text-sm">
-                  <summary className="cursor-pointer font-medium">Endpoint 与朝向 warning 明细</summary>
-                  <div className="mt-2 space-y-1 text-muted-foreground">
-                    {knownOfflineV2Seats.map((seat) => (
-                      <p key={`offline-${seatIdentityKey(seat)}`}>{describeV2Seat(seat)} · Endpoint 离线</p>
-                    ))}
-                    {unknownOnlineV2Seats.map((seat) => (
-                      <p key={`unknown-${seatIdentityKey(seat)}`}>{describeV2Seat(seat)} · Endpoint 在线状态未知</p>
-                    ))}
-                    {latestV2.explanation.unsetFacingSeats.map((seat) => (
-                      <p key={`facing-${seatIdentityKey(seat)}`}>{describeV2Seat(seat)} · 朝向未设置</p>
-                    ))}
-                    {!knownOfflineV2Seats.length && !unknownOnlineV2Seats.length && !latestV2.explanation.unsetFacingSeats.length ? (
-                      <p>没有 Endpoint 或朝向 warning。</p>
-                    ) : null}
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={riskDetail === 'high' ? 'destructive' : 'outline'}
+                      onClick={() => setRiskDetail((value) => (value === 'high' ? null : 'high'))}
+                    >
+                      高风险边 {latestV2.explanation.highRiskEdges.length}
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={riskDetail === 'medium' ? 'default' : 'outline'}
+                      onClick={() => setRiskDetail((value) => (value === 'medium' ? null : 'medium'))}
+                    >
+                      中风险边 {latestV2.explanation.mediumRiskEdges.length}
+                    </Button>
+                    <Badge variant={latestV2.explanation.splitTeamIds.length ? 'destructive' : 'outline'}>
+                      拆分队伍 {latestV2.explanation.splitTeamIds.length}
+                    </Badge>
+                    <Badge variant="outline">跳过座位 {latestV2.explanation.skippedSeats.length}</Badge>
+                    <Badge variant={knownOfflineV2Seats.length ? 'destructive' : 'outline'}>离线 Endpoint {knownOfflineV2Seats.length}</Badge>
+                    <Badge variant={unknownOnlineV2Seats.length ? 'secondary' : 'outline'}>在线未知 {unknownOnlineV2Seats.length}</Badge>
+                    <Badge variant={latestV2.explanation.unsetFacingSeats.length ? 'secondary' : 'outline'}>
+                      朝向未设置 {latestV2.explanation.unsetFacingSeats.length}
+                    </Badge>
                   </div>
-                </details>
-              </div>
-              <div className="space-y-5">
-                {latestV2.classrooms.map((classroom) => (
-                  <ClassroomSeatMap
-                    key={classroom.classroomId}
-                    classroomId={classroom.classroomId}
-                    classroomName={classroomDisplayById.get(classroom.classroomId) || classroom.classroomId}
-                    editable={canMutateV2Draft}
-                    highRiskKeys={highRiskKeys}
-                    mediumRiskKeys={mediumRiskKeys}
-                    mappings={v2Draft}
-                    onSelect={selectForSwap}
-                    rowsByUid={rowsByUid}
-                    seats={latestV2.seatFacts}
-                    selectedUid={selectedUid}
-                    showRiskLines={showRiskLines}
-                    zoom={mapZoom}
+                  {riskDetail ? (
+                    <div className="max-h-56 space-y-1 overflow-auto rounded-md border p-3 text-sm" aria-live="polite">
+                      {(riskDetail === 'high' ? latestV2.explanation.highRiskEdges : latestV2.explanation.mediumRiskEdges).map((edge) => (
+                        <p key={riskEdgeKey(edge)}>
+                          {describeV2Seat(edge.left)} ↔ {describeV2Seat(edge.right)} · {riskReasonLabel[edge.reason]} · 距离 {edge.distance}
+                        </p>
+                      ))}
+                      {!(riskDetail === 'high' ? latestV2.explanation.highRiskEdges : latestV2.explanation.mediumRiskEdges).length ? (
+                        <p className="text-muted-foreground">无该级别风险边。</p>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  <div className="grid gap-3 lg:grid-cols-2">
+                    <details className="rounded-md border p-3 text-sm">
+                      <summary className="cursor-pointer font-medium">拆队和跳过明细</summary>
+                      <div className="mt-2 space-y-2 text-muted-foreground">
+                        {splitTeams.map((team) => (
+                          <div key={team.teamId} className="rounded border p-2">
+                            <p className="font-medium text-foreground">队伍 {team.teamId}</p>
+                            {team.members.map(({ participant, row }) => (
+                              <p key={participant.boundUserId}>
+                                {participant.teamRole === 'captain' ? '队长' : '队员'} · {row?.studentId || participant.studentId}{' '}
+                                {row?.realName || '姓名未知'} →{' '}
+                                {row
+                                  ? `${classroomDisplayById.get(row.classroomId) || row.classroomId} / ${row.seatLabel || row.sourceSeatId}`
+                                  : '座位未知'}
+                              </p>
+                            ))}
+                          </div>
+                        ))}
+                        {!splitTeams.length ? <p>没有被拆分的队伍。</p> : null}
+                        {latestV2.explanation.skippedSeats.map((item) => (
+                          <p key={seatIdentityKey(item.seat)}>
+                            {describeV2Seat(item.seat)} · {skippedReasonLabel[item.reason]}
+                          </p>
+                        ))}
+                        {!latestV2.explanation.skippedSeats.length ? <p>没有被跳过的座位。</p> : null}
+                      </div>
+                    </details>
+                    <details className="rounded-md border p-3 text-sm">
+                      <summary className="cursor-pointer font-medium">Endpoint 与朝向 warning 明细</summary>
+                      <div className="mt-2 space-y-1 text-muted-foreground">
+                        {knownOfflineV2Seats.map((seat) => (
+                          <p key={`offline-${seatIdentityKey(seat)}`}>{describeV2Seat(seat)} · Endpoint 离线</p>
+                        ))}
+                        {unknownOnlineV2Seats.map((seat) => (
+                          <p key={`unknown-${seatIdentityKey(seat)}`}>{describeV2Seat(seat)} · Endpoint 在线状态未知</p>
+                        ))}
+                        {latestV2.explanation.unsetFacingSeats.map((seat) => (
+                          <p key={`facing-${seatIdentityKey(seat)}`}>{describeV2Seat(seat)} · 朝向未设置</p>
+                        ))}
+                        {!knownOfflineV2Seats.length && !unknownOnlineV2Seats.length && !latestV2.explanation.unsetFacingSeats.length ? (
+                          <p>没有 Endpoint 或朝向 warning。</p>
+                        ) : null}
+                      </div>
+                    </details>
+                  </div>
+                  <div className="space-y-5">
+                    {latestV2.classrooms.map((classroom) => (
+                      <ClassroomSeatMap
+                        key={classroom.classroomId}
+                        classroomId={classroom.classroomId}
+                        classroomName={classroomDisplayById.get(classroom.classroomId) || classroom.classroomId}
+                        editable={canMutateV2Draft}
+                        highRiskKeys={highRiskKeys}
+                        mediumRiskKeys={mediumRiskKeys}
+                        mappings={v2Draft}
+                        onSelect={selectForSwap}
+                        rowsByUid={rowsByUid}
+                        seats={latestV2.seatFacts}
+                        selectedUid={selectedUid}
+                        showRiskLines={showRiskLines}
+                        zoom={mapZoom}
+                      />
+                    ))}
+                  </div>
+                </>
+              ) : null}
+
+              {workspace?.endpointState === 'unavailable' ? (
+                <p className="text-sm text-amber-700">终端实时状态暂不可用；不会把未知状态伪装为在线。</p>
+              ) : null}
+              <Input
+                aria-label="搜索学生或座位"
+                placeholder="搜索学号、姓名或座位"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+              />
+              {selectedStudent && canMutateV2Draft ? (
+                <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/20 p-2">
+                  <span className="text-sm">为 {selectedStudent.realName} 指定座位</span>
+                  <SimpleSelect
+                    ariaLabel={`为${selectedStudent.realName}指定座位`}
+                    value={seatSelectValue(selectedStudent)}
+                    disabled={!canMutateV2Draft}
+                    onValueChange={(value) => {
+                      assignSeatV2(selectedStudent.boundUserId, seatKeyFromSelectValue(value));
+                      setSelectedUid(null);
+                    }}
+                    options={eligibleV2Seats.map((candidate) => ({
+                      value: seatSelectValue(candidate),
+                      label: `${classroomDisplayById.get(candidate.classroomId) || candidate.classroomId} · ${candidate.label || candidate.sourceSeatId} · ${candidate.sourceSeatId}`,
+                    }))}
                   />
-                ))}
-              </div>
+                </div>
+              ) : null}
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>学生</TableHead>
+                    <TableHead>座位</TableHead>
+                    <TableHead>终端</TableHead>
+                    <TableHead>状态</TableHead>
+                    <TableHead>人工调整</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredRows.map((row) => {
+                    const seatKey = seatIdentityKey({ classroomId: row.classroomId, sourceSeatId: row.sourceSeatId });
+                    const seat = seatByIdentity.get(seatKey);
+                    const v2Seat = latestV2SeatByKey.get(seatKey);
+                    const endpoint = row.endpointId ? preflightByEndpoint.get(row.endpointId) : null;
+                    return (
+                      <TableRow
+                        key={row.boundUserId}
+                        draggable={canMutateV2Draft}
+                        onDragStart={() => canMutateV2Draft && setSelectedUid(row.boundUserId)}
+                        onDragOver={(event) => canMutateV2Draft && event.preventDefault()}
+                        onDrop={() => {
+                          if (!canMutateV2Draft || selectedUid === null) return;
+                          swapV2(selectedUid, row.boundUserId);
+                          setSelectedUid(null);
+                        }}
+                      >
+                        <TableCell>
+                          <div className="font-medium">{row.studentId}</div>
+                          <div className="text-muted-foreground">{row.realName}</div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="font-medium">{row.seatLabel || '未分配'}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {row.classroomId ? `${classroomDisplayById.get(row.classroomId) || row.classroomId} · ` : ''}
+                            {row.sourceSeatId || '-'}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div>{row.endpointId || '未绑定'}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {seat?.bindingRevision || v2Seat?.bindingRevision ? `绑定 r${seat?.bindingRevision || v2Seat?.bindingRevision}` : '-'}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          {endpoint ? (
+                            <Badge variant={endpoint.online ? 'default' : 'destructive'}>{endpoint.online ? '在线' : '离线'}</Badge>
+                          ) : (
+                            <Badge variant="outline">未知</Badge>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {assignmentIsCurrentV2 ? (
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant={selectedUid === row.boundUserId ? 'default' : 'outline'}
+                                aria-label={`选择${row.realName}换位`}
+                                disabled={!canMutateV2Draft}
+                                onClick={() => selectForSwap(row.boundUserId)}
+                              >
+                                <GripVertical className="size-4" /> 换位
+                              </Button>
+                              <label className="inline-flex items-center gap-1 text-sm">
+                                <Checkbox
+                                  aria-label={`锁定${row.realName}`}
+                                  checked={locked.has(row.boundUserId)}
+                                  disabled={!canMutateV2Draft}
+                                  onCheckedChange={(checked) =>
+                                    setLocked((current) => {
+                                      const next = new Set(current);
+                                      if (checked) next.add(row.boundUserId);
+                                      else next.delete(row.boundUserId);
+                                      return next;
+                                    })
+                                  }
+                                />
+                                <LockKeyhole className="size-3.5" /> 锁定
+                              </label>
+                            </div>
+                          ) : latestV1 ? (
+                            <Badge variant="outline">v1 历史只读</Badge>
+                          ) : latestV2 ? (
+                            <Badge variant="outline">当前分配未引用最新计划</Badge>
+                          ) : (
+                            <Badge variant="outline">尚未生成分配</Badge>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+              {!workspace ? <p className="text-sm text-muted-foreground">正在加载座位分配……</p> : null}
+              {workspace && !rows.length ? <p className="text-sm text-muted-foreground">当前名单为空；系统不会凭空创建学生或分配记录。</p> : null}
+              {diagnostics.length ? (
+                <div className="space-y-1 rounded-md border p-3 text-sm">
+                  <p className="font-medium">完整诊断</p>
+                  {diagnostics.map((item, index) => (
+                    <p key={`${item.code}-${index}`}>{diagnosticText(item)}</p>
+                  ))}
+                </div>
+              ) : null}
+              <StepFooter
+                left={rereadButton}
+                right={
+                  <>
+                    <Button
+                      variant="outline"
+                      disabled={mutationBusy || dirty || !assignmentIsCurrentV2}
+                      onClick={() => latestV2 && execute({ action: 'rerandomizeV2', baseAssignmentRevision: latestV2.revision })}
+                    >
+                      <RefreshCw className="size-4" /> 保留锁定项重新分配
+                    </Button>
+                    <Button
+                      variant={dirty ? 'default' : 'outline'}
+                      disabled={mutationBusy || !assignmentIsCurrentV2 || !dirty}
+                      onClick={() =>
+                        latestV2 &&
+                        execute({
+                          action: 'adjustV2',
+                          baseAssignmentRevision: latestV2.revision,
+                          lockedUids: [...locked].sort((a, b) => a - b),
+                          mappings: v2Draft,
+                        })
+                      }
+                    >
+                      <Save className="size-4" /> 保存跨教室人工调整
+                    </Button>
+                    {nextStepButton}
+                  </>
+                }
+              />
             </CardContent>
           </Card>
         ) : null}
 
-        <Card>
-          <CardHeader>
-            <CardTitle>步骤 6–7：终端预检、网络启动与显式预启动</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {workspace?.eventType === 'external' ? (
-              <div className="rounded-md border bg-muted/20 p-3 text-sm">
-                <p className="font-medium">预登录不适用</p>
-                <p className="mt-1 text-muted-foreground">
-                  外部考试没有受信 Contest 工作台；可继续使用教室或指定终端目标完成网络控制，不创建空名单或伪造票据。
+        {displayStep === 'publish' ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>发布分配</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {dirty ? (
+                <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-sm text-amber-800 dark:text-amber-200">
+                  人工调整尚未保存。请先回到检查调整步骤保存，再发布。
                 </p>
-                <Button asChild className="mt-3" size="sm" variant="outline">
-                  <a href={`/admin/exam-infrastructure/events/${eventId}`}>返回网络策略与目标</a>
-                </Button>
-              </div>
-            ) : !publishedPreparationAssignment ? (
-              <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-800 dark:text-amber-200">
-                请先发布一份座位分配；终端预检不会使用最新未发布草稿。
-              </div>
-            ) : (
-              <>
-                <p className="rounded-md border border-sky-500/30 bg-sky-500/5 p-3 text-sm text-sky-800 dark:text-sky-200">
-                  建议在开赛前 10–15 分钟运行预检并启动网络；系统不会定时唤起、不会 Wake-on-LAN，也不会自动点击最后一步。
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  <Badge variant="outline">名单 r{publishedPreparationAssignment.roster.revision}</Badge>
-                  <Badge variant="outline">分配 r{publishedPreparationAssignment.revision}</Badge>
-                  <Badge variant="outline">发布 r{workspace?.publicationRevision || 0}</Badge>
-                  {preloginWorkflow ? <Badge variant="outline">策略 r{preloginWorkflow.network.policy.revision}</Badge> : null}
-                  {preloginWorkflow ? <Badge variant="outline">目标 r{preloginWorkflow.network.target.revision}</Badge> : null}
-                  {preloginBatch ? <Badge variant="outline">批次 r{preloginBatch.revision}</Badge> : null}
-                  {preloginBatch?.projection ? <Badge variant="outline">投影 r{preloginBatch.projection.projectionRevision}</Badge> : null}
-                </div>
-                <p className="font-mono text-xs text-muted-foreground">发布 assignment {publishedPreparationAssignment.assignmentId}</p>
-                <div className="rounded-md border bg-muted/20 p-3">
-                  <p className="text-sm font-medium">步骤 6：固定终端范围并启动网络</p>
-                  <p className="mt-1 text-xs text-muted-foreground">每一步仍需显式点击；不会自动发布目标或启动网络。</p>
-                  {!publishedAssignmentUsesCanonicalRoster ? (
-                    <p className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-xs text-amber-800 dark:text-amber-200">
-                      当前发布分配使用历史 userbind 子名单，仅供审计；请发布基于 canonical 比赛名单的新分配后再配置终端、网络和预登录。
-                    </p>
-                  ) : null}
-                  <div className="mt-3 rounded-md border bg-background p-3">
-                    <p className="text-sm font-medium">网络策略与活动状态</p>
-                    {!preloginTargetFactsFresh ? (
-                      <Button
-                        className="mt-2"
-                        size="sm"
-                        variant="outline"
-                        disabled={mutationBusy || dirty || !workspaceFresh || !publishedAssignmentUsesCanonicalRoster}
-                        onClick={() => void refreshPreloginTargetFacts()}
-                      >
-                        <RefreshCw className="size-4" /> 读取当前策略与目标事实
-                      </Button>
-                    ) : (
-                      <div className="mt-2 space-y-2">
-                        <div className="flex flex-wrap gap-2 text-xs">
-                          <Badge variant="outline">当前策略 {preloginNetworkPolicyRef ? `r${preloginNetworkPolicyRef.revision}` : '未分配'}</Badge>
-                          <Badge variant="outline">当前目标 {preloginNetworkTargetRef ? `r${preloginNetworkTargetRef.revision}` : '未分配'}</Badge>
-                          <Badge variant="outline">
-                            活动 {workspace?.eventLifecycle === 'draft' ? '草稿' : workspace?.eventLifecycle === 'scheduled' ? '已计划' : '已归档'}
-                          </Badge>
-                        </div>
-                        {preloginPolicyOptions.length ? (
-                          <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-                            <label className="flex-1 text-sm">
-                              <span className="mb-1 block font-medium">已发布网络策略版本</span>
-                              <select
-                                aria-label="已发布网络策略版本"
-                                value={selectedPreloginPolicy}
-                                onChange={(event) => setSelectedPreloginPolicy(event.target.value)}
-                                className="h-9 w-full rounded-md border bg-background px-3"
-                              >
-                                <option value="">请选择策略</option>
-                                {preloginPolicyOptions.map((option) => (
-                                  <option key={`${option.templateId}:${option.revision}`} value={`${option.templateId}:${option.revision}`}>
-                                    {option.name} · r{option.revision}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              disabled={
-                                mutationBusy ||
-                                dirty ||
-                                !workspaceFresh ||
-                                !publishedAssignmentUsesCanonicalRoster ||
-                                !selectedPreloginPolicy ||
-                                selectedPreloginPolicy ===
-                                  (preloginNetworkPolicyRef ? `${preloginNetworkPolicyRef.id}:${preloginNetworkPolicyRef.revision}` : '')
-                              }
-                              onClick={() => void assignPreloginPolicy()}
-                            >
-                              分配所选策略
-                            </Button>
-                          </div>
-                        ) : (
-                          <p className="text-xs text-amber-700 dark:text-amber-300">
-                            当前学校没有可选的已发布网络策略；请先在考试基础设施中发布策略版本。
-                          </p>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                  <div className="mt-3 flex flex-wrap gap-2">
+              ) : null}
+              {latest ? (
+                <Badge variant={latest.published ? 'default' : 'outline'}>
+                  分配版本 {latest.revision}
+                  {latest.published ? ' · 已发布' : ' · 未发布'}
+                </Badge>
+              ) : (
+                <Badge variant="outline">尚未生成</Badge>
+              )}
+              <StepFooter
+                left={
+                  <>
+                    {rereadButton}
+                    <Button variant="outline" disabled={!latest || dirty || mutationBusy || !workspaceFresh} onClick={exportCurrent}>
+                      <Download className="size-4" /> 导出当前页面 CSV
+                    </Button>
+                  </>
+                }
+                right={
+                  <>
                     <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={
-                        mutationBusy ||
-                        dirty ||
-                        !workspaceFresh ||
-                        !publishedAssignmentUsesCanonicalRoster ||
-                        (preloginTargetFactsFresh && preloginTargetDraft?.sourceAssignmentId === publishedPreparationAssignment.assignmentId)
-                      }
-                      onClick={() => void savePublishedAssignmentAsTarget()}
+                      disabled={publishDisabled}
+                      onClick={async () => {
+                        if (
+                          latestV2 &&
+                          (await execute({
+                            action: 'publish',
+                            assignmentRevision: latestV2.revision,
+                            expectedPublicationRevision: workspace?.publicationRevision || 0,
+                          })) === 'ok'
+                        ) {
+                          goToStep(workspace?.eventType === 'external' ? 'launch' : 'network');
+                        }
+                      }}
                     >
-                      1. 保存当前分配为目标
+                      <Upload className="size-4" /> {latestV2 ? `发布跨教室版本 ${latestV2.revision}` : '发布'}
+                    </Button>
+                    {nextStepButton}
+                  </>
+                }
+              />
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {displayStep === 'network' ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>配置网络</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="rounded-md border border-sky-500/30 bg-sky-500/5 p-3 text-sm text-sky-800 dark:text-sky-200">
+                建议在开赛前 10–15 分钟运行预检并启动网络；系统不会定时唤起、不会 Wake-on-LAN，也不会自动点击最后一步。
+              </p>
+              {!publishedAssignmentUsesCanonicalRoster ? (
+                <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-sm text-amber-800 dark:text-amber-200">
+                  当前发布分配使用历史 userbind 子名单，仅供审计；请发布基于 canonical 比赛名单的新分配后再配置终端、网络和预登录。
+                </p>
+              ) : null}
+              <div className="flex flex-wrap gap-2 text-xs">
+                <Badge variant="outline">当前策略 {preloginNetworkPolicyRef ? `r${preloginNetworkPolicyRef.revision}` : '未分配'}</Badge>
+                <Badge variant="outline">当前目标 {preloginNetworkTargetRef ? `r${preloginNetworkTargetRef.revision}` : '未分配'}</Badge>
+                <Badge variant="outline">
+                  活动 {workspace?.eventLifecycle === 'draft' ? '草稿' : workspace?.eventLifecycle === 'scheduled' ? '已计划' : '已归档'}
+                </Badge>
+              </div>
+              {preloginTargetFactsFresh && preloginPolicyOptions.length ? (
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                  <label className="flex-1 text-sm">
+                    <span className="mb-1 block font-medium">已发布网络策略版本</span>
+                    <SimpleSelect
+                      id="seat-network-policy"
+                      ariaLabel="已发布网络策略版本"
+                      value={selectedPreloginPolicy}
+                      onValueChange={setSelectedPreloginPolicy}
+                      placeholder="请选择策略"
+                      options={preloginPolicyOptions.map((option) => ({
+                        value: `${option.templateId}:${option.revision}`,
+                        label: `${option.name} · r${option.revision}`,
+                      }))}
+                    />
+                  </label>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={networkMutationDisabled || !selectedPreloginPolicy || selectedPolicyAlreadyAssigned}
+                    onClick={() => void assignPreloginPolicy()}
+                  >
+                    分配所选策略
+                  </Button>
+                </div>
+              ) : preloginTargetFactsFresh ? (
+                <p className="text-xs text-amber-700 dark:text-amber-300">当前学校没有可选的已发布网络策略；请先在考试基础设施中发布策略版本。</p>
+              ) : null}
+              {preloginTargetPreview ? (
+                <div className="rounded-md border bg-background p-3 text-sm">
+                  <p className="font-medium">即将发布 {preloginTargetPreview.targetCount} 台终端</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    新增 {preloginTargetPreview.addedEndpointIds.length} · 移除 {preloginTargetPreview.removedEndpointIds.length}
+                  </p>
+                  <details className="mt-2 text-xs">
+                    <summary className="cursor-pointer">查看完整 Endpoint 范围</summary>
+                    <ul className="mt-2 space-y-1 font-mono">
+                      {preloginTargetPreview.endpointIds.map((endpointId) => (
+                        <li key={endpointId}>{endpointId}</li>
+                      ))}
+                    </ul>
+                  </details>
+                </div>
+              ) : null}
+              {networkSetupFailedAt ? (
+                <div className="space-y-2 rounded-md border border-destructive/30 bg-destructive/5 p-3">
+                  <p className="text-sm text-destructive">配置停在：{networkSetupStageLabel[networkSetupFailedAt]}</p>
+                  <div className="flex flex-wrap gap-2">
+                    <Button size="sm" variant="outline" disabled={networkMutationDisabled} onClick={() => void savePublishedAssignmentAsTarget()}>
+                      保存当前分配为目标
                     </Button>
                     <Button
                       size="sm"
                       variant="outline"
                       disabled={
-                        mutationBusy ||
-                        dirty ||
-                        !workspaceFresh ||
-                        !publishedAssignmentUsesCanonicalRoster ||
+                        networkMutationDisabled ||
                         !preloginTargetFactsFresh ||
-                        preloginTargetDraft?.sourceAssignmentId !== publishedPreparationAssignment.assignmentId
+                        preloginTargetDraft?.sourceAssignmentId !== publishedPreparationAssignment?.assignmentId
                       }
                       onClick={() => void previewPreloginTarget()}
                     >
-                      2. 重新解析目标
+                      重新解析目标
                     </Button>
                     <Button
                       size="sm"
                       variant="outline"
                       disabled={
-                        mutationBusy ||
-                        dirty ||
-                        !workspaceFresh ||
-                        !publishedAssignmentUsesCanonicalRoster ||
+                        networkMutationDisabled ||
                         !preloginTargetFactsFresh ||
                         !preloginTargetPreview ||
                         preloginTargetPreview.publicationIdentity !== currentPreloginPublicationIdentity
                       }
                       onClick={() => void publishPreloginTarget()}
                     >
-                      3. 发布目标快照
+                      发布目标快照
                     </Button>
                     <Button
                       size="sm"
                       variant="outline"
                       disabled={
-                        mutationBusy ||
-                        dirty ||
-                        !workspaceFresh ||
-                        !publishedAssignmentUsesCanonicalRoster ||
+                        networkMutationDisabled ||
                         !preloginTargetFactsFresh ||
                         !preloginTargetDraft?.latestPublishedRevision ||
-                        preloginTargetDraft.latestPublishedSourceAssignmentId !== publishedPreparationAssignment.assignmentId
+                        preloginTargetDraft.latestPublishedSourceAssignmentId !== publishedPreparationAssignment?.assignmentId
                       }
                       onClick={() => void assignPreloginTarget()}
                     >
-                      4. 分配到活动
+                      分配到活动
                     </Button>
                   </div>
-                  {preloginTargetPreview ? (
-                    <div className="mt-3 rounded-md border bg-background p-3 text-xs">
-                      <p className="font-medium">即将发布 {preloginTargetPreview.targetCount} 台终端</p>
-                      <p className="mt-1 text-muted-foreground">
-                        新增 {preloginTargetPreview.addedEndpointIds.length} · 移除 {preloginTargetPreview.removedEndpointIds.length}
-                      </p>
-                      <details className="mt-2">
-                        <summary className="cursor-pointer">查看完整 Endpoint 范围</summary>
-                        <p className="mt-2 break-all font-mono">{preloginTargetPreview.endpointIds.join('、')}</p>
-                      </details>
-                    </div>
-                  ) : null}
-                  {workspace?.eventLifecycle === 'draft' ? (
+                </div>
+              ) : null}
+              {preloginError ? (
+                <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+                  {preloginError}
+                </p>
+              ) : null}
+              {workspace?.eventLifecycle === 'draft' ? (
+                <Button
+                  disabled={
+                    networkMutationDisabled || !preloginTargetFactsFresh || !preloginNetworkPolicyRef || !preloginNetworkTargetRef
+                  }
+                  onClick={() => void scheduleExamEvent()}
+                >
+                  <Play className="size-4" /> 将考试活动显式计划为待开始
+                </Button>
+              ) : null}
+              <StepFooter
+                left={
+                  <>
+                    {rereadButton}
                     <Button
-                      className="mt-3"
-                      size="sm"
+                      variant="outline"
+                      disabled={mutationBusy || dirty || !workspaceFresh || !publishedAssignmentUsesCanonicalRoster}
+                      onClick={() => void refreshPreloginTargetFacts()}
+                    >
+                      <RefreshCw className="size-4" /> 读取当前策略与目标事实
+                    </Button>
+                  </>
+                }
+                right={
+                  <>
+                    <Button
+                      variant={
+                        workspace?.eventLifecycle === 'draft' || publishedTargetAlreadyAssigned ? 'outline' : 'default'
+                      }
+                      disabled={
+                        networkMutationDisabled ||
+                        Boolean(publishedTargetAlreadyAssigned) ||
+                        !publishedPreparationAssignment
+                      }
+                      onClick={() => void configurePublishedAssignmentAsNetworkTarget()}
+                    >
+                      固定已发布分配为网络目标
+                    </Button>
+                    {nextStepButton}
+                  </>
+                }
+              />
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {displayStep === 'preflight' ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>终端预检</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="rounded-md border border-sky-500/30 bg-sky-500/5 p-3 text-sm text-sky-800 dark:text-sky-200">
+                建议在开赛前 10–15 分钟运行预检并启动网络；系统不会定时唤起、不会 Wake-on-LAN，也不会自动点击最后一步。
+              </p>
+              {!publishedPreparationAssignment ? (
+                <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-800 dark:text-amber-200">
+                  请先发布一份座位分配；终端预检不会使用最新未发布草稿。
+                </div>
+              ) : null}
+              <div className="flex flex-wrap gap-2">
+                {publishedPreparationAssignment ? <Badge variant="outline">名单 r{publishedPreparationAssignment.roster.revision}</Badge> : null}
+                {publishedPreparationAssignment ? <Badge variant="outline">分配 r{publishedPreparationAssignment.revision}</Badge> : null}
+                <Badge variant="outline">发布 r{workspace?.publicationRevision || 0}</Badge>
+                {preloginWorkflow ? <Badge variant="outline">策略 r{preloginWorkflow.network.policy.revision}</Badge> : null}
+                {preloginWorkflow ? <Badge variant="outline">目标 r{preloginWorkflow.network.target.revision}</Badge> : null}
+              </div>
+              {preloginFactsCurrent && preloginPreparation && !preloginWorkflowWriterEnabled ? (
+                <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-800 dark:text-amber-200">
+                  当前处于 P2.9 兼容读取阶段，确认写入尚未启用。请先完成旧批次兼容验证，再由管理员启用 exam.preloginWorkflowWriterEnabled。
+                </p>
+              ) : null}
+              {preloginFactsCurrent && preloginPreparation && publishedPreparationAssignment?.schemaVersion === 2 && !preloginV2WriterEnabled ? (
+                <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-800 dark:text-amber-200">
+                  跨教室预登录当前处于兼容读取阶段。部署并验证 P2.14 reader 后，由管理员一次性启用
+                  exam.preloginV2WriterEnabled；启用后最低回滚版本为 P2.14 compatible reader。
+                </p>
+              ) : null}
+              {preloginError ? (
+                <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+                  {preloginError}
+                </p>
+              ) : null}
+              {preloginFactsCurrent && preloginWorkflow && preloginPreparation ? (
+                <div className="space-y-3 rounded-md border p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="font-medium">确认范围</p>
+                      <p className="text-xs text-muted-foreground">
+                        {preloginWorkflow.network.source === 'execution'
+                          ? `运行执行 r${preloginWorkflow.network.executionRevision}`
+                          : `活动配置 r${preloginWorkflow.network.configRevision}`}
+                        {' · '}目标 {preloginWorkflow.network.targetCount} 台 · 硬截止{' '}
+                        {new Date(preloginWorkflow.network.hardEndAt).toLocaleString()}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        网络应用 {preloginWorkflow.network.appliedCount} · 失败 {preloginWorkflow.network.failedCount} · 在途{' '}
+                        {preloginWorkflow.network.pendingCount}
+                        {preloginWorkflow.network.reason === 'network_execution_not_active' ? ' · 尚未启动' : ''}
+                        {preloginWorkflow.network.reason === 'network_execution_expired' ? ' · 已到硬截止' : ''}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        预登录终端覆盖 {preloginWorkflow.network.coveredPreloginCount}/{preloginWorkflow.network.preloginEndpointCount}
+                        {preloginWorkflow.network.missingPreloginEndpointIds.length
+                          ? ` · 目标缺少 ${preloginWorkflow.network.missingPreloginEndpointIds.join('、')}`
+                          : ''}
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Badge variant={preloginWorkflow.hardErrorCount ? 'destructive' : 'default'}>硬错误 {preloginWorkflow.hardErrorCount}</Badge>
+                      <Badge variant="outline">告警 {preloginWorkflow.warningCount}</Badge>
+                    </div>
+                  </div>
+                  <div className="max-h-96 overflow-auto rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>学生</TableHead>
+                          <TableHead>座位 / Endpoint</TableHead>
+                          <TableHead>Client</TableHead>
+                          <TableHead>预检</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {preloginPreparation.items.map((item) => {
+                          const student = publishedRosterByUid.get(item.uid);
+                          const monitoring = item.endpointId ? monitoringByEndpoint.get(item.endpointId) : null;
+                          const publishedSeat = publishedV2SeatByUid.get(item.uid);
+                          const hardDiagnostics = item.diagnostics.filter((diagnostic) => diagnostic.severity === 'error');
+                          const warningDiagnostics = item.diagnostics.filter((diagnostic) => diagnostic.severity === 'warning');
+                          return (
+                            <TableRow key={item.uid}>
+                              <TableCell>
+                                <div className="font-medium">{student?.studentId || `UID ${item.uid}`}</div>
+                                <div className="text-xs text-muted-foreground">{student?.realName || item.studentRecordId}</div>
+                              </TableCell>
+                              <TableCell>
+                                <div>
+                                  {publishedSeat
+                                    ? `${classroomDisplayById.get(publishedSeat.classroomId) || publishedSeat.classroomId} / ${publishedSeat.sourceSeatId}`
+                                    : item.sourceSeatId}
+                                </div>
+                                <div className="font-mono text-xs text-muted-foreground">{item.endpointId || '未绑定'}</div>
+                              </TableCell>
+                              <TableCell>
+                                <div>{item.endpoint.serviceVersion || monitoring?.serviceVersion || '未知版本'}</div>
+                                <div className="text-xs text-muted-foreground">
+                                  协议 {item.endpoint.protocolVersion || monitoring?.protocolVersion || '未知'}
+                                </div>
+                              </TableCell>
+                              <TableCell>
+                                <Badge variant={item.ready && monitoring?.ready !== false ? 'default' : 'destructive'}>
+                                  {item.ready && monitoring?.ready !== false ? '可投递' : '阻塞'}
+                                </Badge>
+                                {hardDiagnostics.length ? (
+                                  <div className="mt-1 text-xs text-destructive">
+                                    {hardDiagnostics.map((diagnostic) => diagnostic.code).join('、')}
+                                  </div>
+                                ) : null}
+                                {warningDiagnostics.length ? (
+                                  <div className="mt-1 text-xs text-amber-700">
+                                    告警：{warningDiagnostics.map((diagnostic) => diagnostic.code).join('、')}
+                                  </div>
+                                ) : null}
+                                {monitoring?.warnings.length ? (
+                                  <div className="mt-1 text-xs text-amber-700">
+                                    告警：{monitoring.warnings.map((warning) => warning.kind).join('、')}
+                                  </div>
+                                ) : null}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+              ) : null}
+              <StepFooter
+                left={rereadButton}
+                right={
+                  <>
+                    <Button
+                      variant={preloginFactsCurrent ? 'outline' : 'default'}
                       disabled={
                         mutationBusy ||
                         dirty ||
                         !workspaceFresh ||
                         !publishedAssignmentUsesCanonicalRoster ||
-                        !preloginTargetFactsFresh ||
-                        !preloginNetworkPolicyRef ||
-                        !preloginNetworkTargetRef
+                        workspace?.eventLifecycle !== 'scheduled'
                       }
-                      onClick={() => void scheduleExamEvent()}
+                      onClick={() => void preparePrelogin()}
                     >
-                      <Play className="size-4" /> 将考试活动显式计划为待开始
+                      {preloginBusy ? <RefreshCw className="size-4 animate-spin" /> : <AlertTriangle className="size-4" />} 运行终端预检
                     </Button>
+                    {nextStepButton}
+                  </>
+                }
+              />
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {displayStep === 'lock' ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>启动网络策略</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-muted-foreground">可重复执行启动与重试；必须在预检事实仍然有效时进行。</p>
+              {preloginFactsCurrent && preloginWorkflow ? (
+                <p className="text-sm text-muted-foreground">
+                  {preloginWorkflow.network.source === 'execution'
+                    ? `运行执行 r${preloginWorkflow.network.executionRevision}`
+                    : `活动配置 r${preloginWorkflow.network.configRevision}`}
+                  {preloginWorkflow.network.reason === 'network_execution_not_active' ? ' · 尚未启动' : ''}
+                  {preloginWorkflow.network.reason === 'network_execution_expired' ? ' · 已到硬截止' : ''}
+                </p>
+              ) : (
+                <p className="text-sm text-muted-foreground">请先运行终端预检，再启动网络。</p>
+              )}
+              {preloginError ? (
+                <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+                  {preloginError}
+                </p>
+              ) : null}
+              <StepFooter
+                left={rereadButton}
+                right={
+                  <>
+                    {preloginFactsCurrent &&
+                    preloginWorkflow?.network.source === 'execution' &&
+                    !preloginWorkflow.network.ready &&
+                    (preloginWorkflow.network.reason === 'network_execution_pending' ||
+                      preloginWorkflow.network.reason === 'network_execution_failed') ? (
+                      <Button variant="outline" disabled={mutationBusy || dirty} onClick={() => void retryPreloginNetwork()}>
+                        <RefreshCw className="size-4" />
+                        {preloginWorkflow.network.reason === 'network_execution_pending' ? '重试当前网络请求' : '整批重试失败网络命令'}
+                      </Button>
+                    ) : null}
+                    {preloginFactsCurrent && preloginWorkflow?.network.source === 'config' ? (
+                      <Button disabled={mutationBusy || dirty} onClick={() => void startPreloginNetwork()}>
+                        <Play className="size-4" /> 启动网络策略
+                      </Button>
+                    ) : null}
+                    {nextStepButton}
+                  </>
+                }
+              />
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {displayStep === 'launch' && workspace?.eventType === 'external' ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>预登录不适用</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="rounded-md border bg-muted/20 p-3 text-sm">
+                <p className="text-muted-foreground">
+                  外部考试没有受信 Contest 工作台；可继续使用教室或指定终端目标完成网络控制，不创建空名单或伪造票据。
+                </p>
+                <Button asChild className="mt-3" size="sm" variant="outline">
+                  <a href={`/admin/exam-infrastructure/events/${eventId}`}>返回网络策略与目标</a>
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {displayStep === 'launch' && workspace?.eventType !== 'external' ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>预启动终端</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="rounded-md border border-sky-500/30 bg-sky-500/5 p-3 text-sm text-sky-800 dark:text-sky-200">
+                建议在开赛前 10–15 分钟运行预检并启动网络；系统不会定时唤起、不会 Wake-on-LAN，也不会自动点击最后一步。
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {preloginBatch ? <Badge variant="outline">批次 r{preloginBatch.revision}</Badge> : null}
+                {preloginBatch?.projection ? <Badge variant="outline">投影 r{preloginBatch.projection.projectionRevision}</Badge> : null}
+              </div>
+              {preloginFactsCurrent && preloginPreparation && !preloginWorkflowWriterEnabled ? (
+                <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-800 dark:text-amber-200">
+                  当前处于 P2.9 兼容读取阶段，确认写入尚未启用。请先完成旧批次兼容验证，再由管理员启用 exam.preloginWorkflowWriterEnabled。
+                </p>
+              ) : null}
+              {preloginFactsCurrent && preloginPreparation && publishedPreparationAssignment?.schemaVersion === 2 && !preloginV2WriterEnabled ? (
+                <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-800 dark:text-amber-200">
+                  跨教室预登录当前处于兼容读取阶段。部署并验证 P2.14 reader 后，由管理员一次性启用
+                  exam.preloginV2WriterEnabled；启用后最低回滚版本为 P2.14 compatible reader。
+                </p>
+              ) : null}
+              {preloginError ? (
+                <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+                  {preloginError}
+                </p>
+              ) : null}
+              {preloginBatch ? (
+                <div className="space-y-3 rounded-md border p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="font-medium">逐终端结果</p>
+                      <p className="text-sm">批次 r{preloginBatch.revision}</p>
+                      <p className="text-xs text-muted-foreground">
+                        冻结分配 r{preloginBatch.assignment.revision} · 发布 r{preloginBatch.publicationRevision}
+                      </p>
+                      {preloginBatch.workflow ? (
+                        <p className="text-xs text-muted-foreground">
+                          确认时执行 r{preloginBatch.workflow.executionRevision} · 策略 r{preloginBatch.workflow.policy.revision} · 目标 r
+                          {preloginBatch.workflow.target.revision}（{preloginBatch.workflow.targetCount} 台） · 硬截止{' '}
+                          {new Date(preloginBatch.workflow.hardEndAt).toLocaleString()}
+                        </p>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">历史预登录批次（P2.9 前创建），未记录整合工作流网络版本。</p>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Badge variant="default">成功 {preloginResultCounts.success}</Badge>
+                      <Badge variant="destructive">失败 {preloginResultCounts.failed}</Badge>
+                      <Badge variant="secondary">在途 {preloginResultCounts.pending}</Badge>
+                      <Badge variant="outline">未处理 {preloginResultCounts.unprocessed}</Badge>
+                    </div>
+                  </div>
+                  <details className="text-xs text-muted-foreground">
+                    <summary className="cursor-pointer text-sm text-foreground">技术细节</summary>
+                    <div className="mt-2 space-y-1 font-mono">
+                      <p>batch {preloginBatch.batchId}</p>
+                      <p>request {preloginBatch.requestId}</p>
+                    </div>
+                  </details>
+                  {!preloginBatchMatchesCurrentPublication ? (
+                    <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-xs text-amber-800 dark:text-amber-200">
+                      这是历史发布版本的批次，仅供审计；不能对当前发布版本执行失败重试。
+                    </p>
                   ) : null}
-                </div>
-                <div className="flex flex-wrap gap-2">
                   <Button
                     variant="outline"
                     disabled={
-                      mutationBusy || dirty || !workspaceFresh || !publishedAssignmentUsesCanonicalRoster || workspace?.eventLifecycle !== 'scheduled'
+                      mutationBusy ||
+                      !preloginBatchMatchesCurrentPublication ||
+                      !preloginBatch.projection ||
+                      (!preloginBatch.retryableTicketIds.length && !pendingRetryIdentity)
                     }
-                    onClick={() => void preparePrelogin()}
+                    onClick={() => void retryFailedPrelogin()}
                   >
-                    {preloginBusy ? <RefreshCw className="size-4 animate-spin" /> : <AlertTriangle className="size-4" />} 运行终端预检
+                    <RefreshCw className="size-4" />
+                    {pendingRetryIdentity ? '继续上次失败重试' : `只重试 ${preloginBatch.retryableTicketIds.length} 个失败项`}
                   </Button>
-                  {preloginFactsCurrent && preloginWorkflow?.network.source === 'config' ? (
-                    <Button disabled={mutationBusy || dirty} onClick={() => void startPreloginNetwork()}>
-                      <Play className="size-4" /> 启动网络策略
-                    </Button>
-                  ) : null}
-                  {preloginFactsCurrent &&
-                  preloginWorkflow?.network.source === 'execution' &&
-                  !preloginWorkflow.network.ready &&
-                  (preloginWorkflow.network.reason === 'network_execution_pending' ||
-                    preloginWorkflow.network.reason === 'network_execution_failed') ? (
-                    <Button variant="outline" disabled={mutationBusy || dirty} onClick={() => void retryPreloginNetwork()}>
-                      <RefreshCw className="size-4" />
-                      {preloginWorkflow.network.reason === 'network_execution_pending' ? '重试当前网络请求' : '整批重试失败网络命令'}
-                    </Button>
-                  ) : null}
+                  <div className="max-h-96 overflow-auto rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>学生</TableHead>
+                          <TableHead>座位 / Endpoint</TableHead>
+                          <TableHead>阶段</TableHead>
+                          <TableHead>结果</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {preloginBatch.subjects.map((subject) => {
+                          const student = preloginBatchRosterByUid.get(subject.uid);
+                          const structuredSeat = preloginBatchSeatByUid.get(subject.uid);
+                          const result = projectionByTicket.get(subject.ticketId);
+                          const succeeded = result?.status === 'applied' && result.stage === 'page_ready';
+                          return (
+                            <TableRow key={subject.ticketId}>
+                              <TableCell>{student ? `${student.studentId} · ${student.realName}` : `UID ${subject.uid}`}</TableCell>
+                              <TableCell>
+                                <div>
+                                  {structuredSeat
+                                    ? `${classroomDisplayById.get(structuredSeat.classroomId) || structuredSeat.classroomId} / ${structuredSeat.sourceSeatId}`
+                                    : preloginBatchAssignment?.schemaVersion === 1
+                                      ? subject.sourceSeatId
+                                      : `${subject.sourceSeatId}（历史教室不可定位）`}
+                                </div>
+                                <div className="font-mono text-xs text-muted-foreground">{subject.endpointId}</div>
+                              </TableCell>
+                              <TableCell>{result?.stage || 'dispatch'}</TableCell>
+                              <TableCell>
+                                <Badge variant={succeeded ? 'default' : result && retryableStatuses.has(result.status) ? 'destructive' : 'outline'}>
+                                  {succeeded ? '页面就绪' : result?.status || '未处理'}
+                                </Badge>
+                                {result?.failureReason ? <div className="mt-1 text-xs text-destructive">{result.failureReason}</div> : null}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+              ) : null}
+              {pendingConfirmIdentity ? (
+                <div className="space-y-2">
+                  <p className="text-sm">确认请求未完成</p>
+                  <p className="text-xs text-amber-700 dark:text-amber-300">
+                    确认请求结果尚未收敛；原 requestId 已保留，继续同一确认请求前暂不可切换历史批次。
+                  </p>
+                </div>
+              ) : null}
+              <Button size="sm" variant="ghost" disabled={mutationBusy} onClick={() => void loadPreloginBatchHistory()}>
+                查看历史批次
+              </Button>
+              {preloginBatchHistory.length ? (
+                <div className="space-y-2 rounded-md border p-3">
+                  <p className="font-medium">历史预登录批次</p>
+                  {preloginBatchHistory.map((batch) => (
+                    <div key={batch.batchId} className="rounded-md border">
+                      <button
+                        type="button"
+                        disabled={mutationBusy || pendingRetryIdentity || pendingConfirmIdentity}
+                        className="flex w-full flex-wrap items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-muted/30 disabled:cursor-not-allowed disabled:opacity-50"
+                        onClick={() => {
+                          selectPreloginBatch(batch);
+                          writePreloginUrl({ batchId: batch.batchId, requestId: null });
+                        }}
+                      >
+                        <span>
+                          分配 r{batch.assignment.revision} · 发布 r{batch.publicationRevision} · 批次 r{batch.revision}
+                        </span>
+                        <span className="w-full text-xs text-muted-foreground">
+                          {batch.workflow
+                            ? `执行 r${batch.workflow.executionRevision} · 策略 r${batch.workflow.policy.revision} · 目标 r${batch.workflow.target.revision}`
+                            : 'P2.9 前历史批次，无整合工作流引用'}
+                        </span>
+                      </button>
+                      <details className="border-t px-3 py-2 text-xs text-muted-foreground">
+                        <summary className="cursor-pointer text-sm text-foreground">技术细节</summary>
+                        <div className="mt-2 space-y-1 font-mono">
+                          <p>batchId {batch.batchId}</p>
+                          <p>{batch.requestId}</p>
+                        </div>
+                      </details>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              <StepFooter
+                left={rereadButton}
+                right={
                   <Button
                     disabled={
                       mutationBusy ||
@@ -3404,390 +4289,20 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                       !preloginWorkflow.network.ready ||
                       preloginWorkflow.hardErrorCount > 0 ||
                       !preloginWorkflowWriterEnabled ||
-                      (publishedPreparationAssignment.schemaVersion === 2 && !preloginV2WriterEnabled) ||
+                      (publishedPreparationAssignment?.schemaVersion === 2 && !preloginV2WriterEnabled) ||
                       currentPublicationAlreadyConfirmed
                     }
                     onClick={() => void confirmPrelogin()}
                   >
-                    <Play className="size-4" /> 步骤 7：一键预启动全部终端
+                    <Play className="size-4" /> 一键预启动全部终端
                   </Button>
-                </div>
-                {preloginFactsCurrent && preloginPreparation && !preloginWorkflowWriterEnabled ? (
-                  <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-800 dark:text-amber-200">
-                    当前处于 P2.9 兼容读取阶段，确认写入尚未启用。请先完成旧批次兼容验证，再由管理员启用 exam.preloginWorkflowWriterEnabled。
-                  </p>
-                ) : null}
-                {preloginFactsCurrent && preloginPreparation && publishedPreparationAssignment.schemaVersion === 2 && !preloginV2WriterEnabled ? (
-                  <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-800 dark:text-amber-200">
-                    跨教室预登录当前处于兼容读取阶段。部署并验证 P2.14 reader 后，由管理员一次性启用
-                    exam.preloginV2WriterEnabled；启用后最低回滚版本为 P2.14 compatible reader。
-                  </p>
-                ) : null}
-                {preloginError ? (
-                  <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-                    {preloginError}
-                  </p>
-                ) : null}
-                {preloginFactsCurrent && preloginWorkflow && preloginPreparation ? (
-                  <div className="space-y-3 rounded-md border p-3">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div>
-                        <p className="font-medium">确认范围</p>
-                        <p className="text-xs text-muted-foreground">
-                          {preloginWorkflow.network.source === 'execution'
-                            ? `运行执行 r${preloginWorkflow.network.executionRevision}`
-                            : `活动配置 r${preloginWorkflow.network.configRevision}`}
-                          {' · '}目标 {preloginWorkflow.network.targetCount} 台 · 硬截止{' '}
-                          {new Date(preloginWorkflow.network.hardEndAt).toLocaleString()}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          网络应用 {preloginWorkflow.network.appliedCount} · 失败 {preloginWorkflow.network.failedCount} · 在途{' '}
-                          {preloginWorkflow.network.pendingCount}
-                          {preloginWorkflow.network.reason === 'network_execution_not_active' ? ' · 尚未启动' : ''}
-                          {preloginWorkflow.network.reason === 'network_execution_expired' ? ' · 已到硬截止' : ''}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          预登录终端覆盖 {preloginWorkflow.network.coveredPreloginCount}/{preloginWorkflow.network.preloginEndpointCount}
-                          {preloginWorkflow.network.missingPreloginEndpointIds.length
-                            ? ` · 目标缺少 ${preloginWorkflow.network.missingPreloginEndpointIds.join('、')}`
-                            : ''}
-                        </p>
-                      </div>
-                      <div className="flex gap-2">
-                        <Badge variant={preloginWorkflow.hardErrorCount ? 'destructive' : 'default'}>硬错误 {preloginWorkflow.hardErrorCount}</Badge>
-                        <Badge variant="outline">告警 {preloginWorkflow.warningCount}</Badge>
-                      </div>
-                    </div>
-                    <div className="max-h-96 overflow-auto rounded-md border">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>学生</TableHead>
-                            <TableHead>座位 / Endpoint</TableHead>
-                            <TableHead>Client</TableHead>
-                            <TableHead>预检</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {preloginPreparation.items.map((item) => {
-                            const student = publishedRosterByUid.get(item.uid);
-                            const monitoring = item.endpointId ? monitoringByEndpoint.get(item.endpointId) : null;
-                            const publishedSeat = publishedV2SeatByUid.get(item.uid);
-                            const hardDiagnostics = item.diagnostics.filter((diagnostic) => diagnostic.severity === 'error');
-                            const warningDiagnostics = item.diagnostics.filter((diagnostic) => diagnostic.severity === 'warning');
-                            return (
-                              <TableRow key={item.uid}>
-                                <TableCell>
-                                  <div className="font-medium">{student?.studentId || `UID ${item.uid}`}</div>
-                                  <div className="text-xs text-muted-foreground">{student?.realName || item.studentRecordId}</div>
-                                </TableCell>
-                                <TableCell>
-                                  <div>
-                                    {publishedSeat
-                                      ? `${classroomDisplayById.get(publishedSeat.classroomId) || publishedSeat.classroomId} / ${publishedSeat.sourceSeatId}`
-                                      : item.sourceSeatId}
-                                  </div>
-                                  <div className="font-mono text-xs text-muted-foreground">{item.endpointId || '未绑定'}</div>
-                                </TableCell>
-                                <TableCell>
-                                  <div>{item.endpoint.serviceVersion || monitoring?.serviceVersion || '未知版本'}</div>
-                                  <div className="text-xs text-muted-foreground">
-                                    协议 {item.endpoint.protocolVersion || monitoring?.protocolVersion || '未知'}
-                                  </div>
-                                </TableCell>
-                                <TableCell>
-                                  <Badge variant={item.ready && monitoring?.ready !== false ? 'default' : 'destructive'}>
-                                    {item.ready && monitoring?.ready !== false ? '可投递' : '阻塞'}
-                                  </Badge>
-                                  {hardDiagnostics.length ? (
-                                    <div className="mt-1 text-xs text-destructive">
-                                      {hardDiagnostics.map((diagnostic) => diagnostic.code).join('、')}
-                                    </div>
-                                  ) : null}
-                                  {warningDiagnostics.length ? (
-                                    <div className="mt-1 text-xs text-amber-700">
-                                      告警：{warningDiagnostics.map((diagnostic) => diagnostic.code).join('、')}
-                                    </div>
-                                  ) : null}
-                                  {monitoring?.warnings.length ? (
-                                    <div className="mt-1 text-xs text-amber-700">
-                                      告警：{monitoring.warnings.map((warning) => warning.kind).join('、')}
-                                    </div>
-                                  ) : null}
-                                </TableCell>
-                              </TableRow>
-                            );
-                          })}
-                        </TableBody>
-                      </Table>
-                    </div>
-                  </div>
-                ) : null}
-                {preloginBatch ? (
-                  <div className="space-y-3 rounded-md border p-3">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div>
-                        <p className="font-medium">逐终端结果</p>
-                        <p className="font-mono text-xs text-muted-foreground">batch {preloginBatch.batchId}</p>
-                        <p className="font-mono text-xs text-muted-foreground">request {preloginBatch.requestId}</p>
-                        <p className="text-xs text-muted-foreground">
-                          冻结分配 r{preloginBatch.assignment.revision} · 发布 r{preloginBatch.publicationRevision}
-                        </p>
-                        {preloginBatch.workflow ? (
-                          <p className="text-xs text-muted-foreground">
-                            确认时执行 r{preloginBatch.workflow.executionRevision} · 策略 r{preloginBatch.workflow.policy.revision} · 目标 r
-                            {preloginBatch.workflow.target.revision}（{preloginBatch.workflow.targetCount} 台） · 硬截止{' '}
-                            {new Date(preloginBatch.workflow.hardEndAt).toLocaleString()}
-                          </p>
-                        ) : (
-                          <p className="text-xs text-muted-foreground">历史预登录批次（P2.9 前创建），未记录整合工作流网络版本。</p>
-                        )}
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        <Badge variant="default">成功 {preloginResultCounts.success}</Badge>
-                        <Badge variant="destructive">失败 {preloginResultCounts.failed}</Badge>
-                        <Badge variant="secondary">在途 {preloginResultCounts.pending}</Badge>
-                        <Badge variant="outline">未处理 {preloginResultCounts.unprocessed}</Badge>
-                      </div>
-                    </div>
-                    {!preloginBatchMatchesCurrentPublication ? (
-                      <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-xs text-amber-800 dark:text-amber-200">
-                        这是历史发布版本的批次，仅供审计；不能对当前发布版本执行失败重试。
-                      </p>
-                    ) : null}
-                    <Button
-                      variant="outline"
-                      disabled={
-                        mutationBusy ||
-                        !preloginBatchMatchesCurrentPublication ||
-                        !preloginBatch.projection ||
-                        (!preloginBatch.retryableTicketIds.length && !pendingRetryIdentity)
-                      }
-                      onClick={() => void retryFailedPrelogin()}
-                    >
-                      <RefreshCw className="size-4" />
-                      {pendingRetryIdentity ? '继续上次失败重试' : `只重试 ${preloginBatch.retryableTicketIds.length} 个失败项`}
-                    </Button>
-                    <div className="max-h-96 overflow-auto rounded-md border">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>学生</TableHead>
-                            <TableHead>座位 / Endpoint</TableHead>
-                            <TableHead>阶段</TableHead>
-                            <TableHead>结果</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {preloginBatch.subjects.map((subject) => {
-                            const student = preloginBatchRosterByUid.get(subject.uid);
-                            const structuredSeat = preloginBatchSeatByUid.get(subject.uid);
-                            const result = projectionByTicket.get(subject.ticketId);
-                            const succeeded = result?.status === 'applied' && result.stage === 'page_ready';
-                            return (
-                              <TableRow key={subject.ticketId}>
-                                <TableCell>{student ? `${student.studentId} · ${student.realName}` : `UID ${subject.uid}`}</TableCell>
-                                <TableCell>
-                                  <div>
-                                    {structuredSeat
-                                      ? `${classroomDisplayById.get(structuredSeat.classroomId) || structuredSeat.classroomId} / ${structuredSeat.sourceSeatId}`
-                                      : preloginBatchAssignment?.schemaVersion === 1
-                                        ? subject.sourceSeatId
-                                        : `${subject.sourceSeatId}（历史教室不可定位）`}
-                                  </div>
-                                  <div className="font-mono text-xs text-muted-foreground">{subject.endpointId}</div>
-                                </TableCell>
-                                <TableCell>{result?.stage || 'dispatch'}</TableCell>
-                                <TableCell>
-                                  <Badge variant={succeeded ? 'default' : result && retryableStatuses.has(result.status) ? 'destructive' : 'outline'}>
-                                    {succeeded ? '页面就绪' : result?.status || '未处理'}
-                                  </Badge>
-                                  {result?.failureReason ? <div className="mt-1 text-xs text-destructive">{result.failureReason}</div> : null}
-                                </TableCell>
-                              </TableRow>
-                            );
-                          })}
-                        </TableBody>
-                      </Table>
-                    </div>
-                  </div>
-                ) : null}
-                <Button size="sm" variant="ghost" disabled={mutationBusy} onClick={() => void loadPreloginBatchHistory()}>
-                  查看历史批次
-                </Button>
-                {pendingConfirmIdentity ? (
-                  <p className="text-xs text-amber-700 dark:text-amber-300">
-                    确认请求结果尚未收敛；原 requestId 已保留，继续同一确认请求前暂不可切换历史批次。
-                  </p>
-                ) : null}
-                {preloginBatchHistory.length ? (
-                  <div className="space-y-2 rounded-md border p-3">
-                    <p className="font-medium">历史预登录批次</p>
-                    {preloginBatchHistory.map((batch) => (
-                      <button
-                        key={batch.batchId}
-                        type="button"
-                        disabled={mutationBusy || pendingRetryIdentity || pendingConfirmIdentity}
-                        className="flex w-full flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-left text-sm hover:bg-muted/30 disabled:cursor-not-allowed disabled:opacity-50"
-                        onClick={() => {
-                          selectPreloginBatch(batch);
-                          writePreloginUrl({ batchId: batch.batchId, requestId: null });
-                        }}
-                      >
-                        <span>
-                          分配 r{batch.assignment.revision} · 发布 r{batch.publicationRevision} · 批次 r{batch.revision}
-                        </span>
-                        <span className="font-mono text-xs text-muted-foreground">{batch.requestId}</span>
-                        <span className="w-full text-xs text-muted-foreground">
-                          {batch.workflow
-                            ? `执行 r${batch.workflow.executionRevision} · 策略 r${batch.workflow.policy.revision} · 目标 r${batch.workflow.target.revision}`
-                            : 'P2.9 前历史批次，无整合工作流引用'}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-              </>
-            )}
-          </CardContent>
-        </Card>
+                }
+              />
+            </CardContent>
+          </Card>
+        ) : null}
 
-        <Card>
-          <CardHeader>
-            <CardTitle>步骤 4 补充：学生与实体座位清单</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {workspace?.endpointState === 'unavailable' ? (
-              <p className="text-sm text-amber-700">终端实时状态暂不可用；不会把未知状态伪装为在线。</p>
-            ) : null}
-            <Input
-              aria-label="搜索学生或座位"
-              placeholder="搜索学号、姓名或座位"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-            />
-            {selectedStudent && canMutateV2Draft ? (
-              <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/20 p-2">
-                <span className="text-sm">为 {selectedStudent.realName} 指定座位</span>
-                <select
-                  aria-label={`为${selectedStudent.realName}指定座位`}
-                  value={seatIdentityKey(selectedStudent)}
-                  disabled={!canMutateV2Draft}
-                  onChange={(event) => {
-                    assignSeatV2(selectedStudent.boundUserId, event.target.value);
-                    setSelectedUid(null);
-                  }}
-                  className="rounded-md border bg-background px-2 py-1 text-sm"
-                >
-                  {eligibleV2Seats.map((candidate) => (
-                    <option key={seatIdentityKey(candidate)} value={seatIdentityKey(candidate)}>
-                      {classroomDisplayById.get(candidate.classroomId) || candidate.classroomId} · {candidate.label || candidate.sourceSeatId} ·{' '}
-                      {candidate.sourceSeatId}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            ) : null}
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>学生</TableHead>
-                  <TableHead>座位</TableHead>
-                  <TableHead>终端</TableHead>
-                  <TableHead>状态</TableHead>
-                  <TableHead>人工调整</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredRows.map((row) => {
-                  const seatKey = seatIdentityKey({ classroomId: row.classroomId, sourceSeatId: row.sourceSeatId });
-                  const seat = seatByIdentity.get(seatKey);
-                  const v2Seat = latestV2SeatByKey.get(seatKey);
-                  const endpoint = row.endpointId ? preflightByEndpoint.get(row.endpointId) : null;
-                  return (
-                    <TableRow
-                      key={row.boundUserId}
-                      draggable={canMutateV2Draft}
-                      onDragStart={() => canMutateV2Draft && setSelectedUid(row.boundUserId)}
-                      onDragOver={(event) => canMutateV2Draft && event.preventDefault()}
-                      onDrop={() => {
-                        if (!canMutateV2Draft || selectedUid === null) return;
-                        swapV2(selectedUid, row.boundUserId);
-                        setSelectedUid(null);
-                      }}
-                    >
-                      <TableCell>
-                        <div className="font-medium">{row.studentId}</div>
-                        <div className="text-muted-foreground">{row.realName}</div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="font-medium">{row.seatLabel || '未分配'}</div>
-                        <div className="text-xs text-muted-foreground">
-                          {row.classroomId ? `${classroomDisplayById.get(row.classroomId) || row.classroomId} · ` : ''}
-                          {row.sourceSeatId || '-'}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div>{row.endpointId || '未绑定'}</div>
-                        <div className="text-xs text-muted-foreground">
-                          {seat?.bindingRevision || v2Seat?.bindingRevision ? `绑定 r${seat?.bindingRevision || v2Seat?.bindingRevision}` : '-'}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        {endpoint ? (
-                          <Badge variant={endpoint.online ? 'default' : 'destructive'}>{endpoint.online ? '在线' : '离线'}</Badge>
-                        ) : (
-                          <Badge variant="outline">未知</Badge>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {assignmentIsCurrentV2 ? (
-                          <div className="flex flex-wrap items-center gap-2">
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant={selectedUid === row.boundUserId ? 'default' : 'outline'}
-                              aria-label={`选择${row.realName}换位`}
-                              disabled={!canMutateV2Draft}
-                              onClick={() => selectForSwap(row.boundUserId)}
-                            >
-                              <GripVertical className="size-4" /> 换位
-                            </Button>
-                            <label className="inline-flex items-center gap-1 text-sm">
-                              <input
-                                type="checkbox"
-                                aria-label={`锁定${row.realName}`}
-                                checked={locked.has(row.boundUserId)}
-                                disabled={!canMutateV2Draft}
-                                onChange={(event) =>
-                                  setLocked((current) => {
-                                    const next = new Set(current);
-                                    if (event.target.checked) next.add(row.boundUserId);
-                                    else next.delete(row.boundUserId);
-                                    return next;
-                                  })
-                                }
-                              />
-                              <LockKeyhole className="size-3.5" /> 锁定
-                            </label>
-                          </div>
-                        ) : latestV1 ? (
-                          <Badge variant="outline">v1 历史只读</Badge>
-                        ) : latestV2 ? (
-                          <Badge variant="outline">当前分配未引用最新计划</Badge>
-                        ) : (
-                          <Badge variant="outline">尚未生成分配</Badge>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-            {!workspace ? <p className="text-sm text-muted-foreground">正在加载座位分配……</p> : null}
-            {workspace && !rows.length ? <p className="text-sm text-muted-foreground">当前名单为空；系统不会凭空创建学生或分配记录。</p> : null}
-          </CardContent>
-        </Card>
+        {!workspace ? <p className="text-sm text-muted-foreground">正在加载座位分配……</p> : null}
       </div>
     </AdminPage>
   );

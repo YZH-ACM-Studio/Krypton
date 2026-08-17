@@ -44,6 +44,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { SimpleSelect } from '@/components/ui/select';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
@@ -1152,19 +1153,17 @@ function SeatOperationalProfileEditor({
           <div className="grid gap-2 sm:grid-cols-[minmax(0,11rem)_minmax(0,1fr)]">
             <label>
               <span className="sr-only">禁用原因</span>
-              <select
-                aria-label="禁用原因"
+              <SimpleSelect
+                ariaLabel="禁用原因"
                 value={disabledReason}
-                onChange={(event) => onDisabledReasonChange(event.target.value as SeatDisabledReason)}
+                onValueChange={(reason) => onDisabledReasonChange(reason as SeatDisabledReason)}
                 disabled={busy}
-                className="h-9 w-full rounded-md border bg-background px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                {Object.entries(DISABLED_REASON_LABELS).map(([reason, label]) => (
-                  <option key={reason} value={reason}>
-                    {label}
-                  </option>
-                ))}
-              </select>
+                size="sm"
+                options={Object.entries(DISABLED_REASON_LABELS).map(([reason, label]) => ({
+                  value: reason,
+                  label,
+                }))}
+              />
             </label>
             <label>
               <span className="sr-only">禁用备注（可选）</span>

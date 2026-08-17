@@ -456,3 +456,62 @@ test('retry accepts only the active session linked to the exact redeemed ticket'
         /exam_prelogin_resume_session_invalid/,
     );
 });
+
+test('retry reports an issued ticket active-session conflict as a readiness blocker', async () => {
+    const ticketId = new ObjectId('64b20000000000000000000a');
+    const batchId = new ObjectId('64b20000000000000000000b');
+    const ticket: import('../src/model/exam-prelogin').ExamPreloginTicketDoc = {
+        _id: ticketId,
+        batchId,
+        domainId,
+        eventId,
+        eventRevision: 3,
+        assignment: { assignmentId, revision: 2, fingerprint },
+        publicationRevision: 1,
+        uid: 42,
+        studentRecordId,
+        sourceSeatId: 'seat-1',
+        bindingId,
+        bindingRevision: 3,
+        endpointId: 'ep_one',
+        workspace: { kind: 'contest', contestId: contestId.toHexString(), path: `/exam-mode/${contestId.toHexString()}` },
+        nonce: 'b'.repeat(32),
+        ticketDigest: 'c'.repeat(64),
+        issuedAt: new Date('2026-08-12T00:55:00.000Z'),
+        expiresAt: new Date('2026-08-12T01:05:00.000Z'),
+        state: 'issued',
+        redemptionRequestId: null,
+        redeemedAt: null,
+        fingerprint: 'd'.repeat(64),
+    };
+
+    await assert.rejects(
+        validateExamPreloginTicketsCurrent(
+            event(),
+            [ticket],
+            async () => [
+                {
+                    endpointId: 'ep_one',
+                    online: true,
+                    compatible: true,
+                    serviceVersion: '0.5.0',
+                    protocolVersion: 2,
+                    capabilities: [{ name: 'exam.prelogin', version: 1, commands: ['launch_prelogin'] }],
+                    activeSessionId: 'session_left_active',
+                    resumableSessionId: null,
+                },
+            ],
+            new Date('2026-08-12T01:00:00.000Z'),
+        ),
+        (error: unknown) => {
+            assert.equal(error instanceof Error && error.name, 'ExamPreloginRetryReadinessError');
+            assert.equal(error instanceof Error && error.message, 'exam_prelogin_retry_blocked');
+            assert.equal((error as { eventId?: unknown }).eventId, eventId.toHexString());
+            assert.equal((error as { batchId?: unknown }).batchId, batchId.toHexString());
+            assert.deepEqual((error as { failures?: unknown }).failures, [
+                { uid: 42, endpointId: 'ep_one', diagnostics: ['active_session_conflict'] },
+            ]);
+            return true;
+        },
+    );
+});

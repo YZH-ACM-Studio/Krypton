@@ -7,6 +7,7 @@ import { ExamEventDoc, examEventService } from '../model/exam-event';
 import { withExamEventBoundary } from '../model/exam-event-boundary';
 import { ExamNetworkConfigError } from '../model/exam-network-config';
 import {
+    ExamPreloginRetryReadinessError,
     loadExamPreloginDispatchRecovery,
     validateExamPreloginTicketCurrent,
     validateExamPreloginTicketsCurrent,
@@ -55,6 +56,26 @@ function assertCanonicalEvent(event: ExamEventDoc, domainId: string, eventId: Ob
 }
 
 function translate(error: unknown): never {
+    if (error instanceof ExamPreloginRetryReadinessError) {
+        const reasonCounts = new Map<string, number>();
+        for (const failure of error.failures) {
+            for (const diagnostic of failure.diagnostics) reasonCounts.set(diagnostic, (reasonCounts.get(diagnostic) ?? 0) + 1);
+        }
+        const reasons = [...reasonCounts]
+            .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+            .map(([reason, count]) => `${reason}=${count}`)
+            .join(',');
+        const sample = JSON.stringify(error.failures.slice(0, 50));
+        logger.warn(
+            'Exam prelogin retry readiness rejected event=%s batch=%s total=%d reasons=%s items=%s',
+            error.eventId,
+            error.batchId,
+            error.failures.length,
+            reasons,
+            sample,
+        );
+        throw new ValidationError('examPrelogin', null, localizedErrorText`Invalid request: ${`${error.reason}:${reasons}`}`);
+    }
     if (error instanceof ExamSeatAssignmentReadinessError) {
         logger.warn(
             'Exam prelogin readiness rejected event=%s assignment=%s stage=%s reason=%s classroom=%s seat=%s uid=%s',

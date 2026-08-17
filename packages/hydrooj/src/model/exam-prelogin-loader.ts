@@ -7,7 +7,7 @@ import { examPreloginTicketId, ExamPreloginBatchDoc, ExamPreloginDispatchRecover
 import { compileExamPreloginPreparation, ExamPreloginEndpointPreflight } from './exam-prelogin-resolver';
 import { loadCurrentExamSeatAssignmentV2Facts, loadCurrentExamSeatAssignmentV2TicketFact } from './exam-seat-assignment-readiness';
 import { assertExamSeatAssignmentIntegrity, examSeatAssignmentService, examSeatIdentityKey, isExamSeatAssignmentV2 } from './exam-seat-assignment';
-import type { ExamPreloginTicketDoc } from './exam-prelogin';
+import type { ExamPreloginDiagnosticCode, ExamPreloginTicketDoc } from './exam-prelogin';
 import type { ExamEventDoc } from './exam-event';
 import { endpointSeatBindingService } from './endpoint-seat-binding';
 import { assertExamRosterRevisionIntegrity, assertExamSeatPlanIntegrity, examSeatPlanService, isExamSeatPlanV2 } from './exam-seat-plan';
@@ -19,6 +19,27 @@ function compareText(left: string, right: string): number {
 
 function sameStrings(left: string[], right: string[]): boolean {
     return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+export interface ExamPreloginRetryReadinessFailure {
+    uid: number;
+    endpointId: string;
+    diagnostics: ExamPreloginDiagnosticCode[];
+}
+
+export class ExamPreloginRetryReadinessError extends TypeError {
+    readonly reason = 'exam_prelogin_retry_blocked' as const;
+    readonly failures: ExamPreloginRetryReadinessFailure[];
+
+    constructor(
+        readonly eventId: string,
+        readonly batchId: string,
+        failures: ExamPreloginRetryReadinessFailure[],
+    ) {
+        super('exam_prelogin_retry_blocked');
+        this.name = 'ExamPreloginRetryReadinessError';
+        this.failures = failures.map((failure) => ({ ...failure, diagnostics: [...failure.diagnostics] }));
+    }
 }
 
 async function contestEligibility(event: ExamEventDoc, uid: number, observedAt: Date): Promise<{ uid: number; eligible: boolean; reason?: string }> {
@@ -581,11 +602,11 @@ export async function validateExamPreloginTicketsCurrent(
     ) {
         throw new TypeError('exam_prelogin_activity_changed');
     }
+    const readinessFailures: ExamPreloginRetryReadinessFailure[] = [];
     for (const ticket of tickets) {
         const item = preparation.items.find((candidate) => candidate.uid === ticket.uid);
         if (
             !item ||
-            !item.ready ||
             !item.studentRecordId.equals(ticket.studentRecordId) ||
             item.sourceSeatId !== ticket.sourceSeatId ||
             !item.bindingId?.equals(ticket.bindingId) ||
@@ -594,6 +615,18 @@ export async function validateExamPreloginTicketsCurrent(
         ) {
             throw new TypeError('exam_prelogin_activity_changed');
         }
+        if (!item.ready) {
+            const diagnostics = item.diagnostics.filter((diagnostic) => diagnostic.severity === 'error').map((diagnostic) => diagnostic.code);
+            if (!diagnostics.length) throw new TypeError('exam_prelogin_retry_readiness_invalid');
+            readinessFailures.push({
+                uid: ticket.uid,
+                endpointId: ticket.endpointId,
+                diagnostics,
+            });
+        }
+    }
+    if (readinessFailures.length) {
+        throw new ExamPreloginRetryReadinessError(event._id.toHexString(), reference.batchId.toHexString(), readinessFailures);
     }
     return resumeSessions;
 }

@@ -1609,9 +1609,30 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
           current.batchId === batch.batchId &&
           batch.revision === current.revision &&
           incomingProjectionRevision === currentProjectionRevision &&
-          JSON.stringify(batch) !== JSON.stringify(current)
+          batch.subjects.length < current.subjects.length
         ) {
-          throw new Error('同一预登录批次版本返回了冲突内容');
+          return current;
+        }
+        if (current.batchId === batch.batchId && batch.revision === current.revision && incomingProjectionRevision === currentProjectionRevision) {
+          if (JSON.stringify({ ...batch, subjects: [] }) !== JSON.stringify({ ...current, subjects: [] })) {
+            throw new Error('同一预登录批次版本返回了冲突内容');
+          }
+          for (let index = 0; index < current.subjects.length; index += 1) {
+            const currentSubject = current.subjects[index];
+            const incomingSubject = batch.subjects[index];
+            if (
+              JSON.stringify({ ...incomingSubject, state: 'issued', redeemedAt: null }) !==
+              JSON.stringify({ ...currentSubject, state: 'issued', redeemedAt: null })
+            ) {
+              throw new Error('同一预登录批次版本返回了冲突内容');
+            }
+            if (currentSubject.state === 'redeemed') {
+              if (incomingSubject.state !== 'redeemed') return current;
+              if (incomingSubject.redeemedAt !== currentSubject.redeemedAt) {
+                throw new Error('同一预登录批次版本返回了冲突内容');
+              }
+            }
+          }
         }
       }
       if (!current || current.batchId !== batch.batchId) preloginBatchGenerationRef.current += 1;

@@ -2299,6 +2299,35 @@ describe('p2.5 exam seat assignment workspace', () => {
     expect(batchPolls).toBe(1);
   });
 
+  it('accepts monotonic ticket redemption while the batch and projection revisions are unchanged', async () => {
+    const initial = preloginBatch([{ status: 'sent', stage: 'launch' }]);
+    const redeemed = {
+      ...structuredClone(initial),
+      subjects: initial.subjects.map((subject) => ({ ...subject, state: 'redeemed', redeemedAt: '2026-08-13T01:00:02.000Z' })),
+    };
+    let batchPolls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith('/seat-plans')) return json(PLAN_RESPONSE);
+        if (url.endsWith('/seat-assignments')) return json(PUBLISHED_ASSIGNMENT_RESPONSE);
+        if (url.endsWith('/prelogin-latest')) return json({ batch: initial });
+        if (url.endsWith(`/prelogin-batches/${initial.batchId}`)) {
+          batchPolls += 1;
+          return json({ batch: redeemed });
+        }
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+    renderPage();
+
+    expect(await screen.findByText('在途 1')).toBeInTheDocument();
+    await waitFor(() => expect(batchPolls).toBe(1), { timeout: 3500 });
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(screen.queryByText('同一预登录批次版本返回了冲突内容')).not.toBeInTheDocument();
+  });
+
   it('does not create a second request for an already confirmed published assignment', async () => {
     const existing = preloginBatch([{ status: 'applied', stage: 'page_ready' }]);
     let confirmPosts = 0;

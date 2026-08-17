@@ -176,7 +176,7 @@ async function buildCourseMindmapView(domainId: string, tdoc: TrainingDoc, pids:
     }
     const serialized = serializeCourseMindmapSnapshot(snapshot, expectedMapId);
     const nodeIds = new Set(serialized.nodes.map((node) => node._id));
-    const projection = [...problem.PROJECTION_LIST, 'knowledgeMapId', 'knowledgeNodeIds', 'managedAuthoring.selectedMindmapNodeIds'] as any;
+    const projection = [...problem.PROJECTION_LIST, 'knowledgeMapId', 'knowledgeNodeIds', 'managedAuthoring'] as any;
     const visible = await problem.getListViewableAuthorized(domainId, pids, currentUser, projection, false, true);
     const problems: Array<{
         domainId: string;

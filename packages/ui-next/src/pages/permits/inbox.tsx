@@ -9,6 +9,7 @@
  * maintainer role remains administrator-controlled.
  */
 import { ChevronRight, Code2, EyeOff, Lock, Mail, Send, Trophy } from 'lucide-react';
+import { SendProblemToCph } from '@/components/competitive-companion-bridge';
 import { motion } from 'motion/react';
 import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
@@ -269,6 +270,7 @@ function ContributionRowItem({
         ) : null}
       </div>
       <div className="flex flex-wrap items-center gap-2 shrink-0">
+        <SendProblemToCph href={problemHref} compact />
         <Button asChild type="button" size="sm" variant="outline">
           <a href={`${problemHref}?ide=1`}>
             <Code2 className="mr-1 size-3.5" />

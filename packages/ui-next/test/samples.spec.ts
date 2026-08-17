@@ -77,6 +77,21 @@ describe('extractSamples', () => {
     const content = { zh: 42, en: '```input1\nin\n```\n```output1\nout\n```' } as unknown as Record<string, string>;
     expect(extractSamples(content)).to.deep.equal([{ id: 1, input: 'in', output: 'out' }]);
   });
+
+  it('accepts Hydro-style fences indented by up to three spaces', () => {
+    expect(extractSamples('   ```input1\n1 2\n   ```\n   ```output1\n3\n   ```')).to.deep.equal([{ id: 1, input: '1 2', output: '3' }]);
+  });
+
+  it('pairs leftover Hydro HTML language-inputN / language-outputN blocks', () => {
+    const html =
+      '<pre><code class="language-input1">1 &lt; 2</code></pre><pre class="language-output1"><code>yes</code></pre>';
+    expect(extractSamples(html)).to.deep.equal([{ id: 1, input: '1 < 2', output: 'yes' }]);
+  });
+
+  it('pairs 输入样例 / Sample Output headings followed by ordinary fences', () => {
+    const md = '### 输入样例 1\n\n```\na\n```\n\n### Sample Output 1\n\n```\nb\n```';
+    expect(extractSamples(md)).to.deep.equal([{ id: 1, input: 'a', output: 'b' }]);
+  });
 });
 
 describe('resolveContentString', () => {

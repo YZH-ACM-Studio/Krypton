@@ -93,6 +93,7 @@ describe('p2.25 contribution assignment and task UI', () => {
     const inbox = read('packages/ui-next/src/pages/permits/inbox.tsx');
     expect(inbox).to.include('${problemHref}?ide=1');
     expect(inbox).to.include('${problemHref}/submit');
+    expect(inbox).to.include('<SendProblemToCph href={problemHref} compact />');
     expect(inbox).to.include('IDE');
     expect(inbox).to.include('提交');
   });

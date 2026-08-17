@@ -104,6 +104,7 @@ describe('p3.15 programming editor workspace correction', () => {
     expect(shell).to.include('`${problemUrl}/submit`');
     expect(shell).to.include('IDE');
     expect(shell).to.include('提交');
+    expect(shell).to.include('<SendProblemToCph href={problemUrl} compact />');
     expect(edit).to.include('canSubmit={canSubmitProblem}');
     expect(config).to.include('canSubmit={capabilities.canSubmitProblem === true}');
     expect(files).to.include('canSubmit={capabilities.canSubmitProblem === true}');

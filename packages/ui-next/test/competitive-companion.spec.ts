@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import {
   buildCompanionTask,
   companionContestEligibility,
+  collectCompanionTests,
   companionContestName,
   companionPostUrl,
   companionProblemName,
@@ -86,6 +87,43 @@ describe('competitive companion payload', () => {
     });
     expect(task.timeLimit).to.equal(1000);
     expect(task.memoryLimit).to.equal(256);
+  });
+
+  it('reads structured examples first and falls back to compiled or legacy markdown', () => {
+    expect(
+      collectCompanionTests({
+        programmingStatementView: { examples: { items: [{ input: 'hi', output: 'ho', inputEmpty: false, outputEmpty: false }] } },
+        content: '```input1\nold\n```\n```output1\nlegacy\n```',
+      }),
+    ).to.deep.equal([{ input: 'hi', output: 'ho' }]);
+    expect(
+      collectCompanionTests({
+        programmingStatementView: { examples: { items: [] } },
+        programmingStatement: { examples: { state: 'present', items: [{ input: 'new', output: 'yes', inputEmpty: false, outputEmpty: false }] } },
+        content: '',
+      }),
+    ).to.deep.equal([{ input: 'new', output: 'yes' }]);
+    expect(
+      collectCompanionTests({
+        programmingStatementView: { examples: { items: [] } },
+        content: '```input1\nold\n```\n```output1\nlegacy\n```',
+      }),
+    ).to.deep.equal([{ input: 'old', output: 'legacy' }]);
+  });
+
+  it('lets HydroParser-shaped markup keep title, limits, and paired samples', () => {
+    const built = companionTaskFromProblemPage({
+      payload: programmingPayload({
+        programmingStatementView: { examples: { items: [] } },
+        content: '```input1\n1 2\n```\n```output1\n3\n```',
+      }),
+      url: 'http://oj.test/p/H1000',
+    });
+    expect(built.ok).to.equal(true);
+    if (!built.ok) throw new Error(built.reason);
+    expect(built.task.tests).to.deep.equal([{ input: '1 2\n', output: '3\n' }]);
+    expect(built.task.timeLimit).to.equal(1000);
+    expect(built.task.memoryLimit).to.equal(256);
   });
 
   it('keeps the problem page bridge off Exam Mode', () => {

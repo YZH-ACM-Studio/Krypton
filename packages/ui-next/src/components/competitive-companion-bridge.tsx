@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Download, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { SimpleSelect } from '@/components/ui/select';
 import {
   buildCompanionTask,
+  companionTaskFromProblemPage,
+  fetchCompanionProblemPayload,
   importContestCompanionTasks,
   mapCompanionLanguage,
   readCompanionSourceFile,
@@ -13,6 +15,7 @@ import {
   submitCompanionSolution,
   type CompanionContestEligibility,
   type CompanionContestProblemRef,
+  type CompanionTask,
   type CompanionTest,
 } from '@/lib/competitive-companion';
 import { COMMON_LANG_OPTIONS, resolveLangs } from '@/lib/multi-select-presets';
@@ -45,6 +48,77 @@ export function HydroCompanionMarkup({
       ])}
       <span className="icon-stopwatch">{timeLimitMs}ms</span>
       <span className="icon-comparison">{memoryLimitMb}MiB</span>
+    </div>
+  );
+}
+
+export function SendProblemToCph({ href, compact = false }: { href: string; compact?: boolean }) {
+  const [task, setTask] = useState<CompanionTask | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [status, setStatus] = useState<'idle' | 'sending' | 'sent' | 'failed'>('idle');
+  const [sendError, setSendError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setTask(null);
+    setLoadError(null);
+    void fetchCompanionProblemPayload(href)
+      .then((payload) => {
+        if (cancelled) return;
+        const built = companionTaskFromProblemPage({
+          payload,
+          url: new URL(href, window.location.origin).href,
+        });
+        if (!built.ok) {
+          setLoadError(built.reason);
+          return;
+        }
+        setTask(built.task);
+      })
+      .catch((cause: unknown) => {
+        if (!cancelled) setLoadError(cause instanceof Error && cause.message ? cause.message : '题目加载失败');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [href]);
+
+  return (
+    <div className="flex flex-col items-stretch gap-1 sm:items-end">
+      {task ? (
+        <HydroCompanionMarkup name={task.name} timeLimitMs={task.timeLimit} memoryLimitMb={task.memoryLimit} tests={task.tests} />
+      ) : null}
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        className="gap-1"
+        disabled={!task || status === 'sending'}
+        onClick={() => {
+          if (!task) return;
+          setStatus('sending');
+          setSendError(null);
+          void sendCompanionTask(task).then(
+            () => setStatus('sent'),
+            (cause: unknown) => {
+              setStatus('failed');
+              setSendError(cause instanceof Error && cause.message ? cause.message : '发送失败');
+            },
+          );
+        }}
+      >
+        <Download className="size-3.5" />
+        {status === 'sending' ? '正在发送…' : status === 'sent' ? '已发送到 CPH' : status === 'failed' ? '发送失败' : '发送到 CPH'}
+      </Button>
+      {compact && status !== 'failed' && !loadError ? null : (
+        <p className="max-w-72 text-[11px] leading-4 text-muted-foreground sm:text-right">
+          {status === 'failed'
+            ? sendError || '本机没有收到题目。请先打开 VS Code 里的 CPH。'
+            : loadError
+              ? loadError
+              : 'Competitive Companion 请右键绿色加号，选择 Parse with → Hydro。也可点按钮直接发到本机 CPH。'}
+        </p>
+      )}
     </div>
   );
 }

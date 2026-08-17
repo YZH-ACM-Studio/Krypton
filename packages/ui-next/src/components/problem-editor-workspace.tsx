@@ -1,5 +1,6 @@
 import { ArrowLeft, Code2, FileArchive, FileText, FolderInput, Send, Settings2, ShieldCheck } from 'lucide-react';
 import { type ReactNode, useMemo } from 'react';
+import { SendProblemToCph } from '@/components/competitive-companion-bridge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/cn';
 
@@ -153,6 +154,7 @@ export function ProblemEditorWorkspace({
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2">
             {status}
+            {!isCreate ? <SendProblemToCph href={problemUrl} compact /> : null}
             {!isCreate && canSubmit ? (
               <>
                 <Button asChild size="sm" variant="outline">

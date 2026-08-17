@@ -289,7 +289,7 @@ function samplesFromStructuredView(view: unknown): CompanionTest[] {
   const root = asRecord(view);
   const examples = asRecord(root?.examples);
   const items = examples?.items;
-  if (!Array.isArray(items)) return [];
+  if (!Array.isArray(items) || items.length === 0) return [];
   return items.map((item) => {
     const row = asRecord(item);
     return {
@@ -297,6 +297,19 @@ function samplesFromStructuredView(view: unknown): CompanionTest[] {
       output: row?.outputEmpty === true ? '' : readString(row?.output),
     };
   });
+}
+
+export function collectCompanionTests(pdoc: unknown): CompanionTest[] {
+  const root = asRecord(pdoc);
+  if (!root) return [];
+  const structured = samplesFromStructuredView(root.programmingStatementView);
+  if (structured.length) return structured;
+  const canonical = samplesFromStructuredView(root.programmingStatement);
+  if (canonical.length) return canonical;
+  return extractSamples(root.content as string | Record<string, string> | null | undefined).map((sample) => ({
+    input: sample.input,
+    output: sample.output,
+  }));
 }
 
 function isBlockedProgrammingProblem(kind: string, type: string): boolean {
@@ -324,8 +337,7 @@ export function companionTaskFromProblemPage(input: {
   if (isBlockedProgrammingProblem(kind, type)) return { ok: false, reason: '非编程题不能导入 CPH' };
   const title = readString(pdoc.title) || readString(pdoc.pid) || String(pdoc.docId || 'Problem');
   const name = input.letter ? companionContestName(input.letter, title) : companionProblemName(readString(pdoc.pid) || String(pdoc.docId || ''), title);
-  const structured = samplesFromStructuredView(pdoc.programmingStatementView);
-  const tests = structured.length > 0 ? structured : extractSamples(pdoc.content as string | Record<string, string> | null | undefined);
+  const tests = collectCompanionTests(pdoc);
   return {
     ok: true,
     task: buildCompanionTask({

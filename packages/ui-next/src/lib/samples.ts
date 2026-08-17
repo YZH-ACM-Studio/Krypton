@@ -63,14 +63,51 @@ function normalizeContent(content: string | Record<string, string> | null | unde
  * The opening fence may use 3+ backticks and have trailing whitespace
  * before the newline. The closing fence must match the opening length.
  */
+function decodeBasicEntities(text: string): string {
+  return text
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&');
+}
+
 function* iterateSampleBlocks(md: string): Generator<{ kind: 'input' | 'output'; id: number; body: string }> {
-  // Use a tolerant pattern that accepts any 3+ backticks and optional id.
-  const re = /(?:^|\n)(`{3,})(input|output)(\d*)[^\S\n]*\n([\s\S]*?)\n\1(?=\s|$)/gi;
+  // Use a tolerant pattern that accepts any 3+ backticks, optional indent, and optional id.
+  const re = /(?:^|\n)[ \t]{0,3}(`{3,})(input|output)(\d*)[^\S\n]*\n([\s\S]*?)\n[ \t]{0,3}\1(?=\s|$)/gi;
   for (let m = re.exec(md); m !== null; m = re.exec(md)) {
     const kind = m[2].toLowerCase() as 'input' | 'output';
     const id = m[3] ? Number.parseInt(m[3], 10) : 1;
     const body = m[4].replace(/\s+$/u, '');
     yield { kind, id, body };
+  }
+}
+
+function* iterateHydroHtmlSampleBlocks(html: string): Generator<{ kind: 'input' | 'output'; id: number; body: string }> {
+  const re = /<(?:code|pre)[^>]*class="[^"]*language-(input|output)(\d*)[^"]*"[^>]*>([\s\S]*?)<\/(?:code|pre)>/gi;
+  for (let m = re.exec(html); m !== null; m = re.exec(html)) {
+    const kind = m[1].toLowerCase() as 'input' | 'output';
+    const id = m[2] ? Number.parseInt(m[2], 10) : 1;
+    const body = decodeBasicEntities(m[3].replace(/<[^>]+>/g, '')).replace(/\s+$/u, '');
+    yield { kind, id, body };
+  }
+}
+
+function headingKind(label: string): 'input' | 'output' | null {
+  const normalized = label.replace(/\s+/g, ' ').trim().toLowerCase();
+  if (/^(输入样例|样例输入|sample input)$/.test(normalized)) return 'input';
+  if (/^(输出样例|样例输出|sample output)$/.test(normalized)) return 'output';
+  return null;
+}
+
+function* iterateHeadingSampleBlocks(md: string): Generator<{ kind: 'input' | 'output'; id: number; body: string }> {
+  const re =
+    /(?:^|\n)(?:#{1,6}\s*|\*{0,2})(输入样例|样例输入|输出样例|样例输出|Sample\s+Input|Sample\s+Output)\s*(\d*)(?:\*{0,2})[^\n]*\n+```[^\n]*\n([\s\S]*?)\n```/gi;
+  for (let m = re.exec(md); m !== null; m = re.exec(md)) {
+    const kind = headingKind(m[1]);
+    if (!kind) continue;
+    const id = m[2] ? Number.parseInt(m[2], 10) : 1;
+    yield { kind, id, body: m[3].replace(/\s+$/u, '') };
   }
 }
 
@@ -104,11 +141,10 @@ export function extractSamples(content: string | Record<string, string> | null |
   return [];
 }
 
-/** Pull paired sample cases from a single markdown string. */
-function extractFromMarkdown(md: string): SampleCase[] {
+function pairSampleBlocks(blocks: Iterable<{ kind: 'input' | 'output'; id: number; body: string }>): SampleCase[] {
   const inputs = new Map<number, string>();
   const outputs = new Map<number, string>();
-  for (const blk of iterateSampleBlocks(md)) {
+  for (const blk of blocks) {
     (blk.kind === 'input' ? inputs : outputs).set(blk.id, blk.body);
   }
   const ids = [...new Set([...inputs.keys(), ...outputs.keys()])].sort((a, b) => a - b);
@@ -117,6 +153,15 @@ function extractFromMarkdown(md: string): SampleCase[] {
     input: inputs.get(id) ?? '',
     output: outputs.get(id) ?? '',
   }));
+}
+
+/** Pull paired sample cases from a single markdown or legacy Hydro HTML string. */
+function extractFromMarkdown(md: string): SampleCase[] {
+  const fromFences = pairSampleBlocks(iterateSampleBlocks(md));
+  if (fromFences.length) return fromFences;
+  const fromHtml = pairSampleBlocks(iterateHydroHtmlSampleBlocks(md));
+  if (fromHtml.length) return fromHtml;
+  return pairSampleBlocks(iterateHeadingSampleBlocks(md));
 }
 
 /** Parse content from JSON format (same as markdown-renderer.tsx) */

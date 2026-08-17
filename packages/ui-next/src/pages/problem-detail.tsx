@@ -947,10 +947,13 @@ export function ProblemDetailPage() {
   // problem-statement markdown now renders sample blocks inline (see
   // MarkdownView → splitMarkdownBySamples).
   const structuredStatement = (pdoc.programmingStatementView || null) as ProgrammingStatementViewData | null;
-  const samples = useMemo(
-    () => (structuredStatement ? structuredStatementSamples(structuredStatement) : extractSamples(content)),
-    [content, structuredStatement],
-  );
+  const samples = useMemo(() => {
+    if (structuredStatement) {
+      const fromView = structuredStatementSamples(structuredStatement);
+      if (fromView.length) return fromView;
+    }
+    return extractSamples(content);
+  }, [content, structuredStatement]);
   const companionTimeMs = parseConfigTimeMS(config.time) ?? parseConfigTimeMS(config.timeMin) ?? 1000;
   const companionMemoryMb = Math.max(1, Math.floor(parseConfigMemoryMB(config.memory) ?? parseConfigMemoryMB(config.memoryMin) ?? 256));
   const companionName = companionProblemName(String(pid), baseTitle);
@@ -1148,6 +1151,22 @@ export function ProblemDetailPage() {
             </Badge>
           ) : null}
           <div className="flex-1" />
+          {showCompanion ? (
+            <CompetitiveCompanionBridge
+              name={companionName}
+              group={companionGroup}
+              url={companionUrl}
+              timeLimitMs={companionTimeMs}
+              memoryLimitMb={companionMemoryMb}
+              tests={samples}
+              canSubmitBack={canSubmitBack}
+              submitUrl={submitUrl}
+              allowedLangs={config.langs || []}
+              tid={tid || undefined}
+              practiceContextId={practiceContextId}
+              recordDetailUrl={(rid) => replaceRouteTokens(recordDetailRoute, { RID: rid })}
+            />
+          ) : null}
           <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs" onClick={() => setIdeMode(false)}>
             <X className="size-3.5" />
             退出 IDE

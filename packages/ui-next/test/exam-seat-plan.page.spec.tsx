@@ -1362,6 +1362,41 @@ describe('p2.5 exam seat assignment workspace', () => {
     expect(await screen.findByRole('button', { name: '生成尽力型跨教室分配' })).toBeEnabled();
   });
 
+  it('defaults the classroom picker to 北教 25 and reveals other buildings by search', async () => {
+    const classrooms = [
+      { classroomId: PLAN_RESPONSE.seatPlans[0].classroomId, name: '北实 201', layoutRevision: 7, seatCount: 2 },
+      { classroomId: objectIdFromIndex(0x910), name: '北教25-114', layoutRevision: 1, seatCount: 44 },
+      { classroomId: objectIdFromIndex(0x911), name: '北教 25-116', layoutRevision: 1, seatCount: 50 },
+      { classroomId: objectIdFromIndex(0x912), name: '南教101', layoutRevision: 1, seatCount: 80 },
+    ];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith('/seat-plans')) return json({ ...PLAN_RESPONSE, seatPlans: [] });
+        if (url.endsWith('/seat-assignments')) return json({ ...ASSIGNMENT_RESPONSE, assignments: [], classrooms });
+        if (url.endsWith('/prelogin-latest')) return json({ batch: null });
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+    renderPageAtStep('classrooms');
+
+    expect(await screen.findByRole('checkbox', { name: '选择教室北教25-114' })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: '选择教室北教 25-116' })).toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: '选择教室北实 201' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: '选择教室南教101' })).not.toBeInTheDocument();
+    expect(screen.getByText('另有 2 间教室已隐藏，可搜索后勾选。')).toBeInTheDocument();
+
+    await user.type(screen.getByRole('textbox', { name: '搜索教室' }), '北实');
+    expect(screen.getByRole('checkbox', { name: '选择教室北实 201' })).toBeInTheDocument();
+    await user.click(screen.getByRole('checkbox', { name: '选择教室北实 201' }));
+    await user.clear(screen.getByRole('textbox', { name: '搜索教室' }));
+    expect(screen.getByRole('checkbox', { name: '选择教室北实 201' })).toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: '选择教室南教101' })).not.toBeInTheDocument();
+    expect(screen.getByText('已选 1 间')).toBeInTheDocument();
+  });
+
   it('renders 500 v2 assignments and map seats with one shared selector instead of one full selector per row', { timeout: 30_000 }, async () => {
     const count = 500;
     const classroomId = PLAN_RESPONSE.seatPlans[0].classroomId;
@@ -1481,6 +1516,8 @@ describe('p2.5 exam seat assignment workspace', () => {
     renderPageAtStep('adjust');
     const map = await screen.findByRole('region', { name: '北实 201座位图' });
     expect(within(map).getAllByRole('button')).toHaveLength(count);
+    const canvas = map.querySelector('[data-seat-map-canvas]');
+    expect(canvas).toHaveStyle({ height: '1880px', width: '3440px' });
     await user.click(await screen.findByRole('button', { name: '选择学生0换位' }));
     const selector = screen.getByRole('combobox', { name: '为学生0指定座位' });
     expect(screen.getAllByRole('combobox', { name: /为.+指定座位/ })).toHaveLength(1);

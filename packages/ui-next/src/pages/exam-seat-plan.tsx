@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { AlertTriangle, ArrowLeft, Download, GripVertical, LockKeyhole, Play, RefreshCw, Save, Shuffle, Upload, ZoomIn, ZoomOut } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Download, GripVertical, LockKeyhole, Play, RefreshCw, Save, Search, Shuffle, Upload, ZoomIn, ZoomOut } from 'lucide-react';
 import { AdminPage } from '@/components/admin/admin-page';
 import { ForbiddenPanel } from '@/components/admin/forbidden';
 import { Badge } from '@/components/ui/badge';
@@ -1437,6 +1437,24 @@ function rosterDriftText(item: PublishedRosterDriftItem): string {
   return `团队或角色变化：${person}（${previous} → ${current}）`;
 }
 
+const DEFAULT_CLASSROOM_BUILDING_PREFIX = '北教25';
+const SEAT_MAP_CELL_WIDTH = 136;
+const SEAT_MAP_CELL_HEIGHT = 92;
+const SEAT_MAP_PADDING = 20;
+
+function normalizeClassroomLookup(value: string): string {
+  return value.replace(/\s+/g, '').toLowerCase();
+}
+
+function classroomMatchesDefaultBuilding(name: string): boolean {
+  return normalizeClassroomLookup(name).startsWith(normalizeClassroomLookup(DEFAULT_CLASSROOM_BUILDING_PREFIX));
+}
+
+function classroomMatchesSearch(name: string, query: string): boolean {
+  const normalizedQuery = normalizeClassroomLookup(query);
+  return !normalizedQuery || normalizeClassroomLookup(name).includes(normalizedQuery);
+}
+
 const facingLabel: Record<AssignmentV2SeatFact['facing'], string> = {
   down: '↓',
   left: '←',
@@ -1551,20 +1569,23 @@ function ClassroomSeatMap({
 }) {
   const roomSeats = seats.filter((seat) => seat.classroomId === classroomId);
   if (!roomSeats.length) return null;
-  const xs = roomSeats.map((seat) => seat.x);
-  const ys = roomSeats.map((seat) => seat.y);
-  const minX = Math.min(...xs);
-  const minY = Math.min(...ys);
-  const width = Math.max(1, Math.max(...xs) - minX);
-  const height = Math.max(1, Math.max(...ys) - minY);
-  const mapWidth = Math.round(760 * zoom);
-  const mapHeight = Math.round(420 * zoom);
+  const uniqueXs = [...new Set(roomSeats.map((seat) => seat.x))].sort((left, right) => left - right);
+  const uniqueYs = [...new Set(roomSeats.map((seat) => seat.y))].sort((left, right) => left - right);
+  const columnByX = new Map(uniqueXs.map((value, index) => [value, index]));
+  const rowByY = new Map(uniqueYs.map((value, index) => [value, index]));
+  const cellWidth = Math.round(SEAT_MAP_CELL_WIDTH * zoom);
+  const cellHeight = Math.round(SEAT_MAP_CELL_HEIGHT * zoom);
+  const tileInset = 6;
+  const tileWidth = Math.max(88, cellWidth - tileInset * 2);
+  const tileHeight = Math.max(64, cellHeight - tileInset * 2);
+  const mapWidth = SEAT_MAP_PADDING * 2 + uniqueXs.length * cellWidth;
+  const mapHeight = SEAT_MAP_PADDING * 2 + uniqueYs.length * cellHeight;
   const positionBySeat = new Map(
     roomSeats.map((seat) => [
       seatIdentityKey(seat),
       {
-        left: 36 + ((seat.x - minX) / width) * (mapWidth - 132),
-        top: 36 + ((seat.y - minY) / height) * (mapHeight - 100),
+        left: SEAT_MAP_PADDING + (columnByX.get(seat.x) || 0) * cellWidth + tileInset,
+        top: SEAT_MAP_PADDING + (rowByY.get(seat.y) || 0) * cellHeight + tileInset,
       },
     ]),
   );
@@ -1587,8 +1608,12 @@ function ClassroomSeatMap({
         <h4 className="font-medium">{classroomName}</h4>
         <span className="text-xs text-muted-foreground">{roomSeats.length} 个候选座位</span>
       </div>
-      <div className="max-w-full overflow-auto rounded-md border bg-muted/20" tabIndex={0} aria-label={`${classroomName}座位图，可滚动平移`}>
-        <div className="relative" style={{ height: mapHeight, minHeight: 260, width: mapWidth }}>
+      <div className="max-w-full overflow-auto rounded-lg border bg-muted/20" tabIndex={0} aria-label={`${classroomName}座位图，可滚动平移`}>
+        <div
+          data-seat-map-canvas=""
+          className="relative"
+          style={{ height: mapHeight, minHeight: cellHeight + SEAT_MAP_PADDING * 2, width: mapWidth }}
+        >
           {showRiskLines ? (
             <svg className="pointer-events-none absolute inset-0 size-full" aria-hidden="true">
               {[...highRiskKeys, ...mediumRiskKeys].map((edgeKey) => {
@@ -1600,13 +1625,13 @@ function ClassroomSeatMap({
                 return (
                   <line
                     key={edgeKey}
-                    x1={left.left + 42}
-                    y1={left.top + 20}
-                    x2={right.left + 42}
-                    y2={right.top + 20}
+                    x1={left.left + tileWidth / 2}
+                    y1={left.top + tileHeight / 2}
+                    x2={right.left + tileWidth / 2}
+                    y2={right.top + tileHeight / 2}
                     stroke={high ? 'rgb(220 38 38)' : 'rgb(217 119 6)'}
                     strokeOpacity={high ? 0.7 : 0.5}
-                    strokeWidth={high ? 2 : 1.5}
+                    strokeWidth={high ? 2.5 : 2}
                   />
                 );
               })}
@@ -1628,7 +1653,7 @@ function ClassroomSeatMap({
                   row ? `，${row.studentId} ${row.realName}` : '，未分配'
                 }${hasHighRisk ? '，高风险' : hasMediumRisk ? '，中风险' : ''}`}
                 onClick={() => uid !== null && onSelect(uid)}
-                className={`absolute w-[84px] rounded-md border px-1 py-1 text-center text-[11px] shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                className={`absolute flex flex-col items-center justify-center gap-0.5 rounded-lg border px-2 py-1.5 text-center shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
                   uid !== null && selectedUid === uid
                     ? 'border-primary bg-primary text-primary-foreground'
                     : hasHighRisk
@@ -1636,15 +1661,22 @@ function ClassroomSeatMap({
                       : hasMediumRisk
                         ? 'border-amber-600 bg-amber-50 text-amber-950 dark:bg-amber-950/40 dark:text-amber-100'
                         : uid === null
-                          ? 'border-dashed bg-background text-muted-foreground'
+                          ? 'border-dashed border-border/80 bg-background/70 text-muted-foreground'
                           : 'bg-background'
                 }`}
-                style={{ left: position.left, top: position.top }}
+                style={{ left: position.left, top: position.top, width: tileWidth, height: tileHeight }}
               >
-                <span className="block truncate font-medium">
+                <span className="w-full truncate text-sm font-semibold leading-tight">
                   {facingLabel[seat.facing]} {seat.label || seat.sourceSeatId}
                 </span>
-                <span className="block truncate">{row ? `${row.studentId} ${row.realName}` : '空座'}</span>
+                {row ? (
+                  <>
+                    <span className="w-full truncate text-xs font-medium leading-tight">{row.studentId}</span>
+                    <span className="w-full truncate text-xs leading-tight opacity-80">{row.realName}</span>
+                  </>
+                ) : (
+                  <span className="text-xs leading-tight">空座</span>
+                )}
               </button>
             );
           })}
@@ -1669,6 +1701,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
   const [sourceKind, setSourceKind] = useState<'contestAudience' | 'userbindGroups' | 'userbindSchool'>('contestAudience');
   const [selectedGroupIds, setSelectedGroupIds] = useState<Set<string>>(new Set());
   const [selectedV2ClassroomIds, setSelectedV2ClassroomIds] = useState<Set<string>>(new Set());
+  const [classroomSearch, setClassroomSearch] = useState('');
   const [v2Strategy, setV2Strategy] = useState<'maximizeSpacing' | 'minimizeClassrooms'>('minimizeClassrooms');
   const [mapZoom, setMapZoom] = useState(1);
   const [showRiskLines, setShowRiskLines] = useState(false);
@@ -2242,6 +2275,24 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
       ]),
     );
   }, [workspace]);
+  const visibleClassrooms = useMemo(() => {
+    const classrooms = workspace?.classrooms || [];
+    const hasDefaultBuilding = classrooms.some((classroom) => classroomMatchesDefaultBuilding(classroom.name));
+    return classrooms.filter((classroom) => {
+      const displayName = classroomDisplayById.get(classroom.classroomId) || classroom.name;
+      const selected = selectedV2ClassroomIds.has(classroom.classroomId);
+      if (classroomSearch.trim()) return selected || classroomMatchesSearch(`${displayName} ${classroom.name}`, classroomSearch);
+      if (selected || !hasDefaultBuilding) return true;
+      return classroomMatchesDefaultBuilding(classroom.name);
+    });
+  }, [classroomDisplayById, classroomSearch, selectedV2ClassroomIds, workspace?.classrooms]);
+  const hiddenClassroomCount = useMemo(() => {
+    const classrooms = workspace?.classrooms || [];
+    if (!classrooms.some((classroom) => classroomMatchesDefaultBuilding(classroom.name))) return 0;
+    return classrooms.filter(
+      (classroom) => !classroomMatchesDefaultBuilding(classroom.name) && !selectedV2ClassroomIds.has(classroom.classroomId),
+    ).length;
+  }, [selectedV2ClassroomIds, workspace?.classrooms]);
   const latestV2SeatByKey = useMemo(() => new Map((latestV2?.seatFacts || []).map((seat) => [seatIdentityKey(seat), seat])), [latestV2]);
   const v2OccupantBySeatKey = useMemo(() => new Map(v2Draft.map((mapping) => [seatIdentityKey(mapping.seat), mapping.boundUserId])), [v2Draft]);
   const highRiskKeys = useMemo(() => new Set((latestV2?.explanation.highRiskEdges || []).map(riskEdgeKey)), [latestV2]);
@@ -3468,7 +3519,9 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
               <CardTitle>选择教室</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <p className="text-sm text-muted-foreground">可跨教室多选；计划会冻结当前布局、朝向和禁用配置版本。</p>
+              <p className="text-sm text-muted-foreground">
+                默认可直接勾选北教 25。其他教学楼先搜索再勾选；计划会冻结当前布局、朝向和禁用配置版本。
+              </p>
               <p className="text-sm text-muted-foreground">
                 朝向、禁用和终端绑定在教室工作台维护；没有权限时请找基础设施管理员。
               </p>
@@ -3478,39 +3531,69 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
               {latest?.schemaVersion === 1 || latestPlan?.schemaVersion === 1 ? (
                 <p className="rounded-md border bg-muted/20 p-2 text-sm text-muted-foreground">v1 历史只读；新的候选计划和分配统一使用跨教室 v2。</p>
               ) : null}
-              <div className="max-h-56 space-y-1 overflow-auto rounded-md bg-muted/30 p-2">
-                {workspace?.classrooms.map((classroom) => (
-                  <div key={classroom.classroomId} className="flex items-center justify-between gap-2 rounded px-1 py-1 text-sm">
-                    <label className="flex min-w-0 items-center gap-2">
-                      <Checkbox
-                        aria-label={`选择教室${classroomDisplayById.get(classroom.classroomId) || classroom.classroomId}`}
-                        disabled={mutationBusy || dirty || !workspaceFresh || !automaticSeatingAllowed}
-                        checked={selectedV2ClassroomIds.has(classroom.classroomId)}
-                        onCheckedChange={(checked) =>
-                          setSelectedV2ClassroomIds((current) => {
-                            const next = new Set(current);
-                            if (checked) next.add(classroom.classroomId);
-                            else next.delete(classroom.classroomId);
-                            return next;
-                          })
-                        }
-                      />
-                      <span className="truncate">
-                        {classroomDisplayById.get(classroom.classroomId) || classroom.classroomId} · layout r{classroom.layoutRevision} ·{' '}
-                        {classroom.seatCount} 座
-                      </span>
-                    </label>
-                    <a
-                      href={`/admin/exam-infrastructure/classrooms/${classroom.classroomId}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="shrink-0 text-xs text-primary underline-offset-4 hover:underline"
-                    >
-                      朝向 / 禁用设置
-                    </a>
-                  </div>
-                ))}
-                {!workspace?.classrooms.length ? <p className="text-sm text-muted-foreground">当前学校没有可用教室。</p> : null}
+              <div className="space-y-3">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    aria-label="搜索教室"
+                    className="h-11 pl-9 text-base"
+                    placeholder="搜索其他教室，例如 北实、南教、518"
+                    value={classroomSearch}
+                    onChange={(event) => setClassroomSearch(event.target.value)}
+                  />
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
+                  <span>已选 {selectedV2ClassroomIds.size} 间</span>
+                  {hiddenClassroomCount > 0 && !classroomSearch.trim() ? (
+                    <span>另有 {hiddenClassroomCount} 间教室已隐藏，可搜索后勾选。</span>
+                  ) : null}
+                </div>
+                <div className="max-h-[32rem] space-y-2 overflow-auto rounded-lg border bg-muted/20 p-2">
+                  {visibleClassrooms.map((classroom) => {
+                    const displayName = classroomDisplayById.get(classroom.classroomId) || classroom.classroomId;
+                    return (
+                      <div
+                        key={classroom.classroomId}
+                        className="flex items-center justify-between gap-4 rounded-lg border bg-background px-4 py-3"
+                      >
+                        <label className="flex min-w-0 flex-1 items-center gap-3">
+                          <Checkbox
+                            className="size-5"
+                            aria-label={`选择教室${displayName}`}
+                            disabled={mutationBusy || dirty || !workspaceFresh || !automaticSeatingAllowed}
+                            checked={selectedV2ClassroomIds.has(classroom.classroomId)}
+                            onCheckedChange={(checked) =>
+                              setSelectedV2ClassroomIds((current) => {
+                                const next = new Set(current);
+                                if (checked) next.add(classroom.classroomId);
+                                else next.delete(classroom.classroomId);
+                                return next;
+                              })
+                            }
+                          />
+                          <span className="min-w-0">
+                            <span className="block truncate text-base font-medium">{displayName}</span>
+                            <span className="block text-sm text-muted-foreground">
+                              layout r{classroom.layoutRevision} · {classroom.seatCount} 座
+                            </span>
+                          </span>
+                        </label>
+                        <a
+                          href={`/admin/exam-infrastructure/classrooms/${classroom.classroomId}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="shrink-0 text-sm text-primary underline-offset-4 hover:underline"
+                        >
+                          朝向 / 禁用设置
+                        </a>
+                      </div>
+                    );
+                  })}
+                  {!workspace?.classrooms.length ? <p className="px-2 py-6 text-sm text-muted-foreground">当前学校没有可用教室。</p> : null}
+                  {workspace?.classrooms.length && !visibleClassrooms.length ? (
+                    <p className="px-2 py-6 text-sm text-muted-foreground">没有匹配的教室，请改用教室名或编号搜索。</p>
+                  ) : null}
+                </div>
               </div>
               <StepFooter
                 left={rereadButton}
@@ -3642,8 +3725,8 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                       size="sm"
                       variant="outline"
                       aria-label="缩小座位图"
-                      disabled={mapZoom <= 0.6}
-                      onClick={() => setMapZoom((current) => Math.max(0.6, Number((current - 0.2).toFixed(1))))}
+                      disabled={mapZoom <= 0.7}
+                      onClick={() => setMapZoom((current) => Math.max(0.7, Number((current - 0.2).toFixed(1))))}
                     >
                       <ZoomOut className="size-4" />
                     </Button>
@@ -3653,8 +3736,8 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                       size="sm"
                       variant="outline"
                       aria-label="放大座位图"
-                      disabled={mapZoom >= 1.8}
-                      onClick={() => setMapZoom((current) => Math.min(1.8, Number((current + 0.2).toFixed(1))))}
+                      disabled={mapZoom >= 2.2}
+                      onClick={() => setMapZoom((current) => Math.min(2.2, Number((current + 0.2).toFixed(1))))}
                     >
                       <ZoomIn className="size-4" />
                     </Button>

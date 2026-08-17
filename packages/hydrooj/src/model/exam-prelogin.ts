@@ -398,7 +398,14 @@ function preparationFact(preparation: Omit<ExamPreloginPreparation, 'fingerprint
 }
 
 export function createExamPreloginPreparation(input: Omit<ExamPreloginPreparation, 'fingerprint'>): ExamPreloginPreparation {
-    const preparation = { ...input, fingerprint: canonicalHash(preparationFact(input)) };
+    const canonicalInput: Omit<ExamPreloginPreparation, 'fingerprint'> = {
+        ...input,
+        items: input.items.map((item) => ({
+            ...item,
+            endpoint: canonicalEndpointFact(item.endpoint),
+        })),
+    };
+    const preparation = { ...canonicalInput, fingerprint: canonicalHash(preparationFact(canonicalInput)) };
     assertExamPreloginPreparationIntegrity(preparation);
     return preparation;
 }

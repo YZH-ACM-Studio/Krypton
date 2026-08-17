@@ -326,6 +326,62 @@ test('facing-only presentation warnings do not invalidate the preparation author
     assert.notEqual(hardChanged.fingerprint, original.fingerprint);
 });
 
+test('preparation canonicalizes the real Client capability manifest before hashing', () => {
+    const original = preparation();
+    const { fingerprint: _originalFingerprint, ...facts } = original;
+    const clientCapabilityManifest = [
+        { name: 'endpoint.status', version: 1, commands: ['ping'] },
+        { name: 'exam.prelogin', version: 1, commands: ['launch_prelogin'] },
+        {
+            name: 'network.policy',
+            version: 1,
+            commands: ['apply_network_policy', 'get_network_policy_status', 'stop_network_policy'],
+        },
+        {
+            name: 'exam.monitoring',
+            version: 1,
+            commands: ['start_monitoring', 'get_monitoring_status', 'stop_monitoring'],
+        },
+    ];
+    const fromClient = createExamPreloginPreparation({
+        ...facts,
+        items: facts.items.map((item) => ({
+            ...item,
+            endpoint: { ...item.endpoint, capabilities: clientCapabilityManifest },
+        })),
+    });
+    const canonical = createExamPreloginPreparation({
+        ...facts,
+        items: facts.items.map((item) => ({
+            ...item,
+            endpoint: {
+                ...item.endpoint,
+                capabilities: [
+                    { name: 'endpoint.status', version: 1, commands: ['ping'] },
+                    {
+                        name: 'exam.monitoring',
+                        version: 1,
+                        commands: ['get_monitoring_status', 'start_monitoring', 'stop_monitoring'],
+                    },
+                    { name: 'exam.prelogin', version: 1, commands: ['launch_prelogin'] },
+                    {
+                        name: 'network.policy',
+                        version: 1,
+                        commands: ['apply_network_policy', 'get_network_policy_status', 'stop_network_policy'],
+                    },
+                ],
+            },
+        })),
+    });
+
+    assert.deepEqual(
+        fromClient.items[0].endpoint.capabilities.map((capability) => capability.name),
+        ['endpoint.status', 'exam.monitoring', 'exam.prelogin', 'network.policy'],
+    );
+    assert.deepEqual(fromClient.items[0].endpoint.capabilities[1].commands, ['get_monitoring_status', 'start_monitoring', 'stop_monitoring']);
+    assert.equal(fromClient.fingerprint, canonical.fingerprint);
+});
+
 test('confirm persists only ticket digests and replays one request without duplicate dispatch identity', async () => {
     const dispatches: unknown[] = [];
     const { value, batches, tickets } = service(dispatches);

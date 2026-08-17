@@ -938,6 +938,7 @@ export async function preflightExamPreloginOnVigil(subjects: ExamPreloginEndpoin
     const response = await fetchWithRetry(`${baseUrl()}/api/integrations/oj/prelogin/preflight`, {
         method: 'POST',
         body: { items: subjects },
+        timeout: 15_000,
         retries: 1,
     });
     const payload = exactBridgeRecord(await readVigilJson(response), ['items', 'ready'], 'Vigil prelogin preflight was malformed.');
@@ -1061,6 +1062,7 @@ export async function dispatchExamPreloginOnVigil(payload: ExamPreloginDispatchP
     const response = await fetchWithRetry(`${baseUrl()}/api/integrations/oj/prelogin/dispatch`, {
         method: 'POST',
         body: payload,
+        timeout: 30_000,
     });
     const projection = parseVigilExamPreloginProjection(await readVigilJson(response));
     const expectedItems = new Map(payload.items.map((item) => [item.ticketId, item.endpointId]));
@@ -1079,6 +1081,7 @@ export async function retryExamPreloginOnVigil(payload: ExamPreloginRetryPayload
     const response = await fetchWithRetry(`${baseUrl()}/api/integrations/oj/prelogin/retry`, {
         method: 'POST',
         body: payload,
+        timeout: 30_000,
     });
     const projection = parseVigilExamPreloginProjection(await readVigilJson(response));
     if (

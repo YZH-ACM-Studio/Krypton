@@ -480,6 +480,7 @@ export async function preflightExamMonitoringOnVigil(endpointIds: string[]): Pro
     const response = await fetchWithRetry(`${baseUrl()}/api/integrations/oj/monitoring/preflight`, {
         method: 'POST',
         body: { endpointIds },
+        timeout: 15_000,
         retries: 1,
     });
     const payload = exactBridgeRecord(await readVigilJson(response), ['items', 'ready'], 'Vigil monitoring preflight was malformed.');

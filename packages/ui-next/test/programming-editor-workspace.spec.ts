@@ -91,6 +91,25 @@ describe('p3.15 programming editor workspace correction', () => {
     expect(edit).to.include('requestTagNormalizationPreview');
   });
 
+  it('exposes submit and IDE actions for data and tag testers from the workspace', () => {
+    const handler = read('packages/hydrooj/src/handler/problem.ts');
+    const shell = read('packages/ui-next/src/components/problem-editor-workspace.tsx');
+    const edit = read('packages/ui-next/src/pages/problem-edit.tsx');
+    const config = read('packages/ui-next/src/pages/problem-config-page-wrapper.tsx');
+    const files = read('packages/ui-next/src/pages/problem-manage.tsx');
+    const detail = read('packages/ui-next/src/pages/problem-detail.tsx');
+    expect(handler).to.include('canSubmitProblem: problem.canSubmitProblem(udoc, pdoc)');
+    expect(shell).to.include('canSubmit = false');
+    expect(shell).to.include('`${problemUrl}?ide=1`');
+    expect(shell).to.include('`${problemUrl}/submit`');
+    expect(shell).to.include('IDE');
+    expect(shell).to.include('提交');
+    expect(edit).to.include('canSubmit={canSubmitProblem}');
+    expect(config).to.include('canSubmit={capabilities.canSubmitProblem === true}');
+    expect(files).to.include('canSubmit={capabilities.canSubmitProblem === true}');
+    expect(detail).to.include("get('ide') === '1'");
+  });
+
   it('keeps testdata and additional files on refresh-stable views of the existing files route', () => {
     const shell = read('packages/ui-next/src/components/problem-editor-workspace.tsx');
     const files = read('packages/ui-next/src/pages/problem-manage.tsx');

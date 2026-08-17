@@ -97,6 +97,7 @@ interface ProblemAuthoringCapabilities {
   canEditData?: boolean;
   canEditDraftMetadata?: boolean;
   canEditTags?: boolean;
+  canSubmitProblem?: boolean;
   canManageCollaborators?: boolean;
   canManageContributions?: boolean;
   canPublish?: boolean;
@@ -800,6 +801,7 @@ export function ProblemEditPage() {
   const canEditContent = isCreate || capabilities.canEditContent === true;
   const canEditData = !isCreate && capabilities.canEditData === true;
   const canEditTags = !isCreate && capabilities.canEditTags === true;
+  const canSubmitProblem = !isCreate && capabilities.canSubmitProblem === true;
   const canEditDraftMetadata = isCreate || capabilities.canEditDraftMetadata === true;
   const canPublish = !isCreate && capabilities.canPublish === true;
   const canDelete = !isCreate && capabilities.canDelete === true;
@@ -1335,6 +1337,7 @@ export function ProblemEditPage() {
       editEnabled={isCreate || canEditContent || canEditTags}
       dataEnabled={canEditData}
       collaborationEnabled={collaborationEnabled}
+      canSubmit={canSubmitProblem}
       status={showCollaboration || !canEditContent ? undefined : status}
       actions={showCollaboration ? undefined : actions}
     >

@@ -549,6 +549,7 @@ function problemAuthoringCapabilities(udoc: User, pdoc: ProblemDoc) {
         canEditData: problem.canEditProblemData(udoc, pdoc),
         canEditTags: problem.canEditProblemTags(udoc, pdoc),
         canEditDraftMetadata: problem.canEditProblemMetadata(udoc, pdoc),
+        canSubmitProblem: problem.canSubmitProblem(udoc, pdoc),
         canManageCollaborators: problem.canManageProblemCollaborators(udoc, pdoc),
         canManageContributions: problem.canManageProblemContributions(udoc, pdoc),
         canManageMaintainers: problem.canManageProblemMaintainers(udoc, pdoc),

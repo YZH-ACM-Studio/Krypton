@@ -916,6 +916,7 @@ export function ProblemDetailPage() {
   const showExternals = !inContest || mode === 'correction';
 
   const problemUrl = replaceRouteTokens(bs.urls.problemDetail, { PID: String(pid) });
+  const requestIdeMode = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('ide') === '1';
   const [ideMode, setIdeMode] = useState(false);
   const [rejudgeOpen, setRejudgeOpen] = useState(false);
   const [teamCodeBuffer, setTeamCodeBuffer] = useState<TeamCodeBuffer | null>(null);
@@ -933,6 +934,10 @@ export function ProblemDetailPage() {
   const isObjective = objectiveQuestions.length > 0;
   const isStructuredAnswer =
     ['program_fill', 'function'].includes(config.type ?? '') && ['program_fill', 'function'].includes(String(pdoc.problemKind));
+  const canOpenIde = canSubmit && !isObjective && !isStructuredAnswer;
+  useEffect(() => {
+    if (requestIdeMode && canOpenIde) setIdeMode(true);
+  }, [canOpenIde, requestIdeMode]);
   const isSubjective = pdoc.problemKind === 'subjective';
   const canPreviewSubjective = !!data.canPreviewSubjective;
   const objectiveDraftKey = `objective-draft:${bs.user?.id || 0}/${bs.domain?.id || 'default'}/${pdoc.docId || pid}${tid ? `@${tid}` : ''}${practiceDraftScope ? `@practice:${practiceDraftScope}` : ''}`;

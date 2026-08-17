@@ -56,6 +56,7 @@ interface ProblemManageCapabilities {
   canEditContent?: boolean;
   canEditData?: boolean;
   canEditTags?: boolean;
+  canSubmitProblem?: boolean;
   canManageCollaborators?: boolean;
   canManageContributions?: boolean;
   canPublish?: boolean;
@@ -376,6 +377,7 @@ export function ProblemFilesPage() {
       editEnabled={capabilities.canEditContent === true || capabilities.canEditTags === true}
       dataEnabled={capabilities.canEditData === true}
       collaborationEnabled={collaborationEnabled}
+      canSubmit={capabilities.canSubmitProblem === true}
       actions={
         <Button asChild variant="outline" size="sm">
           <a href={problemUrl}>

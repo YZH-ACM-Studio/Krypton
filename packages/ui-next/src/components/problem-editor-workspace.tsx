@@ -1,5 +1,6 @@
-import { ArrowLeft, FileArchive, FileText, FolderInput, Settings2, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, Code2, FileArchive, FileText, FolderInput, Send, Settings2, ShieldCheck } from 'lucide-react';
 import { type ReactNode, useMemo } from 'react';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/cn';
 
 export type ProblemEditorWorkspacePage = 'edit' | 'collaboration' | 'config' | 'files';
@@ -25,6 +26,7 @@ export function ProblemEditorWorkspace({
   editEnabled = true,
   dataEnabled = true,
   collaborationEnabled = true,
+  canSubmit = false,
   status,
   actions,
   children,
@@ -38,6 +40,7 @@ export function ProblemEditorWorkspace({
   editEnabled?: boolean;
   dataEnabled?: boolean;
   collaborationEnabled?: boolean;
+  canSubmit?: boolean;
   status?: ReactNode;
   actions?: ReactNode;
   children: ReactNode;
@@ -150,6 +153,22 @@ export function ProblemEditorWorkspace({
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2">
             {status}
+            {!isCreate && canSubmit ? (
+              <>
+                <Button asChild size="sm" variant="outline">
+                  <a href={`${problemUrl}?ide=1`}>
+                    <Code2 className="mr-1 size-3.5" />
+                    IDE
+                  </a>
+                </Button>
+                <Button asChild size="sm">
+                  <a href={`${problemUrl}/submit`}>
+                    <Send className="mr-1 size-3.5" />
+                    提交
+                  </a>
+                </Button>
+              </>
+            ) : null}
             {actions}
           </div>
         </div>

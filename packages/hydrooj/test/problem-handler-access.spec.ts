@@ -189,7 +189,8 @@ const problemStub = {
     canEditProblemData: (user: any) => user.canEditData ?? user.canEditContent ?? maintainResult,
     canEditProblemTags: (user: any) => user.canEditTags ?? user.canEditContent ?? maintainResult,
     canEditProblemMetadata: (user: any) => user.canEditMetadata ?? maintainResult,
-    canSubmitProblem: (user: any) => user.hasPerm?.(PERM.PERM_SUBMIT_PROBLEM) === true || user.canSubmitManagedDraft === true,
+    canSubmitProblem: (user: any) =>
+        user.hasPerm?.(PERM.PERM_SUBMIT_PROBLEM) === true || user.canSubmitManagedDraft === true || user.canSubmitContribution === true,
     canManageProblemCollaborators: (user: any) => user.canManageCollaborators ?? maintainResult,
     canManageProblemContributions: (user: any) => user.canManageContributions ?? maintainResult,
     pendingProblemContributionFingerprint: () => 'pending-fingerprint',
@@ -3533,6 +3534,30 @@ describe('P3.15 files workspace capability contract', () => {
             expect(handler.response.body.pdoc.managedAuthoring?.metadataStatus, scenario.role).to.equal('confirmed');
             expect(calls.getCapabilityAuthorized.at(-1)?.[3], scenario.role).to.equal('data');
             expect(calls.getCapabilityAuthorized.at(-1)?.[4], scenario.role).to.equal(problemStub.PROJECTION_MANAGED_EDITOR);
+        }
+    });
+
+    it('publishes submit capability for data and tag testers', async () => {
+        const pdoc = {
+            domainId: 'system',
+            docId: 7,
+            pid: 'P3101',
+            title: 'Managed problem',
+            authoringMode: 'managed',
+            managedAuthoring: { workingTitle: 'Draft title', metadataStatus: 'confirmed' },
+            data: [],
+            additional_file: [],
+        };
+        for (const role of ['data', 'tag'] as const) {
+            const handler = makeHandler(ProblemFilesHandler, {
+                canEditData: role === 'data',
+                canEditTags: role === 'tag',
+                canSubmitContribution: true,
+            });
+            handler.pdoc = pdoc;
+            maintainableResults = [{ ...pdoc }];
+            await handler.get({}, undefined, false);
+            expect(handler.response.body.problemAuthoringCapabilities.canSubmitProblem, role).to.equal(true);
         }
     });
 });

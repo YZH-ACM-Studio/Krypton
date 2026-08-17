@@ -8,7 +8,7 @@
  * `viaContest`). Direct author/verifier roles may be self-revoked; a managed
  * maintainer role remains administrator-controlled.
  */
-import { ChevronRight, EyeOff, Lock, Mail, Trophy } from 'lucide-react';
+import { ChevronRight, Code2, EyeOff, Lock, Mail, Send, Trophy } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
@@ -252,10 +252,11 @@ function ContributionRowItem({
 }) {
   const p = pdict[row.pid] || ({} as ProblemMini);
   const assigner = udict[row.assignedBy];
+  const problemHref = `/p/${p.pid || p.docId || row.pid}`;
   return (
     <li className="flex flex-col gap-3 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
       <div className="min-w-0">
-        <a href={`/p/${p.pid || p.docId}/edit`} className="truncate text-sm font-medium hover:text-primary hover:underline">
+        <a href={`${problemHref}/edit`} className="truncate text-sm font-medium hover:text-primary hover:underline">
           <span className="font-mono text-[11px] text-muted-foreground">{p.pid || p.docId || row.pid}</span>
           <span className="ml-1.5">{p.title || '题目'}</span>
         </a>
@@ -267,13 +268,27 @@ function ContributionRowItem({
           <p className="mt-1 text-xs text-muted-foreground">首次完成于 {new Date(row.firstCompletedAt).toLocaleString('zh-CN')}</p>
         ) : null}
       </div>
-      {onComplete ? (
-        <Button type="button" size="sm" onClick={onComplete} disabled={completing}>
-          {completing ? '提交中…' : '标记完成'}
+      <div className="flex flex-wrap items-center gap-2 shrink-0">
+        <Button asChild type="button" size="sm" variant="outline">
+          <a href={`${problemHref}?ide=1`}>
+            <Code2 className="mr-1 size-3.5" />
+            IDE
+          </a>
         </Button>
-      ) : (
-        <Badge variant="secondary">已完成</Badge>
-      )}
+        <Button asChild type="button" size="sm" variant="outline">
+          <a href={`${problemHref}/submit`}>
+            <Send className="mr-1 size-3.5" />
+            提交
+          </a>
+        </Button>
+        {onComplete ? (
+          <Button type="button" size="sm" onClick={onComplete} disabled={completing}>
+            {completing ? '提交中…' : '标记完成'}
+          </Button>
+        ) : (
+          <Badge variant="secondary">已完成</Badge>
+        )}
+      </div>
     </li>
   );
 }

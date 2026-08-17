@@ -16,6 +16,7 @@ interface ProblemAuthoringCapabilities {
   canEditContent?: boolean;
   canEditTags?: boolean;
   canEditData?: boolean;
+  canSubmitProblem?: boolean;
   canManageCollaborators?: boolean;
   canManageContributions?: boolean;
   canPublish?: boolean;
@@ -50,6 +51,7 @@ export function ProblemConfigPage() {
       collaborationEnabled={
         capabilities.canManageCollaborators === true || capabilities.canManageContributions === true || capabilities.canPublish === true
       }
+      canSubmit={capabilities.canSubmitProblem === true}
     >
       <ProblemConfigEditor problemUrl={problemUrl} pdoc={pdoc} files={testdata} initialYaml={config} dataWriteGuard={data.dataWriteGuard} embedded />
     </ProblemEditorWorkspace>

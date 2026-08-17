@@ -89,6 +89,14 @@ describe('p2.25 contribution assignment and task UI', () => {
     expect(source).to.include('/contributions/revoke');
   });
 
+  it('lets data and tag testers open the problem IDE and submit from the inbox', () => {
+    const inbox = read('packages/ui-next/src/pages/permits/inbox.tsx');
+    expect(inbox).to.include('${problemHref}?ide=1');
+    expect(inbox).to.include('${problemHref}/submit');
+    expect(inbox).to.include('IDE');
+    expect(inbox).to.include('提交');
+  });
+
   it('adds pending-first data and tag groups while keeping completed tasks collapsible', () => {
     const source = read('packages/ui-next/src/pages/permits/inbox.tsx');
     expect(source).to.include('const direct = (data.permits || []).filter');

@@ -55,4 +55,12 @@ describe('Exam network control HTTP contracts', () => {
         expect(source).to.include('policyTemplateAuditFacts(action, template)');
         expect(source).to.include('targetAssignmentAuditFacts(action, assignment)');
     });
+
+    it('translates teacher-facing HTTP errors into Chinese and keeps reason codes in logs', () => {
+        expect(source).to.include("throwExamTeacherValidationError('examNetwork'");
+        expect(source).to.include('logger.warn');
+        expect(source).to.include('reason=%s');
+        expect(source).not.to.include('Invalid request:');
+        expect(source).not.to.include("throw new ValidationError('examNetwork', null, error.reason)");
+    });
 });

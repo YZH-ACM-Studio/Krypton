@@ -1665,7 +1665,8 @@ describe('p2.5 exam seat assignment workspace', () => {
     await openPreflightAfterAssignedNetwork(user);
 
     await user.click(await screen.findByRole('button', { name: '运行终端预检' }));
-    expect(await screen.findByText('告警：usb_storage_detected')).toBeInTheDocument();
+    expect(await screen.findByText('告警：检测到可移动存储设备')).toBeInTheDocument();
+    expect(screen.queryByText(/usb_storage_detected/)).not.toBeInTheDocument();
     expect(screen.getByText('硬错误 0')).toBeInTheDocument();
     await goToSeatPlanStep(user, '预启动终端');
     expect(screen.getByRole('button', { name: '一键预启动全部终端' })).toBeEnabled();
@@ -1734,7 +1735,8 @@ describe('p2.5 exam seat assignment workspace', () => {
     await user.click(screen.getByRole('button', { name: '运行终端预检' }));
     expect(await screen.findByText(/跨教室预登录当前处于兼容读取阶段/)).toBeInTheDocument();
     expect(screen.getByText('北实 201 / seat-01')).toBeInTheDocument();
-    expect(screen.getByText('告警：seat_facing_changed')).toHaveClass('text-amber-700');
+    expect(screen.getByText('告警：座位朝向已变化')).toHaveClass('text-amber-700');
+    expect(screen.queryByText(/seat_facing_changed/)).not.toBeInTheDocument();
     await goToSeatPlanStep(user, '预启动终端');
     expect(screen.getByRole('button', { name: '一键预启动全部终端' })).toBeDisabled();
   });
@@ -2273,7 +2275,8 @@ describe('p2.5 exam seat assignment workspace', () => {
     await user.click(screen.getByRole('button', { name: '一键预启动全部终端' }));
 
     expect(await screen.findByText('确认请求未完成')).toBeInTheDocument();
-    expect(screen.getByText('确认请求结果尚未收敛；原 requestId 已保留，继续同一确认请求前暂不可切换历史批次。')).toBeInTheDocument();
+    expect(screen.getByText('正在按同一确认请求收敛…')).toBeInTheDocument();
+    expect(screen.getByText('同一确认请求尚未收敛，暂不可切换历史批次。')).toBeInTheDocument();
     const lockedHistory = historyBatchButton(historical.requestId);
     expect(lockedHistory).toBeDisabled();
     expect(window.location.search).toContain(`requestId=${request}`);
@@ -2282,6 +2285,266 @@ describe('p2.5 exam seat assignment workspace', () => {
     expect(confirmBodies[0]?.requestId).toBe(request);
     expect(confirmBodies[1]?.requestId).toBe(request);
     expect(window.location.search).toContain(`requestId=${request}`);
+  });
+
+  it('polls the same confirm request until the batch appears without requiring a new confirm click', async () => {
+    const request = '88888888-8888-4888-8888-888888888888';
+    const batch = preloginBatch([
+      { status: 'sent', stage: 'launch' },
+      { status: 'queued', stage: 'dispatch' },
+    ]);
+    batch.requestId = request;
+    if (batch.projection) batch.projection.requestId = request;
+    let requestGets = 0;
+    let confirmPosts = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (init?.method === 'POST' && url.endsWith('/prelogin/confirm')) {
+          confirmPosts += 1;
+          throw new Error(`unexpected confirm: ${url}`);
+        }
+        if (url.endsWith(`/prelogin-requests/${request}`)) {
+          requestGets += 1;
+          return json({ batch: requestGets >= 2 ? batch : null });
+        }
+        if (url.endsWith('/seat-plans')) return json(PLAN_RESPONSE);
+        if (url.endsWith('/seat-assignments')) return json(PUBLISHED_ASSIGNMENT_RESPONSE);
+        if (url.endsWith('/prelogin-latest')) return json({ batch: null });
+        const assigned = assignedNetworkResponse(url);
+        if (assigned) return assigned;
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+    window.history.replaceState(null, '', `/?step=launch&requestId=${request}`);
+    renderPage();
+
+    expect(await screen.findByText('正在按同一确认请求收敛…')).toBeInTheDocument();
+    expect(screen.queryByText('请重新运行终端预检')).not.toBeInTheDocument();
+    expect(screen.queryByText('逐终端结果')).not.toBeInTheDocument();
+    const nav = screen.getByRole('navigation', { name: '考试座位步骤' });
+    expect(within(nav).getByRole('button', { name: '预启动终端' })).toHaveAttribute('aria-current', 'step');
+    expect(await screen.findByText('逐终端结果', {}, { timeout: 3500 })).toBeInTheDocument();
+    expect(requestGets).toBeGreaterThanOrEqual(2);
+    expect(confirmPosts).toBe(0);
+    expect(window.location.search).toContain(`batchId=${batch.batchId}`);
+    expect(window.location.search).not.toContain('requestId=');
+    expect(screen.queryByText('正在按同一确认请求收敛…')).not.toBeInTheDocument();
+  });
+
+  it('resumes a dispatching batch with the same requestId until it is dispatched', async () => {
+    const dispatching = preloginBatch([
+      { status: 'queued', stage: 'dispatch' },
+      { status: 'queued', stage: 'dispatch' },
+    ]);
+    dispatching.state = 'dispatching';
+    (dispatching as { projection: unknown }).projection = null;
+    dispatching.subjects = dispatching.subjects.slice(0, 1);
+    dispatching.retryableTicketIds = [];
+    const completed = preloginBatch([
+      { status: 'sent', stage: 'launch' },
+      { status: 'queued', stage: 'dispatch' },
+    ]);
+    completed.batchId = dispatching.batchId;
+    completed.requestId = dispatching.requestId;
+    completed.assignment = { ...dispatching.assignment };
+    completed.preparationFingerprint = dispatching.preparationFingerprint;
+    if (!dispatching.workflow) throw new Error('dispatching fixture requires a P2.9 workflow');
+    completed.workflow = { ...dispatching.workflow };
+    if (completed.projection) {
+      completed.projection.batchId = completed.batchId;
+      completed.projection.requestId = completed.requestId;
+    }
+    const confirmBodies: Record<string, unknown>[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (init?.method === 'POST' && url.endsWith('/prelogin/confirm')) {
+          confirmBodies.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+          return json({ batch: confirmBodies.length === 1 ? dispatching : completed });
+        }
+        if (init?.method === 'POST' && url.endsWith('/prelogin/prepare')) return readyPreloginPrepareResponse();
+        if (url.endsWith('/seat-plans')) return json(PLAN_RESPONSE);
+        if (url.endsWith('/seat-assignments')) return json(PUBLISHED_ASSIGNMENT_RESPONSE);
+        if (url.endsWith('/prelogin-latest')) return json({ batch: dispatching });
+        if (url.endsWith(`/prelogin-batches/${dispatching.batchId}`)) return json({ batch: completed });
+        const assigned = assignedNetworkResponse(url);
+        if (assigned) return assigned;
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+    renderPageAtStep('launch');
+    expect(await screen.findByText('正在按同一确认请求收敛…')).toBeInTheDocument();
+    await waitFor(() => expect(window.location.search).toContain(`batchId=${dispatching.batchId}`), { timeout: 3500 });
+    expect(window.location.search).not.toContain('requestId=');
+    expect(await screen.findByText('逐终端结果')).toBeInTheDocument();
+    await openLaunchAfterReadyNetwork(user);
+    expect(confirmBodies.length).toBeGreaterThanOrEqual(2);
+    expect(confirmBodies.every((body) => body.requestId === dispatching.requestId)).toBe(true);
+    expect(confirmBodies[0]).toEqual({
+      assignmentRevision: dispatching.assignment.revision,
+      preparationFingerprint: dispatching.preparationFingerprint,
+      workflowFingerprint: dispatching.workflow?.fingerprint,
+      requestId: dispatching.requestId,
+    });
+    expect(window.location.search).toContain(`batchId=${dispatching.batchId}`);
+    expect(window.location.search).not.toContain('requestId=');
+  });
+
+  it('explains contest_not_enterable as a prelogin time window, not a broken configuration', async () => {
+    const preparation = preloginPreparation();
+    preparation.items = preparation.items.map((item, index) =>
+      index === 0
+        ? { ...item, ready: false, diagnostics: [{ code: 'contest_not_enterable', severity: 'error' }] }
+        : item,
+    );
+    preparation.hardErrorCount = 1;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (init?.method === 'POST' && url.endsWith('/prelogin/prepare')) {
+          return json({ preparation, workflow: preloginWorkflow(), v2WriterEnabled: true, workflowWriterEnabled: true });
+        }
+        if (url.endsWith('/seat-plans')) return json(PLAN_RESPONSE);
+        if (url.endsWith('/seat-assignments')) return json(PUBLISHED_ASSIGNMENT_RESPONSE);
+        if (url.endsWith('/prelogin-latest')) return json({ batch: null });
+        const assigned = assignedNetworkResponse(url);
+        if (assigned) return assigned;
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+    renderPageAtStep('preflight');
+    await openPreflightAfterAssignedNetwork(user);
+    await user.click(await screen.findByRole('button', { name: '运行终端预检' }));
+    expect(await screen.findByText('比赛尚未进入可预登录时间（约开赛前 60 分钟）')).toBeInTheDocument();
+    expect(screen.queryByText(/contest_not_enterable/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/配置损坏/)).not.toBeInTheDocument();
+  });
+
+  it('renders monitoring detector warnings in Chinese without exposing detector_degraded', async () => {
+    const workflow = preloginWorkflow();
+    workflow.monitoring.items = workflow.monitoring.items.map((item, index) =>
+      index === 0
+        ? {
+            ...item,
+            warnings: [{ kind: 'detector_degraded', detector: 'process', reason: 'process_path_partial_access_denied' }],
+          }
+        : item,
+    );
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (init?.method === 'POST' && url.endsWith('/prelogin/prepare')) {
+          return json({ preparation: preloginPreparation(), workflow, v2WriterEnabled: true, workflowWriterEnabled: true });
+        }
+        if (url.endsWith('/seat-plans')) return json(PLAN_RESPONSE);
+        if (url.endsWith('/seat-assignments')) return json(PUBLISHED_ASSIGNMENT_RESPONSE);
+        if (url.endsWith('/prelogin-latest')) return json({ batch: null });
+        const assigned = assignedNetworkResponse(url);
+        if (assigned) return assigned;
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+    renderPageAtStep('preflight');
+    await openPreflightAfterAssignedNetwork(user);
+    await user.click(await screen.findByRole('button', { name: '运行终端预检' }));
+    expect(await screen.findByText('告警：进程检测不完整：无法读取部分系统进程路径')).toBeInTheDocument();
+    expect(screen.queryByText(/detector_degraded/)).not.toBeInTheDocument();
+  });
+
+  it('lists retry-blocked reasons by count instead of a single activity-changed banner', async () => {
+    const initial = preloginBatch([{ status: 'failed', stage: 'launch' }]);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (init?.method === 'POST' && url.endsWith(`/prelogin-batches/${initial.batchId}/retry`)) {
+          return new Response(
+            JSON.stringify({
+              error: {
+                name: 'ValidationError',
+                errorCode: 'ValidationError',
+                code: 400,
+                status: 400,
+                params: [],
+                message: '请求无效：exam_prelogin_retry_blocked:active_session_conflict=3',
+              },
+            }),
+            { status: 400, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+        if (init?.method === 'POST' && url.endsWith('/prelogin/prepare')) return readyPreloginPrepareResponse();
+        if (url.endsWith('/seat-plans')) return json(PLAN_RESPONSE);
+        if (url.endsWith('/seat-assignments')) return json(PUBLISHED_ASSIGNMENT_RESPONSE);
+        if (url.endsWith('/prelogin-latest')) return json({ batch: initial });
+        if (url.endsWith(`/prelogin-batches/${initial.batchId}`)) return json({ batch: initial });
+        const assigned = assignedNetworkResponse(url);
+        if (assigned) return assigned;
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+    renderPageAtStep('launch');
+    await openLaunchAfterReadyNetwork(user);
+    await user.click(await screen.findByRole('button', { name: '只重试 1 个失败项' }));
+    expect(await screen.findByText('预登录失败重试被阻止')).toBeInTheDocument();
+    expect(screen.getByText('该终端已有活动考试会话：3 台')).toBeInTheDocument();
+    expect(screen.queryByText('活动变了')).not.toBeInTheDocument();
+    expect(screen.queryByText(/active_session_conflict/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/exam_prelogin_retry_blocked/)).not.toBeInTheDocument();
+  });
+
+  it('lists every reason from a production field-validation retry-blocked sentence', async () => {
+    const initial = preloginBatch([{ status: 'failed', stage: 'launch' }]);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (init?.method === 'POST' && url.endsWith(`/prelogin-batches/${initial.batchId}/retry`)) {
+          return new Response(
+            JSON.stringify({
+              error: {
+                name: 'ValidationError',
+                errorCode: 'ValidationError',
+                code: 400,
+                status: 400,
+                params: [],
+                message: '字段 考试预登录 验证失败。（无法重试预登录：该终端已有活动考试会话 2 台、终端离线 3 台。）',
+              },
+            }),
+            { status: 400, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+        if (init?.method === 'POST' && url.endsWith('/prelogin/prepare')) return readyPreloginPrepareResponse();
+        if (url.endsWith('/seat-plans')) return json(PLAN_RESPONSE);
+        if (url.endsWith('/seat-assignments')) return json(PUBLISHED_ASSIGNMENT_RESPONSE);
+        if (url.endsWith('/prelogin-latest')) return json({ batch: initial });
+        if (url.endsWith(`/prelogin-batches/${initial.batchId}`)) return json({ batch: initial });
+        const assigned = assignedNetworkResponse(url);
+        if (assigned) return assigned;
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+    renderPageAtStep('launch');
+    await openLaunchAfterReadyNetwork(user);
+    await user.click(await screen.findByRole('button', { name: '只重试 1 个失败项' }));
+    expect(
+      await screen.findByText('无法重试预登录：该终端已有活动考试会话 2 台、终端离线 3 台。'),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/该终端已有活动考试会话/)).toBeInTheDocument();
+    expect(screen.getByText(/终端离线/)).toBeInTheDocument();
+    expect(screen.queryByText(/字段 考试预登录 验证失败/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/active_session_conflict/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/endpoint_offline/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/exam_prelogin_retry_blocked/)).not.toBeInTheDocument();
   });
 
   it('separates final success, retryable failure and in-flight subjects and retries only the exact failure set', async () => {

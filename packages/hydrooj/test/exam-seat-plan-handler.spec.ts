@@ -71,4 +71,12 @@ describe('P2.4 roster and seat-plan HTTP boundary', () => {
         expect(eventSource).to.include('examSeatPlanService.assertEventSchoolChangeAllowed(domainId, eventId)');
         expect(eventSource).to.include('examNetworkConfigService.assertEventSchoolChangeAllowed(domainId, eventId)');
     });
+
+    it('translates teacher-facing HTTP errors into Chinese and keeps reason codes in logs', () => {
+        expect(source).to.include("throwExamTeacherValidationError('examSeatPlan'");
+        expect(source).to.include("throwExamTeacherValidationError('eventId', 'event_canonical_invalid')");
+        expect(source).to.include("throwExamTeacherValidationError('eventId', 'event_archived')");
+        expect(source).to.include('logger.warn(\'Exam seat plan rejected reason=%s\'');
+        expect(source).not.to.include('Invalid request:');
+    });
 });

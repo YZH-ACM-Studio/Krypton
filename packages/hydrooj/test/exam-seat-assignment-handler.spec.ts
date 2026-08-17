@@ -104,6 +104,13 @@ describe('P2.5 seat assignment HTTP boundary', () => {
         expect(loggerCalls.join('\n')).not.to.match(/realName|studentId/);
     });
 
+    it('translates teacher-facing HTTP errors into Chinese and keeps reason codes in logs', () => {
+        expect(source).to.include("throwExamTeacherValidationError('examSeatAssignment'");
+        expect(source).to.include("throwExamTeacherValidationError('eventId', 'event_canonical_invalid')");
+        expect(source).to.include('logger.warn(\'Exam seat assignment rejected reason=%s\'');
+        expect(source).not.to.include('Invalid request:');
+    });
+
     it('publishes only the strict latest v2 assignment for the strict latest v2 plan', () => {
         expect(source).to.include('examSeatAssignmentService.latestRevision(domainId, eventId)');
         expect(source).to.include('examSeatPlanService.latestSeatPlanRevision(domainId, eventId)');

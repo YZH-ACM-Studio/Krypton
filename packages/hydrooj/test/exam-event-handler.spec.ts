@@ -244,4 +244,11 @@ describe('ExamEvent audited mutation boundary', () => {
         expect(tryOffset).to.be.lessThan(source.indexOf('canonicalCollaboratorUids(this.user._id', tryOffset));
         expect(source.indexOf('translateExamEventError(error)', tryOffset)).to.be.greaterThan(tryOffset);
     });
+
+    it('translates teacher-facing HTTP errors into Chinese and keeps reason codes in logs', () => {
+        expect(source).to.include("throwExamTeacherValidationError('examEvent'");
+        expect(source).to.include('logger.warn(\'Exam event rejected reason=%s\'');
+        expect(source).not.to.include('Invalid request:');
+        expect(source).not.to.include("throw new ValidationError('examEvent', null, error.reason)");
+    });
 });

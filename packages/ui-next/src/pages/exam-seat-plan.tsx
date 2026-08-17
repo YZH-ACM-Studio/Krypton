@@ -1189,6 +1189,226 @@ function riskEdgeKey(edge: AssignmentV2RiskEdge): string {
   return `${seatIdentityKey(edge.left)}\u0001${seatIdentityKey(edge.right)}`;
 }
 
+const UNKNOWN_TEACHER_ERROR = '操作无法完成，请重试。';
+const SNAKE_CASE_TOKEN = /[a-z][a-z0-9]*(?:_[a-z0-9]+)+/;
+const HAS_CJK = /[\u3400-\u9fff]/;
+
+const TEACHER_CODE_LABELS: Record<string, string> = {
+  active_session_conflict: '该终端已有活动考试会话',
+  assignment_already_confirmed: '当前发布版本已经确认过预登录',
+  assignment_reference_changed: '座位分配引用已变化',
+  batch_not_found: '找不到该预登录批次',
+  contest_not_enterable: '比赛尚未进入可预登录时间（约开赛前 60 分钟）',
+  constraint_conflict: '约束冲突',
+  detector_degraded: '检测不完整',
+  detector_failed: '检测失败',
+  detector_unsupported: '检测不受支持',
+  duplicate_fixed_seat: '多个学生被指定到同一座位',
+  duplicate_seat: '存在重复座位',
+  duplicate_uid: '存在重复学生',
+  endpoint_capability_missing: '终端缺少预登录能力',
+  endpoint_credential_not_active: '终端凭据不是活动状态',
+  endpoint_incompatible: '终端版本或协议不兼容',
+  endpoint_not_registered: '终端尚未登记',
+  endpoint_offline: '终端离线',
+  endpoint_offline_before_send: '发送前终端已离线',
+  exam_prelogin_activity_changed: '当前预登录条件已变化，请重新核对接线后再试',
+  exam_prelogin_assignment_not_found: '找不到用于预登录的座位分配',
+  exam_prelogin_assignment_not_published: '用于预登录的座位分配尚未发布',
+  exam_prelogin_assignment_reference_changed: '座位分配引用已变化',
+  exam_prelogin_retry_blocked: '预登录失败重试被阻止',
+  exam_prelogin_retry_readiness_invalid: '失败重试前的就绪检查结果无效',
+  external_workspace_unavailable: '外部考试没有可用的 Contest 工作台',
+  forbidden_process_detected: '检测到禁用进程',
+  forbidden_window_detected: '检测到可疑前台窗口',
+  locked_manual_mismatch: '锁定座位与人工映射不一致',
+  locked_seat_unavailable: '锁定的座位当前不可分配',
+  locked_uid_missing: '锁定座位对应的学生已不在名单中',
+  manual_mapping_incomplete: '人工映射不完整',
+  manual_seat_unavailable: '人工指定的座位当前不可分配',
+  manual_uid_missing: '人工指定的学生已不在名单中',
+  monitoring_failed: '监测失败',
+  monitoring_unavailable: '监测不可用',
+  network_execution_expired: '网络执行已到硬截止',
+  network_execution_failed: '网络执行失败',
+  network_execution_not_active: '网络尚未启动',
+  network_execution_not_ready: '网络策略尚未在全部目标终端完成应用',
+  network_execution_pending: '网络执行仍在进行',
+  page_launch_failed: '未能打开考试页面',
+  preparation_fingerprint_changed: '终端预检指纹已变化，请重新运行终端预检',
+  process_launch_failed: '未能拉起考试客户端',
+  process_path_partial_access_denied: '无法读取部分系统进程路径',
+  process_path_partial_query_failed: '无法读取部分系统进程路径',
+  process_snapshot_failed: '无法获取系统进程快照',
+  process_snapshot_read_failed: '无法读取系统进程列表',
+  ready: '已就绪',
+  result_not_bijective: '分配结果不是一一对应',
+  seat_binding_changed: '座位绑定已变化',
+  seat_facing_changed: '座位朝向已变化',
+  usb_storage_detected: '检测到可移动存储设备',
+  user_binding_changed: '学生绑定已变化',
+  vigil_delivery_unknown: '投递结果未知',
+  workflow_fingerprint_changed: '准备工作流已变化，请重新运行终端预检',
+  workflow_not_ready: '准备工作流仍有硬错误，不能预启动',
+};
+
+const MONITORING_DETECTOR_LABELS: Record<'foreground' | 'process' | 'usb', string> = {
+  foreground: '前台窗口',
+  process: '进程',
+  usb: 'USB',
+};
+
+const PRELOGIN_STAGE_LABELS: Record<PreloginStage, string> = {
+  dispatch: '投递',
+  launch: '拉起',
+  page_ready: '页面就绪',
+  process_ready: '进程就绪',
+  redeemed: '已兑换',
+};
+
+const PRELOGIN_STATUS_LABELS: Record<PreloginDispatchStatus, string> = {
+  applied: '已应用',
+  expired: '已过期',
+  failed: '失败',
+  offline: '离线',
+  queued: '排队中',
+  rejected: '已拒绝',
+  sent: '已发送',
+};
+
+function teacherCodeLabel(code: string): string | null {
+  if (TEACHER_CODE_LABELS[code]) return TEACHER_CODE_LABELS[code];
+  const stripped = code.replace(/^exam_prelogin_/, '');
+  if (stripped !== code && TEACHER_CODE_LABELS[stripped]) return TEACHER_CODE_LABELS[stripped];
+  const numbered = code.match(/^([a-z][a-z0-9]*(?:_[a-z0-9]+)+)_\d+$/);
+  if (numbered?.[1] && TEACHER_CODE_LABELS[numbered[1]]) return TEACHER_CODE_LABELS[numbered[1]];
+  return null;
+}
+
+function formatTeacherCode(code: string, fallback = UNKNOWN_TEACHER_ERROR): string {
+  return teacherCodeLabel(code) || fallback;
+}
+
+function formatPreloginDiagnostic(code: PreloginDiagnosticCode): string {
+  return formatTeacherCode(code);
+}
+
+function formatMonitoringWarning(warning: { kind: MonitoringWarningKind; detector: 'foreground' | 'process' | 'usb' | null; reason: string | null }): string {
+  const kindLabel = formatTeacherCode(warning.kind);
+  const detectorLabel = warning.detector ? MONITORING_DETECTOR_LABELS[warning.detector] : null;
+  const reasonLabel = warning.reason
+    ? teacherCodeLabel(warning.reason) || (HAS_CJK.test(warning.reason) ? warning.reason : null)
+    : null;
+  if (detectorLabel && (warning.kind === 'detector_degraded' || warning.kind === 'detector_failed' || warning.kind === 'detector_unsupported')) {
+    const headline = `${detectorLabel}${kindLabel}`;
+    return reasonLabel ? `${headline}：${reasonLabel}` : headline;
+  }
+  return reasonLabel ? `${kindLabel}：${reasonLabel}` : kindLabel;
+}
+
+function formatNetworkReason(reason: PreloginWorkflow['network']['reason']): string {
+  if (reason === 'ready') return '';
+  if (reason === 'network_execution_not_active') return '尚未启动';
+  if (reason === 'network_execution_expired') return '已到硬截止';
+  if (reason === 'network_execution_pending') return '网络执行仍在进行';
+  if (reason === 'network_execution_failed') return '网络执行失败';
+  return formatTeacherCode(reason);
+}
+
+function formatConstraintReason(reason: string): string {
+  return teacherCodeLabel(reason) || (HAS_CJK.test(reason) ? reason : UNKNOWN_TEACHER_ERROR);
+}
+
+function formatFailureReason(reason: string): string {
+  return teacherCodeLabel(reason) || (HAS_CJK.test(reason) ? reason : UNKNOWN_TEACHER_ERROR);
+}
+
+function isExplicitTeacherFailure(message: string): boolean {
+  return /请求无效|访问被拒绝|没有管理|无权访问/.test(message);
+}
+
+function parseFieldValidationInner(message: string): string | null {
+  const payload = message.replace(/^(?:请求无效：)+/, '').trim();
+  const wrapped =
+    payload.match(/字段\s+.+?\s+验证失败。[（(]([\s\S]+?)[）)]/)
+    || payload.match(/Field\s+.+?\s+validation failed\.\s*\(([\s\S]+?)\)/);
+  const inner = wrapped?.[1]?.trim();
+  return inner || null;
+}
+
+function parseRetryBlocked(message: string): { summary: string; items: string[]; raw: string | null } | null {
+  const inner = parseFieldValidationInner(message);
+  if (inner && HAS_CJK.test(inner) && !SNAKE_CASE_TOKEN.test(inner)) {
+    return { summary: inner, items: [], raw: null };
+  }
+  const source = inner || message;
+  const match = source.match(/exam_prelogin_retry_blocked(?::(.*))?/);
+  if (!match) return null;
+  const rest = (match[1] || '').trim();
+  const pairs = [...rest.matchAll(/([a-z][a-z0-9]*(?:_[a-z0-9]+)+)=(\d+)/g)];
+  if (pairs.length) {
+    const unknown = pairs.some(([, code]) => !teacherCodeLabel(code));
+    return {
+      summary: TEACHER_CODE_LABELS.exam_prelogin_retry_blocked,
+      items: pairs.map(([, code, count]) => `${formatTeacherCode(code)}：${count} 台`),
+      raw: unknown ? rest : null,
+    };
+  }
+  if (rest && HAS_CJK.test(rest) && !SNAKE_CASE_TOKEN.test(rest)) {
+    return { summary: TEACHER_CODE_LABELS.exam_prelogin_retry_blocked, items: [rest], raw: null };
+  }
+  if (rest) {
+    const label = teacherCodeLabel(rest);
+    return {
+      summary: TEACHER_CODE_LABELS.exam_prelogin_retry_blocked,
+      items: [label || UNKNOWN_TEACHER_ERROR],
+      raw: label ? null : rest,
+    };
+  }
+  return { summary: TEACHER_CODE_LABELS.exam_prelogin_retry_blocked, items: [], raw: null };
+}
+
+function presentTeacherError(message: string): { summary: string; items: string[]; raw: string | null } {
+  const trimmed = message.trim();
+  const retry = parseRetryBlocked(trimmed);
+  if (retry) return retry;
+  const payload = trimmed.replace(/^(?:请求无效：)+/, '');
+  const inner = parseFieldValidationInner(payload);
+  if (inner && HAS_CJK.test(inner) && !SNAKE_CASE_TOKEN.test(inner)) {
+    return { summary: inner, items: [], raw: null };
+  }
+  const exact = payload.match(/^([a-z][a-z0-9]*(?:_[a-z0-9]+)+)(?::(.*))?$/);
+  if (exact) {
+    const label = teacherCodeLabel(exact[1]);
+    if (!label) return { summary: UNKNOWN_TEACHER_ERROR, items: [], raw: payload };
+    const detail = exact[2]?.trim();
+    if (!detail) return { summary: label, items: [], raw: null };
+    const detailLabel = teacherCodeLabel(detail) || (HAS_CJK.test(detail) ? detail : null);
+    return detailLabel ? { summary: `${label}：${detailLabel}`, items: [], raw: null } : { summary: label, items: [], raw: payload };
+  }
+  const replaced = payload.replace(new RegExp(SNAKE_CASE_TOKEN, 'g'), (token) => teacherCodeLabel(token) || token);
+  if (SNAKE_CASE_TOKEN.test(replaced)) return { summary: UNKNOWN_TEACHER_ERROR, items: [], raw: trimmed };
+  return { summary: replaced, items: [], raw: null };
+}
+
+function TeacherSurfaceError({ className, message }: { className?: string; message: string }) {
+  const presented = presentTeacherError(message);
+  return (
+    <div role="alert" className={className}>
+      <p>{presented.summary}</p>
+      {presented.items.map((item) => (
+        <p key={item}>{item}</p>
+      ))}
+      {presented.raw ? (
+        <details className="mt-2 text-xs text-muted-foreground">
+          <summary className="cursor-pointer text-sm text-foreground">技术细节</summary>
+          <p className="mt-1 font-mono">{presented.raw}</p>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
 function diagnosticText(diagnostic: AssignmentDiagnostic): string {
   if (diagnostic.code === 'insufficient_seats') {
     return `可用座位不足：需要 ${diagnostic.requiredSeatCount || 0}，当前 ${diagnostic.availableSeatCount || 0}`;
@@ -1197,9 +1417,14 @@ function diagnosticText(diagnostic: AssignmentDiagnostic): string {
   if (diagnostic.code === 'seat_unbound') return `已排除未绑定终端的座位：${diagnostic.sourceSeatIds?.join('、') || '-'}`;
   if (diagnostic.code === 'seat_status_invalid') return `座位状态异常：${diagnostic.sourceSeatIds?.join('、') || '-'}`;
   if (diagnostic.code === 'seat_skipped') {
-    return `已跳过不可分配座位：${diagnostic.seats?.map((item) => `${item.seat.classroomId}/${item.seat.sourceSeatId}（${item.reason}）`).join('、') || '-'}`;
+    return `已跳过不可分配座位：${
+      diagnostic.seats
+        ?.map((item) => `${item.seat.classroomId}/${item.seat.sourceSeatId}（${skippedReasonLabel[item.reason]}）`)
+        .join('、') || '-'
+    }`;
   }
-  return `约束冲突：${diagnostic.reasons?.join('、') || diagnostic.code}`;
+  const reasons = diagnostic.reasons?.map(formatConstraintReason).join('、');
+  return `约束冲突：${reasons || formatTeacherCode(diagnostic.code)}`;
 }
 
 function rosterDriftText(item: PublishedRosterDriftItem): string {
@@ -1468,6 +1693,8 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
   const [selectedPreloginPolicy, setSelectedPreloginPolicy] = useState('');
   const [preloginBusy, setPreloginBusy] = useState(false);
   const [preloginError, setPreloginError] = useState<string | null>(null);
+  const [pendingConfirmRequestId, setPendingConfirmRequestId] = useState<string | null>(() => new URL(window.location.href).searchParams.get('requestId'));
+  const [holdLaunchAfterConfirm, setHoldLaunchAfterConfirm] = useState(() => Boolean(new URL(window.location.href).searchParams.get('requestId')));
   const [activeStep, setActiveStep] = useState<SeatPlanStepId | null>(readSeatPlanStepFromUrl);
   const [networkSetupFailedAt, setNetworkSetupFailedAt] = useState<NetworkSetupStage | null>(null);
   const workspaceLoadGenerationRef = useRef(0);
@@ -1642,6 +1869,10 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
         else if (value === null) url.searchParams.delete(key);
       }
       window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+      if (state.requestId !== undefined) {
+        setPendingConfirmRequestId(state.requestId);
+        if (state.requestId) setHoldLaunchAfterConfirm(true);
+      }
     },
     [],
   );
@@ -1741,10 +1972,14 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
         requestId: batch.requestId,
       });
       const resumed = parsePreloginBatch(payload.batch, eventId);
-      if (resumed.state !== 'dispatched' || resumed.requestId !== batch.requestId || resumed.batchId !== batch.batchId) {
+      if (resumed.requestId !== batch.requestId || resumed.batchId !== batch.batchId) {
         throw new Error('预登录确认恢复未收敛');
       }
-      if (acceptPreloginBatch(resumed, expected)) writePreloginUrl({ batchId: resumed.batchId, requestId: null });
+      if (resumed.state === 'dispatched') {
+        if (acceptPreloginBatch(resumed, expected)) writePreloginUrl({ batchId: resumed.batchId, requestId: null });
+      } else {
+        acceptPreloginBatch(resumed, expected);
+      }
       return resumed;
     },
     [acceptPreloginBatch, eventId, path, writePreloginUrl],
@@ -1766,10 +2001,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
       const payload = recoverRequestId
         ? await apiObject(`${path}/prelogin-requests/${encodeURIComponent(requestId(recoverRequestId, '预登录 URL'))}`)
         : await apiObject(`${path}/prelogin-latest`);
-      if (payload.batch === null) {
-        if (recoverRequestId) throw new Error('尚未找到该确认请求；请重新运行终端预检后使用同一请求继续。');
-        return null;
-      }
+      if (payload.batch === null) return null;
       const batch = parsePreloginBatch(payload.batch, eventId);
       if (current) {
         selectPreloginBatch(batch);
@@ -1785,6 +2017,45 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
       current = false;
     };
   }, [eventId, loadPreloginBatch, path, resumeDispatchingPrelogin, selectPreloginBatch, writePreloginUrl]);
+
+  useEffect(() => {
+    if (preloginBatch || !pendingConfirmRequestId) return;
+    let current = true;
+    let timer: number | null = null;
+    const poll = async () => {
+      if (!current) return;
+      if (document.visibilityState === 'hidden') {
+        timer = window.setTimeout(poll, 2000);
+        return;
+      }
+      try {
+        const payload = await apiObject(`${path}/prelogin-requests/${encodeURIComponent(requestId(pendingConfirmRequestId, '预登录 URL'))}`);
+        if (!current) return;
+        if (payload.batch === null) {
+          timer = window.setTimeout(poll, 2000);
+          return;
+        }
+        const batch = parsePreloginBatch(payload.batch, eventId);
+        selectPreloginBatch(batch);
+        if (batch.state === 'dispatched') writePreloginUrl({ batchId: batch.batchId, requestId: null });
+        else writePreloginUrl({ batchId: null, requestId: batch.requestId });
+        if (batch.state === 'dispatching') await resumeDispatchingPrelogin(batch);
+      } catch (reason) {
+        if (!current) return;
+        const message = reason instanceof Error ? reason.message : String(reason);
+        if (isExplicitTeacherFailure(message)) {
+          setPreloginError(message);
+          return;
+        }
+        timer = window.setTimeout(poll, 2000);
+      }
+    };
+    timer = window.setTimeout(poll, 2000);
+    return () => {
+      current = false;
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [eventId, path, pendingConfirmRequestId, preloginBatch, resumeDispatchingPrelogin, selectPreloginBatch, writePreloginUrl]);
 
   const loadPreloginBatchHistory = useCallback(async () => {
     setPreloginBusy(true);
@@ -1809,8 +2080,13 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
         return;
       }
       try {
-        const batch = await loadPreloginBatch(preloginBatch.batchId);
-        if (!batch || preloginBatchReachedTerminalState(batch)) return;
+        if (preloginBatch.state === 'dispatching') {
+          const resumed = await resumeDispatchingPrelogin(preloginBatch);
+          if (preloginBatchReachedTerminalState(resumed)) return;
+        } else {
+          const batch = await loadPreloginBatch(preloginBatch.batchId);
+          if (!batch || preloginBatchReachedTerminalState(batch)) return;
+        }
       } catch (reason) {
         if (current) setPreloginError(reason instanceof Error ? reason.message : String(reason));
       }
@@ -1821,7 +2097,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
       current = false;
       if (timer !== null) window.clearTimeout(timer);
     };
-  }, [loadPreloginBatch, preloginBatch]);
+  }, [loadPreloginBatch, preloginBatch, resumeDispatchingPrelogin]);
 
   const execute = useCallback(
     async (body: Record<string, unknown>): Promise<'blocked' | 'error' | 'ok'> => {
@@ -2841,7 +3117,8 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
     const url = new URL(window.location.href);
     return Boolean(url.searchParams.get('retryRequestId') && url.searchParams.get('retryProjectionRevision'));
   }, [preloginBatch, preloginError]);
-  const pendingConfirmIdentity = new URL(window.location.href).searchParams.has('requestId');
+  const pendingConfirmIdentity = Boolean(pendingConfirmRequestId);
+  const convergingConfirmRequest = pendingConfirmIdentity && !preloginBatch;
   const steps = workspace?.eventType === 'external' ? EXTERNAL_SEAT_PLAN_STEPS : KRYPTON_SEAT_PLAN_STEPS;
   const hasRoster = Boolean(workspace?.rosterRevisions.length);
   const hasPlan = Boolean(workspace?.seatPlans.length);
@@ -2887,7 +3164,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
     ),
     preflight: Boolean(preloginFactsCurrent && preloginPreparation),
     lock: Boolean(preloginWorkflow?.network.ready),
-    launch: Boolean(preloginBatch || pendingConfirmIdentity),
+    launch: Boolean(preloginBatch),
   };
   const firstIncompleteStep = ((): SeatPlanStepId => {
     if (publicContestBlocksSeating || !stepCompleted.roster) return 'roster';
@@ -2903,6 +3180,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
   })();
   const canVisitStep = (step: SeatPlanStepId): boolean => {
     if (!workspace) return step === 'roster';
+    if ((convergingConfirmRequest || holdLaunchAfterConfirm) && step === 'launch') return true;
     if (publicContestBlocksSeating) return step === 'roster';
     if (workspace.eventType === 'external' && (step === 'network' || step === 'preflight' || step === 'lock')) return false;
     const stepIndex = steps.findIndex((item) => item.id === step);
@@ -2912,17 +3190,31 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
     if ((step === 'adjust' || step === 'publish') && hasAssignment && hasRoster) return true;
     return false;
   };
-  const displayStep = activeStep && canVisitStep(activeStep) ? activeStep : workspace ? firstIncompleteStep : 'roster';
+  const displayStep = convergingConfirmRequest
+    ? 'launch'
+    : activeStep && canVisitStep(activeStep)
+      ? activeStep
+      : workspace
+        ? firstIncompleteStep
+        : 'roster';
   const goToStep = (step: SeatPlanStepId) => {
+    if (step !== 'launch') setHoldLaunchAfterConfirm(false);
     setActiveStep(step);
     writePreloginUrl({ step });
   };
   useEffect(() => {
     if (!workspace) return;
+    if (convergingConfirmRequest || (holdLaunchAfterConfirm && (activeStep === 'launch' || !activeStep))) {
+      if (activeStep !== 'launch') {
+        setActiveStep('launch');
+        writePreloginUrl({ step: 'launch' });
+      }
+      return;
+    }
     if (activeStep && canVisitStep(activeStep)) return;
     setActiveStep(firstIncompleteStep);
     writePreloginUrl({ step: firstIncompleteStep });
-  }, [activeStep, firstIncompleteStep, workspace, writePreloginUrl]);
+  }, [activeStep, convergingConfirmRequest, firstIncompleteStep, holdLaunchAfterConfirm, workspace, writePreloginUrl]);
   const displayStepIndex = steps.findIndex((step) => step.id === displayStep);
   const nextStep = displayStepIndex >= 0 ? steps[displayStepIndex + 1] : undefined;
   const nextStepReady = Boolean(nextStep && stepCompleted[displayStep] && canVisitStep(nextStep.id));
@@ -2982,9 +3274,10 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
     >
       <div className="space-y-4 pb-10">
         {error ? (
-          <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-            {error}
-          </div>
+          <TeacherSurfaceError
+            className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive"
+            message={error}
+          />
         ) : null}
         {workspace?.publishedRosterDrift?.changed ? (
           <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
@@ -3831,9 +4124,10 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                 </div>
               ) : null}
               {preloginError ? (
-                <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-                  {preloginError}
-                </p>
+                <TeacherSurfaceError
+                  className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive"
+                  message={preloginError}
+                />
               ) : null}
               {workspace?.eventLifecycle === 'draft' ? (
                 <Button
@@ -3914,9 +4208,10 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                 </p>
               ) : null}
               {preloginError ? (
-                <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-                  {preloginError}
-                </p>
+                <TeacherSurfaceError
+                  className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive"
+                  message={preloginError}
+                />
               ) : null}
               {preloginFactsCurrent && preloginWorkflow && preloginPreparation ? (
                 <div className="space-y-3 rounded-md border p-3">
@@ -3933,8 +4228,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                       <p className="text-xs text-muted-foreground">
                         网络应用 {preloginWorkflow.network.appliedCount} · 失败 {preloginWorkflow.network.failedCount} · 在途{' '}
                         {preloginWorkflow.network.pendingCount}
-                        {preloginWorkflow.network.reason === 'network_execution_not_active' ? ' · 尚未启动' : ''}
-                        {preloginWorkflow.network.reason === 'network_execution_expired' ? ' · 已到硬截止' : ''}
+                        {formatNetworkReason(preloginWorkflow.network.reason) ? ` · ${formatNetworkReason(preloginWorkflow.network.reason)}` : ''}
                       </p>
                       <p className="text-xs text-muted-foreground">
                         预登录终端覆盖 {preloginWorkflow.network.coveredPreloginCount}/{preloginWorkflow.network.preloginEndpointCount}
@@ -3991,17 +4285,19 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                                 </Badge>
                                 {hardDiagnostics.length ? (
                                   <div className="mt-1 text-xs text-destructive">
-                                    {hardDiagnostics.map((diagnostic) => diagnostic.code).join('、')}
+                                    {hardDiagnostics.map((diagnostic) => formatPreloginDiagnostic(diagnostic.code)).join('、')}
                                   </div>
                                 ) : null}
                                 {warningDiagnostics.length ? (
                                   <div className="mt-1 text-xs text-amber-700">
-                                    告警：{warningDiagnostics.map((diagnostic) => diagnostic.code).join('、')}
+                                    告警：{warningDiagnostics.map((diagnostic) => formatPreloginDiagnostic(diagnostic.code)).join('、')}
                                   </div>
                                 ) : null}
                                 {monitoring?.warnings.length ? (
-                                  <div className="mt-1 text-xs text-amber-700">
-                                    告警：{monitoring.warnings.map((warning) => warning.kind).join('、')}
+                                  <div className="mt-1 space-y-1 text-xs text-amber-700">
+                                    {monitoring.warnings.map((warning, index) => (
+                                      <div key={`${warning.kind}-${warning.detector || 'none'}-${index}`}>告警：{formatMonitoringWarning(warning)}</div>
+                                    ))}
                                   </div>
                                 ) : null}
                               </TableCell>
@@ -4050,16 +4346,16 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                   {preloginWorkflow.network.source === 'execution'
                     ? `运行执行 r${preloginWorkflow.network.executionRevision}`
                     : `活动配置 r${preloginWorkflow.network.configRevision}`}
-                  {preloginWorkflow.network.reason === 'network_execution_not_active' ? ' · 尚未启动' : ''}
-                  {preloginWorkflow.network.reason === 'network_execution_expired' ? ' · 已到硬截止' : ''}
+                  {formatNetworkReason(preloginWorkflow.network.reason) ? ` · ${formatNetworkReason(preloginWorkflow.network.reason)}` : ''}
                 </p>
               ) : (
                 <p className="text-sm text-muted-foreground">请先运行终端预检，再启动网络。</p>
               )}
               {preloginError ? (
-                <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-                  {preloginError}
-                </p>
+                <TeacherSurfaceError
+                  className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive"
+                  message={preloginError}
+                />
               ) : null}
               <StepFooter
                 left={rereadButton}
@@ -4131,9 +4427,10 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                 </p>
               ) : null}
               {preloginError ? (
-                <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-                  {preloginError}
-                </p>
+                <TeacherSurfaceError
+                  className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive"
+                  message={preloginError}
+                />
               ) : null}
               {preloginBatch ? (
                 <div className="space-y-3 rounded-md border p-3">
@@ -4215,12 +4512,14 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                                 </div>
                                 <div className="font-mono text-xs text-muted-foreground">{subject.endpointId}</div>
                               </TableCell>
-                              <TableCell>{result?.stage || 'dispatch'}</TableCell>
+                              <TableCell>{result ? PRELOGIN_STAGE_LABELS[result.stage] : PRELOGIN_STAGE_LABELS.dispatch}</TableCell>
                               <TableCell>
                                 <Badge variant={succeeded ? 'default' : result && retryableStatuses.has(result.status) ? 'destructive' : 'outline'}>
-                                  {succeeded ? '页面就绪' : result?.status || '未处理'}
+                                  {succeeded ? '页面就绪' : result ? PRELOGIN_STATUS_LABELS[result.status] : '未处理'}
                                 </Badge>
-                                {result?.failureReason ? <div className="mt-1 text-xs text-destructive">{result.failureReason}</div> : null}
+                                {result?.failureReason ? (
+                                  <div className="mt-1 text-xs text-destructive">{formatFailureReason(result.failureReason)}</div>
+                                ) : null}
                               </TableCell>
                             </TableRow>
                           );
@@ -4230,12 +4529,13 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                   </div>
                 </div>
               ) : null}
+              {convergingConfirmRequest || preloginBatch?.state === 'dispatching' ? (
+                <p className="text-sm">正在按同一确认请求收敛…</p>
+              ) : null}
               {pendingConfirmIdentity ? (
                 <div className="space-y-2">
                   <p className="text-sm">确认请求未完成</p>
-                  <p className="text-xs text-amber-700 dark:text-amber-300">
-                    确认请求结果尚未收敛；原 requestId 已保留，继续同一确认请求前暂不可切换历史批次。
-                  </p>
+                  <p className="text-xs text-amber-700 dark:text-amber-300">同一确认请求尚未收敛，暂不可切换历史批次。</p>
                 </div>
               ) : null}
               <Button size="sm" variant="ghost" disabled={mutationBusy} onClick={() => void loadPreloginBatchHistory()}>

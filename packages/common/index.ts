@@ -1,5 +1,6 @@
 export * from './datetime';
 export * from './error-envelope';
+export * from './exam-teacher-errors';
 export * from './lang';
 export * from './objective';
 export * from './permission';

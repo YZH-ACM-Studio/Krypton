@@ -1,6 +1,8 @@
 import { lookup } from 'node:dns/promises';
+import { Logger } from '@hydrooj/utils';
 import { ObjectId } from 'mongodb';
-import { Context, Handler, localizedErrorText, param, PermissionError, Types, ValidationError } from 'hydrooj';
+import { Context, Handler, param, PermissionError, Types, ValidationError } from 'hydrooj';
+import { throwExamTeacherValidationError } from '../lib/exam-teacher-http-error';
 import { PERM } from '../model/builtin';
 import { assertCanManageExamEvent, assertExamEventCollaborators, isExamInfrastructureAdmin } from '../model/exam-event-access';
 import { ExamEventDoc, examEventService } from '../model/exam-event';
@@ -130,14 +132,26 @@ function serializePreview(preview: TargetPreview) {
     return preview;
 }
 
+const logger = new Logger('exam-network-config');
+
 export function translateExamNetworkError(error: unknown): never {
     if (error instanceof ExamNetworkConfigError && error.detail) {
         const location = [error.detail.classroomId, error.detail.sourceSeatId].filter(Boolean).join('/');
         const detail = [error.detail.stage, location || null, error.detail.uid ? `uid=${error.detail.uid}` : null].filter(Boolean).join(':');
-        throw new ValidationError('examNetwork', null, localizedErrorText`Invalid request: ${error.reason}:${detail}`);
+        logger.warn(
+            'Exam network rejected reason=%s event=%s classroom=%s seat=%s uid=%s stage=%s',
+            error.reason,
+            error.detail.eventId ?? '-',
+            error.detail.classroomId ?? '-',
+            error.detail.sourceSeatId ?? '-',
+            error.detail.uid ?? '-',
+            error.detail.stage ?? '-',
+        );
+        throwExamTeacherValidationError('examNetwork', `${error.reason}:${detail}`);
     }
     if (error instanceof ExamNetworkConfigError || error instanceof ExamNetworkPolicyError) {
-        throw new ValidationError('examNetwork', null, error.reason);
+        logger.warn('Exam network rejected reason=%s', error.reason);
+        throwExamTeacherValidationError('examNetwork', error.reason);
     }
     throw error;
 }
@@ -183,7 +197,7 @@ abstract class ExamNetworkBaseHandler extends Handler {
     }
 
     protected assertEventWritable(event: ExamEventDoc): void {
-        if (event.lifecycle === 'archived') throw new ValidationError('eventId', null, 'archived');
+        if (event.lifecycle === 'archived') throwExamTeacherValidationError('eventId', 'archived');
     }
 }
 

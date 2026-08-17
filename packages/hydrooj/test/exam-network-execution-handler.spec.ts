@@ -58,6 +58,9 @@ describe('exam network execution HTTP contracts', () => {
         expect(handler).to.include('examNetworkExecutionService.beginRetry');
         expect(handler).to.include("retryMode: 'full_target'");
         expect(handler).to.include("throw new ExamNetworkExecutionError('retry_requires_current_config')");
+        expect(handler).to.include("throwExamTeacherValidationError('examNetworkExecution'");
+        expect(handler).to.include('logger.warn(\'Exam network execution rejected reason=%s\'');
+        expect(handler).not.to.include("throw new ValidationError('examNetworkExecution', null, error.reason)");
     });
 
     it('accepts callbacks only through the existing Vigil service-token handler', () => {

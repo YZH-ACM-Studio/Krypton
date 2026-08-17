@@ -1,6 +1,7 @@
 import { Logger } from '@hydrooj/utils';
 import { ObjectId } from 'mongodb';
-import { Context, Handler, localizedErrorText, OplogModel, param, PermissionError, requireServiceToken, Types, ValidationError } from 'hydrooj';
+import { Context, Handler, OplogModel, param, PermissionError, requireServiceToken, Types, ValidationError } from 'hydrooj';
+import { throwExamTeacherValidationError } from '../lib/exam-teacher-http-error';
 import { PERM } from '../model/builtin';
 import { assertCanManageExamEvent, isExamInfrastructureAdmin } from '../model/exam-event-access';
 import { ExamEventDoc, examEventService } from '../model/exam-event';
@@ -74,7 +75,7 @@ function translate(error: unknown): never {
             reasons,
             sample,
         );
-        throw new ValidationError('examPrelogin', null, localizedErrorText`Invalid request: ${`${error.reason}:${reasons}`}`);
+        throwExamTeacherValidationError('examPrelogin', `${error.reason}:${reasons}`);
     }
     if (error instanceof ExamSeatAssignmentReadinessError) {
         logger.warn(
@@ -89,13 +90,15 @@ function translate(error: unknown): never {
         );
         const location = [error.detail.classroomId, error.detail.sourceSeatId].filter(Boolean).join('/');
         const detail = [error.stage, location || null, error.detail.uid ? `uid=${error.detail.uid}` : null].filter(Boolean).join(':');
-        throw new ValidationError('examPrelogin', null, localizedErrorText`Invalid request: ${error.reason}:${detail}`);
+        throwExamTeacherValidationError('examPrelogin', `${error.reason}:${detail}`);
     }
     if (error instanceof ExamPreloginError || error instanceof ExamNetworkConfigError) {
-        throw new ValidationError('examPrelogin', null, localizedErrorText`Invalid request: ${error.reason}`);
+        logger.warn('Exam prelogin rejected reason=%s', error.reason);
+        throwExamTeacherValidationError('examPrelogin', error.reason);
     }
     if (error instanceof TypeError) {
-        throw new ValidationError('examPrelogin', null, localizedErrorText`Invalid request: ${error.message}`);
+        logger.warn('Exam prelogin rejected reason=%s', error.message);
+        throwExamTeacherValidationError('examPrelogin', error.message);
     }
     throw error;
 }

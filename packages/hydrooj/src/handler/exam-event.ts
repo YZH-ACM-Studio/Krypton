@@ -1,5 +1,7 @@
+import { Logger } from '@hydrooj/utils';
 import { ObjectId } from 'mongodb';
-import { Context, Handler, localizedErrorText, param, PermissionError, Types, ValidationError } from 'hydrooj';
+import { Context, Handler, param, PermissionError, Types, ValidationError } from 'hydrooj';
+import { throwExamTeacherValidationError } from '../lib/exam-teacher-http-error';
 import { PERM } from '../model/builtin';
 import { AUDITED_EVENT_FIELDS, ExamEventAuditContext, runAuditedExamEventMutation } from '../model/exam-event-audit';
 import {
@@ -115,13 +117,14 @@ async function loadPreparationSummary(domainId: string, eventId: ObjectId) {
     };
 }
 
+const logger = new Logger('exam-event');
+
 export function translateExamEventError(error: unknown): never {
-    if (error instanceof ExamNetworkConfigError) throw new ValidationError('examEvent', null, error.reason);
-    if (error instanceof ExamSeatPlanError) {
-        throw new ValidationError('examEvent', null, localizedErrorText`Invalid request: ${error.reason}`);
+    if (error instanceof ExamNetworkConfigError || error instanceof ExamSeatPlanError || error instanceof ExamEventError) {
+        logger.warn('Exam event rejected reason=%s', error.reason);
+        throwExamTeacherValidationError('examEvent', error.reason);
     }
-    if (!(error instanceof ExamEventError)) throw error;
-    throw new ValidationError('examEvent', null, error.reason);
+    throw error;
 }
 
 async function availableSchools(domainId: string, actor: typeof Handler.prototype.user) {

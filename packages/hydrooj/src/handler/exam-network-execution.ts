@@ -1,5 +1,7 @@
+import { Logger } from '@hydrooj/utils';
 import { ObjectId } from 'mongodb';
 import { Context, Handler, OplogModel, param, PermissionError, Types, ValidationError } from 'hydrooj';
+import { throwExamTeacherValidationError } from '../lib/exam-teacher-http-error';
 import { PERM } from '../model/builtin';
 import { resolveExamTargetSources } from '../lib/exam-network-resolver';
 import { assertCanManageExamEvent, isExamInfrastructureAdmin } from '../model/exam-event-access';
@@ -190,9 +192,12 @@ function executionPayload(execution: ExamNetworkExecutionDoc, config: ResolvedEx
     };
 }
 
+const logger = new Logger('exam-network-execution');
+
 function translateExecutionError(error: unknown): never {
     if (error instanceof ExamNetworkExecutionError || error instanceof ExamNetworkConfigError) {
-        throw new ValidationError('examNetworkExecution', null, error.reason);
+        logger.warn('Exam network execution rejected reason=%s', error.reason);
+        throwExamTeacherValidationError('examNetworkExecution', error.reason);
     }
     throw error;
 }

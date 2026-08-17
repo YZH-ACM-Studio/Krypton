@@ -39,6 +39,7 @@ import {
     SendMailError,
     UserNotFoundError,
 } from '../src/error';
+import { examTeacherCatalogTranslations } from '@hydrooj/common';
 import { getProblemConfigErrorText, validateStructuredCodeTemplate } from '../src/lib/problem-config';
 
 const workspaceRoot = process.cwd();
@@ -881,6 +882,11 @@ describe('P2.43 error message catalog', () => {
                 )
                 .join('\n'),
         );
+    });
+
+    it('catalogs every exam teacher Chinese sentence', () => {
+        const missing = Object.keys(examTeacherCatalogTranslations()).filter((template) => !(template in ERROR_MESSAGE_TRANSLATIONS));
+        assert.deepEqual(missing, [], missing.map((template) => JSON.stringify(template)).join('\n'));
     });
 
     it('supports explicit English and fixed zh-CN without falling back to source text', () => {

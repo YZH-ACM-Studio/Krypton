@@ -1,6 +1,7 @@
 import { Logger } from '@hydrooj/utils';
 import { ObjectId } from 'mongodb';
-import { Context, Handler, localizedErrorText, OplogModel, param, PermissionError, Types, ValidationError } from 'hydrooj';
+import { Context, Handler, OplogModel, param, PermissionError, Types, ValidationError } from 'hydrooj';
+import { throwExamTeacherValidationError } from '../lib/exam-teacher-http-error';
 import { PERM } from '../model/builtin';
 import { examClassroomService } from '../model/exam-classroom';
 import { examSeatOperationalProfileService } from '../model/exam-seat-operational-profile';
@@ -33,7 +34,8 @@ function exactBody(value: unknown, keys: string[]): void {
 
 function translate(error: unknown): never {
     if (!(error instanceof ExamSeatPlanError)) throw error;
-    throw new ValidationError('examSeatPlan', null, localizedErrorText`Invalid request: ${error.reason}`);
+    logger.warn('Exam seat plan rejected reason=%s', error.reason);
+    throwExamTeacherValidationError('examSeatPlan', error.reason);
 }
 
 function serializeSource(source: ExamRosterRevisionDoc['source']) {
@@ -150,7 +152,7 @@ abstract class ExamSeatPlanBaseHandler extends Handler {
         const event = await examEventService.get(domainId, eventId);
         if (!event) throw new ValidationError('eventId');
         if (!['krypton', 'external'].includes(event.type) || !['draft', 'scheduled', 'archived'].includes(event.lifecycle)) {
-            throw new ValidationError('eventId', null, localizedErrorText`Invalid request: ${'event_canonical_invalid'}`);
+            throwExamTeacherValidationError('eventId', 'event_canonical_invalid');
         }
         await assertCanManageExamEvent(domainId, event, this.user);
         if (!isExamInfrastructureAdmin(this.user) && !this.user.hasPerm(PERM.PERM_USERBIND_MANAGE_STUDENTS)) {
@@ -160,7 +162,7 @@ abstract class ExamSeatPlanBaseHandler extends Handler {
     }
 
     protected assertWritableEvent(event: ExamEventDoc): void {
-        if (event.lifecycle === 'archived') throw new ValidationError('eventId', null, localizedErrorText`Invalid request: ${'event_archived'}`);
+        if (event.lifecycle === 'archived') throwExamTeacherValidationError('eventId', 'event_archived');
     }
 }
 

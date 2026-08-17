@@ -65,4 +65,13 @@ describe('P2.6 exam pre-login HTTP boundaries', () => {
         expect(source).to.include('ticket_batch_mismatch');
         expect(source).to.include('getExamPreloginService().applyProjection');
     });
+
+    it('translates teacher-facing HTTP errors into Chinese and keeps reason codes in logs', () => {
+        const source = readFileSync(sourcePath, 'utf8');
+        expect(source).to.include("throwExamTeacherValidationError('examPrelogin'");
+        expect(source).to.include('logger.warn');
+        expect(source).to.include('reason=%s');
+        expect(source).not.to.include('Invalid request:');
+        expect(source).not.to.include('localizedErrorText`Invalid request');
+    });
 });

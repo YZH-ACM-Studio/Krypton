@@ -1278,6 +1278,8 @@ describe('exam infrastructure workspace', () => {
     setEventPanel('run');
     renderPage({ eventId: EVENT.eventId });
 
+    expect(await screen.findByText('终端离线')).toBeInTheDocument();
+    expect(screen.queryByText('endpoint_offline')).not.toBeInTheDocument();
     await user.click(await screen.findByRole('button', { name: '整批重试失败项' }));
     const dialog = screen.getByRole('dialog', { name: '整批重新应用网络策略？' });
     expect(dialog).toHaveTextContent('不是只给失败终端补发');

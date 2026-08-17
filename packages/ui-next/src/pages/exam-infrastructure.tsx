@@ -288,6 +288,40 @@ const ENDPOINT_STATUS_LABELS: Record<ProjectionItem['status'], string> = {
 };
 
 const DELIVERY_UNKNOWN_FAILURE_REASON = 'transport_send_failed_delivery_unknown';
+const UNKNOWN_TEACHER_ERROR = '操作无法完成，请重试。';
+const INFRA_CODE_LABELS: Record<string, string> = {
+  endpoint_offline: '终端离线',
+  endpoint_incompatible: '终端版本或协议不兼容',
+  endpoint_capability_missing: '终端缺少所需能力',
+  endpoint_not_registered: '终端尚未登记',
+  endpoint_credential_not_active: '终端凭据不是活动状态',
+  ready: '就绪',
+  transport_send_failed_delivery_unknown: '发送结果未知',
+  vigil_delivery_unknown: '投递结果未知',
+  vigil_http_rejected: 'Vigil 拒绝了本次请求',
+  vigil_dispatch_incomplete: '命令尚未全部派发完成',
+  network_platform_clear_failed: '未能清理终端网络规则',
+};
+
+function teacherReasonLabel(reason: string): string {
+  if (INFRA_CODE_LABELS[reason]) return INFRA_CODE_LABELS[reason];
+  if (/[\u3400-\u9fff]/.test(reason)) return reason;
+  if (!/[a-z][a-z0-9]*(?:_[a-z0-9]+)+/.test(reason)) return reason;
+  return UNKNOWN_TEACHER_ERROR;
+}
+
+function presentInfraError(message: string): { summary: string; raw: string | null } {
+  const trimmed = message.trim();
+  const payload = trimmed.replace(/^(?:请求无效：)+/, '');
+  if (INFRA_CODE_LABELS[payload]) return { summary: INFRA_CODE_LABELS[payload], raw: null };
+  if (/[\u3400-\u9fff]/.test(payload) && !/[a-z][a-z0-9]*(?:_[a-z0-9]+)+/.test(payload)) return { summary: payload, raw: null };
+  if (/[a-z][a-z0-9]*(?:_[a-z0-9]+)+/.test(payload) && !/[\u3400-\u9fff]/.test(payload)) {
+    return { summary: UNKNOWN_TEACHER_ERROR, raw: payload };
+  }
+  const replaced = payload.replace(/[a-z][a-z0-9]*(?:_[a-z0-9]+)+/g, (token) => INFRA_CODE_LABELS[token] || token);
+  if (/[a-z][a-z0-9]*(?:_[a-z0-9]+)+/.test(replaced)) return { summary: UNKNOWN_TEACHER_ERROR, raw: trimmed };
+  return { summary: replaced, raw: null };
+}
 
 const EVENT_PANELS: Array<{ id: EventPanel; label: string }> = [
   { id: 'basics', label: '基本信息' },
@@ -797,6 +831,7 @@ function statusBadge(status: EventStatus) {
 
 function MutationNotice({ error, success }: { error: string | null; success?: string | null }) {
   if (!error && !success) return null;
+  const presented = error ? presentInfraError(error) : null;
   return (
     <div
       role={error ? 'alert' : 'status'}
@@ -807,7 +842,19 @@ function MutationNotice({ error, success }: { error: string | null; success?: st
           : 'border-emerald-500/25 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300',
       )}
     >
-      {error || success}
+      {presented ? (
+        <>
+          <p>{presented.summary}</p>
+          {presented.raw ? (
+            <details className="mt-2 text-xs text-muted-foreground">
+              <summary className="cursor-pointer text-sm text-foreground">技术细节</summary>
+              <p className="mt-1 font-mono">{presented.raw}</p>
+            </details>
+          ) : null}
+        </>
+      ) : (
+        success
+      )}
     </div>
   );
 }
@@ -2556,7 +2603,7 @@ function ExecutionSection({
                     <div key={item.endpointId} className="rounded-lg bg-muted/30 px-3 py-2 text-sm">
                       <div className="flex items-center justify-between gap-2">
                         <span className="font-mono text-xs">{item.endpointId}</span>
-                        <Badge variant={item.ready ? 'outline' : 'destructive'}>{item.ready ? '就绪' : item.reason}</Badge>
+                        <Badge variant={item.ready ? 'outline' : 'destructive'}>{item.ready ? '就绪' : teacherReasonLabel(item.reason)}</Badge>
                       </div>
                       <p className="mt-1 text-xs text-muted-foreground">
                         {item.online ? '在线' : '离线'} · Service {item.serviceVersion || '未知'}
@@ -2607,7 +2654,7 @@ function ExecutionFacts({ execution }: { execution: NetworkExecution }) {
             <div className="flex flex-wrap gap-1">
               {Object.entries(projection.summary).map(([status, count]) => (
                 <Badge key={status} variant="outline">
-                  {status} {count}
+                  {ENDPOINT_STATUS_LABELS[status as ProjectionItem['status']] || teacherReasonLabel(status)} {count}
                 </Badge>
               ))}
             </div>
@@ -2642,7 +2689,11 @@ function ExecutionFacts({ execution }: { execution: NetworkExecution }) {
                       {item.appliedPolicyRevision ?? item.networkPolicyState?.policyRevision ?? '—'}
                     </TableCell>
                     <TableCell className="max-w-64 text-xs text-muted-foreground">
-                      {item.failureReason || item.networkPolicyState?.reason || '—'}
+                      {item.failureReason
+                        ? teacherReasonLabel(item.failureReason)
+                        : item.networkPolicyState?.reason
+                          ? teacherReasonLabel(item.networkPolicyState.reason)
+                          : '—'}
                     </TableCell>
                   </TableRow>
                 ))}

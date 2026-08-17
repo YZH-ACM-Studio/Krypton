@@ -12,13 +12,15 @@ function CourseRow({ course, status, manageable }: { course: CourseRecord; statu
   const chapterCount = Array.isArray(course.dag) ? course.dag.length : 0;
   const summary = formatPlainTextSummary(course.description || course.content || '').slice(0, 120);
   return (
-    <article className="group grid gap-3 border-b border-border/70 py-4 last:border-b-0 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+    <article className="group grid gap-3 rounded-2xl px-3 py-4 transition-colors duration-150 hover:bg-muted/50 motion-reduce:transition-none md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
       <a href={`/course/${tid}`} className="min-w-0 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
         <div className="flex items-start gap-3">
-          <BookOpen className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+          <span className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-xl bg-muted text-muted-foreground">
+            <BookOpen className="size-4" />
+          </span>
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h3 className="truncate text-sm font-semibold transition-colors duration-200 group-hover:text-primary">{course.title}</h3>
+              <h3 className="truncate text-sm font-semibold text-pretty group-hover:text-primary">{course.title}</h3>
               {course.term ? (
                 <Badge variant="outline" className="rounded-md text-[10px]">
                   {course.term}
@@ -26,7 +28,7 @@ function CourseRow({ course, status, manageable }: { course: CourseRecord; statu
               ) : null}
               {status?.enroll ? <span className="text-[11px] font-medium text-emerald-700 dark:text-emerald-400">已报名</span> : null}
             </div>
-            {summary ? <p className="mt-1 line-clamp-1 text-xs leading-5 text-muted-foreground">{summary}</p> : null}
+            {summary ? <p className="mt-1 line-clamp-2 text-xs leading-5 text-pretty text-muted-foreground">{summary}</p> : null}
             <p className="mt-1.5 flex flex-wrap items-center gap-3 text-[11px] tabular-nums text-muted-foreground">
               <span>{chapterCount} 章</span>
               {(course.courseGroupIds || []).length ? (
@@ -72,17 +74,17 @@ function CourseSection({
 }) {
   if (!courses.length) return null;
   return (
-    <section aria-labelledby={`course-section-${title}`}>
-      <div className="mb-2 flex items-end justify-between gap-4">
+    <section aria-labelledby={`course-section-${title}`} className="space-y-3">
+      <div className="flex items-end justify-between gap-4 px-1">
         <div>
-          <h2 id={`course-section-${title}`} className="text-sm font-semibold">
+          <h2 id={`course-section-${title}`} className="text-sm font-semibold text-balance">
             {title}
           </h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
+          <p className="mt-0.5 text-xs text-pretty text-muted-foreground">{description}</p>
         </div>
         <span className="text-xs tabular-nums text-muted-foreground">{courses.length}</span>
       </div>
-      <div className="border-y border-border/70">
+      <div className="space-y-1">
         {courses.map((course) => {
           const tid = String(course.docId || course._id);
           return <CourseRow key={tid} course={course} status={statuses[tid]} manageable={managedIds.has(tid)} />;
@@ -113,14 +115,14 @@ export function CoursePage() {
 
   return (
     <main className="w-full min-w-0 space-y-8 pb-8">
-      <header className="flex flex-col gap-4 border-b border-border/70 pb-6 sm:flex-row sm:items-end sm:justify-between">
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-xs font-medium tracking-wide text-muted-foreground">学习空间</p>
           <h1 className="mt-1 text-3xl font-semibold tracking-tight text-balance">课程</h1>
-          <p className="mt-2 text-sm text-muted-foreground">共 {Number(data.tcount) || 0} 门课程</p>
+          <p className="mt-2 text-sm text-pretty text-muted-foreground">共 {Number(data.tcount) || 0} 门课程</p>
         </div>
         {data.canCreate ? (
-          <Button asChild className="min-h-11 gap-1.5">
+          <Button asChild className="min-h-11 gap-1.5 active:scale-[0.96]">
             <a href="/course/create">
               <Plus className="size-4" />
               新建课程
@@ -133,18 +135,34 @@ export function CoursePage() {
         <label className="relative min-w-0 flex-1">
           <span className="sr-only">搜索课程</span>
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input name="q" defaultValue={q} className="min-h-11 pl-10" placeholder="按课程名称搜索" />
+          <Input name="q" defaultValue={q} className="min-h-11 pl-10 text-base sm:text-sm" placeholder="操作系统" />
         </label>
-        <Button type="submit" variant="outline" className="min-h-11 px-5">
+        <Button type="submit" variant="outline" className="min-h-11 px-5 active:scale-[0.96]">
           搜索
         </Button>
       </form>
 
       {!courses.length ? (
-        <section className="border-y border-border/70 py-16 text-center">
-          <BookOpen className="mx-auto size-6 text-muted-foreground" />
-          <h2 className="mt-3 text-sm font-semibold">{q ? '没有匹配的课程' : '暂无可见课程'}</h2>
-          <p className="mt-1 text-xs text-muted-foreground">{q ? '调整关键词后重新搜索。' : '课程开放后会显示在这里。'}</p>
+        <section className="rounded-3xl bg-muted/40 px-6 py-16 text-center">
+          <span className="mx-auto grid size-12 place-items-center rounded-2xl bg-background text-muted-foreground shadow-sm">
+            <BookOpen className="size-5" />
+          </span>
+          <h2 className="mt-4 text-sm font-semibold">{q ? `没有匹配「${q}」的课程` : '暂无可见课程'}</h2>
+          <p className="mx-auto mt-1 max-w-sm text-xs leading-5 text-pretty text-muted-foreground">
+            {q ? '换一个课程名称再试，或清除搜索查看全部课程。' : '课程开放后会显示在这里。'}
+          </p>
+          {q ? (
+            <Button asChild variant="outline" className="mt-5 min-h-11">
+              <a href="/course">清除搜索</a>
+            </Button>
+          ) : data.canCreate ? (
+            <Button asChild className="mt-5 min-h-11 gap-1.5">
+              <a href="/course/create">
+                <Plus className="size-4" />
+                新建课程
+              </a>
+            </Button>
+          ) : null}
         </section>
       ) : (
         <div className="space-y-10">

@@ -47,9 +47,9 @@ function CourseProblemPanel({
             {selected.description ? <p className="mt-1 text-sm text-muted-foreground">{selected.description}</p> : null}
           </>
         ) : (
-          <div className="py-5 text-center text-sm text-muted-foreground">
+          <div className="py-5 text-center text-sm text-pretty text-muted-foreground">
             <Network className="mx-auto mb-2 size-5" />
-            选择节点查看本课程题目
+            选择一个节点，查看本课直接归属于它的题目
           </div>
         )}
       </header>
@@ -88,7 +88,9 @@ function CourseProblemPanel({
               ))}
             </ul>
           ) : (
-            <p className="px-5 py-10 text-center text-sm text-muted-foreground">本课程没有直接归属于该节点的可见题目。</p>
+            <p className="px-5 py-10 text-center text-sm text-pretty text-muted-foreground">
+              本课程没有直接归属于该节点的可见题目。章节里仍可挂其它导图或尚未归类的题。
+            </p>
           )}
         </ScrollArea>
       ) : null}
@@ -120,8 +122,8 @@ export function CourseMindmapView({
           <span className="mx-auto grid size-12 place-items-center rounded-2xl bg-muted text-muted-foreground">
             <Network className="size-5" />
           </span>
-          <h2 className="mt-4 text-lg font-semibold">本课程尚未绑定知识导图</h2>
-          <p className="mt-1 text-sm text-muted-foreground">课程内容不受影响；绑定公开导图后，可在这里查看课程题目覆盖的知识节点。</p>
+          <h2 className="mt-4 text-lg font-semibold text-balance">本课程尚未绑定知识导图</h2>
+          <p className="mt-1 text-sm text-pretty text-muted-foreground">课程内容不受影响。绑定一张公开导图后，这里会标出本课题目直接覆盖的节点。</p>
           {canManage ? (
             <Button asChild variant="outline" className="mt-5 min-h-11 gap-1.5">
               <a href={`/course/${encodeURIComponent(tid)}/edit#course-mindmap-settings`}>
@@ -146,7 +148,7 @@ export function CourseMindmapView({
               </span>
               <div className="min-w-0">
                 <h2 className="truncate text-sm font-semibold">{data.config.title}</h2>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-xs tabular-nums text-muted-foreground">
                   {data.usedNodeIds.length} 个直接使用节点 · {data.problems.length} 道可见题目
                 </p>
               </div>

@@ -196,15 +196,15 @@ export function CourseEditPage() {
 
   return (
     <main className="w-full min-w-0 space-y-5 pb-8">
-      <header className="flex flex-wrap items-center gap-3 border-b border-border/70 pb-4">
+      <header className="flex flex-wrap items-center gap-3">
         <Button asChild variant="ghost" size="icon" className="size-11">
-          <a href={isEdit ? `/course/${tid}` : '/course'} aria-label="返回">
+          <a href={isEdit ? `/course/${tid}` : '/course'} aria-label={isEdit ? '返回课程' : '返回课程列表'}>
             <ArrowLeft className="size-4" />
           </a>
         </Button>
         <div className="min-w-0 flex-1">
           <p className="text-xs text-muted-foreground">课程工作区</p>
-          <h1 className="mt-0.5 truncate text-2xl font-semibold tracking-tight">{isEdit ? `编辑 ${course.title}` : '新建课程'}</h1>
+          <h1 className="mt-0.5 truncate text-2xl font-semibold tracking-tight text-balance">{isEdit ? `编辑 ${course.title}` : '新建课程'}</h1>
         </div>
         <Button type="button" variant="outline" className="min-h-11 gap-1.5 lg:hidden" onClick={() => setOutlineOpen(true)}>
           <ListTree className="size-4" />
@@ -213,7 +213,7 @@ export function CourseEditPage() {
         <div aria-live="polite" className="text-xs text-muted-foreground">
           {saveState === 'saving' ? '正在保存…' : saveState === 'dirty' ? '有未保存更改' : '已保存'}
         </div>
-        <Button form="course-editor-form" type="submit" disabled={saveState === 'saving'} className="min-h-11 gap-1.5">
+        <Button form="course-editor-form" type="submit" disabled={saveState === 'saving'} className="min-h-11 gap-1.5 active:scale-[0.96]">
           <Save className="size-4" />
           {saveState === 'saving' ? '保存中' : '保存课程'}
         </Button>
@@ -231,7 +231,7 @@ export function CourseEditPage() {
         action={formAction}
         onSubmit={submit}
         onChange={markDirty}
-        className="grid min-w-0 gap-6 lg:grid-cols-[15rem_minmax(0,1fr)_19rem]"
+        className="grid min-w-0 gap-8 lg:grid-cols-[16rem_minmax(0,1fr)_20rem]"
       >
         {isEdit ? <input type="hidden" name="tid" value={tid} /> : null}
         <input type="hidden" name="chapters" value={chaptersJson} />
@@ -239,8 +239,8 @@ export function CourseEditPage() {
         <input type="hidden" name="description" value={course.description || ''} />
 
         <aside className="hidden self-start lg:sticky lg:top-20 lg:block">
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <h2 className="text-xs font-semibold text-muted-foreground">章节目录</h2>
+          <div className="mb-4 flex items-center justify-between gap-2 px-1">
+            <h2 className="text-xs font-semibold tracking-wide text-muted-foreground">章节目录</h2>
             <Button type="button" variant="ghost" size="sm" className="h-9 gap-1 px-2" onClick={addChapter}>
               <Plus className="size-3.5" />
               添加
@@ -249,12 +249,12 @@ export function CourseEditPage() {
           <ChapterOutline chapters={chapters} activeId={activeChapter._id} onSelect={selectChapter} onMove={moveChapter} onRemove={removeChapter} />
         </aside>
 
-        <section className="min-w-0 space-y-6" aria-labelledby="active-chapter-title">
-          <header className="border-b border-border/70 pb-4">
+        <section className="min-w-0 space-y-8" aria-labelledby="active-chapter-title">
+          <header className="space-y-1">
             <p className="text-xs tabular-nums text-muted-foreground">
               第 {chapters.findIndex((chapter) => chapter._id === activeChapter._id) + 1} 章
             </p>
-            <h2 id="active-chapter-title" className="mt-1 text-xl font-semibold tracking-tight">
+            <h2 id="active-chapter-title" className="text-xl font-semibold tracking-tight text-balance">
               章节内容
             </h2>
           </header>
@@ -264,7 +264,7 @@ export function CourseEditPage() {
             <Input
               value={activeChapter.title}
               onChange={(event) => updateChapter(activeChapter._id, { title: event.target.value })}
-              className="min-h-11"
+              className="min-h-11 text-base sm:text-sm"
               required
             />
           </label>
@@ -287,9 +287,9 @@ export function CourseEditPage() {
           <section className="space-y-2" aria-labelledby="chapter-problems-title">
             <div>
               <h3 id="chapter-problems-title" className="text-sm font-medium">
-                题目
+                本章小测
               </h3>
-              <p className="mt-0.5 text-xs text-muted-foreground">按当前顺序显示在章节中。</p>
+              <p className="mt-0.5 text-xs text-pretty text-muted-foreground">按当前顺序显示在章节中，通常挂本课对应知识点的题目。</p>
             </div>
             <ProblemPicker value={activeChapter.pids} onChange={(pids) => updateChapter(activeChapter._id, { pids })} />
           </section>
@@ -304,7 +304,7 @@ export function CourseEditPage() {
             <Input
               value={activeChapter.tids}
               onChange={(event) => updateChapter(activeChapter._id, { tids: event.target.value })}
-              className="min-h-11 font-mono text-xs"
+              className="min-h-11 font-mono text-base sm:text-xs"
               placeholder="65abc… , 65def…"
             />
             <a
@@ -342,18 +342,18 @@ export function CourseEditPage() {
           </section>
         </section>
 
-        <aside className={cn('space-y-6 self-start border-t border-border/70 pt-6', 'lg:sticky lg:top-20 lg:border-l lg:border-t-0 lg:pl-6 lg:pt-0')}>
+        <aside className={cn('space-y-8 self-start pt-2', 'lg:sticky lg:top-20 lg:border-l lg:border-border/60 lg:pl-6 lg:pt-0')}>
           <section className="space-y-4" aria-labelledby="course-settings-title">
             <h2 id="course-settings-title" className="text-sm font-semibold">
               课程设置
             </h2>
             <label className="block space-y-1.5">
               <span className="text-xs font-medium">课程名称</span>
-              <Input name="title" defaultValue={course.title || ''} required className="min-h-11" />
+              <Input name="title" defaultValue={course.title || ''} required className="min-h-11 text-base sm:text-sm" />
             </label>
             <label className="block space-y-1.5">
               <span className="text-xs font-medium">学期</span>
-              <Input name="term" defaultValue={course.term || ''} className="min-h-11" placeholder="如 2026 秋" />
+              <Input name="term" defaultValue={course.term || ''} className="min-h-11 text-base sm:text-sm" placeholder="2026 秋" />
             </label>
             <section id="course-mindmap-settings" className="scroll-mt-24 space-y-1.5" aria-labelledby="course-mindmap-title">
               <span id="course-mindmap-title" className="flex items-center gap-1.5 text-xs font-medium">
@@ -390,8 +390,8 @@ export function CourseEditPage() {
               </h2>
               <p className="mt-0.5 text-xs text-muted-foreground">不选择时对全域用户开放。</p>
             </div>
-            <ScrollArea className="max-h-52 border-y border-border/70">
-              <div className="space-y-1 py-2">
+            <ScrollArea className="max-h-52 rounded-xl bg-muted/30">
+              <div className="space-y-1 p-2">
                 {activeGroups.length ? (
                   activeGroups.map((group) => (
                     <label
@@ -420,7 +420,7 @@ export function CourseEditPage() {
                     </label>
                   ))
                 ) : (
-                  <p className="px-2 py-3 text-xs text-muted-foreground">暂无班级。</p>
+                  <p className="px-2 py-3 text-xs text-pretty text-muted-foreground">还没有班级。不选择时课程对全域开放。</p>
                 )}
               </div>
             </ScrollArea>
@@ -451,9 +451,9 @@ export function CourseEditPage() {
               <p className="text-xs text-muted-foreground">先保存课程，再上传课件。</p>
             ) : null}
             {courseFiles.length ? (
-              <div className="divide-y divide-border/70 border-y border-border/70">
+              <div className="space-y-1">
                 {courseFiles.map((file) => (
-                  <div key={file.name} className="flex min-h-11 items-center gap-2 py-2 text-xs">
+                  <div key={file.name} className="flex min-h-11 items-center gap-2 rounded-xl px-2 py-2 text-xs hover:bg-muted/50">
                     <FileText className="size-4 shrink-0 text-muted-foreground" />
                     <span className="min-w-0 flex-1 truncate font-medium">{file.name}</span>
                     <a

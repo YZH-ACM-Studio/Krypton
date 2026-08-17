@@ -31,10 +31,15 @@ export function ChapterOutline({
           <div
             key={chapter._id}
             className={cn(
-              'group flex min-h-11 items-center rounded-lg border border-transparent transition-colors duration-200',
-              active ? 'bg-primary/8 text-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+              'group flex min-h-11 items-stretch overflow-hidden rounded-xl border border-transparent',
+              'transition-[background-color,color,border-color] duration-150 motion-reduce:transition-none',
+              active ? 'border-border/70 bg-primary/8 text-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
             )}
           >
+            <span
+              aria-hidden="true"
+              className={cn('w-0.5 shrink-0 self-stretch rounded-full', active ? 'bg-primary' : 'bg-transparent')}
+            />
             <button
               type="button"
               onClick={() => onSelect(chapter._id)}
@@ -42,7 +47,7 @@ export function ChapterOutline({
               aria-current={active ? 'page' : undefined}
             >
               <span className="block text-[11px] tabular-nums text-muted-foreground">第 {index + 1} 章</span>
-              <span className="block truncate text-sm font-medium">{chapter.title}</span>
+              <span className="block truncate text-sm font-medium text-foreground">{chapter.title}</span>
               {typeof chapter.totalCount === 'number' ? (
                 <span className="mt-1 block text-[11px] tabular-nums text-muted-foreground">
                   {chapter.doneCount}/{chapter.totalCount} 题 · {chapter.progress}%
@@ -52,8 +57,9 @@ export function ChapterOutline({
             {onMove || onRemove ? (
               <div
                 className={cn(
-                  'mr-1 flex shrink-0 items-center opacity-100',
-                  'lg:opacity-0 lg:transition-opacity lg:group-hover:opacity-100 lg:group-focus-within:opacity-100',
+                  'mr-1 flex shrink-0 items-center self-center opacity-100',
+                  'lg:opacity-0 lg:transition-opacity lg:duration-150 lg:group-hover:opacity-100 lg:group-focus-within:opacity-100',
+                  'motion-reduce:transition-none',
                 )}
               >
                 {onMove ? (

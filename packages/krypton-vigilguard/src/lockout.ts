@@ -217,7 +217,11 @@ function isBoundClientRequestAllowed(ctx: KoaContext, domainId: string, contestI
 
     if (method === 'POST' && /^\/p\/[^/]+\/submit$/.test(path)) return true;
     if (method === 'GET' && /^\/p\/[^/]+\/file\/[^/]+$/.test(path)) return true;
-    if (method === 'GET' && (ctx as any).HydroContext?.request?.json === true && /^\/record\/[0-9a-f]{24}$/i.test(path)) return true;
+    if (
+        method === 'GET'
+        && (ctx as any).HydroContext?.request?.json === true
+        && (path === '/record' || /^\/record\/[0-9a-f]{24}$/i.test(path))
+    ) return true;
     return false;
 }
 

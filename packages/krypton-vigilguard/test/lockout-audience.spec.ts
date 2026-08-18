@@ -537,6 +537,7 @@ describe('P1.28 browser-lockout runtime facts', () => {
             clientRequestContext('/p/100/submit', { method: 'POST', query: { tid }, json: true }),
             clientRequestContext('/p/100/file/diagram.png', { query: { tid } }),
             clientRequestContext('/record/64a000000000000000000777', { query: { tid }, json: true }),
+            clientRequestContext('/record', { query: { tid, pid: '100', uidOrName: '62' }, json: true }),
         ];
         for (const request of allowed) {
             expect(await runClientRequest(request)).to.deep.equal({ handlerReached: true, businessLogicRan: true, control: undefined });
@@ -554,6 +555,21 @@ describe('P1.28 browser-lockout runtime facts', () => {
         const htmlRecord = clientRequestContext('/record/64a000000000000000000777', { query: { tid } });
         expect(await runClientRequest(htmlRecord)).to.deep.equal({ handlerReached: true, businessLogicRan: false, control: 'cleanup' });
         expect(htmlRecord.response.redirect).to.equal(`/d/system/exam-mode/${tid}`);
+
+        const htmlRecordList = clientRequestContext('/record', { query: { tid, uidOrName: '62' } });
+        expect(await runClientRequest(htmlRecordList)).to.deep.equal({ handlerReached: true, businessLogicRan: false, control: 'cleanup' });
+        expect(htmlRecordList.response.redirect).to.equal(`/d/system/exam-mode/${tid}`);
+
+        const recordListMissingTid = clientRequestContext('/record', { query: { uidOrName: '62' }, json: true });
+        expect(await runClientRequest(recordListMissingTid)).to.deep.equal({ handlerReached: true, businessLogicRan: false, control: 'cleanup' });
+        expect(recordListMissingTid.response.redirect).to.equal(`/d/system/exam-mode/${tid}`);
+
+        const recordListWrongContest = clientRequestContext('/record', {
+            query: { tid: new ObjectId().toHexString(), uidOrName: '62' },
+            json: true,
+        });
+        expect(await runClientRequest(recordListWrongContest)).to.deep.equal({ handlerReached: true, businessLogicRan: false, control: 'cleanup' });
+        expect(recordListWrongContest.response.redirect).to.equal(`/d/system/exam-mode/${tid}`);
 
         for (const path of ['/logout', '/bind', '/claim', '/oauth/authorize', '/client-required-notice']) {
             const recoveryEscape = clientRequestContext(path);

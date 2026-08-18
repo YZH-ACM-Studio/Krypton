@@ -121,6 +121,7 @@ export async function run(
         username,
         password,
         domainId,
+        knowledgeMapId,
         dataDir = '/www/jnoj/jnoj/judge/data/',
         uploadDir = '/www/jnoj/jnoj/web/uploads/',
         rerun = true,
@@ -148,6 +149,7 @@ export async function run(
     report({ message: JSON.stringify(await query("show VARIABLES like 'char%';")) });
     const target = await DomainModel.get(domainId);
     if (!target) throw localizeError(new NotFoundError(domainId), 'Resource {0} not found.', domainId);
+    const knowledge = await ProblemModel.resolveProgrammingKnowledgeMap(knowledgeMapId);
     report({ message: 'Connected to database' });
     // await SystemModel.set('migrate.lock', 'jnoj');
     /*  User
@@ -323,9 +325,9 @@ export async function run(
                                 .filter((i) => i),
                         );
                     }
-                    const pid = await ProblemModel.add(domainId, `P${pdoc.id}`, pdoc.title, content, 1, tags, {
-                        hidden: pdoc.status === 1,
-                        problemKind: 'programming',
+                    const pid = await ProblemModel.addTrustedProgrammingProblem(domainId, `P${pdoc.id}`, pdoc.title, content, 1, tags, {
+                        knowledgeMapId: knowledge.mapId,
+                        knowledgeNodeIds: [],
                     });
                     if (!markdown) await ProblemModel.edit(domainId, pid, { html: true });
                     pidMap[pdoc.id] = pid;

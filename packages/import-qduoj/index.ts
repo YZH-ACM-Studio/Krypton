@@ -98,11 +98,18 @@ class ImportQduojHandler extends Handler {
                     return true;
                 };
                 if (!(await isValidPid(pdoc.display_id))) pdoc.display_id = null;
-                const pid = await ProblemModel.add(domainId, pdoc.display_id, pdoc.title, content, this.user._id, pdoc.tags || [], {
-                    problemKind: 'programming',
-                    knowledgeMapId: knowledge.mapId,
-                    knowledgeNodeIds: [],
-                });
+                const pid = await ProblemModel.addTrustedProgrammingProblem(
+                    domainId,
+                    pdoc.display_id || '',
+                    pdoc.title,
+                    content,
+                    this.user._id,
+                    pdoc.tags || [],
+                    {
+                        knowledgeMapId: knowledge.mapId,
+                        knowledgeNodeIds: [],
+                    },
+                );
                 const config: ProblemConfigFile = {
                     time: `${pdoc.time_limit}ms`,
                     memory: `${pdoc.memory_limit}m`,

@@ -47,7 +47,20 @@ const nameMap: Record<string, string> = {
 };
 
 export async function run(
-    { host = 'localhost', port = 3306, name, username, password, domainId, contestType = 'oi', dataDir, imageDir, rerun = true, randomMail = false },
+    {
+        host = 'localhost',
+        port = 3306,
+        name,
+        username,
+        password,
+        domainId,
+        knowledgeMapId,
+        contestType = 'oi',
+        dataDir,
+        imageDir,
+        rerun = true,
+        randomMail = false,
+    },
     report: (data: any) => void,
 ) {
     const src = await mariadb.createConnection({
@@ -67,6 +80,7 @@ export async function run(
         });
     const target = await DomainModel.get(domainId);
     if (!target) throw localizeError(new NotFoundError(domainId), 'Resource {0} not found.', domainId);
+    const knowledge = await ProblemModel.resolveProgrammingKnowledgeMap(knowledgeMapId);
     report({ message: 'Connected to database' });
     /*
         user_id     varchar 20	N	用户id（主键）
@@ -185,7 +199,7 @@ export async function run(
                         report({ message: `failed to read file: ${path.join(imageDir, file[1])}` });
                     }
                 }
-                const pid = await ProblemModel.add(
+                const pid = await ProblemModel.addTrustedProgrammingProblem(
                     domainId,
                     `P${pdoc.problem_id}`,
                     pdoc.title,
@@ -197,7 +211,7 @@ export async function run(
                               .map((i) => i.trim())
                               .filter((i) => i)
                         : [],
-                    { hidden: pdoc.defunct === 'Y', problemKind: 'programming' },
+                    { knowledgeMapId: knowledge.mapId, knowledgeNodeIds: [] },
                 );
                 pidMap[pdoc.problem_id] = pid;
                 await Promise.all(Object.keys(files).map((filename) => ProblemModel.addAdditionalFile(domainId, pid, filename, files[filename])));

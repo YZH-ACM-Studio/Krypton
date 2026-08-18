@@ -151,6 +151,11 @@ const problemStub = {
         calls.adds.push(args);
         return 500;
     },
+    async addTrustedProgrammingProblem(...args: any[]) {
+        calls.events.push('add');
+        calls.adds.push(args);
+        return 500;
+    },
     async del(...args: any[]) {
         calls.events.push('del');
         calls.dels.push(args);

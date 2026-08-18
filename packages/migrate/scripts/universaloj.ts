@@ -61,7 +61,18 @@ function handleMailLower(mail: string) {
 }
 
 export async function run(
-    { host = '172.17.0.2', port = 3306, name = 'app_uoj233', username, password, domainId, dataDir, rerun = true, randomMail = false },
+    {
+        host = '172.17.0.2',
+        port = 3306,
+        name = 'app_uoj233',
+        username,
+        password,
+        domainId,
+        knowledgeMapId,
+        dataDir,
+        rerun = true,
+        randomMail = false,
+    },
     report: (data: any) => void,
 ) {
     const src = await mariadb.createConnection({
@@ -79,6 +90,7 @@ export async function run(
         });
     const target = await DomainModel.get(domainId);
     if (!target) throw localizeError(new NotFoundError(domainId), 'Resource {0} not found.', domainId);
+    const knowledge = await ProblemModel.resolveProgrammingKnowledgeMap(knowledgeMapId);
     report({ message: 'Connected to database' });
     /*
         CREATE TABLE `user_info` (
@@ -247,9 +259,15 @@ export async function run(
             }
             if (!pidMap[pdoc.id]) {
                 const content = await query(`SELECT * FROM \`problems_contents\` WHERE \`id\` = ${pdoc.id}`);
-                const pid = await ProblemModel.add(domainId, `P${pdoc.id}`, pdoc.title, content[0].statement_md || '', 1, [], {
-                    problemKind: 'programming',
-                });
+                const pid = await ProblemModel.addTrustedProgrammingProblem(
+                    domainId,
+                    `P${pdoc.id}`,
+                    pdoc.title,
+                    content[0].statement_md || '',
+                    1,
+                    [],
+                    { knowledgeMapId: knowledge.mapId, knowledgeNodeIds: [] },
+                );
                 pidMap[pdoc.id] = pid;
             }
             const [permissions, tags] = await Promise.all([

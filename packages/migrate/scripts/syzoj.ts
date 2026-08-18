@@ -89,7 +89,18 @@ const langMap = {
     haskell: 'hs',
 };
 export async function run(
-    { host = 'localhost', port = 3306, name = 'syzoj', username, password, domainId, dataDir, rerun = true, randomMail = 'never' },
+    {
+        host = 'localhost',
+        port = 3306,
+        name = 'syzoj',
+        username,
+        password,
+        domainId,
+        knowledgeMapId,
+        dataDir,
+        rerun = true,
+        randomMail = 'never',
+    },
     report: (data: any) => void,
 ) {
     const src = await mariadb.createConnection({
@@ -108,6 +119,7 @@ export async function run(
         });
     const target = await DomainModel.get(domainId);
     if (!target) throw localizeError(new NotFoundError(domainId), 'Resource {0} not found.', domainId);
+    const knowledge = await ProblemModel.resolveProgrammingKnowledgeMap(knowledgeMapId);
     report({ message: 'Connected to database' });
     /*
         `id` int NOT NULL AUTO_INCREMENT, 用户id（主键）
@@ -259,9 +271,15 @@ export async function run(
                     else problemAdditionalFile[`P${pdoc.id}`].push({ fromPid: pid, filename });
                     content = content.replace(origialPath, `file://${filename}`);
                 }
-                const pid = await ProblemModel.add(domainId, `P${pdoc.id}`, pdoc.title, content, uidMap[pdoc.user_id] || 1, [], {
-                    problemKind: 'programming',
-                });
+                const pid = await ProblemModel.addTrustedProgrammingProblem(
+                    domainId,
+                    `P${pdoc.id}`,
+                    pdoc.title,
+                    content,
+                    uidMap[pdoc.user_id] || 1,
+                    [],
+                    { knowledgeMapId: knowledge.mapId, knowledgeNodeIds: [] },
+                );
                 pidMap[pdoc.id] = pid;
             }
             const tags = await query(`SELECT * FROM \`problem_tag_map\` WHERE \`problem_id\` = ${pdoc.id}`);

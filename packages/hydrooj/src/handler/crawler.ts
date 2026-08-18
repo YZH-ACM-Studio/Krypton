@@ -147,9 +147,7 @@ class CrawlerProblemHandler extends CrawlerApiHandler {
         // Create HIDDEN atomically (no judge testdata yet). Passing meta.hidden
         // avoids a create-visible-then-flip window that would briefly publish +
         // ES-index the problem (and leave it permanently visible if the flip threw).
-        const docId = await problem.add(domainId, realPid, t, content, this.user._id, [], {
-            hidden: true,
-            problemKind: 'programming',
+        const docId = await problem.addTrustedProgrammingProblem(domainId, realPid, t, content, this.user._id, [], {
             knowledgeMapId: knowledge.mapId,
             knowledgeNodeIds: [],
         });

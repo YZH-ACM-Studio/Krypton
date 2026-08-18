@@ -111,13 +111,29 @@ describe('physical problem storage clone', () => {
         expect(method).not.to.include("if (problemKind === 'programming') args.knowledgeNodeIds = []");
     });
 
+    it('creates trusted programming imports through the managed-create authority without a draft surface', () => {
+        const source = readFileSync(resolve(__dirname, '../src/model/problem.ts'), 'utf8');
+        const start = source.indexOf('static addTrustedProgrammingProblem(');
+        const end = source.indexOf('static async createBuiltinWelcomeProblem', start);
+        const method = source.slice(start, end);
+
+        expect(start).to.be.greaterThan(-1);
+        expect(method).to.include("problemKind: 'programming'");
+        expect(method).to.include('knowledgeMapId: options.knowledgeMapId');
+        expect(method).to.include('managedProgrammingCreateAuthority');
+        expect(method).not.to.include("authoringMode: 'managed'");
+        expect(method).not.to.include('managedAuthoring');
+    });
+
     it('creates the bootstrap welcome draft with an explicit empty canonical node array', () => {
         const source = readFileSync(resolve(__dirname, '../src/model/problem.ts'), 'utf8');
         const start = source.indexOf('static async createBuiltinWelcomeProblem(');
         const end = source.indexOf('private static async materializeStartedContainerLock', start);
         const method = source.slice(start, end);
 
-        expect(method).to.include("{ problemKind: 'programming', knowledgeMapId: knowledge.mapId, knowledgeNodeIds: [] }");
+        expect(method).to.include('ProblemModel.addTrustedProgrammingProblem(');
+        expect(method).to.include('knowledgeMapId: knowledge.mapId');
+        expect(method).to.include('knowledgeNodeIds: []');
     });
 
     it('resolves one public map before a Hydro archive import can create any problem', () => {
@@ -132,7 +148,7 @@ describe('physical problem storage clone', () => {
         expect(resolution).to.be.greaterThan(-1);
         expect(resolution).to.be.lessThan(extraction);
         expect(creation).to.be.greaterThan(extraction);
-        expect(method).to.include('knowledgeNodeIds: []');
+        expect(method).to.include('mindmapNodeIds: []');
     });
 
     it('plumbs an explicit map through every non-interactive programming ingestion path', () => {
@@ -141,17 +157,22 @@ describe('physical problem storage clone', () => {
             'packages/import-hoj/index.ts',
             'packages/import-qduoj/index.ts',
             'packages/vjudge/src/index.ts',
+            'packages/fps-importer/index.ts',
+            'packages/migrate/scripts/hustoj.ts',
+            'packages/migrate/scripts/jnoj.ts',
+            'packages/migrate/scripts/syzoj.ts',
+            'packages/migrate/scripts/universaloj.ts',
+            'packages/migrate/scripts/poj.ts',
         ].map((filename) => readFileSync(resolve(process.cwd(), filename), 'utf8'));
 
         for (const source of directSources) {
             expect(source).to.include('resolveProgrammingKnowledgeMap(');
-            expect(source).to.include('knowledgeMapId: knowledge.mapId');
+            expect(source).to.include('addTrustedProgrammingProblem(');
             expect(source).to.include('knowledgeNodeIds: []');
+            expect(source).not.to.include('ProblemModel.add(');
+            expect(source).not.to.include('problem.add(');
         }
-        const fps = readFileSync(resolve(process.cwd(), 'packages/fps-importer/index.ts'), 'utf8');
-        expect(fps).to.include('resolveProgrammingKnowledgeMap(');
-        expect(fps).to.include('this.run(domainId, task, knowledge.mapId)');
-        expect(fps).to.include('knowledgeMapId,');
-        expect(fps).to.include('knowledgeNodeIds: []');
+        expect(directSources[4]).to.include('this.run(domainId, task, knowledge.mapId)');
+        expect(directSources[4]).to.include('knowledgeMapId,');
     });
 });

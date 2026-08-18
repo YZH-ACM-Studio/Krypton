@@ -62,14 +62,14 @@ class ImportHojHandler extends Handler {
                     return true;
                 };
                 if (!(await isValidPid(pdoc.problemId))) pdoc.display_id = null;
-                const pid = await ProblemModel.add(
+                const pid = await ProblemModel.addTrustedProgrammingProblem(
                     domainId,
-                    pdoc.display_id,
+                    pdoc.display_id || '',
                     pdoc.title,
                     buildContent(content, 'markdown'),
                     this.user._id,
                     doc.tags || [],
-                    { problemKind: 'programming', knowledgeMapId: knowledge.mapId, knowledgeNodeIds: [] },
+                    { knowledgeMapId: knowledge.mapId, knowledgeNodeIds: [] },
                 );
                 const config: ProblemConfigFile = {
                     time: `${pdoc.timeLimit}ms`,

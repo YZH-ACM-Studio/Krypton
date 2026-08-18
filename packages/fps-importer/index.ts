@@ -68,8 +68,7 @@ class FpsProblemImportHandler extends Handler {
             const tags = _.filter(p.source, (i: string) => i.trim())
                 .flatMap((i) => i.split(' '))
                 .filter((i) => i);
-            const pid = await ProblemModel.add(domainId, null, title, content, this.user._id, tags, {
-                problemKind: 'programming',
+            const pid = await ProblemModel.addTrustedProgrammingProblem(domainId, '', title, content, this.user._id, tags, {
                 knowledgeMapId,
                 knowledgeNodeIds: [],
             });

@@ -841,6 +841,12 @@ interface ProblemCreateOptions {
     programmingStatement?: ProblemDoc['programmingStatement'];
 }
 
+interface TrustedProgrammingCreateOptions {
+    knowledgeMapId: NonNullable<ProblemDoc['knowledgeMapId']>;
+    knowledgeNodeIds?: ProblemDoc['knowledgeNodeIds'];
+    difficulty?: number;
+}
+
 interface ProblemCreateHooks {
     /** Called with the exact insert identity before document hooks or Mongo. */
     onAllocated?: (docId: number, documentId: ObjectId) => void;
@@ -2614,6 +2620,39 @@ export class ProblemModel {
         );
     }
 
+    /**
+     * Server-side programming ingestion that is not a teacher managed draft.
+     * Callers still bind one public knowledge map. File writes stay on the raw
+     * testdata entries because authoringMode is not set.
+     */
+    static addTrustedProgrammingProblem(
+        domainId: string,
+        pid: string = '',
+        title: string,
+        content: string,
+        owner: number,
+        tag: string[] = [],
+        options: TrustedProgrammingCreateOptions,
+    ) {
+        if (!options.knowledgeMapId) throw new ValidationError('knowledgeMapId');
+        return ProblemModel.add(
+            domainId,
+            pid,
+            title,
+            content,
+            owner,
+            tag,
+            {
+                problemKind: 'programming',
+                knowledgeMapId: options.knowledgeMapId,
+                ...(options.knowledgeNodeIds !== undefined ? { knowledgeNodeIds: options.knowledgeNodeIds } : {}),
+                ...(options.difficulty ? { difficulty: options.difficulty } : {}),
+            },
+            {},
+            managedProgrammingCreateAuthority,
+        );
+    }
+
     /** Fixed bootstrap-only exception for a fresh system domain. */
     static async createBuiltinWelcomeProblem(content: string) {
         const knowledge = await materializeKnowledgeMindmapTags([], {
@@ -2621,16 +2660,14 @@ export class ProblemModel {
             requireMap: true,
             requirePublicMap: true,
         });
-        return ProblemModel.add(
+        return ProblemModel.addTrustedProgrammingProblem(
             'system',
             'P1000',
             'A+B Problem',
             content,
             1,
             ['系统测试'],
-            { problemKind: 'programming', knowledgeMapId: knowledge.mapId, knowledgeNodeIds: [] },
-            {},
-            managedProgrammingCreateAuthority,
+            { knowledgeMapId: knowledge.mapId, knowledgeNodeIds: [] },
         );
     }
 

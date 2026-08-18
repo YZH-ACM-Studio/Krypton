@@ -115,6 +115,7 @@ export async function run(
         username,
         password,
         domainId,
+        knowledgeMapId,
         contestType = 'oi',
         dataDir,
         uploadDir = '/home/judge/src/web/upload/',
@@ -141,6 +142,7 @@ export async function run(
     report({ message: JSON.stringify(await query("show VARIABLES like 'char%';")) });
     const target = await DomainModel.get(domainId);
     if (!target) throw localizeError(new NotFoundError(domainId), 'Resource {0} not found.', domainId);
+    const knowledge = await ProblemModel.resolveProgrammingKnowledgeMap(knowledgeMapId);
     report({ message: 'Connected to database' });
     await SystemModel.set('migrate.lock', 'hustoj');
     /*
@@ -270,7 +272,7 @@ export async function run(
                             report({ message: `failed to read file: ${path.join(uploadDir, file[1])}` });
                         }
                     }
-                    const pid = await ProblemModel.add(
+                    const pid = await ProblemModel.addTrustedProgrammingProblem(
                         domainId,
                         `P${pdoc.problem_id}`,
                         pdoc.title,
@@ -282,7 +284,7 @@ export async function run(
                                   .map((i) => i.trim())
                                   .filter((i) => i)
                             : [],
-                        { hidden: pdoc.defunct === 'Y', problemKind: 'programming' },
+                        { knowledgeMapId: knowledge.mapId, knowledgeNodeIds: [] },
                     );
                     if (!markdown) await ProblemModel.edit(domainId, pid, { html: true });
                     pidMap[pdoc.problem_id] = pid;

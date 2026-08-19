@@ -1,7 +1,7 @@
 import { STATUS_CODES, type STATUS } from '@hydrooj/common';
 
 export type RecordDetailTab = 'overview' | 'cases' | 'code';
-export type RecordDetailMode = 'workspace' | 'legacy-contest' | 'exam-code';
+export type RecordDetailMode = 'workspace' | 'exam-code';
 
 export interface RecordCaseLike {
   status?: number;
@@ -19,16 +19,12 @@ export function defaultRecordDetailTab({ hasCode, caseCount }: { hasCode: boolea
 
 export function recordDetailMode({
   hasExamMode,
-  hasContestContext,
-  postContestPractice,
 }: {
   hasExamMode: boolean;
-  hasContestContext: boolean;
-  postContestPractice: boolean;
+  hasContestContext?: boolean;
+  postContestPractice?: boolean;
 }): RecordDetailMode {
-  if (hasExamMode) return 'exam-code';
-  if (hasContestContext && !postContestPractice) return 'legacy-contest';
-  return 'workspace';
+  return hasExamMode ? 'exam-code' : 'workspace';
 }
 
 export function recordCodeDownloadAvailable({

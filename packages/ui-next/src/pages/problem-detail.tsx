@@ -235,6 +235,44 @@ function buildUrlWithQuery(baseUrl: string, params: Record<string, unknown>) {
   return `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}${query}`;
 }
 
+export function buildProblemRecordsHref(input: {
+  recordsBase: string;
+  docId?: number;
+  pid?: string | number;
+  tid?: string | null;
+  practice?: boolean;
+  uidOrName?: string | number;
+  status?: number;
+}) {
+  const pid = input.docId ?? input.pid;
+  if (pid == null || pid === '') return input.recordsBase;
+  return buildUrlWithQuery(input.recordsBase, {
+    pid,
+    tid: input.tid || undefined,
+    practice: input.practice || undefined,
+    uidOrName: input.uidOrName || undefined,
+    status: input.status,
+  });
+}
+
+export function extractRecordListPayload(json: unknown): unknown[] {
+  if (!json || typeof json !== 'object' || Array.isArray(json)) return [];
+  const root = json as Record<string, unknown>;
+  if (Array.isArray(root.rdocs)) return root.rdocs;
+  const page = root.page;
+  if (page && typeof page === 'object' && !Array.isArray(page)) {
+    const data = (page as { data?: unknown }).data;
+    if (data && typeof data === 'object' && !Array.isArray(data) && Array.isArray((data as { rdocs?: unknown }).rdocs)) {
+      return (data as { rdocs: unknown[] }).rdocs;
+    }
+  }
+  const nested = root.data;
+  if (nested && typeof nested === 'object' && !Array.isArray(nested) && Array.isArray((nested as { rdocs?: unknown }).rdocs)) {
+    return (nested as { rdocs: unknown[] }).rdocs;
+  }
+  return [];
+}
+
 function normalizeId(value: unknown): string {
   if (value == null) return '';
   if (typeof value === 'object' && value && '$oid' in value) {
@@ -516,14 +554,22 @@ function ResizableSplit({
 /*  Info bar — dense row of stats                                      */
 /* ------------------------------------------------------------------ */
 
-function InfoChip({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: React.ReactNode }) {
-  return (
-    <div className="flex items-center gap-1.5 text-xs">
+function InfoChip({ icon: Icon, label, value, href }: { icon: LucideIcon; label: string; value: React.ReactNode; href?: string }) {
+  const body = (
+    <>
       <Icon className="size-3.5 text-muted-foreground" />
       <span className="text-muted-foreground">{label}</span>
       <span className="font-medium">{value}</span>
-    </div>
+    </>
   );
+  if (href) {
+    return (
+      <a href={href} className="inline-flex items-center gap-1.5 text-xs hover:text-primary">
+        {body}
+      </a>
+    );
+  }
+  return <div className="flex items-center gap-1.5 text-xs">{body}</div>;
 }
 
 function PracticeIntegrityNotice({ context, problemUrl }: { context: PracticeIntegrityPageContext | null; problemUrl: string }) {
@@ -896,6 +942,24 @@ export function ProblemDetailPage() {
   const recordContextTid = tid;
   const recordPracticeScope = postContestPracticeActive || undefined;
   const contestUrl = tid ? examUrls.overview || replaceRouteTokens(isHomework ? bs.urls.homeworkDetail : bs.urls.contestDetail, { TID: tid }) : null;
+  const recordFilterPid = pdoc.docId ?? pid;
+  const problemRecordsHref = buildProblemRecordsHref({
+    recordsBase: bs.urls.records,
+    docId: typeof pdoc.docId === 'number' ? pdoc.docId : undefined,
+    pid,
+    tid,
+    practice: postContestPracticeActive,
+    uidOrName: bs.user?.signedIn ? bs.user.id : undefined,
+  });
+  const acceptedRecordsHref = buildProblemRecordsHref({
+    recordsBase: bs.urls.records,
+    docId: typeof pdoc.docId === 'number' ? pdoc.docId : undefined,
+    pid,
+    tid,
+    practice: postContestPracticeActive,
+    uidOrName: bs.user?.signedIn ? bs.user.id : undefined,
+    status: 1,
+  });
   const recordDetailRouteBase = examUrls.record || bs.urls.recordDetail;
   const recordDetailRoute = postContestPracticeActive
     ? buildUrlWithQuery(recordDetailRouteBase, { tid: recordContextTid, practice: true })
@@ -1051,7 +1115,7 @@ export function ProblemDetailPage() {
     setIdeRecordsError(null);
     try {
       const url = buildUrlWithQuery(bs.urls.records, {
-        pid,
+        pid: recordFilterPid,
         tid: recordContextTid || undefined,
         practice: recordPracticeScope,
         uidOrName: bs.user.id,
@@ -1061,9 +1125,8 @@ export function ProblemDetailPage() {
         credentials: 'same-origin',
       });
       if (!res.ok) throw new Error(await readHydroResponseError(res, '加载提交记录失败'));
-      const json = (await res.json()) as { rdocs?: unknown; page?: { data?: { rdocs?: unknown } } };
-      const rdocs = Array.isArray(json.rdocs) ? json.rdocs : Array.isArray(json.page?.data?.rdocs) ? json.page.data.rdocs : [];
-      const entries = rdocs.map((rdoc: RawRecordDoc) => recordEntryFromRdoc(rdoc, recordDetailRoute)).filter(Boolean) as RecordEntry[];
+      const rdocs = extractRecordListPayload(await res.json());
+      const entries = rdocs.map((rdoc) => recordEntryFromRdoc(rdoc as RawRecordDoc, recordDetailRoute)).filter(Boolean) as RecordEntry[];
       setIdeRecords((prev) => mergeIdeRecordSnapshot(prev, entries));
       if (teamCodeReadOnly && entries[0]) await loadReadonlySource(entries[0]);
       setIdeRecordsLoaded(true);
@@ -1078,7 +1141,7 @@ export function ProblemDetailPage() {
     bs.user?.id,
     bs.user?.signedIn,
     loadReadonlySource,
-    pid,
+    recordFilterPid,
     recordContextTid,
     recordDetailRoute,
     recordPracticeScope,
@@ -1087,14 +1150,14 @@ export function ProblemDetailPage() {
   ]);
 
   useEffect(() => {
-    if (showIdeRecords && !ideRecordsLoaded && !ideRecordsLoading) {
+    if ((ideMode || showIdeRecords) && !ideRecordsLoaded && !ideRecordsLoading) {
       void loadIdeRecords();
     }
-  }, [showIdeRecords, ideRecordsLoaded, ideRecordsLoading, loadIdeRecords]);
+  }, [ideMode, showIdeRecords, ideRecordsLoaded, ideRecordsLoading, loadIdeRecords]);
 
   useRecordSocket({
     filters: {
-      pid: String(pid),
+      pid: String(recordFilterPid),
       tid: recordContextTid || undefined,
       practice: recordPracticeScope,
       uidOrName: bs.user?.id || undefined,
@@ -1221,8 +1284,13 @@ export function ProblemDetailPage() {
                   {dataContributorUdocs.length ? (
                     <InfoChip icon={HardDrive} label="数据贡献者" value={<ProblemAuthorText authors={dataContributorUdocs} />} />
                   ) : null}
-                  <InfoChip icon={Send} label="提交" value={nSubmit} />
-                  <InfoChip icon={CheckCircle2} label="通过" value={<span className="text-green-600 dark:text-green-400">{nAccept}</span>} />
+                  <InfoChip icon={Send} label="提交" value={nSubmit} href={problemRecordsHref} />
+                  <InfoChip
+                    icon={CheckCircle2}
+                    label="通过"
+                    value={<span className="text-green-600 dark:text-green-400">{nAccept}</span>}
+                    href={acceptedRecordsHref}
+                  />
                   <InfoChip icon={Trophy} label="通过率" value={`${rate}%`} />
                   {!inContest && pdoc.origStat ? <InfoChip icon={BarChart3} label="赛时通过率" value={origStatChipValue(pdoc.origStat)} /> : null}
                 </div>
@@ -1248,6 +1316,9 @@ export function ProblemDetailPage() {
                       <span className="text-xs font-medium">{teamExamMode ? '本队提交记录' : '提交记录'}</span>
                       <span className="text-[10px] text-muted-foreground">({ideRecords.length})</span>
                       <div className="flex-1" />
+                      <a href={problemRecordsHref} className="text-xs text-primary hover:underline">
+                        全部
+                      </a>
                       <button type="button" onClick={() => setShowIdeRecords(false)} className="text-xs text-muted-foreground hover:text-foreground">
                         收起
                       </button>
@@ -1486,12 +1557,20 @@ export function ProblemDetailPage() {
               variant="default"
               className="gap-1"
               onClick={() => {
-                if (teamCodeReadOnly && teamCanViewRecords) setShowIdeRecords(true);
+                if (teamCanViewRecords) setShowIdeRecords(true);
                 setIdeMode(true);
               }}
             >
               <Code2 className="size-3.5" />
               {teamCodeReadOnly ? '只读代码' : 'IDE 模式'}
+            </Button>
+          ) : null}
+          {bs.user?.signedIn ? (
+            <Button asChild size="sm" variant="outline">
+              <a href={problemRecordsHref}>
+                <History className="mr-1 size-3.5" />
+                提交记录
+              </a>
             </Button>
           ) : null}
           {canSubmit && !examMode?.enabled && (!practiceControlled || !practicePolicy?.removeIndependentSubmitForm || isStructuredAnswer) ? (
@@ -1521,8 +1600,13 @@ export function ProblemDetailPage() {
 
       {/* Dense info bar — during contest, hide owner/solutions/discussions to avoid info leak */}
       <div className="flex flex-wrap gap-x-4 gap-y-1.5 rounded-lg border bg-muted/30 px-3 py-2">
-        <InfoChip icon={Send} label="提交" value={nSubmit} />
-        <InfoChip icon={CheckCircle2} label="通过" value={<span className="text-green-600 dark:text-green-400">{nAccept}</span>} />
+        <InfoChip icon={Send} label="提交" value={nSubmit} href={problemRecordsHref} />
+        <InfoChip
+          icon={CheckCircle2}
+          label="通过"
+          value={<span className="text-green-600 dark:text-green-400">{nAccept}</span>}
+          href={acceptedRecordsHref}
+        />
         <InfoChip icon={Trophy} label="通过率" value={`${rate}%`} />
         {!inContest && pdoc.origStat ? <InfoChip icon={BarChart3} label="赛时通过率" value={origStatChipValue(pdoc.origStat)} /> : null}
         {!inContest ? <InfoChip icon={User} label="出题人" value={<ProblemAuthorText authors={authorUdocs} />} /> : null}
@@ -1620,6 +1704,12 @@ export function ProblemDetailPage() {
                   <FileText className="size-3" />
                   附件
                 </a>
+                {bs.user?.signedIn ? (
+                  <a href={problemRecordsHref} className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary">
+                    <History className="size-3" />
+                    提交记录
+                  </a>
+                ) : null}
               </CardContent>
             </Card>
           ) : (
@@ -1629,6 +1719,12 @@ export function ProblemDetailPage() {
                   <FileText className="size-3" />
                   附件
                 </a>
+                {bs.user?.signedIn ? (
+                  <a href={problemRecordsHref} className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary">
+                    <History className="size-3" />
+                    提交记录
+                  </a>
+                ) : null}
                 {contestUrl ? (
                   <a href={contestUrl} className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary">
                     <ChevronRight className="size-3 rotate-180" />

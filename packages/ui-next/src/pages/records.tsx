@@ -25,6 +25,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { SimpleSelect } from '@/components/ui/select';
 import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { MiniTabs } from '@/components/ui/mini-tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -305,21 +306,6 @@ function DiagnosticPanel({ title, texts }: { title: string; texts: string[] }) {
   );
 }
 
-function LegacyDiagnosticCard({ title, texts }: { title: string; texts: string[] }) {
-  if (!texts.length) return null;
-
-  return (
-    <Card>
-      <CardContent className="p-0">
-        <div className="border-b px-4 py-3 text-sm font-medium">{title}</div>
-        <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words p-4 font-mono text-xs leading-relaxed text-foreground">
-          {texts.join('\n')}
-        </pre>
-      </CardContent>
-    </Card>
-  );
-}
-
 async function copyRecordCode(text: string) {
   if (!text) throw new Error('没有可复制的代码');
   if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText && window.isSecureContext) {
@@ -350,159 +336,6 @@ async function copyRecordCode(text: string) {
     active?.focus();
   }
   if (!copied) throw new Error('浏览器拒绝了复制操作');
-}
-
-function LegacyRecordDetailBody({
-  rdoc,
-  data,
-  locale,
-  compilerTexts,
-  judgeTexts,
-  subtasks,
-  cases,
-  testHints,
-  code,
-}: {
-  rdoc: RecordDocument;
-  data: RecordLanguageContext;
-  locale: string;
-  compilerTexts: string[];
-  judgeTexts: string[];
-  subtasks: SubtaskView[];
-  cases: RecordCase[];
-  testHints: Record<string, { hint?: string; videoUrl?: string }>;
-  code: unknown;
-}) {
-  return (
-    <>
-      <Card>
-        <CardContent className="grid gap-4 p-4 text-sm sm:grid-cols-4">
-          <div>
-            <p className="text-xs text-muted-foreground">语言</p>
-            <p className="mt-1 font-medium">{langDisplay(data.langs, rdoc.lang)}</p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">提交时间</p>
-            <p className="mt-1 font-medium">{formatRecordTime(rdoc._id, locale)}</p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">评测时间</p>
-            <p className="mt-1 font-medium">{rdoc.judgeAt ? formatRecordTime(rdoc.judgeAt, locale) : '—'}</p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">进度</p>
-            <p className="mt-1 font-medium">{rdoc.progress != null ? `${Math.trunc(Number(rdoc.progress))}%` : '—'}</p>
-          </div>
-        </CardContent>
-      </Card>
-
-      <LegacyDiagnosticCard title="编译输出" texts={compilerTexts} />
-      <LegacyDiagnosticCard title="评测输出" texts={judgeTexts} />
-
-      {subtasks.length > 0 ? (
-        <Card>
-          <CardContent className="p-0">
-            <div className="border-b px-4 py-3 text-sm font-medium">子任务</div>
-            <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
-              {subtasks.map((subtask) => (
-                <div key={subtask.id} className="rounded-md border p-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-sm font-medium">#{subtask.id}</span>
-                    {statusDisplay(subtask.status)}
-                  </div>
-                  <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-                    <span>得分 {subtask.score ?? '—'}</span>
-                    {subtask.type ? (
-                      <Badge variant="outline" className="text-[10px]">
-                        {subtask.type}
-                      </Badge>
-                    ) : null}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {cases.length > 0 ? (
-        <Card>
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-12">#</TableHead>
-                  <TableHead>状态</TableHead>
-                  <TableHead className="w-20 text-right">得分</TableHead>
-                  <TableHead className="w-24 text-right">时间</TableHead>
-                  <TableHead className="w-24 text-right">内存</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {cases.map((c, i) => {
-                  const message = formatJudgeText(c.message);
-                  const subtaskId = c.subtaskId ?? c.subtask;
-                  const caseId = c.id ?? i + 1;
-                  return (
-                    <TableRow key={`${subtaskId ?? 'case'}-${caseId}-${i}`}>
-                      <TableCell className="text-muted-foreground">{subtaskId != null ? `${subtaskId}-${caseId}` : caseId}</TableCell>
-                      <TableCell>
-                        <div>{statusDisplay(c.status)}</div>
-                        {message ? (
-                          <p className="mt-1 max-w-xl whitespace-pre-wrap break-words font-mono text-xs text-muted-foreground">{message}</p>
-                        ) : null}
-                        {(() => {
-                          const h = testHints[subtaskId != null ? `${subtaskId}-${caseId}` : `1-${caseId}`];
-                          if (!h?.hint && !h?.videoUrl) return null;
-                          return (
-                            <div className="mt-1.5 max-w-xl rounded border border-amber-200 bg-amber-50/60 px-2 py-1 text-xs dark:border-amber-900/50 dark:bg-amber-950/20">
-                              {h.hint ? <p className="whitespace-pre-wrap break-words text-amber-800 dark:text-amber-200">💡 {h.hint}</p> : null}
-                              {h.videoUrl && /^https?:\/\//i.test(h.videoUrl) ? (
-                                <a href={h.videoUrl} target="_blank" rel="noreferrer" className="mt-0.5 inline-block text-primary hover:underline">
-                                  ▶ 讲解视频
-                                </a>
-                              ) : null}
-                            </div>
-                          );
-                        })()}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">{c.score ?? '—'}</TableCell>
-                      <TableCell className="text-right tabular-nums text-sm text-muted-foreground">{formatTime(c.time, c.status)}</TableCell>
-                      <TableCell className="text-right tabular-nums text-sm text-muted-foreground">{formatMemory(c.memory)}</TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {code ? (
-        <Card>
-          <CardContent className="p-0">
-            <div className="flex items-center justify-between border-b px-4 py-2">
-              <span className="text-sm font-medium">代码</span>
-              <Badge variant="outline">{langDisplay(data.langs, rdoc.lang)}</Badge>
-            </div>
-            <div className="overflow-hidden" style={{ height: 'min(60vh, 640px)', minHeight: 320 }}>
-              <KryptonIDE
-                mode="readonly"
-                langs={[]}
-                defaultLang={rdoc.lang || 'cc.cc17'}
-                value={String(code)}
-                onValueChange={() => {
-                  /* read-only */
-                }}
-                minHeight={320}
-                className="h-full rounded-none border-0"
-              />
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
-    </>
-  );
 }
 
 function RecordIdentityCard({
@@ -1291,18 +1124,6 @@ export function RecordDetailPage() {
             <RecordCodeContent data={data} rdoc={rdoc} code={code} copyState={copyState} onCopy={() => void handleCopyCode()} examCodeOnly />
           </CardContent>
         </Card>
-      ) : detailMode === 'legacy-contest' ? (
-        <LegacyRecordDetailBody
-          rdoc={rdoc}
-          data={data}
-          locale={locale}
-          compilerTexts={compilerTexts}
-          judgeTexts={judgeTexts}
-          subtasks={subtasks}
-          cases={cases}
-          testHints={testHints}
-          code={code}
-        />
       ) : (
         <Card className="overflow-hidden">
           <CardContent className="p-0">
@@ -1311,28 +1132,18 @@ export function RecordDetailPage() {
                 <p className="text-sm font-semibold">评测详情</p>
                 <p className="mt-0.5 text-xs text-muted-foreground">在摘要、测试点和源码之间直接切换</p>
               </div>
-              <div role="tablist" aria-label="提交详情视图" className="flex max-w-full gap-1 overflow-x-auto rounded-lg bg-muted p-1">
-                {tabs.map((tab) => {
-                  const selected = currentTab === tab;
-                  const Icon = tab === 'overview' ? LayoutDashboard : tab === 'cases' ? ListChecks : Code2;
-                  const label = tab === 'overview' ? '概览' : tab === 'cases' ? `测试点 ${cases.length}` : '代码';
-                  return (
-                    <button
-                      key={tab}
-                      type="button"
-                      role="tab"
-                      aria-selected={selected}
-                      onClick={() => setActiveTab(tab)}
-                      className={`inline-flex h-10 shrink-0 items-center gap-2 rounded-md px-3 text-sm font-medium transition-colors active:scale-[0.96] ${
-                        selected ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:bg-background/60 hover:text-foreground'
-                      }`}
-                    >
-                      <Icon className="size-4" />
-                      {label}
-                    </button>
-                  );
-                })}
-              </div>
+              <MiniTabs
+                value={currentTab}
+                onValueChange={setActiveTab}
+                size="md"
+                aria-label="提交详情视图"
+                items={tabs.map((tab) => ({
+                  value: tab,
+                  label: tab === 'overview' ? '概览' : tab === 'cases' ? '测试点' : '代码',
+                  count: tab === 'cases' ? cases.length : undefined,
+                  icon: tab === 'overview' ? LayoutDashboard : tab === 'cases' ? ListChecks : Code2,
+                }))}
+              />
             </div>
 
             {currentTab === 'overview' ? (

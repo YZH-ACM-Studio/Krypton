@@ -60,9 +60,9 @@ describe('p2.34 record detail workspace', () => {
     });
   });
 
-  it('selects the code-only Exam Mode view without changing other contest routes', () => {
+  it('uses the tabbed workspace for ordinary and contest records, and code-only Exam Mode', () => {
     expect(recordDetailMode({ hasExamMode: true, hasContestContext: true, postContestPractice: false })).to.equal('exam-code');
-    expect(recordDetailMode({ hasExamMode: false, hasContestContext: true, postContestPractice: false })).to.equal('legacy-contest');
+    expect(recordDetailMode({ hasExamMode: false, hasContestContext: true, postContestPractice: false })).to.equal('workspace');
     expect(recordDetailMode({ hasExamMode: false, hasContestContext: true, postContestPractice: true })).to.equal('workspace');
     expect(recordDetailMode({ hasExamMode: false, hasContestContext: false, postContestPractice: false })).to.equal('workspace');
   });
@@ -127,6 +127,9 @@ describe('p2.34 record detail workspace', () => {
     expect(source).to.include('recordDetailMode({');
     expect(source).to.include('!!data.examMode || data.examRecordCodeOnly === true');
     expect(source).to.include("detailMode === 'exam-code'");
+    expect(source).to.include('<MiniTabs');
+    expect(source).not.to.include('LegacyRecordDetailBody');
+    expect(source).not.to.include('legacy-contest');
     expect(source).to.include("disabled: !rdoc._id || detailMode === 'exam-code'");
     expect(source).to.include('serverAvailable: data.examRecordDownloadAvailable');
     expect(source).to.include('data.udoc || getUser(bs.udict, rdoc.uid)');

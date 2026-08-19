@@ -874,6 +874,7 @@ function parsePreloginWorkflow(value: unknown): PreloginWorkflow {
     throw new Error('网络版本响应身份不一致');
   }
   const monitoring = record(row.monitoring, '监测预检');
+  let hiddenExpectedDetectorWarnings = 0;
   const monitoringItems = array(monitoring.items, '监测预检').map((rawItem) => {
     const item = record(rawItem, '监测预检终端');
     const warnings = array(item.warnings, '监测告警').map((rawWarning) => {
@@ -890,6 +891,8 @@ function parsePreloginWorkflow(value: unknown): PreloginWorkflow {
         reason: optionalText(warning.reason, '监测告警'),
       };
     });
+    const visibleWarnings = warnings.filter((warning) => !isExpectedExamPreflightDetectorWarning(warning));
+    hiddenExpectedDetectorWarnings += warnings.length - visibleWarnings.length;
     array(item.capabilities, '监测能力').forEach((rawCapability) => {
       const capability = record(rawCapability, '监测能力');
       text(capability.name, '监测能力');
@@ -903,7 +906,7 @@ function parsePreloginWorkflow(value: unknown): PreloginWorkflow {
       online: boolean(item.online, '监测预检终端'),
       serviceVersion: optionalText(item.serviceVersion, '监测预检终端'),
       protocolVersion: item.protocolVersion === null ? null : positiveInteger(item.protocolVersion, '监测预检终端'),
-      warnings,
+      warnings: visibleWarnings,
     };
   });
   if (
@@ -914,6 +917,8 @@ function parsePreloginWorkflow(value: unknown): PreloginWorkflow {
   }
   const hardErrorCount = nonNegativeInteger(row.hardErrorCount, '考试准备工作流');
   if (!networkReady && hardErrorCount < 1) throw new Error('考试准备工作流响应状态不一致');
+  const reportedWarningCount = nonNegativeInteger(row.warningCount, '考试准备工作流');
+  if (reportedWarningCount < hiddenExpectedDetectorWarnings) throw new Error('考试准备工作流响应状态不一致');
   return {
     network: {
       source,
@@ -935,7 +940,7 @@ function parsePreloginWorkflow(value: unknown): PreloginWorkflow {
     },
     monitoring: { ready: monitoringItems.every((item) => item.ready), items: monitoringItems },
     hardErrorCount,
-    warningCount: nonNegativeInteger(row.warningCount, '考试准备工作流'),
+    warningCount: reportedWarningCount - hiddenExpectedDetectorWarnings,
     fingerprint: fingerprint(row.fingerprint, '考试准备工作流'),
   };
 }
@@ -1291,6 +1296,14 @@ function formatTeacherCode(code: string, fallback = UNKNOWN_TEACHER_ERROR): stri
 
 function formatPreloginDiagnostic(code: PreloginDiagnosticCode): string {
   return formatTeacherCode(code);
+}
+
+function isExpectedExamPreflightDetectorWarning(warning: { detector: 'foreground' | 'process' | 'usb' | string | null; reason: string | null }): boolean {
+  return (
+    (warning.detector === 'process' &&
+      (warning.reason === 'process_path_partial_access_denied' || warning.reason === 'process_path_partial_query_failed')) ||
+    (warning.detector === 'foreground' && warning.reason === 'foreground_interactive_session_required')
+  );
 }
 
 function formatMonitoringWarning(warning: { kind: MonitoringWarningKind; detector: 'foreground' | 'process' | 'usb' | null; reason: string | null }): string {
@@ -2950,30 +2963,54 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
     setPreloginBusy(true);
     setPreloginError(null);
     setPreloginFactsFresh(false);
+    let startAccepted = false;
     try {
       await post(`${path}/network-execution`, {
         action: 'start',
         expectedRevision: preloginWorkflow.network.executionRevision,
         expectedConfigRevision: preloginWorkflow.network.configRevision,
       });
-      const refreshed = await loadPreloginFacts();
-      if (refreshed.workflow.network.source !== 'execution' || !refreshed.workflow.network.ready) {
-        throw new Error('网络策略尚未在全部目标终端完成应用；请查看逐终端网络执行事实。');
+      startAccepted = true;
+      const deadline = Date.now() + 30000;
+      let latest = await loadPreloginFacts();
+      while (Date.now() < deadline) {
+        if (latest.workflow.network.source === 'execution' && latest.workflow.network.ready) {
+          setActiveStep('launch');
+          writePreloginUrl({ step: 'launch' });
+          return;
+        }
+        if (latest.workflow.network.reason === 'network_execution_failed') {
+          throw new Error(
+            `网络策略未在全部目标完成应用${formatNetworkReason(latest.workflow.network.reason) ? `（${formatNetworkReason(latest.workflow.network.reason)}）` : ''}。请查看逐终端网络执行事实，不要再次点击启动。`,
+          );
+        }
+        await new Promise((resolve) => {
+          window.setTimeout(resolve, 1500);
+        });
+        latest = await loadPreloginFacts();
       }
-      setActiveStep('launch');
-      writePreloginUrl({ step: 'launch' });
+      if (latest.workflow.network.source === 'execution' && latest.workflow.network.ready) {
+        setActiveStep('launch');
+        writePreloginUrl({ step: 'launch' });
+        return;
+      }
+      throw new Error('网络策略仍在逐终端应用中。请查看逐终端事实；若已是已应用，不要再次点击启动。');
     } catch (reason) {
       const operationError = reason instanceof Error ? reason.message : String(reason);
       try {
         await loadPreloginFacts();
-        setPreloginError(`${operationError}；启动结果未知，已重读当前网络执行事实，请核对后继续。`);
+        setPreloginError(
+          startAccepted
+            ? operationError
+            : `${operationError}。启动请求未得到确定响应，已重读当前网络执行事实。若逐终端已是已应用，不要再点启动。`,
+        );
       } catch (recoveryReason) {
         const recoveryError = recoveryReason instanceof Error ? recoveryReason.message : String(recoveryReason);
         const refreshed = await refreshWorkspace();
         setPreloginError(
           refreshed
             ? `${operationError}；当前网络执行事实重读失败（${recoveryError}），已重读名单与考试活动，请核对后继续。`
-            : `${operationError}；启动结果未知且网络执行、名单事实均重读失败：${recoveryError}`,
+            : `${operationError}；网络执行、名单事实均重读失败：${recoveryError}`,
         );
       }
     } finally {
@@ -3277,14 +3314,14 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
   const rereadButton = (
     <Button
       type="button"
-      variant="ghost"
-      disabled={mutationBusy || (dirty && workspaceFresh)}
+      variant={!workspaceFresh || dirty ? 'default' : 'ghost'}
+      disabled={mutationBusy}
       onClick={() => {
         if (dirty && !window.confirm('这会放弃当前未保存的人工调整，并从服务端重新读取最终状态。是否继续？')) return;
         void refreshWorkspace();
       }}
     >
-      <RefreshCw className="size-4" /> {dirty && !workspaceFresh ? '放弃未保存调整并重读' : '重读教室事实'}
+      <RefreshCw className="size-4" /> {dirty || !workspaceFresh ? '放弃草稿并重读' : '重读教室事实'}
     </Button>
   );
   const rosterCreateDisabled =
@@ -3356,7 +3393,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
         ) : null}
         {!workspaceFresh && workspace ? (
           <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-sm text-amber-800 dark:text-amber-200">
-            页面事实尚未完成重读；所有写入、发布和导出均已暂停。请点击“重读教室事实”。
+            页面事实尚未完成重读；所有写入、发布和导出均已暂停。请点击“放弃草稿并重读”。
           </p>
         ) : null}
         <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -4658,27 +4695,34 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                   ))}
                 </div>
               ) : null}
+              {currentPublicationAlreadyConfirmed || preloginBatch ? (
+                <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-800 dark:text-amber-200">
+                  当前发布版本已有预登录批次，不能再点一键预启动。失败项用上方“只重试失败项”。若终端报已有活动考试会话，先到 Vigil
+                  作废该 UID 的会话。
+                </p>
+              ) : null}
               <StepFooter
                 left={rereadButton}
                 right={
-                  <Button
-                    disabled={
-                      mutationBusy ||
-                      dirty ||
-                      !preloginFactsCurrent ||
-                      !preloginPreparation ||
-                      !preloginWorkflow ||
-                      preloginWorkflow.network.source !== 'execution' ||
-                      !preloginWorkflow.network.ready ||
-                      preloginWorkflow.hardErrorCount > 0 ||
-                      !preloginWorkflowWriterEnabled ||
-                      (publishedPreparationAssignment?.schemaVersion === 2 && !preloginV2WriterEnabled) ||
-                      currentPublicationAlreadyConfirmed
-                    }
-                    onClick={() => void confirmPrelogin()}
-                  >
-                    <Play className="size-4" /> 一键预启动全部终端
-                  </Button>
+                  currentPublicationAlreadyConfirmed || preloginBatch ? null : (
+                    <Button
+                      disabled={
+                        mutationBusy ||
+                        dirty ||
+                        !preloginFactsCurrent ||
+                        !preloginPreparation ||
+                        !preloginWorkflow ||
+                        preloginWorkflow.network.source !== 'execution' ||
+                        !preloginWorkflow.network.ready ||
+                        preloginWorkflow.hardErrorCount > 0 ||
+                        !preloginWorkflowWriterEnabled ||
+                        (publishedPreparationAssignment?.schemaVersion === 2 && !preloginV2WriterEnabled)
+                      }
+                      onClick={() => void confirmPrelogin()}
+                    >
+                      <Play className="size-4" /> 一键预启动全部终端
+                    </Button>
+                  )
                 }
               />
             </CardContent>

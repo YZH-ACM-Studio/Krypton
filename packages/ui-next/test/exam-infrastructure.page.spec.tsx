@@ -1239,7 +1239,8 @@ describe('exam infrastructure workspace', () => {
     expect(await screen.findByRole('button', { name: '重试当前请求' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '整批重试失败项' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '热更新策略' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '停止' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '停止' })).toBeDisabled();
+    expect(screen.getByText(/offline 不是已释放/)).toBeInTheDocument();
   });
 
   it('shows old, expected and actual policy revisions for every endpoint fact', async () => {
@@ -1274,19 +1275,51 @@ describe('exam infrastructure workspace', () => {
         return base(input);
       }),
     );
-    const user = userEvent.setup();
     setEventPanel('run');
     renderPage({ eventId: EVENT.eventId });
 
     expect(await screen.findByText('终端离线')).toBeInTheDocument();
     expect(screen.queryByText('endpoint_offline')).not.toBeInTheDocument();
-    await user.click(await screen.findByRole('button', { name: '整批重试失败项' }));
-    const dialog = screen.getByRole('dialog', { name: '整批重新应用网络策略？' });
-    expect(dialog).toHaveTextContent('不是只给失败终端补发');
-    expect(dialog).toHaveTextContent('2 → 3');
-    expect(dialog).toHaveTextContent('endpoint-002');
-    await user.click(screen.getByRole('button', { name: '确认整批重试' }));
-    await waitFor(() => expect(submitted).toEqual({ action: 'retryFailed', expectedRevision: 3 }));
+    expect(screen.queryByRole('button', { name: '整批重试失败项' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '停止' })).toBeDisabled();
+    expect(screen.getByText(/offline 不是已释放/)).toBeInTheDocument();
+    expect(submitted).toBeNull();
+  });
+
+  it('labels empty-owner and restored-disk stop failures in Chinese', async () => {
+    vi.stubGlobal(
+      'fetch',
+      detailFetch(
+        executionFixture([
+          projectionItem(1, {
+            command: 'stop_network_policy',
+            status: 'failed',
+            failureReason: 'network_activity_not_active',
+            appliedPolicyRevision: null,
+            networkPolicyState: { state: 'inactive', reason: 'initialized', permitRuleCount: 0 },
+          }),
+          projectionItem(2, {
+            command: 'stop_network_policy',
+            status: 'failed',
+            failureReason: 'network_stop_reaffirmation_mismatch',
+            appliedPolicyRevision: null,
+            networkPolicyState: {
+              state: 'inactive',
+              reason: 'authorized_stop_empty_owner_pending',
+              permitRuleCount: 0,
+            },
+          }),
+        ]),
+        ['endpoint-001', 'endpoint-002'],
+      ),
+    );
+    setEventPanel('run');
+    renderPage({ eventId: EVENT.eventId });
+
+    expect(await screen.findByText('本机没有这场网络锁，整盘还原后需再点一次停止')).toBeInTheDocument();
+    expect(screen.getByText('本机残留的停止证明和当前策略不一致，常见于整盘还原')).toBeInTheDocument();
+    expect(screen.queryByText('network_activity_not_active')).not.toBeInTheDocument();
+    expect(screen.queryByText('network_stop_reaffirmation_mismatch')).not.toBeInTheDocument();
   });
 
   it('keeps a failed start confirmation open and shows the server error in place', async () => {

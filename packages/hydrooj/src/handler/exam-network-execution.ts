@@ -1,3 +1,4 @@
+import { lookup } from 'node:dns/promises';
 import { Logger } from '@hydrooj/utils';
 import { ObjectId } from 'mongodb';
 import { Context, Handler, OplogModel, param, PermissionError, Types, ValidationError } from 'hydrooj';
@@ -8,7 +9,7 @@ import { assertCanManageExamEvent, isExamInfrastructureAdmin } from '../model/ex
 import { ExamEventDoc, examEventDisplayStatus, examEventService } from '../model/exam-event';
 import { withExamEventBoundary } from '../model/exam-event-boundary';
 import { ExamNetworkAuditContext, runAuditedExamNetworkMutation } from '../model/exam-network-audit';
-import { diffExamNetworkPolicies } from '../model/exam-network-policy';
+import { diffExamNetworkPolicies, ExamNetworkPolicyError, validateExamNetworkPolicyResolution } from '../model/exam-network-policy';
 import {
     ExamNetworkConfigError,
     ExamNetworkRevisionRef,
@@ -19,6 +20,7 @@ import {
     examTargetAssignmentColl,
     registerExamNetworkControlPlaneResolver,
     registerExamTargetResolver,
+    requireExamNetworkControlPlaneResolver,
 } from '../model/exam-network-config';
 import {
     ExamNetworkExecutionDoc,
@@ -195,7 +197,11 @@ function executionPayload(execution: ExamNetworkExecutionDoc, config: ResolvedEx
 const logger = new Logger('exam-network-execution');
 
 function translateExecutionError(error: unknown): never {
-    if (error instanceof ExamNetworkExecutionError || error instanceof ExamNetworkConfigError) {
+    if (
+        error instanceof ExamNetworkExecutionError
+        || error instanceof ExamNetworkConfigError
+        || error instanceof ExamNetworkPolicyError
+    ) {
         logger.warn('Exam network execution rejected reason=%s', error.reason);
         throwExamTeacherValidationError('examNetworkExecution', error.reason);
     }
@@ -283,6 +289,13 @@ class ExamNetworkExecutionHandler extends ExamNetworkExecutionBaseHandler {
                     if (configured.configRevision !== expectedConfigRevision) {
                         throw new ExamNetworkExecutionError('config_revision_conflict');
                     }
+                    const controlPlane = await requireExamNetworkControlPlaneResolver()();
+                    await validateExamNetworkPolicyResolution(
+                        configured.policy.policy,
+                        async (hostname) =>
+                            (await lookup(hostname, { all: true, verbatim: true })).map((entry) => entry.address),
+                        controlPlane,
+                    );
                     let startPreflight;
                     try {
                         startPreflight = await preflightExamNetworkOnVigil(configured.target.endpointIds);

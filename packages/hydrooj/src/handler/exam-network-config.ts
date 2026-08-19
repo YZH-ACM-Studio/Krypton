@@ -26,7 +26,7 @@ import {
     runAuditedExamNetworkMutation,
     targetAssignmentAuditFacts,
 } from '../model/exam-network-audit';
-import { ExamNetworkPolicyError } from '../model/exam-network-policy';
+import { ExamNetworkPolicyError, suggestedExamNetworkPolicy } from '../model/exam-network-policy';
 
 function auditContext(handler: ExamNetworkBaseHandler): ExamNetworkAuditContext {
     return {
@@ -156,8 +156,19 @@ export function translateExamNetworkError(error: unknown): never {
     throw error;
 }
 
-async function resolveHost(hostname: string): Promise<string[]> {
+export async function resolveExamNetworkHost(hostname: string): Promise<string[]> {
     return (await lookup(hostname, { all: true, verbatim: true })).map((entry) => entry.address);
+}
+
+async function resolveHost(hostname: string): Promise<string[]> {
+    return resolveExamNetworkHost(hostname);
+}
+
+function requestPublicHost(handler: Handler): string {
+    const forwarded = handler.request.headers?.['x-forwarded-host'];
+    if (typeof forwarded === 'string' && forwarded.trim()) return forwarded.split(',')[0].trim().split(':')[0];
+    const host = handler.request.host || handler.request.hostname || '';
+    return String(host).split(':')[0];
 }
 
 function serializedExamEventWrite(_target: unknown, _key: string, descriptor: PropertyDescriptor) {
@@ -208,7 +219,18 @@ class ExamPolicyTemplateCollectionHandler extends ExamNetworkBaseHandler {
         const templates = await examNetworkConfigService
             .listTemplates(event.domainId, event.schoolId, isExamInfrastructureAdmin(this.user) ? undefined : this.user._id)
             .toArray();
-        this.response.body = { templates: templates.map(serializeTemplate) };
+        let suggestedPolicy = null;
+        try {
+            const controlPlane = await requireExamNetworkControlPlaneResolver()();
+            suggestedPolicy = suggestedExamNetworkPolicy(controlPlane, requestPublicHost(this));
+        } catch (error) {
+            logger.warn(
+                'Exam network suggested policy unavailable reason=%s',
+                error instanceof Error ? error.message : String(error),
+            );
+            suggestedPolicy = null;
+        }
+        this.response.body = { templates: templates.map(serializeTemplate), suggestedPolicy };
     }
 
     @param('eventId', Types.ObjectId)

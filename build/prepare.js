@@ -199,6 +199,7 @@ const CheckConfig = {
         'packages/*/test/**/*.ts',
         'packages/*/test/**/*.tsx',
         'packages/*/package.json',
+        'packages/elastic/document.ts',
         'packages/ui-default/index.ts',
         'packages/ui-default/backendlib/**/*.ts',
         'packages/ui-default/utils/error-presenter.ts',

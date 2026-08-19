@@ -205,6 +205,23 @@ async function expectReject(work: Promise<unknown>, message: string) {
     expect.fail('expected promise to reject');
 }
 
+async function configureFirstProblemTestlibChecker(manifestPath: string, source: string) {
+    const root = path.dirname(manifestPath);
+    const manifest = JSON.parse(await fsp.readFile(manifestPath, 'utf8'));
+    const problem = manifest.problems[0];
+    const dataDirectory = path.resolve(root, problem.testdata.directory);
+    const checkerName = 'checker.cc';
+    await fsp.writeFile(path.join(dataDirectory, checkerName), source);
+    problem.testdata.files.push(checkerName);
+    problem.testdata.checker = checkerName;
+    const configPath = path.resolve(root, problem.testdata.config);
+    const config = yaml.load(await fsp.readFile(configPath, 'utf8')) as Record<string, unknown>;
+    config.checker_type = 'testlib';
+    config.checker = checkerName;
+    await fsp.writeFile(configPath, yaml.dump(config));
+    await fsp.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
 describe('P2.23 canonical problem batch import', () => {
     let root: string;
     let manifestPath: string;
@@ -297,6 +314,60 @@ Promise.resolve(cli.runMatchedCommand()).catch((error) => {
         expect(summary.totalCases).to.equal(173);
         expect(batch.problems[0].testdataFiles[0].name).to.equal('1.in');
         expect(batch.problems[0].configFile.name).to.equal('config.yaml');
+    });
+
+    it('rejects testlib checkers that replace Hydro argv with hard-coded filenames', async () => {
+        const checkerRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'problem-batch-checker-'));
+        try {
+            const checkerManifest = await writeFixture(checkerRoot);
+            await configureFirstProblemTestlibChecker(
+                checkerManifest,
+                `#include "testlib.h"
+int main() {
+    static char arg0[] = "checker";
+    static char arg1[] = "input";
+    static char arg2[] = "user_output";
+    static char arg3[] = "output";
+    char* argv[] = {arg0, arg1, arg2, arg3};
+    registerTestlibCmd(4, argv);
+    quitf(_ok, "ok");
+}
+`,
+            );
+            await expectReject(validateProblemBatchManifest(checkerManifest), 'must forward process argc/argv');
+
+            await fsp.writeFile(
+                path.join(checkerRoot, 'problems', 'A', 'testdata', 'checker.cc'),
+                `#include "testlib.h"
+int main(int argc, char* argv[]) {
+    registerTestlibCmd(argc, argv);
+    quitf(_ok, "ok");
+}
+`,
+            );
+            const batch = await validateProblemBatchManifest(checkerManifest);
+            expect(batch.problems[0].testdata.checker).to.equal('checker.cc');
+        } finally {
+            await fsp.rm(checkerRoot, { recursive: true, force: true });
+        }
+    });
+
+    it('rejects structured statements containing literal CJK Unicode escapes', async () => {
+        const escapedRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'problem-batch-unicode-'));
+        try {
+            const escapedManifest = await writeFixture(escapedRoot);
+            const manifest = JSON.parse(await fsp.readFile(escapedManifest, 'utf8'));
+            const canonicalPath = path.resolve(escapedRoot, manifest.problems[0].programmingStatement);
+            const statementPath = path.resolve(escapedRoot, manifest.problems[0].statement);
+            const canonical = JSON.parse(await fsp.readFile(canonicalPath, 'utf8'));
+            canonical.description.content = '\\u6C50\\u4E0E\\u98CE\\u5B50';
+            await fsp.writeFile(canonicalPath, JSON.stringify(canonical));
+            await fsp.writeFile(statementPath, compileProgrammingStatement(canonical));
+
+            await expectReject(validateProblemBatchManifest(escapedManifest), 'contains literal CJK Unicode escapes');
+        } finally {
+            await fsp.rm(escapedRoot, { recursive: true, force: true });
+        }
     });
 
     it('keeps legacy manifests public by default and accepts batch or per-problem visibility', async () => {

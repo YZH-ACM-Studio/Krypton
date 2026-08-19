@@ -138,8 +138,8 @@ function fixture() {
     return { service, templates, assignments, configs };
 }
 
-function policy(hosts: string[] = ['judge.example.edu']) {
-    return { hosts, ips: ['10.10.0.0/16', '2001:db8::/64'], ports: [80, 443] };
+function policy(hosts: string[] = ['judge.example.edu', 'vigil.example.edu']) {
+    return { hosts, ips: ['10.10.0.0/16', '2001:db8::/64'], ports: [80, 443, 1935] };
 }
 
 const controlPlane = { host: 'vigil.example.edu', port: 443 };
@@ -161,9 +161,9 @@ async function reason(run: () => unknown | Promise<unknown>): Promise<string | n
 describe('Exam network policy canonical schema', () => {
     it('normalizes the strict wire policy and preserves a stable fingerprint', () => {
         const canonical = policyModule.canonicalExamNetworkPolicy({
-            hosts: ['JUDGE.Example.EDU'],
+            hosts: ['JUDGE.Example.EDU', 'VIGIL.Example.EDU'],
             ips: ['2001:0db8::/64', '10.10.0.0/16'],
-            ports: [443, 80],
+            ports: [1935, 443, 80],
         });
         expect(canonical).to.deep.equal(policy());
         expect(policyModule.examNetworkPolicyFingerprint(canonical)).to.match(/^[a-f0-9]{64}$/);
@@ -222,9 +222,59 @@ describe('Exam network policy canonical schema', () => {
         const explicitlyCovered = policyModule.canonicalExamNetworkPolicy({
             hosts: [controlPlane.host],
             ips: explicitIps,
-            ports: [controlPlane.port],
+            ports: [],
         });
         await policyModule.validateExamNetworkPolicyResolution(explicitlyCovered, async () => resolved, controlPlane);
+    });
+
+    it('rejects a policy that only covers OJ and leaves Vigil implicit', async () => {
+        const ojOnly = policyModule.canonicalExamNetworkPolicy({
+            hosts: [],
+            ips: ['10.1.234.2'],
+            ports: [],
+        });
+        expect(
+            await reason(() => policyModule.validateExamNetworkPolicyResolution(ojOnly, async () => ['198.51.100.1'], controlPlane)),
+        ).to.equal('control_plane_not_explicit');
+    });
+
+    it('rejects a listed Vigil destination that omits the control-plane or stream port', async () => {
+        const missingControlPort = policyModule.canonicalExamNetworkPolicy({
+            hosts: [controlPlane.host],
+            ips: [],
+            ports: [80, policyModule.EXAM_NETWORK_STREAM_PORT],
+        });
+        expect(
+            await reason(() =>
+                policyModule.validateExamNetworkPolicyResolution(missingControlPort, async () => ['198.51.100.1'], controlPlane),
+            ),
+        ).to.equal('control_plane_port_not_explicit');
+        const missingStreamPort = policyModule.canonicalExamNetworkPolicy({
+            hosts: [controlPlane.host],
+            ips: [],
+            ports: [controlPlane.port],
+        });
+        expect(
+            await reason(() =>
+                policyModule.validateExamNetworkPolicyResolution(missingStreamPort, async () => ['198.51.100.1'], controlPlane),
+            ),
+        ).to.equal('stream_port_not_explicit');
+    });
+
+    it('accepts an explicit Vigil IP or hostname and derives editor defaults from OJ plus the control plane', async () => {
+        const byIp = policyModule.canonicalExamNetworkPolicy({
+            hosts: [],
+            ips: ['198.51.100.1', '10.1.234.2'],
+            ports: [80, 443, policyModule.EXAM_NETWORK_STREAM_PORT],
+        });
+        await policyModule.validateExamNetworkPolicyResolution(byIp, async () => ['198.51.100.1'], controlPlane);
+        expect(
+            policyModule.suggestedExamNetworkPolicy({ host: '10.1.235.155', port: 8765 }, '10.1.234.2'),
+        ).to.deep.equal({
+            hosts: [],
+            ips: ['10.1.234.2', '10.1.235.155'],
+            ports: [80, 443, 1935, 8765],
+        });
     });
 
     it('classifies policy changes by effective host, CIDR and all-port semantics', () => {
@@ -346,7 +396,7 @@ describe('Exam policy templates and immutable revisions', () => {
             templateId: created._id,
             expectedRevision: 2,
             actorUid: 1,
-            policy: { hosts: ['new.example.edu'], ips: [], ports: [443] },
+            policy: { hosts: ['new.example.edu', 'vigil.example.edu'], ips: [], ports: [443, 1935] },
         });
         const secondPublished = await service.publishTemplate({
             domainId: 'system',
@@ -358,7 +408,7 @@ describe('Exam policy templates and immutable revisions', () => {
         });
         expect(secondPublished.revisions.map((revision) => revision.revision)).to.deep.equal([1, 2]);
         expect(secondPublished.revisions[0].fingerprint).to.equal(firstFingerprint);
-        expect(secondPublished.revisions[0].policy.hosts).to.deep.equal(['judge.example.edu']);
+        expect(secondPublished.revisions[0].policy.hosts).to.deep.equal(['judge.example.edu', 'vigil.example.edu']);
         const archived = await service.archiveTemplate({
             domainId: 'system',
             templateId: created._id,
@@ -641,7 +691,7 @@ describe('Exam target snapshots and event revision references', () => {
             templateId: template._id,
             expectedRevision: first.revision,
             actorUid: 1,
-            policy: { hosts: ['second.example.edu'], ips: [], ports: [443] },
+            policy: { hosts: ['second.example.edu', 'vigil.example.edu'], ips: [], ports: [443, 1935] },
         });
         await service.publishTemplate({
             domainId: 'system',

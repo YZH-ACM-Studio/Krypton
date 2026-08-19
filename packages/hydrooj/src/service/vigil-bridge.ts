@@ -274,6 +274,16 @@ export interface VigilMonitoringWarning {
     reason: string | null;
 }
 
+const PREFLIGHT_EXPECTED_DETECTOR_REASONS = new Set([
+    'process:process_path_partial_access_denied',
+    'process:process_path_partial_query_failed',
+    'foreground:foreground_interactive_session_required',
+]);
+
+export function isExpectedExamPreflightDetectorWarning(warning: Pick<VigilMonitoringWarning, 'detector' | 'reason'>): boolean {
+    return warning.detector !== null && warning.reason !== null && PREFLIGHT_EXPECTED_DETECTOR_REASONS.has(`${warning.detector}:${warning.reason}`);
+}
+
 export interface VigilMonitoringPreflightItem extends VigilEndpointPreflightItem {
     warnings: VigilMonitoringWarning[];
 }
@@ -527,7 +537,7 @@ export async function preflightExamMonitoringOnVigil(endpointIds: string[]): Pro
             serviceVersion: bridgeString(item.serviceVersion, 'Vigil monitoring preflight item was malformed.', true),
             protocolVersion: bridgeInteger(item.protocolVersion, 'Vigil monitoring preflight item was malformed.', true),
             capabilities: item.capabilities.map(parseEndpointCapability),
-            warnings: item.warnings.map(parseMonitoringWarning),
+            warnings: item.warnings.map(parseMonitoringWarning).filter((warning) => !isExpectedExamPreflightDetectorWarning(warning)),
         } satisfies VigilMonitoringPreflightItem;
         const capabilityNames = parsed.capabilities.map((capability) => capability.name);
         if (new Set(capabilityNames).size !== capabilityNames.length) {

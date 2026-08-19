@@ -27,8 +27,10 @@ const getLoader = (type: LoadTask, filename: string) =>
                 const loadType = type.replace(/^(.)/, (t) => t.toUpperCase());
                 try {
                     const m = unwrapExports(require(p));
-                    if (m.apply) ctx.loader.reloadPlugin(p, name);
-                    else logger.info(`${loadType} init: %s`, i);
+                    if (m.apply) {
+                        const fiber = await ctx.loader.reloadPlugin(p, name);
+                        await fiber?.await();
+                    } else logger.info(`${loadType} init: %s`, i);
                 } catch (e) {
                     fail.push(i);
                     app.injectUI('Notification', `${loadType} load fail: {0}`, { args: [i], type: 'warn' }, PRIV.PRIV_VIEW_SYSTEM_NOTIFICATION);

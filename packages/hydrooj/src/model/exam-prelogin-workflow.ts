@@ -71,6 +71,14 @@ function canonicalCompare(left: string, right: string): number {
     return left < right ? -1 : left > right ? 1 : 0;
 }
 
+function isExpectedExamPreflightDetectorWarning(warning: Pick<VigilMonitoringPreflightItem['warnings'][number], 'detector' | 'reason'>): boolean {
+    return (
+        (warning.detector === 'process' &&
+            (warning.reason === 'process_path_partial_access_denied' || warning.reason === 'process_path_partial_query_failed')) ||
+        (warning.detector === 'foreground' && warning.reason === 'foreground_interactive_session_required')
+    );
+}
+
 function sha256(value: unknown): string {
     return createHash('sha256').update(JSON.stringify(value), 'utf8').digest('hex');
 }
@@ -346,13 +354,17 @@ export async function loadExamPreloginWorkflow(
     if (monitoringItems.length !== endpointIds.length || monitoringItems.some((item, index) => item.endpointId !== endpointIds[index])) {
         throw new ExamPreloginError('monitoring_preflight_identity_mismatch');
     }
-    const monitoring = { ready: monitoringItems.every((item) => item.ready), items: monitoringItems };
+    const visibleMonitoringItems = monitoringItems.map((item) => ({
+        ...item,
+        warnings: item.warnings.filter((warning) => !isExpectedExamPreflightDetectorWarning(warning)),
+    }));
+    const monitoring = { ready: visibleMonitoringItems.every((item) => item.ready), items: visibleMonitoringItems };
     const hardErrorCount =
         preparation.hardErrorCount +
-        monitoringItems.filter((item) => !item.ready).length +
+        visibleMonitoringItems.filter((item) => !item.ready).length +
         (network.ready ? 0 : 1) +
         missingPreloginEndpointIds.length;
-    const warningCount = preparation.warningCount + monitoringItems.reduce((count, item) => count + item.warnings.length, 0);
+    const warningCount = preparation.warningCount + visibleMonitoringItems.reduce((count, item) => count + item.warnings.length, 0);
     const canonical: Omit<ExamPreloginWorkflowSnapshot, 'fingerprint'> = {
         schemaVersion: 1,
         preparation,

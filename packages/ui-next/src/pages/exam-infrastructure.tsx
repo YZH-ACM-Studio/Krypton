@@ -301,6 +301,12 @@ const INFRA_CODE_LABELS: Record<string, string> = {
   vigil_http_rejected: 'Vigil 拒绝了本次请求',
   vigil_dispatch_incomplete: '命令尚未全部派发完成',
   network_platform_clear_failed: '未能清理终端网络规则',
+  network_activity_not_active: '本机没有这场网络锁，整盘还原后需再点一次停止',
+  network_stop_reaffirmation_mismatch: '本机残留的停止证明和当前策略不一致，常见于整盘还原',
+  network_stop_managed_filters_without_activity: '本机没有活动记录，但仍有托管网络规则',
+  authorized_stop_empty_owner_pending: '已按空 owner 认领停止',
+  authorized_stop_empty_owner: '已按空 owner 认领停止',
+  initialized: '本机网络锁已初始化，当前没有活动',
 };
 
 function teacherReasonLabel(reason: string): string {
@@ -1567,6 +1573,7 @@ function Fact({ label, value }: { label: string; value: ReactNode }) {
 function PolicySection({
   eventId,
   templates,
+  suggestedPolicy,
   config,
   readOnly,
   reload,
@@ -1574,6 +1581,7 @@ function PolicySection({
 }: {
   eventId: string;
   templates: PolicyTemplate[];
+  suggestedPolicy: NetworkPolicy | null;
   config: NetworkConfig | null;
   readOnly: boolean;
   reload: () => Promise<void>;
@@ -1596,9 +1604,9 @@ function PolicySection({
   useEffect(() => {
     if (!selected) {
       setName('');
-      setHosts('');
-      setIps('');
-      setPorts('');
+      setHosts(suggestedPolicy?.hosts.join('\n') || '');
+      setIps(suggestedPolicy?.ips.join('\n') || '');
+      setPorts(suggestedPolicy?.ports.join(', ') || '');
       return;
     }
     setSelectedId(selected.templateId);
@@ -1606,7 +1614,7 @@ function PolicySection({
     setHosts(selected.draft.policy.hosts.join('\n'));
     setIps(selected.draft.policy.ips.join('\n'));
     setPorts(selected.draft.policy.ports.join(', '));
-  }, [selected?.templateId, selected?.revision]);
+  }, [selected?.templateId, selected?.revision, suggestedPolicy]);
   const policy = (): NetworkPolicy => ({ hosts: splitValues(hosts), ips: splitValues(ips), ports: splitValues(ports).map((value) => Number(value)) });
   const dirty =
     Boolean(selected) && JSON.stringify({ name, policy: policy() }) !== JSON.stringify({ name: selected?.name, policy: selected?.draft.policy });
@@ -1683,7 +1691,10 @@ function PolicySection({
         <CardTitle role="heading" aria-level={3}>
           网络策略
         </CardTitle>
-        <p className="mt-1 text-sm text-muted-foreground">草稿可反复保存；发布后版本不可变，活动只引用明确版本。</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          草稿可反复保存；发布后版本不可变。新建策略会预填 OJ 与 Vigil 地址，以及 80/443/8765/1935。只填
+          OJ、不显式允许 Vigil 时，学生客户端、截图和推流都会被锁死。
+        </p>
       </CardHeader>
       <CardContent className="space-y-4">
         <MutationNotice error={error} />
@@ -1720,10 +1731,10 @@ function PolicySection({
           <FormField label="允许域名" htmlFor="policy-hosts" hint="每行一个精确域名或 *.example.com">
             <Textarea id="policy-hosts" value={hosts} disabled={readOnly} onChange={(event) => setHosts(event.target.value)} rows={5} />
           </FormField>
-          <FormField label="允许 IP / CIDR" htmlFor="policy-ips" hint="每行一个 IPv4、IPv6 或 CIDR">
+          <FormField label="允许 IP / CIDR" htmlFor="policy-ips" hint="必须显式包含 Vigil IP，例如 10.1.235.155；只填 OJ 会发布失败">
             <Textarea id="policy-ips" value={ips} disabled={readOnly} onChange={(event) => setIps(event.target.value)} rows={5} />
           </FormField>
-          <FormField label="允许端口" htmlFor="policy-ports" hint="逗号或换行分隔">
+          <FormField label="允许端口" htmlFor="policy-ports" hint="留空表示已填地址的全部端口；若填写则必须包含控制面端口和 1935">
             <Textarea id="policy-ports" value={ports} disabled={readOnly} onChange={(event) => setPorts(event.target.value)} rows={5} />
           </FormField>
         </FormRow>
@@ -2292,6 +2303,11 @@ function ExecutionSection({
   const visiblePreflight = preflight?.configIdentity === configIdentity ? preflight.items : null;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const offlineEndpoints = execution?.projection?.items.filter((item) => !item.online) || [];
+  const stopBlockedByOffline = execution?.desiredState === 'active' && offlineEndpoints.length > 0;
+  const incompleteRelease =
+    execution?.desiredState === 'stopped' &&
+    (execution.projection?.items.some((item) => item.status !== 'applied') ?? false);
   const call = async (
     action: 'preflight' | 'refresh' | 'retry' | 'retryFailed' | 'start' | 'stop',
     rethrow = false,
@@ -2368,6 +2384,7 @@ function ExecutionSection({
     execution?.projection?.dispatchStatus === 'complete' &&
       retryableFailures.length > 0 &&
       !hasDeliveryUnknownFailure &&
+      offlineEndpoints.length === 0 &&
       event.lifecycle !== 'archived' &&
       (execution.desiredState !== 'active' || !canonicalUpdatePreview),
   );
@@ -2480,11 +2497,17 @@ function ExecutionSection({
                 <Button
                   size="sm"
                   variant="destructive"
-                  disabled={busy}
+                  disabled={busy || stopBlockedByOffline}
+                  title={
+                    stopBlockedByOffline
+                      ? '有终端离线。现在停止只会记成 offline，不是已释放。请等终端上线后再停。'
+                      : undefined
+                  }
                   onClick={() =>
                     requestConfirm({
                       title: '停止网络策略？',
-                      description: '停止命令仍需逐机执行；离线或失败终端不会被伪装成已解锁，硬截止保持不变。',
+                      description:
+                        '停止命令仍需逐机执行且终端必须在线。离线终端不会被记成已释放；已整盘还原的机器先在本机运行 --network-lock-recover。',
                       confirmLabel: '确认停止',
                       tone: 'destructive',
                       facts: [
@@ -2507,6 +2530,18 @@ function ExecutionSection({
                 </Button>
               ) : null}
             </div>
+            {stopBlockedByOffline ? (
+              <p className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm text-amber-800 dark:text-amber-200">
+                {offlineEndpoints.length} 台终端离线（{offlineEndpoints.map((item) => item.endpointId).join('、')}
+                ）。offline 不是已释放。请等这些机器上线后再点停止；已还原或状态不可读的机器先在本机管理员运行
+                KryptonVigilClient.exe --network-lock-recover。
+              </p>
+            ) : null}
+            {incompleteRelease ? (
+              <p className="rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                旧目标尚未完整释放。命令事实为 offline / failed 的终端硬盘里可能还有锁，不能当作已经解锁，也不能换目标后重试启动。
+              </p>
+            ) : null}
             {execution?.desiredState === 'active' && canonicalUpdatePreview ? (
               <div
                 className={cn(
@@ -2712,6 +2747,7 @@ function EventDetailPage({ eventId }: { eventId: string }) {
   const [event, setEvent] = useState<ExamEventView | null>(null);
   const [schools, setSchools] = useState<SchoolView[]>([]);
   const [templates, setTemplates] = useState<PolicyTemplate[]>([]);
+  const [suggestedPolicy, setSuggestedPolicy] = useState<NetworkPolicy | null>(null);
   const [assignment, setAssignment] = useState<TargetAssignment | null>(null);
   const [config, setConfig] = useState<NetworkConfig | null>(null);
   const [execution, setExecution] = useState<NetworkExecution | null>(null);
@@ -2748,6 +2784,7 @@ function EventDetailPage({ eventId }: { eventId: string }) {
       }),
     );
     setTemplates(policyPayload.templates.map(parseTemplate));
+    setSuggestedPolicy(policyPayload.suggestedPolicy == null ? null : parsePolicy(policyPayload.suggestedPolicy));
     setAssignment(parseAssignment(targetPayload.assignment));
     setConfig(parseConfig(configPayload.config));
     setExecution(parseExecution(executionPayload.execution));
@@ -2859,6 +2896,7 @@ function EventDetailPage({ eventId }: { eventId: string }) {
           <PolicySection
             eventId={eventId}
             templates={templates}
+            suggestedPolicy={suggestedPolicy}
             config={config}
             readOnly={event.lifecycle === 'archived'}
             reload={reload}

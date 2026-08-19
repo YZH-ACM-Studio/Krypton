@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { expect } from 'chai';
 import { ObjectId } from 'mongodb';
-import { localizeError, localizeErrorParameter, localizedErrorText } from '@hydrooj/framework';
+import { localizeError, localizeErrorParameter, localizedErrorText, param as realParam, Types as realTypes } from '@hydrooj/framework';
 import { beforeEach, describe, it } from 'node:test';
 
 const Module = require('module');
@@ -406,12 +406,12 @@ function noopDecorator() {
 class HandlerStub {}
 const serverStub = {
     Handler: HandlerStub,
-    param: noopDecorator,
+    param: realParam,
     post: noopDecorator,
     query: noopDecorator,
     route: noopDecorator,
     Query: (_schema: unknown, resolver: unknown) => resolver,
-    Types: new Proxy({}, { get: () => () => ({}) }),
+    Types: realTypes,
 };
 
 const systemStub = { get: () => false };
@@ -2411,6 +2411,21 @@ describe('P2.11 authoritative problem route domain', () => {
         expect(handler.response.body).to.deep.equal({ ok: true, rejudged: 2 });
         expect(calls.oplog.at(-1)?.[1]).to.equal('problem.rejudge.all');
         expect(calls.oplog.at(-1)?.[2]).to.deep.include({ pid: 7, count: 2 });
+    });
+
+    it('accepts an external alphanumeric PID when dispatching whole-problem rejudge', async () => {
+        const handler = makeHandler(ProblemDetailHandler, {});
+        handler.pdoc = { domainId: 'system', docId: 2752, pid: 'HDU1139', config: { type: 'default' } };
+        handler.checkPerm = () => undefined;
+        handler.back = (body: unknown) => {
+            handler.response.body = body;
+        };
+        recordGetMultiResults = [[]];
+
+        await handler.postRejudge({ domainId: 'system', pid: 'HDU1139' });
+
+        expect(handler.response.body).to.deep.equal({ ok: true, rejudged: 0 });
+        expect(calls.recordGetMulti[0]?.[1]).to.deep.include({ pid: 2752 });
     });
 
     it('rejects forged contest context before whole-problem rejudge reads any records', async () => {

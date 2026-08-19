@@ -2067,8 +2067,7 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
         }
     }
 
-    @param('pid', Types.UnsignedInt)
-    async postRejudge(_domainId: string, _pid: number) {
+    async postRejudge() {
         const domainId = this.pdoc.domainId;
         this.checkPerm(PERM.PERM_REJUDGE_PROBLEM);
         if (this.tdoc) {

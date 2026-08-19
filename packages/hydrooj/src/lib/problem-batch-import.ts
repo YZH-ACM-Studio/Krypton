@@ -238,6 +238,24 @@ export function canonicalJson(value: unknown): string {
     return JSON.stringify(canonicalize(value));
 }
 
+function countLiteralCjkUnicodeEscapes(value: unknown): number {
+    if (typeof value === 'string') {
+        return [...value.matchAll(/\\u([0-9a-fA-F]{4})/g)].filter((match) => {
+            const codePoint = Number.parseInt(match[1], 16);
+            return (
+                (codePoint >= 0x3000 && codePoint <= 0x303f) ||
+                (codePoint >= 0x3400 && codePoint <= 0x9fff) ||
+                (codePoint >= 0xff00 && codePoint <= 0xffef)
+            );
+        }).length;
+    }
+    if (Array.isArray(value)) return value.reduce((count, item) => count + countLiteralCjkUnicodeEscapes(item), 0);
+    if (isPlainObject(value)) {
+        return Object.values(value).reduce((count, item) => count + countLiteralCjkUnicodeEscapes(item), 0);
+    }
+    return 0;
+}
+
 export function sha256(value: string | Buffer): string {
     return createHash('sha256').update(value).digest('hex');
 }
@@ -552,33 +570,28 @@ export async function validateProblemBatchManifest(manifestPathInput: string): P
         let programmingStatementFile: ValidatedBatchFile | undefined;
         let canonicalStatement: ProgrammingStatement | undefined;
         if (manifest.schemaVersion === 2) {
-            const canonicalPath = await resolveBatchPath(
-                rootDir,
-                entry.programmingStatement!,
-                `${prefix}.programmingStatement`,
-            );
+            const canonicalPath = await resolveBatchPath(rootDir, entry.programmingStatement!, `${prefix}.programmingStatement`);
             programmingStatementFile = await inspectFile(canonicalPath, `${prefix}.programmingStatement`, false);
             let canonicalInput: unknown;
             try {
                 canonicalInput = JSON.parse(await fs.readFile(canonicalPath, 'utf8'));
             } catch (error) {
-                throw new ProblemBatchImportError(
-                    `${prefix}.programmingStatement is not valid JSON`,
-                    'BATCH_IMPORT_STATEMENT_INVALID',
-                    undefined,
-                    { cause: error },
-                );
+                throw new ProblemBatchImportError(`${prefix}.programmingStatement is not valid JSON`, 'BATCH_IMPORT_STATEMENT_INVALID', undefined, {
+                    cause: error,
+                });
             }
             try {
                 canonicalStatement = normalizeProgrammingStatement(canonicalInput);
             } catch (error) {
-                throw new ProblemBatchImportError(
-                    `${prefix}.programmingStatement is invalid`,
-                    'BATCH_IMPORT_STATEMENT_INVALID',
-                    undefined,
-                    { cause: error as Error },
-                );
+                throw new ProblemBatchImportError(`${prefix}.programmingStatement is invalid`, 'BATCH_IMPORT_STATEMENT_INVALID', undefined, {
+                    cause: error as Error,
+                });
             }
+            invariant(
+                countLiteralCjkUnicodeEscapes(canonicalStatement) === 0,
+                `${prefix}.programmingStatement contains literal CJK Unicode escapes; regenerate it with the supported Node runtime`,
+                'BATCH_IMPORT_STATEMENT_INVALID',
+            );
             invariant(
                 compileProgrammingStatement(canonicalStatement) === statement,
                 `${prefix}.statement differs from its canonical programming statement`,
@@ -652,18 +665,25 @@ export async function validateProblemBatchManifest(manifestPathInput: string): P
             try {
                 assertProgrammingStatementComplete(canonicalStatement, config);
             } catch (error) {
-                throw new ProblemBatchImportError(
-                    `${prefix}.programmingStatement is incomplete`,
-                    'BATCH_IMPORT_STATEMENT_INVALID',
-                    undefined,
-                    { cause: error as Error },
-                );
+                throw new ProblemBatchImportError(`${prefix}.programmingStatement is incomplete`, 'BATCH_IMPORT_STATEMENT_INVALID', undefined, {
+                    cause: error as Error,
+                });
             }
         }
         invariant(canonicalJson(config.cases) === canonicalJson(entry.testdata.cases), `${prefix}.testdata.config cases differ from the manifest`);
         if (entry.testdata.checker) {
             invariant(config.checker === entry.testdata.checker, `${prefix}.testdata checker differs from config`);
             invariant(typeof config.checker_type === 'string' && !!config.checker_type, `${prefix}.testdata checker_type is missing`);
+            if (config.checker_type === 'testlib') {
+                const checkerSource = await fs.readFile(path.resolve(dataDir, entry.testdata.checker), 'utf8');
+                const hasProcessMain = /\bint\s+main\s*\(\s*int\s+argc\s*,\s*char\s*(?:\*\s*argv\s*\[\s*\]|\*\s*\*\s*argv)\s*\)/.test(checkerSource);
+                const forwardsProcessArguments = /\bregisterTestlibCmd\s*\(\s*argc\s*,\s*argv\s*\)/.test(checkerSource);
+                invariant(
+                    hasProcessMain && forwardsProcessArguments,
+                    `${prefix}.testdata testlib checker must forward process argc/argv to registerTestlibCmd from main(int argc, char* argv[])`,
+                    'BATCH_IMPORT_CONFIG_INVALID',
+                );
+            }
         } else {
             invariant(config.checker === undefined && config.checker_type === undefined, `${prefix}.testdata has an undeclared checker`);
         }

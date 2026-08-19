@@ -280,6 +280,7 @@ const EXAM_TEACHER_ERROR_ENTRIES: Readonly<Record<string, ExamTeacherErrorText>>
     seat_plan_v2_not_current: { zh: '当前座位计划不是最新版本，请刷新后重试。', en: 'This seat plan is not the latest revision. Reload and try again.' },
     seat_plan_school_mismatch: SCHOOL_MISMATCH,
     userbind_roster_resolver_unavailable: { zh: '学生名单解析服务不可用。', en: 'The student-roster resolver is unavailable.' },
+    userbind_student_resolver_unavailable: { zh: '学生档案服务不可用。', en: 'The student-record resolver is unavailable.' },
     userbind_group_resolver_unavailable: { zh: '用户组解析服务不可用。', en: 'The user-group resolver is unavailable.' },
     userbind_group_canonical_invalid: { zh: '用户组数据无效。', en: 'The user-group data is invalid.' },
     userbind_school_bridge_unavailable: { zh: '学校数据服务不可用。', en: 'The school directory is unavailable.' },
@@ -340,6 +341,8 @@ const EXAM_TEACHER_ERROR_ENTRIES: Readonly<Record<string, ExamTeacherErrorText>>
     ticket_batch_mismatch: { zh: '预登录票据与批次不匹配。', en: 'The pre-login ticket does not match this batch.' },
     ticket_invalid: { zh: '预登录票据无效。', en: 'The pre-login ticket is invalid.' },
     ticket_not_redeemed: { zh: '预登录票据尚未兑换。', en: 'The pre-login ticket has not been redeemed.' },
+    student_identity_missing: { zh: '预登录票据对应的学号或姓名缺失。', en: 'The pre-login ticket is missing a student ID or name.' },
+    student_record_mismatch: { zh: '预登录票据与学生档案不一致。', en: 'The pre-login ticket does not match the student record.' },
     ticket_key_not_configured: { zh: '预登录票据密钥未配置。', en: 'The pre-login ticket key is not configured.' },
     ticket_key_changed_restart_required: { zh: '预登录票据密钥已变化，需要重启服务。', en: 'The pre-login ticket key changed and the service must be restarted.' },
     active_session_conflict: ACTIVE_SESSION_CONFLICT,
@@ -447,6 +450,18 @@ const EXAM_TEACHER_ERROR_ENTRIES: Readonly<Record<string, ExamTeacherErrorText>>
     permit_rule_limit: { zh: '网络策略规则数量超过上限。', en: 'The network policy exceeds the permit-rule limit.' },
     unresolved_control_plane: { zh: '无法解析考试控制面地址。', en: 'The exam control plane could not be resolved.' },
     unresolved_host: { zh: '网络策略中的主机无法解析。', en: 'A host in the network policy could not be resolved.' },
+    control_plane_not_explicit: {
+        zh: '网络策略必须显式允许 Vigil 控制面地址。只填 OJ 时学生客户端、截图和推流都会被锁死。',
+        en: 'The network policy must explicitly allow the Vigil control-plane address. Allowing only the OJ host blocks the student client, screenshots, and live streams.',
+    },
+    control_plane_port_not_explicit: {
+        zh: '已填写端口时必须包含 Vigil 控制面端口。',
+        en: 'When ports are listed, the Vigil control-plane port must be included.',
+    },
+    stream_port_not_explicit: {
+        zh: '已填写端口时必须包含录屏/摄像头推流端口 1935。',
+        en: 'When ports are listed, live-stream port 1935 must be included.',
+    },
 
     execution_not_found: { zh: '网络执行记录不存在。', en: 'The network execution does not exist.' },
     execution_not_active: { zh: '网络执行未处于活动状态。', en: 'Network execution is not active.' },

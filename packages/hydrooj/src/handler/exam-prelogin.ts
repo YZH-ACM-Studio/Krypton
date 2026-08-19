@@ -258,8 +258,29 @@ async function serializeBatch(batch: ExamPreloginBatchDoc) {
     };
 }
 
-function serializeRedemption(ticket: ExamPreloginTicketDoc) {
+async function serializeRedemption(ticket: ExamPreloginTicketDoc) {
     if (ticket.state !== 'redeemed' || !ticket.redeemedAt) throw new ExamPreloginError('ticket_not_redeemed');
+    const userbind = (global as { Hydro?: { model?: { userbind?: { findStudentByUserId?: (domainId: string, uid: number) => Promise<unknown> } } } }).Hydro?.model?.userbind;
+    if (!userbind || typeof userbind.findStudentByUserId !== 'function') {
+        throw new ExamPreloginError('userbind_student_resolver_unavailable');
+    }
+    const student = await userbind.findStudentByUserId(ticket.domainId, ticket.uid) as {
+        _id?: unknown;
+        boundUserId?: unknown;
+        studentId?: unknown;
+        realName?: unknown;
+    } | null;
+    if (
+        !student
+        || student.boundUserId !== ticket.uid
+        || !(student._id instanceof ObjectId)
+        || !student._id.equals(ticket.studentRecordId)
+    ) {
+        throw new ExamPreloginError('student_record_mismatch');
+    }
+    const studentId = typeof student.studentId === 'string' ? student.studentId.trim() : '';
+    const realName = typeof student.realName === 'string' ? student.realName.trim() : '';
+    if (!studentId || !realName) throw new ExamPreloginError('student_identity_missing');
     return {
         ticketId: ticket._id.toHexString(),
         batchId: ticket.batchId.toHexString(),
@@ -273,6 +294,8 @@ function serializeRedemption(ticket: ExamPreloginTicketDoc) {
         },
         publicationRevision: ticket.publicationRevision,
         uid: ticket.uid,
+        studentId,
+        realName,
         endpointId: ticket.endpointId,
         workspace: { ...ticket.workspace },
         redeemedAt: ticket.redeemedAt.toISOString(),
@@ -623,7 +646,7 @@ class VigilExamPreloginRedeemHandler extends VigilExamPreloginHandler {
                 endpointId,
                 requestId,
             );
-            this.response.body = { redemption: serializeRedemption(redeemed), requestId };
+            this.response.body = { redemption: await serializeRedemption(redeemed), requestId };
         } catch (error) {
             translate(error);
         }

@@ -155,6 +155,27 @@ test('workflow derives endpoint monitoring from the published preparation and ex
     assert.equal(warned.fingerprint, clean.fingerprint);
 });
 
+test('workflow hides expected session-0 detector noise from warning counts', async () => {
+    const noisy = await loadExamPreloginWorkflow(
+        event,
+        3,
+        dependencies([
+            { kind: 'detector_degraded', detector: 'process', reason: 'process_path_partial_query_failed' },
+            { kind: 'detector_failed', detector: 'foreground', reason: 'foreground_interactive_session_required' },
+        ]),
+    );
+    const real = await loadExamPreloginWorkflow(
+        event,
+        3,
+        dependencies([{ kind: 'detector_failed', detector: 'process', reason: 'process_snapshot_failed_5' }]),
+    );
+    assert.equal(noisy.warningCount, 0);
+    assert.deepEqual(noisy.monitoring.items[0].warnings, []);
+    assert.equal(real.warningCount, 1);
+    assert.equal(real.monitoring.items[0].warnings[0].reason, 'process_snapshot_failed_5');
+    assert.equal(noisy.fingerprint, real.fingerprint);
+});
+
 test('workflow hard readiness and network identity participate in the fingerprint', async () => {
     const readyDependencies = dependencies();
     const ready = await loadExamPreloginWorkflow(event, 3, readyDependencies);

@@ -210,6 +210,8 @@ test('monitoring preflight sends only the server-derived endpoint set and projec
                                     storage: { deviceCategory: 'removable_storage', identifierDigest: `sha256_${'1'.repeat(64)}` },
                                 },
                                 { kind: 'detector_failed', detector: 'process', reason: 'process_snapshot_failed_5' },
+                                { kind: 'detector_degraded', detector: 'process', reason: 'process_path_partial_query_failed' },
+                                { kind: 'detector_failed', detector: 'foreground', reason: 'foreground_interactive_session_required' },
                             ],
                         },
                     ],

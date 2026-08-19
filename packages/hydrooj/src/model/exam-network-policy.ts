@@ -174,6 +174,8 @@ function rangeIdentity(value: string): string {
     return `${value}/${isIP(value) === 4 ? 32 : 128}`;
 }
 
+export const EXAM_NETWORK_STREAM_PORT = 1935;
+
 function hostMatchesPolicy(patterns: string[], host: string): boolean {
     return patterns.some(
         (pattern) => pattern === host || (pattern.startsWith('*.') && host.endsWith(pattern.slice(1)) && host.length > pattern.length - 1),
@@ -325,4 +327,53 @@ export async function validateExamNetworkPolicyResolution(
             }
         }
     }
+    assertExamNetworkPolicyExplicitClientAccess(policy, controlPlane, resolved.get(controlPlane.host) || []);
+}
+
+function policyCoversAddress(ips: string[], address: string): boolean {
+    return ipRulesCover(ips, [exactAddress(address)]);
+}
+
+export function assertExamNetworkPolicyExplicitClientAccess(
+    policy: ExamNetworkPolicy,
+    controlPlaneValue: ExamNetworkControlPlane,
+    resolvedControlPlaneAddresses: string[],
+): void {
+    const controlPlane = canonicalControlPlane(controlPlaneValue);
+    const addresses = resolvedControlPlaneAddresses.map(exactAddress);
+    const hostExplicit = !isIP(controlPlane.host) && hostMatchesPolicy(policy.hosts, controlPlane.host);
+    const ipExplicit = addresses.some((address) => policyCoversAddress(policy.ips, address));
+    if (!hostExplicit && !ipExplicit) throw new ExamNetworkPolicyError('control_plane_not_explicit');
+    if (!policy.ports.length) return;
+    if (!policy.ports.includes(controlPlane.port)) throw new ExamNetworkPolicyError('control_plane_port_not_explicit');
+    if (!policy.ports.includes(EXAM_NETWORK_STREAM_PORT)) throw new ExamNetworkPolicyError('stream_port_not_explicit');
+}
+
+export function suggestedExamNetworkPolicy(
+    controlPlaneValue: ExamNetworkControlPlane,
+    ojHost: string,
+): ExamNetworkPolicy {
+    const controlPlane = canonicalControlPlane(controlPlaneValue);
+    const hosts: string[] = [];
+    const ips: string[] = [];
+    const addDestination = (value: string) => {
+        const trimmed = value.trim().replace(/^\[/, '').replace(/\]$/, '');
+        if (!trimmed) return;
+        if (isIP(trimmed)) {
+            const address = exactAddress(trimmed);
+            if (!ips.includes(address)) ips.push(address);
+            return;
+        }
+        const host = canonicalHost(trimmed);
+        if (!hosts.includes(host)) hosts.push(host);
+    };
+    try {
+        addDestination(ojHost);
+    } catch (error) {
+        if (!(error instanceof ExamNetworkPolicyError)) throw error;
+    }
+    addDestination(controlPlane.host);
+    if (!hosts.length && !ips.length) throw new ExamNetworkPolicyError('destination_required');
+    const ports = Array.from(new Set([80, 443, controlPlane.port, EXAM_NETWORK_STREAM_PORT])).sort((left, right) => left - right);
+    return canonicalExamNetworkPolicy({ hosts, ips, ports });
 }

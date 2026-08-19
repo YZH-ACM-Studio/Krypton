@@ -966,9 +966,9 @@ describe('p2.5 exam seat assignment workspace', () => {
     await user.click(screen.getByRole('button', { name: '保存跨教室人工调整' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('座位分配操作失败');
     expect(screen.getByText('人工调整未保存')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '放弃未保存调整并重读' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '放弃草稿并重读' })).toBeEnabled();
 
-    await user.click(screen.getByRole('button', { name: '放弃未保存调整并重读' }));
+    await user.click(screen.getByRole('button', { name: '放弃草稿并重读' }));
     await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
     expect(screen.queryByText('人工调整未保存')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '选择张三换位' })).toBeEnabled();
@@ -2463,13 +2463,18 @@ describe('p2.5 exam seat assignment workspace', () => {
     expect(screen.queryByText(/配置损坏/)).not.toBeInTheDocument();
   });
 
-  it('renders monitoring detector warnings in Chinese without exposing detector_degraded', async () => {
+  it('hides expected session-0 detector noise and still renders real process failures', async () => {
     const workflow = preloginWorkflow();
+    workflow.warningCount = 3;
     workflow.monitoring.items = workflow.monitoring.items.map((item, index) =>
       index === 0
         ? {
             ...item,
-            warnings: [{ kind: 'detector_degraded', detector: 'process', reason: 'process_path_partial_access_denied' }],
+            warnings: [
+              { kind: 'detector_degraded', detector: 'process', reason: 'process_path_partial_query_failed' },
+              { kind: 'detector_failed', detector: 'foreground', reason: 'foreground_interactive_session_required' },
+              { kind: 'detector_failed', detector: 'process', reason: 'process_snapshot_failed_5' },
+            ],
           }
         : item,
     );
@@ -2492,8 +2497,11 @@ describe('p2.5 exam seat assignment workspace', () => {
     renderPageAtStep('preflight');
     await openPreflightAfterAssignedNetwork(user);
     await user.click(await screen.findByRole('button', { name: '运行终端预检' }));
-    expect(await screen.findByText('告警：进程检测不完整：无法读取部分系统进程路径')).toBeInTheDocument();
-    expect(screen.queryByText(/detector_degraded/)).not.toBeInTheDocument();
+    expect(await screen.findByText('告警：进程检测失败：无法获取系统进程快照')).toBeInTheDocument();
+    expect(screen.getByText('告警 1')).toBeInTheDocument();
+    expect(screen.queryByText(/无法读取部分系统进程路径/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/前台窗口/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/detector_degraded|detector_failed|foreground_interactive/)).not.toBeInTheDocument();
   });
 
   it('lists retry-blocked reasons by count instead of a single activity-changed banner', async () => {
@@ -2883,9 +2891,8 @@ describe('p2.5 exam seat assignment workspace', () => {
     await openLaunchAfterReadyNetwork(user);
 
     expect(await screen.findByText('成功 1')).toBeInTheDocument();
-    const confirm = await screen.findByRole('button', { name: '一键预启动全部终端' });
-    expect(confirm).toBeDisabled();
-    await user.click(confirm);
+    expect(screen.queryByRole('button', { name: '一键预启动全部终端' })).not.toBeInTheDocument();
+    expect(screen.getByText(/已有预登录批次，不能再点一键预启动/)).toBeInTheDocument();
     expect(confirmPosts).toBe(0);
   });
 

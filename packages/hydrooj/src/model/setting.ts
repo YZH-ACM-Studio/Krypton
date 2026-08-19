@@ -390,7 +390,7 @@ SystemSetting(
     Setting(
         'setting_vigil',
         'vigil.networkLockDefaultPorts',
-        '53\n67\n68\n80\n443\n8765',
+        '53\n67\n68\n80\n443\n1935\n8765',
         'textarea',
         'vigil.networkLockDefaultPorts',
         'Default remote ports for Vigil network lockdown. Whitespace, comma, or newline separated.',

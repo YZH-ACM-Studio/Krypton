@@ -38,12 +38,19 @@ manifest 不接受 PID。PID 只能由 `preflight` 根据当时的服务端 coun
 ## 2. 本地校验
 
 ```bash
-hydrooj problem:batch-import validate /absolute/path/to/batch.json
+node -r ./node_modules/@hydrooj/register \
+  ./packages/hydrooj/bin/hydrooj.js problem:batch-import validate /absolute/path/to/batch.json
 ```
 
 `validate` 不初始化 Hydro runtime、不访问数据库，只读取本地 manifest 和文件。成功时 stdout 只有一条 JSON，包含批次指纹、逐题文件/资源/测试点统计；失败时非零退出并在 stderr 输出结构化错误。
 
 必须在继续前人工核对：题目筛选、标题/难度、导图节点、图片、可用的赛时统计、checker、逐题 cases 数和总 cases 数。任何歧义必须写入该题的 `ambiguities` 并明确设为 `confirmed: true`；未确认项不能 apply。
+
+生成结构化题面及执行本地 `validate` 必须使用上述 Node + `@hydrooj/register` 入口，不得用 Bun 直接运行含 `String.raw` 的题面生成器。流水线会拒绝 canonical 题面中残留的 CJK `\\uXXXX` 字面量；这类内容表示生成器把 Unicode 源码转义误当成了正文，禁止带病导入。
+
+使用 `checker_type: testlib` 时，checker 必须从真实进程入口接收文件路径：`int main(int argc, char* argv[])` 调用 `registerTestlibCmd(argc, argv)`。禁止丢弃真实参数后硬编码 `input/user_output/output` 等外部平台文件名；Hydro 的 testlib 运行契约是通过 argv 传入输入、选手输出和标准答案的绝对路径，文件名不是公共协议。`validate` 会在生产预检前拒绝缺少标准进程入口或未转发 `argc/argv` 的 testlib checker。
+
+SPJ 还必须在真实 go-judge sandbox 做无 Record 的冷编译和正反例烟测：官方输出作为选手输出应被接受，删改 token 或明显非法输出应被拒绝。只通过本机编译、只验证 `config.yaml`，或者只命中既有 checker 编译缓存，都不能证明 SPJ 可用；烟测不得创建提交或触发历史重测。
 
 ## 3. 生产只读预检
 

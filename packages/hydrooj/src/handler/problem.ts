@@ -83,11 +83,12 @@ import {
     type PracticeScopeKind,
     type TrustedPracticeContextReference,
 } from '../model/practice-integrity';
+import { selectPracticeIssueTargets } from '../lib/practice-issue-targets';
 import {
     assertPracticeContextAccess,
-    assertPracticeTargetAccess,
     canManagePracticeContainer,
     canPreviewPracticeIntegrity,
+    preparePracticeIssue,
 } from '../model/practice-integrity-access';
 import problem from '../model/problem';
 import {
@@ -1640,7 +1641,7 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
         const target = { containerKind, containerId, scopeKind, scopeId };
         let rejectionReason = 'context-access-denied';
         try {
-            const tdoc = await assertPracticeTargetAccess({
+            const prepared = await preparePracticeIssue({
                 domainId: this.pdoc.domainId,
                 user: this.user,
                 handler: this,
@@ -1651,11 +1652,25 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
                     rejectionReason = reason;
                 },
             });
+            const tdoc = prepared.primaryContainer;
             const canPreview = canPreviewPracticeIntegrity(this.user, this.pdoc, canManagePracticeContainer(this.user, tdoc, containerKind));
             rejectionReason = 'policy-read-failed';
             const published = await practiceIntegrityService.getLatestPublished(this.pdoc.domainId, containerKind, containerId);
+            const extraPublished = prepared.extra
+                ? await practiceIntegrityService.getLatestPublished(
+                      this.pdoc.domainId,
+                      prepared.extra.containerKind,
+                      prepared.extra.containerId,
+                  )
+                : null;
             const entry = { containerKind, containerId: containerId.toHexString(), scopeKind, scopeId };
-            if (!published) return { controlled: false, bypassed: false, previewAvailable: false, entry };
+            const selected = selectPracticeIssueTargets({
+                primary: target,
+                extra: prepared.extra,
+                primaryPublished: published,
+                extraPublished,
+            });
+            if (!selected.controlled) return { controlled: false, bypassed: false, previewAvailable: false, entry };
             if (canPreview && !preview) {
                 return { controlled: false, bypassed: true, previewAvailable: true, entry };
             }
@@ -1663,13 +1678,13 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
             const context = await practiceIntegrityService.issueContext({
                 domainId: this.pdoc.domainId,
                 uid: this.user._id,
-                containerKind,
-                containerId,
-                scopeKind,
-                scopeId,
+                containerKind: selected.identity.containerKind,
+                containerId: selected.identity.containerId,
+                scopeKind: selected.identity.scopeKind,
+                scopeId: selected.identity.scopeId,
                 pid: this.pdoc.docId,
                 mode: preview ? 'preview' : 'student',
-                targets: [{ revision: published, scopeKind, scopeId }],
+                targets: selected.targets,
             });
             const contextId = context._id.toHexString();
             logger.info(

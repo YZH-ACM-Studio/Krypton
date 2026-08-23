@@ -54,9 +54,12 @@ const calls = {
 
 const containerId = new ObjectId('66b700000000000000000010');
 const revisionId = new ObjectId('66b700000000000000000011');
+const extraSetId = new ObjectId('66b700000000000000000030');
 let currentContainer: any;
+let extraContainers: Record<string, any> = {};
 let currentPolicyState: any;
 let latestRevision: any;
+let setPublished: any;
 let groupIds: ObjectId[] = [];
 let problemVisible = true;
 let problemAuthor = false;
@@ -68,7 +71,7 @@ let publishError: Error | null = null;
 const trainingStub = {
     async get(domainId: string, id: ObjectId) {
         calls.getContainer.push([domainId, id]);
-        return currentContainer;
+        return extraContainers[String(id)] || currentContainer;
     },
     getPids(dag: any[] = []) {
         return Array.from(new Set(dag.flatMap((node) => node.pids || [])));
@@ -104,6 +107,7 @@ const practiceIntegrityService = {
     },
     async getLatestPublished(...args: any[]) {
         calls.latest.push(args);
+        if (args[1] === 'problemSet' && setPublished !== undefined) return setPublished;
         return latestRevision;
     },
     async saveDraft(input: any) {
@@ -177,6 +181,7 @@ const originalLoad = Module._load;
 Module._load = function load(request: string, parent: NodeModule, isMain: boolean) {
     const fromHandler = parent?.filename?.endsWith('/packages/hydrooj/src/handler/practice-integrity.ts');
     const fromPracticeAccess = parent?.filename?.endsWith('/packages/hydrooj/src/model/practice-integrity-access.ts');
+    const fromLiveRef = parent?.filename?.endsWith('/packages/hydrooj/src/lib/course-live-ref.ts');
     const fromPracticeModule = fromHandler || fromPracticeAccess;
     if (fromHandler && request === '@hydrooj/utils') {
         return {
@@ -191,7 +196,7 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
             },
         };
     }
-    if (fromPracticeModule && request === '../error') {
+    if ((fromPracticeModule && request === '../error') || (fromLiveRef && request === '../error')) {
         return {
             localizedErrorText,
             PermissionError: TestPermissionError,
@@ -226,10 +231,19 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
                 async assertStageEnterable() {
                     return { discoverable: true, accessible: true, enrolled: false, sources: [{ kind: 'public' }], stageAccess: 'all' };
                 },
+                async hasActiveEntitlement() {
+                    return false;
+                },
             },
         };
     }
-    if ((fromHandler && request === '../model/training') || (fromPracticeAccess && request === './training')) return trainingStub;
+    if (
+        (fromHandler && request === '../model/training') ||
+        (fromPracticeAccess && request === './training') ||
+        (fromLiveRef && request === '../model/training')
+    ) {
+        return trainingStub;
+    }
     if (fromHandler && request === '../service/server') {
         return {
             Handler: HandlerStub,
@@ -242,7 +256,11 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
 
 try {
     const handlerPath = require.resolve('../src/handler/practice-integrity.ts');
+    const accessModulePath = require.resolve('../src/model/practice-integrity-access.ts');
+    const liveRefPath = require.resolve('../src/lib/course-live-ref.ts');
     delete require.cache[handlerPath];
+    delete require.cache[accessModulePath];
+    delete require.cache[liveRefPath];
     const module = require(handlerPath) as typeof import('../src/handler/practice-integrity');
     void module.apply({
         Route(name: string, _path: string, HandlerClass: any) {
@@ -296,6 +314,8 @@ async function capture(run: () => Promise<unknown>) {
 
 beforeEach(() => {
     for (const entries of Object.values(calls)) entries.length = 0;
+    extraContainers = {};
+    setPublished = undefined;
     groupIds = [];
     problemVisible = true;
     problemAuthor = false;
@@ -526,5 +546,60 @@ describe('practice integrity handlers', () => {
         const verifier = makeUser({ _permitPids: new Set([42]) });
         await makeHandler('practice_context', verifier).postIssue(contextIssueArgs({ preview: true }));
         expect(calls.issue.at(-1)?.mode).to.equal('preview');
+    });
+
+    it('issues a course→problem-set chain for a live-referenced pid without copying pids', async () => {
+        currentContainer.dag = [{ _id: 3, pids: [], problemSetId: extraSetId }];
+        extraContainers[String(extraSetId)] = {
+            docId: extraSetId,
+            kind: 'problem_set',
+            owner: 7,
+            dag: [{ _id: 1, pids: [42] }],
+        };
+        setPublished = {
+            _id: new ObjectId('66b700000000000000000031'),
+            domainId: 'system',
+            containerKind: 'problemSet',
+            containerId: extraSetId,
+            revision: 4,
+            state: 'published',
+            policy: latestRevision.policy,
+        };
+        const handler = makeHandler('practice_context');
+        await handler.postIssue(contextIssueArgs());
+        expect(calls.issue[0].containerKind).to.equal('course');
+        expect(calls.issue[0].targets).to.have.length(2);
+        expect(calls.issue[0].targets[1].revision.containerKind).to.equal('problemSet');
+        expect(String(calls.issue[0].targets[1].revision.containerId)).to.equal(String(extraSetId));
+    });
+
+    it('issues the problem set as primary when the course has no published policy', async () => {
+        currentContainer.dag = [{ _id: 3, pids: [], problemSetId: extraSetId }];
+        extraContainers[String(extraSetId)] = {
+            docId: extraSetId,
+            kind: 'problem_set',
+            owner: 7,
+            dag: [{ _id: 1, pids: [42] }],
+        };
+        latestRevision = null;
+        setPublished = {
+            _id: new ObjectId('66b700000000000000000031'),
+            domainId: 'system',
+            containerKind: 'problemSet',
+            containerId: extraSetId,
+            revision: 4,
+            state: 'published',
+            policy: {
+                prohibitExternalCodeInjection: true,
+                removeIndependentSubmitForm: false,
+                antiAiCopyInjection: false,
+            },
+        };
+        const handler = makeHandler('practice_context');
+        await handler.postIssue(contextIssueArgs());
+        expect(calls.issue[0].containerKind).to.equal('problemSet');
+        expect(String(calls.issue[0].containerId)).to.equal(String(extraSetId));
+        expect(calls.issue[0].scopeKind).to.equal('stage');
+        expect(calls.issue[0].targets).to.have.length(1);
     });
 });

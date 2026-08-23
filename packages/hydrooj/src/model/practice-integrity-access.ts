@@ -1,6 +1,7 @@
 import { ObjectId } from 'mongodb';
 import { localizedErrorText, PermissionError, ValidationError } from '../error';
 import type { User } from '../interface';
+import { liveReferencedPids } from '../lib/course-live-ref';
 import { isCourseKind, isProblemSetKind } from '../lib/training-kind';
 import { PERM, PRIV, STATUS } from './builtin';
 import { problemSetAccessService } from './problem-set-access';
@@ -79,9 +80,9 @@ async function assertCourseVisible(domainId: string, user: User, tdoc: any, canM
     if (typeof findStudent !== 'function') throw new TypeError('userbind.findStudentByUserId is unavailable');
     const student = await findStudent(domainId, user._id);
     const groups = new Set((student?.groupIds || []).map((groupId: ObjectId) => String(groupId)));
-    if (!(tdoc.courseGroupIds || []).some((groupId: ObjectId) => groups.has(String(groupId)))) {
-        throw new PermissionError(PERM.PERM_VIEW_TRAINING);
-    }
+    if ((tdoc.courseGroupIds || []).some((groupId: ObjectId) => groups.has(String(groupId)))) return;
+    if (await problemSetAccessService.hasActiveEntitlement(domainId, user._id, 'course', tdoc.docId)) return;
+    throw new PermissionError(PERM.PERM_VIEW_TRAINING);
 }
 
 export async function assertPracticeTargetAccess(input: {
@@ -135,10 +136,62 @@ export async function assertPracticeTargetAccess(input: {
     }
     input.setRejectionReason?.('pid-outside-scope');
     const scope = (tdoc.dag || []).find((node: any) => Number(node._id) === target.scopeId);
-    if (!scope || !(scope.pids || []).map(Number).includes(pid)) {
+    if (!scope) {
         throw new ValidationError('pid', null, localizedErrorText`题目不属于请求的真实性训练范围`);
     }
+    const direct = (scope.pids || []).map(Number).includes(pid);
+    if (!direct) {
+        if (target.containerKind !== 'course' || !scope.problemSetId) {
+            throw new ValidationError('pid', null, localizedErrorText`题目不属于请求的真实性训练范围`);
+        }
+        const livePids = await liveReferencedPids(domainId, scope);
+        if (!livePids.map(Number).includes(pid)) {
+            throw new ValidationError('pid', null, localizedErrorText`题目不属于请求的真实性训练范围`);
+        }
+    }
     return tdoc;
+}
+
+export interface PreparedPracticeIssue {
+    primaryContainer: Awaited<ReturnType<typeof loadPracticeContainer>>;
+    extra?: PracticeAccessTarget;
+}
+
+export async function preparePracticeIssue(input: {
+    domainId: string;
+    user: User;
+    handler: PracticeAccessHandler;
+    target: PracticeAccessTarget;
+    pid: number;
+    mode: PracticeContextMode;
+    setRejectionReason?: (reason: string) => void;
+}): Promise<PreparedPracticeIssue> {
+    const primaryContainer = await assertPracticeTargetAccess(input);
+    if (input.target.containerKind !== 'course') return { primaryContainer };
+    const chapter = (primaryContainer.dag || []).find((node: { _id: number }) => Number(node._id) === input.target.scopeId) as
+        | { problemSetId?: ObjectId; stageIds?: number[]; pids?: number[] }
+        | undefined;
+    if (!chapter?.problemSetId || (chapter.pids || []).map(Number).includes(input.pid)) return { primaryContainer };
+    input.setRejectionReason?.('problem-set-stage-denied');
+    const setDoc = await loadPracticeContainer(input.domainId, 'problemSet', chapter.problemSetId);
+    const allowed = Array.isArray(chapter.stageIds) ? chapter.stageIds.map(Number) : [];
+    const setStage = (setDoc.dag || []).find(
+        (node: { _id: number; pids?: number[] }) =>
+            (!allowed.length || allowed.includes(Number(node._id))) && (node.pids || []).map(Number).includes(input.pid),
+    );
+    if (!setStage) throw new ValidationError('pid', null, localizedErrorText`题目不属于请求的真实性训练范围`);
+    const extra: PracticeAccessTarget = {
+        containerKind: 'problemSet',
+        containerId: setDoc.docId,
+        scopeKind: 'stage',
+        scopeId: Number(setStage._id),
+    };
+    await assertPracticeTargetAccess({
+        ...input,
+        target: extra,
+        checkProblem: false,
+    });
+    return { primaryContainer, extra };
 }
 
 export async function assertPracticeContextAccess(input: {

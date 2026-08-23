@@ -690,6 +690,10 @@ const practiceIntegrityAccessStub = {
         input.setRejectionReason?.('ok');
         return practiceContainer;
     },
+    async preparePracticeIssue(input: any) {
+        const tdoc = await practiceIntegrityAccessStub.assertPracticeTargetAccess(input);
+        return { primaryContainer: tdoc };
+    },
     canManagePracticeContainer(user: any) {
         return user.canManagePractice === true;
     },

@@ -38,7 +38,8 @@ import * as training from '../model/training';
 import user from '../model/user';
 import { Handler, param, post, Types } from '../service/server';
 import { resolveProblemKnowledgeNodeIds } from '../lib/problem-tag-canonical';
-import { courseKindClause, isCourseKind } from '../lib/training-kind';
+import { courseKindClause, isCourseKind, isProblemSetKind } from '../lib/training-kind';
+import { computePrerequisiteClosure } from '../lib/problem-set-stage';
 import { getVisibleReferencedProblems, normalizeProblemDocIds } from './problem-reference';
 
 const logger = new Logger('course');
@@ -264,6 +265,21 @@ async function parseChaptersJson(domainId: string, raw: string): Promise<Trainin
                 throw new ValidationError('chapters', null, localizedErrorText`章节 ${node._id} 的讲义必须是字符串`);
             }
             const pids = normalizeProblemDocIds(Array.isArray(node.pids) ? node.pids : []);
+            let problemSetId: ObjectId | undefined;
+            let stageIds: number[] | undefined;
+            if (node.problemSetId) {
+                try {
+                    problemSetId = node.problemSetId instanceof ObjectId ? node.problemSetId : new ObjectId(String(node.problemSetId));
+                } catch {
+                    throw new ValidationError('problemSetId', null, localizedErrorText`无效的题集 id`);
+                }
+                const setDoc = await training.get(domainId, problemSetId);
+                if (!isProblemSetKind(setDoc.kind)) throw new ValidationError('problemSetId', null, localizedErrorText`引用的不是题集`);
+                if (Array.isArray(node.stageIds) && node.stageIds.length) {
+                    stageIds = Array.from(new Set(node.stageIds.map(Number)));
+                    for (const stageId of stageIds) computePrerequisiteClosure(setDoc.dag || [], stageId);
+                }
+            }
             const rawTids: string[] = Array.isArray(node.tids) ? node.tids : [];
             // 校验比赛存在。
             const tids: ObjectId[] = [];
@@ -286,12 +302,25 @@ async function parseChaptersJson(domainId: string, raw: string): Promise<Trainin
                 requireNids: [], // 线性目录：无先修依赖
                 pids,
                 ...(tids.length ? { tids } : {}),
+                ...(problemSetId ? { problemSetId } : {}),
+                ...(stageIds?.length ? { stageIds } : {}),
             });
         }
     } catch (e: any) {
         throw localizeErrorParameter(new ValidationError('chapters', null, e.message), 2, 'The course structure is invalid: {0}', e.message);
     }
     return parsed;
+}
+
+async function liveReferencedPids(domainId: string, node: TrainingNode): Promise<number[]> {
+    if (!node.problemSetId) return [];
+    const setDoc = await training.get(domainId, node.problemSetId);
+    if (!isProblemSetKind(setDoc.kind)) throw new ValidationError('problemSetId', null, localizedErrorText`引用的不是题集`);
+    const stages =
+        Array.isArray(node.stageIds) && node.stageIds.length
+            ? (setDoc.dag || []).filter((stage) => node.stageIds!.map(Number).includes(Number(stage._id)))
+            : setDoc.dag || [];
+    return training.getPids(stages);
 }
 
 class CourseMainHandler extends Handler {
@@ -369,7 +398,16 @@ class CourseDetailHandler extends Handler {
                 throw new ValidationError('tid', null, localizedErrorText`你不在该课程的可见范围内`);
             }
         }
-        const pids = training.getPids(tdoc.dag);
+        const referencedPidsByChapter = new Map<number, number[]>();
+        for (const node of tdoc.dag || []) {
+            referencedPidsByChapter.set(node._id, await liveReferencedPids(domainId, node));
+        }
+        const pids = Array.from(
+            new Set([
+                ...training.getPids(tdoc.dag),
+                ...Array.from(referencedPidsByChapter.values()).flat(),
+            ]),
+        );
         // 解析章节引用的所有比赛。
         const allTids = Array.from(new Set<string>(tdoc.dag.flatMap((n) => (n.tids || []).map((t) => String(t))))).map((s) => new ObjectId(s));
         const overviewData =
@@ -409,17 +447,25 @@ class CourseDetailHandler extends Handler {
         const chapters =
             activeView === 'overview'
                 ? tdoc.dag.map((node) => {
-                      const total = node.pids.length;
+                      const livePids = Array.from(new Set([...node.pids, ...(referencedPidsByChapter.get(node._id) || [])]));
+                      const total = livePids.length;
                       const completed = contextualDoneByScope ? contextualDoneByScope.get(node._id) || new Set<number>() : donePids;
-                      const done = node.pids.filter((p) => completed.has(p)).length;
+                      // Per-problem marks and the chapter counter read the same
+                      // scoped set, so the list can never disagree with the
+                      // progress figure, and a published integrity policy never
+                      // falls back to global ProblemStatus.
+                      const donePidsInChapter = livePids.filter((p) => completed.has(p));
                       return {
                           _id: node._id,
                           title: node.title,
                           content: node.content || '',
-                          pids: node.pids,
+                          pids: livePids,
+                          completedPids: donePidsInChapter,
                           tids: (node.tids || []).map((t) => String(t)),
-                          progress: total ? Math.floor(100 * (done / total)) : 100,
-                          doneCount: done,
+                          problemSetId: node.problemSetId ? String(node.problemSetId) : '',
+                          stageIds: node.stageIds || [],
+                          progress: total ? Math.floor(100 * (donePidsInChapter.length / total)) : 100,
+                          doneCount: donePidsInChapter.length,
                           totalCount: total,
                       };
                   })
@@ -531,6 +577,8 @@ class CourseEditHandler extends Handler {
                     content: n.content || '',
                     pids: n.pids,
                     tids: (n.tids || []).map((t) => String(t)),
+                    problemSetId: n.problemSetId ? String(n.problemSetId) : '',
+                    stageIds: n.stageIds || [],
                 })),
                 null,
                 2,

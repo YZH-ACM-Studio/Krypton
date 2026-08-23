@@ -26,7 +26,15 @@ export interface CourseChapter {
   title: string;
   content: string;
   pids: number[];
+  /**
+   * Chapter problems the viewer has finished, from the same scoped source
+   * that produced `doneCount`. Under a published integrity policy this is
+   * the contextual completion set, never global `ProblemStatus`.
+   */
+  completedPids: number[];
   tids: string[];
+  problemSetId?: string;
+  stageIds?: number[];
   progress: number;
   doneCount: number;
   totalCount: number;
@@ -38,6 +46,8 @@ export interface ChapterDraft {
   content: string;
   pids: string[];
   tids: string;
+  problemSetId?: string;
+  stageIds?: string;
 }
 
 export interface CourseMindmapProblem {

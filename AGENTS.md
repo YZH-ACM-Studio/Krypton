@@ -189,6 +189,17 @@
 - 任何单条或列表读取都必须验证教室根、layout revision 与布局 item 的 exact canonical schema 及内容 fingerprint；自洽 hash 不得替代 discriminator、必填字段、数值边界、稳定身份和 grid/items 语义校验。Endpoint 绑定、永久保留的历史配对窗口、考试目标、座位计划与分配引用必须先解析到同域 active 教室及真实 current seatId，悬空、跨域或错座位事实一律 fail closed。
 - apply 必须在 Hydro 停止、完成全量及目标集合备份后，由站点或考试基础设施管理员携带精确 plan fingerprint 与确认 token 执行。相同 batch 重跑幂等；本地 WAL 领先只能从记录的精确 Mongo predecessor 继续，已记录逐教室结果不得在恢复时覆写，确定性 success audit/batch 的 ACK 丢失必须读回精确事实后收敛；若读回也暂时失败，只能保留 applied/原状态重试，绝不得降级或写出非法 WAL。时钟回拨必须在写入前拒绝。非目标漂移、完整文档 CAS 竞争、被终端绑定或考试事实引用的教室删除/seatId 移除必须整批 fail closed，verify 必须从 Mongo canonical 与持久 batch/audit 重新核验。
 
+## 题集访问权益协议
+
+- 发现、进入内容和开始学习是三个事实。`enroll` 只是个人学习记录，不是授权。公开和 userbind 组、课程引用动态计算；兑换写入 `access.entitlements` 持久来源。多个来源取并集，撤销一个来源不得删除其它来源。
+- 列表、详情、阶段、题目入口、附件和直接 URL 共用 `ProblemSetAccessService`。仅兑换可见的题集在兑换前不得泄漏标题、阶段或成员。GET 介绍页不得写库。
+- 阶段进入必须同时满足来源访问权和 DAG 先修完成。兑换一个阶段只授予该阶段及其传递先修的访问权，不创建 AC、不标记完成。整集来源等价于当前全部阶段可访问。
+- 兑换码只保存版本化 HMAC 摘要，明文仅创建响应出现一次。单次码和限量通用码用条件更新计数，失败不得发出 entitlement。停用只阻止未来兑换；单人撤销只删除指定兑换来源。
+
+## 课程引用题集协议
+
+- 课程章节可保存 `{problemSetId, stageIds?}` 实时引用，不复制 pids。题集仍是阶段和成员的唯一事实源。从课程引用入口签发的 `PracticeContext` 可包含课程→题集链；从题集独立入口不得反向完成引用它的课程。
+
 ## 题集 TrainingDoc kind 协议
 
 - canonical 仍是 `document` 中 `docType:40` 的 `TrainingDoc`。新建题集显式写 `kind:'problem_set'`；`kind:'course'` 只表示课程；无 `kind` 或旧 `kind:'training'` 仅在读取时解释为题集。

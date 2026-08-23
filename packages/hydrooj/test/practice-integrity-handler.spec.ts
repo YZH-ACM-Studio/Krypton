@@ -70,6 +70,15 @@ const trainingStub = {
         calls.getContainer.push([domainId, id]);
         return currentContainer;
     },
+    getPids(dag: any[] = []) {
+        return Array.from(new Set(dag.flatMap((node) => node.pids || [])));
+    },
+    isDone(node: any, doneNids: Set<number>, donePids: Set<number>) {
+        return (node.requireNids || []).every((nid: number) => doneNids.has(nid)) && (node.pids || []).every((pid: number) => donePids.has(pid));
+    },
+    buildScopedTrainingProgress() {
+        return { doneNids: [] };
+    },
 };
 
 const problemStub = {
@@ -82,6 +91,9 @@ const problemStub = {
     async getViewableAuthorized(domainId: string, pid: number, user: any, projection: string[]) {
         calls.problemViews.push({ domainId, pid, user, projection });
         return problemVisible ? { domainId, docId: pid } : null;
+    },
+    async getListStatus() {
+        return {};
     },
 };
 
@@ -202,6 +214,21 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
         };
     }
     if ((fromHandler && request === '../model/problem') || (fromPracticeAccess && request === './problem')) return problemStub;
+    if ((fromHandler && request === '../model/problem-set-access') || (fromPracticeAccess && request === './problem-set-access')) {
+        return {
+            canManageProblemSet() {
+                return false;
+            },
+            problemSetAccessService: {
+                async assertAccessible() {
+                    return { discoverable: true, accessible: true, enrolled: false, sources: [{ kind: 'public' }], stageAccess: 'all' };
+                },
+                async assertStageEnterable() {
+                    return { discoverable: true, accessible: true, enrolled: false, sources: [{ kind: 'public' }], stageAccess: 'all' };
+                },
+            },
+        };
+    }
     if ((fromHandler && request === '../model/training') || (fromPracticeAccess && request === './training')) return trainingStub;
     if (fromHandler && request === '../service/server') {
         return {

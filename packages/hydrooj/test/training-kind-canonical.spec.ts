@@ -18,6 +18,8 @@ const trainingId = new ObjectId('68486d8165edbb11e9ec9036');
 const created: any[] = [];
 let stored: any = null;
 let documentGetResult: any = null;
+let enrollAvailable = true;
+let enrollIncCalls = 0;
 
 const trainingPath = require.resolve('../src/model/training.ts');
 const documentPath = require.resolve('../src/model/document.ts');
@@ -51,6 +53,15 @@ require.cache[documentPath] = {
         async set(_domainId: string, _docType: number, _tid: unknown, $set: any) {
             created.push($set);
             return $set;
+        },
+        async setIfNotStatus() {
+            if (!enrollAvailable) return false;
+            enrollAvailable = false;
+            return { enroll: 1 };
+        },
+        async inc() {
+            enrollIncCalls += 1;
+            return 1;
         },
         coll: {
             async findOne(filter: any) {
@@ -176,6 +187,8 @@ describe('P3.1 training document write and read gates', () => {
         created.length = 0;
         stored = null;
         documentGetResult = null;
+        enrollAvailable = true;
+        enrollIncCalls = 0;
     });
 
     it('creates new problem sets with kind problem_set and does not backfill extra.kind:training', async () => {
@@ -240,5 +253,14 @@ describe('P3.1 training document write and read gates', () => {
             }),
             'Error',
         );
+    });
+
+    it('creates a learning record once and treats a repeat enroll as already present', async () => {
+        expect(await TrainingModel.ensureEnrolled('system', trainingId, 42)).to.equal(true);
+        expect(enrollIncCalls).to.equal(1);
+        expect(await TrainingModel.ensureEnrolled('system', trainingId, 42)).to.equal(false);
+        expect(enrollIncCalls).to.equal(1);
+        await expectReject(TrainingModel.enroll('system', trainingId, 42), 'Error');
+        expect(enrollIncCalls).to.equal(1);
     });
 });

@@ -38,6 +38,7 @@ import { buildHomeworkListAccessFilter, canBypassHomeworkAccess, getHomeworkUser
 import message from '../model/message';
 import * as oplog from '../model/oplog';
 import ProblemModel from '../model/problem';
+import { problemSetAccessService } from '../model/problem-set-access';
 import { practiceIntegrityService } from '../model/practice-integrity';
 import * as setting from '../model/setting';
 import storage from '../model/storage';
@@ -114,16 +115,23 @@ export class HomeHandler extends Handler {
 
     async getTraining(domainId: string, limit = 10) {
         if (!this.user.hasPerm(PERM.PERM_VIEW_TRAINING)) return [[], {}];
-        const tdocs = await training
+        const listed = await training
             .getMulti(domainId, withProblemSetKind({}) as Filter<TrainingDoc>)
             .sort({ pin: -1, _id: 1 })
-            .limit(limit)
             .toArray();
         const tsdict = await training.getListStatus(
             domainId,
             this.user._id,
-            tdocs.map((tdoc) => tdoc.docId),
+            listed.map((tdoc) => tdoc.docId),
         );
+        const enrollments = new Map<string, boolean>(
+            Object.entries(tsdict).map(([key, status]) => [key, (status as { enroll?: number })?.enroll === 1]),
+        );
+        const decisions = await problemSetAccessService.evaluateMany(domainId, this.user, listed, enrollments);
+        const tdocs = listed.filter((tdoc) => decisions.get(String(tdoc.docId))?.discoverable).slice(0, limit);
+        for (const key of Object.keys(tsdict)) {
+            if (!tdocs.some((tdoc) => String(tdoc.docId) === String(key))) delete tsdict[key];
+        }
         if (this.user.hasPriv(PRIV.PRIV_USER_PROFILE)) {
             await Promise.all(
                 tdocs.map(async (tdoc) => {

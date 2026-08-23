@@ -375,6 +375,10 @@ export interface TrainingNode {
      * （引用制——比赛在比赛模块独立创建，章节只存 tid）。仅 course 用。
      */
     tids?: ObjectId[];
+    /** Course chapter live-reference to a problem set. Members stay on the set. */
+    problemSetId?: ObjectId;
+    /** When omitted, the chapter references the whole problem set. */
+    stageIds?: number[];
 }
 
 export interface Tdoc extends Document {
@@ -519,6 +523,14 @@ export interface TrainingDoc extends Omit<Tdoc, 'docType'> {
     mindmapId?: ObjectId;
     /** 课程学期等元信息（自由文本），仅展示用。仅 course。 */
     term?: string;
+    /**
+     * Problem-set discovery audience. Missing means public legacy behaviour.
+     * `public:false` with empty groupIds is redeem/course-only.
+     */
+    problemSetAudience?: {
+        public: boolean;
+        groupIds: ObjectId[];
+    };
 }
 
 export interface DomainDoc extends Record<string, any> {
@@ -904,6 +916,10 @@ declare module './service/db' {
         'practice.integrityRevisions': import('./model/practice-integrity').PracticeIntegrityRevisionDoc;
         'practice.contexts': import('./model/practice-integrity').PracticeContextDoc;
         'practice.contextualCompletions': import('./model/contextual-completion').ContextualCompletionDoc;
+        'access.entitlements': import('./model/problem-set-access').AccessEntitlementDoc;
+        'redemption.batches': import('./model/redemption').RedemptionCodeBatchDoc;
+        'redemption.codes': import('./model/redemption').RedemptionCodeDoc;
+        'redemption.redemptions': import('./model/redemption').RedemptionDoc;
         'endpoint.enrollmentBatches': import('./model/endpoint-enrollment').EndpointEnrollmentBatchDoc;
         'endpoint.registrations': import('./model/endpoint-enrollment').EndpointRegistrationDoc;
         'exam.events': import('./model/exam-event').ExamEventDoc;

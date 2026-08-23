@@ -190,6 +190,7 @@ export function ManageDashboardPage() {
           { label: '导入用户', desc: '批量导入用户', href: '/manage/userimport', icon: Users },
           { label: '用户权限', desc: '管理用户权限', href: '/manage/userpriv', icon: Users },
           { label: '赛时通过率', desc: '录入/迁移原赛通过数据', href: '/manage/realpass', icon: Activity },
+          { label: '兑换码', desc: '创建批次、一次性导出明文并停用或撤销', href: '/manage/redemption-codes', icon: Activity },
           { label: '系统状态', desc: '查看系统运行状态', href: bs.urls.status, icon: Server },
         ].map((item) => (
           <a key={item.href} href={item.href}>

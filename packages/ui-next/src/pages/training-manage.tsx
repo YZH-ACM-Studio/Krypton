@@ -51,11 +51,19 @@ interface TrainingFile {
   lastModified?: unknown;
 }
 
+interface TrainingManageGroup {
+  _id: string;
+  name: string;
+  archivedAt?: string | null;
+}
+
 interface TrainingManagePageData {
   tdoc?: TrainingManageDocument;
   page_name?: string;
   dag?: unknown;
   files?: TrainingFile[];
+  groups?: TrainingManageGroup[];
+  audience?: { public?: boolean; groupIds?: string[] };
 }
 
 const DEFAULT_PLAN: TrainingPlanNode[] = [
@@ -131,6 +139,11 @@ export function TrainingEditPage() {
   const tdoc = data.tdoc || {};
   const isEdit = data.page_name === 'problem_set_edit';
   const trainingUrl = isEdit ? replaceRouteTokens(bs.urls.trainingDetail, { TID: String(tdoc.docId || tdoc._id) }) : bs.urls.training;
+  const groups = (data.groups || []).filter((group) => !group.archivedAt);
+  const [audiencePublic, setAudiencePublic] = useState(data.audience?.public !== false);
+  const [audienceGroupIds, setAudienceGroupIds] = useState<Set<string>>(
+    () => new Set((data.audience?.groupIds || []).map(String)),
+  );
   const [planNodes, setPlanNodes] = useState<TrainingPlanNode[]>(() => {
     try {
       return parsePlan(data.dag || tdoc.dag);
@@ -242,6 +255,42 @@ export function TrainingEditPage() {
               toggleDependency={toggleDependency}
             />
             <input type="hidden" name="dag" value={serializePlan(planNodes)} readOnly />
+            <input type="hidden" name="audiencePublic" value={audiencePublic ? '1' : '0'} />
+            <input type="hidden" name="audienceGroupIds" value={Array.from(audienceGroupIds).join(',')} />
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">可见范围</label>
+              <p className="text-xs text-muted-foreground">公开和用户组动态生效；关闭公开且不选用户组后，仅兑换或课程引用可见。</p>
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox checked={audiencePublic} onCheckedChange={(checked) => setAudiencePublic(checked === true)} />
+                公开可见
+              </label>
+              {groups.length ? (
+                <div className="grid gap-2 rounded-md border p-3 sm:grid-cols-2">
+                  {groups.map((group) => {
+                    const checked = audienceGroupIds.has(group._id);
+                    return (
+                      <label key={group._id} className="flex items-center gap-2 text-sm">
+                        <Checkbox
+                          checked={checked}
+                          onCheckedChange={(next) => {
+                            setAudienceGroupIds((current) => {
+                              const copy = new Set(current);
+                              if (next === true) copy.add(group._id);
+                              else copy.delete(group._id);
+                              return copy;
+                            });
+                          }}
+                        />
+                        {group.name}
+                      </label>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">当前域还没有用户组。</p>
+              )}
+            </div>
 
             <div className="space-y-1.5">
               <label htmlFor="pin" className="text-sm font-medium">

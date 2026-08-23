@@ -101,6 +101,7 @@ export const PERMS = [
     Permission('perm_problem', PERM.PERM_CREATE_PROGRAMMING_DRAFT, 'Create managed programming drafts'),
     Permission('perm_exam_infrastructure', PERM.PERM_CREATE_EXAM_EVENT, 'Create and manage own school exam events'),
     Permission('perm_exam_infrastructure', PERM.PERM_MANAGE_EXAM_INFRASTRUCTURE, 'Manage all exam infrastructure in this domain'),
+    Permission('perm_training', PERM.PERM_CREATE_REDEMPTION_CODE, 'Create redemption codes'),
 ];
 
 export const PERMS_BY_FAMILY = {};

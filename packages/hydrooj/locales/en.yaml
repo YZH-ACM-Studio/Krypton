@@ -109,6 +109,8 @@ training_detail: Training Detail
 training_edit: Training Edit
 training_main: Problem Sets
 problem_set_main: Problem Sets
+manage_redemption_codes: Redemption Codes
+redeem: Redeem
 problem_set_create: Create Problem Set
 problem_set_detail: Problem Set
 problem_set_edit: Edit Problem Set

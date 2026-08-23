@@ -8,6 +8,7 @@ import { resolveAnnouncementManagementCapability } from './announcement-capabili
 import { resolveDomainPermissionManagementCapability } from './domain-permission-capabilities';
 import { resolveExamInfrastructureCapability } from './exam-infrastructure-capabilities';
 import { resolveRankboardCapabilities } from './rankboard-capabilities';
+import { resolveRedemptionManageCapability } from './redemption-capabilities';
 import { resolveTaskManagementCapability } from './task-capabilities';
 import { resolveUiLocale } from './ui-locale';
 
@@ -293,6 +294,22 @@ function buildBootstrap(templateName: string, args: Record<string, any>, context
       );
     },
   });
+  const canManageRedemptionCodes = resolveRedemptionManageCapability({
+    user: context.handler?.user,
+    editSystemPriv: PRIV.PRIV_EDIT_SYSTEM,
+    createRedemptionPerm: PERM.PERM_CREATE_REDEMPTION_CODE,
+    onError(error) {
+      console.error(
+        '[ui-next] redemption management capability resolution failed:',
+        {
+          domainId: String(domain?._id || ''),
+          uid: Number(context.handler?.user?._id || 0),
+          templateName,
+        },
+        error,
+      );
+    },
+  });
   const problemBankCapability = resolveProblemBankCapability(context.handler?.user, (error) => {
     console.error(
       '[ui-next] problem bank capability resolution failed; denying navigation:',
@@ -348,6 +365,7 @@ function buildBootstrap(templateName: string, args: Record<string, any>, context
       canManageTasks,
       canManageDomainPermissions,
       canManageExamInfrastructure,
+      canManageRedemptionCodes,
       impersonation,
     },
     domain: {

@@ -44,6 +44,27 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     if (fromHandler && request === '../model/problem-access') return { assertProblemBankSelection: async () => undefined };
     if (fromHandler && request === '../model/storage') return { put() {}, getMeta() {}, del() {}, signDownloadLink() {} };
     if (fromHandler && request === '../model/system') return { get: () => 1 };
+    if (fromHandler && request === '../model/problem-set-access') {
+        return {
+            canManageProblemSet() {
+                return false;
+            },
+            problemSetAccessService: {
+                async evaluateMany() {
+                    return new Map();
+                },
+                async assertAccessible() {
+                    return { accessible: true, stageAccess: 'all' };
+                },
+                stageIsAccessible() {
+                    return true;
+                },
+                async assertStageEnterable() {
+                    return { accessible: true, stageAccess: 'all' };
+                },
+            },
+        };
+    }
     if (fromHandler && request === '../model/training') return { get() {}, getMulti() {}, getPids: () => [] };
     if (fromHandler && request === '../model/user') return {};
     if (fromHandler && request === './problem-reference') {

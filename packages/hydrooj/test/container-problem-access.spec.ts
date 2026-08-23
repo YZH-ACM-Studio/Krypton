@@ -86,6 +86,7 @@ const calls = {
     trainingStatusWrites: [] as any[],
 };
 let denySelection = false;
+let problemSetAccessDecision: any = { discoverable: true, accessible: true, enrolled: false, sources: [{ kind: 'public' }], stageAccess: 'all' };
 let currentContainer: any;
 let currentTrainingStatus: any;
 let trainingRows: any[] = [];
@@ -207,6 +208,8 @@ const trainingStub = {
     isInvalid: (node: any, doneNids: Set<number>) => !node.requireNids.every((nid: number) => doneNids.has(nid)),
     async get(domainId: string, tid: unknown) {
         calls.containerGets.push({ domainId, tid });
+        const listed = trainingRows.find((row) => String(row.docId) === String(tid));
+        if (listed) return listed;
         return currentContainer;
     },
     async add(...args: any[]) {
@@ -237,6 +240,18 @@ const trainingStub = {
     async getList(_domainId: string, tids: ObjectId[]) {
         const wanted = new Set(tids.map(String));
         return Object.fromEntries(trainingRows.filter((tdoc) => wanted.has(String(tdoc.docId))).map((tdoc) => [String(tdoc.docId), tdoc]));
+    },
+    async enroll(...args: any[]) {
+        calls.trainingStatusWrites.push(['enroll', ...args]);
+        return true;
+    },
+    async ensureEnrolled(...args: any[]) {
+        calls.trainingStatusWrites.push(['ensureEnrolled', ...args]);
+        return true;
+    },
+    async setProblemSetAudience(...args: any[]) {
+        calls.edit.push(['audience', ...args]);
+        return { public: true, groupIds: [] };
     },
 };
 
@@ -341,6 +356,40 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     if (fromHandler && request === '../model/problem-access') return problemAccessStub;
     if (fromHandler && request === '../model/storage') return storageStub;
     if (fromHandler && request === '../model/system') return { get: () => 1000 };
+    if (fromHandler && request === '../model/problem-set-access') {
+        return {
+            canManageProblemSet(user: any, tdoc: any) {
+                return user.own?.(tdoc) || user.hasPerm?.(PERM.PERM_EDIT_TRAINING);
+            },
+            problemSetAccessService: {
+                async evaluate() {
+                    return problemSetAccessDecision;
+                },
+                async evaluateMany(_domainId: string, _user: unknown, tdocs: any[]) {
+                    return new Map(tdocs.map((tdoc) => [String(tdoc.docId), problemSetAccessDecision]));
+                },
+                stageIsAccessible(decision: any) {
+                    return decision?.accessible !== false && decision?.stageAccess === 'all';
+                },
+                async assertAccessible() {
+                    if (!problemSetAccessDecision.accessible) {
+                        const error: any = new Error('training');
+                        error.name = 'NotFoundError';
+                        throw error;
+                    }
+                    return problemSetAccessDecision;
+                },
+                async assertStageEnterable() {
+                    if (!problemSetAccessDecision.accessible) {
+                        const error: any = new Error('training');
+                        error.name = 'NotFoundError';
+                        throw error;
+                    }
+                    return problemSetAccessDecision;
+                },
+            },
+        };
+    }
     if (fromHandler && request === '../model/training') return trainingStub;
     if (fromHandler && request === '../model/user') return userStub;
     if (fromHandler && request === '../service/server') return serverStub;
@@ -396,6 +445,9 @@ function makeHandler(HandlerClass: any, user = makeUser()) {
         domain: { _id: 'system' },
         user,
         url: () => '/target',
+        back() {
+            handler.response.redirect = '/back';
+        },
         checkPerm: () => undefined,
         checkPriv(priv: number) {
             if (!user.hasPriv(priv)) throw new TestPermissionError();
@@ -441,6 +493,7 @@ beforeEach(() => {
     calls.mindmapSnapshots.length = 0;
     calls.trainingStatusWrites.length = 0;
     denySelection = false;
+    problemSetAccessDecision = { discoverable: true, accessible: true, enrolled: false, sources: [{ kind: 'public' }], stageAccess: 'all' };
     problemDocs.clear();
     currentContainer = null;
     currentTrainingStatus = null;
@@ -1331,5 +1384,104 @@ describe('P3.1 training kind canonical handlers', () => {
                 'ValidationError',
             );
         }
+    });
+});
+
+describe('P3.3 problem set access handler gates', () => {
+    it('does not write training status on a GET detail and hides inaccessible sets', async () => {
+        currentContainer = {
+            domainId: 'system',
+            docId: 'set',
+            owner: 7,
+            kind: 'problem_set',
+            title: 'Public',
+            description: '',
+            dag: [{ _id: 1, title: 'Stage', requireNids: [], pids: [11] }],
+            files: [{ name: 'a.txt' }],
+        };
+        const visible = makeHandler(trainingRoutes.training_detail);
+        await visible.get('forged-domain', 'set');
+        expect(calls.trainingStatusWrites).to.deep.equal([]);
+        expect(visible.response.body.access.accessible).to.equal(true);
+
+        problemSetAccessDecision = { discoverable: false, accessible: false, enrolled: true, sources: [] };
+        expect((await captureFailure(() => makeHandler(trainingRoutes.training_detail).get('forged-domain', 'set')))?.name).to.equal('NotFoundError');
+        expect((await captureFailure(() => makeHandler(trainingRoutes.training_file_download).get('forged-domain', 'set', 'a.txt')))?.name).to.equal(
+            'NotFoundError',
+        );
+        expect((await captureFailure(() => makeHandler(trainingRoutes.training_files).prepare('forged-domain', 'set')))?.name).to.equal('NotFoundError');
+        expect((await captureFailure(() => makeHandler(trainingRoutes.training_edit).prepare('forged-domain', 'set')))?.name).to.equal('NotFoundError');
+        expect(calls.trainingStatusWrites).to.deep.equal([]);
+    });
+
+    it('creates an enrollment only after an explicit start and treats repeats as success', async () => {
+        currentContainer = {
+            domainId: 'system',
+            docId: 'set',
+            owner: 7,
+            kind: 'problem_set',
+            title: 'Public',
+            description: '',
+            dag: [{ _id: 1, title: 'Stage', requireNids: [], pids: [11] }],
+        };
+        const handler = makeHandler(trainingRoutes.training_detail);
+        await handler.postEnroll('system', 'set');
+        await handler.postEnroll('system', 'set');
+        expect(calls.trainingStatusWrites).to.deep.equal([
+            ['ensureEnrolled', 'system', 'set', 42],
+            ['ensureEnrolled', 'system', 'set', 42],
+        ]);
+        problemSetAccessDecision = { discoverable: false, accessible: false, enrolled: false, sources: [] };
+        expect((await captureFailure(() => makeHandler(trainingRoutes.training_detail).postEnroll('system', 'set')))?.name).to.equal('NotFoundError');
+    });
+});
+
+describe('P3.9 course chapter problem-set refs', () => {
+    it('keeps live problem-set refs on course chapter writes', async () => {
+        const setId = new ObjectId();
+        trainingRows = [
+            {
+                domainId: 'system',
+                docId: setId,
+                owner: 7,
+                kind: 'problem_set',
+                title: 'Set',
+                dag: [{ _id: 1, title: 'S', requireNids: [], pids: [11] }],
+            },
+        ];
+        currentContainer = {
+            domainId: 'system',
+            docId: 'course',
+            owner: 42,
+            kind: 'course',
+            title: 'Course',
+            dag: [],
+        };
+        const handler = makeHandler(courseRoutes.course_edit);
+        handler.tdoc = currentContainer;
+        await handler.post(
+            'forged-domain',
+            'course',
+            'Course',
+            'body',
+            JSON.stringify([
+                {
+                    _id: 1,
+                    title: 'Ch',
+                    pids: [],
+                    tids: [],
+                    problemSetId: String(setId),
+                    stageIds: [1],
+                },
+            ]),
+            '',
+            '',
+            [],
+            '',
+        );
+        const dag = calls.edit[0][2].dag;
+        expect(String(dag[0].problemSetId)).to.equal(String(setId));
+        expect(dag[0].stageIds).to.deep.equal([1]);
+        expect(dag[0].pids).to.deep.equal([]);
     });
 });

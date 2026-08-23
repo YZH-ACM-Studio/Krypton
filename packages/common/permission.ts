@@ -118,6 +118,9 @@ export const PERM = {
     PERM_CREATE_EXAM_EVENT: 1n << 81n,
     PERM_MANAGE_EXAM_INFRASTRUCTURE: 1n << 82n,
 
+    // Krypton: create and manage redemption codes for problem sets/courses.
+    PERM_CREATE_REDEMPTION_CODE: 1n << 83n,
+
     // Placeholder
     PERM_ALL: -1n,
     PERM_BASIC: 0n,
@@ -227,7 +230,8 @@ PERM.PERM_TEACHER =
     PERM.PERM_CREATE_TASK |
     PERM.PERM_RANKBOARD_IMPORT |
     PERM.PERM_USERBIND_MANAGE_STUDENTS |
-    PERM.PERM_CREATE_EXAM_EVENT;
+    PERM.PERM_CREATE_EXAM_EVENT |
+    PERM.PERM_CREATE_REDEMPTION_CODE;
 
 export const PRIV = {
     PRIV_NONE: 0,

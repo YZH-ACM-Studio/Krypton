@@ -83,6 +83,8 @@ import { RankBoardDetailPage, RankBoardMainPage } from '@/pages/rankboard';
 import { AdminAwardTypesPage, AdminRankBoardListPage, AdminRankBoardPersonPage } from '@/pages/rankboard/admin';
 import { RankBoardGalleryPage } from '@/pages/rankboard/gallery';
 import { RankingPage } from '@/pages/ranking';
+import { RedeemPage } from '@/pages/redeem';
+import { RedemptionCodeManagePage } from '@/pages/redemption-manage';
 import { RealPassManagePage } from '@/pages/realpass-manage';
 import { RecordDetailPage, RecordsPage } from '@/pages/records';
 import { SpikeWebViewProbePage } from '@/pages/spike-webview';
@@ -238,6 +240,8 @@ const PAGE_MAP: Record<string, PageComponent> = {
   'manage_setting.html': ManageSettingPage,
   'manage_config.html': ManageConfigPage,
   'manage_realpass.html': RealPassManagePage,
+  'redemption_code_manage.html': RedemptionCodeManagePage,
+  'redeem.html': RedeemPage,
   'admin_stats.html': AdminStatsPage,
   'admin_accounts.html': AdminAccountsPage,
   'admin_account_detail.html': AdminAccountDetailPage,

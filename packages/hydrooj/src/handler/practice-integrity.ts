@@ -205,7 +205,7 @@ class PracticeContextHandler extends Handler {
             rejectionReason = 'invalid-scope-kind';
             scopeKind = canonicalScopeKind(scopeKindRaw);
             rejectionReason = 'context-access-denied';
-            await assertPracticeTargetAccess({
+            const primaryContainer = await assertPracticeTargetAccess({
                 domainId,
                 user: this.user,
                 handler: this,
@@ -232,6 +232,43 @@ class PracticeContextHandler extends Handler {
                 throw new TypeError(`practice integrity published revision identity mismatch: ${published._id}`);
             }
             rejectionReason = 'context-issue-failed';
+            const targets: Array<{ revision: PracticeIntegrityRevisionDoc; scopeKind: PracticeScopeKind; scopeId: number }> = [
+                { revision: published, scopeKind, scopeId },
+            ];
+            if (containerKind === 'course') {
+                const chapter = (primaryContainer.dag || []).find((node: { _id: number }) => Number(node._id) === scopeId) as
+                    | { problemSetId?: ObjectId; stageIds?: number[]; pids?: number[] }
+                    | undefined;
+                if (chapter?.problemSetId && !(chapter.pids || []).map(Number).includes(pid)) {
+                    const setDoc = await loadPracticeContainer(domainId, 'problemSet', chapter.problemSetId);
+                    const allowed = Array.isArray(chapter.stageIds) ? chapter.stageIds.map(Number) : [];
+                    const setStage = (setDoc.dag || []).find(
+                        (node: { _id: number; pids?: number[] }) =>
+                            (!allowed.length || allowed.includes(Number(node._id))) && (node.pids || []).map(Number).includes(pid),
+                    );
+                    if (!setStage) throw new ValidationError('pid', null, localizedErrorText`题目不属于请求的真实性训练范围`);
+                    rejectionReason = 'problem-set-stage-denied';
+                    await assertPracticeTargetAccess({
+                        domainId,
+                        user: this.user,
+                        handler: this,
+                        target: {
+                            containerKind: 'problemSet',
+                            containerId: setDoc.docId,
+                            scopeKind: 'stage',
+                            scopeId: Number(setStage._id),
+                        },
+                        pid,
+                        mode: preview ? 'preview' : 'student',
+                        checkProblem: false,
+                        setRejectionReason: (reason) => {
+                            rejectionReason = reason;
+                        },
+                    });
+                    const setPublished = await practiceIntegrityService.getLatestPublished(domainId, 'problemSet', setDoc.docId);
+                    if (setPublished) targets.push({ revision: setPublished, scopeKind: 'stage', scopeId: Number(setStage._id) });
+                }
+            }
             const context = await practiceIntegrityService.issueContext({
                 domainId,
                 uid: this.user._id,
@@ -241,7 +278,7 @@ class PracticeContextHandler extends Handler {
                 scopeId,
                 pid,
                 mode: preview ? 'preview' : 'student',
-                targets: [{ revision: published, scopeKind, scopeId }],
+                targets,
             });
             const contextId = context._id.toHexString();
             logger.info(

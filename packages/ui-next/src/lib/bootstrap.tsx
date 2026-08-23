@@ -64,6 +64,8 @@ export interface KryptonUser {
   canManageDomainPermissions?: boolean;
   /** 当前域考试基础设施入口能力；具体学校与活动权限仍由服务端逐次校验。 */
   canManageExamInfrastructure?: boolean;
+  /** 兑换码管理工作台入口；服务端仍逐请求校验创建权限与目标归属。 */
+  canManageRedemptionCodes?: boolean;
   /** 管理员代理身份；只来自服务端 session，普通账号不可自行声明。 */
   impersonation?: {
     actorUid: number;

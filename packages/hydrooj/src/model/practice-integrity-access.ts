@@ -2,7 +2,8 @@ import { ObjectId } from 'mongodb';
 import { localizedErrorText, PermissionError, ValidationError } from '../error';
 import type { User } from '../interface';
 import { isCourseKind, isProblemSetKind } from '../lib/training-kind';
-import { PERM, PRIV } from './builtin';
+import { PERM, PRIV, STATUS } from './builtin';
+import { problemSetAccessService } from './problem-set-access';
 import type { PracticeContainerKind, PracticeContextMode, PracticeScopeKind } from './practice-integrity';
 import problem from './problem';
 import * as training from './training';
@@ -49,6 +50,29 @@ export async function loadPracticeContainer(domainId: string, containerKind: Pra
     return tdoc;
 }
 
+async function completedProblemSetNodeIds(domainId: string, uid: number, tdoc: any): Promise<Set<number>> {
+    const integrity = global.Hydro?.model?.practiceIntegrity?.practiceIntegrityService;
+    const completions = global.Hydro?.model?.contextualCompletion?.contextualCompletionService;
+    if (typeof integrity?.getLatestPublished === 'function' && typeof completions?.getCompletedByScope === 'function') {
+        const published = await integrity.getLatestPublished(domainId, 'problemSet', tdoc.docId);
+        if (published) {
+            const scoped = await completions.getCompletedByScope(domainId, uid, 'problemSet', tdoc.docId);
+            return new Set(training.buildScopedTrainingProgress(tdoc, scoped).doneNids);
+        }
+    }
+    const pids = training.getPids(tdoc.dag || []);
+    const psdict = await problem.getListStatus(domainId, uid, pids);
+    const donePids = new Set<number>();
+    for (const [pid, psdoc] of Object.entries(psdict || {})) {
+        if ((psdoc as { status?: number } | undefined)?.status === STATUS.STATUS_ACCEPTED) donePids.add(+pid);
+    }
+    const doneNids = new Set<number>();
+    for (const node of tdoc.dag || []) {
+        if (training.isDone(node, doneNids, donePids)) doneNids.add(node._id);
+    }
+    return doneNids;
+}
+
 async function assertCourseVisible(domainId: string, user: User, tdoc: any, canManage: boolean): Promise<void> {
     if (canManage || !(tdoc.courseGroupIds || []).length) return;
     const findStudent = global.Hydro?.model?.userbind?.findStudentByUserId;
@@ -81,6 +105,18 @@ export async function assertPracticeTargetAccess(input: {
     const canManage = canManagePracticeContainer(user, tdoc, target.containerKind);
     input.setRejectionReason?.('container-view-denied');
     if (!user.hasPerm(PERM.PERM_VIEW_TRAINING) && !canManage) throw new PermissionError(PERM.PERM_VIEW_TRAINING);
+    if (target.containerKind === 'problemSet' && !canManage) {
+        input.setRejectionReason?.('problem-set-access-denied');
+        await problemSetAccessService.assertAccessible(domainId, user, tdoc);
+        input.setRejectionReason?.('problem-set-stage-denied');
+        await problemSetAccessService.assertStageEnterable(
+            domainId,
+            user,
+            tdoc,
+            target.scopeId,
+            await completedProblemSetNodeIds(domainId, user._id, tdoc),
+        );
+    }
     input.setRejectionReason?.('container-extension-denied');
     if (target.containerKind === 'problemSet') await handler.ctx.parallel('training/get', tdoc, handler);
     input.setRejectionReason?.('course-group-denied');

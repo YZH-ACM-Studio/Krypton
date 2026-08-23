@@ -16,6 +16,7 @@ import { PERM } from './builtin';
 import * as document from './document';
 import * as OplogModel from './oplog';
 import { isProblemBankAdmin, type ProblemAclUser } from './problem-access';
+import { canonicalProblemSetAudience } from '../lib/problem-set-audience';
 
 const logger = new Logger('training');
 
@@ -83,13 +84,16 @@ export function buildScopedTrainingProgress(
     };
 }
 
+export async function ensureEnrolled(domainId: string, tid: ObjectId, uid: number): Promise<boolean> {
+    const created = await document.setIfNotStatus(domainId, document.TYPE_TRAINING, tid, uid, 'enroll', 1, 1, {});
+    if (!created) return false;
+    await document.inc(domainId, document.TYPE_TRAINING, tid, 'attend', 1);
+    logger.info('Problem set enrollment created domain=%s tid=%s uid=%d stage=enroll result=created', domainId, tid, uid);
+    return true;
+}
+
 export async function enroll(domainId: string, tid: ObjectId, uid: number) {
-    try {
-        await document.setIfNotStatus(domainId, document.TYPE_TRAINING, tid, uid, 'enroll', 1, 1, {});
-    } catch (e) {
-        throw new TrainingAlreadyEnrollError(tid, uid);
-    }
-    return await document.inc(domainId, document.TYPE_TRAINING, tid, 'attend', 1);
+    if (!(await ensureEnrolled(domainId, tid, uid))) throw new TrainingAlreadyEnrollError(tid, uid);
 }
 
 export function setStatus(domainId: string, tid: ObjectId, uid: number, $set: any) {
@@ -125,6 +129,21 @@ export function edit(domainId: string, tid: ObjectId, $set: Partial<TrainingDoc>
         throw new TypeError('training document kind cannot be edited');
     }
     return document.set(domainId, document.TYPE_TRAINING, tid, $set, $unset as any);
+}
+
+export async function setProblemSetAudience(domainId: string, tid: ObjectId, audienceInput: unknown) {
+    const tdoc = await get(domainId, tid);
+    if (!isProblemSetKind(tdoc.kind)) throw new TrainingNotFoundError(domainId, tid);
+    const problemSetAudience = canonicalProblemSetAudience(audienceInput);
+    await edit(domainId, tid, { problemSetAudience });
+    logger.info(
+        'Problem set audience updated domain=%s tid=%s public=%s groups=%d stage=audience result=success',
+        domainId,
+        tid,
+        problemSetAudience.public,
+        problemSetAudience.groupIds.length,
+    );
+    return problemSetAudience;
 }
 
 interface ProblemBatchChapterAuditInput {
@@ -486,6 +505,8 @@ global.Hydro.model.training = {
     getMultiStatus,
     getStatus,
     enroll,
+    ensureEnrolled,
     setStatus,
     getListStatus,
+    setProblemSetAudience,
 };

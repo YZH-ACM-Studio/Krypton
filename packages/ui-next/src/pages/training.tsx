@@ -13,6 +13,15 @@ import { formatPlainTextSummary, replaceRouteTokens } from '@/lib/format';
 import { practiceProblemEntryUrl } from '@/lib/practice-integrity';
 import { useChapterQuery } from './course/chapter-query';
 import {
+  isStageEnterable,
+  matchesProblemSetBucket,
+  problemSetAccessSources,
+  problemSetSourceLabel,
+  stageLockReason,
+  type ProblemSetAccessDecision,
+  type ProblemSetListBucket,
+} from './training-access';
+import {
   resolveTrainingListProgress,
   searchTrainingProblems,
   type TrainingListContextualProgress,
@@ -58,6 +67,8 @@ interface TrainingNodeStatus {
   isProgress?: boolean;
   isOpen?: boolean;
   isInvalid?: boolean;
+  hasAccess?: boolean;
+  lockReason?: 'no_access' | 'prereq';
   donePids?: number[];
 }
 
@@ -99,6 +110,7 @@ interface TrainingListEntry {
   progress: ReturnType<typeof resolveTrainingListProgress>;
   enrolled: boolean;
   fullyDone: boolean;
+  access?: ProblemSetAccessDecision;
 }
 
 interface TrainingPageData {
@@ -119,6 +131,7 @@ interface TrainingPageData {
   tsdict?: Record<string, TrainingStatusDoc | undefined>;
   tsdoc?: TrainingStatusDoc;
   udoc?: { uname?: string };
+  access?: ProblemSetAccessDecision | Record<string, ProblemSetAccessDecision | undefined>;
 }
 
 /* ────────────────────────────────────────────────────────────────── */
@@ -152,6 +165,11 @@ export function TrainingPage() {
   }, [view]);
 
   const [statusFilter, setStatusFilter] = useState<'all' | 'enrolled' | 'done' | 'not_started'>('all');
+  const [bucket, setBucket] = useState<ProblemSetListBucket>('all');
+  const accessById = useMemo(
+    () => (data.access && !('sources' in data.access) ? data.access : {}) as Record<string, ProblemSetAccessDecision | undefined>,
+    [data.access],
+  );
 
   // Compute per-training stats
   const enriched = useMemo(
@@ -164,6 +182,7 @@ export function TrainingPage() {
         const pct = total > 0 ? Math.round((done / total) * 100) : 0;
         const sectionCount = Array.isArray(t.dag) ? t.dag.length : 0;
         const sectionDone = progress.doneNids.length;
+        const access = accessById[String(t.docId)];
         return {
           t,
           ts,
@@ -173,23 +192,25 @@ export function TrainingPage() {
           sectionCount,
           sectionDone,
           progress,
-          enrolled: !!ts.enroll,
+          enrolled: !!ts.enroll || !!access?.enrolled,
           fullyDone: total > 0 && done === total,
+          access,
         };
       }),
-    [tdocs, tsdict],
+    [accessById, tdocs, tsdict],
   );
 
   const filtered = useMemo(
     () =>
       enriched.filter((e) => {
+        if (!matchesProblemSetBucket(bucket, e.access, e.enrolled)) return false;
         if (statusFilter === 'all') return true;
         if (statusFilter === 'enrolled') return e.enrolled && !e.fullyDone;
         if (statusFilter === 'done') return e.fullyDone;
         if (statusFilter === 'not_started') return !e.enrolled;
         return true;
       }),
-    [enriched, statusFilter],
+    [bucket, enriched, statusFilter],
   );
 
   const stats = useMemo(
@@ -242,6 +263,21 @@ export function TrainingPage() {
         <StatCell label="总题数" value={stats.totalProblems} icon={<Award className="size-4 text-amber-600" />} />
       </div>
 
+      <div className="flex flex-wrap gap-2">
+        {(
+          [
+            ['all', '全部'],
+            ['discoverable', '可发现'],
+            ['mine', '我的题集'],
+            ['redemption', '兑换获得'],
+          ] as Array<[ProblemSetListBucket, string]>
+        ).map(([id, label]) => (
+          <Button key={id} type="button" size="sm" variant={bucket === id ? 'default' : 'outline'} onClick={() => setBucket(id)}>
+            {label}
+          </Button>
+        ))}
+      </div>
+
       {/* Search + view */}
       <Card>
         <CardContent className="p-4">
@@ -282,7 +318,7 @@ export function TrainingPage() {
       {filtered.length === 0 ? (
         <Card>
           <CardContent className="py-12 text-center text-sm text-muted-foreground">
-            {tdocs.length === 0 ? '暂无题集' : '没有符合条件的题集'}
+            {tdocs.length === 0 ? '暂无题集' : bucket === 'redemption' ? '还没有通过兑换获得的题集' : '没有符合条件的题集'}
           </CardContent>
         </Card>
       ) : view === 'cards' ? (
@@ -331,8 +367,9 @@ function StatCell({
 }
 
 function TrainingCard({ e, bs }: { e: TrainingListEntry; bs: ReturnType<typeof useBootstrap> }) {
-  const { t, ts, total, done, pct, sectionCount, enrolled, fullyDone } = e;
+  const { t, ts, total, done, pct, sectionCount, enrolled, fullyDone, access } = e;
   const url = replaceRouteTokens(bs.urls.trainingDetail, { TID: String(t.docId) });
+  const sources = problemSetAccessSources(access);
   return (
     <a href={url} className="group block">
       <Card className="h-full transition-all group-hover:border-primary/40 group-hover:shadow-md">
@@ -349,10 +386,19 @@ function TrainingCard({ e, bs }: { e: TrainingListEntry; bs: ReturnType<typeof u
               </Badge>
             ) : (
               <Badge variant="outline" className="shrink-0">
-                未参加
+                未开始
               </Badge>
             )}
           </div>
+          {sources.length ? (
+            <div className="mt-2 flex flex-wrap gap-1">
+              {sources.map((source) => (
+                <Badge key={`${source.kind}:${source.groupId || source.courseId || source.entitlementId || ''}`} variant="outline" className="text-[10px]">
+                  {problemSetSourceLabel(source)}
+                </Badge>
+              ))}
+            </div>
+          ) : null}
         </CardHeader>
         <CardContent className="space-y-3">
           <p className="line-clamp-2 text-sm text-muted-foreground min-h-[40px]">{formatPlainTextSummary(t.content || t.desc) || '精选题集'}</p>
@@ -418,9 +464,14 @@ function TrainingTable({ rows, bs }: { rows: TrainingListEntry[]; bs: ReturnType
                     </Badge>
                   ) : (
                     <Badge variant="outline" className="text-[10px]">
-                      未参加
+                      未开始
                     </Badge>
                   )}
+                  {problemSetAccessSources(e.access).map((source) => (
+                    <Badge key={`${source.kind}:${source.groupId || source.courseId || source.entitlementId || ''}`} variant="outline" className="text-[10px]">
+                      {problemSetSourceLabel(source)}
+                    </Badge>
+                  ))}
                 </div>
                 <p className="line-clamp-1 text-xs text-muted-foreground">{formatPlainTextSummary(e.t.content || e.t.desc) || '—'}</p>
               </div>
@@ -517,7 +568,9 @@ export function TrainingDetailPage() {
   const tsdoc: TrainingStatusDoc = data.tsdoc || {};
   const ndict: Record<string, TrainingDagNode> = data.ndict || {};
   const nsdict: Record<string, TrainingNodeStatus> = data.nsdict || {};
-  const enrolled = !!tsdoc.enroll;
+  const access = (data.access && 'sources' in data.access ? data.access : undefined) as ProblemSetAccessDecision | undefined;
+  const enrolled = !!tsdoc.enroll || !!access?.enrolled;
+  const accessSources = problemSetAccessSources(access);
   const integrityControlled = data.integrityControlled === true;
   const dag = Array.isArray(tdoc.dag) ? tdoc.dag : [];
 
@@ -545,7 +598,7 @@ export function TrainingDetailPage() {
     if (!enrolled) return null;
     for (const node of dag) {
       const ns = nsdict[node._id] || {};
-      if (!ns.isOpen && !ns.isProgress) continue; // locked or done
+      if (!isStageEnterable(ns) || ns.isDone) continue;
       for (const pid of node.pids || []) {
         if (!ns.donePids?.map(Number).includes(Number(pid))) {
           return problemEntryUrl(pid, node._id);
@@ -560,14 +613,17 @@ export function TrainingDetailPage() {
   // DAG canvas was dropped; users browse stages top-down like a TOC now.)
 
   const preferredNid =
-    dag.find((node) => nsdict[node._id]?.isProgress)?._id ??
-    dag.find((node) => nsdict[node._id]?.isOpen && !nsdict[node._id]?.isDone)?._id ??
+    dag.find((node) => isStageEnterable(nsdict[node._id] || {}) && nsdict[node._id]?.isProgress)?._id ??
+    dag.find((node) => isStageEnterable(nsdict[node._id] || {}) && nsdict[node._id]?.isOpen && !nsdict[node._id]?.isDone)?._id ??
+    dag.find((node) => isStageEnterable(nsdict[node._id] || {}))?._id ??
     dag[0]?._id ??
     null;
   const { activeId: selectedNid, selectChapter } = useChapterQuery(dag, preferredNid);
 
   const selected = selectedNid != null ? ndict[selectedNid] || dag.find((n) => n._id === selectedNid) : null;
   const selectedStatus = selectedNid != null ? nsdict[selectedNid] || {} : {};
+  const selectedEnterable = selected ? isStageEnterable(selectedStatus) : false;
+  const selectedLock = selected ? stageLockReason(selectedStatus) : null;
   const isOwner = data.tdoc?.owner === bs.user?.id;
   const trainingUrl = replaceRouteTokens(bs.urls.trainingDetail, { TID: String(tdoc.docId) });
   const [problemQuery, setProblemQuery] = useState('');
@@ -576,8 +632,10 @@ export function TrainingDetailPage() {
     [dag, integrityControlled, nsdict, pdict, problemQuery, psdict],
   );
   const problemSearchEntryUrl = (row: TrainingProblemSearchRow) => {
-    const chapter = row.chapters.find((item) => !item.completed) || row.chapters[0];
-    if (!chapter) throw new TypeError(`training problem ${row.docId} has no source stage`);
+    const chapter =
+      row.chapters.find((item) => !item.completed && isStageEnterable(nsdict[item.id] || {})) ||
+      row.chapters.find((item) => isStageEnterable(nsdict[item.id] || {}));
+    if (!chapter) return null;
     return problemEntryUrl(row.docId, chapter.id);
   };
 
@@ -605,6 +663,18 @@ export function TrainingDetailPage() {
             <span>
               {dag.length} 段 · {totalProblems} 题
             </span>
+            {accessSources.length ? (
+              <>
+                <span>·</span>
+                <span className="flex flex-wrap items-center gap-1">
+                  {accessSources.map((source) => (
+                    <Badge key={`${source.kind}:${source.groupId || source.courseId || source.entitlementId || ''}`} variant="outline" className="text-[10px]">
+                      {problemSetSourceLabel(source)}
+                    </Badge>
+                  ))}
+                </span>
+              </>
+            ) : null}
             {data.udoc?.uname ? (
               <>
                 <span>·</span>
@@ -623,10 +693,10 @@ export function TrainingDetailPage() {
           </div>
         </div>
         <div className="flex gap-2 shrink-0">
-          {!enrolled ? (
+          {!enrolled && bs.user.signedIn ? (
             <form method="post">
               <input type="hidden" name="operation" value="enroll" />
-              <Button type="submit">参加题集</Button>
+              <Button type="submit">开始题集</Button>
             </form>
           ) : null}
           {continueLink ? (
@@ -711,10 +781,13 @@ export function TrainingDetailPage() {
           {problemQuery.trim() ? (
             problemSearch.results.length ? (
               <div className="divide-y rounded-lg border">
-                {problemSearch.results.map((row) => (
+                {problemSearch.results.map((row) => {
+                  const searchHref = problemSearchEntryUrl(row);
+                  return (
                   <div key={row.docId} className="flex flex-col gap-2 px-3 py-2.5 sm:flex-row sm:items-center">
+                    {searchHref ? (
                     <a
-                      href={problemSearchEntryUrl(row)}
+                      href={searchHref}
                       className="min-w-0 flex-1 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       <div className="flex min-w-0 items-center gap-2">
@@ -731,6 +804,11 @@ export function TrainingDetailPage() {
                         <span className="truncate text-sm font-medium hover:text-primary">{row.title}</span>
                       </div>
                     </a>
+                    ) : (
+                      <div className="min-w-0 flex-1 text-sm text-muted-foreground">
+                        <span className="shrink-0 font-mono text-xs">{row.displayPid}</span> {row.title} · 阶段未解锁
+                      </div>
+                    )}
                     <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">
                       <Badge
                         variant={
@@ -766,7 +844,8 @@ export function TrainingDetailPage() {
                       ))}
                     </div>
                   </div>
-                ))}
+                );
+                })}
               </div>
             ) : (
               <div className="rounded-lg border border-dashed px-4 py-8 text-center text-sm text-muted-foreground" role="status" aria-live="polite">
@@ -820,6 +899,12 @@ export function TrainingDetailPage() {
                     })}
                   </div>
                 ) : null}
+                {!selectedEnterable ? (
+                  <div className="rounded-md border border-dashed px-3 py-6 text-center text-sm text-muted-foreground">
+                    <Lock className="mx-auto mb-2 size-4" />
+                    {selectedLock === 'no_access' ? '未获得访问权' : '前置阶段未完成'}
+                  </div>
+                ) : (
                 <div className="space-y-1.5">
                   {(selected.pids || []).map((pid: string | number) => {
                     const p = pdict[String(pid)] || {};
@@ -885,6 +970,7 @@ export function TrainingDetailPage() {
                     );
                   })}
                 </div>
+                )}
               </CardContent>
             </Card>
           ) : (
@@ -1285,10 +1371,17 @@ function _Legend({ color, label }: { color: string; label: string }) {
 }
 
 function SectionStatusBadge({ ns }: { ns: TrainingNodeStatus }) {
+  if (ns.hasAccess === false || ns.lockReason === 'no_access') {
+    return (
+      <Badge variant="outline" className="text-[10px] opacity-60">
+        未获得访问权
+      </Badge>
+    );
+  }
   if (ns.isInvalid) {
     return (
       <Badge variant="destructive" className="text-[10px]">
-        无效
+        前置阶段未完成
       </Badge>
     );
   }
@@ -1315,7 +1408,7 @@ function SectionStatusBadge({ ns }: { ns: TrainingNodeStatus }) {
   }
   return (
     <Badge variant="outline" className="text-[10px] opacity-60">
-      已锁定
+      前置阶段未完成
     </Badge>
   );
 }

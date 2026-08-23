@@ -19,6 +19,7 @@ import {
     userStatsPipeline,
 } from '../lib/admin-stats';
 import { isProblemSetKind, withProblemSetKind } from '../lib/training-kind';
+import { problemSetAccessService } from '../model/problem-set-access';
 import { Handler, param, Types } from '../service/server';
 import { PRIV, STATUS } from '../model/builtin';
 import * as contest from '../model/contest';
@@ -65,11 +66,13 @@ class AdminStatsHandler extends Handler {
                 .getMulti(domainId, { rule: { $ne: 'homework' } })
                 .project({ docId: 1, title: 1, beginAt: 1, endAt: 1, rule: 1 })
                 .toArray(),
-            training.getMulti(domainId, trainingFilter).project({ docId: 1, title: 1 }).toArray(),
+            training.getMulti(domainId, trainingFilter).project({ docId: 1, title: 1, kind: 1, owner: 1, problemSetAudience: 1, dag: 1 }).toArray(),
         ]);
 
+        const trainingDecisions = await problemSetAccessService.evaluateMany(domainId, this.user, trainings as TrainingDoc[]);
+        const visibleTrainings = trainings.filter((tdoc) => trainingDecisions.get(String(tdoc.docId))?.discoverable);
         const selectedContestId = view === 'contest' ? contestId || contests[0]?.docId : undefined;
-        const selectedTrainingId = view === 'training' ? trainingId || trainings[0]?.docId : undefined;
+        const selectedTrainingId = view === 'training' ? trainingId || visibleTrainings[0]?.docId : undefined;
         let selectedContest: any = null;
         let selectedTraining: any = null;
         let stats: any = null;
@@ -92,6 +95,7 @@ class AdminStatsHandler extends Handler {
         } else if (selectedTrainingId) {
             selectedTraining = await training.get(domainId, selectedTrainingId);
             if (!isProblemSetKind(selectedTraining.kind)) throw new NotFoundError(localizedErrorText`training`);
+            await problemSetAccessService.assertAccessible(domainId, this.user, selectedTraining);
             const pids = training.getPids(selectedTraining.dag || []);
             const enrollmentRows = await document.collStatus
                 .aggregate(trainingEnrollmentPipeline(domainId, selectedTrainingId), { maxTimeMS: ADMIN_STATS_MAX_TIME_MS })
@@ -161,14 +165,15 @@ class AdminStatsHandler extends Handler {
                                 docId: { $in: trainingStatuses.map((row) => row.docId) },
                             }) as Filter<TrainingDoc>,
                         )
-                        .project({ docId: 1, title: 1 })
+                        .project({ docId: 1, title: 1, kind: 1, owner: 1, problemSetAudience: 1, dag: 1 })
                         .toArray(),
                 ]);
+                const enrolledDecisions = await problemSetAccessService.evaluateMany(domainId, this.user, enrolledTrainings as TrainingDoc[]);
                 stats = {
                     ...normalizeUserStats(rows, dayWindow.days),
                     student: studentDict[String(uid)] || null,
                     contests: attendedContests,
-                    trainings: enrolledTrainings,
+                    trainings: enrolledTrainings.filter((tdoc) => enrolledDecisions.get(String(tdoc.docId))?.discoverable),
                 };
             }
         } else if (view === 'group') {
@@ -288,7 +293,7 @@ class AdminStatsHandler extends Handler {
         this.response.body = {
             view,
             contests,
-            trainings,
+            trainings: visibleTrainings,
             selectedContest,
             selectedTraining,
             stats,

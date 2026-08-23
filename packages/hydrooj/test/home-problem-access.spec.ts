@@ -119,6 +119,20 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     if (request === '../model/builtin') return { PERM, PRIV };
     if (request === '../model/contest') return contestStub;
     if (request === '../model/homework-access') return homeworkAccessModule;
+    if (request === '../model/problem-set-access') {
+        return {
+            problemSetAccessService: {
+                async evaluateMany(_domainId: string, _user: unknown, tdocs: any[]) {
+                    return new Map(
+                        (tdocs || []).map((tdoc) => [
+                            String(tdoc.docId),
+                            { discoverable: true, accessible: true, enrolled: false, sources: [{ kind: 'public' }] },
+                        ]),
+                    );
+                },
+            },
+        };
+    }
     if (request === '../model/problem') return problemStub;
     if (request === '../model/user') return userStub;
     if (request === '../service/server') return serverStub;

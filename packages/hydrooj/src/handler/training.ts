@@ -4,6 +4,7 @@ import { Filter, ObjectId } from 'mongodb';
 import { sortFiles } from '@hydrooj/utils/lib/utils';
 import { localizeErrorParameter, localizedErrorText, FileLimitExceededError, FileUploadError, NotFoundError, ValidationError } from '../error';
 import { Tdoc, TrainingDoc } from '../interface';
+import { problemSetAudienceOf } from '../lib/problem-set-audience';
 import { isProblemSetKind, withProblemSetKind } from '../lib/training-kind';
 import { PERM, PRIV, STATUS } from '../model/builtin';
 import { contextualCompletionService } from '../model/contextual-completion';
@@ -14,6 +15,7 @@ import problem from '../model/problem';
 import { assertProblemBankSelection } from '../model/problem-access';
 import storage from '../model/storage';
 import system from '../model/system';
+import { canManageProblemSet, problemSetAccessService } from '../model/problem-set-access';
 import * as training from '../model/training';
 import user from '../model/user';
 import { Handler, param, post, Types } from '../service/server';
@@ -68,37 +70,61 @@ class TrainingMainHandler extends Handler {
             q ? { title: { $regex: new RegExp(escapeRegExp(q), 'i') } } : {},
         ) as Filter<TrainingDoc>;
         await this.ctx.parallel('training/list', query, this);
-        const [tdocs, tpcount] = await this.paginate(training.getMulti(domainId, query), page, 'training');
-        const tids: Set<ObjectId> = new Set();
-        for (const tdoc of tdocs) tids.add(tdoc.docId);
+        const listed = await training.getMulti(domainId, query).toArray();
         const tsdict = {};
-        let tdict = {};
+        let extraDocs: TrainingDoc[] = [];
         if (this.user.hasPriv(PRIV.PRIV_USER_PROFILE)) {
-            const enrolledTids: Set<ObjectId> = new Set();
+            const listedIds = new Set(listed.map((tdoc) => String(tdoc.docId)));
             const tsdocs = await training
                 .getMultiStatus(domainId, {
                     uid: this.user._id,
-                    $or: [{ docId: { $in: Array.from(tids) } }, { enroll: 1 }],
+                    $or: [{ docId: { $in: listed.map((tdoc) => tdoc.docId) } }, { enroll: 1 }],
                 })
                 .toArray();
+            const extraIds: ObjectId[] = [];
             for (const tsdoc of tsdocs) {
                 tsdict[tsdoc.docId] = tsdoc;
-                enrolledTids.add(tsdoc.docId);
+                if (!listedIds.has(String(tsdoc.docId)) && tsdoc.enroll === 1) extraIds.push(tsdoc.docId);
             }
-            for (const tid of tids) enrolledTids.delete(tid);
-            if (enrolledTids.size) {
-                tdict = await training.getList(domainId, Array.from(enrolledTids));
-                // enroll:1 会命中已报名的 course，getList 不区分 kind——只保留
-                // 题集，避免课程或未知 kind 串进训练页「已报名」列表。
-                for (const k of Object.keys(tdict)) {
-                    if (!isProblemSetKind(tdict[k]?.kind)) {
-                        delete tdict[k];
-                        tsdict[k] = undefined;
-                    }
-                }
+            if (extraIds.length) {
+                extraDocs = Object.values(await training.getList(domainId, extraIds)).filter((tdoc: TrainingDoc) => isProblemSetKind(tdoc?.kind));
             }
         }
-        for (const tdoc of tdocs) tdict[tdoc.docId.toHexString()] = tdoc;
+        const enrollments = new Map<string, boolean>();
+        for (const [key, tsdoc] of Object.entries(tsdict)) {
+            enrollments.set(String((tsdoc as { docId?: ObjectId }).docId || key), (tsdoc as { enroll?: number }).enroll === 1);
+        }
+        const candidates = [...listed, ...extraDocs];
+        const decisions = await problemSetAccessService.evaluateMany(domainId, this.user, candidates, enrollments);
+        const discoverableListed = listed.filter((tdoc) => decisions.get(String(tdoc.docId))?.discoverable);
+        const pageSize = this.ctx.setting.get('pagination.training') || 20;
+        const tpcount = Math.max(1, Math.ceil(discoverableListed.length / pageSize));
+        const tdocs = discoverableListed.slice((page - 1) * pageSize, page * pageSize);
+        const tdict = {};
+        const access = {};
+        for (const tdoc of extraDocs) {
+            const decision = decisions.get(String(tdoc.docId));
+            if (!decision?.discoverable) {
+                tsdict[String(tdoc.docId)] = undefined;
+                continue;
+            }
+            tdict[String(tdoc.docId)] = tdoc;
+            access[String(tdoc.docId)] = decision;
+        }
+        for (const tdoc of tdocs) {
+            tdict[tdoc.docId.toHexString()] = tdoc;
+            access[tdoc.docId.toHexString()] = decisions.get(String(tdoc.docId));
+        }
+        const extraDiscoverable = extraDocs.filter((tdoc) => decisions.get(String(tdoc.docId))?.discoverable);
+        for (const tdoc of extraDiscoverable) {
+            if (tdocs.some((listedDoc) => String(listedDoc.docId) === String(tdoc.docId))) continue;
+            tdocs.push(tdoc);
+        }
+        for (const key of Object.keys(tsdict)) {
+            const status = tsdict[key] as { docId?: ObjectId };
+            const id = String(status?.docId || key);
+            if (!decisions.get(id)?.discoverable) delete tsdict[key];
+        }
         if (this.user.hasPriv(PRIV.PRIV_USER_PROFILE)) {
             await Promise.all(
                 (Object.values(tdict) as TrainingDoc[]).map(async (tdoc) => {
@@ -125,6 +151,7 @@ class TrainingMainHandler extends Handler {
             tpcount,
             tsdict,
             tdict,
+            access,
             q,
         };
     }
@@ -138,6 +165,7 @@ class TrainingDetailHandler extends Handler {
         problem.assertProblemAclDomain(this.user, domainId);
         const tdoc = await training.get(domainId, tid);
         assertProblemSet(tdoc);
+        const access = await problemSetAccessService.assertAccessible(domainId, this.user, tdoc);
         await this.ctx.parallel('training/get', tdoc, this);
         let enrollUsers: number[] = [];
         let shouldCompare = false;
@@ -196,12 +224,16 @@ class TrainingDetailHandler extends Handler {
             if (contextualDoneByScope) for (const pid of scopedDonePids) donePids.add(pid);
             const doneCount = nodePids.intersection(new Set(scopedDonePids)).size;
             completedProblemCount += doneCount;
+            const hasAccess = problemSetAccessService.stageIsAccessible(access, node._id);
+            const isInvalid = training.isInvalid(node, doneNids);
             const nsdoc = {
                 progress: totalCount ? Math.floor(100 * (doneCount / totalCount)) : 100,
                 isDone: training.isDone(node, doneNids, scopedDonePids),
                 isProgress: training.isProgress(node, doneNids, scopedDonePids, progPids),
                 isOpen: training.isOpen(node, doneNids, scopedDonePids, progPids),
-                isInvalid: training.isInvalid(node, doneNids),
+                isInvalid,
+                hasAccess,
+                lockReason: hasAccess ? (isInvalid ? 'prereq' : undefined) : 'no_access',
                 donePids: Array.from(scopedDonePids),
                 selfDonePids: selfContextualDoneByScope
                     ? Array.from(nodePids.intersection(selfContextualDoneByScope.get(node._id) || new Set<number>()))
@@ -215,9 +247,7 @@ class TrainingDetailHandler extends Handler {
             donePids: Array.from(donePids),
             done: doneNids.size === tdoc.dag.length,
         };
-        const tsdoc = publishedIntegrity
-            ? { ...(await training.getStatus(domainId, tdoc.docId, uid)), ...computedStatus }
-            : await training.setStatus(domainId, tdoc.docId, uid, computedStatus);
+        const tsdoc = { ...(await training.getStatus(domainId, tdoc.docId, uid)), ...computedStatus };
         const groups = this.user.hasPerm(PERM.PERM_EDIT_DOMAIN) ? await user.listGroup(domainId) : [];
         this.response.body = {
             tdoc,
@@ -235,6 +265,7 @@ class TrainingDetailHandler extends Handler {
             completedProblemCount,
             totalProblemCount,
             integrityControlled: !!publishedIntegrity,
+            access,
         };
         this.response.body.tdoc.description = this.response.body.tdoc.description
             .replace(/\(file:\/\//g, `(./${tdoc.docId}/file/`)
@@ -306,7 +337,8 @@ class TrainingDetailHandler extends Handler {
         this.checkPriv(PRIV.PRIV_USER_PROFILE);
         const tdoc = await training.get(domainId, tid);
         assertProblemSet(tdoc);
-        await training.enroll(domainId, tdoc.docId, this.user._id);
+        await problemSetAccessService.assertAccessible(domainId, this.user, tdoc);
+        await training.ensureEnrolled(domainId, tdoc.docId, this.user._id);
         this.back();
     }
 
@@ -333,14 +365,29 @@ class TrainingEditHandler extends Handler {
         if (tid) {
             this.tdoc = await training.get(authoritativeDomainId, tid);
             assertProblemSet(this.tdoc);
+            if (!canManageProblemSet(this.user, this.tdoc)) {
+                await problemSetAccessService.assertAccessible(authoritativeDomainId, this.user, this.tdoc);
+            }
             if (!this.user.own(this.tdoc)) this.checkPerm(PERM.PERM_EDIT_TRAINING);
             else this.checkPerm(PERM.PERM_EDIT_TRAINING_SELF);
         } else this.checkPerm(PERM.PERM_CREATE_TRAINING);
     }
 
     async get() {
+        const authoritativeDomainId = String(this.domain?._id);
+        const groups = (global as any).Hydro?.model?.userbind?.listUserGroups
+            ? await (global as any).Hydro.model.userbind.listUserGroups(authoritativeDomainId)
+            : [];
         this.response.template = 'problem_set_edit.html';
-        this.response.body = { page_name: this.tdoc ? 'problem_set_edit' : 'problem_set_create' };
+        this.response.body = {
+            page_name: this.tdoc ? 'problem_set_edit' : 'problem_set_create',
+            groups: (groups as Array<{ _id: unknown; name: string; archivedAt?: unknown }>).map((group) => ({
+                _id: String(group._id),
+                name: group.name,
+                archivedAt: group.archivedAt || null,
+            })),
+            audience: this.tdoc ? problemSetAudienceOf(this.tdoc) : { public: true, groupIds: [] },
+        };
         if (this.tdoc) {
             this.response.body.tdoc = this.tdoc;
             this.response.body.dag = JSON.stringify(this.tdoc.dag, null, 2);
@@ -353,7 +400,19 @@ class TrainingEditHandler extends Handler {
     @param('dag', Types.Content)
     @param('pin', Types.UnsignedInt)
     @param('description', Types.Content)
-    async post(_domainId: string, tid: ObjectId, title: string, content: string, _dag: string, pin = 0, description: string) {
+    @param('audiencePublic', Types.Boolean, true)
+    @param('audienceGroupIds', Types.CommaSeperatedArray, true)
+    async post(
+        _domainId: string,
+        tid: ObjectId,
+        title: string,
+        content: string,
+        _dag: string,
+        pin = 0,
+        description: string,
+        audiencePublic?: boolean,
+        audienceGroupIds?: string[],
+    ) {
         const authoritativeDomainId = String(this.domain?._id);
         problem.assertProblemAclDomain(this.user, authoritativeDomainId);
         if (!!this.tdoc?.pin !== !!pin) this.checkPerm(PERM.PERM_PIN_TRAINING);
@@ -373,6 +432,12 @@ class TrainingEditHandler extends Handler {
                 pin,
             });
         }
+        if (audiencePublic !== undefined) {
+            await training.setProblemSetAudience(authoritativeDomainId, tid, {
+                public: !!audiencePublic,
+                groupIds: audienceGroupIds || [],
+            });
+        }
         this.response.body = { tid };
         this.response.redirect = this.url('training_detail', { tid });
     }
@@ -385,6 +450,9 @@ export class TrainingFilesHandler extends Handler {
     async prepare(domainId: string, tid: ObjectId) {
         this.tdoc = await training.get(domainId, tid);
         assertProblemSet(this.tdoc);
+        if (!canManageProblemSet(this.user, this.tdoc)) {
+            await problemSetAccessService.assertAccessible(domainId, this.user, this.tdoc);
+        }
         if (!this.user.own(this.tdoc)) this.checkPerm(PERM.PERM_EDIT_TRAINING);
         else this.checkPerm(PERM.PERM_EDIT_TRAINING_SELF);
     }
@@ -452,6 +520,7 @@ export class TrainingFileDownloadHandler extends Handler {
         const domainId = String(this.domain?._id);
         const tdoc = await training.get(domainId, tid);
         assertProblemSet(tdoc);
+        await problemSetAccessService.assertAccessible(domainId, this.user, tdoc);
         if (!(tdoc.files || []).some((file) => file.name === filename)) throw new NotFoundError(localizedErrorText`file`);
         this.response.addHeader('Cache-Control', 'public');
         const target = `training/${domainId}/${tid}/${filename}`;

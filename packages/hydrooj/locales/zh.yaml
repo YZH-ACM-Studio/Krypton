@@ -866,6 +866,8 @@ problem_set_detail: 题集详情
 problem_set_edit: 编辑题集
 problem_set_files: 题集文件
 problem_set_main: 题集
+manage_redemption_codes: 兑换码
+redeem: 兑换码
 Training: 训练
 Trainings per page: 每页展示的训练数量
 Type: 类型

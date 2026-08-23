@@ -1,7 +1,8 @@
 import { omit } from 'lodash';
 import { Filter, ObjectId } from 'mongodb';
 import { Context } from '../context';
-import { localizeError, DiscussionNodeNotFoundError, DocumentNotFoundError } from '../error';
+import { localizeError, DiscussionNodeNotFoundError, DocumentNotFoundError, TrainingNotFoundError } from '../error';
+import { isProblemSetKind } from '../lib/training-kind';
 import { DiscussionHistoryDoc, DiscussionReplyDoc, DiscussionTailReplyDoc, Document } from '../interface';
 import bus from '../service/bus';
 import db from '../service/db';
@@ -11,6 +12,7 @@ import { PERM } from './builtin';
 import * as contest from './contest';
 import * as document from './document';
 import problem from './problem';
+import { problemSetAccessService } from './problem-set-access';
 import * as training from './training';
 import { User } from './user';
 
@@ -322,16 +324,43 @@ export async function getVnode(domainId: string, type: number, id: string, userO
         if (!pdoc) throw new DiscussionNodeNotFoundError(domainId, `problem/${id}`);
         return { ...pdoc, type, id: pdoc.docId };
     }
-    if ([document.TYPE_CONTEST, document.TYPE_TRAINING].includes(type as any)) {
-        const model = type === document.TYPE_TRAINING ? training : contest;
-        const typeName = type === document.TYPE_TRAINING ? 'training' : 'contest';
-        if (!ObjectId.isValid(id)) throw new DiscussionNodeNotFoundError(domainId, `${typeName}/${id}`);
+    if (type === document.TYPE_TRAINING) {
+        if (typeof userOrUid !== 'object') throw new TypeError('training discussion vnode reads require the current user');
+        if (!ObjectId.isValid(id)) throw new DiscussionNodeNotFoundError(domainId, `training/${id}`);
         const _id = new ObjectId(id);
-        const tdoc = await model.get(domainId, _id);
-        if (!tdoc) throw new DiscussionNodeNotFoundError(domainId, `${typeName}/${id}`);
+        let tdoc;
+        try {
+            tdoc = await training.get(domainId, _id);
+        } catch (error) {
+            if (error instanceof TrainingNotFoundError) throw new DiscussionNodeNotFoundError(domainId, `training/${id}`);
+            throw error;
+        }
+        if (!tdoc) throw new DiscussionNodeNotFoundError(domainId, `training/${id}`);
+        if (isProblemSetKind(tdoc.kind)) {
+            try {
+                await problemSetAccessService.assertAccessible(domainId, userOrUid, tdoc);
+            } catch (error) {
+                if (error instanceof TrainingNotFoundError) throw new DiscussionNodeNotFoundError(domainId, `training/${id}`);
+                throw error;
+            }
+        }
+        const tsdoc = await training.getStatus(domainId, _id, userOrUid._id);
+        tdoc.attend = tsdoc?.attend || tsdoc?.enroll;
+        return {
+            ...tdoc,
+            type,
+            id: _id,
+            hidden: false,
+        };
+    }
+    if (type === document.TYPE_CONTEST) {
+        if (!ObjectId.isValid(id)) throw new DiscussionNodeNotFoundError(domainId, `contest/${id}`);
+        const _id = new ObjectId(id);
+        const tdoc = await contest.get(domainId, _id);
+        if (!tdoc) throw new DiscussionNodeNotFoundError(domainId, `contest/${id}`);
         const uid = typeof userOrUid === 'number' ? userOrUid : userOrUid?._id;
         if (uid) {
-            const tsdoc = await model.getStatus(domainId, _id, uid);
+            const tsdoc = await contest.getStatus(domainId, _id, uid);
             tdoc.attend = tsdoc?.attend || tsdoc?.enroll;
         }
         return {
@@ -371,6 +400,22 @@ export async function getListVnodes(domainId: string, ddocs: any, user: User) {
     }
     await Promise.all(ddocs.map((ddoc) => task(ddoc)));
     return res;
+}
+
+export function discussionParentVisible(
+    ddoc: Pick<DiscussionDoc, 'parentType' | 'parentId'>,
+    vndict: Record<string | number, Record<string, unknown>>,
+): boolean {
+    const byType = vndict[ddoc.parentType];
+    if (!byType) return false;
+    return !!(byType[ddoc.parentId as any] || byType[String(ddoc.parentId)]);
+}
+
+export function filterDiscussionsByVnodes<T extends Pick<DiscussionDoc, 'parentType' | 'parentId'>>(
+    ddocs: T[],
+    vndict: Record<string | number, Record<string, unknown>>,
+): T[] {
+    return ddocs.filter((ddoc) => discussionParentVisible(ddoc, vndict));
 }
 
 export function checkVNodeVisibility(type: number, vnode: any, user: User) {
@@ -448,5 +493,6 @@ global.Hydro.model.discussion = {
     getNodes,
     getVnode,
     getListVnodes,
+    filterDiscussionsByVnodes,
     checkVNodeVisibility,
 };

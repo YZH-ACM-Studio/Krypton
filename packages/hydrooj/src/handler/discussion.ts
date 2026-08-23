@@ -86,7 +86,7 @@ class DiscussionMainHandler extends Handler {
         const [vndict, vnodes] = await Promise.all([discussion.getListVnodes(domainId, ddocs, this.user), discussion.getNodes(domainId)]);
         this.response.template = 'discussion_main_or_node.html';
         this.response.body = {
-            ddocs,
+            ddocs: discussion.filterDiscussionsByVnodes(ddocs, vndict),
             dpcount,
             udict,
             page,

@@ -154,8 +154,9 @@ export class HomeHandler extends Handler {
         if (!this.user.hasPerm(PERM.PERM_VIEW_DISCUSSION)) return [[], {}];
         const ddocs = await discussion.getMulti(domainId).limit(limit).toArray();
         const vndict = await discussion.getListVnodes(domainId, ddocs, this.user);
-        this.collectUser(ddocs.map((ddoc) => ddoc.owner));
-        return [ddocs, vndict];
+        const visible = discussion.filterDiscussionsByVnodes(ddocs, vndict);
+        this.collectUser(visible.map((ddoc) => ddoc.owner));
+        return [visible, vndict];
     }
 
     async getRanking(domainId: string, limit = 50) {

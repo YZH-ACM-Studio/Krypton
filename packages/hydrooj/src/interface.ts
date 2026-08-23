@@ -328,6 +328,10 @@ export type RecordDoc = {
     dataWriteActiveContainerConfirmation?: ProblemDataWriteConfirmation;
     /** Server-validated practice context snapshot carried to the asynchronous judge callback. */
     practiceContext?: import('./model/practice-integrity').TrustedPracticeContextReference;
+    /** Virtual contest attempt this record belongs to. Must not be inferred from `contest`. */
+    virtualAttemptId?: ObjectId;
+    /** Source contest for a virtual contest record. Independent of official `contest`. */
+    sourceContestId?: ObjectId;
 };
 
 export interface RecordHistoryDoc extends RecordJudgeInfo {
@@ -399,6 +403,8 @@ export interface Tdoc extends Document {
     allowViewCode?: boolean;
     allowPrint?: boolean;
     keepScoreboardHidden?: boolean;
+    /** Missing means virtual contests are allowed after the source contest ends. */
+    allowVirtual?: boolean;
 
     // ── Krypton: per-contest ACM participation identity ────────────────
     /** Missing is intentionally equivalent to `individual` for every legacy contest. */

@@ -174,6 +174,8 @@ contest_manage: 比赛管理
 contest_print: 打印
 contest_problemlist: 题目列表
 contest_scoreboard: 比赛成绩表
+contest_virtual: 虚拟参赛
+contest_virtual_scoreboard: 虚拟参赛榜单
 contest_user: 参赛者管理
 contest: 比赛
 Contest: 比赛
@@ -991,3 +993,16 @@ You've already claimed this homework.: 您已认领过该作业。
 You've already voted.: 您已经投过票。
 Your permission: 您的权限
 Your role: 您的角色
+虚拟参赛: 虚拟参赛
+该比赛不支持虚拟参赛: 该比赛不支持虚拟参赛
+每人每场只能有一次正式虚拟参赛: 每人每场只能有一次正式虚拟参赛
+没有虚拟参赛管理权限: 没有虚拟参赛管理权限
+虚拟参赛已结束: 虚拟参赛已结束
+已有提交后不能取消虚拟参赛: 已有提交后不能取消虚拟参赛
+虚拟参赛状态已变化: 虚拟参赛状态已变化
+确认后才能重新开放虚拟参赛资格: 确认后才能重新开放虚拟参赛资格
+题目不属于该虚拟参赛快照: 题目不属于该虚拟参赛快照
+虚拟参赛尚未开始: 虚拟参赛尚未开始
+确认后才能重测虚拟参赛记录: 确认后才能重测虚拟参赛记录
+比赛或 VP 提交不能使用真实性训练上下文: 比赛或 VP 提交不能使用真实性训练上下文
+虚拟参赛记录不能被 hack: 虚拟参赛记录不能被 hack

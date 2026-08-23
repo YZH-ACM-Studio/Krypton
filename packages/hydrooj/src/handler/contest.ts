@@ -29,6 +29,8 @@ import {
 } from '../error';
 import { FileInfo, ScoreboardConfig, Tdoc } from '../interface';
 import { canUsePostContestPractice, getPostContestPracticeState } from '../lib/contest-correction';
+import { isContestGloballyEnded } from '../lib/virtual-contest';
+import { virtualContestService } from '../model/virtual-contest';
 import { withContestEditBoundary } from '../lib/contest-edit-boundary';
 import { getScoreboardExportCapabilities, getScoreboardSnapshotMode } from '../lib/contest-scoreboard-export';
 import {
@@ -538,9 +540,30 @@ export class ContestDetailHandler extends ContestDetailBaseHandler {
             canManageContest,
             canViewRecord,
             postContestPractice,
+            virtualContest: null,
             files: this.tsdoc?.attend && !contest.isNotStarted(this.tdoc) ? sortFiles(this.tdoc.privateFiles || []) : [],
             urlForFile: (filename: string) => this.url('contest_file_download', { tid, filename, type: 'private' }),
         };
+        if (this.user.hasPriv(PRIV.PRIV_USER_PROFILE) && isContestGloballyEnded(this.tdoc)) {
+            const inspected = await virtualContestService.inspectEligibility(
+                authoritativeDomainId,
+                tid,
+                undefined,
+                this.tsdoc?.attend === 1,
+            );
+            const attempt = await virtualContestService.getOfficialAttempt(authoritativeDomainId, tid, this.user._id);
+            this.response.body.virtualContest = {
+                eligibility: inspected.eligibility,
+                attempt: attempt
+                    ? {
+                          _id: attempt._id,
+                          status: attempt.status,
+                          startAt: attempt.startAt,
+                          endAt: attempt.endAt,
+                      }
+                    : null,
+            };
+        }
         if (this.request.json) return;
         this.response.body.tdoc.content = this.response.body.tdoc.content
             .replace(/\(file:\/\//g, `(./${this.tdoc.docId}/file/public/`)
@@ -976,6 +999,7 @@ export class ContestEditHandler extends Handler {
     @param('allowViewCode', Types.Boolean)
     @param('allowPrint', Types.Boolean)
     @param('keepScoreboardHidden', Types.Boolean)
+    @param('allowVirtual', Types.Boolean, true)
     @param('langs', Types.CommaSeperatedArray, true)
     // ── Krypton: client-required & Vigil anti-cheat ─────────────────────
     @param('vigilEnabled', Types.Boolean)
@@ -1027,6 +1051,7 @@ export class ContestEditHandler extends Handler {
         allowViewCode = false,
         allowPrint = false,
         keepScoreboardHidden = false,
+        allowVirtual: boolean = null,
         langs: string[] = [],
         vigilEnabled = false,
         entryMode: 'open' | 'client_required' = 'open',
@@ -1187,6 +1212,7 @@ export class ContestEditHandler extends Handler {
                 autoHide,
                 autoHidePendingPids: pendingAutoHideTargets,
                 autoHideProblemPids: prewriteAutoHideProblemPids,
+                ...(allowVirtual != null ? { allowVirtual } : {}),
                 ...(requestedPlannedTeamBatchId ? { plannedTeamBatchId: requestedPlannedTeamBatchId } : {}),
             });
         }
@@ -1289,6 +1315,7 @@ export class ContestEditHandler extends Handler {
             allowViewCode,
             allowPrint,
             keepScoreboardHidden,
+            ...(allowVirtual != null ? { allowVirtual } : {}),
             langs,
             vigilEnabled,
             entryMode,

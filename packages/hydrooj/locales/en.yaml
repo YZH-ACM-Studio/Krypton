@@ -13,6 +13,8 @@ contest_manage: Contest Management
 contest_print: Print
 contest_problemlist: Problem List
 contest_scoreboard: Scoreboard
+contest_virtual: Virtual Contest
+contest_virtual_scoreboard: Virtual Contest Scoreboard
 contest_user: Attendee Manage
 discussion_create: Create Discussion
 discussion_detail: Discussion Detail
@@ -123,3 +125,16 @@ user_register: Register
 user_sudo: Entering Sudo Mode
 wiki_about: About
 wiki_help: Help
+虚拟参赛: Virtual Contest
+该比赛不支持虚拟参赛: This contest does not support virtual contests
+每人每场只能有一次正式虚拟参赛: Each user may have only one official virtual contest attempt
+没有虚拟参赛管理权限: You do not have virtual contest management permission
+虚拟参赛已结束: The virtual contest has ended
+已有提交后不能取消虚拟参赛: A virtual contest cannot be cancelled after the first submission
+虚拟参赛状态已变化: Virtual contest status has changed
+确认后才能重新开放虚拟参赛资格: Confirmation is required to reopen virtual contest eligibility
+题目不属于该虚拟参赛快照: The problem is not in this virtual contest snapshot
+虚拟参赛尚未开始: The virtual contest has not started
+确认后才能重测虚拟参赛记录: Confirmation is required to rejudge virtual contest records
+比赛或 VP 提交不能使用真实性训练上下文: Contest and virtual contest submissions cannot use a practice integrity context
+虚拟参赛记录不能被 hack: Virtual contest records cannot be hacked

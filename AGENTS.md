@@ -221,6 +221,13 @@
 - Context 的 Mongo TTL 只负责清理；签发与每次读取都必须从 canonical revision 集合重取全部引用、验证不可变身份和三布尔策略并重算 OR。新签发还必须在写 Context 前重查每个参与容器的 latest published revision；已经签发的旧 Context 只校验其固定 revision，不因后续发布追溯失效。后续提交边界仍须显式校验过期、用户、容器、scope、pid、模式与适用 revision。无已发布策略的存量 Course/题集保持普通模式；受控入口缺失、伪造或过期 Context 时 fail closed，不得降级成普通提交。
 - 策略管理只允许容器 owner、既有容器管理权限持有者或管理员；预览 Context 必须标记 `mode:'preview'`，不得产生学生完成事实。日志只记录 contextId、uid、容器、pid、revision、stage 和拒绝原因，不记录剪贴板、代码或隐藏提示正文。
 
+## 个人赛虚拟参赛协议
+
+- `virtual.attempts` 是唯一 Attempt 集合。每人每场最多一个 `active|ended` 正式 attempt；首份 VP 提交前可取消重开，作废需管理员确认口令。到时在读取路径 settle，不引入后台任务。
+- VP Record 只保存 `virtualAttemptId` 与 `sourceContestId`，不得写 `contest`，不得进入 ContestStatus、正式榜单、Rating、RP、气球、虚拟打印、团队、Vigil 或 PracticeContext。
+- 活跃 VP 只是普通浏览器自律计时；即使源比赛是 Vigil/`client_required` 也不启动 Client、不建 Vigil session。题目页与工作台隐藏标签/统计/题解/讨论/关联比赛/正式榜单，文案不得承诺强防作弊。
+- 独立相对时间榜单；普通用户仅在本人 ended 后可见，不能看他人进行中。整题重测和 hack 连锁重测默认排除 VP；VP 重测必须精确 attempt 并展示 Record ID。
+
 ## 赛事题目批量导入触发规则
 
 ### 何时自动触发

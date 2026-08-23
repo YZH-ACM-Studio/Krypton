@@ -9,7 +9,7 @@ Hint::icon::switch_account: As a superadmin, you can switch to anyone's account.
 manage: System Manage
 no_translation_warn: <blockquote class="warn">This part of content is under translation.</blockquote>
 page.problem_detail.sidebar.show_category: Click to Show
-page.training_detail.invalid_when_not_enrolled: You cannot view problem details unless enrolled.
+page.training_detail.invalid_when_not_enrolled: You cannot view problem details unless you have started the problem set.
 pager_first: « First
 pager_last: Last »
 pager_next: Next ›
@@ -20,7 +20,7 @@ perm_general: General
 perm_problem_solution: Problem Solutions
 perm_problem: Problems
 perm_record: Records
-perm_training: Trainings
+perm_training: Problem Sets
 preferredPrefix_hint: This is used for re-organizing problem IDs. For example, if the ID of the problem in the problemset are P1001, P1002, P1003, and you set "T" in this option, those problem will be imported with ID T1001, T1002 and T1003.
 problem_create: Problem Create
 problem_edit: Problem Edit
@@ -59,9 +59,9 @@ sort::default: Default
 sort::recent: Recent
 tasks_list: Task list
 timeago_locale: en_US
-training_create: Training Create
-training_edit: Training Edit
-training_main: Training
+training_create: Create Problem Set
+training_edit: Edit Problem Set
+training_main: Problem Sets
 user_detail: User Detail
 user_login: Login
 user_logout: Logout

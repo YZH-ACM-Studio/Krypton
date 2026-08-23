@@ -9,7 +9,7 @@ function readTemplate(name: string) {
 
 describe('ui-default contextual training progress', () => {
   it('uses scoped list progress for current-page and enrolled cards before legacy status', () => {
-    const template = readTemplate('training_main.html');
+    const template = readTemplate('problem_set_main.html');
     expect(template).to.include("tsdict[tdoc.docId]['contextualProgress']");
     expect(template).to.include("tsdoc['contextualProgress']");
     expect(template.match(/contextual\['completedProblemCount'\]/g)).to.have.length(2);
@@ -19,7 +19,7 @@ describe('ui-default contextual training progress', () => {
   });
 
   it('uses scope-aware counts for controlled detail progress and keeps legacy behavior separate', () => {
-    const template = readTemplate('training_detail.html');
+    const template = readTemplate('problem_set_detail.html');
     const controlledBranch = template.indexOf('{% if integrityControlled %}');
     const scopedFormula = template.indexOf('completedProblemCount / totalProblemCount');
     const legacyFormula = template.indexOf("tsdoc['donePids']|length / pids|length");
@@ -30,7 +30,7 @@ describe('ui-default contextual training progress', () => {
 
   it('keeps scoped progress authoritative on the homepage, file page, and detail problem rows', () => {
     const home = readTemplate('partials/homepage/training.html');
-    const files = readTemplate('training_files.html');
+    const files = readTemplate('problem_set_files.html');
     const detailRows = readTemplate('partials/training_detail.html');
 
     expect(home.indexOf("tsdict[tdoc.docId]['contextualProgress']")).to.be.lessThan(home.indexOf("tsdict[tdoc.docId]['donePids']"));

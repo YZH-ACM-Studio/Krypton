@@ -57,7 +57,7 @@ manage: System Manage
 no_translation_warn: <blockquote class="warn">This part of content is under translation.</blockquote>
 page.problem_detail.sidebar.show_category: Click to Show
 page.training_detail.invalid_when_not_enrolled: You cannot view problem details unless enrolled.
-page.training_detail.see_other_user_detail: You are viewing user {0} training details.
+page.training_detail.see_other_user_detail: You are viewing user {0} problem set details.
 pager_first: « First
 pager_last: Last »
 pager_next: Next ›
@@ -70,7 +70,7 @@ perm_problem_solution: Problem Solutions
 perm_problem: Problems
 perm_ranking: Ranking
 perm_record: Records
-perm_training: Trainings
+perm_training: Problem Sets
 problem_create: Problem Create
 problem_detail: Problem Detail
 problem_edit: Problem Edit
@@ -104,9 +104,9 @@ setting_session: Session Settings
 setting_smtp: SMTP Settings
 setting_usage: Usage Preference
 timeago_locale: en_US
-training_create: Training Create
-training_detail: Training Detail
-training_edit: Training Edit
+training_create: Create Problem Set
+training_detail: Problem Set
+training_edit: Edit Problem Set
 training_main: Problem Sets
 problem_set_main: Problem Sets
 manage_redemption_codes: Redemption Codes

@@ -366,7 +366,7 @@ function handleDrop(e: JQuery.DropEvent<Document, undefined, HTMLElement, HTMLEl
 }
 
 const page = new NamedPage(
-  ['problem_config', 'problem_files', 'problem_edit', 'contest_edit', 'contest_manage', 'home_files', 'training_files', 'homework_files'],
+  ['problem_config', 'problem_files', 'problem_edit', 'contest_edit', 'contest_manage', 'home_files', 'training_files', 'problem_set_files', 'homework_files'],
   (pageName) => {
     if (pageName === 'problem_config' || pageName === 'problem_edit') endpoint = './files';
     if (pageName === 'contest_edit') endpoint = './management';

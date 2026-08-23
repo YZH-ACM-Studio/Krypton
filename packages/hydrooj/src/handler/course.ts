@@ -37,9 +37,11 @@ import system from '../model/system';
 import * as training from '../model/training';
 import user from '../model/user';
 import { Handler, param, post, Types } from '../service/server';
+import { liveReferencedPids } from '../lib/course-live-ref';
 import { resolveProblemKnowledgeNodeIds } from '../lib/problem-tag-canonical';
 import { courseKindClause, isCourseKind, isProblemSetKind } from '../lib/training-kind';
 import { computePrerequisiteClosure } from '../lib/problem-set-stage';
+import { problemSetAccessService } from '../model/problem-set-access';
 import { getVisibleReferencedProblems, normalizeProblemDocIds } from './problem-reference';
 
 const logger = new Logger('course');
@@ -240,6 +242,17 @@ function courseVisibleTo(tdoc: TrainingDoc, myGroups: Set<string>, canManage: bo
     return groups.some((g) => myGroups.has(String(g)));
 }
 
+async function courseAccessibleTo(
+    domainId: string,
+    uid: number,
+    tdoc: TrainingDoc,
+    myGroups: Set<string>,
+    canManage: boolean,
+): Promise<boolean> {
+    if (courseVisibleTo(tdoc, myGroups, canManage)) return true;
+    return problemSetAccessService.hasActiveEntitlement(domainId, uid, 'course', tdoc.docId);
+}
+
 function courseFilePrefix(domainId: string, tid: ObjectId): string {
     return `course/${domainId}/${tid}/`;
 }
@@ -312,17 +325,6 @@ async function parseChaptersJson(domainId: string, raw: string): Promise<Trainin
     return parsed;
 }
 
-async function liveReferencedPids(domainId: string, node: TrainingNode): Promise<number[]> {
-    if (!node.problemSetId) return [];
-    const setDoc = await training.get(domainId, node.problemSetId);
-    if (!isProblemSetKind(setDoc.kind)) throw new ValidationError('problemSetId', null, localizedErrorText`引用的不是题集`);
-    const stages =
-        Array.isArray(node.stageIds) && node.stageIds.length
-            ? (setDoc.dag || []).filter((stage) => node.stageIds!.map(Number).includes(Number(stage._id)))
-            : setDoc.dag || [];
-    return training.getPids(stages);
-}
-
 class CourseMainHandler extends Handler {
     @param('page', Types.PositiveInt, true)
     @param('q', Types.String, true)
@@ -347,11 +349,13 @@ class CourseMainHandler extends Handler {
                     }
                 })
                 .filter((x): x is ObjectId => !!x);
+            const entitledIds = await problemSetAccessService.listActiveTargetIds(domainId, this.user._id, 'course');
             query.$or = [
                 { owner: this.user._id },
                 { courseGroupIds: { $exists: false } },
                 { courseGroupIds: { $size: 0 } },
                 ...(groupOids.length ? [{ courseGroupIds: { $in: groupOids } }] : []),
+                ...(entitledIds.length ? [{ docId: { $in: entitledIds } }] : []),
             ];
         }
         const [tdocs, tpcount, tcount] = await this.paginate(training.getMulti(domainId, query), page, 'training');
@@ -394,7 +398,7 @@ class CourseDetailHandler extends Handler {
         // 可见性拦截（非管理者且不属于课程班级 → 拒绝）。
         if (!canManage && (tdoc.courseGroupIds || []).length) {
             const myGroups = await userGroupIds(domainId, this.user._id);
-            if (!courseVisibleTo(tdoc, myGroups, false)) {
+            if (!(await courseAccessibleTo(domainId, this.user._id, tdoc, myGroups, false))) {
                 throw new ValidationError('tid', null, localizedErrorText`你不在该课程的可见范围内`);
             }
         }
@@ -506,7 +510,8 @@ class CourseDetailHandler extends Handler {
         // 可见范围外不允许报名。
         if ((tdoc.courseGroupIds || []).length) {
             const myGroups = await userGroupIds(domainId, this.user._id);
-            if (!courseVisibleTo(tdoc, myGroups, this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM))) {
+            const canManage = this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
+            if (!(await courseAccessibleTo(domainId, this.user._id, tdoc, myGroups, canManage))) {
                 throw new PermissionError(PERM.PERM_VIEW_TRAINING);
             }
         }
@@ -754,7 +759,9 @@ class CourseFileDownloadHandler extends Handler {
         const canManage = this.user.own(tdoc) || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
         if (!canManage && (tdoc.courseGroupIds || []).length) {
             const myGroups = await userGroupIds(domainId, this.user._id);
-            if (!courseVisibleTo(tdoc, myGroups, false)) throw new PermissionError(PERM.PERM_VIEW_TRAINING);
+            if (!(await courseAccessibleTo(domainId, this.user._id, tdoc, myGroups, false))) {
+                throw new PermissionError(PERM.PERM_VIEW_TRAINING);
+            }
         }
         const target = `${courseFilePrefix(domainId, tid)}${filename}`;
         this.response.addHeader('Cache-Control', 'private');

@@ -167,13 +167,22 @@ export class ProblemSetAccessService {
             return result;
         }
         const groupIds = await this.findStudentGroupIds(domainId, user._id);
-        const [entitlements, courses] = await Promise.all([
+        const [entitlements, courseEntitlements, courses] = await Promise.all([
             this.entitlements
                 .find({
                     domainId,
                     uid: user._id,
                     targetKind: { $in: ['problem_set', 'problem_set_stage'] },
                     targetId: { $in: tdocs.map((tdoc) => tdoc.docId) },
+                    source: 'redemption',
+                    revokedAt: null,
+                } as Filter<AccessEntitlementDoc>)
+                .toArray(),
+            this.entitlements
+                .find({
+                    domainId,
+                    uid: user._id,
+                    targetKind: 'course',
                     source: 'redemption',
                     revokedAt: null,
                 } as Filter<AccessEntitlementDoc>)
@@ -187,6 +196,7 @@ export class ProblemSetAccessService {
                 } as Filter<TrainingDoc>)
                 .toArray(),
         ]);
+        const entitledCourseIds = new Set(courseEntitlements.map((row) => String(row.targetId)));
         const entitlementsBySet = new Map<string, AccessEntitlementDoc[]>();
         for (const entitlement of entitlements) {
             const key = String(entitlement.targetId);
@@ -197,7 +207,7 @@ export class ProblemSetAccessService {
         const coursesBySet = new Map<string, TrainingDoc[]>();
         const courseStageIdsBySet = new Map<string, { wholeSet: boolean; stageIds: Set<number> }>();
         for (const course of courses) {
-            if (!courseVisibleTo(course, user, groupIds)) continue;
+            if (!courseVisibleTo(course, user, groupIds) && !entitledCourseIds.has(String(course.docId))) continue;
             for (const node of course.dag || []) {
                 if (!node.problemSetId) continue;
                 const key = String(node.problemSetId);
@@ -440,6 +450,79 @@ export class ProblemSetAccessService {
             current.targetId,
         );
         return { ...current, revokedAt };
+    }
+
+    async hasActiveEntitlement(
+        domainId: string,
+        uid: number,
+        targetKind: AccessEntitlementTargetKind,
+        targetId: ObjectId,
+    ): Promise<boolean> {
+        await this.ensureIndexes();
+        const current = await this.entitlements.findOne({
+            domainId,
+            uid,
+            targetKind,
+            targetId,
+            source: 'redemption',
+            revokedAt: null,
+        });
+        return !!current;
+    }
+
+    async listActiveTargetIds(domainId: string, uid: number, targetKind: AccessEntitlementTargetKind): Promise<ObjectId[]> {
+        await this.ensureIndexes();
+        const rows = await this.entitlements
+            .find({
+                domainId,
+                uid,
+                targetKind,
+                source: 'redemption',
+                revokedAt: null,
+            } as Filter<AccessEntitlementDoc>)
+            .toArray();
+        return rows.map((row) => row.targetId);
+    }
+
+    async listActiveBySource(domainId: string, uid: number, sourceId: ObjectId): Promise<AccessEntitlementDoc[]> {
+        await this.ensureIndexes();
+        return this.entitlements
+            .find({
+                domainId,
+                uid,
+                source: 'redemption',
+                sourceId,
+            } as Filter<AccessEntitlementDoc>)
+            .toArray();
+    }
+
+    async getEntitlement(domainId: string, uid: number, entitlementId: ObjectId): Promise<AccessEntitlementDoc | null> {
+        await this.ensureIndexes();
+        return this.entitlements.findOne({
+            _id: entitlementId,
+            domainId,
+            uid,
+            source: 'redemption',
+        });
+    }
+
+    async listActiveForTarget(
+        domainId: string,
+        uid: number,
+        targetKind: AccessEntitlementTargetKind,
+        targetId: ObjectId,
+    ): Promise<AccessEntitlementDoc[]> {
+        await this.ensureIndexes();
+        return this.entitlements
+            .find({
+                domainId,
+                uid,
+                targetKind,
+                targetId,
+                source: 'redemption',
+                revokedAt: null,
+            } as Filter<AccessEntitlementDoc>)
+            .toArray();
     }
 }
 

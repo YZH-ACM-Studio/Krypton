@@ -1,14 +1,19 @@
 import { createHmac, randomBytes } from 'node:crypto';
 import { Collection, Filter, ObjectId } from 'mongodb';
 import { Logger } from '@hydrooj/utils';
-import { ForbiddenError, localizedErrorText, NotFoundError, ValidationError } from '../error';
+import { ForbiddenError, localizedErrorText, NotFoundError, TrainingNotFoundError, ValidationError } from '../error';
 import type { TrainingDoc } from '../interface';
 import { Context } from '../context';
 import db from '../service/db';
 import { isCourseKind, isProblemSetKind } from '../lib/training-kind';
-import { computePrerequisiteClosure } from '../lib/problem-set-stage';
+import { computePrerequisiteClosure, ProblemSetStageGraphError } from '../lib/problem-set-stage';
 import { PERM, PRIV } from './builtin';
-import { ACCESS_ENTITLEMENT_WHOLE_SET_STAGE, problemSetAccessService, type AccessEntitlementTargetKind } from './problem-set-access';
+import {
+    ACCESS_ENTITLEMENT_WHOLE_SET_STAGE,
+    problemSetAccessService,
+    type AccessEntitlementTargetKind,
+    type ProblemSetAccessSource,
+} from './problem-set-access';
 import * as training from './training';
 import { settleDomainCleanupOperations } from './domain-lifecycle-boundary';
 import system from './system';
@@ -58,6 +63,7 @@ export interface RedemptionCodeDoc {
     kind: RedemptionCodeKind;
     maxUses: number;
     usedCount: number;
+    claimedRedemptionIds: ObjectId[];
     expiresAt: Date | null;
     status: RedemptionCodeStatus;
     manual: boolean;
@@ -73,6 +79,7 @@ export interface RedemptionDoc {
     uid: number;
     createdAt: Date;
     entitlementIds: ObjectId[];
+    quotaClaimed: boolean;
 }
 
 export interface PlainRedemptionCode {
@@ -87,7 +94,7 @@ type CodeCollection = Pick<
     Collection<RedemptionCodeDoc>,
     'createIndex' | 'find' | 'findOne' | 'insertOne' | 'insertMany' | 'updateOne' | 'findOneAndUpdate' | 'deleteMany'
 >;
-type RedemptionCollection = Pick<Collection<RedemptionDoc>, 'createIndex' | 'find' | 'findOne' | 'insertOne' | 'deleteMany'>;
+type RedemptionCollection = Pick<Collection<RedemptionDoc>, 'createIndex' | 'find' | 'findOne' | 'insertOne' | 'updateOne' | 'deleteMany'>;
 
 export interface RedemptionServiceOptions {
     batches: BatchCollection;
@@ -139,6 +146,27 @@ async function withCodeGate<T>(codeId: string, work: () => Promise<T>): Promise<
     } finally {
         release();
         if (codeGates.get(codeId) === chained) codeGates.delete(codeId);
+    }
+}
+
+const batchGates = new Map<string, Promise<unknown>>();
+async function withBatchGate<T>(batchId: string, work: () => Promise<T>): Promise<T> {
+    const previous = batchGates.get(batchId) || Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    const chained = previous.then(
+        () => current,
+        () => current,
+    );
+    batchGates.set(batchId, chained);
+    await previous.catch(() => undefined);
+    try {
+        return await work();
+    } finally {
+        release();
+        if (batchGates.get(batchId) === chained) batchGates.delete(batchId);
     }
 }
 
@@ -225,8 +253,49 @@ export class RedemptionService {
         }
     }
 
+    private hideRedeemTargetError(error: unknown): never {
+        if (
+            error instanceof TrainingNotFoundError ||
+            error instanceof NotFoundError ||
+            error instanceof ValidationError ||
+            error instanceof ProblemSetStageGraphError
+        ) {
+            throw new NotFoundError(localizedErrorText`兑换码`);
+        }
+        throw error;
+    }
+
+    private async markFirstRedeemed(batch: RedemptionCodeBatchDoc): Promise<void> {
+        await withBatchGate(String(batch._id), async () => {
+            await this.batches.updateOne({ _id: batch._id, firstRedeemedAt: null }, { $set: { firstRedeemedAt: this.now() } });
+        });
+    }
+
+    private async settleExistingRedemption(
+        existing: RedemptionDoc,
+        input: { domainId: string; uid: number },
+        sourceId: ObjectId,
+        batch: RedemptionCodeBatchDoc,
+    ): Promise<RedemptionDoc | 'continue'> {
+        const granted = await problemSetAccessService.listActiveBySource(input.domainId, input.uid, sourceId);
+        const active = granted.filter((row) => !row.revokedAt);
+        if (active.length) {
+            if (!existing.entitlementIds.length) {
+                await this.redemptions.updateOne({ _id: existing._id }, { $set: { entitlementIds: active.map((row) => row._id) } });
+                existing.entitlementIds = active.map((row) => row._id);
+            }
+            await this.markFirstRedeemed(batch);
+            return existing;
+        }
+        if (existing.entitlementIds.length || granted.some((row) => row.revokedAt)) {
+            throw new ValidationError('code', null, localizedErrorText`该兑换权益已撤销`);
+        }
+        return 'continue';
+    }
+
     async resolveTarget(domainId: string, targetKind: RedemptionTargetKind, targetId: ObjectId, stageId = ACCESS_ENTITLEMENT_WHOLE_SET_STAGE) {
         const tdoc = await this.loadTraining(domainId, targetId);
+        if (!tdoc) throw new TrainingNotFoundError(domainId, targetId);
         if (targetKind === 'course') {
             if (!isCourseKind(tdoc.kind)) throw new ValidationError('target', null, localizedErrorText`兑换目标不是课程`);
         } else if (!isProblemSetKind(tdoc.kind)) {
@@ -303,6 +372,7 @@ export class RedemptionService {
                 kind: input.kind,
                 maxUses: maxUses as number,
                 usedCount: 0,
+                claimedRedemptionIds: [],
                 expiresAt: input.expiresAt || null,
                 status: 'active',
                 manual: !!manualCodes[index],
@@ -338,7 +408,42 @@ export class RedemptionService {
         await this.ensureIndexes();
         await this.assertManagePermission(user);
         const filter: Filter<RedemptionCodeBatchDoc> = canManageAllRedemptions(user) ? { domainId } : { domainId, createdBy: user._id };
-        return this.batches.find(filter).toArray();
+        const batches = await this.batches.find(filter).toArray();
+        const codes = batches.length
+            ? await this.codes.find({ domainId, batchId: { $in: batches.map((batch) => batch._id) } } as Filter<RedemptionCodeDoc>).toArray()
+            : [];
+        const codesByBatch = new Map<string, RedemptionCodeDoc[]>();
+        for (const code of codes) {
+            const key = String(code.batchId);
+            const list = codesByBatch.get(key) || [];
+            list.push(code);
+            codesByBatch.set(key, list);
+        }
+        return batches.map((batch) => {
+            const batchCodes = codesByBatch.get(String(batch._id)) || [];
+            return {
+                ...batch,
+                stats: {
+                    total: batchCodes.length,
+                    active: batchCodes.filter((code) => code.status === 'active').length,
+                    disabled: batchCodes.filter((code) => code.status === 'disabled').length,
+                    used: batchCodes.reduce((sum, code) => sum + code.usedCount, 0),
+                    remaining: batchCodes.reduce(
+                        (sum, code) => sum + (code.status === 'active' ? Math.max(0, code.maxUses - code.usedCount) : 0),
+                        0,
+                    ),
+                },
+                hints: batchCodes.map((code) => ({
+                    codeId: code._id,
+                    hint: code.hint,
+                    status: code.status,
+                    usedCount: code.usedCount,
+                    maxUses: code.maxUses,
+                    expiresAt: code.expiresAt,
+                    kind: code.kind,
+                })),
+            };
+        });
     }
 
     async getBatch(domainId: string, user: RedemptionActor, batchId: ObjectId) {
@@ -364,6 +469,7 @@ export class RedemptionService {
     }) {
         await this.ensureIndexes();
         const { batch, codes } = await this.getBatch(input.domainId, input.user, input.batchId);
+        return withBatchGate(String(batch._id), async () => {
         const frozen = !!batch.firstRedeemedAt;
         const $set: Partial<RedemptionCodeBatchDoc> = {};
         if (input.note !== undefined) $set.note = String(input.note);
@@ -382,10 +488,20 @@ export class RedemptionService {
         } else if (input.targetKind || input.targetId || input.stageId !== undefined || input.allowedGroupIds) {
             throw new ValidationError('batch', null, localizedErrorText`首次兑换后不能修改目标和允许用户组`);
         }
-        if (Object.keys($set).length) await this.batches.updateOne({ _id: batch._id }, { $set });
         const codeSet: Partial<RedemptionCodeDoc> = {};
         if (input.note !== undefined) codeSet.note = String(input.note);
-        if (input.expiresAt !== undefined) codeSet.expiresAt = input.expiresAt;
+        if (input.expiresAt !== undefined) {
+            if (frozen) {
+                for (const code of codes) {
+                    const current = code.expiresAt;
+                    const next = input.expiresAt;
+                    const shortened = current === null && next !== null;
+                    const earlier = current && next && next.getTime() < current.getTime();
+                    if (shortened || earlier) throw new ValidationError('expiresAt', null, localizedErrorText`首次兑换后只能延长有效期`);
+                }
+            }
+            codeSet.expiresAt = input.expiresAt;
+        }
         if (input.maxUses !== undefined) {
             if (!Number.isSafeInteger(input.maxUses) || input.maxUses < 1) throw new ValidationError('maxUses', null, localizedErrorText`兑换次数上限无效`);
             for (const code of codes) {
@@ -394,6 +510,14 @@ export class RedemptionService {
             }
             codeSet.maxUses = input.maxUses;
         }
+        if (!Object.keys($set).length && !Object.keys(codeSet).length) {
+            return this.getBatch(input.domainId, input.user, input.batchId);
+        }
+        const freezeFilter = frozen ? { _id: batch._id, firstRedeemedAt: { $ne: null } } : { _id: batch._id, firstRedeemedAt: null };
+        const batchSet = Object.keys($set).length ? $set : { note: batch.note };
+        const result = await this.batches.updateOne(freezeFilter, { $set: batchSet });
+        const matched = result.matchedCount ?? result.modifiedCount;
+        if (matched !== 1) throw new ValidationError('batch', null, localizedErrorText`批次状态已变化`);
         if (Object.keys(codeSet).length) {
             for (const code of codes) {
                 await this.codes.updateOne({ _id: code._id }, { $set: codeSet });
@@ -401,6 +525,7 @@ export class RedemptionService {
         }
         logger.info('Redemption batch edited domain=%s batch=%s frozen=%s stage=edit result=success', input.domainId, batch._id, frozen);
         return this.getBatch(input.domainId, input.user, input.batchId);
+        });
     }
 
     async disableCode(domainId: string, user: RedemptionActor, codeId: ObjectId) {
@@ -441,25 +566,82 @@ export class RedemptionService {
         return withCodeGate(String(code._id), async () => {
             const current = await this.codes.findOne({ _id: code!._id });
             if (!current) throw new NotFoundError(localizedErrorText`兑换码`);
-            const existing = await this.redemptions.findOne({ domainId: input.domainId, codeId: current._id, uid: input.uid });
-            if (existing) return existing;
-            if (current.status !== 'active') throw new ValidationError('code', null, localizedErrorText`兑换码已停用`);
-            if (current.expiresAt && current.expiresAt.getTime() <= this.now().getTime()) throw new ValidationError('code', null, localizedErrorText`兑换码已过期`);
+            let existing = await this.redemptions.findOne({ domainId: input.domainId, codeId: current._id, uid: input.uid });
+            const batchEarly = existing ? await this.batches.findOne({ _id: existing.batchId, domainId: input.domainId }) : null;
+            if (existing && batchEarly) {
+                const settled = await this.settleExistingRedemption(existing, input, current._id, batchEarly);
+                if (settled !== 'continue') return settled;
+            }
             const batch = await this.batches.findOne({ _id: current.batchId, domainId: input.domainId });
             if (!batch) throw new NotFoundError(localizedErrorText`兑换批次`);
-            if (batch.allowedGroupIds.length) {
-                const groups = await this.findStudentGroupIds(input.domainId, input.uid);
-                if (!batch.allowedGroupIds.some((groupId) => groups.has(groupId))) {
-                    throw new ForbiddenError(localizedErrorText`当前用户组不能兑换该码`);
+            if (!existing) {
+                if (current.status !== 'active') throw new ValidationError('code', null, localizedErrorText`兑换码已停用`);
+                if (current.expiresAt && current.expiresAt.getTime() <= this.now().getTime()) throw new ValidationError('code', null, localizedErrorText`兑换码已过期`);
+                if (batch.allowedGroupIds.length) {
+                    const groups = await this.findStudentGroupIds(input.domainId, input.uid);
+                    if (!batch.allowedGroupIds.some((groupId) => groups.has(groupId))) {
+                        throw new ForbiddenError(localizedErrorText`当前用户组不能兑换该码`);
+                    }
                 }
             }
-            const tdoc = await this.resolveTarget(input.domainId, batch.targetKind, batch.targetId, batch.stageId);
-            const updated = await this.codes.findOneAndUpdate(
-                { _id: current._id, status: 'active', usedCount: { $lt: current.maxUses } },
-                { $inc: { usedCount: 1 } },
-                { returnDocument: 'after' },
-            );
-            if (!updated) throw new ValidationError('code', null, localizedErrorText`兑换名额已满`);
+            let tdoc;
+            try {
+                tdoc = await this.resolveTarget(input.domainId, batch.targetKind, batch.targetId, batch.stageId);
+            } catch (error) {
+                logger.info(
+                    'Redemption target unavailable domain=%s uid=%d code=%s batch=%s stage=redeem result=target-unavailable',
+                    input.domainId,
+                    input.uid,
+                    current._id,
+                    batch._id,
+                );
+                this.hideRedeemTargetError(error);
+            }
+            if (!tdoc) throw new NotFoundError(localizedErrorText`兑换码`);
+            if (!existing) {
+                const pending: RedemptionDoc = {
+                    _id: this.idFactory(),
+                    domainId: input.domainId,
+                    codeId: current._id,
+                    batchId: batch._id,
+                    uid: input.uid,
+                    createdAt: this.now(),
+                    entitlementIds: [],
+                    quotaClaimed: false,
+                };
+                try {
+                    await this.redemptions.insertOne(pending);
+                    existing = pending;
+                } catch (error) {
+                    const confirmed = await this.redemptions.findOne({ domainId: input.domainId, codeId: current._id, uid: input.uid });
+                    if (!confirmed) throw error;
+                    const settled = await this.settleExistingRedemption(confirmed, input, current._id, batch);
+                    if (settled !== 'continue') return settled;
+                    existing = confirmed;
+                }
+            }
+            const claimed = (current.claimedRedemptionIds || []).some((id) => String(id) === String(existing!._id));
+            if (!claimed) {
+                const updated = await this.codes.findOneAndUpdate(
+                    {
+                        _id: current._id,
+                        status: 'active',
+                        usedCount: { $lt: current.maxUses },
+                        claimedRedemptionIds: { $nin: [existing._id] },
+                    },
+                    { $inc: { usedCount: 1 }, $addToSet: { claimedRedemptionIds: existing._id } },
+                    { returnDocument: 'after' },
+                );
+                if (!updated) {
+                    const latest = await this.codes.findOne({ _id: current._id });
+                    const alreadyClaimed = (latest?.claimedRedemptionIds || []).some((id) => String(id) === String(existing!._id));
+                    if (!alreadyClaimed) throw new ValidationError('code', null, localizedErrorText`兑换名额已满`);
+                }
+            }
+            if (!existing.quotaClaimed) {
+                await this.redemptions.updateOne({ _id: existing._id, quotaClaimed: { $ne: true } }, { $set: { quotaClaimed: true } });
+                existing.quotaClaimed = true;
+            }
             const entitlementIds: ObjectId[] = [];
             if (batch.targetKind === 'problem_set_stage') {
                 const granted = await problemSetAccessService.grantStageRedemptionWithClosure({
@@ -480,26 +662,23 @@ export class RedemptionService {
                 });
                 entitlementIds.push(granted._id);
             }
-            await training.ensureEnrolled(input.domainId, tdoc.docId, input.uid);
-            const redemption: RedemptionDoc = {
-                _id: this.idFactory(),
-                domainId: input.domainId,
-                codeId: current._id,
-                batchId: batch._id,
-                uid: input.uid,
-                createdAt: this.now(),
-                entitlementIds,
-            };
             try {
-                await this.redemptions.insertOne(redemption);
+                await training.ensureEnrolled(input.domainId, tdoc.docId, input.uid);
             } catch (error) {
-                const confirmed = await this.redemptions.findOne({ domainId: input.domainId, codeId: current._id, uid: input.uid });
-                if (!confirmed) throw error;
-                return confirmed;
+                logger.error(
+                    'Redemption enrollment write failed domain=%s uid=%d code=%s batch=%s stage=redeem result=enroll-failed',
+                    input.domainId,
+                    input.uid,
+                    current._id,
+                    batch._id,
+                );
+                throw new Error('problem set enrollment write failed during redeem');
             }
-            if (!batch.firstRedeemedAt) {
-                await this.batches.updateOne({ _id: batch._id, firstRedeemedAt: null }, { $set: { firstRedeemedAt: this.now() } });
+            if (!existing.entitlementIds.length) {
+                await this.redemptions.updateOne({ _id: existing._id }, { $set: { entitlementIds } });
+                existing.entitlementIds = entitlementIds;
             }
+            await this.markFirstRedeemed(batch);
             logger.info(
                 'Redemption succeeded domain=%s uid=%d code=%s batch=%s target=%s/%s stage=redeem result=success',
                 input.domainId,
@@ -509,26 +688,73 @@ export class RedemptionService {
                 batch.targetKind,
                 batch.targetId,
             );
-            return redemption;
+            return existing;
         });
     }
 
     async revokeUserSource(input: { domainId: string; user: RedemptionActor; uid: number; entitlementId: ObjectId }) {
         await this.ensureIndexes();
-        await this.assertManagePermission(input.user);
-        const revoked = await problemSetAccessService.revokeRedemptionEntitlement({
-            domainId: input.domainId,
-            uid: input.uid,
-            entitlementId: input.entitlementId,
-        });
+        const current = await problemSetAccessService.getEntitlement(input.domainId, input.uid, input.entitlementId);
+        if (!current) throw new NotFoundError(localizedErrorText`entitlement`);
+        const code = await this.codes.findOne({ _id: current.sourceId, domainId: input.domainId });
+        if (!code) throw new NotFoundError(localizedErrorText`兑换码`);
+        const batch = await this.batches.findOne({ _id: code.batchId, domainId: input.domainId });
+        if (!batch) throw new NotFoundError(localizedErrorText`兑换批次`);
+        await this.assertManagePermission(input.user, batch);
+        const rows = await problemSetAccessService.listActiveBySource(input.domainId, input.uid, current.sourceId);
+        const fromSource = rows.length ? rows : [current];
+        const student = {
+            _id: input.uid,
+            hasPerm: (perm: bigint) => perm === PERM.PERM_VIEW_TRAINING,
+            hasPriv: () => false,
+            own: () => false,
+        };
+        let remainingSources: ProblemSetAccessSource[] = [];
+        try {
+            const tdoc = await this.resolveTarget(input.domainId, batch.targetKind, batch.targetId, batch.stageId);
+            const revoking = new Set(fromSource.filter((row) => !row.revokedAt).map((row) => String(row._id)));
+            if (batch.targetKind === 'course') {
+                const others = await problemSetAccessService.listActiveForTarget(input.domainId, input.uid, 'course', batch.targetId);
+                remainingSources = others
+                    .filter((row) => !revoking.has(String(row._id)))
+                    .map((row) => ({ kind: 'redemption' as const, entitlementId: String(row._id) }));
+            } else {
+                const decision = await problemSetAccessService.evaluate(input.domainId, student, tdoc);
+                remainingSources = decision.sources.filter(
+                    (source) => source.kind !== 'redemption' || !revoking.has(String(source.entitlementId)),
+                );
+            }
+        } catch (error) {
+            if (
+                !(error instanceof TrainingNotFoundError) &&
+                !(error instanceof NotFoundError) &&
+                !(error instanceof ValidationError) &&
+                !(error instanceof ProblemSetStageGraphError)
+            ) {
+                throw error;
+            }
+        }
+        const revoked = [];
+        for (const row of fromSource) {
+            if (row.revokedAt) continue;
+            revoked.push(
+                await problemSetAccessService.revokeRedemptionEntitlement({
+                    domainId: input.domainId,
+                    uid: input.uid,
+                    entitlementId: row._id,
+                }),
+            );
+        }
         logger.info(
-            'Redemption entitlement revoked domain=%s actor=%d uid=%d entitlement=%s stage=revoke result=success',
+            'Redemption source revoked domain=%s actor=%d uid=%d sourceId=%s count=%d remaining=%d stage=revoke result=success',
             input.domainId,
             input.user._id,
             input.uid,
-            input.entitlementId,
+            current.sourceId,
+            revoked.length,
+            remainingSources.length,
         );
-        return revoked;
+        return { revoked, remainingSources };
     }
 }
 

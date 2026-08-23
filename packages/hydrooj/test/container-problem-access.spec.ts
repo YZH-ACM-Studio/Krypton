@@ -387,12 +387,19 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
                     }
                     return problemSetAccessDecision;
                 },
+                async hasActiveEntitlement() {
+                    return false;
+                },
+                async listActiveTargetIds() {
+                    return [];
+                },
             },
         };
     }
     if (fromHandler && request === '../model/training') return trainingStub;
     if (fromHandler && request === '../model/user') return userStub;
     if (fromHandler && request === '../service/server') return serverStub;
+    if (parent?.filename?.includes('/lib/course-live-ref.ts') && request === '../model/training') return trainingStub;
     return originalLoad.call(this, request, parent, isMain);
 };
 
@@ -403,6 +410,7 @@ try {
     const coursePath = require.resolve('../src/handler/course.ts');
     delete require.cache[trainingPath];
     delete require.cache[coursePath];
+    delete require.cache[require.resolve('../src/lib/course-live-ref.ts')];
     trainingModule = require(trainingPath);
     courseModule = require(coursePath);
 } finally {

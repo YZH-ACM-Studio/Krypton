@@ -163,6 +163,40 @@ describe('P3.3 problem set access sources', () => {
         expect((await withoutRef.evaluate(domainId, user(), hiddenSet as any)).discoverable).to.equal(false);
     });
 
+    it('lets a course redemption keep the referenced problem set visible', async () => {
+        const course = {
+            domainId,
+            docId: courseId,
+            owner: 9,
+            kind: 'course',
+            courseGroupIds: [groupId],
+            dag: [{ _id: 1, title: 'Ch', requireNids: [], pids: [], problemSetId: otherSetId }],
+        };
+        const access = service({
+            groups: [],
+            courses: [course],
+            entitlements: [
+                {
+                    _id: new ObjectId(),
+                    domainId,
+                    uid,
+                    targetKind: 'course',
+                    targetId: courseId,
+                    stageId: ACCESS_ENTITLEMENT_WHOLE_SET_STAGE,
+                    source: 'redemption',
+                    sourceId,
+                    createdAt: new Date(),
+                    revokedAt: null,
+                },
+            ],
+        });
+        const decision = await access.evaluate(domainId, user(), hiddenSet as any);
+        expect(decision.accessible).to.equal(true);
+        expect(decision.sources.map((source) => source.kind)).to.deep.equal(['course']);
+        expect(await access.hasActiveEntitlement(domainId, uid, 'course', courseId)).to.equal(true);
+        expect(await access.hasActiveEntitlement(domainId, uid, 'course', otherSetId)).to.equal(false);
+    });
+
     it('keeps a redemption entitlement after leaving the group and after revoking a different source', async () => {
         const grouped = {
             ...hiddenSet,

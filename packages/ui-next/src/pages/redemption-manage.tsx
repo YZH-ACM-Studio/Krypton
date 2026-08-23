@@ -9,6 +9,16 @@ import { SimpleSelect } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { useBootstrap } from '@/lib/bootstrap';
 
+interface RedemptionHint {
+  codeId: string;
+  hint: string;
+  status?: string;
+  usedCount?: number;
+  maxUses?: number;
+  expiresAt?: string | null;
+  kind?: string;
+}
+
 interface RedemptionBatch {
   _id: string;
   note?: string;
@@ -17,6 +27,8 @@ interface RedemptionBatch {
   stageId?: number;
   firstRedeemedAt?: string | null;
   createdAt?: string;
+  stats?: { total?: number; active?: number; disabled?: number; used?: number; remaining?: number };
+  hints?: RedemptionHint[];
 }
 
 interface PlainCode {
@@ -34,6 +46,7 @@ interface RedemptionManageData {
   plaintext?: PlainCode[];
   csv?: string;
   batch?: RedemptionBatch;
+  revokeResult?: { revokedCount?: number; remainingSources?: Array<{ kind?: string; entitlementId?: string; groupId?: string; courseId?: string }> };
 }
 
 function downloadCsv(name: string, csv: string) {
@@ -62,6 +75,25 @@ export function RedemptionCodeManagePage() {
       }
       bypassPrivGate
     >
+      {data.revokeResult ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">撤销结果</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-1 text-sm">
+            <p>已撤销 {data.revokeResult.revokedCount || 0} 项同一兑换来源权益。</p>
+            <p className="text-muted-foreground">
+              仍有效来源：
+              {(data.revokeResult.remainingSources || []).length
+                ? (data.revokeResult.remainingSources || [])
+                    .map((source) => source.kind || 'unknown')
+                    .join('、')
+                : '无'}
+            </p>
+          </CardContent>
+        </Card>
+      ) : null}
+
       {plaintext.length ? (
         <Card className="border-amber-300">
           <CardHeader>
@@ -208,6 +240,8 @@ function BatchRow({ batch }: { batch: RedemptionBatch }) {
     () => `${batch.targetKind || ''} ${batch.targetId || ''} 阶段 ${batch.stageId ?? 0}${frozen ? ' · 已冻结目标' : ''}`,
     [batch, frozen],
   );
+  const stats = batch.stats;
+  const hints = Array.isArray(batch.hints) ? batch.hints : [];
   return (
     <div className="rounded-md border p-3 text-sm">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -215,6 +249,11 @@ function BatchRow({ batch }: { batch: RedemptionBatch }) {
           <p className="font-mono text-xs">{String(batch._id)}</p>
           <p className="text-muted-foreground">{batch.note || '无备注'}</p>
           <p className="text-xs text-muted-foreground">{summary}</p>
+          {stats ? (
+            <p className="text-xs text-muted-foreground">
+              用量 {stats.used || 0} / 剩余 {stats.remaining || 0} · 有效 {stats.active || 0} · 停用 {stats.disabled || 0}
+            </p>
+          ) : null}
         </div>
         <Button type="button" size="sm" variant="outline" onClick={() => setOpen((value) => !value)}>
           {open ? '收起编辑' : '编辑允许字段'}
@@ -258,6 +297,24 @@ function BatchRow({ batch }: { batch: RedemptionBatch }) {
             </Button>
           </div>
         </form>
+      ) : null}
+      {hints.length ? (
+        <ul className="mt-3 space-y-1 text-xs">
+          {hints.map((hint) => (
+            <li key={String(hint.codeId)} className="flex flex-wrap items-center justify-between gap-2 font-mono">
+              <span>
+                {hint.hint} · {hint.status || 'active'} · {hint.usedCount || 0}/{hint.maxUses || 0}
+              </span>
+              <form method="post">
+                <input type="hidden" name="operation" value="disable" />
+                <input type="hidden" name="codeId" value={String(hint.codeId)} />
+                <Button type="submit" size="sm" variant="outline" disabled={hint.status === 'disabled'}>
+                  停用
+                </Button>
+              </form>
+            </li>
+          ))}
+        </ul>
       ) : null}
     </div>
   );

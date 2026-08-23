@@ -29,15 +29,20 @@ class RedemptionManageHandler extends Handler {
         if (!canCreateRedemption(this.user)) this.checkPerm(PERM.PERM_CREATE_REDEMPTION_CODE);
     }
 
-    async get() {
+    private async renderManage(extra: Record<string, unknown> = {}) {
         const domainId = String(this.domain?._id);
         const batches = await redemptionService.listBatches(domainId, this.user);
         this.response.template = 'redemption_code_manage.html';
         this.response.body = {
             batches,
             canManageAll: canManageAllRedemptions(this.user),
+            ...extra,
         };
         this.response.addHeader('Cache-Control', 'no-store');
+    }
+
+    async get() {
+        await this.renderManage();
     }
 
     @param('note', Types.String, true)
@@ -83,8 +88,7 @@ class RedemptionManageHandler extends Handler {
             count: manualCodes.length || count,
             manualCodes,
         });
-        this.response.addHeader('Cache-Control', 'no-store');
-        this.response.body = {
+        await this.renderManage({
             once: true,
             warning: created.warning || null,
             batch: created.batch,
@@ -95,7 +99,7 @@ class RedemptionManageHandler extends Handler {
                     [created.batch._id, created.batch.targetKind, created.batch.targetId, created.batch.stageId, item.code].map(csvCell).join(','),
                 ),
             ].join('\r\n'),
-        };
+        });
     }
 
     @param('batchId', Types.ObjectId)
@@ -118,7 +122,7 @@ class RedemptionManageHandler extends Handler {
         maxUses?: number,
     ) {
         const domainId = String(this.domain?._id);
-        this.response.body = await redemptionService.editBatch({
+        await redemptionService.editBatch({
             domainId,
             user: this.user,
             batchId,
@@ -130,25 +134,30 @@ class RedemptionManageHandler extends Handler {
             expiresAt: expiresAt === undefined ? undefined : parseOptionalDate(expiresAt),
             maxUses,
         });
-        this.response.addHeader('Cache-Control', 'no-store');
+        await this.renderManage();
     }
 
     @param('codeId', Types.ObjectId)
     async postDisable(_domainId: string, codeId: ObjectId) {
-        this.response.body = { code: await redemptionService.disableCode(String(this.domain?._id), this.user, codeId) };
+        await redemptionService.disableCode(String(this.domain?._id), this.user, codeId);
+        await this.renderManage();
     }
 
     @param('uid', Types.PositiveInt)
     @param('entitlementId', Types.ObjectId)
     async postRevoke(_domainId: string, uid: number, entitlementId: ObjectId) {
-        this.response.body = {
-            entitlement: await redemptionService.revokeUserSource({
-                domainId: String(this.domain?._id),
-                user: this.user,
-                uid,
-                entitlementId,
-            }),
-        };
+        const result = await redemptionService.revokeUserSource({
+            domainId: String(this.domain?._id),
+            user: this.user,
+            uid,
+            entitlementId,
+        });
+        await this.renderManage({
+            revokeResult: {
+                revokedCount: result.revoked.length,
+                remainingSources: result.remainingSources,
+            },
+        });
     }
 
     @param('batchId', Types.ObjectId)

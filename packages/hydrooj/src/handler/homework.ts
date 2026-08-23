@@ -14,6 +14,7 @@ import {
     ValidationError,
 } from '../error';
 import { PenaltyRules, Tdoc, TrainingDoc, TrainingNode } from '../interface';
+import { isCourseKind } from '../lib/training-kind';
 import { PERM, PRIV } from '../model/builtin';
 import * as contest from '../model/contest';
 import * as discussion from '../model/discussion';
@@ -73,7 +74,7 @@ async function loadCourseQuizContext(
     handlerUser: any,
 ): Promise<{ course: TrainingDoc; chapter: TrainingNode }> {
     const course = await training.get(domainId, courseId);
-    if (course.kind !== 'course') throw new ValidationError('fromCourse');
+    if (!isCourseKind(course.kind)) throw new ValidationError('fromCourse');
     if (!handlerUser.own(course) && !handlerUser.hasPerm(PERM.PERM_EDIT_COURSE) && !handlerUser.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) {
         throw new PermissionError(PERM.PERM_EDIT_COURSE);
     }

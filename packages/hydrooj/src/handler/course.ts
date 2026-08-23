@@ -1,7 +1,7 @@
 /**
  * 课程模块（PLAN 2026-07-02 §10）。
  *
- * 课程与训练共用 docType 40（TrainingDoc），靠 `kind: 'course'` 区分；
+ * 课程与题集共用 docType 40（TrainingDoc），靠 `kind: 'course'` 区分；
  * 复用 training model 的报名 / 进度 / 章节题目跟踪。课程额外有：
  *   - `courseGroupIds`：可见范围（userbind 班级；空 = 全域可见）
  *   - 章节 `tids`：引用制挂已有比赛/作业（比赛在比赛模块独立创建）
@@ -38,6 +38,7 @@ import * as training from '../model/training';
 import user from '../model/user';
 import { Handler, param, post, Types } from '../service/server';
 import { resolveProblemKnowledgeNodeIds } from '../lib/problem-tag-canonical';
+import { courseKindClause, isCourseKind } from '../lib/training-kind';
 import { getVisibleReferencedProblems, normalizeProblemDocIds } from './problem-reference';
 
 const logger = new Logger('course');
@@ -298,7 +299,7 @@ class CourseMainHandler extends Handler {
     @param('q', Types.String, true)
     async get(_domainId: string, page = 1, q = '') {
         const domainId = String(this.domain?._id);
-        const query: Filter<TrainingDoc> = { kind: 'course' };
+        const query: Filter<TrainingDoc> = { ...courseKindClause() };
         if (q) query.title = { $regex: new RegExp(escapeRegExp(q), 'i') };
         const isAdmin = this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
         const canCreate = this.user.hasPerm(PERM.PERM_CREATE_COURSE) || isAdmin;
@@ -358,7 +359,7 @@ class CourseDetailHandler extends Handler {
         const domainId = String(this.domain?._id);
         problem.assertProblemAclDomain(this.user, domainId);
         const tdoc = await training.get(domainId, tid);
-        if (tdoc.kind !== 'course') throw new ValidationError('tid', null, localizedErrorText`Not a course`);
+        if (!isCourseKind(tdoc.kind)) throw new ValidationError('tid', null, localizedErrorText`Not a course`);
         const activeView = view === 'mindmap' ? 'mindmap' : 'overview';
         const canManage = this.user.own(tdoc) || this.user.hasPerm(PERM.PERM_EDIT_COURSE) || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
         // 可见性拦截（非管理者且不属于课程班级 → 拒绝）。
@@ -455,7 +456,7 @@ class CourseDetailHandler extends Handler {
     async postEnroll(domainId: string, tid: ObjectId) {
         this.checkPriv(PRIV.PRIV_USER_PROFILE);
         const tdoc = await training.get(domainId, tid);
-        if (tdoc.kind !== 'course') throw new ValidationError('tid', null, localizedErrorText`Not a course`);
+        if (!isCourseKind(tdoc.kind)) throw new ValidationError('tid', null, localizedErrorText`Not a course`);
         // 可见范围外不允许报名。
         if ((tdoc.courseGroupIds || []).length) {
             const myGroups = await userGroupIds(domainId, this.user._id);
@@ -477,7 +478,7 @@ class CourseEditHandler extends Handler {
         problem.assertProblemAclDomain(this.user, authoritativeDomainId);
         if (tid) {
             this.tdoc = await training.get(authoritativeDomainId, tid);
-            if (this.tdoc.kind !== 'course') throw new ValidationError('tid', null, localizedErrorText`Not a course`);
+            if (!isCourseKind(this.tdoc.kind)) throw new ValidationError('tid', null, localizedErrorText`Not a course`);
             if (!this.user.own(this.tdoc)) this.checkPerm(PERM.PERM_EDIT_COURSE);
         } else if (!this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) {
             if (!this.user.hasPerm(PERM.PERM_CREATE_COURSE)) {
@@ -618,7 +619,7 @@ class CourseEditHandler extends Handler {
     async postDelete(_domainId: string, tid: ObjectId) {
         const domainId = String(this.domain?._id);
         const tdoc = await training.get(domainId, tid);
-        if (tdoc.kind !== 'course') throw new ValidationError('tid', null, localizedErrorText`Not a course`);
+        if (!isCourseKind(tdoc.kind)) throw new ValidationError('tid', null, localizedErrorText`Not a course`);
         if (!this.user.own(tdoc)) this.checkPerm(PERM.PERM_EDIT_COURSE);
         await Promise.all([
             training.del(domainId, tid),
@@ -640,7 +641,7 @@ class CourseFilesHandler extends Handler {
     async prepare(_domainId: string, tid: ObjectId) {
         this.domainId = String(this.domain?._id);
         this.tdoc = await training.get(this.domainId, tid);
-        if (this.tdoc.kind !== 'course') throw new NotFoundError(localizedErrorText`course`);
+        if (!isCourseKind(this.tdoc.kind)) throw new NotFoundError(localizedErrorText`course`);
         if (!this.user.own(this.tdoc)) this.checkPriv(PRIV.PRIV_EDIT_SYSTEM);
     }
 
@@ -700,7 +701,7 @@ class CourseFileDownloadHandler extends Handler {
         this.checkPriv(PRIV.PRIV_USER_PROFILE);
         const domainId = String(this.domain?._id);
         const tdoc = await training.get(domainId, tid);
-        if (tdoc.kind !== 'course') throw new NotFoundError(localizedErrorText`course`);
+        if (!isCourseKind(tdoc.kind)) throw new NotFoundError(localizedErrorText`course`);
         const file = listedCourseFile(tdoc, filename);
         const canManage = this.user.own(tdoc) || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
         if (!canManage && (tdoc.courseGroupIds || []).length) {

@@ -2,6 +2,7 @@ import { Logger } from '@hydrooj/utils';
 import { localizedErrorText, ManagedProblemMetadataConflictError } from '../error';
 import type { ProblemDoc } from '../interface';
 import type { ObjectId } from 'mongodb';
+import { withProblemSetKind } from '../lib/training-kind';
 import db from '../service/db';
 import * as document from './document';
 import type { ManagedSourceMeta, ManagedTrainingPlacement } from './managed-problem-authoring';
@@ -100,12 +101,13 @@ async function attachToTraining(input: ManagedProblemPublicationCommit, session?
     try {
         const result = await document.coll.updateOne(
             {
-                domainId: input.domainId,
-                docType: document.TYPE_TRAINING,
-                docId: placement.trainingId,
-                kind: { $ne: 'course' },
-                dag: { $elemMatch: { _id: placement.chapterId, pids: { $nin: [input.docId, String(input.docId)] } } },
-                'dag.pids': { $nin: [input.docId, String(input.docId)] },
+                ...withProblemSetKind({
+                    domainId: input.domainId,
+                    docType: document.TYPE_TRAINING,
+                    docId: placement.trainingId,
+                    dag: { $elemMatch: { _id: placement.chapterId, pids: { $nin: [input.docId, String(input.docId)] } } },
+                    'dag.pids': { $nin: [input.docId, String(input.docId)] },
+                }),
             },
             { $addToSet: { 'dag.$.pids': input.docId } } as any,
             session ? { session } : undefined,
@@ -154,12 +156,11 @@ async function readTrainingChapter(input: ManagedProblemPublicationCommit): Prom
     const placement = input.pendingTrainingPlacement;
     if (!placement) return { exists: false, containsProblem: false };
     const training = await document.coll.findOne(
-        {
+        withProblemSetKind({
             domainId: input.domainId,
             docType: document.TYPE_TRAINING,
             docId: placement.trainingId,
-            kind: { $ne: 'course' },
-        },
+        }),
         { projection: { dag: 1 } },
     );
     const chapter = Array.isArray(training?.dag) ? training.dag.find((candidate) => candidate?._id === placement.chapterId) : null;
@@ -175,13 +176,12 @@ async function compensateTraining(input: ManagedProblemPublicationCommit, public
     let compensationError: unknown;
     try {
         const result = await document.coll.updateOne(
-            {
+            withProblemSetKind({
                 domainId: input.domainId,
                 docType: document.TYPE_TRAINING,
                 docId: placement.trainingId,
-                kind: { $ne: 'course' },
                 dag: { $elemMatch: { _id: placement.chapterId, pids: { $in: [input.docId, String(input.docId)] } } },
-            },
+            }),
             { $pull: { 'dag.$.pids': { $in: [input.docId, String(input.docId)] } } } as any,
         );
         if (result.modifiedCount === 1) throw publicationError;

@@ -18,6 +18,7 @@ import {
     trainingEnrollmentPipeline,
     userStatsPipeline,
 } from '../lib/admin-stats';
+import { isProblemSetKind, withProblemSetKind } from '../lib/training-kind';
 import { Handler, param, Types } from '../service/server';
 import { PRIV, STATUS } from '../model/builtin';
 import * as contest from '../model/contest';
@@ -58,7 +59,7 @@ class AdminStatsHandler extends Handler {
         range: 30 | 90 = 30,
         tag = '',
     ) {
-        const trainingFilter: Filter<TrainingDoc> = { kind: { $ne: 'course' } };
+        const trainingFilter: Filter<TrainingDoc> = withProblemSetKind({}) as Filter<TrainingDoc>;
         const [contests, trainings] = await Promise.all([
             contest
                 .getMulti(domainId, { rule: { $ne: 'homework' } })
@@ -90,7 +91,7 @@ class AdminStatsHandler extends Handler {
             problems = await this.problemSummaries(domainId, selectedContest.pids || []);
         } else if (selectedTrainingId) {
             selectedTraining = await training.get(domainId, selectedTrainingId);
-            if (selectedTraining.kind === 'course') throw new NotFoundError(localizedErrorText`training`);
+            if (!isProblemSetKind(selectedTraining.kind)) throw new NotFoundError(localizedErrorText`training`);
             const pids = training.getPids(selectedTraining.dag || []);
             const enrollmentRows = await document.collStatus
                 .aggregate(trainingEnrollmentPipeline(domainId, selectedTrainingId), { maxTimeMS: ADMIN_STATS_MAX_TIME_MS })
@@ -154,10 +155,12 @@ class AdminStatsHandler extends Handler {
                         .project({ docId: 1, title: 1, beginAt: 1, endAt: 1 })
                         .toArray(),
                     training
-                        .getMulti(domainId, {
-                            docId: { $in: trainingStatuses.map((row) => row.docId) },
-                            kind: { $ne: 'course' },
-                        })
+                        .getMulti(
+                            domainId,
+                            withProblemSetKind({
+                                docId: { $in: trainingStatuses.map((row) => row.docId) },
+                            }) as Filter<TrainingDoc>,
+                        )
                         .project({ docId: 1, title: 1 })
                         .toArray(),
                 ]);

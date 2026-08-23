@@ -3,7 +3,7 @@ import { generateRegistrationOptions, verifyRegistrationResponse } from '@simple
 import { isoBase64URL, isoUint8Array } from '@simplewebauthn/server/helpers';
 import yaml from 'js-yaml';
 import { pick } from 'lodash';
-import { Binary, ObjectId } from 'mongodb';
+import { Binary, Filter, ObjectId } from 'mongodb';
 import { UAParser } from 'ua-parser-js';
 import { Context } from '../context';
 import {
@@ -21,12 +21,13 @@ import {
     ValidationError,
     VerifyPasswordError,
 } from '../error';
-import { DomainDoc, Setting } from '../interface';
+import { DomainDoc, Setting, TrainingDoc } from '../interface';
 import avatar, { validate } from '../lib/avatar';
 import * as mail from '../lib/mail';
 import { assertImpersonationActorPrivileges } from '../lib/sudo-auth';
 import { runAuditedUsernameRename } from '../lib/user-rename';
 import { verifyTFA } from '../lib/verifyTFA';
+import { practiceContainerKindOf, withProblemSetKind } from '../lib/training-kind';
 import BlackListModel from '../model/blacklist';
 import { PERM, PRIV } from '../model/builtin';
 import * as contest from '../model/contest';
@@ -113,7 +114,11 @@ export class HomeHandler extends Handler {
 
     async getTraining(domainId: string, limit = 10) {
         if (!this.user.hasPerm(PERM.PERM_VIEW_TRAINING)) return [[], {}];
-        const tdocs = await training.getMulti(domainId).sort({ pin: -1, _id: 1 }).limit(limit).toArray();
+        const tdocs = await training
+            .getMulti(domainId, withProblemSetKind({}) as Filter<TrainingDoc>)
+            .sort({ pin: -1, _id: 1 })
+            .limit(limit)
+            .toArray();
         const tsdict = await training.getListStatus(
             domainId,
             this.user._id,
@@ -122,7 +127,7 @@ export class HomeHandler extends Handler {
         if (this.user.hasPriv(PRIV.PRIV_USER_PROFILE)) {
             await Promise.all(
                 tdocs.map(async (tdoc) => {
-                    const containerKind = tdoc.kind === 'course' ? 'course' : 'problemSet';
+                    const containerKind = practiceContainerKindOf(tdoc.kind);
                     const revision = await practiceIntegrityService.getLatestPublished(domainId, containerKind, tdoc.docId);
                     if (!revision) return;
                     const doneByScope = await contextualCompletionService.getCompletedByScope(domainId, this.user._id, containerKind, tdoc.docId);

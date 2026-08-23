@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import { BSON, ObjectId } from 'mongodb';
 import { canonicalJson, sha256 } from './problem-batch-import';
+import { isCourseKind } from './training-kind';
 
 export const MINDMAP_MULTI_MIGRATION_SCHEMA_VERSION = 1;
 export const MINDMAP_MULTI_MIGRATION_NODE_COUNT = 274;
@@ -216,7 +217,7 @@ function sourceFacts(snapshot: MindmapMultiMigrationSnapshot): MindmapMultiMigra
         );
     }
     for (const course of snapshot.courses) {
-        if (course.docType !== 40 || course.kind !== 'course') fail('course query returned a non-course document');
+        if (course.docType !== 40 || !isCourseKind(course.kind)) fail('course query returned a non-course document');
         if (own(course, 'knowledgeMapId')) {
             fail(`Course ${course.domainId}/${course.docId} is already bound to a map`, 'MINDMAP_MULTI_MIGRATION_PARTIAL_STATE');
         }

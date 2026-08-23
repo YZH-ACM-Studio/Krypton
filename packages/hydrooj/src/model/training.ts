@@ -3,6 +3,15 @@ import { Filter, ObjectId } from 'mongodb';
 import { Logger } from '@hydrooj/utils';
 import { PermissionError, TrainingAlreadyEnrollError, TrainingNotFoundError } from '../error';
 import { TrainingDoc, TrainingNode } from '../interface';
+import {
+    courseKindClause,
+    isCourseKind,
+    isKnownTrainingKind,
+    isProblemSetKind,
+    problemSetKindClause,
+    resolveWritableTrainingKind,
+    withProblemSetKind,
+} from '../lib/training-kind';
 import { PERM } from './builtin';
 import * as document from './document';
 import * as OplogModel from './oplog';
@@ -87,7 +96,7 @@ export function setStatus(domainId: string, tid: ObjectId, uid: number, $set: an
     return document.setStatus(domainId, document.TYPE_TRAINING, tid, uid, $set);
 }
 
-export function add(
+export async function add(
     domainId: string,
     title: string,
     content: string,
@@ -97,18 +106,24 @@ export function add(
     pin = 0,
     extra: Partial<TrainingDoc> = {},
 ) {
-    return document.add(domainId, content, owner, document.TYPE_TRAINING, null, null, null, {
+    const kind = resolveWritableTrainingKind(extra.kind);
+    const tid = await document.add(domainId, content, owner, document.TYPE_TRAINING, null, null, null, {
         dag,
         title,
         description,
         attend: 0,
         pin,
-        // Krypton 课程模块（§10）：kind/courseGroupIds/term 等课程专属字段。
         ...extra,
+        kind,
     });
+    logger.info('Training document created domain=%s tid=%s kind=%s owner=%d stage=add result=success', domainId, tid, kind, owner);
+    return tid;
 }
 
 export function edit(domainId: string, tid: ObjectId, $set: Partial<TrainingDoc>, $unset: Partial<Record<keyof TrainingDoc, 1>> = {}) {
+    if (Object.hasOwn($set, 'kind') || Object.hasOwn($unset, 'kind')) {
+        throw new TypeError('training document kind cannot be edited');
+    }
     return document.set(domainId, document.TYPE_TRAINING, tid, $set, $unset as any);
 }
 
@@ -231,13 +246,14 @@ export async function ensureProblemBatchChapter(input: {
     const trainingTitle = input.trainingTitle.trim();
     const chapterTitle = input.chapterTitle.trim();
     if (!trainingTitle || !chapterTitle) throw new TypeError('problem batch training and chapter titles are required');
-    const training = await document.coll.findOne({
-        domainId: input.domainId,
-        docType: document.TYPE_TRAINING,
-        docId: input.trainingId,
-        kind: { $ne: 'course' },
-    });
-    if (!training || training.title !== trainingTitle || !Array.isArray(training.dag)) {
+    const training = await document.coll.findOne(
+        withProblemSetKind({
+            domainId: input.domainId,
+            docType: document.TYPE_TRAINING,
+            docId: input.trainingId,
+        }) as Filter<TrainingDoc>,
+    );
+    if (!training || !isProblemSetKind(training.kind) || training.title !== trainingTitle || !Array.isArray(training.dag)) {
         throw new Error(`problem batch training identity changed: ${input.domainId}/${input.trainingId}`);
     }
     if (input.mode === 'replace-existing') {
@@ -373,7 +389,7 @@ export async function attachContestToCourseChapter(domainId: string, tid: Object
             domainId,
             docType: document.TYPE_TRAINING,
             docId: tid,
-            kind: 'course',
+            ...courseKindClause(),
             'dag._id': chapterId,
         },
         { $addToSet: { 'dag.$[chapter].tids': contestId } } as any,
@@ -422,6 +438,10 @@ export async function count(domainId: string, query: Filter<TrainingDoc>) {
 export async function get(domainId: string, tid: ObjectId) {
     const tdoc = await document.get(domainId, document.TYPE_TRAINING, tid);
     if (!tdoc) throw new TrainingNotFoundError(domainId, tid);
+    if (!isKnownTrainingKind(tdoc.kind)) {
+        logger.error('Unknown training document kind domain=%s tid=%s kind=%o stage=get result=failed', domainId, tid, tdoc.kind);
+        throw new TrainingNotFoundError(domainId, tid);
+    }
     for (const i in tdoc.dag) {
         for (const j in tdoc.dag[i].pids) {
             if (Number.isSafeInteger(Number.parseInt(tdoc.dag[i].pids[j], 10))) {
@@ -449,6 +469,10 @@ global.Hydro.model.training = {
     isProgress,
     isOpen,
     isInvalid,
+    isCourseKind,
+    isProblemSetKind,
+    problemSetKindClause,
+    withProblemSetKind,
     add,
     edit,
     ensureProblemBatchChapter,

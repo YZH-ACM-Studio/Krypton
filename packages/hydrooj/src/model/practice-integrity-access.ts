@@ -1,6 +1,7 @@
 import { ObjectId } from 'mongodb';
 import { localizedErrorText, PermissionError, ValidationError } from '../error';
 import type { User } from '../interface';
+import { isCourseKind, isProblemSetKind } from '../lib/training-kind';
 import { PERM, PRIV } from './builtin';
 import type { PracticeContainerKind, PracticeContextMode, PracticeScopeKind } from './practice-integrity';
 import problem from './problem';
@@ -24,7 +25,7 @@ export function canPreviewPracticeIntegrity(user: User, pdoc: any, canManageCont
 }
 
 export function assertPracticeContainerKind(tdoc: any, containerKind: PracticeContainerKind): void {
-    const matches = containerKind === 'course' ? tdoc?.kind === 'course' : tdoc?.kind === undefined || tdoc?.kind === 'training';
+    const matches = containerKind === 'course' ? isCourseKind(tdoc?.kind) : isProblemSetKind(tdoc?.kind);
     if (!matches) throw new ValidationError('containerKind', null, localizedErrorText`真实性训练容器类型不匹配`);
 }
 

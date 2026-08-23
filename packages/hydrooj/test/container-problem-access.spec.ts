@@ -225,7 +225,11 @@ const trainingStub = {
     },
     getMulti(domainId: string, query: any) {
         calls.trainingQueries.push({ domainId, query: structuredClone(query) });
-        return cursor(trainingRows);
+        const kindUnion = query?.$or?.find((clause: any) => Array.isArray(clause?.kind?.$in))?.kind?.$in;
+        const rows = Array.isArray(kindUnion)
+            ? trainingRows.filter((row) => row.kind === undefined || row.kind === null || kindUnion.includes(row.kind))
+            : trainingRows;
+        return cursor(rows);
     },
     getMultiStatus() {
         return cursor(trainingStatusRows);
@@ -1258,3 +1262,74 @@ function registerReferencedProblemVisibilitySuite(label: 'training' | 'course', 
 
 registerReferencedProblemVisibilitySuite('training', trainingRoutes, 'training_detail');
 registerReferencedProblemVisibilitySuite('course', courseRoutes, 'course_detail');
+
+describe('P3.1 training kind canonical handlers', () => {
+    it('queries problem sets with an explicit kind union and drops enrolled courses', async () => {
+        const setId = new ObjectId();
+        const courseId = new ObjectId();
+        trainingRows = [
+            { domainId: 'system', docId: setId, owner: 7, kind: 'problem_set', title: 'Set', dag: [] },
+            { domainId: 'system', docId: courseId, owner: 7, kind: 'course', title: 'Course', dag: [] },
+        ];
+        trainingStatusRows = [
+            { docId: setId, uid: 42, enroll: 1 },
+            { docId: courseId, uid: 42, enroll: 1 },
+        ];
+        const handler = makeHandler(trainingRoutes.training_main);
+        await handler.get('forged-domain', 1, '');
+        expect(calls.trainingQueries[0].query.$or).to.deep.include({ kind: { $in: ['training', 'problem_set'] } });
+        expect(handler.response.body.tdict[String(courseId)]).to.equal(undefined);
+        expect(handler.response.body.tdict[String(setId)]).to.include({ kind: 'problem_set' });
+    });
+
+    it('rejects course and unknown kinds on training list/detail/edit/file routes', async () => {
+        currentContainer = {
+            domainId: 'system',
+            docId: 'course',
+            owner: 42,
+            kind: 'course',
+            title: 'Course',
+            files: [{ name: 'a.txt' }],
+            dag: [],
+        };
+        for (const run of [
+            () => makeHandler(trainingRoutes.training_detail).get('forged-domain', 'course'),
+            () => makeHandler(trainingRoutes.training_edit).prepare('forged-domain', 'course'),
+            () => makeHandler(trainingRoutes.training_files).prepare('forged-domain', 'course'),
+            () => makeHandler(trainingRoutes.training_file_download).get('forged-domain', 'course', 'a.txt'),
+            () => makeHandler(trainingRoutes.training_detail).postEnroll('forged-domain', 'course'),
+            () => makeHandler(trainingRoutes.training_detail).postDelete('forged-domain', 'course'),
+        ]) {
+            expect((await captureFailure(run))?.name).to.equal('NotFoundError');
+        }
+        currentContainer = { ...currentContainer, kind: 'other', docId: 'weird' };
+        expect((await captureFailure(() => makeHandler(trainingRoutes.training_detail).get('forged-domain', 'weird')))?.name).to.equal(
+            'NotFoundError',
+        );
+    });
+
+    it('rejects problem sets, legacy training, missing kind and unknown kinds on course routes', async () => {
+        const base = { domainId: 'system', docId: 'set', owner: 42, title: 'Set', files: [{ name: 'a.txt' }], dag: [] };
+        for (const kind of [undefined, 'training', 'problem_set', 'other']) {
+            currentContainer = { ...base, kind };
+            expect((await captureFailure(() => makeHandler(courseRoutes.course_detail).get('forged-domain', 'set')))?.name).to.equal(
+                'ValidationError',
+            );
+            expect((await captureFailure(() => makeHandler(courseRoutes.course_edit).prepare('forged-domain', 'set')))?.name).to.equal(
+                'ValidationError',
+            );
+            expect((await captureFailure(() => makeHandler(courseRoutes.course_files).prepare('forged-domain', 'set')))?.name).to.equal(
+                'NotFoundError',
+            );
+            expect((await captureFailure(() => makeHandler(courseRoutes.course_file_download).get('forged-domain', 'set', 'a.txt')))?.name).to.equal(
+                'NotFoundError',
+            );
+            expect((await captureFailure(() => makeHandler(courseRoutes.course_detail).postEnroll('forged-domain', 'set')))?.name).to.equal(
+                'ValidationError',
+            );
+            expect((await captureFailure(() => makeHandler(courseRoutes.course_edit).postDelete('forged-domain', 'set')))?.name).to.equal(
+                'ValidationError',
+            );
+        }
+    });
+});

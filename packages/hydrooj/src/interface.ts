@@ -509,11 +509,10 @@ export interface TrainingDoc extends Omit<Tdoc, 'docType'> {
     pin?: number;
     dag: TrainingNode[];
     /**
-     * Krypton 课程模块（PLAN 2026-07-02 §10）：`kind` 区分「训练」（题集
-     * 容器，缺省）与「课程」（教师主导教学，含章节+比赛+班级范围）。同
-     * docType 40，训练列表查询排除 course，存量零迁移。
+     * docType 40 容器类型：新建题集写 `problem_set`；无 kind 或旧
+     * `training` 在读取时解释为题集；`course` 只表示课程。未知 kind fail closed。
      */
-    kind?: 'training' | 'course';
+    kind?: 'training' | 'course' | 'problem_set';
     /** 课程可见范围：绑定的 userbind 班级 id（空 = 全域可见）。仅 course。 */
     courseGroupIds?: ObjectId[];
     /** Optional public knowledge map rendered inside a course workspace. */

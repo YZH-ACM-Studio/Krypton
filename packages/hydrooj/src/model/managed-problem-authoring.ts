@@ -12,6 +12,7 @@ import {
     type ProgrammingStatementFormat,
 } from '../lib/programming-statement';
 import type { KnowledgeMapOption, KnowledgeMindmapOption } from '../lib/problem-tag-canonical';
+import { withProblemSetKind } from '../lib/training-kind';
 import db from '../service/db';
 import * as document from './document';
 import {
@@ -571,7 +572,7 @@ function canonicalTrainingChapters(dag: unknown): TrainingNode[] {
 /** Existing training membership determines which fixed source templates it accepts. */
 export async function listManagedTrainingOptions(domainId: string): Promise<ManagedTrainingOption[]> {
     const trainings = await document.coll
-        .find({ domainId, docType: document.TYPE_TRAINING, kind: { $ne: 'course' } }, { projection: { docId: 1, title: 1, dag: 1 } })
+        .find(withProblemSetKind({ domainId, docType: document.TYPE_TRAINING }), { projection: { docId: 1, title: 1, dag: 1 } })
         .sort({ title: 1, docId: 1 })
         .toArray();
     const pids = [
@@ -607,7 +608,7 @@ export async function listManagedTrainingOptions(domainId: string): Promise<Mana
 /** Read the persisted training membership of an existing problem. */
 export async function listManagedProblemTrainingPlacements(domainId: string, pid: number): Promise<ManagedProblemTrainingPlacementView[]> {
     const trainings = await document.coll
-        .find({ domainId, docType: document.TYPE_TRAINING, kind: { $ne: 'course' } }, { projection: { docId: 1, title: 1, dag: 1 } })
+        .find(withProblemSetKind({ domainId, docType: document.TYPE_TRAINING }), { projection: { docId: 1, title: 1, dag: 1 } })
         .sort({ title: 1, docId: 1 })
         .toArray();
     return trainings.flatMap((training) =>
@@ -641,10 +642,9 @@ export async function validateManagedTrainingPlacement(
     if (!ObjectId.isValid(trainingIdValue)) throw new ValidationError('trainingId');
     const chapterId = parseInteger(placementInput.chapterId, 'chapterId', 1, Number.MAX_SAFE_INTEGER);
     const trainingId = new ObjectId(trainingIdValue);
-    const training = await document.coll.findOne(
-        { domainId, docType: document.TYPE_TRAINING, docId: trainingId, kind: { $ne: 'course' } },
-        { projection: { dag: 1 } },
-    );
+    const training = await document.coll.findOne(withProblemSetKind({ domainId, docType: document.TYPE_TRAINING, docId: trainingId }), {
+        projection: { dag: 1 },
+    });
     const chapters = canonicalTrainingChapters(training?.dag);
     const chapter = chapters.find((candidate) => candidate._id === chapterId);
     if (!training || !chapter) throw new ManagedProblemMetadataConflictError(localizedErrorText`待挂训练或章节已删除`);
@@ -740,12 +740,11 @@ export async function prepareManagedProblemPublication(
     }
     if (pendingTrainingPlacement) {
         const training = await document.coll.findOne(
-            {
+            withProblemSetKind({
                 domainId,
                 docType: document.TYPE_TRAINING,
                 docId: pendingTrainingPlacement.trainingId,
-                kind: { $ne: 'course' },
-            },
+            }),
             { projection: { dag: 1 } },
         );
         const chapters = canonicalTrainingChapters(training?.dag);

@@ -16,6 +16,7 @@ import {
     type ProblemBatchFactProblem,
     type ProblemBatchFactsRepository,
 } from '../lib/problem-batch-production-facts';
+import { withProblemSetKind } from '../lib/training-kind';
 import { load } from '../options';
 
 const TYPE_PROBLEM = 10;
@@ -111,7 +112,7 @@ export class MongoProblemBatchFactsRepository implements ProblemBatchFactsReposi
 
     async getTraining(domainId: string, trainingId: string) {
         const training = await this.collection('document').findOne(
-            { domainId, docType: TYPE_TRAINING, docId: new ObjectId(trainingId), kind: { $ne: 'course' } },
+            withProblemSetKind({ domainId, docType: TYPE_TRAINING, docId: new ObjectId(trainingId) }),
             { projection: { docId: 1, title: 1, dag: 1 } },
         );
         if (!training) return null;

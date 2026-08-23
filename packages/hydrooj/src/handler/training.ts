@@ -4,6 +4,7 @@ import { Filter, ObjectId } from 'mongodb';
 import { sortFiles } from '@hydrooj/utils/lib/utils';
 import { localizeErrorParameter, localizedErrorText, FileLimitExceededError, FileUploadError, NotFoundError, ValidationError } from '../error';
 import { Tdoc, TrainingDoc } from '../interface';
+import { isProblemSetKind, withProblemSetKind } from '../lib/training-kind';
 import { PERM, PRIV, STATUS } from '../model/builtin';
 import { contextualCompletionService } from '../model/contextual-completion';
 import * as document from '../model/document';
@@ -55,18 +56,17 @@ async function _parseDagJson(domainId: string, _dag: string): Promise<Tdoc['dag'
  * course 的班级可见性 / PERM_EDIT_COURSE 会被训练路由绕过（对抗性审查
  * #1/#2）。
  */
-function assertNotCourse(tdoc: { kind?: string }): void {
-    if (tdoc?.kind === 'course') throw new NotFoundError(localizedErrorText`training`);
+function assertProblemSet(tdoc: { kind?: string }): void {
+    if (!isProblemSetKind(tdoc?.kind)) throw new NotFoundError(localizedErrorText`training`);
 }
 
 class TrainingMainHandler extends Handler {
     @param('page', Types.PositiveInt, true)
     @param('q', Types.String, true)
     async get(domainId: string, page = 1, q = '') {
-        // Krypton §10：训练列表排除课程（kind='course'）。存量训练无 kind
-        // 字段，$ne:'course' 天然把它们纳入。
-        const query: Filter<TrainingDoc> = { kind: { $ne: 'course' } };
-        if (q) query.title = { $regex: new RegExp(escapeRegExp(q), 'i') };
+        const query: Filter<TrainingDoc> = withProblemSetKind(
+            q ? { title: { $regex: new RegExp(escapeRegExp(q), 'i') } } : {},
+        ) as Filter<TrainingDoc>;
         await this.ctx.parallel('training/list', query, this);
         const [tdocs, tpcount] = await this.paginate(training.getMulti(domainId, query), page, 'training');
         const tids: Set<ObjectId> = new Set();
@@ -88,10 +88,10 @@ class TrainingMainHandler extends Handler {
             for (const tid of tids) enrolledTids.delete(tid);
             if (enrolledTids.size) {
                 tdict = await training.getList(domainId, Array.from(enrolledTids));
-                // enroll:1 会命中已报名的 course，getList 不区分 kind——剔除
-                // course，避免课程串进训练页「已报名」列表（对抗性审查 #4）。
+                // enroll:1 会命中已报名的 course，getList 不区分 kind——只保留
+                // 题集，避免课程或未知 kind 串进训练页「已报名」列表。
                 for (const k of Object.keys(tdict)) {
-                    if (tdict[k]?.kind === 'course') {
+                    if (!isProblemSetKind(tdict[k]?.kind)) {
                         delete tdict[k];
                         tsdict[k] = undefined;
                     }
@@ -137,7 +137,7 @@ class TrainingDetailHandler extends Handler {
         const domainId = String(this.domain?._id);
         problem.assertProblemAclDomain(this.user, domainId);
         const tdoc = await training.get(domainId, tid);
-        assertNotCourse(tdoc);
+        assertProblemSet(tdoc);
         await this.ctx.parallel('training/get', tdoc, this);
         let enrollUsers: number[] = [];
         let shouldCompare = false;
@@ -305,7 +305,7 @@ class TrainingDetailHandler extends Handler {
     async postEnroll(domainId: string, tid: ObjectId) {
         this.checkPriv(PRIV.PRIV_USER_PROFILE);
         const tdoc = await training.get(domainId, tid);
-        assertNotCourse(tdoc);
+        assertProblemSet(tdoc);
         await training.enroll(domainId, tdoc.docId, this.user._id);
         this.back();
     }
@@ -313,7 +313,7 @@ class TrainingDetailHandler extends Handler {
     @param('tid', Types.ObjectId)
     async postDelete(domainId: string, tid: ObjectId) {
         const tdoc = await training.get(domainId, tid);
-        assertNotCourse(tdoc);
+        assertProblemSet(tdoc);
         if (!this.user.own(tdoc)) this.checkPerm(PERM.PERM_EDIT_TRAINING);
         await Promise.all([
             training.del(domainId, tid),
@@ -332,7 +332,7 @@ class TrainingEditHandler extends Handler {
         problem.assertProblemAclDomain(this.user, authoritativeDomainId);
         if (tid) {
             this.tdoc = await training.get(authoritativeDomainId, tid);
-            assertNotCourse(this.tdoc);
+            assertProblemSet(this.tdoc);
             if (!this.user.own(this.tdoc)) this.checkPerm(PERM.PERM_EDIT_TRAINING);
             else this.checkPerm(PERM.PERM_EDIT_TRAINING_SELF);
         } else this.checkPerm(PERM.PERM_CREATE_TRAINING);
@@ -384,7 +384,7 @@ export class TrainingFilesHandler extends Handler {
     @param('tid', Types.ObjectId)
     async prepare(domainId: string, tid: ObjectId) {
         this.tdoc = await training.get(domainId, tid);
-        assertNotCourse(this.tdoc);
+        assertProblemSet(this.tdoc);
         if (!this.user.own(this.tdoc)) this.checkPerm(PERM.PERM_EDIT_TRAINING);
         else this.checkPerm(PERM.PERM_EDIT_TRAINING_SELF);
     }
@@ -451,7 +451,7 @@ export class TrainingFileDownloadHandler extends Handler {
     async get(_domainId: string, tid: ObjectId, filename: string, noDisposition = false) {
         const domainId = String(this.domain?._id);
         const tdoc = await training.get(domainId, tid);
-        assertNotCourse(tdoc);
+        assertProblemSet(tdoc);
         if (!(tdoc.files || []).some((file) => file.name === filename)) throw new NotFoundError(localizedErrorText`file`);
         this.response.addHeader('Cache-Control', 'public');
         const target = `training/${domainId}/${tid}/${filename}`;

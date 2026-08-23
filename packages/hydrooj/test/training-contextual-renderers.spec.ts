@@ -10,8 +10,8 @@ describe('controlled training renderer data', () => {
         const home = readFileSync(resolve(root, 'src/handler/home.ts'), 'utf8');
         const training = readFileSync(resolve(root, 'src/handler/training.ts'), 'utf8');
 
-        expect(home).to.include('training.getMulti(domainId)');
-        expect(home).to.include("const containerKind = tdoc.kind === 'course' ? 'course' : 'problemSet'");
+        expect(home).to.include('withProblemSetKind({})');
+        expect(home).to.include('practiceContainerKindOf(tdoc.kind)');
         expect(home).to.include('practiceIntegrityService.getLatestPublished(domainId, containerKind');
         expect(home).to.include('contextualCompletionService.getCompletedByScope(');
         expect(home).to.include('training.buildScopedTrainingProgress(tdoc, doneByScope)');

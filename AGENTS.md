@@ -189,6 +189,12 @@
 - 任何单条或列表读取都必须验证教室根、layout revision 与布局 item 的 exact canonical schema 及内容 fingerprint；自洽 hash 不得替代 discriminator、必填字段、数值边界、稳定身份和 grid/items 语义校验。Endpoint 绑定、永久保留的历史配对窗口、考试目标、座位计划与分配引用必须先解析到同域 active 教室及真实 current seatId，悬空、跨域或错座位事实一律 fail closed。
 - apply 必须在 Hydro 停止、完成全量及目标集合备份后，由站点或考试基础设施管理员携带精确 plan fingerprint 与确认 token 执行。相同 batch 重跑幂等；本地 WAL 领先只能从记录的精确 Mongo predecessor 继续，已记录逐教室结果不得在恢复时覆写，确定性 success audit/batch 的 ACK 丢失必须读回精确事实后收敛；若读回也暂时失败，只能保留 applied/原状态重试，绝不得降级或写出非法 WAL。时钟回拨必须在写入前拒绝。非目标漂移、完整文档 CAS 竞争、被终端绑定或考试事实引用的教室删除/seatId 移除必须整批 fail closed，verify 必须从 Mongo canonical 与持久 batch/audit 重新核验。
 
+## 题集 TrainingDoc kind 协议
+
+- canonical 仍是 `document` 中 `docType:40` 的 `TrainingDoc`。新建题集显式写 `kind:'problem_set'`；`kind:'course'` 只表示课程；无 `kind` 或旧 `kind:'training'` 仅在读取时解释为题集。
+- 类型判断、列表过滤和写入只走共享 helper；handler 不得各自猜 kind，也不得在请求路径回填、批量迁移或另建第二套题集集合。
+- 未知 kind fail closed，不得当作题集或课程。课程路由与题集路由必须分别做类型校验。
+
 ## 真实性训练可信完成协议
 
 - Course 与 ProblemSet 的真实性策略只认发布后不可变的 `practice.integrityRevisions`；短期 `PracticeContext` 必须绑定域、用户、题目、主容器/作用域及每个明确参与目标的容器、作用域和 revision。签发与提交都要重新读取 canonical revision 并校验当前题目/容器可见性和范围成员关系，客户端字段不得自证授权。

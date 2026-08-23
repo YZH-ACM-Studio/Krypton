@@ -7,6 +7,7 @@ import {
     type MindmapMultiMigrationSnapshot,
     type MindmapMultiMigrationSourceFacts,
 } from '../lib/mindmap-multi-migration';
+import { courseKindClause } from '../lib/training-kind';
 import { load } from '../options';
 
 const TYPE_PROBLEM = 10;
@@ -60,7 +61,9 @@ export class MongoMindmapMultiMigrationRepository implements MindmapMultiMigrati
             this.collection('mindmap.maps').find({}).toArray(),
             this.collection('mindmap.nodes').find({}).toArray(),
             this.collection('document').find({ docType: TYPE_PROBLEM }).toArray(),
-            this.collection('document').find({ docType: TYPE_TRAINING, kind: 'course' }).toArray(),
+            this.collection('document')
+                .find({ docType: TYPE_TRAINING, ...courseKindClause() })
+                .toArray(),
         ]);
         return { configs, maps, nodes, problems, courses };
     }

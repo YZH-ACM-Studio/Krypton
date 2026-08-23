@@ -27,6 +27,7 @@ import {
     problemBatchDocumentState,
 } from '../lib/problem-batch-production-facts';
 import { resolveProblemKnowledgeNodeIds } from '../lib/problem-tag-canonical';
+import { withProblemSetKind } from '../lib/training-kind';
 import storageService from '../service/storage';
 import * as document from './document';
 import {
@@ -76,12 +77,13 @@ const factsRepository: ProblemBatchFactsRepository = {
         return counter?.value ?? null;
     },
     async getTraining(domainId, trainingId) {
-        const training = await document.coll.findOne({
-            domainId,
-            docType: document.TYPE_TRAINING,
-            docId: new ObjectId(trainingId),
-            kind: { $ne: 'course' },
-        });
+        const training = await document.coll.findOne(
+            withProblemSetKind({
+                domainId,
+                docType: document.TYPE_TRAINING,
+                docId: new ObjectId(trainingId),
+            }),
+        );
         return training ? { id: String(training.docId), title: training.title, dag: training.dag } : null;
     },
     async hasTrainingAnchor(domainId, pids, tag) {
@@ -596,13 +598,14 @@ async function verifyBatch(batch: ValidatedProblemBatch, plan: ProblemBatchImpor
         if (!planned) fail(`${entry.sourceProblemCode}: missing preflight problem plan`, 'BATCH_IMPORT_VERIFY_FAILED');
         problems.push(await verifyImportedProblem(batch, entry, planned.pid, planned.knowledgeMapId));
     }
-    const training = await document.coll.findOne({
-        domainId: batch.manifest.domain,
-        docType: document.TYPE_TRAINING,
-        docId: new ObjectId(batch.manifest.training.id),
-        title: batch.manifest.training.title,
-        kind: { $ne: 'course' },
-    });
+    const training = await document.coll.findOne(
+        withProblemSetKind({
+            domainId: batch.manifest.domain,
+            docType: document.TYPE_TRAINING,
+            docId: new ObjectId(batch.manifest.training.id),
+            title: batch.manifest.training.title,
+        }),
+    );
     const chapter = Array.isArray(training?.dag)
         ? training.dag.find((candidate) => candidate?._id === plan.facts.training.chapterId && candidate?.title === plan.facts.training.chapterTitle)
         : null;

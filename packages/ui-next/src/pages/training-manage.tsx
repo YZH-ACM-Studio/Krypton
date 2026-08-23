@@ -129,7 +129,7 @@ export function TrainingEditPage() {
   const bs = useBootstrap();
   const data = bs.page.data as TrainingManagePageData;
   const tdoc = data.tdoc || {};
-  const isEdit = data.page_name === 'training_edit';
+  const isEdit = data.page_name === 'problem_set_edit';
   const trainingUrl = isEdit ? replaceRouteTokens(bs.urls.trainingDetail, { TID: String(tdoc.docId || tdoc._id) }) : bs.urls.training;
   const [planNodes, setPlanNodes] = useState<TrainingPlanNode[]>(() => {
     try {
@@ -205,7 +205,7 @@ export function TrainingEditPage() {
             <ArrowLeft className="size-4" />
           </a>
         </Button>
-        <h1 className="text-xl font-semibold">{isEdit ? '编辑训练' : '创建训练'}</h1>
+        <h1 className="text-xl font-semibold">{isEdit ? '编辑题集' : '创建题集'}</h1>
       </div>
 
       <Card>
@@ -263,7 +263,7 @@ export function TrainingEditPage() {
             <div className="flex items-center gap-3">
               <Button type="submit">
                 <Save className="mr-1 size-4" />
-                {isEdit ? '保存修改' : '创建训练'}
+                {isEdit ? '保存修改' : '创建题集'}
               </Button>
             </div>
           </form>
@@ -354,7 +354,7 @@ function StagePlanEditor({ planNodes, setPlanNodes, addNode, removeNode, updateN
   return (
     <div className="space-y-1.5">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <label className="text-sm font-medium">训练计划 ({planNodes.length} 阶段)</label>
+        <label className="text-sm font-medium">题集阶段 ({planNodes.length})</label>
         <div className="flex items-center gap-2">
           <SimpleSelect
             value=""
@@ -547,7 +547,7 @@ export function TrainingFilesPage() {
           </a>
         </Button>
         <div>
-          <h1 className="text-xl font-semibold">训练文件</h1>
+          <h1 className="text-xl font-semibold">题集文件</h1>
           <p className="text-sm text-muted-foreground">{tdoc.title}</p>
         </div>
       </div>
@@ -605,3 +605,5 @@ export function TrainingFilesPage() {
     </motion.div>
   );
 }
+
+export { TrainingFilesPage as ProblemSetFilesPage, TrainingEditPage as ProblemSetManagePage };

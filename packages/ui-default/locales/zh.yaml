@@ -111,7 +111,7 @@ All Contests: 所有比赛
 All Homeworks: 所有作业
 All Languages: 所有语言
 All Submissions: 所有递交
-All Training Plans: 所有训练计划
+All Training Plans: 所有题集
 All Users: 所有用户
 All: 全部
 Allow to maintain this {0}: 允许管理此{0}
@@ -623,7 +623,7 @@ New Email: 新电子邮件
 New Filename: 新文件名
 New filename(s): 新文件名
 New Password: 新密码
-New Training Plan: 新训练计划
+New Training Plan: 新题集
 New: 创建
 No {0} at current.: 当前没有{0}。
 No changes to make.: 没有任何修改。
@@ -1039,7 +1039,7 @@ Total: 总计
 Training requirement is not satisfied.: 不满足训练条件。
 training_create: 创建训练
 training_edit: 编辑训练
-training_main: 训练
+training_main: 题集
 Training: 训练
 Transports: 支持类型
 Tried: 尝试

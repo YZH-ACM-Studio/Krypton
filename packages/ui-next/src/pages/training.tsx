@@ -208,11 +208,11 @@ export function TrainingPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold">训练</h1>
-          <p className="text-sm text-muted-foreground">系统化训练计划，按 DAG 推进</p>
+          <h1 className="text-xl font-semibold">题集</h1>
+          <p className="text-sm text-muted-foreground">系统化题集，按阶段 DAG 推进</p>
         </div>
         <Button asChild>
-          <a href={`${bs.urls.training}/create`}>创建训练</a>
+          <a href={`${bs.urls.training}/create`}>创建题集</a>
         </Button>
       </div>
 
@@ -250,7 +250,7 @@ export function TrainingPage() {
               <label className="text-xs text-muted-foreground">搜索</label>
               <div className="relative">
                 <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                <input name="q" defaultValue={q} className="w-full rounded-md border bg-background py-2 pl-8 pr-3 text-sm" placeholder="训练标题" />
+                <input name="q" defaultValue={q} className="w-full rounded-md border bg-background py-2 pl-8 pr-3 text-sm" placeholder="题集标题" />
               </div>
             </div>
             <Button type="submit" size="sm">
@@ -282,7 +282,7 @@ export function TrainingPage() {
       {filtered.length === 0 ? (
         <Card>
           <CardContent className="py-12 text-center text-sm text-muted-foreground">
-            {tdocs.length === 0 ? '暂无训练计划' : '没有符合条件的训练'}
+            {tdocs.length === 0 ? '暂无题集' : '没有符合条件的题集'}
           </CardContent>
         </Card>
       ) : view === 'cards' ? (
@@ -338,7 +338,7 @@ function TrainingCard({ e, bs }: { e: TrainingListEntry; bs: ReturnType<typeof u
       <Card className="h-full transition-all group-hover:border-primary/40 group-hover:shadow-md">
         <CardHeader className="pb-2">
           <div className="flex items-start justify-between gap-2">
-            <CardTitle className="line-clamp-2 text-base leading-tight">{t.title || '未命名训练'}</CardTitle>
+            <CardTitle className="line-clamp-2 text-base leading-tight">{t.title || '未命名题集'}</CardTitle>
             {fullyDone ? (
               <Badge variant="default" className="shrink-0">
                 已完成
@@ -355,7 +355,7 @@ function TrainingCard({ e, bs }: { e: TrainingListEntry; bs: ReturnType<typeof u
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
-          <p className="line-clamp-2 text-sm text-muted-foreground min-h-[40px]">{formatPlainTextSummary(t.content || t.desc) || '精选题目训练'}</p>
+          <p className="line-clamp-2 text-sm text-muted-foreground min-h-[40px]">{formatPlainTextSummary(t.content || t.desc) || '精选题集'}</p>
 
           {/* Mini DAG preview */}
           <DagThumbnail
@@ -586,16 +586,16 @@ export function TrainingDetailPage() {
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <a href={bs.urls.training} className="hover:text-primary">
-          训练
+          题集
         </a>
         <ChevronRight className="size-3" />
-        <span className="text-foreground">{tdoc.title || '训练'}</span>
+        <span className="text-foreground">{tdoc.title || '题集'}</span>
       </div>
 
       {/* Hero (compact, single line) */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <h1 className="text-2xl font-bold truncate">{tdoc.title || '训练'}</h1>
+          <h1 className="text-2xl font-bold truncate">{tdoc.title || '题集'}</h1>
           <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <span className="flex items-center gap-1">
               <Users className="size-3" />
@@ -626,14 +626,14 @@ export function TrainingDetailPage() {
           {!enrolled ? (
             <form method="post">
               <input type="hidden" name="operation" value="enroll" />
-              <Button type="submit">参加训练</Button>
+              <Button type="submit">参加题集</Button>
             </form>
           ) : null}
           {continueLink ? (
             <Button asChild>
               <a href={continueLink}>
                 <PlayCircle className="mr-1.5 size-4" />
-                继续训练
+                继续题集
               </a>
             </Button>
           ) : null}
@@ -674,7 +674,7 @@ export function TrainingDetailPage() {
         <CardHeader className="pb-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <CardTitle className="text-sm">训练内搜题</CardTitle>
+              <CardTitle className="text-sm">题集内搜题</CardTitle>
               <p className="mt-0.5 text-xs text-muted-foreground">按题号或标题搜索全部章节</p>
             </div>
             {problemQuery.trim() ? (
@@ -693,7 +693,7 @@ export function TrainingDetailPage() {
               value={problemQuery}
               onChange={(event) => setProblemQuery(event.target.value)}
               placeholder="搜索公开题号、内部题号或标题"
-              aria-label="搜索当前训练中的题目"
+              aria-label="搜索当前题集中的题目"
               className="pl-9 pr-9"
             />
             {problemQuery ? (
@@ -701,7 +701,7 @@ export function TrainingDetailPage() {
                 type="button"
                 onClick={() => setProblemQuery('')}
                 className="absolute right-2 top-1/2 rounded-md p-1 -translate-y-1/2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                aria-label="清空训练题目搜索"
+                aria-label="清空题集题目搜索"
               >
                 <X className="size-3.5" />
               </button>
@@ -770,7 +770,7 @@ export function TrainingDetailPage() {
               </div>
             ) : (
               <div className="rounded-lg border border-dashed px-4 py-8 text-center text-sm text-muted-foreground" role="status" aria-live="polite">
-                当前训练中没有匹配的可见题目
+                当前题集中没有匹配的可见题目
               </div>
             )
           ) : null}
@@ -999,7 +999,7 @@ function TrainingMembersCard({ members, trainingTitle, truncated }: { members: T
     const blob = new Blob([`\uFEFF${lines.join('\r\n')}`], { type: 'text/csv;charset=utf-8' });
     const a = Object.assign(document.createElement('a'), {
       href: URL.createObjectURL(blob),
-      download: `${trainingTitle || '训练'}-参加名单.csv`,
+      download: `${trainingTitle || '题集'}-参加名单.csv`,
     });
     a.click();
     URL.revokeObjectURL(a.href);
@@ -1328,3 +1328,5 @@ function SectionStatusDot({ ns }: { ns: TrainingNodeStatus }) {
   else cls = 'bg-muted-foreground/15';
   return <span className={`size-2.5 rounded-full shrink-0 ${cls}`} />;
 }
+
+export { TrainingDetailPage as ProblemSetDetailPage, TrainingPage as ProblemSetPage };

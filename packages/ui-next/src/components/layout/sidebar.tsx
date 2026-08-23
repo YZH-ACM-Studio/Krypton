@@ -166,10 +166,10 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
         },
         { label: '课程', href: '/course', icon: BookMarked, templates: ['course_main.html', 'course_detail.html', 'course_edit.html'] },
         {
-          label: '训练',
+          label: '题集',
           href: bs.urls.training,
           icon: GraduationCap,
-          templates: ['training_main.html', 'training_detail.html', 'training_edit.html', 'training_files.html'],
+          templates: ['problem_set_main.html', 'problem_set_detail.html', 'problem_set_edit.html', 'problem_set_files.html'],
         },
         { label: '任务', href: '/tasks', icon: ListChecks, templates: ['tasks_center.html', 'tasks_my.html', 'tasks_detail.html'] },
         { label: '协作', href: '/permits/inbox', icon: ShieldCheck, templates: ['my_verify_inbox.html'] },

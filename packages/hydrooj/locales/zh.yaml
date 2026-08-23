@@ -72,7 +72,7 @@ All {0} Contests: 所有 {0} 比赛
 All Contests: 所有比赛
 All Homeworks: 所有作业
 All Submissions: 所有递交
-All Training Plans: 所有训练计划
+All Training Plans: 所有题集
 All: 全部
 Allow builtin-login: 启用内置登录
 Allow users send messages: 允许用户使用私信
@@ -209,8 +209,8 @@ Create problems: 创建全部题型
 Create problems permission detail: 可创建全部八种题型并包含托管编程题基础资格；编程题默认使用 P5，其他题号命名空间仍需另行授权。
 Create tasks: 创建任务
 Create Role: 创建角色
-Create Training Plan: 创建训练计划
-Create training plans: 创建训练计划
+Create Training Plan: 创建题集
+Create training plans: 创建题集
 Create: 创建
 Created By: 创建人
 Current dataset comes from: 当前数据集来自
@@ -320,14 +320,14 @@ Edit own homework: 修改自己的作业
 Edit own problem solution replies: 修改题解中自己的回复
 Edit own problem solutions: 修改自己的题解
 Edit own problems: 修改自己的题目
-Edit own training plans: 修改自己的训练计划
+Edit own training plans: 修改自己的题集
 Edit permissions of a role: 修改角色权限
 Edit problem solution replies: 修改题解的回复
 Edit problem solutions: 修改题解
 Edit Problem: 编辑题目
 Edit problems: 修改题目
 Edit Profile: 编辑个人信息
-Edit training plans: 修改训练计划
+Edit training plans: 修改题集
 Edit: 编辑
 Email Visibility: Email 可见性
 Email: 电子邮件
@@ -420,7 +420,7 @@ In 3 days: 三天后
 In 3 hours: 三个小时后
 In following contests: 在下列比赛中
 In following homework: 在以下作业中
-In following training plans: 在下列训练计划中
+In following training plans: 在下列题集中
 In Progress: 进行中
 Information: 信息
 Init Discussion Nodes: 初始化讨论结点
@@ -470,7 +470,7 @@ Lock Topic: 锁定主题
 Login to Attend Contest: 登录后参加比赛
 Login to Claim Homework: 登录后认领作业
 Login to Create a Discussion: 登录后创建讨论
-Login to join training plan: 登录以参加训练计划
+Login to join training plan: 登录以参加题集
 Login to Submit: 登录后递交
 Login: 登录
 Logout All Sessions: 注销所有会话
@@ -518,7 +518,7 @@ Never expire: 从不过期
 New Email: 新电子邮件
 New file: 新文件
 New Password: 新密码
-New Training Plan: 新训练计划
+New Training Plan: 新题集
 New: 创建
 No comments so far...: 目前还没有评论...
 No dataset at present.: 暂无测试数据。
@@ -567,7 +567,7 @@ OS Info: 系统信息
 Output Format: 输出格式
 Owner: 所有者
 page.problem_detail.sidebar.show_category: 点击显示
-page.training_detail.invalid_when_not_enrolled: 未参加训练计划时您不能查看题目详情。
+page.training_detail.invalid_when_not_enrolled: 未参加题集时您不能查看题目详情。
 page.training_detail.see_other_user_detail: 您正在查看用户 {0} 的训练详情。
 pager_first: « 第一页
 pager_last: 末页 »
@@ -613,7 +613,7 @@ Phone: 手机号
 Pick a problem randomly based on the current filter.: 根据当前过滤条件随机选择一道题
 pid: 题目 ID
 Pin discussions: 置顶讨论
-Pin training plans: 置顶训练计划
+Pin training plans: 置顶题集
 Plan: 计划
 Please attend contest to see the problems.: 请参加比赛来查看题目。
 Please claim the assignment to see the problems.: 认领作业后才可以查看作业内容。
@@ -856,11 +856,16 @@ Total Time (Seconds): 总耗时 (秒)
 Total Time: 总耗时
 Total: 总计
 Training requirement is not satisfied.: 不满足训练条件。
-training_create: 创建训练
-training_detail: 训练详情
-training_edit: 编辑训练
-training_files: 训练文件
-training_main: 训练
+training_create: 创建题集
+training_detail: 题集详情
+training_edit: 编辑题集
+training_files: 题集文件
+training_main: 题集
+problem_set_create: 创建题集
+problem_set_detail: 题集详情
+problem_set_edit: 编辑题集
+problem_set_files: 题集文件
+problem_set_main: 题集
 Training: 训练
 Trainings per page: 每页展示的训练数量
 Type: 类型
@@ -929,14 +934,14 @@ View Homework: 查看作业
 View or create discussion: 查看与发表讨论
 View or submit solution: 查看与发表题解
 View Owned Problems: 查看自己的题目
-View Owned Training Plans: 查看自己的训练计划
+View Owned Training Plans: 查看自己的题集
 View problem solutions after accept: 题目通过后查看题解
 View problem solutions: 查看题解
 View Problem: 查看题目
 View problems: 查看题目
 View ranking: 查看排名
 View this domain: 查看此域
-View training plans: 查看训练计划
+View training plans: 查看题集
 View: 查看
 Visible to registered users: 对注册用户可见
 Visit: 查看
@@ -963,7 +968,7 @@ WYSIWYG: 所见即所得
 Year: 年
 You are banned by the domain moderator.: 您被该域的管理员封禁。
 You are not allowed to join domain {0}. {1}: 您无法加入 {0}。{1}
-You can create your own training plans and share them with others.: 您可以创建您自己的训练计划并且与他人分享。
+You can create your own training plans and share them with others.: 您可以创建自己的题集并与他人分享。
 You cannot submit for this problem because the contest is ended. You can click "Open in Problem Set" to view this problem in normal mode.: 该比赛已结束，您无法在比赛模式下递交该题目。您可以点击“在题库中打开”以普通模式查看和递交本题。
 You cannot submit for this problem because the homework's deadline is due.: 作业已超过截止时间，您无法递交本题目。
 You cannot visit this domain.: 您不能访问此域。

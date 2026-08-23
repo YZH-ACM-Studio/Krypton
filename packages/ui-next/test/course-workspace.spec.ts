@@ -72,7 +72,7 @@ describe('p3.8 course workspace', () => {
     expect(handler).to.include("ctx.Route('course_file_download', '/course/:tid/file/:filename'");
     expect(handler).to.include("@post('filename', Types.Filename)");
     expect(handler).to.include('listedCourseFile(tdoc, filename)');
-    expect(training).to.include('assertNotCourse(tdoc)');
+    expect(training).to.include('assertProblemSet(tdoc)');
     expect(training).to.include('throw new NotFoundError(localizedErrorText`file`)');
     expect(editor).to.include('<FileUploader');
     expect(editor).to.include('uploadConcurrency={1}');

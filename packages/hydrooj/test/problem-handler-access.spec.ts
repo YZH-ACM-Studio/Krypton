@@ -827,7 +827,7 @@ function makeHandler(HandlerClass: any, user: Record<string, unknown>) {
             setting: { get: () => 20 },
             parallel: async () => undefined,
         },
-        url: (name: string) => (name === 'training_main' ? '/training' : `/${name}`),
+        url: (name: string) => (name === 'training_main' ? '/problem-sets' : `/${name}`),
         paginate: async (source: any, page: number, limit: number) => [
             await source
                 .skip((page - 1) * limit)
@@ -912,7 +912,7 @@ describe('P2.11 enumeration entry gates', () => {
     it('redirects the page before any query when the user cannot browse', async () => {
         const handler = makeHandler(ProblemMainHandler, { canBrowse: false });
         await handler.get('system', 1, '', 20, false, false);
-        expect(handler.response.redirect).to.equal('/training');
+        expect(handler.response.redirect).to.equal('/problem-sets');
         expect(calls.getMulti).to.deep.equal([]);
         expect(calls.count).to.deep.equal([]);
     });
@@ -930,8 +930,8 @@ describe('P2.11 enumeration entry gates', () => {
         const mine = makeHandler(ProblemMineHandler, { canBrowse: false });
         await random.get('system', '');
         await mine.get('system', 1);
-        expect(random.response.redirect).to.equal('/training');
-        expect(mine.response.redirect).to.equal('/training');
+        expect(random.response.redirect).to.equal('/problem-sets');
+        expect(mine.response.redirect).to.equal('/problem-sets');
         expect(calls.random).to.deep.equal([]);
         expect(calls.getMulti).to.deep.equal([]);
     });

@@ -187,7 +187,7 @@ export function KryptonHomePage() {
   const stats: Array<{ icon: LucideIcon; label: string; value: number; href: string }> = [
     { icon: Trophy, label: '比赛', value: contests.length, href: bs.urls.contests },
     { icon: BookOpen, label: '作业', value: homework.length, href: bs.urls.homework },
-    { icon: GraduationCap, label: '训练', value: training.length, href: bs.urls.training },
+    { icon: GraduationCap, label: '题集', value: training.length, href: bs.urls.training },
     { icon: MessageSquare, label: '讨论', value: discussions.length, href: bs.urls.discussions },
   ];
 
@@ -373,7 +373,7 @@ export function KryptonHomePage() {
 
           {/* Training */}
           <SectionShell
-            title="训练"
+            title="题集"
             delay={0.2}
             action={
               <Button asChild variant="ghost" size="sm">
@@ -384,7 +384,7 @@ export function KryptonHomePage() {
             }
           >
             {training.length === 0 ? (
-              <Empty text="暂无训练计划" />
+              <Empty text="暂无题集" />
             ) : (
               <div className="grid gap-3 sm:grid-cols-2">
                 {training.slice(0, 4).map((t) => {
@@ -395,7 +395,7 @@ export function KryptonHomePage() {
                       className="group rounded-lg border p-3 transition-colors hover:bg-accent/50"
                       href={replaceRouteTokens(bs.urls.trainingDetail, { TID: String(t.docId) })}
                     >
-                      <p className="truncate text-sm font-medium">{t.title || '未命名训练'}</p>
+                      <p className="truncate text-sm font-medium">{t.title || '未命名题集'}</p>
                       <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
                         {formatPlainTextSummary(t.content || t.desc) || '一组精选题目'}
                       </p>

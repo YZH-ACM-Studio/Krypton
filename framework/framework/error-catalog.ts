@@ -1063,7 +1063,11 @@ const CORE_ERROR_MESSAGE_TRANSLATIONS: Readonly<Record<string, ErrorMessageTrans
     'no-challenge': { en: 'Missing challenge', 'zh-CN': '缺少验证挑战' },
     person: { en: 'Person', 'zh-CN': '人员' },
     student: { en: 'Student', 'zh-CN': '学生' },
-    training: { en: 'Training', 'zh-CN': '训练' },
+    training: { en: 'Problem set', 'zh-CN': '题集' },
+    '请从题集页面提交这次操作。': {
+        en: 'Submit this action from the problem-set page.',
+        'zh-CN': '请从题集页面提交这次操作。',
+    },
     user: { en: 'User', 'zh-CN': '用户' },
     'JSON 格式错误': { en: 'Invalid JSON format.', 'zh-CN': 'JSON 格式错误' },
     'accepted 不能大于 submitted': {

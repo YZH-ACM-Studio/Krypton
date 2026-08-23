@@ -91,8 +91,8 @@ import { SubjectiveProblemEditorPage } from '@/pages/subjective-editor';
 import { SudoPage, SudoRedirectPage } from '@/pages/sudo';
 import { ManageConfigPage, ManageScriptPage, ManageSettingPage } from '@/pages/system-manage';
 import { TaskCenterPage, TaskDetailPage, TaskMyPage } from '@/pages/tasks';
-import { TrainingDetailPage, TrainingPage } from '@/pages/training';
-import { TrainingEditPage, TrainingFilesPage } from '@/pages/training-manage';
+import { ProblemSetDetailPage, ProblemSetPage } from '@/pages/training';
+import { ProblemSetFilesPage, ProblemSetManagePage } from '@/pages/training-manage';
 import { UserDetailPage } from '@/pages/user';
 import { UserAccountPage } from '@/pages/user-account';
 import {
@@ -173,10 +173,10 @@ const PAGE_MAP: Record<string, PageComponent> = {
   'course_main.html': CoursePage,
   'course_detail.html': CourseDetailPage,
   'course_edit.html': CourseEditPage,
-  'training_main.html': TrainingPage,
-  'training_detail.html': TrainingDetailPage,
-  'training_edit.html': TrainingEditPage,
-  'training_files.html': TrainingFilesPage,
+  'problem_set_main.html': ProblemSetPage,
+  'problem_set_detail.html': ProblemSetDetailPage,
+  'problem_set_edit.html': ProblemSetManagePage,
+  'problem_set_files.html': ProblemSetFilesPage,
 
   // Discussions
   'discussion_main_or_node.html': DiscussionsPage,

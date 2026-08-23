@@ -94,7 +94,7 @@ describe('p3.24 training problem search', () => {
   it('connects the search results to existing problem and chapter navigation', () => {
     const source = readFileSync(resolve(import.meta.dirname, '../src/pages/training.tsx'), 'utf8');
     expect(source).to.include('searchTrainingProblems({ dag, pdict, psdict, nsdict, controlled: integrityControlled, query: problemQuery })');
-    expect(source).to.include('aria-label="搜索当前训练中的题目"');
+    expect(source).to.include('aria-label="搜索当前题集中的题目"');
     expect(source).to.include('selectChapter(chapter.id)');
     expect(source).to.include('href={problemSearchEntryUrl(row)}');
     expect(source).to.include('return practiceProblemEntryUrl(base');

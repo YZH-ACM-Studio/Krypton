@@ -118,7 +118,7 @@ class TrainingMainHandler extends Handler {
                 }),
             );
         }
-        this.response.template = 'training_main.html';
+        this.response.template = 'problem_set_main.html';
         this.response.body = {
             tdocs,
             page,
@@ -298,7 +298,7 @@ class TrainingDetailHandler extends Handler {
         }
 
         this.response.pjax = 'partials/training_detail.html';
-        this.response.template = 'training_detail.html';
+        this.response.template = 'problem_set_detail.html';
     }
 
     @param('tid', Types.ObjectId)
@@ -339,8 +339,8 @@ class TrainingEditHandler extends Handler {
     }
 
     async get() {
-        this.response.template = 'training_edit.html';
-        this.response.body = { page_name: this.tdoc ? 'training_edit' : 'training_create' };
+        this.response.template = 'problem_set_edit.html';
+        this.response.body = { page_name: this.tdoc ? 'problem_set_edit' : 'problem_set_create' };
         if (this.tdoc) {
             this.response.body.tdoc = this.tdoc;
             this.response.body.dag = JSON.stringify(this.tdoc.dag, null, 2);
@@ -408,7 +408,7 @@ export class TrainingFilesHandler extends Handler {
             urlForFile: (filename: string) => this.url('training_file_download', { tid, filename }),
         };
         this.response.pjax = 'partials/files.html';
-        this.response.template = 'training_files.html';
+        this.response.template = 'problem_set_files.html';
     }
 
     @param('tid', Types.ObjectId)
@@ -464,11 +464,57 @@ export class TrainingFileDownloadHandler extends Handler {
     }
 }
 
+function requestQuery(handler: Handler): Record<string, string> {
+    const raw = handler.request.query;
+    if (!raw || typeof raw !== 'object') return {};
+    const query: Record<string, string> = {};
+    for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+        if (value === undefined || value === null) continue;
+        query[key] = Array.isArray(value) ? String(value[0]) : String(value);
+    }
+    return query;
+}
+
+function canonicalTrainingRouteName(path: string, tid?: ObjectId, filename?: string) {
+    if (filename) return 'training_file_download';
+    if (/\/edit\/?$/.test(path)) return 'training_edit';
+    if (/\/file\/?$/.test(path)) return 'training_files';
+    if (/\/create\/?$/.test(path)) return 'training_create';
+    if (tid) return 'training_detail';
+    return 'training_main';
+}
+
+class TrainingCompatRedirectHandler extends Handler {
+    async prepare() {
+        if (this.request.method !== 'GET' && this.request.method !== 'HEAD') {
+            throw new ValidationError('path', null, localizedErrorText`请从题集页面提交这次操作。`);
+        }
+    }
+
+    @param('tid', Types.ObjectId, true)
+    @param('filename', Types.Filename, true)
+    async get(_domainId: string, tid?: ObjectId, filename?: string) {
+        const name = canonicalTrainingRouteName(String(this.request.path || ''), tid, filename);
+        const query = requestQuery(this);
+        const args: Record<string, unknown> = Object.keys(query).length ? { query } : {};
+        if (tid) args.tid = tid;
+        if (filename) args.filename = filename;
+        this.response.redirect = this.url(name, args);
+        this.response.status = 301;
+    }
+}
+
 export async function apply(ctx) {
-    ctx.Route('training_main', '/training', TrainingMainHandler, PERM.PERM_VIEW_TRAINING);
-    ctx.Route('training_create', '/training/create', TrainingEditHandler);
-    ctx.Route('training_detail', '/training/:tid', TrainingDetailHandler, PERM.PERM_VIEW_TRAINING);
-    ctx.Route('training_edit', '/training/:tid/edit', TrainingEditHandler);
-    ctx.Route('training_files', '/training/:tid/file', TrainingFilesHandler, PERM.PERM_VIEW_TRAINING);
-    ctx.Route('training_file_download', '/training/:tid/file/:filename', TrainingFileDownloadHandler, PERM.PERM_VIEW_TRAINING);
+    ctx.Route('training_main', '/problem-sets', TrainingMainHandler, PERM.PERM_VIEW_TRAINING);
+    ctx.Route('training_create', '/problem-sets/create', TrainingEditHandler);
+    ctx.Route('training_detail', '/problem-sets/:tid', TrainingDetailHandler, PERM.PERM_VIEW_TRAINING);
+    ctx.Route('training_edit', '/problem-sets/:tid/edit', TrainingEditHandler);
+    ctx.Route('training_files', '/problem-sets/:tid/file', TrainingFilesHandler, PERM.PERM_VIEW_TRAINING);
+    ctx.Route('training_file_download', '/problem-sets/:tid/file/:filename', TrainingFileDownloadHandler, PERM.PERM_VIEW_TRAINING);
+    ctx.Route('training_compat_main', '/training', TrainingCompatRedirectHandler);
+    ctx.Route('training_compat_create', '/training/create', TrainingCompatRedirectHandler);
+    ctx.Route('training_compat_detail', '/training/:tid', TrainingCompatRedirectHandler);
+    ctx.Route('training_compat_edit', '/training/:tid/edit', TrainingCompatRedirectHandler);
+    ctx.Route('training_compat_files', '/training/:tid/file', TrainingCompatRedirectHandler);
+    ctx.Route('training_compat_file_download', '/training/:tid/file/:filename', TrainingCompatRedirectHandler);
 }

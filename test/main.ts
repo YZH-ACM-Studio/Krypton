@@ -30,7 +30,7 @@ describe('App', () => {
         { timeout: 30000 },
     );
 
-    const routes = ['/', '/contest', '/homework', '/user/1', '/training', '/course'];
+    const routes = ['/', '/contest', '/homework', '/user/1', '/problem-sets', '/course'];
     for (const route of routes) {
         // eslint-disable-next-line ts/no-loop-func
         it(`GET ${route}`, () => agent.get(route).expect(200));

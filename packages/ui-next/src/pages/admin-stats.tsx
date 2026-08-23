@@ -218,7 +218,7 @@ function Selector({ view, docs, selectedId }: { view: 'contest' | 'training'; do
       <input type="hidden" name="view" value={view} />
       <div className="min-w-0 flex-1 space-y-1.5">
         <label className="text-xs text-muted-foreground" htmlFor={`stats-${name}`}>
-          {view === 'contest' ? '选择比赛' : '选择训练'}
+          {view === 'contest' ? '选择比赛' : '选择题集'}
         </label>
         <SimpleSelect
           name={name}
@@ -297,10 +297,10 @@ function TrainingView({ data }: { data: AdminStatsData }) {
     <div className="space-y-5">
       <div className="flex flex-col gap-2 lg:flex-row lg:items-end">
         <div className="min-w-0 flex-1"><Selector view="training" docs={data.trainings} selectedId={data.selectedTraining?.docId} /></div>
-        <CsvButton filename="训练成员进度.csv" headers={['UID', '用户名', '姓名', '学号', '完成', '总题数', '完成率']} rows={csvRows} disabled={!stats} />
+        <CsvButton filename="题集成员进度.csv" headers={['UID', '用户名', '姓名', '学号', '完成', '总题数', '完成率']} rows={csvRows} disabled={!stats} />
       </div>
       {!stats || !data.selectedTraining ? (
-        <Card><CardContent className="py-12 text-center text-sm text-muted-foreground">暂无训练可统计</CardContent></Card>
+        <Card><CardContent className="py-12 text-center text-sm text-muted-foreground">暂无题集可统计</CardContent></Card>
       ) : (
         <>
           <div className="grid gap-3 sm:grid-cols-3">
@@ -446,9 +446,9 @@ function UserView({ data }: { data: AdminStatsData }) {
               </CardContent>
             </Card>
             <Card>
-              <CardHeader><CardTitle className="text-sm">参加的训练</CardTitle></CardHeader>
+              <CardHeader><CardTitle className="text-sm">参加的题集</CardTitle></CardHeader>
               <CardContent className="space-y-2">
-                {stats.trainings.map((item) => <a key={item.docId} className="block text-sm text-primary hover:underline" href={`/training/${item.docId}`}>{item.title}</a>)}
+                {stats.trainings.map((item) => <a key={item.docId} className="block text-sm text-primary hover:underline" href={`/problem-sets/${item.docId}`}>{item.title}</a>)}
                 {!stats.trainings.length ? <p className="text-sm text-muted-foreground">暂无</p> : null}
               </CardContent>
             </Card>
@@ -643,7 +643,7 @@ export function AdminStatsPage() {
           value={data.view}
           items={[
             { value: 'contest', label: '按比赛', href: '/admin/stats?view=contest' },
-            { value: 'training', label: '按训练', href: '/admin/stats?view=training' },
+            { value: 'training', label: '按题集', href: '/admin/stats?view=training' },
             { value: 'user', label: '按人', href: '/admin/stats?view=user' },
             { value: 'group', label: '班级组', href: '/admin/stats?view=group' },
             { value: 'dashboard', label: '大盘', href: '/admin/stats?view=dashboard' },

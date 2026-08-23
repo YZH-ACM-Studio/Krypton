@@ -70,7 +70,7 @@ async function handleHashChange() {
   }
 }
 
-const page = new NamedPage('training_detail', () => {
+const page = new NamedPage(['training_detail', 'problem_set_detail'], () => {
   $('.search__input').on('input', _.debounce(searchUser, 500));
   $('select[name=group]').on('change', searchUser);
   $('#searchForm').on('submit', selectUser);

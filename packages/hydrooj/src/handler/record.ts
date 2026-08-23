@@ -5,6 +5,7 @@ import { load as loadYaml } from 'js-yaml';
 import { Filter, ObjectId } from 'mongodb';
 import {
     localizeError,
+    localizedErrorText,
     ContestNotFoundError,
     HackRejudgeFailedError,
     PermissionError,
@@ -17,6 +18,7 @@ import {
 } from '../error';
 import { RecordDoc, Tdoc } from '../interface';
 import { canAccessPostContestPracticeRecord, canUsePostContestPractice } from '../lib/contest-correction';
+import { canViewVirtualContestRecord } from '../lib/virtual-contest';
 import { buildPersonalPracticeRecordQuery } from '../lib/contest-problem-status';
 import { buildExamModeRecordCodePayload, shouldUseLiveClientRecordCodeOnly } from '../lib/exam-mode-record';
 import { formatRecordJudgeMessages } from '../lib/record-judge-presentation';
@@ -38,6 +40,7 @@ import system from '../model/system';
 import user from '../model/user';
 import { ConnectionHandler, param, subscribe, Types } from '../service/server';
 import { buildProjection, Time } from '../utils';
+import { canManageVirtualContest, virtualContestService } from '../model/virtual-contest';
 import { ContestDetailBaseHandler } from './contest';
 
 async function getCurrentTeamForRecord(domainId: string, rdoc: RecordDoc, uid: number): Promise<contestTeam.ContestTeamDoc | null> {
@@ -51,11 +54,36 @@ async function canAccessCurrentTeamRecord(domainId: string, rdoc: RecordDoc, uid
     return !!(await getCurrentTeamForRecord(domainId, rdoc, uid));
 }
 
+async function assertVirtualContestRecordAccess(
+    domainId: string,
+    rdoc: RecordDoc,
+    actor: { _id: number; hasPerm: (...perm: bigint[]) => boolean; hasPriv: (priv: number) => boolean; own: (doc: { owner?: number }) => boolean },
+): Promise<void> {
+    if (!rdoc.virtualAttemptId || !rdoc.sourceContestId) throw new PermissionError(PERM.PERM_VIEW_RECORD);
+    const attempt = await virtualContestService.getAttempt(domainId, rdoc.virtualAttemptId);
+    if (String(attempt.sourceContestId) !== String(rdoc.sourceContestId)) {
+        throw new PermissionError(PERM.PERM_VIEW_RECORD);
+    }
+    const tdoc = await contest.get(domainId, attempt.sourceContestId);
+    const mine = await virtualContestService.getOfficialAttempt(domainId, attempt.sourceContestId, actor._id);
+    if (
+        !canViewVirtualContestRecord({
+            attempt,
+            viewerUid: actor._id,
+            canManage: canManageVirtualContest(actor, tdoc),
+            viewerHasEnded: mine?.status === 'ended',
+        })
+    ) {
+        throw new PermissionError(PERM.PERM_VIEW_RECORD);
+    }
+}
+
 export class RecordListHandler extends ContestDetailBaseHandler {
     @param('page', Types.PositiveInt, true)
     @param('pid', Types.ProblemId, true)
     @param('tid', Types.ObjectId, true)
     @param('practice', Types.Boolean)
+    @param('virtual', Types.Boolean)
     @param('uidOrName', Types.UidOrName, true)
     @param('lang', Types.String, true)
     @param('status', Types.Int, true)
@@ -69,6 +97,7 @@ export class RecordListHandler extends ContestDetailBaseHandler {
         pid?: string | number,
         tid?: ObjectId,
         practice = false,
+        virtual = false,
         uidOrName?: string,
         lang?: string,
         status?: number,
@@ -88,8 +117,11 @@ export class RecordListHandler extends ContestDetailBaseHandler {
         // pretest records (contest = RECORD_PRETEST sentinel) leak into
         // the per-problem "提交记录" list. Build the contest filter
         // explicitly to keep practice records (no contest field) only.
-        let q: Filter<RecordDoc> = tid ? { contest: tid } : { contest: { $exists: false } };
+        let q: Filter<RecordDoc> = tid ? { contest: tid } : { contest: { $exists: false }, virtualAttemptId: { $exists: false } };
         if (practice && !tid) throw new PermissionError(PERM.PERM_VIEW_RECORD);
+        if (virtual && practice) throw new ValidationError('virtual');
+        if (virtual && !tid) throw new ValidationError('tid');
+        if (virtual && (all || allDomain)) throw new ValidationError('virtual');
         if (full) uidOrName = this.user._id.toString();
         if (uidOrName) {
             const udoc =
@@ -103,35 +135,46 @@ export class RecordListHandler extends ContestDetailBaseHandler {
             tdoc = await contest.get(domainId, tid);
             this.tdoc = tdoc;
             if (!tdoc) throw localizeError(new ContestNotFoundError(domainId, pid), 'Contest {0} not found.', tid);
-            postContestPracticeActive = practice && canUsePostContestPractice(tdoc, this.tsdoc);
-            if (practice && !postContestPracticeActive) throw new PermissionError(PERM.PERM_VIEW_RECORD);
-            if (postContestPracticeActive) {
-                if (!pid || all || allDomain || (q.uid !== undefined && q.uid !== this.user._id)) {
-                    throw new PermissionError(PERM.PERM_VIEW_RECORD);
+            if (virtual) {
+                const attempt = await virtualContestService.getOfficialAttempt(domainId, tid, this.user._id);
+                if (!attempt) throw new ValidationError('virtual', null, localizedErrorText`虚拟参赛尚未开始`);
+                const canManage = canManageVirtualContest(this.user, tdoc);
+                if (!canManage && attempt.uid !== this.user._id) throw new PermissionError(PERM.PERM_VIEW_RECORD);
+                q = { virtualAttemptId: attempt._id, uid: canManage && uidOrName ? q.uid : attempt.uid };
+            } else {
+                postContestPracticeActive = practice && canUsePostContestPractice(tdoc, this.tsdoc);
+                if (practice && !postContestPracticeActive) throw new PermissionError(PERM.PERM_VIEW_RECORD);
+                if (postContestPracticeActive) {
+                    if (!pid || all || allDomain || (q.uid !== undefined && q.uid !== this.user._id)) {
+                        throw new PermissionError(PERM.PERM_VIEW_RECORD);
+                    }
+                    q = buildPersonalPracticeRecordQuery(this.user._id, tdoc.pids);
+                } else if (contest.getParticipationMode(tdoc) === 'team' && q.uid === this.user._id) {
+                    const team = await contestTeam.getTeamByMember(domainId, tid, this.user._id);
+                    if (team) {
+                        delete q.uid;
+                        q.contestTeamId = team.teamId;
+                        teamRecordAccess = true;
+                    } else this.checkPerm(PERM.PERM_VIEW_RECORD);
                 }
-                q = buildPersonalPracticeRecordQuery(this.user._id, tdoc.pids);
-            } else if (contest.getParticipationMode(tdoc) === 'team' && q.uid === this.user._id) {
-                const team = await contestTeam.getTeamByMember(domainId, tid, this.user._id);
-                if (team) {
-                    delete q.uid;
-                    q.contestTeamId = team.teamId;
-                    teamRecordAccess = true;
-                } else this.checkPerm(PERM.PERM_VIEW_RECORD);
-            }
-            if (!postContestPracticeActive) {
-                if (!teamRecordAccess && q.uid !== this.user._id) this.checkPerm(PERM.PERM_VIEW_RECORD);
-                if (!contest.canShowScoreboard.call(this, tdoc, true)) {
-                    throw new PermissionError(PERM.PERM_VIEW_CONTEST_HIDDEN_SCOREBOARD);
-                }
-                if (!contest[teamRecordAccess || q.uid === this.user._id ? 'canShowSelfRecord' : 'canShowRecord'].call(this, tdoc, true)) {
-                    throw new PermissionError(PERM.PERM_VIEW_CONTEST_HIDDEN_SCOREBOARD);
-                }
-                if (!(await contest.getStatus(domainId, tid, this.user._id))?.attend) {
-                    const name = tdoc.rule === 'homework' ? "You haven't claimed this homework yet." : "You haven't attended this contest yet.";
-                    notification.push({ name, args: { type: 'note' }, checker: () => true });
+                if (!postContestPracticeActive) {
+                    if (!teamRecordAccess && q.uid !== this.user._id) this.checkPerm(PERM.PERM_VIEW_RECORD);
+                    if (!contest.canShowScoreboard.call(this, tdoc, true)) {
+                        throw new PermissionError(PERM.PERM_VIEW_CONTEST_HIDDEN_SCOREBOARD);
+                    }
+                    if (!contest[teamRecordAccess || q.uid === this.user._id ? 'canShowSelfRecord' : 'canShowRecord'].call(this, tdoc, true)) {
+                        throw new PermissionError(PERM.PERM_VIEW_CONTEST_HIDDEN_SCOREBOARD);
+                    }
+                    if (!(await contest.getStatus(domainId, tid, this.user._id))?.attend) {
+                        const name = tdoc.rule === 'homework' ? "You haven't claimed this homework yet." : "You haven't attended this contest yet.";
+                        notification.push({ name, args: { type: 'note' }, checker: () => true });
+                    }
                 }
             }
         } else if (q.uid !== this.user._id) this.checkPerm(PERM.PERM_VIEW_RECORD);
+        else if (q.uid === this.user._id) {
+            q = { $or: [{ contest: { $exists: false }, virtualAttemptId: { $exists: false } }, { virtualAttemptId: { $exists: true } }], uid: this.user._id };
+        }
         if (pid) {
             if (typeof pid === 'string' && tdoc && /^[A-Z]$/.test(pid)) {
                 pid = tdoc.pids[Number.parseInt(pid, 36) - 10];
@@ -160,10 +203,12 @@ export class RecordListHandler extends ContestDetailBaseHandler {
             this.checkPerm(PERM.PERM_VIEW_CONTEST_HIDDEN_SCOREBOARD);
             this.checkPerm(PERM.PERM_VIEW_HOMEWORK_HIDDEN_SCOREBOARD);
             q.contest = { $nin: [record.RECORD_PRETEST, record.RECORD_GENERATE] };
+            q.virtualAttemptId = { $exists: false };
         }
         if (allDomain) {
             this.checkPriv(PRIV.PRIV_MANAGE_ALL_DOMAIN);
             q.contest = { $nin: [record.RECORD_PRETEST, record.RECORD_GENERATE] };
+            q.virtualAttemptId = { $exists: false };
             q._id = { $gt: Time.getObjectID(new Date(Date.now() - 10 * Time.week)) };
         }
         let cursor = record.getMulti(allDomain ? '' : domainId, q).sort('_id', -1);
@@ -207,7 +252,7 @@ export class RecordListHandler extends ContestDetailBaseHandler {
                           )
                         : Object.fromEntries(uniqBy(rdocs, 'pid').map((rdoc) => [rdoc.pid, { ...problem.default, pid: rdoc.pid }])),
               ]);
-        if (this.tdoc && !postContestPracticeActive && !this.user.own(this.tdoc) && !this.user.hasPerm(PERM.PERM_EDIT_CONTEST)) {
+        if (this.tdoc && !postContestPracticeActive && !virtual && !this.user.own(this.tdoc) && !this.user.hasPerm(PERM.PERM_EDIT_CONTEST)) {
             rdocs = rdocs.map((i) => contest.applyProjection(tdoc, i, this.user));
         }
         // Admin extra column: 学号 / 姓名. Only populated when the viewer has
@@ -232,13 +277,14 @@ export class RecordListHandler extends ContestDetailBaseHandler {
             allDomain,
             filterPid: pid,
             filterTid: tid,
+            virtual,
             filterUidOrName: uidOrName,
             filterLang: lang,
             filterStatus: status,
             notification,
             teamRecordAccess,
             postContestPracticeActive,
-            recordDetailTid: postContestPracticeActive ? tid : undefined,
+            recordDetailTid: postContestPracticeActive || virtual ? tid : undefined,
             recordScoreActions,
             langs,
             statusTexts: STATUS_TEXTS,
@@ -269,6 +315,12 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
     async prepare(domainId: string, rid: ObjectId, practice = false) {
         this.rdoc = await record.get(domainId, rid);
         if (!this.rdoc) throw new RecordNotFoundError(rid);
+        if (this.rdoc.virtualAttemptId) {
+            if (practice) throw new PermissionError(PERM.PERM_VIEW_RECORD);
+            await assertVirtualContestRecordAccess(domainId, this.rdoc, this.user);
+            this.tdoc = await contest.get(domainId, this.rdoc.sourceContestId);
+            return;
+        }
         const realContestRecord =
             this.rdoc.contest instanceof ObjectId &&
             ![record.RECORD_GENERATE, record.RECORD_PRETEST].some((sentinel) => sentinel.equals(this.rdoc.contest));
@@ -380,7 +432,10 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
             });
         if (liveClientRecordCodeOnly && rev) throw new PermissionError(PERM.PERM_VIEW_RECORD);
         const contextualProblemAccess = this.postContestPracticeRecordAccess || this.contestPretestRecordAccess;
-        const requiresDirectProblemAccess = !contextualProblemAccess && (!this.tdoc || (!this.teamRecordAccess && !this.tsdoc?.attend));
+        const requiresDirectProblemAccess =
+            !contextualProblemAccess &&
+            !rdoc.virtualAttemptId &&
+            (!this.tdoc || (!this.teamRecordAccess && !this.tsdoc?.attend));
         const [pdoc, self, udoc] = await Promise.all([
             requiresDirectProblemAccess
                 ? problem.getViewableAuthorized(rdoc.domainId, rdoc.pid, this.user, problem.PROJECTION_LIST.concat('config'))
@@ -529,6 +584,9 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
             }
             throw new PermissionError(PERM.PERM_REJUDGE);
         }
+        if (this.rdoc.virtualAttemptId && operation !== 'cancel') {
+            throw new ValidationError('rid', null, localizedErrorText`确认后才能重测虚拟参赛记录`);
+        }
         if (operation !== 'cancel') {
             if (this.rdoc.files?.hack) throw new HackRejudgeFailedError();
             if (this.rdoc.contest?.toString().startsWith('0'.repeat(23))) throw new PretestRejudgeFailedError();
@@ -538,6 +596,7 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
     @param('expectedCancellationAt', Types.String, true)
     @param('rid', Types.ObjectId)
     async postRejudge(domainId: string, expectedCancellationAt: string | undefined, rid: ObjectId) {
+        if (this.rdoc.virtualAttemptId) throw new ValidationError('rid', null, localizedErrorText`确认后才能重测虚拟参赛记录`);
         if (expectedCancellationAt !== undefined || this.rdoc.status === STATUS.STATUS_CANCELED || this.rdoc.scoreCancellation) {
             if (!expectedCancellationAt) throw new ValidationError('expectedCancellationAt');
             const cancellationAt = new Date(expectedCancellationAt);
@@ -603,6 +662,7 @@ export class RecordMainConnectionHandler extends ConnectionHandler {
     all = false;
     allDomain = false;
     tid: string;
+    virtualAttemptId?: string;
     uid: number;
     teamId?: ObjectId;
     pid: number;
@@ -620,6 +680,7 @@ export class RecordMainConnectionHandler extends ConnectionHandler {
 
     @param('tid', Types.ObjectId, true)
     @param('practice', Types.Boolean)
+    @param('virtual', Types.Boolean)
     @param('pid', Types.ProblemId, true)
     @param('uidOrName', Types.UidOrName, true)
     @param('lang', Types.String, true)
@@ -632,6 +693,7 @@ export class RecordMainConnectionHandler extends ConnectionHandler {
         domainId: string,
         tid?: ObjectId,
         practice = false,
+        virtual = false,
         pid?: string | number,
         uidOrName?: string,
         lang?: string,
@@ -642,7 +704,18 @@ export class RecordMainConnectionHandler extends ConnectionHandler {
         noTemplate = false,
     ) {
         if (practice && !tid) throw new PermissionError(PERM.PERM_VIEW_RECORD);
-        if (tid) {
+        if (virtual && (practice || pretest || all || allDomain)) throw new ValidationError('virtual');
+        if (virtual && !tid) throw new ValidationError('tid');
+        if (virtual) {
+            this.tdoc = await contest.get(domainId, tid);
+            if (!this.tdoc) throw new ContestNotFoundError(domainId, tid);
+            const attempt = await virtualContestService.getOfficialAttempt(domainId, tid, this.user._id);
+            if (!attempt) throw new ValidationError('virtual', null, localizedErrorText`虚拟参赛尚未开始`);
+            const canManage = canManageVirtualContest(this.user, this.tdoc);
+            if (!canManage && attempt.uid !== this.user._id) throw new PermissionError(PERM.PERM_VIEW_RECORD);
+            this.virtualAttemptId = attempt._id.toHexString();
+            this.uid = attempt.uid;
+        } else if (tid) {
             this.tdoc = await contest.get(domainId, tid);
             if (!this.tdoc) throw new ContestNotFoundError(domainId, tid);
             this.practiceTsdoc = practice ? await contest.getStatus(domainId, tid, this.user._id) : undefined;
@@ -658,7 +731,7 @@ export class RecordMainConnectionHandler extends ConnectionHandler {
         if (pretest) {
             this.pretest = true;
             this.uid = this.user._id;
-        } else if (uidOrName) {
+        } else if (uidOrName && !this.virtualAttemptId) {
             let udoc = await user.getById(domainId, +uidOrName);
             if (udoc) this.uid = udoc._id;
             else {
@@ -732,6 +805,7 @@ export class RecordMainConnectionHandler extends ConnectionHandler {
                 {
                     domainId: rdoc.domainId,
                     contestId,
+                    virtualAttemptId: rdoc.virtualAttemptId?.toHexString(),
                     lang: rdoc.lang,
                     status: rdoc.status,
                     input: rdoc.input,
@@ -739,6 +813,7 @@ export class RecordMainConnectionHandler extends ConnectionHandler {
                 {
                     domainId: this.args.domainId,
                     tid: this.tid,
+                    virtualAttemptId: this.virtualAttemptId,
                     lang: this.lang,
                     status: this.status,
                     pretest: this.pretest,
@@ -853,7 +928,12 @@ export class RecordDetailConnectionHandler extends ConnectionHandler {
         if (!rdoc) return;
         const realContestRecord =
             rdoc.contest instanceof ObjectId && ![record.RECORD_GENERATE, record.RECORD_PRETEST].some((sentinel) => sentinel.equals(rdoc.contest));
-        if (practice) {
+        if (rdoc.virtualAttemptId) {
+            if (practice) throw new PermissionError(PERM.PERM_VIEW_RECORD);
+            await assertVirtualContestRecordAccess(domainId, rdoc, this.user);
+            this.tdoc = await contest.get(domainId, rdoc.sourceContestId);
+            this.canViewCode = rdoc.uid === this.user._id || this.user.hasPriv(PRIV.PRIV_READ_RECORD_CODE);
+        } else if (practice) {
             if (!tid || realContestRecord) throw new PermissionError(PERM.PERM_VIEW_RECORD);
             this.tdoc = await contest.get(domainId, tid);
             const tsdoc = await contest.getStatus(domainId, tid, this.user._id);
@@ -914,7 +994,10 @@ export class RecordDetailConnectionHandler extends ConnectionHandler {
             }
         }
         const contextualProblemAccess = this.postContestPracticeRecordAccess || this.contestPretestRecordAccess;
-        const requiresDirectProblemAccess = !contextualProblemAccess && (!rdoc.contest || (!this.teamRecordAccess && this.user._id !== rdoc.uid));
+        const requiresDirectProblemAccess =
+            !contextualProblemAccess &&
+            !rdoc.virtualAttemptId &&
+            (!rdoc.contest || (!this.teamRecordAccess && this.user._id !== rdoc.uid));
         const [pdoc, self] = await Promise.all([
             requiresDirectProblemAccess ? problem.getViewableAuthorized(rdoc.domainId, rdoc.pid, this.user) : problem.get(rdoc.domainId, rdoc.pid),
             problem.getStatus(domainId, rdoc.pid, this.user._id),

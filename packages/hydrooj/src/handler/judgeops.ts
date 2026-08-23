@@ -138,6 +138,7 @@ class JudgeRejudgeHandler extends JudgeApiHandler {
         // misfired request can never rejudge the whole library.
         const query: any = {
             contest: { $nin: [record.RECORD_GENERATE, record.RECORD_PRETEST] },
+            virtualAttemptId: { $exists: false },
             status: { $ne: STATUS.STATUS_CANCELED },
             'files.hack': { $exists: false },
             manualPending: { $ne: true },

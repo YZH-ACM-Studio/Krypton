@@ -127,7 +127,18 @@ export class JudgeResultCallbackContext {
         if (rdoc.contest?.toString().startsWith('0'.repeat(23))) return;
         const accept = rdoc.status === builtin.STATUS.STATUS_ACCEPTED;
         const updated = await problem.updateStatus(rdoc.domainId, rdoc.pid, rdoc.uid, rdoc._id, rdoc.status, rdoc.score);
-        if (rdoc.contest) await contest.updateStatus(rdoc.domainId, rdoc.contest, rdoc.uid, rdoc._id, rdoc.pid, rdoc);
+        if (rdoc.virtualAttemptId) {
+            const virtualContest = global.Hydro?.model?.virtualContest?.virtualContestService;
+            if (!virtualContest?.updateStatus) throw new TypeError('virtualContestService.updateStatus is unavailable');
+            await virtualContest.updateStatus({
+                domainId: rdoc.domainId,
+                attemptId: rdoc.virtualAttemptId,
+                uid: rdoc.uid,
+                rid: rdoc._id,
+                pid: rdoc.pid,
+                result: rdoc,
+            });
+        } else if (rdoc.contest) await contest.updateStatus(rdoc.domainId, rdoc.contest, rdoc.uid, rdoc._id, rdoc.pid, rdoc);
         else if (accept && updated) await domain.incUserInDomain(rdoc.domainId, rdoc.uid, 'nAccept', 1);
         const isNormalSubmission = ![
             STATUS.STATUS_ETC,
@@ -396,7 +407,7 @@ export async function apply(ctx: Context) {
     ctx.Connection('judge_conn', '/judge/conn', JudgeConnectionHandler, builtin.PRIV.PRIV_JUDGE);
     ctx.on('record/judge', async (rdoc, updated, pdoc, t) => {
         if (!pdoc || rdoc.status !== STATUS.STATUS_HACK_SUCCESSFUL) return;
-        if (rdoc.contest) return;
+        if (rdoc.contest || rdoc.virtualAttemptId) return;
         try {
             const config = yaml.load(pdoc.config as string) as ProblemConfigFile;
             assert(Array.isArray(config.subtasks));
@@ -416,6 +427,7 @@ export async function apply(ctx: Context) {
                     pid: rdoc.pid,
                     status: STATUS.STATUS_ACCEPTED,
                     contest: { $nin: [record.RECORD_GENERATE, record.RECORD_PRETEST] },
+                    virtualAttemptId: { $exists: false },
                 })
                 .project({ _id: 1, contest: 1 })
                 .toArray();

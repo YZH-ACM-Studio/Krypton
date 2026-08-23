@@ -69,6 +69,7 @@ import {
 } from '../lib/programming-statement';
 import { resolveProblemKnowledgeNodeIds } from '../lib/problem-tag-canonical';
 import { PERM, PRIV, STATUS } from '../model/builtin';
+import { virtualContestService } from '../model/virtual-contest';
 import { normalizeCodeEvaluationDraftCreationConfig } from '../model/code-evaluation-lifecycle';
 import * as contest from '../model/contest';
 import * as discussion from '../model/discussion';
@@ -1588,6 +1589,7 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
     psdoc: ProblemStatusDoc;
     protected canEditLoadedProblem = false;
     protected canSubmitLoadedProblem = false;
+    protected virtualAttempt?: import('../model/virtual-contest').VirtualContestAttemptDoc;
     protected knowledgeNodeIdsForDetail: string[] = [];
     protected practicePageContext?: {
         controlled: boolean;
@@ -1741,6 +1743,7 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
     @query('practiceScopeKind', Types.String, true)
     @query('practiceScopeId', Types.PositiveInt, true)
     @query('practicePreview', Types.Boolean, true)
+    @query('virtual', Types.Boolean, true)
     async _prepare(
         _domainId: string,
         pid: number | string,
@@ -1750,6 +1753,7 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
         practiceScopeKind = '',
         practiceScopeId?: number,
         practicePreview = false,
+        virtual = false,
     ) {
         const domainId = String(this.domain?._id);
         this.pdoc = tid
@@ -1776,17 +1780,24 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
             delete this.pdoc.managedAuthoring;
         }
         if (tid) {
-            if (!this.tdoc?.pids?.includes(this.pdoc.docId)) throw new ContestNotFoundError(domainId, tid);
-            if (contest.isNotStarted(this.tdoc)) throw new ContestNotLiveError(tid);
-            // Krypton: a privileged viewer (contest owner / editor / system admin)
-            // who opened a problem from an external scoreboard hasn't "attended"
-            // the live contest. Don't block them — let them view it (contest
-            // "view" mode, no submit, since !attend). Ordinary contestants still
-            // must attend before the contest ends.
-            if (!canManageContest && !contest.isDone(this.tdoc, this.tsdoc) && (!this.tsdoc?.attend || !this.tsdoc.startAt)) {
-                throw new ContestNotAttendedError(tid);
+            if (virtual) {
+                this.checkPriv(PRIV.PRIV_USER_PROFILE);
+                const attempt = await virtualContestService.getOfficialAttempt(domainId, tid, this.user._id);
+                if (!attempt) throw new ValidationError('virtual', null, localizedErrorText`虚拟参赛尚未开始`);
+                this.virtualAttempt = await virtualContestService.assertActiveForUser(domainId, attempt._id, this.user._id, this.pdoc.docId);
+            } else {
+                if (!this.tdoc?.pids?.includes(this.pdoc.docId)) throw new ContestNotFoundError(domainId, tid);
+                if (contest.isNotStarted(this.tdoc)) throw new ContestNotLiveError(tid);
+                // Krypton: a privileged viewer (contest owner / editor / system admin)
+                // who opened a problem from an external scoreboard hasn't "attended"
+                // the live contest. Don't block them — let them view it (contest
+                // "view" mode, no submit, since !attend). Ordinary contestants still
+                // must attend before the contest ends.
+                if (!canManageContest && !contest.isDone(this.tdoc, this.tsdoc) && (!this.tsdoc?.attend || !this.tsdoc.startAt)) {
+                    throw new ContestNotAttendedError(tid);
+                }
+                if (postContestProblemMode === 'none') throw new ProblemNotFoundError(domainId, pid);
             }
-            if (postContestProblemMode === 'none') throw new ProblemNotFoundError(domainId, pid);
             // Delete problem-related info in contest mode
             this.pdoc.tag.length = 0;
             delete this.pdoc.nAccept;
@@ -1825,7 +1836,8 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
                         .filter((i) => i),
                 );
             }
-            if (this.tdoc?.langs?.length) t.push(this.tdoc.langs);
+            if (this.virtualAttempt?.snapshot.langs.length) t.push(this.virtualAttempt.snapshot.langs);
+            else if (this.tdoc?.langs?.length) t.push(this.tdoc.langs);
             if (this.pdoc.config.type === 'remote_judge') {
                 const p = this.pdoc.config.subType;
                 const dl = Object.keys(setting.langs).filter((i) => i.startsWith(`${p}.`) || setting.langs[i].validAs[p]);
@@ -1840,13 +1852,18 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
             this.pdoc.config.langs = ['objective', 'submit_answer'].includes(this.pdoc.config.type) ? ['_'] : intersection(baseLangs, ...t);
         }
         await this.ctx.parallel('problem/get', this.pdoc, this);
-        this.practicePageContext = await this.resolvePracticePageContext(
-            practiceContainerKind,
-            practiceContainerId,
-            practiceScopeKind,
-            practiceScopeId,
-            practicePreview,
-        );
+        if (this.virtualAttempt && (practiceContainerKind || practiceContainerId || practiceScopeKind || practiceScopeId)) {
+            throw new ValidationError('virtual', null, localizedErrorText`比赛或 VP 提交不能使用真实性训练上下文`);
+        }
+        this.practicePageContext = this.virtualAttempt
+            ? undefined
+            : await this.resolvePracticePageContext(
+                  practiceContainerKind,
+                  practiceContainerId,
+                  practiceScopeKind,
+                  practiceScopeId,
+                  practicePreview,
+              );
         let knowledgeMapVisible = true;
         if (!tid && this.pdoc.knowledgeMapId && !problem.isProblemBankAdmin(this.user)) {
             const publicMaps = await listKnowledgeMapsForProblemSelection();
@@ -1911,7 +1928,7 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
             delete responsePdoc.knowledgeMapId;
             delete responsePdoc.knowledgeNodeIds;
         }
-        const postContestPracticeActive = postContestProblemMode === 'correction';
+        const postContestPracticeActive = !this.virtualAttempt && postContestProblemMode === 'correction';
         const personalPracticePsdoc = postContestPracticeActive
             ? buildPersonalPracticeStatusByPid(
                   await record
@@ -1932,7 +1949,8 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
               )[this.pdoc.docId] || null
             : null;
         let mode = 'normal';
-        if (tid) {
+        if (this.virtualAttempt) mode = 'contest';
+        else if (tid) {
             if (postContestProblemMode) mode = postContestProblemMode;
             else if (!this.tsdoc?.attend) mode = 'view';
             else if (!contest.isDone(this.tdoc)) mode = 'contest';
@@ -1971,14 +1989,24 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
             ...(antiAiMarkerView ? { antiAiMarkerView } : {}),
             canPreviewSubjective: effectiveProblemKind(this.pdoc) === SUBJECTIVE_KIND && problem.canMaintainProblem(this.user, this.pdoc),
             canSubmitProblem: this.canSubmitLoadedProblem,
-            canRejudgeProblem: !tid && this.user.hasPerm(PERM.PERM_REJUDGE_PROBLEM),
+            canRejudgeProblem: !tid && !this.virtualAttempt && this.user.hasPerm(PERM.PERM_REJUDGE_PROBLEM),
             canEditProblem:
                 this.canEditLoadedProblem ||
                 problem.canEditProblemData(this.user, this.pdoc) ||
                 problem.canEditProblemTags(this.user, this.pdoc) ||
                 problem.canManageProblemContributions(this.user, this.pdoc),
             ...(this.practicePageContext ? { practiceIntegrity: this.practicePageContext } : {}),
+            ...(this.virtualAttempt
+                ? {
+                      virtualContestActive: true,
+                      virtualAttemptId: this.virtualAttempt._id,
+                      virtualRemainingMs: Math.max(0, this.virtualAttempt.endAt.getTime() - Date.now()),
+                      solutionCount: 0,
+                      discussionCount: 0,
+                  }
+                : {}),
         };
+        if (this.virtualAttempt) this.response.addHeader('Cache-Control', 'no-store');
         if (this.tdoc && this.tsdoc) {
             const fields = ['attend', 'startAt'];
             if (this.tdoc.duration) fields.push('endAt');
@@ -2100,6 +2128,7 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
             .getMulti(domainId, {
                 pid: this.pdoc.docId,
                 contest: { $nin: [record.RECORD_GENERATE, record.RECORD_PRETEST] },
+                virtualAttemptId: { $exists: false },
                 status: { $ne: STATUS.STATUS_CANCELED },
                 'files.hack': { $exists: false },
                 manualPending: { $ne: true },
@@ -2246,8 +2275,13 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
             throw new PermissionError(PERM.PERM_SUBMIT_PROBLEM);
         }
         this.assertContestSubmissionContext(tid);
-        const postContestPractice = !!tid && effectiveProblemKind(this.pdoc) !== SUBJECTIVE_KIND && canUsePostContestPractice(this.tdoc, this.tsdoc);
-        if (tid && !postContestPractice && !contest.isOngoing(this.tdoc, this.tsdoc)) throw new ContestNotLiveError(this.tdoc.docId);
+        if (this.virtualAttempt) {
+            await virtualContestService.assertActiveForUser(this.pdoc.domainId, this.virtualAttempt._id, this.user._id, this.pdoc.docId);
+        } else {
+            const postContestPractice =
+                !!tid && effectiveProblemKind(this.pdoc) !== SUBJECTIVE_KIND && canUsePostContestPractice(this.tdoc, this.tsdoc);
+            if (tid && !postContestPractice && !contest.isOngoing(this.tdoc, this.tsdoc)) throw new ContestNotLiveError(this.tdoc.docId);
+        }
         if (effectiveProblemKind(this.pdoc) === SUBJECTIVE_KIND && (!tid || !this.tdoc || !['exam', 'homework', 'oi'].includes(this.tdoc.rule))) {
             throw new ValidationError('rule', null, localizedErrorText`主观题仅允许在 exam、homework 或 oi 容器中提交`);
         }
@@ -2300,6 +2334,7 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
                 ? 'homework_detail_problem_submit'
                 : 'contest_detail_problem_submit'
             : 'problem_submit';
+        if (this.virtualAttempt) this.response.body.virtualContestActive = true;
     }
 
     @param('lang', Types.Name)
@@ -2314,10 +2349,15 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
         const config = this.pdoc.config;
         const isSubjective = effectiveProblemKind(this.pdoc) === SUBJECTIVE_KIND;
         const problemKind = effectiveProblemKind(this.pdoc);
-        const submissionScope = tid
-            ? getContestSubmissionScope(this.tdoc, this.tsdoc, tid)
-            : { postContestPractice: false, recordContestId: undefined };
-        if (tid && !submissionScope.postContestPractice && !contest.isOngoing(this.tdoc, this.tsdoc)) {
+        if (this.virtualAttempt) {
+            await virtualContestService.assertActiveForUser(domainId, this.virtualAttempt._id, this.user._id, this.pdoc.docId);
+        }
+        const submissionScope = this.virtualAttempt
+            ? { postContestPractice: false, recordContestId: undefined, virtualAttemptId: this.virtualAttempt._id, sourceContestId: this.virtualAttempt.sourceContestId }
+            : tid
+              ? getContestSubmissionScope(this.tdoc, this.tsdoc, tid)
+              : { postContestPractice: false, recordContestId: undefined };
+        if (!this.virtualAttempt && tid && !submissionScope.postContestPractice && !contest.isOngoing(this.tdoc, this.tsdoc)) {
             throw new ContestNotLiveError(this.tdoc.docId);
         }
         if (isSubjective && submissionScope.postContestPractice) throw new ContestNotLiveError(this.tdoc.docId);
@@ -2390,7 +2430,18 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
                 );
             }
         }
-        const practiceContext = await this.resolvePracticeContext(practiceContextId, tid);
+        const practiceContext = await this.resolvePracticeContext(practiceContextId, tid || this.virtualAttempt?.sourceContestId);
+        if (this.virtualAttempt && (isSubjective || practiceContext)) {
+            throw new ValidationError('virtual', null, localizedErrorText`比赛或 VP 提交不能使用真实性训练上下文`);
+        }
+        if (this.virtualAttempt && !pretest) {
+            await virtualContestService.markFirstRecord({
+                domainId,
+                attemptId: this.virtualAttempt._id,
+                uid: this.user._id,
+                pid: this.pdoc.docId,
+            });
+        }
         const rid = await record.add(
             domainId,
             this.pdoc.docId,
@@ -2410,6 +2461,8 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
                       files,
                       type: isSubjective ? 'manual' : 'judge',
                       practiceContext,
+                      virtualAttemptId: this.virtualAttempt?._id,
+                      sourceContestId: this.virtualAttempt?.sourceContestId,
                       vigilSessionKey: (global as any).Hydro?.model?.vigilguard?.clientSessionKeyFromSession?.(this.session),
                   },
         );
@@ -2439,6 +2492,17 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
                         rid,
                     }),
                 );
+            } else if (this.virtualAttempt) {
+                updates.push(
+                    virtualContestService.updateStatus({
+                        domainId,
+                        attemptId: this.virtualAttempt._id,
+                        uid: this.user._id,
+                        rid,
+                        pid: this.pdoc.docId,
+                        result: { status: STATUS.STATUS_WAITING, score: 0 },
+                    }),
+                );
             } else if (submissionScope.recordContestId) {
                 updates.push(contest.updateStatus(domainId, submissionScope.recordContestId, this.user._id, rid, this.pdoc.docId));
             }
@@ -2453,7 +2517,11 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
             this.response.body = { rid };
             this.response.redirect = this.url('record_detail', {
                 rid,
-                query: submissionScope.postContestPractice ? { tid, practice: 1 } : undefined,
+                query: this.virtualAttempt
+                    ? { tid, virtual: 1 }
+                    : submissionScope.postContestPractice
+                      ? { tid, practice: 1 }
+                      : undefined,
             });
         }
     }
@@ -2473,6 +2541,7 @@ export class ProblemHackHandler extends ProblemDetailHandler {
         if (!this.rdoc || this.rdoc.pid !== this.pdoc.docId || this.rdoc.contest?.toString() !== tid?.toString()) {
             throw localizeError(new RecordNotFoundError(domainId, rid), 'Record {0} not found.', rid);
         }
+        if (this.rdoc.virtualAttemptId) throw new HackFailedError(localizedErrorText`虚拟参赛记录不能被 hack`);
         if (tid) {
             if (this.tdoc.rule !== 'codeforces') throw new HackFailedError(localizedErrorText`This contest is not hackable.`);
             if (!contest.isOngoing(this.tdoc, this.tsdoc)) throw new ContestNotLiveError(this.tdoc.docId);

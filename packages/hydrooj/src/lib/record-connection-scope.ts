@@ -4,6 +4,7 @@ export const RECORD_GENERATE_CONTEST_ID = '000000000000000000000001';
 interface RecordConnectionScope {
     domainId: string;
     tid?: string;
+    virtualAttemptId?: string;
     lang?: string;
     status?: number;
     pretest: boolean;
@@ -14,6 +15,7 @@ interface RecordConnectionScope {
 interface RecordConnectionCandidate {
     domainId: string;
     contestId?: string;
+    virtualAttemptId?: string;
     lang?: string;
     status?: number;
     input?: unknown;
@@ -28,6 +30,8 @@ export function matchesRecordConnectionScope(candidate: RecordConnectionCandidat
     if (typeof candidate.input === 'string') return false;
     if (scope.lang && candidate.lang !== scope.lang) return false;
     if (typeof scope.status === 'number' && candidate.status !== scope.status) return false;
+    if (scope.virtualAttemptId) return candidate.virtualAttemptId === scope.virtualAttemptId;
+    if (candidate.virtualAttemptId) return false;
     if (scope.allDomain || scope.all) return true;
     if (scope.tid) return candidate.contestId === scope.tid;
     return candidate.contestId === undefined;

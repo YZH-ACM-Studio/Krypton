@@ -42,6 +42,8 @@ export default class RecordModel {
         'domainId',
         'contest',
         'contestTeamId',
+        'virtualAttemptId',
+        'sourceContestId',
         'judger',
         'judgeAt',
         'status',
@@ -250,6 +252,8 @@ export default class RecordModel {
             dataWriteActiveContainerConfirmation?: ProblemDataWriteConfirmation;
             /** Server-validated context snapshot; callers must never construct this from request fields. */
             practiceContext?: TrustedPracticeContextReference;
+            virtualAttemptId?: ObjectId;
+            sourceContestId?: ObjectId;
         } = { type: 'judge' },
     ) {
         const data: RecordDoc = {
@@ -280,8 +284,14 @@ export default class RecordModel {
             data.dataWriteActiveContainerConfirmation = { ...args.dataWriteActiveContainerConfirmation };
         }
         if (args.practiceContext) {
-            if (args.contest || args.contestContext || args.type !== 'judge') throw new ValidationError('practiceContextId');
+            if (args.contest || args.contestContext || args.virtualAttemptId || args.type !== 'judge') throw new ValidationError('practiceContextId');
             data.practiceContext = assertTrustedPracticeContextBinding(args.practiceContext, { domainId, uid, pid });
+        }
+        if (args.virtualAttemptId || args.sourceContestId) {
+            if (!args.virtualAttemptId || !args.sourceContestId) throw new ValidationError('virtualAttemptId');
+            if (args.contest || args.contestContext || args.practiceContext) throw new ValidationError('virtualAttemptId');
+            data.virtualAttemptId = args.virtualAttemptId;
+            data.sourceContestId = args.sourceContestId;
         }
         if (args.type === 'manual') {
             if (!args.contest) throw new ValidationError('contest');
@@ -660,6 +670,11 @@ export async function apply(ctx: Context) {
             { key: { domainId: 1, contest: 1, pid: 1, _id: -1 }, name: 'withProblem' },
             { key: { domainId: 1, contest: 1, pid: 1, uid: 1, _id: -1 }, name: 'withUserAndProblem' },
             { key: { domainId: 1, contest: 1, status: 1, _id: -1 }, name: 'withStatus' },
+            {
+                key: { domainId: 1, virtualAttemptId: 1, uid: 1, pid: 1, _id: -1 },
+                name: 'virtualAttempt',
+                partialFilterExpression: { virtualAttemptId: { $exists: true } },
+            },
         ),
         db.ensureIndexes(
             RecordModel.collStat,

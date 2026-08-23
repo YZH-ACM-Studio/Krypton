@@ -258,6 +258,7 @@ describe('personal post-contest problem statuses', () => {
             pid: { $in: [2, 1] },
             contest: { $exists: false },
             contestTeamId: { $exists: false },
+            virtualAttemptId: { $exists: false },
             hackTarget: { $exists: false },
             input: { $exists: false },
         });
@@ -271,6 +272,7 @@ describe('personal post-contest problem statuses', () => {
             { _id: rid, pid: 1, status: 1, contest: '000000000000000000000000' },
             { _id: rid, pid: 1, status: 1, contest: '000000000000000000000001' },
             { _id: rid, pid: 1, status: 1, contestTeamId: 'team' },
+            { _id: rid, pid: 1, status: 1, virtualAttemptId: 'vp-attempt' },
             { _id: rid, pid: 1, status: 1, hackTarget: 'target-rid' },
             { _id: rid, pid: 1, status: 1, input: 'self-test' },
         ]) {
@@ -298,7 +300,7 @@ describe('post-contest submission integration', () => {
 
     it('uses an explicit flag instead of treating every legacy correction mode as personal practice', () => {
         const source = readFileSync(resolve(process.cwd(), 'packages/hydrooj/src/handler/problem.ts'), 'utf8');
-        expect(source).to.include("const postContestPracticeActive = postContestProblemMode === 'correction'");
+        expect(source).to.include("const postContestPracticeActive = !this.virtualAttempt && postContestProblemMode === 'correction'");
         expect(source).to.include('psdoc: !tid ? this.psdoc : personalPracticePsdoc');
         expect(source).to.include('postContestPracticeActive,');
     });

@@ -116,4 +116,27 @@ describe('record list WebSocket scope', () => {
             ),
         ).to.equal(false);
     });
+
+    it('matches only the exact virtual attempt and never mixes VP into practice or contest scopes', () => {
+        const virtualScope = { ...practiceScope, virtualAttemptId: '64b0000000000000000000aa' };
+        expect(
+            matchesRecordConnectionScope({ domainId: 'system', virtualAttemptId: '64b0000000000000000000aa' }, virtualScope),
+        ).to.equal(true);
+        expect(matchesRecordConnectionScope({ domainId: 'system' }, virtualScope)).to.equal(false);
+        expect(
+            matchesRecordConnectionScope({ domainId: 'system', contestId: '64b000000000000000000001' }, virtualScope),
+        ).to.equal(false);
+        expect(
+            matchesRecordConnectionScope({ domainId: 'system', virtualAttemptId: '64b0000000000000000000aa' }, practiceScope),
+        ).to.equal(false);
+        expect(
+            matchesRecordConnectionScope(
+                { domainId: 'system', virtualAttemptId: '64b0000000000000000000aa' },
+                { ...practiceScope, tid: '64b000000000000000000001' },
+            ),
+        ).to.equal(false);
+        expect(
+            matchesRecordConnectionScope({ domainId: 'system', virtualAttemptId: '64b0000000000000000000aa' }, { ...practiceScope, all: true }),
+        ).to.equal(false);
+    });
 });

@@ -19,6 +19,7 @@ export interface PersonalPracticeRecord {
     status: number;
     contest?: unknown;
     contestTeamId?: unknown;
+    virtualAttemptId?: unknown;
     hackTarget?: unknown;
     input?: unknown;
 }
@@ -66,6 +67,7 @@ export function buildPersonalPracticeRecordQuery(uid: number, problemIds: number
         pid: { $in: Array.from(new Set(problemIds)) },
         contest: { $exists: false },
         contestTeamId: { $exists: false },
+        virtualAttemptId: { $exists: false },
         hackTarget: { $exists: false },
         input: { $exists: false },
     };
@@ -111,6 +113,7 @@ export function buildPersonalPracticeStatusByPid(
         if (
             Object.hasOwn(record, 'contest') ||
             Object.hasOwn(record, 'contestTeamId') ||
+            Object.hasOwn(record, 'virtualAttemptId') ||
             Object.hasOwn(record, 'hackTarget') ||
             Object.hasOwn(record, 'input')
         ) {

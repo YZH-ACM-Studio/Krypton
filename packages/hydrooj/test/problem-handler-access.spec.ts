@@ -752,6 +752,24 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     if (request === '../service/server') return serverStub;
     if (request === './contest') return contestHandlerStub;
     if (request === '../model/contest') return emptyModel;
+    if (request === '../model/virtual-contest') {
+        return {
+            virtualContestService: {
+                async getOfficialAttempt() {
+                    return null;
+                },
+                async assertActiveForUser() {
+                    return null;
+                },
+                async markFirstRecord() {
+                    return null;
+                },
+                async updateStatus() {
+                    return null;
+                },
+            },
+        };
+    }
     if (request === '../model/oplog') return oplogStub;
     if (request === '../model/managed-problem-authoring') return managedAuthoringStub;
     if (request === '../model/problem-pid-namespace') return pidNamespaceStub;
@@ -2400,6 +2418,7 @@ describe('P2.11 authoritative problem route domain', () => {
                 {
                     pid: 7,
                     contest: { $nin: ['generate', 'pretest'] },
+                    virtualAttemptId: { $exists: false },
                     status: { $ne: -2 },
                     'files.hack': { $exists: false },
                     manualPending: { $ne: true },

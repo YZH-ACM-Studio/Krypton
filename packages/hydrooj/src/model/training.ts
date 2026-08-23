@@ -86,10 +86,21 @@ export function buildScopedTrainingProgress(
 
 export async function ensureEnrolled(domainId: string, tid: ObjectId, uid: number): Promise<boolean> {
     const created = await document.setIfNotStatus(domainId, document.TYPE_TRAINING, tid, uid, 'enroll', 1, 1, {});
-    if (!created) return false;
-    await document.inc(domainId, document.TYPE_TRAINING, tid, 'attend', 1);
-    logger.info('Problem set enrollment created domain=%s tid=%s uid=%d stage=enroll result=created', domainId, tid, uid);
-    return true;
+    if (created) {
+        await document.inc(domainId, document.TYPE_TRAINING, tid, 'attend', 1);
+        logger.info('Problem set enrollment created domain=%s tid=%s uid=%d stage=enroll result=created', domainId, tid, uid);
+        return true;
+    }
+    const status = await getStatus(domainId, tid, uid);
+    if (status?.enroll === 1) return false;
+    logger.error(
+        'Problem set enrollment write failed domain=%s tid=%s uid=%d enroll=%o stage=enroll result=failed',
+        domainId,
+        tid,
+        uid,
+        status?.enroll,
+    );
+    throw new Error(`problem set enrollment write failed: ${domainId}/${tid}/${uid}`);
 }
 
 export async function enroll(domainId: string, tid: ObjectId, uid: number) {

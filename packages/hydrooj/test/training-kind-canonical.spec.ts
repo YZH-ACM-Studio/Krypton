@@ -18,7 +18,8 @@ const trainingId = new ObjectId('68486d8165edbb11e9ec9036');
 const created: any[] = [];
 let stored: any = null;
 let documentGetResult: any = null;
-let enrollAvailable = true;
+let enrollState: { enroll?: number } | null = null;
+let enrollWriteFails = false;
 let enrollIncCalls = 0;
 
 const trainingPath = require.resolve('../src/model/training.ts');
@@ -55,9 +56,13 @@ require.cache[documentPath] = {
             return $set;
         },
         async setIfNotStatus() {
-            if (!enrollAvailable) return false;
-            enrollAvailable = false;
-            return { enroll: 1 };
+            if (enrollWriteFails) return false;
+            if (enrollState?.enroll === 1) return false;
+            enrollState = { enroll: 1 };
+            return enrollState;
+        },
+        async getStatus() {
+            return enrollState;
         },
         async inc() {
             enrollIncCalls += 1;
@@ -187,7 +192,8 @@ describe('P3.1 training document write and read gates', () => {
         created.length = 0;
         stored = null;
         documentGetResult = null;
-        enrollAvailable = true;
+        enrollState = null;
+        enrollWriteFails = false;
         enrollIncCalls = 0;
     });
 
@@ -262,5 +268,11 @@ describe('P3.1 training document write and read gates', () => {
         expect(enrollIncCalls).to.equal(1);
         await expectReject(TrainingModel.enroll('system', trainingId, 42), 'Error');
         expect(enrollIncCalls).to.equal(1);
+    });
+
+    it('fails closed when enrollment write misses and the user is not already enrolled', async () => {
+        enrollWriteFails = true;
+        await expectReject(TrainingModel.ensureEnrolled('system', trainingId, 42), 'Error');
+        expect(enrollIncCalls).to.equal(0);
     });
 });

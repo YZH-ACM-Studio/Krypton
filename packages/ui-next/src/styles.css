@@ -407,6 +407,255 @@
   margin-right: 0.4em;
 }
 
+/* ------------------------------------------------------------------ */
+/*  Course workspace design layer.                                    */
+/*                                                                    */
+/*  Namespaced `krypton-course-*` on purpose. The tokens at the top of */
+/*  this file are consumed by every other page, so the course surface  */
+/*  and type scale are built on top of them rather than replacing      */
+/*  them. Nothing here leaks outside `pages/course`.                   */
+/* ------------------------------------------------------------------ */
+
+@keyframes krypton-course-rise {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 12px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@layer components {
+  /* -- Surfaces ---------------------------------------------------- */
+  /* Three levels, no more. Depth is carried by tinted shadow and a
+     hairline ring instead of a hard 1px border, so nested panels stop
+     drawing competing outlines. */
+
+  .krypton-course-panel {
+    position: relative;
+    border-radius: 1rem;
+    background: var(--card);
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--border) 85%, transparent),
+      0 1px 2px -1px hsl(222 47% 11% / 0.07),
+      0 12px 28px -20px hsl(222 47% 11% / 0.25);
+  }
+
+  .dark .krypton-course-panel {
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--border) 95%, transparent),
+      inset 0 1px 0 0 hsl(210 40% 98% / 0.04);
+  }
+
+  .krypton-course-inset {
+    border-radius: 0.75rem;
+    background: color-mix(in srgb, var(--muted) 48%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--border) 50%, transparent);
+  }
+
+  .dark .krypton-course-inset {
+    background: color-mix(in srgb, var(--muted) 38%, transparent);
+  }
+
+  /* Ambient hero. Radial, off-centre and single-hue — a 45deg linear
+     fade is the tell-tale generic gradient. */
+  .krypton-course-hero {
+    position: relative;
+    overflow: hidden;
+    border-radius: 1.25rem;
+    background:
+      radial-gradient(125% 150% at 4% -14%, hsl(199 89% 48% / 0.2) 0%, transparent 60%),
+      radial-gradient(85% 130% at 104% 2%, hsl(186 84% 44% / 0.13) 0%, transparent 54%),
+      var(--card);
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--border) 80%, transparent),
+      0 2px 4px -2px hsl(222 47% 11% / 0.08),
+      0 24px 48px -32px hsl(199 60% 24% / 0.32);
+  }
+
+  .dark .krypton-course-hero {
+    background:
+      radial-gradient(125% 145% at 6% -10%, hsl(199 89% 48% / 0.16) 0%, transparent 58%),
+      radial-gradient(85% 130% at 102% 4%, hsl(186 84% 44% / 0.1) 0%, transparent 52%),
+      var(--card);
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--border) 95%, transparent),
+      inset 0 1px 0 0 hsl(210 40% 98% / 0.05);
+  }
+
+  /* Fine grain over ambient surfaces. Flat vector fills read sterile at
+     this size; the noise sits under content and never intercepts input. */
+  .krypton-course-grain::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    opacity: 0.5;
+    mix-blend-mode: soft-light;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23g)' opacity='0.42'/%3E%3C/svg%3E");
+  }
+
+  .dark .krypton-course-grain::after {
+    opacity: 0.28;
+  }
+
+  /* Cursor-tracked edge light. Driven by --spot-x/--spot-y from JS. */
+  .krypton-course-spotlight::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 360ms ease;
+    background: radial-gradient(16rem 16rem at var(--spot-x, 50%) var(--spot-y, 0%), hsl(199 89% 48% / 0.18), transparent 70%);
+  }
+
+  .krypton-course-spotlight[data-spotlight='on']::before {
+    opacity: 1;
+  }
+
+  /* Course identity monogram. Hue arrives as --mark-h from a stable hash
+     of the course id, held inside one cool band around the primary. */
+  .krypton-course-mark {
+    color: hsl(var(--mark-h) 62% 34%);
+    background: hsl(var(--mark-h) 66% 48% / 0.16);
+    box-shadow: inset 0 0 0 1px hsl(var(--mark-h) 62% 46% / 0.26);
+  }
+
+  .dark .krypton-course-mark {
+    color: hsl(var(--mark-h) 62% 76%);
+    background: hsl(var(--mark-h) 55% 62% / 0.15);
+    box-shadow: inset 0 0 0 1px hsl(var(--mark-h) 55% 62% / 0.24);
+  }
+
+  /* -- Typography -------------------------------------------------- */
+  /* The old pages jumped 3xl -> 2xl -> sm -> xs -> 11px -> 10px with
+     nothing in between, so section labels all collapsed onto one size. */
+
+  .krypton-course-display {
+    font-size: clamp(1.625rem, 1.2rem + 1.7vw, 2.125rem);
+    font-weight: 600;
+    line-height: 1.14;
+    letter-spacing: -0.023em;
+    text-wrap: balance;
+  }
+
+  .krypton-course-title {
+    font-size: 1.0625rem;
+    font-weight: 600;
+    line-height: 1.35;
+    letter-spacing: -0.012em;
+  }
+
+  .krypton-course-section {
+    font-size: 0.9375rem;
+    font-weight: 600;
+    line-height: 1.4;
+    letter-spacing: -0.008em;
+  }
+
+  /* Sparse editorial label. No uppercase — it is inert on CJK and only
+     mangles the occasional latin token. */
+  .krypton-course-eyebrow {
+    font-size: 0.6875rem;
+    font-weight: 500;
+    line-height: 1.4;
+    letter-spacing: 0.1em;
+    color: var(--muted-foreground);
+  }
+
+  .krypton-course-meta {
+    font-size: 0.75rem;
+    line-height: 1.5;
+    color: var(--muted-foreground);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Reading measure for chapter prose. */
+  .krypton-course-measure {
+    max-width: 68ch;
+  }
+
+  /* -- Motion ------------------------------------------------------ */
+  .krypton-course-rise {
+    animation: krypton-course-rise 460ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: var(--rise-delay, 0ms);
+  }
+
+  /* -- Interaction ------------------------------------------------- */
+  .krypton-course-row {
+    border-radius: 0.625rem;
+    transition:
+      background-color 180ms ease,
+      box-shadow 180ms ease,
+      transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .krypton-course-row:hover {
+    background: color-mix(in srgb, var(--muted) 62%, transparent);
+  }
+
+  .krypton-course-row:active {
+    transform: scale(0.994);
+  }
+
+  /* Selected directory row. A tinted fill plus an inset hairline, so the
+     active chapter reads as raised without adding a hard border that
+     would collide with the panel edge next to it. */
+  .krypton-course-active {
+    background: color-mix(in srgb, var(--primary) 7%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 22%, transparent);
+  }
+
+  .dark .krypton-course-active {
+    background: color-mix(in srgb, var(--primary) 13%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 30%, transparent);
+  }
+
+  .krypton-course-lift {
+    transition:
+      box-shadow 240ms ease,
+      transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .krypton-course-lift:hover {
+    transform: translate3d(0, -2px, 0);
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--primary) 32%, transparent),
+      0 2px 4px -2px hsl(222 47% 11% / 0.1),
+      0 18px 36px -22px hsl(199 60% 24% / 0.34);
+  }
+
+  .dark .krypton-course-lift:hover {
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--primary) 42%, transparent),
+      inset 0 1px 0 0 hsl(210 40% 98% / 0.06);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .krypton-course-rise {
+    animation: none;
+  }
+
+  .krypton-course-row,
+  .krypton-course-lift,
+  .krypton-course-spotlight::before {
+    transition: none;
+  }
+
+  .krypton-course-row:active,
+  .krypton-course-lift:hover {
+    transform: none;
+  }
+}
+
 .anti-ai-copy-marker {
   display: inline;
   inline-size: 0;

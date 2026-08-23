@@ -1,5 +1,22 @@
-import { ArrowLeft, ClipboardPlus, Download, FileText, ListTree, Network, Plus, Save, Trash2 } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import {
+  ArrowLeft,
+  Check,
+  ClipboardPlus,
+  Download,
+  ExternalLink,
+  FileText,
+  Layers,
+  ListTree,
+  Loader2,
+  Network,
+  Plus,
+  Save,
+  Trash2,
+  Trophy,
+  Users,
+  X,
+} from 'lucide-react';
+import { type FormEvent, type ReactNode, useEffect, useMemo, useState } from 'react';
 import { MarkdownEditor } from '@/components/markdown-renderer';
 import { ProblemPicker } from '@/components/problem-picker';
 import { Button } from '@/components/ui/button';
@@ -15,6 +32,7 @@ import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presente
 import { ChapterOutline } from './chapter-outline';
 import { useChapterQuery } from './chapter-query';
 import type { ChapterDraft, CourseFile, CourseRecord } from './types';
+import { CourseMark, CourseSectionHeader } from './ui';
 
 type SaveState = 'idle' | 'dirty' | 'saving';
 
@@ -28,7 +46,152 @@ function initialChapterDrafts(serialized?: string): ChapterDraft[] {
     content: String(chapter.content || ''),
     pids: Array.isArray(chapter.pids) ? chapter.pids.map(String) : [],
     tids: Array.isArray(chapter.tids) ? chapter.tids.map(String).join(',') : '',
+    problemSetId: chapter.problemSetId ? String(chapter.problemSetId) : '',
+    stageIds: Array.isArray(chapter.stageIds) ? chapter.stageIds.map(String).join(',') : '',
   }));
+}
+
+function parseRefs(value: string): string[] {
+  return value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+/** A titled group on the settings rail. */
+function SettingsGroup({
+  title,
+  description,
+  icon: Icon,
+  children,
+  id,
+  className,
+}: {
+  title: string;
+  description?: string;
+  icon: typeof Layers;
+  children: ReactNode;
+  id?: string;
+  className?: string;
+}) {
+  const headingId = id ? `${id}-title` : undefined;
+  return (
+    <section id={id} aria-labelledby={headingId} className={cn('krypton-course-panel scroll-mt-24 p-4', className)}>
+      <div className="mb-3.5 flex items-start gap-2.5">
+        <span aria-hidden="true" className="mt-px grid size-7 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+          <Icon className="size-3.5" strokeWidth={1.75} />
+        </span>
+        <div className="min-w-0">
+          <h2 id={headingId} className="text-[13px] font-semibold leading-5">
+            {title}
+          </h2>
+          {description ? <p className="krypton-course-meta mt-0.5 text-pretty">{description}</p> : null}
+        </div>
+      </div>
+      <div className="space-y-3">{children}</div>
+    </section>
+  );
+}
+
+/**
+ * Referenced contests and homework.
+ *
+ * The previous editor asked authors to hand-maintain a comma-joined string
+ * of ObjectIds in a monospace box, so a single stray comma silently broke
+ * the whole chapter. Ids become removable chips here while the submitted
+ * value stays the exact same comma-joined string the handler parses.
+ */
+function ContestRefInput({ value, onChange }: { value: string; onChange: (next: string) => void }) {
+  const [draft, setDraft] = useState('');
+  const refs = parseRefs(value);
+
+  const commit = () => {
+    const additions = parseRefs(draft).filter((item) => !refs.includes(item));
+    if (additions.length) onChange([...refs, ...additions].join(','));
+    setDraft('');
+  };
+
+  return (
+    <div className="space-y-2">
+      {refs.length ? (
+        <ul className="flex flex-wrap gap-1.5">
+          {refs.map((ref) => (
+            <li key={ref}>
+              <span className="krypton-course-inset inline-flex min-h-9 items-center gap-1.5 py-1 pl-2.5 pr-1">
+                <Trophy className="size-3 shrink-0 text-muted-foreground" strokeWidth={1.75} />
+                <span className="font-mono text-[11px]">{ref}</span>
+                <button
+                  type="button"
+                  onClick={() => onChange(refs.filter((item) => item !== ref).join(','))}
+                  aria-label={`移除引用 ${ref}`}
+                  className={cn(
+                    'grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground',
+                    'transition-colors duration-150 hover:bg-destructive/10 hover:text-destructive',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary motion-reduce:transition-none',
+                  )}
+                >
+                  <X className="size-3" strokeWidth={2} />
+                </button>
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      <div className="flex gap-2">
+        <Input
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onBlur={commit}
+          onKeyDown={(event) => {
+            if (event.key !== 'Enter') return;
+            event.preventDefault();
+            commit();
+          }}
+          className="min-h-11 font-mono text-base sm:text-xs"
+          placeholder="粘贴比赛 id 后回车"
+          aria-label="添加比赛或作业引用"
+        />
+        <Button type="button" variant="outline" size="icon" className="size-11 shrink-0" onClick={commit} aria-label="添加引用">
+          <Plus className="size-4" strokeWidth={2} />
+        </Button>
+      </div>
+      <a
+        href="/contest/create"
+        target="_blank"
+        rel="noreferrer"
+        className={cn(
+          'inline-flex items-center gap-1 text-xs font-medium text-primary',
+          'hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+        )}
+      >
+        前往比赛模块创建
+        <ExternalLink className="size-3" strokeWidth={1.75} />
+      </a>
+    </div>
+  );
+}
+
+function SaveIndicator({ state }: { state: SaveState }) {
+  return (
+    <div aria-live="polite" className="krypton-course-meta inline-flex items-center gap-1.5">
+      {state === 'saving' ? (
+        <>
+          <Loader2 className="size-3.5 animate-spin text-primary" strokeWidth={2} />
+          正在保存…
+        </>
+      ) : state === 'dirty' ? (
+        <>
+          <span aria-hidden="true" className="size-1.5 rounded-full bg-amber-500" />
+          <span className="text-amber-700 dark:text-amber-400">有未保存更改</span>
+        </>
+      ) : (
+        <>
+          <Check className="size-3.5 text-emerald-600 dark:text-emerald-400" strokeWidth={2.5} />
+          已保存
+        </>
+      )}
+    </div>
+  );
 }
 
 export function CourseEditPage() {
@@ -48,7 +211,7 @@ export function CourseEditPage() {
   const tid = String(course.docId || course._id || '');
   const parsedChapters = useMemo(() => initialChapterDrafts(data.chapters), [data.chapters]);
   const [chapters, setChapters] = useState<ChapterDraft[]>(
-    parsedChapters.length ? parsedChapters : [{ _id: 1, title: '第一章', content: '', pids: [], tids: '' }],
+    parsedChapters.length ? parsedChapters : [{ _id: 1, title: '第一章', content: '', pids: [], tids: '', problemSetId: '', stageIds: '' }],
   );
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set((course.courseGroupIds || []).map(String)));
   const [selectedMindmapId, setSelectedMindmapId] = useState(String(course.mindmapId || ''));
@@ -87,6 +250,8 @@ export function CourseEditPage() {
         content: '',
         pids: [],
         tids: '',
+        problemSetId: '',
+        stageIds: '',
       },
     ]);
     markDirty();
@@ -121,15 +286,15 @@ export function CourseEditPage() {
       title: chapter.title,
       ...(chapter.content ? { content: chapter.content } : {}),
       pids: chapter.pids,
-      tids: chapter.tids
-        .split(',')
-        .map((value) => value.trim())
-        .filter(Boolean),
+      tids: parseRefs(chapter.tids),
+      ...(chapter.problemSetId.trim() ? { problemSetId: chapter.problemSetId.trim() } : {}),
+      ...(parseRefs(chapter.stageIds).length ? { stageIds: parseRefs(chapter.stageIds).map(Number) } : {}),
     })),
   );
   const activeGroups = (data.groups || []).filter((group) => !group.archivedAt || selectedGroups.has(group._id));
   const formAction = isEdit ? `/course/${tid}/edit` : '/course/create';
   const fileEndpoint = isEdit ? `/course/${tid}/file` : '';
+  const activeIndex = chapters.findIndex((chapter) => chapter._id === activeChapter._id);
 
   const refreshFiles = async () => {
     if (!fileEndpoint) return;
@@ -161,7 +326,7 @@ export function CourseEditPage() {
     }
   };
 
-  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setSaveError('');
     setSaveState('saving');
@@ -195,32 +360,43 @@ export function CourseEditPage() {
   };
 
   return (
-    <main className="w-full min-w-0 space-y-5 pb-8">
-      <header className="flex flex-wrap items-center gap-3">
-        <Button asChild variant="ghost" size="icon" className="size-11">
+    <main className="w-full min-w-0 pb-10">
+      {/* The action bar follows the scroll. A long chapter draft used to push
+          save state and the save button off screen entirely. */}
+      <header
+        className={cn(
+          'krypton-course-panel sticky top-0 z-30 mb-6 flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2.5',
+          'bg-card/85 backdrop-blur-xl',
+        )}
+      >
+        <Button asChild variant="ghost" size="icon" className="size-10 shrink-0">
           <a href={isEdit ? `/course/${tid}` : '/course'} aria-label={isEdit ? '返回课程' : '返回课程列表'}>
-            <ArrowLeft className="size-4" />
+            <ArrowLeft className="size-4" strokeWidth={1.75} />
           </a>
         </Button>
+        {isEdit ? <CourseMark seed={tid} title={course.title || ''} className="size-9 text-sm" /> : null}
         <div className="min-w-0 flex-1">
-          <p className="text-xs text-muted-foreground">课程工作区</p>
-          <h1 className="mt-0.5 truncate text-2xl font-semibold tracking-tight text-balance">{isEdit ? `编辑 ${course.title}` : '新建课程'}</h1>
+          <p className="krypton-course-eyebrow truncate">课程工作区</p>
+          <h1 className="krypton-course-title mt-0.5 truncate">{isEdit ? course.title || '编辑课程' : '新建课程'}</h1>
         </div>
-        <Button type="button" variant="outline" className="min-h-11 gap-1.5 lg:hidden" onClick={() => setOutlineOpen(true)}>
-          <ListTree className="size-4" />
+        <Button type="button" variant="outline" size="sm" className="h-10 shrink-0 gap-1.5 lg:hidden" onClick={() => setOutlineOpen(true)}>
+          <ListTree className="size-3.5" strokeWidth={1.75} />
           章节
         </Button>
-        <div aria-live="polite" className="text-xs text-muted-foreground">
-          {saveState === 'saving' ? '正在保存…' : saveState === 'dirty' ? '有未保存更改' : '已保存'}
-        </div>
-        <Button form="course-editor-form" type="submit" disabled={saveState === 'saving'} className="min-h-11 gap-1.5 active:scale-[0.96]">
-          <Save className="size-4" />
+        <SaveIndicator state={saveState} />
+        <Button
+          form="course-editor-form"
+          type="submit"
+          disabled={saveState === 'saving'}
+          className={cn('h-10 shrink-0 gap-1.5 active:scale-[0.97]', saveState === 'dirty' && 'shadow-md')}
+        >
+          <Save className="size-4" strokeWidth={1.75} />
           {saveState === 'saving' ? '保存中' : '保存课程'}
         </Button>
       </header>
 
       {saveError ? (
-        <div role="alert" className="rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+        <div role="alert" className="mb-5 rounded-xl border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm text-destructive">
           {saveError}
         </div>
       ) : null}
@@ -231,7 +407,7 @@ export function CourseEditPage() {
         action={formAction}
         onSubmit={submit}
         onChange={markDirty}
-        className="grid min-w-0 gap-8 lg:grid-cols-[16rem_minmax(0,1fr)_20rem]"
+        className="grid min-w-0 gap-6 lg:grid-cols-[17rem_minmax(0,1fr)] xl:grid-cols-[17rem_minmax(0,1fr)_21rem] xl:gap-7"
       >
         {isEdit ? <input type="hidden" name="tid" value={tid} /> : null}
         <input type="hidden" name="chapters" value={chaptersJson} />
@@ -239,43 +415,72 @@ export function CourseEditPage() {
         <input type="hidden" name="description" value={course.description || ''} />
 
         <aside className="hidden self-start lg:sticky lg:top-20 lg:block">
-          <div className="mb-4 flex items-center justify-between gap-2 px-1">
-            <h2 className="text-xs font-semibold tracking-wide text-muted-foreground">章节目录</h2>
-            <Button type="button" variant="ghost" size="sm" className="h-9 gap-1 px-2" onClick={addChapter}>
-              <Plus className="size-3.5" />
-              添加
-            </Button>
+          <div className="krypton-course-panel overflow-hidden">
+            <div className="flex items-center justify-between gap-2 border-b border-border/50 px-3 py-2.5">
+              <div className="flex items-center gap-2">
+                <span aria-hidden="true" className="grid size-7 place-items-center rounded-lg bg-primary/10 text-primary">
+                  <Layers className="size-3.5" strokeWidth={1.75} />
+                </span>
+                <div>
+                  <p className="text-[13px] font-semibold leading-4">章节目录</p>
+                  <p className="krypton-course-meta">{chapters.length} 章</p>
+                </div>
+              </div>
+              <Button type="button" variant="ghost" size="sm" className="h-9 gap-1 px-2" onClick={addChapter}>
+                <Plus className="size-3.5" strokeWidth={2} />
+                添加
+              </Button>
+            </div>
+            <div className="p-1.5">
+              <ChapterOutline
+                chapters={chapters}
+                activeId={activeChapter._id}
+                onSelect={selectChapter}
+                onMove={moveChapter}
+                onRemove={removeChapter}
+              />
+            </div>
           </div>
-          <ChapterOutline chapters={chapters} activeId={activeChapter._id} onSelect={selectChapter} onMove={moveChapter} onRemove={removeChapter} />
         </aside>
 
-        <section className="min-w-0 space-y-8" aria-labelledby="active-chapter-title">
-          <header className="space-y-1">
-            <p className="text-xs tabular-nums text-muted-foreground">
-              第 {chapters.findIndex((chapter) => chapter._id === activeChapter._id) + 1} 章
-            </p>
-            <h2 id="active-chapter-title" className="text-xl font-semibold tracking-tight text-balance">
-              章节内容
-            </h2>
-          </header>
-
-          <label className="block space-y-1.5">
-            <span className="text-sm font-medium">章节标题</span>
-            <Input
-              value={activeChapter.title}
-              onChange={(event) => updateChapter(activeChapter._id, { title: event.target.value })}
-              className="min-h-11 text-base sm:text-sm"
-              required
-            />
-          </label>
-
-          <section data-course-slot="chapterContent" className="space-y-2" aria-labelledby="chapter-content-title">
-            <div>
-              <h3 id="chapter-content-title" className="text-sm font-medium">
-                章节讲义
-              </h3>
-              <p className="mt-0.5 text-xs text-muted-foreground">支持 Markdown、代码块与图片。</p>
+        <section className="min-w-0 space-y-7" aria-labelledby="chapter-editor-title">
+          <h2 id="chapter-editor-title" className="sr-only">
+            章节内容
+          </h2>
+          {/* The chapter being edited is the subject of this screen, so its
+              title is the only display-scale element and it is editable in
+              place rather than sitting under a generic section heading. */}
+          <div className="krypton-course-hero krypton-course-grain px-4 py-5 sm:px-6">
+            <div className="relative z-10">
+              <p className="krypton-course-eyebrow">
+                第 {activeIndex + 1} 章 / 共 {chapters.length} 章
+              </p>
+              <label className="mt-2 block">
+                <span id="active-chapter-title" className="sr-only">
+                  章节标题
+                </span>
+                {/* Edited in place. A display-size field with no chrome is
+                    invisible as a control, so it earns a surface on hover
+                    and focus instead of a permanent input border. */}
+                <input
+                  value={activeChapter.title}
+                  onChange={(event) => updateChapter(activeChapter._id, { title: event.target.value })}
+                  required
+                  placeholder="章节标题"
+                  className={cn(
+                    'krypton-course-display -mx-2 w-[calc(100%+1rem)] rounded-lg border-0 bg-transparent px-2 py-0.5',
+                    'transition-colors duration-150 hover:bg-background/55 focus:bg-background/80',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+                    'placeholder:text-muted-foreground/45 motion-reduce:transition-none',
+                  )}
+                />
+              </label>
+              <p className="krypton-course-meta mt-1.5">标题会同时出现在目录、学生视图和小测预填里。</p>
             </div>
+          </div>
+
+          <section data-course-slot="chapterContent" className="space-y-3" aria-labelledby="chapter-content-title">
+            <CourseSectionHeader id="chapter-content-title" title="章节讲义" description="支持 Markdown、代码块与图片。" />
             <MarkdownEditor
               key={activeChapter._id}
               value={activeChapter.content}
@@ -284,69 +489,77 @@ export function CourseEditPage() {
             />
           </section>
 
-          <section className="space-y-2" aria-labelledby="chapter-problems-title">
-            <div>
-              <h3 id="chapter-problems-title" className="text-sm font-medium">
-                本章小测
-              </h3>
-              <p className="mt-0.5 text-xs text-pretty text-muted-foreground">按当前顺序显示在章节中，通常挂本课对应知识点的题目。</p>
-            </div>
+          <section className="space-y-3" aria-labelledby="chapter-problems-title">
+            <CourseSectionHeader
+              id="chapter-problems-title"
+              title="本章小测"
+              description="按当前顺序显示在章节中，通常挂本课对应知识点的题目。"
+              count={activeChapter.pids.length}
+            />
             <ProblemPicker value={activeChapter.pids} onChange={(pids) => updateChapter(activeChapter._id, { pids })} />
           </section>
 
-          <section className="space-y-2" aria-labelledby="chapter-contests-title">
-            <div>
-              <h3 id="chapter-contests-title" className="text-sm font-medium">
-                引用比赛或作业
-              </h3>
-              <p className="mt-0.5 text-xs text-muted-foreground">填写已创建内容的 id，多个 id 用逗号分隔。</p>
-            </div>
-            <Input
-              value={activeChapter.tids}
-              onChange={(event) => updateChapter(activeChapter._id, { tids: event.target.value })}
-              className="min-h-11 font-mono text-base sm:text-xs"
-              placeholder="65abc… , 65def…"
+          <section className="space-y-3" aria-labelledby="chapter-contests-title">
+            <CourseSectionHeader
+              id="chapter-contests-title"
+              title="引用比赛或作业"
+              description="引用已创建的比赛或作业，学生在本章直接进入。"
+              count={parseRefs(activeChapter.tids).length}
             />
-            <a
-              href="/contest/create"
-              target="_blank"
-              rel="noreferrer"
-              className={cn(
-                'inline-flex min-h-11 items-center text-xs font-medium text-primary hover:underline',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-              )}
-            >
-              前往比赛模块创建
-            </a>
+            <ContestRefInput value={activeChapter.tids} onChange={(tids) => updateChapter(activeChapter._id, { tids })} />
           </section>
 
-          <section data-course-slot="quiz" className="border-y border-border/70 py-3">
+          <section className="space-y-3" aria-labelledby="chapter-problem-set-title">
+            <CourseSectionHeader
+              id="chapter-problem-set-title"
+              title="引用题集"
+              description="实时引用题集成员，不复制题目。留空阶段表示整集，填写阶段 ID 则只引用这些阶段。"
+            />
+            <label className="space-y-1 text-sm">
+              题集 ID
+              <Input
+                value={activeChapter.problemSetId}
+                onChange={(event) => updateChapter(activeChapter._id, { problemSetId: event.target.value })}
+                placeholder="可选"
+              />
+            </label>
+            <label className="space-y-1 text-sm">
+              阶段 ID
+              <Input
+                value={activeChapter.stageIds}
+                onChange={(event) => updateChapter(activeChapter._id, { stageIds: event.target.value })}
+                placeholder="逗号分隔，可空"
+              />
+            </label>
+          </section>
+
+          <section data-course-slot="quiz" className="krypton-course-inset px-4 py-3.5">
             {isEdit && data.canCreateQuiz && saveState === 'idle' ? (
               <Button asChild type="button" variant="outline" className="min-h-11 gap-1.5">
                 <a href={`/homework/create?fromCourse=${encodeURIComponent(tid)}&chapter=${activeChapter._id}`}>
-                  <ClipboardPlus className="size-4" />
+                  <ClipboardPlus className="size-4" strokeWidth={1.75} />
                   为本章建小测
                 </a>
               </Button>
             ) : isEdit && data.canCreateQuiz ? (
               <div className="space-y-1.5">
                 <Button type="button" variant="outline" className="min-h-11 gap-1.5" disabled>
-                  <ClipboardPlus className="size-4" />
+                  <ClipboardPlus className="size-4" strokeWidth={1.75} />
                   为本章建小测
                 </Button>
-                <p className="text-xs text-muted-foreground">请先保存课程修改，再按最新标题与班级范围创建小测。</p>
+                <p className="krypton-course-meta">请先保存课程修改，再按最新标题与班级范围创建小测。</p>
               </div>
             ) : !isEdit ? (
-              <p className="text-xs text-muted-foreground">保存课程后即可创建并自动挂载章节小测。</p>
+              <p className="krypton-course-meta">保存课程后即可创建并自动挂载章节小测。</p>
             ) : null}
           </section>
         </section>
 
-        <aside className={cn('space-y-8 self-start pt-2', 'lg:sticky lg:top-20 lg:border-l lg:border-border/60 lg:pl-6 lg:pt-0')}>
-          <section className="space-y-4" aria-labelledby="course-settings-title">
-            <h2 id="course-settings-title" className="text-sm font-semibold">
-              课程设置
-            </h2>
+        {/* Settings rail. Four titled groups instead of one long undivided
+            stack, so course identity, mindmap, audience and files stop
+            reading as a single anonymous column of labels. */}
+        <aside className="space-y-4 self-start lg:col-span-2 xl:col-span-1 xl:sticky xl:top-20">
+          <SettingsGroup title="课程身份" description="显示在课程列表与详情页顶部。" icon={Layers}>
             <label className="block space-y-1.5">
               <span className="text-xs font-medium">课程名称</span>
               <Input name="title" defaultValue={course.title || ''} required className="min-h-11 text-base sm:text-sm" />
@@ -355,50 +568,42 @@ export function CourseEditPage() {
               <span className="text-xs font-medium">学期</span>
               <Input name="term" defaultValue={course.term || ''} className="min-h-11 text-base sm:text-sm" placeholder="2026 秋" />
             </label>
-            <section id="course-mindmap-settings" className="scroll-mt-24 space-y-1.5" aria-labelledby="course-mindmap-title">
-              <span id="course-mindmap-title" className="flex items-center gap-1.5 text-xs font-medium">
-                <Network className="size-3.5 text-muted-foreground" />
-                知识导图
-              </span>
-              <SimpleSelect
-                name="mindmapId"
-                value={selectedMindmapId}
-                onValueChange={(value) => {
-                  setSelectedMindmapId(value);
-                  markDirty();
-                }}
-                options={[
-                  { value: '', label: '不绑定知识导图' },
-                  ...(data.mindmaps || []).map((map) => ({ value: map._id, label: `${map.title} · 已公开` })),
-                ]}
-                ariaLabel="选择课程知识导图"
-                className="min-h-11"
-                contentClassName="[&_[role=option]]:min-h-10"
-              />
-              <p className="text-xs leading-relaxed text-muted-foreground">仅用于课程知识导图视图；章节仍可包含其它导图或尚未归类的题目。</p>
-            </section>
-            <label className="block space-y-1.5">
-              <span className="text-xs font-medium">课程简介</span>
-              <MarkdownEditor name="content" value={course.content || ''} minHeight={180} />
-            </label>
-          </section>
+            <p className="krypton-course-meta">课程简介在页面底部整幅编辑。</p>
+          </SettingsGroup>
 
-          <section className="space-y-2" aria-labelledby="course-visibility-title">
-            <div>
-              <h2 id="course-visibility-title" className="text-sm font-semibold">
-                可见班级
-              </h2>
-              <p className="mt-0.5 text-xs text-muted-foreground">不选择时对全域用户开放。</p>
-            </div>
-            <ScrollArea className="max-h-52 rounded-xl bg-muted/30">
-              <div className="space-y-1 p-2">
+          <SettingsGroup
+            id="course-mindmap-settings"
+            title="知识导图"
+            description="仅用于课程知识导图视图；章节仍可包含其它导图或尚未归类的题目。"
+            icon={Network}
+          >
+            <SimpleSelect
+              name="mindmapId"
+              value={selectedMindmapId}
+              onValueChange={(value) => {
+                setSelectedMindmapId(value);
+                markDirty();
+              }}
+              options={[
+                { value: '', label: '不绑定知识导图' },
+                ...(data.mindmaps || []).map((map) => ({ value: map._id, label: `${map.title} · 已公开` })),
+              ]}
+              ariaLabel="选择课程知识导图"
+              className="min-h-11"
+              contentClassName="[&_[role=option]]:min-h-10"
+            />
+          </SettingsGroup>
+
+          <SettingsGroup title="可见班级" description="不选择时对全域用户开放。" icon={Users}>
+            <ScrollArea className="krypton-course-inset max-h-52">
+              <div className="space-y-0.5 p-1.5">
                 {activeGroups.length ? (
                   activeGroups.map((group) => (
                     <label
                       key={group._id}
                       className={cn(
-                        'flex min-h-11 items-center gap-2 rounded-md px-2 text-xs transition-colors duration-200 hover:bg-muted/60',
-                        'motion-reduce:transition-none',
+                        'flex min-h-10 cursor-pointer items-center gap-2.5 rounded-lg px-2 text-xs',
+                        'transition-colors duration-150 hover:bg-background/70 motion-reduce:transition-none',
                       )}
                     >
                       <Checkbox
@@ -413,78 +618,89 @@ export function CourseEditPage() {
                           markDirty();
                         }}
                       />
-                      <span>
+                      <span className="min-w-0 truncate">
                         {group.name}
                         {group.archivedAt ? '（已归档）' : ''}
                       </span>
                     </label>
                   ))
                 ) : (
-                  <p className="px-2 py-3 text-xs text-pretty text-muted-foreground">还没有班级。不选择时课程对全域开放。</p>
+                  <p className="krypton-course-meta px-2 py-3 text-pretty">还没有班级。不选择时课程对全域开放。</p>
                 )}
               </div>
             </ScrollArea>
-          </section>
+            {selectedGroups.size ? <p className="krypton-course-meta">已选 {selectedGroups.size} 个班级</p> : null}
+          </SettingsGroup>
 
-          <section data-course-slot="files" className="space-y-3" aria-labelledby="course-files-editor-title">
-            <div>
-              <h2 id="course-files-editor-title" className="text-sm font-semibold">
-                课程课件
-              </h2>
-              <p className="mt-0.5 text-xs text-muted-foreground">学生按课程班级范围下载。</p>
-            </div>
-            {fileError ? (
-              <p role="alert" className="text-xs text-destructive">
-                {fileError}
-              </p>
-            ) : null}
-            {isEdit && data.canManageFiles ? (
-              <FileUploader
-                endpoint={fileEndpoint}
-                maxFiles={10}
-                uploadConcurrency={1}
-                onBatchComplete={() => {
-                  void refreshFiles().catch((error) => setFileError(error?.message || '课件列表刷新失败'));
-                }}
-              />
-            ) : !isEdit ? (
-              <p className="text-xs text-muted-foreground">先保存课程，再上传课件。</p>
-            ) : null}
-            {courseFiles.length ? (
-              <div className="space-y-1">
-                {courseFiles.map((file) => (
-                  <div key={file.name} className="flex min-h-11 items-center gap-2 rounded-xl px-2 py-2 text-xs hover:bg-muted/50">
-                    <FileText className="size-4 shrink-0 text-muted-foreground" />
-                    <span className="min-w-0 flex-1 truncate font-medium">{file.name}</span>
-                    <a
-                      href={`/course/${tid}/file/${encodeURIComponent(file.name)}`}
-                      className={cn(
-                        'inline-flex size-10 items-center justify-center rounded-md hover:bg-muted',
-                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-                      )}
-                      aria-label={`下载${file.name}`}
-                    >
-                      <Download className="size-4" />
-                    </a>
-                    {data.canManageFiles ? (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="size-10 text-destructive"
-                        onClick={() => deleteFile(file.name)}
-                        aria-label={`删除${file.name}`}
+          <SettingsGroup id="course-files-editor" title="课程课件" description="学生按课程班级范围下载。" icon={FileText}>
+            <div data-course-slot="files" className="space-y-3">
+              {fileError ? (
+                <p role="alert" className="text-xs text-destructive">
+                  {fileError}
+                </p>
+              ) : null}
+              {isEdit && data.canManageFiles ? (
+                <FileUploader
+                  endpoint={fileEndpoint}
+                  maxFiles={10}
+                  uploadConcurrency={1}
+                  onBatchComplete={() => {
+                    void refreshFiles().catch((error) => setFileError(error?.message || '课件列表刷新失败'));
+                  }}
+                />
+              ) : !isEdit ? (
+                <p className="krypton-course-meta">先保存课程，再上传课件。</p>
+              ) : null}
+              {courseFiles.length ? (
+                <div className="space-y-0.5">
+                  {courseFiles.map((file) => (
+                    <div key={file.name} className="krypton-course-row flex min-h-11 items-center gap-2 px-2 py-1.5 text-xs">
+                      <FileText className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.75} />
+                      <span className="min-w-0 flex-1 truncate font-medium">{file.name}</span>
+                      <a
+                        href={`/course/${tid}/file/${encodeURIComponent(file.name)}`}
+                        className={cn(
+                          'inline-flex size-9 items-center justify-center rounded-md text-muted-foreground',
+                          'transition-colors duration-150 hover:bg-muted hover:text-foreground',
+                          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary motion-reduce:transition-none',
+                        )}
+                        aria-label={`下载${file.name}`}
                       >
-                        <Trash2 className="size-4" />
-                      </Button>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-            ) : null}
-          </section>
+                        <Download className="size-3.5" strokeWidth={1.75} />
+                      </a>
+                      {data.canManageFiles ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="size-9 text-destructive hover:bg-destructive/10"
+                          onClick={() => deleteFile(file.name)}
+                          aria-label={`删除${file.name}`}
+                        >
+                          <Trash2 className="size-3.5" strokeWidth={1.75} />
+                        </Button>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          </SettingsGroup>
           <div data-course-slot="collaborators" />
         </aside>
+
+        {/* Long-form course copy spans the full grid. The side-by-side
+            markdown editor wraps to about ten characters per line inside a
+            21rem rail, which made the field unusable at any height. */}
+        <section aria-labelledby="course-description-title" className="col-span-full min-w-0 space-y-3">
+          <CourseSectionHeader
+            id="course-description-title"
+            level={2}
+            title="课程简介"
+            description="课程级说明，显示在课程列表摘要与详情页顶部。支持 Markdown。"
+          />
+          <MarkdownEditor name="content" value={course.content || ''} minHeight={260} />
+        </section>
       </form>
 
       <Sheet open={outlineOpen} onOpenChange={setOutlineOpen}>
@@ -492,7 +708,7 @@ export function CourseEditPage() {
           <SheetHeader className="flex items-center justify-between gap-2 pr-12">
             <SheetTitle>章节目录</SheetTitle>
             <Button type="button" variant="ghost" size="sm" className="gap-1" onClick={addChapter}>
-              <Plus className="size-3.5" />
+              <Plus className="size-3.5" strokeWidth={2} />
               添加
             </Button>
           </SheetHeader>

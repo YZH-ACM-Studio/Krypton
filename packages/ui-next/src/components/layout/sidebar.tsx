@@ -155,6 +155,8 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
             'contest_balloon.html',
             'contest_clarification.html',
             'contest_print.html',
+            'contest_virtual.html',
+            'contest_virtual_scoreboard.html',
           ],
         },
         { label: '队伍', href: '/teams', icon: Users, templates: ['team_batches.html', 'team_batch_detail.html'] },

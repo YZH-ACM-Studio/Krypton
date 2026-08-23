@@ -166,6 +166,8 @@ interface ProblemDetailPageData {
   mode?: string;
   pdoc?: ProblemDoc;
   postContestPracticeActive?: boolean;
+  virtualContestActive?: boolean;
+  virtualRemainingMs?: number;
   psdoc?: ProblemStatusDoc;
   solutionCount?: number;
   tdoc?: ContestDoc | null;
@@ -241,6 +243,7 @@ export function buildProblemRecordsHref(input: {
   pid?: string | number;
   tid?: string | null;
   practice?: boolean;
+  virtual?: boolean;
   uidOrName?: string | number;
   status?: number;
 }) {
@@ -250,6 +253,7 @@ export function buildProblemRecordsHref(input: {
     pid,
     tid: input.tid || undefined,
     practice: input.practice || undefined,
+    virtual: input.virtual || undefined,
     uidOrName: input.uidOrName || undefined,
     status: input.status,
   });
@@ -388,7 +392,19 @@ function difficultyBadge(d: number | undefined) {
 }
 
 /** Contest entry banner with live countdown and a back-to-contest link. */
-function ContestBanner({ tdoc, mode, letter, contestUrl }: { tdoc: ContestDoc; mode: string; letter: string | null; contestUrl: string }) {
+function ContestBanner({
+  tdoc,
+  mode,
+  letter,
+  contestUrl,
+  virtualRemainingMs,
+}: {
+  tdoc: ContestDoc;
+  mode: string;
+  letter: string | null;
+  contestUrl: string;
+  virtualRemainingMs?: number;
+}) {
   const isHomework = tdoc.rule === 'homework';
   const begin = (() => {
     if (!tdoc.beginAt) return 0;
@@ -401,20 +417,30 @@ function ContestBanner({ tdoc, mode, letter, contestUrl }: { tdoc: ContestDoc; m
     return Number.isNaN(d.getTime()) ? 0 : d.getTime();
   })();
   const now = Date.now();
-  const running = now >= begin && now < end;
-  const ended = now >= end;
+  const virtual = typeof virtualRemainingMs === 'number';
+  const running = virtual ? virtualRemainingMs > 0 : now >= begin && now < end;
+  const ended = virtual ? virtualRemainingMs <= 0 : now >= end;
+
+  const [remainMs, setRemainMs] = useState(virtual ? Math.max(0, virtualRemainingMs) : 0);
+  useEffect(() => {
+    if (!virtual) return;
+    const started = Date.now();
+    const base = virtualRemainingMs;
+    const timer = setInterval(() => setRemainMs(Math.max(0, base - (Date.now() - started))), 1000);
+    return () => clearInterval(timer);
+  }, [virtual, virtualRemainingMs]);
 
   // Live countdown when running
   const [tick, setTick] = useState(0);
   useEffect(() => {
-    if (!running) return;
+    if (virtual || !running) return;
     const t = setInterval(() => setTick((x) => x + 1), 1000);
     return () => clearInterval(t);
-  }, [running]);
+  }, [running, virtual]);
   // Use tick to silence unused warning while letting state drive re-render
   void tick;
 
-  const remaining = running ? Math.max(0, end - Date.now()) : 0;
+  const remaining = virtual ? remainMs : running ? Math.max(0, end - Date.now()) : 0;
   const remH = Math.floor(remaining / 3_600_000);
   const remM = Math.floor((remaining / 60_000) % 60);
   const remS = Math.floor((remaining / 1000) % 60);
@@ -431,7 +457,7 @@ function ContestBanner({ tdoc, mode, letter, contestUrl }: { tdoc: ContestDoc; m
       case 'contest':
         return (
           <Badge variant="default" className="text-[10px]">
-            比赛中
+            {virtual ? '虚拟参赛' : '比赛中'}
           </Badge>
         );
       case 'view':
@@ -458,7 +484,7 @@ function ContestBanner({ tdoc, mode, letter, contestUrl }: { tdoc: ContestDoc; m
       <CardContent className="flex flex-wrap items-center gap-3 p-3">
         <a href={contestUrl} className="flex items-center gap-1.5 text-sm font-medium hover:underline">
           <ChevronRight className="size-3.5 rotate-180" />
-          返回 {isHomework ? '作业' : '比赛'}
+          返回 {virtual ? '虚拟参赛' : isHomework ? '作业' : '比赛'}
         </a>
         <span className="text-muted-foreground">|</span>
         <span className="text-sm font-medium truncate min-w-0 max-w-[40ch]">{tdoc.title || '比赛'}</span>
@@ -933,6 +959,8 @@ export function ProblemDetailPage() {
   const teamCodeEndpoint = String(examUrls.teamCodeSnapshots || '');
   const mode: string = data.mode || 'normal';
   const postContestPracticeActive = data.postContestPracticeActive === true;
+  const virtualContestActive = data.virtualContestActive === true;
+  const virtualRemainingMs = typeof data.virtualRemainingMs === 'number' ? data.virtualRemainingMs : undefined;
   const canSubmit = canSubmitProblemMode(mode) && data.canSubmitProblem === true && !antiAiCopyFailed;
   // mode ∈ 'normal' | 'view' | 'contest' | 'correction' | 'none' (from problem.ts ProblemDetailHandler)
   // Contest mode shows banner + locks down external links; correction reopens them.
@@ -941,7 +969,11 @@ export function ProblemDetailPage() {
   const tid = tdoc?.docId ? String(tdoc.docId) : null;
   const recordContextTid = tid;
   const recordPracticeScope = postContestPracticeActive || undefined;
-  const contestUrl = tid ? examUrls.overview || replaceRouteTokens(isHomework ? bs.urls.homeworkDetail : bs.urls.contestDetail, { TID: tid }) : null;
+  const contestUrl = tid
+    ? virtualContestActive
+      ? `/contest/${encodeURIComponent(tid)}/virtual`
+      : examUrls.overview || replaceRouteTokens(isHomework ? bs.urls.homeworkDetail : bs.urls.contestDetail, { TID: tid })
+    : null;
   const recordFilterPid = pdoc.docId ?? pid;
   const problemRecordsHref = buildProblemRecordsHref({
     recordsBase: bs.urls.records,
@@ -949,6 +981,7 @@ export function ProblemDetailPage() {
     pid,
     tid,
     practice: postContestPracticeActive,
+    virtual: virtualContestActive,
     uidOrName: bs.user?.signedIn ? bs.user.id : undefined,
   });
   const acceptedRecordsHref = buildProblemRecordsHref({
@@ -957,16 +990,20 @@ export function ProblemDetailPage() {
     pid,
     tid,
     practice: postContestPracticeActive,
+    virtual: virtualContestActive,
     uidOrName: bs.user?.signedIn ? bs.user.id : undefined,
     status: 1,
   });
   const recordDetailRouteBase = examUrls.record || bs.urls.recordDetail;
-  const recordDetailRoute = postContestPracticeActive
-    ? buildUrlWithQuery(recordDetailRouteBase, { tid: recordContextTid, practice: true })
-    : recordDetailRouteBase;
+  const recordDetailRoute = virtualContestActive
+    ? buildUrlWithQuery(recordDetailRouteBase, { tid: recordContextTid, virtual: true })
+    : postContestPracticeActive
+      ? buildUrlWithQuery(recordDetailRouteBase, { tid: recordContextTid, practice: true })
+      : recordDetailRouteBase;
   const pretestRecordRoute = buildUrlWithQuery(bs.urls.recordDetail, {
     tid: recordContextTid,
     practice: recordPracticeScope,
+    virtual: virtualContestActive || undefined,
   });
   // Alphabetic id "A" / "B" / "C" from contest problem order
   const contestPids: unknown[] = Array.isArray(tdoc?.pids) ? tdoc!.pids : [];
@@ -986,7 +1023,7 @@ export function ProblemDetailPage() {
   const [teamCodeBuffer, setTeamCodeBuffer] = useState<TeamCodeBuffer | null>(null);
   // Keep tid on the submit endpoint for correction authorization; the server
   // deliberately stores correction records without a contest id.
-  const contestQS = tid ? `?tid=${tid}` : '';
+  const contestQS = tid ? (virtualContestActive ? `?tid=${tid}&virtual=1` : `?tid=${tid}`) : '';
   const submitUrl = `${problemUrl}/submit${contestQS}`;
   const independentSubmitUrl = practiceIntegrity
     ? practiceProblemEntryUrl(`${problemUrl}/submit`, practiceIntegrity.entry, practiceIntegrity.mode === 'preview')
@@ -1118,6 +1155,7 @@ export function ProblemDetailPage() {
         pid: recordFilterPid,
         tid: recordContextTid || undefined,
         practice: recordPracticeScope,
+        virtual: virtualContestActive || undefined,
         uidOrName: bs.user.id,
       });
       const res = await fetchHydroResponse(url, {
@@ -1145,6 +1183,7 @@ export function ProblemDetailPage() {
     recordContextTid,
     recordDetailRoute,
     recordPracticeScope,
+    virtualContestActive,
     teamCanViewRecords,
     teamCodeReadOnly,
   ]);
@@ -1160,6 +1199,7 @@ export function ProblemDetailPage() {
       pid: String(recordFilterPid),
       tid: recordContextTid || undefined,
       practice: recordPracticeScope,
+      virtual: virtualContestActive || undefined,
       uidOrName: bs.user?.id || undefined,
     },
     onRdoc: (rdoc) => {
@@ -1280,18 +1320,20 @@ export function ProblemDetailPage() {
 
                 {/* Info chips */}
                 <div className="flex flex-wrap gap-x-4 gap-y-1.5 rounded-lg border bg-muted/30 px-3 py-2">
-                  <InfoChip icon={User} label="出题人" value={<ProblemAuthorText authors={authorUdocs} />} />
-                  {dataContributorUdocs.length ? (
+                  {!virtualContestActive ? <InfoChip icon={User} label="出题人" value={<ProblemAuthorText authors={authorUdocs} />} /> : null}
+                  {!virtualContestActive && dataContributorUdocs.length ? (
                     <InfoChip icon={HardDrive} label="数据贡献者" value={<ProblemAuthorText authors={dataContributorUdocs} />} />
                   ) : null}
-                  <InfoChip icon={Send} label="提交" value={nSubmit} href={problemRecordsHref} />
-                  <InfoChip
-                    icon={CheckCircle2}
-                    label="通过"
-                    value={<span className="text-green-600 dark:text-green-400">{nAccept}</span>}
-                    href={acceptedRecordsHref}
-                  />
-                  <InfoChip icon={Trophy} label="通过率" value={`${rate}%`} />
+                  {!virtualContestActive ? <InfoChip icon={Send} label="提交" value={nSubmit} href={problemRecordsHref} /> : null}
+                  {!virtualContestActive ? (
+                    <InfoChip
+                      icon={CheckCircle2}
+                      label="通过"
+                      value={<span className="text-green-600 dark:text-green-400">{nAccept}</span>}
+                      href={acceptedRecordsHref}
+                    />
+                  ) : null}
+                  {!virtualContestActive ? <InfoChip icon={Trophy} label="通过率" value={`${rate}%`} /> : null}
                   {!inContest && pdoc.origStat ? <InfoChip icon={BarChart3} label="赛时通过率" value={origStatChipValue(pdoc.origStat)} /> : null}
                 </div>
 
@@ -1470,7 +1512,15 @@ export function ProblemDetailPage() {
     <motion.div className="space-y-4" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
       <ProblemRejudgeDialog open={rejudgeOpen} onOpenChange={setRejudgeOpen} endpoint={problemUrl} pid={String(pid)} title={baseTitle} />
       {/* Contest mode banner — visible whenever we entered via a contest tid */}
-      {inContest && contestUrl ? <ContestBanner tdoc={tdoc!} mode={mode} letter={contestLetter} contestUrl={contestUrl} /> : null}
+      {inContest && contestUrl ? (
+        <ContestBanner
+          tdoc={tdoc!}
+          mode={mode}
+          letter={contestLetter}
+          contestUrl={contestUrl}
+          virtualRemainingMs={virtualContestActive ? virtualRemainingMs : undefined}
+        />
+      ) : null}
       <PracticeIntegrityNotice context={practiceIntegrity} problemUrl={problemUrl} />
 
       {showNoTestdataWarning ? <NoTestdataWarning /> : null}
@@ -1600,14 +1650,16 @@ export function ProblemDetailPage() {
 
       {/* Dense info bar — during contest, hide owner/solutions/discussions to avoid info leak */}
       <div className="flex flex-wrap gap-x-4 gap-y-1.5 rounded-lg border bg-muted/30 px-3 py-2">
-        <InfoChip icon={Send} label="提交" value={nSubmit} href={problemRecordsHref} />
-        <InfoChip
-          icon={CheckCircle2}
-          label="通过"
-          value={<span className="text-green-600 dark:text-green-400">{nAccept}</span>}
-          href={acceptedRecordsHref}
-        />
-        <InfoChip icon={Trophy} label="通过率" value={`${rate}%`} />
+        {!virtualContestActive ? <InfoChip icon={Send} label="提交" value={nSubmit} href={problemRecordsHref} /> : null}
+        {!virtualContestActive ? (
+          <InfoChip
+            icon={CheckCircle2}
+            label="通过"
+            value={<span className="text-green-600 dark:text-green-400">{nAccept}</span>}
+            href={acceptedRecordsHref}
+          />
+        ) : null}
+        {!virtualContestActive ? <InfoChip icon={Trophy} label="通过率" value={`${rate}%`} /> : null}
         {!inContest && pdoc.origStat ? <InfoChip icon={BarChart3} label="赛时通过率" value={origStatChipValue(pdoc.origStat)} /> : null}
         {!inContest ? <InfoChip icon={User} label="出题人" value={<ProblemAuthorText authors={authorUdocs} />} /> : null}
         {!inContest && dataContributorUdocs.length ? (

@@ -44,6 +44,7 @@ import {
 import { ContestTeamsPage } from '@/pages/contest-teams';
 import { TeamBatchesPage } from '@/pages/team-batches';
 import { ContestDetailPage, ContestScoreboardPage, ContestsPage } from '@/pages/contests';
+import { VirtualContestPage, VirtualContestScoreboardPage } from '@/pages/virtual-contest';
 import { CourseDetailPage, CourseEditPage, CoursePage } from '@/pages/course';
 import { DiscussionCreatePage, DiscussionEditPage } from '@/pages/discussion-manage';
 import { DiscussionDetailPage, DiscussionsPage } from '@/pages/discussions';
@@ -163,6 +164,8 @@ const PAGE_MAP: Record<string, PageComponent> = {
   'contest_balloon.html': ContestBalloonPage,
   'contest_clarification.html': ContestClarificationPage,
   'contest_print.html': ContestPrintPage,
+  'contest_virtual.html': VirtualContestPage,
+  'contest_virtual_scoreboard.html': VirtualContestScoreboardPage,
 
   // Homework
   'homework_main.html': HomeworkPage,

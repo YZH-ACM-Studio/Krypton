@@ -57,6 +57,7 @@ interface SubmitPageData {
   tdoc?: SubmitContestDocument | null;
   langRange?: Record<string, string>;
   practiceIntegrity?: unknown;
+  virtualContestActive?: boolean;
 }
 
 export function ProblemSubmitPage() {
@@ -70,7 +71,8 @@ export function ProblemSubmitPage() {
   const baseTitle = pdoc.title || String(pid);
   const problemUrl = replaceRouteTokens(bs.urls.problemDetail, { PID: String(pid) });
   const tid = tdoc?.docId ? String(tdoc.docId) : null;
-  const contestQS = tid ? `?tid=${tid}` : '';
+  const virtualContestActive = data.virtualContestActive === true;
+  const contestQS = tid ? (virtualContestActive ? `?tid=${tid}&virtual=1` : `?tid=${tid}`) : '';
   const submitUrl = `${problemUrl}/submit${contestQS}`;
   const practiceIntegrity = readPracticeIntegrityPageContext(data.practiceIntegrity);
   const practiceControlled = practiceIntegrity?.controlled === true;

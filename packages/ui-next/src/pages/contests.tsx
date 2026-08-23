@@ -134,6 +134,10 @@ interface ContestsPageData {
     open?: boolean;
     supported?: boolean;
   };
+  virtualContest?: {
+    eligibility?: { allowed?: boolean; reason?: string };
+    attempt?: { _id?: string; status?: string } | null;
+  };
   q?: string;
   rows?: ScoreboardCell[][];
   rule?: string;
@@ -850,6 +854,17 @@ export function ContestDetailPage() {
                 </a>
               </Button>
             ) : null}
+            {data.virtualContest?.eligibility?.allowed || data.virtualContest?.attempt ? (
+              <Button asChild>
+                <a href={`${detailUrl}/virtual`}>
+                  {data.virtualContest.attempt?.status === 'active'
+                    ? '继续虚拟参赛'
+                    : data.virtualContest.attempt?.status === 'ended'
+                      ? '查看虚拟参赛'
+                      : '开始虚拟参赛'}
+                </a>
+              </Button>
+            ) : null}
           </div>
         </div>
       </section>
@@ -894,6 +909,11 @@ export function ContestDetailPage() {
               <DetailAction href={`${detailUrl}/scoreboard`} icon={<Trophy className="size-4" />} title="排行榜">
                 查看排名与榜单视图
               </DetailAction>
+              {data.virtualContest?.eligibility?.allowed || data.virtualContest?.attempt ? (
+                <DetailAction href={`${detailUrl}/virtual`} icon={<Clock className="size-4" />} title="虚拟参赛">
+                  计时训练入口，与赛后补题分开
+                </DetailAction>
+              ) : null}
               {isTeam ? (
                 <DetailAction href={`${detailUrl}/teams`} icon={<Users className="size-4" />} title="队伍工作台">
                   组建队伍、处理邀请与查看成员

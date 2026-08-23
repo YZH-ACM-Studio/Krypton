@@ -120,6 +120,7 @@ interface RecordsPageData extends RecordLanguageContext {
   filterStatus?: unknown;
   filterTid?: string;
   filterUidOrName?: string;
+  virtual?: boolean;
   page?: unknown;
   pdict?: Record<string, RecordProblemSummary>;
   postContestPracticeActive?: boolean;
@@ -602,12 +603,14 @@ export function RecordsPage() {
   const statusTexts = data.statusTexts || {};
   const filterStatus = typeof data.filterStatus === 'number' ? String(data.filterStatus) : '';
   const postContestPracticeActive = data.postContestPracticeActive === true;
-  const practiceTid = postContestPracticeActive ? normalizeId(data.recordDetailTid || data.tdoc?.docId) : '';
+  const virtualContestActive = data.virtual === true;
+  const practiceTid = postContestPracticeActive || virtualContestActive ? normalizeId(data.recordDetailTid || data.filterTid || data.tdoc?.docId) : '';
   const filterParams = {
     uidOrName: data.filterUidOrName || '',
     pid: data.filterPid || '',
     tid: data.filterTid || '',
     practice: postContestPracticeActive ? '1' : '',
+    virtual: virtualContestActive ? '1' : '',
     lang: data.filterLang || '',
     status: filterStatus,
     all: data.all ? '1' : '',
@@ -632,6 +635,7 @@ export function RecordsPage() {
     filters: {
       tid: filterParams.tid || undefined,
       practice: postContestPracticeActive || undefined,
+      virtual: virtualContestActive || undefined,
       pid: filterParams.pid || undefined,
       uidOrName: filterParams.uidOrName || undefined,
       lang: filterParams.lang || undefined,
@@ -682,6 +686,7 @@ export function RecordsPage() {
         <CardContent className="p-4">
           <form method="get" action={bs.urls.records} className="grid gap-3 lg:grid-cols-[repeat(5,minmax(0,1fr))_auto] lg:items-end">
             {postContestPracticeActive ? <input type="hidden" name="practice" value="1" /> : null}
+            {virtualContestActive ? <input type="hidden" name="virtual" value="1" /> : null}
             <div className="space-y-1">
               <label className="text-xs text-muted-foreground">用户 / UID</label>
               <Input name="uidOrName" defaultValue={data.filterUidOrName || ''} placeholder="用户名或 UID" />
@@ -788,9 +793,11 @@ export function RecordsPage() {
                   const recordUrl = buildUrlWithQuery(replaceRouteTokens(bs.urls.recordDetail, { RID: String(r._id) }), {
                     tid: practiceTid,
                     practice: postContestPracticeActive,
+                    virtual: virtualContestActive,
                   });
                   const problemUrl = buildUrlWithQuery(replaceRouteTokens(bs.urls.problemDetail, { PID: String(r.pid) }), {
                     tid: practiceTid,
+                    virtual: virtualContestActive,
                   });
                   return (
                     <TableRow key={String(r._id)}>

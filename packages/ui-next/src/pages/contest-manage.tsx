@@ -118,6 +118,7 @@ interface ContestDoc {
   allowViewCode?: boolean;
   allowPrint?: boolean;
   keepScoreboardHidden?: boolean;
+  allowVirtual?: boolean;
   verifiers?: number[];
   participationMode?: string;
   teamBatchId?: string;
@@ -1500,6 +1501,11 @@ export function ContestEditPage() {
                   <label className="flex items-center gap-2 text-sm">
                     <Checkbox name="keepScoreboardHidden" value="true" defaultChecked={tdoc.keepScoreboardHidden} />
                     赛后保持榜单隐藏
+                  </label>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input type="hidden" name="allowVirtual" value="false" />
+                    <Checkbox name="allowVirtual" value="true" defaultChecked={tdoc.allowVirtual !== false} />
+                    允许赛后虚拟参赛
                   </label>
                 </div>
               </div>

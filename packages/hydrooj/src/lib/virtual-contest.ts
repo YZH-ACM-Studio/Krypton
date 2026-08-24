@@ -118,7 +118,8 @@ export function buildVirtualContestSnapshot(tdoc: Tdoc): VirtualContestSnapshot 
 export function virtualAttemptWindow(startAt: Date, durationMs: number): { startAt: Date; endAt: Date } {
     if (!(startAt instanceof Date) || Number.isNaN(startAt.getTime())) throw new TypeError('Virtual attempt startAt must be a valid Date.');
     if (!Number.isSafeInteger(durationMs) || durationMs <= 0) throw new TypeError('Virtual attempt duration must be a positive integer.');
-    return { startAt, endAt: new Date(startAt.getTime() + durationMs) };
+    const alignedStart = new Date(Math.floor(startAt.getTime() / 1000) * 1000);
+    return { startAt: alignedStart, endAt: new Date(alignedStart.getTime() + durationMs) };
 }
 
 export function isVirtualAttemptOpen(
@@ -195,7 +196,8 @@ export function ridCreatedDuringVirtualAttempt(
     attempt: { startAt: Date; endAt: Date },
 ): boolean {
     const createdAt = rid.getTimestamp().getTime();
-    return createdAt >= attempt.startAt.getTime() && createdAt < attempt.endAt.getTime();
+    const startFloor = Math.floor(attempt.startAt.getTime() / 1000) * 1000;
+    return createdAt >= startFloor && createdAt < attempt.endAt.getTime();
 }
 
 export function compareVirtualAttemptRank(

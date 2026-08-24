@@ -170,9 +170,10 @@ describe('P4.1 virtual contest eligibility and snapshot', () => {
         expect(same).to.equal(virtualContestSnapshotFingerprint(snapshot));
         expect(virtualContestSnapshotFingerprint({ ...snapshot, pids: [2, 1] })).to.not.equal(same);
         expect(virtualContestSnapshotFingerprint({ ...snapshot, durationMs: snapshot.durationMs + 1 })).to.not.equal(same);
-        const startAt = new Date('2026-08-10T04:00:00.000Z');
-        const attempt = { startAt, endAt: new Date(startAt.getTime() + Time.hour) };
-        expect(ridCreatedDuringVirtualAttempt(ObjectId.createFromTime(Math.floor(startAt.getTime() / 1000)), attempt)).to.equal(true);
-        expect(ridCreatedDuringVirtualAttempt(ObjectId.createFromTime(Math.floor(attempt.endAt.getTime() / 1000)), attempt)).to.equal(false);
+        const startAt = new Date('2026-08-10T04:00:00.100Z');
+        const window = virtualAttemptWindow(startAt, Time.hour);
+        expect(window.startAt.getTime()).to.equal(Math.floor(startAt.getTime() / 1000) * 1000);
+        expect(ridCreatedDuringVirtualAttempt(ObjectId.createFromTime(Math.floor(startAt.getTime() / 1000)), window)).to.equal(true);
+        expect(ridCreatedDuringVirtualAttempt(ObjectId.createFromTime(Math.floor(window.endAt.getTime() / 1000)), window)).to.equal(false);
     });
 });

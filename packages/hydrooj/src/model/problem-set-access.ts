@@ -6,7 +6,7 @@ import { Context } from '../context';
 import db from '../service/db';
 import { courseKindClause, isProblemSetKind } from '../lib/training-kind';
 import { canonicalProblemSetAudience, isLegacyPublicProblemSet, problemSetAudienceOf } from '../lib/problem-set-audience';
-import { computePrerequisiteClosure, prerequisitesCompleted, trainingNodeById } from '../lib/problem-set-stage';
+import { computePrerequisiteClosure, ProblemSetStageGraphError, prerequisitesCompleted, trainingNodeById } from '../lib/problem-set-stage';
 import { PERM, PRIV } from './builtin';
 import * as document from './document';
 import { settleDomainCleanupOperations } from './domain-lifecycle-boundary';
@@ -254,7 +254,20 @@ export class ProblemSetAccessService {
                     (user._id > 1 ? (await this.getEnrollment(domainId, tdoc.docId, user._id))?.enroll === 1 : false);
                 const courseGrant = courseStageIdsBySet.get(String(tdoc.docId));
                 if (courseGrant && !courseGrant.wholeSet) {
-                    for (const stageId of courseGrant.stageIds) grantedStageIds.add(stageId);
+                    for (const stageId of courseGrant.stageIds) {
+                        try {
+                            for (const granted of computePrerequisiteClosure(tdoc.dag || [], stageId)) grantedStageIds.add(granted);
+                        } catch (error) {
+                            if (!(error instanceof ProblemSetStageGraphError)) throw error;
+                            logger.warn(
+                                'Course stage grant skipped invalid DAG closure domain=%s tid=%s stageId=%d reason=%s stage=evaluate result=fail-closed',
+                                domainId,
+                                tdoc.docId,
+                                stageId,
+                                error.reason,
+                            );
+                        }
+                    }
                 }
                 const wholeSetAccess =
                     sources.some((source) => source.kind === 'public' || source.kind === 'group' || source.kind === 'manage') ||

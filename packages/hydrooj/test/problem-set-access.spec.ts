@@ -163,6 +163,28 @@ describe('P3.3 problem set access sources', () => {
         expect((await withoutRef.evaluate(domainId, user(), hiddenSet as any)).discoverable).to.equal(false);
     });
 
+    it('expands selected course stages through the DAG access-closure', async () => {
+        const staged = {
+            ...hiddenSet,
+            dag: [
+                { _id: 1, title: 'A', requireNids: [], pids: [11] },
+                { _id: 2, title: 'B', requireNids: [1], pids: [12] },
+                { _id: 3, title: 'C', requireNids: [2], pids: [13] },
+            ],
+        };
+        const course = {
+            domainId,
+            docId: courseId,
+            owner: 9,
+            kind: 'course',
+            courseGroupIds: [],
+            dag: [{ _id: 1, title: 'Ch', requireNids: [], pids: [], problemSetId: otherSetId, stageIds: [3] }],
+        };
+        const decision = await service({ courses: [course] }).evaluate(domainId, user(), staged as any);
+        expect(decision.accessible).to.equal(true);
+        expect(decision.stageAccess).to.deep.equal([1, 2, 3]);
+    });
+
     it('lets a course redemption keep the referenced problem set visible', async () => {
         const course = {
             domainId,

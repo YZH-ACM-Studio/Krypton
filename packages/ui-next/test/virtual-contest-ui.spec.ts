@@ -14,6 +14,8 @@ describe('P4.3 virtual contest UI', () => {
     const page = readFileSync(resolve(root, 'src/pages/virtual-contest.tsx'), 'utf8');
     expect(page).to.include('不启动考试客户端');
     expect(page).to.include('virtual=1');
+    expect(page).to.include('?tid=${encodeURIComponent(tid)}&virtual=1');
+    expect(page).to.include('?tid=${encodeURIComponent(tid)}');
     expect(page).to.include('继续赛后练习');
     expect(page).to.include('这是普通浏览器里的自律计时训练');
     expect(page).to.include('不能当作防作弊');
@@ -29,10 +31,11 @@ describe('P4.3 virtual contest UI', () => {
     const submit = readFileSync(resolve(root, 'src/pages/problem-submit.tsx'), 'utf8');
     expect(submit).to.include('?tid=${tid}&virtual=1');
     const records = readFileSync(resolve(root, 'src/pages/records.tsx'), 'utf8');
-    expect(records).to.include("virtual: virtualContestActive ? '1' : ''");
+    expect(records).to.include("virtual: virtualRecords ? '1' : ''");
     expect(records).to.include('name="virtual"');
-    expect(records).to.include('data.virtualContestActive === true || data.virtual === true');
-    expect(records).to.include('virtual: virtualContestActive');
+    expect(records).to.include('data.virtualAttemptOpen === true');
+    expect(records).to.include('virtual: virtualRecords');
+    expect(records).to.include('virtual: virtualAttemptOpen');
     expect(records).to.include('virtual: true');
   });
 });

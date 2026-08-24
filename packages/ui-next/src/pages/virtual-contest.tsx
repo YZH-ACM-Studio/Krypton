@@ -187,7 +187,10 @@ export function VirtualContestPage() {
             {pids.map((pid, index) => {
               const title = data.pdict?.[String(pid)]?.title || `P${pid}`;
               const cell = attempt?.detail?.[String(pid)];
-              const href = attempt?.status === 'active' ? `/p/${pid}?tid=${encodeURIComponent(tid)}&virtual=1` : `/p/${pid}`;
+              const href =
+                attempt?.status === 'active'
+                  ? `/p/${pid}?tid=${encodeURIComponent(tid)}&virtual=1`
+                  : `/p/${pid}?tid=${encodeURIComponent(tid)}`;
               return (
                 <a key={pid} href={href} className="flex items-center justify-between rounded-md border px-3 py-2 text-sm hover:bg-muted/40">
                   <span>

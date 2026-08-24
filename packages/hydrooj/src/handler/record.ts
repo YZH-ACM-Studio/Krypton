@@ -112,6 +112,7 @@ export class RecordListHandler extends ContestDetailBaseHandler {
         let invalid = false;
         let teamRecordAccess = false;
         let postContestPracticeActive = false;
+        let virtualAttemptOpen = false;
         this.response.template = 'record_main.html';
         // tid undefined → practice mode. The Node MongoDB driver strips
         // {contest: undefined} from the filter, which would otherwise let
@@ -141,6 +142,7 @@ export class RecordListHandler extends ContestDetailBaseHandler {
                 if (!attempt) throw new ValidationError('virtual', null, localizedErrorText`虚拟参赛尚未开始`);
                 const canManage = canManageVirtualContest(this.user, tdoc);
                 if (!canManage && attempt.uid !== this.user._id) throw new PermissionError(PERM.PERM_VIEW_RECORD);
+                virtualAttemptOpen = isVirtualAttemptOpen(attempt);
                 q = { virtualAttemptId: attempt._id, uid: canManage && uidOrName ? q.uid : attempt.uid };
             } else {
                 postContestPracticeActive = practice && canUsePostContestPractice(tdoc, this.tsdoc);
@@ -279,6 +281,7 @@ export class RecordListHandler extends ContestDetailBaseHandler {
             filterPid: pid,
             filterTid: tid,
             virtual,
+            virtualAttemptOpen,
             filterUidOrName: uidOrName,
             filterLang: lang,
             filterStatus: status,
@@ -542,7 +545,8 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
         this.response.template = 'record_detail.html';
         const responseRdoc = formatRecordJudgeMessages(omit(rdoc, ['scoreCancellation']), this.translate.bind(this));
         const recordScoreAction = this.user.hasPerm(PERM.PERM_REJUDGE) ? await getRecordScoreAction(rdoc, true) : null;
-        const virtualContestActive = !!rdoc.virtualAttemptId;
+        const virtualRecords = !!rdoc.virtualAttemptId;
+        const virtualAttemptOpen = this.virtualAttempt ? isVirtualAttemptOpen(this.virtualAttempt) : false;
         const responseBody = {
             udoc,
             recordStudent,
@@ -550,8 +554,10 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
             pdoc,
             tdoc: this.tdoc,
             postContestPracticeRecordAccess: this.postContestPracticeRecordAccess,
-            practiceTid: this.postContestPracticeRecordAccess || virtualContestActive ? this.tdoc?.docId : undefined,
-            ...(virtualContestActive ? { virtualContestActive: true, virtual: true } : {}),
+            practiceTid: this.postContestPracticeRecordAccess || virtualRecords ? this.tdoc?.docId : undefined,
+            ...(virtualRecords
+                ? { virtual: true, virtualAttemptOpen, virtualContestActive: virtualAttemptOpen }
+                : {}),
             rev,
             allRevs,
             // ui-next needs `langs` to render `rdoc.lang` (e.g. "cc.cc17") as

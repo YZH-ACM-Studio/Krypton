@@ -2031,9 +2031,13 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
                     filename = decodeURIComponent(filename);
                 } catch (e) {}
                 if (!this.pdoc.additional_file?.find((i) => i.name === filename)) return str;
-                const replacement = !args[1]
-                    ? `./${this.pdoc.docId}/file/${fileinfo}`
-                    : `./${this.pdoc.docId}/file/${fileinfo}${fileinfo.includes('?') ? '&' : '?'}tid=${args[1]}`;
+                const extra = [
+                    ...(args[1] ? [`tid=${args[1]}`] : []),
+                    ...(this.virtualAttempt ? ['virtual=1'] : []),
+                ];
+                const replacement = extra.length
+                    ? `./${this.pdoc.docId}/file/${fileinfo}${fileinfo.includes('?') ? '&' : '?'}${extra.join('&')}`
+                    : `./${this.pdoc.docId}/file/${fileinfo}`;
                 replacements.push({ start: offset, end: offset + str.length, replacementLength: replacement.length });
                 return replacement;
             });

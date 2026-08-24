@@ -121,6 +121,7 @@ interface RecordsPageData extends RecordLanguageContext {
   filterTid?: string;
   filterUidOrName?: string;
   virtual?: boolean;
+  virtualAttemptOpen?: boolean;
   page?: unknown;
   pdict?: Record<string, RecordProblemSummary>;
   postContestPracticeActive?: boolean;
@@ -161,6 +162,7 @@ interface RecordDetailPageData extends RecordLanguageContext {
   testHints?: Record<string, { hint?: string; videoUrl?: string }>;
   udoc?: GenericUserDoc;
   virtual?: boolean;
+  virtualAttemptOpen?: boolean;
   virtualContestActive?: boolean;
 }
 
@@ -605,14 +607,15 @@ export function RecordsPage() {
   const statusTexts = data.statusTexts || {};
   const filterStatus = typeof data.filterStatus === 'number' ? String(data.filterStatus) : '';
   const postContestPracticeActive = data.postContestPracticeActive === true;
-  const virtualContestActive = data.virtual === true;
-  const practiceTid = postContestPracticeActive || virtualContestActive ? normalizeId(data.recordDetailTid || data.filterTid || data.tdoc?.docId) : '';
+  const virtualRecords = data.virtual === true;
+  const virtualAttemptOpen = data.virtualAttemptOpen === true;
+  const practiceTid = postContestPracticeActive || virtualRecords ? normalizeId(data.recordDetailTid || data.filterTid || data.tdoc?.docId) : '';
   const filterParams = {
     uidOrName: data.filterUidOrName || '',
     pid: data.filterPid || '',
     tid: data.filterTid || '',
     practice: postContestPracticeActive ? '1' : '',
-    virtual: virtualContestActive ? '1' : '',
+    virtual: virtualRecords ? '1' : '',
     lang: data.filterLang || '',
     status: filterStatus,
     all: data.all ? '1' : '',
@@ -637,7 +640,7 @@ export function RecordsPage() {
     filters: {
       tid: filterParams.tid || undefined,
       practice: postContestPracticeActive || undefined,
-      virtual: virtualContestActive || undefined,
+      virtual: virtualRecords || undefined,
       pid: filterParams.pid || undefined,
       uidOrName: filterParams.uidOrName || undefined,
       lang: filterParams.lang || undefined,
@@ -688,7 +691,7 @@ export function RecordsPage() {
         <CardContent className="p-4">
           <form method="get" action={bs.urls.records} className="grid gap-3 lg:grid-cols-[repeat(5,minmax(0,1fr))_auto] lg:items-end">
             {postContestPracticeActive ? <input type="hidden" name="practice" value="1" /> : null}
-            {virtualContestActive ? <input type="hidden" name="virtual" value="1" /> : null}
+            {virtualRecords ? <input type="hidden" name="virtual" value="1" /> : null}
             <div className="space-y-1">
               <label className="text-xs text-muted-foreground">用户 / UID</label>
               <Input name="uidOrName" defaultValue={data.filterUidOrName || ''} placeholder="用户名或 UID" />
@@ -795,11 +798,11 @@ export function RecordsPage() {
                   const recordUrl = buildUrlWithQuery(replaceRouteTokens(bs.urls.recordDetail, { RID: String(r._id) }), {
                     tid: practiceTid,
                     practice: postContestPracticeActive,
-                    virtual: virtualContestActive,
+                    virtual: virtualRecords,
                   });
                   const problemUrl = buildUrlWithQuery(replaceRouteTokens(bs.urls.problemDetail, { PID: String(r.pid) }), {
                     tid: practiceTid,
-                    virtual: virtualContestActive,
+                    virtual: virtualAttemptOpen,
                   });
                   return (
                     <TableRow key={String(r._id)}>
@@ -1005,20 +1008,21 @@ export function RecordDetailPage() {
   const examUrls = data.examMode?.urls || {};
   const teamExamMode = readTeamExamModeContext(data.examMode);
   const postContestPracticeRecordAccess = data.postContestPracticeRecordAccess === true;
-  const virtualContestActive = data.virtualContestActive === true || data.virtual === true;
+  const virtualRecords = data.virtual === true;
+  const virtualAttemptOpen = data.virtualAttemptOpen === true;
   const detailMode = recordDetailMode({
     hasExamMode: !!data.examMode || data.examRecordCodeOnly === true,
     hasContestContext: !!data.tdoc,
     postContestPractice: postContestPracticeRecordAccess,
   });
-  const practiceTid = postContestPracticeRecordAccess || virtualContestActive ? normalizeId(data.practiceTid || data.tdoc?.docId) : '';
+  const practiceTid = postContestPracticeRecordAccess || virtualRecords ? normalizeId(data.practiceTid || data.tdoc?.docId) : '';
   const recordUrlBase = examUrls.record
     ? String(examUrls.record).replace('__RID__', String(rdoc._id))
     : replaceRouteTokens(bs.urls.recordDetail, { RID: String(rdoc._id) });
   const recordUrl = buildUrlWithQuery(recordUrlBase, {
     tid: practiceTid,
     practice: postContestPracticeRecordAccess,
-    virtual: virtualContestActive,
+    virtual: virtualRecords,
   });
   const downloadUrl = buildUrlWithQuery(recordUrl, { download: true });
   const codeDownloadAvailable = recordCodeDownloadAvailable({
@@ -1031,8 +1035,8 @@ export function RecordDetailPage() {
   const problemUrlBase = examUrls.problem
     ? String(examUrls.problem).replace('__PID__', String(rdoc.pid))
     : replaceRouteTokens(bs.urls.problemDetail, { PID: String(rdoc.pid) });
-  const problemUrl = buildUrlWithQuery(problemUrlBase, { tid: practiceTid, virtual: virtualContestActive || undefined });
-  const recordListUrl = virtualContestActive
+  const problemUrl = buildUrlWithQuery(problemUrlBase, { tid: practiceTid, virtual: virtualAttemptOpen || undefined });
+  const recordListUrl = virtualRecords
     ? buildUrlWithQuery(bs.urls.records, {
         tid: practiceTid,
         virtual: true,
@@ -1053,7 +1057,7 @@ export function RecordDetailPage() {
       rid: String(rdoc._id || ''),
       tid: practiceTid || undefined,
       practice: postContestPracticeRecordAccess || undefined,
-      virtual: virtualContestActive || undefined,
+      virtual: virtualRecords || undefined,
     },
     onRdoc: (next) => {
       if (!next || !next._id) return;

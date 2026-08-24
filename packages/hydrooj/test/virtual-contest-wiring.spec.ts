@@ -36,8 +36,10 @@ describe('P4 virtual contest wiring contracts', () => {
         expect(model).to.include('ridCreatedDuringVirtualAttempt');
         expect(model).to.include("status: 'ended' as const, endedAt: now");
         expect(model).to.include('left.createdAt.getTime() - right.createdAt.getTime()');
-        expect(records).to.include('virtualContestActive: true');
         expect(records).to.include('virtualAttemptOpen');
+        expect(records).to.include('virtualContestActive: virtualAttemptOpen');
+        const problem = readSrc('src/handler/problem.ts');
+        expect(problem).to.include("...(this.virtualAttempt ? ['virtual=1'] : [])");
         const submit = readSrc('src/handler/problem.ts');
         expect(submit).to.include('!this.virtualAttempt && (!Array.isArray(this.tdoc.pids) || !this.tdoc.pids.includes(this.pdoc.docId))');
         const board = readSrc('src/handler/virtual-contest.ts');

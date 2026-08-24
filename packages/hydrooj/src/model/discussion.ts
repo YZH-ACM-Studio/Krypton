@@ -336,13 +336,12 @@ export async function getVnode(domainId: string, type: number, id: string, userO
             throw error;
         }
         if (!tdoc) throw new DiscussionNodeNotFoundError(domainId, `training/${id}`);
-        if (isProblemSetKind(tdoc.kind)) {
-            try {
-                await problemSetAccessService.assertAccessible(domainId, userOrUid, tdoc);
-            } catch (error) {
-                if (error instanceof TrainingNotFoundError) throw new DiscussionNodeNotFoundError(domainId, `training/${id}`);
-                throw error;
-            }
+        if (!isProblemSetKind(tdoc.kind)) throw new DiscussionNodeNotFoundError(domainId, `training/${id}`);
+        try {
+            await problemSetAccessService.assertAccessible(domainId, userOrUid, tdoc);
+        } catch (error) {
+            if (error instanceof TrainingNotFoundError) throw new DiscussionNodeNotFoundError(domainId, `training/${id}`);
+            throw error;
         }
         const tsdoc = await training.getStatus(domainId, _id, userOrUid._id);
         tdoc.attend = tsdoc?.attend || tsdoc?.enroll;

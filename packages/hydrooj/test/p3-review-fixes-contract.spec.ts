@@ -24,6 +24,7 @@ describe('P3 review must-fix contracts', () => {
     it('gates training discussion vnodes through the problem-set access service', () => {
         const source = readSrc('src/model/discussion.ts');
         expect(source).to.include('problemSetAccessService.assertAccessible');
+        expect(source).to.include("if (!isProblemSetKind(tdoc.kind)) throw new DiscussionNodeNotFoundError");
         expect(source).to.include('DiscussionNodeNotFoundError');
         expect(source).to.include('training discussion vnode reads require the current user');
         expect(source).to.include('filterDiscussionsByVnodes');

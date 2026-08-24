@@ -1,7 +1,7 @@
 import { ObjectId } from 'mongodb';
 import { Logger } from '@hydrooj/utils';
 import { ContestNotFoundError, localizedErrorText, ForbiddenError, PermissionError, ValidationError } from '../error';
-import { rankVirtualAttempts, syntheticVirtualContestDoc } from '../lib/virtual-contest';
+import { rankVirtualAttempts, syntheticVirtualContestDoc, virtualContestSnapshotFingerprint } from '../lib/virtual-contest';
 import { PERM, PRIV, STATUS } from '../model/builtin';
 import * as contest from '../model/contest';
 import problem from '../model/problem';
@@ -172,18 +172,20 @@ export class VirtualContestScoreboardHandler extends ContestDetailBaseHandler {
         const attempts = virtualContestService.boardAttempts(await virtualContestService.listByContest(domainId, tid), {
             includeActive: canManage,
         });
-        const snapshotRules = Array.from(new Set(attempts.map((attempt) => attempt.snapshot.rule)));
-        if (snapshotRules.length > 1) throw new ValidationError('rule', null, localizedErrorText`该赛制不支持虚拟参赛`);
-        const boardRuleName = snapshotRules[0] || this.tdoc.rule;
+        if (attempts.length) {
+            const fingerprints = new Set(attempts.map((attempt) => virtualContestSnapshotFingerprint(attempt.snapshot)));
+            if (fingerprints.size !== 1) throw new ValidationError('snapshot', null, localizedErrorText`虚拟参赛快照不一致`);
+        }
+        const boardSource = attempts[0];
+        const boardRuleName = boardSource?.snapshot.rule || this.tdoc.rule;
         const rule = contest.RULES[boardRuleName];
         if (!rule?.scoreboardHeader || !rule.scoreboardRow) throw new ValidationError('rule', null, localizedErrorText`该赛制不支持虚拟参赛`);
-        const boardPids = attempts[0]?.snapshot.pids || this.tdoc.pids;
+        const boardPids = boardSource?.snapshot.pids || this.tdoc.pids;
         const uids = Array.from(new Set(attempts.map((attempt) => attempt.uid)));
         const [udict, pdict] = await Promise.all([
             user.getListForRender(domainId, uids, ['displayName']),
             problem.getList(domainId, boardPids, true, true, problem.PROJECTION_CONTEST_LIST, true),
         ]);
-        const boardSource = attempts[0];
         const boardDoc = boardSource
             ? syntheticVirtualContestDoc({
                   domainId,

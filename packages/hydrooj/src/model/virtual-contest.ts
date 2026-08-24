@@ -10,6 +10,7 @@ import {
     isVirtualAttemptOpen,
     isVirtualContestScoreFrozen,
     officialAttemptBlocksNewStart,
+    ridCreatedDuringVirtualAttempt,
     syntheticVirtualContestDoc,
     virtualAttemptWindow,
     type VirtualContestAttemptStatus,
@@ -163,10 +164,7 @@ export class VirtualContestService {
     }
 
     async getAttempt(domainId: string, attemptId: ObjectId): Promise<VirtualContestAttemptDoc> {
-        await this.ensureIndexes();
-        const current = await this.attempts.findOne({ _id: attemptId, domainId });
-        if (!current) throw new NotFoundError(localizedErrorText`虚拟参赛`);
-        return this.settle(current);
+        return this.settle(await this.loadAttempt(domainId, attemptId));
     }
 
     async getOfficialAttempt(domainId: string, sourceContestId: ObjectId, uid: number): Promise<VirtualContestAttemptDoc | null> {
@@ -179,6 +177,11 @@ export class VirtualContestService {
     async listByContest(domainId: string, sourceContestId: ObjectId): Promise<VirtualContestAttemptDoc[]> {
         await this.ensureIndexes();
         const rows = await this.attempts.find({ domainId, sourceContestId } as Filter<VirtualContestAttemptDoc>).toArray();
+        rows.sort((left, right) => {
+            const created = left.createdAt.getTime() - right.createdAt.getTime();
+            if (created !== 0) return created;
+            return left._id.toHexString().localeCompare(right._id.toHexString());
+        });
         return Promise.all(rows.map((row) => this.settle(row)));
     }
 
@@ -331,14 +334,21 @@ export class VirtualContestService {
         result: Partial<RecordDoc>;
     }): Promise<VirtualContestAttemptDoc> {
         for (let attempt = 0; attempt < 8; attempt++) {
-            const current = await this.getAttempt(input.domainId, input.attemptId);
+            const current = await this.loadAttempt(input.domainId, input.attemptId);
             if (current.uid !== input.uid) throw new ForbiddenError(localizedErrorText`没有虚拟参赛管理权限`);
             if (current.status === 'cancelled' || current.status === 'voided') {
                 throw new ValidationError('attempt', null, localizedErrorText`虚拟参赛已结束`);
             }
-            if (current.status === 'ended' && !journalOf(current).some((entry) => String(entry.rid) === String(input.rid))) {
+            if (!current.snapshot.pids.includes(input.pid)) {
+                throw new ValidationError('pid', null, localizedErrorText`题目不属于该虚拟参赛快照`);
+            }
+            const alreadyInJournal = journalOf(current).some((entry) => String(entry.rid) === String(input.rid));
+            const inWindow = ridCreatedDuringVirtualAttempt(input.rid, current);
+            if (!alreadyInJournal && !inWindow) {
                 throw new ValidationError('attempt', null, localizedErrorText`虚拟参赛已结束`);
             }
+            const now = this.now();
+            const shouldEnd = current.status === 'active' && now.getTime() >= current.endAt.getTime();
             const journal = journalOf(current).filter((entry) => String(entry.rid) !== String(input.rid));
             journal.push({
                 rid: input.rid,
@@ -354,30 +364,32 @@ export class VirtualContestService {
                 snapshot: current.snapshot,
                 startAt: current.startAt,
                 endAt: current.endAt,
-                unlocked: !isVirtualContestScoreFrozen(current, this.now()),
+                unlocked: current.status === 'ended' || shouldEnd || !isVirtualContestScoreFrozen(current, now),
             });
             const stats = this.scoreAttempt(synthetic, journal);
             const result = await this.attempts.findOneAndUpdate(
-                { _id: current._id, rev: current.rev },
+                { _id: current._id, rev: current.rev, status: current.status },
                 {
                     $set: {
                         journal,
                         ...stats,
-                        firstRecordAt: current.firstRecordAt || this.now(),
+                        firstRecordAt: current.firstRecordAt || now,
                         rev: current.rev + 1,
+                        ...(shouldEnd ? { status: 'ended' as const, endedAt: now } : {}),
                     },
                 },
                 { returnDocument: 'after' },
             );
             if (result) {
                 logger.info(
-                    'Virtual contest status updated domain=%s contest=%s uid=%d attempt=%s rid=%s pid=%d stage=status result=success',
+                    'Virtual contest status updated domain=%s contest=%s uid=%d attempt=%s rid=%s pid=%d ended=%s stage=status result=success',
                     current.domainId,
                     current.sourceContestId,
                     current.uid,
                     current._id,
                     input.rid,
                     input.pid,
+                    shouldEnd,
                 );
                 return result;
             }
@@ -391,6 +403,13 @@ export class VirtualContestService {
             if (attempt.status === 'active') return opts.includeActive && (opts.onlyUid == null || attempt.uid === opts.onlyUid);
             return true;
         });
+    }
+
+    private async loadAttempt(domainId: string, attemptId: ObjectId): Promise<VirtualContestAttemptDoc> {
+        await this.ensureIndexes();
+        const current = await this.attempts.findOne({ _id: attemptId, domainId });
+        if (!current) throw new NotFoundError(localizedErrorText`虚拟参赛`);
+        return current;
     }
 
     private async settle(attempt: VirtualContestAttemptDoc): Promise<VirtualContestAttemptDoc> {

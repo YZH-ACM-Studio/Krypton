@@ -134,6 +134,7 @@ wiki_help: Help
 虚拟参赛状态已变化: Virtual contest status has changed
 确认后才能重新开放虚拟参赛资格: Confirmation is required to reopen virtual contest eligibility
 题目不属于该虚拟参赛快照: The problem is not in this virtual contest snapshot
+虚拟参赛快照不一致: Virtual contest snapshots do not match
 虚拟参赛尚未开始: The virtual contest has not started
 确认后才能重测虚拟参赛记录: Confirmation is required to rejudge virtual contest records
 比赛或 VP 提交不能使用真实性训练上下文: Contest and virtual contest submissions cannot use a practice integrity context

@@ -27,6 +27,16 @@ describe('P4 virtual contest wiring contracts', () => {
         expect(judgeops).to.include('virtualAttemptId: { $exists: false }');
         const practice = readSrc('src/lib/contest-problem-status.ts');
         expect(practice).to.include('virtualAttemptId: { $exists: false }');
+        const model = readSrc('src/model/virtual-contest.ts');
+        expect(model).to.include('const current = await this.loadAttempt(input.domainId, input.attemptId)');
+        expect(model).to.include('ridCreatedDuringVirtualAttempt');
+        expect(model).to.include("status: 'ended' as const, endedAt: now");
+        expect(model).to.include('left.createdAt.getTime() - right.createdAt.getTime()');
+        const submit = readSrc('src/handler/problem.ts');
+        expect(submit).to.include('!this.virtualAttempt && (!Array.isArray(this.tdoc.pids) || !this.tdoc.pids.includes(this.pdoc.docId))');
+        const board = readSrc('src/handler/virtual-contest.ts');
+        expect(board).to.include('virtualContestSnapshotFingerprint');
+        expect(board).to.include('虚拟参赛快照不一致');
     });
 
     it('keeps VP on ordinary browser routes without Vigil session creation', () => {

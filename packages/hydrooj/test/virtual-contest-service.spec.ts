@@ -211,6 +211,58 @@ describe('P4.1 virtual contest attempt machine', () => {
         expect(rows.some((row) => row.status === 'ended')).to.equal(true);
     });
 
+    it('merges an in-window rid after the window ends and restats unlocked in the same write', async () => {
+        now = new Date(endAt);
+        const { svc } = service();
+        const attempt = await svc.start({ domainId, sourceContestId: contestId, uid });
+        const rid = ObjectId.createFromTime(Math.floor(attempt.startAt.getTime() / 1000) + 10);
+        now = new Date(attempt.endAt.getTime() + 1);
+        const updated = await svc.updateStatus({
+            domainId,
+            attemptId: attempt._id,
+            uid,
+            rid,
+            pid: 11,
+            result: { status: STATUS.STATUS_ACCEPTED, score: 100 },
+        });
+        expect(updated.status).to.equal('ended');
+        expect(updated.accept).to.equal(1);
+        expect(updated.endedAt).to.be.instanceOf(Date);
+        const late = ObjectId.createFromTime(Math.floor(attempt.endAt.getTime() / 1000) + 5);
+        await expectReject(
+            svc.updateStatus({
+                domainId,
+                attemptId: attempt._id,
+                uid,
+                rid: late,
+                pid: 11,
+                result: { status: STATUS.STATUS_ACCEPTED, score: 100 },
+            }),
+        );
+    });
+
+    it('still merges an in-window rid after another reader has already settled the attempt', async () => {
+        now = new Date(endAt);
+        const { svc } = service();
+        const attempt = await svc.start({ domainId, sourceContestId: contestId, uid });
+        const rid = ObjectId.createFromTime(Math.floor(attempt.startAt.getTime() / 1000) + 20);
+        now = new Date(attempt.endAt.getTime() + 1);
+        const settled = await svc.getAttempt(domainId, attempt._id);
+        expect(settled.status).to.equal('ended');
+        expect(settled.accept || 0).to.equal(0);
+        const updated = await svc.updateStatus({
+            domainId,
+            attemptId: attempt._id,
+            uid,
+            rid,
+            pid: 12,
+            result: { status: STATUS.STATUS_ACCEPTED, score: 100 },
+        });
+        expect(updated.status).to.equal('ended');
+        expect(updated.accept).to.equal(1);
+        expect(updated.journal.some((entry) => String(entry.rid) === String(rid))).to.equal(true);
+    });
+
     it('voids an official attempt after confirmation so a new start is allowed', async () => {
         now = new Date(endAt);
         const { svc } = service();

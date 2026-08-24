@@ -2193,7 +2193,11 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
 export class ProblemSubmitHandler extends ProblemDetailHandler {
     private assertContestSubmissionContext(tid?: ObjectId) {
         if (!tid) return;
-        if (!this.tdoc || String(this.tdoc.docId) !== String(tid) || !Array.isArray(this.tdoc.pids) || !this.tdoc.pids.includes(this.pdoc.docId)) {
+        if (
+            !this.tdoc ||
+            String(this.tdoc.docId) !== String(tid) ||
+            (!this.virtualAttempt && (!Array.isArray(this.tdoc.pids) || !this.tdoc.pids.includes(this.pdoc.docId)))
+        ) {
             throw new ContestNotFoundError(this.pdoc.domainId, tid);
         }
     }

@@ -171,6 +171,33 @@ export function officialAttemptBlocksNewStart(status: VirtualContestAttemptStatu
     return status === 'active' || status === 'ended';
 }
 
+export function virtualContestSnapshotFingerprint(
+    snapshot: Pick<VirtualContestSnapshot, 'rule' | 'pids' | 'score' | 'durationMs' | 'lockOffsetMs'>,
+): string {
+    const score: Record<string, number> = {};
+    for (const pid of Object.keys(snapshot.score || {})
+        .map(Number)
+        .filter((value) => Number.isSafeInteger(value))
+        .sort((left, right) => left - right)) {
+        score[String(pid)] = snapshot.score[pid];
+    }
+    return JSON.stringify({
+        rule: snapshot.rule,
+        pids: snapshot.pids,
+        score,
+        durationMs: snapshot.durationMs,
+        lockOffsetMs: snapshot.lockOffsetMs ?? null,
+    });
+}
+
+export function ridCreatedDuringVirtualAttempt(
+    rid: ObjectId,
+    attempt: { startAt: Date; endAt: Date },
+): boolean {
+    const createdAt = rid.getTimestamp().getTime();
+    return createdAt >= attempt.startAt.getTime() && createdAt < attempt.endAt.getTime();
+}
+
 export function compareVirtualAttemptRank(
     sort: Record<string, number>,
     left: Record<string, unknown>,

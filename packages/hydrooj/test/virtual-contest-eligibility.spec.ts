@@ -14,9 +14,11 @@ import {
     officialAttemptBlocksNewStart,
     rankVirtualAttempts,
     syntheticVirtualContestDoc,
+    ridCreatedDuringVirtualAttempt,
     virtualAttemptWindow,
     virtualContestDurationMs,
     virtualContestLockOffsetMs,
+    virtualContestSnapshotFingerprint,
 } from '../src/lib/virtual-contest';
 
 const beginAt = new Date('2026-08-01T01:00:00.000Z');
@@ -160,5 +162,17 @@ describe('P4.1 virtual contest eligibility and snapshot', () => {
                 viewerHasEnded: false,
             }),
         ).to.equal(true);
+    });
+
+    it('fingerprints snapshot identity and only counts rids created inside the attempt window', () => {
+        const snapshot = buildVirtualContestSnapshot(contestDoc({ score: { 2: 100, 1: 200 }, lockAt: new Date(beginAt.getTime() + Time.hour) }));
+        const same = virtualContestSnapshotFingerprint({ ...snapshot, score: { 1: 200, 2: 100 } });
+        expect(same).to.equal(virtualContestSnapshotFingerprint(snapshot));
+        expect(virtualContestSnapshotFingerprint({ ...snapshot, pids: [2, 1] })).to.not.equal(same);
+        expect(virtualContestSnapshotFingerprint({ ...snapshot, durationMs: snapshot.durationMs + 1 })).to.not.equal(same);
+        const startAt = new Date('2026-08-10T04:00:00.000Z');
+        const attempt = { startAt, endAt: new Date(startAt.getTime() + Time.hour) };
+        expect(ridCreatedDuringVirtualAttempt(ObjectId.createFromTime(Math.floor(startAt.getTime() / 1000)), attempt)).to.equal(true);
+        expect(ridCreatedDuringVirtualAttempt(ObjectId.createFromTime(Math.floor(attempt.endAt.getTime() / 1000)), attempt)).to.equal(false);
     });
 });

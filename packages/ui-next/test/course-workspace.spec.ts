@@ -131,6 +131,12 @@ describe('p3.8 course workspace', () => {
     expect(mindmap).not.to.include('loadNodeProblems');
   });
 
+  it('attributes live-ref mindmap problems to the referencing course chapter', () => {
+    const handler = readFileSync(resolve(root, '../hydrooj/src/handler/course.ts'), 'utf8');
+    expect(handler).to.include('referencedPidsByChapter.get(chapter._id)');
+    expect(handler).to.include('if (!chapters.length) continue');
+  });
+
   it('keeps controlled course mindmap entries in an explicit chapter scope', () => {
     const problem = {
       domainId: 'system',

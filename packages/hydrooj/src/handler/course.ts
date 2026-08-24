@@ -171,7 +171,13 @@ function serializeCourseMindmapSnapshot(snapshot: { config: any; nodes: any[] },
     };
 }
 
-async function buildCourseMindmapView(domainId: string, tdoc: TrainingDoc, pids: number[], currentUser: any) {
+async function buildCourseMindmapView(
+    domainId: string,
+    tdoc: TrainingDoc,
+    pids: number[],
+    currentUser: any,
+    referencedPidsByChapter: Map<number, number[]>,
+) {
     const expectedMapId = storedObjectIdString(tdoc.mindmapId, 'course.mindmapId');
     const snapshot = await courseMindmapService().getPublicSnapshot(expectedMapId);
     if (!snapshot) {
@@ -206,7 +212,13 @@ async function buildCourseMindmapView(domainId: string, tdoc: TrainingDoc, pids:
             }
             usedNodeIds.add(nodeId);
         }
-        const chapters = tdoc.dag.filter((chapter) => chapter.pids.includes(docId)).map((chapter) => ({ id: chapter._id, title: chapter.title }));
+        const chapters = tdoc.dag
+            .filter(
+                (chapter) =>
+                    chapter.pids.includes(docId) || (referencedPidsByChapter.get(chapter._id) || []).includes(docId),
+            )
+            .map((chapter) => ({ id: chapter._id, title: chapter.title }));
+        if (!chapters.length) continue;
         problems.push({
             domainId: String(pdoc.domainId || domainId),
             docId,
@@ -431,7 +443,7 @@ class CourseDetailHandler extends Handler {
             user.getById(domainId, tdoc.owner),
             this.user.hasPriv(PRIV.PRIV_USER_PROFILE) ? training.getStatus(domainId, tdoc.docId, this.user._id) : null,
             activeView === 'mindmap' && tdoc.mindmapId !== undefined && tdoc.mindmapId !== null
-                ? buildCourseMindmapView(domainId, tdoc, pids, this.user)
+                ? buildCourseMindmapView(domainId, tdoc, pids, this.user, referencedPidsByChapter)
                 : null,
             practiceIntegrityService.getLatestPublished(domainId, 'course', tdoc.docId),
             overviewData,

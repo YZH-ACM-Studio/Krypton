@@ -251,7 +251,7 @@ describe('P3.6 redemption codes', () => {
         const first = await redemption.redeem({ domainId, uid, user: actor(), code: created.plaintext[0].code });
         const again = await redemption.redeem({ domainId, uid, user: actor(), code: created.plaintext[0].code });
         expect(String(again._id)).to.equal(String(first._id));
-        expect(enrollments).to.equal(1);
+        expect(enrollments).to.equal(2);
         expect(granted).to.have.length(1);
         await expectReject(redemption.redeem({ domainId, uid: 99, user: actor({ _id: 99 }), code: created.plaintext[0].code }));
     });

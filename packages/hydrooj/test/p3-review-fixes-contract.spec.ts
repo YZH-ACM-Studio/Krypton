@@ -39,4 +39,13 @@ describe('P3 review must-fix contracts', () => {
         expect(sanitizer).to.include("'plaintext'");
         expect(sanitizer).to.include("'csv'");
     });
+
+    it('pins freeze CAS to the granted target before issuing entitlements', () => {
+        const source = readSrc('src/model/redemption.ts');
+        expect(source).to.include('freezeTargetFilter');
+        expect(source).to.include('freezeTargetMatches');
+        expect(source).to.include('批次状态已变化');
+        expect(source).to.match(/await this\.markFirstRedeemed\(batch\);\s*const entitlementIds/);
+        expect(source).to.include('await training.ensureEnrolled(input.domainId, tdoc.docId, input.uid)');
+    });
 });

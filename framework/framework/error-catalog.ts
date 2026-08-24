@@ -1094,6 +1094,7 @@ const CORE_ERROR_MESSAGE_TRANSLATIONS: Readonly<Record<string, ErrorMessageTrans
     '有效期无效': { en: 'The expiration time is invalid.', 'zh-CN': '有效期无效' },
     '当前用户组不能兑换该码': { en: 'Your user group cannot redeem this code.', 'zh-CN': '当前用户组不能兑换该码' },
     '兑换名额已满': { en: 'This redemption code has no remaining uses.', 'zh-CN': '兑换名额已满' },
+    '批次状态已变化': { en: 'The redemption batch has changed.', 'zh-CN': '批次状态已变化' },
     '请从题集页面提交这次操作。': {
         en: 'Submit this action from the problem-set page.',
         'zh-CN': '请从题集页面提交这次操作。',

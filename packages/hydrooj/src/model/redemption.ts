@@ -265,9 +265,35 @@ export class RedemptionService {
         throw error;
     }
 
+    private freezeTargetFilter(batch: RedemptionCodeBatchDoc) {
+        return {
+            _id: batch._id,
+            targetKind: batch.targetKind,
+            targetId: batch.targetId,
+            stageId: batch.stageId,
+            allowedGroupIds: batch.allowedGroupIds,
+        };
+    }
+
+    private freezeTargetMatches(current: RedemptionCodeBatchDoc, expected: RedemptionCodeBatchDoc): boolean {
+        return (
+            current.targetKind === expected.targetKind &&
+            String(current.targetId) === String(expected.targetId) &&
+            current.stageId === expected.stageId &&
+            String(current.allowedGroupIds || []) === String(expected.allowedGroupIds || [])
+        );
+    }
+
     private async markFirstRedeemed(batch: RedemptionCodeBatchDoc): Promise<void> {
         await withBatchGate(String(batch._id), async () => {
-            await this.batches.updateOne({ _id: batch._id, firstRedeemedAt: null }, { $set: { firstRedeemedAt: this.now() } });
+            const result = await this.batches.updateOne(
+                { ...this.freezeTargetFilter(batch), firstRedeemedAt: null },
+                { $set: { firstRedeemedAt: this.now() } },
+            );
+            if ((result.matchedCount ?? result.modifiedCount) === 1) return;
+            const confirmed = await this.batches.findOne({ _id: batch._id });
+            if (confirmed?.firstRedeemedAt && this.freezeTargetMatches(confirmed, batch)) return;
+            throw new ValidationError('batch', null, localizedErrorText`批次状态已变化`);
         });
     }
 
@@ -284,6 +310,8 @@ export class RedemptionService {
                 await this.redemptions.updateOne({ _id: existing._id }, { $set: { entitlementIds: active.map((row) => row._id) } });
                 existing.entitlementIds = active.map((row) => row._id);
             }
+            const tdoc = await this.resolveTarget(input.domainId, batch.targetKind, batch.targetId, batch.stageId);
+            await training.ensureEnrolled(input.domainId, tdoc.docId, input.uid);
             await this.markFirstRedeemed(batch);
             return existing;
         }
@@ -642,6 +670,7 @@ export class RedemptionService {
                 await this.redemptions.updateOne({ _id: existing._id, quotaClaimed: { $ne: true } }, { $set: { quotaClaimed: true } });
                 existing.quotaClaimed = true;
             }
+            await this.markFirstRedeemed(batch);
             const entitlementIds: ObjectId[] = [];
             if (batch.targetKind === 'problem_set_stage') {
                 const granted = await problemSetAccessService.grantStageRedemptionWithClosure({
@@ -678,7 +707,6 @@ export class RedemptionService {
                 await this.redemptions.updateOne({ _id: existing._id }, { $set: { entitlementIds } });
                 existing.entitlementIds = entitlementIds;
             }
-            await this.markFirstRedeemed(batch);
             logger.info(
                 'Redemption succeeded domain=%s uid=%d code=%s batch=%s target=%s/%s stage=redeem result=success',
                 input.domainId,

@@ -40,12 +40,10 @@ function ProblemList({
   chapter,
   problems,
   courseId,
-  integrityControlled,
 }: {
   chapter: CourseChapter;
   problems: Record<string, CourseRecord>;
   courseId: string;
-  integrityControlled: boolean;
 }) {
   if (!chapter.pids.length) return null;
   const completed = new Set(chapter.completedPids || []);
@@ -64,16 +62,12 @@ function ProblemList({
           return (
             <li key={pid}>
               <a
-                href={
-                  integrityControlled
-                    ? practiceProblemEntryUrl(`/p/${problem.pid || pid}`, {
-                        containerKind: 'course',
-                        containerId: courseId,
-                        scopeKind: 'chapter',
-                        scopeId: chapter._id,
-                      })
-                    : `/p/${problem.pid || pid}`
-                }
+                href={practiceProblemEntryUrl(`/p/${problem.pid || pid}`, {
+                  containerKind: 'course',
+                  containerId: courseId,
+                  scopeKind: 'chapter',
+                  scopeId: chapter._id,
+                })}
                 className={cn(
                   'krypton-course-row group flex min-h-11 items-center gap-3 px-3 py-2.5',
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
@@ -429,7 +423,7 @@ export function CourseDetailPage() {
             ) : (
               <div data-course-slot="chapterContent" />
             )}
-            <ProblemList chapter={activeChapter} problems={data.pdict || {}} courseId={tid} integrityControlled={data.integrityControlled === true} />
+            <ProblemList chapter={activeChapter} problems={data.pdict || {}} courseId={tid} />
             <ContestList chapter={activeChapter} contests={data.cdict || {}} />
             {data.canDownloadFiles && data.files?.length ? (
               <section data-course-slot="files" aria-labelledby="course-files-title" className="space-y-3">

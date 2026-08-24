@@ -13,11 +13,10 @@ import { problemsForCourseMindmapNode } from './mindmap-state';
 import type { CourseMindmapData, CourseMindmapProblem } from './types';
 import { riseStyle } from './ui';
 
-export function courseMindmapProblemHref(tid: string, problem: CourseMindmapProblem, integrityControlled: boolean): string {
+export function courseMindmapProblemHref(tid: string, problem: CourseMindmapProblem, _integrityControlled = false): string {
   const base = mindmapProblemHref(problem);
-  if (!integrityControlled) return base;
   const chapter = problem.chapters[0];
-  if (!chapter) throw new TypeError(`controlled course mindmap problem ${problem.docId} has no chapter scope`);
+  if (!chapter) throw new TypeError(`course mindmap problem ${problem.docId} has no chapter scope`);
   return practiceProblemEntryUrl(base, {
     containerKind: 'course',
     containerId: tid,

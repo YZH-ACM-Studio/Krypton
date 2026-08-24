@@ -24,6 +24,8 @@ describe('p3.8 course workspace', () => {
     expect(training).to.include('useChapterQuery(dag, preferredNid)');
     expect(training).to.include('selectChapter(Number(rid))');
     expect(training).to.include('selectChapter(s._id)');
+    expect(training).to.include('practiceProblemEntryUrl(base');
+    expect(training).not.to.match(/if \(!integrityControlled\) return base/);
   });
 
   it('keeps list, detail, and editor in focused files with explicit extension slots', () => {
@@ -141,7 +143,9 @@ describe('p3.8 course workspace', () => {
     expect(courseMindmapProblemHref('66b800000000000000000021', problem, true)).to.equal(
       '/p/P11?practiceContainerKind=course&practiceContainerId=66b800000000000000000021&practiceScopeKind=chapter&practiceScopeId=3',
     );
-    expect(courseMindmapProblemHref('66b800000000000000000021', problem, false)).to.equal('/p/P11');
+    expect(courseMindmapProblemHref('66b800000000000000000021', problem, false)).to.equal(
+      '/p/P11?practiceContainerKind=course&practiceContainerId=66b800000000000000000021&practiceScopeKind=chapter&practiceScopeId=3',
+    );
     expect(() => courseMindmapProblemHref('66b800000000000000000021', { ...problem, chapters: [] }, true)).to.throw('has no chapter scope');
   });
 

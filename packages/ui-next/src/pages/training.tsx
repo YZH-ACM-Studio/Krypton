@@ -584,7 +584,6 @@ export function TrainingDetailPage() {
   const doneNids: number[] = Array.isArray(tsdoc.doneNids) ? tsdoc.doneNids : [];
   const problemEntryUrl = (pid: string | number, scopeId: number) => {
     const base = replaceRouteTokens(bs.urls.problemDetail, { PID: String(pid) });
-    if (!integrityControlled) return base;
     return practiceProblemEntryUrl(base, {
       containerKind: 'problemSet',
       containerId: String(tdoc.docId),

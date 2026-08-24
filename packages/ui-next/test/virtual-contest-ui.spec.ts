@@ -31,5 +31,8 @@ describe('P4.3 virtual contest UI', () => {
     const records = readFileSync(resolve(root, 'src/pages/records.tsx'), 'utf8');
     expect(records).to.include("virtual: virtualContestActive ? '1' : ''");
     expect(records).to.include('name="virtual"');
+    expect(records).to.include('data.virtualContestActive === true || data.virtual === true');
+    expect(records).to.include('virtual: virtualContestActive');
+    expect(records).to.include('virtual: true');
   });
 });

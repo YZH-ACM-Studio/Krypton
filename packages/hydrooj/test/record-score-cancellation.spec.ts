@@ -272,6 +272,7 @@ beforeEach(() => {
     recoveryRace = false;
     judgeFailure = null;
     judgeCalls = 0;
+    if ((global as any).Hydro?.model) delete (global as any).Hydro.model.virtualContest;
 });
 
 describe('P2.40 record score cancellation', () => {
@@ -283,6 +284,21 @@ describe('P2.40 record score cancellation', () => {
         expect(buildRecordScoreAction(record({ manualGrade: { score: 50 } }), true)).to.equal(null);
         expect(buildRecordScoreAction(record({ files: { hack: 'hack.in' } }), true)).to.equal(null);
         expect(buildRecordScoreAction(record(), false)).to.equal(null);
+        expect(buildRecordScoreAction(record({ virtualAttemptId: new ObjectId() }), true)?.kind).to.equal('cancel');
+        expect(
+            buildRecordScoreAction(
+                record({
+                    virtualAttemptId: new ObjectId(),
+                    status: STATUS.STATUS_CANCELED,
+                    scoreCancellation: {
+                        actor: 2,
+                        at: new Date('2026-07-25T01:00:00.000Z'),
+                        before: { judgeAt: new Date('2026-07-25T00:00:00.000Z') },
+                    },
+                }),
+                true,
+            ),
+        ).to.equal(null);
     });
 
     it('withholds the server capability when current rejudge preflight fails', async () => {
@@ -638,5 +654,43 @@ describe('P2.40 record score cancellation', () => {
         );
         expect(judgeCalls).to.equal(1);
         expect(audits[1]).to.include({ outcome: 'rejected', stage: 'reset', result: 'rejected' });
+    });
+
+    it('restats virtual contest attempts after cancel instead of official contest status', async () => {
+        const vpCalls: any[] = [];
+        (global as any).Hydro.model.virtualContest = {
+            virtualContestService: {
+                async updateStatus(input: any) {
+                    vpCalls.push(clone(input));
+                    return { projected: true };
+                },
+            },
+        };
+        const target = record({
+            virtualAttemptId: new ObjectId(),
+            sourceContestId: new ObjectId(),
+        });
+        records.push(clone(target));
+        statuses.push({
+            domainId: 'system',
+            docType: 10,
+            docId: 100,
+            uid: 8,
+            rid: target._id,
+            status: target.status,
+            score: target.score,
+        });
+        const result = await cancellation.cancelRecordScore({
+            domainId: 'system',
+            rid: target._id,
+            actor: 2,
+            expectedStatus: target.status,
+            expectedJudgeAt: target.judgeAt,
+        });
+        expect(result.rdoc.status).to.equal(STATUS.STATUS_CANCELED);
+        expect(contestCalls).to.have.length(0);
+        expect(vpCalls).to.have.length(1);
+        expect(String(vpCalls[0].attemptId)).to.equal(String(target.virtualAttemptId));
+        expect(vpCalls[0].result.status).to.equal(STATUS.STATUS_CANCELED);
     });
 });

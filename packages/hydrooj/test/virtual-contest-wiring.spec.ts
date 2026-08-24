@@ -27,11 +27,17 @@ describe('P4 virtual contest wiring contracts', () => {
         expect(judgeops).to.include('virtualAttemptId: { $exists: false }');
         const practice = readSrc('src/lib/contest-problem-status.ts');
         expect(practice).to.include('virtualAttemptId: { $exists: false }');
+        const cancellation = readSrc('src/model/record-score-cancellation.ts');
+        expect(cancellation).to.include('if (rdoc.virtualAttemptId)');
+        expect(cancellation).to.include('virtualContest.updateStatus');
+        expect(cancellation).to.include('if (rdoc.virtualAttemptId) return null');
         const model = readSrc('src/model/virtual-contest.ts');
         expect(model).to.include('const current = await this.loadAttempt(input.domainId, input.attemptId)');
         expect(model).to.include('ridCreatedDuringVirtualAttempt');
         expect(model).to.include("status: 'ended' as const, endedAt: now");
         expect(model).to.include('left.createdAt.getTime() - right.createdAt.getTime()');
+        expect(records).to.include('virtualContestActive: true');
+        expect(records).to.include('virtualAttemptOpen');
         const submit = readSrc('src/handler/problem.ts');
         expect(submit).to.include('!this.virtualAttempt && (!Array.isArray(this.tdoc.pids) || !this.tdoc.pids.includes(this.pdoc.docId))');
         const board = readSrc('src/handler/virtual-contest.ts');

@@ -18,7 +18,7 @@ import {
 } from '../error';
 import { RecordDoc, Tdoc } from '../interface';
 import { canAccessPostContestPracticeRecord, canUsePostContestPractice } from '../lib/contest-correction';
-import { canViewVirtualContestRecord } from '../lib/virtual-contest';
+import { canViewVirtualContestRecord, isVirtualAttemptOpen } from '../lib/virtual-contest';
 import { buildPersonalPracticeRecordQuery } from '../lib/contest-problem-status';
 import { buildExamModeRecordCodePayload, shouldUseLiveClientRecordCodeOnly } from '../lib/exam-mode-record';
 import { formatRecordJudgeMessages } from '../lib/record-judge-presentation';
@@ -40,7 +40,7 @@ import system from '../model/system';
 import user from '../model/user';
 import { ConnectionHandler, param, subscribe, Types } from '../service/server';
 import { buildProjection, Time } from '../utils';
-import { canManageVirtualContest, virtualContestService } from '../model/virtual-contest';
+import { canManageVirtualContest, virtualContestService, type VirtualContestAttemptDoc } from '../model/virtual-contest';
 import { ContestDetailBaseHandler } from './contest';
 
 async function getCurrentTeamForRecord(domainId: string, rdoc: RecordDoc, uid: number): Promise<contestTeam.ContestTeamDoc | null> {
@@ -58,7 +58,7 @@ async function assertVirtualContestRecordAccess(
     domainId: string,
     rdoc: RecordDoc,
     actor: { _id: number; hasPerm: (...perm: bigint[]) => boolean; hasPriv: (priv: number) => boolean; own: (doc: { owner?: number }) => boolean },
-): Promise<void> {
+): Promise<VirtualContestAttemptDoc> {
     if (!rdoc.virtualAttemptId || !rdoc.sourceContestId) throw new PermissionError(PERM.PERM_VIEW_RECORD);
     const attempt = await virtualContestService.getAttempt(domainId, rdoc.virtualAttemptId);
     if (String(attempt.sourceContestId) !== String(rdoc.sourceContestId)) {
@@ -76,6 +76,7 @@ async function assertVirtualContestRecordAccess(
     ) {
         throw new PermissionError(PERM.PERM_VIEW_RECORD);
     }
+    return attempt;
 }
 
 export class RecordListHandler extends ContestDetailBaseHandler {
@@ -309,6 +310,7 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
     teamRecordAccess = false;
     postContestPracticeRecordAccess = false;
     contestPretestRecordAccess = false;
+    virtualAttempt?: VirtualContestAttemptDoc;
 
     @param('rid', Types.ObjectId)
     @param('practice', Types.Boolean)
@@ -317,7 +319,7 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
         if (!this.rdoc) throw new RecordNotFoundError(rid);
         if (this.rdoc.virtualAttemptId) {
             if (practice) throw new PermissionError(PERM.PERM_VIEW_RECORD);
-            await assertVirtualContestRecordAccess(domainId, this.rdoc, this.user);
+            this.virtualAttempt = await assertVirtualContestRecordAccess(domainId, this.rdoc, this.user);
             this.tdoc = await contest.get(domainId, this.rdoc.sourceContestId);
             return;
         }
@@ -495,7 +497,8 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
         const testHints: Record<string, { hint?: string; videoUrl?: string }> = {};
         try {
             const inActiveContest = this.tdoc ? !contest.isDone(this.tdoc, this.tsdoc) : false;
-            if (canViewDetail && !inActiveContest) {
+            const virtualAttemptOpen = this.virtualAttempt ? isVirtualAttemptOpen(this.virtualAttempt) : false;
+            if (canViewDetail && !inActiveContest && !virtualAttemptOpen) {
                 const rawPdoc = requiresDirectProblemAccess
                     ? await problem.getViewableAuthorized(rdoc.domainId, rdoc.pid, this.user, ['domainId', 'docId', 'config'], true)
                     : await problem.get(rdoc.domainId, rdoc.pid, ['domainId', 'docId', 'config'], true);
@@ -539,6 +542,7 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
         this.response.template = 'record_detail.html';
         const responseRdoc = formatRecordJudgeMessages(omit(rdoc, ['scoreCancellation']), this.translate.bind(this));
         const recordScoreAction = this.user.hasPerm(PERM.PERM_REJUDGE) ? await getRecordScoreAction(rdoc, true) : null;
+        const virtualContestActive = !!rdoc.virtualAttemptId;
         const responseBody = {
             udoc,
             recordStudent,
@@ -546,7 +550,8 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
             pdoc,
             tdoc: this.tdoc,
             postContestPracticeRecordAccess: this.postContestPracticeRecordAccess,
-            practiceTid: this.postContestPracticeRecordAccess ? this.tdoc.docId : undefined,
+            practiceTid: this.postContestPracticeRecordAccess || virtualContestActive ? this.tdoc?.docId : undefined,
+            ...(virtualContestActive ? { virtualContestActive: true, virtual: true } : {}),
             rev,
             allRevs,
             // ui-next needs `langs` to render `rdoc.lang` (e.g. "cc.cc17") as

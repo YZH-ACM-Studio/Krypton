@@ -71,6 +71,7 @@ export function buildRecordScoreAction(rdoc: RecordDoc, authorized: boolean): Re
     if (!authorized || !hasAutomaticJudgeResult(rdoc)) return null;
     if (rdoc.status === STATUS.STATUS_CANCELED && rdoc.scoreCancellation?.before?.judgeAt instanceof Date) {
         if (!(rdoc.scoreCancellation.at instanceof Date)) return null;
+        if (rdoc.virtualAttemptId) return null;
         return {
             kind: 'rejudge',
             expectedCancellationAt: rdoc.scoreCancellation.at.toISOString(),
@@ -183,6 +184,18 @@ async function projectProblemStatus(rdoc: RecordDoc) {
 }
 
 async function projectContestStatus(rdoc: RecordDoc) {
+    if (rdoc.virtualAttemptId) {
+        const virtualContest = global.Hydro?.model?.virtualContest?.virtualContestService;
+        if (!virtualContest?.updateStatus) throw new TypeError('virtualContestService.updateStatus is unavailable');
+        return virtualContest.updateStatus({
+            domainId: rdoc.domainId,
+            attemptId: rdoc.virtualAttemptId,
+            uid: rdoc.uid,
+            rid: rdoc._id,
+            pid: rdoc.pid,
+            result: rdoc,
+        });
+    }
     if (!(rdoc.contest instanceof ObjectId)) return null;
     return contest.updateStatus(rdoc.domainId, rdoc.contest, rdoc.uid, rdoc._id, rdoc.pid, rdoc);
 }
@@ -200,7 +213,7 @@ async function runProjections(rdoc: RecordDoc, auditId: ObjectId) {
             completedAt: new Date(),
             projection: {
                 problem: true,
-                contest: !!rdoc.contest,
+                contest: !!(rdoc.contest || rdoc.virtualAttemptId),
             },
         });
         return { problemStatus, contestStatus };

@@ -160,6 +160,8 @@ interface RecordDetailPageData extends RecordLanguageContext {
   tdoc?: { docId?: unknown };
   testHints?: Record<string, { hint?: string; videoUrl?: string }>;
   udoc?: GenericUserDoc;
+  virtual?: boolean;
+  virtualContestActive?: boolean;
 }
 
 interface RecordScoreResponse {
@@ -1003,18 +1005,20 @@ export function RecordDetailPage() {
   const examUrls = data.examMode?.urls || {};
   const teamExamMode = readTeamExamModeContext(data.examMode);
   const postContestPracticeRecordAccess = data.postContestPracticeRecordAccess === true;
+  const virtualContestActive = data.virtualContestActive === true || data.virtual === true;
   const detailMode = recordDetailMode({
     hasExamMode: !!data.examMode || data.examRecordCodeOnly === true,
     hasContestContext: !!data.tdoc,
     postContestPractice: postContestPracticeRecordAccess,
   });
-  const practiceTid = postContestPracticeRecordAccess ? normalizeId(data.practiceTid || data.tdoc?.docId) : '';
+  const practiceTid = postContestPracticeRecordAccess || virtualContestActive ? normalizeId(data.practiceTid || data.tdoc?.docId) : '';
   const recordUrlBase = examUrls.record
     ? String(examUrls.record).replace('__RID__', String(rdoc._id))
     : replaceRouteTokens(bs.urls.recordDetail, { RID: String(rdoc._id) });
   const recordUrl = buildUrlWithQuery(recordUrlBase, {
     tid: practiceTid,
     practice: postContestPracticeRecordAccess,
+    virtual: virtualContestActive,
   });
   const downloadUrl = buildUrlWithQuery(recordUrl, { download: true });
   const codeDownloadAvailable = recordCodeDownloadAvailable({
@@ -1027,15 +1031,21 @@ export function RecordDetailPage() {
   const problemUrlBase = examUrls.problem
     ? String(examUrls.problem).replace('__PID__', String(rdoc.pid))
     : replaceRouteTokens(bs.urls.problemDetail, { PID: String(rdoc.pid) });
-  const problemUrl = buildUrlWithQuery(problemUrlBase, { tid: practiceTid });
-  const recordListUrl = postContestPracticeRecordAccess
+  const problemUrl = buildUrlWithQuery(problemUrlBase, { tid: practiceTid, virtual: virtualContestActive || undefined });
+  const recordListUrl = virtualContestActive
     ? buildUrlWithQuery(bs.urls.records, {
         tid: practiceTid,
-        practice: true,
+        virtual: true,
         pid: rdoc.pid,
-        uidOrName: bs.user?.id,
       })
-    : examUrls.problems || bs.urls.records;
+    : postContestPracticeRecordAccess
+      ? buildUrlWithQuery(bs.urls.records, {
+          tid: practiceTid,
+          practice: true,
+          pid: rdoc.pid,
+          uidOrName: bs.user?.id,
+        })
+      : examUrls.problems || bs.urls.records;
 
   useRecordSocket({
     path: '/record-detail-conn',
@@ -1043,6 +1053,7 @@ export function RecordDetailPage() {
       rid: String(rdoc._id || ''),
       tid: practiceTid || undefined,
       practice: postContestPracticeRecordAccess || undefined,
+      virtual: virtualContestActive || undefined,
     },
     onRdoc: (next) => {
       if (!next || !next._id) return;

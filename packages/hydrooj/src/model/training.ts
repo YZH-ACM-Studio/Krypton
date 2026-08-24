@@ -16,6 +16,7 @@ import { PERM } from './builtin';
 import * as document from './document';
 import * as OplogModel from './oplog';
 import { isProblemBankAdmin, type ProblemAclUser } from './problem-access';
+import { courseNodePids } from '../lib/course-chapter';
 import { canonicalProblemSetAudience } from '../lib/problem-set-audience';
 
 const logger = new Logger('training');
@@ -61,7 +62,7 @@ export function buildScopedTrainingProgress(
     let completedProblemCount = 0;
     let totalProblemCount = 0;
     for (const node of tdoc.dag) {
-        const nodePids = new Set(node.pids);
+        const nodePids = new Set(courseNodePids(node));
         totalProblemCount += nodePids.size;
         const scopedDonePids = nodePids.intersection(new Set(contextualDoneByScope.get(node._id) || []));
         completedProblemCount += scopedDonePids.size;
@@ -436,26 +437,28 @@ export function del(domainId: string, tid: ObjectId) {
 }
 
 export function getPids(dag: TrainingNode[]) {
-    return Array.from(new Set(flatten(dag.map((node) => node.pids))));
+    return Array.from(new Set(flatten(dag.map((node) => courseNodePids(node)))));
 }
 
 export function isDone(node: TrainingNode, doneNids: Set<number> | number[], donePids: Set<number> | number[]) {
-    return new Set(doneNids).isSupersetOf(new Set(node.requireNids)) && new Set(donePids).isSupersetOf(new Set(node.pids));
+    return new Set(doneNids).isSupersetOf(new Set(node.requireNids)) && new Set(donePids).isSupersetOf(new Set(courseNodePids(node)));
 }
 
 export function isProgress(node: TrainingNode, doneNids: Set<number> | number[], donePids: Set<number> | number[], progPids: Set<number> | number[]) {
+    const pids = courseNodePids(node);
     return (
         new Set(doneNids).isSupersetOf(new Set(node.requireNids)) &&
-        !new Set(donePids).isSupersetOf(new Set(node.pids)) &&
-        new Set(donePids).union(new Set(progPids)).intersection(new Set(node.pids)).size
+        !new Set(donePids).isSupersetOf(new Set(pids)) &&
+        new Set(donePids).union(new Set(progPids)).intersection(new Set(pids)).size
     );
 }
 
 export function isOpen(node: TrainingNode, doneNids: Set<number> | number[], donePids: Set<number> | number[], progPids: Set<number> | number[]) {
+    const pids = courseNodePids(node);
     return (
         new Set(doneNids).isSupersetOf(new Set(node.requireNids)) &&
-        !new Set(donePids).isSupersetOf(new Set(node.pids)) &&
-        !new Set(donePids).union(new Set(progPids)).intersection(new Set(node.pids)).size
+        !new Set(donePids).isSupersetOf(new Set(pids)) &&
+        !new Set(donePids).union(new Set(progPids)).intersection(new Set(pids)).size
     );
 }
 
@@ -476,6 +479,13 @@ export async function get(domainId: string, tid: ObjectId) {
         for (const j in tdoc.dag[i].pids) {
             if (Number.isSafeInteger(Number.parseInt(tdoc.dag[i].pids[j], 10))) {
                 tdoc.dag[i].pids[j] = Number.parseInt(tdoc.dag[i].pids[j], 10);
+            }
+        }
+        for (const section of tdoc.dag[i].sections || []) {
+            for (const j in section.pids) {
+                if (Number.isSafeInteger(Number.parseInt(section.pids[j], 10))) {
+                    section.pids[j] = Number.parseInt(section.pids[j], 10);
+                }
             }
         }
     }

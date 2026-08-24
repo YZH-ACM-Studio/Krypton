@@ -3,12 +3,21 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/cn';
 import { CourseProgressBar, riseStyle } from './ui';
 
+interface OutlineSection {
+  _id: number;
+  title: string;
+  progress?: number;
+  doneCount?: number;
+  totalCount?: number;
+}
+
 interface OutlineChapter {
   _id: number;
   title: string;
   progress?: number;
   doneCount?: number;
   totalCount?: number;
+  sections?: OutlineSection[];
 }
 
 /**
@@ -23,13 +32,15 @@ interface OutlineChapter {
 export function ChapterOutline({
   chapters,
   activeId,
+  activeSectionId = null,
   onSelect,
   onMove,
   onRemove,
 }: {
   chapters: OutlineChapter[];
   activeId: number | null;
-  onSelect: (chapterId: number) => void;
+  activeSectionId?: number | null;
+  onSelect: (chapterId: number, sectionId?: number | null) => void;
   onMove?: (chapterId: number, direction: -1 | 1) => void;
   onRemove?: (chapterId: number) => void;
 }) {
@@ -42,14 +53,15 @@ export function ChapterOutline({
         const total = typeof chapter.totalCount === 'number' && chapter.totalCount > 0 ? chapter.totalCount : null;
         const done = typeof chapter.doneCount === 'number' ? chapter.doneCount : 0;
         const complete = total !== null && done >= total;
+        const sections = chapter.sections || [];
         return (
+          <div key={chapter._id} className="space-y-0.5">
           <div
-            key={chapter._id}
             style={riseStyle(index, 30, 10)}
             className={cn(
               'krypton-course-rise group relative flex items-stretch gap-0 rounded-[0.625rem]',
               'transition-[background-color,box-shadow] duration-150 motion-reduce:transition-none',
-              active ? 'krypton-course-active' : 'hover:bg-muted/60',
+              active && activeSectionId == null ? 'krypton-course-active' : 'hover:bg-muted/60',
             )}
           >
             <span
@@ -62,8 +74,8 @@ export function ChapterOutline({
             />
             <button
               type="button"
-              onClick={() => onSelect(chapter._id)}
-              aria-current={active ? 'page' : undefined}
+              onClick={() => onSelect(chapter._id, null)}
+              aria-current={active && activeSectionId == null ? 'page' : undefined}
               className={cn(
                 'flex min-w-0 flex-1 items-start gap-2.5 rounded-[0.625rem] px-3 py-2.5 text-left',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
@@ -74,20 +86,24 @@ export function ChapterOutline({
                 className={cn(
                   'mt-px grid size-5 shrink-0 place-items-center rounded-md text-[10px] font-semibold tabular-nums leading-none',
                   'transition-colors duration-150 motion-reduce:transition-none',
-                  active
+                  active && activeSectionId == null
                     ? 'bg-primary text-primary-foreground'
                     : complete
                       ? 'bg-emerald-500/12 text-emerald-700 dark:text-emerald-400'
                       : 'bg-muted text-muted-foreground',
                 )}
               >
-                {complete && !active ? <Check className="size-3" strokeWidth={2.5} /> : String(index + 1).padStart(2, '0')}
+                {complete && (!active || activeSectionId != null) ? (
+                    <Check className="size-3" strokeWidth={2.5} />
+                  ) : (
+                    String(index + 1).padStart(2, '0')
+                  )}
               </span>
               <span className="min-w-0 flex-1">
                 <span
                   className={cn(
                     'block truncate text-[13px] font-medium leading-5 transition-colors duration-150 motion-reduce:transition-none',
-                    active ? 'text-foreground' : 'text-foreground/85 group-hover:text-foreground',
+                    active && activeSectionId == null ? 'text-foreground' : 'text-foreground/85 group-hover:text-foreground',
                   )}
                 >
                   {chapter.title}
@@ -155,6 +171,50 @@ export function ChapterOutline({
                 ) : null}
               </div>
             ) : null}
+          </div>
+          {sections.map((section, sectionIndex) => {
+            const sectionActive = active && activeSectionId === section._id;
+            const sectionTotal = typeof section.totalCount === 'number' && section.totalCount > 0 ? section.totalCount : null;
+            const sectionDone = typeof section.doneCount === 'number' ? section.doneCount : 0;
+            const sectionComplete = sectionTotal !== null && sectionDone >= sectionTotal;
+            return (
+              <button
+                key={section._id}
+                type="button"
+                onClick={() => onSelect(chapter._id, section._id)}
+                aria-current={sectionActive ? 'page' : undefined}
+                className={cn(
+                  'ml-5 flex w-[calc(100%-1.25rem)] items-start gap-2 rounded-[0.625rem] px-3 py-2 text-left',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+                  sectionActive ? 'krypton-course-active' : 'hover:bg-muted/60',
+                )}
+              >
+                <span
+                  aria-hidden="true"
+                  className={cn(
+                    'mt-px grid size-5 shrink-0 place-items-center rounded-md text-[10px] font-semibold tabular-nums leading-none',
+                    sectionActive
+                      ? 'bg-primary text-primary-foreground'
+                      : sectionComplete
+                        ? 'bg-emerald-500/12 text-emerald-700 dark:text-emerald-400'
+                        : 'bg-muted text-muted-foreground',
+                  )}
+                >
+                  {sectionComplete && !sectionActive ? <Check className="size-3" strokeWidth={2.5} /> : `${index + 1}.${sectionIndex + 1}`}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className={cn('block truncate text-[12px] font-medium leading-5', sectionActive ? 'text-foreground' : 'text-foreground/80')}>
+                    {section.title}
+                  </span>
+                  {sectionTotal !== null ? (
+                    <span className="krypton-course-meta mt-1 block text-[10px] leading-none">
+                      {sectionDone}/{sectionTotal}
+                    </span>
+                  ) : null}
+                </span>
+              </button>
+            );
+          })}
           </div>
         );
       })}

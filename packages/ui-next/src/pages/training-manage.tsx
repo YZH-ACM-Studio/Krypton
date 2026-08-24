@@ -108,6 +108,11 @@ function normalizePlanNode(node: RawTrainingPlanNode, index: number): TrainingPl
 function parsePlan(value: unknown): TrainingPlanNode[] {
   const source = Array.isArray(value) ? value : typeof value === 'string' && value.trim() ? JSON.parse(value) : DEFAULT_PLAN;
   if (!Array.isArray(source)) return DEFAULT_PLAN;
+  for (const node of source) {
+    if (node && typeof node === 'object' && !Array.isArray(node) && Object.hasOwn(node, 'sections')) {
+      throw new TypeError('题集阶段不支持小节');
+    }
+  }
   const nodes = source.map(normalizePlanNode).filter((node) => node.title && node.pids.length > 0);
   return nodes.length ? nodes : DEFAULT_PLAN;
 }
@@ -147,7 +152,8 @@ export function TrainingEditPage() {
   const [planNodes, setPlanNodes] = useState<TrainingPlanNode[]>(() => {
     try {
       return parsePlan(data.dag || tdoc.dag);
-    } catch {
+    } catch (error) {
+      if (error instanceof TypeError && error.message === '题集阶段不支持小节') throw error;
       return DEFAULT_PLAN;
     }
   });

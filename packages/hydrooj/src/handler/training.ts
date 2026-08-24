@@ -35,6 +35,9 @@ async function _parseDagJson(domainId: string, _dag: string): Promise<Tdoc['dag'
             assert(node.requireNids instanceof Array);
             assert(node.pids instanceof Array);
             assert(node.pids.length, 'each node must contain at lease one problem');
+            if (Object.hasOwn(node, 'sections')) {
+                throw new Error('题集阶段不支持小节');
+            }
             for (const nid of node.requireNids) {
                 assert(ids.has(nid), `required nid ${nid} not found`);
             }

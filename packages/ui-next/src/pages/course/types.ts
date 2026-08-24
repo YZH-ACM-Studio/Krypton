@@ -21,11 +21,25 @@ export interface CourseFile {
   size?: number;
 }
 
+export interface CourseSection {
+  _id: number;
+  title: string;
+  content: string;
+  pids: number[];
+  completedPids: number[];
+  progress: number;
+  doneCount: number;
+  totalCount: number;
+}
+
 export interface CourseChapter {
   _id: number;
   title: string;
   content: string;
   pids: number[];
+  /** Unsectioned chapter problems plus live-referenced set members. */
+  loosePids: number[];
+  sections: CourseSection[];
   /**
    * Chapter problems the viewer has finished, from the same scoped source
    * that produced `doneCount`. Under a published integrity policy this is
@@ -40,11 +54,19 @@ export interface CourseChapter {
   totalCount: number;
 }
 
+export interface SectionDraft {
+  _id: number;
+  title: string;
+  content: string;
+  pids: string[];
+}
+
 export interface ChapterDraft {
   _id: number;
   title: string;
   content: string;
   pids: string[];
+  sections: SectionDraft[];
   tids: string;
   problemSetId?: string;
   stageIds?: string;

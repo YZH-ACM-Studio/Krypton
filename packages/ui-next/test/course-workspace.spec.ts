@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { resolveChapterId, withChapterQuery } from '../src/pages/course/chapter-query.ts';
+import { claimChapterProblemIds } from '../src/pages/course/chapter-draft.ts';
+import { resolveChapterId, resolveSectionId, withChapterQuery } from '../src/pages/course/chapter-query.ts';
 import { problemsForCourseMindmapNode } from '../src/pages/course/mindmap-state.ts';
 import { courseMindmapProblemHref } from '../src/pages/course/mindmap.tsx';
 
@@ -17,6 +18,11 @@ describe('p3.8 course workspace', () => {
     expect(resolveChapterId([0, 5], null, 5)).to.equal(5);
     expect(resolveChapterId([], '5')).to.equal(null);
     expect(withChapterQuery('https://oj.test/course/abc?q=x', 9)).to.equal('https://oj.test/course/abc?q=x&chapter=9');
+    expect(resolveSectionId([1, 2], '2')).to.equal(2);
+    expect(resolveSectionId([1, 2], '9')).to.equal(null);
+    expect(resolveSectionId([1, 2], null)).to.equal(null);
+    expect(withChapterQuery('https://oj.test/course/abc?chapter=9', 9, 2)).to.equal('https://oj.test/course/abc?chapter=9&section=2');
+    expect(withChapterQuery('https://oj.test/course/abc?chapter=9&section=2', 9)).to.equal('https://oj.test/course/abc?chapter=9');
   });
 
   it('uses the shared chapter query protocol on training details', () => {
@@ -50,6 +56,8 @@ describe('p3.8 course workspace', () => {
     expect(handler).to.include('tsdoc,');
     expect(list).to.include('Number(data.tcount)');
     expect(detail).to.include('const activeChapter = chapters.find');
+    expect(detail).to.include('selectSection');
+    expect(detail).to.include('本章小节');
     expect(detail).to.not.include('chapters.map((ch');
   });
 
@@ -59,8 +67,36 @@ describe('p3.8 course workspace', () => {
     expect(editor).to.include('key={activeChapter._id}');
     expect(editor).to.include('value={activeChapter.content}');
     expect(editor).to.include('{ content }');
+    expect(editor).to.include('添加小节');
+    expect(editor).to.include("from './chapter-draft'");
+    expect(editor).to.include("claimChapterProblemIds(chapter, 'loose', pids)");
+    expect(editor).to.include('claimChapterProblemIds(chapter, sectionId, pids)');
     expect(detail).to.include('content={activeChapter.content}');
-    expect(detail).to.include('!course.content && !activeChapter.content');
+    expect(detail).to.include('!course.content &&');
+    expect(detail).to.include('!activeChapter.content');
+    expect(detail).to.include('该小节暂无内容');
+    expect(detail).to.match(/\{\(activeSection \? activeSection\.totalCount : activeChapter\.totalCount\) \? \(/);
+    expect(detail).to.include('chapter._id === activeChapter?._id');
+  });
+
+  it('moves a claimed pid out of the other picker in the same chapter', () => {
+    const chapter = {
+      _id: 1,
+      title: '第一章',
+      content: '',
+      pids: ['11', '12'],
+      sections: [
+        { _id: 1, title: '引入', content: '', pids: ['13'] },
+        { _id: 2, title: '练习', content: '', pids: ['14'] },
+      ],
+      tids: '',
+      problemSetId: '',
+      stageIds: '',
+    };
+    expect(claimChapterProblemIds(chapter, 1, ['12', '13']).pids).to.deep.equal(['11']);
+    expect(claimChapterProblemIds(chapter, 1, ['12', '13']).sections.map((section) => section.pids)).to.deep.equal([['12', '13'], ['14']]);
+    expect(claimChapterProblemIds(chapter, 'loose', ['13', '11']).pids).to.deep.equal(['13', '11']);
+    expect(claimChapterProblemIds(chapter, 'loose', ['13', '11']).sections.map((section) => section.pids)).to.deep.equal([[], ['14']]);
   });
 
   it('uses protected course file routes without reloading the editor draft', () => {
@@ -75,6 +111,9 @@ describe('p3.8 course workspace', () => {
     expect(handler).to.include("@post('filename', Types.Filename)");
     expect(handler).to.include('listedCourseFile(tdoc, filename)');
     expect(training).to.include('assertProblemSet(tdoc)');
+    const trainingManage = readFileSync(resolve(root, 'src/pages/training-manage.tsx'), 'utf8');
+    expect(trainingManage).to.include("Object.hasOwn(node, 'sections')");
+    expect(trainingManage).to.include('题集阶段不支持小节');
     expect(training).to.include('throw new NotFoundError(localizedErrorText`file`)');
     expect(editor).to.include('<FileUploader');
     expect(editor).to.include('uploadConcurrency={1}');

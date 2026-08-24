@@ -8,6 +8,7 @@
  *   - `term`：学期等元信息
  *
  * 章节结构是线性目录（DAG requireNids 始终为空，前端编辑器只做线性）。
+ * 每章可再挂线性小节；题目可落在章或小节，练习范围仍是章。
  * 权限：查看 PERM_VIEW_TRAINING；建/改 PERM_CREATE_COURSE / PERM_EDIT_COURSE。
  */
 import assert from 'assert';
@@ -37,6 +38,7 @@ import system from '../model/system';
 import * as training from '../model/training';
 import user from '../model/user';
 import { Handler, param, post, Types } from '../service/server';
+import { courseNodePids, parseCourseSections } from '../lib/course-chapter';
 import { liveReferencedPids } from '../lib/course-live-ref';
 import { resolveProblemKnowledgeNodeIds } from '../lib/problem-tag-canonical';
 import { courseKindClause, isCourseKind, isProblemSetKind } from '../lib/training-kind';
@@ -215,7 +217,7 @@ async function buildCourseMindmapView(
         const chapters = tdoc.dag
             .filter(
                 (chapter) =>
-                    chapter.pids.includes(docId) || (referencedPidsByChapter.get(chapter._id) || []).includes(docId),
+                    courseNodePids(chapter).includes(docId) || (referencedPidsByChapter.get(chapter._id) || []).includes(docId),
             )
             .map((chapter) => ({ id: chapter._id, title: chapter.title }));
         if (!chapters.length) continue;
@@ -289,7 +291,17 @@ async function parseChaptersJson(domainId: string, raw: string): Promise<Trainin
             if (node.content !== undefined && typeof node.content !== 'string') {
                 throw new ValidationError('chapters', null, localizedErrorText`章节 ${node._id} 的讲义必须是字符串`);
             }
+            if (node.pids !== undefined && node.pids !== null && !Array.isArray(node.pids)) {
+                throw new Error(`章节 ${node._id} 的题目必须是数组`);
+            }
             const pids = normalizeProblemDocIds(Array.isArray(node.pids) ? node.pids : []);
+            const sections = parseCourseSections(+node._id, node.sections, normalizeProblemDocIds);
+            const sectionPidSet = new Set(sections.flatMap((section) => section.pids));
+            for (const pid of pids) {
+                if (sectionPidSet.has(pid)) {
+                    throw new ValidationError('chapters', null, localizedErrorText`章节 ${node._id} 的题目不能同时属于小节`);
+                }
+            }
             let problemSetId: ObjectId | undefined;
             let stageIds: number[] | undefined;
             if (node.problemSetId) {
@@ -326,6 +338,7 @@ async function parseChaptersJson(domainId: string, raw: string): Promise<Trainin
                 ...(node.content ? { content: node.content } : {}),
                 requireNids: [], // 线性目录：无先修依赖
                 pids,
+                ...(sections.length ? { sections } : {}),
                 ...(tids.length ? { tids } : {}),
                 ...(problemSetId ? { problemSetId } : {}),
                 ...(stageIds?.length ? { stageIds } : {}),
@@ -463,7 +476,7 @@ class CourseDetailHandler extends Handler {
         const chapters =
             activeView === 'overview'
                 ? tdoc.dag.map((node) => {
-                      const livePids = Array.from(new Set([...node.pids, ...(referencedPidsByChapter.get(node._id) || [])]));
+                      const livePids = Array.from(new Set([...courseNodePids(node), ...(referencedPidsByChapter.get(node._id) || [])]));
                       const total = livePids.length;
                       const completed = contextualDoneByScope ? contextualDoneByScope.get(node._id) || new Set<number>() : donePids;
                       // Per-problem marks and the chapter counter read the same
@@ -471,11 +484,33 @@ class CourseDetailHandler extends Handler {
                       // progress figure, and a published integrity policy never
                       // falls back to global ProblemStatus.
                       const donePidsInChapter = livePids.filter((p) => completed.has(p));
+                      const sectionPidSet = new Set((node.sections || []).flatMap((section) => section.pids));
+                      const liveRefPids = referencedPidsByChapter.get(node._id) || [];
+                      const loosePids = Array.from(
+                          new Set([
+                              ...node.pids.filter((pid) => !sectionPidSet.has(pid)),
+                              ...liveRefPids.filter((pid) => !sectionPidSet.has(pid)),
+                          ]),
+                      );
                       return {
                           _id: node._id,
                           title: node.title,
                           content: node.content || '',
                           pids: livePids,
+                          loosePids,
+                          sections: (node.sections || []).map((section) => {
+                              const donePidsInSection = section.pids.filter((pid) => completed.has(pid));
+                              return {
+                                  _id: section._id,
+                                  title: section.title,
+                                  content: section.content || '',
+                                  pids: section.pids,
+                                  completedPids: donePidsInSection,
+                                  progress: section.pids.length ? Math.floor(100 * (donePidsInSection.length / section.pids.length)) : 0,
+                                  doneCount: donePidsInSection.length,
+                                  totalCount: section.pids.length,
+                              };
+                          }),
                           completedPids: donePidsInChapter,
                           tids: (node.tids || []).map((t) => String(t)),
                           problemSetId: node.problemSetId ? String(node.problemSetId) : '',
@@ -593,6 +628,7 @@ class CourseEditHandler extends Handler {
                     title: n.title,
                     content: n.content || '',
                     pids: n.pids,
+                    sections: n.sections || [],
                     tids: (n.tids || []).map((t) => String(t)),
                     problemSetId: n.problemSetId ? String(n.problemSetId) : '',
                     stageIds: n.stageIds || [],

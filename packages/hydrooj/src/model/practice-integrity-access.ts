@@ -1,6 +1,7 @@
 import { ObjectId } from 'mongodb';
 import { localizedErrorText, PermissionError, ValidationError } from '../error';
 import type { User } from '../interface';
+import { courseNodePids } from '../lib/course-chapter';
 import { liveReferencedPids } from '../lib/course-live-ref';
 import { isCourseKind, isProblemSetKind } from '../lib/training-kind';
 import { PERM, PRIV, STATUS } from './builtin';
@@ -139,7 +140,7 @@ export async function assertPracticeTargetAccess(input: {
     if (!scope) {
         throw new ValidationError('pid', null, localizedErrorText`题目不属于请求的真实性训练范围`);
     }
-    const direct = (scope.pids || []).map(Number).includes(pid);
+    const direct = courseNodePids(scope).map(Number).includes(pid);
     if (!direct) {
         if (target.containerKind !== 'course' || !scope.problemSetId) {
             throw new ValidationError('pid', null, localizedErrorText`题目不属于请求的真实性训练范围`);
@@ -169,9 +170,9 @@ export async function preparePracticeIssue(input: {
     const primaryContainer = await assertPracticeTargetAccess(input);
     if (input.target.containerKind !== 'course') return { primaryContainer };
     const chapter = (primaryContainer.dag || []).find((node: { _id: number }) => Number(node._id) === input.target.scopeId) as
-        | { problemSetId?: ObjectId; stageIds?: number[]; pids?: number[] }
+        | { problemSetId?: ObjectId; stageIds?: number[]; pids?: number[]; sections?: { pids?: number[] }[] }
         | undefined;
-    if (!chapter?.problemSetId || (chapter.pids || []).map(Number).includes(input.pid)) return { primaryContainer };
+    if (!chapter?.problemSetId || courseNodePids(chapter).map(Number).includes(input.pid)) return { primaryContainer };
     input.setRejectionReason?.('problem-set-stage-denied');
     const setDoc = await loadPracticeContainer(input.domainId, 'problemSet', chapter.problemSetId);
     const allowed = Array.isArray(chapter.stageIds) ? chapter.stageIds.map(Number) : [];

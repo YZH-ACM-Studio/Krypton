@@ -368,12 +368,24 @@ export type ScoreboardRow = ScoreboardNode[] & { raw?: any };
 
 export type PenaltyRules = Dictionary<number>;
 
+export interface TrainingSection {
+    _id: number;
+    title: string;
+    content?: string;
+    pids: number[];
+}
+
 export interface TrainingNode {
     _id: number;
     title: string;
     content?: string;
     requireNids: number[];
     pids: number[];
+    /**
+     * Optional linear subsections of a course chapter. Problem-set stages
+     * keep using the top-level DAG node and must not persist this field.
+     */
+    sections?: TrainingSection[];
     /**
      * Krypton 课程模块（PLAN 2026-07-02 §10）：章节引用的比赛/作业 tid 列表
      * （引用制——比赛在比赛模块独立创建，章节只存 tid）。仅 course 用。

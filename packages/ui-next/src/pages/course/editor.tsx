@@ -1,5 +1,7 @@
 import {
+  ArrowDown,
   ArrowLeft,
+  ArrowUp,
   Check,
   ClipboardPlus,
   Download,
@@ -29,9 +31,10 @@ import { FileUploader } from '@/components/uploader';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
+import { claimChapterProblemIds } from './chapter-draft';
 import { ChapterOutline } from './chapter-outline';
 import { useChapterQuery } from './chapter-query';
-import type { ChapterDraft, CourseFile, CourseRecord } from './types';
+import type { ChapterDraft, CourseFile, CourseRecord, SectionDraft } from './types';
 import { CourseMark, CourseSectionHeader } from './ui';
 
 type SaveState = 'idle' | 'dirty' | 'saving';
@@ -45,6 +48,14 @@ function initialChapterDrafts(serialized?: string): ChapterDraft[] {
     title: String(chapter.title || ''),
     content: String(chapter.content || ''),
     pids: Array.isArray(chapter.pids) ? chapter.pids.map(String) : [],
+    sections: Array.isArray(chapter.sections)
+      ? chapter.sections.map((section: SectionDraft) => ({
+          _id: Number(section._id),
+          title: String(section.title || ''),
+          content: String(section.content || ''),
+          pids: Array.isArray(section.pids) ? section.pids.map(String) : [],
+        }))
+      : [],
     tids: Array.isArray(chapter.tids) ? chapter.tids.map(String).join(',') : '',
     problemSetId: chapter.problemSetId ? String(chapter.problemSetId) : '',
     stageIds: Array.isArray(chapter.stageIds) ? chapter.stageIds.map(String).join(',') : '',
@@ -211,7 +222,9 @@ export function CourseEditPage() {
   const tid = String(course.docId || course._id || '');
   const parsedChapters = useMemo(() => initialChapterDrafts(data.chapters), [data.chapters]);
   const [chapters, setChapters] = useState<ChapterDraft[]>(
-    parsedChapters.length ? parsedChapters : [{ _id: 1, title: '第一章', content: '', pids: [], tids: '', problemSetId: '', stageIds: '' }],
+    parsedChapters.length
+      ? parsedChapters
+      : [{ _id: 1, title: '第一章', content: '', pids: [], sections: [], tids: '', problemSetId: '', stageIds: '' }],
   );
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set((course.courseGroupIds || []).map(String)));
   const [selectedMindmapId, setSelectedMindmapId] = useState(String(course.mindmapId || ''));
@@ -220,7 +233,7 @@ export function CourseEditPage() {
   const [outlineOpen, setOutlineOpen] = useState(false);
   const [courseFiles, setCourseFiles] = useState<CourseFile[]>(data.files || []);
   const [fileError, setFileError] = useState('');
-  const { activeId, selectChapter } = useChapterQuery(chapters);
+  const { activeId, activeSectionId, selectChapter, selectSection } = useChapterQuery(chapters);
   const activeChapter = chapters.find((chapter) => chapter._id === activeId) || chapters[0];
 
   useEffect(() => {
@@ -249,6 +262,7 @@ export function CourseEditPage() {
         title: `第 ${current.length + 1} 章`,
         content: '',
         pids: [],
+        sections: [],
         tids: '',
         problemSetId: '',
         stageIds: '',
@@ -280,12 +294,84 @@ export function CourseEditPage() {
     markDirty();
   };
 
+  const updateSection = (chapterId: number, sectionId: number, patch: Partial<SectionDraft>) => {
+    setChapters((current) =>
+      current.map((chapter) =>
+        chapter._id === chapterId
+          ? {
+              ...chapter,
+              sections: chapter.sections.map((section) => (section._id === sectionId ? { ...section, ...patch } : section)),
+            }
+          : chapter,
+      ),
+    );
+    markDirty();
+  };
+
+  const updateChapterPids = (chapterId: number, pids: string[]) => {
+    setChapters((current) => current.map((chapter) => (chapter._id === chapterId ? claimChapterProblemIds(chapter, 'loose', pids) : chapter)));
+    markDirty();
+  };
+
+  const updateSectionPids = (chapterId: number, sectionId: number, pids: string[]) => {
+    setChapters((current) => current.map((chapter) => (chapter._id === chapterId ? claimChapterProblemIds(chapter, sectionId, pids) : chapter)));
+    markDirty();
+  };
+
+  const addSection = (chapterId: number) => {
+    setChapters((current) =>
+      current.map((chapter) => {
+        if (chapter._id !== chapterId) return chapter;
+        const sectionId = Math.max(0, ...chapter.sections.map((section) => section._id)) + 1;
+        return {
+          ...chapter,
+          sections: [...chapter.sections, { _id: sectionId, title: `第 ${chapter.sections.length + 1} 节`, content: '', pids: [] }],
+        };
+      }),
+    );
+    markDirty();
+  };
+
+  const moveSection = (chapterId: number, sectionId: number, direction: -1 | 1) => {
+    setChapters((current) =>
+      current.map((chapter) => {
+        if (chapter._id !== chapterId) return chapter;
+        const from = chapter.sections.findIndex((section) => section._id === sectionId);
+        const to = from + direction;
+        if (from < 0 || to < 0 || to >= chapter.sections.length) return chapter;
+        const sections = [...chapter.sections];
+        [sections[from], sections[to]] = [sections[to], sections[from]];
+        return { ...chapter, sections };
+      }),
+    );
+    markDirty();
+  };
+
+  const removeSection = (chapterId: number, sectionId: number) => {
+    setChapters((current) =>
+      current.map((chapter) =>
+        chapter._id === chapterId ? { ...chapter, sections: chapter.sections.filter((section) => section._id !== sectionId) } : chapter,
+      ),
+    );
+    markDirty();
+  };
+
   const chaptersJson = JSON.stringify(
     chapters.map((chapter) => ({
       _id: chapter._id,
       title: chapter.title,
       ...(chapter.content ? { content: chapter.content } : {}),
       pids: chapter.pids,
+      ...(chapter.sections.length
+        ? {
+            sections: chapter.sections.map((section) => ({
+              _id: section._id,
+              title: section.title,
+              ...(section.content ? { content: section.content } : {}),
+              pids: section.pids,
+            })),
+          }
+        : {}),
       tids: parseRefs(chapter.tids),
       ...(chapter.problemSetId.trim() ? { problemSetId: chapter.problemSetId.trim() } : {}),
       ...(parseRefs(chapter.stageIds).length ? { stageIds: parseRefs(chapter.stageIds).map(Number) } : {}),
@@ -354,8 +440,9 @@ export function CourseEditPage() {
     }
   };
 
-  const selectFromMobile = (chapterId: number) => {
-    selectChapter(chapterId);
+  const selectFromMobile = (chapterId: number, sectionId?: number | null) => {
+    if (sectionId == null) selectChapter(chapterId);
+    else selectSection(chapterId, sectionId);
     setOutlineOpen(false);
   };
 
@@ -435,7 +522,8 @@ export function CourseEditPage() {
               <ChapterOutline
                 chapters={chapters}
                 activeId={activeChapter._id}
-                onSelect={selectChapter}
+                activeSectionId={activeSectionId}
+                onSelect={(chapterId, sectionId) => (sectionId == null ? selectChapter(chapterId) : selectSection(chapterId, sectionId))}
                 onMove={moveChapter}
                 onRemove={removeChapter}
               />
@@ -492,11 +580,96 @@ export function CourseEditPage() {
           <section className="space-y-3" aria-labelledby="chapter-problems-title">
             <CourseSectionHeader
               id="chapter-problems-title"
-              title="本章小测"
-              description="按当前顺序显示在章节中，通常挂本课对应知识点的题目。"
+              title="本章题目"
+              description="不属于任何小节的题目，显示在章节开头。"
               count={activeChapter.pids.length}
             />
-            <ProblemPicker value={activeChapter.pids} onChange={(pids) => updateChapter(activeChapter._id, { pids })} />
+            <ProblemPicker value={activeChapter.pids} onChange={(pids) => updateChapterPids(activeChapter._id, pids)} />
+          </section>
+
+          <section className="space-y-3" aria-labelledby="chapter-sections-title">
+            <div className="flex items-end justify-between gap-3">
+              <CourseSectionHeader
+                id="chapter-sections-title"
+                title="小节"
+                description="每一章可以再拆成线性小节，讲义和题目挂在小节里。"
+                count={activeChapter.sections.length}
+              />
+              <Button type="button" variant="outline" size="sm" className="h-9 gap-1" onClick={() => addSection(activeChapter._id)}>
+                <Plus className="size-3.5" strokeWidth={2} />
+                添加小节
+              </Button>
+            </div>
+            {activeChapter.sections.length ? (
+              <div className="space-y-4">
+                {activeChapter.sections.map((section, sectionIndex) => (
+                  <article
+                    key={section._id}
+                    className={cn(
+                      'krypton-course-panel space-y-3 p-4',
+                      activeSectionId === section._id ? 'ring-2 ring-primary/40' : '',
+                    )}
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="krypton-course-meta shrink-0 tabular-nums">
+                        {activeIndex + 1}.{sectionIndex + 1}
+                      </span>
+                      <Input
+                        value={section.title}
+                        onChange={(event) => updateSection(activeChapter._id, section._id, { title: event.target.value })}
+                        required
+                        placeholder="小节标题"
+                        className="min-h-10 min-w-40 flex-1"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="size-8"
+                        disabled={sectionIndex === 0}
+                        onClick={() => moveSection(activeChapter._id, section._id, -1)}
+                        aria-label={`上移${section.title}`}
+                      >
+                        <ArrowUp className="size-3.5" strokeWidth={1.75} />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="size-8"
+                        disabled={sectionIndex === activeChapter.sections.length - 1}
+                        onClick={() => moveSection(activeChapter._id, section._id, 1)}
+                        aria-label={`下移${section.title}`}
+                      >
+                        <ArrowDown className="size-3.5" strokeWidth={1.75} />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="size-8 text-destructive hover:bg-destructive/10"
+                        onClick={() => removeSection(activeChapter._id, section._id)}
+                        aria-label={`删除${section.title}`}
+                      >
+                        <Trash2 className="size-3.5" strokeWidth={1.75} />
+                      </Button>
+                    </div>
+                    <MarkdownEditor
+                      key={`${activeChapter._id}-${section._id}`}
+                      value={section.content}
+                      onChange={(content) => updateSection(activeChapter._id, section._id, { content })}
+                      minHeight={160}
+                    />
+                    <ProblemPicker
+                      value={section.pids}
+                      onChange={(pids) => updateSectionPids(activeChapter._id, section._id, pids)}
+                    />
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <p className="krypton-course-meta">还没有小节。学生会只看到这一章的讲义和题目。</p>
+            )}
           </section>
 
           <section className="space-y-3" aria-labelledby="chapter-contests-title">
@@ -716,6 +889,7 @@ export function CourseEditPage() {
             <ChapterOutline
               chapters={chapters}
               activeId={activeChapter._id}
+              activeSectionId={activeSectionId}
               onSelect={selectFromMobile}
               onMove={moveChapter}
               onRemove={removeChapter}

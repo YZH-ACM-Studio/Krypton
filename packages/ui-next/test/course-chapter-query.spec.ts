@@ -3,6 +3,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { resolveChapterId, useChapterQuery, withChapterQuery } from '../src/pages/course/chapter-query.ts';
 
 const CHAPTERS = [{ _id: 2 }, { _id: 5 }, { _id: 9 }];
+const SECTIONED = [
+  { _id: 2, sections: [{ _id: 1 }, { _id: 2 }] },
+  { _id: 5, sections: [{ _id: 1 }] },
+  { _id: 9, sections: [] },
+];
 
 describe('resolveChapterId', () => {
   it('treats blank and non-numeric raw values as absent', () => {
@@ -96,6 +101,41 @@ describe('useChapterQuery', () => {
       window.dispatchEvent(new PopStateEvent('popstate'));
     });
     expect(result.current.activeId).to.equal(9);
+  });
+
+  it('honors a valid chapter and section deep link', () => {
+    window.history.replaceState(null, '', '/course/1?chapter=2&section=2');
+    const { result } = renderHook(() => useChapterQuery(SECTIONED));
+    expect(result.current.activeId).to.equal(2);
+    expect(result.current.activeSectionId).to.equal(2);
+    expect(window.location.search).to.equal('?chapter=2&section=2');
+  });
+
+  it('drops an invalid section on a valid chapter', () => {
+    window.history.replaceState(null, '', '/course/1?chapter=5&section=9');
+    const { result } = renderHook(() => useChapterQuery(SECTIONED));
+    expect(result.current.activeId).to.equal(5);
+    expect(result.current.activeSectionId).to.equal(null);
+    expect(window.location.search).to.equal('?chapter=5');
+  });
+
+  it('does not apply a section from an invalid chapter onto the fallback chapter', () => {
+    window.history.replaceState(null, '', '/course/1?chapter=404&section=1');
+    const { result } = renderHook(() => useChapterQuery(SECTIONED, 5));
+    expect(result.current.activeId).to.equal(5);
+    expect(result.current.activeSectionId).to.equal(null);
+    expect(window.location.search).to.equal('?chapter=5');
+  });
+
+  it('selects a section and clears it when returning to the chapter', () => {
+    const { result } = renderHook(() => useChapterQuery(SECTIONED));
+    act(() => result.current.selectSection(2, 2));
+    expect(result.current.activeId).to.equal(2);
+    expect(result.current.activeSectionId).to.equal(2);
+    expect(window.location.search).to.equal('?chapter=2&section=2');
+    act(() => result.current.selectChapter(2));
+    expect(result.current.activeSectionId).to.equal(null);
+    expect(window.location.search).to.equal('?chapter=2');
   });
 
   it('stays inert when no chapters exist', () => {

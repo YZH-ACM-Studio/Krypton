@@ -440,7 +440,11 @@ export async function findProblemReferences(domainId: string, pid: number, publi
         testdataSources,
     ] = await Promise.all([
         document.coll.countDocuments({ domainId, docType: document.TYPE_CONTEST, pids: pid }),
-        document.coll.countDocuments({ domainId, docType: document.TYPE_TRAINING, 'dag.pids': pid }),
+        document.coll.countDocuments({
+            domainId,
+            docType: document.TYPE_TRAINING,
+            $or: [{ 'dag.pids': pid }, { 'dag.sections.pids': pid }],
+        }),
         recordColl.countDocuments({ domainId, pid }),
         recordStatColl.countDocuments({ domainId, pid }),
         document.collStatus.countDocuments({ domainId, docType: document.TYPE_PROBLEM, docId: pid }),

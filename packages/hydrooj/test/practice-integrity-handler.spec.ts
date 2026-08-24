@@ -548,6 +548,17 @@ describe('practice integrity handlers', () => {
         expect(calls.issue.at(-1)?.mode).to.equal('preview');
     });
 
+    it('treats section-only pids as in-chapter membership', async () => {
+        currentContainer.dag = [{ _id: 3, pids: [], sections: [{ _id: 1, title: '引入', pids: [42] }] }];
+        const handler = makeHandler('practice_context');
+        await handler.postIssue(contextIssueArgs());
+        expect(calls.issue[0].containerKind).to.equal('course');
+        expect(calls.issue[0].targets).to.have.length(1);
+        const missing = await capture(() => handler.postIssue(contextIssueArgs({ pid: 43 })));
+        expect(missing).to.be.instanceOf(TestValidationError);
+        expect(missing?.message).to.match(/题目不属于请求的真实性训练范围/);
+    });
+
     it('issues a course→problem-set chain for a live-referenced pid without copying pids', async () => {
         currentContainer.dag = [{ _id: 3, pids: [], problemSetId: extraSetId }];
         extraContainers[String(extraSetId)] = {

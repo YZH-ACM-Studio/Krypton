@@ -37,26 +37,36 @@ import { CourseMark, CourseProgressRing, CourseSectionHeader, riseStyle } from '
  * agrees with the chapter counter above it.
  */
 function ProblemList({
-  chapter,
+  pids,
+  completedPids,
   problems,
   courseId,
+  chapterId,
+  title = '课堂小测',
+  description = '按当前顺序作答，完成后进度会记在本课里。',
+  count,
 }: {
-  chapter: CourseChapter;
+  pids: number[];
+  completedPids: number[];
   problems: Record<string, CourseRecord>;
   courseId: string;
+  chapterId: number;
+  title?: string;
+  description?: string;
+  count?: string;
 }) {
-  if (!chapter.pids.length) return null;
-  const completed = new Set(chapter.completedPids || []);
+  if (!pids.length) return null;
+  const completed = new Set(completedPids || []);
   return (
     <section aria-labelledby="course-problems-title" className="space-y-3">
       <CourseSectionHeader
         id="course-problems-title"
-        title="课堂小测"
-        description="按章节顺序作答，完成后进度会记在本课里。"
-        count={`${chapter.doneCount}/${chapter.totalCount}`}
+        title={title}
+        description={description}
+        count={count}
       />
       <ol className="krypton-course-panel overflow-hidden p-1.5">
-        {chapter.pids.map((pid, index) => {
+        {pids.map((pid, index) => {
           const problem = problems[String(pid)] || {};
           const done = completed.has(pid);
           return (
@@ -66,7 +76,7 @@ function ProblemList({
                   containerKind: 'course',
                   containerId: courseId,
                   scopeKind: 'chapter',
-                  scopeId: chapter._id,
+                  scopeId: chapterId,
                 })}
                 className={cn(
                   'krypton-course-row group flex min-h-11 items-center gap-3 px-3 py-2.5',
@@ -222,11 +232,13 @@ export function CourseDetailPage() {
   const course = data.tdoc || {};
   const tid = String(course.docId || course._id);
   const chapters = data.chapters || [];
-  const { activeId, selectChapter } = useChapterQuery(chapters);
+  const { activeId, activeSectionId, selectChapter, selectSection } = useChapterQuery(chapters);
   const activeChapter = chapters.find((chapter) => chapter._id === activeId) || chapters[0];
+  const chapterSections = activeChapter?.sections || [];
+  const activeSection = chapterSections.find((section) => section._id === activeSectionId) || null;
   const activeView = data.view === 'mindmap' ? 'mindmap' : 'overview';
   const [outlineOpen, setOutlineOpen] = useState(false);
-  const chapterIndex = chapters.findIndex((chapter) => chapter._id === activeChapter._id);
+  const chapterIndex = chapters.findIndex((chapter) => chapter._id === activeChapter?._id);
 
   // Course-level totals, derived from the same scoped chapter figures.
   const totalProblems = chapters.reduce((sum, chapter) => sum + chapter.totalCount, 0);
@@ -234,8 +246,9 @@ export function CourseDetailPage() {
   const overallProgress = totalProblems ? Math.floor((100 * doneProblems) / totalProblems) : 0;
   const finishedChapters = chapters.filter((chapter) => chapter.totalCount > 0 && chapter.doneCount === chapter.totalCount).length;
 
-  const selectFromMobile = (chapterId: number) => {
-    selectChapter(chapterId);
+  const selectFromMobile = (chapterId: number, sectionId?: number | null) => {
+    if (sectionId == null) selectChapter(chapterId);
+    else selectSection(chapterId, sectionId);
     setOutlineOpen(false);
   };
 
@@ -305,7 +318,11 @@ export function CourseDetailPage() {
           />
           {activeView === 'overview' && chapters.length ? (
             <p className="krypton-course-meta">
-              {chapters.length} 章 · {totalProblems} 题
+              {chapters.length} 章
+              {chapters.reduce((sum, chapter) => sum + (chapter.sections?.length || 0), 0)
+                ? ` · ${chapters.reduce((sum, chapter) => sum + (chapter.sections?.length || 0), 0)} 节`
+                : ''}{' '}
+              · {totalProblems} 题
               {totalProblems ? ` · 已完成 ${doneProblems}` : ''}
             </p>
           ) : null}
@@ -365,7 +382,12 @@ export function CourseDetailPage() {
                 </div>
               </div>
               <div className="p-1.5">
-                <ChapterOutline chapters={chapters} activeId={activeChapter._id} onSelect={selectChapter} />
+                <ChapterOutline
+                  chapters={chapters}
+                  activeId={activeChapter._id}
+                  activeSectionId={activeSectionId}
+                  onSelect={(chapterId, sectionId) => (sectionId == null ? selectChapter(chapterId) : selectSection(chapterId, sectionId))}
+                />
               </div>
             </div>
           </aside>
@@ -378,8 +400,13 @@ export function CourseDetailPage() {
                 <div className="min-w-0 flex-1 basis-64">
                   <p className="krypton-course-eyebrow">
                     第 {chapterIndex + 1} 章 / 共 {chapters.length} 章
+                    {activeSection
+                      ? ` · ${chapterSections.findIndex((section) => section._id === activeSection._id) + 1}/${chapterSections.length} 节`
+                      : chapterSections.length
+                        ? ` · ${chapterSections.length} 节`
+                        : ''}
                   </p>
-                  <h2 className="krypton-course-display mt-2">{activeChapter.title}</h2>
+                  <h2 className="krypton-course-display mt-2">{activeSection ? activeSection.title : activeChapter.title}</h2>
                   <button
                     type="button"
                     onClick={() => setOutlineOpen(true)}
@@ -393,38 +420,116 @@ export function CourseDetailPage() {
                     切换章节
                   </button>
                 </div>
-                {activeChapter.totalCount ? (
+                {(activeSection ? activeSection.totalCount : activeChapter.totalCount) ? (
                   <div className="flex shrink-0 items-center gap-3.5">
                     <CourseProgressRing
-                      value={activeChapter.progress}
+                      value={activeSection ? activeSection.progress : activeChapter.progress}
                       size={64}
                       thickness={6}
-                      label={`本章完成进度 ${activeChapter.progress}%`}
+                      label={`${activeSection ? '本小节' : '本章'}完成进度 ${activeSection ? activeSection.progress : activeChapter.progress}%`}
                     />
                     <div>
                       <p className="text-2xl font-semibold tabular-nums leading-none tracking-tight">
-                        {activeChapter.doneCount}
-                        <span className="text-base font-normal text-muted-foreground">/{activeChapter.totalCount}</span>
+                        {activeSection ? activeSection.doneCount : activeChapter.doneCount}
+                        <span className="text-base font-normal text-muted-foreground">
+                          /{activeSection ? activeSection.totalCount : activeChapter.totalCount}
+                        </span>
                       </p>
-                      <p className="krypton-course-meta mt-1.5">本章已完成</p>
+                      <p className="krypton-course-meta mt-1.5">{activeSection ? '本小节已完成' : '本章已完成'}</p>
                     </div>
                   </div>
                 ) : null}
               </div>
             </section>
 
-            {activeChapter.content ? (
-              <section data-course-slot="chapterContent" aria-labelledby="chapter-content-title" className="space-y-3">
-                <CourseSectionHeader id="chapter-content-title" title="章节讲义" />
-                <div className="krypton-course-measure text-pretty leading-relaxed">
-                  <MarkdownView content={activeChapter.content} preferredLang={bs.locale} />
-                </div>
-              </section>
+            {activeSection ? (
+              <>
+                {activeSection.content ? (
+                  <section data-course-slot="chapterContent" aria-labelledby="chapter-content-title" className="space-y-3">
+                    <CourseSectionHeader id="chapter-content-title" title="小节讲义" />
+                    <div className="krypton-course-measure text-pretty leading-relaxed">
+                      <MarkdownView content={activeSection.content} preferredLang={bs.locale} />
+                    </div>
+                  </section>
+                ) : (
+                  <div data-course-slot="chapterContent" />
+                )}
+                <ProblemList
+                  pids={activeSection.pids}
+                  completedPids={activeSection.completedPids}
+                  problems={data.pdict || {}}
+                  courseId={tid}
+                  chapterId={activeChapter._id}
+                  title="小节小测"
+                  count={`${activeSection.doneCount}/${activeSection.totalCount}`}
+                />
+                {!activeSection.content && !activeSection.pids.length ? (
+                  <section className="krypton-course-inset px-6 py-14 text-center">
+                    <span aria-hidden="true" className="mx-auto grid size-11 place-items-center rounded-xl bg-background/70 text-muted-foreground">
+                      <Paperclip className="size-5" strokeWidth={1.5} />
+                    </span>
+                    <p className="krypton-course-section mt-4">该小节暂无内容</p>
+                    <p className="krypton-course-meta mt-1">讲义和题目都还没有挂上来。</p>
+                  </section>
+                ) : null}
+              </>
             ) : (
-              <div data-course-slot="chapterContent" />
+              <>
+                {activeChapter.content ? (
+                  <section data-course-slot="chapterContent" aria-labelledby="chapter-content-title" className="space-y-3">
+                    <CourseSectionHeader id="chapter-content-title" title="章节讲义" />
+                    <div className="krypton-course-measure text-pretty leading-relaxed">
+                      <MarkdownView content={activeChapter.content} preferredLang={bs.locale} />
+                    </div>
+                  </section>
+                ) : (
+                  <div data-course-slot="chapterContent" />
+                )}
+                {chapterSections.length ? (
+                  <section aria-labelledby="course-sections-title" className="space-y-3">
+                    <CourseSectionHeader id="course-sections-title" title="本章小节" count={chapterSections.length} />
+                    <ol className="krypton-course-panel overflow-hidden p-1.5">
+                      {chapterSections.map((section, sectionIndex) => (
+                        <li key={section._id}>
+                          <button
+                            type="button"
+                            onClick={() => selectSection(activeChapter._id, section._id)}
+                            className={cn(
+                              'krypton-course-row group flex min-h-11 w-full items-center gap-3 px-3 py-2.5 text-left',
+                              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+                            )}
+                          >
+                            <span
+                              aria-hidden="true"
+                              className="grid size-6 shrink-0 place-items-center rounded-md bg-muted text-[11px] font-semibold tabular-nums text-muted-foreground"
+                            >
+                              {sectionIndex + 1}
+                            </span>
+                            <span className="min-w-0 flex-1 truncate text-sm font-medium group-hover:text-primary">{section.title}</span>
+                            {section.totalCount ? (
+                              <span className="krypton-course-meta shrink-0">
+                                {section.doneCount}/{section.totalCount}
+                              </span>
+                            ) : null}
+                            <ChevronRight className="size-4 shrink-0 text-muted-foreground/50" strokeWidth={1.75} />
+                          </button>
+                        </li>
+                      ))}
+                    </ol>
+                  </section>
+                ) : null}
+                <ProblemList
+                  pids={activeChapter.loosePids}
+                  completedPids={activeChapter.completedPids}
+                  problems={data.pdict || {}}
+                  courseId={tid}
+                  chapterId={activeChapter._id}
+                  title={chapterSections.length ? '本章题目' : '课堂小测'}
+                  count={`${activeChapter.loosePids.filter((pid) => activeChapter.completedPids.includes(pid)).length}/${activeChapter.loosePids.length}`}
+                />
+                <ContestList chapter={activeChapter} contests={data.cdict || {}} />
+              </>
             )}
-            <ProblemList chapter={activeChapter} problems={data.pdict || {}} courseId={tid} />
-            <ContestList chapter={activeChapter} contests={data.cdict || {}} />
             {data.canDownloadFiles && data.files?.length ? (
               <section data-course-slot="files" aria-labelledby="course-files-title" className="space-y-3">
                 <CourseSectionHeader id="course-files-title" title="课程课件" count={data.files.length} />
@@ -466,7 +571,12 @@ export function CourseDetailPage() {
               ) : null}
             </section>
 
-            {!course.content && !activeChapter.content && !activeChapter.pids.length && !activeChapter.tids.length ? (
+            {!course.content &&
+            !activeChapter.content &&
+            !activeChapter.loosePids.length &&
+            !activeChapter.tids.length &&
+            !chapterSections.length &&
+            !activeSection ? (
               <section className="krypton-course-inset px-6 py-14 text-center">
                 <span aria-hidden="true" className="mx-auto grid size-11 place-items-center rounded-xl bg-background/70 text-muted-foreground">
                   <Paperclip className="size-5" strokeWidth={1.5} />
@@ -491,7 +601,12 @@ export function CourseDetailPage() {
             <SheetTitle>课程目录</SheetTitle>
           </SheetHeader>
           <SheetBody className="p-4">
-            <ChapterOutline chapters={chapters} activeId={activeChapter?._id || null} onSelect={selectFromMobile} />
+            <ChapterOutline
+              chapters={chapters}
+              activeId={activeChapter?._id || null}
+              activeSectionId={activeSectionId}
+              onSelect={selectFromMobile}
+            />
           </SheetBody>
         </SheetContent>
       </Sheet>

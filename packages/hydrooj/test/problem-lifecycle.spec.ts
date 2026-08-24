@@ -439,6 +439,12 @@ describe('P2.12 minimal problem lifecycle', () => {
             'reference.domainId': 'system',
             'reference.pid': 42,
         });
+        const trainingQuery = documentQueries.find((query) => query.docType === 40);
+        expect(trainingQuery).to.deep.equal({
+            domainId: 'system',
+            docType: 40,
+            $or: [{ 'dag.pids': 42 }, { 'dag.sections.pids': 42 }],
+        });
     });
 
     it('fails closed when any fixed reference query fails', async () => {

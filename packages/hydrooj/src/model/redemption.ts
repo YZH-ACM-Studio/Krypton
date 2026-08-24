@@ -80,6 +80,10 @@ export interface RedemptionDoc {
     createdAt: Date;
     entitlementIds: ObjectId[];
     quotaClaimed: boolean;
+    targetKind?: RedemptionTargetKind;
+    targetId?: ObjectId;
+    stageId?: number;
+    allowedGroupIds?: string[];
 }
 
 export interface PlainRedemptionCode {
@@ -265,7 +269,7 @@ export class RedemptionService {
         throw error;
     }
 
-    private freezeTargetFilter(batch: RedemptionCodeBatchDoc) {
+    private freezeTargetFilter(batch: Pick<RedemptionCodeBatchDoc, '_id' | 'targetKind' | 'targetId' | 'stageId' | 'allowedGroupIds'>) {
         return {
             _id: batch._id,
             targetKind: batch.targetKind,
@@ -273,6 +277,45 @@ export class RedemptionService {
             stageId: batch.stageId,
             allowedGroupIds: batch.allowedGroupIds,
         };
+    }
+
+    private claimedTarget(
+        batch: RedemptionCodeBatchDoc,
+        existing?: RedemptionDoc | null,
+    ): Pick<RedemptionCodeBatchDoc, '_id' | 'targetKind' | 'targetId' | 'stageId' | 'allowedGroupIds'> {
+        if (existing?.targetKind && existing.targetId) {
+            return {
+                _id: batch._id,
+                targetKind: existing.targetKind,
+                targetId: existing.targetId,
+                stageId: existing.stageId,
+                allowedGroupIds: existing.allowedGroupIds || [],
+            };
+        }
+        return {
+            _id: batch._id,
+            targetKind: batch.targetKind,
+            targetId: batch.targetId,
+            stageId: batch.stageId,
+            allowedGroupIds: batch.allowedGroupIds,
+        };
+    }
+
+    private claimPin(batch: RedemptionCodeBatchDoc) {
+        return {
+            targetKind: batch.targetKind,
+            targetId: batch.targetId,
+            stageId: batch.stageId,
+            allowedGroupIds: Array.from(new Set(batch.allowedGroupIds || [])),
+        };
+    }
+
+    private async pinClaimedTarget(existing: RedemptionDoc, batch: RedemptionCodeBatchDoc): Promise<RedemptionDoc> {
+        if (existing.targetKind && existing.targetId) return existing;
+        if (existing.quotaClaimed) throw new ValidationError('batch', null, localizedErrorText`批次状态已变化`);
+        const pin = this.claimPin(batch);
+        await this.redemptions.updateOne({ _id: existing._id, quotaClaimed: { $ne: true } }, { $set: pin });
+        return { ...existing, ...pin };
     }
 
     private freezeTargetMatches(current: RedemptionCodeBatchDoc, expected: RedemptionCodeBatchDoc): boolean {
@@ -310,9 +353,21 @@ export class RedemptionService {
                 await this.redemptions.updateOne({ _id: existing._id }, { $set: { entitlementIds: active.map((row) => row._id) } });
                 existing.entitlementIds = active.map((row) => row._id);
             }
-            const tdoc = await this.resolveTarget(input.domainId, batch.targetKind, batch.targetId, batch.stageId);
-            await training.ensureEnrolled(input.domainId, tdoc.docId, input.uid);
-            await this.markFirstRedeemed(batch);
+            const claimed = this.claimedTarget(batch, existing);
+            const tdoc = await this.resolveTarget(input.domainId, claimed.targetKind, claimed.targetId, claimed.stageId);
+            try {
+                await training.ensureEnrolled(input.domainId, tdoc.docId, input.uid);
+            } catch (error) {
+                logger.error(
+                    'Redemption enrollment write failed domain=%s uid=%d code=%s batch=%s stage=settle result=enroll-failed',
+                    input.domainId,
+                    input.uid,
+                    sourceId,
+                    batch._id,
+                );
+                throw new Error('problem set enrollment write failed during redeem');
+            }
+            await this.markFirstRedeemed({ ...batch, ...claimed });
             return existing;
         }
         if (existing.entitlementIds.length || granted.some((row) => row.revokedAt)) {
@@ -636,6 +691,7 @@ export class RedemptionService {
                     createdAt: this.now(),
                     entitlementIds: [],
                     quotaClaimed: false,
+                    ...this.claimPin(batch),
                 };
                 try {
                     await this.redemptions.insertOne(pending);
@@ -648,8 +704,8 @@ export class RedemptionService {
                     existing = confirmed;
                 }
             }
-            const claimed = (current.claimedRedemptionIds || []).some((id) => String(id) === String(existing!._id));
-            if (!claimed) {
+            const seatClaimed = (current.claimedRedemptionIds || []).some((id) => String(id) === String(existing!._id));
+            if (!seatClaimed) {
                 const updated = await this.codes.findOneAndUpdate(
                     {
                         _id: current._id,
@@ -666,18 +722,21 @@ export class RedemptionService {
                     if (!alreadyClaimed) throw new ValidationError('code', null, localizedErrorText`兑换名额已满`);
                 }
             }
+            existing = await this.pinClaimedTarget(existing, batch);
+            const claimed = this.claimedTarget(batch, existing);
             if (!existing.quotaClaimed) {
                 await this.redemptions.updateOne({ _id: existing._id, quotaClaimed: { $ne: true } }, { $set: { quotaClaimed: true } });
                 existing.quotaClaimed = true;
             }
-            await this.markFirstRedeemed(batch);
+            await this.markFirstRedeemed({ ...batch, ...claimed });
             const entitlementIds: ObjectId[] = [];
-            if (batch.targetKind === 'problem_set_stage') {
+            tdoc = await this.resolveTarget(input.domainId, claimed.targetKind, claimed.targetId, claimed.stageId);
+            if (claimed.targetKind === 'problem_set_stage') {
                 const granted = await problemSetAccessService.grantStageRedemptionWithClosure({
                     domainId: input.domainId,
                     uid: input.uid,
                     tdoc,
-                    stageId: batch.stageId,
+                    stageId: claimed.stageId,
                     sourceId: current._id,
                 });
                 entitlementIds.push(...granted.map((row) => row._id));
@@ -685,8 +744,8 @@ export class RedemptionService {
                 const granted = await problemSetAccessService.grantRedemptionEntitlement({
                     domainId: input.domainId,
                     uid: input.uid,
-                    targetKind: batch.targetKind,
-                    targetId: batch.targetId,
+                    targetKind: claimed.targetKind,
+                    targetId: claimed.targetId,
                     sourceId: current._id,
                 });
                 entitlementIds.push(granted._id);

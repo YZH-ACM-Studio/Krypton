@@ -45,7 +45,9 @@ describe('P3 review must-fix contracts', () => {
         expect(source).to.include('freezeTargetFilter');
         expect(source).to.include('freezeTargetMatches');
         expect(source).to.include('批次状态已变化');
-        expect(source).to.match(/await this\.markFirstRedeemed\(batch\);\s*const entitlementIds/);
+        expect(source).to.match(/await this\.markFirstRedeemed\(\{ \.\.\.batch, \.\.\.claimed \}\);/);
+        expect(source).to.include('claimedTarget');
+        expect(source).to.include('...this.claimPin(batch)');
         expect(source).to.include('await training.ensureEnrolled(input.domainId, tdoc.docId, input.uid)');
     });
 });

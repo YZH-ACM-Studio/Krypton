@@ -216,18 +216,30 @@ function match(row: any, filter: any) {
     return true;
 }
 
-function service() {
+function harness() {
     granted.length = 0;
     enrollments = 0;
-    return new RedemptionService({
-        batches: memory([]) as any,
-        codes: memory([]) as any,
-        redemptions: memory([]) as any,
-        hmacKeys: async () => ({ current: 1, keys: { 1: 'ab'.repeat(32) } }),
-        loadTraining: async () => currentTarget,
-        findStudentGroupIds: async () => new Set(['g1']),
-        randomCode: () => 'AUTOCODE-1',
-    });
+    const batches = memory([]) as any;
+    const codes = memory([]) as any;
+    const redemptions = memory([]) as any;
+    return {
+        batches,
+        codes,
+        redemptions,
+        redemption: new RedemptionService({
+            batches,
+            codes,
+            redemptions,
+            hmacKeys: async () => ({ current: 1, keys: { 1: 'ab'.repeat(32) } }),
+            loadTraining: async () => currentTarget,
+            findStudentGroupIds: async () => new Set(['g1']),
+            randomCode: () => 'AUTOCODE-1',
+        }),
+    };
+}
+
+function service() {
+    return harness().redemption;
 }
 
 describe('P3.6 redemption codes', () => {
@@ -323,6 +335,38 @@ describe('P3.6 redemption codes', () => {
                 expiresAt: new Date('2026-01-01T00:00:00Z'),
             }),
         );
+    });
+
+    it('does not grant an edited target after quota is claimed', async () => {
+        const { redemption, batches, codes, redemptions } = harness();
+        const created = await redemption.createBatch({
+            domainId,
+            user: actor(),
+            targetKind: 'problem_set',
+            targetId: setId,
+            kind: 'single',
+            manualCodes: ['PinRace99'],
+        });
+        const code = await codes.findOne({ batchId: created.batch._id });
+        const claimId = new ObjectId();
+        await redemptions.insertOne({
+            _id: claimId,
+            domainId,
+            codeId: code._id,
+            batchId: created.batch._id,
+            uid,
+            createdAt: new Date(),
+            entitlementIds: [],
+            quotaClaimed: true,
+            targetKind: 'problem_set',
+            targetId: setId,
+            stageId: 0,
+            allowedGroupIds: [],
+        });
+        await codes.updateOne({ _id: code._id }, { $inc: { usedCount: 1 }, $addToSet: { claimedRedemptionIds: claimId } });
+        await batches.updateOne({ _id: created.batch._id }, { $set: { targetKind: 'course', targetId: new ObjectId() } });
+        await expectReject(redemption.redeem({ domainId, uid, user: actor(), code: 'PinRace99' }));
+        expect(granted).to.have.length(0);
     });
 
     it('hides a deleted target as a missing code and refuses a revoked source on retry', async () => {

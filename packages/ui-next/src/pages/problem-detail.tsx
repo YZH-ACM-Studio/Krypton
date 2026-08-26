@@ -10,6 +10,7 @@ import {
   Edit3,
   FileText,
   HardDrive,
+  HelpCircle,
   History,
   Loader2,
   type LucideIcon,
@@ -18,6 +19,8 @@ import {
   RotateCcw,
   Send,
   Tag,
+  ThumbsDown,
+  ThumbsUp,
   Trophy,
   User,
   X,
@@ -89,6 +92,7 @@ interface ProblemDoc {
   nAccept?: number;
   difficulty?: number;
   origStat?: { accepted: number; submitted: number };
+  reactions?: { up?: unknown; down?: unknown; what?: unknown };
   problemKind?: string;
   programmingStatementView?: ProgrammingStatementViewData | null;
   reference?: unknown;
@@ -97,6 +101,7 @@ interface ProblemDoc {
 /** Per-user problem status doc (`psdoc`). */
 interface ProblemStatusDoc {
   status?: number;
+  reaction?: unknown;
 }
 
 /** Subset of the serialized contest/homework document this page reads. */
@@ -173,6 +178,104 @@ interface ProblemDetailPageData {
   tdoc?: ContestDoc | null;
   practiceIntegrity?: unknown;
   antiAiMarkerView?: unknown;
+}
+
+type ProblemReactionChoice = 'up' | 'down' | 'what';
+
+interface ProblemReactionCounts {
+  up: number;
+  down: number;
+  what: number;
+}
+
+function readProblemReactionCounts(raw: unknown): ProblemReactionCounts | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const node = raw as Record<string, unknown>;
+  const read = (key: ProblemReactionChoice): number | null => {
+    const value = node[key];
+    if (value === undefined) return 0;
+    if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) return null;
+    return value;
+  };
+  const up = read('up');
+  const down = read('down');
+  const what = read('what');
+  if (up === null || down === null || what === null) return null;
+  return { up, down, what };
+}
+
+function readProblemReactionChoice(raw: unknown): ProblemReactionChoice | null {
+  return raw === 'up' || raw === 'down' || raw === 'what' ? raw : null;
+}
+
+function ProblemReactionBar({
+  counts,
+  mine,
+  canReact,
+  pending,
+  error,
+  onSelect,
+}: {
+  counts: ProblemReactionCounts;
+  mine: ProblemReactionChoice | null;
+  canReact: boolean;
+  pending: boolean;
+  error: string;
+  onSelect: (next: ProblemReactionChoice) => void;
+}) {
+  const items: Array<{ key: ProblemReactionChoice; label: string; icon: typeof ThumbsUp; count: number }> = [
+    { key: 'up', label: '赞', icon: ThumbsUp, count: counts.up },
+    { key: 'down', label: '踩', icon: ThumbsDown, count: counts.down },
+    { key: 'what', label: '何意味', icon: HelpCircle, count: counts.what },
+  ];
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+      {items.map((item) => {
+        const active = mine === item.key;
+        const Icon = item.icon;
+        if (!canReact) {
+          return (
+            <span
+              key={item.key}
+              title={item.label}
+              className="inline-flex h-8 items-center gap-1 rounded-md border border-border/70 bg-muted/40 px-2 text-xs text-muted-foreground"
+            >
+              <Icon className="size-3.5" strokeWidth={1.75} />
+              <span className="tabular-nums">{item.count}</span>
+              <span className="sr-only">{item.label}</span>
+            </span>
+          );
+        }
+        return (
+          <button
+            key={item.key}
+            type="button"
+            title={item.label}
+            aria-pressed={active}
+            aria-label={item.label}
+            disabled={pending}
+            onClick={() => onSelect(item.key)}
+            className={cn(
+              'inline-flex h-8 items-center gap-1 rounded-md border px-2 text-xs font-medium',
+              'transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+              'disabled:opacity-60 motion-reduce:transition-none',
+              active
+                ? 'border-primary/40 bg-primary/10 text-primary'
+                : 'border-border/70 bg-background text-muted-foreground hover:border-primary/30 hover:text-foreground',
+            )}
+          >
+            <Icon className="size-3.5" strokeWidth={active ? 2.25 : 1.75} />
+            <span className="tabular-nums">{item.count}</span>
+          </button>
+        );
+      })}
+      {error ? (
+        <p role="alert" className="w-full text-xs text-destructive">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
 }
 
 /* ------------------------------------------------------------------ */
@@ -1021,6 +1124,50 @@ export function ProblemDetailPage() {
   const [ideMode, setIdeMode] = useState(false);
   const [rejudgeOpen, setRejudgeOpen] = useState(false);
   const [teamCodeBuffer, setTeamCodeBuffer] = useState<TeamCodeBuffer | null>(null);
+  const serverReactions = readProblemReactionCounts(pdoc.reactions);
+  const showProblemReactions = Boolean(serverReactions) && !inContest && !virtualContestActive && !examMode?.enabled;
+  const [reactionCounts, setReactionCounts] = useState<ProblemReactionCounts | null>(serverReactions);
+  const [myReaction, setMyReaction] = useState<ProblemReactionChoice | null>(readProblemReactionChoice(psdoc.reaction));
+  const [reactionPending, setReactionPending] = useState(false);
+  const [reactionError, setReactionError] = useState('');
+  useEffect(() => {
+    setReactionCounts(serverReactions);
+    setMyReaction(readProblemReactionChoice(psdoc.reaction));
+    setReactionError('');
+  }, [pdoc.docId, psdoc.reaction, serverReactions?.down, serverReactions?.up, serverReactions?.what]);
+  const submitProblemReaction = async (clicked: ProblemReactionChoice) => {
+    if (!showProblemReactions || !reactionCounts || !bs.user?.signedIn || reactionPending) return;
+    const next = myReaction === clicked ? null : clicked;
+    const previousMine = myReaction;
+    const previousCounts = reactionCounts;
+    const optimistic = { ...reactionCounts };
+    if (previousMine) optimistic[previousMine] = Math.max(0, optimistic[previousMine] - 1);
+    if (next) optimistic[next] += 1;
+    setMyReaction(next);
+    setReactionCounts(optimistic);
+    setReactionPending(true);
+    setReactionError('');
+    try {
+      const response = await fetchHydroResponse(problemUrl, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { Accept: 'application/json' },
+        body: new URLSearchParams({ operation: 'reaction', reaction: next || 'none' }),
+      });
+      if (!response.ok) throw new Error(await readHydroResponseError(response, '反应失败'));
+      const body = (await response.json()) as { reaction?: unknown; reactions?: unknown };
+      const confirmedCounts = readProblemReactionCounts(body.reactions);
+      if (!confirmedCounts) throw new Error('反应结果无效');
+      setReactionCounts(confirmedCounts);
+      setMyReaction(readProblemReactionChoice(body.reaction));
+    } catch (error) {
+      setMyReaction(previousMine);
+      setReactionCounts(previousCounts);
+      setReactionError(error instanceof Error && error.message ? error.message : '反应失败');
+    } finally {
+      setReactionPending(false);
+    }
+  };
   // Keep tid on the submit endpoint for correction authorization; the server
   // deliberately stores correction records without a contest id.
   const contestQS = tid ? (virtualContestActive ? `?tid=${tid}&virtual=1` : `?tid=${tid}`) : '';
@@ -1288,6 +1435,16 @@ export function ProblemDetailPage() {
                     {statusBadge(psdoc.status)}
                     {difficultyBadge(difficulty)}
                   </div>
+                  {showProblemReactions && reactionCounts ? (
+                    <ProblemReactionBar
+                      counts={reactionCounts}
+                      mine={myReaction}
+                      canReact={!!bs.user?.signedIn}
+                      pending={reactionPending}
+                      error={reactionError}
+                      onSelect={submitProblemReaction}
+                    />
+                  ) : null}
                   {tags.length > 0 && (
                     <div className="mt-1.5 flex flex-wrap gap-1">
                       {tags.map((t) => (
@@ -1557,6 +1714,16 @@ export function ProblemDetailPage() {
             {/* Hide difficulty during contest (gives away problem hardness) */}
             {!inContest ? difficultyBadge(difficulty) : null}
           </div>
+          {showProblemReactions && reactionCounts ? (
+            <ProblemReactionBar
+              counts={reactionCounts}
+              mine={myReaction}
+              canReact={!!bs.user?.signedIn}
+              pending={reactionPending}
+              error={reactionError}
+              onSelect={submitProblemReaction}
+            />
+          ) : null}
           {/* Hide tags during contest (gives away algorithm) */}
           {!inContest && tags.length > 0 && (
             <div className="mt-1.5 flex flex-wrap gap-1">

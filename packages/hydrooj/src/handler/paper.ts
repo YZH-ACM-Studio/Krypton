@@ -245,6 +245,7 @@ class PaperBaseHandler extends Handler {
                 }
                 // 考试上下文不得下发原赛通过率（难度提示）——public 投影会带上它。
                 delete pdoc.origStat;
+                delete pdoc.reactions;
                 // 统一解析为完整 config 对象（服务端内部用；含标准答案）。
                 pdoc.config = parsedProblemConfig(pdoc);
                 pdict[pid] = pdoc;
@@ -944,6 +945,7 @@ class ExamModeEntryHandler extends Handler {
                     }
                     // 考试上下文不得下发原赛通过率（难度提示）。
                     delete pdoc.origStat;
+                    delete pdoc.reactions;
                     // 净化 config：原始 YAML 串含标准答案，不下发。
                     pdoc.config = clientProblemConfig(parsedProblemConfig(pdoc));
                     pdict[pid] = pdoc;

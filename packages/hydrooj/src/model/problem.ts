@@ -8,7 +8,7 @@ import fs from 'fs-extra';
 import yaml from 'js-yaml';
 import { cloneDeep, isEqual, keyBy, pick } from 'lodash';
 import { Filter, ObjectId } from 'mongodb';
-import { parseProblemKind, ProblemConfigFile, type ProblemKind, ProblemType } from '@hydrooj/common';
+import { effectiveProblemKind, parseProblemKind, ProblemConfigFile, type ProblemKind, ProblemType } from '@hydrooj/common';
 import { extractZip, Logger, size, streamToBuffer } from '@hydrooj/utils/lib/utils';
 import { Context } from '../context';
 import {
@@ -38,6 +38,13 @@ import {
     normalizeProgrammingStatement,
     ProgrammingStatementValidationError,
 } from '../lib/programming-statement';
+import {
+    nextProblemReactionInc,
+    parseStoredProblemReactionChoice,
+    parseStoredProblemReactions,
+    parseProblemReactionInput,
+    type ProblemReaction,
+} from '../lib/problem-reaction';
 import { resolveProblemKnowledgeNodeIds } from '../lib/problem-tag-canonical';
 import { normalizeProblemTestdataUpload } from '../lib/problem-testdata-upload';
 import { parseConfig } from '../lib/testdataConfig';
@@ -5604,6 +5611,59 @@ export class ProblemModel {
 
     static setStar(domainId: string, pid: number, uid: number, star: boolean) {
         return document.setStatus(domainId, document.TYPE_PROBLEM, pid, uid, { star });
+    }
+
+    static async setReaction(domainId: string, pid: number, uid: number, raw: unknown) {
+        let next: ProblemReaction | null;
+        try {
+            next = parseProblemReactionInput(raw);
+        } catch {
+            throw new ValidationError('reaction', null, localizedErrorText`反应无效`);
+        }
+        const pdoc = await ProblemModel.get(domainId, pid, [...ProblemModel.PROJECTION_PUBLIC, 'reactions']);
+        if (!pdoc) throw new ProblemNotFoundError(domainId, pid);
+        if (effectiveProblemKind(pdoc) !== 'programming') {
+            throw new ValidationError('reaction', null, localizedErrorText`只有编程题可以反应`);
+        }
+        try {
+            parseStoredProblemReactions(pdoc.reactions);
+        } catch (error) {
+            logger.error('Problem reaction store rejected domain=%s pid=%d uid=%d stage=read result=denied error=%o', domainId, pid, uid, error);
+            throw new ValidationError('reactions', null, localizedErrorText`题目反应数据无效`);
+        }
+        const before = await document.setStatus(domainId, document.TYPE_PROBLEM, pid, uid, { reaction: next }, 'before');
+        let prev: ProblemReaction | null;
+        try {
+            prev = parseStoredProblemReactionChoice(before?.reaction);
+        } catch (error) {
+            logger.error('Problem reaction status rejected domain=%s pid=%d uid=%d stage=status result=denied error=%o', domainId, pid, uid, error);
+            throw new ValidationError('reaction', null, localizedErrorText`题目反应数据无效`);
+        }
+        const inc = nextProblemReactionInc(prev, next);
+        let reactions = parseStoredProblemReactions(pdoc.reactions);
+        if (Object.keys(inc).length) {
+            const updated = await document.coll.findOneAndUpdate(
+                { domainId, docType: document.TYPE_PROBLEM, docId: pid },
+                { $inc: inc },
+                { returnDocument: 'after' },
+            );
+            if (!updated) throw new ProblemNotFoundError(domainId, pid);
+            try {
+                reactions = parseStoredProblemReactions(updated.reactions);
+            } catch (error) {
+                logger.error('Problem reaction store rejected domain=%s pid=%d uid=%d stage=write result=denied error=%o', domainId, pid, uid, error);
+                throw new ValidationError('reactions', null, localizedErrorText`题目反应数据无效`);
+            }
+        }
+        logger.info(
+            'Problem reaction written domain=%s pid=%d uid=%d prev=%s next=%s stage=set result=ok',
+            domainId,
+            pid,
+            uid,
+            prev || 'none',
+            next || 'none',
+        );
+        return { reaction: next, reactions };
     }
 
     static canViewBy(pdoc: ProblemDoc, udoc: User & ProblemAclUser) {

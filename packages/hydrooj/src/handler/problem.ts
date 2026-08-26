@@ -67,6 +67,7 @@ import {
     programmingStatementClientView,
     programmingStatementLimits,
 } from '../lib/programming-statement';
+import { parseStoredProblemReactions } from '../lib/problem-reaction';
 import { resolveProblemKnowledgeNodeIds } from '../lib/problem-tag-canonical';
 import { PERM, PRIV, STATUS } from '../model/builtin';
 import { virtualContestService } from '../model/virtual-contest';
@@ -1758,7 +1759,7 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
         const domainId = String(this.domain?._id);
         this.pdoc = tid
             ? await problem.get(domainId, pid)
-            : await problem.getViewableAuthorized(domainId, pid, this.user, [...problem.PROJECTION_PUBLIC, 'managedAuthoring']);
+            : await problem.getViewableAuthorized(domainId, pid, this.user, [...problem.PROJECTION_PUBLIC, 'managedAuthoring', 'reactions']);
         if (!this.pdoc) throw new ProblemNotFoundError(domainId, pid);
         this.canSubmitLoadedProblem = tid ? this.user.hasPerm(PERM.PERM_SUBMIT_PROBLEM) : problem.canSubmitProblem(this.user, this.pdoc);
         const canManageContest =
@@ -1807,6 +1808,7 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
             delete this.pdoc.origStat;
             delete this.pdoc.knowledgeMapId;
             delete this.pdoc.knowledgeNodeIds;
+            delete this.pdoc.reactions;
         }
         let ddoc = this.domain;
         if (this.pdoc.reference) {
@@ -1924,6 +1926,23 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
         } else {
             delete responsePdoc.programmingStatement;
         }
+        const ordinaryProgramming = !tid && !this.virtualAttempt && effectiveProblemKind(this.pdoc) === 'programming';
+        if (ordinaryProgramming) {
+            try {
+                responsePdoc.reactions = parseStoredProblemReactions(this.pdoc.reactions);
+            } catch (error) {
+                logger.error(
+                    'Problem reaction serialize rejected domain=%s pid=%d actor=%d stage=detail-serialize result=denied error=%o',
+                    this.pdoc.domainId,
+                    this.pdoc.docId,
+                    this.user._id,
+                    error,
+                );
+                throw new ValidationError('reactions', null, localizedErrorText`题目反应数据无效`);
+            }
+        } else {
+            delete responsePdoc.reactions;
+        }
         if (!knowledgeMapVisible) {
             delete responsePdoc.knowledgeMapId;
             delete responsePdoc.knowledgeNodeIds;
@@ -1978,7 +1997,13 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
             authorUdocs,
             dataContributorUdocs,
             knowledgeMapView,
-            psdoc: !tid ? this.psdoc : personalPracticePsdoc,
+            psdoc: !tid
+                ? ordinaryProgramming
+                    ? this.psdoc
+                    : this.psdoc
+                      ? { ...this.psdoc, reaction: undefined }
+                      : this.psdoc
+                : personalPracticePsdoc,
             title: this.pdoc.title,
             solutionCount: scnt,
             discussionCount: dcnt,
@@ -2191,6 +2216,36 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
     async postStar(_domainId: string, star: boolean) {
         await problem.setStar(this.pdoc.domainId, this.pdoc.docId, this.user._id, star);
         this.back({ star });
+    }
+
+    @param('reaction', Types.String, true)
+    async postReaction(_domainId: string, reaction = '') {
+        this.checkPriv(PRIV.PRIV_USER_PROFILE);
+        if (this.tdoc || this.virtualAttempt || this.args.tid) {
+            logger.warn(
+                'Problem reaction rejected domain=%s pid=%d uid=%d stage=contest-or-virtual result=denied',
+                this.pdoc.domainId,
+                this.pdoc.docId,
+                this.user._id,
+            );
+            throw new ValidationError('reaction', null, localizedErrorText`比赛和考试中不能对题目反应`);
+        }
+        try {
+            const result = await problem.setReaction(this.pdoc.domainId, this.pdoc.docId, this.user._id, reaction);
+            this.back({ reaction: result.reaction, reactions: result.reactions });
+        } catch (error) {
+            if (error instanceof TypeError) {
+                logger.warn(
+                    'Problem reaction rejected domain=%s pid=%d uid=%d stage=parse result=denied error=%s',
+                    this.pdoc.domainId,
+                    this.pdoc.docId,
+                    this.user._id,
+                    error.message,
+                );
+                throw new ValidationError('reaction', null, localizedErrorText`反应无效`);
+            }
+            throw error;
+        }
     }
 }
 

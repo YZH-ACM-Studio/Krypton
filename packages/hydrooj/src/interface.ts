@@ -196,6 +196,15 @@ declare module './model/problem' {
         content: string;
         nSubmit: number;
         nAccept: number;
+        /**
+         * Programming-problem reactions. Missing means all zeros.
+         * Per-user choice lives on ProblemStatusDoc.reaction.
+         */
+        reactions?: {
+            up: number;
+            down: number;
+            what: number;
+        };
         tag: string[];
         data: FileInfo[];
         additional_file: FileInfo[];
@@ -305,6 +314,8 @@ export interface ProblemStatusDoc extends StatusDocBase {
     score?: number;
     status?: number;
     star?: boolean;
+    /** Exclusive programming-problem reaction; null/missing means none. */
+    reaction?: 'up' | 'down' | 'what' | null;
 }
 
 export type ProblemDataWriteOperation = 'files-upload' | 'files-rename' | 'files-delete' | 'generate-testdata-request' | 'statement-edit';

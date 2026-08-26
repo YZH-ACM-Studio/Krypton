@@ -224,9 +224,9 @@ function ProblemReactionBar({
   onSelect: (next: ProblemReactionChoice) => void;
 }) {
   const items: Array<{ key: ProblemReactionChoice; label: string; icon: typeof ThumbsUp; count: number }> = [
-    { key: 'up', label: '赞', icon: ThumbsUp, count: counts.up },
-    { key: 'down', label: '踩', icon: ThumbsDown, count: counts.down },
-    { key: 'what', label: '何意味', icon: HelpCircle, count: counts.what },
+    { key: 'up', label: '点赞', icon: ThumbsUp, count: counts.up },
+    { key: 'down', label: '点踩', icon: ThumbsDown, count: counts.down },
+    { key: 'what', label: '点问号', icon: HelpCircle, count: counts.what },
   ];
   return (
     <div className="mt-2 flex flex-wrap items-center gap-1.5">

@@ -8,7 +8,10 @@ describe('programming problem reactions', () => {
   it('renders the reaction bar on ordinary UINext problem detail only', () => {
     const detail = readFileSync(resolve(root, 'src/pages/problem-detail.tsx'), 'utf8');
     expect(detail).to.include('function ProblemReactionBar');
-    expect(detail).to.include("label: '何意味'");
+    expect(detail).to.include("label: '点赞'");
+    expect(detail).to.include("label: '点踩'");
+    expect(detail).to.include("label: '点问号'");
+    expect(detail).not.to.include('何意味');
     expect(detail).to.include("operation: 'reaction'");
     expect(detail).to.include('showProblemReactions && reactionCounts');
     expect(detail).to.include('!inContest && !virtualContestActive && !examMode?.enabled');

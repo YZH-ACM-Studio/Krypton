@@ -21,6 +21,7 @@ export async function preloadProblemAcl(
     loadProblemAcl: (domainId: string, uid: number) => Promise<LoadedProblemAcl>,
     loadPidNamespaceAcl: (domainId: string, uid: number) => Promise<LoadedPidNamespaceAcl>,
     onError: (error: unknown) => void,
+    loadManagedContainerPids: (domainId: string, uid: number) => Promise<Set<number>>,
 ): Promise<void> {
     user._permitPids = new Set<number>();
     user._authoredPids = new Set<number>();
@@ -29,6 +30,7 @@ export async function preloadProblemAcl(
     user._tagContributionPids = new Set<number>();
     user._aclFencedPids = new Set<number>();
     user._ownsLegacyProblems = false;
+    user._managedContainerPids = new Set<number>();
     user._problemAclLoaded = false;
     user._problemAclDomainId = undefined;
     user._pidNamespaceAuthorIds = new Set<string>();
@@ -49,7 +51,11 @@ export async function preloadProblemAcl(
         return;
     }
     try {
-        const [loaded, namespaceAcl] = await Promise.all([loadProblemAcl(domainId, uid), loadPidNamespaceAcl(domainId, uid)]);
+        const [loaded, namespaceAcl, managedContainerPids] = await Promise.all([
+            loadProblemAcl(domainId, uid),
+            loadPidNamespaceAcl(domainId, uid),
+            loadManagedContainerPids(domainId, uid),
+        ]);
         if (
             !(loaded?.permitPids instanceof Set) ||
             !(loaded?.authoredPids instanceof Set) ||
@@ -68,6 +74,9 @@ export async function preloadProblemAcl(
         ) {
             throw new TypeError('PID namespace ACL preload returned an invalid snapshot');
         }
+        if (!(managedContainerPids instanceof Set)) {
+            throw new TypeError('managed container ACL preload returned an invalid snapshot');
+        }
         user._permitPids = loaded.permitPids;
         user._authoredPids = loaded.authoredPids;
         user._maintainedPids = loaded.maintainedPids;
@@ -75,6 +84,7 @@ export async function preloadProblemAcl(
         user._tagContributionPids = loaded.tagContributionPids;
         user._aclFencedPids = loaded.fencedPids;
         user._ownsLegacyProblems = loaded.ownsLegacyProblems;
+        user._managedContainerPids = managedContainerPids;
         user._problemAclDomainId = domainId;
         user._problemAclLoaded = true;
         user._pidNamespaceAuthorIds = namespaceAcl.authorNamespaceIds;

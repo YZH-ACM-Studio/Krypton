@@ -116,6 +116,7 @@ function denyProblemAcl(user: any) {
         _tagContributionPids: new Set<number>(),
         _aclFencedPids: new Set<number>(),
         _ownsLegacyProblems: false,
+        _managedContainerPids: new Set<number>(),
         _problemAclDomainId: undefined,
         _problemAclLoaded: false,
         _pidNamespaceAuthorIds: new Set<string>(),

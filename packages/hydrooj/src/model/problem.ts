@@ -98,6 +98,7 @@ import {
     clearProblemWriteClaim,
     commitProblemWriteClaimUpdate,
     isProblemBankAdmin as isProblemBankAdminAccess,
+    loadManagedContainerPids as loadManagedContainerPidsAccess,
     markProblemWriteClaimError,
     normalizeProblemFileListSnapshot,
     problemDataSnapshotFilter,
@@ -990,6 +991,10 @@ export class ProblemModel {
 
     static refreshProblemAcl(user: ProblemAclUser, authoritativeDomainId: string) {
         return refreshProblemAclAccess(user, authoritativeDomainId);
+    }
+
+    static loadManagedContainerPids(user: ProblemAclUser, authoritativeDomainId: string) {
+        return loadManagedContainerPidsAccess(user, authoritativeDomainId);
     }
 
     static buildProblemBankScope(user: ProblemAclUser) {

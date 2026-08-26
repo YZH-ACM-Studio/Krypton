@@ -74,11 +74,15 @@ after(() => {
 });
 
 const TYPE_PROBLEM = 10;
+const TYPE_CONTEST = 30;
+const TYPE_TRAINING = 40;
 const countCalls: Array<{ domainId: string; docType: number; query: unknown }> = [];
 const selectionReadCalls: Array<{ filter: any; options: any }> = [];
+const containerFindCalls: Array<{ filter: any; options: any }> = [];
 const findOneCalls: Array<{ filter: any; options: any }> = [];
 const guardedUpdateCalls: Array<{ filter: any; update: any }> = [];
 const updateCalls: Array<{ filter: any; update: any }> = [];
+let containerDocs: any[] = [];
 let countResult = 0;
 let selectionNotReady: any = null;
 let liveProblem: any = null;
@@ -184,6 +188,22 @@ function applyUpdate(target: any, update: any) {
     }
 }
 
+function matchesContainerFilter(doc: any, filter: any): boolean {
+    if (!filter || typeof filter !== 'object') return false;
+    const rest = { ...filter };
+    delete rest.$or;
+    if (rest.domainId !== undefined && doc.domainId !== rest.domainId) return false;
+    if (rest.docType !== undefined && doc.docType !== rest.docType) return false;
+    if (rest.kind !== undefined && doc.kind !== rest.kind) return false;
+    if (rest.owner !== undefined && doc.owner !== rest.owner) return false;
+    if (rest.maintainer !== undefined && !(doc.maintainer || []).includes(rest.maintainer)) return false;
+    if (rest.rule === 'homework' && doc.rule !== 'homework') return false;
+    if (rest.rule && typeof rest.rule === 'object' && rest.rule.$ne === 'homework' && doc.rule === 'homework') return false;
+    if (rest.docId?.$in && !rest.docId.$in.some((id: unknown) => String(id) === String(doc.docId))) return false;
+    if (!filter.$or) return true;
+    return filter.$or.some((term: any) => matchesContainerFilter(doc, term));
+}
+
 function assertNoProjectionPathCollision(projection: Record<string, unknown> | undefined) {
     const paths = Object.keys(projection || {});
     for (const path of paths) {
@@ -201,6 +221,8 @@ require.cache[documentPath] = {
     loaded: true,
     exports: {
         TYPE_PROBLEM,
+        TYPE_CONTEST,
+        TYPE_TRAINING,
         coll: {
             async findOneAndUpdate(filter: any, update: any) {
                 guardedUpdateCalls.push({ filter: structuredClone(filter), update: structuredClone(update) });
@@ -221,12 +243,23 @@ require.cache[documentPath] = {
                 return { matchedCount: 1 };
             },
             find(filter: any, options?: any) {
-                selectionReadCalls.push({ filter: structuredClone(filter), options: structuredClone(options) });
-                return {
+                if (filter?.docType === TYPE_PROBLEM) {
+                    selectionReadCalls.push({ filter: structuredClone(filter), options: structuredClone(options) });
+                } else {
+                    containerFindCalls.push({ filter: structuredClone(filter), options: structuredClone(options) });
+                }
+                const cursor = {
+                    project() {
+                        return cursor;
+                    },
                     async toArray() {
-                        return selectionNotReady ? [structuredClone(selectionNotReady)] : [];
+                        if (filter?.docType === TYPE_PROBLEM) {
+                            return selectionNotReady ? [structuredClone(selectionNotReady)] : [];
+                        }
+                        return containerDocs.filter((doc) => matchesContainerFilter(doc, filter)).map((doc) => structuredClone(doc));
                     },
                 };
+                return cursor;
             },
             async findOne(filter: any, options?: any) {
                 findOneCalls.push({ filter: structuredClone(filter), options: structuredClone(options) });
@@ -313,15 +346,20 @@ const {
 
 const { PERM, PRIV } = require('../src/model/builtin.ts');
 
-type UserKind = 'student' | 'creator' | 'draft-creator' | 'hidden-viewer' | 'admin';
+type UserKind = 'student' | 'creator' | 'draft-creator' | 'hidden-viewer' | 'bank-viewer' | 'admin';
 
 function makeUser(kind: UserKind, overrides: Record<string, unknown> = {}) {
     const perms = new Set<bigint>();
     if (kind === 'creator') perms.add(PERM.PERM_CREATE_PROBLEM);
     if (kind === 'draft-creator') perms.add(PERM.PERM_CREATE_PROGRAMMING_DRAFT);
     if (kind === 'hidden-viewer') perms.add(PERM.PERM_VIEW_PROBLEM_HIDDEN);
+    if (kind === 'bank-viewer') perms.add(PERM.PERM_VIEW_PROBLEM_BANK);
     if (kind !== 'student') perms.add(PERM.PERM_VIEW_PROBLEM);
     if (kind === 'student') perms.add(PERM.PERM_VIEW_PROBLEM);
+    const extraPerms = Array.isArray(overrides.extraPerms) ? (overrides.extraPerms as bigint[]) : [];
+    for (const perm of extraPerms) perms.add(perm);
+    const rest = { ...overrides };
+    delete rest.extraPerms;
     return {
         _id: 42,
         role: kind === 'admin' ? 'default' : 'root',
@@ -332,6 +370,7 @@ function makeUser(kind: UserKind, overrides: Record<string, unknown> = {}) {
         _tagContributionPids: new Set<number>(),
         _aclFencedPids: new Set<number>(),
         _ownsLegacyProblems: false,
+        _managedContainerPids: new Set<number>(),
         _problemAclDomainId: 'system',
         _problemAclLoaded: true,
         _pidNamespaceAuthorIds: new Set<string>(),
@@ -341,7 +380,7 @@ function makeUser(kind: UserKind, overrides: Record<string, unknown> = {}) {
         _pidNamespaceAclLoaded: true,
         hasPerm: (...wanted: bigint[]) => wanted.some((perm) => perms.has(perm)),
         hasPriv: (...wanted: number[]) => kind === 'admin' && wanted.includes(PRIV.PRIV_EDIT_SYSTEM),
-        ...overrides,
+        ...rest,
     } as any;
 }
 
@@ -393,6 +432,8 @@ async function captureFailure(run: () => Promise<unknown>) {
 beforeEach(() => {
     countCalls.length = 0;
     selectionReadCalls.length = 0;
+    containerFindCalls.length = 0;
+    containerDocs = [];
     findOneCalls.length = 0;
     guardedUpdateCalls.length = 0;
     updateCalls.length = 0;
@@ -460,15 +501,44 @@ describe('P2.11 problem-bank capability matrix', () => {
         expect(canCreateManagedProgrammingDraft(administrator)).to.equal(true);
         expect(canImportProblems(administrator)).to.equal(true);
         expect(canAssignManagedAuthor(administrator)).to.equal(true);
+
+        const bankViewer = makeUser('bank-viewer');
+        expect(canCreateAllProblemKinds(bankViewer)).to.equal(false);
+        expect(canCreateManagedProgrammingDraft(bankViewer)).to.equal(false);
+        expect(canImportProblems(bankViewer)).to.equal(false);
+        expect(canAssignManagedAuthor(bankViewer)).to.equal(false);
     });
 
-    it('lets admins, creators, and actual legacy owners with a successfully loaded ACL browse', () => {
+    it('lets admins, creators, bank viewers, and actual legacy owners with a successfully loaded ACL browse', () => {
         expect(canBrowseProblemBank(makeUser('student'))).to.equal(false);
         expect(canBrowseProblemBank(makeUser('hidden-viewer'))).to.equal(false);
+        expect(canBrowseProblemBank(makeUser('bank-viewer'))).to.equal(true);
+        expect(canBrowseProblemBank(makeUser('bank-viewer', { _problemAclLoaded: false }))).to.equal(false);
         expect(canBrowseProblemBank(makeUser('student', { _ownsLegacyProblems: true }))).to.equal(true);
         expect(canBrowseProblemBank(makeUser('creator'))).to.equal(true);
         expect(canBrowseProblemBank(makeUser('creator', { _problemAclLoaded: false }))).to.equal(false);
         expect(canBrowseProblemBank(makeUser('admin', { _problemAclLoaded: false }))).to.equal(false);
+    });
+
+    it('enumerates the public catalog for browse-only viewers and keeps creator workbenches', () => {
+        expect(buildProblemBankScope(makeUser('bank-viewer'))).to.deep.equal({
+            $and: [{ hidden: { $ne: true } }, { 'aclMutationLocks.uid': { $ne: 42 } }],
+        });
+        expect(buildProblemContainerSelectionScope(makeUser('bank-viewer'))).to.deep.equal({
+            $and: [{ hidden: { $ne: true } }, { 'aclMutationLocks.uid': { $ne: 42 } }],
+        });
+        expect(
+            buildProblemBankScope(
+                makeUser('bank-viewer', {
+                    _aclFencedPids: new Set([9, 3]),
+                }),
+            ),
+        ).to.deep.equal({
+            $and: [{ hidden: { $ne: true } }, { docId: { $nin: [3, 9] } }, { 'aclMutationLocks.uid': { $ne: 42 } }],
+        });
+        expect(buildProblemBankScope(makeUser('creator', { extraPerms: [PERM.PERM_VIEW_PROBLEM_BANK] }))).to.deep.equal({
+            $and: [{ $and: [{ owner: 42 }, { authoringMode: { $ne: 'managed' } }] }, { 'aclMutationLocks.uid': { $ne: 42 } }],
+        });
     });
 
     it('enumerates only own legacy problems for an owner without broad create permission', () => {
@@ -1825,10 +1895,16 @@ describe('P2.11 durable global problem write claim', () => {
 });
 
 describe('P2.11 concrete-problem viewing', () => {
-    it('preserves public, owner, and global-hidden access', () => {
+    it('preserves public and owner access without a global hidden-problem pass', () => {
         expect(canViewProblem(makeUser('student'), pdoc(100, 7, false))).to.equal(true);
         expect(canViewProblem(makeUser('student'), pdoc(100, 42, true))).to.equal(true);
-        expect(canViewProblem(makeUser('hidden-viewer'), pdoc(100))).to.equal(true);
+        expect(canViewProblem(makeUser('hidden-viewer'), pdoc(100))).to.equal(false);
+        expect(canViewProblem(makeUser('hidden-viewer', { _managedContainerPids: new Set([100]) }), pdoc(100))).to.equal(true);
+        expect(canViewProblem(makeUser('hidden-viewer', { _managedContainerPids: new Set([100]) }), managedPdoc(100))).to.equal(true);
+        expect(canViewProblem(makeUser('hidden-viewer', { _managedContainerPids: new Set([99]) }), pdoc(100))).to.equal(false);
+        expect(
+            canViewProblem(makeUser('hidden-viewer', { _managedContainerPids: new Set([100]), _aclFencedPids: new Set([100]) }), pdoc(100)),
+        ).to.equal(false);
     });
 
     it('does not let managed owner or global hidden permission bypass direct ACL assignment', () => {
@@ -2122,12 +2198,11 @@ describe('P2.11 stable direct-problem reads', () => {
         expect(loads).to.equal(2);
     });
 
-    it('keeps public, owner, verifier, global-hidden viewer, and administrator reads stable', async () => {
+    it('keeps public, owner, verifier, and administrator reads stable', async () => {
         for (const [user, doc, permits] of [
             [makeUser('student'), pdoc(100, 7, false), []],
             [makeUser('student'), pdoc(100, 42, true), []],
             [makeUser('student'), pdoc(100), [100]],
-            [makeUser('hidden-viewer'), pdoc(100), []],
             [
                 makeUser('admin', {
                     hasPerm: (...wanted: bigint[]) => wanted.some((perm) => [PERM.PERM_VIEW_PROBLEM, PERM.PERM_VIEW_PROBLEM_HIDDEN].includes(perm)),
@@ -2147,6 +2222,33 @@ describe('P2.11 stable direct-problem reads', () => {
             const result = await readStableViewableProblem('system', user, readLiveProblem());
             expect(result?.docId).to.equal(100);
         }
+    });
+
+    it('does not stabilize another teacher unpublished hidden problem from global hidden permission', async () => {
+        liveProblem = {
+            ...pdoc(100),
+            docType: TYPE_PROBLEM,
+            aclMutationRevision: 2,
+            aclMutationLocks: [],
+        };
+        (global as any).Hydro.model.permits.loadAclForUser = async () => permitSnapshot();
+
+        const result = await readStableViewableProblem('system', makeUser('hidden-viewer'), readLiveProblem());
+        expect(result).to.equal(null);
+    });
+
+    it('stabilizes a hidden problem already hung in a managed contest', async () => {
+        liveProblem = {
+            ...pdoc(100),
+            docType: TYPE_PROBLEM,
+            aclMutationRevision: 2,
+            aclMutationLocks: [],
+        };
+        containerDocs = [{ domainId: 'system', docType: TYPE_CONTEST, owner: 42, rule: 'acm', pids: [100] }];
+        (global as any).Hydro.model.permits.loadAclForUser = async () => permitSnapshot();
+
+        const result = await readStableViewableProblem('system', makeUser('hidden-viewer'), readLiveProblem());
+        expect(result?.docId).to.equal(100);
     });
 
     it('rejects an old maintainer snapshot when downgrade completes before the final raw read', async () => {
@@ -2279,6 +2381,7 @@ describe('P2.11 ACL reload observability', () => {
             _authoredPids: new Set([900]),
             _maintainedPids: new Set([902]),
             _aclFencedPids: new Set([903]),
+            _managedContainerPids: new Set([904]),
             _problemAclDomainId: 'system',
             _problemAclLoaded: true,
         });
@@ -2297,6 +2400,7 @@ describe('P2.11 ACL reload observability', () => {
         expect([...user._authoredPids]).to.deep.equal([]);
         expect([...user._maintainedPids]).to.deep.equal([]);
         expect([...user._aclFencedPids]).to.deep.equal([]);
+        expect([...user._managedContainerPids]).to.deep.equal([]);
         expect(user._problemAclDomainId).to.equal(undefined);
         expect(user._problemAclLoaded).to.equal(false);
         expect(loggerErrorCalls).to.deep.equal([['Problem ACL reload failed domain=%s uid=%d error=%o', 'system', 42, raw]]);
@@ -2315,6 +2419,173 @@ describe('P2.11 ACL reload observability', () => {
         expect(invalid?.cause?.message).to.equal('permits.loadAclForUser returned an invalid ACL snapshot');
         expect(loggerErrorCalls[1]?.slice(0, 3)).to.deep.equal(['Problem ACL reload failed domain=%s uid=%d error=%o', 'system', 42]);
         expect(loggerErrorCalls[1]?.[3]).to.equal(invalid?.cause);
+    });
+});
+
+describe('P2.15 managed container hidden view and bank browse', () => {
+    it('loads hung pids from owned contests, homework, course chapters, sections, and live problem-set refs', async () => {
+        containerDocs = [
+            { domainId: 'system', docType: TYPE_CONTEST, owner: 42, rule: 'acm', pids: [11, 12] },
+            { domainId: 'system', docType: TYPE_CONTEST, owner: 7, maintainer: [42], rule: 'homework', pids: [13] },
+            { domainId: 'system', docType: TYPE_CONTEST, owner: 7, rule: 'acm', pids: [99] },
+            {
+                domainId: 'system',
+                docType: TYPE_TRAINING,
+                kind: 'course',
+                owner: 42,
+                dag: [{ _id: 1, pids: [21], sections: [{ _id: 1, pids: [22] }], problemSetId: 'set-1', stageIds: [2] }],
+            },
+            {
+                domainId: 'system',
+                docType: TYPE_TRAINING,
+                kind: 'problem_set',
+                docId: 'set-1',
+                dag: [
+                    { _id: 1, pids: [31] },
+                    { _id: 2, pids: [32] },
+                ],
+            },
+        ];
+        const user = makeUser('student');
+        await refreshProblemAcl(user, 'system');
+        expect([...user._managedContainerPids].sort((a, b) => a - b)).to.deep.equal([11, 12, 13, 21, 22, 32]);
+        expect(canViewProblem(user, pdoc(11))).to.equal(true);
+        expect(canViewProblem(user, pdoc(99))).to.equal(false);
+        expect(canViewProblem(user, managedPdoc(22))).to.equal(true);
+    });
+
+    it('does not load another teacher contest without an edit-all contest permission', async () => {
+        containerDocs = [{ domainId: 'system', docType: TYPE_CONTEST, owner: 7, rule: 'acm', pids: [99] }];
+        const user = makeUser('hidden-viewer');
+        await refreshProblemAcl(user, 'system');
+        expect([...user._managedContainerPids]).to.deep.equal([]);
+        expect(canViewProblem(user, pdoc(99))).to.equal(false);
+    });
+
+    it('loads every non-homework contest when the caller can edit all contests', async () => {
+        containerDocs = [
+            { domainId: 'system', docType: TYPE_CONTEST, owner: 7, rule: 'acm', pids: [41] },
+            { domainId: 'system', docType: TYPE_CONTEST, owner: 7, rule: 'homework', pids: [42] },
+        ];
+        const user = makeUser('student', { extraPerms: [PERM.PERM_EDIT_CONTEST] });
+        await refreshProblemAcl(user, 'system');
+        expect([...user._managedContainerPids]).to.deep.equal([41]);
+    });
+
+    it('loads every homework when the caller can edit all homework', async () => {
+        containerDocs = [
+            { domainId: 'system', docType: TYPE_CONTEST, owner: 7, rule: 'acm', pids: [41] },
+            { domainId: 'system', docType: TYPE_CONTEST, owner: 7, rule: 'homework', pids: [42] },
+        ];
+        const user = makeUser('student', { extraPerms: [PERM.PERM_EDIT_HOMEWORK] });
+        await refreshProblemAcl(user, 'system');
+        expect([...user._managedContainerPids]).to.deep.equal([42]);
+    });
+
+    it('skips container queries for problem-bank administrators', async () => {
+        containerDocs = [{ domainId: 'system', docType: TYPE_CONTEST, owner: 1, rule: 'acm', pids: [1] }];
+        const user = makeUser('admin');
+        await refreshProblemAcl(user, 'system');
+        expect([...user._managedContainerPids]).to.deep.equal([]);
+        expect(containerFindCalls).to.deep.equal([]);
+        expect(canViewProblem(user, pdoc(1))).to.equal(true);
+    });
+
+    it('does not treat invalid stageIds as the whole referenced problem set', async () => {
+        containerDocs = [
+            {
+                domainId: 'system',
+                docType: TYPE_TRAINING,
+                kind: 'course',
+                owner: 42,
+                docId: 'course-1',
+                dag: [{ _id: 1, pids: [21], problemSetId: 'set-1', stageIds: [null] }],
+            },
+            {
+                domainId: 'system',
+                docType: TYPE_TRAINING,
+                kind: 'problem_set',
+                docId: 'set-1',
+                dag: [
+                    { _id: 1, pids: [31] },
+                    { _id: 2, pids: [32] },
+                ],
+            },
+        ];
+        const user = makeUser('student');
+        await refreshProblemAcl(user, 'system');
+        expect([...user._managedContainerPids]).to.deep.equal([21]);
+        expect(loggerWarnCalls.some((args) => args.includes('invalid-stage-ids'))).to.equal(true);
+    });
+
+    it('loads only matching live-ref stages and treats an empty stageIds list as the whole set', async () => {
+        containerDocs = [
+            {
+                domainId: 'system',
+                docType: TYPE_TRAINING,
+                kind: 'course',
+                owner: 42,
+                dag: [
+                    { _id: 1, pids: [21], problemSetId: 'set-1', stageIds: [2] },
+                    { _id: 2, pids: [22], problemSetId: 'set-2', stageIds: [] },
+                ],
+            },
+            {
+                domainId: 'system',
+                docType: TYPE_TRAINING,
+                kind: 'problem_set',
+                docId: 'set-1',
+                dag: [
+                    { _id: 1, pids: [31] },
+                    { _id: 2, pids: [32] },
+                ],
+            },
+            {
+                domainId: 'system',
+                docType: TYPE_TRAINING,
+                kind: 'problem_set',
+                docId: 'set-2',
+                dag: [
+                    { _id: 1, pids: [41] },
+                    { _id: 2, pids: [42] },
+                ],
+            },
+        ];
+        const user = makeUser('student');
+        await refreshProblemAcl(user, 'system');
+        expect([...user._managedContainerPids].sort((a, b) => a - b)).to.deep.equal([21, 22, 32, 41, 42]);
+    });
+
+    it('loads every course when the caller can edit all courses', async () => {
+        containerDocs = [
+            { domainId: 'system', docType: TYPE_TRAINING, kind: 'course', owner: 7, dag: [{ _id: 1, pids: [55] }] },
+            { domainId: 'system', docType: TYPE_TRAINING, kind: 'problem_set', owner: 7, dag: [{ _id: 1, pids: [66] }] },
+        ];
+        const user = makeUser('student', { extraPerms: [PERM.PERM_EDIT_COURSE] });
+        await refreshProblemAcl(user, 'system');
+        expect([...user._managedContainerPids]).to.deep.equal([55]);
+    });
+
+    it('skips a missing or non-problem-set live reference without dropping direct course pids', async () => {
+        containerDocs = [
+            {
+                domainId: 'system',
+                docType: TYPE_TRAINING,
+                kind: 'course',
+                owner: 42,
+                docId: 'course-1',
+                dag: [
+                    { _id: 1, pids: [21], problemSetId: 'missing-set' },
+                    { _id: 2, pids: [22], problemSetId: 'course-shaped' },
+                ],
+            },
+            { domainId: 'system', docType: TYPE_TRAINING, kind: 'course', docId: 'course-shaped', dag: [{ _id: 1, pids: [88] }] },
+        ];
+        const user = makeUser('student');
+        await refreshProblemAcl(user, 'system');
+        expect([...user._managedContainerPids].sort((a, b) => a - b)).to.deep.equal([21, 22]);
+        expect(loggerWarnCalls).to.have.length(2);
+        expect(loggerWarnCalls[0][0]).to.equal('Managed container live-ref skipped domain=%s uid=%d courseDocId=%s problemSetId=%s reason=%s');
     });
 });
 
@@ -2489,6 +2760,7 @@ describe('P2.11 ProblemModel public surface', () => {
             'canAssignManagedAuthor',
             'canBrowseProblemBank',
             'buildProblemBankScope',
+            'loadManagedContainerPids',
             'canMaintainProblem',
             'canSubmitProblem',
             'assertProblemBankSelection',
@@ -2498,6 +2770,18 @@ describe('P2.11 ProblemModel public surface', () => {
             expect(source).to.match(new RegExp(`static (?:async )?${method}\\(`));
         }
         expect(source).to.include('return canViewProblem(udoc, pdoc);');
+        expect(readFileSync(resolve(process.cwd(), 'packages/hydrooj/src/model/problem-access.ts'), 'utf8')).not.to.match(
+            /hasPerm\(PERM\.PERM_VIEW_PROBLEM_HIDDEN\)/,
+        );
+        expect(readFileSync(resolve(process.cwd(), 'packages/hydrooj/src/model/problem-access.ts'), 'utf8')).to.include(
+            'user.hasPerm(PERM.PERM_VIEW_PROBLEM_BANK)',
+        );
+        expect(readFileSync(resolve(process.cwd(), 'packages/krypton-permits/src/preload.ts'), 'utf8')).to.include(
+            'user._managedContainerPids = managedContainerPids;',
+        );
+        expect(readFileSync(resolve(process.cwd(), 'packages/krypton-permits/index.ts'), 'utf8')).to.include(
+            'problem.loadManagedContainerPids(user, loadedDomainId)',
+        );
         expect(source).to.include('readStableViewableProblem(domainId, user, read)');
         expect(source).to.include('readStableMaintainableProblem(domainId, user, read)');
         expect(source).to.include('PROBLEM_ACL_INTERNAL_FIELDS');

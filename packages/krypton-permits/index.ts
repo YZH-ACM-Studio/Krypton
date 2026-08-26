@@ -68,6 +68,16 @@ export async function apply(ctx: Context) {
                 return pidNamespaces.loadAclForUser(loadedDomainId, uid);
             },
             (error) => logger.error('ACL preload failed domain=%s uid=%d error=%s', domainId, user?._id || 0, error),
+            async (loadedDomainId, uid) => {
+                const problem = (global.Hydro?.model as any)?.problem;
+                if (typeof problem?.loadManagedContainerPids !== 'function') {
+                    throw new TypeError('problem.loadManagedContainerPids is unavailable');
+                }
+                if (user._id !== uid) {
+                    throw new TypeError('managed container ACL preload uid mismatch');
+                }
+                return problem.loadManagedContainerPids(user, loadedDomainId);
+            },
         );
     });
 }

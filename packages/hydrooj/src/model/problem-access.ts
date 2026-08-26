@@ -2,6 +2,7 @@ import type { Filter } from 'mongodb';
 import { Logger } from '@hydrooj/utils';
 import { localizedErrorText, PermissionError, ValidationError } from '../error';
 import { assertProgrammingStatementComplete, compileProgrammingStatement } from '../lib/programming-statement';
+import { courseKindClause, isProblemSetKind } from '../lib/training-kind';
 import { PERM, PRIV } from './builtin';
 import { assertCodeEvaluationLifecyclePatch, assertProblemReadyForUse, CODE_EVALUATION_CANDIDATE_FILTER } from './code-evaluation-lifecycle';
 import * as document from './document';
@@ -24,6 +25,8 @@ import { canonicalizeStructuredKnowledgePatch, touchesCanonicalProblemFields } f
  * sets contain only active narrow data/tag assignments. `_aclFencedPids`
  * contains pairs currently undergoing an ACL role mutation for this user and
  * domain. `_ownsLegacyProblems` is an indexed existence fact, not a role.
+ * `_managedContainerPids` contains problems already hung in a course, contest,
+ * or homework this request can manage; it is not a problem-bank role.
  * Non-admin callers must never infer an empty ACL from absent state; only
  * `_problemAclLoaded === true` makes this complete snapshot authoritative.
  */
@@ -35,6 +38,7 @@ export type ProblemAclUser = PidNamespaceAclUser & {
     _tagContributionPids?: Set<number>;
     _aclFencedPids?: Set<number>;
     _ownsLegacyProblems?: boolean;
+    _managedContainerPids?: Set<number>;
     _problemAclDomainId?: string;
     _problemAclLoaded?: boolean;
 };
@@ -227,6 +231,7 @@ export function canBrowseProblemBank(user: ProblemAclUser): boolean {
     }
     return (
         isProblemBankAdmin(user) ||
+        user.hasPerm(PERM.PERM_VIEW_PROBLEM_BANK) ||
         user.hasPerm(PERM.PERM_CREATE_PROBLEM) ||
         user.hasPerm(PERM.PERM_CREATE_PROGRAMMING_DRAFT) ||
         user._ownsLegacyProblems === true ||
@@ -290,7 +295,13 @@ function buildProblemBankScopeFor(user: ProblemAclUser, includeContributions: bo
             'managedAuthoring.metadataStatus': { $in: ['draft', 'confirmed'] },
         });
     }
-    if (!authorScopes.length) return { ...DENY_ALL_PROBLEMS };
+    if (!authorScopes.length) {
+        if (!user.hasPerm(PERM.PERM_VIEW_PROBLEM_BANK)) return { ...DENY_ALL_PROBLEMS };
+        const publicCatalog: Filter<ProblemDoc> = { hidden: { $ne: true } };
+        return fenced.length
+            ? { $and: [publicCatalog, { docId: { $nin: fenced } }, liveLockExclusion] }
+            : { $and: [publicCatalog, liveLockExclusion] };
+    }
     const authorScope: Filter<ProblemDoc> = authorScopes.length === 1 ? authorScopes[0] : { $or: authorScopes };
     return fenced.length ? { $and: [authorScope, { docId: { $nin: fenced } }, liveLockExclusion] } : { $and: [authorScope, liveLockExclusion] };
 }
@@ -316,6 +327,7 @@ function denyProblemAcl(user: ProblemAclUser): void {
     user._tagContributionPids = new Set<number>();
     user._aclFencedPids = new Set<number>();
     user._ownsLegacyProblems = false;
+    user._managedContainerPids = new Set<number>();
     user._problemAclDomainId = undefined;
     user._problemAclLoaded = false;
     user._pidNamespaceAuthorIds = new Set<string>();
@@ -323,6 +335,201 @@ function denyProblemAcl(user: ProblemAclUser): void {
     user._pidNamespaceEditAllIds = new Set<string>();
     user._pidNamespaceAclDomainId = undefined;
     user._pidNamespaceAclLoaded = false;
+}
+
+interface ManagedContainerDoc {
+    docId?: unknown;
+    pids?: unknown;
+    dag?: unknown;
+    kind?: unknown;
+}
+
+interface CourseChapterRef {
+    pids?: unknown;
+    sections?: unknown;
+    problemSetId?: unknown;
+    stageIds?: unknown;
+}
+
+function readContainerDocs(docs: unknown): ManagedContainerDoc[] {
+    if (!Array.isArray(docs)) throw new TypeError('container ACL query did not return an array');
+    return docs.map((doc) => {
+        if (!doc || typeof doc !== 'object' || Array.isArray(doc)) {
+            throw new TypeError('container ACL document is not an object');
+        }
+        const record = doc as Record<string, unknown>;
+        return { docId: record.docId, pids: record.pids, dag: record.dag, kind: record.kind };
+    });
+}
+
+function addNumericPids(target: Set<number>, values: unknown): void {
+    if (!Array.isArray(values)) return;
+    for (const value of values) {
+        if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) target.add(value);
+    }
+}
+
+function addChapterPids(target: Set<number>, chapter: CourseChapterRef): void {
+    addNumericPids(target, chapter.pids);
+    if (!Array.isArray(chapter.sections)) return;
+    for (const section of chapter.sections) {
+        if (!section || typeof section !== 'object' || Array.isArray(section)) continue;
+        addNumericPids(target, (section as Record<string, unknown>).pids);
+    }
+}
+
+function managedContestFilter(user: ProblemAclUser, domainId: string): Record<string, unknown> {
+    if (user.hasPerm(PERM.PERM_EDIT_CONTEST) && user.hasPerm(PERM.PERM_EDIT_HOMEWORK)) {
+        return { domainId, docType: document.TYPE_CONTEST };
+    }
+    const clauses: Record<string, unknown>[] = [{ owner: user._id }, { maintainer: user._id }];
+    if (user.hasPerm(PERM.PERM_EDIT_CONTEST)) clauses.push({ rule: { $ne: 'homework' } });
+    if (user.hasPerm(PERM.PERM_EDIT_HOMEWORK)) clauses.push({ rule: 'homework' });
+    return { domainId, docType: document.TYPE_CONTEST, $or: clauses };
+}
+
+function managedCourseFilter(user: ProblemAclUser, domainId: string): Record<string, unknown> {
+    const base = { domainId, docType: document.TYPE_TRAINING, ...courseKindClause() };
+    if (user.hasPerm(PERM.PERM_EDIT_COURSE)) return base;
+    return { ...base, $or: [{ owner: user._id }, { maintainer: user._id }] };
+}
+
+function collectLiveRefs(courses: ManagedContainerDoc[]): Array<{ problemSetId: unknown; stageIds?: unknown; courseDocId: unknown }> {
+    const refs: Array<{ problemSetId: unknown; stageIds?: unknown; courseDocId: unknown }> = [];
+    for (const course of courses) {
+        if (!Array.isArray(course.dag)) continue;
+        for (const node of course.dag) {
+            if (!node || typeof node !== 'object' || Array.isArray(node)) continue;
+            const chapter = node as CourseChapterRef;
+            if (chapter.problemSetId === undefined || chapter.problemSetId === null) continue;
+            refs.push({ problemSetId: chapter.problemSetId, stageIds: chapter.stageIds, courseDocId: course.docId });
+        }
+    }
+    return refs;
+}
+
+function resolveLiveRefStages(
+    dag: unknown[],
+    stageIds: unknown,
+    context: { domainId: string; uid: number; courseDocId: unknown; problemSetId: unknown },
+): unknown[] | null {
+    if (!Array.isArray(stageIds) || stageIds.length === 0) return dag;
+    const wanted = new Set<number>();
+    for (const id of stageIds) {
+        if (typeof id !== 'number' || !Number.isSafeInteger(id) || id <= 0) {
+            logger.warn(
+                'Managed container live-ref skipped domain=%s uid=%d courseDocId=%s problemSetId=%s reason=%s',
+                context.domainId,
+                context.uid,
+                context.courseDocId ?? '-',
+                context.problemSetId ?? '-',
+                'invalid-stage-ids',
+            );
+            return null;
+        }
+        wanted.add(id);
+    }
+    return dag.filter((stage) => {
+        if (!stage || typeof stage !== 'object' || Array.isArray(stage)) return false;
+        const stageId = (stage as Record<string, unknown>)._id;
+        return typeof stageId === 'number' && wanted.has(stageId);
+    });
+}
+
+export async function loadManagedContainerPids(user: ProblemAclUser, domainId: string): Promise<Set<number>> {
+    const pids = new Set<number>();
+    if (isProblemBankAdmin(user)) return pids;
+
+    const [contestDocs, courseDocs] = await Promise.all([
+        document.coll
+            .find(managedContestFilter(user, domainId), { projection: { pids: 1, docId: 1 } })
+            .toArray()
+            .then(readContainerDocs),
+        document.coll
+            .find(managedCourseFilter(user, domainId), { projection: { dag: 1, docId: 1 } })
+            .toArray()
+            .then(readContainerDocs),
+    ]);
+
+    for (const contest of contestDocs) {
+        if (contest.pids !== undefined && !Array.isArray(contest.pids)) {
+            logger.warn(
+                'Managed container contest pids skipped domain=%s uid=%d docId=%s reason=%s',
+                domainId,
+                user._id,
+                contest.docId ?? '-',
+                'not-array',
+            );
+            continue;
+        }
+        addNumericPids(pids, contest.pids);
+    }
+    for (const course of courseDocs) {
+        if (course.dag !== undefined && !Array.isArray(course.dag)) {
+            logger.warn(
+                'Managed container course dag skipped domain=%s uid=%d docId=%s reason=%s',
+                domainId,
+                user._id,
+                course.docId ?? '-',
+                'not-array',
+            );
+            continue;
+        }
+        if (!Array.isArray(course.dag)) continue;
+        for (const node of course.dag) {
+            if (!node || typeof node !== 'object' || Array.isArray(node)) continue;
+            addChapterPids(pids, node as CourseChapterRef);
+        }
+    }
+
+    const liveRefs = collectLiveRefs(courseDocs);
+    if (!liveRefs.length) return pids;
+
+    const uniqueSetIds: unknown[] = [];
+    const seenSetIds = new Set<string>();
+    for (const ref of liveRefs) {
+        const key = String(ref.problemSetId);
+        if (!key || seenSetIds.has(key)) continue;
+        seenSetIds.add(key);
+        uniqueSetIds.push(ref.problemSetId);
+    }
+    if (!uniqueSetIds.length) return pids;
+
+    const setDocs = readContainerDocs(
+        await document.coll
+            .find({ domainId, docType: document.TYPE_TRAINING, docId: { $in: uniqueSetIds } }, { projection: { dag: 1, kind: 1, docId: 1 } })
+            .toArray(),
+    );
+    const setsById = new Map<string, ManagedContainerDoc>();
+    for (const setDoc of setDocs) setsById.set(String(setDoc.docId), setDoc);
+
+    for (const ref of liveRefs) {
+        const setDoc = setsById.get(String(ref.problemSetId));
+        if (!setDoc || !isProblemSetKind(setDoc.kind)) {
+            logger.warn(
+                'Managed container live-ref skipped domain=%s uid=%d courseDocId=%s problemSetId=%s reason=%s',
+                domainId,
+                user._id,
+                ref.courseDocId ?? '-',
+                ref.problemSetId ?? '-',
+                setDoc ? 'not-problem-set' : 'missing-problem-set',
+            );
+            continue;
+        }
+        const dag = Array.isArray(setDoc.dag) ? setDoc.dag : [];
+        const stages = resolveLiveRefStages(dag, ref.stageIds, {
+            domainId,
+            uid: user._id,
+            courseDocId: ref.courseDocId,
+            problemSetId: ref.problemSetId,
+        });
+        if (!stages) continue;
+        for (const stage of stages) {
+            if (!stage || typeof stage !== 'object' || Array.isArray(stage)) continue;
+            addChapterPids(pids, stage as CourseChapterRef);
+        }
+    }
+    return pids;
 }
 
 /** Reload persistent canonical/fence/ProblemDoc-lock state immediately before use. */
@@ -333,7 +540,7 @@ export async function refreshProblemAcl(user: ProblemAclUser, authoritativeDomai
         if (typeof permits?.loadAclForUser !== 'function') {
             throw new TypeError('permits.loadAclForUser is unavailable');
         }
-        const [loaded, namespaceAcl] = await Promise.all([
+        const [loaded, namespaceAcl, managedContainerPids] = await Promise.all([
             permits.loadAclForUser(authoritativeDomainId, user._id),
             (async () => {
                 const pidNamespaces = (global.Hydro?.model as any)?.pidNamespaces;
@@ -342,6 +549,7 @@ export async function refreshProblemAcl(user: ProblemAclUser, authoritativeDomai
                 }
                 return pidNamespaces.loadAclForUser(authoritativeDomainId, user._id);
             })(),
+            loadManagedContainerPids(user, authoritativeDomainId),
         ]);
         if (
             !(loaded?.permitPids instanceof Set) ||
@@ -368,6 +576,7 @@ export async function refreshProblemAcl(user: ProblemAclUser, authoritativeDomai
         user._tagContributionPids = loaded.tagContributionPids;
         user._aclFencedPids = loaded.fencedPids;
         user._ownsLegacyProblems = loaded.ownsLegacyProblems;
+        user._managedContainerPids = managedContainerPids;
         user._problemAclDomainId = authoritativeDomainId;
         user._problemAclLoaded = true;
         user._pidNamespaceAuthorIds = namespaceAcl.authorNamespaceIds;
@@ -1170,20 +1379,15 @@ export function canViewProblem(user: ProblemAclUser, pdoc: ProblemDoc): boolean 
     ) {
         return true;
     }
-    if (pdoc.authoringMode === 'managed') {
-        return (
-            user._permitPids?.has(pdoc.docId) === true ||
-            user._dataContributionPids?.has(pdoc.docId) === true ||
-            user._tagContributionPids?.has(pdoc.docId) === true
-        );
-    }
-    if (pdoc.owner === user._id) return true;
-    if (user.hasPerm(PERM.PERM_VIEW_PROBLEM_HIDDEN)) return true;
-    return (
+    const hasDirectHiddenGrant =
         user._permitPids?.has(pdoc.docId) === true ||
         user._dataContributionPids?.has(pdoc.docId) === true ||
-        user._tagContributionPids?.has(pdoc.docId) === true
-    );
+        user._tagContributionPids?.has(pdoc.docId) === true;
+    if (pdoc.authoringMode === 'managed') {
+        return hasDirectHiddenGrant || user._managedContainerPids?.has(pdoc.docId) === true;
+    }
+    if (pdoc.owner === user._id) return true;
+    return hasDirectHiddenGrant || user._managedContainerPids?.has(pdoc.docId) === true;
 }
 
 /**

@@ -124,7 +124,7 @@ const problemStub = {
         if (!user._problemAclLoaded || user._problemAclDomainId !== pdoc.domainId) return false;
         if (user._aclFencedPids?.has(pdoc.docId)) return false;
         if (!user.hasPerm(PERM.PERM_VIEW_PROBLEM)) return false;
-        return !pdoc.hidden || pdoc.owner === user._id || user.hasPerm(PERM.PERM_VIEW_PROBLEM_HIDDEN) || user._permitPids?.has(pdoc.docId);
+        return !pdoc.hidden || pdoc.owner === user._id || user._permitPids?.has(pdoc.docId) || user._managedContainerPids?.has(pdoc.docId) === true;
     },
     async getViewableAuthorized(domainId: string, rawPid: unknown, user: any) {
         calls.getViewableAuthorized.push({ domainId, rawPid });
@@ -1293,6 +1293,16 @@ function registerReferencedProblemVisibilitySuite(label: 'training' | 'course', 
             expect(await render(user)).to.have.property('11');
         });
 
+        it('shows a container manager the hung hidden problem without global hidden permission', async () => {
+            problemDocs.set(11, { domainId: 'system', docId: 11, owner: 7, hidden: true, title: 'Hidden' });
+            const manager = makeUser({ _managedContainerPids: new Set([11]) });
+            const outsider = makeUser({
+                hasPerm: (...wanted: bigint[]) => wanted.includes(PERM.PERM_VIEW_PROBLEM) || wanted.includes(PERM.PERM_VIEW_PROBLEM_HIDDEN),
+            });
+            expect(await render(manager)).to.have.property('11');
+            expect(await render(outsider)).not.to.have.property('11');
+        });
+
         it('hides the referenced hidden problem immediately when fenced or revoked', async () => {
             problemDocs.set(11, { domainId: 'system', docId: 11, owner: 7, hidden: true, title: 'Hidden' });
             const fenced = makeUser({ _permitPids: new Set([11]), _aclFencedPids: new Set([11]) });
@@ -1417,8 +1427,12 @@ describe('P3.3 problem set access handler gates', () => {
         expect((await captureFailure(() => makeHandler(trainingRoutes.training_file_download).get('forged-domain', 'set', 'a.txt')))?.name).to.equal(
             'NotFoundError',
         );
-        expect((await captureFailure(() => makeHandler(trainingRoutes.training_files).prepare('forged-domain', 'set')))?.name).to.equal('NotFoundError');
-        expect((await captureFailure(() => makeHandler(trainingRoutes.training_edit).prepare('forged-domain', 'set')))?.name).to.equal('NotFoundError');
+        expect((await captureFailure(() => makeHandler(trainingRoutes.training_files).prepare('forged-domain', 'set')))?.name).to.equal(
+            'NotFoundError',
+        );
+        expect((await captureFailure(() => makeHandler(trainingRoutes.training_edit).prepare('forged-domain', 'set')))?.name).to.equal(
+            'NotFoundError',
+        );
         expect(calls.trainingStatusWrites).to.deep.equal([]);
     });
 

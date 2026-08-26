@@ -8,6 +8,8 @@ const emptyPidNamespaceAcl = async () => ({
     editAllNamespaceIds: new Set<string>(),
 });
 
+const emptyManagedContainers = async () => new Set<number>();
+
 describe('problem ACL preload', () => {
     it('loads uid=1 administrators instead of bypassing their fences', async () => {
         const user: any = { _id: 1 };
@@ -35,6 +37,7 @@ describe('problem ACL preload', () => {
             (error) => {
                 throw error;
             },
+            emptyManagedContainers,
         );
 
         expect(calls).to.equal(1);
@@ -44,6 +47,7 @@ describe('problem ACL preload', () => {
         expect([...user._dataContributionPids]).to.deep.equal([3]);
         expect([...user._tagContributionPids]).to.deep.equal([4]);
         expect(user._ownsLegacyProblems).to.equal(true);
+        expect([...user._managedContainerPids]).to.deep.equal([]);
         expect([...user._pidNamespaceAuthorIds]).to.deep.equal(['custom:os']);
         expect([...user._pidNamespaceManagerIds]).to.deep.equal(['custom:os']);
         expect(user._pidNamespaceAclLoaded).to.equal(true);
@@ -60,6 +64,7 @@ describe('problem ACL preload', () => {
             _tagContributionPids: new Set([999]),
             _aclFencedPids: new Set(),
             _ownsLegacyProblems: true,
+            _managedContainerPids: new Set([321]),
             _problemAclLoaded: true,
             _problemAclDomainId: 'other',
         };
@@ -72,6 +77,7 @@ describe('problem ACL preload', () => {
             },
             emptyPidNamespaceAcl,
             (error) => errors.push(error),
+            emptyManagedContainers,
         );
 
         expect(user._problemAclLoaded).to.equal(false);
@@ -83,6 +89,7 @@ describe('problem ACL preload', () => {
         expect([...user._tagContributionPids]).to.deep.equal([]);
         expect([...user._aclFencedPids]).to.deep.equal([]);
         expect(user._ownsLegacyProblems).to.equal(false);
+        expect([...user._managedContainerPids]).to.deep.equal([]);
         expect(user._pidNamespaceAclLoaded).to.equal(false);
         expect(user._pidNamespaceAclDomainId).to.equal(undefined);
         expect([...user._pidNamespaceAuthorIds]).to.deep.equal([]);
@@ -107,6 +114,7 @@ describe('problem ACL preload', () => {
                 }) as any,
             emptyPidNamespaceAcl,
             (error) => errors.push(error),
+            emptyManagedContainers,
         );
 
         expect(user._problemAclLoaded).to.equal(false);
@@ -141,6 +149,7 @@ describe('problem ACL preload', () => {
                 }) as any,
             emptyPidNamespaceAcl,
             (error) => errors.push(error),
+            emptyManagedContainers,
         );
 
         expect(user._problemAclLoaded).to.equal(false);
@@ -183,6 +192,7 @@ describe('problem ACL preload', () => {
                     editAllNamespaceIds: new Set(),
                 }) as any,
             (error) => errors.push(error),
+            emptyManagedContainers,
         );
 
         expect(user._problemAclLoaded).to.equal(false);
@@ -211,6 +221,9 @@ describe('problem ACL preload', () => {
             (error) => {
                 throw error;
             },
+            async () => {
+                throw new Error('must not load containers');
+            },
         );
 
         expect(problemLoads).to.equal(0);
@@ -220,5 +233,56 @@ describe('problem ACL preload', () => {
         expect(user._problemAclDomainId).to.equal('system');
         expect(user._pidNamespaceAclDomainId).to.equal('system');
         expect([...user._pidNamespaceAuthorIds]).to.deep.equal([]);
+        expect([...user._managedContainerPids]).to.deep.equal([]);
+    });
+
+    it('loads managed container pids in the same snapshot as permits', async () => {
+        const user: any = { _id: 11, _managedContainerPids: new Set([999]) };
+        await preloadProblemAcl(
+            user,
+            'system',
+            async () => ({
+                permitPids: new Set(),
+                authoredPids: new Set(),
+                maintainedPids: new Set(),
+                dataContributionPids: new Set(),
+                tagContributionPids: new Set(),
+                fencedPids: new Set(),
+                ownsLegacyProblems: false,
+            }),
+            emptyPidNamespaceAcl,
+            (error) => {
+                throw error;
+            },
+            async () => new Set([11, 22]),
+        );
+
+        expect(user._problemAclLoaded).to.equal(true);
+        expect([...user._managedContainerPids].sort((a, b) => a - b)).to.deep.equal([11, 22]);
+    });
+
+    it('fails closed when managed container preload is not a Set', async () => {
+        const user: any = { _id: 12, _managedContainerPids: new Set([9]) };
+        const errors: unknown[] = [];
+        await preloadProblemAcl(
+            user,
+            'system',
+            async () => ({
+                permitPids: new Set([1]),
+                authoredPids: new Set(),
+                maintainedPids: new Set(),
+                dataContributionPids: new Set(),
+                tagContributionPids: new Set(),
+                fencedPids: new Set(),
+                ownsLegacyProblems: false,
+            }),
+            emptyPidNamespaceAcl,
+            (error) => errors.push(error),
+            async () => [11] as any,
+        );
+
+        expect(user._problemAclLoaded).to.equal(false);
+        expect([...user._managedContainerPids]).to.deep.equal([]);
+        expect(errors[0]).to.be.instanceOf(TypeError);
     });
 });

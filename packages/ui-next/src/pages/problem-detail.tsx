@@ -53,6 +53,7 @@ import { shouldShowNoTestdataWarning } from '@/lib/problem-testcase-warning';
 import {
   practiceDraftIdentity,
   practiceProblemEntryUrl,
+  readPracticeEnforcement,
   readPracticeIntegrityPageContext,
   type PracticeIntegrityPageContext,
 } from '@/lib/practice-integrity';
@@ -177,6 +178,7 @@ interface ProblemDetailPageData {
   solutionCount?: number;
   tdoc?: ContestDoc | null;
   practiceIntegrity?: unknown;
+  practiceEnforcement?: unknown;
   antiAiMarkerView?: unknown;
 }
 
@@ -701,6 +703,25 @@ function InfoChip({ icon: Icon, label, value, href }: { icon: LucideIcon; label:
   return <div className="flex items-center gap-1.5 text-xs">{body}</div>;
 }
 
+function InheritedPracticeEnforcementNotice({
+  active,
+  blockExternalCode,
+  ideOnlySubmit,
+}: {
+  active: boolean;
+  blockExternalCode: boolean;
+  ideOnlySubmit: boolean;
+}) {
+  if (!active) return null;
+  const parts = [...(blockExternalCode ? ['禁止粘贴或拖入外部代码'] : []), ...(ideOnlySubmit ? ['只能用题面内的 Krypton IDE 提交'] : [])];
+  if (!parts.length) return null;
+  return (
+    <div role="status" className="border-y border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
+      当前课程或题集要求：{parts.join('，')}。本题库或作业提交不计入真实性完成。
+    </div>
+  );
+}
+
 function PracticeIntegrityNotice({ context, problemUrl }: { context: PracticeIntegrityPageContext | null; problemUrl: string }) {
   if (!context || (!context.controlled && !context.bypassed)) return null;
   const preview = context.controlled && context.mode === 'preview';
@@ -1017,6 +1038,9 @@ export function ProblemDetailPage() {
   const practiceControlled = practiceIntegrity?.controlled === true;
   const practicePolicy = practiceControlled ? practiceIntegrity.policy! : null;
   const practiceContextId = practiceControlled ? practiceIntegrity.contextId : undefined;
+  const practiceEnforcement = readPracticeEnforcement(data.practiceEnforcement);
+  const blockExternalCode = practicePolicy?.prohibitExternalCodeInjection === true || practiceEnforcement.prohibitExternalCodeInjection;
+  const ideOnlySubmit = practicePolicy?.removeIndependentSubmitForm === true || practiceEnforcement.removeIndependentSubmitForm;
   const practiceDraftScope = practiceIntegrity ? practiceDraftIdentity(practiceIntegrity) : null;
   const antiAiCopyInitialization = useMemo(() => {
     if (!practiceControlled || practicePolicy?.antiAiCopyInjection !== true) return { markers: [], failed: false };
@@ -1208,13 +1232,7 @@ export function ProblemDetailPage() {
   const companionGroup = inContest && tdoc?.title ? `Krypton - ${tdoc.title}` : 'Krypton';
   const companionUrl = typeof window === 'undefined' ? problemUrl : window.location.href;
   const showCompanion = !examMode?.enabled;
-  const canSubmitBack =
-    showCompanion &&
-    canSubmit &&
-    !isObjective &&
-    !isStructuredAnswer &&
-    !isSubjective &&
-    tdoc?.participationMode !== 'team';
+  const canSubmitBack = showCompanion && canSubmit && !isObjective && !isStructuredAnswer && !isSubjective && tdoc?.participationMode !== 'team';
   const renderStatement = (includeLegacyLimits: boolean) => {
     const statement = structuredStatement ? (
       <ProgrammingStatementView
@@ -1472,6 +1490,11 @@ export function ProblemDetailPage() {
                 </div>
 
                 <PracticeIntegrityNotice context={practiceIntegrity} problemUrl={problemUrl} />
+                <InheritedPracticeEnforcementNotice
+                  active={!practiceControlled}
+                  blockExternalCode={practiceEnforcement.prohibitExternalCodeInjection}
+                  ideOnlySubmit={practiceEnforcement.removeIndependentSubmitForm}
+                />
 
                 {showNoTestdataWarning ? <NoTestdataWarning /> : null}
 
@@ -1629,8 +1652,8 @@ export function ProblemDetailPage() {
                 defaultLang={config.langs?.[0]}
                 submitUrl={submitUrl}
                 practiceContextId={practiceContextId}
-                prohibitExternalCodeInjection={practicePolicy?.prohibitExternalCodeInjection === true}
-                isolateDraftByLanguage={practiceControlled}
+                prohibitExternalCodeInjection={blockExternalCode}
+                isolateDraftByLanguage={practiceControlled || blockExternalCode}
                 canPretest={problemCanPretest}
                 cacheKey={ideCacheKey}
                 samples={samples}
@@ -1679,6 +1702,11 @@ export function ProblemDetailPage() {
         />
       ) : null}
       <PracticeIntegrityNotice context={practiceIntegrity} problemUrl={problemUrl} />
+      <InheritedPracticeEnforcementNotice
+        active={!practiceControlled}
+        blockExternalCode={practiceEnforcement.prohibitExternalCodeInjection}
+        ideOnlySubmit={practiceEnforcement.removeIndependentSubmitForm}
+      />
 
       {showNoTestdataWarning ? <NoTestdataWarning /> : null}
 
@@ -1790,11 +1818,11 @@ export function ProblemDetailPage() {
               </a>
             </Button>
           ) : null}
-          {canSubmit && !examMode?.enabled && (!practiceControlled || !practicePolicy?.removeIndependentSubmitForm || isStructuredAnswer) ? (
+          {canSubmit && !examMode?.enabled && (!ideOnlySubmit || isStructuredAnswer) ? (
             <Button asChild size="sm" variant="outline">
               <a href={independentSubmitUrl}>
                 <Send className="mr-1 size-3.5" />
-                {practiceControlled && practicePolicy?.removeIndependentSubmitForm && isStructuredAnswer ? '作答' : '提交'}
+                {ideOnlySubmit && isStructuredAnswer ? '作答' : '提交'}
               </a>
             </Button>
           ) : null}

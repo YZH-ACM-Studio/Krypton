@@ -121,7 +121,9 @@ export default connect(
     }
 
     rejectExternalCode = (event: React.SyntheticEvent) => {
-      if (!UiContext.practiceIntegrity?.controlled || !UiContext.practiceIntegrity.policy?.prohibitExternalCodeInjection) return;
+      const controlled = UiContext.practiceIntegrity?.controlled && UiContext.practiceIntegrity.policy?.prohibitExternalCodeInjection;
+      const inherited = UiContext.practiceEnforcement?.prohibitExternalCodeInjection === true;
+      if (!controlled && !inherited) return;
       event.preventDefault();
       event.stopPropagation();
       Notification.warn(i18n('Authenticity training blocks pasted or dropped code. Enter code directly in the editor.'));

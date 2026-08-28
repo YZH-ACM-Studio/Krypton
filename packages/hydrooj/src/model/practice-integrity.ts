@@ -309,6 +309,21 @@ export class PracticeIntegrityService {
         return await this.revisions.find({ domainId, containerKind, containerId, state: 'published' }).sort({ revision: -1 }).limit(1).next();
     }
 
+    async listLatestPublished(domainId: string): Promise<PracticeIntegrityRevisionDoc[]> {
+        await this.ensureIndexes();
+        if (!domainId) throw new TypeError('invalid practice container identity');
+        const published = await this.revisions.find({ domainId, state: 'published' }).sort({ revision: -1 }).toArray();
+        const latest = new Map<string, PracticeIntegrityRevisionDoc>();
+        for (const revision of published) {
+            if (!['course', 'problemSet'].includes(revision.containerKind) || !(revision.containerId instanceof ObjectId)) {
+                throw new TypeError(`invalid published practice integrity revision ${revision._id}`);
+            }
+            const key = `${revision.containerKind}:${revision.containerId.toHexString()}`;
+            if (!latest.has(key)) latest.set(key, revision);
+        }
+        return [...latest.values()];
+    }
+
     async getPolicyState(domainId: string, containerKind: PracticeContainerKind, containerId: ObjectId) {
         await this.ensureIndexes();
         assertContainerIdentity({ domainId, containerKind, containerId });

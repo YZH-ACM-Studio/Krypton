@@ -32,6 +32,7 @@ class MemoryCollection<T extends { _id: ObjectId }> {
                     limit: (count: number) => ({
                         next: async () => values.slice(0, count)[0] || null,
                     }),
+                    toArray: async () => values,
                 };
             },
         };
@@ -302,6 +303,69 @@ describe('practice integrity canonical model', () => {
         );
         expect(results.filter((result) => result.status === 'fulfilled')).to.have.length(1);
         expect(results.filter((result) => result.status === 'rejected')).to.have.length(1);
+    });
+
+    it('lists the latest published revision per container and ignores drafts', async () => {
+        const { service } = makeService();
+        const first = await service.saveDraft({
+            domainId: 'system',
+            containerKind: 'course',
+            containerId: courseId,
+            policy: strictPolicy,
+            actorUid: 2,
+            expectedDraftVersion: 0,
+        });
+        await service.publishDraft({
+            domainId: 'system',
+            containerKind: 'course',
+            containerId: courseId,
+            actorUid: 2,
+            expectedDraftVersion: first.draftVersion!,
+        });
+        const second = await service.saveDraft({
+            domainId: 'system',
+            containerKind: 'course',
+            containerId: courseId,
+            policy: { prohibitExternalCodeInjection: false, removeIndependentSubmitForm: true, antiAiCopyInjection: false },
+            actorUid: 2,
+            expectedDraftVersion: 0,
+        });
+        await service.publishDraft({
+            domainId: 'system',
+            containerKind: 'course',
+            containerId: courseId,
+            actorUid: 2,
+            expectedDraftVersion: second.draftVersion!,
+        });
+        await service.saveDraft({
+            domainId: 'system',
+            containerKind: 'problemSet',
+            containerId: problemSetId,
+            policy: strictPolicy,
+            actorUid: 3,
+            expectedDraftVersion: 0,
+        });
+        const listed = await service.listLatestPublished('system');
+        expect(listed).to.have.length(1);
+        expect(listed[0]).to.include({ containerKind: 'course', revision: 2, state: 'published' });
+        expect(listed[0].policy.removeIndependentSubmitForm).to.equal(true);
+        const setDraft = await service.saveDraft({
+            domainId: 'other',
+            containerKind: 'problemSet',
+            containerId: problemSetId,
+            policy: strictPolicy,
+            actorUid: 3,
+            expectedDraftVersion: 0,
+        });
+        await service.publishDraft({
+            domainId: 'other',
+            containerKind: 'problemSet',
+            containerId: problemSetId,
+            actorUid: 3,
+            expectedDraftVersion: setDraft.draftVersion!,
+        });
+        expect(await service.listLatestPublished('system')).to.have.length(1);
+        expect(await service.listLatestPublished('other')).to.have.length(1);
     });
 
     it('combines nested policies by taking the stricter OR result', () => {

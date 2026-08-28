@@ -10,7 +10,8 @@
       <div class="section__body typo" name="submit_section">
         {% set controlledStructured = practiceIntegrity and practiceIntegrity.controlled and (pdoc.problemKind == 'program_fill' or pdoc.problemKind == 'function') %}
         {% set controlledExternalInjection = practiceIntegrity and practiceIntegrity.controlled and practiceIntegrity.policy.prohibitExternalCodeInjection %}
-        {% if controlledStructured or controlledExternalInjection %}
+        {% set inheritedExternalInjection = practiceEnforcement and practiceEnforcement.prohibitExternalCodeInjection %}
+        {% if controlledStructured or controlledExternalInjection or inheritedExternalInjection %}
           <div class="alert alert--warning">
             {% if controlledStructured %}
               {{ _('This controlled structured problem must be answered in the Krypton interface. Reload this page in a modern browser; the fallback form is disabled.') }}

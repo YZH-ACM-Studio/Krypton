@@ -8,6 +8,7 @@
   codeTemplate: handler.user.codeTemplate,
   pdoc: pdoc,
   practiceIntegrity: practiceIntegrity|default(null),
+  practiceEnforcement: practiceEnforcement|default(null),
   practiceContextId: practiceIntegrity.contextId if practiceIntegrity and practiceIntegrity.controlled else null
 }) }}
 {% if tdoc %}

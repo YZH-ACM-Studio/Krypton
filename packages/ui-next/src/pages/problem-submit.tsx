@@ -21,7 +21,7 @@ import { SimpleSelect } from '@/components/ui/select';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { useBootstrap } from '@/lib/bootstrap';
 import { replaceRouteTokens } from '@/lib/format';
-import { practiceDraftIdentity, practiceProblemEntryUrl, readPracticeIntegrityPageContext } from '@/lib/practice-integrity';
+import { practiceDraftIdentity, practiceProblemEntryUrl, readPracticeEnforcement, readPracticeIntegrityPageContext } from '@/lib/practice-integrity';
 import { parseRecordResponse, preferredPretestResultTab, type PretestResult, type PretestResultTab } from '@/lib/pretest-results';
 import { createEmptyStructuredRegionDraft, parseStructuredRegionDraft } from '@/lib/structured-region-draft';
 
@@ -57,6 +57,7 @@ interface SubmitPageData {
   tdoc?: SubmitContestDocument | null;
   langRange?: Record<string, string>;
   practiceIntegrity?: unknown;
+  practiceEnforcement?: unknown;
   virtualContestActive?: boolean;
 }
 
@@ -77,6 +78,8 @@ export function ProblemSubmitPage() {
   const practiceIntegrity = readPracticeIntegrityPageContext(data.practiceIntegrity);
   const practiceControlled = practiceIntegrity?.controlled === true;
   const practicePolicy = practiceControlled ? practiceIntegrity.policy! : null;
+  const practiceEnforcement = readPracticeEnforcement(data.practiceEnforcement);
+  const blockExternalCode = practicePolicy?.prohibitExternalCodeInjection === true || practiceEnforcement.prohibitExternalCodeInjection;
   const practiceContextId = practiceControlled ? practiceIntegrity.contextId : undefined;
   const practiceDraftScope = practiceIntegrity ? practiceDraftIdentity(practiceIntegrity) : null;
   const problemDetailUrl = practiceIntegrity
@@ -415,7 +418,7 @@ export function ProblemSubmitPage() {
               onChange={updateRegion}
               lang={config.template?.lang || lang}
               singleLine={singleLineRegion}
-              prohibitExternalCodeInjection={practicePolicy?.prohibitExternalCodeInjection === true}
+              prohibitExternalCodeInjection={blockExternalCode}
             />
           </div>
         ) : (
@@ -426,7 +429,7 @@ export function ProblemSubmitPage() {
               defaultLang={lang}
               value={code}
               onValueChange={setCode}
-              prohibitExternalCodeInjection={practicePolicy?.prohibitExternalCodeInjection === true}
+              prohibitExternalCodeInjection={blockExternalCode}
               minHeight={480}
               className="h-full"
             />

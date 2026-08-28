@@ -85,12 +85,18 @@ import {
     type PracticeScopeKind,
     type TrustedPracticeContextReference,
 } from '../model/practice-integrity';
+import {
+    canApplyInheritedPracticeEnforcement,
+    inheritedPracticeEnforcementIsActive,
+    type InheritedPracticeEnforcement,
+} from '../lib/practice-enforcement';
 import { selectPracticeIssueTargets } from '../lib/practice-issue-targets';
 import {
     assertPracticeContextAccess,
     canManagePracticeContainer,
     canPreviewPracticeIntegrity,
     preparePracticeIssue,
+    resolveInheritedPracticeEnforcement,
 } from '../model/practice-integrity-access';
 import problem from '../model/problem';
 import {
@@ -1619,6 +1625,8 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
         }>;
     };
 
+    protected practiceEnforcement?: InheritedPracticeEnforcement;
+
     private async resolvePracticePageContext(
         containerKindRaw: string,
         containerId: ObjectId | undefined,
@@ -1660,11 +1668,7 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
             rejectionReason = 'policy-read-failed';
             const published = await practiceIntegrityService.getLatestPublished(this.pdoc.domainId, containerKind, containerId);
             const extraPublished = prepared.extra
-                ? await practiceIntegrityService.getLatestPublished(
-                      this.pdoc.domainId,
-                      prepared.extra.containerKind,
-                      prepared.extra.containerId,
-                  )
+                ? await practiceIntegrityService.getLatestPublished(this.pdoc.domainId, prepared.extra.containerKind, prepared.extra.containerId)
                 : null;
             const entry = { containerKind, containerId: containerId.toHexString(), scopeKind, scopeId };
             const selected = selectPracticeIssueTargets({
@@ -1859,13 +1863,29 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
         }
         this.practicePageContext = this.virtualAttempt
             ? undefined
-            : await this.resolvePracticePageContext(
-                  practiceContainerKind,
-                  practiceContainerId,
-                  practiceScopeKind,
-                  practiceScopeId,
-                  practicePreview,
-              );
+            : await this.resolvePracticePageContext(practiceContainerKind, practiceContainerId, practiceScopeKind, practiceScopeId, practicePreview);
+        this.practiceEnforcement = undefined;
+        if (
+            !this.practicePageContext?.controlled &&
+            !this.practicePageContext?.bypassed &&
+            canApplyInheritedPracticeEnforcement({ virtualAttempt: this.virtualAttempt, tdoc: this.tdoc })
+        ) {
+            this.practiceEnforcement = await resolveInheritedPracticeEnforcement({
+                domainId: this.pdoc.domainId,
+                user: this.user,
+                pid: this.pdoc.docId,
+            });
+            if (inheritedPracticeEnforcementIsActive(this.practiceEnforcement)) {
+                logger.info(
+                    'Inherited practice enforcement applied domain=%s uid=%d pid=%d paste=%s ideOnly=%s stage=problem-entry result=success',
+                    this.pdoc.domainId,
+                    this.user._id,
+                    this.pdoc.docId,
+                    this.practiceEnforcement.prohibitExternalCodeInjection,
+                    this.practiceEnforcement.removeIndependentSubmitForm,
+                );
+            }
+        }
         let knowledgeMapVisible = true;
         if (!tid && this.pdoc.knowledgeMapId && !problem.isProblemBankAdmin(this.user)) {
             const publicMaps = await listKnowledgeMapsForProblemSelection();
@@ -2021,6 +2041,7 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
                 problem.canEditProblemTags(this.user, this.pdoc) ||
                 problem.canManageProblemContributions(this.user, this.pdoc),
             ...(this.practicePageContext ? { practiceIntegrity: this.practicePageContext } : {}),
+            ...(inheritedPracticeEnforcementIsActive(this.practiceEnforcement) ? { practiceEnforcement: this.practiceEnforcement } : {}),
             ...(this.virtualAttempt
                 ? {
                       virtualContestActive: true,
@@ -2056,10 +2077,7 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
                     filename = decodeURIComponent(filename);
                 } catch (e) {}
                 if (!this.pdoc.additional_file?.find((i) => i.name === filename)) return str;
-                const extra = [
-                    ...(args[1] ? [`tid=${args[1]}`] : []),
-                    ...(this.virtualAttempt ? ['virtual=1'] : []),
-                ];
+                const extra = [...(args[1] ? [`tid=${args[1]}`] : []), ...(this.virtualAttempt ? ['virtual=1'] : [])];
                 const replacement = extra.length
                     ? `./${this.pdoc.docId}/file/${fileinfo}${fileinfo.includes('?') ? '&' : '?'}${extra.join('&')}`
                     : `./${this.pdoc.docId}/file/${fileinfo}`;
@@ -2375,11 +2393,14 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
     async get() {
         const problemKind = effectiveProblemKind(this.pdoc);
         const structuredIde = ['program_fill', 'function'].includes(problemKind);
-        if (this.practicePageContext?.controlled && this.practicePageContext.policy?.removeIndependentSubmitForm && !structuredIde) {
+        const ideOnly =
+            (this.practicePageContext?.controlled && this.practicePageContext.policy?.removeIndependentSubmitForm === true) ||
+            this.practiceEnforcement?.removeIndependentSubmitForm === true;
+        if (ideOnly && !structuredIde) {
             logger.warn(
                 'Independent submit page rejected domain=%s contextId=%s uid=%d pid=%d stage=submit-page reason=ide-only result=rejected',
                 this.pdoc.domainId,
-                this.practicePageContext.contextId,
+                this.practicePageContext?.contextId || '-',
                 this.user._id,
                 this.pdoc.docId,
             );
@@ -2387,6 +2408,7 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
         }
         this.response.template = 'problem_submit.html';
         if (this.practicePageContext) this.response.body.practiceIntegrity = this.practicePageContext;
+        if (inheritedPracticeEnforcementIsActive(this.practiceEnforcement)) this.response.body.practiceEnforcement = this.practiceEnforcement;
         const langRange =
             typeof this.pdoc.config === 'object' && this.pdoc.config.langs
                 ? Object.fromEntries(this.pdoc.config.langs.map((i) => [i, setting.langs[i]?.display || i]))
@@ -2416,7 +2438,12 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
             await virtualContestService.assertActiveForUser(domainId, this.virtualAttempt._id, this.user._id, this.pdoc.docId);
         }
         const submissionScope = this.virtualAttempt
-            ? { postContestPractice: false, recordContestId: undefined, virtualAttemptId: this.virtualAttempt._id, sourceContestId: this.virtualAttempt.sourceContestId }
+            ? {
+                  postContestPractice: false,
+                  recordContestId: undefined,
+                  virtualAttemptId: this.virtualAttempt._id,
+                  sourceContestId: this.virtualAttempt.sourceContestId,
+              }
             : tid
               ? getContestSubmissionScope(this.tdoc, this.tsdoc, tid)
               : { postContestPractice: false, recordContestId: undefined };
@@ -2580,11 +2607,7 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
             this.response.body = { rid };
             this.response.redirect = this.url('record_detail', {
                 rid,
-                query: this.virtualAttempt
-                    ? { tid, virtual: 1 }
-                    : submissionScope.postContestPractice
-                      ? { tid, practice: 1 }
-                      : undefined,
+                query: this.virtualAttempt ? { tid, virtual: 1 } : submissionScope.postContestPractice ? { tid, practice: 1 } : undefined,
             });
         }
     }

@@ -54,6 +54,30 @@ function readEntry(value: unknown, field: string): PracticeEntryTarget {
   };
 }
 
+export interface PracticeEnforcementView {
+  prohibitExternalCodeInjection: boolean;
+  removeIndependentSubmitForm: boolean;
+}
+
+export function readPracticeEnforcement(value: unknown): PracticeEnforcementView {
+  if (value === undefined || value === null) {
+    return { prohibitExternalCodeInjection: false, removeIndependentSubmitForm: false };
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('practiceEnforcement must be an object');
+  const raw = value as Record<string, unknown>;
+  const keys = Object.keys(raw).sort().join(',');
+  if (keys !== 'prohibitExternalCodeInjection,removeIndependentSubmitForm') {
+    throw new TypeError('practiceEnforcement must contain exactly two boolean fields');
+  }
+  if (typeof raw.prohibitExternalCodeInjection !== 'boolean' || typeof raw.removeIndependentSubmitForm !== 'boolean') {
+    throw new TypeError('practiceEnforcement flags are invalid');
+  }
+  return {
+    prohibitExternalCodeInjection: raw.prohibitExternalCodeInjection,
+    removeIndependentSubmitForm: raw.removeIndependentSubmitForm,
+  };
+}
+
 export function readPracticeIntegrityPageContext(value: unknown): PracticeIntegrityPageContext | null {
   if (value === undefined || value === null) return null;
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('practiceIntegrity must be an object');

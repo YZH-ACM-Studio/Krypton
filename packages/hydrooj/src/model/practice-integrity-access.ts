@@ -1,14 +1,28 @@
 import { ObjectId } from 'mongodb';
-import { localizedErrorText, PermissionError, ValidationError } from '../error';
-import type { User } from '../interface';
+import { Logger } from '@hydrooj/utils';
+import { localizedErrorText, PermissionError, TrainingNotFoundError, ValidationError } from '../error';
+import type { TrainingNode, User } from '../interface';
 import { courseNodePids } from '../lib/course-chapter';
 import { liveReferencedPids } from '../lib/course-live-ref';
+import {
+    combineInheritedPracticeEnforcement,
+    emptyInheritedPracticeEnforcement,
+    type InheritedPracticeEnforcement,
+} from '../lib/practice-enforcement';
 import { isCourseKind, isProblemSetKind } from '../lib/training-kind';
 import { PERM, PRIV, STATUS } from './builtin';
 import { problemSetAccessService } from './problem-set-access';
-import type { PracticeContainerKind, PracticeContextMode, PracticeScopeKind } from './practice-integrity';
+import {
+    canonicalPracticePolicy,
+    practiceIntegrityService,
+    type PracticeContainerKind,
+    type PracticeContextMode,
+    type PracticeScopeKind,
+} from './practice-integrity';
 import problem from './problem';
 import * as training from './training';
+
+const logger = new Logger('practice-integrity-access');
 
 interface PracticeAccessHandler {
     ctx: { parallel(name: string, document: unknown, handler: unknown): Promise<unknown> };
@@ -193,6 +207,98 @@ export async function preparePracticeIssue(input: {
         checkProblem: false,
     });
     return { primaryContainer, extra };
+}
+
+export async function practiceContainerContainsPid(
+    domainId: string,
+    tdoc: { dag?: unknown[] },
+    containerKind: PracticeContainerKind,
+    pid: number,
+): Promise<boolean> {
+    if (containerKind === 'problemSet') {
+        return training
+            .getPids((tdoc.dag || []) as TrainingNode[])
+            .map(Number)
+            .includes(pid);
+    }
+    for (const node of tdoc.dag || []) {
+        const chapter = node as { pids?: number[]; sections?: { pids?: number[] }[]; problemSetId?: ObjectId; stageIds?: number[] };
+        if (courseNodePids(chapter).map(Number).includes(pid)) return true;
+        if (!chapter.problemSetId) continue;
+        try {
+            const livePids = await liveReferencedPids(domainId, chapter);
+            if (livePids.map(Number).includes(pid)) return true;
+        } catch (error) {
+            if (error instanceof TrainingNotFoundError || error instanceof ValidationError) continue;
+            throw error;
+        }
+    }
+    return false;
+}
+
+function isExpectedMissingPracticeContainer(error: unknown): boolean {
+    return error instanceof TrainingNotFoundError || error instanceof ValidationError;
+}
+
+async function isInheritedAudience(
+    domainId: string,
+    user: User,
+    tdoc: Awaited<ReturnType<typeof loadPracticeContainer>>,
+    containerKind: PracticeContainerKind,
+): Promise<boolean> {
+    if (containerKind === 'course') {
+        const groups = tdoc.courseGroupIds || [];
+        if (groups.length) {
+            const findStudent = global.Hydro?.model?.userbind?.findStudentByUserId;
+            if (typeof findStudent !== 'function') throw new TypeError('userbind.findStudentByUserId is unavailable');
+            const student = await findStudent(domainId, user._id);
+            const studentGroups = new Set((student?.groupIds || []).map((groupId: ObjectId) => String(groupId)));
+            return groups.some((groupId: ObjectId) => studentGroups.has(String(groupId)));
+        }
+        const status = await training.getStatus(domainId, tdoc.docId, user._id);
+        return Number(status?.enroll) === 1;
+    }
+    const decision = await problemSetAccessService.evaluate(domainId, user, tdoc);
+    return decision.accessible === true;
+}
+
+export async function resolveInheritedPracticeEnforcement(input: {
+    domainId: string;
+    user: User;
+    pid: number;
+}): Promise<InheritedPracticeEnforcement> {
+    if (!input.user.hasPriv(PRIV.PRIV_USER_PROFILE) || !Number.isSafeInteger(input.user._id) || input.user._id <= 1) {
+        return emptyInheritedPracticeEnforcement();
+    }
+    const published = await practiceIntegrityService.listLatestPublished(input.domainId);
+    const matched: InheritedPracticeEnforcement[] = [];
+    for (const revision of published) {
+        let tdoc: Awaited<ReturnType<typeof loadPracticeContainer>>;
+        try {
+            tdoc = await loadPracticeContainer(input.domainId, revision.containerKind, revision.containerId);
+        } catch (error) {
+            if (!isExpectedMissingPracticeContainer(error)) throw error;
+            logger.warn(
+                'Inherited practice enforcement skipped missing container domain=%s container=%s/%s pid=%d stage=inherit result=skipped error=%s',
+                input.domainId,
+                revision.containerKind,
+                revision.containerId,
+                input.pid,
+                error instanceof Error ? error.message : 'unknown',
+            );
+            continue;
+        }
+        if (canManagePracticeContainer(input.user, tdoc, revision.containerKind)) continue;
+        const containsPid = await practiceContainerContainsPid(input.domainId, tdoc, revision.containerKind, input.pid);
+        if (!containsPid) continue;
+        if (!(await isInheritedAudience(input.domainId, input.user, tdoc, revision.containerKind))) continue;
+        const policy = canonicalPracticePolicy(revision.policy);
+        matched.push({
+            prohibitExternalCodeInjection: policy.prohibitExternalCodeInjection,
+            removeIndependentSubmitForm: policy.removeIndependentSubmitForm,
+        });
+    }
+    return combineInheritedPracticeEnforcement(matched);
 }
 
 export async function assertPracticeContextAccess(input: {

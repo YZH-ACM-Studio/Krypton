@@ -211,7 +211,7 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
             },
         };
     }
-    if (fromHandler && request === '../model/practice-integrity') {
+    if ((fromHandler && request === '../model/practice-integrity') || (fromPracticeAccess && request === './practice-integrity')) {
         return {
             PracticeIntegrityConflictError: TestConflictError,
             canonicalPracticePolicy: (value: unknown) => value,

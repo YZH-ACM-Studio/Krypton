@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   practiceDraftIdentity,
   practiceProblemEntryUrl,
+  readPracticeEnforcement,
   readPracticeIntegrityPageContext,
   type PracticeIntegrityPageContext,
 } from '../src/lib/practice-integrity';
@@ -39,6 +40,24 @@ describe('practice integrity client boundary', () => {
       ],
     });
     expect(practiceDraftIdentity(context!)).toBe(`student|course:${containerId}:chapter:2:3|problemSet:66b800000000000000000022:stage:4:7`);
+  });
+
+  it('reads inherited enforcement as a sibling payload and never as uncontrolled policy', () => {
+    expect(readPracticeEnforcement(undefined)).to.deep.equal({
+      prohibitExternalCodeInjection: false,
+      removeIndependentSubmitForm: false,
+    });
+    expect(readPracticeEnforcement({ prohibitExternalCodeInjection: true, removeIndependentSubmitForm: true })).to.deep.equal({
+      prohibitExternalCodeInjection: true,
+      removeIndependentSubmitForm: true,
+    });
+    expect(() =>
+      readPracticeEnforcement({
+        prohibitExternalCodeInjection: true,
+        removeIndependentSubmitForm: false,
+        antiAiCopyInjection: true,
+      }),
+    ).toThrow('exactly two boolean fields');
   });
 
   it('does not allow an uncontrolled payload to smuggle policy or context fields', () => {
@@ -99,7 +118,9 @@ describe('practice integrity client boundary', () => {
     expect(detail).to.include('practiceControlled and practiceIntegrity.policy.antiAiCopyInjection');
     expect(detail).to.include('This interface cannot verify anti-AI copy markers');
     expect(detail).to.include('query={lang:k, practiceContainerKind:practiceIntegrity.entry.containerKind');
-    expect(sidebar).to.include('not practiceIntegrity.policy.removeIndependentSubmitForm or practiceStructuredIde');
+    expect(sidebar).to.include(
+      'not inheritIdeOnly and (not practiceControlled or not practiceIntegrity.policy.removeIndependentSubmitForm or practiceStructuredIde)',
+    );
     expect(sidebar).to.include('{% set practiceEntryActive = practiceIntegrity and practiceIntegrity.entry %}');
     expect(sidebar).to.include('{% set practiceLegacyBlocked = practiceControlled and practiceIntegrity.policy.antiAiCopyInjection %}');
     expect(sidebar).to.include('if practiceLegacyBlocked');
@@ -108,10 +129,11 @@ describe('practice integrity client boundary', () => {
     expect(sidebar).to.include("practicePreview:practiceIntegrity.mode != 'preview'");
     expect(sidebar).to.include("_('Exit student preview') if practiceIntegrity.mode == 'preview' else _('Enter student preview')");
     expect(submitFallback).to.include('practiceIntegrity.policy.prohibitExternalCodeInjection');
-    expect(submitFallback).to.include('{% if controlledStructured or controlledExternalInjection %}');
+    expect(submitFallback).to.include('{% if controlledStructured or controlledExternalInjection or inheritedExternalInjection %}');
     expect(submitFallback).to.include('the fallback form is disabled');
     expect(toolbar.match(/practiceContextId: UiContext\.practiceContextId/g)).to.have.length(2);
     expect(editor).to.include('onPasteCapture={this.rejectExternalCode}');
+    expect(editor).to.include('UiContext.practiceEnforcement?.prohibitExternalCodeInjection === true');
     expect(editor).to.include('onDropCapture={this.rejectExternalCode}');
     expect(editor).to.include("inputType === 'insertFromPaste' || inputType === 'insertFromDrop'");
     expect(draft).to.include('cacheKey += `@practice:');
@@ -137,7 +159,22 @@ describe('practice integrity client boundary', () => {
     expect(detail).to.include('<AntiAiCopyBoundary markers={antiAiCopyMarkers} contextId={practiceContextId}>');
     expect(detail).to.include("observableStatementError(error, 'safe-view-parse', practiceContextId)");
     expect(detail).to.include("observableStatementError(error, 'statement-render', this.props.contextId)");
+    expect(detail).to.include('readPracticeEnforcement(data.practiceEnforcement)');
+    expect(detail).to.include('practicePolicy?.prohibitExternalCodeInjection === true || practiceEnforcement.prohibitExternalCodeInjection');
+    expect(detail).to.include('practicePolicy?.removeIndependentSubmitForm === true || practiceEnforcement.removeIndependentSubmitForm');
     expect(model).to.include('if (pdoc.antiAiMarkers === undefined) return { schemaVersion: 1 as const, markers: [] }');
+  });
+
+  it('mounts the teacher policy panel on course and problem-set editors', () => {
+    const courseEditor = readFileSync(resolve(workspaceRoot, 'ui-next/src/pages/course/editor.tsx'), 'utf8');
+    const setEditor = readFileSync(resolve(workspaceRoot, 'ui-next/src/pages/training-manage.tsx'), 'utf8');
+    const panel = readFileSync(resolve(workspaceRoot, 'ui-next/src/components/practice-integrity-policy-panel.tsx'), 'utf8');
+    expect(courseEditor).to.include('PracticeIntegrityPolicyPanel');
+    expect(courseEditor).to.include('containerKind="course"');
+    expect(setEditor).to.include('PracticeIntegrityPolicyPanel');
+    expect(setEditor).to.include('containerKind="problemSet"');
+    expect(panel).to.include("operation === 'publish' ? '发布真实性策略失败' : '保存真实性策略失败'");
+    expect(panel).to.include('expectedDraftVersion');
   });
 
   it('flushes dedicated submit-page drafts and preserves an intentional empty cache value', () => {

@@ -331,7 +331,7 @@ export function CourseDetailPage() {
       </header>
 
       {activeView === 'overview' && course.content ? (
-        <details className="krypton-course-inset group mb-6 max-w-[76rem] px-4 py-3">
+        <details className="krypton-course-inset group mb-6 px-4 py-3">
           <summary
             className={cn(
               'flex cursor-pointer list-none items-center gap-2 text-sm font-medium marker:content-none',
@@ -370,7 +370,7 @@ export function CourseDetailPage() {
           <p className="krypton-course-meta relative z-10 mt-1.5">课程负责人添加章节后会显示在这里。</p>
         </section>
       ) : (
-        <div className="grid min-w-0 max-w-[76rem] gap-6 lg:grid-cols-[19rem_minmax(0,1fr)] xl:gap-8">
+        <div className="grid min-w-0 w-full gap-6 lg:grid-cols-[19rem_minmax(0,1fr)] xl:gap-8">
           <aside className="hidden self-start lg:sticky lg:top-20 lg:block">
             <div className="krypton-course-panel overflow-hidden">
               <div className="flex items-center gap-3 border-b border-border/50 px-4 py-3.5">

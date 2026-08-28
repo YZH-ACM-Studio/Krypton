@@ -540,6 +540,15 @@ export function CourseEditPage() {
         </aside>
 
         <section className="min-w-0 space-y-7" aria-labelledby="chapter-editor-title">
+          <section aria-labelledby="course-description-title" className="min-w-0 space-y-3">
+            <CourseSectionHeader
+              id="course-description-title"
+              level={2}
+              title="课程简介"
+              description="课程级说明，显示在课程列表摘要与详情页顶部。支持 Markdown。"
+            />
+            <MarkdownEditor name="content" value={course.content || ''} minHeight={220} />
+          </section>
           <h2 id="chapter-editor-title" className="sr-only">
             章节内容
           </h2>
@@ -743,7 +752,6 @@ export function CourseEditPage() {
               <span className="text-xs font-medium">学期</span>
               <Input name="term" defaultValue={course.term || ''} className="min-h-11 text-base sm:text-sm" placeholder="2026 秋" />
             </label>
-            <p className="krypton-course-meta">课程简介在页面底部整幅编辑。</p>
           </SettingsGroup>
 
           <SettingsGroup
@@ -891,19 +899,6 @@ export function CourseEditPage() {
             ) : null}
           </div>
         </aside>
-
-        {/* Long-form course copy spans the full grid. The side-by-side
-            markdown editor wraps to about ten characters per line inside a
-            21rem rail, which made the field unusable at any height. */}
-        <section aria-labelledby="course-description-title" className="col-span-full min-w-0 space-y-3">
-          <CourseSectionHeader
-            id="course-description-title"
-            level={2}
-            title="课程简介"
-            description="课程级说明，显示在课程列表摘要与详情页顶部。支持 Markdown。"
-          />
-          <MarkdownEditor name="content" value={course.content || ''} minHeight={260} />
-        </section>
       </form>
 
       <Sheet open={outlineOpen} onOpenChange={setOutlineOpen}>

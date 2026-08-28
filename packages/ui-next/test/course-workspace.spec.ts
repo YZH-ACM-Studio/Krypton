@@ -48,6 +48,10 @@ describe('p3.8 course workspace', () => {
     expect(list).to.include('CourseAssignDialog');
     expect(list).to.include('分配');
     expect(list).not.to.include('max-w-[76rem]');
+    expect(detail).not.to.include('max-w-[76rem]');
+    expect(editor).not.to.include('col-span-full');
+    expect(editor).not.to.include('课程简介在页面底部整幅编辑');
+    expect(editor).to.match(/<section className="min-w-0 space-y-7"[\s\S]*course-description-title[\s\S]*章节内容/);
   });
 
   it('uses server capabilities, true totals, enrollment status, and one active chapter', () => {
@@ -63,6 +67,7 @@ describe('p3.8 course workspace', () => {
     expect(handler).to.include('canManage,');
     expect(handler).to.include('tsdoc,');
     expect(list).to.include('Number(data.tcount)');
+    expect(detail).to.include('grid min-w-0 w-full gap-6');
     expect(detail).to.include('const activeChapter = chapters.find');
     expect(detail).to.include('selectSection');
     expect(detail).to.include('本章小节');

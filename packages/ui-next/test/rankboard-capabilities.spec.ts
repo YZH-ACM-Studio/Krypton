@@ -106,4 +106,11 @@ describe('rankboard public branding', () => {
     expect(source).to.include('r.student.schoolName !== schoolFilter');
     expect(source).to.include("label: '全部学校'");
   });
+
+  it('uses a custom award filter and splits ICPC-EC from regular medals', () => {
+    expect(source).to.include('buildAwardFilterGroups');
+    expect(source).to.include('IcpcMedalCell');
+    expect(source).to.include('展开明细列');
+    expect(source).not.to.include('<details');
+  });
 });

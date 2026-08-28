@@ -22,9 +22,22 @@ import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { SimpleSelect } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Checkbox } from '@/components/ui/checkbox';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
+import {
+  LADDER_DETAIL_COLUMNS,
+  MEDAL_TEXT_CLASS,
+  awardFilterChipLabel,
+  buildAwardFilterGroups,
+  ladderColumnCount,
+  rowMatchesAwardFilter,
+  shouldShowLadderDetails,
+  tallyAwards,
+  withoutLadderKeys,
+  type AwardFilterGroupId,
+  type MedalMetal,
+  type MedalPair,
+} from './award-display';
 
 interface AwardType {
   _id: string;
@@ -71,18 +84,6 @@ interface LeaderboardRow {
 
 /* ─── helpers ─── */
 
-const CATEGORY_GROUPS: Array<{ label: string; matchers: Array<string | RegExp> }> = [
-  { label: 'ICPC 金', matchers: [/^ICPC[-_].*金奖$/, /^ICPC[-_].*gold/i, /^icpc_gold$/] },
-  { label: 'ICPC 银', matchers: [/^ICPC[-_].*银奖$/, /^ICPC[-_].*silver/i, /^icpc_silver$/] },
-  { label: 'ICPC 铜', matchers: [/^ICPC[-_].*铜奖$/, /^ICPC[-_].*bronze/i, /^icpc_bronze$/] },
-  { label: 'CCPC 金', matchers: [/^CCPC[-_].*金奖$/, /^ccpc_gold$/] },
-  { label: 'CCPC 银', matchers: [/^CCPC[-_].*银奖$/, /^ccpc_silver$/] },
-  { label: 'CCPC 铜', matchers: [/^CCPC[-_].*铜奖$/, /^ccpc_bronze$/] },
-  { label: 'PAT', matchers: [/^pat_/, /^PAT[-_]/] },
-  { label: '天梯赛', matchers: [/^ladder_/, /天梯赛/] },
-  { label: '其它', matchers: [] }, // catch-all
-];
-
 /**
  * Field visibility per award category — kept in sync with the admin form.
  *   ICPC / CCPC: dual rank (现场 + 学校), teammates
@@ -107,24 +108,48 @@ function awardFields(typeKey: string) {
   };
 }
 
-function categorise(typeName: string): string {
-  for (const g of CATEGORY_GROUPS) {
-    if (!g.matchers.length) continue;
-    for (const m of g.matchers) {
-      if (typeof m === 'string' ? m === typeName : m.test(typeName)) return g.label;
-    }
-  }
-  return '其它';
+function IcpcMedalCell({ pair, metal }: { pair: MedalPair; metal: MedalMetal }) {
+  if (pair.regular === 0 && pair.extra === 0) return null;
+  if (pair.extra === 0) return pair.regular;
+  return (
+    <>
+      {pair.regular}
+      <span className={MEDAL_TEXT_CLASS[metal]}>（+{pair.extra}）</span>
+    </>
+  );
 }
 
-function tallyCategories(awards: Award[], typeMap: Map<string, AwardType>): Record<string, number> {
-  const counts: Record<string, number> = {};
-  for (const a of awards) {
-    const type = typeMap.get(a.type);
-    const label = categorise(type?.name || type?.key || a.type);
-    counts[label] = (counts[label] || 0) + 1;
-  }
-  return counts;
+function CountCell({ value }: { value: number }) {
+  return value > 0 ? value : null;
+}
+
+function FilterChip({
+  pressed,
+  onClick,
+  children,
+  title,
+}: {
+  pressed: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+  title?: string;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-pressed={pressed}
+      onClick={onClick}
+      className={cn(
+        'inline-flex min-h-8 items-center rounded-full border px-2.5 text-[11px] font-medium transition-colors',
+        pressed
+          ? 'border-primary bg-primary text-primary-foreground'
+          : 'border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground',
+      )}
+    >
+      {children}
+    </button>
+  );
 }
 
 /* ─── podium card ─── */
@@ -310,13 +335,17 @@ export function RankBoardMainPage() {
     awardTypes: AwardType[];
     config: { baseScore: number; decayFactor: number };
   };
-  const typeMap = new Map(data.awardTypes.map((t) => [t.key, t]));
+  const typeMap = useMemo(() => new Map(data.awardTypes.map((t) => [t.key, t])), [data.awardTypes]);
 
   const [search, setSearch] = useState('');
   const [schoolFilter, setSchoolFilter] = useState<string>('all');
   const [yearFilter, setYearFilter] = useState<string>('all');
   const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set());
+  const [ladderGroupSelected, setLadderGroupSelected] = useState(false);
+  const [showAllLadderDetails, setShowAllLadderDetails] = useState(false);
   const [openRow, setOpenRow] = useState<LeaderboardRow | null>(null);
+  const filterGroups = useMemo(() => buildAwardFilterGroups(data.awardTypes), [data.awardTypes]);
+  const showLadderDetails = shouldShowLadderDetails(typeFilter, showAllLadderDetails, data.awardTypes);
 
   // Build school list once.
   const schools = useMemo(() => {
@@ -347,23 +376,24 @@ export function RankBoardMainPage() {
         const y = r.student.enrollmentYear;
         if (String(y ?? '') !== yearFilter) return false;
       }
-      if (typeFilter.size > 0) {
-        const has = r.person.awards.some((a) => typeFilter.has(a.type));
-        if (!has) return false;
-      }
+      if (!rowMatchesAwardFilter(r.person.awards, typeFilter, ladderGroupSelected, typeMap)) return false;
       if (q) {
         const hay = `${r.student.studentId} ${r.student.realName} ${r.user?.uname || ''}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
     });
-  }, [data.rows, schoolFilter, yearFilter, typeFilter, search]);
+  }, [data.rows, schoolFilter, yearFilter, typeFilter, ladderGroupSelected, search, typeMap]);
 
   const top3 = data.rows.slice(0, 3);
   // Rest of the list (rank >= 4) AFTER filter so top 3 are always shown.
   const rest = filtered.filter((r) => r.rank > 3);
 
+  const ladderKeys = useMemo(() => filterGroups.find((group) => group.id === 'ladder')?.items.map((item) => item.key) || [], [filterGroups]);
+
   const toggleType = (key: string) => {
+    const turningOn = !typeFilter.has(key);
+    if (turningOn && ladderKeys.includes(key)) setLadderGroupSelected(false);
     setTypeFilter((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
@@ -371,6 +401,28 @@ export function RankBoardMainPage() {
       return next;
     });
   };
+
+  const toggleGroup = (id: AwardFilterGroupId, keys: string[]) => {
+    if (id === 'ladder') {
+      setLadderGroupSelected((current) => {
+        const next = !current;
+        if (next) setTypeFilter((prev) => withoutLadderKeys(prev, keys));
+        return next;
+      });
+      return;
+    }
+    setTypeFilter((prev) => {
+      const allOn = keys.every((key) => prev.has(key));
+      const next = new Set(prev);
+      for (const key of keys) {
+        if (allOn) next.delete(key);
+        else next.add(key);
+      }
+      return next;
+    });
+  };
+
+  const filterActive = typeFilter.size > 0 || ladderGroupSelected;
 
   return (
     <div className="space-y-5">
@@ -418,47 +470,91 @@ export function RankBoardMainPage() {
             className="w-auto min-w-[8rem]"
             options={[{ value: 'all', label: '全部年级' }, ...enrollmentYears.map((y) => ({ value: String(y), label: `${y} 级` }))]}
           />
-          <details className="flex-1">
-            <summary className="cursor-pointer rounded-md border bg-background px-3 py-2 text-sm">
-              奖项类型筛选{' '}
-              {typeFilter.size > 0 && (
-                <Badge variant="secondary" className="ml-1 text-[10px]">
-                  {typeFilter.size}
-                </Badge>
-              )}
-            </summary>
-            <div className="mt-2 grid grid-cols-2 gap-1 rounded-md border bg-card p-2 sm:grid-cols-3 lg:grid-cols-4">
-              {data.awardTypes
-                .filter((t) => !t.hidden)
-                .map((t) => (
-                  <label key={t.key} className="flex items-center gap-1.5 rounded px-1.5 py-1 text-[11px] hover:bg-accent/40">
-                    <Checkbox checked={typeFilter.has(t.key)} onChange={() => toggleType(t.key)} />
-                    {t.name}
-                  </label>
-                ))}
-            </div>
-          </details>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardContent className="space-y-3 p-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-sm font-medium">奖项类型</p>
+            {filterActive ? (
+              <Badge variant="secondary" className="text-[10px]">
+                {typeFilter.size + (ladderGroupSelected ? 1 : 0)}
+              </Badge>
+            ) : null}
+            {filterActive ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-8 px-2 text-xs"
+                onClick={() => {
+                  setTypeFilter(new Set());
+                  setLadderGroupSelected(false);
+                  setShowAllLadderDetails(false);
+                }}
+              >
+                清除筛选
+              </Button>
+            ) : null}
+          </div>
+          <div className="flex flex-wrap gap-3">
+            {filterGroups.map((group) => {
+              const keys = group.items.map((item) => item.key);
+              const selectedCount = group.id === 'ladder' ? (ladderGroupSelected ? keys.length : keys.filter((key) => typeFilter.has(key)).length) : keys.filter((key) => typeFilter.has(key)).length;
+              const parentOn = group.id === 'ladder' ? ladderGroupSelected : keys.length > 0 && keys.every((key) => typeFilter.has(key));
+              return (
+                <section key={group.id} className="min-w-[12rem] flex-1 rounded-xl border bg-muted/25 p-2.5">
+                  <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                    <FilterChip pressed={parentOn} onClick={() => toggleGroup(group.id, keys)}>
+                      {group.label}
+                      {selectedCount > 0 ? ` ${selectedCount}` : ''}
+                    </FilterChip>
+                    {group.id === 'ladder' ? (
+                      <FilterChip pressed={showAllLadderDetails} onClick={() => setShowAllLadderDetails((current) => !current)}>
+                        {showAllLadderDetails ? '收起明细列' : '展开明细列'}
+                      </FilterChip>
+                    ) : null}
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {group.items.map((item) => (
+                      <FilterChip key={item.key} pressed={typeFilter.has(item.key)} onClick={() => toggleType(item.key)} title={item.name}>
+                        {awardFilterChipLabel(item)}
+                      </FilterChip>
+                    ))}
+                  </div>
+                </section>
+              );
+            })}
+          </div>
         </CardContent>
       </Card>
 
       {/* Table */}
       <Card>
         <CardContent className="p-0">
-          <div>
+          <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-14 pl-5">排名</TableHead>
                   <TableHead>姓名</TableHead>
                   <TableHead className="w-32">就业去向</TableHead>
-                  <TableHead className="w-12 text-center">ICPC 金</TableHead>
-                  <TableHead className="w-12 text-center">ICPC 银</TableHead>
-                  <TableHead className="w-12 text-center">ICPC 铜</TableHead>
+                  <TableHead className="w-16 text-center">ICPC 金</TableHead>
+                  <TableHead className="w-16 text-center">ICPC 银</TableHead>
+                  <TableHead className="w-16 text-center">ICPC 铜</TableHead>
                   <TableHead className="w-12 text-center">CCPC 金</TableHead>
                   <TableHead className="w-12 text-center">CCPC 银</TableHead>
                   <TableHead className="w-12 text-center">CCPC 铜</TableHead>
                   <TableHead className="w-12 text-center">PAT</TableHead>
-                  <TableHead className="w-14 text-center">天梯赛</TableHead>
+                  {showLadderDetails ? (
+                    LADDER_DETAIL_COLUMNS.map((column) => (
+                      <TableHead key={column.key} className="w-12 text-center">
+                        {column.label}
+                      </TableHead>
+                    ))
+                  ) : (
+                    <TableHead className="w-14 text-center">天梯赛</TableHead>
+                  )}
                   <TableHead className="w-12 text-center">其它</TableHead>
                   <TableHead className="w-16 text-right">OJ AC</TableHead>
                   <TableHead className="w-20 pr-5 text-right">总分</TableHead>
@@ -467,13 +563,13 @@ export function RankBoardMainPage() {
               <TableBody>
                 {rest.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={14} className="py-10 text-center text-sm text-muted-foreground">
+                    <TableCell colSpan={showLadderDetails ? 20 : 14} className="py-10 text-center text-sm text-muted-foreground">
                       {data.rows.length === 0 ? '荣誉榜暂无成员，等待管理员添加。' : '当前筛选下没有匹配的成员。'}
                     </TableCell>
                   </TableRow>
                 ) : (
                   rest.map((r) => {
-                    const counts = tallyCategories(r.person.awards, typeMap);
+                    const counts = tallyAwards(r.person.awards, typeMap);
                     return (
                       <TableRow key={r.person._id} className="cursor-pointer" onClick={() => setOpenRow(r)}>
                         <TableCell className="pl-5 font-mono text-sm font-semibold">#{r.rank}</TableCell>
@@ -486,15 +582,41 @@ export function RankBoardMainPage() {
                         <TableCell className="truncate text-xs text-muted-foreground">
                           {r.person.employmentStatus || <span className="opacity-40">—</span>}
                         </TableCell>
-                        <TableCell className="text-center text-xs">{counts['ICPC 金'] || ''}</TableCell>
-                        <TableCell className="text-center text-xs">{counts['ICPC 银'] || ''}</TableCell>
-                        <TableCell className="text-center text-xs">{counts['ICPC 铜'] || ''}</TableCell>
-                        <TableCell className="text-center text-xs">{counts['CCPC 金'] || ''}</TableCell>
-                        <TableCell className="text-center text-xs">{counts['CCPC 银'] || ''}</TableCell>
-                        <TableCell className="text-center text-xs">{counts['CCPC 铜'] || ''}</TableCell>
-                        <TableCell className="text-center text-xs">{counts['PAT'] || ''}</TableCell>
-                        <TableCell className="text-center text-xs">{counts['天梯赛'] || ''}</TableCell>
-                        <TableCell className="text-center text-xs">{counts['其它'] || ''}</TableCell>
+                        <TableCell className="text-center text-xs">
+                          <IcpcMedalCell pair={counts.icpc.gold} metal="gold" />
+                        </TableCell>
+                        <TableCell className="text-center text-xs">
+                          <IcpcMedalCell pair={counts.icpc.silver} metal="silver" />
+                        </TableCell>
+                        <TableCell className="text-center text-xs">
+                          <IcpcMedalCell pair={counts.icpc.bronze} metal="bronze" />
+                        </TableCell>
+                        <TableCell className="text-center text-xs">
+                          <CountCell value={counts.ccpc.gold} />
+                        </TableCell>
+                        <TableCell className="text-center text-xs">
+                          <CountCell value={counts.ccpc.silver} />
+                        </TableCell>
+                        <TableCell className="text-center text-xs">
+                          <CountCell value={counts.ccpc.bronze} />
+                        </TableCell>
+                        <TableCell className="text-center text-xs">
+                          <CountCell value={counts.pat} />
+                        </TableCell>
+                        {showLadderDetails ? (
+                          LADDER_DETAIL_COLUMNS.map((column) => (
+                            <TableCell key={column.key} className="text-center text-xs">
+                              <CountCell value={ladderColumnCount(r.person.awards, typeMap, column.key)} />
+                            </TableCell>
+                          ))
+                        ) : (
+                          <TableCell className="text-center text-xs">
+                            <CountCell value={counts.ladder} />
+                          </TableCell>
+                        )}
+                        <TableCell className="text-center text-xs">
+                          <CountCell value={counts.other} />
+                        </TableCell>
                         <TableCell className="text-right font-mono text-sm">{r.user ? r.user.nAccept : '—'}</TableCell>
                         <TableCell className="pr-5 text-right font-mono text-sm font-semibold">{r.totalScore.toFixed(1)}</TableCell>
                       </TableRow>

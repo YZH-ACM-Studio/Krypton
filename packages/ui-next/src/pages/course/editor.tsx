@@ -13,6 +13,7 @@ import {
   Network,
   Plus,
   Save,
+  Shield,
   Trash2,
   Trophy,
   Users,
@@ -32,6 +33,7 @@ import type { DomainUserOption } from '@/components/domain-user-search';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
+import { PracticeIntegrityPolicyPanel } from '@/components/practice-integrity-policy-panel';
 import { CourseAssignForm } from './assign';
 import { claimChapterProblemIds } from './chapter-draft';
 import { ChapterOutline } from './chapter-outline';
@@ -611,10 +613,7 @@ export function CourseEditPage() {
                 {activeChapter.sections.map((section, sectionIndex) => (
                   <article
                     key={section._id}
-                    className={cn(
-                      'krypton-course-panel space-y-3 p-4',
-                      activeSectionId === section._id ? 'ring-2 ring-primary/40' : '',
-                    )}
+                    className={cn('krypton-course-panel space-y-3 p-4', activeSectionId === section._id ? 'ring-2 ring-primary/40' : '')}
                   >
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="krypton-course-meta shrink-0 tabular-nums">
@@ -666,10 +665,7 @@ export function CourseEditPage() {
                       onChange={(content) => updateSection(activeChapter._id, section._id, { content })}
                       minHeight={160}
                     />
-                    <ProblemPicker
-                      value={section.pids}
-                      onChange={(pids) => updateSectionPids(activeChapter._id, section._id, pids)}
-                    />
+                    <ProblemPicker value={section.pids} onChange={(pids) => updateSectionPids(activeChapter._id, section._id, pids)} />
                   </article>
                 ))}
               </div>
@@ -810,6 +806,17 @@ export function CourseEditPage() {
             </ScrollArea>
             {selectedGroups.size ? <p className="krypton-course-meta">已选 {selectedGroups.size} 个班级</p> : null}
           </SettingsGroup>
+
+          {isEdit && tid ? (
+            <SettingsGroup
+              id="course-integrity-settings"
+              title="真实性训练"
+              description="默认全部关闭。保存草稿不会影响学生；点发布后才对受众生效。"
+              icon={Shield}
+            >
+              <PracticeIntegrityPolicyPanel containerKind="course" containerId={tid} />
+            </SettingsGroup>
+          ) : null}
 
           <SettingsGroup id="course-files-editor" title="课程课件" description="学生按课程班级范围下载。" icon={FileText}>
             <div data-course-slot="files" className="space-y-3">

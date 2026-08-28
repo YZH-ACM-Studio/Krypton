@@ -17,6 +17,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { MarkdownEditor } from '@/components/markdown-renderer';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ProblemPicker } from '@/components/problem-picker';
+import { PracticeIntegrityPolicyPanel } from '@/components/practice-integrity-policy-panel';
 import { useBootstrap } from '@/lib/bootstrap';
 import { formatDateTime, replaceRouteTokens } from '@/lib/format';
 
@@ -146,9 +147,7 @@ export function TrainingEditPage() {
   const trainingUrl = isEdit ? replaceRouteTokens(bs.urls.trainingDetail, { TID: String(tdoc.docId || tdoc._id) }) : bs.urls.training;
   const groups = (data.groups || []).filter((group) => !group.archivedAt);
   const [audiencePublic, setAudiencePublic] = useState(data.audience?.public !== false);
-  const [audienceGroupIds, setAudienceGroupIds] = useState<Set<string>>(
-    () => new Set((data.audience?.groupIds || []).map(String)),
-  );
+  const [audienceGroupIds, setAudienceGroupIds] = useState<Set<string>>(() => new Set((data.audience?.groupIds || []).map(String)));
   const [planNodes, setPlanNodes] = useState<TrainingPlanNode[]>(() => {
     try {
       return parsePlan(data.dag || tdoc.dag);
@@ -297,6 +296,16 @@ export function TrainingEditPage() {
                 <p className="text-xs text-muted-foreground">当前域还没有用户组。</p>
               )}
             </div>
+
+            {isEdit && (tdoc.docId || tdoc._id) ? (
+              <div className="space-y-2 rounded-md border p-3">
+                <div>
+                  <p className="text-sm font-medium">真实性训练</p>
+                  <p className="text-xs text-muted-foreground">默认全部关闭。保存草稿不会影响学生；点发布后才对受众生效。</p>
+                </div>
+                <PracticeIntegrityPolicyPanel containerKind="problemSet" containerId={String(tdoc.docId || tdoc._id)} />
+              </div>
+            ) : null}
 
             <div className="space-y-1.5">
               <label htmlFor="pin" className="text-sm font-medium">

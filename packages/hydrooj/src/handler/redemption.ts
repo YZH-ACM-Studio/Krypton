@@ -1,9 +1,14 @@
 import { ObjectId } from 'mongodb';
+import { Logger } from '@hydrooj/utils';
 import { localizedErrorText, ValidationError } from '../error';
 import { PERM, PRIV } from '../model/builtin';
 import { ACCESS_ENTITLEMENT_WHOLE_SET_STAGE } from '../model/problem-set-access';
 import { canCreateRedemption, canManageAllRedemptions, redemptionService, type RedemptionTargetKind } from '../model/redemption';
+import * as training from '../model/training';
 import { Handler, param, Types } from '../service/server';
+import { isCourseKind } from '../lib/training-kind';
+
+const logger = new Logger('redemption-handler');
 
 function csvCell(value: unknown): string {
     let text = String(value ?? '');
@@ -181,20 +186,45 @@ class RedeemHandler extends Handler {
     @param('code', Types.String)
     async post(_domainId: string, code: string) {
         await this.limitRate('redeem_code', 60, 8);
+        const domainId = String(this.domain?._id);
         const redemption = await redemptionService.redeem({
-            domainId: String(this.domain?._id),
+            domainId,
             uid: this.user._id,
             user: this.user,
             code,
         });
-        this.response.template = 'redeem.html';
-        this.response.body = {
-            result: {
-                ok: true,
-                redemptionId: redemption._id,
-                batchId: redemption.batchId,
-            },
+        const result: {
+            ok: true;
+            redemptionId: string;
+            batchId: string;
+            targetKind: string | null;
+            title: string | null;
+            href: string | null;
+        } = {
+            ok: true,
+            redemptionId: String(redemption._id),
+            batchId: String(redemption.batchId),
+            targetKind: redemption.targetKind || null,
+            title: null,
+            href: null,
         };
+        if (redemption.targetKind && redemption.targetId) {
+            try {
+                const tdoc = await training.get(domainId, redemption.targetId);
+                result.title = String(tdoc.title || '');
+                result.href = isCourseKind(tdoc.kind) ? `/course/${tdoc.docId}` : `/problem-sets/${tdoc.docId}`;
+            } catch (error) {
+                logger.warn(
+                    'Redeem succeeded but target title lookup failed domain=%s uid=%d redemption=%s stage=redeem result=target-lookup-failed error=%s',
+                    domainId,
+                    this.user._id,
+                    redemption._id,
+                    error instanceof Error ? error.message : String(error),
+                );
+            }
+        }
+        if (!this.request.json) this.response.template = 'redeem.html';
+        this.response.body = { result };
         this.response.addHeader('Cache-Control', 'no-store');
     }
 }

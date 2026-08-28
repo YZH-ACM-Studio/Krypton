@@ -173,16 +173,6 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
           icon: GraduationCap,
           templates: ['problem_set_main.html', 'problem_set_detail.html', 'problem_set_edit.html', 'problem_set_files.html'],
         },
-        ...(bs.user.signedIn
-          ? [
-              {
-                label: '兑换',
-                href: '/redeem',
-                icon: KeyRound,
-                templates: ['redeem.html'],
-              } satisfies NavItem,
-            ]
-          : []),
         { label: '任务', href: '/tasks', icon: ListChecks, templates: ['tasks_center.html', 'tasks_my.html', 'tasks_detail.html'] },
         { label: '协作', href: '/permits/inbox', icon: ShieldCheck, templates: ['my_verify_inbox.html'] },
         {

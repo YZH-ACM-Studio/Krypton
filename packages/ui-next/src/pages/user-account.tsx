@@ -25,6 +25,7 @@ import {
   Upload,
   User as UserIcon,
 } from 'lucide-react';
+import { RedeemDialogButton } from '@/components/redeem-dialog';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -316,6 +317,18 @@ function SettingsPanel() {
   };
 
   return (
+    <div className="space-y-4">
+    {bs.user.signedIn ? (
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">兑换码</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-muted-foreground">用兑换码获取题集或课程访问权益。结果在弹窗里显示。</p>
+          <RedeemDialogButton variant="outline" size="default" />
+        </CardContent>
+      </Card>
+    ) : null}
     <Card>
       <CardContent className="p-5">
         <form method="post" className="space-y-6">
@@ -334,6 +347,7 @@ function SettingsPanel() {
         </form>
       </CardContent>
     </Card>
+    </div>
   );
 }
 

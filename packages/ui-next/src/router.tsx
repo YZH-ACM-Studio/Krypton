@@ -1,6 +1,7 @@
 import { createRootRoute, createRoute, createRouter, Outlet } from '@tanstack/react-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Eye, LogOut, Mail, Menu, Moon, PanelLeftClose, PanelLeftOpen, RotateCcw, Settings, Sun, Swords, User } from 'lucide-react';
+import { RedeemDialogButton } from '@/components/redeem-dialog';
 import { useBootstrap } from '@/lib/bootstrap';
 import { replaceRouteTokens, makeInitials } from '@/lib/format';
 import { KryptonFooter } from '@/components/layout/footer';
@@ -140,6 +141,8 @@ function DefaultAppShell() {
                     )}
                   </a>
                 </Button>
+
+                <RedeemDialogButton variant="ghost" size="icon" iconOnly className="size-8" />
 
                 {/* Settings shortcut */}
                 <Button asChild variant="ghost" size="icon" className="size-8">

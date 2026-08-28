@@ -1,6 +1,7 @@
 import { Award, CheckCircle2, ChevronRight, Clock, LayoutGrid, List, Lock, PlayCircle, Search, Users, X } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useEffect, useMemo, useState } from 'react';
+import { RedeemDialogButton } from '@/components/redeem-dialog';
 import { MarkdownView } from '@/components/markdown-renderer';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -232,9 +233,12 @@ export function TrainingPage() {
           <h1 className="text-xl font-semibold">题集</h1>
           <p className="text-sm text-muted-foreground">系统化题集，按阶段 DAG 推进</p>
         </div>
-        <Button asChild>
-          <a href={`${bs.urls.training}/create`}>创建题集</a>
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          {bs.user.signedIn ? <RedeemDialogButton variant="outline" /> : null}
+          <Button asChild>
+            <a href={`${bs.urls.training}/create`}>创建题集</a>
+          </Button>
+        </div>
       </div>
 
       {/* Stats */}
@@ -692,6 +696,7 @@ export function TrainingDetailPage() {
           </div>
         </div>
         <div className="flex gap-2 shrink-0">
+          {bs.user.signedIn ? <RedeemDialogButton variant="outline" /> : null}
           {!enrolled && bs.user.signedIn ? (
             <form method="post">
               <input type="hidden" name="operation" value="enroll" />

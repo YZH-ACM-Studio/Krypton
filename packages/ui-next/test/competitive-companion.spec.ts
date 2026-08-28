@@ -131,6 +131,9 @@ describe('competitive companion payload', () => {
     expect(problemDetail).to.match(/const showCompanion = !examMode\?\.enabled/);
     expect(problemDetail).to.match(/tdoc\?\.participationMode !== 'team'/);
     expect(problemDetail).to.include('canSubmitBack={canSubmitBack}');
+    expect(problemDetail).to.include('toolbarAfterRecords=');
+    expect(problemDetail).to.match(/toolbarAfterRecords[\s\S]*compact/);
+    expect(problemDetail).not.to.match(/<div className="flex-1" \/>\s*\{showCompanion \? \(\s*<CompetitiveCompanionBridge/);
   });
 
   it('posts text/plain JSON to CPH and companion ports without a CORS preflight', async () => {

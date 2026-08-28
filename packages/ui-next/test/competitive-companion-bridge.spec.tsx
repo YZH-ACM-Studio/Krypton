@@ -57,7 +57,7 @@ describe('competitive companion bridge', () => {
     );
     expect(screen.getByRole('button', { name: '发送到 CPH' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '回传提交' })).not.toBeInTheDocument();
-    expect(screen.getByText(/Parse with → Hydro/)).toBeInTheDocument();
+    expect(screen.queryByText(/Parse with → Hydro/)).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '发送到 CPH' }));
     expect(await screen.findByRole('button', { name: '已发送到 CPH' })).toBeInTheDocument();
     expect(fetchImpl).toHaveBeenCalled();

@@ -1419,22 +1419,6 @@ export function ProblemDetailPage() {
             </Badge>
           ) : null}
           <div className="flex-1" />
-          {showCompanion ? (
-            <CompetitiveCompanionBridge
-              name={companionName}
-              group={companionGroup}
-              url={companionUrl}
-              timeLimitMs={companionTimeMs}
-              memoryLimitMb={companionMemoryMb}
-              tests={samples}
-              canSubmitBack={canSubmitBack}
-              submitUrl={submitUrl}
-              allowedLangs={config.langs || []}
-              tid={tid || undefined}
-              practiceContextId={practiceContextId}
-              recordDetailUrl={(rid) => replaceRouteTokens(recordDetailRoute, { RID: rid })}
-            />
-          ) : null}
           <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs" onClick={() => setIdeMode(false)}>
             <X className="size-3.5" />
             退出 IDE
@@ -1665,6 +1649,20 @@ export function ProblemDetailPage() {
                 showRecordsButton
                 recordsVisible={showIdeRecords}
                 recordsCount={ideRecords.length}
+                toolbarAfterRecords={
+                  showCompanion ? (
+                    <CompetitiveCompanionBridge
+                      compact
+                      name={companionName}
+                      group={companionGroup}
+                      url={companionUrl}
+                      timeLimitMs={companionTimeMs}
+                      memoryLimitMb={companionMemoryMb}
+                      tests={samples}
+                      allowedLangs={config.langs || []}
+                    />
+                  ) : null
+                }
                 reloadOnConflict={!!teamExamMode}
                 onSendToTeammates={teamCanVirtualPrint && teamCodeEndpoint ? setTeamCodeBuffer : undefined}
                 className="h-full rounded-none border-0"

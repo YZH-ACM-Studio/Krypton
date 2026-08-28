@@ -85,9 +85,7 @@ export function SendProblemToCph({ href, compact = false }: { href: string; comp
 
   return (
     <div className="flex flex-col items-stretch gap-1 sm:items-end">
-      {task ? (
-        <HydroCompanionMarkup name={task.name} timeLimitMs={task.timeLimit} memoryLimitMb={task.memoryLimit} tests={task.tests} />
-      ) : null}
+      {task ? <HydroCompanionMarkup name={task.name} timeLimitMs={task.timeLimit} memoryLimitMb={task.memoryLimit} tests={task.tests} /> : null}
       <Button
         type="button"
         size="sm"
@@ -114,9 +112,7 @@ export function SendProblemToCph({ href, compact = false }: { href: string; comp
         <p className="max-w-72 text-[11px] leading-4 text-muted-foreground sm:text-right">
           {status === 'failed'
             ? sendError || '本机没有收到题目。请先打开 VS Code 里的 CPH。'
-            : loadError
-              ? loadError
-              : 'Competitive Companion 请右键绿色加号，选择 Parse with → Hydro。也可点按钮直接发到本机 CPH。'}
+            : loadError || 'Competitive Companion 请右键绿色加号，选择 Parse with → Hydro。也可点按钮直接发到本机 CPH。'}
         </p>
       )}
     </div>
@@ -136,6 +132,7 @@ export function CompetitiveCompanionBridge({
   tid,
   practiceContextId,
   recordDetailUrl,
+  compact = false,
 }: {
   name: string;
   group: string;
@@ -149,21 +146,24 @@ export function CompetitiveCompanionBridge({
   tid?: string;
   practiceContextId?: string;
   recordDetailUrl?: (rid: string) => string;
+  compact?: boolean;
 }) {
   const [status, setStatus] = useState<'idle' | 'sending' | 'sent' | 'failed'>('idle');
   const [error, setError] = useState<string | null>(null);
   const task = buildCompanionTask({ name, group, url, timeLimitMs, memoryLimitMb, tests });
+  const sendLabel = status === 'sending' ? '正在发送…' : status === 'sent' ? '已发送到 CPH' : status === 'failed' ? '发送失败' : '发送到 CPH';
 
   return (
-    <div className="flex flex-col items-stretch gap-1 sm:items-end">
+    <div className={compact ? 'flex items-center' : 'flex items-center justify-end'}>
       <HydroCompanionMarkup name={task.name} timeLimitMs={task.timeLimit} memoryLimitMb={task.memoryLimit} tests={task.tests} />
       <div className="flex flex-wrap items-center justify-end gap-1">
         <Button
           type="button"
           size="sm"
           variant="outline"
-          className="gap-1"
+          className={compact ? 'h-7 gap-1 px-2 text-xs' : 'gap-1'}
           disabled={status === 'sending'}
+          title={status === 'failed' ? error || '本机没有收到题目。请先打开 VS Code 里的 CPH。' : undefined}
           onClick={() => {
             setStatus('sending');
             setError(null);
@@ -177,7 +177,7 @@ export function CompetitiveCompanionBridge({
           }}
         >
           <Download className="size-3.5" />
-          {status === 'sending' ? '正在发送…' : status === 'sent' ? '已发送到 CPH' : status === 'failed' ? '发送失败' : '发送到 CPH'}
+          {sendLabel}
         </Button>
         {canSubmitBack && submitUrl ? (
           <CompanionSubmitBack
@@ -189,11 +189,6 @@ export function CompetitiveCompanionBridge({
           />
         ) : null}
       </div>
-      <p className="max-w-72 text-[11px] leading-4 text-muted-foreground sm:text-right">
-        {status === 'failed'
-          ? error || '本机没有收到题目。请先打开 VS Code 里的 CPH，或用 Competitive Companion 右键加号选择 Hydro。'
-          : 'Competitive Companion 请右键绿色加号，选择 Parse with → Hydro。也可点按钮直接发到本机 CPH。'}
-      </p>
     </div>
   );
 }

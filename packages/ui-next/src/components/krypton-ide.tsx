@@ -13,7 +13,7 @@
  *  - Configurable font size, tab size, word wrap, theme
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 
 import { Compartment, EditorState, type Extension } from '@codemirror/state';
@@ -707,6 +707,8 @@ export interface KryptonIDEProps {
   recordsVisible?: boolean;
   /** Number of records displayed by the external panel */
   recordsCount?: number;
+  /** Extra toolbar actions rendered immediately after the records toggle. */
+  toolbarAfterRecords?: ReactNode;
   /** Reload the authoritative bootstrap after a revision/role conflict. */
   reloadOnConflict?: boolean;
   /** Team Exam Mode read-only viewer: expose zoom controls while removing file-import DOM. */
@@ -759,6 +761,7 @@ export function KryptonIDE({
   showRecordsButton = false,
   recordsVisible,
   recordsCount = 0,
+  toolbarAfterRecords,
   reloadOnConflict = false,
   teamReadOnlyView = false,
   onSendToTeammates,
@@ -1798,6 +1801,7 @@ export function KryptonIDE({
               ) : null}
             </Button>
           )}
+          {toolbarAfterRecords}
 
           <div className="flex-1" />
 

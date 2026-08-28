@@ -84,7 +84,10 @@ const calls = {
     trainingQueries: [] as any[],
     mindmapSnapshots: [] as string[],
     trainingStatusWrites: [] as any[],
+    assign: [] as any[],
+    userLists: [] as any[],
 };
+let usersById: Record<number, { _id: number; uname: string }> = {};
 let denySelection = false;
 let problemSetAccessDecision: any = { discoverable: true, accessible: true, enrolled: false, sources: [{ kind: 'public' }], stageAccess: 'all' };
 let currentContainer: any;
@@ -253,6 +256,20 @@ const trainingStub = {
         calls.edit.push(['audience', ...args]);
         return { public: true, groupIds: [] };
     },
+    async assignCourseOwnership(domainId: string, tid: unknown, input: { expectedOwner: number; owner: number; maintainer?: number[] }) {
+        calls.assign.push({ domainId, tid, input });
+        const current = trainingRows.find((row) => String(row.docId) === String(tid)) || currentContainer;
+        if (!current) {
+            const error: any = new Error('training');
+            error.name = 'TrainingNotFoundError';
+            throw error;
+        }
+        if (current.kind !== 'course') throw new TestValidationError('Not a course');
+        if (current.owner !== input.expectedOwner) throw new TestValidationError('课程负责人已变更，请刷新后重试');
+        current.owner = input.owner;
+        current.maintainer = [...new Set((input.maintainer || []).filter((uid) => uid !== input.owner))];
+        return current;
+    },
 };
 
 const contestStub = {
@@ -302,6 +319,15 @@ const storageStub = {
 const userStub = {
     async getById() {
         return { _id: 7, uname: 'owner' };
+    },
+    async getList(_domainId: string, uids: number[]) {
+        calls.userLists.push([...uids]);
+        return Object.fromEntries(
+            uids.map((uid) => {
+                const loaded = usersById[uid] || { _id: uid, uname: `user${uid}` };
+                return [uid, loaded];
+            }),
+        );
     },
     async getListForRender() {
         return {};
@@ -500,6 +526,9 @@ beforeEach(() => {
     calls.trainingQueries.length = 0;
     calls.mindmapSnapshots.length = 0;
     calls.trainingStatusWrites.length = 0;
+    calls.assign.length = 0;
+    calls.userLists.length = 0;
+    usersById = {};
     denySelection = false;
     problemSetAccessDecision = { discoverable: true, accessible: true, enrolled: false, sources: [{ kind: 'public' }], stageAccess: 'all' };
     problemDocs.clear();
@@ -748,8 +777,76 @@ describe('P3.8 course workspace capabilities', () => {
         expect(handler.response.body.canCreate).to.equal(true);
         expect(handler.response.body.managedIds).to.deep.equal(['own']);
         expect(handler.response.body.tcount).to.equal(2);
+        expect(handler.response.body.canAssign).to.equal(false);
         expect(calls.trainingQueries[0].domainId).to.equal('system');
         expect(calls.trainingQueries[0].query.$or).to.deep.include({ owner: 42 });
+    });
+
+    it('lets course editors CAS-assign owner and maintainers and rejects owners without edit-all', async () => {
+        currentContainer = { domainId: 'system', docId: 'course', owner: 7, maintainer: [8], kind: 'course', title: 'Own', dag: [] };
+        const ownerOnly = makeHandler(courseRoutes.course_edit);
+        await ownerOnly.prepare('forged-domain', 'course');
+        const denied = await captureFailure(() => ownerOnly.postAssign('forged-domain', 'course', 7, 42, [8]));
+        expect(denied?.name).to.equal('PermissionError');
+        expect(calls.assign).to.deep.equal([]);
+
+        const editor = makeHandler(
+            courseRoutes.course_edit,
+            makeUser({
+                hasPerm: (perm: bigint) => perm === PERM.PERM_EDIT_COURSE || perm === PERM.PERM_VIEW_PROBLEM,
+                hasPriv: (priv: number) => priv === PRIV.PRIV_USER_PROFILE,
+            }),
+        );
+        await editor.prepare('forged-domain', 'course');
+        await editor.postAssign('forged-domain', 'course', 7, 42, [8, 42]);
+        expect(calls.assign[0].input).to.deep.equal({ expectedOwner: 7, owner: 42, maintainer: [8, 42] });
+        expect(editor.response.body.ok).to.equal(true);
+        expect(editor.response.body.expectedOwner).to.equal(42);
+        expect(editor.response.body.owner._id).to.equal(42);
+        expect(editor.response.body.maintainers.map((user: { _id: number }) => user._id)).to.deep.equal([8]);
+
+        currentContainer = { domainId: 'system', docId: 'course', owner: 9, maintainer: [], kind: 'course', title: 'Moved', dag: [] };
+        const stale = makeHandler(
+            courseRoutes.course_edit,
+            makeUser({
+                hasPerm: (perm: bigint) => perm === PERM.PERM_EDIT_COURSE || perm === PERM.PERM_VIEW_PROBLEM,
+                hasPriv: (priv: number) => priv === PRIV.PRIV_USER_PROFILE,
+            }),
+        );
+        await stale.prepare('forged-domain', 'course');
+        const mismatch = await captureFailure(() => stale.postAssign('forged-domain', 'course', 7, 42, []));
+        expect(mismatch?.message).to.equal('课程负责人已变更，请刷新后重试');
+
+        usersById[99] = { _id: 0, uname: 'Unknown User' };
+        const missing = makeHandler(
+            courseRoutes.course_edit,
+            makeUser({
+                hasPerm: (perm: bigint) => perm === PERM.PERM_EDIT_COURSE || perm === PERM.PERM_VIEW_PROBLEM,
+                hasPriv: (priv: number) => priv === PRIV.PRIV_USER_PROFILE,
+            }),
+        );
+        currentContainer = { domainId: 'system', docId: 'course', owner: 7, maintainer: [], kind: 'course', title: 'Own', dag: [] };
+        await missing.prepare('forged-domain', 'course');
+        const missingUser = await captureFailure(() => missing.postAssign('forged-domain', 'course', 7, 99, []));
+        expect(missingUser?.message).to.equal('课程分配对象不存在');
+    });
+
+    it('publishes assign users on the course list only for edit-all actors', async () => {
+        trainingRows = [
+            { docId: 'own', owner: 42, maintainer: [8], kind: 'course', title: 'Own', dag: [] },
+            { docId: 'other', owner: 7, kind: 'course', title: 'Other', dag: [] },
+        ];
+        const editor = makeHandler(
+            courseRoutes.course_main,
+            makeUser({
+                hasPerm: (perm: bigint) => perm === PERM.PERM_EDIT_COURSE || perm === PERM.PERM_VIEW_PROBLEM || perm === PERM.PERM_CREATE_COURSE,
+                hasPriv: (priv: number) => priv === PRIV.PRIV_USER_PROFILE,
+            }),
+        );
+        await editor.get('forged-domain', 1, '');
+        expect(editor.response.body.canAssign).to.equal(true);
+        expect(editor.response.body.assignUsers['42']._id).to.equal(42);
+        expect(editor.response.body.assignUsers['8']._id).to.equal(8);
     });
 
     it('passes the real enrollment status to course detail', async () => {

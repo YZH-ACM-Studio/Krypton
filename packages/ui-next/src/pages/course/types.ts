@@ -3,6 +3,8 @@ import type { KnowledgeMap, MindmapNode } from '../mindmap/types';
 export interface CourseRecord {
   _id?: string | number;
   docId?: string | number;
+  owner?: number;
+  maintainer?: number[];
   title?: string;
   term?: string;
   description?: string;

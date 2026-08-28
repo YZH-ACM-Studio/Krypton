@@ -39,6 +39,9 @@ describe('course chapter sections', () => {
         expect(access).to.include('courseNodePids(scope)');
         expect(access).to.include('courseNodePids(chapter)');
         const training = readSrc('src/model/training.ts');
+        expect(training).to.include('export async function assignCourseOwnership');
+        expect(training).to.include("kind: 'course'");
+        expect(training).to.include('owner: expectedOwner');
         expect(training).to.include('const nodePids = new Set(courseNodePids(node))');
         expect(training).to.match(/export function isOpen[\s\S]*const pids = courseNodePids\(node\)/);
         expect(training).to.include('for (const section of tdoc.dag[i].sections || [])');

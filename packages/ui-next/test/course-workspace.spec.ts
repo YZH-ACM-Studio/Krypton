@@ -43,6 +43,11 @@ describe('p3.8 course workspace', () => {
       expect(editor).to.include(`data-course-slot="${slot}"`);
     }
     expect(editor).to.include('data-course-slot="collaborators"');
+    expect(editor).to.include('CourseAssignForm');
+    const list = readFileSync(resolve(root, 'src/pages/course/list.tsx'), 'utf8');
+    expect(list).to.include('CourseAssignDialog');
+    expect(list).to.include('分配');
+    expect(list).not.to.include('max-w-[76rem]');
   });
 
   it('uses server capabilities, true totals, enrollment status, and one active chapter', () => {
@@ -51,6 +56,9 @@ describe('p3.8 course workspace', () => {
     const detail = readFileSync(resolve(root, 'src/pages/course/detail.tsx'), 'utf8');
     expect(handler).to.include('const [tdocs, tpcount, tcount]');
     expect(handler).to.include('canCreate,');
+    expect(handler).to.include('canAssign,');
+    expect(handler).to.include('async postAssign(');
+    expect(handler).to.include('training.assignCourseOwnership');
     expect(handler).to.include('managedIds,');
     expect(handler).to.include('canManage,');
     expect(handler).to.include('tsdoc,');

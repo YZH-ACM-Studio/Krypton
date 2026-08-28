@@ -1,7 +1,7 @@
 import { flatten } from 'lodash';
 import { Filter, ObjectId } from 'mongodb';
 import { Logger } from '@hydrooj/utils';
-import { PermissionError, TrainingAlreadyEnrollError, TrainingNotFoundError } from '../error';
+import { localizedErrorText, PermissionError, TrainingAlreadyEnrollError, TrainingNotFoundError, ValidationError } from '../error';
 import { TrainingDoc, TrainingNode } from '../interface';
 import {
     courseKindClause,
@@ -141,6 +141,81 @@ export function edit(domainId: string, tid: ObjectId, $set: Partial<TrainingDoc>
         throw new TypeError('training document kind cannot be edited');
     }
     return document.set(domainId, document.TYPE_TRAINING, tid, $set, $unset as any);
+}
+
+function canonicalCourseAssignUid(value: unknown, field: string): number {
+    const uid = typeof value === 'number' ? value : Number(value);
+    if (!Number.isSafeInteger(uid) || uid < 1) {
+        if (field === 'maintainer') throw new ValidationError(field, null, localizedErrorText`课程协作教师名单无效`);
+        throw new ValidationError(field, null, localizedErrorText`课程负责人无效`);
+    }
+    return uid;
+}
+
+function canonicalCourseMaintainerUids(values: unknown, owner: number): number[] {
+    if (values == null) return [];
+    if (!Array.isArray(values)) throw new ValidationError('maintainer', null, localizedErrorText`课程协作教师名单无效`);
+    const seen = new Set<number>();
+    const maintainer: number[] = [];
+    for (const item of values) {
+        const uid = canonicalCourseAssignUid(item, 'maintainer');
+        if (uid === owner || seen.has(uid)) continue;
+        seen.add(uid);
+        maintainer.push(uid);
+    }
+    return maintainer;
+}
+
+export async function assignCourseOwnership(
+    domainId: string,
+    tid: ObjectId,
+    input: { expectedOwner: number; owner: number; maintainer?: number[] },
+): Promise<TrainingDoc> {
+    const expectedOwner = canonicalCourseAssignUid(input.expectedOwner, 'expectedOwner');
+    const owner = canonicalCourseAssignUid(input.owner, 'owner');
+    const maintainer = canonicalCourseMaintainerUids(input.maintainer, owner);
+    const updated = await document.coll.findOneAndUpdate(
+        {
+            domainId,
+            docType: document.TYPE_TRAINING,
+            docId: tid,
+            kind: 'course',
+            owner: expectedOwner,
+        },
+        { $set: { owner, maintainer } },
+        { returnDocument: 'after' },
+    );
+    if (updated) {
+        logger.info(
+            'Course ownership assigned domain=%s tid=%s expectedOwner=%d owner=%d maintainers=%d stage=assign result=success',
+            domainId,
+            tid,
+            expectedOwner,
+            owner,
+            maintainer.length,
+        );
+        return updated as TrainingDoc;
+    }
+    const current = await document.get(domainId, document.TYPE_TRAINING, tid);
+    if (!current || !isKnownTrainingKind(current.kind)) throw new TrainingNotFoundError(domainId, tid);
+    if (!isCourseKind(current.kind)) throw new ValidationError('tid', null, localizedErrorText`Not a course`);
+    if (current.owner !== expectedOwner) {
+        logger.warn(
+            'Course ownership assign rejected domain=%s tid=%s expectedOwner=%d actualOwner=%d stage=assign result=cas-mismatch',
+            domainId,
+            tid,
+            expectedOwner,
+            current.owner,
+        );
+        throw new ValidationError('expectedOwner', null, localizedErrorText`课程负责人已变更，请刷新后重试`);
+    }
+    logger.error(
+        'Course ownership assign failed with matching owner domain=%s tid=%s owner=%d stage=assign result=failed',
+        domainId,
+        tid,
+        expectedOwner,
+    );
+    throw new Error(`course ownership assign failed: ${domainId}/${tid}`);
 }
 
 export async function setProblemSetAudience(domainId: string, tid: ObjectId, audienceInput: unknown) {

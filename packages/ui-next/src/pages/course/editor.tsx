@@ -28,9 +28,11 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { SimpleSelect } from '@/components/ui/select';
 import { Sheet, SheetBody, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { FileUploader } from '@/components/uploader';
+import type { DomainUserOption } from '@/components/domain-user-search';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
+import { CourseAssignForm } from './assign';
 import { claimChapterProblemIds } from './chapter-draft';
 import { ChapterOutline } from './chapter-outline';
 import { useChapterQuery } from './chapter-query';
@@ -214,6 +216,10 @@ export function CourseEditPage() {
     groups: Array<{ _id: string; name: string; archivedAt?: string | null }>;
     canManageFiles: boolean;
     canCreateQuiz: boolean;
+    canAssign?: boolean;
+    expectedOwner?: number;
+    ownerUser?: DomainUserOption;
+    maintainerUsers?: DomainUserOption[];
     files: CourseFile[];
     mindmaps: Array<{ _id: string; title: string; visibility: 'public' }>;
   };
@@ -859,7 +865,24 @@ export function CourseEditPage() {
               ) : null}
             </div>
           </SettingsGroup>
-          <div data-course-slot="collaborators" />
+          <div data-course-slot="collaborators">
+            {isEdit && data.canAssign ? (
+              <SettingsGroup
+                id="course-assign"
+                title="课程分配"
+                description="管理员可以把课程转给教师，并指定协作教师。负责人和协作教师都可以编辑内容并管理课件。"
+                icon={Users}
+              >
+                <CourseAssignForm
+                  domainId={bs.domain.id}
+                  action={`/course/${tid}/edit`}
+                  expectedOwner={Number(data.expectedOwner || course.owner || 0)}
+                  initialOwner={data.ownerUser || (Number(course.owner) > 0 ? { _id: Number(course.owner) } : null)}
+                  initialMaintainers={data.maintainerUsers || []}
+                />
+              </SettingsGroup>
+            ) : null}
+          </div>
         </aside>
 
         {/* Long-form course copy spans the full grid. The side-by-side

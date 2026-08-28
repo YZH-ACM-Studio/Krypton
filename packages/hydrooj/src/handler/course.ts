@@ -48,6 +48,47 @@ import { getVisibleReferencedProblems, normalizeProblemDocIds } from './problem-
 
 const logger = new Logger('course');
 
+function canAssignCourse(actor: { hasPerm: (...perm: bigint[]) => boolean; hasPriv: (priv: number) => boolean }) {
+    return actor.hasPriv(PRIV.PRIV_EDIT_SYSTEM) || actor.hasPerm(PERM.PERM_EDIT_COURSE);
+}
+
+function serializeCourseAssignUser(udoc: {
+    _id?: unknown;
+    uname?: unknown;
+    displayName?: unknown;
+    mail?: unknown;
+    avatarUrl?: unknown;
+    studentId?: unknown;
+    realName?: unknown;
+}) {
+    const uid = Number(udoc._id);
+    if (!Number.isSafeInteger(uid) || uid < 1) throw new TypeError('course assign user uid must be a positive integer');
+    return {
+        _id: uid,
+        ...(typeof udoc.uname === 'string' && udoc.uname ? { uname: udoc.uname } : {}),
+        ...(typeof udoc.displayName === 'string' && udoc.displayName ? { displayName: udoc.displayName } : {}),
+        ...(typeof udoc.mail === 'string' && udoc.mail ? { mail: udoc.mail } : {}),
+        ...(typeof udoc.avatarUrl === 'string' && udoc.avatarUrl ? { avatarUrl: udoc.avatarUrl } : {}),
+        ...(typeof udoc.studentId === 'string' && udoc.studentId ? { studentId: udoc.studentId } : {}),
+        ...(typeof udoc.realName === 'string' && udoc.realName ? { realName: udoc.realName } : {}),
+    };
+}
+
+function courseAssignUserView(udict: Record<string, { _id?: unknown }>, uid: number) {
+    const loaded = udict[uid];
+    if (loaded && Number(loaded._id) === uid) return serializeCourseAssignUser(loaded);
+    return { _id: uid, uname: `UID ${uid}` };
+}
+
+async function loadCourseAssignUsers(domainId: string, uids: number[]) {
+    const unique = [...new Set(uids.filter((uid) => Number.isSafeInteger(uid) && uid >= 1))];
+    if (!unique.length) return {};
+    const udict = await user.getList(domainId, unique);
+    const views: Record<string, ReturnType<typeof serializeCourseAssignUser>> = {};
+    for (const uid of unique) views[String(uid)] = courseAssignUserView(udict, uid);
+    return views;
+}
+
 interface CourseMindmapService {
     getPublicMap(id: ObjectId | string): Promise<any | null>;
     getPublicSnapshot(id: ObjectId | string): Promise<{ config: any; nodes: any[] } | null>;
@@ -397,6 +438,13 @@ class CourseMainHandler extends Handler {
             for (const tsdoc of tsdocs) tsdict[tsdoc.docId.toHexString()] = tsdoc;
         }
         this.response.template = 'course_main.html';
+        const canAssign = canAssignCourse(this.user);
+        const assignUsers = canAssign
+            ? await loadCourseAssignUsers(
+                  domainId,
+                  tdocs.flatMap((tdoc) => [tdoc.owner, ...(tdoc.maintainer || [])]),
+              )
+            : {};
         this.response.body = {
             tdocs,
             page,
@@ -405,7 +453,9 @@ class CourseMainHandler extends Handler {
             tsdict,
             q,
             canCreate,
+            canAssign,
             managedIds,
+            assignUsers,
         };
     }
 }
@@ -617,6 +667,7 @@ class CourseEditHandler extends Handler {
             groups: groups.map((g: any) => ({ _id: String(g._id), name: g.name, archivedAt: g.archivedAt || null })),
             canManageFiles: !!this.tdoc && (this.user.own(this.tdoc) || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)),
             canCreateQuiz: !!this.tdoc && this.user.hasPerm(PERM.PERM_CREATE_HOMEWORK),
+            canAssign: !!this.tdoc && canAssignCourse(this.user),
             files: sortFiles(this.tdoc?.files || []),
             mindmaps,
         };
@@ -636,6 +687,17 @@ class CourseEditHandler extends Handler {
                 null,
                 2,
             );
+            if (this.response.body.canAssign) {
+                const assignUsers = await loadCourseAssignUsers(authoritativeDomainId, [
+                    this.tdoc.owner,
+                    ...(this.tdoc.maintainer || []),
+                ]);
+                this.response.body.expectedOwner = this.tdoc.owner;
+                this.response.body.ownerUser = assignUsers[String(this.tdoc.owner)] || courseAssignUserView({}, this.tdoc.owner);
+                this.response.body.maintainerUsers = (this.tdoc.maintainer || [])
+                    .filter((uid) => uid !== this.tdoc.owner)
+                    .map((uid) => assignUsers[String(uid)] || courseAssignUserView({}, uid));
+            }
         }
     }
 
@@ -731,6 +793,43 @@ class CourseEditHandler extends Handler {
         ]);
         await oplog.log(this, 'course.delete', { tid });
         this.response.redirect = this.url('course_main');
+    }
+
+    @param('tid', Types.ObjectId)
+    @param('expectedOwner', Types.Int)
+    @param('owner', Types.Int)
+    @param('maintainer', Types.NumericArray, true)
+    async postAssign(_domainId: string, tid: ObjectId, expectedOwner: number, owner: number, maintainer: number[] = []) {
+        const authoritativeDomainId = String(this.domain?._id);
+        problem.assertProblemAclDomain(this.user, authoritativeDomainId);
+        if (!canAssignCourse(this.user)) throw new PermissionError(PERM.PERM_EDIT_COURSE);
+        const requested = [...new Set([owner, ...maintainer])];
+        const udict = await user.getList(authoritativeDomainId, requested);
+        for (const uid of requested) {
+            if (!Number.isSafeInteger(uid) || uid < 1 || Number(udict[uid]?._id) !== uid) {
+                logger.warn(
+                    'Course assign rejected missing user domain=%s tid=%s actor=%d uid=%s stage=assign result=user-missing',
+                    authoritativeDomainId,
+                    tid,
+                    this.user._id,
+                    uid,
+                );
+                throw new ValidationError('owner', null, localizedErrorText`课程分配对象不存在`);
+            }
+        }
+        const updated = await training.assignCourseOwnership(authoritativeDomainId, tid, { expectedOwner, owner, maintainer });
+        await oplog.log(this, 'course.assign', {
+            tid,
+            expectedOwner,
+            owner: updated.owner,
+            maintainer: updated.maintainer || [],
+        });
+        this.response.body = {
+            ok: true,
+            expectedOwner: updated.owner,
+            owner: serializeCourseAssignUser(udict[updated.owner]),
+            maintainers: (updated.maintainer || []).map((uid) => serializeCourseAssignUser(udict[uid])),
+        };
     }
 }
 

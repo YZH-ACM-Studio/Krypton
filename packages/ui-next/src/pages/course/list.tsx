@@ -1,10 +1,13 @@
-import { ArrowRight, BookOpen, ChevronRight, Layers, Pencil, Plus, Search, Users } from 'lucide-react';
+import { useState } from 'react';
+import { ArrowRight, BookOpen, ChevronRight, Layers, Pencil, Plus, Search, UserPlus, Users } from 'lucide-react';
+import type { DomainUserOption } from '@/components/domain-user-search';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Pagination } from '@/components/ui/pagination';
 import { useBootstrap } from '@/lib/bootstrap';
 import { formatPlainTextSummary } from '@/lib/format';
 import { cn } from '@/lib/cn';
+import { CourseAssignDialog } from './assign';
 import type { CourseRecord } from './types';
 import { CourseMark, CourseSectionHeader, riseStyle, useSpotlight } from './ui';
 
@@ -125,7 +128,19 @@ function CourseCard({ course, index }: { course: CourseRecord; index: number }) 
  * marks ownership and the edit affordance sits on the row instead of being
  * an equal-weight sibling of the title link.
  */
-function ManagedCourseRow({ course, enrolled, index }: { course: CourseRecord; enrolled: boolean; index: number }) {
+function ManagedCourseRow({
+  course,
+  enrolled,
+  index,
+  canAssign,
+  onAssign,
+}: {
+  course: CourseRecord;
+  enrolled: boolean;
+  index: number;
+  canAssign: boolean;
+  onAssign: (course: CourseRecord) => void;
+}) {
   const tid = courseId(course);
   return (
     <div
@@ -155,6 +170,12 @@ function ManagedCourseRow({ course, enrolled, index }: { course: CourseRecord; e
           </span>
         </span>
       </a>
+      {canAssign ? (
+        <Button type="button" variant="ghost" size="sm" className="h-9 shrink-0 gap-1.5" onClick={() => onAssign(course)}>
+          <UserPlus className="size-3.5" strokeWidth={1.75} />
+          分配
+        </Button>
+      ) : null}
       <Button asChild variant="ghost" size="sm" className="h-9 shrink-0 gap-1.5">
         <a href={`/course/${tid}/edit`}>
           <Pencil className="size-3.5" strokeWidth={1.75} />
@@ -172,6 +193,8 @@ export function CoursePage() {
     tsdict: Record<string, CourseRecord>;
     managedIds: string[];
     canCreate: boolean;
+    canAssign?: boolean;
+    assignUsers?: Record<string, DomainUserOption>;
     q?: string;
     page?: number;
     tpcount?: number;
@@ -182,6 +205,8 @@ export function CoursePage() {
   const managedIds = new Set((data.managedIds || []).map(String));
   const q = data.q || '';
   const paginationBase = q ? `/course?q=${encodeURIComponent(q)}` : '/course';
+  const canAssign = data.canAssign === true;
+  const [assigning, setAssigning] = useState<CourseRecord | null>(null);
 
   // Bucketed by the viewer's relationship to the course. Managed wins over
   // enrolled so a teacher's own courses never scatter across two sections.
@@ -192,7 +217,7 @@ export function CoursePage() {
 
   return (
     <main className="w-full min-w-0 pb-10">
-      <header className="mb-8 flex max-w-[76rem] flex-col gap-5 border-b border-border/60 pb-6 lg:flex-row lg:items-end lg:justify-between">
+      <header className="mb-8 flex w-full flex-col gap-5 border-b border-border/60 pb-6 lg:flex-row lg:items-end lg:justify-between">
         <div className="min-w-0">
           <p className="krypton-course-eyebrow">学习空间</p>
           <h1 className="krypton-course-display mt-1.5">课程</h1>
@@ -225,7 +250,7 @@ export function CoursePage() {
       </header>
 
       {!courses.length ? (
-        <section className="krypton-course-hero krypton-course-grain max-w-[76rem] px-6 py-20 text-center">
+        <section className="krypton-course-hero krypton-course-grain w-full px-6 py-20 text-center">
           <span aria-hidden="true" className="relative z-10 mx-auto grid size-14 place-items-center rounded-2xl bg-background/80 text-muted-foreground shadow-sm">
             <BookOpen className="size-6" strokeWidth={1.5} />
           </span>
@@ -247,7 +272,7 @@ export function CoursePage() {
           ) : null}
         </section>
       ) : (
-        <div className="max-w-[76rem] space-y-12">
+        <div className="w-full space-y-12">
           {featured ? (
             <section aria-labelledby="course-section-enrolled" className="space-y-4">
               <h2 id="course-section-enrolled" className="sr-only">
@@ -255,7 +280,7 @@ export function CoursePage() {
               </h2>
               <FeaturedCourse course={featured} />
               {otherEnrolled.length ? (
-                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
                   {otherEnrolled.map((course, index) => (
                     <CourseCard key={courseId(course)} course={course} index={index} />
                   ))}
@@ -280,6 +305,8 @@ export function CoursePage() {
                     course={course}
                     enrolled={Boolean(statuses[courseId(course)]?.enroll)}
                     index={index}
+                    canAssign={canAssign}
+                    onAssign={setAssigning}
                   />
                 ))}
               </div>
@@ -301,7 +328,7 @@ export function CoursePage() {
                   </span>
                 }
               />
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
                 {available.map((course, index) => (
                   <CourseCard key={courseId(course)} course={course} index={index} />
                 ))}
@@ -311,9 +338,20 @@ export function CoursePage() {
         </div>
       )}
 
-      <div className="mt-10 max-w-[76rem]">
+      <div className="mt-10 w-full">
         <Pagination current={Number(data.page) || 1} total={Number(data.tpcount) || 1} baseUrl={paginationBase} />
       </div>
+      {assigning ? (
+        <CourseAssignDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setAssigning(null);
+          }}
+          domainId={bs.domain.id}
+          course={assigning}
+          users={data.assignUsers || {}}
+        />
+      ) : null}
     </main>
   );
 }

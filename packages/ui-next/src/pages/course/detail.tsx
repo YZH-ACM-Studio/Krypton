@@ -21,6 +21,7 @@ import { MiniTabs } from '@/components/ui/mini-tabs';
 import { Sheet, SheetBody, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
+import { PracticeRosterCard, type PracticeRosterMember, type PracticeRosterProblem } from '@/components/practice-roster';
 import { practiceProblemEntryUrl } from '@/lib/practice-integrity';
 import { ChapterOutline } from './chapter-outline';
 import { useChapterQuery } from './chapter-query';
@@ -59,12 +60,7 @@ function ProblemList({
   const completed = new Set(completedPids || []);
   return (
     <section aria-labelledby="course-problems-title" className="space-y-3">
-      <CourseSectionHeader
-        id="course-problems-title"
-        title={title}
-        description={description}
-        count={count}
-      />
+      <CourseSectionHeader id="course-problems-title" title={title} description={description} count={count} />
       <ol className="krypton-course-panel overflow-hidden p-1.5">
         {pids.map((pid, index) => {
           const problem = problems[String(pid)] || {};
@@ -228,6 +224,10 @@ export function CourseDetailPage() {
     view: 'overview' | 'mindmap';
     courseMindmap: CourseMindmapData | null;
     integrityControlled?: boolean;
+    members?: PracticeRosterMember[];
+    membersTruncated?: boolean;
+    rosterProblems?: PracticeRosterProblem[];
+    rosterGroupIds?: string[];
   };
   const course = data.tdoc || {};
   const tid = String(course.docId || course._id);
@@ -277,7 +277,9 @@ export function CourseDetailPage() {
               <Button asChild variant="outline" size="sm" className="h-10 gap-1.5">
                 <a
                   href={
-                    activeView === 'mindmap' ? `/course/${tid}/edit#course-mindmap-settings` : `/course/${tid}/edit?chapter=${activeChapter?._id || ''}`
+                    activeView === 'mindmap'
+                      ? `/course/${tid}/edit#course-mindmap-settings`
+                      : `/course/${tid}/edit?chapter=${activeChapter?._id || ''}`
                   }
                 >
                   <Pencil className="size-3.5" strokeWidth={1.75} />
@@ -322,8 +324,7 @@ export function CourseDetailPage() {
               {chapters.reduce((sum, chapter) => sum + (chapter.sections?.length || 0), 0)
                 ? ` · ${chapters.reduce((sum, chapter) => sum + (chapter.sections?.length || 0), 0)} 节`
                 : ''}{' '}
-              · {totalProblems} 题
-              {totalProblems ? ` · 已完成 ${doneProblems}` : ''}
+              · {totalProblems} 题{totalProblems ? ` · 已完成 ${doneProblems}` : ''}
             </p>
           ) : null}
         </div>
@@ -595,18 +596,23 @@ export function CourseDetailPage() {
         </div>
       )}
 
+      {activeView === 'overview' && Array.isArray(data.members) ? (
+        <PracticeRosterCard
+          members={data.members}
+          problems={Array.isArray(data.rosterProblems) ? data.rosterProblems : []}
+          title={course.title || '课程'}
+          truncated={!!data.membersTruncated}
+          visibleGroupIds={Array.isArray(data.rosterGroupIds) ? data.rosterGroupIds : undefined}
+        />
+      ) : null}
+
       <Sheet open={outlineOpen} onOpenChange={setOutlineOpen}>
         <SheetContent side="left" className="w-[22rem] max-w-[calc(100vw-1rem)]">
           <SheetHeader>
             <SheetTitle>课程目录</SheetTitle>
           </SheetHeader>
           <SheetBody className="p-4">
-            <ChapterOutline
-              chapters={chapters}
-              activeId={activeChapter?._id || null}
-              activeSectionId={activeSectionId}
-              onSelect={selectFromMobile}
-            />
+            <ChapterOutline chapters={chapters} activeId={activeChapter?._id || null} activeSectionId={activeSectionId} onSelect={selectFromMobile} />
           </SheetBody>
         </SheetContent>
       </Sheet>

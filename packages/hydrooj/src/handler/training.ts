@@ -8,7 +8,6 @@ import { problemSetAudienceOf } from '../lib/problem-set-audience';
 import { isProblemSetKind, withProblemSetKind } from '../lib/training-kind';
 import { PERM, PRIV, STATUS } from '../model/builtin';
 import { contextualCompletionService } from '../model/contextual-completion';
-import * as document from '../model/document';
 import * as oplog from '../model/oplog';
 import { practiceIntegrityService } from '../model/practice-integrity';
 import problem from '../model/problem';
@@ -20,6 +19,8 @@ import * as training from '../model/training';
 import user from '../model/user';
 import { Handler, param, post, Types } from '../service/server';
 import { getVisibleReferencedProblems, normalizeProblemDocIds } from './problem-reference';
+import { loadCompletedPidsByUid } from '../lib/practice-roster-load';
+import { assemblePracticeRosterMembers, PRACTICE_ROSTER_ENROLL_LIMIT, serializePracticeRosterProblems } from '../lib/practice-roster';
 
 async function _parseDagJson(domainId: string, _dag: string): Promise<Tdoc['dag']> {
     const parsed = [];
@@ -283,52 +284,40 @@ class TrainingDetailHandler extends Handler {
             const enrollDocs = await training
                 .getMultiStatus(domainId, { docId: tid, uid: { $gt: 1 }, enroll: 1 })
                 .project({ uid: 1 })
-                .limit(1000)
+                .limit(PRACTICE_ROSTER_ENROLL_LIMIT)
                 .toArray();
             const memberUids = enrollDocs.map((x) => +x.uid);
-            const ub = (global as any).Hydro?.model?.userbind;
-            const [memberUdict, students, ubGroups, acDocs, contextualCounts] = await Promise.all([
-                // getListForRender = 单条批量查询；getList 是 N 个 getById（对抗审查发现）
+            const ub = global.Hydro?.model?.userbind;
+            const scopePids = new Map(tdoc.dag.map((node) => [node._id, new Set(node.pids)]));
+            if (memberUids.length && typeof ub?.findStudentsByUserIds !== 'function') {
+                throw new TypeError('userbind.findStudentsByUserIds is unavailable');
+            }
+            if (typeof ub?.listUserGroups !== 'function') throw new TypeError('userbind.listUserGroups is unavailable');
+            const [memberUdict, students, ubGroups, completedPidsByUid] = await Promise.all([
                 user.getListForRender(domainId, memberUids, false),
-                ub?.findStudentsByUserIds ? ub.findStudentsByUserIds(domainId, memberUids) : {},
-                ub?.listUserGroups ? ub.listUserGroups(domainId) : [],
-                !publishedIntegrity && memberUids.length && exist.length
-                    ? document
-                          .getMultiStatus(domainId, document.TYPE_PROBLEM, {
-                              uid: { $in: memberUids },
-                              docId: { $in: exist },
-                              status: STATUS.STATUS_ACCEPTED,
-                          })
-                          .project({ uid: 1, docId: 1 })
-                          .toArray()
-                    : [],
-                publishedIntegrity
-                    ? contextualCompletionService.getCompletedCounts(
-                          domainId,
-                          memberUids,
-                          'problemSet',
-                          tdoc.docId,
-                          new Map(tdoc.dag.map((node) => [node._id, new Set(node.pids)])),
-                      )
-                    : new Map<number, number>(),
+                memberUids.length ? ub.findStudentsByUserIds(domainId, memberUids) : {},
+                ub.listUserGroups(domainId),
+                loadCompletedPidsByUid({
+                    domainId,
+                    memberUids,
+                    pids: exist,
+                    publishedIntegrity: !!publishedIntegrity,
+                    containerKind: 'problemSet',
+                    containerId: tdoc.docId,
+                    scopePids,
+                }),
             ]);
-            // limit 1000 截断不许静默（对抗审查发现）——前端据此提示。
-            this.response.body.membersTruncated = enrollDocs.length >= 1000;
-            const doneByUid = new Map<number, number>();
-            for (const d of acDocs) doneByUid.set(d.uid, (doneByUid.get(d.uid) || 0) + 1);
-            const groupNameById = new Map((ubGroups as any[]).map((g) => [String(g._id), g.name]));
-            this.response.body.members = memberUids.map((mUid) => {
-                const s = (students as any)[String(mUid)];
-                return {
-                    uid: mUid,
-                    uname: memberUdict[mUid]?.uname || `UID ${mUid}`,
-                    realName: s?.realName || '',
-                    studentId: s?.studentId || '',
-                    groups: (s?.groupIds || []).map((g: any) => groupNameById.get(String(g))).filter(Boolean),
-                    done: publishedIntegrity ? contextualCounts.get(mUid) || 0 : doneByUid.get(mUid) || 0,
-                    total: publishedIntegrity ? tdoc.dag.reduce((total, node) => total + node.pids.length, 0) : exist.length,
-                };
+            this.response.body.membersTruncated = enrollDocs.length >= PRACTICE_ROSTER_ENROLL_LIMIT;
+            const groupNameById = new Map((ubGroups as Array<{ _id: ObjectId; name: string }>).map((group) => [String(group._id), group.name]));
+            this.response.body.members = assemblePracticeRosterMembers({
+                memberUids,
+                udict: memberUdict,
+                students,
+                groupNameById,
+                completedPidsByUid,
+                total: exist.length,
             });
+            this.response.body.rosterProblems = serializePracticeRosterProblems(exist, pdict);
         }
 
         this.response.pjax = 'partials/training_detail.html';

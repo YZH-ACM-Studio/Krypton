@@ -45,6 +45,13 @@ import { courseKindClause, isCourseKind, isProblemSetKind } from '../lib/trainin
 import { computePrerequisiteClosure } from '../lib/problem-set-stage';
 import { problemSetAccessService } from '../model/problem-set-access';
 import { getVisibleReferencedProblems, normalizeProblemDocIds } from './problem-reference';
+import { loadCompletedPidsByUid } from '../lib/practice-roster-load';
+import {
+    assemblePracticeRosterMembers,
+    PRACTICE_ROSTER_ENROLL_LIMIT,
+    serializePracticeRosterProblems,
+    uniqueBoundUserIds,
+} from '../lib/practice-roster';
 
 const logger = new Logger('course');
 
@@ -256,10 +263,7 @@ async function buildCourseMindmapView(
             usedNodeIds.add(nodeId);
         }
         const chapters = tdoc.dag
-            .filter(
-                (chapter) =>
-                    courseNodePids(chapter).includes(docId) || (referencedPidsByChapter.get(chapter._id) || []).includes(docId),
-            )
+            .filter((chapter) => courseNodePids(chapter).includes(docId) || (referencedPidsByChapter.get(chapter._id) || []).includes(docId))
             .map((chapter) => ({ id: chapter._id, title: chapter.title }));
         if (!chapters.length) continue;
         problems.push({
@@ -297,13 +301,7 @@ function courseVisibleTo(tdoc: TrainingDoc, myGroups: Set<string>, canManage: bo
     return groups.some((g) => myGroups.has(String(g)));
 }
 
-async function courseAccessibleTo(
-    domainId: string,
-    uid: number,
-    tdoc: TrainingDoc,
-    myGroups: Set<string>,
-    canManage: boolean,
-): Promise<boolean> {
+async function courseAccessibleTo(domainId: string, uid: number, tdoc: TrainingDoc, myGroups: Set<string>, canManage: boolean): Promise<boolean> {
     if (courseVisibleTo(tdoc, myGroups, canManage)) return true;
     return problemSetAccessService.hasActiveEntitlement(domainId, uid, 'course', tdoc.docId);
 }
@@ -481,12 +479,7 @@ class CourseDetailHandler extends Handler {
         for (const node of tdoc.dag || []) {
             referencedPidsByChapter.set(node._id, await liveReferencedPids(domainId, node));
         }
-        const pids = Array.from(
-            new Set([
-                ...training.getPids(tdoc.dag),
-                ...Array.from(referencedPidsByChapter.values()).flat(),
-            ]),
-        );
+        const pids = Array.from(new Set([...training.getPids(tdoc.dag), ...Array.from(referencedPidsByChapter.values()).flat()]));
         // 解析章节引用的所有比赛。
         const allTids = Array.from(new Set<string>(tdoc.dag.flatMap((n) => (n.tids || []).map((t) => String(t))))).map((s) => new ObjectId(s));
         const overviewData =
@@ -537,10 +530,7 @@ class CourseDetailHandler extends Handler {
                       const sectionPidSet = new Set((node.sections || []).flatMap((section) => section.pids));
                       const liveRefPids = referencedPidsByChapter.get(node._id) || [];
                       const loosePids = Array.from(
-                          new Set([
-                              ...node.pids.filter((pid) => !sectionPidSet.has(pid)),
-                              ...liveRefPids.filter((pid) => !sectionPidSet.has(pid)),
-                          ]),
+                          new Set([...node.pids.filter((pid) => !sectionPidSet.has(pid)), ...liveRefPids.filter((pid) => !sectionPidSet.has(pid))]),
                       );
                       return {
                           _id: node._id,
@@ -597,6 +587,64 @@ class CourseDetailHandler extends Handler {
             courseMindmap,
             integrityControlled: !!publishedIntegrity,
         };
+        if (activeView === 'overview' && this.user.hasPerm(PERM.PERM_USERBIND_MANAGE_STUDENTS)) {
+            const ub = global.Hydro?.model?.userbind;
+            const courseGroups = tdoc.courseGroupIds || [];
+            let memberUids: number[] = [];
+            let membersTruncated = false;
+            if (courseGroups.length) {
+                if (typeof ub?.findBoundStudentsByGroupIds !== 'function') {
+                    throw new TypeError('userbind.findBoundStudentsByGroupIds is unavailable');
+                }
+                const boundStudents = await ub.findBoundStudentsByGroupIds(
+                    domainId,
+                    courseGroups.map((groupId) => (groupId instanceof ObjectId ? groupId : new ObjectId(String(groupId)))),
+                );
+                memberUids = uniqueBoundUserIds(boundStudents);
+            } else {
+                const enrollDocs = await training
+                    .getMultiStatus(domainId, { docId: tdoc.docId, uid: { $gt: 1 }, enroll: 1 })
+                    .project({ uid: 1 })
+                    .limit(PRACTICE_ROSTER_ENROLL_LIMIT)
+                    .toArray();
+                memberUids = enrollDocs.map((row) => +row.uid);
+                membersTruncated = enrollDocs.length >= PRACTICE_ROSTER_ENROLL_LIMIT;
+            }
+            const rosterPids = pids.filter((pid) => pdict[pid]?.docId);
+            const scopePids = new Map<number, Set<number>>();
+            for (const node of tdoc.dag || []) {
+                scopePids.set(node._id, new Set([...courseNodePids(node), ...(referencedPidsByChapter.get(node._id) || [])]));
+            }
+            if (memberUids.length && typeof ub?.findStudentsByUserIds !== 'function') {
+                throw new TypeError('userbind.findStudentsByUserIds is unavailable');
+            }
+            if (typeof ub?.listUserGroups !== 'function') throw new TypeError('userbind.listUserGroups is unavailable');
+            const [memberUdict, students, ubGroups, completedPidsByUid] = await Promise.all([
+                user.getListForRender(domainId, memberUids, false),
+                memberUids.length ? ub.findStudentsByUserIds(domainId, memberUids) : {},
+                ub.listUserGroups(domainId),
+                loadCompletedPidsByUid({
+                    domainId,
+                    memberUids,
+                    pids: rosterPids,
+                    publishedIntegrity: !!publishedIntegrity,
+                    containerKind: 'course',
+                    containerId: tdoc.docId,
+                    scopePids,
+                }),
+            ]);
+            this.response.body.membersTruncated = membersTruncated;
+            this.response.body.members = assemblePracticeRosterMembers({
+                memberUids,
+                udict: memberUdict,
+                students,
+                groupNameById: new Map((ubGroups as Array<{ _id: ObjectId; name: string }>).map((group) => [String(group._id), group.name])),
+                completedPidsByUid,
+                total: rosterPids.length,
+            });
+            this.response.body.rosterProblems = serializePracticeRosterProblems(rosterPids, pdict);
+            if (courseGroups.length) this.response.body.rosterGroupIds = courseGroups.map((groupId) => String(groupId));
+        }
     }
 
     @param('tid', Types.ObjectId)
@@ -688,10 +736,7 @@ class CourseEditHandler extends Handler {
                 2,
             );
             if (this.response.body.canAssign) {
-                const assignUsers = await loadCourseAssignUsers(authoritativeDomainId, [
-                    this.tdoc.owner,
-                    ...(this.tdoc.maintainer || []),
-                ]);
+                const assignUsers = await loadCourseAssignUsers(authoritativeDomainId, [this.tdoc.owner, ...(this.tdoc.maintainer || [])]);
                 this.response.body.expectedOwner = this.tdoc.owner;
                 this.response.body.ownerUser = assignUsers[String(this.tdoc.owner)] || courseAssignUserView({}, this.tdoc.owner);
                 this.response.body.maintainerUsers = (this.tdoc.maintainer || [])

@@ -307,6 +307,32 @@ export class ContextualCompletionService {
         }
         return new Map([...identities].map(([uid, completed]) => [uid, completed.size]));
     }
+
+    async getCompletedPidsByUsers(
+        domainId: string,
+        uids: readonly number[],
+        containerKind: PracticeContainerKind,
+        containerId: ObjectId,
+        currentScopePids?: ReadonlyMap<number, ReadonlySet<number>>,
+    ): Promise<Map<number, Set<number>>> {
+        await this.ensureIndexes();
+        if (!uids.length) return new Map();
+        const docs = await this.completions
+            .find({ domainId, uid: { $in: [...new Set(uids)] }, containerKind, containerId })
+            .project({ uid: 1, scopeId: 1, pid: 1 })
+            .toArray();
+        const result = new Map<number, Set<number>>();
+        for (const doc of docs) {
+            if (!isPositiveInteger(doc.uid) || !isPositiveInteger(doc.scopeId) || !isPositiveInteger(doc.pid)) {
+                throw new TypeError(`invalid contextual completion pid projection for ${domainId}/${containerId}`);
+            }
+            if (currentScopePids && !currentScopePids.get(doc.scopeId)?.has(doc.pid)) continue;
+            const completed = result.get(doc.uid) || new Set<number>();
+            completed.add(doc.pid);
+            result.set(doc.uid, completed);
+        }
+        return result;
+    }
 }
 
 export const contextualCompletionColl = db.collection<ContextualCompletionDoc>('practice.contextualCompletions');

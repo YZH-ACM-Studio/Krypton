@@ -264,6 +264,8 @@ describe('contextual completion model', () => {
         expect([...progress.get(2)!]).to.deep.equal([1001]);
         expect(await service.getCompletedCounts('system', [42], 'course', courseId)).to.deep.equal(new Map([[42, 1]]));
         expect(await service.getCompletedCounts('system', [42], 'course', courseId, new Map([[2, new Set([9999])]]))).to.deep.equal(new Map());
+        expect(await service.getCompletedPidsByUsers('system', [42], 'course', courseId)).to.deep.equal(new Map([[42, new Set([1001])]]));
+        expect(await service.getCompletedPidsByUsers('system', [42], 'course', courseId, new Map([[2, new Set([9999])]]))).to.deep.equal(new Map());
     });
 
     it('classifies only an exact identity duplicate as an idempotent concurrent completion', async () => {

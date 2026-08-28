@@ -11,6 +11,7 @@ import { Pagination } from '@/components/ui/pagination';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useBootstrap } from '@/lib/bootstrap';
 import { formatPlainTextSummary, replaceRouteTokens } from '@/lib/format';
+import { PracticeRosterCard, type PracticeRosterMember, type PracticeRosterProblem } from '@/components/practice-roster';
 import { practiceProblemEntryUrl } from '@/lib/practice-integrity';
 import { useChapterQuery } from './course/chapter-query';
 import {
@@ -88,17 +89,6 @@ interface TrainingProblemStatusDoc {
   status?: number;
 }
 
-/** 参加名单 row（P2.3，服务端仅对管理员/教师下发）。 */
-interface TrainingMember {
-  uid: number;
-  uname: string;
-  realName: string;
-  studentId: string;
-  groups: string[];
-  done: number;
-  total: number;
-}
-
 /** Per-training stats derived on the list page. */
 interface TrainingListEntry {
   t: TrainingDoc;
@@ -115,8 +105,9 @@ interface TrainingListEntry {
 }
 
 interface TrainingPageData {
-  members?: TrainingMember[];
+  members?: PracticeRosterMember[];
   membersTruncated?: boolean;
+  rosterProblems?: PracticeRosterProblem[];
   completedProblemCount?: number;
   integrityControlled?: boolean;
   missing?: unknown[];
@@ -397,7 +388,11 @@ function TrainingCard({ e, bs }: { e: TrainingListEntry; bs: ReturnType<typeof u
           {sources.length ? (
             <div className="mt-2 flex flex-wrap gap-1">
               {sources.map((source) => (
-                <Badge key={`${source.kind}:${source.groupId || source.courseId || source.entitlementId || ''}`} variant="outline" className="text-[10px]">
+                <Badge
+                  key={`${source.kind}:${source.groupId || source.courseId || source.entitlementId || ''}`}
+                  variant="outline"
+                  className="text-[10px]"
+                >
                   {problemSetSourceLabel(source)}
                 </Badge>
               ))}
@@ -472,7 +467,11 @@ function TrainingTable({ rows, bs }: { rows: TrainingListEntry[]; bs: ReturnType
                     </Badge>
                   )}
                   {problemSetAccessSources(e.access).map((source) => (
-                    <Badge key={`${source.kind}:${source.groupId || source.courseId || source.entitlementId || ''}`} variant="outline" className="text-[10px]">
+                    <Badge
+                      key={`${source.kind}:${source.groupId || source.courseId || source.entitlementId || ''}`}
+                      variant="outline"
+                      className="text-[10px]"
+                    >
                       {problemSetSourceLabel(source)}
                     </Badge>
                   ))}
@@ -671,7 +670,11 @@ export function TrainingDetailPage() {
                 <span>·</span>
                 <span className="flex flex-wrap items-center gap-1">
                   {accessSources.map((source) => (
-                    <Badge key={`${source.kind}:${source.groupId || source.courseId || source.entitlementId || ''}`} variant="outline" className="text-[10px]">
+                    <Badge
+                      key={`${source.kind}:${source.groupId || source.courseId || source.entitlementId || ''}`}
+                      variant="outline"
+                      className="text-[10px]"
+                    >
                       {problemSetSourceLabel(source)}
                     </Badge>
                   ))}
@@ -788,67 +791,64 @@ export function TrainingDetailPage() {
                 {problemSearch.results.map((row) => {
                   const searchHref = problemSearchEntryUrl(row);
                   return (
-                  <div key={row.docId} className="flex flex-col gap-2 px-3 py-2.5 sm:flex-row sm:items-center">
-                    {searchHref ? (
-                    <a
-                      href={searchHref}
-                      className="min-w-0 flex-1 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    >
-                      <div className="flex min-w-0 items-center gap-2">
-                        {row.status === 'accepted' ? (
-                          <CheckCircle2 className="size-4 shrink-0 text-green-600" />
-                        ) : row.status === 'previouslyAccepted' ? (
-                          <Award className="size-4 shrink-0 text-muted-foreground" />
-                        ) : row.status === 'attempted' || row.status === 'partiallyAccepted' ? (
-                          <Clock className="size-4 shrink-0 text-amber-600" />
-                        ) : (
-                          <span className="size-4 shrink-0 rounded-full border border-muted-foreground/40" aria-hidden="true" />
-                        )}
-                        <span className="shrink-0 font-mono text-xs text-muted-foreground">{row.displayPid}</span>
-                        <span className="truncate text-sm font-medium hover:text-primary">{row.title}</span>
-                      </div>
-                    </a>
-                    ) : (
-                      <div className="min-w-0 flex-1 text-sm text-muted-foreground">
-                        <span className="shrink-0 font-mono text-xs">{row.displayPid}</span> {row.title} · 阶段未解锁
-                      </div>
-                    )}
-                    <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">
-                      <Badge
-                        variant={
-                          row.status === 'accepted'
-                            ? 'default'
-                            : row.status === 'attempted' || row.status === 'partiallyAccepted'
-                              ? 'secondary'
-                              : 'outline'
-                        }
-                        className="text-[10px]"
-                      >
-                        {row.status === 'accepted'
-                          ? '已完成当前题集'
-                          : row.status === 'partiallyAccepted'
-                            ? `已完成 ${row.completedChapterCount}/${row.chapters.length} 个阶段`
-                            : row.status === 'previouslyAccepted'
-                              ? '曾通过，不计当前题集'
-                              : row.status === 'attempted'
-                                ? '尝试中'
-                                : '未尝试'}
-                      </Badge>
-                      {row.chapters.map((chapter) => (
-                        <button
-                          key={chapter.id}
-                          type="button"
-                          onClick={() => selectChapter(chapter.id)}
-                          className="max-w-44 truncate rounded-md border px-2 py-0.5 text-[10px] text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
-                          title={`切换到章节：${chapter.title}`}
+                    <div key={row.docId} className="flex flex-col gap-2 px-3 py-2.5 sm:flex-row sm:items-center">
+                      {searchHref ? (
+                        <a href={searchHref} className="min-w-0 flex-1 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                          <div className="flex min-w-0 items-center gap-2">
+                            {row.status === 'accepted' ? (
+                              <CheckCircle2 className="size-4 shrink-0 text-green-600" />
+                            ) : row.status === 'previouslyAccepted' ? (
+                              <Award className="size-4 shrink-0 text-muted-foreground" />
+                            ) : row.status === 'attempted' || row.status === 'partiallyAccepted' ? (
+                              <Clock className="size-4 shrink-0 text-amber-600" />
+                            ) : (
+                              <span className="size-4 shrink-0 rounded-full border border-muted-foreground/40" aria-hidden="true" />
+                            )}
+                            <span className="shrink-0 font-mono text-xs text-muted-foreground">{row.displayPid}</span>
+                            <span className="truncate text-sm font-medium hover:text-primary">{row.title}</span>
+                          </div>
+                        </a>
+                      ) : (
+                        <div className="min-w-0 flex-1 text-sm text-muted-foreground">
+                          <span className="shrink-0 font-mono text-xs">{row.displayPid}</span> {row.title} · 阶段未解锁
+                        </div>
+                      )}
+                      <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">
+                        <Badge
+                          variant={
+                            row.status === 'accepted'
+                              ? 'default'
+                              : row.status === 'attempted' || row.status === 'partiallyAccepted'
+                                ? 'secondary'
+                                : 'outline'
+                          }
+                          className="text-[10px]"
                         >
-                          {chapter.completed ? '✓ ' : ''}
-                          {chapter.title}
-                        </button>
-                      ))}
+                          {row.status === 'accepted'
+                            ? '已完成当前题集'
+                            : row.status === 'partiallyAccepted'
+                              ? `已完成 ${row.completedChapterCount}/${row.chapters.length} 个阶段`
+                              : row.status === 'previouslyAccepted'
+                                ? '曾通过，不计当前题集'
+                                : row.status === 'attempted'
+                                  ? '尝试中'
+                                  : '未尝试'}
+                        </Badge>
+                        {row.chapters.map((chapter) => (
+                          <button
+                            key={chapter.id}
+                            type="button"
+                            onClick={() => selectChapter(chapter.id)}
+                            className="max-w-44 truncate rounded-md border px-2 py-0.5 text-[10px] text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+                            title={`切换到章节：${chapter.title}`}
+                          >
+                            {chapter.completed ? '✓ ' : ''}
+                            {chapter.title}
+                          </button>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                );
+                  );
                 })}
               </div>
             ) : (
@@ -909,71 +909,71 @@ export function TrainingDetailPage() {
                     {selectedLock === 'no_access' ? '未获得访问权' : '前置阶段未完成'}
                   </div>
                 ) : (
-                <div className="space-y-1.5">
-                  {(selected.pids || []).map((pid: string | number) => {
-                    const p = pdict[String(pid)] || {};
-                    const accepted = selectedStatus.donePids?.map(Number).includes(Number(pid)) || false;
-                    const globalStatus = psdict[String(pid)]?.status;
-                    const attempted = !integrityControlled && !!globalStatus;
-                    const previouslyAccepted = integrityControlled && !accepted && globalStatus === 1;
-                    return (
-                      <a
-                        key={String(pid)}
-                        href={problemEntryUrl(pid, selected._id)}
-                        className={`flex items-center justify-between rounded-md border px-3 py-2 transition-colors hover:bg-accent ${accepted ? 'border-green-200 bg-green-50/30 dark:border-green-900/40 dark:bg-green-950/15' : ''}`}
-                      >
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2">
-                            {accepted ? (
-                              <CheckCircle2 className="size-3.5 text-green-600 shrink-0" />
-                            ) : previouslyAccepted ? (
-                              <Award className="size-3.5 text-muted-foreground shrink-0" />
-                            ) : attempted ? (
-                              <Clock className="size-3.5 text-amber-600 shrink-0" />
-                            ) : null}
-                            <span className="font-mono text-[10px] text-muted-foreground">{pid}</span>
-                            <span className="truncate text-sm font-medium">{p.title || '未命名'}</span>
+                  <div className="space-y-1.5">
+                    {(selected.pids || []).map((pid: string | number) => {
+                      const p = pdict[String(pid)] || {};
+                      const accepted = selectedStatus.donePids?.map(Number).includes(Number(pid)) || false;
+                      const globalStatus = psdict[String(pid)]?.status;
+                      const attempted = !integrityControlled && !!globalStatus;
+                      const previouslyAccepted = integrityControlled && !accepted && globalStatus === 1;
+                      return (
+                        <a
+                          key={String(pid)}
+                          href={problemEntryUrl(pid, selected._id)}
+                          className={`flex items-center justify-between rounded-md border px-3 py-2 transition-colors hover:bg-accent ${accepted ? 'border-green-200 bg-green-50/30 dark:border-green-900/40 dark:bg-green-950/15' : ''}`}
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              {accepted ? (
+                                <CheckCircle2 className="size-3.5 text-green-600 shrink-0" />
+                              ) : previouslyAccepted ? (
+                                <Award className="size-3.5 text-muted-foreground shrink-0" />
+                              ) : attempted ? (
+                                <Clock className="size-3.5 text-amber-600 shrink-0" />
+                              ) : null}
+                              <span className="font-mono text-[10px] text-muted-foreground">{pid}</span>
+                              <span className="truncate text-sm font-medium">{p.title || '未命名'}</span>
+                            </div>
+                            <div className="ml-5 mt-0.5 flex items-center gap-2 text-[10px] text-muted-foreground">
+                              {p.origStat ? (
+                                <>
+                                  <span>
+                                    赛时 {p.origStat.accepted}/{p.origStat.submitted} (
+                                    {p.origStat.submitted > 0 ? Math.round((p.origStat.accepted / p.origStat.submitted) * 100) : 0}%)
+                                  </span>
+                                  <span>·</span>
+                                  <span>
+                                    本站 {p.nAccept || 0}/{p.nSubmit || 0} ({p.nSubmit ? Math.round(((p.nAccept || 0) / p.nSubmit) * 100) : 0}%)
+                                  </span>
+                                </>
+                              ) : (
+                                <>
+                                  <span>通过率 {p.nSubmit ? Math.round(((p.nAccept || 0) / p.nSubmit) * 100) : 0}%</span>
+                                  <span>·</span>
+                                  <span>
+                                    {p.nAccept || 0}/{p.nSubmit || 0}
+                                  </span>
+                                </>
+                              )}
+                            </div>
                           </div>
-                          <div className="ml-5 mt-0.5 flex items-center gap-2 text-[10px] text-muted-foreground">
-                            {p.origStat ? (
-                              <>
-                                <span>
-                                  赛时 {p.origStat.accepted}/{p.origStat.submitted} (
-                                  {p.origStat.submitted > 0 ? Math.round((p.origStat.accepted / p.origStat.submitted) * 100) : 0}%)
-                                </span>
-                                <span>·</span>
-                                <span>
-                                  本站 {p.nAccept || 0}/{p.nSubmit || 0} ({p.nSubmit ? Math.round(((p.nAccept || 0) / p.nSubmit) * 100) : 0}%)
-                                </span>
-                              </>
-                            ) : (
-                              <>
-                                <span>通过率 {p.nSubmit ? Math.round(((p.nAccept || 0) / p.nSubmit) * 100) : 0}%</span>
-                                <span>·</span>
-                                <span>
-                                  {p.nAccept || 0}/{p.nSubmit || 0}
-                                </span>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                        {accepted ? (
-                          <Badge variant="default" className="text-[10px]">
-                            AC
-                          </Badge>
-                        ) : previouslyAccepted ? (
-                          <Badge variant="outline" className="text-[10px]">
-                            曾通过，不计当前题集
-                          </Badge>
-                        ) : attempted ? (
-                          <Badge variant="secondary" className="text-[10px]">
-                            尝试中
-                          </Badge>
-                        ) : null}
-                      </a>
-                    );
-                  })}
-                </div>
+                          {accepted ? (
+                            <Badge variant="default" className="text-[10px]">
+                              AC
+                            </Badge>
+                          ) : previouslyAccepted ? (
+                            <Badge variant="outline" className="text-[10px]">
+                              曾通过，不计当前题集
+                            </Badge>
+                          ) : attempted ? (
+                            <Badge variant="secondary" className="text-[10px]">
+                              尝试中
+                            </Badge>
+                          ) : null}
+                        </a>
+                      );
+                    })}
+                  </div>
                 )}
               </CardContent>
             </Card>
@@ -1041,113 +1041,14 @@ export function TrainingDetailPage() {
 
       {/* 参加名单（P2.3）：服务端仅对管理员/教师下发 members 字段 */}
       {Array.isArray(data.members) ? (
-        <TrainingMembersCard members={data.members} trainingTitle={tdoc.title || ''} truncated={!!data.membersTruncated} />
+        <PracticeRosterCard
+          members={data.members}
+          problems={Array.isArray(data.rosterProblems) ? data.rosterProblems : []}
+          title={tdoc.title || '题集'}
+          truncated={!!data.membersTruncated}
+        />
       ) : null}
     </motion.div>
-  );
-}
-
-/** 参加名单区块（管理员+教师可见；数据由服务端 gate，前端只负责展示/导出）。 */
-function TrainingMembersCard({ members, trainingTitle, truncated }: { members: TrainingMember[]; trainingTitle: string; truncated?: boolean }) {
-  const [q, setQ] = useState('');
-  const kw = q.trim().toLowerCase();
-  const filtered = kw
-    ? members.filter((m) =>
-        [m.uname, m.realName, m.studentId, ...(m.groups || [])].some((f: string) =>
-          String(f || '')
-            .toLowerCase()
-            .includes(kw),
-        ),
-      )
-    : members;
-
-  const exportCsv = () => {
-    // 公式注入防护：uname/realName 学生可控，= + - @ 开头的单元格前置
-    // 单引号，防 Excel 打开时求值（对抗审查发现）。
-    const esc = (v: unknown) => {
-      let s = String(v ?? '');
-      if (/^[=+\-@]/.test(s)) s = `'${s}`;
-      return `"${s.replace(/"/g, '""')}"`;
-    };
-    const lines = [
-      ['用户名', '真实姓名', '学号', '班级组', '已完成题数', '总题数', '完成率'].map(esc).join(','),
-      ...filtered.map((m) =>
-        [
-          m.uname,
-          m.realName,
-          m.studentId,
-          (m.groups || []).join(' / '),
-          m.done,
-          m.total,
-          m.total > 0 ? `${Math.round((m.done / m.total) * 100)}%` : '-',
-        ]
-          .map(esc)
-          .join(','),
-      ),
-    ];
-    // BOM 让 Excel 正确识别 UTF-8 中文
-    const blob = new Blob([`\uFEFF${lines.join('\r\n')}`], { type: 'text/csv;charset=utf-8' });
-    const a = Object.assign(document.createElement('a'), {
-      href: URL.createObjectURL(blob),
-      download: `${trainingTitle || '题集'}-参加名单.csv`,
-    });
-    a.click();
-    URL.revokeObjectURL(a.href);
-  };
-
-  return (
-    <Card className="mt-4">
-      <CardHeader className="pb-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <CardTitle className="text-sm">参加名单</CardTitle>
-          <span className="text-[10px] text-muted-foreground">
-            共 {members.length} 人（仅管理员/教师可见）{truncated ? ' · 仅显示前 1000 人' : ''}
-          </span>
-          <div className="flex-1" />
-          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜索用户名/姓名/学号/班级" className="h-8 w-56 text-xs" />
-          <Button variant="outline" size="sm" onClick={exportCsv} disabled={!filtered.length}>
-            导出 CSV{kw ? `（${filtered.length} 条）` : ''}
-          </Button>
-        </div>
-      </CardHeader>
-      <CardContent className="p-0">
-        <ScrollArea className="max-h-[28rem]" orientation="both">
-          <table className="w-full text-sm">
-            <thead className="sticky top-0 bg-card">
-              <tr className="border-b text-left text-xs text-muted-foreground">
-                <th className="px-4 py-2 font-medium">用户名</th>
-                <th className="px-4 py-2 font-medium">真实姓名</th>
-                <th className="px-4 py-2 font-medium">学号</th>
-                <th className="px-4 py-2 font-medium">班级组</th>
-                <th className="px-4 py-2 text-right font-medium">进度</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-xs text-muted-foreground">
-                    {kw ? '没有匹配的成员' : '还没有人报名'}
-                  </td>
-                </tr>
-              ) : (
-                filtered.map((m) => (
-                  <tr key={m.uid} className="border-b last:border-0 hover:bg-muted/20">
-                    <td className="px-4 py-2">{m.uname}</td>
-                    <td className="px-4 py-2">{m.realName || <span className="text-xs text-muted-foreground">未绑定</span>}</td>
-                    <td className="px-4 py-2 font-mono text-xs">{m.studentId || '—'}</td>
-                    <td className="px-4 py-2 text-xs">{(m.groups || []).join(' / ') || '—'}</td>
-                    <td className="px-4 py-2 text-right font-mono text-xs tabular-nums">
-                      {m.done}/{m.total}
-                      <span className="ml-1 text-muted-foreground">({m.total > 0 ? Math.round((m.done / m.total) * 100) : 0}%)</span>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </ScrollArea>
-      </CardContent>
-    </Card>
   );
 }
 

@@ -239,14 +239,14 @@ export function programmingStatementLimits(configInput: unknown): ProgrammingSta
 export function assertProgrammingStatementComplete(statementInput: unknown, configInput: unknown): ProgrammingStatement {
     const statement = normalizeProgrammingStatement(statementInput);
     const unresolved = [
-        statement.background.state === 'undecided' && 'background',
-        statement.description.state === 'undecided' && 'description',
-        statement.input.state === 'undecided' && 'input',
-        statement.output.state === 'undecided' && 'output',
-        statement.examples.state === 'undecided' && 'examples',
-        statement.hints.state === 'undecided' && 'hints',
+        statement.background.state === 'undecided' && '背景',
+        statement.description.state === 'undecided' && '描述',
+        statement.input.state === 'undecided' && '输入',
+        statement.output.state === 'undecided' && '输出',
+        statement.examples.state === 'undecided' && '样例',
+        statement.hints.state === 'undecided' && '提示',
     ].filter(Boolean);
-    if (unresolved.length) fail('programmingStatement', localizedErrorText`unresolved sections: ${unresolved.join(', ')}`);
+    if (unresolved.length) fail('programmingStatement', localizedErrorText`unresolved sections: ${unresolved.join('、')}`);
     if (statement.description.state !== 'present' || !statement.description.content.trim()) {
         fail('description.content', localizedErrorText`description must be present and non-empty`);
     }

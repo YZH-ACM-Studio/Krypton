@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { expect } from 'chai';
 import { after, beforeEach, describe, it } from 'node:test';
+import { lookupErrorMessageTranslation, resolveErrorTransport } from '@hydrooj/framework';
 
 const Module = require('module');
 (global as any).Hydro ||= { model: {} };
@@ -427,6 +428,14 @@ async function captureFailure(run: () => Promise<unknown>) {
     } catch (error) {
         return error as any;
     }
+}
+
+function presentSelectionError(error: unknown) {
+    return resolveErrorTransport(error, {
+        locale: 'zh-CN',
+        lookup: lookupErrorMessageTranslation,
+        createTraceId: () => 'selection-error-test',
+    });
 }
 
 beforeEach(() => {
@@ -2693,8 +2702,13 @@ describe('P2.11 problem selection assertion', () => {
         };
 
         const error = await captureFailure(() => assertProblemBankSelection('system', [10], makeUser('student'), [10]));
+        const presented = presentSelectionError(error);
 
-        expect(error?.name).to.equal('PermissionError');
+        expect(error?.name).to.equal('ValidationError');
+        expect(presented.error.name).to.equal('ValidationError');
+        expect(presented.error.message).to.include('F10');
+        expect(presented.error.message).to.include('尚未就绪');
+        expect(presented.error.message).to.include('代码评测题草稿尚未完成');
         expect(countCalls).to.deep.equal([]);
         expect(loggerWarnCalls).to.have.length(1);
         expect(loggerWarnCalls[0].slice(0, 7)).to.deep.equal([
@@ -2733,8 +2747,15 @@ describe('P2.11 problem selection assertion', () => {
         };
 
         const error = await captureFailure(() => assertProblemBankSelection('system', [10], makeUser('student'), [10]));
+        const presented = presentSelectionError(error);
 
-        expect(error?.name).to.equal('PermissionError');
+        expect(error?.name).to.equal('ValidationError');
+        expect(presented.error.name).to.equal('ValidationError');
+        expect(presented.error.message).to.include('P10');
+        expect(presented.error.message).to.include('尚未就绪');
+        expect(presented.error.message).to.include('仍有未确认的题面区块');
+        expect(presented.error.message).to.include('背景');
+        expect(presented.error.message).to.include('提示');
         expect(selectionReadCalls[0].filter.$or).to.deep.include({ statementFormat: 'structured-v1' });
         expect(loggerWarnCalls).to.have.length(1);
     });
@@ -2775,6 +2796,9 @@ describe('P2.11 ProblemModel public surface', () => {
         );
         expect(readFileSync(resolve(process.cwd(), 'packages/hydrooj/src/model/problem-access.ts'), 'utf8')).to.include(
             'user.hasPerm(PERM.PERM_VIEW_PROBLEM_BANK)',
+        );
+        expect(readFileSync(resolve(process.cwd(), 'packages/hydrooj/src/model/problem-access.ts'), 'utf8')).to.include(
+            'Problem {0} is not ready to hang in a course, contest, homework, or training. {1}',
         );
         expect(readFileSync(resolve(process.cwd(), 'packages/krypton-permits/src/preload.ts'), 'utf8')).to.include(
             'user._managedContainerPids = managedContainerPids;',

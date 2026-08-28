@@ -664,6 +664,10 @@ const CORE_ERROR_MESSAGE_TRANSLATIONS: Readonly<Record<string, ErrorMessageTrans
         en: 'Problem {0} is already used by contest {1}.',
         'zh-CN': '题目 {0} 已被比赛 {1} 使用。',
     },
+    'Problem {0} is not ready to hang in a course, contest, homework, or training. {1}': {
+        en: 'Problem {0} is not ready to hang in a course, contest, homework, or training. {1}',
+        'zh-CN': '题目 {0} 尚未就绪，不能挂入课程、比赛、作业或训练。{1}',
+    },
     'Problem {0} tags changed. Reload and try again.': {
         en: 'Problem {0} tags changed. Reload and try again.',
         'zh-CN': '题目 {0} 的标签已变化，请刷新后重试。',

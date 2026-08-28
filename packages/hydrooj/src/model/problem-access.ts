@@ -1,7 +1,19 @@
 import type { Filter } from 'mongodb';
 import { Logger } from '@hydrooj/utils';
-import { localizedErrorText, PermissionError, ValidationError } from '../error';
-import { assertProgrammingStatementComplete, compileProgrammingStatement } from '../lib/programming-statement';
+import {
+    getLocalizedErrorMetadata,
+    localizeError,
+    localizeErrorParameter,
+    localizedErrorText,
+    PermissionError,
+    UserFacingError,
+    ValidationError,
+} from '../error';
+import {
+    assertProgrammingStatementComplete,
+    compileProgrammingStatement,
+    ProgrammingStatementValidationError,
+} from '../lib/programming-statement';
 import { courseKindClause, isProblemSetKind } from '../lib/training-kind';
 import { PERM, PRIV } from './builtin';
 import { assertCodeEvaluationLifecyclePatch, assertProblemReadyForUse, CODE_EVALUATION_CANDIDATE_FILTER } from './code-evaluation-lifecycle';
@@ -185,6 +197,36 @@ function selectionDenied(cause?: unknown): Error {
         });
     }
     return denied;
+}
+
+const SELECTION_NOT_READY_TEMPLATE = 'Problem {0} is not ready to hang in a course, contest, homework, or training. {1}';
+
+function throwSelectionNotReady(candidate: { pid?: string; docId: number }, error: unknown): never {
+    const label = candidate.pid || `P${candidate.docId}`;
+    if (error instanceof ProgrammingStatementValidationError) {
+        throw localizeErrorParameter(
+            localizeError(new ValidationError('pids'), SELECTION_NOT_READY_TEMPLATE, label, error.localizedMessage.raw),
+            1,
+            error.localizedMessage.template,
+            ...error.localizedMessage.params,
+        );
+    }
+    if (error instanceof ValidationError) {
+        const detail = getLocalizedErrorMetadata(error)?.parameters.get(2);
+        if (detail) {
+            throw localizeErrorParameter(
+                localizeError(new ValidationError('pids'), SELECTION_NOT_READY_TEMPLATE, label, error.params[2]),
+                1,
+                detail.template,
+                ...detail.params,
+            );
+        }
+        throw localizeError(new ValidationError('pids'), SELECTION_NOT_READY_TEMPLATE, label, error);
+    }
+    if (error instanceof UserFacingError) {
+        throw localizeError(new ValidationError('pids'), SELECTION_NOT_READY_TEMPLATE, label, error);
+    }
+    throw selectionDenied(error);
 }
 
 /** Assert that request-local ACL state belongs to the authoritative domain. */
@@ -1568,8 +1610,8 @@ export async function readStableEditableProblem(
  * Validate every selected code-evaluation problem through the full ready gate,
  * then check only newly selected ids against the caller's bank scope.
  * Existing/grandfathered references survive later permission changes, but can
- * never grandfather an incomplete draft. One scoped count keeps missing and
- * unauthorized ids indistinguishable.
+ * never grandfather an incomplete draft. Ready-gate failures name the pid;
+ * one scoped count keeps missing and unauthorized ids indistinguishable.
  */
 export async function assertProblemBankSelection(
     domainId: string,
@@ -1629,7 +1671,7 @@ export async function assertProblemBankSelection(
                     candidate.structureRevision ?? '-',
                     error,
                 );
-                throw selectionDenied();
+                throwSelectionNotReady(candidate, error);
             }
         }
     }

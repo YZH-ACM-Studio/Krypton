@@ -747,9 +747,9 @@ class CourseEditHandler extends Handler {
     }
 
     @param('tid', Types.ObjectId, true)
-    @param('title', Types.Title)
-    @param('content', Types.Content)
-    @param('chapters', Types.Content)
+    @param('title', Types.Title, true)
+    @param('content', Types.Content, true)
+    @param('chapters', Types.Content, true)
     @param('description', Types.Content, true)
     @param('term', Types.String, true)
     @param('courseGroupIds', Types.CommaSeperatedArray, true)
@@ -757,14 +757,19 @@ class CourseEditHandler extends Handler {
     async post(
         _domainId: string,
         tid: ObjectId,
-        title: string,
-        content: string,
-        chaptersJson: string,
+        title?: string,
+        content?: string,
+        chaptersJson?: string,
         description = '',
         term = '',
         courseGroupIds: string[] = [],
         mindmapId = '',
     ) {
+        // Framework runs `post` before `postAssign`/`postDelete`; those POSTs omit the save payload.
+        if (this.args?.operation || this.request.body?.operation) return;
+        if (title === undefined) throw new ValidationError('title');
+        if (content === undefined) throw new ValidationError('content');
+        if (chaptersJson === undefined) throw new ValidationError('chapters');
         const authoritativeDomainId = String(this.domain?._id);
         problem.assertProblemAclDomain(this.user, authoritativeDomainId);
         const dag = await parseChaptersJson(authoritativeDomainId, chaptersJson);

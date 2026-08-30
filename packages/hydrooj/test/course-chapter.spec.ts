@@ -52,3 +52,20 @@ describe('course chapter sections', () => {
         expect(readSrc('src/model/problem-lifecycle.ts')).to.include("{ 'dag.sections.pids': pid }");
     });
 });
+
+describe('course edit operation dispatch', () => {
+    it('does not require save fields on the shared post entry before assign or delete', () => {
+        const course = readSrc('src/handler/course.ts');
+        const postStart = course.indexOf('\n    async post(');
+        expect(postStart).to.be.greaterThan(0);
+        const decoratorBlock = course.slice(course.lastIndexOf("@param('tid', Types.ObjectId, true)", postStart), postStart);
+        expect(decoratorBlock).to.include("@param('title', Types.Title, true)");
+        expect(decoratorBlock).to.include("@param('content', Types.Content, true)");
+        expect(decoratorBlock).to.include("@param('chapters', Types.Content, true)");
+        const postBody = course.slice(postStart, course.indexOf('async postDelete'));
+        expect(postBody).to.match(/if \(this\.args\?\.operation \|\| this\.request\.body\?\.operation\) return;/);
+        expect(postBody).to.include("throw new ValidationError('title')");
+        expect(postBody).to.include("throw new ValidationError('content')");
+        expect(postBody).to.include("throw new ValidationError('chapters')");
+    });
+});

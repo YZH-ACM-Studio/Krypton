@@ -365,24 +365,25 @@ const courseRoutes: Record<string, any> = {};
 const originalLoad = Module._load;
 Module._load = function load(request: string, parent: NodeModule, isMain: boolean) {
     const fromHandler = parent?.filename?.includes('/packages/hydrooj/src/handler/');
+    const fromSrc = parent?.filename?.includes('/packages/hydrooj/src/');
     if (fromHandler && request === '../error') return errors;
-    if (fromHandler && request === '../model/builtin') return { PERM, PRIV, STATUS };
-    if (fromHandler && request === '../model/contest') return contestStub;
-    if (fromHandler && request === '../model/contextual-completion') return contextualCompletionStub;
-    if (fromHandler && request === '../model/document') return { getMultiStatus: () => cursor(), TYPE_PROBLEM: 10 };
-    if (fromHandler && request === '../model/oplog') {
+    if (fromSrc && request === '../model/builtin') return { PERM, PRIV, STATUS };
+    if (fromSrc && request === '../model/contest') return contestStub;
+    if (fromSrc && request === '../model/contextual-completion') return contextualCompletionStub;
+    if (fromSrc && request === '../model/document') return { getMultiStatus: () => cursor(), TYPE_PROBLEM: 10 };
+    if (fromSrc && request === '../model/oplog') {
         return {
             async log() {
                 return undefined;
             },
         };
     }
-    if (fromHandler && request === '../model/practice-integrity') return practiceIntegrityStub;
-    if (fromHandler && request === '../model/problem') return problemStub;
-    if (fromHandler && request === '../model/problem-access') return problemAccessStub;
-    if (fromHandler && request === '../model/storage') return storageStub;
-    if (fromHandler && request === '../model/system') return { get: () => 1000 };
-    if (fromHandler && request === '../model/problem-set-access') {
+    if (fromSrc && request === '../model/practice-integrity') return practiceIntegrityStub;
+    if (fromSrc && request === '../model/problem') return problemStub;
+    if (fromSrc && request === '../model/problem-access') return problemAccessStub;
+    if (fromSrc && request === '../model/storage') return storageStub;
+    if (fromSrc && request === '../model/system') return { get: () => 1000 };
+    if (fromSrc && request === '../model/problem-set-access') {
         return {
             canManageProblemSet(user: any, tdoc: any) {
                 return user.own?.(tdoc) || user.hasPerm?.(PERM.PERM_EDIT_TRAINING);
@@ -422,8 +423,8 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
             },
         };
     }
-    if (fromHandler && request === '../model/training') return trainingStub;
-    if (fromHandler && request === '../model/user') return userStub;
+    if (fromSrc && request === '../model/training') return trainingStub;
+    if (fromSrc && request === '../model/user') return userStub;
     if (fromHandler && request === '../service/server') return serverStub;
     if (parent?.filename?.includes('/lib/course-live-ref.ts') && request === '../model/training') return trainingStub;
     return originalLoad.call(this, request, parent, isMain);
@@ -829,6 +830,48 @@ describe('P3.8 course workspace capabilities', () => {
         await missing.prepare('forged-domain', 'course');
         const missingUser = await captureFailure(() => missing.postAssign('forged-domain', 'course', 7, 99, []));
         expect(missingUser?.message).to.equal('课程分配对象不存在');
+    });
+
+    it('does not run the ordinary course save pipeline before assign or delete operations', async () => {
+        currentContainer = { domainId: 'system', docId: 'course', owner: 7, maintainer: [], kind: 'course', title: 'Own', dag: [] };
+        const editor = makeHandler(
+            courseRoutes.course_edit,
+            makeUser({
+                hasPerm: (perm: bigint) => perm === PERM.PERM_EDIT_COURSE || perm === PERM.PERM_VIEW_PROBLEM,
+                hasPriv: (priv: number) => priv === PRIV.PRIV_USER_PROFILE,
+            }),
+        );
+        editor.tdoc = currentContainer;
+        editor.args = { operation: 'assign' };
+        editor.request.body = { operation: 'assign', expectedOwner: '7', owner: '42' };
+        await editor.post('forged-domain', 'course');
+        expect(calls.edit).to.deep.equal([]);
+        expect(calls.add).to.deep.equal([]);
+
+        editor.args = { operation: 'delete' };
+        editor.request.body = { operation: 'delete' };
+        await editor.post('forged-domain', 'course');
+        expect(calls.edit).to.deep.equal([]);
+        expect(calls.add).to.deep.equal([]);
+        expect(calls.assign).to.deep.equal([]);
+    });
+
+    it('still requires title, content, and chapters for ordinary course saves', async () => {
+        const handler = makeHandler(courseRoutes.course_create);
+        const missingTitle = await captureFailure(() => handler.post('forged-domain', null));
+        expect(missingTitle?.name).to.equal('ValidationError');
+        expect(missingTitle?.message).to.equal('title');
+        expect(calls.add).to.have.length(0);
+
+        const missingContent = await captureFailure(() => handler.post('forged-domain', null, 'Course'));
+        expect(missingContent?.name).to.equal('ValidationError');
+        expect(missingContent?.message).to.equal('content');
+        expect(calls.add).to.have.length(0);
+
+        const missingChapters = await captureFailure(() => handler.post('forged-domain', null, 'Course', 'Overview'));
+        expect(missingChapters?.name).to.equal('ValidationError');
+        expect(missingChapters?.message).to.equal('chapters');
+        expect(calls.add).to.have.length(0);
     });
 
     it('publishes assign users on the course list only for edit-all actors', async () => {

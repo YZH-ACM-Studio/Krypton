@@ -44,6 +44,9 @@ describe('p3.8 course workspace', () => {
     }
     expect(editor).to.include('data-course-slot="collaborators"');
     expect(editor).to.include('CourseAssignForm');
+    const assign = readFileSync(resolve(root, 'src/pages/course/assign.tsx'), 'utf8');
+    expect(assign).to.match(/new URLSearchParams\(\{\s*operation: 'assign',\s*expectedOwner:/);
+    expect(assign).not.to.match(/URLSearchParams\([\s\S]*title:/);
     const list = readFileSync(resolve(root, 'src/pages/course/list.tsx'), 'utf8');
     expect(list).to.include('CourseAssignDialog');
     expect(list).to.include('分配');
@@ -62,6 +65,8 @@ describe('p3.8 course workspace', () => {
     expect(handler).to.include('canCreate,');
     expect(handler).to.include('canAssign,');
     expect(handler).to.include('async postAssign(');
+    expect(handler).to.include("@param('title', Types.Title, true)");
+    expect(handler).to.match(/if \(this\.args\?\.operation \|\| this\.request\.body\?\.operation\) return;/);
     expect(handler).to.include('training.assignCourseOwnership');
     expect(handler).to.include('managedIds,');
     expect(handler).to.include('canManage,');

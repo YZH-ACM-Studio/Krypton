@@ -207,8 +207,9 @@ PERM.PERM_ADMIN = PERM.PERM_ALL;
 PERM.PERM_STUDENT = PERM.PERM_DEFAULT & ~PERM.PERM_CREATE_TRAINING;
 
 // 教师 — everything a student has, plus authoring (problems / contests /
-// homework / courses), student-data ops, rankboard data import and reading
-// student submissions. Structural / destructive ops stay with admin.
+// homework / courses), student-data ops, and reading student submissions.
+// Structural / destructive ops stay with admin. Rankboard import/manage
+// are not teacher capabilities; honor data is an admin-only workbench.
 // Deliberately NOT granted: PERM_READ_PROBLEM_DATA (owning a problem already
 // covers downloading its own testdata — the global bit would let any teacher
 // pull another teacher's unpublished contest data).
@@ -228,7 +229,6 @@ PERM.PERM_TEACHER =
     PERM.PERM_READ_RECORD_CODE |
     PERM.PERM_REJUDGE_PROBLEM |
     PERM.PERM_CREATE_TASK |
-    PERM.PERM_RANKBOARD_IMPORT |
     PERM.PERM_USERBIND_MANAGE_STUDENTS |
     PERM.PERM_CREATE_EXAM_EVENT |
     PERM.PERM_CREATE_REDEMPTION_CODE;

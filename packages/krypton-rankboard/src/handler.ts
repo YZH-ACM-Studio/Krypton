@@ -107,10 +107,10 @@ class RankBoardDetailHandler extends Handler {
 }
 
 /**
- * 权限分层（PLAN 2026-07-02 §1）：
- *  - 进入 admin 页面：站点管理员 或 持 PERM_RANKBOARD_IMPORT / MANAGE 的角色（教师）。
+ * 权限分层（PLAN 2026-07-02 §1，教师默认包已不含荣誉写权限）：
+ *  - 进入 admin 页面：站点管理员 或 持 PERM_RANKBOARD_IMPORT / MANAGE 的角色。
  *  - 数据操作（导入/录奖/传照片/编辑人员）：PERM_RANKBOARD_IMPORT。
- *  - 结构操作（奖项类型/计分权重/删除人员）：PERM_RANKBOARD_MANAGE，教师默认没有。
+ *  - 结构操作（奖项类型/计分权重/删除人员）：PERM_RANKBOARD_MANAGE。
  */
 /**
  * 荣誉榜是 system 域全局单例。`this.user.hasPerm` 按**请求所在域**求值——

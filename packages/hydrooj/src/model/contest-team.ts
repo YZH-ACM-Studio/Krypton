@@ -39,6 +39,8 @@ export interface ContestTeamDoc {
     sourceBatchTeamId?: ObjectId;
     snapshotId?: ObjectId;
     snapshotState?: 'preparing' | 'active';
+    /** Optional unofficial-star flag. Missing/false = official. */
+    unrank?: boolean;
     /** Request-local warning; never persisted. */
     vigilRoleSyncWarning?: string;
 }
@@ -586,6 +588,74 @@ export async function updateTeam(
         );
     }
     return outcome.updated;
+}
+
+export async function setTeamUnrank(
+    domainId: string,
+    contestId: ObjectId,
+    teamId: ObjectId,
+    actor: ContestTeamActor,
+    input: { expectedRevision: number; unrank: boolean },
+): Promise<ContestTeamDoc> {
+    if (input.unrank !== true && input.unrank !== false) throw new ValidationError('unrank', null, localizedErrorText`打星标记必须是布尔值。`);
+    const auditData: TeamAuditData = {
+        operation: 'set-unrank',
+        domainId,
+        contestId,
+        teamId,
+        actorUid: actor.user._id,
+        targetUids: [],
+        fromRevision: Number.isSafeInteger(input.expectedRevision) ? input.expectedRevision : 0,
+    };
+    const updated = await withContestTeamBoundary(domainId, contestId, async () =>
+        auditedMutation(
+            auditData,
+            async () => {
+                const tdoc = await assertTeamContest(domainId, contestId);
+                const current = await loadActiveTeam(domainId, contestId, teamId);
+                auditData.fromRevision = current.revision;
+                if (current.revision !== input.expectedRevision) teamConflict('revision_mismatch');
+                const admin = canManageContestTeams(actor.user, tdoc);
+                const now = actor.now || new Date();
+                if (!admin) {
+                    if (current.captainUid !== actor.user._id) throw new PermissionError(PERM.PERM_EDIT_CONTEST_SELF);
+                    if (started(tdoc, now)) teamConflict('contest_started');
+                }
+                const latestContest = await contest.get(domainId, contestId);
+                if (
+                    contest.getParticipationMode(latestContest) !== 'team' ||
+                    latestContest.rule !== 'acm' ||
+                    (latestContest.participationRevision ?? 0) !== (tdoc.participationRevision ?? 0)
+                ) {
+                    teamConflict('participation_mode_changed');
+                }
+                if (!admin && started(latestContest, actor.now || new Date())) teamConflict('contest_started');
+                let next: ContestTeamDoc;
+                try {
+                    next = await coll.findOneAndUpdate(
+                        { domainId, contestId, teamId, active: true, revision: current.revision },
+                        { $set: { unrank: input.unrank, updatedAt: actor.now || new Date() }, $inc: { revision: 1 } },
+                        { returnDocument: 'after' },
+                    );
+                } catch (error) {
+                    duplicateConflict(error);
+                }
+                if (!next) teamConflict('revision_mismatch');
+                return next;
+            },
+            (result) => result.revision,
+        ),
+    );
+    console.info('[contest-team] set-unrank', {
+        domainId,
+        contestId,
+        teamId,
+        actorUid: actor.user._id,
+        unrank: input.unrank,
+        revision: updated.revision,
+        stage: 'committed',
+    });
+    return updated;
 }
 
 async function refreshTeamRoleSessionsAfterCommit(before: ContestTeamDoc, after: ContestTeamDoc, actorUid: number): Promise<void> {

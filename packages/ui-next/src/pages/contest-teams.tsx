@@ -1,6 +1,22 @@
 import { useCallback, useState, type FormEvent, type ReactNode } from 'react';
 import { motion } from 'motion/react';
-import { AlertTriangle, ArrowLeft, Copy, Crown, Lock, LockOpen, LogOut, Pencil, Plus, Search, ShieldCheck, UserPlus, Users, X } from 'lucide-react';
+import {
+  AlertTriangle,
+  ArrowLeft,
+  Copy,
+  Crown,
+  Lock,
+  LockOpen,
+  LogOut,
+  Pencil,
+  Plus,
+  Search,
+  ShieldCheck,
+  Star,
+  UserPlus,
+  Users,
+  X,
+} from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -40,6 +56,7 @@ interface TeamView {
   managementMode: 'self' | 'admin';
   revision: number;
   active: boolean;
+  unrank?: boolean;
   createdAt: string;
   updatedAt: string;
   emergencyConfirmation?: string;
@@ -94,6 +111,7 @@ interface ContestTeamsPageData {
     canLeave?: boolean;
     canManage?: boolean;
     canReopen?: boolean;
+    canSetOwnUnrank?: boolean;
     started?: boolean;
   };
   teams?: TeamView[];
@@ -119,6 +137,15 @@ function teamUser(users: Record<string, TeamUser>, uid: number): TeamUser {
 
 function studentIdentity(user: TeamUser) {
   return [user.studentId ? `学号 ${user.studentId}` : '', user.realName].filter(Boolean).join(' · ');
+}
+
+function unrankConfirm(team: TeamView, next: boolean): ConfirmAction {
+  return {
+    title: next ? `将「${team.name}」设为打星参赛？` : `将「${team.name}」恢复为正式参赛？`,
+    description: next ? '打星后这支队伍仍会出现在榜上，但正式名次显示为 *，旁边正式队伍的名次会让开。' : '恢复后这支队伍会重新占用正式名次。',
+    operation: 'set_unrank',
+    fields: { teamId: team.teamId, expectedRevision: team.revision, unrank: next ? 'true' : 'false' },
+  };
 }
 
 function ConfirmDialog({ action, onClose }: { action: ConfirmAction | null; onClose: () => void }) {
@@ -379,6 +406,12 @@ export function ContestTeamsPage() {
                       <Badge variant={ownTeam.managementMode === 'admin' ? 'default' : 'secondary'}>
                         {ownTeam.managementMode === 'admin' ? '管理员编队' : '自主队伍'}
                       </Badge>
+                      {ownTeam.unrank ? (
+                        <Badge variant="outline" className="gap-1">
+                          <Star className="size-3" />
+                          已打星
+                        </Badge>
+                      ) : null}
                     </CardTitle>
                     <p className="mt-2 text-sm text-muted-foreground">{ownTeam.description || '暂无队伍说明'}</p>
                   </div>
@@ -430,6 +463,19 @@ export function ContestTeamsPage() {
                     ) : null
                   }
                 />
+
+                {capabilities.canManage || capabilities.canSetOwnUnrank ? (
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
+                    <p className="text-xs text-muted-foreground">
+                      {ownTeam.unrank ? '本队当前是打星参赛，正式名次会让开。' : '打星后仍会出现在榜上，正式名次显示为 *。'}
+                    </p>
+                    <Button type="button" variant="outline" onClick={() => setConfirmAction(unrankConfirm(ownTeam, !ownTeam.unrank))}>
+                      <Star className="size-4" /> {ownTeam.unrank ? '恢复正式' : '打星参赛'}
+                    </Button>
+                  </div>
+                ) : ownTeam.unrank ? (
+                  <p className="rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground">本队已打星。比赛开始后如需改回正式，请联系管理员。</p>
+                ) : null}
 
                 {capabilities.canLeave ? (
                   <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
@@ -687,6 +733,12 @@ export function ContestTeamsPage() {
                       <Badge variant={team.managementMode === 'admin' ? 'default' : 'secondary'} className="shrink-0 text-[10px]">
                         {team.managementMode === 'admin' ? '管理员' : '自主'}
                       </Badge>
+                      {team.unrank ? (
+                        <Badge variant="outline" className="shrink-0 gap-1 text-[10px]">
+                          <Star className="size-3" />
+                          已打星
+                        </Badge>
+                      ) : null}
                     </div>
                     <p className="mt-1 truncate text-xs text-muted-foreground">{team.description || '无说明'}</p>
                     <p className="mt-2 font-mono text-[10px] text-muted-foreground">
@@ -717,6 +769,14 @@ export function ContestTeamsPage() {
                   </div>
 
                   <div className="flex justify-end gap-2 xl:justify-self-end">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-10 rounded-xl px-3 transition-[scale,background-color,border-color] duration-150 active:scale-[0.96] motion-reduce:transition-none"
+                      onClick={() => setConfirmAction(unrankConfirm(team, !team.unrank))}
+                    >
+                      <Star className="size-3.5" /> {team.unrank ? '恢复正式' : '打星'}
+                    </Button>
                     <Button
                       type="button"
                       variant="outline"

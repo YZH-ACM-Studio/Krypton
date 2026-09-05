@@ -41,6 +41,7 @@ function publicTeam(team: contestTeam.ContestTeamDoc, includeEmergencyConfirmati
         managementMode: team.managementMode,
         revision: team.revision,
         active: team.active,
+        unrank: team.unrank === true,
         createdAt: team.createdAt,
         updatedAt: team.updatedAt,
         ...(includeEmergencyConfirmation ? { emergencyConfirmation: contestTeam.emergencyTeamConfirmation(team.teamId, team.revision) } : {}),
@@ -183,6 +184,7 @@ export class ContestTeamsHandler extends Handler {
                 canInvite: !started && ownTeam?.managementMode === 'self' && ownTeam.captainUid === this.user._id && ownTeam.memberUids.length < 3,
                 canEditOwn: !started && !!ownTeam && (this.canManage || ownTeam.captainUid === this.user._id),
                 canLeave: !started && !!ownTeam && ownTeam.managementMode === 'self',
+                canSetOwnUnrank: !started && !!ownTeam && ownTeam.captainUid === this.user._id,
                 started,
             },
             teams: teams.map((team) => publicTeam(team, true)),
@@ -371,6 +373,15 @@ export class ContestTeamsHandler extends Handler {
     async postDeactivate(_domainId: string, tid: ObjectId, teamId: ObjectId, expectedRevision: number) {
         this.requireManager();
         await contestTeam.updateTeam(this.domainId(), tid, teamId, this.actor(), { expectedRevision, active: false });
+        this.redirectToTeams(tid);
+    }
+
+    @param('tid', Types.ObjectId)
+    @param('teamId', Types.ObjectId)
+    @param('expectedRevision', Types.UnsignedInt)
+    @param('unrank', Types.Boolean)
+    async postSetUnrank(_domainId: string, tid: ObjectId, teamId: ObjectId, expectedRevision: number, unrank: boolean) {
+        await contestTeam.setTeamUnrank(this.domainId(), tid, teamId, this.actor(), { expectedRevision, unrank });
         this.redirectToTeams(tid);
     }
 }

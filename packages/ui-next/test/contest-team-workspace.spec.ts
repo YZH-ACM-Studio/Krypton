@@ -81,6 +81,13 @@ describe('p1.12 team assembly workspace contracts', () => {
     expect(page).to.include('高风险赛中调整');
     expect(page).to.include('已有成绩绑定稳定 teamId，不会转移或重算');
     expect(handler).not.to.match(/presence|onlineUsers|socketPresence/i);
+    expect(handler).to.include('async postSetUnrank');
+    expect(handler).to.include('contestTeam.setTeamUnrank');
+    expect(model).to.include('export async function setTeamUnrank');
+    expect(model).to.include("operation: 'set-unrank'");
+    expect(page).to.include('function unrankConfirm');
+    expect(page).to.include('打星参赛');
+    expect(handler).to.include('unrank: team.unrank === true');
   });
 
   it('provides all required self and admin operations through branded dialogs', () => {
@@ -97,6 +104,7 @@ describe('p1.12 team assembly workspace contracts', () => {
       'create_admin',
       'update_admin',
       'deactivate',
+      'set_unrank',
     ]) {
       expect(page, `missing operation ${operation}`).to.include(operation);
     }

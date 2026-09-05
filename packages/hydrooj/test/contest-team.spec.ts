@@ -1149,4 +1149,89 @@ describe('P1.12 invitation and assignment lifecycle', () => {
         expect(invites.filter((invite) => invite.teamId.equals(converted.teamId) && invite.status === 'pending')).to.have.length(0);
         await rejects(teamModel.createInvite('system', currentContest.docId, { user: actor(10) }, 11), TestPermissionError);
     });
+
+    it('lets the captain star the whole team before start and rejects members or post-start captain writes', async () => {
+        const team = await teamModel.createTeam(
+            'system',
+            currentContest.docId,
+            { user: actor(10) },
+            { name: 'Star team', memberUids: [10], captainUid: 10, managementMode: 'self' },
+        );
+        expect(team.unrank).to.equal(undefined);
+        const fromRevision = team.revision;
+        const starred = await teamModel.setTeamUnrank(
+            'system',
+            currentContest.docId,
+            team.teamId,
+            { user: actor(10) },
+            {
+                expectedRevision: fromRevision,
+                unrank: true,
+            },
+        );
+        expect(starred.unrank).to.equal(true);
+        expect(starred.revision).to.equal(fromRevision + 1);
+        expect(roleEvents()).to.have.length(0);
+        expect(audit.some((entry) => entry.type === 'contest.team.set-unrank' && entry.result === 'success' && !entry.targetUids?.length)).to.equal(
+            true,
+        );
+
+        const invited = await teamModel.createInvite('system', currentContest.docId, { user: actor(10) }, 11);
+        await teamModel.acceptInvite('system', currentContest.docId, invited.inviteId, { user: actor(11) });
+        const current = docs[0];
+        await rejects(
+            teamModel.setTeamUnrank(
+                'system',
+                currentContest.docId,
+                current.teamId,
+                { user: actor(11) },
+                { expectedRevision: current.revision, unrank: false },
+            ),
+            TestPermissionError,
+        );
+        expect(docs[0].unrank).to.equal(true);
+
+        currentContest.beginAt = new Date('2000-01-01T00:00:00Z');
+        await rejects(
+            teamModel.setTeamUnrank(
+                'system',
+                currentContest.docId,
+                current.teamId,
+                { user: actor(10) },
+                { expectedRevision: current.revision, unrank: false },
+            ),
+            TestConflictError,
+        );
+        const restored = await teamModel.setTeamUnrank(
+            'system',
+            currentContest.docId,
+            current.teamId,
+            { user: actor(99, true) },
+            { expectedRevision: current.revision, unrank: false },
+        );
+        expect(restored.unrank).to.equal(false);
+        expect(docs[0].unrank).to.equal(false);
+        expect(roleEvents()).to.have.length(1);
+    });
+
+    it('fails closed on set-unrank revision mismatch and does not touch batch documents', async () => {
+        const team = await teamModel.createTeam(
+            'system',
+            currentContest.docId,
+            { user: actor(10) },
+            { name: 'CAS star', memberUids: [10], captainUid: 10, managementMode: 'self' },
+        );
+        await rejects(
+            teamModel.setTeamUnrank(
+                'system',
+                currentContest.docId,
+                team.teamId,
+                { user: actor(10) },
+                { expectedRevision: team.revision + 1, unrank: true },
+            ),
+            TestConflictError,
+        );
+        expect(docs[0].unrank).to.equal(undefined);
+        expect(docs[0].revision).to.equal(1);
+    });
 });

@@ -2,8 +2,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   canSubmitProblemMode,
+  filterOfficialScoreboardRows,
   getContestProblemStatus,
   getPersonalPracticeStatus,
+  isUnofficialScoreboardRank,
+  officialOnlyFromLocation,
   postContestProblemEntryUrl,
   prioritizeCurrentScoreboardRows,
   scoreboardScoreColor,
@@ -227,5 +230,41 @@ describe('scoreboardScoreColor', () => {
     expect(scoreboardScoreColor(140)).to.equal('#25ad40');
     expect(scoreboardScoreColor(undefined)).to.equal(undefined);
     expect(scoreboardScoreColor('not-a-score')).to.equal(undefined);
+  });
+});
+
+describe('official-only scoreboard filter', () => {
+  it('hides 0 / "0" / * ranks and keeps numeric official rows', () => {
+    expect(isUnofficialScoreboardRank(0)).to.equal(true);
+    expect(isUnofficialScoreboardRank('0')).to.equal(true);
+    expect(isUnofficialScoreboardRank('*')).to.equal(true);
+    expect(isUnofficialScoreboardRank('1')).to.equal(false);
+    const rows: ScoreboardDisplayCell[][] = [
+      [
+        { type: 'rank', value: '1' },
+        { type: 'user', raw: 12 },
+      ],
+      [
+        { type: 'rank', value: '0' },
+        { type: 'user', raw: 11 },
+      ],
+      [
+        { type: 'rank', value: '*' },
+        { type: 'user', raw: 13 },
+      ],
+      [
+        { type: 'rank', value: 2 },
+        { type: 'user', raw: 14 },
+      ],
+    ];
+    expect(filterOfficialScoreboardRows(rows).map((row) => row[1]?.raw)).to.deep.equal([12, 14]);
+  });
+
+  it('reads official-only from hash and falls back to local storage', () => {
+    expect(officialOnlyFromLocation('#filter=rank')).to.equal(true);
+    expect(officialOnlyFromLocation('#official')).to.equal(true);
+    expect(officialOnlyFromLocation('#filter=all')).to.equal(false);
+    expect(officialOnlyFromLocation('', '1')).to.equal(true);
+    expect(officialOnlyFromLocation('', '0')).to.equal(false);
   });
 });

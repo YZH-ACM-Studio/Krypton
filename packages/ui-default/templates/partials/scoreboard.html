@@ -47,7 +47,8 @@
           {%- for column in row -%}
             <td class="col--{{ rows[0][loop.index0]['type'] }}"{% if column.style %} style="{{ column.style }}"{% endif %}>
             {%- if column.type == 'rank' -%}
-              <span class="{{ 'rank--unrank' if column.value == '0' else 'rank--normal' }}">{{ '*' if column.value == '0' else column.value|string|nl2br|safe }}</span>
+              {%- set unofficial = column.value == '0' or column.value == '*' -%}
+              <span class="{{ 'rank--unrank' if unofficial else 'rank--normal' }}">{{ '*' if unofficial else column.value|string|nl2br|safe }}</span>
             {%- elif column.type == 'user' -%}
               {%- set canView = canViewAll or handler.user._id == column.raw -%}
               <button class="star user--{{ column.raw }}" data-uid="{{ column.raw }}">

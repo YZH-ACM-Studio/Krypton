@@ -3,6 +3,7 @@ import { getScoreColor } from '@hydrooj/common';
 export interface ScoreboardDisplayCell {
   type?: string;
   raw?: unknown;
+  value?: string | number;
 }
 
 export function scoreboardScoreColor(percentage: unknown): string | undefined {
@@ -115,4 +116,23 @@ export function prioritizeCurrentScoreboardRows<T extends ScoreboardDisplayCell[
     (scoreboardRowMatches(row, participantColumn, participantId) ? own : others).push(row);
   }
   return own.length ? [...own, ...others] : rows;
+}
+
+export function isUnofficialScoreboardRank(value: unknown): boolean {
+  return value === 0 || value === '0' || value === '*';
+}
+
+export function scoreboardRankCell<T extends ScoreboardDisplayCell>(row: T[]): T | undefined {
+  return row.find((cell) => cell.type === 'rank');
+}
+
+export function filterOfficialScoreboardRows<T extends ScoreboardDisplayCell[]>(rows: T[]): T[] {
+  return rows.filter((row) => !isUnofficialScoreboardRank(scoreboardRankCell(row)?.value));
+}
+
+export function officialOnlyFromLocation(hash: string, stored?: string | null): boolean {
+  const normalized = hash.startsWith('#') ? hash.slice(1) : hash;
+  if (normalized === 'filter=rank' || normalized === 'official') return true;
+  if (normalized === 'filter=all' || normalized === 'all') return false;
+  return stored === '1' || stored === 'true';
 }

@@ -15,6 +15,8 @@ describe('p1.13 team scoring and record-access contracts', () => {
   const contestsPage = source('packages/ui-next/src/pages/contests.tsx');
   const managePage = source('packages/ui-next/src/pages/contest-manage.tsx');
   const rating = source('packages/hydrooj/src/script/rating.ts');
+  const teamStatus = source('packages/hydrooj/src/model/contest-team-status.ts');
+  const batchModel = source('packages/hydrooj/src/model/contest-team-batch.ts');
 
   it('aggregates the default, HTML, CSV and Ghost views by stable team identity', () => {
     expect(contestModel).to.include('getTeamScoreboardEntries');
@@ -66,5 +68,21 @@ describe('p1.13 team scoring and record-access contracts', () => {
 
   it('explicitly excludes team contests from personal rating calculation', () => {
     expect(rating).to.include("participationMode: { $ne: 'team' }");
+    expect(rating).to.include('contestRpRatingInput');
+  });
+
+  it('projects ContestTeam.unrank onto ranked entries and does not copy starring from batch snapshots', () => {
+    expect(teamStatus).to.include('unrank: isContestUnofficial(team.unrank)');
+    expect(teamStatus).not.to.include('isContestUnofficial(status.unrank)');
+    expect(batchModel).not.to.match(/unrank:\s*source\.unrank/);
+    expect(contestHandler).to.include("param('unrank', Types.Boolean, true)");
+    expect(contestHandler).to.include('assertIndividualContestUnrankAllowed');
+    expect(contestModel).to.include('contestScoreboardRankValue(rank)');
+    expect(contestsPage).to.include('打星参赛（不计正式名次）');
+    expect(contestsPage).to.include('只看正式排名');
+    expect(contestsPage).to.include('filterOfficialScoreboardRows(orderedDisplayBody)');
+    expect(contestsPage).to.include('imageExportRows');
+    expect(managePage).to.include('恢复正式');
+    expect(managePage).not.to.include('不计排名');
   });
 });

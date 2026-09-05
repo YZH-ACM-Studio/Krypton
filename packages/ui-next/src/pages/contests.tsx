@@ -37,6 +37,8 @@ import { MarkdownView } from '@/components/markdown-renderer';
 import { useBootstrap, type GenericUserDoc } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 import {
+  filterOfficialScoreboardRows,
+  officialOnlyFromLocation,
   postContestProblemEntryUrl,
   prioritizeCurrentScoreboardRows,
   scoreboardParticipantColumn,
@@ -763,6 +765,7 @@ export function ContestDetailPage() {
     contestId: String(tdoc.docId),
   });
   const canOpenProblems = !postContestPracticeWaiting && (canManageContest || st.phase === 'ended' || (attended && st.phase !== 'upcoming'));
+  const canSelfStar = !isTeam && !isHomework && !isExam && ['acm', 'oi', 'ioi', 'strictioi'].includes(String(tdoc.rule || '').toLowerCase());
   const discussionUrl = replaceRouteTokens(bs.urls.discussionNode, { TYPE: 'contest', NAME: String(tdoc.docId) });
   const myRecordUrl = `${bs.urls.records}?tid=${encodeURIComponent(String(tdoc.docId))}&uidOrName=${encodeURIComponent(String(bs.user.id))}`;
   const allRecordUrl = `${bs.urls.records}?tid=${encodeURIComponent(String(tdoc.docId))}`;
@@ -812,8 +815,17 @@ export function ContestDetailPage() {
 
           <div className="flex flex-wrap gap-2 lg:justify-end">
             {!attended && st.phase !== 'ended' ? (
-              <form method="post">
+              <form method="post" className="flex min-w-[16rem] flex-col gap-2">
                 <input type="hidden" name="operation" value="attend" />
+                {canSelfStar ? (
+                  <label className="flex cursor-pointer items-start gap-2 rounded-lg border bg-background/70 px-3 py-2 text-sm">
+                    <Checkbox name="unrank" value="true" className="mt-0.5" />
+                    <span>
+                      <span className="block font-medium">打星参赛（不计正式名次）</span>
+                      <span className="mt-0.5 block text-xs text-muted-foreground">仍会出现在榜上，名次显示为 *，不影响一血和气球。</span>
+                    </span>
+                  </label>
+                ) : null}
                 <Button type="submit">
                   参加比赛
                   <ArrowRight className="size-4" />
@@ -1179,7 +1191,27 @@ export function ContestScoreboardPage() {
   const participantColumn = scoreboardParticipantColumn(displayHeader, teamMode);
   const currentParticipantId = teamMode ? data.examMode?.teamId : (data.currentUserId ?? bs.user?.id);
   const orderedDisplayBody = inExamMode ? prioritizeCurrentScoreboardRows(displayBody, participantColumn, currentParticipantId) : displayBody;
+  const scoreboardFilterKey = `krypton-scoreboard-official-only:${String(tdoc.docId || '')}`;
+  const [officialOnly, setOfficialOnly] = useState(() =>
+    typeof window === 'undefined' ? false : officialOnlyFromLocation(window.location.hash, window.localStorage.getItem(scoreboardFilterKey)),
+  );
+  const visibleDisplayBody = officialOnly ? filterOfficialScoreboardRows(orderedDisplayBody) : orderedDisplayBody;
+  useEffect(() => {
+    const applyHash = () => {
+      setOfficialOnly(officialOnlyFromLocation(window.location.hash, window.localStorage.getItem(scoreboardFilterKey)));
+    };
+    window.addEventListener('hashchange', applyHash);
+    return () => window.removeEventListener('hashchange', applyHash);
+  }, [scoreboardFilterKey]);
   const canExportImage = canShowScoreboardImageExport(!!data.canExportScoreboardImage, inExamMode);
+
+  function setOfficialOnlyFilter(next: boolean) {
+    setOfficialOnly(next);
+    window.localStorage.setItem(scoreboardFilterKey, next ? '1' : '0');
+    const url = new URL(window.location.href);
+    url.hash = next ? 'filter=rank' : 'filter=all';
+    window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+  }
   const canExportPrivateIdentity = !!data.canExportScoreboardPrivateIdentity && showStudentCols;
   const [imageExportOpen, setImageExportOpen] = useState(false);
   const [includePrivateIdentity, setIncludePrivateIdentity] = useState(false);
@@ -1517,40 +1549,46 @@ export function ContestScoreboardPage() {
           </div>
           <h1 className="mt-1 text-xl font-semibold">排行榜</h1>
         </div>
-        {!inExamMode ? (
-          <div className="flex flex-wrap gap-2">
-            {canExportImage ? (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setIncludePrivateIdentity(false);
-                  setImageExportError('');
-                  setImageExportOpen(true);
-                }}
-              >
-                <ImageDown className="size-4" />
-                导出 PNG
-              </Button>
-            ) : null}
-            {['html', 'csv', 'ghost'].map((view) => (
-              <Button key={view} asChild variant="outline" size="sm">
-                <a href={`${scoreboardUrl}/${view}`} target="_blank" rel="noreferrer">
-                  <Download className="size-4" />
-                  {view.toUpperCase()}
-                </a>
-              </Button>
-            ))}
-            {extraViews.map(([id, name]) => (
-              <Button key={id} asChild variant="outline" size="sm">
-                <a href={`${scoreboardUrl}/${id}`} target="_blank" rel="noreferrer">
-                  {name || id}
-                </a>
-              </Button>
-            ))}
-          </div>
-        ) : null}
+        <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+          <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border bg-background px-3 py-2 text-sm">
+            <Checkbox checked={officialOnly} onCheckedChange={(checked) => setOfficialOnlyFilter(checked === true)} />
+            只看正式排名
+          </label>
+          {!inExamMode ? (
+            <div className="flex flex-wrap gap-2">
+              {canExportImage ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setIncludePrivateIdentity(false);
+                    setImageExportError('');
+                    setImageExportOpen(true);
+                  }}
+                >
+                  <ImageDown className="size-4" />
+                  导出 PNG
+                </Button>
+              ) : null}
+              {['html', 'csv', 'ghost'].map((view) => (
+                <Button key={view} asChild variant="outline" size="sm">
+                  <a href={`${scoreboardUrl}/${view}`} target="_blank" rel="noreferrer">
+                    <Download className="size-4" />
+                    {view.toUpperCase()}
+                  </a>
+                </Button>
+              ))}
+              {extraViews.map(([id, name]) => (
+                <Button key={id} asChild variant="outline" size="sm">
+                  <a href={`${scoreboardUrl}/${id}`} target="_blank" rel="noreferrer">
+                    {name || id}
+                  </a>
+                </Button>
+              ))}
+            </div>
+          ) : null}
+        </div>
       </div>
 
       {tdoc.lockAt && !tdoc.unlocked ? (
@@ -1580,7 +1618,7 @@ export function ContestScoreboardPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {orderedDisplayBody.map((row, rowIndex) => {
+                {visibleDisplayBody.map((row, rowIndex) => {
                   const isCurrent = inExamMode && scoreboardRowMatches(row, participantColumn, currentParticipantId);
                   const participantKey = row[participantColumn]?.raw;
                   return (
@@ -1647,7 +1685,7 @@ export function ContestScoreboardPage() {
             <div className="rounded-xl border bg-muted/35 p-4">
               <p className="font-medium">{tdoc.title || (isHomework ? '作业排行榜' : '比赛排行榜')}</p>
               <p className="mt-1 text-sm text-muted-foreground">
-                将当前页面的 {orderedDisplayBody.length} 行、{displayHeader.length} 列生成一张完整 PNG。
+                将全部 {orderedDisplayBody.length} 行、{displayHeader.length} 列生成一张完整 PNG，含打星（*），不受屏幕过滤影响。
               </p>
               <p className="mt-2 text-xs font-medium text-muted-foreground">
                 {data.scoreboardSnapshotMode === 'frozen' ? '封榜快照：不会绕过封榜读取真实结果' : '实时排行榜：导出当前已显示的实时数据'}

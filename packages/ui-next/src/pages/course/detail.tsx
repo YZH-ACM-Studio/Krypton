@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   ChevronRight,
   ClipboardPlus,
+  Copy,
   Download,
   FileText,
   ListTree,
@@ -216,6 +217,7 @@ export function CourseDetailPage() {
     cdict: Record<string, CourseRecord>;
     udoc?: CourseRecord;
     canManage: boolean;
+    canCreate?: boolean;
     canCreateQuiz: boolean;
     canEnroll: boolean;
     canDownloadFiles: boolean;
@@ -286,6 +288,21 @@ export function CourseDetailPage() {
                   编辑
                 </a>
               </Button>
+            ) : null}
+            {data.canManage && data.canCreate ? (
+              <form method="post" action={`/course/${tid}/edit`}>
+                <input type="hidden" name="operation" value="copy" />
+                <Button
+                  type="submit"
+                  variant="outline"
+                  size="sm"
+                  className="h-10 gap-1.5"
+                  title="复制已保存的章节与设置到新课程，不复制课件、报名和真实性策略。"
+                >
+                  <Copy className="size-3.5" strokeWidth={1.75} />
+                  复制为新课程
+                </Button>
+              </form>
             ) : null}
             {data.canEnroll ? (
               <form method="post" action={`/course/${tid}`}>

@@ -39,6 +39,7 @@ import * as training from '../model/training';
 import user from '../model/user';
 import { Handler, param, post, Types } from '../service/server';
 import { courseNodePids, parseCourseSections } from '../lib/course-chapter';
+import { copiedCourseTitle } from '../lib/course-copy';
 import { liveReferencedPids } from '../lib/course-live-ref';
 import { resolveProblemKnowledgeNodeIds } from '../lib/problem-tag-canonical';
 import { courseKindClause, isCourseKind, isProblemSetKind } from '../lib/training-kind';
@@ -57,6 +58,23 @@ const logger = new Logger('course');
 
 function canAssignCourse(actor: { hasPerm: (...perm: bigint[]) => boolean; hasPriv: (priv: number) => boolean }) {
     return actor.hasPriv(PRIV.PRIV_EDIT_SYSTEM) || actor.hasPerm(PERM.PERM_EDIT_COURSE);
+}
+
+function canCreateCourse(actor: { hasPerm: (...perm: bigint[]) => boolean; hasPriv: (priv: number) => boolean }) {
+    return actor.hasPriv(PRIV.PRIV_EDIT_SYSTEM) || actor.hasPerm(PERM.PERM_CREATE_COURSE);
+}
+
+function courseChapterEditorPayload(tdoc: TrainingDoc) {
+    return (tdoc.dag || []).map((node) => ({
+        _id: node._id,
+        title: node.title,
+        content: node.content || '',
+        pids: node.pids,
+        sections: node.sections || [],
+        tids: (node.tids || []).map((item) => String(item)),
+        problemSetId: node.problemSetId ? String(node.problemSetId) : '',
+        stageIds: node.stageIds || [],
+    }));
 }
 
 function serializeCourseAssignUser(udoc: {
@@ -579,6 +597,7 @@ class CourseDetailHandler extends Handler {
             udoc,
             canManage,
             tsdoc,
+            canCreate: canCreateCourse(this.user),
             canCreateQuiz: canManage && this.user.hasPerm(PERM.PERM_CREATE_HOMEWORK),
             canEnroll: canDownloadFiles && !tsdoc?.enroll,
             canDownloadFiles,
@@ -714,6 +733,7 @@ class CourseEditHandler extends Handler {
             page_name: this.tdoc ? 'course_edit' : 'course_create',
             groups: groups.map((g: any) => ({ _id: String(g._id), name: g.name, archivedAt: g.archivedAt || null })),
             canManageFiles: !!this.tdoc && (this.user.own(this.tdoc) || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)),
+            canCreate: canCreateCourse(this.user),
             canCreateQuiz: !!this.tdoc && this.user.hasPerm(PERM.PERM_CREATE_HOMEWORK),
             canAssign: !!this.tdoc && canAssignCourse(this.user),
             files: sortFiles(this.tdoc?.files || []),
@@ -721,20 +741,7 @@ class CourseEditHandler extends Handler {
         };
         if (this.tdoc) {
             this.response.body.tdoc = this.tdoc;
-            this.response.body.chapters = JSON.stringify(
-                this.tdoc.dag.map((n) => ({
-                    _id: n._id,
-                    title: n.title,
-                    content: n.content || '',
-                    pids: n.pids,
-                    sections: n.sections || [],
-                    tids: (n.tids || []).map((t) => String(t)),
-                    problemSetId: n.problemSetId ? String(n.problemSetId) : '',
-                    stageIds: n.stageIds || [],
-                })),
-                null,
-                2,
-            );
+            this.response.body.chapters = JSON.stringify(courseChapterEditorPayload(this.tdoc), null, 2);
             if (this.response.body.canAssign) {
                 const assignUsers = await loadCourseAssignUsers(authoritativeDomainId, [this.tdoc.owner, ...(this.tdoc.maintainer || [])]);
                 this.response.body.expectedOwner = this.tdoc.owner;
@@ -826,6 +833,57 @@ class CourseEditHandler extends Handler {
         );
         this.response.body = { tid };
         this.response.redirect = this.url('course_detail', { tid });
+    }
+
+    @param('tid', Types.ObjectId)
+    async postCopy(_domainId: string, tid: ObjectId) {
+        const authoritativeDomainId = String(this.domain?._id);
+        problem.assertProblemAclDomain(this.user, authoritativeDomainId);
+        if (!canCreateCourse(this.user)) this.checkPerm(PERM.PERM_CREATE_COURSE);
+        if (!this.tdoc?.docId?.equals(tid) || !isCourseKind(this.tdoc.kind)) {
+            throw new ValidationError('tid', null, localizedErrorText`Not a course`);
+        }
+        const title = copiedCourseTitle(this.tdoc.title || '');
+        if (!title) throw new ValidationError('title', null, localizedErrorText`课程名称无效`);
+        const dag = await parseChaptersJson(authoritativeDomainId, JSON.stringify(courseChapterEditorPayload(this.tdoc)));
+        const pids = training.getPids(dag);
+        await assertProblemBankSelection(authoritativeDomainId, pids, this.user, training.getPids(this.tdoc.dag || []));
+        const mindmapRaw =
+            this.tdoc.mindmapId === undefined || this.tdoc.mindmapId === null ? '' : storedObjectIdString(this.tdoc.mindmapId, 'course.mindmapId');
+        const selectedMindmapId = await resolveCourseMindmapId(authoritativeDomainId, null, this.user._id, mindmapRaw);
+        const groupIds = (this.tdoc.courseGroupIds || []).map((groupId) => {
+            if (groupId instanceof ObjectId) return groupId;
+            try {
+                return new ObjectId(String(groupId));
+            } catch {
+                throw new ValidationError('courseGroupIds', null, localizedErrorText`课程可见范围无效`);
+            }
+        });
+        const newTid = await training.add(authoritativeDomainId, title, this.tdoc.content || '', this.user._id, dag, this.tdoc.description || '', 0, {
+            kind: 'course',
+            courseGroupIds: groupIds,
+            term: this.tdoc.term || '',
+            ...(selectedMindmapId ? { mindmapId: selectedMindmapId } : {}),
+        });
+        const filesSkipped = (this.tdoc.files || []).length;
+        await oplog.log(this, 'course.copy', {
+            from: tid,
+            to: newTid,
+            title,
+            filesSkipped,
+            mindmapId: selectedMindmapId?.toHexString() || null,
+        });
+        logger.info(
+            'Course copied domain=%s from=%s to=%s actor=%d filesSkipped=%d mindmap=%s result=success',
+            authoritativeDomainId,
+            tid,
+            newTid,
+            this.user._id,
+            filesSkipped,
+            selectedMindmapId || 'none',
+        );
+        this.response.body = { tid: newTid };
+        this.response.redirect = this.url('course_edit', { tid: newTid });
     }
 
     @param('tid', Types.ObjectId)

@@ -65,6 +65,7 @@ describe('p3.8 course workspace', () => {
     expect(handler).to.include('canCreate,');
     expect(handler).to.include('canAssign,');
     expect(handler).to.include('async postAssign(');
+    expect(handler).to.include('async postCopy(');
     expect(handler).to.include("@param('title', Types.Title, true)");
     expect(handler).to.match(/if \(this\.args\?\.operation \|\| this\.request\.body\?\.operation\) return;/);
     expect(handler).to.include('training.assignCourseOwnership');
@@ -77,6 +78,23 @@ describe('p3.8 course workspace', () => {
     expect(detail).to.include('selectSection');
     expect(detail).to.include('本章小节');
     expect(detail).to.not.include('chapters.map((ch');
+  });
+
+  it('copies a saved course into a new document from the editor and detail', () => {
+    const handler = readFileSync(resolve(root, '../hydrooj/src/handler/course.ts'), 'utf8');
+    const editor = readFileSync(resolve(root, 'src/pages/course/editor.tsx'), 'utf8');
+    const detail = readFileSync(resolve(root, 'src/pages/course/detail.tsx'), 'utf8');
+    expect(handler).to.include('async postCopy(');
+    expect(handler).to.include("await oplog.log(this, 'course.copy'");
+    expect(handler).to.include('copiedCourseTitle');
+    expect(handler).to.include('canCreate: canCreateCourse(this.user)');
+    expect(editor).to.include('复制为新课程');
+    expect(editor).to.include("operation: 'copy'");
+    expect(editor).to.include('data.canCreate');
+    expect(editor).to.include('请先保存课程修改。复制使用已保存的章节');
+    expect(detail).to.include('复制为新课程');
+    expect(detail).to.include('name="operation" value="copy"');
+    expect(detail).to.include('data.canManage && data.canCreate');
   });
 
   it('edits and renders chapter markdown through the chapterContent slot', () => {

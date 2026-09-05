@@ -4,6 +4,7 @@ import {
   ArrowUp,
   Check,
   ClipboardPlus,
+  Copy,
   Download,
   ExternalLink,
   FileText,
@@ -217,6 +218,7 @@ export function CourseEditPage() {
     page_name: string;
     groups: Array<{ _id: string; name: string; archivedAt?: string | null }>;
     canManageFiles: boolean;
+    canCreate?: boolean;
     canCreateQuiz: boolean;
     canAssign?: boolean;
     expectedOwner?: number;
@@ -238,6 +240,7 @@ export function CourseEditPage() {
   const [selectedMindmapId, setSelectedMindmapId] = useState(String(course.mindmapId || ''));
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [saveError, setSaveError] = useState('');
+  const [copying, setCopying] = useState(false);
   const [outlineOpen, setOutlineOpen] = useState(false);
   const [courseFiles, setCourseFiles] = useState<CourseFile[]>(data.files || []);
   const [fileError, setFileError] = useState('');
@@ -420,6 +423,31 @@ export function CourseEditPage() {
     }
   };
 
+  const copyCourse = async () => {
+    if (!isEdit || !data.canCreate || saveState !== 'idle' || copying) return;
+    setSaveError('');
+    setCopying(true);
+    try {
+      const response = await fetchHydroResponse(`/course/${tid}/edit`, {
+        method: 'POST',
+        body: new URLSearchParams({ operation: 'copy' }),
+        credentials: 'same-origin',
+        headers: { Accept: 'application/json' },
+      });
+      if (!response.ok) throw new Error(await readHydroResponseError(response, '课程复制失败'));
+      if (response.redirected) {
+        window.location.assign(response.url);
+        return;
+      }
+      const body = await response.json();
+      if (!body?.tid) throw new Error('课程复制成功响应缺少 tid');
+      window.location.assign(`/course/${body.tid}/edit`);
+    } catch (error) {
+      setSaveError((error as { message?: string } | null)?.message || '课程复制失败');
+      setCopying(false);
+    }
+  };
+
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setSaveError('');
@@ -479,10 +507,23 @@ export function CourseEditPage() {
           章节
         </Button>
         <SaveIndicator state={saveState} />
+        {isEdit && data.canCreate ? (
+          <Button
+            type="button"
+            variant="outline"
+            disabled={saveState !== 'idle' || copying}
+            onClick={() => void copyCourse()}
+            className="h-10 shrink-0 gap-1.5"
+            title={saveState === 'dirty' ? '请先保存课程修改。复制使用已保存的章节，不会带走未保存草稿、课件、报名或真实性策略。' : undefined}
+          >
+            {copying ? <Loader2 className="size-4 animate-spin" strokeWidth={1.75} /> : <Copy className="size-4" strokeWidth={1.75} />}
+            复制为新课程
+          </Button>
+        ) : null}
         <Button
           form="course-editor-form"
           type="submit"
-          disabled={saveState === 'saving'}
+          disabled={saveState === 'saving' || copying}
           className={cn('h-10 shrink-0 gap-1.5 active:scale-[0.97]', saveState === 'dirty' && 'shadow-md')}
         >
           <Save className="size-4" strokeWidth={1.75} />

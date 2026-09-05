@@ -22,7 +22,7 @@ const page = new NamedPage('contest_user', () => {
           ${i18n('Rank')} 
           <br />
           <label class="checkbox">
-            <input type="checkbox" name="unrank" class="checkbox">${i18n('UnRank')} 
+            <input type="checkbox" name="unrank" class="checkbox">${i18n('Starred participation (unofficial)')} 
           </label>
         </label>
       </div></div>

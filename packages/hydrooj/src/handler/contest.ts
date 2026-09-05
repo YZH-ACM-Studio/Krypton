@@ -29,6 +29,7 @@ import {
 } from '../error';
 import { FileInfo, ScoreboardConfig, Tdoc } from '../interface';
 import { canUsePostContestPractice, getPostContestPracticeState } from '../lib/contest-correction';
+import { assertIndividualContestUnrankAllowed } from '../lib/contest-unrank';
 import { isContestGloballyEnded } from '../lib/virtual-contest';
 import { virtualContestService } from '../model/virtual-contest';
 import { withContestEditBoundary } from '../lib/contest-edit-boundary';
@@ -545,12 +546,7 @@ export class ContestDetailHandler extends ContestDetailBaseHandler {
             urlForFile: (filename: string) => this.url('contest_file_download', { tid, filename, type: 'private' }),
         };
         if (this.user.hasPriv(PRIV.PRIV_USER_PROFILE) && isContestGloballyEnded(this.tdoc)) {
-            const inspected = await virtualContestService.inspectEligibility(
-                authoritativeDomainId,
-                tid,
-                undefined,
-                this.tsdoc?.attend === 1,
-            );
+            const inspected = await virtualContestService.inspectEligibility(authoritativeDomainId, tid, undefined, this.tsdoc?.attend === 1);
             const attempt = await virtualContestService.getOfficialAttempt(authoritativeDomainId, tid, this.user._id);
             this.response.body.virtualContest = {
                 eligibility: inspected.eligibility,
@@ -572,12 +568,17 @@ export class ContestDetailHandler extends ContestDetailBaseHandler {
 
     @param('tid', Types.ObjectId)
     @param('code', Types.String, true)
-    async postAttend(_domainId: string, tid: ObjectId, code = '') {
+    @param('unrank', Types.Boolean, true)
+    async postAttend(_domainId: string, tid: ObjectId, code = '', unrank = false) {
         const authoritativeDomainId = this.authoritativeDomainId();
         this.checkPerm(PERM.PERM_ATTEND_CONTEST);
         if (contest.isDone(this.tdoc)) throw new ContestNotLiveError(tid);
         if (this.tdoc._code && code !== this.tdoc._code) throw new InvalidTokenError(localizedErrorText`Contest Invitation`, code);
-        await contest.attend(authoritativeDomainId, tid, this.user._id, { subscribe: 1 });
+        if (unrank) assertIndividualContestUnrankAllowed(this.tdoc.rule, contest.getParticipationMode(this.tdoc));
+        const payload: { subscribe: number; unrank?: boolean } = { subscribe: 1 };
+        if (unrank) payload.unrank = true;
+        await contest.attend(authoritativeDomainId, tid, this.user._id, payload);
+        logger.info('contest attend domain=%s contest=%s uid=%d unrank=%s stage=create', authoritativeDomainId, tid, this.user._id, unrank);
         this.back();
     }
 
@@ -1858,7 +1859,8 @@ export class ContestUserHandler extends ContestManagementBaseHandler {
     @param('unrank', Types.Boolean)
     async postAddUser(_domainId: string, tid: ObjectId, uids: number[], unrank = false) {
         const authoritativeDomainId = this.authoritativeDomainId();
-        await Promise.all(uids.map((uid) => contest.attend(authoritativeDomainId, tid, uid, { unrank })));
+        if (unrank) assertIndividualContestUnrankAllowed(this.tdoc.rule, contest.getParticipationMode(this.tdoc));
+        await Promise.all(uids.map((uid) => contest.attend(authoritativeDomainId, tid, uid, unrank ? { unrank: true } : {})));
         this.back();
     }
 
@@ -1868,7 +1870,20 @@ export class ContestUserHandler extends ContestManagementBaseHandler {
         const authoritativeDomainId = this.authoritativeDomainId();
         const tsdoc = await contest.getStatus(authoritativeDomainId, tid, uid);
         if (!tsdoc) throw new ContestNotAttendedError(uid);
-        await contest.setStatus(authoritativeDomainId, tid, uid, { unrank: !tsdoc.unrank });
+        if (tsdoc.unrank !== undefined && tsdoc.unrank !== null && typeof tsdoc.unrank !== 'boolean') {
+            throw new ValidationError('unrank', null, localizedErrorText`打星标记必须是布尔值。`);
+        }
+        const nextUnrank = !tsdoc.unrank;
+        if (nextUnrank) assertIndividualContestUnrankAllowed(this.tdoc.rule, contest.getParticipationMode(this.tdoc));
+        await contest.setStatus(authoritativeDomainId, tid, uid, { unrank: nextUnrank });
+        logger.info(
+            'contest unrank-toggle domain=%s contest=%s uid=%d unrank=%s actor=%d stage=admin',
+            authoritativeDomainId,
+            tid,
+            uid,
+            nextUnrank,
+            this.user._id,
+        );
         this.back();
     }
 }

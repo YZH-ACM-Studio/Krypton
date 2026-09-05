@@ -7,9 +7,9 @@
     <td class="col--user">{{ user.render_inline(udict[tsdoc.uid], badge=false) }}</td>
     <td class="col--start-time">{{ contest.render_time(tsdoc.startAt or tdoc.beginAt) }}</td>
     <td class="col--end-time">{{ contest.render_time(tsdoc.endAt or tdoc.endAt) }}</td>
-    <td class="col--rank">{{ _('UnRank') if tsdoc.unrank else _('Rank') }}</td>
+    <td class="col--rank">{{ _('Starred') if tsdoc.unrank else _('Official ranking') }}</td>
     <td class="col--actions">
-      <a name="edit_rank" data-uid="{{ tsdoc.uid }}">{{ _('Rank') if tsdoc.unrank else _('UnRank') }}</a>
+      <a name="edit_rank" data-uid="{{ tsdoc.uid }}">{{ _('Restore official ranking') if tsdoc.unrank else _('Starred') }}</a>
     </td>
   </tr>
   {%- endfor -%}

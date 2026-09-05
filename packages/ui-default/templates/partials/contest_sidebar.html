@@ -46,6 +46,11 @@
     {% if handler.user.hasPerm(perm.PERM_ATTEND_CONTEST) and handler.user.hasPriv(PRIV.PRIV_USER_PROFILE) %}
       <form action="{{ url('contest_detail', tid=tdoc.docId) }}" method="POST">
         <input type="hidden" name="operation" value="attend">
+        {% if tdoc.participationMode != 'team' and tdoc.rule in ['acm', 'oi', 'ioi', 'strictioi'] %}
+        <label class="checkbox" style="display:block;margin:0 1rem 0.5rem;">
+          <input type="checkbox" name="unrank" class="checkbox" value="true"> {{ _('Starred participation (unofficial)') }}
+        </label>
+        {% endif %}
         <button class="menu__link" {% if tdoc._code %}data-contest-code{% endif %} type="submit">
           <span class="icon icon-add"></span> {{ _('Attend Contest') }}
         </button>

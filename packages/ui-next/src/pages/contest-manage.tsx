@@ -2736,7 +2736,7 @@ export function ContestUserPage() {
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <label className="flex items-center gap-2 text-sm">
                       <Checkbox name="unrank" value="true" />
-                      不计入排名
+                      打星参赛（不计正式名次）
                     </label>
                     <Button type="submit" disabled={selectedUsers.length === 0}>
                       <UserPlus className="mr-1 size-4" />
@@ -2777,7 +2777,7 @@ export function ContestUserPage() {
                           <TableCell className="text-center">
                             {ts.attend ? (
                               <Badge variant={ts.unrank ? 'outline' : 'default'} className="text-xs">
-                                {ts.unrank ? '不计排名' : '参赛中'}
+                                {ts.unrank ? '打星' : '参赛中'}
                               </Badge>
                             ) : (
                               <Badge variant="secondary" className="text-xs">
@@ -2796,7 +2796,7 @@ export function ContestUserPage() {
                               <input type="hidden" name="operation" value="rank" />
                               <input type="hidden" name="uid" value={String(ts.uid)} />
                               <Button type="submit" variant="ghost" size="sm" className="h-7 text-xs">
-                                {ts.unrank ? '恢复排名' : '取消排名'}
+                                {ts.unrank ? '恢复正式' : '打星'}
                               </Button>
                             </form>
                           </TableCell>

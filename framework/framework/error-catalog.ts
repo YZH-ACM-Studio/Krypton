@@ -2065,6 +2065,11 @@ const CHINESE_ERROR_MESSAGE_ENGLISH_TRANSLATIONS: Readonly<Record<string, string
     实名管理响应包含错误标记: 'The real-name management response contains an error marker.',
     '课程保存成功响应缺少 tid': 'The successful course-save response is missing its training ID.',
     '课程复制成功响应缺少 tid': 'The successful course-copy response is missing its training ID.',
+    '打星标记必须是布尔值。': 'The unofficial-star flag must be a boolean.',
+    '团队比赛不能按个人打星，请由队长或管理员整队设置。':
+        'Team contests cannot be starred per person. The captain or an administrator must star the whole team.',
+    '只有个人 ACM、OI、IOI 和严格 IOI 比赛允许打星。':
+        'Only individual ACM, OI, IOI, and strict IOI contests allow unofficial starring.',
     贡献分工响应格式错误: 'The contribution-assignment response has an invalid format.',
     '赛前检查响应不是有效 JSON': 'The pre-contest check response is not valid JSON.',
     赛前检查响应缺少明确的成功标记: 'The pre-contest check response is missing an explicit success marker.',

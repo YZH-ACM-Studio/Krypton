@@ -39,6 +39,50 @@ function sameIndexes(left: Set<number>, right: Set<number>): boolean {
     return left.size === right.size && [...left].every((index) => right.has(index));
 }
 
+const NAMED_JUDGE_PARAM_ESCAPES: Record<string, string> = {
+    '\\': '\\\\',
+    '\0': '\\0',
+    '\t': '\\t',
+    '\n': '\\n',
+    '\v': '\\v',
+    '\f': '\\f',
+    '\r': '\\r',
+};
+
+const INVISIBLE_JUDGE_PARAM_CODES = new Set([
+    0x00a0, // NBSP
+    0x00ad, // soft hyphen
+    0x200b, // zero-width space
+    0x200c, // zero-width non-joiner
+    0x200d, // zero-width joiner
+    0x2060, // word joiner
+    0xfeff, // BOM
+]);
+
+/** Make CR/tab/zero-width bytes visible in student-facing checker text. */
+function escapeJudgeParam(value: string): string {
+    let escaped = '';
+    for (const char of value) {
+        const named = NAMED_JUDGE_PARAM_ESCAPES[char];
+        if (named) {
+            escaped += named;
+            continue;
+        }
+        const code = char.codePointAt(0);
+        if (code === undefined) throw new TypeError('Judge message parameter contains an invalid code point');
+        if (code < 0x20 || code === 0x7f) {
+            escaped += `\\x${code.toString(16).padStart(2, '0')}`;
+            continue;
+        }
+        if (INVISIBLE_JUDGE_PARAM_CODES.has(code)) {
+            escaped += `\\u${code.toString(16).padStart(4, '0')}`;
+            continue;
+        }
+        escaped += char;
+    }
+    return escaped;
+}
+
 function formatTemplate(template: string, params: string[], translate: Translate): string {
     const translated = translate(template);
     if (typeof translated !== 'string' || !translated) throw new TypeError(`Judge message translation must be a non-empty string: ${template}`);
@@ -50,8 +94,9 @@ function formatTemplate(template: string, params: string[], translate: Translate
     for (const index of sourceIndexes) {
         if (index >= params.length) throw new TypeError(`Judge message parameter {${index}} is missing: ${template}`);
     }
-    const formatted = translated.replace(/\{(0|[1-9]\d*)\}/g, (_, index) => params[Number(index)]);
-    return sourceIndexes.size ? formatted : [formatted, params.join(' ')].filter(Boolean).join(' ');
+    const visibleParams = params.map(escapeJudgeParam);
+    const formatted = translated.replace(/\{(0|[1-9]\d*)\}/g, (_, index) => visibleParams[Number(index)]);
+    return sourceIndexes.size ? formatted : [formatted, visibleParams.join(' ')].filter(Boolean).join(' ');
 }
 
 function formatJudgeMessage(value: unknown, translate: Translate): string {

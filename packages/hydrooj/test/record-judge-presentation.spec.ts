@@ -62,6 +62,30 @@ describe('record judge presentation', () => {
         );
     });
 
+    it('makes carriage returns and other invisible parameter bytes visible', () => {
+        const formatted = formatRecordJudgeMessages(
+            {
+                judgeTexts: [
+                    {
+                        message: 'On line {0}: Read {1}, expect {2}.',
+                        params: [1, '\rvftdsqnkxwry', 'vftdsqnkxwry'],
+                    },
+                ],
+                testCases: [
+                    {
+                        message: {
+                            message: 'On line {0}: Read {1}, expect {2}.',
+                            params: [1, 'a\\r', 'a\r'],
+                        },
+                    },
+                ],
+            },
+            (message) => (message === 'On line {0}: Read {1}, expect {2}.' ? '第 {0} 行：读取到 {1}，应为 {2}。' : message),
+        );
+        assert.deepEqual(formatted.judgeTexts, ['第 1 行：读取到 \\rvftdsqnkxwry，应为 vftdsqnkxwry。']);
+        assert.equal(formatted.testCases[0].message, '第 1 行：读取到 a\\\\r，应为 a\\r。');
+    });
+
     it('formats the real line checker template through both Chinese judge catalogs', () => {
         const source = 'On line {0}: Read {1}, expect {2}.';
         for (const [locale, expected] of [

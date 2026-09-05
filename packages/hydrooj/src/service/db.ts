@@ -3,6 +3,7 @@ import mongoUri from 'mongodb-uri';
 import { Time } from '@hydrooj/utils';
 import { Context, Service } from '../context';
 import { ValidationError } from '../error';
+import { rankSkippingUnofficial } from '../lib/contest-unrank';
 import { Logger } from '../logger';
 import { load } from '../options';
 import bus from './bus';
@@ -176,22 +177,8 @@ export class MongoService extends Service {
     }
 
     async ranked<T extends Record<string, any>>(cursor: T[] | FindCursor<T>, equ: (a: T, b: T) => boolean): Promise<[number, T][]> {
-        let last = null;
-        let r = 0;
-        let count = 0;
-        const results = [];
         const docs = cursor instanceof Array ? cursor : await cursor.toArray();
-        for (const doc of docs) {
-            if ((doc as any).unrank) {
-                results.push([0, doc]);
-                continue;
-            }
-            count++;
-            if (!last || !equ(last, doc)) r = count;
-            last = doc;
-            results.push([r, doc]);
-        }
-        return results;
+        return rankSkippingUnofficial(docs, equ);
     }
 }
 

@@ -3,6 +3,7 @@ import { isDeepStrictEqual } from 'node:util';
 import type { Context } from '../context';
 import { ValidationError } from '../error';
 import type { ContestStat, RecordDoc, Tdoc } from '../interface';
+import { isContestUnofficial } from '../lib/contest-unrank';
 import db from '../service/db';
 import type { ContestTeamDoc } from './contest-team';
 
@@ -32,6 +33,7 @@ export interface TeamContestStatusDoc extends ContestStat {
 export interface TeamScoreboardEntry {
     team: ContestTeamDoc;
     status: TeamContestStatusDoc;
+    unrank?: boolean;
 }
 
 export function firstAcceptedRidByProblem(statuses: TeamContestStatusDoc[], acceptedStatus: number): Record<number, string> {
@@ -56,7 +58,14 @@ type CalculateStats = (tdoc: Tdoc, journal: TeamContestJournalEntry[]) => Contes
 export const coll = db.collection<TeamContestStatusDoc>('contest.teamStatuses');
 
 export function mergeScoreboardEntries(tdoc: Tdoc, teams: ContestTeamDoc[], statuses: TeamContestStatusDoc[]): TeamScoreboardEntry[] {
-    const teamById = new Map(teams.map((team) => [team.teamId.toHexString(), team]));
+    const teamById = new Map(
+        teams.map((team) => {
+            if (!(team?.teamId instanceof ObjectId)) {
+                throw new TypeError(`Team scoreboard entry is missing team identity ${tdoc.domainId}/${tdoc.docId}.`);
+            }
+            return [team.teamId.toHexString(), team] as const;
+        }),
+    );
     for (const status of statuses) {
         if (!teamById.has(status.teamId.toHexString())) {
             throw new Error(`Team contest status references missing team ${tdoc.domainId}/${tdoc.docId}/${status.teamId}.`);
@@ -84,6 +93,7 @@ export function mergeScoreboardEntries(tdoc: Tdoc, teams: ContestTeamDoc[], stat
                     createdAt: team.createdAt,
                     updatedAt: team.updatedAt,
                 } as TeamContestStatusDoc),
+            unrank: isContestUnofficial(team.unrank),
         }))
         .sort(
             (left, right) =>
@@ -119,8 +129,7 @@ export function journalEntryFromRecord(rdoc: RecordDoc): TeamContestJournalEntry
 function sortedJournal(journal: TeamContestJournalEntry[]): TeamContestJournalEntry[] {
     return [...journal].sort(
         (left, right) =>
-            left.rid.getTimestamp().getTime() - right.rid.getTimestamp().getTime() ||
-            left.rid.toHexString().localeCompare(right.rid.toHexString()),
+            left.rid.getTimestamp().getTime() - right.rid.getTimestamp().getTime() || left.rid.toHexString().localeCompare(right.rid.toHexString()),
     );
 }
 

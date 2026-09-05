@@ -6,6 +6,7 @@ import { ObjectId } from 'mongodb';
 const Module = require('module');
 const modulePath = require.resolve('../src/model/contest-team-status.ts');
 const originalLoad = Module._load;
+const { rankSkippingUnofficial } = require('../src/lib/contest-unrank');
 
 class TestValidationError extends Error {}
 
@@ -58,7 +59,11 @@ const collection = {
         return clone(found);
     },
     async insertOne(doc: any) {
-        if (docs.some((candidate) => candidate.domainId === doc.domainId && same(candidate.contestId, doc.contestId) && same(candidate.teamId, doc.teamId))) {
+        if (
+            docs.some(
+                (candidate) => candidate.domainId === doc.domainId && same(candidate.contestId, doc.contestId) && same(candidate.teamId, doc.teamId),
+            )
+        ) {
             throw Object.assign(new Error('duplicate team status'), { code: 11000 });
         }
         docs.push(clone(doc));
@@ -85,6 +90,15 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     if (parent?.filename === modulePath) {
         if (request === '../context') return { Context: class {} };
         if (request === '../error') return { ValidationError: TestValidationError };
+        if (request === '../lib/contest-unrank') {
+            return {
+                isContestUnofficial(unrank: unknown) {
+                    if (unrank === undefined || unrank === null) return false;
+                    if (typeof unrank === 'boolean') return unrank;
+                    throw new Error(`Malformed contest unrank ${String(unrank)}`);
+                },
+            };
+        }
         if (request === '../service/db') return { __esModule: true, default: { collection: () => collection } };
     }
     return originalLoad.call(this, request, parent, isMain);
@@ -280,7 +294,12 @@ describe('P1.13 team contest status', () => {
         const currentRoster = team(teamA, 'Alpha', true, [11, 12, 13], 12);
         const entries = statusModel.mergeScoreboardEntries(
             tdoc,
-            [team(teamB, 'Beta', false, [20]), team(inactiveWithoutScore, 'Closed', false, [30]), currentRoster, team(new ObjectId(), 'Zero', true, [40])],
+            [
+                team(teamB, 'Beta', false, [20]),
+                team(inactiveWithoutScore, 'Closed', false, [30]),
+                currentRoster,
+                team(new ObjectId(), 'Zero', true, [40]),
+            ],
             [statusB, statusA],
         );
 
@@ -288,6 +307,51 @@ describe('P1.13 team contest status', () => {
         expect(entries[0].team.memberUids).to.deep.equal([11, 12, 13]);
         expect(entries[0].team.captainUid).to.equal(12);
         expect(entries[2].status).to.include({ accept: 0, score: 0, time: 0 });
+        expect(entries.map((entry) => entry.unrank)).to.deep.equal([false, false, false]);
+    });
+
+    it('projects team.unrank onto ranked entries and ignores member or status unrank', () => {
+        const official = team(teamA, 'Official', true, [11, 12]);
+        const starred = { ...team(teamB, 'Starred', true, [20]), unrank: true };
+        const statusWithMemberUnrank = {
+            _id: teamA,
+            domainId,
+            contestId,
+            teamId: teamA,
+            revision: 1,
+            journal: [],
+            score: 2,
+            accept: 2,
+            time: 100,
+            unrank: true,
+            detail: {},
+            display: {},
+            createdAt: beginAt,
+            updatedAt: beginAt,
+        } as any;
+        const entries = statusModel.mergeScoreboardEntries(
+            tdoc,
+            [starred, official],
+            [statusWithMemberUnrank, { ...statusWithMemberUnrank, _id: teamB, teamId: teamB, score: 3, accept: 3, time: 50, unrank: false }],
+        );
+        expect(entries.map((entry) => [entry.team.name, entry.unrank])).to.deep.equal([
+            ['Starred', true],
+            ['Official', false],
+        ]);
+        const ranked = rankSkippingUnofficial(
+            entries,
+            (left, right) => left.status.accept === right.status.accept && left.status.time === right.status.time,
+        );
+        expect(ranked.map(([rank, entry]) => [rank, entry.team.name])).to.deep.equal([
+            [0, 'Starred'],
+            [1, 'Official'],
+        ]);
+    });
+
+    it('fails closed when a team scoreboard row is missing team identity', () => {
+        expect(() => statusModel.mergeScoreboardEntries(tdoc, [{ ...team(teamA, 'Broken', true), teamId: null }] as any, [])).to.throw(
+            /missing team identity/,
+        );
     });
 
     it('fails closed when a team contest record has no valid stable team id', async () => {

@@ -61,7 +61,7 @@
 - `contest.teamBatches`、`contest.teamBatchTeams`、`contest.teamBatchInvites` 只承载比赛创建前的组队协作；每名用户在同一开放批次最多属于一支 1–3 人 active 队伍，关闭批次后所有阵容写入冻结。
 - 团队比赛可先通过 `plannedTeamBatchId` 预绑定同域开放或已关闭批次；预绑定只用于赛前管理预览，不创建临时 ContestTeam，也不参与任何运行时授权或计分。批次关闭后，管理员必须在比赛开始前、无 Record、无既有 active ContestTeam 时显式定版，整批校验后生成新的 `contest.teams` 快照并写入 finalized `teamBatchId`、清除 planned 引用。任一成员不符合目标比赛的 `assign`、`participantScope` 或账号参赛权限时整批拒绝且清理本次准备态；`_code` 是开赛入口凭据，不在赛前快照时自动代领。
 - 本站单 Hydro 进程通过同一 contest 级轻量边界串行化快照激活、ContestTeam 写入及运行时队伍读取，保证多文档快照不会以半批状态对应用可见；禁止新增绕过该边界的 active team 游标或直接写入口，也不为此引入 Mongo 事务、队列或分布式锁。
-- 计分、提交授权、榜单、Vigil 角色、Record 和虚拟打印只读取比赛内 finalized `ContestTeam`；存在 planned 引用但尚未定版的团队赛必须以 `team_batch_not_finalized` fail closed。禁止运行时回查批次、复用批次 teamId、自动同步或把赛内修正反写批次。一个关闭批次可用于多场比赛，但每场必须生成独立 teamId 与 snapshot hash。
+- 计分、提交授权、榜单、Vigil 角色、Record 和虚拟打印只读取比赛内 finalized `ContestTeam`；打星只认该文档的可选 `unrank` 字段，不回查批次，也不从队员 `ContestStatus` 合成。存在 planned 引用但尚未定版的团队赛必须以 `team_batch_not_finalized` fail closed。禁止运行时回查批次、复用批次 teamId、自动同步或把赛内修正反写批次。一个关闭批次可用于多场比赛，但每场必须生成独立 teamId 与 snapshot hash。
 - 本节的“P1.17”是团队 ACM 旧计划编号，不是 `docs/PLAN-2026-08-09-monthly.md` 中“网络锁正式控制面”的 P1.17。该旧任务不修改 Vigil Server 或 Client，不需要迁移或回填历史比赛与队伍；部署只加载 OJ/UI 源码及等值 partial/普通索引，不得顺带创建批次、绑定比赛或连接 Windows 主机。
 - 赛前就绪检查只允许管理员按需执行，复用定版的 canonical 阵容校验并返回聚合诊断；结果不是授权令牌，不能缓存、自动修复、自动关批或自动定版，实际定版必须重新校验。
 

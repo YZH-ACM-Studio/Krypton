@@ -25,6 +25,7 @@ import {
     Tdoc,
 } from '../interface';
 import avatar from '../lib/avatar';
+import { contestScoreboardRankValue } from '../lib/contest-unrank';
 import { effectiveLockoutWindow } from '../lib/contest-lockout';
 import { annotateScoreboardPercentages } from '../lib/scoreboard-score-percentage';
 import bus, { parallelAllSettled } from '../service/bus';
@@ -386,7 +387,7 @@ const acm = buildContestRule({
     },
     async scoreboardRow(config, _, tdoc, pdict, udoc, rank, tsdoc, meta) {
         const row: ScoreboardRow = [
-            { type: 'rank', value: rank.toString() },
+            { type: 'rank', value: contestScoreboardRankValue(rank) },
             { type: 'user', value: udoc.uname, raw: tsdoc.uid },
         ];
         if (config.isExport && config.showDisplayName) {
@@ -552,7 +553,7 @@ const oi = buildContestRule({
     },
     async scoreboardRow(config, _, tdoc, pdict, udoc, rank, tsdoc, meta) {
         const row: ScoreboardNode[] = [
-            { type: 'rank', value: rank.toString() },
+            { type: 'rank', value: contestScoreboardRankValue(rank) },
             { type: 'user', value: udoc.uname, raw: tsdoc.uid },
         ];
         const displayScore = (pid: number, score?: number) => {
@@ -715,7 +716,7 @@ const strictioi = buildContestRule(
         async scoreboardRow(config, _, tdoc, pdict, udoc, rank, tsdoc, meta) {
             const tsddict = tsdoc.detail || {};
             const row: ScoreboardNode[] = [
-                { type: 'rank', value: rank.toString() },
+                { type: 'rank', value: contestScoreboardRankValue(rank) },
                 { type: 'user', value: udoc.uname, raw: tsdoc.uid },
             ];
             if (config.isExport && config.showDisplayName) {
@@ -823,7 +824,7 @@ const ledo = buildContestRule(
         async scoreboardRow(config, _, tdoc, pdict, udoc, rank, tsdoc, meta) {
             const tsddict = tsdoc.detail || {};
             const row: ScoreboardRow = [
-                { type: 'rank', value: rank.toString() },
+                { type: 'rank', value: contestScoreboardRankValue(rank) },
                 { type: 'user', value: udoc.uname, raw: tsdoc.uid },
             ];
             if (config.isExport && config.showDisplayName) {
@@ -964,7 +965,7 @@ const homework = buildContestRule({
     async scoreboardRow(config, _, tdoc, pdict, udoc, rank, tsdoc) {
         const tsddict = tsdoc.detail || {};
         const row: ScoreboardRow = [
-            { type: 'rank', value: rank.toString() },
+            { type: 'rank', value: contestScoreboardRankValue(rank) },
             {
                 type: 'user',
                 value: udoc.uname,

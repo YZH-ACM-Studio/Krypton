@@ -5,6 +5,7 @@ import { Filter, ObjectId } from 'mongodb';
 import Schema from 'schemastery';
 import { Counter } from '@hydrooj/utils';
 import { Tdoc, Udoc } from '../interface';
+import { contestRpRatingInput } from '../lib/contest-unrank';
 import difficultyAlgorithm from '../lib/difficulty';
 import rating from '../lib/rating';
 import { PRIV, STATUS } from '../model/builtin';
@@ -67,7 +68,7 @@ export const RpTypes: Record<string, RpDef> = {
                 if (!(await contest.countStatus(tdoc.domainId, query))) continue;
                 const cursor = contest.getMultiStatus(tdoc.domainId, query).sort(contest.RULES[tdoc.rule].statusSort);
                 const rankedTsdocs = await contest.RULES[tdoc.rule].ranked(tdoc, cursor);
-                const users = rankedTsdocs.map((i) => ({ uid: i[1].uid, rank: i[0], old: udict[i[1].uid] }));
+                const users = contestRpRatingInput(rankedTsdocs, udict);
                 // FIXME sum(rating.new) always less than sum(rating.old)
                 for (const udoc of rating(users)) udict[udoc.uid] = udoc.new;
                 await report({

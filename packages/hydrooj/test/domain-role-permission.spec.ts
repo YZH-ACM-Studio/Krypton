@@ -87,10 +87,10 @@ describe('domain role permission workspace service', () => {
         expectValidationError(() => resolveCurrentDomainId('system', undefined));
     });
 
-    it('exposes the complete 75-permission, 13-family catalog', () => {
-        expect(DOMAIN_PERMISSION_DEFINITIONS).to.have.lengthOf(75);
-        expect(new Set(DOMAIN_PERMISSION_DEFINITIONS.map((permission: any) => permission.family)).size).to.equal(13);
-        expect(new Set(DOMAIN_PERMISSION_DEFINITIONS.map((permission: any) => permission.key.toString())).size).to.equal(75);
+    it('exposes the complete 80-permission, 15-family catalog', () => {
+        expect(DOMAIN_PERMISSION_DEFINITIONS).to.have.lengthOf(80);
+        expect(new Set(DOMAIN_PERMISSION_DEFINITIONS.map((permission: any) => permission.family)).size).to.equal(15);
+        expect(new Set(DOMAIN_PERMISSION_DEFINITIONS.map((permission: any) => permission.key.toString())).size).to.equal(80);
     });
 
     it('has explicit Simplified Chinese names for every permission and family', () => {
@@ -132,7 +132,7 @@ describe('domain role permission workspace service', () => {
             submittedMask: allMask.toString(),
             permissions: bits,
         });
-        expect(result.permissionCount).to.equal(75);
+        expect(result.permissionCount).to.equal(80);
         expect(result.mask).to.equal(allMask.toString());
         expect(repository.roles.get('reviewer')).to.equal(allMask);
     });

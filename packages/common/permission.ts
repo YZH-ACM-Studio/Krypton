@@ -121,6 +121,11 @@ export const PERM = {
     // Krypton: create and manage redemption codes for problem sets/courses.
     PERM_CREATE_REDEMPTION_CODE: 1n << 83n,
 
+    // Krypton: file collections. CREATE is the teacher capability; MANAGE is
+    // the explicit domain-wide role.
+    PERM_CREATE_COLLECT: 1n << 84n,
+    PERM_MANAGE_COLLECT: 1n << 85n,
+
     // Placeholder
     PERM_ALL: -1n,
     PERM_BASIC: 0n,
@@ -231,7 +236,8 @@ PERM.PERM_TEACHER =
     PERM.PERM_CREATE_TASK |
     PERM.PERM_USERBIND_MANAGE_STUDENTS |
     PERM.PERM_CREATE_EXAM_EVENT |
-    PERM.PERM_CREATE_REDEMPTION_CODE;
+    PERM.PERM_CREATE_REDEMPTION_CODE |
+    PERM.PERM_CREATE_COLLECT;
 
 export const PRIV = {
     PRIV_NONE: 0,

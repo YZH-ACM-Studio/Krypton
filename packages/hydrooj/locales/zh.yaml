@@ -214,6 +214,11 @@ Create managed programming drafts permission detail: 提供托管编程题的基
 Create problems: 创建全部题型
 Create problems permission detail: 可创建全部八种题型并包含托管编程题基础资格；编程题默认使用 P5，其他题号命名空间仍需另行授权。
 Create tasks: 创建任务
+Create file collections: 创建文件收集
+Manage all file collections in this domain: 管理本域全部文件收集
+Create and manage own school exam events: 创建并管理本校考试活动
+Manage all exam infrastructure in this domain: 管理本域全部考试基础设施
+Create redemption codes: 创建兑换码
 Create Role: 创建角色
 Create Training Plan: 创建题集
 Create training plans: 创建题集
@@ -600,6 +605,8 @@ perm_record: 记录
 perm_tasks: 任务
 perm_training: 题集
 perm_userbind: 学生档案
+perm_collect: 文件收集
+perm_exam_infrastructure: 考试基础设施
 Browse the problem bank list: 浏览题库列表
 Import and edit rankboard data: 导入与编辑荣誉榜数据
 Manage rankboard structure and scoring: 管理荣誉榜结构与计分

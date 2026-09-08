@@ -1,0 +1,12 @@
+{
+    "name": "@hydrooj/krypton-collect",
+    "version": "0.1.0",
+    "description": "Krypton OJ: teacher file collection (slots, live userbind audience, pack download)",
+    "main": "./index.ts",
+    "license": "AGPL-3.0-or-later",
+    "dependencies": {
+        "@hydrooj/utils": "workspace:^",
+        "hydrooj": "workspace:^",
+        "mongodb": "^7.1.1"
+    }
+}

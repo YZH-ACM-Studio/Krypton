@@ -3,6 +3,7 @@ export interface ProfileCompletionItem {
     title: string;
     count: number;
     href?: string;
+    subtitle?: string;
 }
 
 export function rankCompletionItems(items: readonly ProfileCompletionItem[], limit = 20): ProfileCompletionItem[] {
@@ -46,7 +47,7 @@ function knowledgeNodeIdStrings(problem: { knowledgeNodeIds?: unknown; docId?: u
 
 export function knowledgeNodeCompletionCounts(input: {
     problems: ReadonlyArray<{ knowledgeNodeIds?: unknown; docId?: unknown }>;
-    publicNodes: ReadonlyArray<{ id: string; title: string; href?: string }>;
+    publicNodes: ReadonlyArray<{ id: string; title: string; href?: string; subtitle?: string }>;
 }): ProfileCompletionItem[] {
     const nodes = new Map(input.publicNodes.map((node) => [node.id, node]));
     const counts = new Map<string, number>();
@@ -60,7 +61,13 @@ export function knowledgeNodeCompletionCounts(input: {
         [...counts.entries()].map(([id, count]) => {
             const node = nodes.get(id);
             if (!node) throw new TypeError(`knowledge node ${id} disappeared during tally`);
-            return { id, title: node.title, count, href: node.href };
+            return {
+                id,
+                title: node.title,
+                count,
+                href: node.href,
+                ...(node.subtitle ? { subtitle: node.subtitle } : {}),
+            };
         }),
     );
 }

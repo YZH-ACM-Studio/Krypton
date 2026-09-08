@@ -100,6 +100,7 @@ interface ProfileCompletionItem {
   title: string;
   count: number;
   href?: string;
+  subtitle?: string;
 }
 
 interface UserPageData {
@@ -159,9 +160,6 @@ export function UserDetailPage() {
           { label: '学校', value: udoc.school, icon: UserIcon },
         ]),
   ].filter((it) => it.value);
-
-  const maxProblemSetCount = problemSetCompletions.length ? Math.max(...problemSetCompletions.map((item) => item.count)) : 0;
-  const maxKnowledgeCount = knowledgeNodeCompletions.length ? Math.max(...knowledgeNodeCompletions.map((item) => item.count)) : 0;
 
   const avatarUrl = udoc.avatarUrl || (udoc.avatar && /^https?:|^\//.test(udoc.avatar) ? udoc.avatar : null);
 
@@ -261,18 +259,8 @@ export function UserDetailPage() {
       <div className="grid gap-5 lg:grid-cols-[64fr_36fr]">
         {/* Left */}
         <div className="space-y-4 min-w-0">
-          <CompletionHistogram
-            title="题集完成"
-            icon={<BookOpen className="size-4" />}
-            items={problemSetCompletions}
-            maxCount={maxProblemSetCount}
-          />
-          <CompletionHistogram
-            title="知识点完成"
-            icon={<Network className="size-4" />}
-            items={knowledgeNodeCompletions}
-            maxCount={maxKnowledgeCount}
-          />
+          <CompletionList title="题集完成" icon={<BookOpen className="size-4" />} items={problemSetCompletions} unit="题" />
+          <CompletionList title="知识点完成" icon={<Network className="size-4" />} items={knowledgeNodeCompletions} unit="题" />
 
           {/* Submission heatmap (GitHub-style) */}
           <ActivityHeatmap daily={data.daily || {}} />
@@ -377,48 +365,64 @@ export function UserDetailPage() {
   );
 }
 
-function CompletionHistogram({
+function CompletionList({
   title,
   icon,
   items,
-  maxCount,
+  unit,
 }: {
   title: string;
   icon: React.ReactNode;
   items: ProfileCompletionItem[];
-  maxCount: number;
+  unit: string;
 }) {
   if (!items.length) return null;
+  const shown = items.slice(0, 12);
+  const maxCount = Math.max(...shown.map((item) => item.count));
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-base flex items-center gap-1.5">
-          {icon}
-          {title}
+        <CardTitle className="text-base flex items-center justify-between gap-2">
+          <span className="flex min-w-0 items-center gap-1.5">
+            {icon}
+            {title}
+          </span>
+          <span className="shrink-0 text-xs font-normal text-muted-foreground">{shown.length}</span>
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-1.5">
-        {items.slice(0, 12).map((item) => {
-          const pct = maxCount > 0 ? Math.round((item.count / maxCount) * 100) : 0;
-          const titleClass = 'w-24 truncate';
-          return (
-            <div key={item.id} className="flex items-center gap-3 text-xs">
-              {item.href ? (
-                <a href={item.href} className={`${titleClass} hover:underline`} title={item.title}>
-                  {item.title}
-                </a>
-              ) : (
-                <span className={titleClass} title={item.title}>
-                  {item.title}
+      <CardContent className="p-0">
+        <ol className="divide-y">
+          {shown.map((item, index) => {
+            const pct = maxCount > 0 ? Math.round((item.count / maxCount) * 100) : 0;
+            const row = (
+              <div className="flex items-start gap-3">
+                <span className="w-5 shrink-0 pt-0.5 text-right font-mono text-[11px] tabular-nums text-muted-foreground">{index + 1}</span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium leading-snug break-words">{item.title}</p>
+                  {item.subtitle ? <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">{item.subtitle}</p> : null}
+                  <div className="mt-2 h-1 overflow-hidden rounded-full bg-muted">
+                    <div className="h-full rounded-full bg-primary/80" style={{ width: `${pct}%` }} />
+                  </div>
+                </div>
+                <span className="shrink-0 pt-px text-right">
+                  <span className="block text-base font-semibold tabular-nums leading-none">{item.count}</span>
+                  <span className="mt-0.5 block text-[10px] text-muted-foreground">{unit}</span>
                 </span>
-              )}
-              <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
-                <div className="h-full bg-primary/80 transition-all" style={{ width: `${pct}%` }} />
               </div>
-              <span className="w-10 text-right font-mono tabular-nums text-muted-foreground">{item.count}</span>
-            </div>
-          );
-        })}
+            );
+            return (
+              <li key={item.id}>
+                {item.href ? (
+                  <a href={item.href} className="block px-5 py-3 transition-colors hover:bg-accent" title={item.title}>
+                    {row}
+                  </a>
+                ) : (
+                  <div className="px-5 py-3">{row}</div>
+                )}
+              </li>
+            );
+          })}
+        </ol>
       </CardContent>
     </Card>
   );

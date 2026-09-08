@@ -206,6 +206,14 @@
 - 类型判断、列表过滤和写入只走共享 helper；handler 不得各自猜 kind，也不得在请求路径回填、批量迁移或另建第二套题集集合。
 - 未知 kind fail closed，不得当作题集或课程。课程路由与题集路由必须分别做类型校验。
 
+## 文件收集协议
+
+- `collect.requests`、`collect.submissions`、`collect.files` 是唯一 canonical。blob 只走 `StorageModel` 前缀 `collect/`。禁止写入 testdata、Record、Hydro 作业附件或公开用户网盘。
+- 可交受众每次请求按当前 userbind 用户组 live 计算（同校、已绑定）。新进组立即待交；退组从待交消失；已交文件不删，打包仍带。禁止考试式冻结 roster，禁止从作业或任务推断受众。
+- 创建需 `PERM_CREATE_COLLECT`（教师默认位）。协作者必须显式点名且具备该权限，禁止把学生加进去。协作者可看进度、催未交和打包，不能改槽位或授权他人。
+- 打包只下发签名下载 URL 与清单，由浏览器组 ZIP；禁止在请求路径把全班文件打进内存 ZIP。日志与 oplog 不记录文件正文。
+- 只挂普通浏览器 `/collect`、`/admin/collect`、`/api/collect/*`。禁止考试壳、`/paper`、Vigil Client 或封锁白名单。`docs/PLAN-2026-10-08-file-collect.md` 的 P2.1–P2.10 不是 Vigil 协议单元，完成本地实现不授权部署或连接真实考试机。
+
 ## 真实性训练可信完成协议
 
 - Course 与 ProblemSet 的真实性策略只认发布后不可变的 `practice.integrityRevisions`；短期 `PracticeContext` 必须绑定域、用户、题目、主容器/作用域及每个明确参与目标的容器、作用域和 revision。签发与提交都要重新读取 canonical revision 并校验当前题目/容器可见性和范围成员关系，客户端字段不得自证授权。

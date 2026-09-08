@@ -1,5 +1,6 @@
 import { ObjectId } from 'mongodb';
 import { SolutionNotFoundError } from '../error';
+import { nextSolutionVote } from '../lib/solution-vote';
 import bus from '../service/bus';
 import * as document from './document';
 
@@ -64,13 +65,16 @@ class SolutionModel {
         return document.deleteSub(domainId, document.TYPE_PROBLEM_SOLUTION, psid, 'reply', psrid);
     }
 
-    static async vote(domainId: string, psid: ObjectId, uid: number, value: number) {
+    static async vote(domainId: string, psid: ObjectId, uid: number, value: 1 | -1) {
         const doc = await document.get(domainId, document.TYPE_PROBLEM_SOLUTION, psid);
         if (!doc) throw new SolutionNotFoundError(domainId, psid);
-        const before = await document.setStatus(domainId, document.TYPE_PROBLEM_SOLUTION, psid, uid, { vote: value }, 'before');
-        let inc = value;
+        const status = await document.getStatus(domainId, document.TYPE_PROBLEM_SOLUTION, psid, uid);
+        const next = nextSolutionVote(status?.vote, value);
+        const before = await document.setStatus(domainId, document.TYPE_PROBLEM_SOLUTION, psid, uid, { vote: next }, 'before');
+        let inc = next;
         if (before?.vote) inc -= before.vote;
-        return inc ? await document.inc(domainId, document.TYPE_PROBLEM_SOLUTION, psid, 'vote', inc) : doc;
+        const psdoc = inc ? await document.inc(domainId, document.TYPE_PROBLEM_SOLUTION, psid, 'vote', inc) : doc;
+        return { ...psdoc, userVote: next };
     }
 
     static async getListStatus(domainId: string, psids: ObjectId[], uid: number) {

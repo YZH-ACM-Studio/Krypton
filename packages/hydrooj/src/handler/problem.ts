@@ -3858,9 +3858,21 @@ export class ProblemSolutionHandler extends ProblemDetailHandler {
             }
         }
         const udict = await user.getList(domainId, uids);
-        const pssdict = await solution.getListStatus(domainId, docids, this.user._id);
+        const status = await solution.getListStatus(domainId, docids, this.user._id);
+        const pssdict: Record<string, { vote: number }> = {};
+        for (const [id, row] of Object.entries(status)) {
+            pssdict[String(id)] = { vote: row.vote === 1 || row.vote === -1 ? row.vote : 0 };
+        }
         this.response.body = {
-            psdocs,
+            psdocs: psdocs.map((psdoc) => ({
+                ...psdoc,
+                canEdit: this.user.own(psdoc)
+                    ? this.user.hasPerm(PERM.PERM_EDIT_PROBLEM_SOLUTION_SELF)
+                    : this.user.hasPerm(PERM.PERM_EDIT_PROBLEM_SOLUTION),
+                canDelete: this.user.own(psdoc)
+                    ? this.user.hasPerm(PERM.PERM_DELETE_PROBLEM_SOLUTION_SELF)
+                    : this.user.hasPerm(PERM.PERM_DELETE_PROBLEM_SOLUTION),
+            })),
             page,
             pcount,
             pscount,
@@ -3868,6 +3880,8 @@ export class ProblemSolutionHandler extends ProblemDetailHandler {
             pssdict,
             pdoc: this.pdoc,
             sid,
+            canCreateSolution: this.user.hasPerm(PERM.PERM_CREATE_PROBLEM_SOLUTION),
+            canVoteSolution: this.user.hasPerm(PERM.PERM_VOTE_PROBLEM_SOLUTION),
         };
     }
 
@@ -3942,7 +3956,7 @@ export class ProblemSolutionHandler extends ProblemDetailHandler {
         const domainId = this.pdoc.domainId;
         this.checkPerm(PERM.PERM_VOTE_PROBLEM_SOLUTION);
         const psdoc = await solution.vote(domainId, psid, this.user._id, 1);
-        this.back({ vote: psdoc.vote, user_vote: 1 });
+        this.back({ vote: psdoc.vote, user_vote: psdoc.userVote });
     }
 
     @param('psid', Types.ObjectId)
@@ -3950,7 +3964,7 @@ export class ProblemSolutionHandler extends ProblemDetailHandler {
         const domainId = this.pdoc.domainId;
         this.checkPerm(PERM.PERM_VOTE_PROBLEM_SOLUTION);
         const psdoc = await solution.vote(domainId, psid, this.user._id, -1);
-        this.back({ vote: psdoc.vote, user_vote: -1 });
+        this.back({ vote: psdoc.vote, user_vote: psdoc.userVote });
     }
 }
 

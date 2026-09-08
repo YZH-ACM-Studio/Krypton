@@ -41,6 +41,7 @@ import { SimpleSelect } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { FileUploader } from '@/components/uploader';
 import { type GenericUserDoc, useBootstrap } from '@/lib/bootstrap';
+import { cn } from '@/lib/cn';
 import { formatDateTime, formatRelativeTime, makeInitials, replaceRouteTokens } from '@/lib/format';
 import { downloadProblemFiles } from '@/lib/problem-package';
 
@@ -70,10 +71,13 @@ interface ProblemManagedFile {
 
 interface ProblemSolutionDocument {
   _id?: string | number;
+  docId?: string | number;
   owner?: string | number;
   updateAt?: unknown;
   vote?: number;
   content?: string;
+  canEdit?: boolean;
+  canDelete?: boolean;
 }
 
 interface ProblemStatisticRecord {
@@ -93,6 +97,9 @@ interface ProblemManagePageData {
   reference?: Record<string, unknown> | null;
   dataWriteGuard?: ProblemDataWriteGuardState;
   psdocs?: ProblemSolutionDocument[];
+  pssdict?: Record<string, { vote?: number }>;
+  canCreateSolution?: boolean;
+  canVoteSolution?: boolean;
   page?: string | number;
   pcount?: string | number;
   udict?: Record<string, GenericUserDoc>;
@@ -517,18 +524,72 @@ export function ProblemFilesPage() {
 
 /* ---------- Problem Solution ---------- */
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function asSolutionId(value: unknown): string {
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  if (typeof value === 'number' && Number.isSafeInteger(value)) return String(value);
+  if (isRecord(value) && typeof value.$oid === 'string' && value.$oid.trim()) return value.$oid.trim();
+  return '';
+}
+
+function solutionVoteOf(pssdict: Record<string, { vote?: number }>, ps: ProblemSolutionDocument): number {
+  const keys = [asSolutionId(ps._id), asSolutionId(ps.docId)].filter(Boolean);
+  for (const key of keys) {
+    const vote = pssdict[key]?.vote;
+    if (vote === 1 || vote === -1) return vote;
+  }
+  return 0;
+}
+
+function parseSolutionPageData(raw: unknown): {
+  pdoc: ProblemManageDocument;
+  psdocs: ProblemSolutionDocument[];
+  pssdict: Record<string, { vote?: number }>;
+  page: number;
+  pcount: number;
+  udict: Record<string, GenericUserDoc>;
+  canCreateSolution: boolean;
+  canVoteSolution: boolean;
+} {
+  const rec = isRecord(raw) ? raw : {};
+  const pdoc = isRecord(rec.pdoc) ? (rec.pdoc as ProblemManageDocument) : {};
+  const psdocs = Array.isArray(rec.psdocs) ? (rec.psdocs as ProblemSolutionDocument[]) : [];
+  const pssdict: Record<string, { vote?: number }> = {};
+  if (isRecord(rec.pssdict)) {
+    for (const [key, value] of Object.entries(rec.pssdict)) {
+      if (!isRecord(value)) continue;
+      pssdict[key] = { vote: typeof value.vote === 'number' ? value.vote : 0 };
+    }
+  }
+  const udict = isRecord(rec.udict) ? (rec.udict as Record<string, GenericUserDoc>) : {};
+  return {
+    pdoc,
+    psdocs,
+    pssdict,
+    page: Number(rec.page) || 1,
+    pcount: Number(rec.pcount) || 1,
+    udict,
+    canCreateSolution: rec.canCreateSolution === true,
+    canVoteSolution: rec.canVoteSolution === true,
+  };
+}
+
 export function ProblemSolutionPage() {
   const bs = useBootstrap();
-  const data = bs.page.data as ProblemManagePageData;
-  const pdoc = data.pdoc || {};
-  const psdocs = data.psdocs || [];
-  const page = Number(data.page) || 1;
-  const pcount = Number(data.pcount) || 1;
-  const udict: Record<string, GenericUserDoc> = bs.udict || data.udict || {};
+  const data = parseSolutionPageData(bs.page.data);
+  const pdoc = data.pdoc;
+  const psdocs = data.psdocs;
+  const page = data.page;
+  const pcount = data.pcount;
+  const udict: Record<string, GenericUserDoc> = Object.keys(bs.udict || {}).length ? bs.udict : data.udict;
   const pid = pdoc.pid || pdoc.docId || '';
   const problemUrl = replaceRouteTokens(bs.urls.problemDetail, { PID: String(pid) });
 
   const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState('');
 
   return (
     <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
@@ -544,13 +605,20 @@ export function ProblemSolutionPage() {
             <p className="text-sm text-muted-foreground">{pdoc.title || pid}</p>
           </div>
         </div>
-        <Button onClick={() => setShowForm((p) => !p)}>
-          <MessageSquare className="mr-1 size-4" />
-          发布题解
-        </Button>
+        {data.canCreateSolution ? (
+          <Button
+            onClick={() => {
+              setEditingId('');
+              setShowForm((open) => !open);
+            }}
+          >
+            <MessageSquare className="mr-1 size-4" />
+            发布题解
+          </Button>
+        ) : null}
       </div>
 
-      {showForm && (
+      {showForm && data.canCreateSolution ? (
         <Card>
           <CardContent className="p-4">
             <form method="post" className="space-y-3">
@@ -568,7 +636,7 @@ export function ProblemSolutionPage() {
             </form>
           </CardContent>
         </Card>
-      )}
+      ) : null}
 
       {psdocs.length === 0 ? (
         <Card>
@@ -578,8 +646,11 @@ export function ProblemSolutionPage() {
         <div className="space-y-4">
           {psdocs.map((ps) => {
             const owner = getUser(udict, ps.owner);
+            const psid = asSolutionId(ps.docId) || asSolutionId(ps._id);
+            const userVote = solutionVoteOf(data.pssdict, ps);
+            const editing = editingId === psid && psid !== '';
             return (
-              <Card key={String(ps._id)}>
+              <Card key={psid || String(ps._id)}>
                 <CardContent className="p-4">
                   <div className="mb-3 flex items-center gap-3">
                     <Avatar className="size-8">
@@ -589,27 +660,91 @@ export function ProblemSolutionPage() {
                       <p className="text-sm font-medium">{owner?.uname || `UID ${ps.owner}`}</p>
                       <p className="text-xs text-muted-foreground">{ps.updateAt ? formatRelativeTime(ps.updateAt, bs.locale) : ''}</p>
                     </div>
-                    <div className="ml-auto flex items-center gap-3">
-                      <form method="post" className="inline">
-                        <input type="hidden" name="operation" value="upvote" />
-                        <input type="hidden" name="psid" value={String(ps._id)} />
-                        <button type="submit" className="flex items-center gap-1 text-sm text-muted-foreground hover:text-primary">
+                    <div className="ml-auto flex items-center gap-2">
+                      {ps.canEdit ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 px-2"
+                          onClick={() => {
+                            setShowForm(false);
+                            setEditingId((current) => (current === psid ? '' : psid));
+                          }}
+                        >
+                          <Pencil className="mr-1 size-3.5" />
+                          {editing ? '取消编辑' : '编辑'}
+                        </Button>
+                      ) : null}
+                      {ps.canDelete ? (
+                        <form method="post" className="inline">
+                          <input type="hidden" name="operation" value="delete_solution" />
+                          <input type="hidden" name="psid" value={psid} />
+                          <Button type="submit" variant="ghost" size="sm" className="h-8 px-2 text-destructive hover:text-destructive">
+                            <Trash2 className="mr-1 size-3.5" />
+                            删除
+                          </Button>
+                        </form>
+                      ) : null}
+                      {data.canVoteSolution ? (
+                        <>
+                          <form method="post" className="inline">
+                            <input type="hidden" name="operation" value="upvote" />
+                            <input type="hidden" name="psid" value={psid} />
+                            <button
+                              type="submit"
+                              className={cn(
+                                'flex items-center gap-1 text-sm hover:text-primary',
+                                userVote === 1 ? 'text-primary' : 'text-muted-foreground',
+                              )}
+                              aria-pressed={userVote === 1}
+                              aria-label={userVote === 1 ? '取消点赞' : '点赞'}
+                            >
+                              <ThumbsUp className="size-3.5" />
+                              {ps.vote || 0}
+                            </button>
+                          </form>
+                          <form method="post" className="inline">
+                            <input type="hidden" name="operation" value="downvote" />
+                            <input type="hidden" name="psid" value={psid} />
+                            <button
+                              type="submit"
+                              className={cn(
+                                'flex items-center gap-1 text-sm hover:text-destructive',
+                                userVote === -1 ? 'text-destructive' : 'text-muted-foreground',
+                              )}
+                              aria-pressed={userVote === -1}
+                              aria-label={userVote === -1 ? '取消点踩' : '点踩'}
+                            >
+                              <ThumbsDown className="size-3.5" />
+                            </button>
+                          </form>
+                        </>
+                      ) : (
+                        <span className="flex items-center gap-1 text-sm text-muted-foreground">
                           <ThumbsUp className="size-3.5" />
                           {ps.vote || 0}
-                        </button>
-                      </form>
-                      <form method="post" className="inline">
-                        <input type="hidden" name="operation" value="downvote" />
-                        <input type="hidden" name="psid" value={String(ps._id)} />
-                        <button type="submit" className="flex items-center gap-1 text-sm text-muted-foreground hover:text-destructive">
-                          <ThumbsDown className="size-3.5" />
-                        </button>
-                      </form>
+                        </span>
+                      )}
                     </div>
                   </div>
-                  <div className="prose prose-sm dark:prose-invert max-w-none">
-                    <MarkdownView content={ps.content || ''} />
-                  </div>
+                  {editing ? (
+                    <form method="post" className="space-y-3">
+                      <input type="hidden" name="operation" value="edit_solution" />
+                      <input type="hidden" name="psid" value={psid} />
+                      <MarkdownEditor name="content" value={ps.content || ''} minHeight={320} preferredLang={bs.locale} />
+                      <div className="flex justify-end gap-2">
+                        <Button type="button" variant="outline" onClick={() => setEditingId('')}>
+                          取消
+                        </Button>
+                        <Button type="submit">保存</Button>
+                      </div>
+                    </form>
+                  ) : (
+                    <div className="prose prose-sm dark:prose-invert max-w-none">
+                      <MarkdownView content={ps.content || ''} />
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             );

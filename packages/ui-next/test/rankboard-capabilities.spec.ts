@@ -94,6 +94,7 @@ describe('rankboard bootstrap capabilities', () => {
 describe('rankboard public branding', () => {
   const source = readFileSync(resolvePath(import.meta.dirname, '../src/pages/rankboard/index.tsx'), 'utf8');
   const gallerySource = readFileSync(resolvePath(import.meta.dirname, '../src/pages/rankboard/gallery.tsx'), 'utf8');
+  const adminSource = readFileSync(resolvePath(import.meta.dirname, '../src/pages/rankboard/admin.tsx'), 'utf8');
 
   it('uses the university title and does not render school names', () => {
     expect(source).to.include('中国民航大学荣誉榜');
@@ -112,5 +113,16 @@ describe('rankboard public branding', () => {
     expect(source).to.include('IcpcMedalCell');
     expect(source).to.include('展开明细列');
     expect(source).not.to.include('<details');
+  });
+
+  it('puts filtered top-3 rows into the table and adds a totals row', () => {
+    expect(source).to.include('isRankboardStatsMode');
+    expect(source).to.include('rankboardTableRows');
+    expect(source).to.include('合计');
+  });
+
+  it('lets honor-board admins edit 天梯赛个人 scores', () => {
+    expect(adminSource).to.include('awardHasEditableExamScore');
+    expect(adminSource).to.include('天梯赛得分');
   });
 });

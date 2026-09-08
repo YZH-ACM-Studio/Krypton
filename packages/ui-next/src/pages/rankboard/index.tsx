@@ -21,7 +21,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { SimpleSelect } from '@/components/ui/select';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 import {
@@ -29,12 +29,17 @@ import {
   MEDAL_TEXT_CLASS,
   awardFilterChipLabel,
   buildAwardFilterGroups,
+  emptyAwardTally,
+  isRankboardStatsMode,
   ladderColumnCount,
+  mergeAwardTally,
+  rankboardTableRows,
   rowMatchesAwardFilter,
   shouldShowLadderDetails,
   tallyAwards,
   withoutLadderKeys,
   type AwardFilterGroupId,
+  type AwardTally,
   type MedalMetal,
   type MedalPair,
 } from './award-display';
@@ -121,6 +126,60 @@ function IcpcMedalCell({ pair, metal }: { pair: MedalPair; metal: MedalMetal }) 
 
 function CountCell({ value }: { value: number }) {
   return value > 0 ? value : null;
+}
+
+function LeaderboardCountCells({
+  awards,
+  typeMap,
+  showLadderDetails,
+  counts,
+  ladderCounts,
+}: {
+  awards: Award[];
+  typeMap: Map<string, AwardType>;
+  showLadderDetails: boolean;
+  counts: AwardTally;
+  ladderCounts?: Record<string, number>;
+}) {
+  return (
+    <>
+      <TableCell className="text-center text-xs">
+        <IcpcMedalCell pair={counts.icpc.gold} metal="gold" />
+      </TableCell>
+      <TableCell className="text-center text-xs">
+        <IcpcMedalCell pair={counts.icpc.silver} metal="silver" />
+      </TableCell>
+      <TableCell className="text-center text-xs">
+        <IcpcMedalCell pair={counts.icpc.bronze} metal="bronze" />
+      </TableCell>
+      <TableCell className="text-center text-xs">
+        <CountCell value={counts.ccpc.gold} />
+      </TableCell>
+      <TableCell className="text-center text-xs">
+        <CountCell value={counts.ccpc.silver} />
+      </TableCell>
+      <TableCell className="text-center text-xs">
+        <CountCell value={counts.ccpc.bronze} />
+      </TableCell>
+      <TableCell className="text-center text-xs">
+        <CountCell value={counts.pat} />
+      </TableCell>
+      {showLadderDetails ? (
+        LADDER_DETAIL_COLUMNS.map((column) => (
+          <TableCell key={column.key} className="text-center text-xs">
+            <CountCell value={ladderCounts?.[column.key] ?? ladderColumnCount(awards, typeMap, column.key)} />
+          </TableCell>
+        ))
+      ) : (
+        <TableCell className="text-center text-xs">
+          <CountCell value={counts.ladder} />
+        </TableCell>
+      )}
+      <TableCell className="text-center text-xs">
+        <CountCell value={counts.other} />
+      </TableCell>
+    </>
+  );
 }
 
 function FilterChip({
@@ -386,8 +445,32 @@ export function RankBoardMainPage() {
   }, [data.rows, schoolFilter, yearFilter, typeFilter, ladderGroupSelected, search, typeMap]);
 
   const top3 = data.rows.slice(0, 3);
-  // Rest of the list (rank >= 4) AFTER filter so top 3 are always shown.
-  const rest = filtered.filter((r) => r.rank > 3);
+  const statsMode = isRankboardStatsMode({
+    typeFilterSize: typeFilter.size,
+    ladderGroupSelected,
+    schoolFilter,
+    yearFilter,
+    search,
+  });
+  const tableRows = useMemo(() => rankboardTableRows(filtered, statsMode), [filtered, statsMode]);
+  const tableTotals = useMemo(() => {
+    if (!statsMode || tableRows.length === 0) return null;
+    let tally = emptyAwardTally();
+    const ladderColumns = Object.fromEntries(LADDER_DETAIL_COLUMNS.map((column) => [column.key, 0])) as Record<string, number>;
+    let nAccept = 0;
+    let totalScore = 0;
+    for (const row of tableRows) {
+      tally = mergeAwardTally(tally, tallyAwards(row.person.awards, typeMap));
+      if (showLadderDetails) {
+        for (const column of LADDER_DETAIL_COLUMNS) {
+          ladderColumns[column.key] += ladderColumnCount(row.person.awards, typeMap, column.key);
+        }
+      }
+      nAccept += row.user?.nAccept || 0;
+      totalScore += row.totalScore;
+    }
+    return { tally, ladderColumns, nAccept, totalScore };
+  }, [statsMode, tableRows, typeMap, showLadderDetails]);
 
   const ladderKeys = useMemo(() => filterGroups.find((group) => group.id === 'ladder')?.items.map((item) => item.key) || [], [filterGroups]);
 
@@ -561,14 +644,14 @@ export function RankBoardMainPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {rest.length === 0 ? (
+                {tableRows.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={showLadderDetails ? 20 : 14} className="py-10 text-center text-sm text-muted-foreground">
                       {data.rows.length === 0 ? '荣誉榜暂无成员，等待管理员添加。' : '当前筛选下没有匹配的成员。'}
                     </TableCell>
                   </TableRow>
                 ) : (
-                  rest.map((r) => {
+                  tableRows.map((r) => {
                     const counts = tallyAwards(r.person.awards, typeMap);
                     return (
                       <TableRow key={r.person._id} className="cursor-pointer" onClick={() => setOpenRow(r)}>
@@ -582,41 +665,7 @@ export function RankBoardMainPage() {
                         <TableCell className="truncate text-xs text-muted-foreground">
                           {r.person.employmentStatus || <span className="opacity-40">—</span>}
                         </TableCell>
-                        <TableCell className="text-center text-xs">
-                          <IcpcMedalCell pair={counts.icpc.gold} metal="gold" />
-                        </TableCell>
-                        <TableCell className="text-center text-xs">
-                          <IcpcMedalCell pair={counts.icpc.silver} metal="silver" />
-                        </TableCell>
-                        <TableCell className="text-center text-xs">
-                          <IcpcMedalCell pair={counts.icpc.bronze} metal="bronze" />
-                        </TableCell>
-                        <TableCell className="text-center text-xs">
-                          <CountCell value={counts.ccpc.gold} />
-                        </TableCell>
-                        <TableCell className="text-center text-xs">
-                          <CountCell value={counts.ccpc.silver} />
-                        </TableCell>
-                        <TableCell className="text-center text-xs">
-                          <CountCell value={counts.ccpc.bronze} />
-                        </TableCell>
-                        <TableCell className="text-center text-xs">
-                          <CountCell value={counts.pat} />
-                        </TableCell>
-                        {showLadderDetails ? (
-                          LADDER_DETAIL_COLUMNS.map((column) => (
-                            <TableCell key={column.key} className="text-center text-xs">
-                              <CountCell value={ladderColumnCount(r.person.awards, typeMap, column.key)} />
-                            </TableCell>
-                          ))
-                        ) : (
-                          <TableCell className="text-center text-xs">
-                            <CountCell value={counts.ladder} />
-                          </TableCell>
-                        )}
-                        <TableCell className="text-center text-xs">
-                          <CountCell value={counts.other} />
-                        </TableCell>
+                        <LeaderboardCountCells awards={r.person.awards} typeMap={typeMap} showLadderDetails={showLadderDetails} counts={counts} />
                         <TableCell className="text-right font-mono text-sm">{r.user ? r.user.nAccept : '—'}</TableCell>
                         <TableCell className="pr-5 text-right font-mono text-sm font-semibold">{r.totalScore.toFixed(1)}</TableCell>
                       </TableRow>
@@ -624,6 +673,24 @@ export function RankBoardMainPage() {
                   })
                 )}
               </TableBody>
+              {tableTotals ? (
+                <TableFooter>
+                  <TableRow className="hover:bg-transparent">
+                    <TableCell className="pl-5 font-semibold">合计</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{tableRows.length} 人</TableCell>
+                    <TableCell />
+                    <LeaderboardCountCells
+                      awards={[]}
+                      typeMap={typeMap}
+                      showLadderDetails={showLadderDetails}
+                      counts={tableTotals.tally}
+                      ladderCounts={tableTotals.ladderColumns}
+                    />
+                    <TableCell className="text-right font-mono text-sm">{tableTotals.nAccept}</TableCell>
+                    <TableCell className="pr-5 text-right font-mono text-sm font-semibold">{tableTotals.totalScore.toFixed(1)}</TableCell>
+                  </TableRow>
+                </TableFooter>
+              ) : null}
             </Table>
           </div>
         </CardContent>

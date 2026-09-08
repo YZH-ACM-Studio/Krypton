@@ -234,6 +234,55 @@ async function runClientRequest(request: ReturnType<typeof clientRequestContext>
     return { handlerReached, businessLogicRan, control };
 }
 
+function ordinaryBrowserRequestContext(
+    path: string,
+    options: {
+        method?: string;
+        query?: Record<string, string>;
+        json?: boolean;
+        uid?: number;
+        domainId?: string;
+        hasPriv?: boolean;
+        hasPerm?: boolean;
+    } = {},
+) {
+    const redirects: string[] = [];
+    const method = options.method || 'GET';
+    const uid = options.uid ?? 70;
+    const context = {
+        request: { path, method, query: options.query || {} },
+        query: options.query || {},
+        session: { uid },
+        status: null as number | null,
+        HydroContext: {
+            request: { path, method: method.toLowerCase(), json: options.json === true },
+            user: { _id: uid, hasPriv: () => options.hasPriv === true, hasPerm: () => options.hasPerm === true },
+            domain: { _id: options.domainId || 'system' },
+        },
+        redirect: (target: string) => redirects.push(target),
+    } as any;
+    return { context, redirects };
+}
+
+async function runOrdinaryBrowserRequest(request: ReturnType<typeof ordinaryBrowserRequestContext>) {
+    let continued = false;
+    await lockout.vigilGuardLockoutLayer(request.context, async () => {
+        continued = true;
+    });
+    return { continued };
+}
+
+const collectRequestId = '64a000000000000000000aaa';
+const COLLECT_LOCKOUT_REQUESTS: Array<{ path: string; method?: string; query?: Record<string, string>; json?: boolean }> = [
+    { path: '/collect' },
+    { path: '/collect', method: 'POST' },
+    { path: '/admin/collect' },
+    { path: '/admin/collect', method: 'POST' },
+    { path: '/api/collect/pending' },
+    { path: '/api/collect/pending', method: 'POST' },
+    { path: `/collect/${collectRequestId}`, method: 'POST' },
+];
+
 beforeEach(() => {
     clockNow = originalDateNow();
     contests.length = 0;
@@ -616,5 +665,71 @@ describe('P1.28 browser-lockout runtime facts', () => {
         expect(userHandler).to.include('udoc.hasPerm(PERM.PERM_EDIT_CONTEST)');
         const pluginSource = readFileSync(resolve(__dirname, '../index.ts'), 'utf8');
         expect(pluginSource).to.include("ctx.on('handler/before-prepare', enforceBoundClientHandler)");
+    });
+});
+
+describe('P2.9 file-collect lockout isolation', () => {
+    it('does not mention /collect in the lockout allowlists', () => {
+        const lockoutSource = readFileSync(resolve(__dirname, '../src/lockout.ts'), 'utf8');
+        expect(lockoutSource).to.not.include('/collect');
+    });
+
+    it('treats collect paths as unbound Client requests and redirects to the exam workspace', async () => {
+        clientSessions.set('client-62', { uid: 62, domainId: 'system', contestId });
+        const tid = contestId.toHexString();
+        const denied = [
+            ...COLLECT_LOCKOUT_REQUESTS.map((spec) =>
+                clientRequestContext(spec.path, { method: spec.method, query: spec.query, json: spec.json }),
+            ),
+            clientRequestContext('/collect', { query: { tid } }),
+            clientRequestContext('/admin/collect', { query: { tid } }),
+            clientRequestContext('/api/collect/pending', { query: { tid }, json: true }),
+            clientRequestContext(`/collect/${collectRequestId}`, { method: 'POST', query: { tid }, json: true }),
+            clientRequestContext('/d/system/collect'),
+            clientRequestContext('/d/system/admin/collect'),
+            clientRequestContext('/d/system/api/collect/pending', { json: true }),
+            clientRequestContext(`/d/system/collect/${collectRequestId}`, { method: 'POST', query: { tid } }),
+            clientRequestContext('/collect', { hasPriv: true, hasPerm: true }),
+        ];
+        for (const request of denied) {
+            expect(await runClientRequest(request)).to.deep.equal({
+                handlerReached: true,
+                businessLogicRan: false,
+                control: 'cleanup',
+            });
+            expect(request.response.redirect).to.equal(`/d/system/exam-mode/${tid}`);
+            expect(request.context.session.uid).to.equal(62);
+        }
+    });
+
+    it('drops ordinary-browser collect requests to the lockout notice', async () => {
+        contests.push(contestDoc());
+        attended.add(`${contestId.toHexString()}:70`);
+        const notice = `/client-required-notice?tid=${contestId.toHexString()}`;
+        const denied = [
+            ...COLLECT_LOCKOUT_REQUESTS,
+            { path: '/d/system/collect' },
+            { path: '/d/system/admin/collect' },
+            { path: '/d/system/api/collect/pending' },
+            { path: `/d/system/collect/${collectRequestId}`, method: 'POST' as const },
+        ];
+        for (const spec of denied) {
+            const request = ordinaryBrowserRequestContext(spec.path, {
+                method: spec.method,
+                query: spec.query,
+                json: spec.json,
+                uid: 70,
+            });
+            expect(await runOrdinaryBrowserRequest(request)).to.deep.equal({ continued: false });
+            expect(request.context.status).to.equal(302);
+            expect(request.redirects).to.deep.equal([notice]);
+            expect(request.context.session.uid).to.equal(0);
+        }
+
+        const recovery = ordinaryBrowserRequestContext('/login', { uid: 70 });
+        expect(await runOrdinaryBrowserRequest(recovery)).to.deep.equal({ continued: true });
+        expect(recovery.redirects).to.deep.equal([]);
+        expect(recovery.context.session.uid).to.equal(70);
+        expect(recovery.context.status).to.equal(null);
     });
 });

@@ -5,6 +5,7 @@ import {
   BookOpen,
   ClipboardList,
   Clock,
+  FolderUp,
   GraduationCap,
   HardDriveDownload,
   Home,
@@ -174,6 +175,7 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
           templates: ['problem_set_main.html', 'problem_set_detail.html', 'problem_set_edit.html', 'problem_set_files.html'],
         },
         { label: '任务', href: '/tasks', icon: ListChecks, templates: ['tasks_center.html', 'tasks_my.html', 'tasks_detail.html'] },
+        { label: '文件收集', href: '/collect', icon: FolderUp, templates: ['collect_main.html', 'collect_detail.html'] },
         { label: '协作', href: '/permits/inbox', icon: ShieldCheck, templates: ['my_verify_inbox.html'] },
         {
           label: '讨论',
@@ -236,6 +238,14 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
             'admin_tasks_scores.html',
             'admin_tasks_settings.html',
           ],
+        });
+      }
+      if (bs.user.canManageCollect) {
+        adminItems.push({
+          label: '文件收集',
+          href: '/admin/collect',
+          icon: FolderUp,
+          templates: ['admin_collect.html', 'admin_collect_edit.html', 'admin_collect_stats.html'],
         });
       }
       if (bs.user.canManageRedemptionCodes) {

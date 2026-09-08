@@ -9,6 +9,7 @@ import {
   Copy,
   Download,
   FileText,
+  FolderInput,
   ListTree,
   Network,
   Paperclip,
@@ -17,18 +18,66 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 import { MarkdownView } from '@/components/markdown-renderer';
+import { PracticeRosterCard, type PracticeRosterMember, type PracticeRosterProblem } from '@/components/practice-roster';
 import { Button } from '@/components/ui/button';
+import { DateTime } from '@/components/ui/datetime';
 import { MiniTabs } from '@/components/ui/mini-tabs';
 import { Sheet, SheetBody, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
-import { PracticeRosterCard, type PracticeRosterMember, type PracticeRosterProblem } from '@/components/practice-roster';
 import { practiceProblemEntryUrl } from '@/lib/practice-integrity';
 import { ChapterOutline } from './chapter-outline';
 import { useChapterQuery } from './chapter-query';
 import { CourseMindmapView } from './mindmap';
 import type { CourseChapter, CourseFile, CourseMindmapData, CourseRecord } from './types';
 import { CourseMark, CourseProgressRing, CourseSectionHeader, riseStyle } from './ui';
+
+const COURSE_COLLECT_STATUSES = ['draft', 'published', 'closed', 'archived'] as const;
+type CourseCollectStatus = (typeof COURSE_COLLECT_STATUSES)[number];
+
+interface CourseCollectRequest {
+  _id: string;
+  title: string;
+  dueAt: string;
+  status: CourseCollectStatus;
+  chapterId: number;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isCourseCollectStatus(value: unknown): value is CourseCollectStatus {
+  return typeof value === 'string' && (COURSE_COLLECT_STATUSES as readonly string[]).includes(value);
+}
+
+function readCourseCollectRequests(value: unknown): CourseCollectRequest[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw new TypeError('collectRequests must be an array');
+  return value.map((item, index) => {
+    if (!isRecord(item)) throw new TypeError(`collectRequests[${index}] must be an object`);
+    const id = typeof item._id === 'string' ? item._id : '';
+    const title = typeof item.title === 'string' ? item.title : '';
+    const dueAt = typeof item.dueAt === 'string' ? item.dueAt : '';
+    if (!id) throw new TypeError(`collectRequests[${index}]._id must be a string`);
+    if (!title) throw new TypeError(`collectRequests[${index}].title must be a string`);
+    if (!dueAt || Number.isNaN(Date.parse(dueAt))) throw new TypeError(`collectRequests[${index}].dueAt must be an ISO date`);
+    if (!isCourseCollectStatus(item.status)) throw new TypeError(`collectRequests[${index}].status is invalid`);
+    if (typeof item.chapterId !== 'number' || !Number.isSafeInteger(item.chapterId)) {
+      throw new TypeError(`collectRequests[${index}].chapterId must be an integer`);
+    }
+    return { _id: id, title, dueAt, status: item.status, chapterId: item.chapterId };
+  });
+}
+
+function collectStatusLabel(status: CourseCollectStatus, dueAt: string): string {
+  if (status === 'draft') return '草稿';
+  if (status === 'closed') return '已关闭';
+  if (status === 'archived') return '已归档';
+  const due = Date.parse(dueAt);
+  if (Number.isFinite(due) && due <= Date.now()) return '已截止';
+  return '收集中';
+}
 
 /**
  * Chapter problems.
@@ -103,6 +152,66 @@ function ProblemList({
           );
         })}
       </ol>
+    </section>
+  );
+}
+
+function CollectRequestList({
+  requests,
+  canManage,
+  canCreate,
+  courseId,
+  chapterId,
+}: {
+  requests: CourseCollectRequest[];
+  canManage: boolean;
+  canCreate: boolean;
+  courseId: string;
+  chapterId: number;
+}) {
+  if (!requests.length && !canCreate) return null;
+  return (
+    <section data-course-slot="collect" aria-labelledby="course-collect-title" className="space-y-3">
+      <CourseSectionHeader id="course-collect-title" title="文件收集" description="本章布置的文件收集。不写入章节结构。" count={requests.length || undefined} />
+      {requests.length ? (
+        <ul className="grid gap-2 sm:grid-cols-2">
+          {requests.map((request, index) => {
+            const href = canManage ? `/admin/collect/${request._id}` : `/collect/${request._id}`;
+            return (
+              <li key={request._id} style={riseStyle(index)} className="krypton-course-rise">
+                <a
+                  href={href}
+                  className={cn(
+                    'krypton-course-panel krypton-course-lift flex min-h-11 items-center gap-3 px-3.5 py-3',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+                  )}
+                >
+                  <span aria-hidden="true" className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+                    <FolderInput className="size-4" strokeWidth={1.75} />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium">{request.title}</span>
+                    <span className="krypton-course-meta block">
+                      {collectStatusLabel(request.status, request.dueAt)} · 截止 <DateTime value={request.dueAt} mode="datetime" />
+                    </span>
+                  </span>
+                  <ChevronRight className="size-4 shrink-0 text-muted-foreground/50" strokeWidth={1.75} />
+                </a>
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <p className="krypton-course-meta">本章还没有文件收集。</p>
+      )}
+      {canCreate ? (
+        <Button asChild variant="outline" className="min-h-11 gap-1.5">
+          <a href={`/admin/collect/create?fromCourse=${encodeURIComponent(courseId)}&chapter=${chapterId}`}>
+            <FolderInput className="size-4" strokeWidth={1.75} />
+            布置文件收集
+          </a>
+        </Button>
+      ) : null}
     </section>
   );
 }
@@ -219,6 +328,8 @@ export function CourseDetailPage() {
     canManage: boolean;
     canCreate?: boolean;
     canCreateQuiz: boolean;
+    canCreateCollect?: boolean;
+    collectRequests?: unknown;
     canEnroll: boolean;
     canDownloadFiles: boolean;
     tsdoc?: CourseRecord;
@@ -234,6 +345,7 @@ export function CourseDetailPage() {
   const course = data.tdoc || {};
   const tid = String(course.docId || course._id);
   const chapters = data.chapters || [];
+  const collectRequests = readCourseCollectRequests(data.collectRequests);
   const { activeId, activeSectionId, selectChapter, selectSection } = useChapterQuery(chapters);
   const activeChapter = chapters.find((chapter) => chapter._id === activeId) || chapters[0];
   const chapterSections = activeChapter?.sections || [];
@@ -548,6 +660,13 @@ export function CourseDetailPage() {
                 <ContestList chapter={activeChapter} contests={data.cdict || {}} />
               </>
             )}
+            <CollectRequestList
+              requests={collectRequests.filter((request) => request.chapterId === activeChapter._id)}
+              canManage={data.canManage}
+              canCreate={data.canCreateCollect === true}
+              courseId={tid}
+              chapterId={activeChapter._id}
+            />
             {data.canDownloadFiles && data.files?.length ? (
               <section data-course-slot="files" aria-labelledby="course-files-title" className="space-y-3">
                 <CourseSectionHeader id="course-files-title" title="课程课件" count={data.files.length} />
@@ -594,7 +713,9 @@ export function CourseDetailPage() {
             !activeChapter.loosePids.length &&
             !activeChapter.tids.length &&
             !chapterSections.length &&
-            !activeSection ? (
+            !activeSection &&
+            !collectRequests.some((request) => request.chapterId === activeChapter._id) &&
+            data.canCreateCollect !== true ? (
               <section className="krypton-course-inset px-6 py-14 text-center">
                 <span aria-hidden="true" className="mx-auto grid size-11 place-items-center rounded-xl bg-background/70 text-muted-foreground">
                   <Paperclip className="size-5" strokeWidth={1.5} />

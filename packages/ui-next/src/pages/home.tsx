@@ -22,6 +22,7 @@ import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { MarkdownView } from '@/components/markdown-renderer';
 import { AnnouncementHomeBlock } from '@/components/announcement-home-block';
+import { CollectHomeBlock } from '@/components/collect-home-block';
 import { type GenericUserDoc, useBootstrap } from '@/lib/bootstrap';
 import { formatDateTime, formatPlainTextSummary, formatRelativeTime, formatShortDate, makeInitials, replaceRouteTokens, toDate } from '@/lib/format';
 
@@ -502,6 +503,8 @@ export function KryptonHomePage() {
               </div>
             )}
           </SectionShell>
+
+          <CollectHomeBlock />
 
           {/* Ranking */}
           <SectionShell

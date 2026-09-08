@@ -476,6 +476,87 @@ class CourseMainHandler extends Handler {
     }
 }
 
+type CourseCollectRequestStatus = 'draft' | 'published' | 'closed' | 'archived';
+
+interface CourseCollectRequestView {
+    _id: string;
+    title: string;
+    dueAt: string;
+    status: CourseCollectRequestStatus;
+    chapterId: number;
+}
+
+interface CollectCourseQueryModule {
+    listByCourseChapter?: (
+        domainId: string,
+        courseId: ObjectId,
+        chapterId: number,
+        options?: { includeDraft?: boolean },
+    ) => Promise<unknown>;
+}
+
+function isNodeModuleNotFound(error: unknown): boolean {
+    if (!error || typeof error !== 'object') return false;
+    const code = (error as { code?: unknown }).code;
+    return code === 'MODULE_NOT_FOUND' || code === 'ERR_MODULE_NOT_FOUND';
+}
+
+function loadCollectCourseQuery(): CollectCourseQueryModule | null {
+    try {
+        return require('@hydrooj/krypton-collect') as CollectCourseQueryModule;
+    } catch (error) {
+        if (!isNodeModuleNotFound(error)) throw error;
+    }
+    try {
+        return require('@hydrooj/krypton-collect/src/course-query') as CollectCourseQueryModule;
+    } catch (error) {
+        if (!isNodeModuleNotFound(error)) throw error;
+    }
+    const collect = global.Hydro?.model && (global.Hydro.model as { collect?: CollectCourseQueryModule }).collect;
+    return collect || null;
+}
+
+function asCourseCollectRequestView(value: unknown, index: number): CourseCollectRequestView {
+    if (!value || typeof value !== 'object') throw new TypeError(`collectRequests[${index}] must be an object`);
+    const row = value as Record<string, unknown>;
+    const id = typeof row._id === 'string' ? row._id : '';
+    const title = typeof row.title === 'string' ? row.title : '';
+    const dueAt = typeof row.dueAt === 'string' ? row.dueAt : '';
+    const status = row.status;
+    const chapterId = row.chapterId;
+    if (!id) throw new TypeError(`collectRequests[${index}]._id must be a string`);
+    if (!title) throw new TypeError(`collectRequests[${index}].title must be a string`);
+    if (!dueAt || Number.isNaN(new Date(dueAt).getTime())) throw new TypeError(`collectRequests[${index}].dueAt must be an ISO date`);
+    if (status !== 'draft' && status !== 'published' && status !== 'closed' && status !== 'archived') {
+        throw new TypeError(`collectRequests[${index}].status is invalid`);
+    }
+    if (typeof chapterId !== 'number' || !Number.isSafeInteger(chapterId)) {
+        throw new TypeError(`collectRequests[${index}].chapterId must be an integer`);
+    }
+    return { _id: id, title, dueAt, status, chapterId };
+}
+
+async function loadCourseCollectRequests(
+    domainId: string,
+    courseId: ObjectId,
+    chapterIds: number[],
+    includeDraft: boolean,
+): Promise<{ available: boolean; requests: CourseCollectRequestView[] }> {
+    const mod = loadCollectCourseQuery();
+    const listByCourseChapter = mod?.listByCourseChapter;
+    if (typeof listByCourseChapter !== 'function') return { available: false, requests: [] };
+    if (!chapterIds.length) return { available: true, requests: [] };
+    const lists = await Promise.all(
+        chapterIds.map((chapterId) => listByCourseChapter(domainId, courseId, chapterId, { includeDraft })),
+    );
+    const requests: CourseCollectRequestView[] = [];
+    for (const list of lists) {
+        if (!Array.isArray(list)) throw new TypeError('listByCourseChapter must return an array');
+        for (const item of list) requests.push(asCourseCollectRequestView(item, requests.length));
+    }
+    return { available: true, requests };
+}
+
 class CourseDetailHandler extends Handler {
     @param('tid', Types.ObjectId)
     @param('view', Types.String, true)
@@ -513,7 +594,16 @@ class CourseDetailHandler extends Handler {
                           : [],
                   ])
                 : Promise.resolve([{}, {}, []] as const);
-        const [udoc, tsdoc, courseMindmap, publishedIntegrity, [pdict, psdict, ctdocs]] = await Promise.all([
+        const collectQuery =
+            activeView === 'overview'
+                ? loadCourseCollectRequests(
+                      domainId,
+                      tid,
+                      (tdoc.dag || []).map((node) => node._id),
+                      canManage,
+                  )
+                : Promise.resolve({ available: false, requests: [] as CourseCollectRequestView[] });
+        const [udoc, tsdoc, courseMindmap, publishedIntegrity, [pdict, psdict, ctdocs], collectResult] = await Promise.all([
             user.getById(domainId, tdoc.owner),
             this.user.hasPriv(PRIV.PRIV_USER_PROFILE) ? training.getStatus(domainId, tdoc.docId, this.user._id) : null,
             activeView === 'mindmap' && tdoc.mindmapId !== undefined && tdoc.mindmapId !== null
@@ -521,6 +611,7 @@ class CourseDetailHandler extends Handler {
                 : null,
             practiceIntegrityService.getLatestPublished(domainId, 'course', tdoc.docId),
             overviewData,
+            collectQuery,
         ]);
         const contextualDoneByScope =
             activeView === 'overview' && publishedIntegrity && this.user.hasPriv(PRIV.PRIV_USER_PROFILE)
@@ -599,6 +690,13 @@ class CourseDetailHandler extends Handler {
             tsdoc,
             canCreate: canCreateCourse(this.user),
             canCreateQuiz: canManage && this.user.hasPerm(PERM.PERM_CREATE_HOMEWORK),
+            canCreateCollect:
+                collectResult.available &&
+                canManage &&
+                (this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM) ||
+                    this.user.hasPerm(PERM.PERM_CREATE_COLLECT) ||
+                    this.user.hasPerm(PERM.PERM_MANAGE_COLLECT)),
+            collectRequests: collectResult.requests,
             canEnroll: canDownloadFiles && !tsdoc?.enroll,
             canDownloadFiles,
             files: activeView === 'overview' && canDownloadFiles ? sortFiles(tdoc.files || []) : [],

@@ -777,6 +777,7 @@ export function CourseEditPage() {
             ) : !isEdit ? (
               <p className="krypton-course-meta">保存课程后即可创建并自动挂载章节小测。</p>
             ) : null}
+            <p className="krypton-course-meta mt-2">文件收集不写入章节结构，请到课程详情页布置。</p>
           </section>
         </section>
 

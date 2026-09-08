@@ -2,6 +2,11 @@ import { useBootstrap } from '@/lib/bootstrap';
 import { AdminAccountDetailPage, AdminAccountsPage } from '@/pages/admin-accounts';
 import { DomainDashboardPage, ManageDashboardPage, StatusPage } from '@/pages/admin';
 import {
+  AdminCollectEditPage,
+  AdminCollectListPage,
+  AdminCollectStatsPage,
+} from '@/pages/admin-collect';
+import {
   AdminTasksAssignPage,
   AdminTasksCandidatesPage,
   AdminTasksEditPage,
@@ -45,6 +50,7 @@ import { ContestTeamsPage } from '@/pages/contest-teams';
 import { TeamBatchesPage } from '@/pages/team-batches';
 import { ContestDetailPage, ContestScoreboardPage, ContestsPage } from '@/pages/contests';
 import { VirtualContestPage, VirtualContestScoreboardPage } from '@/pages/virtual-contest';
+import { CollectDetailPage, CollectListPage } from '@/pages/collect';
 import { CourseDetailPage, CourseEditPage, CoursePage } from '@/pages/course';
 import { DiscussionCreatePage, DiscussionEditPage } from '@/pages/discussion-manage';
 import { DiscussionDetailPage, DiscussionsPage } from '@/pages/discussions';
@@ -309,6 +315,15 @@ const PAGE_MAP: Record<string, PageComponent> = {
   'admin_tasks_candidates.html': AdminTasksCandidatesPage,
   'admin_tasks_scores.html': AdminTasksScoresPage,
   'admin_tasks_settings.html': AdminTasksSettingsPage,
+
+  // krypton-collect (user-facing)
+  'collect_main.html': CollectListPage,
+  'collect_detail.html': CollectDetailPage,
+
+  // krypton-collect (admin-facing)
+  'admin_collect.html': AdminCollectListPage,
+  'admin_collect_edit.html': AdminCollectEditPage,
+  'admin_collect_stats.html': AdminCollectStatsPage,
 
   // krypton-announcement
   'announce_list.html': AnnounceListPage,

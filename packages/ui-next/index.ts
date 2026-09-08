@@ -5,6 +5,7 @@ import { Context, PERM, PRIV, ProblemModel } from 'hydrooj';
 import { serializer } from '@hydrooj/framework';
 import type { ViteDevServer } from 'vite';
 import { resolveAnnouncementManagementCapability } from './announcement-capabilities';
+import { resolveCollectManagementCapability } from './collect-capabilities';
 import { resolveDomainPermissionManagementCapability } from './domain-permission-capabilities';
 import { resolveExamInfrastructureCapability } from './exam-infrastructure-capabilities';
 import { resolveRankboardCapabilities } from './rankboard-capabilities';
@@ -262,6 +263,23 @@ function buildBootstrap(templateName: string, args: Record<string, any>, context
       );
     },
   });
+  const canManageCollect = resolveCollectManagementCapability({
+    user: context.handler?.user,
+    editSystemPriv: PRIV.PRIV_EDIT_SYSTEM,
+    createCollectPerm: PERM.PERM_CREATE_COLLECT,
+    manageCollectPerm: PERM.PERM_MANAGE_COLLECT,
+    onError(error) {
+      console.error(
+        '[ui-next] collect management capability resolution failed:',
+        {
+          domainId: String(domain?._id || ''),
+          uid: Number(context.handler?.user?._id || 0),
+          templateName,
+        },
+        error,
+      );
+    },
+  });
   const canManageDomainPermissions = resolveDomainPermissionManagementCapability({
     user: context.handler?.user,
     editDomainPerm: PERM.PERM_EDIT_DOMAIN,
@@ -363,6 +381,7 @@ function buildBootstrap(templateName: string, args: Record<string, any>, context
       canManageRankboard: rankboardCapabilities.canManageRankboard,
       canManageAnnouncements,
       canManageTasks,
+      canManageCollect,
       canManageDomainPermissions,
       canManageExamInfrastructure,
       canManageRedemptionCodes,

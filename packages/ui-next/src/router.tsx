@@ -12,6 +12,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Sidebar } from '@/components/layout/sidebar';
 import { PageResolver } from '@/pages/resolver';
 import { AnnouncementPopover } from '@/components/announcement-popover';
+import { CollectPendingBadge } from '@/components/collect-pending-badge';
 
 const SIDEBAR_KEY = 'krypton:sidebar-collapsed';
 const THEME_KEY = 'krypton:theme';
@@ -129,6 +130,7 @@ function DefaultAppShell() {
               <>
                 {/* Announcement popover */}
                 <AnnouncementPopover signedIn={bs.user.signedIn} />
+                <CollectPendingBadge />
 
                 {/* Messages icon */}
                 <Button asChild variant="ghost" size="icon" className="relative size-8">

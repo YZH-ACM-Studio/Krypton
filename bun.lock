@@ -333,6 +333,15 @@
         "mongodb": "^7.1.1",
       },
     },
+    "packages/krypton-collect": {
+      "name": "@hydrooj/krypton-collect",
+      "version": "0.1.0",
+      "dependencies": {
+        "@hydrooj/utils": "workspace:^",
+        "hydrooj": "workspace:^",
+        "mongodb": "^7.1.1",
+      },
+    },
     "packages/krypton-mindmap": {
       "name": "@hydrooj/krypton-mindmap",
       "version": "0.1.0",
@@ -1288,6 +1297,8 @@
     "@hydrooj/import-qduoj": ["@hydrooj/import-qduoj@workspace:packages/import-qduoj"],
 
     "@hydrooj/krypton-announcement": ["@hydrooj/krypton-announcement@workspace:packages/krypton-announcement"],
+
+    "@hydrooj/krypton-collect": ["@hydrooj/krypton-collect@workspace:packages/krypton-collect"],
 
     "@hydrooj/krypton-mindmap": ["@hydrooj/krypton-mindmap@workspace:packages/krypton-mindmap"],
 

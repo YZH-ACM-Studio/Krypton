@@ -232,6 +232,11 @@ function asOptionalString(value: unknown, label: string): string {
   return asString(value, label);
 }
 
+function asOptionalId(value: unknown, label: string): string {
+  if (value === undefined || value === null || value === '') return '';
+  return asId(value, label);
+}
+
 function asId(value: unknown, label: string): string {
   if (typeof value === 'string' && value.trim()) return value.trim();
   if (typeof value === 'number' && Number.isSafeInteger(value)) return String(value);
@@ -501,7 +506,7 @@ function parseEditPageData(value: unknown, currentUid: number): CollectEditPageD
     courses: parseCourses(rec.courses),
     collaborators: parseCollaborators(rec.collaborators, collaboratorUids),
     fromCourse: asOptionalString(rec.fromCourse, '来源课程'),
-    chapter: rec.chapter === undefined || rec.chapter === null ? '' : asId(rec.chapter, '来源章节'),
+    chapter: asOptionalId(rec.chapter, '来源章节'),
     prefillGroupIds: parseIdList(rec.prefillGroupIds, '预填用户组'),
     prefillSchoolId: rec.prefillSchoolId ? asId(rec.prefillSchoolId, '预填学校') : '',
   };

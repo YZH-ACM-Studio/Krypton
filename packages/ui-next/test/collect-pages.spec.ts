@@ -224,6 +224,7 @@ describe('collect teacher payload contracts', () => {
     expect(admin).to.include('hasFiles: optionalBoolean(rec.hasFiles');
     expect(admin).to.include('!item.hasFiles');
     expect(admin).to.include('item.hasFiles && item.status');
+    expect(admin).to.include("chapter: asOptionalId(rec.chapter, '来源章节')");
   });
 
   it('uses locked product copy on the homepage pending block', () => {

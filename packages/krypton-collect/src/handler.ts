@@ -13,6 +13,7 @@ import {
     PRIV,
     PermissionError,
     StorageModel,
+    TrainingModel,
     Types,
     param,
 } from 'hydrooj';
@@ -62,20 +63,30 @@ function actorOf(handler: Handler) {
 }
 
 async function assertNotBoundClient(handler: Handler): Promise<void> {
-    const session = handler.session as { sid?: string; id?: string } | undefined;
-    const sid = String(session?.sid || session?.id || '');
-    if (!sid) return;
+    const session = handler.session as { sessionId?: string; _id?: string; sid?: string } | undefined;
+    const sid = String(session?.sessionId || session?._id || session?.sid || '');
+    let vigil: {
+        clientSessionKeyFromSession?: (value: unknown) => string;
+        currentClientSession?: (id: string) => Promise<unknown>;
+    };
     try {
-        const vigil = require('@hydrooj/krypton-vigilguard') as { currentClientSession?: (id: string) => Promise<unknown> };
-        if (typeof vigil.currentClientSession !== 'function') return;
-        const bound = await vigil.currentClientSession(sid);
-        if (bound) throw new CollectForbiddenError('考试会话中不能使用文件收集');
+        vigil = require('@hydrooj/krypton-vigilguard');
     } catch (error) {
-        if (error instanceof CollectForbiddenError) throw error;
         const code = error && typeof error === 'object' && 'code' in error ? String((error as { code?: unknown }).code) : '';
-        if (code === 'MODULE_NOT_FOUND') return;
+        if (code === 'MODULE_NOT_FOUND') {
+            throw new CollectForbiddenError('无法确认考试会话，拒绝访问文件收集');
+        }
         throw error;
     }
+    const key = typeof vigil.clientSessionKeyFromSession === 'function'
+        ? String(vigil.clientSessionKeyFromSession(handler.session) || sid)
+        : sid;
+    if (!key) return;
+    if (typeof vigil.currentClientSession !== 'function') {
+        throw new CollectForbiddenError('无法确认考试会话，拒绝访问文件收集');
+    }
+    const bound = await vigil.currentClientSession(key);
+    if (bound) throw new CollectForbiddenError('考试会话中不能使用文件收集');
 }
 
 function parseObjectIdList(raw: unknown): string[] {
@@ -125,9 +136,10 @@ async function notifyUids(uids: number[], title: string, path: string): Promise<
 
 async function loadCatalog(domainId: string) {
     const ub = await userbindOrThrow();
-    const [schools, groups] = await Promise.all([
+    const [schools, groups, courseDocs] = await Promise.all([
         typeof ub.listSchools === 'function' ? ub.listSchools(domainId) : Promise.resolve([]),
         typeof ub.listUserGroups === 'function' ? ub.listUserGroups(domainId) : Promise.resolve([]),
+        TrainingModel.getMulti(domainId, { kind: 'course' }).limit(100).toArray(),
     ]);
     return {
         schools: (schools as Array<{ _id: ObjectId; name: string }>).map((row) => ({ _id: String(row._id), name: row.name })),
@@ -137,11 +149,43 @@ async function loadCatalog(domainId: string) {
             name: row.name,
             ...(row.archivedAt ? { archivedAt: row.archivedAt.toISOString() } : {}),
         })),
-        courses: [] as Array<{ _id: string; title: string; chapters: Array<{ _id: string; title: string }> }>,
+        courses: courseDocs.map((doc) => ({
+            _id: String(doc.docId || doc._id),
+            title: String(doc.title || '未命名课程'),
+            chapters: Array.isArray(doc.dag)
+                ? doc.dag.map((node) => ({ _id: String(node._id), title: String(node.title || '未命名章节') }))
+                : [],
+        })),
     };
 }
 
-function serializeRequest(doc: CollectRequestDoc) {
+async function coursePrefill(domainId: string, courseId: string, chapter: string) {
+    if (!courseId) return { prefillGroupIds: [] as string[], prefillSchoolId: '', fromCourse: '', chapter: '' };
+    const tdoc = await TrainingModel.get(domainId, new ObjectId(courseId));
+    if (tdoc.kind !== 'course') {
+        return { prefillGroupIds: [] as string[], prefillSchoolId: '', fromCourse: '', chapter: '' };
+    }
+    const groupIds = Array.isArray(tdoc.courseGroupIds) ? tdoc.courseGroupIds.map((id: ObjectId) => String(id)) : [];
+    const ub = await userbindOrThrow();
+    let prefillSchoolId = '';
+    if (groupIds[0] && typeof ub.getUserGroup === 'function') {
+        const group = await ub.getUserGroup(domainId, new ObjectId(groupIds[0]));
+        if (group?.schoolId) prefillSchoolId = String(group.schoolId);
+    }
+    return {
+        prefillGroupIds: groupIds,
+        prefillSchoolId,
+        fromCourse: courseId,
+        chapter,
+    };
+}
+
+function serializeRequest(doc: CollectRequestDoc, extras: {
+    hasSubmissions?: boolean;
+    hasFiles?: boolean;
+    canEdit?: boolean;
+    schoolName?: string;
+} = {}) {
     return {
         _id: String(doc._id),
         title: doc.title,
@@ -160,7 +204,10 @@ function serializeRequest(doc: CollectRequestDoc) {
         courseRef: doc.courseRef
             ? { courseId: String(doc.courseRef.courseId), chapterId: doc.courseRef.chapterId }
             : null,
-        hasSubmissions: false,
+        hasSubmissions: extras.hasSubmissions === true,
+        hasFiles: extras.hasFiles === true,
+        canEdit: extras.canEdit === true,
+        ...(extras.schoolName ? { schoolName: extras.schoolName } : {}),
     };
 }
 
@@ -200,6 +247,7 @@ class CollectDetailHandler extends CollectBaseHandler {
     async get(_domainId: string, id: ObjectId) {
         const domainId = domainIdOf(this);
         const request = await getRequest(domainId, id);
+        if (request.status === 'draft' || request.status === 'archived') throw new CollectNotFoundError();
         const member = await isAudienceMember(domainId, this.user._id, request);
         const submission = await submissionsColl.findOne({ domainId, requestId: request._id, uid: this.user._id });
         if (!member && !submission) throw new CollectForbiddenError('不在收集名单中');
@@ -218,6 +266,7 @@ class CollectDetailHandler extends CollectBaseHandler {
             description: request.description,
             dueAt: request.dueAt.toISOString(),
             status: request.status,
+            member,
             submitted: submission?.status === 'submitted',
             filled: requiredSlotsFilled(request.slots, submission?.currentFiles || []),
             slots: request.slots,
@@ -243,6 +292,7 @@ class CollectDetailHandler extends CollectBaseHandler {
             throw new CollectForbiddenError('域不匹配');
         }
         const request = await getRequest(authoritativeDomainId, id);
+        if (request.status === 'draft' || request.status === 'archived') throw new CollectNotFoundError();
         const operation = String((this.args as { operation?: string }).operation || this.request.body?.operation || '');
         if (operation === 'upload_file' || operation === 'replace_file') {
             await this.limitRate('collect_upload', 60, 20);
@@ -295,6 +345,7 @@ class CollectFileDownloadHandler extends CollectBaseHandler {
     @param('fileId', Types.String)
     async get(_domainId: string, id: ObjectId, fileId: string) {
         const request = await getRequest(domainIdOf(this), id);
+        if (request.status === 'draft' || request.status === 'archived') throw new CollectNotFoundError();
         const file = await getFileForDownload(request, actorOf(this), fileId);
         this.response.addHeader('Cache-Control', 'private, no-store');
         this.response.addHeader('X-Content-Type-Options', 'nosniff');
@@ -304,7 +355,7 @@ class CollectFileDownloadHandler extends CollectBaseHandler {
             size: file.size,
             ownerUid: file.uid,
         });
-        this.response.redirect = await StorageModel.signDownloadLink(file.storagePath, 'download', false, 'user');
+        this.response.redirect = await StorageModel.signDownloadLink(file.storagePath, file.originalName, false, 'user');
     }
 }
 
@@ -330,37 +381,82 @@ class AdminCollectListHandler extends CollectBaseHandler {
 
     async get() {
         const domainId = domainIdOf(this);
-        const docs = await listRequestsForTeacher(domainId, actorOf(this));
-        const progress = await Promise.all(docs.map(async (doc) => {
-            const rows = await listProgress(doc);
+        const actor = actorOf(this);
+        const catalog = await loadCatalog(domainId);
+        const docs = await listRequestsForTeacher(domainId, actor);
+        const schoolName = new Map(catalog.schools.map((row) => [row._id, row.name]));
+        const extras = await Promise.all(docs.map(async (doc) => {
+            const [rows, file] = await Promise.all([
+                listProgress(doc),
+                filesColl.findOne({ domainId, requestId: doc._id }),
+            ]);
             const due = rows.filter((row) => !row.leftGroup);
             const submitted = due.filter((row) => row.status === 'submitted').length;
-            return { id: String(doc._id), submitted, total: due.length };
+            const leftSubmitted = rows.some((row) => row.leftGroup && row.status === 'submitted');
+            return {
+                id: String(doc._id),
+                submitted,
+                total: due.length,
+                hasSubmissions: submitted > 0 || leftSubmitted,
+                hasFiles: !!file || submitted > 0 || leftSubmitted,
+            };
         }));
-        const byId = new Map(progress.map((row) => [row.id, row]));
+        const byId = new Map(extras.map((row) => [row.id, row]));
         this.response.template = 'admin_collect.html';
         this.response.body = {
-            requests: docs.map((doc) => ({
-                ...serializeRequest(doc),
-                submitted: byId.get(String(doc._id))?.submitted || 0,
-                total: byId.get(String(doc._id))?.total || 0,
-            })),
+            schools: catalog.schools,
+            canCreate: canCreateCollect(this.user),
+            requests: docs.map((doc) => {
+                const extra = byId.get(String(doc._id));
+                return {
+                    ...serializeRequest(doc, {
+                        hasSubmissions: extra?.hasSubmissions === true,
+                        hasFiles: extra?.hasFiles === true,
+                        canEdit: canEditCollect(actor, doc),
+                        schoolName: schoolName.get(String(doc.schoolId)),
+                    }),
+                    submitted: extra?.submitted || 0,
+                    total: extra?.total || 0,
+                };
+            }),
         };
     }
 
     @param('id', Types.ObjectId, true)
     async post(_domainId: string, id?: ObjectId) {
         const domainId = domainIdOf(this);
+        const actor = actorOf(this);
         const operation = String(this.request.body?.operation || this.args.operation || '');
-        if (operation === 'archive' && id) {
-            await archiveRequest(domainId, id, actorOf(this), Number(this.request.body?.revision || 0) || (await getRequest(domainId, id)).revision);
+        if (!id) throw new CollectNotFoundError();
+        const current = await getRequest(domainId, id);
+        if (operation === 'publish') {
+            const published = await publishRequest(domainId, id, actor, current.revision);
+            const audience = await resolveAudience(published.domainId, published.schoolId, published.groupIds);
+            await notifyUids(audience.map((row) => row.boundUserId), published.title, collectUrl(this, published._id));
+            await OplogModel.log(this, 'collect.publish', { requestId: String(id), assigneeCount: audience.length });
+            this.back();
+            return;
+        }
+        if (operation === 'close') {
+            await closeRequest(domainId, id, actor, current.revision);
+            await OplogModel.log(this, 'collect.close', { requestId: String(id) });
+            this.back();
+            return;
+        }
+        if (operation === 'reopen') {
+            await reopenRequest(domainId, id, actor, current.revision);
+            await OplogModel.log(this, 'collect.reopen', { requestId: String(id) });
+            this.back();
+            return;
+        }
+        if (operation === 'archive') {
+            await archiveRequest(domainId, id, actor, current.revision);
             await OplogModel.log(this, 'collect.archive', { requestId: String(id) });
             this.back();
             return;
         }
-        if (operation === 'delete' && id) {
-            const current = await getRequest(domainId, id);
-            await deleteRequestIfEmpty(domainId, id, actorOf(this), current.revision);
+        if (operation === 'delete') {
+            await deleteRequestIfEmpty(domainId, id, actor, current.revision);
             await OplogModel.log(this, 'collect.delete', { requestId: String(id) });
             this.response.redirect = '/admin/collect';
             return;
@@ -381,19 +477,33 @@ class AdminCollectEditHandler extends CollectBaseHandler {
     async get(_domainId: string, id?: ObjectId, fromCourse?: ObjectId, chapter?: number) {
         const domainId = domainIdOf(this);
         const catalog = await loadCatalog(domainId);
-        let doc = null as ReturnType<typeof serializeRequest> | null;
+        const prefill = await coursePrefill(domainId, fromCourse ? String(fromCourse) : '', chapter != null ? String(chapter) : '');
+        let requestView = null as ReturnType<typeof serializeRequest> | null;
+        let hasSubmissions = false;
+        let hasFiles = false;
         if (id) {
             const request = await getRequest(domainId, id);
             if (!canViewCollect(this.user, request)) throw new CollectForbiddenError('无权查看该收集');
-            const submitted = await submissionsColl.findOne({ domainId, requestId: request._id, status: 'submitted' });
-            doc = { ...serializeRequest(request), hasSubmissions: !!submitted };
+            const [submitted, file] = await Promise.all([
+                submissionsColl.findOne({ domainId, requestId: request._id, status: 'submitted' }),
+                filesColl.findOne({ domainId, requestId: request._id }),
+            ]);
+            hasSubmissions = !!submitted;
+            hasFiles = !!file || !!submitted;
+            requestView = serializeRequest(request, {
+                hasSubmissions,
+                hasFiles,
+                canEdit: canEditCollect(actorOf(this), request),
+            });
         }
         this.response.template = 'admin_collect_edit.html';
         this.response.body = {
             ...catalog,
-            doc,
-            fromCourse: fromCourse ? String(fromCourse) : '',
-            chapter: chapter != null ? String(chapter) : '',
+            request: requestView,
+            hasSubmissions,
+            hasFiles,
+            canEdit: requestView ? requestView.canEdit : canCreateCollect(this.user),
+            ...prefill,
         };
     }
 
@@ -411,9 +521,10 @@ class AdminCollectEditHandler extends CollectBaseHandler {
         const maxFileBytes = Number(body.maxFileBytes);
         const maxTotalBytes = Number(body.maxTotalBytes);
         const maxFiles = Number(body.maxFiles);
-        const courseId = String(body.courseId || body.fromCourse || '');
-        const chapterId = Number(body.chapterId || body.chapter);
-        const courseRef = courseId && Number.isInteger(chapterId)
+        const courseId = String(body.courseId || '').trim();
+        const chapterToken = body.chapterId;
+        const chapterId = chapterToken === '' || chapterToken == null ? Number.NaN : Number(chapterToken);
+        const courseRef = courseId && Number.isInteger(chapterId) && chapterId >= 0
             ? { courseId, chapterId }
             : null;
         const patch = {
@@ -429,11 +540,25 @@ class AdminCollectEditHandler extends CollectBaseHandler {
             courseRef,
         };
 
-        if (operation === 'create' || (!id && operation === 'update')) {
-            const created = await createRequest(domainId, this.user._id, patch);
-            await OplogModel.log(this, 'collect.create', { requestId: String(created._id) });
-            this.response.redirect = `/admin/collect/${String(created._id)}/edit`;
-            return;
+        if (operation === 'create' || operation === 'publish' || (!id && operation === 'update')) {
+            if (!id) {
+                const created = await createRequest(domainId, this.user._id, patch);
+                const collaborators = parseUidList(body.collaboratorUids);
+                const withCollab = collaborators.length
+                    ? await setCollaborators(domainId, created._id, actorOf(this), created.revision, collaborators)
+                    : created;
+                await OplogModel.log(this, 'collect.create', { requestId: String(created._id) });
+                if (operation === 'publish') {
+                    const published = await publishRequest(domainId, created._id, actorOf(this), withCollab.revision);
+                    const audience = await resolveAudience(published.domainId, published.schoolId, published.groupIds);
+                    await notifyUids(audience.map((row) => row.boundUserId), published.title, collectUrl(this, published._id));
+                    await OplogModel.log(this, 'collect.publish', { requestId: String(created._id), assigneeCount: audience.length });
+                    this.response.redirect = `/admin/collect/${String(created._id)}`;
+                    return;
+                }
+                this.response.redirect = `/admin/collect/${String(created._id)}/edit`;
+                return;
+            }
         }
         if (!id) throw new CollectNotFoundError();
         const current = await getRequest(domainId, id);
@@ -484,9 +609,23 @@ class AdminCollectStatsHandler extends CollectBaseHandler {
         const request = await getRequest(domainIdOf(this), id);
         if (!canViewCollect(this.user, request)) throw new CollectForbiddenError('无权查看该收集');
         const rows = await listProgress(request);
+        const canEdit = canEditCollect(this.user, request);
+        const historyDocs = await filesColl
+            .find({ domainId: request.domainId, requestId: request._id, current: false })
+            .sort({ createdAt: -1, _id: -1 })
+            .toArray();
+        const historyByUid = new Map<number, typeof historyDocs>();
+        for (const file of historyDocs) {
+            const list = historyByUid.get(file.uid) || [];
+            list.push(file);
+            historyByUid.set(file.uid, list);
+        }
         this.response.template = 'admin_collect_stats.html';
         this.response.body = {
-            request: serializeRequest(request),
+            request: serializeRequest(request, { canEdit }),
+            canEdit,
+            canNudge: request.status === 'published' || request.status === 'closed',
+            canPack: true,
             rows: rows.map((row) => ({
                 uid: row.uid,
                 studentId: row.studentId,
@@ -496,6 +635,14 @@ class AdminCollectStatsHandler extends CollectBaseHandler {
                 leftGroup: row.leftGroup,
                 files: row.currentFiles.map((file) => ({
                     ...file,
+                    url: `/admin/collect/${String(request._id)}/file/${file.fileId}`,
+                })),
+                history: (historyByUid.get(row.uid) || []).map((file) => ({
+                    slotId: file.slotId,
+                    fileId: file.fileId,
+                    originalName: file.originalName,
+                    size: file.size,
+                    version: file.version,
                     url: `/admin/collect/${String(request._id)}/file/${file.fileId}`,
                 })),
             })),
@@ -556,7 +703,7 @@ class AdminCollectFileDownloadHandler extends CollectBaseHandler {
             size: file.size,
             ownerUid: file.uid,
         });
-        this.response.redirect = await StorageModel.signDownloadLink(file.storagePath, 'download', false, 'user');
+        this.response.redirect = await StorageModel.signDownloadLink(file.storagePath, file.originalName, false, 'user');
     }
 }
 

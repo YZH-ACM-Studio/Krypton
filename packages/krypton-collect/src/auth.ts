@@ -40,8 +40,8 @@ export function canViewCollect(
     request: Pick<CollectRequestDoc, 'ownerUid' | 'collaboratorUids'>,
 ): boolean {
     if (canEditCollect(user, request)) return true;
-    if (request.collaboratorUids.includes(user._id)) return true;
-    return false;
+    if (!request.collaboratorUids.includes(user._id)) return false;
+    return canCreateCollect(user);
 }
 
 export const canPackCollect = canViewCollect;

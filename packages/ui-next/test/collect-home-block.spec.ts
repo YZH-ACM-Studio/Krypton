@@ -73,8 +73,8 @@ describe('collect home block pending payload', () => {
       }),
     );
     render(createElement(CollectHomeBlock));
-    expect(await screen.findByText('待提交文件')).not.to.equal(null);
-    expect(screen.getByRole('link', { name: '去提交' }).getAttribute('href')).to.equal('/collect/66b800000000000000000701');
+    expect(await screen.findByText('未交文件')).not.to.equal(null);
+    expect(screen.getByRole('link', { name: '去交文件' }).getAttribute('href')).to.equal('/collect/66b800000000000000000701');
     expect(screen.getByRole('link', { name: /查看全部/ }).getAttribute('href')).to.equal('/collect');
   });
 });

@@ -7,7 +7,7 @@
  *   - admin_collect_stats.html → AdminCollectStatsPage
  */
 import { useEffect, useMemo, useState } from 'react';
-import { Archive, ArrowLeft, Bell, Copy, FileDown, FolderUp, Plus, Save, Trash2 } from 'lucide-react';
+import { Archive, ArrowLeft, Bell, FileDown, FolderUp, Plus, Save, Trash2 } from 'lucide-react';
 import { DomainUserSearchOption, domainUserSearchLabel, loadDomainUsers, type DomainUserOption } from '@/components/domain-user-search';
 import { ModuleWorkspace, type ModuleWorkspaceNavItem } from '@/components/management/module-workspace';
 import { Badge } from '@/components/ui/badge';
@@ -112,6 +112,7 @@ interface CollectListItem {
   submitted: number;
   total: number;
   hasSubmissions: boolean;
+  hasFiles: boolean;
   canEdit: boolean;
 }
 
@@ -144,6 +145,10 @@ interface ProgressFile {
   url: string;
 }
 
+interface ProgressHistoryFile extends ProgressFile {
+  version: number;
+}
+
 interface ProgressRow {
   uid: number;
   studentId: string;
@@ -152,6 +157,7 @@ interface ProgressRow {
   leftGroup: boolean;
   submittedAt: string | null;
   files: ProgressFile[];
+  history: ProgressHistoryFile[];
 }
 
 interface CollectStatsRequest {
@@ -391,6 +397,7 @@ function parseListItem(value: unknown, schools: SchoolRef[], currentUid: number)
     submitted,
     total,
     hasSubmissions: optionalBoolean(rec.hasSubmissions, submitted > 0, '是否已有提交'),
+    hasFiles: optionalBoolean(rec.hasFiles, rec.hasSubmissions === true || submitted > 0, '是否已有文件'),
     canEdit: optionalBoolean(rec.canEdit, ownerUid === null ? true : ownerUid === currentUid, '编辑权限'),
   };
 }
@@ -445,7 +452,7 @@ function parseEditPageData(value: unknown, currentUid: number): CollectEditPageD
     fromCourse: asOptionalString(rec.fromCourse, '来源课程'),
     chapter: rec.chapter === undefined || rec.chapter === null ? '' : asId(rec.chapter, '来源章节'),
     prefillGroupIds: parseIdList(rec.prefillGroupIds, '预填用户组'),
-    prefillSchoolId: rec.schoolId ? asId(rec.schoolId, '学校') : '',
+    prefillSchoolId: rec.prefillSchoolId ? asId(rec.prefillSchoolId, '预填学校') : '',
   };
 }
 
@@ -477,10 +484,18 @@ function parseProgressStatus(rec: Record<string, unknown>): ProgressRowStatus {
   throw new Error('提交状态格式不正确');
 }
 
+function parseProgressHistoryFile(value: unknown, slots: SlotDraft[], requestId: string): ProgressHistoryFile {
+  const file = parseProgressFile(value, slots, requestId);
+  const rec = asRecord(value, '历史文件');
+  return { ...file, version: asNonNegativeInt(rec.version, '历史版本') };
+}
+
 function parseProgressRow(value: unknown, slots: SlotDraft[], requestId: string): ProgressRow {
   const rec = asRecord(value, '进度行');
   const filesRaw = rec.files ?? rec.currentFiles;
   if (!Array.isArray(filesRaw)) throw new Error('进度文件列表格式不正确');
+  const historyRaw = rec.history;
+  if (historyRaw !== undefined && !Array.isArray(historyRaw)) throw new Error('历史文件列表格式不正确');
   return {
     uid: asUid(rec.uid, '用户'),
     studentId: asOptionalString(rec.studentId, '学号'),
@@ -489,6 +504,7 @@ function parseProgressRow(value: unknown, slots: SlotDraft[], requestId: string)
     leftGroup: optionalBoolean(rec.leftGroup, false, '已退组'),
     submittedAt: asOptionalIso(rec.submittedAt, '提交时间'),
     files: filesRaw.map((item) => parseProgressFile(item, slots, requestId)),
+    history: Array.isArray(historyRaw) ? historyRaw.map((item) => parseProgressHistoryFile(item, slots, requestId)) : [],
   };
 }
 
@@ -742,20 +758,12 @@ export function AdminCollectListPage() {
                             关闭
                           </TableAction>
                         ) : null}
-                        {item.canEdit && item.status === 'closed' ? (
+                        {item.canEdit && item.status === 'closed' && Date.parse(item.dueAt) > Date.now() ? (
                           <TableAction formAction="/admin/collect" hidden={{ operation: 'reopen', id: item._id }}>
                             重新开放
                           </TableAction>
                         ) : null}
-                        {item.canEdit ? (
-                          <TableAction
-                            formAction="/admin/collect"
-                            hidden={{ operation: 'clone', id: item._id }}
-                            icon={Copy}
-                            hint="复制"
-                          />
-                        ) : null}
-                        {item.canEdit && !item.hasSubmissions && item.status !== 'archived' ? (
+                        {item.canEdit && !item.hasFiles && item.status !== 'archived' ? (
                           <TableAction
                             formAction="/admin/collect"
                             hidden={{ operation: 'delete', id: item._id }}
@@ -765,7 +773,7 @@ export function AdminCollectListPage() {
                             confirm={`确定删除文件收集「${item.title}」？`}
                           />
                         ) : null}
-                        {item.canEdit && item.hasSubmissions && item.status !== 'archived' ? (
+                        {item.canEdit && item.hasFiles && item.status !== 'archived' ? (
                           <TableAction
                             formAction="/admin/collect"
                             hidden={{ operation: 'archive', id: item._id }}
@@ -900,12 +908,6 @@ export function AdminCollectEditPage() {
       <form method="post" action={formAction} className="space-y-4">
         {isEdit ? <input type="hidden" name="id" value={initial._id} /> : null}
         {isEdit ? <input type="hidden" name="revision" value={String(initial.revision)} /> : null}
-        {data.fromCourse || query.courseId ? (
-          <>
-            <input type="hidden" name="fromCourse" value={data.fromCourse || query.courseId} />
-            <input type="hidden" name="chapter" value={data.chapter || query.chapterId} />
-          </>
-        ) : null}
         <input type="hidden" name="slots" value={JSON.stringify(serializeSlots(slots))} />
         <input type="hidden" name="maxFileBytes" value={String(mibToBytes(maxFileMib, HARD_MAX_FILE_BYTES))} />
         <input type="hidden" name="maxTotalBytes" value={String(mibToBytes(maxTotalMib, HARD_MAX_TOTAL_BYTES))} />
@@ -1379,7 +1381,7 @@ function ProgressTableRow({ row }: { row: ProgressRow }) {
         )}
       </TableCell>
       <TableCell>
-        {row.files.length === 0 ? (
+        {row.files.length === 0 && row.history.length === 0 ? (
           <span className="text-xs text-muted-foreground">—</span>
         ) : (
           <div className="space-y-1">
@@ -1387,6 +1389,17 @@ function ProgressTableRow({ row }: { row: ProgressRow }) {
               <a key={file.fileId} href={file.url} className="block text-xs text-primary hover:underline" rel="noopener">
                 {file.slotTitle} / {file.originalName}
                 <span className="ml-1 text-muted-foreground">({formatSize(file.size)})</span>
+              </a>
+            ))}
+            {row.history.map((file) => (
+              <a
+                key={`history-${file.fileId}`}
+                href={file.url}
+                className="block text-xs text-muted-foreground hover:underline"
+                rel="noopener"
+              >
+                历史 v{file.version} / {file.slotTitle} / {file.originalName}
+                <span className="ml-1">({formatSize(file.size)})</span>
               </a>
             ))}
           </div>

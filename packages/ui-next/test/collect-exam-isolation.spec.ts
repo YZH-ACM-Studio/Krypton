@@ -103,6 +103,9 @@ describe('file-collect exam isolation', () => {
       expect(handler).to.include("'/api/collect/pending'");
       expect(handler).to.not.include('/exam-mode');
       expect(handler).to.not.include('/paper/');
+      expect(handler).to.include('clientSessionKeyFromSession');
+      expect(handler).to.include('MODULE_NOT_FOUND');
+      expect(handler).to.include("request.status === 'draft' || request.status === 'archived'");
     }
   });
 });

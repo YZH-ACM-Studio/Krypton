@@ -186,3 +186,37 @@ describe('collect exam isolation contracts', () => {
     expect(examShell).not.to.include('CollectHomeBlock');
   });
 });
+
+describe('collect teacher payload contracts', () => {
+  const handler = source('packages/krypton-collect/src/handler.ts');
+  const admin = source('packages/ui-next/src/pages/admin-collect/index.tsx');
+  const homeBlock = source('packages/ui-next/src/components/collect-home-block.tsx');
+
+  it('binds edit/stats/list pages to request, canEdit, hasFiles, and prefillSchoolId', () => {
+    expect(handler).to.include('this.response.body = {');
+    expect(handler).to.include('request: requestView');
+    expect(handler).to.include('hasFiles');
+    expect(handler).to.include("canNudge: request.status === 'published' || request.status === 'closed'");
+    expect(handler).to.include('canPack: true');
+    expect(handler).to.include('serializeRequest(request, { canEdit })');
+    expect(admin).to.include('rec.prefillSchoolId');
+    expect(admin).not.to.include('prefillSchoolId: rec.schoolId');
+    expect(admin).to.include('hasFiles: optionalBoolean(rec.hasFiles');
+    expect(admin).to.include('!item.hasFiles');
+    expect(admin).to.include('item.hasFiles && item.status');
+  });
+
+  it('uses locked product copy on the homepage pending block', () => {
+    expect(homeBlock).to.include('未交文件');
+    expect(homeBlock).to.include('去交文件');
+    expect(homeBlock).not.to.include('待提交文件');
+    expect(homeBlock).not.to.include('去提交');
+  });
+
+  it('labels the student pending tab as 未交文件', () => {
+    const student = source('packages/ui-next/src/pages/collect/index.tsx');
+    expect(student).to.include("label: '未交文件'");
+    expect(student).not.to.include("label: '待交文件'");
+    expect(student).to.include('open = !closed && data.member');
+  });
+});

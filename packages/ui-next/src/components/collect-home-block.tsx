@@ -78,7 +78,7 @@ export function CollectHomeBlock() {
       <CardContent className="p-0">
         <div className="flex items-center gap-2 border-b px-4 py-3">
           <FolderInput className="size-4 text-primary" />
-          <span className="text-sm font-semibold">待提交文件</span>
+          <span className="text-sm font-semibold">未交文件</span>
         </div>
         <ul className="divide-y">
           {docs.slice(0, 3).map((doc) => (
@@ -91,7 +91,7 @@ export function CollectHomeBlock() {
                   </p>
                 </div>
                 <a href={`/collect/${doc._id}`} className="shrink-0 text-xs text-primary hover:underline">
-                  去提交
+                  去交文件
                 </a>
               </div>
             </li>

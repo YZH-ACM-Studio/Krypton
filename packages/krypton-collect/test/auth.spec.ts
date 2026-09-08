@@ -79,12 +79,14 @@ describe('krypton-collect auth', () => {
 
     it('lets owners, collaborators, and manage-all view, pack, and nudge', () => {
         const owner = user(10);
-        const collaborator = user(20);
+        const collaborator = user(20, { perms: [PERM.PERM_CREATE_COLLECT] });
+        const demoted = user(20);
         const stranger = user(99);
         const manager = user(5, { perms: [PERM.PERM_MANAGE_COLLECT] });
 
         expect(auth.canViewCollect(owner, request)).to.equal(true);
         expect(auth.canViewCollect(collaborator, request)).to.equal(true);
+        expect(auth.canViewCollect(demoted, request)).to.equal(false);
         expect(auth.canViewCollect(stranger, request)).to.equal(false);
         expect(auth.canViewCollect(manager, request)).to.equal(true);
 
@@ -92,6 +94,7 @@ describe('krypton-collect auth', () => {
         expect(auth.canNudgeCollect).to.equal(auth.canViewCollect);
         expect(auth.canPackCollect(collaborator, request)).to.equal(true);
         expect(auth.canNudgeCollect(collaborator, request)).to.equal(true);
+        expect(auth.canPackCollect(demoted, request)).to.equal(false);
         expect(auth.canPackCollect(stranger, request)).to.equal(false);
         expect(auth.canNudgeCollect(stranger, request)).to.equal(false);
     });

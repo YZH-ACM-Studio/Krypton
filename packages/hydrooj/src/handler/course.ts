@@ -491,7 +491,10 @@ interface CollectCourseQueryModule {
         domainId: string,
         courseId: ObjectId,
         chapterId: number,
-        options?: { includeDraft?: boolean },
+        options?: {
+            includeDraft?: boolean;
+            viewer?: { _id: number; hasPerm(p: bigint): boolean; hasPriv(p: number): boolean };
+        },
     ) => Promise<unknown>;
 }
 
@@ -541,13 +544,14 @@ async function loadCourseCollectRequests(
     courseId: ObjectId,
     chapterIds: number[],
     includeDraft: boolean,
+    viewer: { _id: number; hasPerm(p: bigint): boolean; hasPriv(p: number): boolean },
 ): Promise<{ available: boolean; requests: CourseCollectRequestView[] }> {
     const mod = loadCollectCourseQuery();
     const listByCourseChapter = mod?.listByCourseChapter;
     if (typeof listByCourseChapter !== 'function') return { available: false, requests: [] };
     if (!chapterIds.length) return { available: true, requests: [] };
     const lists = await Promise.all(
-        chapterIds.map((chapterId) => listByCourseChapter(domainId, courseId, chapterId, { includeDraft })),
+        chapterIds.map((chapterId) => listByCourseChapter(domainId, courseId, chapterId, { includeDraft, viewer })),
     );
     const requests: CourseCollectRequestView[] = [];
     for (const list of lists) {
@@ -601,6 +605,7 @@ class CourseDetailHandler extends Handler {
                       tid,
                       (tdoc.dag || []).map((node) => node._id),
                       canManage,
+                      this.user,
                   )
                 : Promise.resolve({ available: false, requests: [] as CourseCollectRequestView[] });
         const [udoc, tsdoc, courseMindmap, publishedIntegrity, [pdict, psdict, ctdocs], collectResult] = await Promise.all([

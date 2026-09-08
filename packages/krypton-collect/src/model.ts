@@ -5,7 +5,7 @@
  * and does not send 站内信.
  */
 import { createHash, randomBytes } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { nanoid, ObjectId, StorageModel, UserModel } from 'hydrooj';
 import type { Filter } from 'mongodb';
 import { canCreateCollect, canEditCollect, canManageAllCollect, canViewCollect } from './auth';
@@ -21,6 +21,7 @@ import {
     CollectSlotLockedError,
 } from './errors';
 import { assertUploadAllowed } from './file-validate';
+import { collectRequestLockKey, collectUserLockKey, withCollectLock } from './lock';
 import { zipEntryName, zipStudentFolder } from './pack-format';
 import {
     COLLECT_ALLOWED_EXTS,
@@ -164,6 +165,7 @@ const SLOT_ID_RE = /^[A-Za-z0-9_-]{1,32}$/;
 const FILE_ID_RE = /^[A-Za-z0-9_-]{8,32}$/;
 const OBJECT_ID_RE = /^[a-f0-9]{24}$/i;
 const TITLE_MAX = 200;
+const DESCRIPTION_MAX = 20000;
 const COLLABORATOR_MAX = 50;
 
 function rejectFile(message: string): never {
@@ -228,6 +230,7 @@ function asTitle(value: unknown): string {
 function asDescription(value: unknown): string {
     if (value == null) return '';
     if (typeof value !== 'string') rejectFile('说明不合法');
+    if (value.length > DESCRIPTION_MAX) rejectFile('说明过长');
     return value;
 }
 
@@ -465,17 +468,33 @@ async function loadRequest(domainId: string, id: ObjectId | string): Promise<Col
     return doc;
 }
 
+async function withLockedRequest<T>(
+    domainId: string,
+    id: ObjectId | string,
+    fn: (current: CollectRequestDoc) => Promise<T>,
+): Promise<T> {
+    const currentId = parseRequestId(id);
+    return withCollectLock(collectRequestLockKey(domainId, String(currentId)), async () => {
+        const current = await loadRequest(domainId, currentId);
+        return fn(current);
+    });
+}
+
 async function casRequest(
     domainId: string,
     id: ObjectId,
     expectedRevision: number,
     set: Partial<CollectRequestDoc>,
+    expectedStatus?: CollectRequestDoc['status'] | CollectRequestDoc['status'][],
 ): Promise<CollectRequestDoc> {
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
         throw new CollectRevisionConflictError();
     }
+    const filter: Filter<CollectRequestDoc> = { domainId, _id: id, revision: expectedRevision };
+    if (typeof expectedStatus === 'string') filter.status = expectedStatus;
+    else if (Array.isArray(expectedStatus)) filter.status = { $in: expectedStatus };
     const result = await requestsColl.updateOne(
-        { domainId, _id: id, revision: expectedRevision },
+        filter,
         { $set: { ...set, revision: expectedRevision + 1, updatedAt: new Date() } },
     );
     if (result.matchedCount !== 1) {
@@ -544,43 +563,44 @@ export async function updateRequest(
     expectedRevision: number,
     patch: UpdateCollectRequestPatch,
 ): Promise<CollectRequestDoc> {
-    const current = await loadRequest(domainId, id);
-    assertCanEdit(actor, current);
-    assertMutable(current);
-    const set: Partial<CollectRequestDoc> = {};
-    if (patch.title !== undefined) set.title = asTitle(patch.title);
-    if (patch.description !== undefined) set.description = asDescription(patch.description);
-    if (patch.dueAt !== undefined) set.dueAt = parseCollectDueAt(patch.dueAt);
-    if (patch.schoolId !== undefined) set.schoolId = asObjectId(patch.schoolId, 'schoolId');
-    if (patch.groupIds !== undefined) set.groupIds = asObjectIdList(patch.groupIds, 'groupIds');
-    if (patch.courseRef !== undefined) set.courseRef = parseCourseRef(patch.courseRef);
+    return withLockedRequest(domainId, id, async (current) => {
+        assertCanEdit(actor, current);
+        assertMutable(current);
+        const set: Partial<CollectRequestDoc> = {};
+        if (patch.title !== undefined) set.title = asTitle(patch.title);
+        if (patch.description !== undefined) set.description = asDescription(patch.description);
+        if (patch.dueAt !== undefined) set.dueAt = parseCollectDueAt(patch.dueAt);
+        if (patch.schoolId !== undefined) set.schoolId = asObjectId(patch.schoolId, 'schoolId');
+        if (patch.groupIds !== undefined) set.groupIds = asObjectIdList(patch.groupIds, 'groupIds');
+        if (patch.courseRef !== undefined) set.courseRef = parseCourseRef(patch.courseRef);
 
-    const nextSlots = patch.slots !== undefined ? normalizeCollectSlots(patch.slots) : current.slots;
-    const nextQuotas = normalizeCollectQuotas({
-        maxFileBytes: patch.maxFileBytes !== undefined ? patch.maxFileBytes : current.maxFileBytes,
-        maxTotalBytes: patch.maxTotalBytes !== undefined ? patch.maxTotalBytes : current.maxTotalBytes,
-        maxFiles: patch.maxFiles !== undefined ? patch.maxFiles : current.maxFiles,
+        const nextSlots = patch.slots !== undefined ? normalizeCollectSlots(patch.slots) : current.slots;
+        const nextQuotas = normalizeCollectQuotas({
+            maxFileBytes: patch.maxFileBytes !== undefined ? patch.maxFileBytes : current.maxFileBytes,
+            maxTotalBytes: patch.maxTotalBytes !== undefined ? patch.maxTotalBytes : current.maxTotalBytes,
+            maxFiles: patch.maxFiles !== undefined ? patch.maxFiles : current.maxFiles,
+        });
+        const rulesChanged =
+            (patch.slots !== undefined && !sameSlotRules(current.slots, nextSlots))
+            || (patch.maxFileBytes !== undefined && nextQuotas.maxFileBytes !== current.maxFileBytes)
+            || (patch.maxTotalBytes !== undefined && nextQuotas.maxTotalBytes !== current.maxTotalBytes)
+            || (patch.maxFiles !== undefined && nextQuotas.maxFiles !== current.maxFiles);
+        if (rulesChanged) {
+            if (await hasSubmittedRow(domainId, current._id)) throw new CollectSlotLockedError();
+            if (patch.slots !== undefined) set.slots = nextSlots;
+            if (patch.maxFileBytes !== undefined) set.maxFileBytes = nextQuotas.maxFileBytes;
+            if (patch.maxTotalBytes !== undefined) set.maxTotalBytes = nextQuotas.maxTotalBytes;
+            if (patch.maxFiles !== undefined) set.maxFiles = nextQuotas.maxFiles;
+        }
+
+        if (current.status !== 'draft') {
+            const schoolId = set.schoolId || current.schoolId;
+            const groupIds = set.groupIds || current.groupIds;
+            await assertGroupsBelongToSchool(domainId, schoolId, groupIds);
+        }
+
+        return casRequest(domainId, current._id, expectedRevision, set, current.status);
     });
-    const rulesChanged =
-        (patch.slots !== undefined && !sameSlotRules(current.slots, nextSlots))
-        || (patch.maxFileBytes !== undefined && nextQuotas.maxFileBytes !== current.maxFileBytes)
-        || (patch.maxTotalBytes !== undefined && nextQuotas.maxTotalBytes !== current.maxTotalBytes)
-        || (patch.maxFiles !== undefined && nextQuotas.maxFiles !== current.maxFiles);
-    if (rulesChanged) {
-        if (await hasSubmittedRow(domainId, current._id)) throw new CollectSlotLockedError();
-        if (patch.slots !== undefined) set.slots = nextSlots;
-        if (patch.maxFileBytes !== undefined) set.maxFileBytes = nextQuotas.maxFileBytes;
-        if (patch.maxTotalBytes !== undefined) set.maxTotalBytes = nextQuotas.maxTotalBytes;
-        if (patch.maxFiles !== undefined) set.maxFiles = nextQuotas.maxFiles;
-    }
-
-    if (current.status !== 'draft') {
-        const schoolId = set.schoolId || current.schoolId;
-        const groupIds = set.groupIds || current.groupIds;
-        await assertGroupsBelongToSchool(domainId, schoolId, groupIds);
-    }
-
-    return casRequest(domainId, current._id, expectedRevision, set);
 }
 
 export async function publishRequest(
@@ -589,21 +609,22 @@ export async function publishRequest(
     actor: CollectActor,
     expectedRevision: number,
 ): Promise<CollectRequestDoc> {
-    const current = await loadRequest(domainId, id);
-    assertCanEdit(actor, current);
-    if (current.status !== 'draft') throw new CollectForbiddenError('只有草稿可以发布');
-    if (current.dueAt.getTime() <= Date.now()) rejectFile('截止时间必须晚于当前时间');
-    if (!current.slots.some((slot) => slot.required)) rejectFile('至少需要一个必填槽位');
-    const ids = new Set(current.slots.map((slot) => slot.id));
-    if (ids.size !== current.slots.length) rejectFile('槽位编号重复');
-    await assertGroupsBelongToSchool(domainId, current.schoolId, current.groupIds);
-    const audience = await resolveAudience(domainId, current.schoolId, current.groupIds);
-    if (!audience.length) throw new CollectAudienceEmptyError();
-    const now = new Date();
-    return casRequest(domainId, current._id, expectedRevision, {
-        status: 'published',
-        publishedAt: current.publishedAt || now,
-        closedAt: null,
+    return withLockedRequest(domainId, id, async (current) => {
+        assertCanEdit(actor, current);
+        if (current.status !== 'draft') throw new CollectForbiddenError('只有草稿可以发布');
+        if (current.dueAt.getTime() <= Date.now()) rejectFile('截止时间必须晚于当前时间');
+        if (!current.slots.some((slot) => slot.required)) rejectFile('至少需要一个必填槽位');
+        const ids = new Set(current.slots.map((slot) => slot.id));
+        if (ids.size !== current.slots.length) rejectFile('槽位编号重复');
+        await assertGroupsBelongToSchool(domainId, current.schoolId, current.groupIds);
+        const audience = await resolveAudience(domainId, current.schoolId, current.groupIds);
+        if (!audience.length) throw new CollectAudienceEmptyError();
+        const now = new Date();
+        return casRequest(domainId, current._id, expectedRevision, {
+            status: 'published',
+            publishedAt: current.publishedAt || now,
+            closedAt: null,
+        }, 'draft');
     });
 }
 
@@ -613,12 +634,13 @@ export async function closeRequest(
     actor: CollectActor,
     expectedRevision: number,
 ): Promise<CollectRequestDoc> {
-    const current = await loadRequest(domainId, id);
-    assertCanEdit(actor, current);
-    if (current.status !== 'published') throw new CollectForbiddenError('只有已发布的收集可以关闭');
-    return casRequest(domainId, current._id, expectedRevision, {
-        status: 'closed',
-        closedAt: new Date(),
+    return withLockedRequest(domainId, id, async (current) => {
+        assertCanEdit(actor, current);
+        if (current.status !== 'published') throw new CollectForbiddenError('只有已发布的收集可以关闭');
+        return casRequest(domainId, current._id, expectedRevision, {
+            status: 'closed',
+            closedAt: new Date(),
+        }, 'published');
     });
 }
 
@@ -629,15 +651,16 @@ export async function reopenRequest(
     expectedRevision: number,
     dueAt?: Date | string,
 ): Promise<CollectRequestDoc> {
-    const current = await loadRequest(domainId, id);
-    assertCanEdit(actor, current);
-    if (current.status !== 'closed') throw new CollectForbiddenError('只有已关闭的收集可以重新开放');
-    const nextDue = dueAt !== undefined ? parseCollectDueAt(dueAt) : current.dueAt;
-    if (nextDue.getTime() <= Date.now()) rejectFile('截止时间必须晚于当前时间');
-    return casRequest(domainId, current._id, expectedRevision, {
-        status: 'published',
-        dueAt: nextDue,
-        closedAt: null,
+    return withLockedRequest(domainId, id, async (current) => {
+        assertCanEdit(actor, current);
+        if (current.status !== 'closed') throw new CollectForbiddenError('只有已关闭的收集可以重新开放');
+        const nextDue = dueAt !== undefined ? parseCollectDueAt(dueAt) : current.dueAt;
+        if (nextDue.getTime() <= Date.now()) rejectFile('截止时间必须晚于当前时间');
+        return casRequest(domainId, current._id, expectedRevision, {
+            status: 'published',
+            dueAt: nextDue,
+            closedAt: null,
+        }, 'closed');
     });
 }
 
@@ -647,12 +670,13 @@ export async function archiveRequest(
     actor: CollectActor,
     expectedRevision: number,
 ): Promise<CollectRequestDoc> {
-    const current = await loadRequest(domainId, id);
-    assertCanEdit(actor, current);
-    if (current.status === 'archived') throw new CollectForbiddenError('收集已归档');
-    return casRequest(domainId, current._id, expectedRevision, {
-        status: 'archived',
-        archivedAt: new Date(),
+    return withLockedRequest(domainId, id, async (current) => {
+        assertCanEdit(actor, current);
+        if (current.status === 'archived') throw new CollectForbiddenError('收集已归档');
+        return casRequest(domainId, current._id, expectedRevision, {
+            status: 'archived',
+            archivedAt: new Date(),
+        }, current.status);
     });
 }
 
@@ -662,15 +686,16 @@ export async function deleteRequestIfEmpty(
     actor: CollectActor,
     expectedRevision: number,
 ): Promise<void> {
-    const current = await loadRequest(domainId, id);
-    assertCanEdit(actor, current);
-    if (current.revision !== expectedRevision) throw new CollectRevisionConflictError();
-    const file = await filesColl.findOne({ domainId, requestId: current._id });
-    if (file) throw new CollectForbiddenError('已有文件，只能归档');
-    if (await hasSubmittedRow(domainId, current._id)) throw new CollectForbiddenError('已有提交，只能归档');
-    const deleted = await requestsColl.deleteOne({ domainId, _id: current._id, revision: expectedRevision });
-    if (deleted.deletedCount !== 1) throw new CollectRevisionConflictError();
-    await submissionsColl.deleteMany({ domainId, requestId: current._id });
+    return withLockedRequest(domainId, id, async (current) => {
+        assertCanEdit(actor, current);
+        if (current.revision !== expectedRevision) throw new CollectRevisionConflictError();
+        const file = await filesColl.findOne({ domainId, requestId: current._id });
+        if (file) throw new CollectForbiddenError('已有文件，只能归档');
+        if (await hasSubmittedRow(domainId, current._id)) throw new CollectForbiddenError('已有提交，只能归档');
+        const deleted = await requestsColl.deleteOne({ domainId, _id: current._id, revision: expectedRevision });
+        if (deleted.deletedCount !== 1) throw new CollectRevisionConflictError();
+        await submissionsColl.deleteMany({ domainId, requestId: current._id });
+    });
 }
 
 export async function listRequestsForTeacher(domainId: string, actor: CollectActor): Promise<CollectRequestDoc[]> {
@@ -678,7 +703,8 @@ export async function listRequestsForTeacher(domainId: string, actor: CollectAct
     const filter: Filter<CollectRequestDoc> = canManageAllCollect(actor)
         ? { domainId }
         : { domainId, $or: [{ ownerUid: actor._id }, { collaboratorUids: actor._id }] };
-    return requestsColl.find(filter).sort({ updatedAt: -1, _id: -1 }).toArray();
+    const docs = await requestsColl.find(filter).sort({ updatedAt: -1, _id: -1 }).toArray();
+    return docs.filter((doc) => canViewCollect(actor, doc));
 }
 
 export async function listRequestsForStudent(domainId: string, uid: number): Promise<CollectRequestDoc[]> {
@@ -690,9 +716,11 @@ export async function listRequestsForStudent(domainId: string, uid: number): Pro
         userbindOrThrow(),
     ]);
     if (!requests.length) return [];
-    const owned = new Set(submissions.map((row) => String(row.requestId)));
+    const submittedIds = new Set(
+        submissions.filter((row) => row.status === 'submitted').map((row) => String(row.requestId)),
+    );
     const student = await ub.findStudentByUserId(domainId, uid);
-    return requests.filter((request) => owned.has(String(request._id)) || studentMatchesAudience(student, request));
+    return requests.filter((request) => submittedIds.has(String(request._id)) || studentMatchesAudience(student, request));
 }
 
 export async function listPendingForUser(domainId: string, uid: number): Promise<CollectRequestDoc[]> {
@@ -735,26 +763,27 @@ export async function setCollaborators(
     expectedRevision: number,
     uids: number[],
 ): Promise<CollectRequestDoc> {
-    const current = await loadRequest(domainId, id);
-    assertCanEdit(actor, current);
-    assertMutable(current);
-    if (!Array.isArray(uids)) rejectFile('协作者不合法');
-    const seen = new Set<number>();
-    const next: number[] = [];
-    for (const uid of uids) {
-        if (!Number.isSafeInteger(uid) || uid < 2) throw new CollectForbiddenError('协作者必须是正式用户');
-        if (uid === current.ownerUid) continue;
-        if (seen.has(uid)) continue;
-        seen.add(uid);
-        next.push(uid);
-    }
-    if (next.length > COLLABORATOR_MAX) rejectFile('协作者人数超过上限');
-    for (const uid of next) {
-        const loaded = await UserModel.getById(domainId, uid);
-        const user = asPermUser(loaded, uid);
-        if (!canCreateCollect(user)) throw new CollectForbiddenError('协作者必须具有创建收集权限');
-    }
-    return casRequest(domainId, current._id, expectedRevision, { collaboratorUids: next });
+    return withLockedRequest(domainId, id, async (current) => {
+        assertCanEdit(actor, current);
+        assertMutable(current);
+        if (!Array.isArray(uids)) rejectFile('协作者不合法');
+        const seen = new Set<number>();
+        const next: number[] = [];
+        for (const uid of uids) {
+            if (!Number.isSafeInteger(uid) || uid < 2) throw new CollectForbiddenError('协作者必须是正式用户');
+            if (uid === current.ownerUid) continue;
+            if (seen.has(uid)) continue;
+            seen.add(uid);
+            next.push(uid);
+        }
+        if (next.length > COLLABORATOR_MAX) rejectFile('协作者人数超过上限');
+        for (const uid of next) {
+            const loaded = await UserModel.getById(domainId, uid);
+            const user = asPermUser(loaded, uid);
+            if (!canCreateCollect(user)) throw new CollectForbiddenError('协作者必须具有创建收集权限');
+        }
+        return casRequest(domainId, current._id, expectedRevision, { collaboratorUids: next }, current.status);
+    });
 }
 
 function displayName(originalName: string): string {
@@ -898,7 +927,15 @@ async function prepareUpload(
     const slot = request.slots.find((item) => item.id === input.slotId);
     if (!slot) rejectFile('槽位不存在');
     const originalName = displayName(input.originalName);
+    if (!Number.isFinite(input.size) || input.size <= 0) rejectFile('空文件');
+    if (input.size > COLLECT_HARD_MAX_FILE_BYTES || input.size > request.maxFileBytes) rejectFile('文件过大');
+    if (typeof input.tempPath === 'string' && input.tempPath) {
+        const info = await stat(input.tempPath);
+        if (info.size !== input.size) rejectFile('文件大小不一致');
+        if (info.size > request.maxFileBytes || info.size > COLLECT_HARD_MAX_FILE_BYTES) rejectFile('文件过大');
+    }
     const loaded = await loadUploadBody(input.bytes, input.tempPath);
+    assertOpenWindow(request);
     if (input.size !== loaded.size) rejectFile('文件大小不一致');
     if (input.sha256 && input.sha256 !== loaded.sha256) rejectFile('文件校验失败');
     const currentFiles = await loadCurrentFiles(request.domainId, request._id, input.uid);
@@ -944,63 +981,96 @@ async function prepareUpload(
 }
 
 async function insertPreparedFile(prepared: PreparedUpload): Promise<{ file: CollectFileDoc; submission: CollectSubmissionDoc }> {
-    const submission = await ensureSubmission(prepared.request.domainId, prepared.request, prepared.uid);
+    const request = await loadRequest(prepared.request.domainId, prepared.request._id);
+    assertOpenWindow(request);
+    const slot = request.slots.find((item) => item.id === prepared.slot.id);
+    if (!slot) rejectFile('槽位不存在');
+    if (!slot.allowedExt.includes(prepared.ext)) rejectFile('不允许的文件类型');
+    const currentFiles = await loadCurrentFiles(request.domainId, request._id, prepared.uid);
+    const replacing = prepared.replacing
+        ? currentFiles.find((file) => file.fileId === prepared.replacing?.fileId && file.slotId === slot.id) || null
+        : null;
+    if (prepared.replacing && !replacing) rejectFile('只能替换当前槽位中的文件');
+    const counted = replacing ? currentFiles.filter((file) => file.fileId !== replacing.fileId) : currentFiles;
+    if (counted.filter((file) => file.slotId === slot.id).length >= slot.maxFiles) rejectFile('该槽位文件数量超限');
+    if (counted.reduce((sum, file) => sum + file.size, 0) + prepared.size > request.maxTotalBytes) rejectFile('合计大小超限');
+    if (counted.length >= request.maxFiles) rejectFile('文件数量超限');
+    if (prepared.size > request.maxFileBytes) rejectFile('文件过大');
+    const submission = await ensureSubmission(request.domainId, request, prepared.uid);
     const now = new Date();
     const file: CollectFileDoc = {
         _id: new ObjectId(),
-        domainId: prepared.request.domainId,
-        requestId: prepared.request._id,
+        domainId: request.domainId,
+        requestId: request._id,
         submissionId: submission._id,
         uid: prepared.uid,
-        slotId: prepared.slot.id,
+        slotId: slot.id,
         fileId: prepared.fileId,
         storagePath: prepared.storagePath,
         originalName: prepared.originalName,
         size: prepared.size,
         sha256: prepared.sha256,
         ext: prepared.ext,
-        version: await nextFileVersion(prepared.request.domainId, prepared.request._id, prepared.uid, prepared.slot.id),
+        version: await nextFileVersion(request.domainId, request._id, prepared.uid, prepared.slot.id),
         current: true,
         createdAt: now,
     };
     await filesColl.insertOne(file);
-    if (prepared.replacing) {
+    if (replacing) {
         const unmarked = await filesColl.updateOne(
             {
-                domainId: prepared.request.domainId,
-                requestId: prepared.request._id,
+                domainId: request.domainId,
+                requestId: request._id,
                 uid: prepared.uid,
-                fileId: prepared.replacing.fileId,
+                fileId: replacing.fileId,
                 current: true,
             },
             { $set: { current: false } },
         );
-        if (unmarked.matchedCount !== 1) throw new CollectFileRejectedError('原文件已不是当前版本');
+        if (unmarked.matchedCount !== 1) {
+            await filesColl.updateOne(
+                {
+                    domainId: request.domainId,
+                    requestId: request._id,
+                    uid: prepared.uid,
+                    fileId: file.fileId,
+                    current: true,
+                },
+                { $set: { current: false } },
+            );
+            throw new CollectFileRejectedError('原文件已不是当前版本');
+        }
     }
-    return { file, submission: await syncSubmissionFiles(prepared.request, submission) };
+    return { file, submission: await syncSubmissionFiles(request, submission) };
 }
 
 export async function putStudentFile(input: PutStudentFileInput): Promise<{ file: CollectFileDoc; submission: CollectSubmissionDoc }> {
-    const prepared = await prepareUpload(input, { putStorage: true });
-    await StorageModel.put(prepared.storagePath, prepared.body as Buffer | string, input.uid);
-    return insertPreparedFile(prepared);
+    return withCollectLock(collectUserLockKey(input.request.domainId, String(input.request._id), input.uid), async () => {
+        const prepared = await prepareUpload(input, { putStorage: true });
+        await StorageModel.put(prepared.storagePath, prepared.body as Buffer | string, input.uid);
+        return withLockedRequest(prepared.request.domainId, prepared.request._id, async () => insertPreparedFile(prepared));
+    });
 }
 
 export const addFile = putStudentFile;
 
 export async function addFileMeta(input: AddFileMetaInput): Promise<{ file: CollectFileDoc; submission: CollectSubmissionDoc }> {
-    const prepared = await prepareUpload(input, {
-        fileId: input.fileId,
-        storagePath: input.storagePath,
-        putStorage: false,
+    return withCollectLock(collectUserLockKey(input.request.domainId, String(input.request._id), input.uid), async () => {
+        const prepared = await prepareUpload(input, {
+            fileId: input.fileId,
+            storagePath: input.storagePath,
+            putStorage: false,
+        });
+        return withLockedRequest(prepared.request.domainId, prepared.request._id, async () => insertPreparedFile(prepared));
     });
-    return insertPreparedFile(prepared);
 }
 
 export async function replaceFile(input: ReplaceFileInput): Promise<{ file: CollectFileDoc; submission: CollectSubmissionDoc }> {
-    const prepared = await prepareUpload(input, { putStorage: true, replacingFileId: input.fileId });
-    await StorageModel.put(prepared.storagePath, prepared.body as Buffer | string, input.uid);
-    return insertPreparedFile(prepared);
+    return withCollectLock(collectUserLockKey(input.request.domainId, String(input.request._id), input.uid), async () => {
+        const prepared = await prepareUpload(input, { putStorage: true, replacingFileId: input.fileId });
+        await StorageModel.put(prepared.storagePath, prepared.body as Buffer | string, input.uid);
+        return withLockedRequest(prepared.request.domainId, prepared.request._id, async () => insertPreparedFile(prepared));
+    });
 }
 
 export async function deleteCurrentFile(
@@ -1008,22 +1078,23 @@ export async function deleteCurrentFile(
     uid: number,
     fileId: string,
 ): Promise<CollectSubmissionDoc> {
-    const request = await loadRequest(requestInput.domainId, requestInput._id);
-    assertOpenWindow(request);
-    assertSafeUid(uid);
-    if (!(await isAudienceMember(request.domainId, uid, request))) throw new CollectForbiddenError('不在收集名单中');
-    const unmarked = await filesColl.updateOne(
-        { domainId: request.domainId, requestId: request._id, uid, fileId, current: true },
-        { $set: { current: false } },
-    );
-    if (unmarked.matchedCount !== 1) rejectFile('文件不是当前版本');
-    const submission = await submissionsColl.findOne({ domainId: request.domainId, requestId: request._id, uid });
-    if (!submission) throw new CollectNotFoundError();
-    return syncSubmissionFiles(request, submission);
+    return withLockedRequest(requestInput.domainId, requestInput._id, async (request) => {
+        assertOpenWindow(request);
+        assertSafeUid(uid);
+        if (!(await isAudienceMember(request.domainId, uid, request))) throw new CollectForbiddenError('不在收集名单中');
+        const unmarked = await filesColl.updateOne(
+            { domainId: request.domainId, requestId: request._id, uid, fileId, current: true },
+            { $set: { current: false } },
+        );
+        if (unmarked.matchedCount !== 1) rejectFile('文件不是当前版本');
+        const submission = await submissionsColl.findOne({ domainId: request.domainId, requestId: request._id, uid });
+        if (!submission) throw new CollectNotFoundError();
+        return syncSubmissionFiles(request, submission);
+    });
 }
 
 export async function confirmSubmit(requestInput: CollectRequestDoc, uid: number): Promise<CollectSubmissionDoc> {
-    const request = await loadRequest(requestInput.domainId, requestInput._id);
+    return withLockedRequest(requestInput.domainId, requestInput._id, async (request) => {
     assertOpenWindow(request);
     assertSafeUid(uid);
     if (!(await isAudienceMember(request.domainId, uid, request))) throw new CollectForbiddenError('不在收集名单中');
@@ -1049,6 +1120,7 @@ export async function confirmSubmit(requestInput: CollectRequestDoc, uid: number
         throw new CollectRevisionConflictError();
     }
     return { ...submission, status: 'submitted', submittedAt: now, currentFiles, updatedAt: now };
+    });
 }
 
 export async function getFileForDownload(

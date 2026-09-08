@@ -149,7 +149,11 @@ function memoryCollection(uniqueKeys: string[][]) {
 
 const requestsColl = memoryCollection([['_id']]);
 const submissionsColl = memoryCollection([['domainId', 'requestId', 'uid']]);
-const filesColl = memoryCollection([['domainId', 'fileId'], ['storagePath']]);
+const filesColl = memoryCollection([
+    ['domainId', 'fileId'],
+    ['storagePath'],
+    ['domainId', 'requestId', 'uid', 'slotId', 'version'],
+]);
 const stored = new Map<string, Buffer | string>();
 const usersById = new Map<number, { _id: number; hasPerm(perm: bigint): boolean; hasPriv(priv: number): boolean }>();
 let nanoidSeq = 0;
@@ -391,6 +395,11 @@ describe('krypton-collect requests', () => {
         expect(updated.title).to.equal('新标题');
         expect(updated.revision).to.equal(2);
         await expectReject(() => model.updateRequest(domainId, created._id, teacher, 1, { title: '冲突' }), 'CollectRevisionConflictError');
+        await expectReject(
+            () => model.updateRequest(domainId, created._id, teacher, updated.revision, { description: 'x'.repeat(20001) }),
+            'CollectFileRejectedError',
+            '说明过长',
+        );
     });
 
     it('rejects publish without bound audience or when groups are from another school', async () => {
@@ -487,6 +496,10 @@ describe('krypton-collect lists', () => {
         expect(afterCollab.collaboratorUids).to.include(collaborator._id);
         expect((await model.listRequestsForTeacher(domainId, collaborator)).length).to.equal(1);
         expect((await model.listRequestsForTeacher(domainId, manager)).length).to.equal(1);
+        const demoted = actor(20);
+        usersById.set(20, demoted);
+        expect((await model.listRequestsForTeacher(domainId, demoted)).length).to.equal(0);
+        usersById.set(20, collaborator);
 
         expect((await model.listPendingForUser(domainId, 101)).length).to.equal(0);
         expect((await model.listPendingForUser(domainId, 102)).map((row) => String(row._id))).to.deep.equal([String(published._id)]);
@@ -501,6 +514,23 @@ describe('krypton-collect lists', () => {
         expect(pack.entries.some((entry) => entry.uid === 101 && entry.leftGroup)).to.equal(true);
         expect(pack.missing.map((row) => row.uid)).to.deep.equal([102]);
         expect(pack.entries[0].name).to.include('24000001');
+    });
+
+    it('drops leavers who only uploaded a draft from the student list', async () => {
+        const published = await createPublished();
+        const body = pdf();
+        await model.putStudentFile({
+            request: published,
+            uid: 102,
+            slotId: published.slots[0].id,
+            originalName: 'draft.pdf',
+            size: body.length,
+            bytes: body,
+        });
+        students = students.map((student) => (student.boundUserId === 102 ? { ...student, groupIds: [] } : student));
+        expect((await model.listRequestsForStudent(domainId, 102)).map((row) => String(row._id))).to.deep.equal([]);
+        expect((await model.listPendingForUser(domainId, 102)).map((row) => String(row._id))).to.deep.equal([]);
+        expect((await model.listRequestsForStudent(domainId, 101)).map((row) => String(row._id))).to.deep.equal([String(published._id)]);
     });
 });
 

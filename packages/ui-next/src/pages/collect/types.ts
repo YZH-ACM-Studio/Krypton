@@ -58,6 +58,7 @@ export interface CollectDetailPayload {
   description: string;
   dueAt: string;
   status: CollectRequestStatus;
+  member: boolean;
   submitted: boolean;
   filled: boolean;
   slots: CollectSlotView[];
@@ -253,6 +254,7 @@ function unwrapDetailSource(data: unknown): unknown {
     dueAt: request.dueAt,
     status: request.status,
     slots: request.slots,
+    member: data.member,
     submitted: typeof data.submitted === 'boolean' ? data.submitted : submittedFromSubmission,
     filled: data.filled,
     currentFiles: data.currentFiles !== undefined ? data.currentFiles : submission?.currentFiles,
@@ -272,6 +274,7 @@ export function parseCollectDetailPayload(data: unknown): CollectParseResult<Col
   const status = parseRequestStatus(source.status);
   if (!status) return { ok: false, error: 'status 无效' };
   if (typeof source.submitted !== 'boolean') return { ok: false, error: '缺少 submitted' };
+  if (typeof source.member !== 'boolean') return { ok: false, error: '缺少 member' };
   if (!Array.isArray(source.slots) || source.slots.length === 0) return { ok: false, error: '缺少 slots 数组' };
   const slots: CollectSlotView[] = [];
   const slotIds = new Set<string>();
@@ -305,6 +308,7 @@ export function parseCollectDetailPayload(data: unknown): CollectParseResult<Col
     description: source.description,
     dueAt,
     status,
+    member: source.member,
     submitted: source.submitted,
     filled,
     slots,

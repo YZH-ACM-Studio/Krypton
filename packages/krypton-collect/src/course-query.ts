@@ -6,6 +6,7 @@
  */
 import { ObjectId } from 'hydrooj';
 import type { Filter } from 'mongodb';
+import { canViewCollect } from './auth';
 import { requestsColl } from './db';
 import type { CollectRequestDoc, CollectRequestStatus } from './types';
 
@@ -19,6 +20,7 @@ export interface CourseCollectRequestView {
 
 export interface ListByCourseChapterOptions {
     includeDraft?: boolean;
+    viewer?: { _id: number; hasPerm(p: bigint): boolean; hasPriv(p: number): boolean };
 }
 
 function canonicalObjectId(value: ObjectId | string, field: string): ObjectId {
@@ -67,7 +69,8 @@ export async function listByCourseChapter(
     if (typeof domainId !== 'string' || !domainId) throw new TypeError('domainId is required');
     if (!Number.isSafeInteger(chapterId)) throw new TypeError('chapterId must be a safe integer');
     const courseObjectId = canonicalObjectId(courseId, 'courseId');
-    const includeDraft = options.includeDraft === true;
+    const viewer = options.viewer;
+    const includeDraft = options.includeDraft === true && !!viewer;
     const filter: Filter<CollectRequestDoc> = {
         domainId,
         'courseRef.courseId': courseObjectId,
@@ -83,7 +86,14 @@ export async function listByCourseChapter(
             dueAt: 1,
             status: 1,
             courseRef: 1,
+            ownerUid: 1,
+            collaboratorUids: 1,
         })
         .toArray();
-    return docs.map((doc) => serializeCourseCollectRequest(doc, chapterId));
+    return docs
+        .filter((doc) => doc.status !== 'draft' || (viewer && canViewCollect(viewer, {
+            ownerUid: doc.ownerUid,
+            collaboratorUids: doc.collaboratorUids || [],
+        })))
+        .map((doc) => serializeCourseCollectRequest(doc, chapterId));
 }

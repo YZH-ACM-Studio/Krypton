@@ -247,7 +247,7 @@ export function CollectListPage() {
         onValueChange={setTab}
         aria-label="文件收集分类"
         items={[
-          { value: 'pending', label: '待交文件', count: counts.pending },
+          { value: 'pending', label: '未交文件', count: counts.pending },
           { value: 'submitted', label: '已交文件', count: counts.submitted },
           { value: 'closed', label: '已截止', count: counts.closed },
         ]}
@@ -437,7 +437,7 @@ export function CollectDetailPage() {
   const data = parsed.value;
   const dueAtMs = collectDueMs(data.dueAt);
   const closed = dueAtMs === null || isCollectWindowClosed(data.status, dueAtMs, now);
-  const open = !closed;
+  const open = !closed && data.member;
 
   const confirm = async () => {
     if (confirming || !open || data.submitted || !data.filled) return;
@@ -570,12 +570,12 @@ export function CollectDetailPage() {
                 onReplace={(fileId) => setReplacingFileId((current) => (current === fileId ? null : fileId))}
                 onDelete={(file) => void deleteFile(file)}
               />
-              {open ? (
+              {open && files.length < slot.maxFiles ? (
                 <FileUploader
                   endpoint={`/collect/${encodeURIComponent(data._id)}`}
                   meta={{ operation: 'upload_file', slotId: slot.id }}
                   maxFileSize={COLLECT_MAX_FILE_BYTES}
-                  maxFiles={slot.maxFiles}
+                  maxFiles={slot.maxFiles - files.length}
                   uploadConcurrency={1}
                   retryOnFailure={false}
                   accept={acceptFromSlot(slot)}

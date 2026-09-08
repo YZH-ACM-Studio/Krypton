@@ -64,6 +64,7 @@ describe('collect csv formula neutralization', () => {
         expect(csvCell('\tbad')).to.equal(`"'\tbad"`);
         expect(csvCell('张三')).to.equal('张三');
         expect(csvCell(42)).to.equal('42');
+        expect(csvCell('\u200b=HYPERLINK("https://example.invalid")')).to.equal(`"'\u200b=HYPERLINK(""https://example.invalid"")"`);
     });
 
     it('quotes commas, quotes, and line breaks after neutralization', () => {

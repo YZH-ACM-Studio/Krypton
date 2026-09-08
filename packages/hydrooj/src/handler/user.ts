@@ -1,7 +1,7 @@
 import { generateAuthenticationOptions, verifyAuthenticationResponse } from '@simplewebauthn/server';
 import { isoBase64URL } from '@simplewebauthn/server/helpers';
 import moment from 'moment-timezone';
-import { Binary, ObjectId } from 'mongodb';
+import { Binary, Filter, ObjectId } from 'mongodb';
 import Schema from 'schemastery';
 import { randomstring } from '@hydrooj/utils';
 import type { Context } from '../context';
@@ -21,22 +21,33 @@ import {
     ValidationError,
     VerifyPasswordError,
 } from '../error';
-import { TokenDoc, Udoc, User } from '../interface';
+import { TokenDoc, TrainingDoc, Udoc, User } from '../interface';
 import avatar from '../lib/avatar';
 import { sendMail } from '../lib/mail';
 import { assertImpersonationActorPrivileges, resolveSudoAuthenticationUser } from '../lib/sudo-auth';
+import { withProblemSetKind } from '../lib/training-kind';
+import {
+    knowledgeNodeCompletionCounts,
+    problemSetCompletionCount,
+    rankCompletionItems,
+    type ProfileCompletionItem,
+} from '../lib/user-profile-progress';
 import { verifyTFA } from '../lib/verifyTFA';
 import BlackListModel from '../model/blacklist';
 import { PERM, PRIV, STATUS } from '../model/builtin';
 import * as ContestModel from '../model/contest';
+import { contextualCompletionService } from '../model/contextual-completion';
 import domain from '../model/domain';
 import * as oplog from '../model/oplog';
+import { practiceIntegrityService } from '../model/practice-integrity';
 import problem, { ProblemDoc } from '../model/problem';
+import { problemSetAccessService } from '../model/problem-set-access';
 import RecordModel from '../model/record';
 import ScheduleModel from '../model/schedule';
 import SolutionModel from '../model/solution';
 import system from '../model/system';
 import token from '../model/token';
+import * as training from '../model/training';
 import user, { deleteUserCache } from '../model/user';
 import { Handler, param, post, Query, Types } from '../service/server';
 
@@ -415,6 +426,8 @@ class UserDetailHandler extends Handler {
         if (!udoc) throw new UserNotFoundError(uid);
         const pdocs: ProblemDoc[] = [];
         const acInfo: Record<string, number> = {};
+        let problemSetCompletions: ProfileCompletionItem[] = [];
+        let knowledgeNodeCompletions: ProfileCompletionItem[] = [];
         if (this.user.hasPerm(PERM.PERM_VIEW_PROBLEM)) {
             const psdocs = await problem.getMultiStatus(domainId, { uid, status: STATUS.STATUS_ACCEPTED }).toArray();
             pdocs.push(
@@ -423,7 +436,7 @@ class UserDetailHandler extends Handler {
                         domainId,
                         psdocs.map((i) => i.docId),
                         this.user,
-                        problem.PROJECTION_LIST,
+                        [...problem.PROJECTION_LIST, 'knowledgeNodeIds'],
                         false,
                         true,
                     ),
@@ -439,6 +452,73 @@ class UserDetailHandler extends Handler {
         const tags = Object.entries(acInfo)
             .sort((a, b) => b[1] - a[1])
             .slice(0, 20);
+        const visibleAcPids = new Set(pdocs.map((pdoc) => pdoc.docId));
+        if (this.user.hasPerm(PERM.PERM_VIEW_PROBLEM) && this.user.hasPerm(PERM.PERM_VIEW_TRAINING)) {
+            const listed = await training.getMulti(domainId, withProblemSetKind({}) as Filter<TrainingDoc>).toArray();
+            const tsdict = await training.getListStatus(
+                domainId,
+                this.user._id,
+                listed.map((tdoc) => tdoc.docId),
+            );
+            const enrollments = new Map<string, boolean>(
+                Object.entries(tsdict).map(([key, status]) => [key, (status as { enroll?: number })?.enroll === 1]),
+            );
+            const decisions = await problemSetAccessService.evaluateMany(domainId, this.user, listed, enrollments);
+            const published = await practiceIntegrityService.listLatestPublished(domainId);
+            const integritySetIds = new Set(
+                published.filter((revision) => revision.containerKind === 'problemSet').map((revision) => revision.containerId.toHexString()),
+            );
+            const discoverable = listed.filter((tdoc) => decisions.get(String(tdoc.docId))?.discoverable);
+            problemSetCompletions = rankCompletionItems(
+                await Promise.all(
+                    discoverable.map(async (tdoc) => {
+                        const integrity = integritySetIds.has(tdoc.docId.toHexString());
+                        const scopedDonePids = new Set<number>();
+                        if (integrity) {
+                            const byScope = await contextualCompletionService.getCompletedByScope(domainId, uid, 'problemSet', tdoc.docId);
+                            for (const pids of byScope.values()) {
+                                for (const pid of pids) scopedDonePids.add(pid);
+                            }
+                        }
+                        return {
+                            id: tdoc.docId.toHexString(),
+                            title: tdoc.title,
+                            count: problemSetCompletionCount({
+                                setPids: training.getPids(tdoc.dag),
+                                visibleAcPids,
+                                integrity,
+                                scopedDonePids,
+                            }),
+                            href: `/problem-sets/${tdoc.docId}`,
+                        };
+                    }),
+                ),
+            );
+        }
+        const mindmap = (global as any).Hydro?.model?.mindmap;
+        if (this.user.hasPerm(PERM.PERM_VIEW_PROBLEM) && mindmap?.listPublicMaps && mindmap.getPublicSnapshot) {
+            const maps = await mindmap.listPublicMaps();
+            const publicNodes: Array<{ id: string; title: string; href?: string }> = [];
+            for (const map of maps) {
+                const snapshot = await mindmap.getPublicSnapshot(map._id);
+                if (!snapshot) continue;
+                const mapTitle = String(snapshot.config?.title || map.title || '').trim();
+                const mapId = String(snapshot.config?._id || map._id);
+                if (!mapId) throw new TypeError('public knowledge map missing id');
+                for (const node of snapshot.nodes || []) {
+                    const id = String(node._id || '');
+                    if (!id) throw new TypeError(`mindmap node missing id map=${mapId}`);
+                    const topic = String(node.topic || '').trim();
+                    if (!topic) throw new TypeError(`mindmap node ${id} topic must be non-empty`);
+                    publicNodes.push({
+                        id,
+                        title: maps.length > 1 && mapTitle ? `${mapTitle} / ${topic}` : topic,
+                        href: `/mindmap?mapId=${mapId}`,
+                    });
+                }
+            }
+            knowledgeNodeCompletions = knowledgeNodeCompletionCounts({ problems: pdocs, publicNodes });
+        }
         const tsdocs = await ContestModel.getMultiStatus(domainId, { uid, attend: { $exists: true } })
             .project({ docId: 1 })
             .toArray();
@@ -490,6 +570,8 @@ class UserDetailHandler extends Handler {
             sdoc,
             pdocs,
             tags,
+            problemSetCompletions,
+            knowledgeNodeCompletions,
             tdocs,
             daily,
         };

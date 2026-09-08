@@ -2,21 +2,22 @@
  * User detail page — redesigned (Q2):
  *   - Hero with large avatar + identity + KPI strip
  *   - Bio card directly under hero, rendered as full Markdown
- *   - 65 : 35 split — left = tag histogram + solved problems + attended contests,
+ *   - 65 : 35 split — left = problem-set / knowledge-node completions + attended contests,
  *     right = identity meta + contacts (with copy) + solution previews.
  */
 import { useState } from 'react';
 import { motion } from 'motion/react';
 import {
   Activity,
+  BookOpen,
   Calendar,
   Clipboard,
   Hash,
   ListChecks,
   Mail,
   MessageSquare,
+  Network,
   Settings as SettingsIcon,
-  Tag,
   Trophy,
   User as UserIcon,
 } from 'lucide-react';
@@ -94,11 +95,20 @@ interface UserMessage {
   content?: string;
 }
 
+interface ProfileCompletionItem {
+  id: string;
+  title: string;
+  count: number;
+  href?: string;
+}
+
 interface UserPageData {
   udoc?: UserProfileDocument;
   sdoc?: { updateAt?: unknown };
   pdocs?: unknown[];
   tags?: Array<[string, number]>;
+  problemSetCompletions?: ProfileCompletionItem[];
+  knowledgeNodeCompletions?: ProfileCompletionItem[];
   tdocs?: UserContestDocument[];
   psdocs?: UserSolutionDocument[];
   pdict?: Record<string, { title?: string }>;
@@ -118,7 +128,8 @@ export function UserDetailPage() {
   const udoc = data.udoc || {};
   const sdoc = data.sdoc || {};
   const pdocs = data.pdocs || [];
-  const tags = data.tags || [];
+  const problemSetCompletions = data.problemSetCompletions || [];
+  const knowledgeNodeCompletions = data.knowledgeNodeCompletions || [];
   const tdocs = data.tdocs || [];
   const psdocs = data.psdocs || [];
   const pdict = data.pdict || {};
@@ -149,8 +160,8 @@ export function UserDetailPage() {
         ]),
   ].filter((it) => it.value);
 
-  // Top tag histogram — normalise widths from the largest count
-  const maxTagCount = tags.length ? Math.max(...tags.map(([, c]) => c)) : 0;
+  const maxProblemSetCount = problemSetCompletions.length ? Math.max(...problemSetCompletions.map((item) => item.count)) : 0;
+  const maxKnowledgeCount = knowledgeNodeCompletions.length ? Math.max(...knowledgeNodeCompletions.map((item) => item.count)) : 0;
 
   const avatarUrl = udoc.avatarUrl || (udoc.avatar && /^https?:|^\//.test(udoc.avatar) ? udoc.avatar : null);
 
@@ -250,33 +261,18 @@ export function UserDetailPage() {
       <div className="grid gap-5 lg:grid-cols-[64fr_36fr]">
         {/* Left */}
         <div className="space-y-4 min-w-0">
-          {/* Tag histogram */}
-          {tags.length ? (
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base flex items-center gap-1.5">
-                  <Tag className="size-4" />
-                  常通过标签
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-1.5">
-                {tags.slice(0, 12).map(([tag, count]) => {
-                  const pct = maxTagCount > 0 ? Math.round((count / maxTagCount) * 100) : 0;
-                  return (
-                    <div key={tag} className="flex items-center gap-3 text-xs">
-                      <span className="w-24 truncate" title={tag}>
-                        {tag}
-                      </span>
-                      <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
-                        <div className="h-full bg-primary/80 transition-all" style={{ width: `${pct}%` }} />
-                      </div>
-                      <span className="w-10 text-right font-mono tabular-nums text-muted-foreground">{count}</span>
-                    </div>
-                  );
-                })}
-              </CardContent>
-            </Card>
-          ) : null}
+          <CompletionHistogram
+            title="题集完成"
+            icon={<BookOpen className="size-4" />}
+            items={problemSetCompletions}
+            maxCount={maxProblemSetCount}
+          />
+          <CompletionHistogram
+            title="知识点完成"
+            icon={<Network className="size-4" />}
+            items={knowledgeNodeCompletions}
+            maxCount={maxKnowledgeCount}
+          />
 
           {/* Submission heatmap (GitHub-style) */}
           <ActivityHeatmap daily={data.daily || {}} />
@@ -378,6 +374,53 @@ export function UserDetailPage() {
         </div>
       </div>
     </motion.div>
+  );
+}
+
+function CompletionHistogram({
+  title,
+  icon,
+  items,
+  maxCount,
+}: {
+  title: string;
+  icon: React.ReactNode;
+  items: ProfileCompletionItem[];
+  maxCount: number;
+}) {
+  if (!items.length) return null;
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base flex items-center gap-1.5">
+          {icon}
+          {title}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-1.5">
+        {items.slice(0, 12).map((item) => {
+          const pct = maxCount > 0 ? Math.round((item.count / maxCount) * 100) : 0;
+          const titleClass = 'w-24 truncate';
+          return (
+            <div key={item.id} className="flex items-center gap-3 text-xs">
+              {item.href ? (
+                <a href={item.href} className={`${titleClass} hover:underline`} title={item.title}>
+                  {item.title}
+                </a>
+              ) : (
+                <span className={titleClass} title={item.title}>
+                  {item.title}
+                </span>
+              )}
+              <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
+                <div className="h-full bg-primary/80 transition-all" style={{ width: `${pct}%` }} />
+              </div>
+              <span className="w-10 text-right font-mono tabular-nums text-muted-foreground">{item.count}</span>
+            </div>
+          );
+        })}
+      </CardContent>
+    </Card>
   );
 }
 

@@ -73,6 +73,9 @@
       "path": "packages/krypton-announcement"
     },
     {
+      "path": "packages/krypton-collect"
+    },
+    {
       "path": "packages/krypton-mindmap"
     },
     {

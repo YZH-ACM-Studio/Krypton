@@ -58,6 +58,14 @@ export function isPatType(type: AwardTypeLike | undefined, fallback = ''): boole
   return /^pat(?:_|$)/i.test(key) || /^PAT[-_]/i.test(name);
 }
 
+export function isLadderIndividualKey(typeKey: string): boolean {
+  return /^ladder_individual(?:_|$)/i.test(typeKey);
+}
+
+export function awardHasEditableExamScore(typeKey: string): boolean {
+  return /^pat/i.test(typeKey) || isLadderIndividualKey(typeKey);
+}
+
 export function isLadderType(type: AwardTypeLike | undefined, fallback = ''): boolean {
   const key = type?.key || fallback;
   const name = type?.name || fallback;
@@ -233,4 +241,41 @@ export function ladderColumnCount(awards: AwardLike[], typeMap: Map<string, Awar
     if (key === columnKey || (column && column.matchName.test(name))) count += 1;
   }
   return count;
+}
+
+export function mergeAwardTally(left: AwardTally, right: AwardTally): AwardTally {
+  const ladderByKey = { ...left.ladderByKey };
+  for (const [key, value] of Object.entries(right.ladderByKey)) {
+    ladderByKey[key] = (ladderByKey[key] || 0) + value;
+  }
+  return {
+    icpc: {
+      gold: { regular: left.icpc.gold.regular + right.icpc.gold.regular, extra: left.icpc.gold.extra + right.icpc.gold.extra },
+      silver: { regular: left.icpc.silver.regular + right.icpc.silver.regular, extra: left.icpc.silver.extra + right.icpc.silver.extra },
+      bronze: { regular: left.icpc.bronze.regular + right.icpc.bronze.regular, extra: left.icpc.bronze.extra + right.icpc.bronze.extra },
+    },
+    ccpc: {
+      gold: left.ccpc.gold + right.ccpc.gold,
+      silver: left.ccpc.silver + right.ccpc.silver,
+      bronze: left.ccpc.bronze + right.ccpc.bronze,
+    },
+    pat: left.pat + right.pat,
+    ladder: left.ladder + right.ladder,
+    ladderByKey,
+    other: left.other + right.other,
+  };
+}
+
+export function isRankboardStatsMode(input: {
+  typeFilterSize: number;
+  ladderGroupSelected: boolean;
+  schoolFilter: string;
+  yearFilter: string;
+  search: string;
+}): boolean {
+  return input.typeFilterSize > 0 || input.ladderGroupSelected || input.schoolFilter !== 'all' || input.yearFilter !== 'all' || input.search.trim() !== '';
+}
+
+export function rankboardTableRows<T extends { rank: number }>(filtered: T[], statsMode: boolean): T[] {
+  return statsMode ? filtered : filtered.filter((row) => row.rank > 3);
 }

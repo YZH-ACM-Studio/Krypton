@@ -329,8 +329,8 @@ class AdminPersonDetailHandler extends AdminBase {
     async get(_ctx: any, id: ObjectId) {
         const person = await getPerson(id);
         if (!person) throw new NotFoundError(localizedErrorText`person`, String(id));
-        // Overlay 天梯赛 scores from the store (store-first, embedded fallback)
-        // so the admin sees the same numeric score as the public board.
+        // Overlay empty 天梯赛 scores from the store so the admin sees the
+        // same numeric score as the public board; existing edits stay.
         await applyGpltStoreScores([person]);
         const student = await studentsColl.findOne({ _id: person.studentDocId });
         const types = await listAwardTypes({ includeHidden: true });

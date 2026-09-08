@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   LADDER_DETAIL_COLUMNS,
+  awardHasEditableExamScore,
+  emptyAwardTally,
   isIcpcEcType,
   isIcpcRegularType,
+  isRankboardStatsMode,
+  mergeAwardTally,
+  rankboardTableRows,
   rowMatchesAwardFilter,
   shouldShowLadderDetails,
   tallyAwards,
@@ -63,5 +68,40 @@ describe('rankboard award display', () => {
     const next = withoutLadderKeys(new Set(['ladder_team_1', 'icpc_gold']), ['ladder_team_1', 'ladder_team_special']);
     expect([...next]).to.deep.equal(['icpc_gold']);
     expect(shouldShowLadderDetails(next, false, types)).to.equal(false);
+  });
+
+  it('lets admins edit exam scores on PAT and 天梯赛个人 awards only', () => {
+    expect(awardHasEditableExamScore('pat_a')).to.equal(true);
+    expect(awardHasEditableExamScore('ladder_individual_1')).to.equal(true);
+    expect(awardHasEditableExamScore('ladder_team_1')).to.equal(false);
+    expect(awardHasEditableExamScore('icpc_gold')).to.equal(false);
+  });
+
+  it('puts every filtered row into the table and sums medal columns in stats mode', () => {
+    expect(
+      isRankboardStatsMode({
+        typeFilterSize: 1,
+        ladderGroupSelected: false,
+        schoolFilter: 'all',
+        yearFilter: 'all',
+        search: '',
+      }),
+    ).to.equal(true);
+    expect(
+      isRankboardStatsMode({
+        typeFilterSize: 0,
+        ladderGroupSelected: false,
+        schoolFilter: 'all',
+        yearFilter: 'all',
+        search: '',
+      }),
+    ).to.equal(false);
+    const rows = [{ rank: 1 }, { rank: 4 }, { rank: 2 }];
+    expect(rankboardTableRows(rows, false).map((row) => row.rank)).to.deep.equal([4]);
+    expect(rankboardTableRows(rows, true).map((row) => row.rank)).to.deep.equal([1, 4, 2]);
+    const gold = tallyAwards([{ type: 'icpc_gold' }, { type: 'icpc_ec_gold' }], typeMap);
+    const moreGold = tallyAwards([{ type: 'icpc_gold' }], typeMap);
+    expect(mergeAwardTally(gold, moreGold).icpc.gold).to.deep.equal({ regular: 2, extra: 1 });
+    expect(mergeAwardTally(emptyAwardTally(), gold).icpc.gold).to.deep.equal({ regular: 1, extra: 1 });
   });
 });

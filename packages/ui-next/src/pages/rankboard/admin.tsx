@@ -23,6 +23,7 @@ import { fetchHydroResponse } from '@/lib/error-presenter';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 import { uploadUserFile } from '@/lib/upload';
+import { awardHasEditableExamScore, isLadderIndividualKey } from './award-display';
 
 const RANKBOARD_WORKSPACE_NAV = [
   {
@@ -73,7 +74,7 @@ interface AwardType {
  * preset names map predictably:
  *   ICPC / CCPC  — 3-person team contests: team name + teammates + 现场 + 学校排名
  *   天梯赛-团队   — team name + single 排名 (no teammates)
- *   天梯赛-个人   — single 排名 only
+ *   天梯赛-个人   — single 排名 + 天梯赛得分 (independent of ranking formula)
  *   PAT 系列     — single 排名 + 实际考试得分 (independent of ranking formula)
  *   其它         — single 排名 only
  */
@@ -81,13 +82,13 @@ function awardFields(typeKey: string) {
   const isICPC = /^icpc/i.test(typeKey);
   const isCCPC = /^ccpc/i.test(typeKey);
   const isLadderTeam = typeKey.startsWith('ladder_team');
-  const isPAT = /^pat/i.test(typeKey);
   const hasTeam = isICPC || isCCPC || isLadderTeam;
   const hasTeammates = isICPC || isCCPC;
   const hasDualRank = isICPC || isCCPC;
   const hasSingleRank = !hasDualRank;
-  const hasExamScore = isPAT;
-  return { hasTeam, hasTeammates, hasDualRank, hasSingleRank, hasExamScore };
+  const hasExamScore = awardHasEditableExamScore(typeKey);
+  const examScoreIsLadder = isLadderIndividualKey(typeKey);
+  return { hasTeam, hasTeammates, hasDualRank, hasSingleRank, hasExamScore, examScoreIsLadder };
 }
 
 interface SearchResult {
@@ -1030,13 +1031,13 @@ export function AdminRankBoardPersonPage() {
                         </FormField>
                       )}
                       {fields.hasExamScore && (
-                        <FormField label="实际考试得分">
+                        <FormField label={fields.examScoreIsLadder ? '天梯赛得分' : '实际考试得分'}>
                           <Input
                             type="number"
                             step="any"
                             value={award.score ?? ''}
                             onChange={(e) => updateAward(idx, { score: e.target.value ? Number(e.target.value) : undefined })}
-                            placeholder="如 PAT 98 分"
+                            placeholder={fields.examScoreIsLadder ? '如 220 分' : '如 PAT 98 分'}
                           />
                           <p className="mt-1 text-[11px] text-muted-foreground">独立于 OJ ranking 得分，仅用于展示。</p>
                         </FormField>

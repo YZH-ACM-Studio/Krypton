@@ -37,10 +37,10 @@ export interface Award {
     liveRank?: number;
     schoolRank?: number;
     /**
-     * 天梯赛 numeric score (0–290) — DISPLAY only, never affects ranking.
-     * Single source of truth is `tasks.score_gplt`; this embedded value is now
-     * a fallback. The leaderboard overlays the store value at read time (see
-     * model.ts applyGpltStoreScores). For PAT it's the "实际考试得分".
+     * Display-only exam score; never affects ranking. For PAT this is the
+     * actual exam grade. For 天梯赛个人奖 this is the honor-board score
+     * (admin-editable). `tasks.score_gplt` still fills empty ladder scores
+     * at read time (see model.ts applyGpltStoreScores).
      */
     score?: number;
     /**

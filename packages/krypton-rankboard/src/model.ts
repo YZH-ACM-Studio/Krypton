@@ -441,12 +441,12 @@ export function gpltYearFromContest(contest?: string): number | null {
 }
 
 /**
- * Overlay the 天梯赛 numeric score from the single source of truth
- * (tasks.score_gplt, national level) onto each `ladder_*` award for display.
- * Store-first, falls back to the award's embedded `score` when the store has
- * no row (unbound-but-not-imported, or pre-migration). Mutates in place; does
- * NOT affect ranking (computeAwardScore ignores award.score). If the tasks
- * plugin / helper is absent, embedded scores are kept. See docs/PLAN-2026-06-07.
+ * Overlay the 天梯赛 numeric score from tasks.score_gplt (national level)
+ * onto each `ladder_*` award that does not already have an embedded score.
+ * Honor-board edits persist; the store only fills empty display scores.
+ * Mutates in place; does NOT affect ranking (computeAwardScore ignores
+ * award.score). If the tasks plugin / helper is absent, embedded scores are
+ * kept. See docs/PLAN-2026-06-07.
  */
 export async function applyGpltStoreScores(people: PersonRecord[]): Promise<void> {
     const tasksModel = (global as any).Hydro?.model?.tasks;
@@ -464,6 +464,7 @@ export async function applyGpltStoreScores(people: PersonRecord[]): Promise<void
     for (const p of people) {
         for (const award of p.awards || []) {
             if (!String(award.type).startsWith('ladder_')) continue;
+            if (award.score != null) continue;
             const year = (award as any).gpltYear ?? gpltYearFromContest(award.contest);
             if (year == null) continue;
             const s = scoreMap.get(`${String(p.studentDocId)}:${year}`);
@@ -477,8 +478,8 @@ export async function listLeaderboard(): Promise<LeaderboardRow[]> {
     const [people, awardTypes, config] = await Promise.all([listPeople(), listAwardTypes({ includeHidden: true }), getConfig()]);
     const typeMap = new Map(awardTypes.map((t) => [t.key, t]));
 
-    // Overlay 天梯赛 numeric scores from the single source of truth (tasks
-    // store) onto ladder awards before serving — store-first, embedded fallback.
+    // Overlay empty 天梯赛 numeric scores from the tasks store; honor-board
+    // edits already on the award are kept.
     await applyGpltStoreScores(people);
 
     // Pull student + school + groups + udoc in bulk.

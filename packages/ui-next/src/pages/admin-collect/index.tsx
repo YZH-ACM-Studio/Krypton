@@ -6,7 +6,7 @@
  *   - admin_collect_edit.html  → AdminCollectEditPage  (create + edit)
  *   - admin_collect_stats.html → AdminCollectStatsPage
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Archive, ArrowLeft, Bell, FileDown, FolderUp, Plus, Save, Trash2 } from 'lucide-react';
 import { DomainUserSearchOption, domainUserSearchLabel, loadDomainUsers, type DomainUserOption } from '@/components/domain-user-search';
 import { ModuleWorkspace, type ModuleWorkspaceNavItem } from '@/components/management/module-workspace';
@@ -25,6 +25,15 @@ import { Textarea } from '@/components/ui/textarea';
 import { useBootstrap } from '@/lib/bootstrap';
 import { downloadZip, type ZipDownloadTarget } from '@/lib/download-zip';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
+import {
+  COLLECT_DEFAULT_FILE_NAME_TEMPLATE,
+  COLLECT_DEFAULT_PACK_LAYOUT,
+  COLLECT_NAME_TOKENS,
+  renderAssignedFileName,
+  renderPackEntryName,
+  type CollectNameToken,
+  type CollectPackLayout,
+} from '@/pages/collect/name-format';
 
 const COLLECT_WORKSPACE_NAV = [
   {
@@ -97,6 +106,8 @@ interface CollectRequestView {
   maxFileBytes: number;
   maxTotalBytes: number;
   maxFiles: number;
+  fileNameTemplate: string;
+  packLayout: CollectPackLayout;
   courseRef: { courseId: string; chapterId: string } | null;
   ownerUid: number;
   canEdit: boolean;
@@ -141,6 +152,9 @@ interface ProgressFile {
   slotTitle: string;
   fileId: string;
   originalName: string;
+  assignedName?: string;
+  duplicateCount?: number;
+  duplicateStudentIds?: string[];
   size: number;
   url: string;
 }
@@ -182,9 +196,26 @@ interface CollectStatsPageData {
 interface PackPayload {
   entries: ZipDownloadTarget[];
   csv: string;
+  submittedCsv: string;
   manifest: string;
   filename: string;
 }
+
+const FILE_NAME_PREVIEW_CTX = {
+  uid: 1,
+  studentId: '24000001',
+  realName: '张三',
+  slotTitle: '实验报告',
+  index: 1,
+  ext: 'pdf',
+  originalName: 'lab.pdf',
+} as const;
+
+const FILE_NAME_PREVIEW_FOLDER = '24000001-张三';
+const PACK_LAYOUT_OPTIONS = [
+  { value: 'nested', label: '学号-姓名 / 槽位 / 文件' },
+  { value: 'flat', label: '全部文件放在压缩包根目录' },
+] as const;
 
 function asRecord(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label}格式不正确`);
@@ -358,6 +389,24 @@ function parseCourseRef(value: unknown): CollectRequestView['courseRef'] {
   return { courseId: asId(rec.courseId, '课程'), chapterId: asId(rec.chapterId, '章节') };
 }
 
+function parseFileNameTemplate(value: unknown): string {
+  if (value === undefined || value === null) return COLLECT_DEFAULT_FILE_NAME_TEMPLATE;
+  const template = asString(value, '文件名格式');
+  return template.trim() ? template : COLLECT_DEFAULT_FILE_NAME_TEMPLATE;
+}
+
+function parsePackLayout(value: unknown): CollectPackLayout {
+  if (value === undefined || value === null || value === '') return COLLECT_DEFAULT_PACK_LAYOUT;
+  if (value === 'nested' || value === 'flat') return value;
+  throw new Error('打包目录格式不正确');
+}
+
+function parseOptionalStringList(value: unknown, label: string): string[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) throw new Error(`${label}格式不正确`);
+  return value.map((item) => asString(item, label));
+}
+
 function parseCollaborator(value: unknown): DomainUserOption {
   const rec = asRecord(value, '协作者');
   const user: DomainUserOption = { _id: asUid(rec._id, '协作者') };
@@ -431,6 +480,8 @@ function parseRequestView(value: unknown, currentUid: number): CollectRequestVie
     maxFileBytes: asBoundedInt(rec.maxFileBytes, 1, HARD_MAX_FILE_BYTES, '单文件上限'),
     maxTotalBytes: asBoundedInt(rec.maxTotalBytes, 1, HARD_MAX_TOTAL_BYTES, '合计上限'),
     maxFiles: asBoundedInt(rec.maxFiles, 1, HARD_MAX_FILES, '文件个数上限'),
+    fileNameTemplate: parseFileNameTemplate(rec.fileNameTemplate),
+    packLayout: parsePackLayout(rec.packLayout),
     courseRef: parseCourseRef(rec.courseRef),
     ownerUid,
     canEdit: optionalBoolean(rec.canEdit, ownerUid === currentUid, '编辑权限'),
@@ -466,7 +517,7 @@ function parseProgressFile(value: unknown, slots: SlotDraft[], requestId: string
     typeof rec.url === 'string' && rec.url.trim()
       ? rec.url.trim()
       : `/admin/collect/${encodeURIComponent(requestId)}/file/${encodeURIComponent(fileId)}`;
-  return {
+  const file: ProgressFile = {
     slotId,
     slotTitle,
     fileId,
@@ -474,6 +525,15 @@ function parseProgressFile(value: unknown, slots: SlotDraft[], requestId: string
     size: asNonNegativeInt(rec.size, '文件大小'),
     url,
   };
+  if (rec.assignedName !== undefined && rec.assignedName !== null && rec.assignedName !== '') {
+    file.assignedName = asString(rec.assignedName, '指定文件名');
+  }
+  if (rec.duplicateCount !== undefined) {
+    file.duplicateCount = asNonNegativeInt(rec.duplicateCount, '重复人数');
+  }
+  const duplicateStudentIds = parseOptionalStringList(rec.duplicateStudentIds, '重复学号');
+  if (duplicateStudentIds) file.duplicateStudentIds = duplicateStudentIds;
+  return file;
 }
 
 function parseProgressStatus(rec: Record<string, unknown>): ProgressRowStatus {
@@ -557,9 +617,11 @@ function parsePackPayload(value: unknown, title: string): PackPayload {
     return { name, url };
   });
   const csv = asString(rec.csv, '未交 CSV');
+  if (typeof rec.submittedCsv !== 'string') throw new Error('打包结果格式不正确');
+  const submittedCsv = rec.submittedCsv;
   const manifest = asString(rec.manifest, 'MANIFEST');
   const filename = typeof rec.filename === 'string' && rec.filename.trim() ? rec.filename.trim() : `${safeZipStem(title)}.zip`;
-  return { entries, csv, manifest, filename };
+  return { entries, csv, submittedCsv, manifest, filename };
 }
 
 function safeZipStem(title: string): string {
@@ -823,6 +885,32 @@ export function AdminCollectEditPage() {
   const [maxFileMib, setMaxFileMib] = useState(bytesToMib(initial?.maxFileBytes || HARD_MAX_FILE_BYTES));
   const [maxTotalMib, setMaxTotalMib] = useState(bytesToMib(initial?.maxTotalBytes || HARD_MAX_TOTAL_BYTES));
   const [maxFiles, setMaxFiles] = useState(initial?.maxFiles || HARD_MAX_FILES);
+  const [fileNameTemplate, setFileNameTemplate] = useState(initial?.fileNameTemplate || COLLECT_DEFAULT_FILE_NAME_TEMPLATE);
+  const [packLayout, setPackLayout] = useState<CollectPackLayout>(initial?.packLayout || COLLECT_DEFAULT_PACK_LAYOUT);
+  const templateInputRef = useRef<HTMLInputElement>(null);
+  const namesLocked = slotsLocked || !canEdit;
+  const namePreview = useMemo(() => {
+    const assigned = renderAssignedFileName(fileNameTemplate, FILE_NAME_PREVIEW_CTX);
+    return {
+      assigned,
+      pack: renderPackEntryName(packLayout, FILE_NAME_PREVIEW_FOLDER, FILE_NAME_PREVIEW_CTX.slotTitle, assigned),
+    };
+  }, [fileNameTemplate, packLayout]);
+
+  function insertNameToken(token: CollectNameToken) {
+    if (namesLocked) return;
+    const wrapped = `{${token}}`;
+    const input = templateInputRef.current;
+    const start = input?.selectionStart ?? fileNameTemplate.length;
+    const end = input?.selectionEnd ?? fileNameTemplate.length;
+    const next = `${fileNameTemplate.slice(0, start)}${wrapped}${fileNameTemplate.slice(end)}`;
+    setFileNameTemplate(next);
+    const cursor = start + wrapped.length;
+    requestAnimationFrame(() => {
+      input?.focus();
+      input?.setSelectionRange(cursor, cursor);
+    });
+  }
 
   const collaboratorUidsKey = data.collaborators.map((user) => user._id).join(',');
   useEffect(() => {
@@ -912,6 +1000,8 @@ export function AdminCollectEditPage() {
         <input type="hidden" name="maxFileBytes" value={String(mibToBytes(maxFileMib, HARD_MAX_FILE_BYTES))} />
         <input type="hidden" name="maxTotalBytes" value={String(mibToBytes(maxTotalMib, HARD_MAX_TOTAL_BYTES))} />
         <input type="hidden" name="maxFiles" value={String(maxFiles)} />
+        <input type="hidden" name="fileNameTemplate" value={fileNameTemplate} />
+        <input type="hidden" name="packLayout" value={packLayout} />
         <input type="hidden" name="groupIds" value={groupIds.join(',')} />
         <input type="hidden" name="courseId" value={courseId} />
         <input type="hidden" name="chapterId" value={chapterId} />
@@ -1143,6 +1233,71 @@ export function AdminCollectEditPage() {
 
         <Card>
           <CardHeader>
+            <CardTitle className="text-sm">文件名</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <FormSection>
+              {slotsLocked ? (
+                <p role="note" className="rounded-lg border border-amber-300/60 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+                  已有人提交，不能改文件名格式或打包目录
+                </p>
+              ) : null}
+              <FormField label="打包目录" htmlFor="collect-pack-layout">
+                <SimpleSelect
+                  id="collect-pack-layout"
+                  value={packLayout}
+                  onValueChange={(next) => {
+                    if (namesLocked) return;
+                    if (next === 'nested' || next === 'flat') setPackLayout(next);
+                  }}
+                  disabled={namesLocked}
+                  className="min-h-10"
+                  options={[...PACK_LAYOUT_OPTIONS]}
+                />
+              </FormField>
+              <FormField label="文件名格式" htmlFor="collect-file-name-template" hint="扩展名始终使用实际上传类型；不改学生文件本身">
+                <Input
+                  id="collect-file-name-template"
+                  ref={templateInputRef}
+                  value={fileNameTemplate}
+                  onChange={(e) => setFileNameTemplate(e.target.value)}
+                  disabled={namesLocked}
+                  placeholder="{originalName}"
+                  className="min-h-10 font-mono"
+                />
+              </FormField>
+              <div className="flex flex-wrap gap-2">
+                {COLLECT_NAME_TOKENS.map((token) => (
+                  <Button
+                    key={token}
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="min-h-10 font-mono"
+                    disabled={namesLocked}
+                    onClick={() => insertNameToken(token)}
+                  >
+                    {`{${token}}`}
+                  </Button>
+                ))}
+              </div>
+              <p className="rounded-md bg-muted px-3 py-2 font-mono text-xs leading-6">
+                <span className="text-muted-foreground">预览文件名 </span>
+                {namePreview.assigned}
+                <br />
+                <span className="text-muted-foreground">预览打包 </span>
+                {namePreview.pack}
+                <br />
+                <span className="text-muted-foreground">
+                  示例 24000001 / 张三 / 实验报告 / 1 / pdf / lab.pdf
+                </span>
+              </p>
+            </FormSection>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
             <CardTitle className="text-sm">协作者</CardTitle>
           </CardHeader>
           <CardContent>
@@ -1250,6 +1405,7 @@ export function AdminCollectStatsPage() {
       const pack = parsePackPayload(await response.json(), data.request.title);
       await downloadZip(pack.filename, [
         ...pack.entries,
+        { name: '已交.csv', content: pack.submittedCsv },
         { name: '未交.csv', content: pack.csv },
         { name: 'MANIFEST', content: pack.manifest },
       ]);
@@ -1368,6 +1524,49 @@ export function AdminCollectStatsPage() {
   );
 }
 
+function duplicateOtherCount(file: ProgressFile): number | null {
+  if (file.duplicateCount === undefined || file.duplicateCount <= 1) return null;
+  if (file.duplicateStudentIds && file.duplicateStudentIds.length > 0) return file.duplicateStudentIds.length;
+  return file.duplicateCount - 1;
+}
+
+function ProgressFileLink({
+  file,
+  prefix,
+  showDuplicates,
+  muted,
+}: {
+  file: ProgressFile;
+  prefix?: string;
+  showDuplicates: boolean;
+  muted?: boolean;
+}) {
+  const primary = file.assignedName || file.originalName;
+  const showOriginal = Boolean(file.assignedName && file.assignedName !== file.originalName);
+  const others = showDuplicates ? duplicateOtherCount(file) : null;
+  return (
+    <div className="space-y-0.5">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <a
+          href={file.url}
+          className={muted ? 'text-xs text-muted-foreground hover:underline' : 'text-xs text-primary hover:underline'}
+          rel="noopener"
+        >
+          {prefix}
+          {file.slotTitle} / {primary}
+          <span className={muted ? 'ml-1' : 'ml-1 text-muted-foreground'}>({formatSize(file.size)})</span>
+        </a>
+        {others !== null && others > 0 ? (
+          <Badge variant="outline" title={file.duplicateStudentIds?.join('、') || undefined}>
+            与 {others} 人相同
+          </Badge>
+        ) : null}
+      </div>
+      {showOriginal ? <p className="text-[11px] text-muted-foreground">原名 {file.originalName}</p> : null}
+    </div>
+  );
+}
+
 function ProgressTableRow({ row }: { row: ProgressRow }) {
   return (
     <TableRow>
@@ -1386,21 +1585,16 @@ function ProgressTableRow({ row }: { row: ProgressRow }) {
         ) : (
           <div className="space-y-1">
             {row.files.map((file) => (
-              <a key={file.fileId} href={file.url} className="block text-xs text-primary hover:underline" rel="noopener">
-                {file.slotTitle} / {file.originalName}
-                <span className="ml-1 text-muted-foreground">({formatSize(file.size)})</span>
-              </a>
+              <ProgressFileLink key={file.fileId} file={file} showDuplicates />
             ))}
             {row.history.map((file) => (
-              <a
+              <ProgressFileLink
                 key={`history-${file.fileId}`}
-                href={file.url}
-                className="block text-xs text-muted-foreground hover:underline"
-                rel="noopener"
-              >
-                历史 v{file.version} / {file.slotTitle} / {file.originalName}
-                <span className="ml-1">({formatSize(file.size)})</span>
-              </a>
+                file={file}
+                prefix={`历史 v${file.version} / `}
+                showDuplicates={false}
+                muted
+              />
             ))}
           </div>
         )}

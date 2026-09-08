@@ -142,6 +142,14 @@ _Avoid_: 当作作业提交、写入 Record/testdata、免登录链接、考试�
 每个用户对一次文件收集恰好一行的确认记录；`submitted` 表示已交齐。截止前可换当前文件，历史版本保留。退组后提交与文件不删，只从待交名单消失，打包仍带已交文件。
 _Avoid_: Record、ContestStatus、作业成绩表
 
+**文件名模板（`fileNameTemplate`）**:
+一次收集一条模板，与 `packLayout`（`nested|flat`）一起存在请求上；默认 `{originalName}` 与 `nested`。缺字段按默认读取，禁止请求路径回填。首份提交后与槽位一同锁定。
+_Avoid_: 请求路径回填、有人提交后再改模板或 layout、班级目录
+
+**分配文件名（`assignedName`）**:
+展示、打包、下载时由模板与 live userbind 派生的名字，不入库；blob 路径保持 `collect/{domain}/{request}/{uid}/{fileId}`。未交 CSV 按每个必填槽给预期名；已交 CSV 含 assigned、original 与 sha256。当前文件 sha256 重复只是教师进度提示。
+_Avoid_: 持久化改名、改写 blob 路径、用哈希去重拒绝上传或当作抄袭裁定
+
 ## 虚拟参赛
 
 **虚拟参赛尝试（`VirtualContestAttempt`）**:

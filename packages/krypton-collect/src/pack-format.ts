@@ -1,14 +1,7 @@
 /** Zip entry names and teacher CSV/manifest for collect pack download. */
+import { renderPackEntryName, sanitizeZipPart } from './name-format';
 
-// Zip parts cannot contain separators, reserved filename chars, or C0 controls.
-// eslint-disable-next-line no-control-regex
-const INVALID_ZIP_PART_CHARS = /[\\/:*?"<>|\x00-\x1F]/g;
-
-export function sanitizeZipPart(value: string): string {
-    const sanitized = value.replace(INVALID_ZIP_PART_CHARS, '_').replace(/\s+/g, ' ').trim();
-    if (!sanitized || sanitized === '.' || sanitized === '..') return '_';
-    return sanitized;
-}
+export { sanitizeZipPart };
 
 export function zipStudentFolder(student: { studentId?: string; realName?: string; uid: number }): string {
     if (student.studentId) return `${student.studentId}-${sanitizeZipPart(student.realName ?? '')}`;
@@ -16,7 +9,7 @@ export function zipStudentFolder(student: { studentId?: string; realName?: strin
 }
 
 export function zipEntryName(folder: string, slotTitle: string, originalName: string): string {
-    return `${sanitizeZipPart(folder)}/${sanitizeZipPart(slotTitle)}/${sanitizeZipPart(originalName)}`;
+    return renderPackEntryName('nested', folder, slotTitle, sanitizeZipPart(originalName));
 }
 
 const CSV_INVISIBLE_PREFIX = /[\u0000-\u001F\u007F\u200B-\u200D\uFEFF\u00AD\u2060\u2800]/g;
@@ -28,12 +21,35 @@ export function csvCell(value: string | number): string {
     return /[",\r\n\t]/.test(neutralized) ? `"${neutralized.replaceAll('"', '""')}"` : neutralized;
 }
 
-export function buildMissingCsv(rows: { studentId: string; realName: string; uid: number }[]): string {
+function csvTable(headers: string[], rows: Array<Array<string | number>>): string {
     const lines = [
-        ['学号', '姓名', 'UID'].map(csvCell).join(','),
-        ...rows.map((row) => [row.studentId, row.realName, row.uid].map(csvCell).join(',')),
+        headers.map(csvCell).join(','),
+        ...rows.map((row) => row.map(csvCell).join(',')),
     ];
     return `\uFEFF${lines.join('\r\n')}\r\n`;
+}
+
+export function buildMissingCsv(rows: { studentId: string; realName: string; uid: number; slotTitle: string; assignedName: string }[]): string {
+    return csvTable(
+        ['学号', '姓名', 'UID', '槽位', '预期文件名'],
+        rows.map((row) => [row.studentId, row.realName, row.uid, row.slotTitle, row.assignedName]),
+    );
+}
+
+export function buildSubmittedCsv(rows: {
+    studentId: string;
+    realName: string;
+    uid: number;
+    slotTitle: string;
+    assignedName: string;
+    originalName: string;
+    sha256: string;
+    size: number;
+}[]): string {
+    return csvTable(
+        ['学号', '姓名', 'UID', '槽位', '文件名', '原文件名', 'sha256', 'size'],
+        rows.map((row) => [row.studentId, row.realName, row.uid, row.slotTitle, row.assignedName, row.originalName, row.sha256, row.size]),
+    );
 }
 
 export function buildManifest(entries: { name: string; sha256: string; size: number }[]): string {

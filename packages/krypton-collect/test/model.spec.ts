@@ -15,6 +15,7 @@ const authPath = require.resolve('../src/auth.ts');
 const errorsPath = require.resolve('../src/errors.ts');
 const fileValidatePath = require.resolve('../src/file-validate.ts');
 const packPath = require.resolve('../src/pack-format.ts');
+const nameFormatPath = require.resolve('../src/name-format.ts');
 const typesPath = require.resolve('../src/types.ts');
 
 type AnyDoc = Record<string, unknown>;
@@ -240,7 +241,7 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     return originalLoad.call(this, request, parent, isMain);
 };
 
-for (const path of [modelPath, authPath, errorsPath, fileValidatePath, packPath, typesPath]) {
+for (const path of [modelPath, authPath, errorsPath, fileValidatePath, packPath, nameFormatPath, typesPath]) {
     delete require.cache[path];
 }
 
@@ -311,6 +312,24 @@ async function createDraft(overrides: Record<string, unknown> = {}) {
 async function createPublished(overrides: Record<string, unknown> = {}) {
     const draft = await createDraft(overrides);
     return model.publishRequest(domainId, draft._id, teacher, draft.revision);
+}
+
+async function submitPdf(
+    request: Awaited<ReturnType<typeof model.getRequest>>,
+    uid: number,
+    originalName: string,
+    body: Buffer,
+    slotId = request.slots[0].id,
+) {
+    await model.putStudentFile({
+        request,
+        uid,
+        slotId,
+        originalName,
+        size: body.length,
+        bytes: body,
+    });
+    return model.confirmSubmit(request, uid);
 }
 
 beforeEach(() => {
@@ -706,5 +725,114 @@ describe('krypton-collect nudge', () => {
         storedRequest.lastNudgeAt = new Date(Date.now() - 11 * 60 * 1000);
         const again = await model.nudgeUnsubmitted(await model.getRequest(domainId, published._id), teacher);
         expect(again).to.deep.equal([102]);
+    });
+});
+
+describe('krypton-collect naming Rev.2', () => {
+    it('keeps the default pack path as 学号-姓名/槽/原名', async () => {
+        const published = await createPublished({
+            slots: [{ title: '实验报告', required: true, allowedExt: ['pdf'], maxFiles: 1 }],
+        });
+        await submitPdf(published, 101, 'lab.pdf', pdf('lab-101'));
+        const pack = await model.listPackEntries(await model.getRequest(domainId, published._id));
+        expect(pack.entries.map((entry) => entry.name)).to.deep.equal(['24000001-甲/实验报告/lab.pdf']);
+        expect(pack.missing.map((row) => row.uid)).to.deep.equal([102]);
+    });
+
+    it('uses a flat assigned name after updating fileNameTemplate and packLayout', async () => {
+        const published = await createPublished({
+            slots: [{ title: '实验报告', required: true, allowedExt: ['pdf'], maxFiles: 1 }],
+        });
+        const updated = await model.updateRequest(domainId, published._id, teacher, published.revision, {
+            fileNameTemplate: '{studentId}_{realName}_{slotTitle}',
+            packLayout: 'flat',
+        });
+        await submitPdf(updated, 101, 'lab.pdf', pdf('lab-flat'));
+        const pack = await model.listPackEntries(await model.getRequest(domainId, published._id));
+        expect(pack.entries).to.have.length(1);
+        expect(pack.entries[0].name).to.equal('24000001_甲_实验报告.pdf');
+        expect(pack.entries[0].name).to.not.include('/');
+    });
+
+    it('locks fileNameTemplate after confirmSubmit', async () => {
+        const published = await createPublished();
+        await submitPdf(published, 101, 'a.pdf', pdf('locked'));
+        const current = await model.getRequest(domainId, published._id);
+        await expectReject(
+            () => model.updateRequest(domainId, current._id, teacher, current.revision, {
+                fileNameTemplate: '{studentId}_{realName}_{slotTitle}',
+            }),
+            'CollectSlotLockedError',
+        );
+        await expectReject(
+            () => model.updateRequest(domainId, current._id, teacher, current.revision, {
+                packLayout: 'flat',
+            }),
+            'CollectSlotLockedError',
+        );
+    });
+
+    it('lists 预期 names for required slots of unsubmitted audience', async () => {
+        const published = await createPublished({
+            slots: [
+                { title: '实验报告', required: true, allowedExt: ['pdf'], maxFiles: 1 },
+                { title: '附件', required: true, allowedExt: ['zip'], maxFiles: 1 },
+                { title: '选交', required: false, allowedExt: ['jpg'], maxFiles: 1 },
+            ],
+        });
+        const defaultRows = await model.listExpectedMissingRows(published);
+        expect(defaultRows.map((row) => row.uid).sort((left, right) => left - right)).to.deep.equal([101, 101, 102, 102]);
+        expect(defaultRows.every((row) => row.slotTitle !== '选交')).to.equal(true);
+        expect(defaultRows.every((row) => row.assignedName.includes('未交'))).to.equal(true);
+
+        const updated = await model.updateRequest(domainId, published._id, teacher, published.revision, {
+            fileNameTemplate: '{studentId}_{realName}_{slotTitle}',
+            packLayout: 'flat',
+        });
+        const report = updated.slots.find((slot) => slot.title === '实验报告');
+        const attachment = updated.slots.find((slot) => slot.title === '附件');
+        if (!report || !attachment) expect.fail('expected required slots 实验报告 and 附件');
+        const reportBody = pdf('report-101');
+        const zipBody = zip();
+        await model.putStudentFile({
+            request: updated,
+            uid: 101,
+            slotId: report.id,
+            originalName: 'lab.pdf',
+            size: reportBody.length,
+            bytes: reportBody,
+        });
+        await model.putStudentFile({
+            request: updated,
+            uid: 101,
+            slotId: attachment.id,
+            originalName: 'extra.zip',
+            size: zipBody.length,
+            bytes: zipBody,
+        });
+        await model.confirmSubmit(updated, 101);
+
+        const missing = await model.listExpectedMissingRows(await model.getRequest(domainId, published._id));
+        expect(missing).to.have.length(2);
+        expect(missing.every((row) => row.uid === 102)).to.equal(true);
+        const bySlot = new Map(missing.map((row) => [row.slotTitle, row.assignedName]));
+        expect(bySlot.get('实验报告')).to.equal('24000002_乙_实验报告.pdf');
+        expect(bySlot.get('附件')).to.equal('24000002_乙_附件.zip');
+        expect(bySlot.has('选交')).to.equal(false);
+    });
+
+    it('annotates progress duplicateCount when two students share sha256', async () => {
+        const published = await createPublished();
+        const body = pdf('same-bytes');
+        const digest = sha256(body);
+        await submitPdf(published, 101, 'a.pdf', body);
+        await submitPdf(published, 102, 'b.pdf', body);
+        const progress = await model.listProgress(await model.getRequest(domainId, published._id));
+        const files = progress
+            .filter((row) => row.uid === 101 || row.uid === 102)
+            .flatMap((row) => row.currentFiles)
+            .filter((file) => file.sha256 === digest);
+        expect(files).to.have.length(2);
+        expect(files.every((file) => file.duplicateCount >= 2)).to.equal(true);
     });
 });

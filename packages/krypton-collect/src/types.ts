@@ -45,6 +45,8 @@ export interface CollectRequestDoc {
     maxFileBytes: number;
     maxTotalBytes: number;
     maxFiles: number;
+    fileNameTemplate: string;
+    packLayout: 'nested' | 'flat';
     courseRef: CollectCourseRef | null;
     createdAt: Date;
     updatedAt: Date;

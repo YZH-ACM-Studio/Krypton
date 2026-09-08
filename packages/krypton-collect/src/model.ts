@@ -22,7 +22,18 @@ import {
 } from './errors';
 import { assertUploadAllowed } from './file-validate';
 import { collectRequestLockKey, collectUserLockKey, withCollectLock } from './lock';
-import { zipEntryName, zipStudentFolder } from './pack-format';
+import {
+    dedupePackNames,
+    missingOriginalName,
+    parseFileNameTemplate,
+    parsePackLayout,
+    renderAssignedFileName,
+    renderPackEntryName,
+    requestFileNameTemplate,
+    requestPackLayout,
+    slotPreviewExt,
+} from './name-format';
+import { zipStudentFolder } from './pack-format';
 import {
     COLLECT_ALLOWED_EXTS,
     COLLECT_HARD_MAX_FILE_BYTES,
@@ -40,11 +51,11 @@ import {
     type CollectSubmissionDoc,
 } from './types';
 
-export type CollectActor = {
+export interface CollectActor {
     _id: number;
     hasPerm(perm: bigint): boolean;
     hasPriv(priv: number): boolean;
-};
+}
 
 export interface CollectBoundStudent {
     schoolId: ObjectId;
@@ -86,6 +97,8 @@ export interface CreateCollectRequestInput {
     maxFileBytes?: number;
     maxTotalBytes?: number;
     maxFiles?: number;
+    fileNameTemplate?: string;
+    packLayout?: 'nested' | 'flat';
     courseRef?: { courseId: ObjectId | string; chapterId: number } | null;
 }
 
@@ -99,6 +112,8 @@ export interface UpdateCollectRequestPatch {
     maxFileBytes?: number;
     maxTotalBytes?: number;
     maxFiles?: number;
+    fileNameTemplate?: string;
+    packLayout?: 'nested' | 'flat';
     courseRef?: { courseId: ObjectId | string; chapterId: number } | null;
 }
 
@@ -122,18 +137,24 @@ export interface ReplaceFileInput extends PutStudentFileInput {
     fileId: string;
 }
 
+export interface CollectProgressFile extends CollectCurrentFileRef {
+    duplicateCount: number;
+    duplicateStudentIds: string[];
+}
+
 export interface CollectProgressRow {
     uid: number;
     studentId: string;
     realName: string;
     status: CollectSubmissionDoc['status'] | 'missing';
     submittedAt: Date | null;
-    currentFiles: CollectCurrentFileRef[];
+    currentFiles: CollectProgressFile[];
     leftGroup: boolean;
 }
 
 export interface CollectPackFileEntry {
     name: string;
+    assignedName: string;
     uid: number;
     studentId: string;
     realName: string;
@@ -153,13 +174,38 @@ export interface CollectPackMissing {
     realName: string;
 }
 
-type HydroGlobal = {
+export interface CollectExpectedMissingRow {
+    studentId: string;
+    realName: string;
+    uid: number;
+    slotTitle: string;
+    assignedName: string;
+}
+
+export interface CollectSubmittedCsvRow {
+    studentId: string;
+    realName: string;
+    uid: number;
+    slotTitle: string;
+    assignedName: string;
+    originalName: string;
+    sha256: string;
+    size: number;
+}
+
+export interface CollectNameIdentity {
+    uid: number;
+    studentId?: string;
+    realName?: string;
+}
+
+interface HydroGlobal {
     Hydro?: {
         model?: {
             userbind?: unknown;
         };
     };
-};
+}
 
 const SLOT_ID_RE = /^[A-Za-z0-9_-]{1,32}$/;
 const FILE_ID_RE = /^[A-Za-z0-9_-]{8,32}$/;
@@ -539,6 +585,8 @@ export async function createRequest(
         maxFileBytes: quotas.maxFileBytes,
         maxTotalBytes: quotas.maxTotalBytes,
         maxFiles: quotas.maxFiles,
+        fileNameTemplate: parseFileNameTemplate(input.fileNameTemplate),
+        packLayout: parsePackLayout(input.packLayout),
         courseRef: parseCourseRef(input.courseRef),
         createdAt: now,
         updatedAt: now,
@@ -580,17 +628,29 @@ export async function updateRequest(
             maxTotalBytes: patch.maxTotalBytes !== undefined ? patch.maxTotalBytes : current.maxTotalBytes,
             maxFiles: patch.maxFiles !== undefined ? patch.maxFiles : current.maxFiles,
         });
+        const nextFileNameTemplate = patch.fileNameTemplate !== undefined
+            ? parseFileNameTemplate(patch.fileNameTemplate)
+            : undefined;
+        const nextPackLayout = patch.packLayout !== undefined
+            ? parsePackLayout(patch.packLayout)
+            : undefined;
+        const currentFileNameTemplate = requestFileNameTemplate(current.fileNameTemplate);
+        const currentPackLayout = requestPackLayout(current.packLayout);
         const rulesChanged =
             (patch.slots !== undefined && !sameSlotRules(current.slots, nextSlots))
             || (patch.maxFileBytes !== undefined && nextQuotas.maxFileBytes !== current.maxFileBytes)
             || (patch.maxTotalBytes !== undefined && nextQuotas.maxTotalBytes !== current.maxTotalBytes)
-            || (patch.maxFiles !== undefined && nextQuotas.maxFiles !== current.maxFiles);
+            || (patch.maxFiles !== undefined && nextQuotas.maxFiles !== current.maxFiles)
+            || (nextFileNameTemplate !== undefined && nextFileNameTemplate !== currentFileNameTemplate)
+            || (nextPackLayout !== undefined && nextPackLayout !== currentPackLayout);
         if (rulesChanged) {
             if (await hasSubmittedRow(domainId, current._id)) throw new CollectSlotLockedError();
             if (patch.slots !== undefined) set.slots = nextSlots;
             if (patch.maxFileBytes !== undefined) set.maxFileBytes = nextQuotas.maxFileBytes;
             if (patch.maxTotalBytes !== undefined) set.maxTotalBytes = nextQuotas.maxTotalBytes;
             if (patch.maxFiles !== undefined) set.maxFiles = nextQuotas.maxFiles;
+            if (nextFileNameTemplate !== undefined) set.fileNameTemplate = nextFileNameTemplate;
+            if (nextPackLayout !== undefined) set.packLayout = nextPackLayout;
         }
 
         if (current.status !== 'draft') {
@@ -814,6 +874,25 @@ async function loadCurrentFiles(domainId: string, requestId: ObjectId, uid: numb
         .find({ domainId, requestId, uid, current: true })
         .sort({ createdAt: 1, _id: 1 })
         .toArray();
+}
+
+async function loadCurrentFilesByUids(
+    domainId: string,
+    requestId: ObjectId,
+    uids: number[],
+): Promise<Map<number, CollectFileDoc[]>> {
+    const out = new Map<number, CollectFileDoc[]>();
+    if (!uids.length) return out;
+    const docs = await filesColl
+        .find({ domainId, requestId, uid: { $in: uids }, current: true })
+        .sort({ createdAt: 1, _id: 1 })
+        .toArray();
+    for (const file of docs) {
+        const list = out.get(file.uid) || [];
+        list.push(file);
+        out.set(file.uid, list);
+    }
+    return out;
 }
 
 async function nextFileVersion(domainId: string, requestId: ObjectId, uid: number, slotId: string): Promise<number> {
@@ -1177,12 +1256,89 @@ function packIdentity(uid: number, names: Map<number, { studentId: string; realN
     };
 }
 
+interface CollectSlotFileIndexRef {
+    fileId: string;
+    slotId: string;
+    createdAt?: Date;
+    _id?: ObjectId | string;
+}
+
+/** 1-based index among that slot's current files. Prefers createdAt,_id from file docs; CollectCurrentFileRef has no createdAt so it sorts by fileId. */
+export function fileIndexInSlot(
+    currentFilesForUid: ReadonlyArray<CollectSlotFileIndexRef>,
+    slotId: string,
+    fileId: string,
+): number {
+    const inSlot = currentFilesForUid.filter((file) => file.slotId === slotId);
+    const useCreatedAt = inSlot.every((file) => file.createdAt instanceof Date && !Number.isNaN(file.createdAt.getTime()));
+    const sorted = inSlot.slice().sort((left, right) => {
+        if (useCreatedAt) {
+            const delta = (left.createdAt as Date).getTime() - (right.createdAt as Date).getTime();
+            if (delta !== 0) return delta;
+            return String(left._id ?? left.fileId).localeCompare(String(right._id ?? right.fileId));
+        }
+        return left.fileId.localeCompare(right.fileId);
+    });
+    const index = sorted.findIndex((file) => file.fileId === fileId);
+    if (index < 0) throw new TypeError(`file ${fileId} is not among current files for slot ${slotId}`);
+    return index + 1;
+}
+
+export function assignedNameForFile(
+    request: { fileNameTemplate?: string | null },
+    identity: CollectNameIdentity,
+    slot: Pick<CollectSlot, 'title'>,
+    file: { fileId: string; originalName: string; ext: string; slotId: string },
+    index: number,
+): string {
+    return renderAssignedFileName(requestFileNameTemplate(request.fileNameTemplate), {
+        uid: identity.uid,
+        studentId: identity.studentId,
+        realName: identity.realName,
+        slotTitle: slot.title,
+        index,
+        ext: file.ext,
+        originalName: file.originalName,
+    });
+}
+
+export function annotateProgressDuplicates(
+    rows: ReadonlyArray<Omit<CollectProgressRow, 'currentFiles'> & { currentFiles: readonly CollectCurrentFileRef[] }>,
+): CollectProgressRow[] {
+    const peopleByHash = new Map<string, Map<number, string>>();
+    for (const row of rows) {
+        for (const file of row.currentFiles) {
+            let people = peopleByHash.get(file.sha256);
+            if (!people) {
+                people = new Map();
+                peopleByHash.set(file.sha256, people);
+            }
+            people.set(row.uid, row.studentId);
+        }
+    }
+    return rows.map((row) => ({
+        ...row,
+        currentFiles: row.currentFiles.map((file) => {
+            const people = peopleByHash.get(file.sha256) || new Map();
+            const duplicateStudentIds = [...people.entries()]
+                .filter(([uid]) => uid !== row.uid)
+                .map(([, studentId]) => studentId)
+                .sort((left, right) => left.localeCompare(right));
+            return {
+                ...file,
+                duplicateCount: people.size,
+                duplicateStudentIds,
+            };
+        }),
+    }));
+}
+
 export async function listProgress(request: CollectRequestDoc): Promise<CollectProgressRow[]> {
     const audience = await resolveAudience(request.domainId, request.schoolId, request.groupIds);
     const submissions = await submissionsColl.find({ domainId: request.domainId, requestId: request._id }).toArray();
     const byUid = new Map(submissions.map((row) => [row.uid, row]));
     const audienceUids = new Set(audience.map((student) => student.boundUserId));
-    const rows: CollectProgressRow[] = audience.map((student) => {
+    const rows: Array<Omit<CollectProgressRow, 'currentFiles'> & { currentFiles: CollectCurrentFileRef[] }> = audience.map((student) => {
         const submission = byUid.get(student.boundUserId);
         return {
             uid: student.boundUserId,
@@ -1208,7 +1364,11 @@ export async function listProgress(request: CollectRequestDoc): Promise<CollectP
             leftGroup: true,
         });
     }
-    return rows;
+    return annotateProgressDuplicates(rows);
+}
+
+function slotForFile(request: CollectRequestDoc, slotId: string): Pick<CollectSlot, 'title'> {
+    return request.slots.find((slot) => slot.id === slotId) || { title: slotId };
 }
 
 export async function listPackEntries(
@@ -1222,21 +1382,36 @@ export async function listPackEntries(
     const audienceByUid = new Map(audience.map((student) => [student.boundUserId, student]));
     const extraUids = submissions.map((row) => row.uid).filter((uid) => !audienceByUid.has(uid));
     const names = await studentNames(request.domainId, extraUids);
-    const slotTitle = new Map(request.slots.map((slot) => [slot.id, slot.title]));
+    const currentByUid = await loadCurrentFilesByUids(
+        request.domainId,
+        request._id,
+        submissions.map((row) => row.uid),
+    );
+    const layout = requestPackLayout(request.packLayout);
     const entries: CollectPackFileEntry[] = [];
     for (const submission of submissions) {
         const member = audienceByUid.get(submission.uid);
         if (member) names.set(submission.uid, { studentId: member.studentId, realName: member.realName });
         const ident = packIdentity(submission.uid, names);
-        for (const file of submission.currentFiles) {
-            const title = slotTitle.get(file.slotId) || file.slotId;
+        const identity = { uid: submission.uid, studentId: ident.studentId, realName: ident.realName };
+        const currentFiles = currentByUid.get(submission.uid) || [];
+        for (const file of currentFiles) {
+            const slot = slotForFile(request, file.slotId);
+            const assignedName = assignedNameForFile(
+                request,
+                identity,
+                slot,
+                file,
+                fileIndexInSlot(currentFiles, file.slotId, file.fileId),
+            );
             entries.push({
-                name: zipEntryName(ident.folder, title, file.originalName),
+                name: renderPackEntryName(layout, ident.folder, slot.title, assignedName),
+                assignedName,
                 uid: submission.uid,
                 studentId: ident.studentId,
                 realName: ident.realName,
                 slotId: file.slotId,
-                slotTitle: title,
+                slotTitle: slot.title,
                 fileId: file.fileId,
                 originalName: file.originalName,
                 size: file.size,
@@ -1246,11 +1421,62 @@ export async function listPackEntries(
             });
         }
     }
-    entries.sort((a, b) => a.name.localeCompare(b.name) || a.fileId.localeCompare(b.fileId));
+    entries.sort((left, right) => left.name.localeCompare(right.name) || left.fileId.localeCompare(right.fileId));
+    const deduped = dedupePackNames(entries);
+    deduped.sort((left, right) => left.name.localeCompare(right.name) || left.fileId.localeCompare(right.fileId));
     const missing: CollectPackMissing[] = audience
         .filter((student) => byUid.get(student.boundUserId)?.status !== 'submitted')
         .map((student) => ({ uid: student.boundUserId, studentId: student.studentId, realName: student.realName }));
-    return { entries, missing };
+    return { entries: deduped, missing };
+}
+
+export async function listExpectedMissingRows(request: CollectRequestDoc): Promise<CollectExpectedMissingRow[]> {
+    const [audience, submissions] = await Promise.all([
+        resolveAudience(request.domainId, request.schoolId, request.groupIds),
+        submissionsColl.find({ domainId: request.domainId, requestId: request._id, status: 'submitted' }).toArray(),
+    ]);
+    const submitted = new Set(submissions.map((row) => row.uid));
+    const requiredSlots = request.slots.filter((slot) => slot.required);
+    const rows: CollectExpectedMissingRow[] = [];
+    for (const student of audience) {
+        if (submitted.has(student.boundUserId)) continue;
+        const identity = { uid: student.boundUserId, studentId: student.studentId, realName: student.realName };
+        for (const slot of requiredSlots) {
+            const ext = slotPreviewExt(slot);
+            rows.push({
+                studentId: student.studentId,
+                realName: student.realName,
+                uid: student.boundUserId,
+                slotTitle: slot.title,
+                assignedName: assignedNameForFile(
+                    request,
+                    identity,
+                    slot,
+                    {
+                        fileId: slot.id,
+                        originalName: missingOriginalName(ext),
+                        ext,
+                        slotId: slot.id,
+                    },
+                    1,
+                ),
+            });
+        }
+    }
+    return rows;
+}
+
+export function listSubmittedCsvRows(entries: CollectPackFileEntry[]): CollectSubmittedCsvRow[] {
+    return entries.map((entry) => ({
+        studentId: entry.studentId,
+        realName: entry.realName,
+        uid: entry.uid,
+        slotTitle: entry.slotTitle,
+        assignedName: entry.assignedName,
+        originalName: entry.originalName,
+        sha256: entry.sha256,
+        size: entry.size,
+    }));
 }
 
 export async function nudgeUnsubmitted(requestInput: CollectRequestDoc, actor: CollectActor): Promise<number[]> {

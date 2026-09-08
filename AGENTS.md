@@ -211,8 +211,12 @@
 - `collect.requests`、`collect.submissions`、`collect.files` 是唯一 canonical。blob 只走 `StorageModel` 前缀 `collect/`。禁止写入 testdata、Record、Hydro 作业附件或公开用户网盘。
 - 可交受众每次请求按当前 userbind 用户组 live 计算（同校、已绑定）。新进组立即待交；退组从待交消失；已交文件不删，打包仍带。禁止考试式冻结 roster，禁止从作业或任务推断受众。
 - 创建需 `PERM_CREATE_COLLECT`（教师默认位）。协作者必须显式点名且具备该权限，禁止把学生加进去。协作者可看进度、催未交和打包，不能改槽位或授权他人。
+- `fileNameTemplate` 与 `packLayout`（`nested|flat`）存在 `collect.requests` 上。默认 `{originalName}` 与 `nested`。缺字段按默认读取，禁止请求路径回填。
+- `assignedName` 只在展示、打包、下载时派生，永不持久化；blob 路径保持 `collect/{domain}/{request}/{uid}/{fileId}`。
+- 首份已提交行出现后锁定模板与 layout，规则与槽位相同。
 - 打包只下发签名下载 URL 与清单，由浏览器组 ZIP；禁止在请求路径把全班文件打进内存 ZIP。日志与 oplog 不记录文件正文。
-- 只挂普通浏览器 `/collect`、`/admin/collect`、`/api/collect/*`。禁止考试壳、`/paper`、Vigil Client 或封锁白名单。`docs/PLAN-2026-10-08-file-collect.md` 的 P2.1–P2.10 不是 Vigil 协议单元，完成本地实现不授权部署或连接真实考试机。
+- 打包 CSV：未交按每个必填槽给出预期文件名；已交含 assigned、original 与 sha256。当前文件 sha256 重复只作为教师进度提示。
+- 只挂普通浏览器 `/collect`、`/admin/collect`、`/api/collect/*`。禁止考试壳、`/paper`、Vigil Client 或封锁白名单。`docs/PLAN-2026-10-08-file-collect.md` 的 P2.1–P2.15 不是 Vigil 协议单元，完成本地实现不授权部署或连接真实考试机。
 
 ## 真实性训练可信完成协议
 

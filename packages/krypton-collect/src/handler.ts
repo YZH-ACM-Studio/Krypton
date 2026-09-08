@@ -22,6 +22,7 @@ import { filesColl, submissionsColl } from './db';
 import { CollectForbiddenError, CollectNotFoundError } from './errors';
 import {
     archiveRequest,
+    assignedNameForFile,
     closeRequest,
     confirmSubmit,
     createRequest,
@@ -30,11 +31,13 @@ import {
     getFileForDownload,
     getRequest,
     isAudienceMember,
+    listExpectedMissingRows,
     listPackEntries,
     listPendingForUser,
     listProgress,
     listRequestsForStudent,
     listRequestsForTeacher,
+    listSubmittedCsvRows,
     nudgeUnsubmitted,
     parseCollectDueAt,
     publishRequest,
@@ -45,10 +48,13 @@ import {
     setCollaborators,
     updateRequest,
     userbindOrThrow,
+    type CreateCollectRequestInput,
+    type UpdateCollectRequestPatch,
 } from './model';
-import { buildManifest, buildMissingCsv } from './pack-format';
+import { requestFileNameTemplate, requestPackLayout } from './name-format';
+import { buildManifest, buildMissingCsv, buildSubmittedCsv } from './pack-format';
 import { requiredSlotsFilled } from './types';
-import type { CollectRequestDoc } from './types';
+import type { CollectFileDoc, CollectRequestDoc } from './types';
 
 function domainIdOf(handler: Handler): string {
     return String(handler.domain?._id || '');
@@ -180,6 +186,54 @@ async function coursePrefill(domainId: string, courseId: string, chapter: string
     };
 }
 
+interface CollectIdentity {
+    studentId: string;
+    realName: string;
+}
+
+function slotTitleOf(request: CollectRequestDoc, slotId: string): string {
+    return request.slots.find((slot) => slot.id === slotId)?.title || slotId;
+}
+
+function currentFileIndex(files: Array<{ slotId: string; fileId: string }>, file: { slotId: string; fileId: string }): number {
+    const sameSlot = files.filter((row) => row.slotId === file.slotId);
+    const pos = sameSlot.findIndex((row) => row.fileId === file.fileId);
+    return pos >= 0 ? pos + 1 : 1;
+}
+
+function assignedNameFor(
+    request: CollectRequestDoc,
+    identity: { uid: number; studentId?: string; realName?: string },
+    file: { slotId: string; fileId: string; originalName: string; ext: string },
+    index: number,
+): string {
+    return assignedNameForFile(request, identity, { title: slotTitleOf(request, file.slotId) }, file, index);
+}
+
+async function lookupStudentIdentity(domainId: string, uid: number): Promise<CollectIdentity> {
+    const ub = await userbindOrThrow();
+    const student = await ub.findStudentByUserId(domainId, uid);
+    return {
+        studentId: student?.studentId?.trim() || '',
+        realName: student?.realName?.trim() || '',
+    };
+}
+
+async function assignedDownloadName(
+    request: CollectRequestDoc,
+    file: CollectFileDoc,
+    identity: CollectIdentity,
+): Promise<string> {
+    if (!file.current) return file.originalName;
+    const submission = await submissionsColl.findOne({
+        domainId: request.domainId,
+        requestId: request._id,
+        uid: file.uid,
+    });
+    const currentFiles = submission?.currentFiles || [];
+    return assignedNameFor(request, { uid: file.uid, ...identity }, file, currentFileIndex(currentFiles, file));
+}
+
 function serializeRequest(doc: CollectRequestDoc, extras: {
     hasSubmissions?: boolean;
     hasFiles?: boolean;
@@ -201,6 +255,8 @@ function serializeRequest(doc: CollectRequestDoc, extras: {
         maxFileBytes: doc.maxFileBytes,
         maxTotalBytes: doc.maxTotalBytes,
         maxFiles: doc.maxFiles,
+        fileNameTemplate: requestFileNameTemplate(doc.fileNameTemplate),
+        packLayout: requestPackLayout(doc.packLayout),
         courseRef: doc.courseRef
             ? { courseId: String(doc.courseRef.courseId), chapterId: doc.courseRef.chapterId }
             : null,
@@ -255,8 +311,16 @@ class CollectDetailHandler extends CollectBaseHandler {
             .find({ domainId, requestId: request._id, uid: this.user._id })
             .sort({ createdAt: -1 })
             .toArray();
-        const currentFiles = (submission?.currentFiles || []).map((file) => ({
+        const identity = await lookupStudentIdentity(domainId, this.user._id);
+        const files = submission?.currentFiles || [];
+        const currentFiles = files.map((file) => ({
             ...file,
+            assignedName: assignedNameFor(
+                request,
+                { uid: this.user._id, ...identity },
+                file,
+                currentFileIndex(files, file),
+            ),
             url: `/collect/${String(request._id)}/file/${file.fileId}`,
         }));
         this.response.template = 'collect_detail.html';
@@ -268,8 +332,11 @@ class CollectDetailHandler extends CollectBaseHandler {
             status: request.status,
             member,
             submitted: submission?.status === 'submitted',
-            filled: requiredSlotsFilled(request.slots, submission?.currentFiles || []),
+            filled: requiredSlotsFilled(request.slots, files),
             slots: request.slots,
+            fileNameTemplate: requestFileNameTemplate(request.fileNameTemplate),
+            packLayout: requestPackLayout(request.packLayout),
+            identity: { uid: this.user._id, ...identity },
             currentFiles,
             history: history.map((file) => ({
                 slotId: file.slotId,
@@ -347,6 +414,8 @@ class CollectFileDownloadHandler extends CollectBaseHandler {
         const request = await getRequest(domainIdOf(this), id);
         if (request.status === 'draft' || request.status === 'archived') throw new CollectNotFoundError();
         const file = await getFileForDownload(request, actorOf(this), fileId);
+        const identity = await lookupStudentIdentity(request.domainId, this.user._id);
+        const assignedName = await assignedDownloadName(request, file, identity);
         this.response.addHeader('Cache-Control', 'private, no-store');
         this.response.addHeader('X-Content-Type-Options', 'nosniff');
         await OplogModel.log(this, 'collect.view_file', {
@@ -355,7 +424,7 @@ class CollectFileDownloadHandler extends CollectBaseHandler {
             size: file.size,
             ownerUid: file.uid,
         });
-        this.response.redirect = await StorageModel.signDownloadLink(file.storagePath, file.originalName, false, 'user');
+        this.response.redirect = await StorageModel.signDownloadLink(file.storagePath, assignedName, false, 'user');
     }
 }
 
@@ -527,7 +596,7 @@ class AdminCollectEditHandler extends CollectBaseHandler {
         const courseRef = courseId && Number.isInteger(chapterId) && chapterId >= 0
             ? { courseId, chapterId }
             : null;
-        const patch = {
+        const patch: CreateCollectRequestInput & UpdateCollectRequestPatch = {
             title,
             description,
             dueAt,
@@ -538,6 +607,8 @@ class AdminCollectEditHandler extends CollectBaseHandler {
             maxTotalBytes,
             maxFiles,
             courseRef,
+            fileNameTemplate: body.fileNameTemplate,
+            packLayout: body.packLayout,
         };
 
         if (operation === 'create' || operation === 'publish' || (!id && operation === 'update')) {
@@ -635,6 +706,15 @@ class AdminCollectStatsHandler extends CollectBaseHandler {
                 leftGroup: row.leftGroup,
                 files: row.currentFiles.map((file) => ({
                     ...file,
+                    originalName: file.originalName,
+                    assignedName: assignedNameFor(
+                        request,
+                        { uid: row.uid, studentId: row.studentId, realName: row.realName },
+                        file,
+                        currentFileIndex(row.currentFiles, file),
+                    ),
+                    duplicateCount: file.duplicateCount,
+                    duplicateStudentIds: file.duplicateStudentIds,
                     url: `/admin/collect/${String(request._id)}/file/${file.fileId}`,
                 })),
                 history: (historyByUid.get(row.uid) || []).map((file) => ({
@@ -669,12 +749,16 @@ class AdminCollectPackHandler extends CollectBaseHandler {
     async get(_domainId: string, id: ObjectId) {
         const request = await getRequest(domainIdOf(this), id);
         if (!canViewCollect(this.user, request)) throw new CollectForbiddenError('无权打包');
-        const { entries, missing } = await listPackEntries(request);
-        const signed = await Promise.all(entries.map(async (entry) => {
-            const file = await getFileForDownload(request, actorOf(this), entry.fileId);
-            const url = await StorageModel.signDownloadLink(file.storagePath, 'download', false, 'user');
-            return { name: entry.name, url, sha256: entry.sha256, size: entry.size };
-        }));
+        const { entries } = await listPackEntries(request);
+        const [signed, csvRows] = await Promise.all([
+            Promise.all(entries.map(async (entry) => {
+                const file = await getFileForDownload(request, actorOf(this), entry.fileId);
+                const url = await StorageModel.signDownloadLink(file.storagePath, entry.assignedName, false, 'user');
+                return { name: entry.name, url, sha256: entry.sha256, size: entry.size };
+            })),
+            listExpectedMissingRows(request),
+        ]);
+        const submittedRows = listSubmittedCsvRows(entries);
         await OplogModel.log(this, 'collect.pack_download', {
             requestId: String(id),
             fileCount: signed.length,
@@ -682,7 +766,8 @@ class AdminCollectPackHandler extends CollectBaseHandler {
         });
         this.response.body = {
             entries: signed.map((row) => ({ name: row.name, url: row.url })),
-            csv: buildMissingCsv(missing),
+            csv: buildMissingCsv(csvRows),
+            submittedCsv: buildSubmittedCsv(submittedRows),
             manifest: buildManifest(signed),
         };
     }
@@ -695,6 +780,8 @@ class AdminCollectFileDownloadHandler extends CollectBaseHandler {
         const request = await getRequest(domainIdOf(this), id);
         if (!canViewCollect(this.user, request)) throw new CollectForbiddenError('无权下载');
         const file = await getFileForDownload(request, actorOf(this), fileId);
+        const identity = await lookupStudentIdentity(request.domainId, file.uid);
+        const assignedName = await assignedDownloadName(request, file, identity);
         this.response.addHeader('Cache-Control', 'private, no-store');
         this.response.addHeader('X-Content-Type-Options', 'nosniff');
         await OplogModel.log(this, 'collect.view_file', {
@@ -703,7 +790,7 @@ class AdminCollectFileDownloadHandler extends CollectBaseHandler {
             size: file.size,
             ownerUid: file.uid,
         });
-        this.response.redirect = await StorageModel.signDownloadLink(file.storagePath, file.originalName, false, 'user');
+        this.response.redirect = await StorageModel.signDownloadLink(file.storagePath, assignedName, false, 'user');
     }
 }
 

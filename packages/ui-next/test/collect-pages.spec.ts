@@ -36,6 +36,26 @@ function sliceBetween(text: string, startMarker: string, endMarker: string) {
   return text.slice(start, end);
 }
 
+const COLLECT_NAME_TOKEN_LIST = [
+  'studentId',
+  'realName',
+  'slotTitle',
+  'index',
+  'ext',
+  'originalStem',
+  'originalName',
+] as const;
+
+function collectNameTokens(text: string, label: string): string[] {
+  const match = text.match(/COLLECT_NAME_TOKENS\s*=\s*\[([\s\S]*?)\]/);
+  expect(match, `${label} missing COLLECT_NAME_TOKENS`).to.not.equal(null);
+  return [...(match?.[1].matchAll(/['"]([A-Za-z]+)['"]/g) ?? [])].map((item) => item[1]);
+}
+
+function hasNameToken(text: string, token: string): boolean {
+  return text.includes(`{${token}}`) || text.includes(`'${token}'`) || text.includes(`"${token}"`);
+}
+
 function walkTsFiles(dir: string, acc: string[]) {
   if (!existsSync(dir)) return;
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -218,5 +238,77 @@ describe('collect teacher payload contracts', () => {
     expect(student).to.include("label: '未交文件'");
     expect(student).not.to.include("label: '待交文件'");
     expect(student).to.include('open = !closed && data.member');
+  });
+
+  it('binds file-name template, pack layout, assigned names, duplicates, and submitted CSV', () => {
+    expect(admin).to.include('fileNameTemplate: parseFileNameTemplate(rec.fileNameTemplate)');
+    expect(admin).to.include('packLayout: parsePackLayout(rec.packLayout)');
+    expect(admin).to.include('name="fileNameTemplate"');
+    expect(admin).to.include('name="packLayout"');
+    expect(admin).to.include('CardTitle className="text-sm">文件名');
+    expect(admin).to.include("from '@/pages/collect/name-format'");
+    expect(admin).to.include("name: '已交.csv'");
+    expect(admin).to.include("typeof rec.submittedCsv !== 'string'");
+    expect(admin).to.include('与 {others} 人相同');
+    expect(admin).to.include('file.assignedName || file.originalName');
+    expect(admin).to.include('disabled={namesLocked}');
+  });
+});
+
+describe('collect name-format contract', () => {
+  const plugin = source('packages/krypton-collect/src/name-format.ts');
+  const ui = source('packages/ui-next/src/pages/collect/name-format.ts');
+
+  it('locks the same tokens and defaults as the plugin', () => {
+    expect(ui).to.include("COLLECT_DEFAULT_FILE_NAME_TEMPLATE = '{originalName}'");
+    expect(plugin).to.include("COLLECT_DEFAULT_FILE_NAME_TEMPLATE = '{originalName}'");
+    expect(ui).to.include("COLLECT_DEFAULT_PACK_LAYOUT: CollectPackLayout = 'nested'");
+    expect(plugin).to.include("COLLECT_DEFAULT_PACK_LAYOUT: CollectPackLayout = 'nested'");
+    for (const token of ['studentId', 'realName', 'slotTitle', 'index', 'ext', 'originalStem', 'originalName']) {
+      expect(ui).to.include(`'${token}'`);
+      expect(plugin).to.include(`'${token}'`);
+    }
+  });
+});
+
+describe('collect naming rev.2 source contracts', () => {
+  const handler = source('packages/krypton-collect/src/handler.ts');
+  const admin = source('packages/ui-next/src/pages/admin-collect/index.tsx');
+  const student = source('packages/ui-next/src/pages/collect/index.tsx');
+  const pluginNameFormat = source('packages/krypton-collect/src/name-format.ts');
+  const uiNameFormatPath = resolve(workspaceRoot, 'packages/ui-next/src/pages/collect/name-format.ts');
+
+  it('keeps fileNameTemplate, packLayout, submitted csv, and duplicate copy on the admin workspace', () => {
+    expect(admin).to.include('fileNameTemplate');
+    expect(admin).to.include('packLayout');
+    expect(admin).to.match(/将保存为|CardTitle[^>]*>\s*文件名\s*</);
+    expect(admin).to.include('已交.csv');
+    expect(admin).to.include('duplicateCount');
+    expect(admin).to.include('与');
+  });
+
+  it('shows assignedName or 将保存为 on the student collect page', () => {
+    expect(student).to.match(/assignedName|将保存为/);
+  });
+
+  it('locks name-format tokens and the {originalName} default', () => {
+    expect(pluginNameFormat).to.include("COLLECT_DEFAULT_FILE_NAME_TEMPLATE = '{originalName}'");
+    expect(collectNameTokens(pluginNameFormat, 'plugin name-format')).to.deep.equal([...COLLECT_NAME_TOKEN_LIST]);
+    if (!existsSync(uiNameFormatPath)) return;
+    const uiNameFormat = readFileSync(uiNameFormatPath, 'utf8');
+    for (const token of COLLECT_NAME_TOKEN_LIST) {
+      expect(hasNameToken(uiNameFormat, token), `ui-next name-format missing {${token}}`).to.equal(true);
+    }
+    expect(uiNameFormat).to.include("'{originalName}'");
+    expect(collectNameTokens(uiNameFormat, 'ui-next name-format')).to.deep.equal(
+      collectNameTokens(pluginNameFormat, 'plugin name-format'),
+    );
+  });
+
+  it('serializes submittedCsv, fileNameTemplate, packLayout, and assignedName from collect handlers', () => {
+    expect(handler).to.include('submittedCsv');
+    expect(handler).to.include('fileNameTemplate');
+    expect(handler).to.include('packLayout');
+    expect(handler).to.include('assignedName');
   });
 });

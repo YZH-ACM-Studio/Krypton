@@ -28,6 +28,7 @@ import { MiniTabs } from '@/components/ui/mini-tabs';
 import { cn } from '@/lib/cn';
 import { useBootstrap } from '@/lib/bootstrap';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
+import { missingOriginalName, renderAssignedFileName, slotPreviewExt } from './name-format';
 import {
   acceptFromSlot,
   COLLECT_MAX_FILE_BYTES,
@@ -40,6 +41,7 @@ import {
   type CollectHistoryFileView,
   type CollectListItem,
   type CollectSlotView,
+  type CollectStudentIdentity,
 } from './types';
 
 type CollectListTab = 'pending' | 'submitted' | 'closed';
@@ -163,6 +165,54 @@ function classifyListItem(item: CollectListItem, now: number): CollectListTab {
 
 function filesForSlot(files: CollectCurrentFileView[], slotId: string): CollectCurrentFileView[] {
   return files.filter((file) => file.slotId === slotId);
+}
+
+function fileAssignedExt(file: CollectCurrentFileView, slot: CollectSlotView): string {
+  if (file.ext) return file.ext;
+  const name = file.originalName.trim();
+  const dot = name.lastIndexOf('.');
+  if (dot > 0 && dot < name.length - 1) {
+    const ext = name.slice(dot + 1).toLowerCase();
+    if (ext) return ext === 'jpeg' ? 'jpg' : ext;
+  }
+  return slotPreviewExt(slot);
+}
+
+function assignedFileTitle(
+  file: CollectCurrentFileView,
+  slot: CollectSlotView,
+  index: number,
+  template: string,
+  identity: CollectStudentIdentity,
+): string {
+  if (file.assignedName) return file.assignedName;
+  return renderAssignedFileName(template, {
+    uid: identity.uid,
+    studentId: identity.studentId,
+    realName: identity.realName,
+    slotTitle: slot.title,
+    index,
+    ext: fileAssignedExt(file, slot),
+    originalName: file.originalName,
+  });
+}
+
+function nextUploadPreviewName(
+  slot: CollectSlotView,
+  nextIndex: number,
+  template: string,
+  identity: CollectStudentIdentity,
+): string {
+  const ext = slotPreviewExt(slot);
+  return renderAssignedFileName(template, {
+    uid: identity.uid,
+    studentId: identity.studentId,
+    realName: identity.realName,
+    slotTitle: slot.title,
+    index: nextIndex,
+    ext,
+    originalName: missingOriginalName(ext),
+  });
 }
 
 async function postCollectOperation(requestId: string, fields: Record<string, string>, fallback: string): Promise<void> {
@@ -307,6 +357,8 @@ function SlotFiles({
   open,
   replacingFileId,
   busyFileId,
+  fileNameTemplate,
+  identity,
   onReplace,
   onDelete,
 }: {
@@ -316,6 +368,8 @@ function SlotFiles({
   open: boolean;
   replacingFileId: string | null;
   busyFileId: string | null;
+  fileNameTemplate: string;
+  identity: CollectStudentIdentity;
   onReplace: (fileId: string) => void;
   onDelete: (file: CollectCurrentFileView) => void;
 }) {
@@ -324,53 +378,61 @@ function SlotFiles({
   }
   return (
     <ul className="space-y-1.5">
-      {files.map((file) => (
-        <li key={file.fileId} className="rounded-md border bg-card px-2.5 py-2 text-xs">
-          <div className="flex items-center gap-2">
-            <span className="min-w-0 flex-1 truncate font-medium">{file.originalName}</span>
-            <span className="shrink-0 text-muted-foreground">{formatSize(file.size)}</span>
-            <a
-              href={collectFileHref(requestId, file)}
-              className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-              aria-label={`下载${file.originalName}`}
-            >
-              <Download className="size-3.5" />
-            </a>
-            {open ? (
-              <>
-                <Button type="button" variant="ghost" size="sm" className="h-8 px-2" onClick={() => onReplace(file.fileId)}>
-                  替换
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="size-8 text-destructive hover:bg-destructive/10"
-                  disabled={busyFileId === file.fileId}
-                  onClick={() => onDelete(file)}
-                  aria-label={`删除${file.originalName}`}
-                >
-                  {busyFileId === file.fileId ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
-                </Button>
-              </>
-            ) : null}
-          </div>
-          {open && replacingFileId === file.fileId ? (
-            <div className="mt-2">
-              <FileUploader
-                endpoint={`/collect/${encodeURIComponent(requestId)}`}
-                meta={{ operation: 'replace_file', slotId: slot.id, fileId: file.fileId }}
-                maxFileSize={COLLECT_MAX_FILE_BYTES}
-                maxFiles={1}
-                uploadConcurrency={1}
-                retryOnFailure={false}
-                accept={acceptFromSlot(slot)}
-                onBatchComplete={() => window.location.reload()}
-              />
+      {files.map((file, index) => {
+        const assignedName = assignedFileTitle(file, slot, index + 1, fileNameTemplate, identity);
+        return (
+          <li key={file.fileId} className="rounded-md border bg-card px-2.5 py-2 text-xs">
+            <div className="flex items-center gap-2">
+              <div className="min-w-0 flex-1">
+                <span className="block truncate font-medium">{assignedName}</span>
+                {file.originalName !== assignedName ? (
+                  <span className="block truncate text-muted-foreground">{file.originalName}</span>
+                ) : null}
+              </div>
+              <span className="shrink-0 text-muted-foreground">{formatSize(file.size)}</span>
+              <a
+                href={collectFileHref(requestId, file)}
+                className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                aria-label={`下载${assignedName}`}
+              >
+                <Download className="size-3.5" />
+              </a>
+              {open ? (
+                <>
+                  <Button type="button" variant="ghost" size="sm" className="h-8 px-2" onClick={() => onReplace(file.fileId)}>
+                    替换
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="size-8 text-destructive hover:bg-destructive/10"
+                    disabled={busyFileId === file.fileId}
+                    onClick={() => onDelete(file)}
+                    aria-label={`删除${file.originalName}`}
+                  >
+                    {busyFileId === file.fileId ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
+                  </Button>
+                </>
+              ) : null}
             </div>
-          ) : null}
-        </li>
-      ))}
+            {open && replacingFileId === file.fileId ? (
+              <div className="mt-2">
+                <FileUploader
+                  endpoint={`/collect/${encodeURIComponent(requestId)}`}
+                  meta={{ operation: 'replace_file', slotId: slot.id, fileId: file.fileId }}
+                  maxFileSize={COLLECT_MAX_FILE_BYTES}
+                  maxFiles={1}
+                  uploadConcurrency={1}
+                  retryOnFailure={false}
+                  accept={acceptFromSlot(slot)}
+                  onBatchComplete={() => window.location.reload()}
+                />
+              </div>
+            ) : null}
+          </li>
+        );
+      })}
     </ul>
   );
 }
@@ -567,20 +629,27 @@ export function CollectDetailPage() {
                 open={open}
                 replacingFileId={replacingFileId}
                 busyFileId={busyFileId}
+                fileNameTemplate={data.fileNameTemplate}
+                identity={data.identity}
                 onReplace={(fileId) => setReplacingFileId((current) => (current === fileId ? null : fileId))}
                 onDelete={(file) => void deleteFile(file)}
               />
               {open && files.length < slot.maxFiles ? (
-                <FileUploader
-                  endpoint={`/collect/${encodeURIComponent(data._id)}`}
-                  meta={{ operation: 'upload_file', slotId: slot.id }}
-                  maxFileSize={COLLECT_MAX_FILE_BYTES}
-                  maxFiles={slot.maxFiles - files.length}
-                  uploadConcurrency={1}
-                  retryOnFailure={false}
-                  accept={acceptFromSlot(slot)}
-                  onBatchComplete={() => window.location.reload()}
-                />
+                <div className="space-y-2">
+                  <p className="text-xs text-muted-foreground">
+                    将保存为 {nextUploadPreviewName(slot, files.length + 1, data.fileNameTemplate, data.identity)}
+                  </p>
+                  <FileUploader
+                    endpoint={`/collect/${encodeURIComponent(data._id)}`}
+                    meta={{ operation: 'upload_file', slotId: slot.id }}
+                    maxFileSize={COLLECT_MAX_FILE_BYTES}
+                    maxFiles={slot.maxFiles - files.length}
+                    uploadConcurrency={1}
+                    retryOnFailure={false}
+                    accept={acceptFromSlot(slot)}
+                    onBatchComplete={() => window.location.reload()}
+                  />
+                </div>
               ) : null}
             </CardContent>
           </Card>

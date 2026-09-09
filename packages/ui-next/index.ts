@@ -386,6 +386,7 @@ function buildBootstrap(templateName: string, args: Record<string, any>, context
       canManageExamInfrastructure,
       canManageRedemptionCodes,
       impersonation,
+      bindRequired: context.handler?.forceBindRequired === true,
     },
     domain: {
       id: String(domain._id || 'system'),

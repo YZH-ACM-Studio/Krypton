@@ -242,6 +242,18 @@ function DefaultAppShell() {
           </div>
         ) : null}
 
+        {bs.user.bindRequired && bs.page.templateName === 'main.html' ? (
+          <div className="flex shrink-0 flex-col gap-2 border-b border-amber-300 bg-amber-50 px-3 py-2 text-amber-950 dark:border-amber-800 dark:bg-amber-950/70 dark:text-amber-100 sm:flex-row sm:items-center sm:px-4">
+            <div className="flex min-w-0 flex-1 items-center gap-2 text-sm">
+              <User className="size-4 shrink-0" />
+              <span className="truncate">请先绑定学生身份，才能使用题目、比赛和作业。</span>
+            </div>
+            <Button asChild variant="outline" size="sm" className="h-7 border-amber-400 bg-background/70 text-xs hover:bg-background">
+              <a href="/userbind">去绑定</a>
+            </Button>
+          </div>
+        ) : null}
+
         {/* Content area — full-bleed; pages decide their own max width.
             The viewport's inner wrapper is forced to flex-col + min-h-full
             so on short pages it stretches to the viewport height (sticking

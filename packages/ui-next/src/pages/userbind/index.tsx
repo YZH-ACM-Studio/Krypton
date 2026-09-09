@@ -1696,7 +1696,7 @@ export function UserBindPage() {
     <div className="space-y-5">
       <div className="space-y-1">
         <h1 className="text-xl font-semibold">绑定学生身份</h1>
-        <p className="text-sm text-muted-foreground">提交学号和姓名后，由管理员审核通过后完成绑定。</p>
+        <p className="text-sm text-muted-foreground">填写学校、学号和姓名。与花名册一致则立即绑定；对不上再提交管理员审核。</p>
       </div>
       {data.hasPending && (
         <Card className="border-amber-500/40 bg-amber-500/5">
@@ -1709,7 +1709,7 @@ export function UserBindPage() {
                 <a href="/userbind/applications" className="underline">
                   我的申请
                 </a>
-                」查看进度。
+                」查看进度。若学号姓名已在花名册中，提交仍会立即绑定。
               </p>
             </div>
           </CardContent>
@@ -1740,7 +1740,7 @@ export function UserBindPage() {
               <a href="/userbind/applications" className="text-xs text-muted-foreground hover:underline">
                 查看我的申请记录 →
               </a>
-              <Button type="submit">提交申请</Button>
+              <Button type="submit">绑定</Button>
             </div>
           </form>
         </CardContent>

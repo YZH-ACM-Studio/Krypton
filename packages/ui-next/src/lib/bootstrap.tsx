@@ -76,6 +76,8 @@ export interface KryptonUser {
     targetName: string;
     startedAt: string | null;
   } | null;
+  /** 服务端判定：强制绑定开启且当前用户是未绑定的 default 角色学生。前端不得自行用学号或角色名推断。 */
+  bindRequired?: boolean;
 }
 
 export interface KryptonDomain {

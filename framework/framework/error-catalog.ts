@@ -1855,6 +1855,7 @@ const CHINESE_ERROR_MESSAGE_ENGLISH_TRANSLATIONS: Readonly<Record<string, string
     学生档案不存在: 'The student record does not exist.',
     '姓名不匹配（档案内"{0}"）': 'The name does not match (student record: "{0}").',
     '学生未绑定 OJ 账号': 'The student has not bound an OJ account.',
+    '请先绑定学生身份': 'Please bind your student identity first.',
     '{0} 无法加入上传队列': '{0} could not be added to the upload queue.',
     上传批次失败: 'The upload batch failed.',
     下载失败: 'The download failed.',

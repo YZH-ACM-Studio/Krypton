@@ -7,7 +7,7 @@
  * Loaded as a built-in addon — see packages/hydrooj/src/loader.ts.
  */
 // Side-effect imports: register binding-path methods + export/import methods on userBindModel.
-import { Context } from 'hydrooj';
+import { Context, SettingModel } from 'hydrooj';
 import { registerCommands } from './src/cli';
 import { applyHandlers } from './src/handler';
 import { applyLegacyRedirects } from './src/legacy-redirects';
@@ -17,6 +17,8 @@ import { sweepPendingBindingNotifications } from './src/binding-notification';
 // Side-effect imports: register binding-path methods + export/import methods on userBindModel.
 import './src/binding';
 import './src/migrate-domain';
+
+const Setting = SettingModel.Setting;
 
 export * from './src/exam-roster-source';
 export { userBindModel } from './src/model';
@@ -32,6 +34,28 @@ export function apply(ctx: Context) {
     // packages/hydrooj/src/init.ts (no Proxy on `model`) — so each plugin
     // that wants to be addressable this way must assign it explicitly.
     if ((global as any).Hydro?.model) (global as any).Hydro.model.userbind = userBindModel;
+
+    ctx.inject(['setting'], (c) => {
+        c.setting.SystemSetting(
+            Setting(
+                'setting_userbind',
+                'userbind.forceBind',
+                true,
+                'boolean',
+                'userbind.forceBind',
+                'Require default-role students to bind a student record before using the site',
+            ),
+        );
+        // Addon SystemSetting runs after SystemModel.init, so seed cache when Mongo has no override.
+        const system = global.Hydro.model.system;
+        const current = system.get('userbind.forceBind');
+        if (current === undefined || current === null || current === '') {
+            if (!system.cache) {
+                throw new Error('Hydro.model.system.cache is missing; cannot apply userbind.forceBind default');
+            }
+            system.cache['userbind.forceBind'] = true;
+        }
+    });
 
     // Register routes directly — `ctx.Route` is available on the apply context
     // (same pattern as packages/blog/index.ts).

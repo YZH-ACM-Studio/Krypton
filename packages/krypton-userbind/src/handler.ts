@@ -6,10 +6,29 @@
  */
 import { localizedErrorText, Context, Handler, NotFoundError, ObjectId, OplogModel, param, PRIV, Types, UserModel, ValidationError } from 'hydrooj';
 import { bindingRequestsColl, bindTokensColl, schoolsColl, studentsColl, userGroupsColl } from './db';
+import { BindingRequiredError } from './errors';
+import { decideForceBind, isForceBindEnabled, shouldForceBindSubject, wantsForceBindHtml, type ForceBindSubject } from './force-bind';
 import { userBindModel } from './model';
 import type { ParsedStudentFilterQuery } from './student-filter';
 import { parseStudentFilterQuery } from './student-filter';
 import { parseAdminStudentFilters } from './student-filter-http';
+
+type ForceBindHandler = Handler & { forceBindRequired?: boolean };
+
+function userIsTemporary(user: Handler['user'] | undefined): boolean {
+    if (!user) return false;
+    const rec = user as Handler['user'] & { isTemporary?: unknown; _udoc?: { isTemporary?: unknown } };
+    return rec.isTemporary === true || rec._udoc?.isTemporary === true;
+}
+
+async function currentCanonicalBinding(domainId: string, userId: number) {
+    const student = await userBindModel.findStudentByUserId(domainId, userId);
+    return {
+        alreadyBound: !!student,
+        currentStudentId: student?.studentId || null,
+        currentRealName: student?.realName || null,
+    };
+}
 
 // ─── Admin handlers ───────────────────────────────────────────────────────
 
@@ -746,7 +765,7 @@ class AdminRequestsHandler extends UserbindAdminHandler {
 
 /**
  * /user/bind — apply form (manual application, e.g. no token in hand).
- * After submitting a request, redirects to /user/bind/applications.
+ * Roster hits bind immediately; otherwise the request is queued for review.
  */
 class UserBindHandler extends Handler {
     async prepare() {
@@ -755,7 +774,7 @@ class UserBindHandler extends Handler {
 
     async get({ domainId }: { domainId: string }) {
         const schools = await userBindModel.listSchools(domainId);
-        const alreadyBound = !!(this.user as any).studentId;
+        const binding = await currentCanonicalBinding(domainId, this.user._id);
         const pendingApplication = await bindingRequestsColl.findOne({
             domainId,
             userId: this.user._id,
@@ -764,9 +783,7 @@ class UserBindHandler extends Handler {
         this.response.template = 'user_bind.html';
         this.response.body = {
             schools,
-            alreadyBound,
-            currentStudentId: (this.user as any).studentId || null,
-            currentRealName: (this.user as any).realName || null,
+            ...binding,
             hasPending: !!pendingApplication,
         };
     }
@@ -775,9 +792,27 @@ class UserBindHandler extends Handler {
     @param('studentId', Types.String)
     @param('realName', Types.String)
     async post({ domainId }: { domainId: string }, schoolId: ObjectId, studentId: string, realName: string) {
-        await userBindModel.submitBindingRequest(domainId, this.user._id, schoolId, studentId, realName);
-        await OplogModel.log(this, 'userbind.request.create', { schoolId, studentId });
-        this.response.redirect = this.url('user_bind_applications');
+        const result = await userBindModel.bindByRosterOrQueue(domainId, schoolId, this.user._id, studentId, realName);
+        if (result.kind === 'queued') {
+            await OplogModel.log(this, 'userbind.request.create', {
+                schoolId,
+                studentId,
+                requestId: result.request._id,
+            });
+            this.response.redirect = this.url('user_bind_applications');
+            return;
+        }
+        await OplogModel.log(this, 'userbind.bind.roster_match', {
+            studentRecordId: result.studentRecord._id,
+            schoolId,
+            kind: result.kind,
+        });
+        this.response.template = 'user_bind_success.html';
+        this.response.body = {
+            studentRecord: result.studentRecord,
+            school: result.school,
+            wasAlreadyBound: result.kind === 'already_bound',
+        };
     }
 }
 
@@ -811,9 +846,7 @@ class UserBindApplicationsHandler extends Handler {
             requests,
             schoolMap,
             groupMap,
-            alreadyBound: !!(this.user as any).studentId,
-            currentStudentId: (this.user as any).studentId || null,
-            currentRealName: (this.user as any).realName || null,
+            ...(await currentCanonicalBinding(domainId, this.user._id)),
         };
     }
 }
@@ -1156,31 +1189,6 @@ class UserBindClaimHandler extends Handler {
     }
 }
 
-// ─── Force-bind middleware (before-prepare hook) ──────────────────────────
-
-const FORCE_BIND_BYPASS_PREFIX = [
-    '/userbind',
-    '/bind',
-    '/login',
-    '/logout',
-    '/register',
-    '/lostpass',
-    '/sudo',
-    '/api',
-    '/manifest.json',
-    '/favicon',
-    '/_spike-webview',
-];
-
-function shouldEnforceBindFor(handler: Handler): boolean {
-    if (!handler.user || handler.user._id === 0) return false;
-    if ((handler.user as any).isTemporary) return false; // temp users (Task 2) — never enforce
-    if ((handler.user as any).studentId) return false; // already bound
-    const path = handler.request.path || '';
-    if (FORCE_BIND_BYPASS_PREFIX.some((p) => path === p || path.startsWith(`${p}/`))) return false;
-    return true;
-}
-
 // ─── Route registration ───────────────────────────────────────────────────
 
 export function applyHandlers(ctx: Context) {
@@ -1238,15 +1246,40 @@ export function applyHandlers(ctx: Context) {
             : { bound: false };
     });
 
-    // Force-bind enforcement hook (PRD §3.2 — "保留，但条件化")
     ctx.on('handler/before-prepare', async (h) => {
-        const enforced = global.Hydro.model.system.get('userbind.forceBind');
-        if (!enforced) return;
-        if (!shouldEnforceBindFor(h as Handler)) return;
-        const accept = h.request?.headers?.accept || '';
-        if (h.request?.method !== 'GET') return;
-        if (!accept.includes('text/html')) return;
-        (h.response as any).redirect = (h as Handler).url('user_bind');
-        return true;
+        const handler = h as ForceBindHandler;
+        const enabled = isForceBindEnabled(global.Hydro.model.system.get('userbind.forceBind'));
+        const user = handler.user;
+        const subject: ForceBindSubject = {
+            uid: user?._id || 0,
+            role: user?.role || 'default',
+            isTemporary: userIsTemporary(user),
+            hasEditSystem: !!user?.hasPriv?.(PRIV.PRIV_EDIT_SYSTEM),
+            bound: false,
+        };
+        if (subject.uid > 0) {
+            const domainId = handler.args?.domainId || handler.domain?._id || 'system';
+            const student = await userBindModel.findStudentByUserId(domainId, subject.uid);
+            subject.bound = !!student;
+        }
+        handler.forceBindRequired = enabled && shouldForceBindSubject(subject);
+        const method = handler.request.method || 'GET';
+        const accept = String(handler.request.headers?.accept || '');
+        const action = decideForceBind({
+            enabled,
+            subject,
+            path: handler.request.path || '/',
+            method,
+            wantsHtml: wantsForceBindHtml(method, accept, !!handler.request.json),
+        });
+        if (action === 'allow') return;
+        if (action === 'redirect') {
+            handler.response.status = 302;
+            handler.response.template = null;
+            handler.response.body = {};
+            handler.response.redirect = handler.url('user_bind');
+            return 'cleanup';
+        }
+        throw new BindingRequiredError();
     });
 }

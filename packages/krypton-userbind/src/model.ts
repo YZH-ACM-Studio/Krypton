@@ -1088,6 +1088,17 @@ export const userBindModel = {
         userId: number,
         extraGroupId?: ObjectId,
     ) => Promise<{ studentRecord: StudentRecord; school: School }>,
+    bindByRosterOrQueue: null as unknown as (
+        domainId: string,
+        schoolId: ObjectId,
+        userId: number,
+        studentIdInput: string,
+        realNameInput: string,
+    ) => Promise<
+        | { kind: 'bound'; studentRecord: StudentRecord; school: School }
+        | { kind: 'already_bound'; studentRecord: StudentRecord; school: School | null }
+        | { kind: 'queued'; request: BindingRequest }
+    >,
     joinUserGroup: null as unknown as (userId: number, studentRecord: StudentRecord, userGroupId: ObjectId) => Promise<void>,
     getInviteToken: null as unknown as (tokenId: string) => Promise<BindToken>,
     rosterLookup: null as unknown as (

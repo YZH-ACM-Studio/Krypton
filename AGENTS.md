@@ -200,6 +200,18 @@
 
 - 课程章节可保存 `{problemSetId, stageIds?}` 实时引用，不复制 pids。题集仍是阶段和成员的唯一事实源。从课程引用入口签发的 `PracticeContext` 可包含课程→题集链；从题集独立入口不得反向完成引用它的课程。
 
+## 学生强制绑定协议
+
+- canonical 绑定只认 `userbind.students` 的 `boundUserId`，通过 `findStudentByUserId(domainId, uid)` 判定；禁止从资料字段 `user.studentId` 推断已绑定。
+- 系统设置 `userbind.forceBind` 默认 true；Mongo 显式 `false` 才关闭。未登记不得当成关。
+- 仅强制已登录且域角色为 `default` 的用户；运行时空角色归一为 `default`。
+- 豁免：访客 uid 0、`isTemporary`、`PRIV_EDIT_SYSTEM`、任何非 `default` 角色（`teacher` / `root` / `create_problems` 及其它自定义教职工角色）。禁止只用 `role==='teacher'` 判断教职工。
+- HTML GET（除放行的首页/绑定/登录/考试壳路径外）在 `handler/before-prepare` 返回 `'cleanup'` 并 302 到 `/userbind`，不得返回 `true`。
+- 其它方法与 API fail closed：`BindingRequiredError` 403。禁止整段放行 `/api`。
+- 首页 `/` 可进，强制对象看到 `bindRequired` 横幅。`/exam-mode`、`/paper`、`/client-required-notice` 不改道。首页壳还放行 `/api/collect/pending`、`/api/announce/unread`、`/api/announce/homepage` 和 `/home/messages`。
+- `/userbind` POST：花名册精确命中未占用记录立即绑定；对不上进入 pending 申请；已被他人占用则拒绝。
+- 老师不要求绑定学生档案。本节是 OJ 学生档案强制绑定；P1.8 式考试/Vigil 终端身份是另一套绑定，不得混用。
+
 ## 题集 TrainingDoc kind 协议
 
 - canonical 仍是 `document` 中 `docType:40` 的 `TrainingDoc`。新建题集显式写 `kind:'problem_set'`；`kind:'course'` 只表示课程；无 `kind` 或旧 `kind:'training'` 仅在读取时解释为题集。

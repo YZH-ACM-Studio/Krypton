@@ -182,44 +182,14 @@ export async function consumeStudentInviteToken(tokenId: string, userId: number)
         await bindTokensColl.updateOne({ _id: tokenId }, { $set: { used: true, usedAt: nowDate() } });
         throw new ValidationError('studentRecord', null, localizedErrorText`This student is already bound`);
     }
-    const school = await schoolsColl.findOne({ _id: student.schoolId });
-    if (!school) throw new NotFoundError(localizedErrorText`School`);
-
-    const existing = await UserModel.coll.findOne({ _id: userId });
-    if (existing?.studentId && existing.studentId !== student.studentId) {
-        throw new ValidationError('user', null, localizedErrorText`Your account is already bound to studentId "${existing.studentId}"`);
-    }
-
-    await Promise.all([
-        bindTokensColl.updateOne(
-            { _id: tokenId },
-            {
-                $set: { used: true, usedBy: userId, usedAt: nowDate() },
-            },
-        ),
-        studentsColl.updateOne(
-            { _id: student._id },
-            {
-                $set: { boundUserId: userId, boundAt: nowDate() },
-            },
-        ),
-        UserModel.coll.updateOne(
-            { _id: userId },
-            {
-                $set: {
-                    studentId: student.studentId,
-                    realName: student.realName,
-                },
-                $addToSet: {
-                    parentSchoolId: school._id,
-                    ...(student.groupIds.length > 0 ? { parentUserGroupId: { $each: student.groupIds } as any } : {}),
-                } as any,
-            },
-        ),
-    ]);
-
-    const refreshed = await studentsColl.findOne({ _id: student._id });
-    return { studentRecord: refreshed!, school };
+    const { studentRecord, school } = await bindMatchedStudent(student, userId);
+    await bindTokensColl.updateOne(
+        { _id: tokenId },
+        {
+            $set: { used: true, usedBy: userId, usedAt: nowDate() },
+        },
+    );
+    return { studentRecord, school };
 }
 
 /** Consume a school-kind token after a successful roster match. Binds + sets school. */
@@ -230,10 +200,6 @@ export async function bindMatchedStudent(
 ): Promise<{ studentRecord: StudentRecord; school: School }> {
     if (record.boundUserId && record.boundUserId !== userId) {
         throw new ValidationError('studentRecord', null, localizedErrorText`Already bound to another user`);
-    }
-    const existingUser = await UserModel.coll.findOne({ _id: userId });
-    if (existingUser?.studentId && existingUser.studentId !== record.studentId) {
-        throw new ValidationError('user', null, localizedErrorText`Your account is already bound to studentId "${existingUser.studentId}"`);
     }
     const school = await schoolsColl.findOne({ _id: record.schoolId });
     if (!school) throw new NotFoundError(localizedErrorText`School`);
@@ -247,32 +213,94 @@ export async function bindMatchedStudent(
             throw new ValidationError('userGroupId', null, localizedErrorText`该邀请对应的用户组已归档，无法加入`);
         }
     }
+
+    const existingBinding = await studentsColl.findOne({ domainId: record.domainId, boundUserId: userId });
+    if (existingBinding && !existingBinding._id.equals(record._id)) {
+        throw new ValidationError(
+            'studentRecord',
+            null,
+            localizedErrorText`Your account is already bound to studentId "${existingBinding.studentId}"`,
+        );
+    }
+
+    const now = nowDate();
     const groupIdsToAdd = [...record.groupIds];
     if (extraGroupId && !groupIdsToAdd.some((g) => g.equals(extraGroupId))) {
         groupIdsToAdd.push(extraGroupId);
     }
-    await Promise.all([
-        // Bind student record to the user (idempotent if already bound to same user).
-        studentsColl.updateOne(
-            { _id: record._id },
-            {
-                $set: { boundUserId: userId, boundAt: nowDate() },
-                $addToSet: extraGroupId ? { groupIds: extraGroupId as any } : ({} as any),
-            },
-        ),
-        UserModel.coll.updateOne(
-            { _id: userId },
-            {
-                $set: { studentId: record.studentId, realName: record.realName },
-                $addToSet: {
-                    parentSchoolId: school._id,
-                    ...(groupIdsToAdd.length > 0 ? { parentUserGroupId: { $each: groupIdsToAdd } as any } : {}),
-                } as any,
-            },
-        ),
-    ]);
+
+    // CAS: only claim an unbound record or re-apply the same uid (idempotent self-bind).
+    const casResult = await studentsColl.updateOne(
+        { _id: record._id, $or: [{ boundUserId: null }, { boundUserId: userId }] },
+        {
+            $set: { boundUserId: userId, boundAt: now },
+            $addToSet: extraGroupId ? { groupIds: extraGroupId as any } : ({} as any),
+        },
+    );
+    if (casResult.matchedCount === 0) {
+        const latest = await studentsColl.findOne({ _id: record._id });
+        if (!latest) throw new NotFoundError(localizedErrorText`Student record`);
+        if (latest.boundUserId && latest.boundUserId !== userId) {
+            throw new ValidationError('studentRecord', null, localizedErrorText`Already bound to another user`);
+        }
+        throw new ValidationError('studentRecord', null, localizedErrorText`Already bound to another user`);
+    }
+
+    await UserModel.coll.updateOne(
+        { _id: userId },
+        {
+            $set: { studentId: record.studentId, realName: record.realName },
+            $addToSet: {
+                parentSchoolId: school._id,
+                ...(groupIdsToAdd.length > 0 ? { parentUserGroupId: { $each: groupIdsToAdd } as any } : {}),
+            } as any,
+        },
+    );
     const refreshed = await studentsColl.findOne({ _id: record._id });
     return { studentRecord: refreshed!, school };
+}
+
+export type BindByRosterResult =
+    | { kind: 'bound'; studentRecord: StudentRecord; school: School }
+    | { kind: 'already_bound'; studentRecord: StudentRecord; school: School | null }
+    | { kind: 'queued'; request: BindingRequest };
+
+export async function bindByRosterOrQueue(
+    domainId: string,
+    schoolId: ObjectId,
+    userId: number,
+    studentIdInput: string,
+    realNameInput: string,
+): Promise<BindByRosterResult> {
+    const outcome = await rosterLookup(domainId, schoolId, studentIdInput, realNameInput, userId);
+    if (outcome.kind === 'matched_unbound') {
+        const { studentRecord, school } = await bindMatchedStudent(outcome.studentRecord, userId);
+        await bindingRequestsColl.updateMany(
+            { domainId, userId, status: 'pending' },
+            {
+                $set: {
+                    status: 'rejected',
+                    rejectReason: '已通过花名册匹配完成绑定',
+                    reviewedBy: null,
+                    reviewedAt: nowDate(),
+                },
+            },
+        );
+        return { kind: 'bound', studentRecord, school };
+    }
+    if (outcome.kind === 'matched_self') {
+        const school = await schoolsColl.findOne({ _id: outcome.studentRecord.schoolId });
+        return { kind: 'already_bound', studentRecord: outcome.studentRecord, school };
+    }
+    if (outcome.kind === 'matched_other') {
+        throw new ValidationError(
+            'studentRecord',
+            null,
+            localizedErrorText`该学生身份已被其他账号绑定（UID ${outcome.boundToUid}）。如有错误请联系管理员。`,
+        );
+    }
+    const request = await submitBindingRequest(domainId, userId, schoolId, studentIdInput, realNameInput);
+    return { kind: 'queued', request };
 }
 
 /**
@@ -772,6 +800,7 @@ userBindModel.generateUserGroupInviteToken = generateUserGroupInviteToken;
 userBindModel.consumeInviteToken = consumeInviteToken;
 userBindModel.consumeStudentInviteToken = consumeStudentInviteToken;
 userBindModel.bindMatchedStudent = bindMatchedStudent;
+userBindModel.bindByRosterOrQueue = bindByRosterOrQueue;
 userBindModel.joinUserGroup = joinUserGroup;
 userBindModel.getInviteToken = getInviteToken;
 userBindModel.rosterLookup = rosterLookup;

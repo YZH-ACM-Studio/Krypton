@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 import { ObjectId } from 'mongodb';
 
 const Module = require('module');
-(global as any).Hydro ||= { model: {}, module: {} };
+(global as any).Hydro ||= { model: {}, module: {}, ui: {} };
 
 class TestValidationError extends Error {
     name = 'ValidationError';
@@ -72,6 +72,15 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     }
     if (fromHandler && request === '../lib/training-kind') {
         return originalLoad.call(this, request, parent, isMain);
+    }
+    if (fromHandler && request === '../lib/problem-set-audience') return { problemSetAudienceOf: () => [] };
+    if (fromHandler && request === '../lib/practice-roster-load') return { loadCompletedPidsByUid: async () => [] };
+    if (fromHandler && request === '../lib/practice-roster') {
+        return {
+            assemblePracticeRosterMembers: () => [],
+            PRACTICE_ROSTER_ENROLL_LIMIT: 500,
+            serializePracticeRosterProblems: () => [],
+        };
     }
     if (fromHandler && request === '../service/server') {
         return {
@@ -181,10 +190,27 @@ describe('P3.2 problem-set routes and training redirects', () => {
         await download.get('system', tid, 'a.txt');
         expect(download.response.redirect).to.equal(`/problem-sets/${tid}/file/a.txt`);
 
+        const lowercaseGet = makeRedirect('training_compat_detail', `/training/${tid}`, 'get');
+        await lowercaseGet.prepare();
+        await lowercaseGet.get('system', tid);
+        expect(lowercaseGet.response.status).to.equal(301);
+        expect(lowercaseGet.response.redirect).to.equal(`/problem-sets/${tid}`);
+
+        const lowercaseHead = makeRedirect('training_compat_main', '/training', 'head');
+        await lowercaseHead.prepare();
+
         const post = makeRedirect('training_compat_main', '/training', 'POST');
         try {
             await post.prepare();
             expect.fail('expected mutation on /training to fail closed');
+        } catch (error) {
+            expect(error).to.be.instanceOf(TestValidationError);
+        }
+
+        const lowercasePost = makeRedirect('training_compat_detail', `/training/${tid}`, 'post');
+        try {
+            await lowercasePost.prepare();
+            expect.fail('expected lowercase post on /training to fail closed');
         } catch (error) {
             expect(error).to.be.instanceOf(TestValidationError);
         }

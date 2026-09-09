@@ -545,9 +545,15 @@ function canonicalTrainingRouteName(path: string, tid?: ObjectId, filename?: str
     return 'training_main';
 }
 
+function httpMethodName(method: unknown): string {
+    return String(method || '').toUpperCase();
+}
+
 class TrainingCompatRedirectHandler extends Handler {
     async prepare() {
-        if (this.request.method !== 'GET' && this.request.method !== 'HEAD') {
+        // Hydro stores request.method in lowercase (`get` / `head` / `post`).
+        const method = httpMethodName(this.request.method);
+        if (method !== 'GET' && method !== 'HEAD') {
             throw new ValidationError('path', null, localizedErrorText`请从题集页面提交这次操作。`);
         }
     }

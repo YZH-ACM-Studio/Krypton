@@ -353,14 +353,32 @@ class CollectDetailHandler extends CollectBaseHandler {
     }
 
     @param('id', Types.ObjectId)
-    async post(domainId: string, id: ObjectId) {
+    async postUploadFile(domainId: string, id: ObjectId) {
+        return this.applyStudentPost(domainId, id, 'upload_file');
+    }
+
+    @param('id', Types.ObjectId)
+    async postReplaceFile(domainId: string, id: ObjectId) {
+        return this.applyStudentPost(domainId, id, 'replace_file');
+    }
+
+    @param('id', Types.ObjectId)
+    async postDeleteFile(domainId: string, id: ObjectId) {
+        return this.applyStudentPost(domainId, id, 'delete_file');
+    }
+
+    @param('id', Types.ObjectId)
+    async postConfirm(domainId: string, id: ObjectId) {
+        return this.applyStudentPost(domainId, id, 'confirm');
+    }
+
+    async applyStudentPost(domainId: string, id: ObjectId, operation: string) {
         const authoritativeDomainId = domainIdOf(this);
         if (domainId && String(domainId) !== authoritativeDomainId) {
             throw new CollectForbiddenError('域不匹配');
         }
         const request = await getRequest(authoritativeDomainId, id);
         if (request.status === 'draft' || request.status === 'archived') throw new CollectNotFoundError();
-        const operation = String((this.args as { operation?: string }).operation || this.request.body?.operation || '');
         if (operation === 'upload_file' || operation === 'replace_file') {
             await this.limitRate('collect_upload', 60, 20);
             const uploaded = this.request.files?.file as { filepath?: string; size?: number; originalFilename?: string; name?: string } | undefined;
@@ -492,10 +510,33 @@ class AdminCollectListHandler extends CollectBaseHandler {
     }
 
     @param('id', Types.ObjectId, true)
-    async post(_domainId: string, id?: ObjectId) {
+    async postPublish(_domainId: string, id?: ObjectId) {
+        return this.applyListPost(id, 'publish');
+    }
+
+    @param('id', Types.ObjectId, true)
+    async postClose(_domainId: string, id?: ObjectId) {
+        return this.applyListPost(id, 'close');
+    }
+
+    @param('id', Types.ObjectId, true)
+    async postReopen(_domainId: string, id?: ObjectId) {
+        return this.applyListPost(id, 'reopen');
+    }
+
+    @param('id', Types.ObjectId, true)
+    async postArchive(_domainId: string, id?: ObjectId) {
+        return this.applyListPost(id, 'archive');
+    }
+
+    @param('id', Types.ObjectId, true)
+    async postDelete(_domainId: string, id?: ObjectId) {
+        return this.applyListPost(id, 'delete');
+    }
+
+    async applyListPost(id: ObjectId | undefined, operation: string) {
         const domainId = domainIdOf(this);
         const actor = actorOf(this);
-        const operation = String(this.request.body?.operation || this.args.operation || '');
         if (!id) throw new CollectNotFoundError();
         const current = await getRequest(domainId, id);
         if (operation === 'publish') {
@@ -577,10 +618,33 @@ class AdminCollectEditHandler extends CollectBaseHandler {
     }
 
     @param('id', Types.ObjectId, true)
-    async post(_domainId: string, id?: ObjectId) {
+    async postCreate(_domainId: string, id?: ObjectId) {
+        return this.applyEditPost(id, 'create');
+    }
+
+    @param('id', Types.ObjectId, true)
+    async postUpdate(_domainId: string, id?: ObjectId) {
+        return this.applyEditPost(id, 'update');
+    }
+
+    @param('id', Types.ObjectId, true)
+    async postPublish(_domainId: string, id?: ObjectId) {
+        return this.applyEditPost(id, 'publish');
+    }
+
+    @param('id', Types.ObjectId, true)
+    async postClose(_domainId: string, id?: ObjectId) {
+        return this.applyEditPost(id, 'close');
+    }
+
+    @param('id', Types.ObjectId, true)
+    async postReopen(_domainId: string, id?: ObjectId) {
+        return this.applyEditPost(id, 'reopen');
+    }
+
+    async applyEditPost(id: ObjectId | undefined, operation: string) {
         const domainId = domainIdOf(this);
         const body = this.request.body || {};
-        const operation = String(body.operation || '');
         const title = String(body.title || '');
         const description = String(body.description || '');
         const dueAt = parseCollectDueAt(body.dueAt);
@@ -730,17 +794,12 @@ class AdminCollectStatsHandler extends CollectBaseHandler {
     }
 
     @param('id', Types.ObjectId)
-    async post(_domainId: string, id: ObjectId) {
+    async postNudge(_domainId: string, id: ObjectId) {
         const request = await getRequest(domainIdOf(this), id);
-        const operation = String(this.request.body?.operation || '');
-        if (operation === 'nudge') {
-            const uids = await nudgeUnsubmitted(request, actorOf(this));
-            await notifyUids(uids, request.title, collectUrl(this, request._id));
-            await OplogModel.log(this, 'collect.nudge', { requestId: String(id), count: uids.length });
-            this.back();
-            return;
-        }
-        throw new CollectForbiddenError('未知操作');
+        const uids = await nudgeUnsubmitted(request, actorOf(this));
+        await notifyUids(uids, request.title, collectUrl(this, request._id));
+        await OplogModel.log(this, 'collect.nudge', { requestId: String(id), count: uids.length });
+        this.back();
     }
 }
 

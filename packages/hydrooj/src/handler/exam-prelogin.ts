@@ -37,25 +37,6 @@ function exactBody(value: unknown, keys: readonly string[]): void {
     if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) throw new ValidationError('body');
 }
 
-function assertCanonicalEvent(event: ExamEventDoc, domainId: string, eventId: ObjectId): void {
-    if (
-        event.domainId !== domainId ||
-        !event._id.equals(eventId) ||
-        !(event.schoolId instanceof ObjectId) ||
-        !['external', 'krypton'].includes(event.type) ||
-        !['archived', 'draft', 'scheduled'].includes(event.lifecycle) ||
-        !(event.startAt instanceof Date) ||
-        !Number.isFinite(event.startAt.getTime()) ||
-        !(event.endAt instanceof Date) ||
-        !Number.isFinite(event.endAt.getTime()) ||
-        event.endAt <= event.startAt ||
-        !Number.isSafeInteger(event.revision) ||
-        event.revision < 1
-    ) {
-        throw new ExamPreloginError('event_canonical_invalid');
-    }
-}
-
 function translate(error: unknown): never {
     if (error instanceof ExamPreloginRetryReadinessError) {
         const reasonCounts = new Map<string, number>();
@@ -305,20 +286,15 @@ async function serializeRedemption(ticket: ExamPreloginTicketDoc) {
 abstract class ExamPreloginManagerHandler extends Handler {
     async prepare() {
         if (!this.user || this.user._id < 1) throw new PermissionError(PERM.PERM_CREATE_EXAM_EVENT);
-        if (!isExamInfrastructureAdmin(this.user)) {
-            if (!this.user.hasPerm(PERM.PERM_CREATE_EXAM_EVENT)) throw new PermissionError(PERM.PERM_CREATE_EXAM_EVENT);
-            if (!this.user.hasPerm(PERM.PERM_USERBIND_MANAGE_STUDENTS)) {
-                throw new PermissionError(PERM.PERM_USERBIND_MANAGE_STUDENTS);
-            }
+        if (!isExamInfrastructureAdmin(this.user) && !this.user.hasPerm(PERM.PERM_CREATE_EXAM_EVENT)) {
+            throw new PermissionError(PERM.PERM_CREATE_EXAM_EVENT);
         }
-        await Promise.all([examEventService.ensureIndexes(), examSeatAssignmentService.ensureIndexes(), getExamPreloginService().ensureIndexes()]);
     }
 
     protected async event(eventId: ObjectId): Promise<ExamEventDoc> {
         const domainId = String(this.domain._id);
         const event = await examEventService.get(domainId, eventId);
         if (!event) throw new ValidationError('eventId');
-        assertCanonicalEvent(event, domainId, eventId);
         await assertCanManageExamEvent(domainId, event, this.user);
         return event;
     }
@@ -590,7 +566,6 @@ abstract class VigilExamPreloginHandler extends Handler {
 
     async prepare() {
         requireServiceToken(this, 'vigil');
-        await getExamPreloginService().ensureIndexes();
     }
 }
 
@@ -634,7 +609,6 @@ class VigilExamPreloginRedeemHandler extends VigilExamPreloginHandler {
                     await withExamEventBoundary(currentTicket.domainId, currentTicket.eventId, async () => {
                         const current = await examEventService.get(currentTicket.domainId, currentTicket.eventId);
                         if (!current) throw new ExamPreloginError('event_not_found');
-                        assertCanonicalEvent(current, currentTicket.domainId, currentTicket.eventId);
                         await validateExamPreloginTicketCurrent(current, currentTicket, batch.preparationFingerprint, preflightExamPreloginOnVigil);
                     });
                 },

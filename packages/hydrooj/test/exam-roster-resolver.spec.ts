@@ -292,6 +292,257 @@ describe('P2.4 Contest audience compilation', () => {
         ]);
     });
 
+    it('inspects team facts against one live roster snapshot', async () => {
+        userStateRows = [
+            { _id: 201, priv: 4 },
+            { _id: 202, priv: 4 },
+        ];
+        let userbindReads = 0;
+        mutableModel().userbind = {
+            loadExamRosterUserbindSnapshot: async (_domainId: string, _schoolId: ObjectId, groupIds: ObjectId[] | null) => {
+                userbindReads++;
+                const base = snapshot(groupIds, [
+                    { uid: 201, record: 1 },
+                    { uid: 202, record: 2 },
+                ]);
+                return userbindReads <= 2 ? base : { ...base, fingerprint: 'e'.repeat(64) };
+            },
+        };
+        mutableModel().contest = {
+            get: async () => ({
+                _id: contestId,
+                docId: contestId,
+                domainId,
+                participantScopeMode: 'none',
+                participantGroupIds: [],
+                participantSchoolIds: [],
+                participationMode: 'team',
+                rule: 'acm',
+                participationRevision: 4,
+                teamBatchId: new ObjectId('66bb00000000000000000005'),
+                assign: [],
+            }),
+            getMultiStatus: () => cursor([]),
+        };
+        const teamId = new ObjectId('66bb00000000000000000006');
+        mutableModel().contestTeam = {
+            listTeams: async () => [{ teamId, revision: 1, captainUid: 201, memberUids: [201, 202] }],
+        };
+        const frozen = await resolverModule.resolveExamRosterForEvent(event(), { kind: 'contestAudience' });
+        const roster = {
+            _id: new ObjectId('66bb00000000000000000008'),
+            domainId,
+            eventId,
+            schoolId,
+            source: frozen.source,
+            entries: frozen.entries,
+            exclusions: frozen.exclusions,
+        } as import('../src/model/exam-seat-plan').ExamRosterRevisionDoc;
+        userbindReads = 0;
+
+        const drift = await resolverModule.inspectExamRosterDrift(event(), roster, [
+            {
+                boundUserId: 201,
+                studentRecordId: frozen.entries[0].studentRecordId,
+                studentId: frozen.entries[0].studentId,
+                teamId: teamId.toHexString(),
+                teamRole: 'captain',
+            },
+            {
+                boundUserId: 202,
+                studentRecordId: frozen.entries[1].studentRecordId,
+                studentId: frozen.entries[1].studentId,
+                teamId: teamId.toHexString(),
+                teamRole: 'member',
+            },
+        ]);
+
+        expect(userbindReads).to.equal(2);
+        expect(drift.changed).to.equal(false);
+        expect(drift.items).to.deep.equal([]);
+    });
+
+    it('rejects a team contest whose stored roster is not contestAudience', async () => {
+        userStateRows = [{ _id: 101, priv: 4 }];
+        mutableModel().userbind = {
+            loadExamRosterUserbindSnapshot: async (_domainId: string, _schoolId: ObjectId, groupIds: ObjectId[] | null) =>
+                snapshot(groupIds, [{ uid: 101, record: 1 }]),
+        };
+        mutableModel().contest = {
+            get: async () => ({
+                _id: contestId,
+                docId: contestId,
+                domainId,
+                participantScopeMode: 'none',
+                participantGroupIds: [],
+                participantSchoolIds: [],
+                participationMode: 'team',
+                rule: 'acm',
+                teamBatchId: new ObjectId('66bb00000000000000000005'),
+                assign: [],
+            }),
+            getMultiStatus: () => cursor([]),
+        };
+        let listTeamReads = 0;
+        mutableModel().contestTeam = {
+            listTeams: async () => {
+                listTeamReads++;
+                return [{ teamId: new ObjectId('66bb00000000000000000006'), revision: 1, captainUid: 101, memberUids: [101] }];
+            },
+        };
+        const frozen = await resolverModule.resolveExamRosterForEvent(event(), { kind: 'userbindSchool' });
+        const roster = {
+            _id: new ObjectId('66bb00000000000000000008'),
+            domainId,
+            eventId,
+            schoolId,
+            source: frozen.source,
+            entries: frozen.entries,
+            exclusions: frozen.exclusions,
+        } as import('../src/model/exam-seat-plan').ExamRosterRevisionDoc;
+        listTeamReads = 0;
+        let reason: string | null = null;
+        try {
+            await resolverModule.inspectExamRosterDrift(event(), roster, [
+                {
+                    boundUserId: 101,
+                    studentRecordId: frozen.entries[0].studentRecordId,
+                    studentId: frozen.entries[0].studentId,
+                    teamId: null,
+                    teamRole: null,
+                },
+            ]);
+        } catch (error) {
+            reason = (error as { reason?: string }).reason || null;
+        }
+        expect(reason).to.equal('roster_source_changed');
+        expect(listTeamReads).to.equal(0);
+    });
+
+    it('rejects malformed current team documents after compiling the live roster', async () => {
+        userStateRows = [
+            { _id: 201, priv: 4 },
+            { _id: 202, priv: 4 },
+        ];
+        mutableModel().userbind = {
+            loadExamRosterUserbindSnapshot: async (_domainId: string, _schoolId: ObjectId, groupIds: ObjectId[] | null) =>
+                snapshot(groupIds, [
+                    { uid: 201, record: 1 },
+                    { uid: 202, record: 2 },
+                ]),
+        };
+        mutableModel().contest = {
+            get: async () => ({
+                _id: contestId,
+                docId: contestId,
+                domainId,
+                participantScopeMode: 'none',
+                participantGroupIds: [],
+                participantSchoolIds: [],
+                participationMode: 'team',
+                rule: 'acm',
+                teamBatchId: new ObjectId('66bb00000000000000000005'),
+                assign: [],
+            }),
+            getMultiStatus: () => cursor([]),
+        };
+        const teamId = new ObjectId('66bb00000000000000000006');
+        mutableModel().contestTeam = {
+            listTeams: async () => [{ teamId, revision: 1, memberUids: [201, 202] }],
+        };
+        const frozen = await resolverModule.resolveExamRosterForEvent(event(), { kind: 'contestAudience' });
+        const roster = {
+            _id: new ObjectId('66bb00000000000000000008'),
+            domainId,
+            eventId,
+            schoolId,
+            source: frozen.source,
+            entries: frozen.entries,
+            exclusions: frozen.exclusions,
+        } as import('../src/model/exam-seat-plan').ExamRosterRevisionDoc;
+        let reason: string | null = null;
+        try {
+            await resolverModule.inspectExamRosterDrift(event(), roster, [
+                {
+                    boundUserId: 201,
+                    studentRecordId: frozen.entries[0].studentRecordId,
+                    studentId: frozen.entries[0].studentId,
+                    teamId: teamId.toHexString(),
+                    teamRole: 'captain',
+                },
+                {
+                    boundUserId: 202,
+                    studentRecordId: frozen.entries[1].studentRecordId,
+                    studentId: frozen.entries[1].studentId,
+                    teamId: teamId.toHexString(),
+                    teamRole: 'member',
+                },
+            ]);
+        } catch (error) {
+            reason = (error as { reason?: string }).reason || null;
+        }
+        expect(reason).to.equal('contest_team_roster_invalid');
+    });
+
+    it('rejects current team membership that does not match compiled roster entries', async () => {
+        userStateRows = [
+            { _id: 201, priv: 4 },
+            { _id: 202, priv: 0 },
+        ];
+        mutableModel().userbind = {
+            loadExamRosterUserbindSnapshot: async (_domainId: string, _schoolId: ObjectId, groupIds: ObjectId[] | null) =>
+                snapshot(groupIds, [
+                    { uid: 201, record: 1 },
+                    { uid: 202, record: 2 },
+                ]),
+        };
+        mutableModel().contest = {
+            get: async () => ({
+                _id: contestId,
+                docId: contestId,
+                domainId,
+                participantScopeMode: 'none',
+                participantGroupIds: [],
+                participantSchoolIds: [],
+                participationMode: 'team',
+                rule: 'acm',
+                teamBatchId: new ObjectId('66bb00000000000000000005'),
+                assign: [],
+            }),
+            getMultiStatus: () => cursor([]),
+        };
+        const teamId = new ObjectId('66bb00000000000000000006');
+        mutableModel().contestTeam = {
+            listTeams: async () => [{ teamId, revision: 1, captainUid: 201, memberUids: [201, 202] }],
+        };
+        const frozen = await resolverModule.resolveExamRosterForEvent(event(), { kind: 'contestAudience' });
+        expect(frozen.entries.map((entry) => entry.boundUserId)).to.deep.equal([201]);
+        const roster = {
+            _id: new ObjectId('66bb00000000000000000008'),
+            domainId,
+            eventId,
+            schoolId,
+            source: frozen.source,
+            entries: frozen.entries,
+            exclusions: frozen.exclusions,
+        } as import('../src/model/exam-seat-plan').ExamRosterRevisionDoc;
+        let reason: string | null = null;
+        try {
+            await resolverModule.inspectExamRosterDrift(event(), roster, [
+                {
+                    boundUserId: 201,
+                    studentRecordId: frozen.entries[0].studentRecordId,
+                    studentId: frozen.entries[0].studentId,
+                    teamId: teamId.toHexString(),
+                    teamRole: 'captain',
+                },
+            ]);
+        } catch (error) {
+            reason = (error as { reason?: string }).reason || null;
+        }
+        expect(reason).to.equal('contest_team_roster_invalid');
+    });
+
     it('rejects an empty active team before reading userbind PII', async () => {
         let userbindReads = 0;
         mutableModel().userbind = {

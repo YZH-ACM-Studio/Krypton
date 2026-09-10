@@ -45,7 +45,7 @@ describe('P2.5 seat assignment HTTP boundary', () => {
     });
 
     it('revalidates immutable roster/plan, current layout and active seat bindings before any revision write', () => {
-        expect(source).to.include('assertExamSeatAssignmentIntegrity(assignment)');
+        expect(source).to.include('assertExamSeatAssignmentIntegrity(latestAssignment)');
         expect(source).to.include('JSON.stringify(rosterUids) !== JSON.stringify(assignedUids)');
         expect(source).to.include('assignment_publication_reference_drift');
         expect(source).to.include('classroom.layoutRevision !== seatPlan.layoutRevision');
@@ -71,6 +71,11 @@ describe('P2.5 seat assignment HTTP boundary', () => {
         expect(source).to.include('examSeatOperationalProfileService.getCurrent(domainId, classroomRef.classroomId)');
         expect(source).to.include('endpointSeatBindingService.listClassroomBindings(domainId, classroomRef.classroomId)');
         expect(source).to.include("throw new ExamSeatAssignmentError('assignment_endpoint_duplicate')");
+        expect(source).to.include('liveStatus = false');
+        expect(source).to.include('if (liveStatus && endpointIds.length)');
+        expect(source).to.include('this.sourceV2(current, assignment.seatPlan.revision, true)');
+        expect(source).to.include('this.sourceV2(current, seatPlanRevision, true)');
+        expect(source).to.include('this.sourceV2(current, base.seatPlan.revision, true)');
         expect(source).to.include('endpointOnline: fact.endpointId');
         expect(source).to.include('onlineByEndpoint.get(fact.endpointId) ?? null');
         expect(source).to.include('Exam seat assignment v2 live status unavailable');
@@ -88,14 +93,34 @@ describe('P2.5 seat assignment HTTP boundary', () => {
     });
 
     it('renders an existing assignment from its exact historical seat-plan source instead of a newer draft plan', () => {
-        expect(source).to.include('isExamSeatAssignmentV2(assignments[0])');
-        expect(source).to.include('this.displaySourceFromV2(assignments[0])');
-        expect(source).to.include('this.source(event, assignments[0].seatPlan.revision, false)');
+        expect(source).to.include('isExamSeatAssignmentV2(latestAssignment)');
+        expect(source).to.include('this.displaySourceFromV2(latestAssignment)');
+        expect(source).to.include('this.source(event, latestAssignment.seatPlan.revision, false)');
         expect(source).to.include('if (isExamSeatPlanV2(latestPlan))');
         expect(source).to.include('latestPlanSource = await this.source(event, latestPlan.revision, false)');
         expect(source).to.include("? 'current'");
         expect(source).to.include(": 'layout-drift'");
         expect(source).to.include('else if (latestPlanSource) currentSource = this.displaySourceFromV1(latestPlanSource)');
+        expect(source).not.to.include('items: await preflightExamNetworkOnVigil');
+        expect(source).not.to.include('stage=preflight');
+        expect(source).to.include("{ state: 'unavailable', items: [] }");
+        expect(source).to.include("{ state: 'not-required', items: [] }");
+    });
+
+    it('revalidates stored references only for the latest and currently published assignments', () => {
+        const getHandler = source.slice(
+            source.indexOf('class ExamSeatAssignmentCollectionHandler'),
+            source.indexOf("@param('action', Types.Range(['adjust', 'adjustV2', 'generate', 'generateV2', 'publish', 'rerandomize', 'rerandomizeV2']))"),
+        );
+        expect(getHandler).not.to.include('for (const assignment of assignments)');
+        expect(getHandler).to.include('const latestAssignment = assignments[0]');
+        expect(getHandler).to.include('assertExamSeatAssignmentIntegrity(latestAssignment)');
+        expect(getHandler).to.include('await this.assertStoredReferences(event, latestAssignment)');
+        expect(getHandler).to.include('await this.assertStoredReferences(event, published)');
+        expect(getHandler).to.include("throw new ExamSeatAssignmentError('assignment_publication_reference_drift')");
+        expect(getHandler).to.include('assignments.map((assignment) => serializeAssignment(assignment, publication?.assignment.revision || null))');
+        expect(source).to.include('examClassroomService.get(domainId, classroomRef.classroomId, true)');
+        expect(source).to.include('seatFactMatchesBindingHistory(domainId, event.schoolId, fact, binding || null)');
     });
 
     it('blocks event school changes after assignment facts and logs only stable IDs/counts/fingerprints', () => {

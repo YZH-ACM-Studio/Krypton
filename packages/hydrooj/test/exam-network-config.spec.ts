@@ -974,16 +974,12 @@ describe('Exam target resolver and audit boundaries', () => {
         disposeControl();
     });
 
-    it('persists audit intent before mutation and records fingerprint/count on success', async () => {
+    it('persists one success oplog after mutation and records fingerprint/count', async () => {
         const writes: Array<Record<string, unknown>> = [];
         const store = {
-            add: async (data: Record<string, unknown>) => {
+            add: async (data: Record<string, unknown> & { type: string }) => {
                 writes.push(data);
                 return new ObjectId('66b800000000000000000799');
-            },
-            updateOne: async (_filter: unknown, update: { $set: Record<string, unknown> }) => {
-                writes.push(update.$set);
-                return { matchedCount: 1 };
             },
         };
         const entityId = new ObjectId('66b800000000000000000798');
@@ -1006,15 +1002,16 @@ describe('Exam target resolver and audit boundaries', () => {
             store,
         );
         expect(result.revision).to.equal(2);
+        expect(writes).to.have.length(1);
         expect(writes[0]).to.include({
             type: 'exam.network.target-assignment.publish',
-            result: 'started',
+            result: 'success',
             expectedRevision: 1,
             observedRevision: 1,
             targetRevision: 2,
             targetCount: 2,
+            fingerprint: 'b'.repeat(64),
         });
-        expect(writes[1]).to.include({ result: 'success', targetCount: 2, fingerprint: 'b'.repeat(64) });
     });
 
     it('reports current draft facts without reusing the previous published fingerprint or target count', async () => {
@@ -1063,42 +1060,37 @@ describe('Exam target resolver and audit boundaries', () => {
         expect(targetFacts).not.to.have.property('fingerprint');
     });
 
-    it('does not mutate when the audit intent cannot be written', async () => {
+    it('returns the committed result when the success oplog write fails', async () => {
         let mutated = false;
-        let error: unknown;
-        try {
-            await auditModule.runAuditedExamNetworkMutation(
-                { domainId: 'system', actorUid: 1 },
-                'config.assignPolicy',
-                {
-                    eventId,
-                    entityKind: 'config',
-                    entityId: eventId,
-                    auditRef: `exam-event-network-config:${eventId}:1`,
-                    expectedRevision: 0,
-                    observedRevision: null,
-                    targetRevision: 1,
+        const committed = { revision: 1, auditRef: `exam-event-network-config:${eventId}:1` };
+        const result = await auditModule.runAuditedExamNetworkMutation(
+            { domainId: 'system', actorUid: 1 },
+            'config.assignPolicy',
+            {
+                eventId,
+                entityKind: 'config',
+                entityId: eventId,
+                auditRef: committed.auditRef,
+                expectedRevision: 0,
+                observedRevision: null,
+                targetRevision: 1,
+            },
+            async () => {
+                mutated = true;
+                return committed;
+            },
+            () => ({}),
+            {
+                add: async () => {
+                    throw new Error('audit unavailable');
                 },
-                async () => {
-                    mutated = true;
-                    return { revision: 1, auditRef: `exam-event-network-config:${eventId}:1` };
-                },
-                () => ({}),
-                {
-                    add: async () => {
-                        throw new Error('audit unavailable');
-                    },
-                    updateOne: async () => ({ matchedCount: 1 }),
-                },
-            );
-        } catch (caught) {
-            error = caught;
-        }
-        expect(error).to.have.property('message', 'audit unavailable');
-        expect(mutated).to.equal(false);
+            },
+        );
+        expect(mutated).to.equal(true);
+        expect(result).to.equal(committed);
     });
 
-    it('finalizes the audit as failed when a mutation returns the wrong canonical identity', async () => {
+    it('rejects a mutation that returns the wrong canonical identity without an audit finalize CAS', async () => {
         const writes: Array<Record<string, unknown>> = [];
         const auditRef = `exam-event-network-config:${eventId}:1`;
         let caught: unknown;
@@ -1118,10 +1110,9 @@ describe('Exam target resolver and audit boundaries', () => {
                 async () => ({ revision: 2, auditRef }),
                 () => ({}),
                 {
-                    add: async () => new ObjectId('66b800000000000000000799'),
-                    updateOne: async (_filter, update) => {
-                        writes.push(update.$set);
-                        return { matchedCount: 1 };
+                    add: async (data: Record<string, unknown> & { type: string }) => {
+                        writes.push(data);
+                        return new ObjectId('66b800000000000000000799');
                     },
                 },
             );
@@ -1129,7 +1120,7 @@ describe('Exam target resolver and audit boundaries', () => {
             caught = error;
         }
         expect(caught).to.have.property('message', `Exam network mutation returned an unexpected identity: ${auditRef}`);
-        expect(writes).to.have.length(1);
-        expect(writes[0]).to.include({ result: 'failed' });
+        expect(caught).not.to.be.instanceOf(AggregateError);
+        expect(writes).to.have.length(0);
     });
 });

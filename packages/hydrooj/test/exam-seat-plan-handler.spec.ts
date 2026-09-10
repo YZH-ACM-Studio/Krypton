@@ -79,4 +79,23 @@ describe('P2.4 roster and seat-plan HTTP boundary', () => {
         expect(source).to.include('logger.warn(\'Exam seat plan rejected reason=%s\'');
         expect(source).not.to.include('Invalid request:');
     });
+
+    it('lists historical roster and plan revisions from stored fields and only re-walks the latest plan layout', () => {
+        const getHandler = source.slice(source.indexOf('async get('), source.indexOf("@param('action'"));
+        expect(getHandler).not.to.include('for (const roster of rosters)');
+        expect(getHandler).not.to.include('for (const plan of plans)');
+        expect(getHandler).not.to.include('examClassroomService.get');
+        expect(getHandler).to.include('const latestRoster = rosters[0]');
+        expect(getHandler).to.include('const latestPlan = plans[0]');
+        expect(getHandler).to.include('assertExamRosterRevisionIntegrity(latestRoster)');
+        expect(getHandler).to.include('assertExamSeatPlanIntegrity(latestPlan)');
+        expect(getHandler).to.include('await this.assertStoredSeatPlanReferences(event, latestPlan)');
+        expect(getHandler).to.include('rosterRevisions: rosters.map((roster) => serializeRoster(roster, event.revision))');
+        expect(getHandler).to.include('seatPlans: plans.map((plan) => serializePlan(plan, event.revision))');
+        expect(source).to.include('examClassroomService.get(event.domainId, classroomRef.classroomId, true)');
+        expect(source).to.include('examClassroomService.layout(classroom, classroomRef.layoutRevision)');
+        expect(source).to.include('examSeatOperationalProfileService.getRevision');
+        expect(source).to.include("throw new ExamSeatPlanError('seat_plan_layout_drift')");
+        expect(source).to.include('examSeatOperationalProfileService.getCurrent(domainId, selectedClassroomId)');
+    });
 });

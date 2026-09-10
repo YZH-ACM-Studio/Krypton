@@ -403,23 +403,15 @@ export interface ExamRosterDrift {
     items: ExamRosterDriftItem[];
 }
 
-function resolvedRosterIdentity(roster: ResolvedExamRoster): string {
-    return sha256({
-        sourceFingerprint: roster.source.sourceFingerprint,
-        entries: rosterEntriesFingerprint(roster.entries),
-        exclusions: rosterExclusionsFingerprint(roster.exclusions),
-    });
-}
-
 async function currentTeamFacts(
     event: ExamEventDoc,
     roster: ExamRosterRevisionDoc,
 ): Promise<{ roster: ResolvedExamRoster; teams: Map<number, { teamId: string; teamRole: 'captain' | 'member' }> }> {
-    const before = await resolveCurrentExamRoster(event, roster);
+    const current = await resolveCurrentExamRoster(event, roster);
     const teams = new Map<number, { teamId: string; teamRole: 'captain' | 'member' }>();
-    if (event.type !== 'krypton' || !event.contestId) return { roster: before, teams };
+    if (event.type !== 'krypton' || !event.contestId) return { roster: current, teams };
     const context = await contestAudienceContext(event);
-    if (!context || context.participationMode !== 'team') return { roster: before, teams };
+    if (!context || context.participationMode !== 'team') return { roster: current, teams };
     if (roster.source.kind !== 'contestAudience') throw new ExamSeatPlanError('roster_source_changed');
     const contestTeams = await global.Hydro.model.contestTeam.listTeams(event.domainId, event.contestId);
     const teamIds = new Set<string>();
@@ -445,12 +437,10 @@ async function currentTeamFacts(
             teams.set(uid, { teamId, teamRole: uid === team.captainUid ? 'captain' : 'member' });
         }
     }
-    const after = await resolveCurrentExamRoster(event, roster);
-    if (resolvedRosterIdentity(before) !== resolvedRosterIdentity(after)) throw new ExamSeatPlanError('roster_source_changed');
-    if (teams.size !== after.entries.length || after.entries.some((entry) => !teams.has(entry.boundUserId))) {
+    if (teams.size !== current.entries.length || current.entries.some((entry) => !teams.has(entry.boundUserId))) {
         throw new ExamSeatPlanError('contest_team_roster_invalid');
     }
-    return { roster: after, teams };
+    return { roster: current, teams };
 }
 
 export async function inspectExamRosterDrift(

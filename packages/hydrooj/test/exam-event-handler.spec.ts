@@ -52,11 +52,13 @@ describe('ExamEvent HTTP boundary contracts', () => {
         expect(requestSource).to.include('empty_update');
     });
 
-    it('creates the audit intent before every mutation and finalizes the same fact', () => {
+    it('writes one success oplog after mutation and never fails the HTTP write because audit missed', () => {
         expect(source).to.include('runAuditedExamEventMutation(');
-        expect(auditSource).to.include("result: 'started'");
+        expect(auditSource).not.to.include("result: 'started'");
         expect(auditSource).to.include("result: 'success'");
         expect(auditSource).to.include("result: 'failed'");
+        expect(auditSource).not.to.include('matchedCount');
+        expect(auditSource).not.to.include('AggregateError');
         expect(auditSource).to.include('eventAuditSnapshot');
         expect(auditSource).to.include('changedEventFields');
     });
@@ -105,49 +107,40 @@ function event(patch: Partial<ExamEventDoc> = {}): ExamEventDoc {
 }
 
 describe('ExamEvent audited mutation boundary', () => {
-    it('does not mutate if the audit intent cannot be persisted', async () => {
+    it('returns the committed event when the success oplog write fails', async () => {
         let mutated = false;
-        const store = {
-            add: async () => {
-                throw new Error('audit unavailable');
+        const after = event({ lifecycle: 'scheduled', revision: 2, auditRef: 'exam-event:66b800000000000000000601:2' });
+        const result = await auditModule.runAuditedExamEventMutation(
+            { actorUid: 1, domainId: 'system' },
+            'schedule',
+            {
+                eventId: after._id,
+                expectedRevision: 1,
+                observedRevision: 1,
+                targetRevision: 2,
+                requestedFields: ['lifecycle'],
+                before: event(),
             },
-            updateOne: async () => ({ matchedCount: 1 }),
-        };
-        try {
-            await auditModule.runAuditedExamEventMutation(
-                { actorUid: 1, domainId: 'system' },
-                'schedule',
-                {
-                    eventId: event()._id,
-                    expectedRevision: 1,
-                    observedRevision: 1,
-                    targetRevision: 2,
-                    requestedFields: ['lifecycle'],
-                    before: event(),
+            async () => {
+                mutated = true;
+                return after;
+            },
+            {
+                add: async () => {
+                    throw new Error('audit unavailable');
                 },
-                async () => {
-                    mutated = true;
-                    return event({ lifecycle: 'scheduled', revision: 2 });
-                },
-                store,
-            );
-            expect.fail('expected audit failure');
-        } catch (error) {
-            expect(error).to.have.property('message', 'audit unavailable');
-        }
-        expect(mutated).to.equal(false);
+            },
+        );
+        expect(mutated).to.equal(true);
+        expect(result).to.equal(after);
     });
 
     it('records full canonical associations and the actual schedule/archive field change', async () => {
         const writes: Array<Record<string, unknown>> = [];
         const store = {
-            add: async (data: Record<string, unknown>) => {
+            add: async (data: Record<string, unknown> & { type: string }) => {
                 writes.push(data);
                 return new ObjectId('66b800000000000000000603');
-            },
-            updateOne: async (_filter: unknown, update: { $set: Record<string, unknown> }) => {
-                writes.push(update.$set);
-                return { matchedCount: 1 };
             },
         };
         const before = event();
@@ -166,6 +159,7 @@ describe('ExamEvent audited mutation boundary', () => {
             async () => after,
             store,
         );
+        expect(writes).to.have.length(1);
         expect(writes[0]).to.include({
             type: 'exam.event.schedule',
             operator: 1,
@@ -173,11 +167,10 @@ describe('ExamEvent audited mutation boundary', () => {
             observedRevision: 1,
             targetRevision: 2,
             auditRef: 'exam-event:66b800000000000000000601:2',
-            result: 'started',
+            result: 'success',
         });
-        expect(writes[1]).to.include({ result: 'success' });
-        expect(writes[1].changedFields).to.deep.equal(['lifecycle']);
-        expect(writes[1].after).to.deep.include({
+        expect(writes[0].changedFields).to.deep.equal(['lifecycle']);
+        expect(writes[0].after).to.deep.include({
             schoolId: '66b800000000000000000602',
             type: 'external',
             contestId: null,
@@ -191,13 +184,9 @@ describe('ExamEvent audited mutation boundary', () => {
         for (const expectedRevision of [1, 4]) {
             const writes: Array<Record<string, unknown>> = [];
             const store = {
-                add: async (data: Record<string, unknown>) => {
+                add: async (data: Record<string, unknown> & { type: string }) => {
                     writes.push(data);
                     return new ObjectId();
-                },
-                updateOne: async (_filter: unknown, update: { $set: Record<string, unknown> }) => {
-                    writes.push(update.$set);
-                    return { matchedCount: 1 };
                 },
             };
             const before = event({ revision: 3, auditRef: 'exam-event:66b800000000000000000601:3' });
@@ -221,14 +210,45 @@ describe('ExamEvent audited mutation boundary', () => {
                 expect.fail('expected revision conflict');
             } catch (error) {
                 expect(error).to.have.property('reason', 'revision_conflict');
+                expect(error).not.to.be.instanceOf(AggregateError);
             }
+            expect(writes).to.have.length(1);
             expect(writes[0]).to.include({
                 expectedRevision,
                 observedRevision: 3,
                 targetRevision: expectedRevision + 1,
                 auditRef: `exam-event:66b800000000000000000601:${expectedRevision + 1}`,
+                result: 'failed',
             });
-            expect(writes[1]).to.include({ result: 'failed' });
+        }
+    });
+
+    it('rethrows the mutation error when the failed oplog write also fails', async () => {
+        try {
+            await auditModule.runAuditedExamEventMutation(
+                { actorUid: 1, domainId: 'system' },
+                'update',
+                {
+                    eventId: event()._id,
+                    expectedRevision: 1,
+                    observedRevision: 3,
+                    targetRevision: 2,
+                    requestedFields: ['title'],
+                    before: event({ revision: 3, auditRef: 'exam-event:66b800000000000000000601:3' }),
+                },
+                async () => {
+                    throw new eventModel.ExamEventError('revision_conflict');
+                },
+                {
+                    add: async () => {
+                        throw new Error('audit unavailable');
+                    },
+                },
+            );
+            expect.fail('expected revision conflict');
+        } catch (error) {
+            expect(error).to.have.property('reason', 'revision_conflict');
+            expect(error).not.to.be.instanceOf(AggregateError);
         }
     });
 

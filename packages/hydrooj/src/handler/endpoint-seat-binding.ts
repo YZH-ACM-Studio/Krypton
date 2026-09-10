@@ -11,7 +11,6 @@ import {
     ExamSeatOperationalProfileView,
     examSeatOperationalProfileService,
 } from '../model/exam-seat-operational-profile';
-import { preflightExamNetworkOnVigil } from '../service/vigil-bridge';
 import {
     EndpointSeatBindingDoc,
     EndpointSeatBindingError,
@@ -221,23 +220,9 @@ class EndpointSeatClassroomStateHandler extends EndpointSeatAdminHandler {
             .filter((binding) => binding.status === 'active' && binding.endpointId)
             .map((binding) => binding.endpointId!)
             .sort();
-        let endpointPreflight: {
-            state: 'available' | 'not-required' | 'unavailable';
-            items: Awaited<ReturnType<typeof preflightExamNetworkOnVigil>>;
-        };
-        if (!endpointIds.length) endpointPreflight = { state: 'not-required', items: [] };
-        else {
-            try {
-                endpointPreflight = { state: 'available', items: await preflightExamNetworkOnVigil(endpointIds) };
-            } catch (error) {
-                logger.warn(
-                    'Endpoint seat live status unavailable classroom=%s stage=preflight reason=%s',
-                    classroomId.toHexString(),
-                    error instanceof Error ? error.message : 'unknown_error',
-                );
-                endpointPreflight = { state: 'unavailable', items: [] };
-            }
-        }
+        const endpointPreflight: { state: 'available' | 'not-required' | 'unavailable'; items: unknown[] } = endpointIds.length
+            ? { state: 'unavailable', items: [] }
+            : { state: 'not-required', items: [] };
         this.response.body = {
             classroom: {
                 classroomId: classroom._id.toHexString(),

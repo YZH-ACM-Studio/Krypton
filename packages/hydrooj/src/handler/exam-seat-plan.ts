@@ -164,6 +164,62 @@ abstract class ExamSeatPlanBaseHandler extends Handler {
             throw new PermissionError(PERM.PERM_USERBIND_MANAGE_STUDENTS);
         }
     }
+
+    protected async assertStoredSeatPlanReferences(event: ExamEventDoc, plan: ExamSeatPlanDoc): Promise<void> {
+        const classroomRefs = isExamSeatPlanV2(plan)
+            ? plan.classrooms
+            : [
+                  {
+                      classroomId: plan.classroomId,
+                      layoutRevision: plan.layoutRevision,
+                      layoutFingerprint: plan.layoutFingerprint,
+                      profileRevision: null,
+                      profileFingerprint: null,
+                      candidateSeatIds: plan.candidateSeatIds,
+                  },
+              ];
+        for (const classroomRef of classroomRefs) {
+            const classroom = await examClassroomService.get(event.domainId, classroomRef.classroomId, true);
+            if (!classroom || !classroom.schoolId.equals(plan.schoolId)) throw new ExamSeatPlanError('seat_plan_classroom_missing');
+            const layout = examClassroomService.layout(classroom, classroomRef.layoutRevision).snapshot;
+            if (layout.fingerprint !== classroomRef.layoutFingerprint) throw new ExamSeatPlanError('seat_plan_layout_drift');
+            const seatIds = new Set(layout.seats.map((seat) => seat.sourceSeatId));
+            if (classroomRef.candidateSeatIds.some((seatId) => !seatIds.has(seatId))) throw new ExamSeatPlanError('seat_plan_seat_missing');
+            if (classroomRef.profileRevision !== null) {
+                const profile = await examSeatOperationalProfileService.getRevision(
+                    event.domainId,
+                    classroomRef.classroomId,
+                    classroomRef.layoutRevision,
+                    classroomRef.profileRevision,
+                );
+                if (!profile || profile.fingerprint !== classroomRef.profileFingerprint || !profile.schoolId.equals(plan.schoolId)) {
+                    throw new ExamSeatPlanError('seat_plan_profile_missing');
+                }
+            }
+        }
+        const candidateCount = classroomRefs.reduce((sum, classroom) => sum + classroom.candidateSeatIds.length, 0);
+        if (plan.roster) {
+            const roster = await examSeatPlanService.getRosterRevision(event.domainId, event._id, plan.roster.revision);
+            if (!roster || !roster._id.equals(plan.roster.rosterId) || roster.fingerprint !== plan.roster.fingerprint) {
+                throw new ExamSeatPlanError('seat_plan_roster_missing');
+            }
+            const expectedDiagnostics =
+                roster.entries.length > candidateCount
+                    ? [
+                          {
+                              code: 'insufficient_seats',
+                              requiredSeatCount: roster.entries.length,
+                              availableSeatCount: candidateCount,
+                          },
+                      ]
+                    : [];
+            if (JSON.stringify(plan.diagnostics) !== JSON.stringify(expectedDiagnostics)) {
+                throw new ExamSeatPlanError('seat_plan_diagnostic_drift');
+            }
+        } else if (plan.diagnostics.length) {
+            throw new ExamSeatPlanError('seat_plan_diagnostic_drift');
+        }
+    }
 }
 
 class ExamSeatPlanCollectionHandler extends ExamSeatPlanBaseHandler {
@@ -175,66 +231,16 @@ class ExamSeatPlanCollectionHandler extends ExamSeatPlanBaseHandler {
             examSeatPlanService.listSeatPlans(event.domainId, eventId).toArray(),
             getExamContestAudienceState(event),
         ]);
-        for (const roster of rosters) {
-            assertExamRosterRevisionIntegrity(roster);
-            if (!roster.schoolId.equals(event.schoolId)) throw new ExamSeatPlanError('roster_school_mismatch');
+        const latestRoster = rosters[0];
+        if (latestRoster) {
+            assertExamRosterRevisionIntegrity(latestRoster);
+            if (!latestRoster.schoolId.equals(event.schoolId)) throw new ExamSeatPlanError('roster_school_mismatch');
         }
-        for (const plan of plans) {
-            assertExamSeatPlanIntegrity(plan);
-            if (!plan.schoolId.equals(event.schoolId)) throw new ExamSeatPlanError('seat_plan_school_mismatch');
-            const classroomRefs = isExamSeatPlanV2(plan)
-                ? plan.classrooms
-                : [
-                      {
-                          classroomId: plan.classroomId,
-                          layoutRevision: plan.layoutRevision,
-                          layoutFingerprint: plan.layoutFingerprint,
-                          profileRevision: null,
-                          profileFingerprint: null,
-                          candidateSeatIds: plan.candidateSeatIds,
-                      },
-                  ];
-            for (const classroomRef of classroomRefs) {
-                const classroom = await examClassroomService.get(event.domainId, classroomRef.classroomId, true);
-                if (!classroom || !classroom.schoolId.equals(plan.schoolId)) throw new ExamSeatPlanError('seat_plan_classroom_missing');
-                const layout = examClassroomService.layout(classroom, classroomRef.layoutRevision).snapshot;
-                if (layout.fingerprint !== classroomRef.layoutFingerprint) throw new ExamSeatPlanError('seat_plan_layout_drift');
-                const seatIds = new Set(layout.seats.map((seat) => seat.sourceSeatId));
-                if (classroomRef.candidateSeatIds.some((seatId) => !seatIds.has(seatId))) throw new ExamSeatPlanError('seat_plan_seat_missing');
-                if (classroomRef.profileRevision !== null) {
-                    const profile = await examSeatOperationalProfileService.getRevision(
-                        event.domainId,
-                        classroomRef.classroomId,
-                        classroomRef.layoutRevision,
-                        classroomRef.profileRevision,
-                    );
-                    if (!profile || profile.fingerprint !== classroomRef.profileFingerprint || !profile.schoolId.equals(plan.schoolId)) {
-                        throw new ExamSeatPlanError('seat_plan_profile_missing');
-                    }
-                }
-            }
-            const candidateCount = classroomRefs.reduce((sum, classroom) => sum + classroom.candidateSeatIds.length, 0);
-            if (plan.roster) {
-                const roster = await examSeatPlanService.getRosterRevision(event.domainId, eventId, plan.roster.revision);
-                if (!roster || !roster._id.equals(plan.roster.rosterId) || roster.fingerprint !== plan.roster.fingerprint) {
-                    throw new ExamSeatPlanError('seat_plan_roster_missing');
-                }
-                const expectedDiagnostics =
-                    roster.entries.length > candidateCount
-                        ? [
-                              {
-                                  code: 'insufficient_seats',
-                                  requiredSeatCount: roster.entries.length,
-                                  availableSeatCount: candidateCount,
-                              },
-                          ]
-                        : [];
-                if (JSON.stringify(plan.diagnostics) !== JSON.stringify(expectedDiagnostics)) {
-                    throw new ExamSeatPlanError('seat_plan_diagnostic_drift');
-                }
-            } else if (plan.diagnostics.length) {
-                throw new ExamSeatPlanError('seat_plan_diagnostic_drift');
-            }
+        const latestPlan = plans[0];
+        if (latestPlan) {
+            assertExamSeatPlanIntegrity(latestPlan);
+            if (!latestPlan.schoolId.equals(event.schoolId)) throw new ExamSeatPlanError('seat_plan_school_mismatch');
+            await this.assertStoredSeatPlanReferences(event, latestPlan);
         }
         this.response.body = {
             event: {

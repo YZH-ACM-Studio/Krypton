@@ -24,7 +24,6 @@ export interface ExamEventAuditInput {
 
 export interface ExamEventAuditStore {
     add(data: Record<string, unknown> & { type: string }): Promise<ObjectId>;
-    updateOne(filter: { _id: ObjectId }, update: { $set: Record<string, unknown> }): Promise<{ matchedCount: number }>;
 }
 
 export const AUDITED_EVENT_FIELDS = [
@@ -71,19 +70,16 @@ function productionAuditStore(): ExamEventAuditStore {
     const oplog = require('./oplog') as typeof import('./oplog');
     return {
         add: (data) => oplog.add(data),
-        updateOne: (filter, update) => oplog.coll.updateOne(filter, update),
     };
 }
 
-export async function runAuditedExamEventMutation(
+function examEventAuditPayload(
     context: ExamEventAuditContext,
     operation: 'create' | 'update' | 'schedule' | 'archive',
     input: ExamEventAuditInput,
-    work: () => Promise<ExamEventDoc>,
-    store: ExamEventAuditStore = productionAuditStore(),
-): Promise<ExamEventDoc> {
-    const auditRef = examEventAuditRef(input.eventId, input.targetRevision);
-    const auditId = await store.add({
+    auditRef: string,
+) {
+    return {
         type: `exam.event.${operation}`,
         time: new Date(),
         domainId: context.domainId,
@@ -99,21 +95,53 @@ export async function runAuditedExamEventMutation(
         auditRef,
         requestedFields: [...input.requestedFields],
         before: input.before ? eventAuditSnapshot(input.before) : null,
-        result: 'started',
-    });
+    };
+}
+
+async function writeExamEventAudit(
+    store: ExamEventAuditStore,
+    data: Record<string, unknown> & { type: string },
+    eventId: ObjectId,
+    auditRef: string,
+    stage: 'success' | 'failed',
+): Promise<void> {
+    try {
+        await store.add(data);
+    } catch (auditError) {
+        logger.error(
+            'ExamEvent audit write failed event=%s audit=%s stage=%s %s',
+            eventId.toHexString(),
+            auditRef,
+            stage,
+            auditError instanceof Error ? auditError.stack || auditError.message : String(auditError),
+        );
+    }
+}
+
+export async function runAuditedExamEventMutation(
+    context: ExamEventAuditContext,
+    operation: 'create' | 'update' | 'schedule' | 'archive',
+    input: ExamEventAuditInput,
+    work: () => Promise<ExamEventDoc>,
+    store: ExamEventAuditStore = productionAuditStore(),
+): Promise<ExamEventDoc> {
+    const auditRef = examEventAuditRef(input.eventId, input.targetRevision);
     let event: ExamEventDoc;
     try {
         event = await work();
     } catch (error) {
-        try {
-            const finalized = await store.updateOne(
-                { _id: auditId },
-                { $set: { result: 'failed', finishedAt: new Date(), error: safeAuditFailure(error) } },
-            );
-            if (finalized.matchedCount !== 1) throw new Error(`ExamEvent audit ${auditRef} is missing while finalizing failure`);
-        } catch (auditError) {
-            throw new AggregateError([error, auditError], `ExamEvent mutation and audit finalization failed: ${auditRef}`);
-        }
+        await writeExamEventAudit(
+            store,
+            {
+                ...examEventAuditPayload(context, operation, input, auditRef),
+                result: 'failed',
+                finishedAt: new Date(),
+                error: safeAuditFailure(error),
+            },
+            input.eventId,
+            auditRef,
+            'failed',
+        );
         throw error;
     }
     if (event.revision !== input.targetRevision || event.auditRef !== auditRef) {
@@ -127,20 +155,18 @@ export async function runAuditedExamEventMutation(
         );
         throw new Error(`ExamEvent mutation returned an unexpected revision identity: ${auditRef}`);
     }
-    const finalized = await store.updateOne(
-        { _id: auditId },
+    await writeExamEventAudit(
+        store,
         {
-            $set: {
-                result: 'success',
-                finishedAt: new Date(),
-                changedFields: changedEventFields(input.before, event),
-                after: eventAuditSnapshot(event),
-            },
+            ...examEventAuditPayload(context, operation, input, auditRef),
+            result: 'success',
+            finishedAt: new Date(),
+            changedFields: changedEventFields(input.before, event),
+            after: eventAuditSnapshot(event),
         },
+        input.eventId,
+        auditRef,
+        'success',
     );
-    if (finalized.matchedCount !== 1) {
-        logger.error('ExamEvent audit finalization missing event=%s audit=%s stage=success', input.eventId.toHexString(), auditRef);
-        throw new Error(`ExamEvent audit ${auditRef} is missing while finalizing success`);
-    }
     return event;
 }

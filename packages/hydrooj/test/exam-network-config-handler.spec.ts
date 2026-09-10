@@ -45,11 +45,13 @@ describe('Exam network control HTTP contracts', () => {
         expect(eventSource).to.include('withExamEventBoundary(domainId, eventId');
     });
 
-    it('creates an audit intent before every write and logs immutable identities without endpoint commands', () => {
+    it('writes one success oplog after mutation and logs immutable identities without endpoint commands', () => {
         expect(source).to.include('runAuditedExamNetworkMutation(');
-        expect(auditSource).to.include("result: 'started'");
+        expect(auditSource).not.to.include("result: 'started'");
         expect(auditSource).to.include("result: 'success'");
         expect(auditSource).to.include("result: 'failed'");
+        expect(auditSource).not.to.include('matchedCount');
+        expect(auditSource).not.to.include('AggregateError');
         expect(auditSource).to.include('fingerprint: input.fingerprint');
         expect(auditSource).to.include('targetCount: input.targetCount');
         expect(source).to.include('policyTemplateAuditFacts(action, template)');

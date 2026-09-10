@@ -306,29 +306,14 @@ function workflowFingerprint(input: Omit<ExamPreloginWorkflowSnapshot, 'fingerpr
             hardEndAt: input.network.hardEndAt.toISOString(),
             ready: input.network.ready,
             reason: input.network.reason,
-            appliedCount: input.network.appliedCount,
-            failedCount: input.network.failedCount,
-            pendingCount: input.network.pendingCount,
+            missingPreloginEndpointIds: input.network.missingPreloginEndpointIds,
             preloginEndpointCount: input.network.preloginEndpointCount,
             coveredPreloginCount: input.network.coveredPreloginCount,
-            missingPreloginEndpointIds: input.network.missingPreloginEndpointIds,
         },
         monitoring: input.monitoring.items.map((item) => ({
             endpointId: item.endpointId,
             ready: item.ready,
             reason: item.reason,
-            credentialStatus: item.credentialStatus,
-            online: item.online,
-            compatible: item.compatible,
-            serviceVersion: item.serviceVersion,
-            protocolVersion: item.protocolVersion,
-            capabilities: [...item.capabilities]
-                .map((capability) => ({
-                    name: capability.name,
-                    version: capability.version,
-                    commands: [...capability.commands].sort(canonicalCompare),
-                }))
-                .sort((left, right) => canonicalCompare(`${left.name}\0${left.version}`, `${right.name}\0${right.version}`)),
         })),
     });
 }

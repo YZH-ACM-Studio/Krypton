@@ -429,7 +429,7 @@ abstract class ExamSeatAssignmentBaseHandler extends Handler {
         });
     }
 
-    protected async sourceV2(event: ExamEventDoc, seatPlanRevision: number): Promise<AssignmentV2Source> {
+    protected async sourceV2(event: ExamEventDoc, seatPlanRevision: number, liveStatus = false): Promise<AssignmentV2Source> {
         const domainId = String(this.domain._id);
         if (event.type === 'krypton' && (await getExamContestAudienceState(event)) !== 'fixed') {
             throw new ExamSeatAssignmentError('assignment_roster_source_changed');
@@ -505,7 +505,7 @@ abstract class ExamSeatAssignmentBaseHandler extends Handler {
         const endpointIds = seatFacts.flatMap((fact) => (fact.endpointId ? [fact.endpointId] : []));
         if (new Set(endpointIds).size !== endpointIds.length) throw new ExamSeatAssignmentError('assignment_endpoint_duplicate');
         let onlineByEndpoint = new Map<string, boolean>();
-        if (endpointIds.length) {
+        if (liveStatus && endpointIds.length) {
             try {
                 const items = await preflightExamNetworkOnVigil(endpointIds);
                 onlineByEndpoint = new Map(items.map((item) => [item.endpointId, item.online]));
@@ -691,9 +691,10 @@ class ExamSeatAssignmentCollectionHandler extends ExamSeatAssignmentBaseHandler 
             this.rosterGroups(event),
             examClassroomService.listDomain(domainId, false, 500).toArray(),
         ]);
-        for (const assignment of assignments) {
-            assertExamSeatAssignmentIntegrity(assignment);
-            await this.assertStoredReferences(event, assignment);
+        const latestAssignment = assignments[0];
+        if (latestAssignment) {
+            assertExamSeatAssignmentIntegrity(latestAssignment);
+            await this.assertStoredReferences(event, latestAssignment);
         }
         let publishedAssignment: ExamSeatAssignmentRevisionDoc | null = null;
         if (publication) {
@@ -705,7 +706,7 @@ class ExamSeatAssignmentCollectionHandler extends ExamSeatAssignmentBaseHandler 
             ) {
                 throw new ExamSeatAssignmentError('assignment_publication_reference_drift');
             }
-            if (!assignments.some((assignment) => assignment._id.equals(published._id))) await this.assertStoredReferences(event, published);
+            if (!latestAssignment || !latestAssignment._id.equals(published._id)) await this.assertStoredReferences(event, published);
             publishedAssignment = published;
         }
         const publishedRosterDrift =
@@ -745,29 +746,15 @@ class ExamSeatAssignmentCollectionHandler extends ExamSeatAssignmentBaseHandler 
             }
         }
         let currentSource: AssignmentDisplaySource | null = null;
-        if (assignments.length) {
-            currentSource = isExamSeatAssignmentV2(assignments[0])
-                ? this.displaySourceFromV2(assignments[0])
-                : this.displaySourceFromV1(await this.source(event, assignments[0].seatPlan.revision, false));
+        if (latestAssignment) {
+            currentSource = isExamSeatAssignmentV2(latestAssignment)
+                ? this.displaySourceFromV2(latestAssignment)
+                : this.displaySourceFromV1(await this.source(event, latestAssignment.seatPlan.revision, false));
         } else if (latestPlanSource) currentSource = this.displaySourceFromV1(latestPlanSource);
         const endpointIds = currentSource?.seats.flatMap((seat) => (seat.endpointId ? [seat.endpointId] : [])) || [];
-        let endpointPreflight: { state: 'available' | 'not-required' | 'unavailable'; items: unknown[] };
-        if (!endpointIds.length) endpointPreflight = { state: 'not-required', items: [] };
-        else {
-            try {
-                endpointPreflight = { state: 'available', items: await preflightExamNetworkOnVigil(endpointIds) };
-            } catch (error) {
-                const failure = classifyVigilBridgeFailure(error);
-                logger.warn(
-                    'Exam seat assignment live status unavailable event=%s stage=preflight reason=%s errorName=%s httpStatus=%s',
-                    eventId.toHexString(),
-                    failure.reason,
-                    failure.errorName,
-                    failure.httpStatus ?? '-',
-                );
-                endpointPreflight = { state: 'unavailable', items: [] };
-            }
-        }
+        const endpointPreflight: { state: 'available' | 'not-required' | 'unavailable'; items: unknown[] } = endpointIds.length
+            ? { state: 'unavailable', items: [] }
+            : { state: 'not-required', items: [] };
         this.response.body = {
             assignments: assignments.map((assignment) => serializeAssignment(assignment, publication?.assignment.revision || null)),
             publication: publication
@@ -849,7 +836,7 @@ class ExamSeatAssignmentCollectionHandler extends ExamSeatAssignmentBaseHandler 
                     ) {
                         throw new ExamSeatAssignmentError('assignment_v2_not_current');
                     }
-                    const source = await this.sourceV2(current, assignment.seatPlan.revision);
+                    const source = await this.sourceV2(current, assignment.seatPlan.revision, true);
                     this.assertCurrentV2Source(assignment, source);
                     return examSeatAssignmentService.publishRevision({
                         domainId,
@@ -894,7 +881,7 @@ class ExamSeatAssignmentCollectionHandler extends ExamSeatAssignmentBaseHandler 
                         if ((latest?.revision || 0) !== expectedPreviousRevision) {
                             throw new ExamSeatAssignmentError('assignment_revision_conflict');
                         }
-                        const source = await this.sourceV2(current, seatPlanRevision);
+                        const source = await this.sourceV2(current, seatPlanRevision, true);
                         const samePlan = Boolean(
                             latest &&
                             isExamSeatAssignmentV2(latest) &&
@@ -940,7 +927,7 @@ class ExamSeatAssignmentCollectionHandler extends ExamSeatAssignmentBaseHandler 
                         ) {
                             throw new ExamSeatAssignmentError('seat_plan_v2_not_current');
                         }
-                        const source = await this.sourceV2(current, base.seatPlan.revision);
+                        const source = await this.sourceV2(current, base.seatPlan.revision, true);
                         this.assertCurrentV2Source(base, source);
                         let lockedAssignments: ExamSeatAssignmentV2Mapping[];
                         let manualAssignments: ExamSeatAssignmentV2Mapping[];

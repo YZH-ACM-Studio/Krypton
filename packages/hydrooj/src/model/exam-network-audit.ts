@@ -38,7 +38,6 @@ export interface ExamNetworkAuditResult {
 
 export interface ExamNetworkAuditStore {
     add(data: Record<string, unknown> & { type: string }): Promise<ObjectId>;
-    updateOne(filter: { _id: ObjectId }, update: { $set: Record<string, unknown> }): Promise<{ matchedCount: number }>;
 }
 
 export function policyTemplateAuditFacts(action: 'archive' | 'publish' | 'saveDraft', template: ExamPolicyTemplateDoc) {
@@ -74,7 +73,6 @@ function productionAuditStore(): ExamNetworkAuditStore {
     const oplog = require('./oplog') as typeof import('./oplog');
     return {
         add: (data) => oplog.add(data),
-        updateOne: (filter, update) => oplog.coll.updateOne(filter, update),
     };
 }
 
@@ -85,15 +83,8 @@ function safeFailure(error: unknown) {
     };
 }
 
-export async function runAuditedExamNetworkMutation<T extends ExamNetworkAuditResult>(
-    context: ExamNetworkAuditContext,
-    operation: string,
-    input: ExamNetworkAuditInput,
-    work: () => Promise<T>,
-    resultFacts: (result: T) => Record<string, unknown>,
-    store: ExamNetworkAuditStore = productionAuditStore(),
-): Promise<T> {
-    const auditId = await store.add({
+function examNetworkAuditPayload(context: ExamNetworkAuditContext, operation: string, input: ExamNetworkAuditInput) {
+    return {
         type: `exam.network.${operation}`,
         time: new Date(),
         domainId: context.domainId,
@@ -111,21 +102,53 @@ export async function runAuditedExamNetworkMutation<T extends ExamNetworkAuditRe
         targetRevision: input.targetRevision,
         fingerprint: input.fingerprint,
         targetCount: input.targetCount,
-        result: 'started',
-    });
+    };
+}
+
+async function writeExamNetworkAudit(
+    store: ExamNetworkAuditStore,
+    data: Record<string, unknown> & { type: string },
+    eventId: ObjectId,
+    auditRef: string,
+    stage: 'success' | 'failed',
+): Promise<void> {
+    try {
+        await store.add(data);
+    } catch (auditError) {
+        logger.error(
+            'Exam network audit write failed event=%s audit=%s stage=%s %s',
+            eventId.toHexString(),
+            auditRef,
+            stage,
+            auditError instanceof Error ? auditError.stack || auditError.message : String(auditError),
+        );
+    }
+}
+
+export async function runAuditedExamNetworkMutation<T extends ExamNetworkAuditResult>(
+    context: ExamNetworkAuditContext,
+    operation: string,
+    input: ExamNetworkAuditInput,
+    work: () => Promise<T>,
+    resultFacts: (result: T) => Record<string, unknown>,
+    store: ExamNetworkAuditStore = productionAuditStore(),
+): Promise<T> {
     let result: T;
     try {
         result = await work();
     } catch (error) {
-        try {
-            const finalized = await store.updateOne(
-                { _id: auditId },
-                { $set: { result: 'failed', error: safeFailure(error), finishedAt: new Date() } },
-            );
-            if (finalized.matchedCount !== 1) throw new Error(`Exam network audit ${input.auditRef} is missing`);
-        } catch (auditError) {
-            throw new AggregateError([error, auditError], `Exam network mutation and audit finalization failed: ${input.auditRef}`);
-        }
+        await writeExamNetworkAudit(
+            store,
+            {
+                ...examNetworkAuditPayload(context, operation, input),
+                result: 'failed',
+                error: safeFailure(error),
+                finishedAt: new Date(),
+            },
+            input.eventId,
+            input.auditRef,
+            'failed',
+        );
         throw error;
     }
     if (result.revision !== input.targetRevision || result.auditRef !== input.auditRef) {
@@ -138,20 +161,19 @@ export async function runAuditedExamNetworkMutation<T extends ExamNetworkAuditRe
             result.revision,
             result.auditRef,
         );
-        const identityError = new Error(`Exam network mutation returned an unexpected identity: ${input.auditRef}`);
-        const finalized = await store.updateOne(
-            { _id: auditId },
-            { $set: { result: 'failed', error: safeFailure(identityError), finishedAt: new Date() } },
-        );
-        if (finalized.matchedCount !== 1) {
-            throw new AggregateError([identityError, new Error(`Exam network audit ${input.auditRef} is missing`)], identityError.message);
-        }
-        throw identityError;
+        throw new Error(`Exam network mutation returned an unexpected identity: ${input.auditRef}`);
     }
-    const finalized = await store.updateOne({ _id: auditId }, { $set: { result: 'success', finishedAt: new Date(), ...resultFacts(result) } });
-    if (finalized.matchedCount !== 1) {
-        logger.error('Exam network audit finalization missing event=%s audit=%s', input.eventId.toHexString(), input.auditRef);
-        throw new Error(`Exam network audit ${input.auditRef} is missing`);
-    }
+    await writeExamNetworkAudit(
+        store,
+        {
+            ...examNetworkAuditPayload(context, operation, input),
+            result: 'success',
+            finishedAt: new Date(),
+            ...resultFacts(result),
+        },
+        input.eventId,
+        input.auditRef,
+        'success',
+    );
     return result;
 }

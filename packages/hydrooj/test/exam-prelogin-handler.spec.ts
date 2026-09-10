@@ -38,6 +38,16 @@ describe('P2.6 exam pre-login HTTP boundaries', () => {
         expect(source).to.include('validateExamPreloginRetryWorkflow');
     });
 
+    it('does not require userbind student-management, re-assert canonical events, or create indexes on every request', () => {
+        const source = readFileSync(sourcePath, 'utf8');
+        expect(source).to.include('PERM.PERM_CREATE_EXAM_EVENT');
+        expect(source).to.include('isExamInfrastructureAdmin(this.user)');
+        expect(source).to.include('assertCanManageExamEvent(domainId, event, this.user)');
+        expect(source).not.to.include('PERM_USERBIND_MANAGE_STUDENTS');
+        expect(source).not.to.include('assertCanonicalEvent');
+        expect(source).not.to.include('ensureIndexes()');
+    });
+
     it('exposes the P2.14 compatibility gate and applies it only before a new v2 batch is written', () => {
         const source = readFileSync(sourcePath, 'utf8');
         expect(source).to.include('v2WriterEnabled: isExamPreloginV2WriterEnabled()');

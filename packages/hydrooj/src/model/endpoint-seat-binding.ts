@@ -526,6 +526,60 @@ export function assertEndpointSeatBindingIntegrity(value: unknown): asserts valu
     }
 }
 
+const BINDING_LIST_REQUIRED_KEYS = [
+    '_id',
+    'classroomId',
+    'createdAt',
+    'createdBy',
+    'domainId',
+    'history',
+    'revision',
+    'schoolId',
+    'sourceSeatId',
+    'status',
+    'updatedAt',
+    'updatedBy',
+] as const;
+
+function assertEndpointSeatBindingListRow(
+    value: unknown,
+    expectedDomainId: string,
+    expectedClassroomId: ObjectId,
+): asserts value is EndpointSeatBindingDoc {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new EndpointSeatBindingError('binding_canonical_invalid');
+    const binding = value as Record<string, unknown>;
+    const active = binding.status === 'active';
+    if (!active && binding.status !== 'unbound') throw new EndpointSeatBindingError('binding_canonical_invalid');
+    if (BINDING_LIST_REQUIRED_KEYS.some((key) => !Object.hasOwn(binding, key)) || (active && !Object.hasOwn(binding, 'endpointId'))) {
+        throw new EndpointSeatBindingError('binding_canonical_invalid');
+    }
+    assertObjectId(binding._id, 'binding_id');
+    if (canonicalDomainId(binding.domainId) !== expectedDomainId) throw new EndpointSeatBindingError('binding_canonical_invalid');
+    assertObjectId(binding.schoolId, 'school_id');
+    assertObjectId(binding.classroomId, 'classroom_id');
+    if (!binding.classroomId.equals(expectedClassroomId)) throw new EndpointSeatBindingError('binding_canonical_invalid');
+    canonicalText(binding.sourceSeatId, 'source_seat');
+    if (active) canonicalEndpointId(binding.endpointId);
+    assertPositiveInteger(binding.revision, 'binding_revision');
+    assertUid(binding.createdBy);
+    assertUid(binding.updatedBy);
+    assertDate(binding.createdAt, 'binding_created_at');
+    assertDate(binding.updatedAt, 'binding_updated_at');
+    if (!Array.isArray(binding.history)) throw new EndpointSeatBindingError('binding_canonical_invalid');
+}
+
+function assertClassroomBindingListUniqueness(rows: EndpointSeatBindingDoc[]): void {
+    const seats = new Set<string>();
+    const endpoints = new Set<string>();
+    for (const row of rows) {
+        if (seats.has(row.sourceSeatId)) throw new EndpointSeatBindingError('binding_uniqueness_conflict');
+        seats.add(row.sourceSeatId);
+        if (row.status !== 'active') continue;
+        if (!row.endpointId || endpoints.has(row.endpointId)) throw new EndpointSeatBindingError('binding_uniqueness_conflict');
+        endpoints.add(row.endpointId);
+    }
+}
+
 function assertPairingEntry(value: unknown): asserts value is EndpointSeatPairingEntry {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new EndpointSeatBindingError('pairing_entry_invalid');
     const entry = value as Record<string, unknown>;
@@ -1044,7 +1098,11 @@ export class EndpointSeatBindingService {
         );
         for (const sourceSeatId of sourceSeatIds) {
             const binding = bindingsBySeat.get(sourceSeatId);
-            if (binding && now < binding.updatedAt) throw new EndpointSeatBindingError('clock_rollback');
+            if (binding) {
+                assertEndpointSeatBindingIntegrity(binding);
+                await this.assertBindingReference(binding);
+                if (now < binding.updatedAt) throw new EndpointSeatBindingError('clock_rollback');
+            }
             const replacement = replacementSeatIds.includes(sourceSeatId);
             if (replacement) {
                 if (!binding || binding.status !== 'active') throw new EndpointSeatBindingError('seat_not_bound');
@@ -1745,14 +1803,8 @@ export class EndpointSeatBindingService {
         canonicalDomainId(domainId);
         assertObjectId(classroomId, 'classroom_id');
         const rows = await this.bindings.find({ domainId, classroomId }).toArray();
-        rows.forEach(assertEndpointSeatBindingIntegrity);
-        if (rows.length) {
-            await this.assertSeatReferences(
-                domainId,
-                classroomId,
-                rows.map((binding) => ({ schoolId: binding.schoolId, sourceSeatId: binding.sourceSeatId })),
-            );
-        }
+        for (const row of rows) assertEndpointSeatBindingListRow(row, domainId, classroomId);
+        assertClassroomBindingListUniqueness(rows);
         rows.sort((left, right) => left.sourceSeatId.localeCompare(right.sourceSeatId));
         return rows;
     }

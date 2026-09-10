@@ -711,7 +711,7 @@ describe('P2.2 endpoint seat binding canonical and pairing state machine', () =>
         expect(result.status).to.equal('bound');
     });
 
-    it('fails every canonical read when a binding or pairing window no longer resolves to the current school seat', async () => {
+    it('fails mutation and identity reads when a binding or pairing window no longer resolves to the current school seat', async () => {
         own('ep_read_integrity_1234');
         const service = makeService();
         await service.ensureIndexes();
@@ -725,7 +725,9 @@ describe('P2.2 endpoint seat binding canonical and pairing state machine', () =>
         const window = (await windows.findOne({ _id: opened.window._id }))!;
 
         await bindings.replaceOne({ _id: binding._id }, { ...binding, schoolId: new ObjectId(schoolTwo) });
-        await rejectReason(service.listClassroomBindings('system', classroomOne), 'seat_school_mismatch');
+        const listedWrongSchool = await service.listClassroomBindings('system', classroomOne);
+        expect(listedWrongSchool).to.have.length(1);
+        expect(listedWrongSchool[0].schoolId.equals(schoolTwo)).to.equal(true);
         await rejectReason(service.getBindingById('system', binding._id), 'seat_school_mismatch');
         await bindings.replaceOne({ _id: binding._id }, binding);
 
@@ -734,9 +736,91 @@ describe('P2.2 endpoint seat binding canonical and pairing state machine', () =>
         await windows.replaceOne({ _id: window._id }, window);
 
         seats.delete(seatKey('system', classroomOne, 'seat-1'));
-        await rejectReason(service.listClassroomBindings('system', classroomOne), 'seat_not_found');
+        expect((await service.listClassroomBindings('system', classroomOne)).map((row) => row.sourceSeatId)).to.deep.equal(['seat-1']);
         await rejectReason(service.getBindingById('system', binding._id), 'seat_not_found');
         await rejectReason(service.getPairingWindow('system', classroomOne), 'seat_not_found');
+    });
+
+    it('lists classroom bindings by active identity without replaying history or rejecting extra keys', async () => {
+        own('ep_list_identity_1234');
+        const service = makeService();
+        await service.ensureIndexes();
+        const opened = await openWindow(service, ['seat-1']);
+        await service.redeemPairingCode({
+            endpointId: 'ep_list_identity_1234',
+            pairingCode: opened.codes[0].code,
+            requestId: 'endpoint_list_identity_01',
+        });
+        const binding = (await bindings.findOne({ sourceSeatId: 'seat-1' }))!;
+        await bindings.replaceOne({ _id: binding._id }, {
+            ...binding,
+            extra: true,
+            history: [binding.history[0], { ...binding.history[0], revision: 1 }],
+        } as EndpointSeatBindingDoc & { extra: true });
+        const listed = await service.listClassroomBindings('system', classroomOne);
+        expect(listed).to.have.length(1);
+        expect(listed[0]).to.include({ status: 'active', endpointId: 'ep_list_identity_1234', sourceSeatId: 'seat-1' });
+        expect(() => assertEndpointSeatBindingIntegrity(listed[0])).to.throw(EndpointSeatBindingError);
+        await rejectReason(service.getBindingById('system', binding._id), 'binding_canonical_invalid');
+        const settled = (await windows.findOne({ _id: opened.window._id }))!;
+        now = new Date(opened.window.expiresAt.getTime() + 1);
+        await rejectReason(openWindow(service, ['seat-1'], ['seat-1'], classroomOne, settled.revision), 'binding_canonical_invalid');
+        expect(await windows.countDocuments({ domainId: 'system', classroomId: classroomOne })).to.equal(1);
+    });
+
+    it('rejects classroom lists that reuse an active seat or endpoint identity', async () => {
+        const service = makeService();
+        const at = new Date(fixedNow);
+        const shared = {
+            domainId: 'system',
+            schoolId: schoolOne,
+            classroomId: classroomOne,
+            status: 'active' as const,
+            revision: 1,
+            history: [],
+            createdBy: 7,
+            createdAt: at,
+            updatedBy: 7,
+            updatedAt: at,
+        };
+        await bindings.insertMany([
+            {
+                ...shared,
+                _id: new ObjectId(),
+                sourceSeatId: 'seat-1',
+                endpointId: 'ep_list_unique_0001',
+            },
+            {
+                ...shared,
+                _id: new ObjectId(),
+                sourceSeatId: 'seat-2',
+                endpointId: 'ep_list_unique_0001',
+            },
+        ]);
+        await rejectReason(service.listClassroomBindings('system', classroomOne), 'binding_uniqueness_conflict');
+        await bindings.deleteMany({});
+        await bindings.insertMany([
+            {
+                ...shared,
+                _id: new ObjectId(),
+                sourceSeatId: 'seat-1',
+                endpointId: 'ep_list_unique_0001',
+            },
+            {
+                ...shared,
+                _id: new ObjectId(),
+                sourceSeatId: 'seat-1',
+                endpointId: 'ep_list_unique_0002',
+            },
+        ]);
+        await rejectReason(service.listClassroomBindings('system', classroomOne), 'binding_uniqueness_conflict');
+        await bindings.deleteMany({});
+        await bindings.insertOne({
+            ...shared,
+            _id: new ObjectId(),
+            sourceSeatId: 'seat-1',
+        });
+        await rejectReason(service.listClassroomBindings('system', classroomOne), 'binding_canonical_invalid');
     });
 
     it('rejects a wrong-school binding before every replacement mutation and leaves its window unchanged', async () => {

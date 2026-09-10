@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { ObjectId } from 'mongodb';
 import type { ExamEventDoc } from '../src/model/exam-event';
+import type { ExamNetworkExecutionDoc } from '../src/model/exam-network-execution';
 import type { ExamPreloginPreparation } from '../src/model/exam-prelogin';
 import type { ExamPreloginWorkflowDependencies } from '../src/model/exam-prelogin-workflow';
-import type { VigilMonitoringWarning } from '../src/service/vigil-bridge';
+import type { VigilMonitoringPreflightItem, VigilMonitoringWarning } from '../src/service/vigil-bridge';
 
 (global as unknown as { Hydro: { model: Record<string, unknown>; module: Record<string, unknown>; ui: Record<string, unknown> } }).Hydro ||= {
     model: {},
@@ -139,6 +140,90 @@ function dependencies(monitoringWarnings: VigilMonitoringWarning[] = []): ExamPr
     };
 }
 
+function monitoringItem(overrides: Partial<VigilMonitoringPreflightItem> = {}): VigilMonitoringPreflightItem {
+    return {
+        endpointId: 'ep_one',
+        ready: true,
+        reason: 'ready',
+        credentialStatus: 'active',
+        online: true,
+        compatible: true,
+        serviceVersion: '0.5.0',
+        protocolVersion: 2,
+        capabilities: [
+            { name: 'exam.monitoring', version: 1, commands: ['start_monitoring', 'stop_monitoring', 'get_monitoring_status'] },
+        ],
+        warnings: [],
+        ...overrides,
+    };
+}
+
+function activeExecution(projection: ExamNetworkExecutionDoc['projection']): ExamNetworkExecutionDoc {
+    return {
+        _id: new ObjectId('66c10000000000000000000c'),
+        domainId: event.domainId,
+        eventId,
+        schoolId,
+        activityId: `exam:${eventId.toHexString()}`,
+        revision: 9,
+        networkPolicyRevision: 3,
+        desiredState: 'active',
+        policyRef: { id: executionPolicyId, revision: 4, fingerprint: 'b'.repeat(64) },
+        targetRef: { id: executionTargetId, revision: 5, fingerprint: 'c'.repeat(64) },
+        startAt: new Date('2026-08-14T00:30:00.000Z'),
+        hardEndAt: new Date('2026-08-14T03:30:00.000Z'),
+        operation: {
+            kind: 'apply',
+            requestId: 'exam-network:test',
+            idempotencyKey: 'exam-network:test',
+            executionRevision: 9,
+            status: 'received',
+            requestedAt: event.updatedAt,
+            requestedBy: 2,
+            receivedAt: event.updatedAt,
+        },
+        projection,
+        auditRef: 'exam-network-execution:66c10000000000000000000c:9',
+        createdAt: event.createdAt,
+        createdBy: 2,
+        updatedAt: event.updatedAt,
+        updatedBy: 2,
+    };
+}
+
+function appliedProjection(): NonNullable<ExamNetworkExecutionDoc['projection']> {
+    return {
+        revision: 1,
+        fingerprint: 'd'.repeat(64),
+        dispatchStatus: 'complete',
+        summary: { applied: 1 },
+        items: [
+            {
+                commandId: 'network-command-1',
+                endpointId: 'ep_one',
+                executionSessionId: 'session-1',
+                commandRevision: 9,
+                command: 'apply_network_policy',
+                previousPolicyRevision: null,
+                expectedPolicyRevision: 3,
+                appliedPolicyRevision: 3,
+                status: 'applied',
+                failureReason: null,
+                online: true,
+                networkPolicyState: { state: 'active', activityId: `exam:${eventId.toHexString()}`, policyRevision: 3 },
+            },
+        ],
+        receivedAt: event.updatedAt,
+    };
+}
+
+async function loadWorkflowWithExecution(execution: ExamNetworkExecutionDoc) {
+    const frozen = dependencies();
+    frozen.getExecution = async () => execution;
+    frozen.loadNetworkReferences = async () => ({ endpointIds: ['ep_one'], targetCount: 1 });
+    return loadExamPreloginWorkflow(event, 3, frozen);
+}
+
 test('workflow derives endpoint monitoring from the published preparation and excludes warnings from its drift fingerprint', async () => {
     const clean = await loadExamPreloginWorkflow(event, 3, dependencies());
     const warned = await loadExamPreloginWorkflow(event, 3, dependencies([{ kind: 'usb_storage_detected', detector: null, reason: null }]));
@@ -181,23 +266,43 @@ test('workflow hard readiness and network identity participate in the fingerprin
     const ready = await loadExamPreloginWorkflow(event, 3, readyDependencies);
     const offlineDependencies = dependencies();
     offlineDependencies.preflightMonitoring = async () => [
-        {
-            endpointId: 'ep_one',
-            ready: false,
-            reason: 'endpoint_offline',
-            credentialStatus: 'active',
-            online: false,
-            compatible: true,
-            serviceVersion: '0.5.0',
-            protocolVersion: 2,
-            capabilities: [],
-            warnings: [],
-        },
+        monitoringItem({ ready: false, reason: 'endpoint_offline', online: false, capabilities: [] }),
     ];
     const offline = await loadExamPreloginWorkflow(event, 3, offlineDependencies);
     assert.equal(offline.hardErrorCount, 2);
     assert.equal(offline.monitoring.ready, false);
     assert.notEqual(offline.fingerprint, ready.fingerprint);
+});
+
+test('workflow fingerprint ignores Vigil display listings while network.ready still binds confirm', async () => {
+    const baseline = await loadExamPreloginWorkflow(event, 3, dependencies());
+    const displayDependencies = dependencies();
+    displayDependencies.preflightMonitoring = async () => [
+        monitoringItem({
+            credentialStatus: 'pending',
+            online: false,
+            compatible: false,
+            serviceVersion: '0.9.9',
+            protocolVersion: 1,
+            capabilities: [
+                { name: 'network.policy', version: 1, commands: ['apply'] },
+                { name: 'exam.monitoring', version: 9, commands: ['get_monitoring_status'] },
+            ],
+        }),
+    ];
+    const display = await loadExamPreloginWorkflow(event, 3, displayDependencies);
+    assert.equal(display.monitoring.items[0].serviceVersion, '0.9.9');
+    assert.equal(display.monitoring.items[0].ready, true);
+    assert.equal(display.fingerprint, baseline.fingerprint);
+
+    const applied = await loadWorkflowWithExecution(activeExecution(appliedProjection()));
+    const pending = await loadWorkflowWithExecution(activeExecution(undefined));
+    assert.equal(applied.network.ready, true);
+    assert.equal(applied.network.reason, 'ready');
+    assert.equal(pending.network.ready, false);
+    assert.equal(pending.network.reason, 'network_execution_pending');
+    assert.equal(applied.network.executionRevision, pending.network.executionRevision);
+    assert.notEqual(pending.fingerprint, applied.fingerprint);
 });
 
 test('an active execution freezes the running policy, target and hard deadline instead of following newer config refs', async () => {

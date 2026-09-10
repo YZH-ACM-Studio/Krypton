@@ -161,7 +161,10 @@ describe('P2.2 endpoint seat binding HTTP boundary', () => {
         expect(source).to.include('layout: serializeLayout(classroom)');
         expect(source).to.include('references: state.references.map(serializeReference)');
         expect(source).to.include('seatOperationalProfile: serializeSeatOperationalProfile(seatOperationalProfile)');
-        expect(source).to.include("state: 'unavailable'");
+        expect(source).to.include("{ state: 'unavailable', items: [] }");
+        expect(source).to.include("{ state: 'not-required', items: [] }");
+        expect(source).not.to.include('preflightExamNetworkOnVigil');
+        expect(source).not.to.include('stage=preflight');
         expect(source).not.to.include('setInterval');
     });
 });

@@ -80,7 +80,7 @@ function ConversationRow({
   return (
     <div
       className={cn(
-        'group flex items-stretch rounded-lg transition-colors duration-150 motion-reduce:transition-none',
+        'group flex min-w-0 items-stretch overflow-hidden rounded-lg transition-colors duration-150 motion-reduce:transition-none',
         selected ? 'bg-accent' : 'hover:bg-accent/50',
       )}
     >
@@ -88,15 +88,15 @@ function ConversationRow({
         type="button"
         aria-current={selected ? 'true' : undefined}
         onClick={() => onSelect(conv.uid)}
-        className="flex min-w-0 flex-1 items-center gap-2.5 px-2.5 py-2 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        className="flex min-w-0 flex-1 items-center gap-2.5 overflow-hidden px-2.5 py-2 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
       >
         <Avatar className="size-8 shrink-0">
           {conv.udoc.avatarUrl ? <AvatarImage src={String(conv.udoc.avatarUrl)} alt={name} /> : null}
           <AvatarFallback className="text-[10px]">{makeInitials(name)}</AvatarFallback>
         </Avatar>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-baseline justify-between gap-2">
-            <p className={cn('truncate text-sm', hasUnread ? 'font-semibold' : 'font-medium')}>{highlightText(name, search)}</p>
+        <div className="min-w-0 flex-1 overflow-hidden">
+          <div className="flex min-w-0 items-baseline justify-between gap-2">
+            <p className={cn('min-w-0 flex-1 truncate text-sm', hasUnread ? 'font-semibold' : 'font-medium')}>{highlightText(name, search)}</p>
             {lastAt ? (
               <time
                 dateTime={lastAt.toISOString()}
@@ -107,9 +107,11 @@ function ConversationRow({
             ) : null}
           </div>
           {preview || hasUnread ? (
-            <div className="mt-0.5 flex items-center justify-between gap-2">
+            <div className="mt-0.5 flex min-w-0 items-center justify-between gap-2">
               {preview ? (
-                <p className={cn('truncate text-xs', hasUnread ? 'text-foreground/80' : 'text-muted-foreground')}>{highlightText(preview, search)}</p>
+                <p className={cn('min-w-0 flex-1 truncate text-xs', hasUnread ? 'text-foreground/80' : 'text-muted-foreground')}>
+                  {highlightText(preview.replace(/\s+/g, ' '), search)}
+                </p>
               ) : (
                 <span className="min-w-0 flex-1" />
               )}
@@ -182,7 +184,7 @@ export function ConversationList(props: {
   const emptyLabel = conversations.length === 0 ? '暂无消息' : '无匹配会话';
 
   return (
-    <div className="flex h-full min-h-0 flex-col border-r bg-background">
+    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-r bg-background">
       <div className="flex items-center gap-2 border-b p-2.5">
         <div className="relative min-w-0 flex-1">
           <span className="pointer-events-none absolute inset-y-0 left-2.5 flex items-center">

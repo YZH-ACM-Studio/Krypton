@@ -170,6 +170,20 @@ describe('user account messages', () => {
     expect(screen.queryByRole('button', { name: /Alice/ })).not.toBeInTheDocument();
   });
 
+  it('keeps a long last-message preview inside a truncating list row', () => {
+    const long = '新的绑定申请 申请人：world2018（UID 1047）还附带很长一段说明文字不要撑破会话列表';
+    renderPanel({
+      8: {
+        udoc: { _id: 8, uname: 'System' },
+        messages: [{ _id: '66a72f200000000000000003', from: 1, to: 2, content: long }],
+      },
+    });
+    const preview = screen.getAllByText(long).find((node) => node.classList.contains('truncate'));
+    expect(preview).toBeTruthy();
+    expect(preview?.className).toMatch(/\bmin-w-0\b/);
+    expect(preview?.className).toMatch(/\bflex-1\b/);
+  });
+
   it('does not throw when messages is null or an empty array', () => {
     let view: ReturnType<typeof renderPanel> | undefined;
     expect(() => {

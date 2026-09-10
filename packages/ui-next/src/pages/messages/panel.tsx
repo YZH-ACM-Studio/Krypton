@@ -478,8 +478,8 @@ export function MessagesPanel(): JSX.Element {
           {errorText}
         </p>
       ) : null}
-      <div className="grid min-h-0 flex-1 md:grid-cols-[minmax(260px,320px)_1fr]">
-        <section className={cn('h-full min-h-0 flex-col', showThread ? 'hidden md:flex' : 'flex')}>
+      <div className="grid min-h-0 min-w-0 flex-1 md:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
+        <section className={cn('h-full min-h-0 min-w-0 overflow-hidden flex-col', showThread ? 'hidden md:flex' : 'flex')}>
           <ConversationList
             conversations={orderedConversations}
             filtered={filteredConversations}
@@ -498,7 +498,7 @@ export function MessagesPanel(): JSX.Element {
             headerAction={<NewConversation domainId={bs.domain.id} selfUid={selfUid} onPick={handlePickUser} />}
           />
         </section>
-        <section className={cn('h-full min-h-0 flex-col', showList ? 'hidden md:flex' : 'flex')}>
+        <section className={cn('h-full min-h-0 min-w-0 overflow-hidden flex-col', showList ? 'hidden md:flex' : 'flex')}>
           <MessageThread
             conv={activeConv}
             selfUid={selfUid}

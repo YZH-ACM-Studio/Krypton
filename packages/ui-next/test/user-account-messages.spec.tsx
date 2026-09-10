@@ -182,6 +182,9 @@ describe('user account messages', () => {
     expect(preview).toBeTruthy();
     expect(preview?.className).toMatch(/\bmin-w-0\b/);
     expect(preview?.className).toMatch(/\bflex-1\b/);
+    const list = screen.getByRole('list', { name: '会话' });
+    expect(list.className).toMatch(/\bmin-w-0\b/);
+    expect(list.parentElement?.parentElement?.getAttribute('data-radix-scroll-area-viewport')).toBe('');
   });
 
   it('does not throw when messages is null or an empty array', () => {

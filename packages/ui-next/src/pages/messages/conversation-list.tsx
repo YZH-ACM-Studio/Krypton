@@ -219,8 +219,8 @@ export function ConversationList(props: {
           {conversations.length === 0 ? <p className="mt-1 text-xs text-muted-foreground">点右上角「新会话」开始聊天。</p> : null}
         </div>
       ) : (
-        <ScrollArea className="flex-1" viewportClassName="p-1">
-          <div role="list" aria-label="会话" className="flex flex-col">
+        <ScrollArea className="min-h-0 min-w-0 flex-1" viewportLayout="block" viewportClassName="overflow-x-hidden p-1 [&>div]:min-w-0 [&>div]:w-full">
+          <div role="list" aria-label="会话" className="flex w-full min-w-0 flex-col overflow-hidden">
             {filtered.map((conv) => (
               <ConversationRow
                 key={conv.uid}

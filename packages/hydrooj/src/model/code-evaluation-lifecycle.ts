@@ -8,6 +8,7 @@ import {
     STRUCTURED_CODE_REGION_ID,
     templateSourceHash,
     validateCompiledStructuredConfig,
+    validateStructuredCodeJudgeConfig,
     validateStructuredCodeTemplate,
     validateStructuredCodeTestdataFiles,
 } from '../lib/problem-config';
@@ -37,6 +38,18 @@ interface CodeEvaluationProblemSnapshot {
 
 function localizedConfigValidation(field: string, detail: LocalizedErrorText) {
     return new ValidationError(field, null, detail);
+}
+
+function throwStructuredConfigError(error: unknown, field: string): never {
+    const localizedDetail = getProblemConfigErrorText(error);
+    if (localizedDetail) throw localizedConfigValidation(field, localizedDetail);
+    const message = error instanceof Error ? error.message : String(error);
+    throw localizeErrorParameter(
+        new ValidationError(field, null, message),
+        2,
+        'The code-evaluation configuration is invalid: {0}',
+        message,
+    );
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -128,42 +141,39 @@ function nextRegionId(existing: Set<string>): string {
     return id;
 }
 
-export function normalizeStructuredCodeConfig(kindInput: ProblemKind, value: unknown, currentConfigInput?: unknown): Record<string, unknown> {
+export function normalizeStructuredCodeConfig(
+    kindInput: ProblemKind,
+    value: unknown,
+    currentConfigInput?: unknown,
+    options: { allowEmpty?: boolean } = {},
+): Record<string, unknown> {
     const kind = parseProblemKind(kindInput);
-    if (!isPlainObject(value)) throw new ValidationError('structuredConfig');
-    assertExactKeys(value, ['main'], 'structuredConfig');
-    if (!isPlainObject(value.main)) throw new ValidationError('structuredConfig', null, localizedErrorText`main 必须是对象`);
-    assertExactKeys(value.main, ['mode', 'lang', 'source', 'sourceHash', 'publicRanges', 'regions', 'cases'], 'structuredConfig.main');
-    const mode = kind === 'function' ? 'function' : value.main.mode === 'text' || value.main.mode === 'compile' ? value.main.mode : undefined;
+    if (!isPlainObject(value) || !isPlainObject(value.main)) {
+        throw new ValidationError('structuredConfig', null, localizedErrorText`main 必须是对象`);
+    }
+    const main = value.main;
+    const mode = kind === 'function' ? 'function' : main.mode === 'text' || main.mode === 'compile' ? main.mode : undefined;
     if (!mode) throw new ValidationError('mode', null, localizedErrorText`程序填空模式必须是 text 或 compile`);
-    if (kind === 'function' && value.main.mode !== 'function') throw new ValidationError('mode', null, localizedErrorText`评测方式必须是 function`);
-    const lang = mode === 'text' ? normalizeOptionalLanguage(value.main.lang) : normalizeLanguage(value.main.lang);
-    const initialDraftShell = !['source', 'sourceHash', 'publicRanges', 'regions', 'cases'].some((field) =>
-        Object.hasOwn(value.main as Record<string, unknown>, field),
-    );
+    if (kind === 'function' && main.mode !== 'function') throw new ValidationError('mode', null, localizedErrorText`评测方式必须是 function`);
+    const lang = mode === 'text' ? normalizeOptionalLanguage(main.lang) : normalizeLanguage(main.lang);
+    const initialDraftShell = !['source', 'publicRanges', 'regions', 'cases'].some((field) => Object.hasOwn(main, field));
     if (!initialDraftShell) {
-        const missing = ['source', 'sourceHash', 'publicRanges', 'regions'].find(
-            (field) => !Object.hasOwn(value.main as Record<string, unknown>, field),
-        );
+        const missing = ['source', 'publicRanges', 'regions'].find((field) => !Object.hasOwn(main, field));
         if (missing) throw new ValidationError(missing, null, localizedErrorText`完整代码模板缺少字段：${missing}`);
     }
-    const sourceInput = value.main.source === undefined ? '' : value.main.source;
+    const sourceInput = main.source === undefined ? '' : main.source;
     if (typeof sourceInput !== 'string') throw new ValidationError('source', null, localizedErrorText`私有模板必须是文本`);
     const source = sourceInput.replace(/\r\n?/g, '\n');
-    if (!initialDraftShell && (typeof value.main.sourceHash !== 'string' || value.main.sourceHash !== templateSourceHash(source))) {
-        throw new ValidationError('sourceHash', null, localizedErrorText`源码摘要与本次提交内容不一致，请重新载入后再保存`);
-    }
-    const rawPublicRanges = value.main.publicRanges === undefined ? [] : value.main.publicRanges;
+    const rawPublicRanges = main.publicRanges === undefined ? [] : main.publicRanges;
     if (!Array.isArray(rawPublicRanges)) throw new ValidationError('publicRanges', null, localizedErrorText`公开区必须是数组`);
     const publicRanges = rawPublicRanges.map((item, index): StructuredCodeRange => {
         if (!isPlainObject(item)) throw new ValidationError('publicRanges', null, localizedErrorText`公开区 ${index + 1} 格式错误`);
-        assertExactKeys(item, ['startLine', 'endLine'], `publicRanges[${index}]`);
         if (!Number.isSafeInteger(item.startLine) || !Number.isSafeInteger(item.endLine)) {
             throw new ValidationError('publicRanges', null, localizedErrorText`公开区 ${index + 1} 的行范围无效`);
         }
         return { startLine: Number(item.startLine), endLine: Number(item.endLine) };
     });
-    const rawRegions = value.main.regions === undefined ? [] : value.main.regions;
+    const rawRegions = main.regions === undefined ? [] : main.regions;
     if (!Array.isArray(rawRegions)) throw new ValidationError('regions');
     const currentConfig = parseProblemConfigObject({ config: currentConfigInput });
     const currentTemplate = currentConfig?.template as StructuredCodeTemplate | undefined;
@@ -173,11 +183,6 @@ export function normalizeStructuredCodeConfig(kindInput: ProblemKind, value: unk
     const allocatedIds = new Set(currentRegions.keys());
     const regions = rawRegions.map((item, index) => {
         if (!isPlainObject(item)) throw new ValidationError('regions', null, localizedErrorText`区域 ${index + 1} 格式错误`);
-        assertExactKeys(
-            item,
-            kind === 'function' ? ['id', 'startLine', 'endLine', 'title', 'description'] : ['id', 'startLine', 'endLine', 'prompt'],
-            `regions[${index}]`,
-        );
         const submittedId = item.id === undefined ? '' : item.id;
         if (typeof submittedId !== 'string') throw new ValidationError('regions', null, localizedErrorText`区域 ${index + 1} ID 格式错误`);
         if (submittedId && !STRUCTURED_CODE_REGION_ID.test(submittedId)) {
@@ -211,42 +216,39 @@ export function normalizeStructuredCodeConfig(kindInput: ProblemKind, value: unk
     if (new Set(regions.map((region) => region.id)).size !== regions.length) {
         throw new ValidationError('regions', null, localizedErrorText`区域 ID 不能重复`);
     }
-    if (mode === 'text' && Object.hasOwn(value.main, 'cases')) {
+    if (mode === 'text' && Object.hasOwn(main, 'cases')) {
         throw new ValidationError('cases', null, localizedErrorText`文本程序填空不使用测试数据映射`);
     }
-    const cases = mode === 'text' ? [] : normalizeCodeEvaluationCases(value.main.cases ?? [], true);
-    const template = {
+    const cases = mode === 'text' ? [] : normalizeCodeEvaluationCases(main.cases ?? [], true);
+    const structuredKind = kind === 'function' ? 'function' : 'program_fill';
+    const template: StructuredCodeTemplate = {
         ...(lang ? { lang } : {}),
         source,
         sourceHash: templateSourceHash(source),
         publicRanges,
         regions: [...regions].sort(compareStructuredCodeRegions),
-    } as StructuredCodeTemplate;
-    try {
-        validateStructuredCodeTemplate(template, kind as 'program_fill' | 'function', { allowEmpty: true });
-    } catch (error: any) {
-        const localizedDetail = getProblemConfigErrorText(error);
-        if (localizedDetail) throw localizedConfigValidation('regions', localizedDetail);
-        throw localizeErrorParameter(
-            new ValidationError('regions', null, error.message),
-            2,
-            'The code-evaluation configuration is invalid: {0}',
-            error.message,
-        );
-    }
-    return {
-        type: kind === 'function' ? 'function' : 'program_fill',
+    };
+    const config = {
+        type: structuredKind,
         ...(kind === 'program_fill' ? { mode } : {}),
         score: 100,
         ...(lang ? { langs: [lang] } : {}),
         template,
         ...(mode === 'text' ? {} : { cases }),
     };
+    try {
+        if (options.allowEmpty) validateStructuredCodeTemplate(template, structuredKind, { allowEmpty: true });
+        else if (kind === 'program_fill' && mode === 'text') validateStructuredCodeJudgeConfig(config, 'program_fill');
+        else validateCompiledStructuredConfig(structuredKind, config);
+    } catch (error: unknown) {
+        throwStructuredConfigError(error, options.allowEmpty ? 'regions' : 'config');
+    }
+    return config;
 }
 
 export function normalizeCodeEvaluationDraftConfig(kindInput: ProblemKind, value: unknown, currentConfigInput?: unknown): Record<string, unknown> {
     const kind = parseProblemKind(kindInput);
-    const config = normalizeStructuredCodeConfig(kind, value, currentConfigInput);
+    const config = normalizeStructuredCodeConfig(kind, value, currentConfigInput, { allowEmpty: true });
     if (!isCodeEvaluationProblem(kind, config)) {
         throw new ValidationError('mode', null, localizedErrorText`只有编译型程序填空和代码实现题使用代码评测草稿`);
     }
@@ -309,15 +311,8 @@ export function assertProblemReadyForUse(pdoc: CodeEvaluationProblemSnapshot, _c
         const config = parseProblemConfigObject(pdoc);
         validateCompiledStructuredConfig(String(pdoc.problemKind), config);
         validateStructuredCodeTestdataFiles(config, pdoc.data || [], pdoc.problemKind as 'program_fill' | 'function');
-    } catch (error: any) {
-        const localizedDetail = getProblemConfigErrorText(error);
-        if (localizedDetail) throw localizedConfigValidation('codeEvaluationStatus', localizedDetail);
-        throw localizeErrorParameter(
-            new ValidationError('codeEvaluationStatus', null, error.message),
-            2,
-            'The code-evaluation configuration is invalid: {0}',
-            error.message,
-        );
+    } catch (error: unknown) {
+        throwStructuredConfigError(error, 'codeEvaluationStatus');
     }
 }
 

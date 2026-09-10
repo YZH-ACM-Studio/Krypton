@@ -100,24 +100,10 @@ async function logManagedPermitDenied(handler: Handler, pdoc: any, action: 'gran
     });
 }
 
-async function assertManagedPermitBody(handler: Handler, pdoc: any, allowed: string[], action: 'grant' | 'revoke') {
+function assertManagedPermitBody(handler: Handler, pdoc: { authoringMode?: string }, allowed: string[]) {
     if (pdoc.authoringMode !== 'managed') return;
-    const unknownFields = Object.keys((handler as any).request?.body || {}).filter((field) => !allowed.includes(field));
+    const unknownFields = Object.keys(handler.request?.body || {}).filter((field) => !allowed.includes(field));
     if (!unknownFields.length) return;
-    logger.warn(
-        'Managed permit denied domain=%s pid=%d actor=%d action=%s fields=%o result=denied',
-        pdoc.domainId,
-        pdoc.docId,
-        handler.user._id,
-        action,
-        unknownFields,
-    );
-    await OplogModel.log(handler as any, 'problem.permit.denied', {
-        problemId: pdoc.docId,
-        action,
-        fields: unknownFields,
-        result: 'denied',
-    });
     throw new ValidationError('fields', null, localizedErrorText`托管题权限接口不接受字段：${unknownFields.join(', ')}`);
 }
 
@@ -216,7 +202,7 @@ class ProblemPermitGrantHandler extends Handler {
         }
         const pdoc = await ProblemModel.getViewableAuthorized(domainId, pid, this.user);
         if (!pdoc) throw problemNotFound();
-        await assertManagedPermitBody(this, pdoc, ['uid', 'uids', 'role', 'note', 'requestId'], 'grant');
+        assertManagedPermitBody(this, pdoc, ['uid', 'uids', 'role', 'note', 'requestId']);
         if (pdoc.authoringMode === 'managed' && targetUids.length !== 1) {
             await logManagedPermitDenied(this, pdoc, 'grant', role as PermitRole);
             throw new ValidationError('uids', null, localizedErrorText`托管题每次只能变更一个用户的角色`);
@@ -336,7 +322,7 @@ class ProblemPermitRevokeHandler extends Handler {
         const domainId = authoritativeDomainId(this, args);
         const pdoc = await ProblemModel.getViewableAuthorized(domainId, pid, this.user);
         if (!pdoc) throw problemNotFound();
-        await assertManagedPermitBody(this, pdoc, ['permitId', 'requestId'], 'revoke');
+        assertManagedPermitBody(this, pdoc, ['permitId', 'requestId']);
         const row = await permitsColl.findOne({
             domainId,
             _id: permitId,

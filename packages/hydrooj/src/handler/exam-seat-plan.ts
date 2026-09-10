@@ -133,11 +133,8 @@ function serializePlan(plan: ExamSeatPlanDoc, currentEventRevision: number) {
 abstract class ExamSeatPlanBaseHandler extends Handler {
     async prepare() {
         if (!this.user || this.user._id < 1) throw new PermissionError(PERM.PERM_CREATE_EXAM_EVENT);
-        if (!isExamInfrastructureAdmin(this.user)) {
-            if (!this.user.hasPerm(PERM.PERM_CREATE_EXAM_EVENT)) throw new PermissionError(PERM.PERM_CREATE_EXAM_EVENT);
-            if (!this.user.hasPerm(PERM.PERM_USERBIND_MANAGE_STUDENTS)) {
-                throw new PermissionError(PERM.PERM_USERBIND_MANAGE_STUDENTS);
-            }
+        if (!isExamInfrastructureAdmin(this.user) && !this.user.hasPerm(PERM.PERM_CREATE_EXAM_EVENT)) {
+            throw new PermissionError(PERM.PERM_CREATE_EXAM_EVENT);
         }
         await Promise.all([
             examEventService.ensureIndexes(),
@@ -155,14 +152,17 @@ abstract class ExamSeatPlanBaseHandler extends Handler {
             throwExamTeacherValidationError('eventId', 'event_canonical_invalid');
         }
         await assertCanManageExamEvent(domainId, event, this.user);
-        if (!isExamInfrastructureAdmin(this.user) && !this.user.hasPerm(PERM.PERM_USERBIND_MANAGE_STUDENTS)) {
-            throw new PermissionError(PERM.PERM_USERBIND_MANAGE_STUDENTS);
-        }
         return event;
     }
 
     protected assertWritableEvent(event: ExamEventDoc): void {
         if (event.lifecycle === 'archived') throwExamTeacherValidationError('eventId', 'event_archived');
+    }
+
+    protected assertRosterWritePermission(): void {
+        if (!isExamInfrastructureAdmin(this.user) && !this.user.hasPerm(PERM.PERM_USERBIND_MANAGE_STUDENTS)) {
+            throw new PermissionError(PERM.PERM_USERBIND_MANAGE_STUDENTS);
+        }
     }
 }
 
@@ -291,6 +291,7 @@ class ExamSeatPlanCollectionHandler extends ExamSeatPlanBaseHandler {
                 const roster = await withExamEventBoundary(domainId, eventId, async () => {
                     const current = await this.event(eventId);
                     this.assertWritableEvent(current);
+                    this.assertRosterWritePermission();
                     if (current.type === 'krypton' && sourceKind !== 'contestAudience') {
                         throw new ExamSeatPlanError('contest_audience_roster_required');
                     }

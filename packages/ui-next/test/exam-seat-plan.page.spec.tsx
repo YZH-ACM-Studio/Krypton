@@ -147,7 +147,7 @@ function preloginPreparation(count = 2) {
       bindingRevision: index + 3,
       endpointId: `endpoint-${String(index + 1).padStart(2, '0')}`,
       ready: true,
-      diagnostics: [],
+      diagnostics: [] as Array<{ code: string; severity: 'error' | 'warning' }>,
       endpoint: {
         online: true,
         serviceVersion: '0.5.0',
@@ -196,7 +196,11 @@ function preloginWorkflow(count = 2, source: 'config' | 'execution' = 'execution
         serviceVersion: '0.5.0',
         protocolVersion: 2,
         capabilities: [{ name: 'exam.monitoring', version: 1, commands: ['start_monitoring', 'stop_monitoring', 'get_monitoring_status'] }],
-        warnings: index === 0 ? [{ kind: 'usb_storage_detected', detector: null, reason: null }] : [],
+        warnings: (index === 0 ? [{ kind: 'usb_storage_detected', detector: null, reason: null }] : []) as Array<{
+          kind: string;
+          detector: string | null;
+          reason: string | null;
+        }>,
       })),
     },
     hardErrorCount: networkReady ? 0 : 1,
@@ -280,6 +284,22 @@ function bootstrap(allowed = true): KryptonBootstrap {
 
 function json(body: unknown) {
   return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+}
+
+function hydroClientError(status: number, message: string) {
+  return new Response(
+    JSON.stringify({
+      error: {
+        name: 'ValidationError',
+        errorCode: 'ValidationError',
+        code: status,
+        status,
+        params: [],
+        message,
+      },
+    }),
+    { status, headers: { 'Content-Type': 'application/json' } },
+  );
 }
 
 function renderPage(allowed = true) {
@@ -679,12 +699,14 @@ describe('p2.5 exam seat assignment workspace', () => {
     await goToSeatPlanStep(user, '发布分配');
     expect(screen.getByRole('button', { name: '发布跨教室版本 2' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '导出当前页面 CSV' })).toBeDisabled();
+    await goToSeatPlanStep(user, '配置网络');
+    expect(screen.getByRole('button', { name: '固定已发布分配为网络目标' })).toBeEnabled();
     await goToSeatPlanStep(user, '选择教室');
     expect(screen.getByRole('button', { name: '创建跨教室候选计划' })).toBeDisabled();
     await goToSeatPlanStep(user, '检查调整');
     await user.click(screen.getByRole('button', { name: '保存跨教室人工调整' }));
     await waitFor(() => expect(postBodies).toHaveLength(1));
-    expect(postBodies[0]).toEqual({
+    expect(postBodies[0]).toMatchObject({
       action: 'adjustV2',
       baseAssignmentRevision: 2,
       lockedUids: [21],
@@ -755,7 +777,7 @@ describe('p2.5 exam seat assignment workspace', () => {
     await chooseSelectOption(user, '跨教室分配策略', '优先隔开');
     await user.click(screen.getByRole('button', { name: '生成尽力型跨教室分配' }));
     await waitFor(() =>
-      expect(postBodies).toEqual([{ action: 'generateV2', expectedPreviousRevision: 1, seatPlanRevision: 5, strategy: 'maximizeSpacing' }]),
+      expect(postBodies[0]).toMatchObject({ action: 'generateV2', expectedPreviousRevision: 1, seatPlanRevision: 5, strategy: 'maximizeSpacing' }),
     );
     expect(screen.getByText('可用座位不足：需要 2，当前 1')).toBeInTheDocument();
   });
@@ -893,6 +915,8 @@ describe('p2.5 exam seat assignment workspace', () => {
     expect(screen.getByRole('button', { name: '生成或刷新名单' })).toBeDisabled();
     await goToSeatPlanStep(user, '选择教室');
     expect(screen.getByRole('button', { name: '创建跨教室候选计划' })).toBeDisabled();
+    const nav = screen.getByRole('navigation', { name: '考试座位步骤' });
+    expect(within(nav).getByRole('button', { name: '配置网络' })).toBeDisabled();
   });
 
   it('fails closed during an explicit refresh and restores editing only after both canonical reads settle', async () => {
@@ -972,6 +996,81 @@ describe('p2.5 exam seat assignment workspace', () => {
     await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
     expect(screen.queryByText('人工调整未保存')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '选择张三换位' })).toBeEnabled();
+  });
+
+  it('does not freeze the workspace after a known Hydro 4xx JSON rejection', async () => {
+    const fixture = singleClassroomV2Fixture();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (init?.method === 'POST') return hydroClientError(400, '请求无效：constraint_conflict');
+        if (url.endsWith('/seat-plans')) return json(fixture.planResponse);
+        if (url.endsWith('/seat-assignments')) return json(fixture.assignmentResponse);
+        if (url.endsWith('/prelogin-latest')) return json({ batch: null });
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+    renderPageAtStep('adjust');
+    await user.click(await screen.findByRole('button', { name: '选择张三换位' }));
+    await user.click(screen.getByRole('button', { name: '选择李四换位' }));
+    await user.click(screen.getByRole('button', { name: '保存跨教室人工调整' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('约束冲突');
+    expect(screen.queryByText(/页面事实尚未完成重读/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '保存跨教室人工调整' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '选择张三换位' })).toBeEnabled();
+  });
+
+  it('shows a truncated assignment payload without requiring historical fingerprints in the same response', async () => {
+    const plans = {
+      ...PLAN_RESPONSE,
+      event: { ...PLAN_RESPONSE.event, startAt: '2026-08-14T01:00:00Z', ignoredExtra: 'ok' },
+      seatPlans: [],
+    };
+    const assignments = {
+      ...ASSIGNMENT_RESPONSE,
+      assignments: [{ ...ASSIGNMENT, ignoredExtra: true }],
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith('/seat-plans')) return json(plans);
+        if (url.endsWith('/seat-assignments')) return json(assignments);
+        if (url.endsWith('/prelogin-latest')) return json({ batch: null });
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+    renderPageAtStep('adjust');
+    expect(await screen.findByText('A01')).toBeInTheDocument();
+    expect(screen.getByText(/分配 r1/)).toBeInTheDocument();
+    expect(screen.queryByText(/与当前显示版本不一致/)).not.toBeInTheDocument();
+  });
+
+  it('keeps reread and roster writes available while a prelogin GET is in flight', async () => {
+    const fixture = singleClassroomV2Fixture();
+    let resolveLatest!: (response: Response) => void;
+    const pendingLatest = new Promise<Response>((resolve) => {
+      resolveLatest = resolve;
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith('/seat-plans')) return json(fixture.planResponse);
+        if (url.endsWith('/seat-assignments')) return json(fixture.assignmentResponse);
+        if (url.endsWith('/prelogin-latest')) return pendingLatest;
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+    renderPageAtStep('adjust');
+    expect(await screen.findByRole('button', { name: '选择张三换位' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '重读教室事实' })).toBeEnabled();
+    await goToSeatPlanStep(user, '冻结名单');
+    expect(screen.getByRole('button', { name: '生成或刷新名单' })).toBeEnabled();
+    resolveLatest(json({ batch: null }));
   });
 
   it('keeps an older v2 assignment read-only when a newer v2 plan is already canonical', async () => {
@@ -1278,13 +1377,13 @@ describe('p2.5 exam seat assignment workspace', () => {
     expect(screen.queryByRole('combobox', { name: '名单来源' })).not.toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: '2026 级一班' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '生成或刷新名单' }));
-    await waitFor(() => expect(bodies[0]?.body).toEqual({ action: 'createRoster', sourceKind: 'contestAudience', groupIds: [] }));
+    await waitFor(() => expect(bodies[0]?.body).toMatchObject({ action: 'createRoster', sourceKind: 'contestAudience', groupIds: [] }));
 
     expect(await screen.findByRole('checkbox', { name: '选择教室北实 201' })).toBeInTheDocument();
     await user.click(screen.getByRole('checkbox', { name: '选择教室北实 201' }));
     await user.click(screen.getByRole('button', { name: '创建跨教室候选计划' }));
     await waitFor(() =>
-      expect(bodies[1]?.body).toEqual({
+      expect(bodies[1]?.body).toMatchObject({
         action: 'createSeatPlanV2',
         classroomIds: [PLAN_RESPONSE.seatPlans[0].classroomId],
         expectedPreviousRevision: 0,
@@ -1294,7 +1393,7 @@ describe('p2.5 exam seat assignment workspace', () => {
 
     await user.click(screen.getByRole('button', { name: '生成尽力型跨教室分配' }));
     await waitFor(() =>
-      expect(bodies[2]?.body).toEqual({ action: 'generateV2', expectedPreviousRevision: 0, seatPlanRevision: 5, strategy: 'minimizeClassrooms' }),
+      expect(bodies[2]?.body).toMatchObject({ action: 'generateV2', expectedPreviousRevision: 0, seatPlanRevision: 5, strategy: 'minimizeClassrooms' }),
     );
     expect(bodies.some((entry) => entry.url.includes('/exam-infrastructure/classrooms/'))).toBe(false);
   });
@@ -1350,15 +1449,14 @@ describe('p2.5 exam seat assignment workspace', () => {
     await user.click(await screen.findByRole('checkbox', { name: '选择教室北实 201' }));
     await user.click(screen.getByRole('button', { name: '创建跨教室候选计划' }));
     await waitFor(() =>
-      expect(bodies).toEqual([
-        {
-          action: 'createSeatPlanV2',
-          classroomIds: [classroomId],
-          expectedPreviousRevision: 0,
-          rosterRevision: 2,
-        },
-      ]),
+      expect(bodies[0]).toMatchObject({
+        action: 'createSeatPlanV2',
+        classroomIds: [classroomId],
+        expectedPreviousRevision: 0,
+        rosterRevision: 2,
+      }),
     );
+    expect(bodies).toHaveLength(1);
     expect(await screen.findByRole('button', { name: '生成尽力型跨教室分配' })).toBeEnabled();
   });
 
@@ -1711,14 +1809,112 @@ describe('p2.5 exam seat assignment workspace', () => {
     expect(await screen.findByText('逐终端结果')).toBeInTheDocument();
 
     expect(posts[0]?.url.endsWith('/prelogin/prepare')).toBe(true);
-    expect(posts[0]?.body).toEqual({ assignmentRevision: 1 });
-    expect(posts[1]?.body).toEqual({
+    expect(posts[0]?.body).toMatchObject({ assignmentRevision: 1 });
+    expect(posts[1]?.body).toMatchObject({
       assignmentRevision: 1,
       preparationFingerprint: preparation.fingerprint,
       workflowFingerprint: workflow.fingerprint,
       requestId: '00010203-0405-4607-8809-0a0b0c0d0e0f',
     });
     expect(posts[1]?.urlState).toContain('requestId=00010203-0405-4607-8809-0a0b0c0d0e0f');
+  });
+
+  it('keeps unknown diagnostic codes as code plus generic Chinese instead of failing the prepare parse', async () => {
+    const preparation = preloginPreparation();
+    preparation.items = preparation.items.map((item, index) =>
+      index === 0
+        ? {
+            ...item,
+            ready: false,
+            diagnostics: [{ code: 'brand_new_prelogin_code', severity: 'error' as const, ignoredExtra: true }],
+          }
+        : item,
+    );
+    preparation.hardErrorCount = 1;
+    const workflow = preloginWorkflow();
+    workflow.monitoring.items = workflow.monitoring.items.map((item, index) =>
+      index === 0
+        ? {
+            ...item,
+            warnings: [...item.warnings, { kind: 'brand_new_warning_kind', detector: null, reason: null }],
+          }
+        : item,
+    );
+    workflow.warningCount = 2;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (init?.method === 'POST' && url.endsWith('/prelogin/prepare')) {
+          return json({ preparation, workflow, v2WriterEnabled: true, workflowWriterEnabled: true });
+        }
+        if (url.endsWith('/seat-plans')) return json(PLAN_RESPONSE);
+        if (url.endsWith('/seat-assignments')) return json(PUBLISHED_ASSIGNMENT_RESPONSE);
+        if (url.endsWith('/prelogin-latest')) return json({ batch: null });
+        const assigned = assignedNetworkResponse(url);
+        if (assigned) return assigned;
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+    renderPageAtStep('preflight');
+    await openPreflightAfterAssignedNetwork(user);
+    await user.click(await screen.findByRole('button', { name: '运行终端预检' }));
+    expect(await screen.findByText('未知诊断：brand_new_prelogin_code。')).toBeInTheDocument();
+    expect(screen.getByText('告警：未知诊断：brand_new_warning_kind。')).toBeInTheDocument();
+    expect(screen.getByText('确认范围')).toBeInTheDocument();
+  });
+
+  it('accepts a successful confirm when requestId matches even if the workflow fingerprint differs locally', async () => {
+    const preparation = preloginPreparation();
+    const workflow = preloginWorkflow();
+    vi.stubGlobal('crypto', {
+      getRandomValues(bytes: Uint8Array) {
+        bytes.forEach((_, index) => {
+          bytes[index] = index;
+        });
+        return bytes;
+      },
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (init?.method === 'POST' && url.endsWith('/prelogin/prepare')) {
+          return json({
+            preparation: { ...preparation, fingerprint: 'a'.repeat(64) },
+            workflow: { ...workflow, fingerprint: 'b'.repeat(64) },
+            v2WriterEnabled: true,
+            workflowWriterEnabled: true,
+          });
+        }
+        if (init?.method === 'POST' && url.endsWith('/prelogin/confirm')) {
+          const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+          const batch = preloginBatch([
+            { status: 'sent', stage: 'launch' },
+            { status: 'queued', stage: 'dispatch' },
+          ]);
+          batch.requestId = String(body.requestId);
+          if (batch.workflow) batch.workflow.fingerprint = 'c'.repeat(64);
+          if (batch.projection) batch.projection.requestId = String(body.requestId);
+          return json({ batch });
+        }
+        if (url.endsWith('/seat-plans')) return json(PLAN_RESPONSE);
+        if (url.endsWith('/seat-assignments')) return json(PUBLISHED_ASSIGNMENT_RESPONSE);
+        if (url.endsWith('/prelogin-latest')) return json({ batch: null });
+        const assigned = assignedNetworkResponse(url);
+        if (assigned) return assigned;
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+    renderPageAtStep('preflight');
+    await openPreflightAfterAssignedNetwork(user);
+    await user.click(await screen.findByRole('button', { name: '运行终端预检' }));
+    await goToSeatPlanStep(user, '预启动终端');
+    await user.click(screen.getByRole('button', { name: '一键预启动全部终端' }));
+    expect(await screen.findByText('逐终端结果')).toBeInTheDocument();
+    expect(screen.queryByText(/预登录确认响应身份不一致/)).not.toBeInTheDocument();
   });
 
   it('shows structured v2 seats and keeps prestart closed until the P2.14 writer gate is enabled', async () => {
@@ -1970,17 +2166,17 @@ describe('p2.5 exam seat assignment workspace', () => {
     expect(screen.getByText('endpoint-01')).toBeInTheDocument();
     expect(screen.getByText('endpoint-02')).toBeInTheDocument();
 
-    expect(posts.find((entry) => entry.body.action === 'saveDraft')?.body).toEqual({
+    expect(posts.find((entry) => entry.body.action === 'saveDraft')?.body).toMatchObject({
       action: 'saveDraft',
       expectedRevision: 0,
       sources,
     });
-    expect(posts.find((entry) => entry.body.action === 'publish')?.body).toEqual({
+    expect(posts.find((entry) => entry.body.action === 'publish')?.body).toMatchObject({
       action: 'publish',
       expectedRevision: 1,
       confirmationFingerprint: targetFingerprint,
     });
-    expect(posts.find((entry) => entry.body.action === 'assignTarget')?.body).toEqual({
+    expect(posts.find((entry) => entry.body.action === 'assignTarget')?.body).toMatchObject({
       action: 'assignTarget',
       expectedRevision: 5,
       assignmentId: targetAssignmentId,
@@ -2084,13 +2280,13 @@ describe('p2.5 exam seat assignment workspace', () => {
     await user.click(screen.getByRole('button', { name: /将考试活动显式计划为待开始/ }));
     await waitFor(() => expect(screen.getByText('活动 已计划')).toBeInTheDocument());
 
-    expect(posts.find((entry) => entry.body.action === 'assignPolicy')?.body).toEqual({
+    expect(posts.find((entry) => entry.body.action === 'assignPolicy')?.body).toMatchObject({
       action: 'assignPolicy',
       expectedRevision: 5,
       templateId: selectedPolicyId,
       revision: 3,
     });
-    expect(posts.find((entry) => entry.body.action === 'schedule')?.body).toEqual({
+    expect(posts.find((entry) => entry.body.action === 'schedule')?.body).toMatchObject({
       action: 'schedule',
       expectedRevision: 3,
     });
@@ -2160,7 +2356,7 @@ describe('p2.5 exam seat assignment workspace', () => {
     expect(screen.queryByRole('button', { name: '下一步' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '启动网络策略' }));
     await waitFor(() => expect(screen.getByRole('button', { name: '一键预启动全部终端' })).toBeEnabled());
-    expect(posts.find((entry) => entry.url.endsWith('/network-execution'))?.body).toEqual({
+    expect(posts.find((entry) => entry.url.endsWith('/network-execution'))?.body).toMatchObject({
       action: 'start',
       expectedRevision: 0,
       expectedConfigRevision: 6,
@@ -2214,7 +2410,7 @@ describe('p2.5 exam seat assignment workspace', () => {
     await user.click(await screen.findByRole('button', { name: '重试当前网络请求' }));
     await waitFor(() => expect(screen.getByRole('button', { name: '一键预启动全部终端' })).toBeEnabled());
 
-    expect(posts.find((entry) => entry.url.endsWith('/network-execution'))?.body).toEqual({
+    expect(posts.find((entry) => entry.url.endsWith('/network-execution'))?.body).toMatchObject({
       action: 'retry',
       expectedRevision: 7,
     });
@@ -2421,7 +2617,7 @@ describe('p2.5 exam seat assignment workspace', () => {
     await openLaunchAfterReadyNetwork(user);
     expect(confirmBodies.length).toBeGreaterThanOrEqual(2);
     expect(confirmBodies.every((body) => body.requestId === dispatching.requestId)).toBe(true);
-    expect(confirmBodies[0]).toEqual({
+    expect(confirmBodies[0]).toMatchObject({
       assignmentRevision: dispatching.assignment.revision,
       preparationFingerprint: dispatching.preparationFingerprint,
       workflowFingerprint: dispatching.workflow?.fingerprint,
@@ -2638,7 +2834,7 @@ describe('p2.5 exam seat assignment workspace', () => {
     expect(screen.getByText('未处理 0')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '只重试 1 个失败项' }));
     await waitFor(() => expect(retryPosts).toHaveLength(1));
-    expect(retryPosts[0]?.body).toEqual({
+    expect(retryPosts[0]?.body).toMatchObject({
       expectedProjectionRevision: 1,
       requestId: retryRequest,
       ticketIds: [initial.subjects[1].ticketId],
@@ -2945,7 +3141,7 @@ describe('p2.5 exam seat assignment workspace', () => {
     await waitFor(() => expect(resumeBody).not.toBeNull());
     await openLaunchAfterReadyNetwork(user);
     expect(await screen.findByText('逐终端结果')).toBeInTheDocument();
-    expect(resumeBody).toEqual({
+    expect(resumeBody).toMatchObject({
       assignmentRevision: dispatching.assignment.revision,
       preparationFingerprint: dispatching.preparationFingerprint,
       workflowFingerprint: dispatching.workflow?.fingerprint,

@@ -36,10 +36,11 @@ describe('programming statement canonical protocol', () => {
         expect(statement.examples).to.deep.equal({ state: 'undecided', items: [] });
     });
 
-    it('rejects unknown schema, locale, fields, dormant absent content, and absent descriptions', () => {
+    it('rejects unknown schema, locale, missing sections, dormant absent content, and absent descriptions', () => {
         expect(() => normalizeProgrammingStatement({ ...emptyProgrammingStatement(), schemaVersion: 2 })).to.throw(/schema/);
         expect(() => normalizeProgrammingStatement({ ...emptyProgrammingStatement(), locale: 'en' })).to.throw(/locale/);
-        expect(() => normalizeProgrammingStatement({ ...emptyProgrammingStatement(), order: [] })).to.throw(/unsupported fields/);
+        expect(normalizeProgrammingStatement({ ...emptyProgrammingStatement(), order: [] })).to.deep.equal(emptyProgrammingStatement());
+        expect(() => normalizeProgrammingStatement({ schemaVersion: 1, locale: 'zh-CN' })).to.throw(/must be an object/);
         expect(() =>
             normalizeProgrammingStatement({
                 ...emptyProgrammingStatement(),
@@ -73,6 +74,24 @@ describe('programming statement canonical protocol', () => {
                 },
             }),
         ).to.throw(/both sides empty/);
+        expect(
+            normalizeProgrammingStatement({
+                ...completeStatement(),
+                examples: {
+                    state: 'present',
+                    items: [{ input: '1', output: '2', note: '', extra: true }],
+                },
+            }).examples.items[0],
+        ).to.deep.equal({ input: '1', inputEmpty: false, output: '2', outputEmpty: false, note: '' });
+        expect(
+            normalizeProgrammingStatement({
+                ...completeStatement(),
+                examples: {
+                    state: 'present',
+                    items: [{ input: '', output: 'done', note: '' }],
+                },
+            }).examples.items[0],
+        ).to.deep.equal({ input: '', inputEmpty: true, output: 'done', outputEmpty: false, note: '' });
     });
 
     it('compiles deterministic Hydro-compatible paired sample fences in array order', () => {

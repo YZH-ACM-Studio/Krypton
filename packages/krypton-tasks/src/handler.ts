@@ -71,6 +71,10 @@ function stayValidation(reason: LocalizedErrorText): never {
     throw new ValidationError('studentId', null, reason);
 }
 
+function assertCanCreateTasks(user: { hasPerm(p: bigint): boolean; hasPriv(p: number): boolean }) {
+    if (!canCreateTask(user)) throw new ForbiddenError();
+}
+
 function parsePosition(p: any): { x: number; y: number } {
     if (!p || typeof p !== 'object') return { x: 0, y: 0 };
     return {
@@ -519,9 +523,7 @@ class TaskAssignmentActionHandler extends Handler {
 
 export class AdminTasksListHandler extends Handler {
     async prepare() {
-        if (!canCreateTask(this.user as any) && !canManageAllTasks(this.user as any)) {
-            this.checkPriv(PRIV.PRIV_EDIT_SYSTEM);
-        }
+        assertCanCreateTasks(this.user);
     }
 
     async get({ domainId }: { domainId: string }) {
@@ -571,9 +573,7 @@ export class AdminTasksListHandler extends Handler {
 
 export class AdminTasksEditHandler extends Handler {
     async prepare() {
-        if (!canCreateTask(this.user as any) && !canManageAllTasks(this.user as any)) {
-            this.checkPriv(PRIV.PRIV_EDIT_SYSTEM);
-        }
+        assertCanCreateTasks(this.user);
     }
 
     @param('tid', Types.ObjectId, true)
@@ -720,9 +720,7 @@ export class AdminTasksEditHandler extends Handler {
 
 class AdminTasksAssignHandler extends Handler {
     async prepare() {
-        if (!canCreateTask(this.user as any) && !canManageAllTasks(this.user as any)) {
-            this.checkPriv(PRIV.PRIV_EDIT_SYSTEM);
-        }
+        assertCanCreateTasks(this.user);
     }
 
     @param('tid', Types.ObjectId)
@@ -809,9 +807,7 @@ class AdminTasksAssignHandler extends Handler {
 
 class AdminTasksOverrideHandler extends Handler {
     async prepare() {
-        if (!canCreateTask(this.user as any) && !canManageAllTasks(this.user as any)) {
-            this.checkPriv(PRIV.PRIV_EDIT_SYSTEM);
-        }
+        assertCanCreateTasks(this.user);
     }
 
     @param('tid', Types.ObjectId)
@@ -842,9 +838,7 @@ class AdminTasksOverrideHandler extends Handler {
 
 export class AdminTasksStatsHandler extends Handler {
     async prepare() {
-        if (!canCreateTask(this.user as any) && !canManageAllTasks(this.user as any)) {
-            this.checkPriv(PRIV.PRIV_EDIT_SYSTEM);
-        }
+        assertCanCreateTasks(this.user);
     }
 
     @param('tid', Types.ObjectId)
@@ -987,9 +981,7 @@ export class AdminTasksStatsHandler extends Handler {
  */
 class AdminTasksCandidatesHandler extends Handler {
     async prepare() {
-        if (!canCreateTask(this.user as any) && !canManageAllTasks(this.user as any)) {
-            this.checkPriv(PRIV.PRIV_EDIT_SYSTEM);
-        }
+        assertCanCreateTasks(this.user);
     }
 
     @param('tid', Types.ObjectId)
@@ -1137,9 +1129,7 @@ class AdminTasksCandidatesHandler extends Handler {
  */
 class AdminTasksProblemSearchHandler extends Handler {
     async prepare() {
-        if (!canCreateTask(this.user as any) && !canManageAllTasks(this.user as any)) {
-            this.checkPriv(PRIV.PRIV_EDIT_SYSTEM);
-        }
+        assertCanCreateTasks(this.user);
         if (!ProblemModel.canBrowseProblemBank(this.user as any)) throw new ForbiddenError();
     }
 

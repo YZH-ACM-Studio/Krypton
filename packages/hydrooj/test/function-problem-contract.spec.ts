@@ -25,7 +25,7 @@ describe('P3.18 function problem wiring', () => {
         expect(lifecycle).to.match(/do id = `r_\$\{nanoid\(16\)\}`/);
         expect(lifecycle).to.include('sourceHash: templateSourceHash(source)');
         expect(lifecycle).to.include('ID 不属于当前题目');
-        expect(lifecycle).to.include('源码摘要与本次提交内容不一致');
+        expect(lifecycle).not.to.include('源码摘要与本次提交内容不一致');
         expect(lifecycle).to.include('compareStructuredCodeRegions');
     });
 

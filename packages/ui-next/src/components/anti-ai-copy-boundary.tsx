@@ -332,6 +332,10 @@ interface AtomicFormulaIndex {
   index: number;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
 function atomicFormula(element: Element): { source: string; indexes: AtomicFormulaIndex[] } {
   const source = element.getAttribute(ATOMIC_SOURCE_ATTRIBUTE);
   const rawIndexes = element.getAttribute(ATOMIC_INDEXES_ATTRIBUTE);
@@ -346,22 +350,18 @@ function atomicFormula(element: Element): { source: string; indexes: AtomicFormu
   const ids = new Set<string>();
   const indexes = parsed.map((entry) => {
     if (
-      !entry ||
-      typeof entry !== 'object' ||
-      Array.isArray(entry) ||
-      Object.keys(entry).sort().join(',') !== 'id,index' ||
-      typeof (entry as { id?: unknown }).id !== 'string' ||
-      !/^[A-Za-z0-9_-]{8,64}$/.test((entry as { id: string }).id) ||
-      ids.has((entry as { id: string }).id) ||
-      !Number.isSafeInteger((entry as { index?: unknown }).index) ||
-      Number((entry as { index: number }).index) < 0 ||
-      Number((entry as { index: number }).index) > source.length
+      !isRecord(entry) ||
+      typeof entry.id !== 'string' ||
+      !/^[A-Za-z0-9_-]{8,64}$/.test(entry.id) ||
+      ids.has(entry.id) ||
+      !Number.isSafeInteger(entry.index) ||
+      Number(entry.index) < 0 ||
+      Number(entry.index) > source.length
     ) {
       throw new TypeError('Rendered atomic formula metadata is invalid');
     }
-    const id = (entry as { id: string }).id;
-    ids.add(id);
-    return { id, index: Number((entry as { index: number }).index) };
+    ids.add(entry.id);
+    return { id: entry.id, index: Number(entry.index) };
   });
   const fullIds = atomicMarkerIds(element, ATOMIC_FULL_ATTRIBUTE);
   if (fullIds.length !== indexes.length || fullIds.some((id) => !ids.has(id))) {

@@ -44,9 +44,7 @@ export function wantsForceBindHtml(method: string, accept: string, isJson: boole
 }
 
 function normalizeForceBindPath(path: string): string {
-    const queryIndex = path.indexOf('?');
-    const withoutQuery = queryIndex === -1 ? path : path.slice(0, queryIndex);
-    return withoutQuery === '' ? '/' : withoutQuery;
+    return path === '' ? '/' : path;
 }
 
 function pathHasAllowedPrefix(path: string, prefix: string): boolean {

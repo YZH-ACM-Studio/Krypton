@@ -135,12 +135,12 @@ describe('pathIsForceBindAllowed', () => {
         expect(decide({ path: '/contest/1', wantsHtml: false })).to.equal('reject');
     });
 
-    it('does not lowercase paths and ignores a query string', () => {
+    it('does not lowercase paths; empty path is the homepage', () => {
         expect(pathIsForceBindAllowed('/Userbind')).to.equal(false);
         expect(pathIsForceBindAllowed('/HOME')).to.equal(false);
-        expect(pathIsForceBindAllowed('/userbind?next=/p/1')).to.equal(true);
-        expect(pathIsForceBindAllowed('/p/1?tab=submit')).to.equal(false);
-        expect(pathIsForceBindAllowed('?from=home')).to.equal(true);
+        expect(pathIsForceBindAllowed('')).to.equal(true);
+        expect(pathIsForceBindAllowed('/userbind?next=/p/1')).to.equal(false);
+        expect(pathIsForceBindAllowed('?from=home')).to.equal(false);
     });
 });
 

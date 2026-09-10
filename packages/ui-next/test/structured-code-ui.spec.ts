@@ -178,13 +178,15 @@ describe('p3.21 shared structured-code workspace', () => {
     const editor = read('packages/ui-next/src/components/structured-region-author-editor.tsx');
     const ranges = read('packages/ui-next/src/lib/structured-code-ranges.ts');
     const workspace = read('packages/ui-next/src/pages/structured-code-editors.tsx');
-    expect(editor).to.include('export function mapAuthorLineRanges');
+    expect(editor).to.include('mapStructuredLineRanges');
+    expect(editor).not.to.include('mapAuthorLineRanges');
     expect(ranges).to.include('changes.mapPos');
     expect(workspace).to.include('conflicted.add');
     expect(workspace).to.include('请删除后重新框选，系统不会猜测迁移');
     expect(workspace).not.to.include('disabled={saving || completionBlocked}');
     expect(workspace).to.include('disabled={saving}');
-    expect(workspace).to.include("sourceHash: sha256Text(source.replace(/\\r\\n?/g, '\\n'))");
+    expect(workspace).not.to.include('sha256Text');
+    expect(workspace).not.to.include('sourceHash');
   });
 
   it('shares the same safe region inputs across direct, contest, homework, exam, training, and course references', () => {
@@ -238,10 +240,12 @@ describe('p3.22 code implementation authoring and student contract', () => {
   it('keeps only optional title and description and makes source position the only order', () => {
     const workspace = read('packages/ui-next/src/pages/structured-code-editors.tsx');
     const lifecycle = read('packages/hydrooj/src/model/code-evaluation-lifecycle.ts');
+    const config = read('packages/hydrooj/src/lib/problem-config.ts');
     expect(workspace).to.include('作答区标题（可选）');
     expect(workspace).to.include('局部要求（可选）');
     expect(workspace).not.to.include('函数签名');
-    expect(lifecycle).to.include("['id', 'startLine', 'endLine', 'title', 'description']");
+    expect(config).to.include("['id', 'startLine', 'endLine', 'title', 'description']");
+    expect(lifecycle).not.to.include("['id', 'startLine', 'endLine', 'title', 'description']");
     expect(lifecycle).not.to.include('allowEmptySignature');
     expect(lifecycle).not.to.include('region.order');
   });

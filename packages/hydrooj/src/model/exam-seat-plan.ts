@@ -569,12 +569,16 @@ export class ExamSeatPlanService {
 
     private async latestRoster(domainId: string, eventId: ObjectId): Promise<ExamRosterRevisionDoc | null> {
         const rows = await this.rosters.find({ domainId, eventId }).sort({ revision: -1 }).limit(1).toArray();
-        return rows[0] || null;
+        const roster = rows[0] || null;
+        if (roster) assertExamRosterRevisionIntegrity(roster);
+        return roster;
     }
 
     private async latestSeatPlan(domainId: string, eventId: ObjectId): Promise<ExamSeatPlanDoc | null> {
         const rows = await this.seatPlans.find({ domainId, eventId }).sort({ revision: -1 }).limit(1).toArray();
-        return rows[0] || null;
+        const plan = rows[0] || null;
+        if (plan) assertExamSeatPlanIntegrity(plan);
+        return plan;
     }
 
     async createRosterRevision(input: {
@@ -592,7 +596,6 @@ export class ExamSeatPlanService {
         assertUid(input.actorUid);
         assertFingerprint(input.resolved.fingerprint, 'resolved_roster_fingerprint');
         const previous = await this.latestRoster(input.domainId, input.eventId);
-        if (previous) assertExamRosterRevisionIntegrity(previous);
         const revision = (previous?.revision || 0) + 1;
         const currentUids = input.resolved.entries.map((entry) => entry.boundUserId);
         const previousUids = previous?.entries.map((entry) => entry.boundUserId) || [];
@@ -624,7 +627,6 @@ export class ExamSeatPlanService {
             createdBy: input.actorUid,
         };
         const doc: ExamRosterRevisionDoc = { ...canonicalDoc, fingerprint: rosterDocumentFingerprint(canonicalDoc) };
-        assertExamRosterRevisionIntegrity(doc);
         try {
             await this.rosters.insertOne(doc);
         } catch (error) {
@@ -657,7 +659,6 @@ export class ExamSeatPlanService {
         assertFingerprint(input.layoutFingerprint, 'layout_fingerprint');
         if (input.requireRoster && !input.roster) throw new ExamSeatPlanError('roster_required');
         if (input.roster) {
-            assertExamRosterRevisionIntegrity(input.roster);
             if (
                 input.roster.domainId !== input.domainId ||
                 !input.roster.eventId.equals(input.eventId) ||
@@ -670,7 +671,6 @@ export class ExamSeatPlanService {
         const candidateSeatIds = input.candidateSeatIds.map((value) => canonicalText(value, 'candidate_seat_id', 128)).sort();
         if (new Set(candidateSeatIds).size !== candidateSeatIds.length) throw new ExamSeatPlanError('candidate_seat_duplicate');
         const previous = await this.latestSeatPlan(input.domainId, input.eventId);
-        if (previous) assertExamSeatPlanIntegrity(previous);
         if (previous && isExamSeatPlanV2(previous)) throw new ExamSeatPlanError('seat_plan_v2_writer_required');
         const revision = (previous?.revision || 0) + 1;
         const requiredSeatCount = input.roster?.entries.length || 0;
@@ -701,7 +701,6 @@ export class ExamSeatPlanService {
             createdBy: input.actorUid,
         };
         const doc: ExamSeatPlanV1Doc = { ...canonicalDoc, fingerprint: planDocumentFingerprint(canonicalDoc) };
-        assertExamSeatPlanIntegrity(doc);
         try {
             await this.seatPlans.insertOne(doc);
         } catch (error) {
@@ -732,7 +731,6 @@ export class ExamSeatPlanService {
         }
         if (input.requireRoster && !input.roster) throw new ExamSeatPlanError('roster_required');
         if (input.roster) {
-            assertExamRosterRevisionIntegrity(input.roster);
             if (
                 input.roster.domainId !== input.domainId ||
                 !input.roster.eventId.equals(input.eventId) ||
@@ -759,20 +757,14 @@ export class ExamSeatPlanService {
         if (candidateSeatCount > 500) throw new ExamSeatPlanError('candidate_seats_invalid');
 
         const previous = await this.latestSeatPlan(input.domainId, input.eventId);
-        if (previous) {
-            assertExamSeatPlanIntegrity(previous);
-            if (!previous.schoolId.equals(input.schoolId) || previous.eventRevision > input.eventRevision) {
-                throw new ExamSeatPlanError('seat_plan_history_identity_mismatch');
-            }
+        if (previous && (!previous.schoolId.equals(input.schoolId) || previous.eventRevision > input.eventRevision)) {
+            throw new ExamSeatPlanError('seat_plan_history_identity_mismatch');
         }
         if ((previous?.revision || 0) !== input.expectedPreviousRevision) {
             throw new ExamSeatPlanError('seat_plan_revision_conflict');
         }
         const revision = (previous?.revision || 0) + 1;
         const createdAt = canonicalDate(this.now(), 'now');
-        if (createdAt.getTime() < Math.max(input.roster?.createdAt.getTime() || 0, previous?.createdAt.getTime() || 0)) {
-            throw new ExamSeatPlanError('seat_plan_clock_rollback');
-        }
         const requiredSeatCount = input.roster?.entries.length || 0;
         const diagnostics: ExamSeatPlanDiagnostic[] =
             requiredSeatCount > candidateSeatCount
@@ -796,7 +788,6 @@ export class ExamSeatPlanService {
             createdBy: input.actorUid,
         };
         const doc: ExamSeatPlanV2Doc = { ...canonical, fingerprint: planDocumentFingerprint(canonical) };
-        assertExamSeatPlanIntegrity(doc);
         try {
             await this.seatPlans.insertOne(doc);
         } catch (error) {
@@ -827,9 +818,7 @@ export class ExamSeatPlanService {
     async latestSeatPlanRevision(domainId: string, eventId: ObjectId): Promise<ExamSeatPlanDoc | null> {
         assertDomainId(domainId);
         assertObjectId(eventId, 'eventId');
-        const plan = await this.latestSeatPlan(domainId, eventId);
-        if (plan) assertExamSeatPlanIntegrity(plan);
-        return plan;
+        return this.latestSeatPlan(domainId, eventId);
     }
 
     async assertEventSchoolChangeAllowed(domainId: string, eventId: ObjectId): Promise<void> {

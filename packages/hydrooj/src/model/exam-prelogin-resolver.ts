@@ -1,5 +1,6 @@
 import { ObjectId } from 'mongodb';
 import {
+    canonicalEndpointFact,
     createExamPreloginPreparation,
     ExamPreloginDiagnostic,
     ExamPreloginEndpointCapability,
@@ -206,13 +207,13 @@ export function compileExamPreloginPreparation(facts: ExamPreloginPreparationFac
                 endpointId: validBinding ? binding.endpointId : null,
                 ready: !canonicalDiagnostics.some((item) => item.severity === 'error'),
                 diagnostics: canonicalDiagnostics,
-                endpoint: {
+                endpoint: canonicalEndpointFact({
                     online: endpoint.online,
                     serviceVersion: endpoint.serviceVersion,
                     protocolVersion: endpoint.protocolVersion,
                     capabilities: endpoint.capabilities,
                     activeSessionId: endpoint.activeSessionId,
-                },
+                }),
             };
         });
     const hardErrorCount = items.reduce(

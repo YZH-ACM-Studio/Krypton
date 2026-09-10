@@ -2304,7 +2304,7 @@ function ExecutionSection({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const offlineEndpoints = execution?.projection?.items.filter((item) => !item.online) || [];
-  const stopBlockedByOffline = execution?.desiredState === 'active' && offlineEndpoints.length > 0;
+  const activeOfflineEndpoints = execution?.desiredState === 'active' ? offlineEndpoints : [];
   const incompleteRelease =
     execution?.desiredState === 'stopped' &&
     (execution.projection?.items.some((item) => item.status !== 'applied') ?? false);
@@ -2412,10 +2412,8 @@ function ExecutionSection({
                 <Button
                   size="sm"
                   variant={primaryAction === 'start' ? 'default' : 'outline'}
-                  disabled={busy || !runnable || !visiblePreflight || currentRequestUnresolved}
-                  title={
-                    currentRequestUnresolved ? '请先重试当前请求或刷新到完整执行事实' : !visiblePreflight ? '请先对当前配置执行终端预检' : undefined
-                  }
+                  disabled={busy || !runnable || currentRequestUnresolved}
+                  title={currentRequestUnresolved ? '请先重试当前请求或刷新到完整执行事实' : undefined}
                   onClick={() =>
                     requestConfirm({
                       title: '启动网络策略？',
@@ -2497,12 +2495,7 @@ function ExecutionSection({
                 <Button
                   size="sm"
                   variant="destructive"
-                  disabled={busy || stopBlockedByOffline}
-                  title={
-                    stopBlockedByOffline
-                      ? '有终端离线。现在停止只会记成 offline，不是已释放。请等终端上线后再停。'
-                      : undefined
-                  }
+                  disabled={busy}
                   onClick={() =>
                     requestConfirm({
                       title: '停止网络策略？',
@@ -2530,9 +2523,9 @@ function ExecutionSection({
                 </Button>
               ) : null}
             </div>
-            {stopBlockedByOffline ? (
+            {activeOfflineEndpoints.length > 0 ? (
               <p className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm text-amber-800 dark:text-amber-200">
-                {offlineEndpoints.length} 台终端离线（{offlineEndpoints.map((item) => item.endpointId).join('、')}
+                {activeOfflineEndpoints.length} 台终端离线（{activeOfflineEndpoints.map((item) => item.endpointId).join('、')}
                 ）。offline 不是已释放。请等这些机器上线后再点停止；已还原或状态不可读的机器先在本机管理员运行
                 KryptonVigilClient.exe --network-lock-recover。
               </p>
@@ -2570,10 +2563,8 @@ function ExecutionSection({
                     <Button
                       size="sm"
                       variant={updateTone}
-                      disabled={busy || !runnable || !visiblePreflight || currentRequestUnresolved}
-                      title={
-                        currentRequestUnresolved ? '请先重试当前请求或刷新到完整执行事实' : !visiblePreflight ? '请先对新配置执行终端预检' : undefined
-                      }
+                      disabled={busy || !runnable || currentRequestUnresolved}
+                      title={currentRequestUnresolved ? '请先重试当前请求或刷新到完整执行事实' : undefined}
                       onClick={() =>
                         requestConfirm({
                           title: updateIsRollback ? '回滚并热更新网络策略？' : '热更新网络策略？',

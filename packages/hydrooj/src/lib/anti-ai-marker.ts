@@ -152,19 +152,16 @@ function graphemeBoundaries(source: string): Set<number> {
 
 function canonicalInput(value: unknown): AntiAiMarkerInput {
     if (!isPlainObject(value)) throw new TypeError('antiAiMarkers must be an object');
-    exactKeys(value, ['schemaVersion', 'markers'], 'antiAiMarkers');
     if (value.schemaVersion !== 1) throw new TypeError('antiAiMarkers.schemaVersion is unsupported');
     if (!Array.isArray(value.markers)) throw new TypeError('antiAiMarkers.markers must be an array');
     const ids = new Set<string>();
     const markers: AntiAiMarkerInput['markers'] = value.markers.map((raw, index) => {
         if (!isPlainObject(raw)) throw new TypeError(`antiAiMarkers.markers.${index} must be an object`);
-        exactKeys(raw, ['id', 'anchor', 'injectionText', 'revision'], `antiAiMarkers.markers.${index}`);
         if (typeof raw.id !== 'string' || !MARKER_ID.test(raw.id) || ids.has(raw.id)) {
             throw new TypeError(`antiAiMarkers.markers.${index}.id is invalid`);
         }
         ids.add(raw.id);
         if (!isPlainObject(raw.anchor)) throw new TypeError(`antiAiMarkers.markers.${index}.anchor must be an object`);
-        exactKeys(raw.anchor, ['path', 'offset', 'affinity'], `antiAiMarkers.markers.${index}.anchor`);
         if (typeof raw.anchor.path !== 'string' || !raw.anchor.path) throw new TypeError(`antiAiMarkers.markers.${index}.anchor.path is invalid`);
         if (!Number.isSafeInteger(raw.anchor.offset) || Number(raw.anchor.offset) < 0) {
             throw new TypeError(`antiAiMarkers.markers.${index}.anchor.offset is invalid`);

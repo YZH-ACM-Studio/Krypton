@@ -51,20 +51,53 @@ describe('anti AI marker authoring state', () => {
     });
   });
 
-  it('accepts only the exact stored author schema and strips internal anchor context', () => {
+  it('requires author marker identity while ignoring extra keys and optional anchor context', () => {
     const stored = {
       schemaVersion: 1,
+      extra: true,
       markers: [
         {
           id: 'marker_0001',
-          anchor: { path: 'content', offset: 2, affinity: 'after', before: 'ab', after: 'cd' },
+          unknown: true,
+          anchor: { path: 'content', offset: 2, affinity: 'after' as const, before: 'ab', after: 'cd', extra: 'ignored' },
           injectionText: '隐藏提示',
           revision: 3,
         },
       ],
     };
-    expect(readAntiAiMarkerDrafts(stored)).toEqual([{ ...marker(2), revision: 3 }]);
-    expect(() => readAntiAiMarkerDrafts({ ...stored, unknown: true })).toThrow('schema');
-    expect(() => readAntiAiMarkerDrafts({ ...stored, markers: [{ ...stored.markers[0], unknown: true }] })).toThrow('invalid');
+    const expected = [{ ...marker(2), revision: 3 }];
+    expect(readAntiAiMarkerDrafts(stored)).toEqual(expected);
+    expect(
+      readAntiAiMarkerDrafts({
+        schemaVersion: 1,
+        markers: [
+          {
+            id: 'marker_0001',
+            anchor: { path: 'content', offset: 2, affinity: 'after' },
+            injectionText: '隐藏提示',
+            revision: 3,
+          },
+        ],
+      }),
+    ).toEqual(expected);
+    expect(() =>
+      readAntiAiMarkerDrafts({
+        schemaVersion: 1,
+        markers: [{ id: 'marker_0001', injectionText: '隐藏提示', revision: 3 }],
+      }),
+    ).toThrow('invalid');
+    expect(() =>
+      readAntiAiMarkerDrafts({
+        schemaVersion: 1,
+        markers: [
+          {
+            id: 'marker_0001',
+            anchor: { path: 'content', offset: 2 },
+            injectionText: '隐藏提示',
+            revision: 3,
+          },
+        ],
+      }),
+    ).toThrow('invalid');
   });
 });

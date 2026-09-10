@@ -1,7 +1,13 @@
 /** Lifecycle hooks. Every write delegates to the fenced ACL model. */
-import type { Context } from 'hydrooj';
-import { isLegacyPublishTransition } from './hook-policy';
+import type { Context, ProblemDoc } from 'hydrooj';
 import { permitsModel } from './model';
+
+export function isLegacyPublishTransition(
+    pdoc: Pick<ProblemDoc, 'authoringMode' | 'hidden'> | null | undefined,
+    previous?: { hidden?: boolean },
+): boolean {
+    return pdoc?.authoringMode !== 'managed' && previous?.hidden === true && pdoc?.hidden === false;
+}
 
 export function attachHooks(ctx: Context) {
     ctx.on('problem/edit', async (pdoc, writeClaimRequestId, previous) => {

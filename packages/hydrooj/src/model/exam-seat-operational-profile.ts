@@ -232,7 +232,6 @@ function virtualProfile(classroom: ExamSeatOperationalClassroomFacts): ExamSeatO
 }
 
 function storedView(profile: ExamSeatOperationalProfileDoc): ExamSeatOperationalProfileView {
-    assertExamSeatOperationalProfileIntegrity(profile);
     return { ...profile, persisted: true };
 }
 
@@ -421,7 +420,6 @@ export class ExamSeatOperationalProfileService {
                 createdAt: new Date(this.options.now?.() || new Date()),
                 createdBy: input.actorUid,
             };
-            assertExamSeatOperationalProfileIntegrity(profile);
             try {
                 await this.options.profiles.insertOne(profile);
             } catch (error) {

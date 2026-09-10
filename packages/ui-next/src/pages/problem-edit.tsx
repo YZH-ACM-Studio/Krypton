@@ -1175,12 +1175,6 @@ export function ProblemEditPage() {
       setSaveState('error');
       return;
     }
-    if (!structuredSave && contentText.length > 65535) {
-      const message = '题面正文不能超过 65535 个字符。';
-      setSaveError(message);
-      setSaveState('error');
-      return;
-    }
     if (tagSelectionDirty) {
       const message = programmingTagNeedsNormalization
         ? '知识标签选择尚未确认；请先在“标签与知识导图”中预览并确认规范化结果。'

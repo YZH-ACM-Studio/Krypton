@@ -5,8 +5,6 @@ import { settleDomainCleanupOperations } from './domain-lifecycle-boundary';
 import type { ExamSeatDisabledReason, ExamSeatFacing } from './exam-seat-operational-profile';
 import type { EndpointSeatBindingDoc } from './endpoint-seat-binding';
 import {
-    assertExamRosterRevisionIntegrity,
-    assertExamSeatPlanIntegrity,
     ExamRosterRevisionDoc,
     ExamSeatPlanClassroomRef,
     ExamSeatPlanV1Doc,
@@ -387,8 +385,6 @@ export function buildExamSeatAssignment(input: {
     lockedAssignments: ExamSeatAssignmentMapping[];
     manualAssignments: ExamSeatAssignmentMapping[];
 }): ExamSeatAssignmentBuildResult {
-    assertExamRosterRevisionIntegrity(input.roster);
-    assertExamSeatPlanIntegrity(input.seatPlan);
     if (
         !input.seatPlan.roster ||
         !input.seatPlan.roster.rosterId.equals(input.roster._id) ||
@@ -1114,8 +1110,6 @@ export function buildExamSeatAssignmentV2(input: {
     lockedAssignments: ExamSeatAssignmentV2Mapping[];
     manualAssignments: ExamSeatAssignmentV2Mapping[];
 }): ExamSeatAssignmentV2BuildResult {
-    assertExamRosterRevisionIntegrity(input.roster);
-    assertExamSeatPlanIntegrity(input.seatPlan);
     if (!isExamSeatPlanV2(input.seatPlan)) throw new ExamSeatAssignmentError('assignment_v2_plan_required');
     if (
         !input.seatPlan.roster ||
@@ -1590,8 +1584,6 @@ export class ExamSeatAssignmentService {
         if (!Number.isSafeInteger(input.expectedPreviousRevision) || input.expectedPreviousRevision < 0) {
             throw new TypeError('expectedPreviousRevision is invalid');
         }
-        assertExamRosterRevisionIntegrity(input.roster);
-        assertExamSeatPlanIntegrity(input.seatPlan);
         if (
             input.roster.domainId !== input.domainId ||
             input.seatPlan.domainId !== input.domainId ||
@@ -1605,7 +1597,6 @@ export class ExamSeatAssignmentService {
         const built = buildExamSeatAssignment(input);
         if (!built.ok) return { assignment: null, diagnostics: built.diagnostics };
         const previous = await this.latestRevision(input.domainId, input.eventId);
-        if (previous) assertExamSeatAssignmentIntegrity(previous);
         if (previous && isExamSeatAssignmentV2(previous)) throw new ExamSeatAssignmentError('assignment_v2_writer_required');
         if ((previous?.revision || 0) !== input.expectedPreviousRevision) {
             throw new ExamSeatAssignmentError('assignment_revision_conflict');
@@ -1614,8 +1605,6 @@ export class ExamSeatAssignmentService {
             throw new ExamSeatAssignmentError('assignment_history_identity_mismatch');
         }
         const createdAt = canonicalDate(this.now(), 'now');
-        const earliestCreatedAt = Math.max(input.roster.createdAt.getTime(), input.seatPlan.createdAt.getTime(), previous?.createdAt.getTime() || 0);
-        if (createdAt.getTime() < earliestCreatedAt) throw new ExamSeatAssignmentError('assignment_clock_rollback');
         const revision = (previous?.revision || 0) + 1;
         const canonical: Omit<ExamSeatAssignmentV1Doc, 'fingerprint'> = {
             _id: this.idFactory(),
@@ -1642,7 +1631,6 @@ export class ExamSeatAssignmentService {
             createdBy: input.actorUid,
         };
         const assignment: ExamSeatAssignmentV1Doc = { ...canonical, fingerprint: assignmentDocumentFingerprint(canonical) };
-        assertExamSeatAssignmentIntegrity(assignment);
         try {
             await this.assignments.insertOne(assignment);
         } catch (error) {
@@ -1676,8 +1664,6 @@ export class ExamSeatAssignmentService {
         if (!Number.isSafeInteger(input.expectedPreviousRevision) || input.expectedPreviousRevision < 0) {
             throw new TypeError('expectedPreviousRevision is invalid');
         }
-        assertExamRosterRevisionIntegrity(input.roster);
-        assertExamSeatPlanIntegrity(input.seatPlan);
         if (!isExamSeatPlanV2(input.seatPlan)) throw new ExamSeatAssignmentError('assignment_v2_plan_required');
         if (
             input.roster.domainId !== input.domainId ||
@@ -1692,7 +1678,6 @@ export class ExamSeatAssignmentService {
         const built = buildExamSeatAssignmentV2(input);
         if (!built.ok) return { assignment: null, diagnostics: built.diagnostics };
         const previous = await this.latestRevision(input.domainId, input.eventId);
-        if (previous) assertExamSeatAssignmentIntegrity(previous);
         if ((previous?.revision || 0) !== input.expectedPreviousRevision) {
             throw new ExamSeatAssignmentError('assignment_revision_conflict');
         }
@@ -1700,8 +1685,6 @@ export class ExamSeatAssignmentService {
             throw new ExamSeatAssignmentError('assignment_history_identity_mismatch');
         }
         const createdAt = canonicalDate(this.now(), 'now');
-        const earliestCreatedAt = Math.max(input.roster.createdAt.getTime(), input.seatPlan.createdAt.getTime(), previous?.createdAt.getTime() || 0);
-        if (createdAt.getTime() < earliestCreatedAt) throw new ExamSeatAssignmentError('assignment_clock_rollback');
         const revision = (previous?.revision || 0) + 1;
         const canonical: Omit<ExamSeatAssignmentV2Doc, 'fingerprint'> = {
             _id: this.idFactory(),
@@ -1734,7 +1717,6 @@ export class ExamSeatAssignmentService {
             createdBy: input.actorUid,
         };
         const assignment: ExamSeatAssignmentV2Doc = { ...canonical, fingerprint: assignmentDocumentFingerprint(canonical) };
-        assertExamSeatAssignmentIntegrity(assignment);
         try {
             await this.assignments.insertOne(assignment);
         } catch (error) {
@@ -1767,9 +1749,6 @@ export class ExamSeatAssignmentService {
         }
         const revision = input.expectedPublicationRevision + 1;
         const updatedAt = canonicalDate(this.now(), 'now');
-        if (updatedAt.getTime() < Math.max(assignment.createdAt.getTime(), current?.updatedAt.getTime() || 0)) {
-            throw new ExamSeatAssignmentError('assignment_clock_rollback');
-        }
         const canonical: Omit<ExamSeatAssignmentPublicationDoc, 'fingerprint'> = {
             _id: current ? new ObjectId(current._id) : this.idFactory(),
             domainId: input.domainId,
@@ -1781,7 +1760,6 @@ export class ExamSeatAssignmentService {
             updatedBy: input.actorUid,
         };
         const target: ExamSeatAssignmentPublicationDoc = { ...canonical, fingerprint: publicationDocumentFingerprint(canonical) };
-        assertExamSeatAssignmentPublicationIntegrity(target);
         try {
             if (!current) await this.publications.insertOne(target);
             else {

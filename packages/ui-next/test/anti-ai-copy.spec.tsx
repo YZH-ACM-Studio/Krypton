@@ -519,11 +519,56 @@ describe('controlled statement anti AI copy', () => {
     );
   });
 
+  it('ignores extra formula index keys while still injecting at the recorded index', () => {
+    const source = 'before $a+b$ after';
+    const { container } = controlledMarkdown(source, [marker('marker_math_inside', source.indexOf('+'), '[内部]')]);
+    const scope = container.querySelector<HTMLElement>('[data-anti-ai-copy-scope]')!;
+    const carrier = scope.querySelector<HTMLElement>('[data-anti-ai-atomic-indexes]')!;
+    carrier.setAttribute('data-anti-ai-atomic-indexes', JSON.stringify([{ id: 'marker_math_inside', index: 1, extra: true }]));
+    selectContents(scope.querySelector('.katex')!);
+    const data = clipboard();
+
+    fireEvent.copy(scope, { clipboardData: data });
+    expect(data.values.get('text/plain')).toBe('a[内部]+b');
+  });
+
+  it('blocks copy when formula index JSON is missing required fields', () => {
+    const source = 'before $a+b$ after';
+    const { container } = controlledMarkdown(source, [marker('marker_math_inside', source.indexOf('+'), '[内部]')]);
+    const scope = container.querySelector<HTMLElement>('[data-anti-ai-copy-scope]')!;
+    const carrier = scope.querySelector<HTMLElement>('[data-anti-ai-atomic-indexes]')!;
+    carrier.setAttribute('data-anti-ai-atomic-indexes', JSON.stringify([{ id: 'marker_math_inside', extra: true }]));
+    selectContents(scope.querySelector('.katex')!);
+    const data = clipboard();
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    expect(fireEvent.copy(scope, { clipboardData: data })).toBe(false);
+    expect(data.clearData).toHaveBeenCalledWith('text/plain');
+    expect(data.clearData).toHaveBeenCalledWith('text/html');
+    expect(screen.getByRole('alert')).toHaveTextContent('复制或剪切失败');
+  });
+
   it('rejects malformed client marker views before rendering a controlled page', () => {
+    expect(
+      readAntiAiMarkerClientView({
+        schemaVersion: 1,
+        extra: true,
+        markers: [{ id: 'marker_extra', path: 'content', offset: 2, injectionText: '隐藏', unknown: true }],
+      }),
+    ).toEqual({
+      schemaVersion: 1,
+      markers: [{ id: 'marker_extra', path: 'content', offset: 2, injectionText: '隐藏' }],
+    });
     expect(() =>
       readAntiAiMarkerClientView({
         schemaVersion: 1,
         markers: [{ id: 'marker_invalid', path: 'content', offset: -1, injectionText: '隐藏' }],
+      }),
+    ).toThrow('antiAiMarkerView marker 0 is invalid');
+    expect(() =>
+      readAntiAiMarkerClientView({
+        schemaVersion: 1,
+        markers: [{ id: 'marker_missing', path: 'content', offset: 0 }],
       }),
     ).toThrow('antiAiMarkerView marker 0 is invalid');
   });

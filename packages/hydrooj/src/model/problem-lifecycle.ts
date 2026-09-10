@@ -1,22 +1,13 @@
 import type { ProblemKind } from '@hydrooj/common';
 import { compareStructuredCodeRegions, parseProblemKind } from '@hydrooj/common';
-import { localizeErrorParameter, localizedErrorText, type LocalizedErrorText, ValidationError } from '../error';
-import {
-    getProblemConfigErrorText,
-    parseProblemConfigObject,
-    validateCompiledStructuredConfig,
-    validateStructuredCodeJudgeConfig,
-} from '../lib/problem-config';
+import { localizedErrorText, ValidationError } from '../error';
+import { parseProblemConfigObject } from '../lib/problem-config';
 import db from '../service/db';
 import { normalizeStructuredCodeConfig } from './code-evaluation-lifecycle';
 import * as document from './document';
 
 const recordColl = db.collection('record');
 const recordStatColl = db.collection('record.stat');
-
-function localizedConfigValidation(field: string, detail: LocalizedErrorText) {
-    return new ValidationError(field, null, detail);
-}
 
 const FORBIDDEN_STATEMENT_FIELDS = new Set(['prompt', 'statement', 'description', 'instructions', 'introduction', 'preface']);
 
@@ -140,24 +131,6 @@ function assertNoSecondaryStatement(value: unknown, path = 'config'): void {
         }
         assertNoSecondaryStatement(child, `${path}.${key}`);
     }
-}
-
-function normalizeAuthorStructuredCode(kind: 'program_fill' | 'function', main: Record<string, unknown>, currentConfig?: unknown) {
-    const config = normalizeStructuredCodeConfig(kind, { main }, currentConfig);
-    try {
-        if (kind === 'program_fill' && config.mode === 'text') validateStructuredCodeJudgeConfig(config, 'program_fill');
-        else validateCompiledStructuredConfig(kind, config);
-    } catch (error: any) {
-        const localizedDetail = getProblemConfigErrorText(error);
-        if (localizedDetail) throw localizedConfigValidation('config', localizedDetail);
-        throw localizeErrorParameter(
-            new ValidationError('config', null, error.message),
-            2,
-            'The code-evaluation configuration is invalid: {0}',
-            error.message,
-        );
-    }
-    return config;
 }
 
 function normalizeOptions(value: unknown): string[] {
@@ -293,13 +266,9 @@ export function normalizeStructuredProblemConfig(kind: ProblemKind, config: unkn
         if (!isPlainObject(config.main)) throw new ValidationError('config', null, localizedErrorText`main 必须是对象`);
         return normalizeBasicObjective(kind, config.main);
     }
-    if (kind === 'program_fill') {
+    if (kind === 'program_fill' || kind === 'function') {
         if (!isPlainObject(config.main)) throw new ValidationError('config', null, localizedErrorText`main 必须是对象`);
-        return normalizeAuthorStructuredCode('program_fill', config.main, currentConfig);
-    }
-    if (kind === 'function') {
-        if (!isPlainObject(config.main)) throw new ValidationError('config', null, localizedErrorText`main 必须是对象`);
-        return normalizeAuthorStructuredCode('function', config.main, currentConfig);
+        return normalizeStructuredCodeConfig(kind, { main: config.main }, currentConfig);
     }
     return { ...config, score: 100 };
 }

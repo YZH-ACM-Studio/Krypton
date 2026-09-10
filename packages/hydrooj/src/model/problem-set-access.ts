@@ -153,7 +153,6 @@ export class ProblemSetAccessService {
         tdocs: TrainingDoc[],
         enrollments?: ReadonlyMap<string, boolean>,
     ): Promise<Map<string, ProblemSetAccessDecision>> {
-        await this.ensureIndexes();
         const result = new Map<string, ProblemSetAccessDecision>();
         if (!tdocs.length) return result;
         if (
@@ -388,7 +387,6 @@ export class ProblemSetAccessService {
         stageId?: number;
         sourceId: ObjectId;
     }): Promise<AccessEntitlementDoc> {
-        await this.ensureIndexes();
         const stageId = input.stageId ?? ACCESS_ENTITLEMENT_WHOLE_SET_STAGE;
         if (!Number.isSafeInteger(stageId) || stageId < 0) throw new TypeError('entitlement stageId must be a non-negative integer');
         assertObjectId(input.targetId, 'targetId');
@@ -438,7 +436,6 @@ export class ProblemSetAccessService {
     }
 
     async revokeRedemptionEntitlement(input: { domainId: string; uid: number; entitlementId: ObjectId }): Promise<AccessEntitlementDoc> {
-        await this.ensureIndexes();
         const current = await this.entitlements.findOne({
             _id: input.entitlementId,
             domainId: input.domainId,
@@ -471,7 +468,6 @@ export class ProblemSetAccessService {
         targetKind: AccessEntitlementTargetKind,
         targetId: ObjectId,
     ): Promise<boolean> {
-        await this.ensureIndexes();
         const current = await this.entitlements.findOne({
             domainId,
             uid,
@@ -484,7 +480,6 @@ export class ProblemSetAccessService {
     }
 
     async listActiveTargetIds(domainId: string, uid: number, targetKind: AccessEntitlementTargetKind): Promise<ObjectId[]> {
-        await this.ensureIndexes();
         const rows = await this.entitlements
             .find({
                 domainId,
@@ -498,7 +493,6 @@ export class ProblemSetAccessService {
     }
 
     async listActiveBySource(domainId: string, uid: number, sourceId: ObjectId): Promise<AccessEntitlementDoc[]> {
-        await this.ensureIndexes();
         return this.entitlements
             .find({
                 domainId,
@@ -510,7 +504,6 @@ export class ProblemSetAccessService {
     }
 
     async getEntitlement(domainId: string, uid: number, entitlementId: ObjectId): Promise<AccessEntitlementDoc | null> {
-        await this.ensureIndexes();
         return this.entitlements.findOne({
             _id: entitlementId,
             domainId,
@@ -525,7 +518,6 @@ export class ProblemSetAccessService {
         targetKind: AccessEntitlementTargetKind,
         targetId: ObjectId,
     ): Promise<AccessEntitlementDoc[]> {
-        await this.ensureIndexes();
         return this.entitlements
             .find({
                 domainId,

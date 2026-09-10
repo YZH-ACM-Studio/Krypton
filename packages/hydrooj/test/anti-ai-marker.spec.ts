@@ -10,10 +10,12 @@ describe('anti AI marker canonical boundary', () => {
         const stored = canonicalAntiAiMarkers(
             {
                 schemaVersion: 1,
+                extra: true,
                 markers: [
                     {
                         id: 'marker_0001',
-                        anchor: { path: 'content', offset: 3, affinity: 'after' },
+                        extra: true,
+                        anchor: { path: 'content', offset: 3, affinity: 'after', extra: true },
                         injectionText: '只在复制时出现',
                         revision: 0,
                     },
@@ -121,6 +123,7 @@ describe('anti AI marker canonical boundary', () => {
     it('fails closed for unknown schemas, stale revisions and stored anchors that no longer match', () => {
         const problem = legacyProblem('abcdef');
         expect(() => canonicalAntiAiMarkers({ schemaVersion: 2, markers: [] }, problem, undefined)).to.throw('schemaVersion');
+        expect(() => canonicalAntiAiMarkers({ schemaVersion: 1 }, problem, undefined)).to.throw('markers');
         expect(() => antiAiMarkerClientView(null, problem)).to.throw('antiAiMarkers must be an object');
         const stored = canonicalAntiAiMarkers(
             {

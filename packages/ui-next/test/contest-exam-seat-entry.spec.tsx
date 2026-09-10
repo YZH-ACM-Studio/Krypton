@@ -224,6 +224,100 @@ describe('contest exam seat entry', () => {
     expect(screen.queryByRole('button', { name: '创建考试活动并安排座位' })).not.toBeInTheDocument();
   });
 
+  it('does not treat a known 4xx create validation as an unknown outcome', async () => {
+    const user = userEvent.setup();
+    let gets = 0;
+    let posts = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === 'POST') {
+          posts++;
+          return new Response(
+            JSON.stringify({
+              error: {
+                name: 'ValidationError',
+                errorCode: 'ValidationError',
+                code: 400,
+                status: 400,
+                params: [],
+                message: '时间窗口无效',
+              },
+            }),
+            { status: 400, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+        gets++;
+        return json({ events: [], schools: [SCHOOL_ONE] });
+      }),
+    );
+    render(<ContestExamSeatEntry tdoc={fixedContest()} contestId={CONTEST_ID} />);
+
+    await user.click(await screen.findByRole('button', { name: '创建考试活动并安排座位' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('时间窗口无效');
+    expect(screen.queryByRole('button', { name: '再次重读关联活动' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '创建考试活动并安排座位' })).toBeEnabled();
+    expect(posts).toBe(1);
+    expect(gets).toBe(1);
+  });
+
+  it('treats a 5xx create response as an unknown outcome', async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === 'POST') {
+          return new Response(
+            JSON.stringify({
+              error: {
+                name: 'ServiceUnavailableError',
+                errorCode: 'service_unavailable',
+                code: 503,
+                status: 503,
+                params: [],
+                message: '考试活动服务暂时不可用',
+              },
+            }),
+            { status: 503, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+        return json({ events: [], schools: [SCHOOL_ONE] });
+      }),
+    );
+    render(<ContestExamSeatEntry tdoc={fixedContest()} contestId={CONTEST_ID} />);
+
+    await user.click(await screen.findByRole('button', { name: '创建考试活动并安排座位' }));
+
+    expect(await screen.findByRole('button', { name: '再次重读关联活动' })).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent(/创建结果仍未知/);
+    expect(screen.queryByRole('button', { name: '创建考试活动并安排座位' })).not.toBeInTheDocument();
+  });
+
+  it('keeps an already-loaded event entry when a later linked-event refresh fails', async () => {
+    const linked = event('66bf0000000000000000010e', '机房场次 A');
+    let call = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        call++;
+        if (call === 1) return json({ events: [linked], schools: [SCHOOL_ONE] });
+        return new Response(JSON.stringify({ error: 'temporarily_unavailable' }), {
+          status: 503,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }),
+    );
+    const { rerender } = render(<ContestExamSeatEntry tdoc={fixedContest()} contestId={CONTEST_ID} />);
+    expect(await screen.findByRole('button', { name: '进入座位工作台' })).toBeInTheDocument();
+
+    rerender(<ContestExamSeatEntry tdoc={fixedContest()} contestId="66bf00000000000000000199" />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/加载比赛考试活动失败|暂时不可用|无法解析/);
+    expect(screen.getByRole('button', { name: '进入座位工作台' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '重新读取关联活动' })).not.toBeInTheDocument();
+  });
+
   it('keeps creation blocked when a lost create response is followed by an empty recovery read', async () => {
     const user = userEvent.setup();
     let call = 0;

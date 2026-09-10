@@ -604,6 +604,72 @@ export async function getRequest(domainId: string, id: ObjectId | string): Promi
     return loadRequest(domainId, id);
 }
 
+function patchTouchesLockedRules(patch: UpdateCollectRequestPatch): boolean {
+    return patch.slots !== undefined
+        || patch.maxFileBytes !== undefined
+        || patch.maxTotalBytes !== undefined
+        || patch.maxFiles !== undefined
+        || patch.fileNameTemplate !== undefined
+        || patch.packLayout !== undefined;
+}
+
+async function applyRequestUpdate(
+    domainId: string,
+    actor: CollectActor,
+    expectedRevision: number,
+    patch: UpdateCollectRequestPatch,
+    current: CollectRequestDoc,
+): Promise<CollectRequestDoc> {
+    assertCanEdit(actor, current);
+    assertMutable(current);
+    const set: Partial<CollectRequestDoc> = {};
+    if (patch.title !== undefined) set.title = asTitle(patch.title);
+    if (patch.description !== undefined) set.description = asDescription(patch.description);
+    if (patch.dueAt !== undefined) set.dueAt = parseCollectDueAt(patch.dueAt);
+    if (patch.schoolId !== undefined) set.schoolId = asObjectId(patch.schoolId, 'schoolId');
+    if (patch.groupIds !== undefined) set.groupIds = asObjectIdList(patch.groupIds, 'groupIds');
+    if (patch.courseRef !== undefined) set.courseRef = parseCourseRef(patch.courseRef);
+
+    const nextSlots = patch.slots !== undefined ? normalizeCollectSlots(patch.slots) : current.slots;
+    const nextQuotas = normalizeCollectQuotas({
+        maxFileBytes: patch.maxFileBytes !== undefined ? patch.maxFileBytes : current.maxFileBytes,
+        maxTotalBytes: patch.maxTotalBytes !== undefined ? patch.maxTotalBytes : current.maxTotalBytes,
+        maxFiles: patch.maxFiles !== undefined ? patch.maxFiles : current.maxFiles,
+    });
+    const nextFileNameTemplate = patch.fileNameTemplate !== undefined
+        ? parseFileNameTemplate(patch.fileNameTemplate)
+        : undefined;
+    const nextPackLayout = patch.packLayout !== undefined
+        ? parsePackLayout(patch.packLayout)
+        : undefined;
+    const currentFileNameTemplate = requestFileNameTemplate(current.fileNameTemplate);
+    const currentPackLayout = requestPackLayout(current.packLayout);
+    const rulesChanged =
+        (patch.slots !== undefined && !sameSlotRules(current.slots, nextSlots))
+        || (patch.maxFileBytes !== undefined && nextQuotas.maxFileBytes !== current.maxFileBytes)
+        || (patch.maxTotalBytes !== undefined && nextQuotas.maxTotalBytes !== current.maxTotalBytes)
+        || (patch.maxFiles !== undefined && nextQuotas.maxFiles !== current.maxFiles)
+        || (nextFileNameTemplate !== undefined && nextFileNameTemplate !== currentFileNameTemplate)
+        || (nextPackLayout !== undefined && nextPackLayout !== currentPackLayout);
+    if (rulesChanged) {
+        if (await hasSubmittedRow(domainId, current._id)) throw new CollectSlotLockedError();
+        if (patch.slots !== undefined) set.slots = nextSlots;
+        if (patch.maxFileBytes !== undefined) set.maxFileBytes = nextQuotas.maxFileBytes;
+        if (patch.maxTotalBytes !== undefined) set.maxTotalBytes = nextQuotas.maxTotalBytes;
+        if (patch.maxFiles !== undefined) set.maxFiles = nextQuotas.maxFiles;
+        if (nextFileNameTemplate !== undefined) set.fileNameTemplate = nextFileNameTemplate;
+        if (nextPackLayout !== undefined) set.packLayout = nextPackLayout;
+    }
+
+    if (current.status !== 'draft') {
+        const schoolId = set.schoolId || current.schoolId;
+        const groupIds = set.groupIds || current.groupIds;
+        await assertGroupsBelongToSchool(domainId, schoolId, groupIds);
+    }
+
+    return casRequest(domainId, current._id, expectedRevision, set, current.status);
+}
+
 export async function updateRequest(
     domainId: string,
     id: ObjectId | string,
@@ -611,56 +677,11 @@ export async function updateRequest(
     expectedRevision: number,
     patch: UpdateCollectRequestPatch,
 ): Promise<CollectRequestDoc> {
-    return withLockedRequest(domainId, id, async (current) => {
-        assertCanEdit(actor, current);
-        assertMutable(current);
-        const set: Partial<CollectRequestDoc> = {};
-        if (patch.title !== undefined) set.title = asTitle(patch.title);
-        if (patch.description !== undefined) set.description = asDescription(patch.description);
-        if (patch.dueAt !== undefined) set.dueAt = parseCollectDueAt(patch.dueAt);
-        if (patch.schoolId !== undefined) set.schoolId = asObjectId(patch.schoolId, 'schoolId');
-        if (patch.groupIds !== undefined) set.groupIds = asObjectIdList(patch.groupIds, 'groupIds');
-        if (patch.courseRef !== undefined) set.courseRef = parseCourseRef(patch.courseRef);
-
-        const nextSlots = patch.slots !== undefined ? normalizeCollectSlots(patch.slots) : current.slots;
-        const nextQuotas = normalizeCollectQuotas({
-            maxFileBytes: patch.maxFileBytes !== undefined ? patch.maxFileBytes : current.maxFileBytes,
-            maxTotalBytes: patch.maxTotalBytes !== undefined ? patch.maxTotalBytes : current.maxTotalBytes,
-            maxFiles: patch.maxFiles !== undefined ? patch.maxFiles : current.maxFiles,
-        });
-        const nextFileNameTemplate = patch.fileNameTemplate !== undefined
-            ? parseFileNameTemplate(patch.fileNameTemplate)
-            : undefined;
-        const nextPackLayout = patch.packLayout !== undefined
-            ? parsePackLayout(patch.packLayout)
-            : undefined;
-        const currentFileNameTemplate = requestFileNameTemplate(current.fileNameTemplate);
-        const currentPackLayout = requestPackLayout(current.packLayout);
-        const rulesChanged =
-            (patch.slots !== undefined && !sameSlotRules(current.slots, nextSlots))
-            || (patch.maxFileBytes !== undefined && nextQuotas.maxFileBytes !== current.maxFileBytes)
-            || (patch.maxTotalBytes !== undefined && nextQuotas.maxTotalBytes !== current.maxTotalBytes)
-            || (patch.maxFiles !== undefined && nextQuotas.maxFiles !== current.maxFiles)
-            || (nextFileNameTemplate !== undefined && nextFileNameTemplate !== currentFileNameTemplate)
-            || (nextPackLayout !== undefined && nextPackLayout !== currentPackLayout);
-        if (rulesChanged) {
-            if (await hasSubmittedRow(domainId, current._id)) throw new CollectSlotLockedError();
-            if (patch.slots !== undefined) set.slots = nextSlots;
-            if (patch.maxFileBytes !== undefined) set.maxFileBytes = nextQuotas.maxFileBytes;
-            if (patch.maxTotalBytes !== undefined) set.maxTotalBytes = nextQuotas.maxTotalBytes;
-            if (patch.maxFiles !== undefined) set.maxFiles = nextQuotas.maxFiles;
-            if (nextFileNameTemplate !== undefined) set.fileNameTemplate = nextFileNameTemplate;
-            if (nextPackLayout !== undefined) set.packLayout = nextPackLayout;
-        }
-
-        if (current.status !== 'draft') {
-            const schoolId = set.schoolId || current.schoolId;
-            const groupIds = set.groupIds || current.groupIds;
-            await assertGroupsBelongToSchool(domainId, schoolId, groupIds);
-        }
-
-        return casRequest(domainId, current._id, expectedRevision, set, current.status);
-    });
+    if (patchTouchesLockedRules(patch)) {
+        return withLockedRequest(domainId, id, (current) => applyRequestUpdate(domainId, actor, expectedRevision, patch, current));
+    }
+    const current = await loadRequest(domainId, id);
+    return applyRequestUpdate(domainId, actor, expectedRevision, patch, current);
 }
 
 export async function publishRequest(
@@ -823,27 +844,26 @@ export async function setCollaborators(
     expectedRevision: number,
     uids: number[],
 ): Promise<CollectRequestDoc> {
-    return withLockedRequest(domainId, id, async (current) => {
-        assertCanEdit(actor, current);
-        assertMutable(current);
-        if (!Array.isArray(uids)) rejectFile('协作者不合法');
-        const seen = new Set<number>();
-        const next: number[] = [];
-        for (const uid of uids) {
-            if (!Number.isSafeInteger(uid) || uid < 2) throw new CollectForbiddenError('协作者必须是正式用户');
-            if (uid === current.ownerUid) continue;
-            if (seen.has(uid)) continue;
-            seen.add(uid);
-            next.push(uid);
-        }
-        if (next.length > COLLABORATOR_MAX) rejectFile('协作者人数超过上限');
-        for (const uid of next) {
-            const loaded = await UserModel.getById(domainId, uid);
-            const user = asPermUser(loaded, uid);
-            if (!canCreateCollect(user)) throw new CollectForbiddenError('协作者必须具有创建收集权限');
-        }
-        return casRequest(domainId, current._id, expectedRevision, { collaboratorUids: next }, current.status);
-    });
+    const current = await loadRequest(domainId, id);
+    assertCanEdit(actor, current);
+    assertMutable(current);
+    if (!Array.isArray(uids)) rejectFile('协作者不合法');
+    const seen = new Set<number>();
+    const next: number[] = [];
+    for (const uid of uids) {
+        if (!Number.isSafeInteger(uid) || uid < 2) throw new CollectForbiddenError('协作者必须是正式用户');
+        if (uid === current.ownerUid) continue;
+        if (seen.has(uid)) continue;
+        seen.add(uid);
+        next.push(uid);
+    }
+    if (next.length > COLLABORATOR_MAX) rejectFile('协作者人数超过上限');
+    for (const uid of next) {
+        const loaded = await UserModel.getById(domainId, uid);
+        const user = asPermUser(loaded, uid);
+        if (!canCreateCollect(user)) throw new CollectForbiddenError('协作者必须具有创建收集权限');
+    }
+    return casRequest(domainId, current._id, expectedRevision, { collaboratorUids: next }, current.status);
 }
 
 function displayName(originalName: string): string {
@@ -1007,37 +1027,26 @@ async function prepareUpload(
     if (!slot) rejectFile('槽位不存在');
     const originalName = displayName(input.originalName);
     if (!Number.isFinite(input.size) || input.size <= 0) rejectFile('空文件');
-    if (input.size > COLLECT_HARD_MAX_FILE_BYTES || input.size > request.maxFileBytes) rejectFile('文件过大');
+    if (input.size > COLLECT_HARD_MAX_FILE_BYTES) rejectFile('文件过大');
     if (typeof input.tempPath === 'string' && input.tempPath) {
         const info = await stat(input.tempPath);
         if (info.size !== input.size) rejectFile('文件大小不一致');
-        if (info.size > request.maxFileBytes || info.size > COLLECT_HARD_MAX_FILE_BYTES) rejectFile('文件过大');
+        if (info.size > COLLECT_HARD_MAX_FILE_BYTES) rejectFile('文件过大');
     }
     const loaded = await loadUploadBody(input.bytes, input.tempPath);
     assertOpenWindow(request);
     if (input.size !== loaded.size) rejectFile('文件大小不一致');
     if (input.sha256 && input.sha256 !== loaded.sha256) rejectFile('文件校验失败');
-    const currentFiles = await loadCurrentFiles(request.domainId, request._id, input.uid);
-    const replacing = opts.replacingFileId
-        ? currentFiles.find((file) => file.fileId === opts.replacingFileId) || null
-        : null;
-    if (opts.replacingFileId && (!replacing || replacing.slotId !== slot.id)) {
-        rejectFile('只能替换当前槽位中的文件');
+    let replacing: CollectFileDoc | null = null;
+    if (opts.replacingFileId) {
+        const currentFiles = await loadCurrentFiles(request.domainId, request._id, input.uid);
+        replacing = currentFiles.find((file) => file.fileId === opts.replacingFileId) || null;
+        if (!replacing || replacing.slotId !== slot.id) rejectFile('只能替换当前槽位中的文件');
     }
-    const counted = replacing ? currentFiles.filter((file) => file.fileId !== replacing.fileId) : currentFiles;
-    const currentCountInSlot = counted.filter((file) => file.slotId === slot.id).length;
-    const currentTotalBytes = counted.reduce((sum, file) => sum + file.size, 0);
-    const currentTotalFiles = counted.length;
-    if (loaded.size > request.maxFileBytes) rejectFile('文件过大');
-    if (currentTotalBytes + loaded.size > request.maxTotalBytes) rejectFile('合计大小超限');
-    if (currentTotalFiles >= request.maxFiles) rejectFile('文件数量超限');
     const validated = assertUploadAllowed({
         filename: originalName,
         size: loaded.size,
         slot,
-        currentCountInSlot,
-        currentTotalBytes,
-        currentTotalFiles,
         header: loaded.header,
     });
     const fileId = opts.fileId ? asFileId(opts.fileId) : nanoid(16);
@@ -1059,6 +1068,22 @@ async function prepareUpload(
     };
 }
 
+function assertUploadCapacity(
+    request: CollectRequestDoc,
+    slot: CollectSlot,
+    counted: CollectFileDoc[],
+    size: number,
+): void {
+    const currentCountInSlot = counted.filter((file) => file.slotId === slot.id).length;
+    const currentTotalBytes = counted.reduce((sum, file) => sum + file.size, 0);
+    if (size > COLLECT_HARD_MAX_FILE_BYTES || size > request.maxFileBytes) rejectFile('文件过大');
+    if (currentTotalBytes + size > COLLECT_HARD_MAX_TOTAL_BYTES || currentTotalBytes + size > request.maxTotalBytes) {
+        rejectFile('合计大小超限');
+    }
+    if (currentCountInSlot >= slot.maxFiles) rejectFile('该槽位文件数量超限');
+    if (counted.length >= COLLECT_HARD_MAX_FILES || counted.length >= request.maxFiles) rejectFile('文件数量超限');
+}
+
 async function insertPreparedFile(prepared: PreparedUpload): Promise<{ file: CollectFileDoc; submission: CollectSubmissionDoc }> {
     const request = await loadRequest(prepared.request.domainId, prepared.request._id);
     assertOpenWindow(request);
@@ -1071,10 +1096,6 @@ async function insertPreparedFile(prepared: PreparedUpload): Promise<{ file: Col
         : null;
     if (prepared.replacing && !replacing) rejectFile('只能替换当前槽位中的文件');
     const counted = replacing ? currentFiles.filter((file) => file.fileId !== replacing.fileId) : currentFiles;
-    if (counted.filter((file) => file.slotId === slot.id).length >= slot.maxFiles) rejectFile('该槽位文件数量超限');
-    if (counted.reduce((sum, file) => sum + file.size, 0) + prepared.size > request.maxTotalBytes) rejectFile('合计大小超限');
-    if (counted.length >= request.maxFiles) rejectFile('文件数量超限');
-    if (prepared.size > request.maxFileBytes) rejectFile('文件过大');
     const submission = await ensureSubmission(request.domainId, request, prepared.uid);
     const now = new Date();
     const file: CollectFileDoc = {
@@ -1094,6 +1115,7 @@ async function insertPreparedFile(prepared: PreparedUpload): Promise<{ file: Col
         current: true,
         createdAt: now,
     };
+    assertUploadCapacity(request, slot, counted, prepared.size);
     await filesColl.insertOne(file);
     if (replacing) {
         const unmarked = await filesColl.updateOne(
@@ -1127,7 +1149,7 @@ export async function putStudentFile(input: PutStudentFileInput): Promise<{ file
     return withCollectLock(collectUserLockKey(input.request.domainId, String(input.request._id), input.uid), async () => {
         const prepared = await prepareUpload(input, { putStorage: true });
         await StorageModel.put(prepared.storagePath, prepared.body as Buffer | string, input.uid);
-        return withLockedRequest(prepared.request.domainId, prepared.request._id, async () => insertPreparedFile(prepared));
+        return insertPreparedFile(prepared);
     });
 }
 
@@ -1140,7 +1162,7 @@ export async function addFileMeta(input: AddFileMetaInput): Promise<{ file: Coll
             storagePath: input.storagePath,
             putStorage: false,
         });
-        return withLockedRequest(prepared.request.domainId, prepared.request._id, async () => insertPreparedFile(prepared));
+        return insertPreparedFile(prepared);
     });
 }
 
@@ -1148,7 +1170,7 @@ export async function replaceFile(input: ReplaceFileInput): Promise<{ file: Coll
     return withCollectLock(collectUserLockKey(input.request.domainId, String(input.request._id), input.uid), async () => {
         const prepared = await prepareUpload(input, { putStorage: true, replacingFileId: input.fileId });
         await StorageModel.put(prepared.storagePath, prepared.body as Buffer | string, input.uid);
-        return withLockedRequest(prepared.request.domainId, prepared.request._id, async () => insertPreparedFile(prepared));
+        return insertPreparedFile(prepared);
     });
 }
 
@@ -1157,7 +1179,8 @@ export async function deleteCurrentFile(
     uid: number,
     fileId: string,
 ): Promise<CollectSubmissionDoc> {
-    return withLockedRequest(requestInput.domainId, requestInput._id, async (request) => {
+    return withCollectLock(collectUserLockKey(requestInput.domainId, String(requestInput._id), uid), async () => {
+        const request = await loadRequest(requestInput.domainId, requestInput._id);
         assertOpenWindow(request);
         assertSafeUid(uid);
         if (!(await isAudienceMember(request.domainId, uid, request))) throw new CollectForbiddenError('不在收集名单中');

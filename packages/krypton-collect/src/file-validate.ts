@@ -1,8 +1,6 @@
 import { CollectFileRejectedError } from './errors';
 import {
     COLLECT_HARD_MAX_FILE_BYTES,
-    COLLECT_HARD_MAX_FILES,
-    COLLECT_HARD_MAX_TOTAL_BYTES,
     COLLECT_REJECTED_EXTS,
     isAllowedExt,
     normalizeExt,
@@ -45,10 +43,7 @@ function reject(message: string): never {
 export function assertUploadAllowed(args: {
     filename: string;
     size: number;
-    slot: Pick<CollectSlot, 'allowedExt' | 'maxFiles'>;
-    currentCountInSlot: number;
-    currentTotalBytes: number;
-    currentTotalFiles: number;
+    slot: Pick<CollectSlot, 'allowedExt'>;
     header: Uint8Array;
 }): { ext: CollectAllowedExt; originalName: string } {
     const originalName = args.filename.trim();
@@ -60,9 +55,6 @@ export function assertUploadAllowed(args: {
 
     if (!Number.isFinite(args.size) || args.size <= 0) reject('空文件');
     if (args.size > COLLECT_HARD_MAX_FILE_BYTES) reject('文件过大');
-    if (args.currentTotalBytes + args.size > COLLECT_HARD_MAX_TOTAL_BYTES) reject('合计大小超限');
-    if (args.currentCountInSlot >= args.slot.maxFiles) reject('该槽位文件数量超限');
-    if (args.currentTotalFiles >= COLLECT_HARD_MAX_FILES) reject('文件数量超限');
     if (!detectExtMagic(args.header, ext)) reject('文件内容与扩展名不符');
 
     return { ext, originalName };

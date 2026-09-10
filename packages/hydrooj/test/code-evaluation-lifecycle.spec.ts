@@ -137,20 +137,20 @@ describe('P3.17 code evaluation lifecycle', () => {
         });
     });
 
-    it('generates stable opaque ids, accepts explicit coordinate mapping, and rejects forged ids or hashes', () => {
+    it('generates stable opaque ids, accepts explicit coordinate mapping, and rejects forged ids', () => {
         const first = codeEvaluation.normalizeCodeEvaluationDraftConfig('function', {
             main: {
                 mode: 'function',
                 lang: 'cc.cc17',
                 source: functionSource,
-                sourceHash: templateSourceHash(functionSource),
                 publicRanges: [],
                 regions: [{ id: '', startLine: 0, endLine: 3, title: 'solve' }],
                 cases: [],
             },
-        }) as any;
+        }) as { template: { sourceHash: string; regions: Array<{ id: string; startLine: number; endLine: number }> } };
         const id = first.template.regions[0].id;
         expect(id).to.match(/^r_[A-Za-z0-9_-]{12,32}$/);
+        expect(first.template.sourceHash).to.equal(templateSourceHash(functionSource));
 
         const movedSource = `// header\n${functionSource}`;
         const savedAgain = codeEvaluation.normalizeCodeEvaluationDraftConfig(
@@ -160,14 +160,14 @@ describe('P3.17 code evaluation lifecycle', () => {
                     mode: 'function',
                     lang: 'cc.cc17',
                     source: movedSource,
-                    sourceHash: templateSourceHash(movedSource),
                     publicRanges: [],
                     regions: [{ ...first.template.regions[0], startLine: 1, endLine: 4 }],
                     cases: [],
+                    ignored: true,
                 },
             },
             first,
-        ) as any;
+        ) as { template: { regions: Array<{ id: string; startLine: number; endLine: number }> } };
         expect(savedAgain.template.regions[0]).to.include({ id, startLine: 1, endLine: 4 });
         expect(() =>
             codeEvaluation.normalizeCodeEvaluationDraftConfig(
@@ -177,7 +177,6 @@ describe('P3.17 code evaluation lifecycle', () => {
                         mode: 'function',
                         lang: 'cc.cc17',
                         source: functionSource,
-                        sourceHash: templateSourceHash(functionSource),
                         publicRanges: [],
                         regions: [{ ...first.template.regions[0], id: 'r_zzzzzzzzzzzz' }],
                         cases: [],
@@ -186,23 +185,23 @@ describe('P3.17 code evaluation lifecycle', () => {
                 first,
             ),
         ).to.throw(/不属于当前题目/);
-        expect(() =>
-            codeEvaluation.normalizeCodeEvaluationDraftConfig(
-                'function',
-                {
-                    main: {
-                        mode: 'function',
-                        lang: 'cc.cc17',
-                        source: functionSource,
-                        sourceHash: 'forged',
-                        publicRanges: [],
-                        regions: [{ ...first.template.regions[0] }],
-                        cases: [],
-                    },
+        const ignoredClientHash = codeEvaluation.normalizeCodeEvaluationDraftConfig(
+            'function',
+            {
+                main: {
+                    mode: 'function',
+                    lang: 'cc.cc17',
+                    source: functionSource,
+                    sourceHash: 'forged',
+                    publicRanges: [{ startLine: 3, endLine: 4, label: 'ignored' }],
+                    regions: [{ ...first.template.regions[0] }],
+                    cases: [],
                 },
-                first,
-            ),
-        ).to.throw(/源码摘要/);
+            },
+            first,
+        ) as { template: { sourceHash: string; publicRanges: Array<{ startLine: number; endLine: number }> } };
+        expect(ignoredClientHash.template.sourceHash).to.equal(templateSourceHash(functionSource));
+        expect(ignoredClientHash.template.publicRanges).to.deep.equal([{ startLine: 3, endLine: 4 }]);
     });
 
     it('rejects forged, incomplete, or ambiguous case filenames', () => {

@@ -88,13 +88,14 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
     return prototype === Object.prototype || prototype === null;
 }
 
-function assertKeys(value: Record<string, unknown>, allowed: readonly string[], field: string) {
-    const unknown = Object.keys(value).filter((key) => !allowed.includes(key));
-    if (unknown.length) fail(field, localizedErrorText`${field} contains unsupported fields: ${unknown.join(', ')}`);
-}
-
 function text(value: unknown, field: string): string {
     if (typeof value !== 'string') fail(field, localizedErrorText`${field} must be text`);
+    return value;
+}
+
+function optionalBoolean(value: unknown, field: string): boolean | undefined {
+    if (value === undefined) return undefined;
+    if (typeof value !== 'boolean') fail(field, localizedErrorText`${field} must be boolean`);
     return value;
 }
 
@@ -105,7 +106,6 @@ function triState(value: unknown, field: string): ProgrammingStatementTriState {
 
 function normalizeTextSection(value: unknown, field: string): ProgrammingStatementTextSection {
     if (!isPlainObject(value)) fail(field, localizedErrorText`${field} must be an object`);
-    assertKeys(value, ['state', 'content'], field);
     const state = triState(value.state, `${field}.state`);
     const content = text(value.content, `${field}.content`);
     if (state === 'absent' && content) fail(`${field}.content`, localizedErrorText`${field} cannot retain hidden content`);
@@ -114,7 +114,6 @@ function normalizeTextSection(value: unknown, field: string): ProgrammingStateme
 
 function normalizeDescription(value: unknown): ProgrammingStatementDescriptionSection {
     if (!isPlainObject(value)) fail('description', localizedErrorText`description must be an object`);
-    assertKeys(value, ['state', 'content'], 'description');
     if (!['undecided', 'present'].includes(String(value.state))) {
         fail('description.state', localizedErrorText`description has an invalid state`);
     }
@@ -127,27 +126,25 @@ function normalizeDescription(value: unknown): ProgrammingStatementDescriptionSe
 function normalizeExample(value: unknown, index: number): ProgrammingStatementExample {
     const field = `examples.items.${index}`;
     if (!isPlainObject(value)) fail(field, localizedErrorText`${field} must be an object`);
-    assertKeys(value, ['input', 'inputEmpty', 'output', 'outputEmpty', 'note'], field);
     const input = text(value.input, `${field}.input`);
     const output = text(value.output, `${field}.output`);
     const note = text(value.note, `${field}.note`);
-    if (typeof value.inputEmpty !== 'boolean') fail(`${field}.inputEmpty`, localizedErrorText`${field}.inputEmpty must be boolean`);
-    if (typeof value.outputEmpty !== 'boolean') fail(`${field}.outputEmpty`, localizedErrorText`${field}.outputEmpty must be boolean`);
-    if (value.inputEmpty && input) fail(`${field}.input`, localizedErrorText`${field} cannot retain hidden input`);
-    if (value.outputEmpty && output) fail(`${field}.output`, localizedErrorText`${field} cannot retain hidden output`);
-    if (!value.inputEmpty && !input) {
+    const inputEmpty = optionalBoolean(value.inputEmpty, `${field}.inputEmpty`) ?? input === '';
+    const outputEmpty = optionalBoolean(value.outputEmpty, `${field}.outputEmpty`) ?? output === '';
+    if (inputEmpty && input) fail(`${field}.input`, localizedErrorText`${field} cannot retain hidden input`);
+    if (outputEmpty && output) fail(`${field}.output`, localizedErrorText`${field} cannot retain hidden output`);
+    if (!inputEmpty && !input) {
         fail(`${field}.input`, localizedErrorText`${field} input must have content or be explicitly empty`);
     }
-    if (!value.outputEmpty && !output) {
+    if (!outputEmpty && !output) {
         fail(`${field}.output`, localizedErrorText`${field} output must have content or be explicitly empty`);
     }
-    if (value.inputEmpty && value.outputEmpty) fail(field, localizedErrorText`${field} cannot have both sides empty`);
-    return { input, inputEmpty: value.inputEmpty, output, outputEmpty: value.outputEmpty, note };
+    if (inputEmpty && outputEmpty) fail(field, localizedErrorText`${field} cannot have both sides empty`);
+    return { input, inputEmpty, output, outputEmpty, note };
 }
 
 function normalizeExamples(value: unknown): ProgrammingStatementExamplesSection {
     if (!isPlainObject(value)) fail('examples', localizedErrorText`examples must be an object`);
-    assertKeys(value, ['state', 'items'], 'examples');
     const state = triState(value.state, 'examples.state');
     if (!Array.isArray(value.items)) fail('examples.items', localizedErrorText`examples.items must be an array`);
     const items = value.items.map(normalizeExample);
@@ -171,7 +168,6 @@ export function emptyProgrammingStatement(): ProgrammingStatement {
 
 export function normalizeProgrammingStatement(value: unknown): ProgrammingStatement {
     if (!isPlainObject(value)) fail('programmingStatement', localizedErrorText`programmingStatement must be an object`);
-    assertKeys(value, ['schemaVersion', 'locale', 'background', 'description', 'input', 'output', 'examples', 'hints'], 'programmingStatement');
     if (value.schemaVersion !== PROGRAMMING_STATEMENT_SCHEMA_VERSION) {
         fail('schemaVersion', localizedErrorText`unsupported programming statement schema`);
     }

@@ -686,7 +686,7 @@ describe('P2.5 immutable revisions and publication CAS', () => {
         );
     });
 
-    it('rejects a clock rollback before appending or publishing immutable facts', async () => {
+    it('keeps revision CAS when the wall clock moves backwards', async () => {
         const revisions = new MemoryCollection<Record<string, unknown>>();
         const publications = new MemoryCollection<Record<string, unknown>>();
         let now = new Date('2026-08-12T00:20:00.000Z');
@@ -723,7 +723,7 @@ describe('P2.5 immutable revisions and publication CAS', () => {
                     eventRevision: 3,
                     schoolId,
                     actorUid: 2,
-                    expectedPreviousRevision: 1,
+                    expectedPreviousRevision: 0,
                     roster: rosterDoc,
                     seatPlan: plan(1, rosterDoc),
                     seatFacts: seatFacts(1),
@@ -733,20 +733,50 @@ describe('P2.5 immutable revisions and publication CAS', () => {
                     manualAssignments: [],
                 }),
             ),
-        ).to.equal('assignment_clock_rollback');
+        ).to.equal('assignment_revision_conflict');
+        const second = await service.createRevision({
+            domainId: 'system',
+            eventId,
+            eventRevision: 3,
+            schoolId,
+            actorUid: 2,
+            expectedPreviousRevision: 1,
+            roster: rosterDoc,
+            seatPlan: plan(1, rosterDoc),
+            seatFacts: seatFacts(1),
+            mode: 'random',
+            seed: seedB,
+            lockedAssignments: [],
+            manualAssignments: [],
+        });
+        expect(second.assignment).not.to.equal(null);
+        expect(revisions.docs).to.have.lengthOf(2);
         expect(
             await failureReason(() =>
                 service.publishRevision({
                     domainId: 'system',
                     eventId,
-                    assignmentRevision: 1,
-                    expectedPublicationRevision: 0,
+                    assignmentRevision: 2,
+                    expectedPublicationRevision: 1,
                     actorUid: 2,
                 }),
             ),
-        ).to.equal('assignment_clock_rollback');
-        expect(revisions.docs).to.have.lengthOf(1);
-        expect(publications.docs).to.have.lengthOf(0);
+        ).to.equal('assignment_publication_conflict');
+        const published = await service.publishRevision({
+            domainId: 'system',
+            eventId,
+            assignmentRevision: 2,
+            expectedPublicationRevision: 0,
+            actorUid: 2,
+        });
+        expect(published.revision).to.equal(1);
+        expect(publications.docs).to.have.lengthOf(1);
+        const loaded = await service.getRevision('system', eventId, 2);
+        expect(loaded?.fingerprint).to.equal(second.assignment!.fingerprint);
+        expect(() => moduleUnderTest.assertExamSeatAssignmentIntegrity(loaded!)).not.to.throw();
+        const loadedPublication = await service.getPublication('system', eventId);
+        expect(loadedPublication?.fingerprint).to.equal(published.fingerprint);
+        expect(() => moduleUnderTest.assertExamSeatAssignmentPublicationIntegrity(loadedPublication!)).not.to.throw();
     });
 });
 

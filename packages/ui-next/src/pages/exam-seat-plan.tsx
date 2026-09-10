@@ -11,7 +11,7 @@ import { SimpleSelect } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
-import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
+import { fetchHydroResponse, presentHydroResponseError } from '@/lib/error-presenter';
 import { createRequestId } from '@/lib/request-id';
 
 type AssignmentMode = 'random' | 'studentId';
@@ -95,7 +95,7 @@ interface AssignmentMapping {
 interface AssignmentDiagnostic {
   code: string;
   sourceSeatIds?: string[];
-  seats?: Array<{ seat: SeatIdentity; reason: 'disabled' | 'layout_status' | 'unbound' }>;
+  seats?: Array<{ seat: SeatIdentity; reason: string }>;
   requiredSeatCount?: number;
   availableSeatCount?: number;
   reasons?: string[];
@@ -240,16 +240,6 @@ interface RevisionRef {
   fingerprint: string;
 }
 
-type MonitoringWarningKind =
-  | 'detector_degraded'
-  | 'detector_failed'
-  | 'detector_unsupported'
-  | 'forbidden_process_detected'
-  | 'forbidden_window_detected'
-  | 'monitoring_failed'
-  | 'monitoring_unavailable'
-  | 'usb_storage_detected';
-
 interface PreloginWorkflow {
   network: {
     source: 'config' | 'execution';
@@ -278,25 +268,13 @@ interface PreloginWorkflow {
       online: boolean;
       serviceVersion: string | null;
       protocolVersion: number | null;
-      warnings: Array<{ kind: MonitoringWarningKind; detector: 'foreground' | 'process' | 'usb' | null; reason: string | null }>;
+      warnings: Array<{ kind: string; detector: string | null; reason: string | null }>;
     }>;
   };
   hardErrorCount: number;
   warningCount: number;
   fingerprint: string;
 }
-
-type PreloginDiagnosticCode =
-  | 'active_session_conflict'
-  | 'assignment_reference_changed'
-  | 'contest_not_enterable'
-  | 'endpoint_capability_missing'
-  | 'endpoint_incompatible'
-  | 'endpoint_offline'
-  | 'external_workspace_unavailable'
-  | 'seat_facing_changed'
-  | 'seat_binding_changed'
-  | 'user_binding_changed';
 
 interface PreloginPreparationItem {
   uid: number;
@@ -306,7 +284,7 @@ interface PreloginPreparationItem {
   bindingRevision: number | null;
   endpointId: string | null;
   ready: boolean;
-  diagnostics: Array<{ code: PreloginDiagnosticCode; severity: 'error' | 'warning' }>;
+  diagnostics: Array<{ code: string; severity: 'error' | 'warning' }>;
   endpoint: {
     online: boolean;
     serviceVersion: string | null;
@@ -487,8 +465,7 @@ function objectId(value: unknown, label: string): string {
 
 function isoDate(value: unknown, label: string): string {
   const result = text(value, label);
-  const parsed = new Date(result);
-  if (!Number.isFinite(parsed.getTime()) || parsed.toISOString() !== result) throw new Error(`${label}响应格式不正确`);
+  if (!Number.isFinite(Date.parse(result))) throw new Error(`${label}响应格式不正确`);
   return result;
 }
 
@@ -532,9 +509,7 @@ function parseDiagnostic(value: unknown): AssignmentDiagnostic {
   if (row.seats !== undefined) {
     diagnostic.seats = array(row.seats, '诊断').map((item) => {
       const skipped = record(item, '座位跳过诊断');
-      const reason = text(skipped.reason, '座位跳过诊断');
-      if (reason !== 'disabled' && reason !== 'layout_status' && reason !== 'unbound') throw new Error('座位跳过诊断响应格式不正确');
-      return { seat: parseSeatIdentity(skipped.seat, '座位跳过诊断'), reason };
+      return { seat: parseSeatIdentity(skipped.seat, '座位跳过诊断'), reason: text(skipped.reason, '座位跳过诊断') };
     });
   }
   if (row.requiredSeatCount !== undefined) diagnostic.requiredSeatCount = integer(row.requiredSeatCount, '诊断');
@@ -825,17 +800,6 @@ function parseRevisionRef(value: unknown, label: string): RevisionRef {
   };
 }
 
-const monitoringWarningKinds = new Set<MonitoringWarningKind>([
-  'detector_degraded',
-  'detector_failed',
-  'detector_unsupported',
-  'forbidden_process_detected',
-  'forbidden_window_detected',
-  'monitoring_failed',
-  'monitoring_unavailable',
-  'usb_storage_detected',
-]);
-
 function parsePreloginWorkflow(value: unknown): PreloginWorkflow {
   const row = record(value, '考试准备工作流');
   if (positiveInteger(row.schemaVersion, '考试准备工作流') !== 1) throw new Error('考试准备工作流响应格式不正确');
@@ -879,26 +843,15 @@ function parsePreloginWorkflow(value: unknown): PreloginWorkflow {
     const item = record(rawItem, '监测预检终端');
     const warnings = array(item.warnings, '监测告警').map((rawWarning) => {
       const warning = record(rawWarning, '监测告警');
-      const kind = text(warning.kind, '监测告警') as MonitoringWarningKind;
-      if (!monitoringWarningKinds.has(kind)) throw new Error('监测告警响应格式不正确');
-      const detector = warning.detector;
-      if (detector !== null && detector !== 'foreground' && detector !== 'process' && detector !== 'usb') {
-        throw new Error('监测告警响应格式不正确');
-      }
+      const detector = warning.detector === null || warning.detector === undefined ? null : text(warning.detector, '监测告警');
       return {
-        kind,
-        detector: detector as 'foreground' | 'process' | 'usb' | null,
+        kind: text(warning.kind, '监测告警'),
+        detector,
         reason: optionalText(warning.reason, '监测告警'),
       };
     });
     const visibleWarnings = warnings.filter((warning) => !isExpectedExamPreflightDetectorWarning(warning));
     hiddenExpectedDetectorWarnings += warnings.length - visibleWarnings.length;
-    array(item.capabilities, '监测能力').forEach((rawCapability) => {
-      const capability = record(rawCapability, '监测能力');
-      text(capability.name, '监测能力');
-      positiveInteger(capability.version, '监测能力');
-      array(capability.commands, '监测能力').forEach((command) => text(command, '监测能力'));
-    });
     return {
       endpointId: text(item.endpointId, '监测预检终端'),
       ready: boolean(item.ready, '监测预检终端'),
@@ -945,19 +898,6 @@ function parsePreloginWorkflow(value: unknown): PreloginWorkflow {
   };
 }
 
-const preloginDiagnosticCodes = new Set<PreloginDiagnosticCode>([
-  'active_session_conflict',
-  'assignment_reference_changed',
-  'contest_not_enterable',
-  'endpoint_capability_missing',
-  'endpoint_incompatible',
-  'endpoint_offline',
-  'external_workspace_unavailable',
-  'seat_facing_changed',
-  'seat_binding_changed',
-  'user_binding_changed',
-]);
-
 function parsePreloginPreparation(value: unknown, expectedEventId: string): PreloginPreparation {
   const row = record(value, '预登录预检');
   if (positiveInteger(row.schemaVersion, '预登录预检') !== 1 || objectId(row.eventId, '预登录预检') !== expectedEventId) {
@@ -974,21 +914,12 @@ function parsePreloginPreparation(value: unknown, expectedEventId: string): Prel
   const items = array(row.items, '预登录预检').map((rawItem): PreloginPreparationItem => {
     const item = record(rawItem, '预登录终端');
     const endpoint = record(item.endpoint, '预登录终端');
-    boolean(endpoint.online, '预登录终端');
-    array(endpoint.capabilities, '预登录终端').forEach((rawCapability) => {
-      const capability = record(rawCapability, '预登录能力');
-      text(capability.name, '预登录能力');
-      positiveInteger(capability.version, '预登录能力');
-      array(capability.commands, '预登录能力').forEach((command) => text(command, '预登录能力'));
-    });
-    const diagnostics = array(item.diagnostics, '预登录诊断').map((rawDiagnostic) => {
+    const endpointOnline = boolean(endpoint.online, '预登录终端');
+    const diagnostics = array(item.diagnostics, '预登录诊断').map((rawDiagnostic): PreloginPreparationItem['diagnostics'][number] => {
       const diagnostic = record(rawDiagnostic, '预登录诊断');
-      const code = text(diagnostic.code, '预登录诊断') as PreloginDiagnosticCode;
       const severity = text(diagnostic.severity, '预登录诊断');
-      if (!preloginDiagnosticCodes.has(code) || (severity !== 'error' && severity !== 'warning')) {
-        throw new Error('预登录诊断响应格式不正确');
-      }
-      return { code, severity } as const;
+      if (severity !== 'error' && severity !== 'warning') throw new Error('预登录诊断响应格式不正确');
+      return { code: text(diagnostic.code, '预登录诊断'), severity };
     });
     return {
       uid: positiveInteger(item.uid, '预登录终端'),
@@ -1000,7 +931,7 @@ function parsePreloginPreparation(value: unknown, expectedEventId: string): Prel
       ready: boolean(item.ready, '预登录终端'),
       diagnostics,
       endpoint: {
-        online: endpoint.online as boolean,
+        online: endpointOnline,
         serviceVersion: optionalText(endpoint.serviceVersion, '预登录终端'),
         protocolVersion: endpoint.protocolVersion === null ? null : positiveInteger(endpoint.protocolVersion, '预登录终端'),
         activeSessionId: optionalText(endpoint.activeSessionId, '预登录终端'),
@@ -1147,13 +1078,35 @@ function parsePreloginBatch(value: unknown, expectedEventId: string): PreloginBa
   };
 }
 
+class HydroApiError extends Error {
+  readonly status: number;
+  readonly knownClientError: boolean;
+  constructor(message: string, status: number, knownClientError: boolean) {
+    super(message);
+    this.name = 'HydroApiError';
+    this.status = status;
+    this.knownClientError = knownClientError;
+  }
+}
+
+function isKnownHydroClientError(reason: unknown): boolean {
+  return reason instanceof HydroApiError && reason.knownClientError && reason.status >= 400 && reason.status < 500;
+}
+
 async function apiObject(path: string, init?: RequestInit): Promise<Record<string, unknown>> {
   const response = await fetchHydroResponse(
     path,
     { ...init, credentials: 'include', headers: { Accept: 'application/json', ...(init?.headers || {}) } },
     '座位分配操作失败',
   );
-  if (!response.ok) throw new Error(await readHydroResponseError(response, '座位分配操作失败'));
+  if (!response.ok) {
+    const presented = await presentHydroResponseError(response, '座位分配操作失败');
+    throw new HydroApiError(
+      presented.message,
+      response.status,
+      Boolean(presented.payload) && response.status >= 400 && response.status < 500,
+    );
+  }
   const value: unknown = await response.json();
   return record(value, '座位分配');
 }
@@ -1294,8 +1247,12 @@ function formatTeacherCode(code: string, fallback = UNKNOWN_TEACHER_ERROR): stri
   return teacherCodeLabel(code) || fallback;
 }
 
-function formatPreloginDiagnostic(code: PreloginDiagnosticCode): string {
-  return formatTeacherCode(code);
+function formatUnknownTeacherCode(code: string): string {
+  return teacherCodeLabel(code) || `未知诊断：${code}。`;
+}
+
+function formatPreloginDiagnostic(code: string): string {
+  return formatUnknownTeacherCode(code);
 }
 
 function isExpectedExamPreflightDetectorWarning(warning: { detector: 'foreground' | 'process' | 'usb' | string | null; reason: string | null }): boolean {
@@ -1306,9 +1263,12 @@ function isExpectedExamPreflightDetectorWarning(warning: { detector: 'foreground
   );
 }
 
-function formatMonitoringWarning(warning: { kind: MonitoringWarningKind; detector: 'foreground' | 'process' | 'usb' | null; reason: string | null }): string {
-  const kindLabel = formatTeacherCode(warning.kind);
-  const detectorLabel = warning.detector ? MONITORING_DETECTOR_LABELS[warning.detector] : null;
+function formatMonitoringWarning(warning: { kind: string; detector: string | null; reason: string | null }): string {
+  const kindLabel = formatUnknownTeacherCode(warning.kind);
+  const detectorLabel =
+    warning.detector === 'foreground' || warning.detector === 'process' || warning.detector === 'usb'
+      ? MONITORING_DETECTOR_LABELS[warning.detector]
+      : null;
   const reasonLabel = warning.reason
     ? teacherCodeLabel(warning.reason) || (HAS_CJK.test(warning.reason) ? warning.reason : null)
     : null;
@@ -1432,12 +1392,12 @@ function diagnosticText(diagnostic: AssignmentDiagnostic): string {
   if (diagnostic.code === 'seat_skipped') {
     return `已跳过不可分配座位：${
       diagnostic.seats
-        ?.map((item) => `${item.seat.classroomId}/${item.seat.sourceSeatId}（${skippedReasonLabel[item.reason]}）`)
+        ?.map((item) => `${item.seat.classroomId}/${item.seat.sourceSeatId}（${skippedReasonText(item.reason)}）`)
         .join('、') || '-'
     }`;
   }
   const reasons = diagnostic.reasons?.map(formatConstraintReason).join('、');
-  return `约束冲突：${reasons || formatTeacherCode(diagnostic.code)}`;
+  return `约束冲突：${reasons || formatUnknownTeacherCode(diagnostic.code)}`;
 }
 
 function rosterDriftText(item: PublishedRosterDriftItem): string {
@@ -1489,6 +1449,11 @@ const skippedReasonLabel: Record<AssignmentV2Explanation['skippedSeats'][number]
   layout_status: '布局状态不可用',
   unbound: '未绑定 Endpoint',
 };
+
+function skippedReasonText(reason: string): string {
+  if (reason === 'disabled' || reason === 'layout_status' || reason === 'unbound') return skippedReasonLabel[reason];
+  return formatUnknownTeacherCode(reason);
+}
 
 const riskReasonLabel: Record<AssignmentV2RiskEdge['reason'], string> = {
   perpendicular_facing: '垂直朝向',
@@ -1738,6 +1703,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
   const [preloginPolicyOptions, setPreloginPolicyOptions] = useState<PreloginPolicyOption[]>([]);
   const [selectedPreloginPolicy, setSelectedPreloginPolicy] = useState('');
   const [preloginBusy, setPreloginBusy] = useState(false);
+  const [preloginReadBusy, setPreloginReadBusy] = useState(false);
   const [preloginError, setPreloginError] = useState<string | null>(null);
   const [pendingConfirmRequestId, setPendingConfirmRequestId] = useState<string | null>(() => new URL(window.location.href).searchParams.get('requestId'));
   const [holdLaunchAfterConfirm, setHoldLaunchAfterConfirm] = useState(() => Boolean(new URL(window.location.href).searchParams.get('requestId')));
@@ -1817,40 +1783,6 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
     }
     if (displayedAssignment && next.source?.schemaVersion !== displayedAssignment.schemaVersion) {
       throw new Error('分配来源 schema 与当前显示版本不一致');
-    }
-    if (
-      displayedAssignment &&
-      !next.rosterRevisions.some(
-        (item) =>
-          item.rosterId === displayedAssignment.roster.rosterId &&
-          item.revision === displayedAssignment.roster.revision &&
-          item.fingerprint === displayedAssignment.roster.fingerprint,
-      )
-    ) {
-      throw new Error('分配名单与当前显示版本不一致');
-    }
-    if (
-      displayedAssignment &&
-      !next.seatPlans.some(
-        (item) =>
-          item.seatPlanId === displayedAssignment.seatPlan.seatPlanId &&
-          item.revision === displayedAssignment.seatPlan.revision &&
-          item.fingerprint === displayedAssignment.seatPlan.fingerprint,
-      )
-    ) {
-      throw new Error('分配计划与当前显示版本不一致');
-    }
-    const displayedPlan = next.seatPlans[0];
-    if (
-      displayedPlan?.roster &&
-      !next.rosterRevisions.some(
-        (item) =>
-          item.rosterId === displayedPlan.roster?.rosterId &&
-          item.revision === displayedPlan.roster.revision &&
-          item.fingerprint === displayedPlan.roster.fingerprint,
-      )
-    ) {
-      throw new Error('座位计划名单与当前显示版本不一致');
     }
     const nextPublishedAssignment = next.assignments.find((assignment) => assignment.published) || null;
     const nextPublicationIdentity = nextPublishedAssignment ? preloginPublicationIdentity(nextPublishedAssignment, next.publicationRevision) : null;
@@ -1961,24 +1893,10 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
           return current;
         }
         if (current.batchId === batch.batchId && batch.revision === current.revision && incomingProjectionRevision === currentProjectionRevision) {
-          if (JSON.stringify({ ...batch, subjects: [] }) !== JSON.stringify({ ...current, subjects: [] })) {
-            throw new Error('同一预登录批次版本返回了冲突内容');
-          }
           for (let index = 0; index < current.subjects.length; index += 1) {
             const currentSubject = current.subjects[index];
             const incomingSubject = batch.subjects[index];
-            if (
-              JSON.stringify({ ...incomingSubject, state: 'issued', redeemedAt: null }) !==
-              JSON.stringify({ ...currentSubject, state: 'issued', redeemedAt: null })
-            ) {
-              throw new Error('同一预登录批次版本返回了冲突内容');
-            }
-            if (currentSubject.state === 'redeemed') {
-              if (incomingSubject.state !== 'redeemed') return current;
-              if (incomingSubject.redeemedAt !== currentSubject.redeemedAt) {
-                throw new Error('同一预登录批次版本返回了冲突内容');
-              }
-            }
+            if (currentSubject.state === 'redeemed' && incomingSubject?.state !== 'redeemed') return current;
           }
         }
       }
@@ -2036,7 +1954,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
     const batchId = url.searchParams.get('batchId');
     const recoverRequestId = url.searchParams.get('requestId');
     let current = true;
-    setPreloginBusy(true);
+    setPreloginReadBusy(true);
     setPreloginError(null);
     const recover = async () => {
       if (batchId) {
@@ -2058,7 +1976,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
     };
     void recover()
       .catch((reason: unknown) => current && setPreloginError(reason instanceof Error ? reason.message : String(reason)))
-      .finally(() => current && setPreloginBusy(false));
+      .finally(() => current && setPreloginReadBusy(false));
     return () => {
       current = false;
     };
@@ -2104,7 +2022,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
   }, [eventId, path, pendingConfirmRequestId, preloginBatch, resumeDispatchingPrelogin, selectPreloginBatch, writePreloginUrl]);
 
   const loadPreloginBatchHistory = useCallback(async () => {
-    setPreloginBusy(true);
+    setPreloginReadBusy(true);
     setPreloginError(null);
     try {
       const payload = await apiObject(`${path}/prelogin-batches`);
@@ -2112,7 +2030,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
     } catch (reason) {
       setPreloginError(reason instanceof Error ? reason.message : String(reason));
     } finally {
-      setPreloginBusy(false);
+      setPreloginReadBusy(false);
     }
   }, [eventId, path]);
 
@@ -2151,6 +2069,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
       setWorkspaceFresh(false);
       setError(null);
       setActionDiagnostics([]);
+      let mutationAccepted = false;
       try {
         const result = await post(`${path}/seat-assignments`, body);
         if (Object.hasOwn(result, 'assignment')) {
@@ -2161,10 +2080,12 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
           }
           parseAssignment(result.assignment);
         }
+        mutationAccepted = true;
         await load();
         return 'ok';
       } catch (reason) {
         setError(reason instanceof Error ? reason.message : String(reason));
+        if (!mutationAccepted && isKnownHydroClientError(reason)) setWorkspaceFresh(true);
         return 'error';
       } finally {
         setBusy(false);
@@ -2178,12 +2099,15 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
       setPreparationBusy(true);
       setWorkspaceFresh(false);
       setError(null);
+      let mutationAccepted = false;
       try {
         await post(`${path}/seat-plans`, body);
+        mutationAccepted = true;
         await load();
         return true;
       } catch (reason) {
         setError(reason instanceof Error ? reason.message : String(reason));
+        if (!mutationAccepted && isKnownHydroClientError(reason)) setWorkspaceFresh(true);
         return false;
       } finally {
         setPreparationBusy(false);
@@ -2198,7 +2122,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
   const latestPlanV2 = latestPlan?.schemaVersion === 2 ? latestPlan : null;
   const latestV1 = latest?.schemaVersion === 1 ? latest : null;
   const latestPlanCurrent = workspace?.latestSeatPlanState === 'current';
-  const mutationBusy = busy || preparationBusy || preloginBusy;
+  const workspaceWriteBusy = busy || preparationBusy;
   const rosterRef = latest?.roster || latestPlan?.roster || null;
   const roster = rosterRef
     ? workspace?.rosterRevisions.find(
@@ -2228,7 +2152,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
     latestV2.seatPlan.revision === latestPlanV2.revision &&
     latestV2.seatPlan.fingerprint === latestPlanV2.fingerprint,
   );
-  const canMutateV2Draft = assignmentIsCurrentV2 && !mutationBusy;
+  const canMutateV2Draft = assignmentIsCurrentV2 && !workspaceWriteBusy;
   const seats = workspace?.source?.seats || [];
   const seatByIdentity = useMemo(() => new Map(seats.map((seat) => [seatIdentityKey(seat), seat])), [seats]);
   const v1SeatById = useMemo(() => new Map(seats.map((seat) => [seat.sourceSeatId, seat])), [seats]);
@@ -2482,22 +2406,11 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
   const loadPreloginFacts = useCallback(async () => {
     if (!publishedPreparationAssignment || workspace?.eventType !== 'krypton') throw new Error('当前考试不支持预登录');
     setPreloginFactsFresh(false);
-    const expectedPublicationIdentity = preloginPublicationIdentity(publishedPreparationAssignment, workspace.publicationRevision);
     const payload = await post(`${path}/prelogin/prepare`, { assignmentRevision: publishedPreparationAssignment.revision });
     const preparation = parsePreloginPreparation(payload.preparation, eventId);
     const workflow = parsePreloginWorkflow(payload.workflow);
     const v2WriterEnabled = boolean(payload.v2WriterEnabled, '跨教室预登录兼容写入门禁');
     const writerEnabled = boolean(payload.workflowWriterEnabled, '预登录兼容写入门禁');
-    if (
-      preparation.eventRevision !== workspace.eventRevision ||
-      preparation.assignment.assignmentId !== publishedPreparationAssignment.assignmentId ||
-      preparation.assignment.revision !== publishedPreparationAssignment.revision ||
-      preparation.assignment.fingerprint !== publishedPreparationAssignment.fingerprint ||
-      preparation.publicationRevision !== workspace.publicationRevision ||
-      preloginPublicationIdentityRef.current !== expectedPublicationIdentity
-    ) {
-      throw new Error('预登录预检与当前发布分配不一致');
-    }
     setPreloginPreparation(preparation);
     setPreloginWorkflow(workflow);
     setPreloginV2WriterEnabled(v2WriterEnabled);
@@ -2609,14 +2522,14 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
   }, [eventId, path]);
 
   const refreshPreloginTargetFacts = useCallback(async () => {
-    setPreloginBusy(true);
+    setPreloginReadBusy(true);
     setPreloginError(null);
     try {
       await loadPreloginTargetDraft();
     } catch (reason) {
       setPreloginError(reason instanceof Error ? reason.message : String(reason));
     } finally {
-      setPreloginBusy(false);
+      setPreloginReadBusy(false);
     }
   }, [loadPreloginTargetDraft]);
 
@@ -3091,9 +3004,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
         requestId: canonicalRequestId,
       });
       const batch = parsePreloginBatch(payload.batch, eventId);
-      if (!batch.workflow || batch.workflow.fingerprint !== preloginWorkflow.fingerprint || batch.requestId !== canonicalRequestId) {
-        throw new Error('预登录确认响应身份不一致');
-      }
+      if (batch.requestId !== canonicalRequestId) throw new Error('预登录确认响应身份不一致');
       if (acceptPreloginBatch(batch, expected)) writePreloginUrl({ batchId: batch.batchId, requestId: null });
     } catch (reason) {
       const operationError = reason instanceof Error ? reason.message : String(reason);
@@ -3232,7 +3143,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
   const publishedTargetAlreadyAssigned =
     preloginTargetFactsFresh &&
     preloginTargetDraft?.sourceAssignmentId === publishedPreparationAssignment?.assignmentId &&
-    preloginTargetDraft.latestPublishedSourceAssignmentId === publishedPreparationAssignment?.assignmentId &&
+    preloginTargetDraft?.latestPublishedSourceAssignmentId === publishedPreparationAssignment?.assignmentId &&
     Boolean(preloginNetworkTargetRef);
   const latestMatchesPublication = Boolean(
     latest &&
@@ -3276,6 +3187,13 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
     if (stepIndex >= 0 && firstIndex >= 0 && stepIndex <= firstIndex) return true;
     if (step === 'generate' && hasPlan && hasRoster) return true;
     if ((step === 'adjust' || step === 'publish') && hasAssignment && hasRoster) return true;
+    if (
+      dirty &&
+      publishedPreparationAssignment &&
+      (step === 'network' || step === 'preflight' || step === 'lock' || step === 'launch')
+    ) {
+      return true;
+    }
     return false;
   };
   const displayStep = convergingConfirmRequest
@@ -3315,7 +3233,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
     <Button
       type="button"
       variant={!workspaceFresh || dirty ? 'default' : 'ghost'}
-      disabled={mutationBusy}
+      disabled={workspaceWriteBusy}
       onClick={() => {
         if (dirty && !window.confirm('这会放弃当前未保存的人工调整，并从服务端重新读取最终状态。是否继续？')) return;
         void refreshWorkspace();
@@ -3325,16 +3243,16 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
     </Button>
   );
   const rosterCreateDisabled =
-    mutationBusy ||
+    workspaceWriteBusy ||
     dirty ||
     !workspaceFresh ||
     !automaticSeatingAllowed ||
     (sourceKind === 'contestAudience' && workspace?.contestAudienceState !== 'fixed') ||
     (sourceKind === 'userbindGroups' && !selectedGroupIds.size);
   const createPlanDisabled =
-    mutationBusy || dirty || !workspaceFresh || !automaticSeatingAllowed || !latestRosterForPlan || !selectedV2ClassroomIds.size;
+    workspaceWriteBusy || dirty || !workspaceFresh || !automaticSeatingAllowed || !latestRosterForPlan || !selectedV2ClassroomIds.size;
   const generateDisabled =
-    mutationBusy ||
+    workspaceWriteBusy ||
     dirty ||
     !workspaceFresh ||
     !automaticSeatingAllowed ||
@@ -3342,8 +3260,8 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
     !latestPlanV2?.roster ||
     !latestPlanCurrent ||
     !planRoster;
-  const publishDisabled = mutationBusy || dirty || !assignmentIsCurrentV2;
-  const networkMutationDisabled = mutationBusy || dirty || !workspaceFresh || !publishedAssignmentUsesCanonicalRoster;
+  const publishDisabled = workspaceWriteBusy || dirty || !assignmentIsCurrentV2;
+  const networkMutationDisabled = preloginBusy || !workspaceFresh || !publishedAssignmentUsesCanonicalRoster;
   const selectedPolicyAlreadyAssigned =
     selectedPreloginPolicy === (preloginNetworkPolicyRef ? `${preloginNetworkPolicyRef.id}:${preloginNetworkPolicyRef.revision}` : '');
   return (
@@ -3485,7 +3403,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                     id="seat-roster-source"
                     ariaLabel="名单来源"
                     value={sourceKind}
-                    disabled={mutationBusy || dirty || !workspaceFresh || !automaticSeatingAllowed}
+                    disabled={workspaceWriteBusy || dirty || !workspaceFresh || !automaticSeatingAllowed}
                     onValueChange={(value) => setSourceKind(value as 'userbindGroups' | 'userbindSchool')}
                     options={[
                       { value: 'userbindGroups', label: '指定 userbind 用户组' },
@@ -3503,7 +3421,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                     {workspace?.rosterGroups.map((group) => (
                       <label key={group.groupId} className="flex items-center gap-2 text-sm">
                         <Checkbox
-                          disabled={mutationBusy || dirty || !workspaceFresh || !automaticSeatingAllowed}
+                          disabled={workspaceWriteBusy || dirty || !workspaceFresh || !automaticSeatingAllowed}
                           checked={selectedGroupIds.has(group.groupId)}
                           onCheckedChange={(checked) =>
                             setSelectedGroupIds((current) => {
@@ -3597,7 +3515,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                           <Checkbox
                             className="size-5"
                             aria-label={`选择教室${displayName}`}
-                            disabled={mutationBusy || dirty || !workspaceFresh || !automaticSeatingAllowed}
+                            disabled={workspaceWriteBusy || dirty || !workspaceFresh || !automaticSeatingAllowed}
                             checked={selectedV2ClassroomIds.has(classroom.classroomId)}
                             onCheckedChange={(checked) =>
                               setSelectedV2ClassroomIds((current) => {
@@ -3698,7 +3616,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                     id="seat-v2-strategy"
                     ariaLabel="跨教室分配策略"
                     value={v2Strategy}
-                    disabled={mutationBusy || dirty || !workspaceFresh || !automaticSeatingAllowed || !latestPlanUsesCanonicalRoster}
+                    disabled={workspaceWriteBusy || dirty || !workspaceFresh || !automaticSeatingAllowed || !latestPlanUsesCanonicalRoster}
                     onValueChange={(value) => setV2Strategy(value as AssignmentV2Revision['constraints']['strategy'])}
                     options={[
                       { value: 'minimizeClassrooms', label: '少用教室' },
@@ -4047,14 +3965,14 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                   <>
                     <Button
                       variant="outline"
-                      disabled={mutationBusy || dirty || !assignmentIsCurrentV2}
+                      disabled={workspaceWriteBusy || dirty || !assignmentIsCurrentV2}
                       onClick={() => latestV2 && execute({ action: 'rerandomizeV2', baseAssignmentRevision: latestV2.revision })}
                     >
                       <RefreshCw className="size-4" /> 保留锁定项重新分配
                     </Button>
                     <Button
                       variant={dirty ? 'default' : 'outline'}
-                      disabled={mutationBusy || !assignmentIsCurrentV2 || !dirty}
+                      disabled={workspaceWriteBusy || !assignmentIsCurrentV2 || !dirty}
                       onClick={() =>
                         latestV2 &&
                         execute({
@@ -4098,7 +4016,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                 left={
                   <>
                     {rereadButton}
-                    <Button variant="outline" disabled={!latest || dirty || mutationBusy || !workspaceFresh} onClick={exportCurrent}>
+                    <Button variant="outline" disabled={!latest || dirty || workspaceWriteBusy || !workspaceFresh} onClick={exportCurrent}>
                       <Download className="size-4" /> 导出当前页面 CSV
                     </Button>
                   </>
@@ -4265,7 +4183,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                     {rereadButton}
                     <Button
                       variant="outline"
-                      disabled={mutationBusy || dirty || !workspaceFresh || !publishedAssignmentUsesCanonicalRoster}
+                      disabled={preloginBusy || preloginReadBusy || !workspaceFresh || !publishedAssignmentUsesCanonicalRoster}
                       onClick={() => void refreshPreloginTargetFacts()}
                     >
                       <RefreshCw className="size-4" /> 读取当前策略与目标事实
@@ -4436,8 +4354,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                     <Button
                       variant={preloginFactsCurrent ? 'outline' : 'default'}
                       disabled={
-                        mutationBusy ||
-                        dirty ||
+                        preloginBusy ||
                         !workspaceFresh ||
                         !publishedAssignmentUsesCanonicalRoster ||
                         workspace?.eventLifecycle !== 'scheduled'
@@ -4486,13 +4403,13 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                     !preloginWorkflow.network.ready &&
                     (preloginWorkflow.network.reason === 'network_execution_pending' ||
                       preloginWorkflow.network.reason === 'network_execution_failed') ? (
-                      <Button variant="outline" disabled={mutationBusy || dirty} onClick={() => void retryPreloginNetwork()}>
+                      <Button variant="outline" disabled={preloginBusy} onClick={() => void retryPreloginNetwork()}>
                         <RefreshCw className="size-4" />
                         {preloginWorkflow.network.reason === 'network_execution_pending' ? '重试当前网络请求' : '整批重试失败网络命令'}
                       </Button>
                     ) : null}
                     {preloginFactsCurrent && preloginWorkflow?.network.source === 'config' ? (
-                      <Button disabled={mutationBusy || dirty} onClick={() => void startPreloginNetwork()}>
+                      <Button disabled={preloginBusy} onClick={() => void startPreloginNetwork()}>
                         <Play className="size-4" /> 启动网络策略
                       </Button>
                     ) : null}
@@ -4593,7 +4510,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                   <Button
                     variant="outline"
                     disabled={
-                      mutationBusy ||
+                      preloginBusy ||
                       !preloginBatchMatchesCurrentPublication ||
                       !preloginBatch.projection ||
                       (!preloginBatch.retryableTicketIds.length && !pendingRetryIdentity)
@@ -4658,7 +4575,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                   <p className="text-xs text-amber-700 dark:text-amber-300">同一确认请求尚未收敛，暂不可切换历史批次。</p>
                 </div>
               ) : null}
-              <Button size="sm" variant="ghost" disabled={mutationBusy} onClick={() => void loadPreloginBatchHistory()}>
+              <Button size="sm" variant="ghost" disabled={preloginBusy || preloginReadBusy} onClick={() => void loadPreloginBatchHistory()}>
                 查看历史批次
               </Button>
               {preloginBatchHistory.length ? (
@@ -4668,7 +4585,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                     <div key={batch.batchId} className="rounded-md border">
                       <button
                         type="button"
-                        disabled={mutationBusy || pendingRetryIdentity || pendingConfirmIdentity}
+                        disabled={preloginBusy || preloginReadBusy || pendingRetryIdentity || pendingConfirmIdentity}
                         className="flex w-full flex-wrap items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-muted/30 disabled:cursor-not-allowed disabled:opacity-50"
                         onClick={() => {
                           selectPreloginBatch(batch);
@@ -4707,8 +4624,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                   currentPublicationAlreadyConfirmed || preloginBatch ? null : (
                     <Button
                       disabled={
-                        mutationBusy ||
-                        dirty ||
+                        preloginBusy ||
                         !preloginFactsCurrent ||
                         !preloginPreparation ||
                         !preloginWorkflow ||

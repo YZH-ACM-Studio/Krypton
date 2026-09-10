@@ -43,6 +43,3 @@ export function canViewCollect(
     if (!request.collaboratorUids.includes(user._id)) return false;
     return canCreateCollect(user);
 }
-
-export const canPackCollect = canViewCollect;
-export const canNudgeCollect = canViewCollect;

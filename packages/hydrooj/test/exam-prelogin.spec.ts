@@ -326,9 +326,11 @@ test('facing-only presentation warnings do not invalidate the preparation author
     assert.notEqual(hardChanged.fingerprint, original.fingerprint);
 });
 
-test('preparation canonicalizes the real Client capability manifest before hashing', () => {
-    const original = preparation();
-    const { fingerprint: _originalFingerprint, ...facts } = original;
+test('compiler canonicalizes the real Client capability manifest before hashing', () => {
+    const { compileExamPreloginPreparation } =
+        require('../src/model/exam-prelogin-resolver.ts') as typeof import('../src/model/exam-prelogin-resolver');
+    const schoolId = new ObjectId('64b00000000000000000000a');
+    const contestId = '64b000000000000000000005';
     const clientCapabilityManifest = [
         { name: 'endpoint.status', version: 1, commands: ['ping'] },
         { name: 'exam.prelogin', version: 1, commands: ['launch_prelogin'] },
@@ -343,35 +345,62 @@ test('preparation canonicalizes the real Client capability manifest before hashi
             commands: ['start_monitoring', 'get_monitoring_status', 'stop_monitoring'],
         },
     ];
-    const fromClient = createExamPreloginPreparation({
+    const canonicalCapabilities = [
+        { name: 'endpoint.status', version: 1, commands: ['ping'] },
+        {
+            name: 'exam.monitoring',
+            version: 1,
+            commands: ['get_monitoring_status', 'start_monitoring', 'stop_monitoring'],
+        },
+        { name: 'exam.prelogin', version: 1, commands: ['launch_prelogin'] },
+        {
+            name: 'network.policy',
+            version: 1,
+            commands: ['apply_network_policy', 'get_network_policy_status', 'stop_network_policy'],
+        },
+    ];
+    const facts = {
+        domainId: 'system',
+        eventId,
+        eventRevision: 4,
+        eventType: 'krypton' as const,
+        eventLifecycle: 'scheduled' as const,
+        eventEndAt: new Date('2026-08-12T03:00:00.000Z'),
+        schoolId,
+        assignment: { assignmentId, revision: 2, fingerprint: 'a'.repeat(64) },
+        publicationRevision: 1,
+        workspace: { kind: 'contest' as const, contestId, path: `/exam-mode/${contestId}` },
+        assignments: [{ uid: 42, studentRecordId, sourceSeatId: 'seat-1' }],
+        students: [{ uid: 42, studentRecordId, schoolId }],
+        bindings: [{ sourceSeatId: 'seat-1', bindingId, bindingRevision: 3, endpointId: 'ep_one', schoolId }],
+        contestEligibility: [{ uid: 42, eligible: true }],
+        observedAt: new Date('2026-08-12T01:00:00.000Z'),
+    };
+    const fromClient = compileExamPreloginPreparation({
         ...facts,
-        items: facts.items.map((item) => ({
-            ...item,
-            endpoint: { ...item.endpoint, capabilities: clientCapabilityManifest },
-        })),
-    });
-    const canonical = createExamPreloginPreparation({
-        ...facts,
-        items: facts.items.map((item) => ({
-            ...item,
-            endpoint: {
-                ...item.endpoint,
-                capabilities: [
-                    { name: 'endpoint.status', version: 1, commands: ['ping'] },
-                    {
-                        name: 'exam.monitoring',
-                        version: 1,
-                        commands: ['get_monitoring_status', 'start_monitoring', 'stop_monitoring'],
-                    },
-                    { name: 'exam.prelogin', version: 1, commands: ['launch_prelogin'] },
-                    {
-                        name: 'network.policy',
-                        version: 1,
-                        commands: ['apply_network_policy', 'get_network_policy_status', 'stop_network_policy'],
-                    },
-                ],
+        endpointFacts: [
+            {
+                endpointId: 'ep_one',
+                online: true,
+                serviceVersion: '0.5.0',
+                protocolVersion: 2,
+                capabilities: clientCapabilityManifest,
+                activeSessionId: null,
             },
-        })),
+        ],
+    });
+    const canonical = compileExamPreloginPreparation({
+        ...facts,
+        endpointFacts: [
+            {
+                endpointId: 'ep_one',
+                online: true,
+                serviceVersion: '0.5.0',
+                protocolVersion: 2,
+                capabilities: canonicalCapabilities,
+                activeSessionId: null,
+            },
+        ],
     });
 
     assert.deepEqual(

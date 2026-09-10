@@ -38,30 +38,25 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
-function hasExactKeys(value: Record<string, unknown>, expected: string[]) {
-  const actual = Object.keys(value).sort();
-  return actual.length === expected.length && actual.every((key, index) => key === [...expected].sort()[index]);
+function hasRequiredKeys(value: Record<string, unknown>, required: readonly string[]) {
+  return required.every((key) => Object.hasOwn(value, key));
 }
 
 export function readAntiAiMarkerDrafts(value: unknown): AntiAiMarkerDraft[] {
   if (value === undefined) return [];
-  if (!isRecord(value) || !hasExactKeys(value, ['schemaVersion', 'markers']) || value.schemaVersion !== 1 || !Array.isArray(value.markers)) {
+  if (!isRecord(value) || !hasRequiredKeys(value, ['schemaVersion', 'markers']) || value.schemaVersion !== 1 || !Array.isArray(value.markers)) {
     throw new TypeError('antiAiMarkers schema is invalid');
   }
   const ids = new Set<string>();
   return value.markers.map((raw, index) => {
-    if (
-      !isRecord(raw) ||
-      !hasExactKeys(raw, ['id', 'anchor', 'injectionText', 'revision']) ||
-      !isRecord(raw.anchor) ||
-      !hasExactKeys(raw.anchor, ['path', 'offset', 'affinity', 'before', 'after'])
-    ) {
+    if (!isRecord(raw) || !hasRequiredKeys(raw, ['id', 'anchor', 'injectionText', 'revision']) || !isRecord(raw.anchor)) {
       throw new TypeError(`antiAiMarkers marker ${index} is invalid`);
     }
     if (
       typeof raw.id !== 'string' ||
       !raw.id ||
       ids.has(raw.id) ||
+      !hasRequiredKeys(raw.anchor, ['path', 'offset', 'affinity']) ||
       typeof raw.anchor.path !== 'string' ||
       !Number.isSafeInteger(raw.anchor.offset) ||
       Number(raw.anchor.offset) < 0 ||
@@ -88,12 +83,12 @@ export function readAntiAiMarkerDrafts(value: unknown): AntiAiMarkerDraft[] {
 }
 
 export function readAntiAiMarkerClientView(value: unknown): AntiAiMarkerClientView {
-  if (!isRecord(value) || !hasExactKeys(value, ['schemaVersion', 'markers']) || value.schemaVersion !== 1 || !Array.isArray(value.markers)) {
+  if (!isRecord(value) || !hasRequiredKeys(value, ['schemaVersion', 'markers']) || value.schemaVersion !== 1 || !Array.isArray(value.markers)) {
     throw new TypeError('antiAiMarkerView schema is invalid');
   }
   const ids = new Set<string>();
   const markers = value.markers.map((raw, index) => {
-    if (!isRecord(raw) || !hasExactKeys(raw, ['id', 'path', 'offset', 'injectionText'])) {
+    if (!isRecord(raw) || !hasRequiredKeys(raw, ['id', 'path', 'offset', 'injectionText'])) {
       throw new TypeError(`antiAiMarkerView marker ${index} is invalid`);
     }
     if (

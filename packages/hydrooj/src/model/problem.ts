@@ -33,6 +33,7 @@ import { copyProblemStorageFiles } from '../lib/problem-clone';
 import { isProblemConfigFilename, parseProblemConfigObject } from '../lib/problem-config';
 import {
     assertLegacyProgrammingStatementFingerprint,
+    assertProgrammingStatementComplete,
     assertProgrammingStatementProjection,
     compileProgrammingStatement,
     normalizeProgrammingStatement,
@@ -58,7 +59,6 @@ import {
     assertCodeEvaluationLifecyclePatch,
     assertCodeEvaluationMappingsExist,
     assertCodeEvaluationStatusInvariant,
-    assertCodeEvaluationStatusTransition,
     assertProblemReadyForUse as assertCodeEvaluationProblemReady,
     type CodeEvaluationFileMutation,
     isCodeEvaluationProblem,
@@ -3626,7 +3626,6 @@ export class ProblemModel {
         if (rawStatementTouched && currentAntiAiMarkers?.markers.length) {
             throw new ValidationError('antiAiMarkers', null, localizedErrorText`题面包含防 AI 标记，必须从题面编辑器完成重新定位`);
         }
-        assertCodeEvaluationStatusTransition(current.codeEvaluationStatus, $set as Record<string, unknown>, $unset, 'raw-edit');
         const rawEditContext = { domainId, pid: _id, operation: 'raw-edit' };
         const preserveProgrammingTagPair =
             current.authoringMode !== 'managed' &&
@@ -3655,7 +3654,6 @@ export class ProblemModel {
             );
             throw new ValidationError('tag', null, localizedErrorText`未请求标签变更时，写入钩子不能修改编程题标签`);
         }
-        assertCodeEvaluationStatusTransition(current.codeEvaluationStatus, $set as Record<string, unknown>, $unset, 'raw-edit');
         assertCodeEvaluationLifecyclePatchWithTrace(current as ProblemDoc, $set as Record<string, unknown>, $unset, {
             operation: 'raw-edit',
             stage: 'raw-edit',
@@ -4601,7 +4599,7 @@ export class ProblemModel {
             const nextHidden = Object.hasOwn(input.metadata || {}, 'hidden') ? input.metadata?.hidden : current.hidden;
             if (nextHidden !== true) {
                 try {
-                    assertProgrammingStatementProjection(programmingStatement, nextConfig, compileProgrammingStatement(programmingStatement));
+                    assertProgrammingStatementComplete(programmingStatement, nextConfig);
                 } catch (error) {
                     if (error instanceof ProgrammingStatementValidationError) {
                         throw localizeErrorParameter(

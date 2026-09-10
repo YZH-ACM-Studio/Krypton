@@ -14,8 +14,6 @@ interface CollectAuth {
     canManageAllCollect(user: CollectAuthUser): boolean;
     canEditCollect(user: CollectAuthUser, request: Pick<CollectRequest, 'ownerUid'>): boolean;
     canViewCollect(user: CollectAuthUser, request: CollectRequest): boolean;
-    canPackCollect(user: CollectAuthUser, request: CollectRequest): boolean;
-    canNudgeCollect(user: CollectAuthUser, request: CollectRequest): boolean;
 }
 
 Module._load = function load(request: string, parent: NodeModule, isMain: boolean) {
@@ -77,7 +75,7 @@ describe('krypton-collect auth', () => {
         expect(auth.canEditCollect(user(6, { privs: [PRIV.PRIV_EDIT_SYSTEM] }), request)).to.equal(true);
     });
 
-    it('lets owners, collaborators, and manage-all view, pack, and nudge', () => {
+    it('lets owners, collaborators, and manage-all view collections', () => {
         const owner = user(10);
         const collaborator = user(20, { perms: [PERM.PERM_CREATE_COLLECT] });
         const demoted = user(20);
@@ -89,13 +87,6 @@ describe('krypton-collect auth', () => {
         expect(auth.canViewCollect(demoted, request)).to.equal(false);
         expect(auth.canViewCollect(stranger, request)).to.equal(false);
         expect(auth.canViewCollect(manager, request)).to.equal(true);
-
-        expect(auth.canPackCollect).to.equal(auth.canViewCollect);
-        expect(auth.canNudgeCollect).to.equal(auth.canViewCollect);
-        expect(auth.canPackCollect(collaborator, request)).to.equal(true);
-        expect(auth.canNudgeCollect(collaborator, request)).to.equal(true);
-        expect(auth.canPackCollect(demoted, request)).to.equal(false);
-        expect(auth.canPackCollect(stranger, request)).to.equal(false);
-        expect(auth.canNudgeCollect(stranger, request)).to.equal(false);
+        expect(auth.canViewCollect(user(6, { privs: [PRIV.PRIV_EDIT_SYSTEM] }), request)).to.equal(true);
     });
 });

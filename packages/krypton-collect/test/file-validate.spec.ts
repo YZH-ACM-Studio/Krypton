@@ -2,8 +2,6 @@ import { expect } from 'chai';
 import { describe, it } from 'node:test';
 import {
     COLLECT_HARD_MAX_FILE_BYTES,
-    COLLECT_HARD_MAX_FILES,
-    COLLECT_HARD_MAX_TOTAL_BYTES,
     type CollectAllowedExt,
     type CollectSlot,
 } from '../src/types';
@@ -31,10 +29,7 @@ interface FileValidate {
     assertUploadAllowed(args: {
         filename: string;
         size: number;
-        slot: Pick<CollectSlot, 'allowedExt' | 'maxFiles'>;
-        currentCountInSlot: number;
-        currentTotalBytes: number;
-        currentTotalFiles: number;
+        slot: Pick<CollectSlot, 'allowedExt'>;
         header: Uint8Array;
     }): { ext: CollectAllowedExt; originalName: string };
 }
@@ -50,9 +45,8 @@ try {
 
 const { detectExtMagic, assertUploadAllowed } = fileValidate;
 
-const slot: Pick<CollectSlot, 'allowedExt' | 'maxFiles'> = {
+const slot: Pick<CollectSlot, 'allowedExt'> = {
     allowedExt: ['pdf', 'docx', 'zip', 'png', 'jpg'],
-    maxFiles: 2,
 };
 
 const PDF = Uint8Array.of(0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x34);
@@ -84,19 +78,13 @@ function expectRejected(run: () => unknown, needle: string) {
 function upload(overrides: {
     filename?: string;
     size?: number;
-    slot?: Pick<CollectSlot, 'allowedExt' | 'maxFiles'>;
-    currentCountInSlot?: number;
-    currentTotalBytes?: number;
-    currentTotalFiles?: number;
+    slot?: Pick<CollectSlot, 'allowedExt'>;
     header?: Uint8Array;
 } = {}) {
     return assertUploadAllowed({
         filename: 'report.pdf',
         size: 32,
         slot,
-        currentCountInSlot: 0,
-        currentTotalBytes: 0,
-        currentTotalFiles: 0,
         header: PDF,
         ...overrides,
     });
@@ -127,10 +115,7 @@ describe('krypton-collect file-validate', () => {
         expectRejected(() => upload({ filename: 'pack.zip', header: PDF }), '扩展名');
     });
 
-    it('rejects oversize and count overflows', () => {
+    it('rejects oversize files', () => {
         expectRejected(() => upload({ size: COLLECT_HARD_MAX_FILE_BYTES + 1 }), '过大');
-        expectRejected(() => upload({ currentTotalBytes: COLLECT_HARD_MAX_TOTAL_BYTES, size: 1 }), '合计');
-        expectRejected(() => upload({ currentCountInSlot: slot.maxFiles }), '槽位');
-        expectRejected(() => upload({ currentTotalFiles: COLLECT_HARD_MAX_FILES }), '数量');
     });
 });

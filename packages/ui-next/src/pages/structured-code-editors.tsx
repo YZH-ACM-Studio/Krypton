@@ -21,7 +21,6 @@ import { readAntiAiMarkerDrafts, serializeAntiAiMarkerInput, type AntiAiMarkerDr
 import { cn } from '@/lib/cn';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { readProblemSaveSuccess } from '@/lib/problem-save-response';
-import { sha256Text } from '@/lib/sha256';
 import { structuredCodeCompletionIssues, type StructuredAuthorStage, type StructuredCodeCompletionIssue } from '@/lib/structured-code-readiness';
 
 interface StructuredEditorProblemDoc {
@@ -539,15 +538,7 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
       if (!isCreate && (markerChanged || (contentChanged && persistedAntiAiMarkers.length > 0))) {
         formData.set('antiAiMarkers', JSON.stringify(serializeAntiAiMarkerInput(antiAiMarkers)));
       }
-      if (!draftCreation) {
-        formData.set(
-          'structuredConfig',
-          JSON.stringify({
-            ...structuredConfig,
-            main: { ...structuredConfig.main, sourceHash: sha256Text(source.replace(/\r\n?/g, '\n')) },
-          }),
-        );
-      }
+      if (!draftCreation) formData.set('structuredConfig', JSON.stringify(structuredConfig));
       if (!isCreate) formData.set('expectedStructureRevision', String(structureRevision));
       if (completing) formData.set('completeCodeEvaluationDraft', 'true');
       const statementChanged = !isCreate && (markerChanged || contentChanged);

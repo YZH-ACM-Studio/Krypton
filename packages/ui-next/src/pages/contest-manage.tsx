@@ -61,7 +61,7 @@ import {
 import { useBootstrap, type GenericUserDoc } from '@/lib/bootstrap';
 import { getContestProblemStatus, getPersonalPracticeStatus, type PersonalPracticeStatusSnapshot } from '@/lib/contest-exam-display';
 import { companionContestEligibility, contestProblemLetter } from '@/lib/competitive-companion';
-import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
+import { fetchHydroResponse, presentHydroResponseError, readHydroResponseError, type PresentedResponseError } from '@/lib/error-presenter';
 import { formatDateTime, formatRelativeTime, makeInitials, replaceRouteTokens } from '@/lib/format';
 import { isSystemAdmin } from '@/lib/perms';
 
@@ -483,6 +483,14 @@ async function readContestExamResponse(response: Response, fallback: string): Pr
     throw new Error(`${fallback}：响应不是有效 JSON`, { cause });
   }
   return responseRecord(payload, fallback);
+}
+
+function isAbortError(cause: unknown): boolean {
+  return Boolean(cause && typeof cause === 'object' && 'name' in cause && cause.name === 'AbortError');
+}
+
+function isKnownCreateValidationFailure(response: Response, payload: PresentedResponseError['payload']): boolean {
+  return !response.redirected && response.status >= 400 && response.status < 500 && payload !== undefined;
 }
 
 function hasFixedAutomaticSeatAudience(tdoc: ContestDoc): boolean {
@@ -1766,29 +1774,33 @@ export function ContestExamSeatEntry({
     `${event.title} · ${schoolLabel(event.schoolId)} · ${formatDateTime(event.startAt, 'zh-CN')} → ${formatDateTime(event.endAt, 'zh-CN')}`;
 
   const loadLinkedEvents = useCallback(async (): Promise<ContestExamEventSummary[]> => {
-    setLinkedEventsFresh(false);
-    const response = await fetchHydroResponse(
-      `/api/admin/exam-events?contestId=${encodeURIComponent(linkedContestId)}`,
-      { credentials: 'include', headers: { Accept: 'application/json' } },
-      '加载比赛考试活动失败',
-    );
-    const payload = await readContestExamResponse(response, '加载比赛考试活动失败');
-    if (!Array.isArray(payload.events) || !Array.isArray(payload.schools)) throw new Error('考试活动响应格式不正确');
-    const linkedEvents = payload.events.map(parseContestExamEvent).filter((event) => event.type === 'krypton' && event.contestId === linkedContestId);
-    const nextEvents = fixedSchoolId ? linkedEvents.filter((event) => event.schoolId === fixedSchoolId) : linkedEvents;
-    const nextSchools = payload.schools.map(parseContestExamSchool);
-    if (new Set(nextEvents.map((event) => event.eventId)).size !== nextEvents.length) throw new Error('考试活动响应包含重复活动');
-    if (new Set(nextSchools.map((school) => school.schoolId)).size !== nextSchools.length) throw new Error('学校响应包含重复学校');
-    const eligibleSchools = fixedSchoolId ? nextSchools.filter((school) => school.schoolId === fixedSchoolId) : nextSchools;
-    setIneligibleEventCount(linkedEvents.length - nextEvents.length);
-    setEvents(nextEvents);
-    setSchools(eligibleSchools);
-    setSelectedEventId(nextEvents.length === 1 ? nextEvents[0].eventId : '');
-    setSelectedSchoolId(
-      fixedSchoolId && eligibleSchools.length === 1 ? fixedSchoolId : eligibleSchools.length === 1 ? eligibleSchools[0].schoolId : '',
-    );
-    setLinkedEventsFresh(true);
-    return nextEvents;
+    try {
+      const response = await fetchHydroResponse(
+        `/api/admin/exam-events?contestId=${encodeURIComponent(linkedContestId)}`,
+        { credentials: 'include', headers: { Accept: 'application/json' } },
+        '加载比赛考试活动失败',
+      );
+      const payload = await readContestExamResponse(response, '加载比赛考试活动失败');
+      if (!Array.isArray(payload.events) || !Array.isArray(payload.schools)) throw new Error('考试活动响应格式不正确');
+      const linkedEvents = payload.events.map(parseContestExamEvent).filter((event) => event.type === 'krypton' && event.contestId === linkedContestId);
+      const nextEvents = fixedSchoolId ? linkedEvents.filter((event) => event.schoolId === fixedSchoolId) : linkedEvents;
+      const nextSchools = payload.schools.map(parseContestExamSchool);
+      if (new Set(nextEvents.map((event) => event.eventId)).size !== nextEvents.length) throw new Error('考试活动响应包含重复活动');
+      if (new Set(nextSchools.map((school) => school.schoolId)).size !== nextSchools.length) throw new Error('学校响应包含重复学校');
+      const eligibleSchools = fixedSchoolId ? nextSchools.filter((school) => school.schoolId === fixedSchoolId) : nextSchools;
+      setIneligibleEventCount(linkedEvents.length - nextEvents.length);
+      setEvents(nextEvents);
+      setSchools(eligibleSchools);
+      setSelectedEventId(nextEvents.length === 1 ? nextEvents[0].eventId : '');
+      setSelectedSchoolId(
+        fixedSchoolId && eligibleSchools.length === 1 ? fixedSchoolId : eligibleSchools.length === 1 ? eligibleSchools[0].schoolId : '',
+      );
+      setLinkedEventsFresh(true);
+      return nextEvents;
+    } catch (cause) {
+      setLinkedEventsFresh(false);
+      throw cause;
+    }
   }, [fixedSchoolId, linkedContestId]);
 
   const refreshLinkedEvents = useCallback(async () => {
@@ -1814,50 +1826,79 @@ export function ContestExamSeatEntry({
     onNavigate(`/admin/exam-infrastructure/events/${eventId}/seats`);
   };
 
+  const markCreateOutcomeUnknown = async (operationError: string) => {
+    setCreationOutcomeUnknown(true);
+    try {
+      const currentEvents = await loadLinkedEvents();
+      if (currentEvents.length) setCreationOutcomeUnknown(false);
+      setError(
+        currentEvents.length
+          ? `${operationError}；创建结果未知，已重读到 ${currentEvents.length} 个关联活动，请从当前列表继续。`
+          : `${operationError}；创建结果仍未知，当前读取尚未看到关联活动。为避免重复创建，请稍后再次重读。`,
+      );
+    } catch (recoveryCause) {
+      const recoveryError = recoveryCause instanceof Error ? recoveryCause.message : '加载比赛考试活动失败';
+      setError(`${operationError}；创建结果未知且关联活动重读失败：${recoveryError}`);
+    }
+  };
+
   const createEvent = async () => {
     if (!fixedAudience || !linkedEventsFresh || creationOutcomeUnknown || !selectedSchoolId || !beginAt || !endAt || !validWindow) return;
     setCreating(true);
     setError(null);
     try {
-      const response = await fetchHydroResponse(
-        '/api/admin/exam-events',
-        {
-          method: 'POST',
-          credentials: 'include',
-          headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            schoolId: selectedSchoolId,
-            title: tdoc.title || '未命名比赛',
-            type: 'krypton',
-            contestId: linkedContestId,
-            startAt: beginAt.toISOString(),
-            endAt: endAt.toISOString(),
-            collaboratorUids: [],
-          }),
-        },
-        '创建比赛考试活动失败',
-      );
-      const payload = await readContestExamResponse(response, '创建比赛考试活动失败');
-      const created = parseContestExamEvent(payload.event);
+      let response: Response;
+      try {
+        response = await fetchHydroResponse(
+          '/api/admin/exam-events',
+          {
+            method: 'POST',
+            credentials: 'include',
+            headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              schoolId: selectedSchoolId,
+              title: tdoc.title || '未命名比赛',
+              type: 'krypton',
+              contestId: linkedContestId,
+              startAt: beginAt.toISOString(),
+              endAt: endAt.toISOString(),
+              collaboratorUids: [],
+            }),
+          },
+          '创建比赛考试活动失败',
+        );
+      } catch (cause) {
+        await markCreateOutcomeUnknown(!isAbortError(cause) && cause instanceof Error ? cause.message : '创建比赛考试活动失败');
+        return;
+      }
+      if (response.redirected) {
+        await markCreateOutcomeUnknown('创建比赛考试活动失败：请求被重定向，服务器未确认创建成功');
+        return;
+      }
+      if (!response.ok) {
+        const presented = await presentHydroResponseError(response, '创建比赛考试活动失败');
+        if (isKnownCreateValidationFailure(response, presented.payload)) {
+          setError(presented.message);
+          return;
+        }
+        await markCreateOutcomeUnknown(presented.message);
+        return;
+      }
+      let payload: unknown;
+      try {
+        payload = await response.json();
+      } catch {
+        await markCreateOutcomeUnknown('创建比赛考试活动失败：响应不是有效 JSON');
+        return;
+      }
+      const created = parseContestExamEvent(responseRecord(payload, '创建比赛考试活动失败').event);
       if (created.type !== 'krypton' || created.contestId !== linkedContestId || created.schoolId !== selectedSchoolId) {
         throw new Error('创建结果与当前比赛不一致');
       }
       openEvent(created.eventId);
     } catch (cause) {
-      const operationError = cause instanceof Error ? cause.message : '创建比赛考试活动失败';
-      setCreationOutcomeUnknown(true);
-      try {
-        const currentEvents = await loadLinkedEvents();
-        if (currentEvents.length) setCreationOutcomeUnknown(false);
-        setError(
-          currentEvents.length
-            ? `${operationError}；创建结果未知，已重读到 ${currentEvents.length} 个关联活动，请从当前列表继续。`
-            : `${operationError}；创建结果仍未知，当前读取尚未看到关联活动。为避免重复创建，请稍后再次重读。`,
-        );
-      } catch (recoveryCause) {
-        const recoveryError = recoveryCause instanceof Error ? recoveryCause.message : '加载比赛考试活动失败';
-        setError(`${operationError}；创建结果未知且关联活动重读失败：${recoveryError}`);
-      }
+      await markCreateOutcomeUnknown(cause instanceof Error ? cause.message : '创建比赛考试活动失败');
+    } finally {
       setCreating(false);
     }
   };
@@ -1893,15 +1934,11 @@ export function ContestExamSeatEntry({
             {error}
           </p>
         ) : null}
-        {loading ? (
+        {loading && events.length === 0 ? (
           <p className="flex items-center gap-2 text-sm text-muted-foreground">
             <RefreshCw className="size-4 animate-spin" /> 加载考试活动…
           </p>
-        ) : !linkedEventsFresh || creationOutcomeUnknown ? (
-          <Button type="button" variant="outline" onClick={() => void refreshLinkedEvents()}>
-            <RefreshCw className="size-4" /> {creationOutcomeUnknown ? '再次重读关联活动' : '重新读取关联活动'}
-          </Button>
-        ) : !fixedAudience ? null : events.length === 1 ? (
+        ) : fixedAudience && events.length === 1 ? (
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/20 p-3">
             <div>
               <p className="text-sm font-medium">{events[0].title}</p>
@@ -1914,7 +1951,7 @@ export function ContestExamSeatEntry({
               进入座位工作台
             </Button>
           </div>
-        ) : events.length > 1 ? (
+        ) : fixedAudience && events.length > 1 ? (
           <div className="flex flex-col gap-2 rounded-md border p-3 sm:flex-row sm:items-end">
             <label className="flex-1 text-sm">
               <span className="mb-1 block font-medium">选择考试活动</span>
@@ -1936,6 +1973,10 @@ export function ContestExamSeatEntry({
               进入所选活动
             </Button>
           </div>
+        ) : !linkedEventsFresh || creationOutcomeUnknown ? (
+          <Button type="button" variant="outline" onClick={() => void refreshLinkedEvents()}>
+            <RefreshCw className="size-4" /> {creationOutcomeUnknown ? '再次重读关联活动' : '重新读取关联活动'}
+          </Button>
         ) : fixedAudience ? (
           <div className="space-y-3 rounded-md border p-3">
             <div className="grid gap-2 text-sm sm:grid-cols-3">

@@ -105,26 +105,3 @@ export function requireServiceToken(handler: Handler, channel: string): void {
     }
     logger.debug('service-token check on channel "%s" passed', channel);
 }
-
-/**
- * Decorator factory variant: place above a Handler method to gate it.
- *
- * ```ts
- * class MyHandler extends Handler {
- *   noCheckPermView = true;
- *
- *   @withServiceToken('vigil')
- *   async post(...) { ... }
- * }
- * ```
- */
-export function withServiceToken(channel: string) {
-    return function (target: any, _funcName: string, descriptor: PropertyDescriptor) {
-        const originalMethod = descriptor.value;
-        descriptor.value = function gated(this: Handler, ...args: any[]) {
-            requireServiceToken(this, channel);
-            return originalMethod.apply(this, args);
-        };
-        return descriptor;
-    };
-}

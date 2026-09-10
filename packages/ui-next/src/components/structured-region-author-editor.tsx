@@ -2,7 +2,7 @@ import { closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { bracketMatching, defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { Compartment, EditorState } from '@codemirror/state';
-import { Decoration, EditorView, highlightActiveLine, keymap, lineNumbers, type ViewUpdate } from '@codemirror/view';
+import { Decoration, EditorView, highlightActiveLine, keymap, lineNumbers } from '@codemirror/view';
 import { useEffect, useMemo, useRef } from 'react';
 import { structuredCodeLanguageExtension } from '@/lib/structured-code-language';
 import { mapStructuredLineRanges, type StructuredLineRange } from '@/lib/structured-code-ranges';
@@ -26,12 +26,6 @@ function selectedWholeLines(state: EditorState): AuthorLineSelection | null {
     endLine: end.number,
     expanded: range.from !== start.from || range.to !== end.to,
   };
-}
-
-/** Map whole-line ranges through the exact CodeMirror transaction. */
-export function mapAuthorLineRanges(update: ViewUpdate, ranges: AuthorLineRange[]): AuthorLineRange[] {
-  if (!update.docChanged) return ranges;
-  return mapStructuredLineRanges(update.startState.doc, update.state.doc, update.changes, ranges);
 }
 
 export function StructuredRegionAuthorEditor({
@@ -115,7 +109,12 @@ export function StructuredRegionAuthorEditor({
         EditorView.contentAttributes.of({ 'aria-label': '私有完整模板源码', 'aria-readonly': String(readOnly) }),
         EditorView.lineWrapping,
         EditorView.updateListener.of((update) => {
-          if (update.docChanged) sourceChangeRef.current(update.state.doc.toString(), mapAuthorLineRanges(update, rangeSnapshot));
+          if (update.docChanged) {
+            sourceChangeRef.current(
+              update.state.doc.toString(),
+              mapStructuredLineRanges(update.startState.doc, update.state.doc, update.changes, rangeSnapshot),
+            );
+          }
           if (update.docChanged || update.selectionSet) selectionChangeRef.current(selectedWholeLines(update.state));
         }),
         EditorView.decorations.compute(['doc'], (current) => {

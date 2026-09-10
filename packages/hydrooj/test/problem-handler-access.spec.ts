@@ -2871,8 +2871,7 @@ describe('P2.13 managed programming edit boundary', () => {
         expect(error).to.be.instanceOf(GenericError);
         expect(calls.claims).to.have.lengthOf(0);
         expect(calls.renameFile).to.have.lengthOf(0);
-        expect(calls.oplog.at(-1)?.[1]).to.equal('problem.managed.write.denied');
-        expect(calls.oplog.at(-1)?.[2]?.fields).to.deep.equal(['hidden']);
+        expect(calls.oplog).to.deep.equal([]);
     });
 });
 

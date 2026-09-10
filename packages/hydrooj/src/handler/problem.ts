@@ -507,7 +507,6 @@ async function assertManagedFileWriteBody(handler: Handler, pdoc: ProblemDoc) {
     if (!allowed) return;
     const unknownFields = Object.keys(body).filter((field) => !allowed.includes(field));
     if (!unknownFields.length) return;
-    await auditManagedWriteDenied(handler, pdoc, operation, 'content', unknownFields);
     throw new ValidationError('fields', null, localizedErrorText`托管题文件操作不接受字段：${unknownFields.join(', ')}`);
 }
 
@@ -2918,7 +2917,6 @@ export class ProblemEditHandler extends ProblemManageHandler {
             ]);
             const unknownFields = Object.keys(body).filter((field) => !allowed.has(field));
             if (unknownFields.length) {
-                await auditManagedWriteDenied(this, this.pdoc, 'edit', 'unknown', unknownFields);
                 throw new ValidationError('fields', null, localizedErrorText`托管题编辑不接受字段：${unknownFields.join(', ')}`);
             }
             const canonicalFields = ['pid', 'tag'].filter((field) => Object.hasOwn(body, field));

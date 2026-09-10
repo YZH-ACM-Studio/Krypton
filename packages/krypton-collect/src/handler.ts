@@ -645,6 +645,21 @@ class AdminCollectEditHandler extends CollectBaseHandler {
     async applyEditPost(id: ObjectId | undefined, operation: string) {
         const domainId = domainIdOf(this);
         const body = this.request.body || {};
+        if (operation === 'close' || operation === 'reopen') {
+            if (!id) throw new CollectNotFoundError();
+            const current = await getRequest(domainId, id);
+            const revision = Number(body.revision || current.revision);
+            if (operation === 'close') {
+                await closeRequest(domainId, id, actorOf(this), revision);
+                await OplogModel.log(this, 'collect.close', { requestId: String(id) });
+                this.back();
+                return;
+            }
+            await reopenRequest(domainId, id, actorOf(this), revision);
+            await OplogModel.log(this, 'collect.reopen', { requestId: String(id) });
+            this.back();
+            return;
+        }
         const title = String(body.title || '');
         const description = String(body.description || '');
         const dueAt = parseCollectDueAt(body.dueAt);
@@ -715,18 +730,6 @@ class AdminCollectEditHandler extends CollectBaseHandler {
             await notifyUids(audience.map((row) => row.boundUserId), published.title, collectUrl(this, published._id));
             await OplogModel.log(this, 'collect.publish', { requestId: String(id), assigneeCount: audience.length });
             this.response.redirect = `/admin/collect/${String(id)}`;
-            return;
-        }
-        if (operation === 'close') {
-            await closeRequest(domainId, id, actorOf(this), revision);
-            await OplogModel.log(this, 'collect.close', { requestId: String(id) });
-            this.back();
-            return;
-        }
-        if (operation === 'reopen') {
-            await reopenRequest(domainId, id, actorOf(this), revision, dueAt);
-            await OplogModel.log(this, 'collect.reopen', { requestId: String(id) });
-            this.back();
             return;
         }
         throw new CollectForbiddenError('未知操作');

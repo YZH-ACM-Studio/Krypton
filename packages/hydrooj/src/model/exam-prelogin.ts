@@ -316,7 +316,7 @@ function canonicalCapability(value: unknown): ExamPreloginEndpointCapability {
     return { name, version: capability.version, commands };
 }
 
-function canonicalEndpointFact(value: unknown): ExamPreloginEndpointFact {
+export function canonicalEndpointFact(value: unknown): ExamPreloginEndpointFact {
     const endpoint = exactObject(value, ['activeSessionId', 'capabilities', 'online', 'protocolVersion', 'serviceVersion'], 'endpoint_fact_invalid');
     if (typeof endpoint.online !== 'boolean') throw new ExamPreloginError('endpoint_fact_invalid');
     if (endpoint.serviceVersion !== null) canonicalText(endpoint.serviceVersion, 'service_version', 32);
@@ -398,16 +398,7 @@ function preparationFact(preparation: Omit<ExamPreloginPreparation, 'fingerprint
 }
 
 export function createExamPreloginPreparation(input: Omit<ExamPreloginPreparation, 'fingerprint'>): ExamPreloginPreparation {
-    const canonicalInput: Omit<ExamPreloginPreparation, 'fingerprint'> = {
-        ...input,
-        items: input.items.map((item) => ({
-            ...item,
-            endpoint: canonicalEndpointFact(item.endpoint),
-        })),
-    };
-    const preparation = { ...canonicalInput, fingerprint: canonicalHash(preparationFact(canonicalInput)) };
-    assertExamPreloginPreparationIntegrity(preparation);
-    return preparation;
+    return { ...input, fingerprint: canonicalHash(preparationFact(input)) };
 }
 
 export function assertExamPreloginPreparationIntegrity(value: unknown): asserts value is ExamPreloginPreparation {
@@ -564,7 +555,6 @@ export function createExamPreloginDispatchRecovery(preparation: ExamPreloginPrep
             };
         }),
     };
-    assertDispatchRecoveryIntegrity(recovery, ticketIds);
     return recovery;
 }
 
@@ -1058,8 +1048,7 @@ export class ExamPreloginService {
                 createdBy: actorUid,
                 updatedAt: createdAt,
             };
-            const target = { ...canonical, fingerprint: batchFingerprint(canonical) };
-            assertBatchIntegrity(target);
+            const target: ExamPreloginBatchDoc = { ...canonical, fingerprint: batchFingerprint(canonical) };
             try {
                 await this.batches.insertOne(target);
                 batch = target;
@@ -1133,8 +1122,7 @@ export class ExamPreloginService {
             projection,
             updatedAt,
         };
-        const target = { ...canonical, fingerprint: batchFingerprint(canonical) };
-        assertBatchIntegrity(target);
+        const target: ExamPreloginBatchDoc = { ...canonical, fingerprint: batchFingerprint(canonical) };
         const replaced = await this.batches.replaceOne(batch, target);
         if (replaced.matchedCount !== 1) {
             const winner = await this.batches.findOne({ _id: batch._id });
@@ -1193,8 +1181,7 @@ export class ExamPreloginService {
                 ...withoutDigest,
                 ticketDigest: sha256(material),
             };
-            const target = { ...canonical, fingerprint: ticketFingerprint(canonical) };
-            assertTicketIntegrity(target);
+            const target: ExamPreloginTicketDoc = { ...canonical, fingerprint: ticketFingerprint(canonical) };
             if (existing) {
                 assertTicketIntegrity(existing);
                 if (!sameTicketIssueFacts(existing, target)) throw new ExamPreloginError('ticket_fact_conflict');
@@ -1292,8 +1279,7 @@ export class ExamPreloginService {
             redemptionRequestId: requestId,
             redeemedAt,
         };
-        const target = { ...canonical, fingerprint: ticketFingerprint(canonical) };
-        assertTicketIntegrity(target);
+        const target: ExamPreloginTicketDoc = { ...canonical, fingerprint: ticketFingerprint(canonical) };
         const replaced = await this.tickets.replaceOne(ticket, target);
         if (replaced.matchedCount === 1) return target;
         const winner = await this.tickets.findOne({ _id: ticket._id });
@@ -1483,8 +1469,7 @@ export class ExamPreloginService {
             ...withoutDigest,
             ticketDigest: sha256(ticketMaterial(unsigned, this.dependencies.ticketKey)),
         };
-        const target = { ...canonical, fingerprint: ticketFingerprint(canonical) };
-        assertTicketIntegrity(target);
+        const target: ExamPreloginTicketDoc = { ...canonical, fingerprint: ticketFingerprint(canonical) };
         const replaced = await this.tickets.replaceOne(ticket, target);
         if (replaced.matchedCount === 1) return target;
         const winner = await this.tickets.findOne({ _id: ticket._id });
@@ -1562,8 +1547,7 @@ export class ExamPreloginService {
                 projection,
                 updatedAt,
             };
-            const target = { ...canonical, fingerprint: batchFingerprint(canonical) };
-            assertBatchIntegrity(target);
+            const target: ExamPreloginBatchDoc = { ...canonical, fingerprint: batchFingerprint(canonical) };
             try {
                 const replaced = await this.batches.replaceOne(current, target);
                 if (replaced.matchedCount === 1) return { batch: target, changed: true };

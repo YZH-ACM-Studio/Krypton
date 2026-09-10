@@ -981,8 +981,10 @@ describe('exam infrastructure workspace', () => {
     setEventPanel('run');
     renderPage({ eventId: EVENT.eventId });
 
+    expect(await screen.findByRole('button', { name: '启动' })).toBeEnabled();
     await user.click(await screen.findByRole('button', { name: '终端预检' }));
     expect(await screen.findByText('1/1 就绪')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '启动' })).toBeEnabled();
   });
 
   it('does not offer a new preflight or apply after the exam has ended', async () => {
@@ -1037,11 +1039,9 @@ describe('exam infrastructure workspace', () => {
     renderPage({ eventId: EVENT.eventId });
 
     const hotUpdate = await screen.findByRole('button', { name: '热更新策略' });
-    expect(hotUpdate).toBeDisabled();
+    expect(hotUpdate).toBeEnabled();
     expect(screen.getByText('配置已有新版本等待应用')).toBeInTheDocument();
     expect(screen.getByText('放宽')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: '终端预检' }));
-    await waitFor(() => expect(hotUpdate).toBeEnabled());
     await user.click(hotUpdate);
     const dialog = screen.getByRole('dialog', { name: '热更新网络策略？' });
     expect(dialog).toHaveTextContent('2 → 3');
@@ -1239,7 +1239,7 @@ describe('exam infrastructure workspace', () => {
     expect(await screen.findByRole('button', { name: '重试当前请求' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '整批重试失败项' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '热更新策略' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '停止' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '停止' })).toBeEnabled();
     expect(screen.getByText(/offline 不是已释放/)).toBeInTheDocument();
   });
 
@@ -1281,9 +1281,33 @@ describe('exam infrastructure workspace', () => {
     expect(await screen.findByText('终端离线')).toBeInTheDocument();
     expect(screen.queryByText('endpoint_offline')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '整批重试失败项' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '停止' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '停止' })).toBeEnabled();
     expect(screen.getByText(/offline 不是已释放/)).toBeInTheDocument();
     expect(submitted).toBeNull();
+  });
+
+  it('keeps the incomplete-release warning when a stopped batch still has an offline endpoint', async () => {
+    const execution = {
+      ...executionFixture([
+        projectionItem(1, {
+          command: 'stop_network_policy',
+          appliedPolicyRevision: null,
+          status: 'offline',
+          failureReason: 'endpoint_offline',
+          online: false,
+          networkPolicyState: null,
+        }),
+      ]),
+      desiredState: 'stopped' as const,
+      operation: { kind: 'stop' as const, status: 'received' as const, failureReason: null },
+    };
+    vi.stubGlobal('fetch', detailFetch(execution, ['endpoint-001']));
+    setEventPanel('run');
+    renderPage({ eventId: EVENT.eventId });
+
+    expect(await screen.findByText(/旧目标尚未完整释放/)).toBeInTheDocument();
+    expect(screen.getByText(/不能当作已经解锁/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '停止' })).not.toBeInTheDocument();
   });
 
   it('labels empty-owner and restored-disk stop failures in Chinese', async () => {
@@ -1361,8 +1385,6 @@ describe('exam infrastructure workspace', () => {
     setEventPanel('run');
     renderPage({ eventId: EVENT.eventId });
 
-    await user.click(await screen.findByRole('button', { name: '终端预检' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: '启动' })).toBeEnabled());
     await user.click(await screen.findByRole('button', { name: '启动' }));
     expect(screen.getByRole('heading', { name: '启动网络策略？' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '确认启动' }));

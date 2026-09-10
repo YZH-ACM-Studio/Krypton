@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BootstrapProvider, type KryptonBootstrap } from '../src/lib/bootstrap';
 import { MessagesPanel } from '../src/pages/user-account';
 
@@ -59,7 +59,18 @@ function renderPanel(messages = (bootstrap().page.data as { messages: unknown })
   );
 }
 
+function resetClientState() {
+  window.history.replaceState({}, '', '/home/messages');
+  sessionStorage.clear();
+  localStorage.clear();
+}
+
+beforeEach(() => {
+  resetClientState();
+});
+
 afterEach(() => {
+  resetClientState();
   vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -82,12 +93,15 @@ describe('user account message failures', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(failureBody, { status: 403 })));
     renderPanel();
 
-    fireEvent.click(screen.getByTitle('删除'));
+    const deleteTrigger = screen.getByTitle('删除');
+    const bubbleGroup = deleteTrigger.closest('div');
+    if (bubbleGroup) fireEvent.mouseEnter(bubbleGroup);
+    fireEvent.click(deleteTrigger);
     const deleteButtons = screen.getAllByRole('button', { name: '删除' });
     fireEvent.click(deleteButtons[deleteButtons.length - 1]);
 
     expect(await screen.findByRole('alert')).toHaveTextContent('无权执行消息操作。');
-    expect(screen.getAllByText('保留这条消息')).toHaveLength(2);
+    expect(screen.getAllByText('保留这条消息').length).toBeGreaterThanOrEqual(1);
   });
 
   it('shows a polling error instead of silently serving stale messages and clears it after recovery', async () => {

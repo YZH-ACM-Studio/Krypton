@@ -7,7 +7,7 @@
  * current templateName from bootstrap.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { motion } from 'motion/react';
 import {
   FolderOpen,
@@ -17,8 +17,6 @@ import {
   LogOut,
   Lock,
   Mail,
-  Quote,
-  Send,
   Settings,
   Shield,
   Trash2,
@@ -26,23 +24,22 @@ import {
   User as UserIcon,
 } from 'lucide-react';
 import { RedeemDialogButton } from '@/components/redeem-dialog';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { SimpleSelect } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { AvatarUpload } from '@/components/uploader';
 import { MarkdownEditor } from '@/components/markdown-renderer';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { useBootstrap } from '@/lib/bootstrap';
-import { makeInitials, formatRelativeTime, formatDateTime, replaceRouteTokens } from '@/lib/format';
+import { formatDateTime } from '@/lib/format';
 import { cn } from '@/lib/cn';
+import { MessagesPanel } from './messages';
+
+export { MessagesPanel } from './messages';
 
 /* ------------------------------------------------------------------ */
 /*  Server-doc shapes flowing through the loosely-typed page data      */
@@ -97,18 +94,6 @@ interface LoginMethod {
   text?: string;
 }
 
-interface MessageDoc {
-  _id: string;
-  from?: number;
-  flag?: number;
-  content?: unknown;
-}
-
-interface MessageUser {
-  uname?: string;
-  avatarUrl?: string;
-}
-
 interface UserFileDoc {
   _id?: string;
   name?: string;
@@ -126,66 +111,6 @@ interface UserAccountPageData {
   relations?: OauthRelation[];
   sessions?: SessionDoc[];
   settings?: SettingDescriptor[];
-}
-
-function objectIdDate(id: unknown) {
-  const value = String(id || '');
-  if (!/^[0-9a-f]{24}$/i.test(value)) return null;
-  const timestamp = Number.parseInt(value.slice(0, 8), 16) * 1000;
-  return Number.isFinite(timestamp) ? new Date(timestamp) : null;
-}
-
-function parseSystemMessage(content: unknown) {
-  if (typeof content !== 'string') return null;
-  try {
-    const data = JSON.parse(content);
-    if (!data || typeof data.message !== 'string') return null;
-    return {
-      message: data.message as string,
-      params: Array.isArray(data.params) ? data.params : [],
-    };
-  } catch {
-    return null;
-  }
-}
-
-function getMessagePreview(message: MessageDoc) {
-  const system = parseSystemMessage(message.content);
-  if (!system) return String(message.content || '');
-  return system.message.replace(/\{([^{}]+)\}/g, (_, key: string) => {
-    const index = Number.parseInt(key.split(':')[0], 10);
-    return String(system.params[index] || '');
-  });
-}
-
-function renderMessageContent(message: MessageDoc, linkClassName: string) {
-  const system = parseSystemMessage(message.content);
-  if (!system) return String(message.content || '');
-  const parts: React.ReactNode[] = [];
-  let cursor = 0;
-  const regex = /\{([^{}]+)\}/g;
-  for (let match = regex.exec(system.message); match; match = regex.exec(system.message)) {
-    if (match.index > cursor) parts.push(system.message.slice(cursor, match.index));
-    const key = match[1];
-    const index = Number.parseInt(key.split(':')[0], 10);
-    const param = String(system.params[index] || '');
-    if (key.endsWith(':link') && param) {
-      parts.push(
-        <a key={`${match.index}-${key}`} href={param} className={linkClassName} target="_blank" rel="noreferrer">
-          {param}
-        </a>,
-      );
-    } else {
-      parts.push(
-        <span key={`${match.index}-${key}`} className="font-medium">
-          {param}
-        </span>,
-      );
-    }
-    cursor = match.index + match[0].length;
-  }
-  if (cursor < system.message.length) parts.push(system.message.slice(cursor));
-  return parts;
 }
 
 function binaryIdToBase64(value: string | BinaryIdLike | null | undefined) {
@@ -249,17 +174,23 @@ export function UserAccountPage() {
   const bs = useBootstrap();
   const { tabs, activeId } = useTabs();
   const tpl = bs.page.templateName;
+  const isMessages = tpl === 'home_messages.html';
 
   let content: React.ReactNode;
   if (tpl === 'home_settings.html') content = <SettingsPanel />;
   else if (tpl === 'home_security.html') content = <SecurityPanel />;
-  else if (tpl === 'home_messages.html') content = <MessagesPanel />;
+  else if (isMessages) content = <MessagesPanel />;
   else if (tpl === 'home_files.html') content = <FilesPanel />;
   else content = <SettingsPanel />;
 
   return (
-    <motion.div className="space-y-4" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
-      <h1 className="text-lg font-semibold">账号设置</h1>
+    <motion.div
+      className={isMessages ? 'flex min-h-0 flex-col gap-2' : 'space-y-4'}
+      initial={isMessages ? false : { opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.25 }}
+    >
+      <h1 className="text-lg font-semibold">{isMessages ? '消息' : '账号设置'}</h1>
 
       {/* Tab bar */}
       <div className="flex gap-1 overflow-x-auto rounded-lg border bg-muted/40 p-1">
@@ -318,35 +249,35 @@ function SettingsPanel() {
 
   return (
     <div className="space-y-4">
-    {bs.user.signedIn ? (
+      {bs.user.signedIn ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">兑换码</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-muted-foreground">用兑换码获取题集或课程访问权益。结果在弹窗里显示。</p>
+            <RedeemDialogButton variant="outline" size="default" />
+          </CardContent>
+        </Card>
+      ) : null}
       <Card>
-        <CardHeader>
-          <CardTitle className="text-base">兑换码</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm text-muted-foreground">用兑换码获取题集或课程访问权益。结果在弹窗里显示。</p>
-          <RedeemDialogButton variant="outline" size="default" />
+        <CardContent className="p-5">
+          <form method="post" className="space-y-6">
+            {Array.from(families.entries()).map(([fam, items]) => (
+              <fieldset key={fam} className="space-y-4">
+                <legend className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{familyLabels[fam] || fam}</legend>
+                {items.map((setting) => (
+                  <SettingField key={setting.key} setting={setting} value={current[setting.key]} />
+                ))}
+              </fieldset>
+            ))}
+            <Separator />
+            <div className="flex justify-end">
+              <Button type="submit">保存设置</Button>
+            </div>
+          </form>
         </CardContent>
       </Card>
-    ) : null}
-    <Card>
-      <CardContent className="p-5">
-        <form method="post" className="space-y-6">
-          {Array.from(families.entries()).map(([fam, items]) => (
-            <fieldset key={fam} className="space-y-4">
-              <legend className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{familyLabels[fam] || fam}</legend>
-              {items.map((setting) => (
-                <SettingField key={setting.key} setting={setting} value={current[setting.key]} />
-              ))}
-            </fieldset>
-          ))}
-          <Separator />
-          <div className="flex justify-end">
-            <Button type="submit">保存设置</Button>
-          </div>
-        </form>
-      </CardContent>
-    </Card>
     </div>
   );
 }
@@ -741,423 +672,6 @@ function SecurityPanel() {
       </Card>
     </div>
   );
-}
-
-/* ------------------------------------------------------------------ */
-/*  Messages panel — data.messages is { [uid]: { udoc, messages[] } }  */
-/* ------------------------------------------------------------------ */
-
-interface Conv {
-  uid: number;
-  udoc: MessageUser;
-  messages: MessageDoc[];
-}
-
-function parseConversations(raw: unknown): Conv[] {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [];
-  const result: Conv[] = [];
-  for (const [uid, conv] of Object.entries(raw)) {
-    const c = conv as { udoc?: MessageUser; messages?: MessageDoc[] };
-    result.push({
-      uid: Number(uid),
-      udoc: c.udoc || {},
-      messages: Array.isArray(c.messages) ? c.messages : [],
-    });
-  }
-  // Sort by last message time (most recent first).
-  result.sort((a, b) => {
-    const ta = lastMessageTime(a.messages);
-    const tb = lastMessageTime(b.messages);
-    return tb - ta;
-  });
-  return result;
-}
-
-function lastMessageTime(messages: MessageDoc[]): number {
-  const last = messages[messages.length - 1];
-  if (!last) return 0;
-  return objectIdDate(last._id)?.getTime() || 0;
-}
-
-/** Hydro `FLAG_UNREAD = 1` — count incoming messages still flagged unread. */
-function countUnread(conv: Conv, selfUid: number): number {
-  let n = 0;
-  for (const m of conv.messages) {
-    if (m.from === selfUid) continue;
-    if ((m.flag ?? 0) & 1) n += 1;
-  }
-  return n;
-}
-
-export function MessagesPanel() {
-  const bs = useBootstrap();
-  const data = bs.page.data as UserAccountPageData;
-  const selfUid = bs.user.id;
-
-  const [conversations, setConversations] = useState<Conv[]>(() => parseConversations(data.messages));
-  const [selectedUid, setSelectedUid] = useState<number | null>(conversations[0]?.uid ?? null);
-  const [search, setSearch] = useState('');
-  const [draftContent, setDraftContent] = useState('');
-  const [pendingDelete, setPendingDelete] = useState<MessageDoc | null>(null);
-  const [sending, setSending] = useState(false);
-  const [messageError, setMessageError] = useState('');
-  const [refreshError, setRefreshError] = useState('');
-  const draftRef = useRef<HTMLTextAreaElement | null>(null);
-
-  /* Poll /home/messages every 15s for new messages. Hydro doesn't expose
-     a dedicated WS endpoint for messages, so polling is the simplest way
-     to keep the panel live. We merge by message _id so existing scrolling
-     position / drafts aren't disturbed. */
-  useEffect(() => {
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const tick = async () => {
-      try {
-        const res = await fetchHydroResponse('/home/messages', { headers: { Accept: 'application/json' }, credentials: 'include' }, '刷新消息失败');
-        if (!res.ok) throw new Error(await readHydroResponseError(res, '刷新消息失败'));
-        const data2 = await res.json();
-        if (cancelled) return;
-        setRefreshError('');
-        const fresh = parseConversations(data2.messages);
-        // Detect new messages for desktop notification
-        let newIncoming = 0;
-        const prevIds = new Set<string>();
-        for (const c of conversations) for (const m of c.messages) prevIds.add(String(m._id));
-        for (const c of fresh) {
-          for (const m of c.messages) {
-            if (!prevIds.has(String(m._id)) && m.from !== selfUid) newIncoming += 1;
-          }
-        }
-        setConversations(fresh);
-        if (
-          newIncoming > 0 &&
-          typeof window !== 'undefined' &&
-          'Notification' in window &&
-          Notification.permission === 'granted' &&
-          document.visibilityState === 'hidden'
-        ) {
-          void new Notification('Krypton', { body: `${newIncoming} 条新消息` });
-        }
-      } catch (error) {
-        if (cancelled) return;
-        console.error('[user-account] Message refresh failed', error);
-        setRefreshError(error instanceof Error && error.message ? error.message : '刷新消息失败');
-      } finally {
-        if (!cancelled) timer = setTimeout(tick, 15000);
-      }
-    };
-    timer = setTimeout(tick, 15000);
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-    };
-  }, []);
-
-  /* Ask for notification permission once (best-effort). */
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    if (!('Notification' in window)) return;
-    if (Notification.permission === 'default') Notification.requestPermission().catch(() => {});
-  }, []);
-
-  // Filter conversations by search (uname or message content)
-  const filteredConvs = conversations.filter((c) => {
-    if (!search.trim()) return true;
-    const q = search.toLowerCase();
-    if ((c.udoc.uname || '').toLowerCase().includes(q)) return true;
-    return c.messages.some((m) =>
-      String(m.content || '')
-        .toLowerCase()
-        .includes(q),
-    );
-  });
-
-  const activeConv = conversations.find((c) => c.uid === selectedUid) || null;
-
-  const insertQuote = (m: MessageDoc) => {
-    if (!activeConv) return;
-    const uname = activeConv.udoc.uname || `UID ${activeConv.uid}`;
-    const body = String(m.content || '')
-      .split('\n')
-      .map((l) => `> ${l}`)
-      .join('\n');
-    const quote = `> @${uname} 写道：\n${body}\n\n`;
-    setDraftContent((cur) => cur + (cur && !cur.endsWith('\n') ? '\n' : '') + quote);
-    requestAnimationFrame(() => draftRef.current?.focus());
-  };
-
-  const sendMessage = async () => {
-    if (!activeConv) return;
-    if (!draftContent.trim() || sending) return;
-    setSending(true);
-    setMessageError('');
-    let fallback = '发送消息失败';
-    try {
-      const form = new FormData();
-      form.append('operation', 'send');
-      form.append('uid', String(activeConv.uid));
-      form.append('content', draftContent);
-      const res = await fetchHydroResponse(
-        '/home/messages',
-        {
-          method: 'POST',
-          body: form,
-          credentials: 'include',
-          headers: { Accept: 'application/json' },
-        },
-        fallback,
-      );
-      if (!res.ok) throw new Error(await readHydroResponseError(res, fallback));
-      setDraftContent('');
-
-      // Refresh now so we see the just-sent message.
-      fallback = '刷新消息失败';
-      const fr = await fetchHydroResponse('/home/messages', { headers: { Accept: 'application/json' }, credentials: 'include' }, fallback);
-      if (!fr.ok) throw new Error(await readHydroResponseError(fr, fallback));
-      let data3: { messages?: unknown };
-      try {
-        data3 = (await fr.json()) as { messages?: unknown };
-      } catch (error) {
-        console.error('[user-account] Invalid message refresh response', error);
-        throw new Error(fallback, { cause: error });
-      }
-      setConversations(parseConversations(data3.messages));
-    } catch (error) {
-      setMessageError(error instanceof Error && error.message ? error.message : fallback);
-    } finally {
-      setSending(false);
-    }
-  };
-
-  const confirmDelete = async (msg: MessageDoc) => {
-    setPendingDelete(null);
-    if (!msg?._id) return;
-    setMessageError('');
-    const form = new FormData();
-    form.append('operation', 'delete_message');
-    form.append('messageId', String(msg._id));
-    try {
-      const response = await fetchHydroResponse(
-        '/home/messages',
-        {
-          method: 'POST',
-          body: form,
-          credentials: 'include',
-          headers: { Accept: 'application/json' },
-        },
-        '删除消息失败',
-      );
-      if (!response.ok) throw new Error(await readHydroResponseError(response, '删除消息失败'));
-      // Drop locally
-      setConversations((cur) =>
-        cur
-          .map((c) => ({
-            ...c,
-            messages: c.messages.filter((m) => String(m._id) !== String(msg._id)),
-          }))
-          .filter((c) => c.messages.length > 0),
-      );
-    } catch (error) {
-      setMessageError(error instanceof Error && error.message ? error.message : '删除消息失败');
-    }
-  };
-
-  return (
-    <Card className="overflow-hidden">
-      {/* Definite height so the thread + composer can flex inside without
-          pushing the surrounding Card past the viewport. The grid cells
-          inherit this and the message list scrolls internally. */}
-      <div className="grid md:grid-cols-[260px_1fr] h-[calc(100vh-220px)] min-h-[480px]">
-        {/* Conversation list */}
-        <div className="border-r bg-muted/20 flex flex-col min-h-0">
-          <div className="p-3 border-b space-y-2">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">会话</h3>
-            <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="搜索用户 / 内容…" className="h-8 text-xs" />
-          </div>
-          {filteredConvs.length === 0 ? (
-            <div className="px-3 py-6 text-center">
-              <Mail className="mx-auto size-8 text-muted-foreground/40" />
-              <p className="mt-2 text-xs text-muted-foreground">{conversations.length === 0 ? '暂无消息' : '无匹配会话'}</p>
-            </div>
-          ) : (
-            <ScrollArea className="flex-1" viewportClassName="space-y-0.5 p-1">
-              {filteredConvs.map((c) => {
-                const name = c.udoc.uname || `UID ${c.uid}`;
-                const last = c.messages[c.messages.length - 1];
-                const unread = countUnread(c, selfUid);
-                return (
-                  <button
-                    key={c.uid}
-                    type="button"
-                    onClick={() => setSelectedUid(c.uid)}
-                    className={cn(
-                      'flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left transition-colors',
-                      selectedUid === c.uid ? 'bg-accent' : 'hover:bg-accent/50',
-                    )}
-                  >
-                    <Avatar className="size-7 shrink-0">
-                      {c.udoc?.avatarUrl ? <AvatarImage src={String(c.udoc.avatarUrl)} alt={name} /> : null}
-                      <AvatarFallback className="text-[10px]">{makeInitials(name)}</AvatarFallback>
-                    </Avatar>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center justify-between gap-1.5">
-                        <p className="truncate text-sm font-medium">{name}</p>
-                        {unread > 0 ? <Badge className="shrink-0 h-4 min-w-4 px-1 text-[10px]">{unread > 99 ? '99+' : unread}</Badge> : null}
-                      </div>
-                      {last && <p className="truncate text-[11px] text-muted-foreground">{getMessagePreview(last)}</p>}
-                    </div>
-                  </button>
-                );
-              })}
-            </ScrollArea>
-          )}
-        </div>
-
-        {/* Thread + composer — `min-h-0` so the message list (flex-1) can
-            actually shrink below its content and scroll internally. */}
-        <div className="flex flex-col min-h-0">
-          {activeConv ? (
-            <div className="border-b px-4 py-2.5 flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2 min-w-0">
-                <Avatar className="size-7 shrink-0">
-                  {activeConv.udoc?.avatarUrl ? <AvatarImage src={String(activeConv.udoc.avatarUrl)} alt={activeConv.udoc.uname || '?'} /> : null}
-                  <AvatarFallback className="text-[10px]">{makeInitials(activeConv.udoc.uname || '?')}</AvatarFallback>
-                </Avatar>
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium">{activeConv.udoc.uname || `UID ${activeConv.uid}`}</p>
-                  <p className="text-[10px] text-muted-foreground">{activeConv.messages.length} 条消息</p>
-                </div>
-              </div>
-              <a href={replaceRouteTokens(bs.urls.userDetail, { UID: String(activeConv.uid) })} className="text-xs text-primary hover:underline">
-                资料 →
-              </a>
-            </div>
-          ) : null}
-          {messageError || refreshError ? (
-            <p role="alert" className="border-b bg-destructive/10 px-4 py-2 text-xs text-destructive">
-              {messageError || refreshError}
-            </p>
-          ) : null}
-          {activeConv ? (
-            <>
-              <ScrollArea className="flex-1" viewportClassName="space-y-2 p-4">
-                {renderGroupedMessages(activeConv.messages, selfUid, bs.locale, insertQuote, setPendingDelete)}
-              </ScrollArea>
-              <div className="border-t p-3 space-y-2">
-                <textarea
-                  ref={draftRef}
-                  value={draftContent}
-                  onChange={(e) => setDraftContent(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                      e.preventDefault();
-                      sendMessage();
-                    }
-                  }}
-                  rows={3}
-                  placeholder="输入消息… 支持 Markdown · Ctrl/⌘+Enter 发送"
-                  className="w-full rounded-md border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring resize-none"
-                />
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[10px] text-muted-foreground">{draftContent.length} 字符</span>
-                  <Button type="button" size="sm" disabled={!draftContent.trim() || sending} onClick={sendMessage}>
-                    <Send className="mr-1 size-3.5" />
-                    {sending ? '发送中…' : '发送'}
-                  </Button>
-                </div>
-              </div>
-            </>
-          ) : (
-            <div className="flex flex-1 items-center justify-center">
-              <p className="text-sm text-muted-foreground">选择一个会话</p>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Delete confirm */}
-      <Dialog open={!!pendingDelete} onOpenChange={(o) => !o && setPendingDelete(null)}>
-        <DialogContent className="w-full sm:w-[400px]" onClose={() => setPendingDelete(null)}>
-          <DialogHeader>
-            <DialogTitle>删除消息</DialogTitle>
-          </DialogHeader>
-          <p className="text-sm text-muted-foreground">此操作无法撤销。该消息将从你和对方的会话中移除。</p>
-          <div className="mt-4 flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setPendingDelete(null)}>
-              取消
-            </Button>
-            <Button variant="destructive" onClick={() => pendingDelete && confirmDelete(pendingDelete)}>
-              删除
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-    </Card>
-  );
-}
-
-/**
- * Render messages with same-minute grouping (only show timestamp on the
- * first message of each minute-bucket) and per-message quote / delete
- * affordances.
- */
-function renderGroupedMessages(
-  messages: MessageDoc[],
-  selfUid: number,
-  locale: string,
-  onQuote: (m: MessageDoc) => void,
-  onAskDelete: (m: MessageDoc) => void,
-) {
-  return messages.map((m, i) => {
-    const fromMe = m.from === selfUid;
-    const time = objectIdDate(m._id);
-    const prevTime = i > 0 ? objectIdDate(messages[i - 1]._id) : null;
-    const showTime = !prevTime || (time && prevTime && Math.abs(time.getTime() - prevTime.getTime()) > 60_000);
-    return (
-      <div key={String(m._id) || i} className="space-y-1">
-        {showTime && time ? <p className="my-1 text-center text-[10px] text-muted-foreground/70">{formatRelativeTime(time, locale)}</p> : null}
-        <div className={cn('group flex items-center gap-1.5', fromMe ? 'justify-end' : 'justify-start')}>
-          {fromMe ? (
-            <div className="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-              <button
-                type="button"
-                onClick={() => onQuote(m)}
-                title="引用"
-                className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-              >
-                <Quote className="size-3" />
-              </button>
-              <button
-                type="button"
-                onClick={() => onAskDelete(m)}
-                title="删除"
-                className="rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-              >
-                <Trash2 className="size-3" />
-              </button>
-            </div>
-          ) : null}
-          <div className={cn('max-w-[75%] rounded-lg px-3 py-2 text-sm leading-6', fromMe ? 'bg-primary text-primary-foreground' : 'bg-muted')}>
-            <div className={cn('break-words whitespace-pre-wrap', fromMe ? '[&_a]:underline' : '')}>
-              {renderMessageContent(m, fromMe ? 'font-medium underline underline-offset-2' : 'font-medium text-primary underline underline-offset-2')}
-            </div>
-          </div>
-          {!fromMe ? (
-            <div className="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-              <button
-                type="button"
-                onClick={() => onQuote(m)}
-                title="引用"
-                className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-              >
-                <Quote className="size-3" />
-              </button>
-            </div>
-          ) : null}
-        </div>
-      </div>
-    );
-  });
 }
 
 /* ------------------------------------------------------------------ */

@@ -258,19 +258,9 @@ function sameClassroomRefs(left: ExamSeatAssignmentV2Doc['classrooms'], right: E
 abstract class ExamSeatAssignmentBaseHandler extends Handler {
     async prepare() {
         if (!this.user || this.user._id < 1) throw new PermissionError(PERM.PERM_CREATE_EXAM_EVENT);
-        if (!isExamInfrastructureAdmin(this.user)) {
-            if (!this.user.hasPerm(PERM.PERM_CREATE_EXAM_EVENT)) throw new PermissionError(PERM.PERM_CREATE_EXAM_EVENT);
-            if (!this.user.hasPerm(PERM.PERM_USERBIND_MANAGE_STUDENTS)) {
-                throw new PermissionError(PERM.PERM_USERBIND_MANAGE_STUDENTS);
-            }
+        if (!isExamInfrastructureAdmin(this.user) && !this.user.hasPerm(PERM.PERM_CREATE_EXAM_EVENT)) {
+            throw new PermissionError(PERM.PERM_CREATE_EXAM_EVENT);
         }
-        await Promise.all([
-            examEventService.ensureIndexes(),
-            examClassroomService.ensureIndexes(),
-            examSeatPlanService.ensureIndexes(),
-            examSeatAssignmentService.ensureIndexes(),
-            endpointSeatBindingService.ensureIndexes(),
-        ]);
     }
 
     protected async event(eventId: ObjectId): Promise<ExamEventDoc> {
@@ -281,9 +271,6 @@ abstract class ExamSeatAssignmentBaseHandler extends Handler {
             throwExamTeacherValidationError('eventId', 'event_canonical_invalid');
         }
         await assertCanManageExamEvent(domainId, event, this.user);
-        if (!isExamInfrastructureAdmin(this.user) && !this.user.hasPerm(PERM.PERM_USERBIND_MANAGE_STUDENTS)) {
-            throw new PermissionError(PERM.PERM_USERBIND_MANAGE_STUDENTS);
-        }
         return event;
     }
 

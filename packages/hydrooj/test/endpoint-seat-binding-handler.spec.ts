@@ -38,8 +38,7 @@ describe('P2.2 endpoint seat binding HTTP boundary', () => {
         expect(routeRegistration('vigil_endpoint_seat_binding_status')).to.include("'/api/vigil/endpoint-seat-binding/status'");
         expect(source).to.include('isExamInfrastructureAdmin(this.user)');
         expect(source).to.include("requireServiceToken(this, 'vigil')");
-        expect(source).to.include('await endpointSeatBindingService.ensureIndexes()');
-        expect(source).to.include('examSeatOperationalProfileService.ensureIndexes()');
+        expect(source).not.to.include('ensureIndexes()');
         expect(source).to.include("this.response.template = 'admin_exam_classroom.html'");
     });
 

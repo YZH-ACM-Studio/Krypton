@@ -61,7 +61,6 @@ export class ExamClassroomService {
     }
 
     layout(classroom: ExamClassroomDoc, revision = classroom.layoutRevision): ExamClassroomLayoutRevision {
-        assertExamClassroomIntegrity(classroom);
         if (!Number.isSafeInteger(revision) || revision < 1) throw new TypeError('layout revision is invalid');
         const matches = classroom.layoutRevisions.filter((candidate) => candidate.revision === revision);
         if (matches.length !== 1) {

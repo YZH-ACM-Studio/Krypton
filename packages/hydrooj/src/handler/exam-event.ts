@@ -149,7 +149,6 @@ abstract class ExamEventBaseHandler extends Handler {
         if (!isExamInfrastructureAdmin(this.user) && !this.user.hasPerm(PERM.PERM_CREATE_EXAM_EVENT)) {
             throw new PermissionError(PERM.PERM_CREATE_EXAM_EVENT);
         }
-        await examEventService.ensureIndexes();
     }
 }
 
@@ -332,7 +331,6 @@ class ExamInfrastructurePageHandler extends ExamEventBaseHandler {
 class ExamInfrastructureDetailPageHandler extends ExamEventBaseHandler {
     @param('eventId', Types.ObjectId)
     async get(_args: unknown, eventId: ObjectId) {
-        await examEventService.ensureIndexes();
         const event = await examEventService.get(String(this.domain._id), eventId);
         if (!event) throw new ValidationError('eventId');
         await assertCanManageExamEvent(String(this.domain._id), event, this.user);

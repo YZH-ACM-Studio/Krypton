@@ -21,6 +21,7 @@ describe('Exam network control HTTP contracts', () => {
         for (const forbidden of ['send_command', 'apply_network_policy', 'dashboardToken', '/api/integrations/oj/network-lock']) {
             expect(source).not.to.include(forbidden);
         }
+        expect(source).not.to.include('ensureIndexes()');
     });
 
     it('rechecks event/template/school permissions and never accepts browser endpoint facts', () => {

@@ -406,7 +406,6 @@ export class RedemptionService {
         count?: number;
         manualCodes?: string[];
     }): Promise<{ batch: RedemptionCodeBatchDoc; plaintext: PlainRedemptionCode[]; warning?: string }> {
-        await this.ensureIndexes();
         await this.assertManagePermission(input.user);
         const stageId = input.stageId ?? ACCESS_ENTITLEMENT_WHOLE_SET_STAGE;
         const tdoc = await this.resolveTarget(input.domainId, input.targetKind, input.targetId, stageId);
@@ -488,7 +487,6 @@ export class RedemptionService {
     }
 
     async listBatches(domainId: string, user: RedemptionActor) {
-        await this.ensureIndexes();
         await this.assertManagePermission(user);
         const filter: Filter<RedemptionCodeBatchDoc> = canManageAllRedemptions(user) ? { domainId } : { domainId, createdBy: user._id };
         const batches = await this.batches.find(filter).toArray();
@@ -530,7 +528,6 @@ export class RedemptionService {
     }
 
     async getBatch(domainId: string, user: RedemptionActor, batchId: ObjectId) {
-        await this.ensureIndexes();
         const batch = await this.batches.findOne({ _id: batchId, domainId });
         if (!batch) throw new NotFoundError(localizedErrorText`兑换批次`);
         await this.assertManagePermission(user, batch);
@@ -550,7 +547,6 @@ export class RedemptionService {
         expiresAt?: Date | null;
         maxUses?: number;
     }) {
-        await this.ensureIndexes();
         const { batch, codes } = await this.getBatch(input.domainId, input.user, input.batchId);
         return withBatchGate(String(batch._id), async () => {
         const frozen = !!batch.firstRedeemedAt;
@@ -612,7 +608,6 @@ export class RedemptionService {
     }
 
     async disableCode(domainId: string, user: RedemptionActor, codeId: ObjectId) {
-        await this.ensureIndexes();
         const code = await this.codes.findOne({ _id: codeId, domainId });
         if (!code) throw new NotFoundError(localizedErrorText`兑换码`);
         const batch = await this.batches.findOne({ _id: code.batchId, domainId });
@@ -630,7 +625,6 @@ export class RedemptionService {
     }
 
     async redeem(input: { domainId: string; uid: number; code: string; user: RedemptionActor }): Promise<RedemptionDoc> {
-        await this.ensureIndexes();
         const normalized = normalizeRedemptionCode(input.code);
         const keys = await this.hmacKeys();
         let code: RedemptionCodeDoc | null = null;
@@ -780,7 +774,6 @@ export class RedemptionService {
     }
 
     async revokeUserSource(input: { domainId: string; user: RedemptionActor; uid: number; entitlementId: ObjectId }) {
-        await this.ensureIndexes();
         const current = await problemSetAccessService.getEntitlement(input.domainId, input.uid, input.entitlementId);
         if (!current) throw new NotFoundError(localizedErrorText`entitlement`);
         const code = await this.codes.findOne({ _id: current.sourceId, domainId: input.domainId });

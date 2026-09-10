@@ -214,7 +214,6 @@ abstract class ExamNetworkExecutionBaseHandler extends Handler {
         if (!isExamInfrastructureAdmin(this.user) && !this.user.hasPerm(PERM.PERM_CREATE_EXAM_EVENT)) {
             throw new PermissionError(PERM.PERM_CREATE_EXAM_EVENT);
         }
-        await Promise.all([examEventService.ensureIndexes(), examNetworkExecutionService.ensureIndexes()]);
     }
 
     protected async loadEvent(eventId: ObjectId): Promise<ExamEventDoc> {

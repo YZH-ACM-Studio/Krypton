@@ -61,7 +61,6 @@ function enrollmentErrorStatus(reason: string): number {
 class EndpointEnrollmentAdminHandler extends Handler {
     async prepare() {
         this.checkPriv(PRIV.PRIV_EDIT_SYSTEM);
-        await endpointEnrollmentBatchService.ensureIndexes();
     }
 
     async get() {
@@ -103,7 +102,6 @@ class EndpointEnrollmentAdminHandler extends Handler {
 class EndpointEnrollmentBatchRevokeHandler extends Handler {
     async prepare() {
         this.checkPriv(PRIV.PRIV_EDIT_SYSTEM);
-        await endpointEnrollmentBatchService.ensureIndexes();
     }
 
     @param('batchId', Types.ObjectId)
@@ -130,7 +128,6 @@ class EndpointEnrollmentBatchRevokeHandler extends Handler {
 class EndpointCredentialRevokeHandler extends Handler {
     async prepare() {
         this.checkPriv(PRIV.PRIV_EDIT_SYSTEM);
-        await endpointEnrollmentBatchService.ensureIndexes();
     }
 
     @param('endpointId', Types.String)
@@ -154,7 +151,6 @@ abstract class VigilEndpointEnrollmentHandler extends Handler {
 
     async prepare() {
         requireServiceToken(this, 'vigil');
-        await Promise.all([endpointEnrollmentBatchService.ensureIndexes(), endpointRegistrationService.ensureIndexes()]);
     }
 
     protected reject(error: EndpointEnrollmentError, stage: string, claimId: string) {

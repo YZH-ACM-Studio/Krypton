@@ -2,23 +2,12 @@ import { ObjectId } from 'mongodb';
 import type { ExamEventDoc } from './exam-event';
 import { endpointSeatBindingService } from './endpoint-seat-binding';
 import { examClassroomService } from './exam-classroom';
-import {
-    assertExamSeatAssignmentIntegrity,
-    examSeatIdentityKey,
-    isExamSeatAssignmentV2,
-    seatPlanMatchesAssignmentRoster,
-} from './exam-seat-assignment';
+import { examSeatIdentityKey, isExamSeatAssignmentV2, seatPlanMatchesAssignmentRoster } from './exam-seat-assignment';
 import type { ExamSeatAssignmentV2Doc } from './exam-seat-assignment';
 import { examSeatOperationalProfileService } from './exam-seat-operational-profile';
 import { assertExamRosterCurrent, getExamContestAudienceState, inspectExamRosterDrift } from './exam-roster-resolver';
 import type { ExamRosterDrift } from './exam-roster-resolver';
-import {
-    assertExamRosterRevisionIntegrity,
-    assertExamSeatPlanIntegrity,
-    ExamSeatPlanError,
-    examSeatPlanService,
-    isExamSeatPlanV2,
-} from './exam-seat-plan';
+import { ExamSeatPlanError, examSeatPlanService, isExamSeatPlanV2 } from './exam-seat-plan';
 import type { ExamSeatPlanV2Doc } from './exam-seat-plan';
 
 export class ExamSeatAssignmentReadinessError extends TypeError {
@@ -100,7 +89,6 @@ function sameClassrooms(assignment: ExamSeatAssignmentV2Doc, seatPlan: ExamSeatP
 }
 
 async function loadFrozenRoots(event: ExamEventDoc, assignment: ExamSeatAssignmentV2Doc) {
-    assertExamSeatAssignmentIntegrity(assignment);
     if (!isExamSeatAssignmentV2(assignment)) changed('assignment', event, assignment);
     if (
         assignment.domainId !== event.domainId ||
@@ -116,8 +104,6 @@ async function loadFrozenRoots(event: ExamEventDoc, assignment: ExamSeatAssignme
     ]);
     if (!seatPlan) changed('seat_plan', event, assignment);
     if (!roster) changed('roster', event, assignment);
-    assertExamSeatPlanIntegrity(seatPlan);
-    assertExamRosterRevisionIntegrity(roster);
     if (
         !isExamSeatPlanV2(seatPlan) ||
         seatPlan.domainId !== event.domainId ||

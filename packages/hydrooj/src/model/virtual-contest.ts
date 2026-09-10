@@ -168,14 +168,12 @@ export class VirtualContestService {
     }
 
     async getOfficialAttempt(domainId: string, sourceContestId: ObjectId, uid: number): Promise<VirtualContestAttemptDoc | null> {
-        await this.ensureIndexes();
         const rows = await this.attempts.find({ domainId, sourceContestId, uid } as Filter<VirtualContestAttemptDoc>).toArray();
         const official = rows.find((row) => officialAttemptBlocksNewStart(row.status));
         return official ? this.settle(official) : null;
     }
 
     async listByContest(domainId: string, sourceContestId: ObjectId): Promise<VirtualContestAttemptDoc[]> {
-        await this.ensureIndexes();
         const rows = await this.attempts.find({ domainId, sourceContestId } as Filter<VirtualContestAttemptDoc>).toArray();
         rows.sort((left, right) => {
             const created = left.createdAt.getTime() - right.createdAt.getTime();
@@ -186,7 +184,6 @@ export class VirtualContestService {
     }
 
     async start(input: { domainId: string; sourceContestId: ObjectId; uid: number; attended?: boolean }): Promise<VirtualContestAttemptDoc> {
-        await this.ensureIndexes();
         const now = this.now();
         const { tdoc, eligibility } = await this.inspectEligibility(input.domainId, input.sourceContestId, now, input.attended === true);
         if (!eligibility.allowed) {
@@ -406,7 +403,6 @@ export class VirtualContestService {
     }
 
     private async loadAttempt(domainId: string, attemptId: ObjectId): Promise<VirtualContestAttemptDoc> {
-        await this.ensureIndexes();
         const current = await this.attempts.findOne({ _id: attemptId, domainId });
         if (!current) throw new NotFoundError(localizedErrorText`虚拟参赛`);
         return current;

@@ -29,7 +29,7 @@ describe('endpoint enrollment HTTP boundary', () => {
 
     it('requires the Vigil service channel for consume and finalize', () => {
         expect(source).to.include("requireServiceToken(this, 'vigil')");
-        expect(source).to.include('endpointEnrollmentBatchService.ensureIndexes()');
+        expect(source).not.to.include('ensureIndexes()');
         expect(source).to.include("'/api/vigil/endpoint-enrollment/consume'");
         expect(source).to.include("'/api/vigil/endpoint-enrollment/finalize'");
     });

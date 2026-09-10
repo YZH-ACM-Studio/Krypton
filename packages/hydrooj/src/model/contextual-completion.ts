@@ -186,7 +186,6 @@ export class ContextualCompletionService {
             logTargets('info', practiceContext.mode === 'preview' ? 'preview' : 'not-accepted');
             return;
         }
-        await this.ensureIndexes();
         const completedAt = this.now();
         const writes = practiceContext.targets.map(async (target) => {
             const identity = {
@@ -268,7 +267,6 @@ export class ContextualCompletionService {
         containerKind: PracticeContainerKind,
         containerId: ObjectId,
     ): Promise<Map<number, Set<number>>> {
-        await this.ensureIndexes();
         const docs = await this.completions.find({ domainId, uid, containerKind, containerId }).project({ scopeId: 1, pid: 1 }).toArray();
         const result = new Map<number, Set<number>>();
         for (const doc of docs) {
@@ -289,7 +287,6 @@ export class ContextualCompletionService {
         containerId: ObjectId,
         currentScopePids?: ReadonlyMap<number, ReadonlySet<number>>,
     ): Promise<Map<number, number>> {
-        await this.ensureIndexes();
         if (!uids.length) return new Map();
         const docs = await this.completions
             .find({ domainId, uid: { $in: [...new Set(uids)] }, containerKind, containerId })
@@ -315,7 +312,6 @@ export class ContextualCompletionService {
         containerId: ObjectId,
         currentScopePids?: ReadonlyMap<number, ReadonlySet<number>>,
     ): Promise<Map<number, Set<number>>> {
-        await this.ensureIndexes();
         if (!uids.length) return new Map();
         const docs = await this.completions
             .find({ domainId, uid: { $in: [...new Set(uids)] }, containerKind, containerId })
@@ -338,7 +334,8 @@ export class ContextualCompletionService {
 export const contextualCompletionColl = db.collection<ContextualCompletionDoc>('practice.contextualCompletions');
 export const contextualCompletionService = new ContextualCompletionService({ completions: contextualCompletionColl });
 
-export function apply(ctx: Context): void {
+export async function apply(ctx: Context): Promise<void> {
+    await contextualCompletionService.ensureIndexes();
     ctx.on('record/judge', async (rdoc: RecordDoc) => contextualCompletionService.recordJudge(rdoc));
     ctx.on('domain/delete', (domainId: string) => contextualCompletionColl.deleteMany({ domainId }));
 }

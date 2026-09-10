@@ -818,6 +818,7 @@ describe('practice integrity canonical model', () => {
 
     it('rejects expired contexts even before Mongo TTL cleanup', async () => {
         const { service, setNow, revisions, contexts } = makeService();
+        await service.ensureIndexes();
         const revision: PracticeIntegrityRevisionDoc = {
             _id: new ObjectId(),
             domainId: 'system',

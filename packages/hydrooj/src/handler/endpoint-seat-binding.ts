@@ -194,11 +194,6 @@ function translateSeatOperationalProfile(error: unknown): never {
 abstract class EndpointSeatAdminHandler extends Handler {
     async prepare() {
         if (!this.user || !isExamInfrastructureAdmin(this.user)) throw new PermissionError(PERM.PERM_MANAGE_EXAM_INFRASTRUCTURE);
-        await Promise.all([
-            endpointSeatBindingService.ensureIndexes(),
-            examClassroomService.ensureIndexes(),
-            examSeatOperationalProfileService.ensureIndexes(),
-        ]);
     }
 
     protected async classroom(classroomId: ObjectId, includeArchived = false) {
@@ -548,7 +543,6 @@ class VigilEndpointSeatPairingRedeemHandler extends Handler {
 
     async prepare() {
         requireServiceToken(this, 'vigil');
-        await endpointSeatBindingService.ensureIndexes();
     }
 
     @param('endpointId', Types.String)
@@ -582,7 +576,6 @@ class VigilEndpointSeatBindingStatusHandler extends Handler {
 
     async prepare() {
         requireServiceToken(this, 'vigil');
-        await endpointSeatBindingService.ensureIndexes();
     }
 
     @param('endpointId', Types.String)

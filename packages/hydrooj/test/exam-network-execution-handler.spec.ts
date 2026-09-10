@@ -14,6 +14,7 @@ describe('exam network execution HTTP contracts', () => {
         expect(handler).to.include("'/api/admin/exam-events/:eventId/network-execution'");
         expect(handler).to.include('assertCanManageExamEvent(domainId, event, this.user)');
         expect(handler).to.include('withExamEventBoundary(domainId, eventId');
+        expect(handler).not.to.include('ensureIndexes()');
         expect(handler).to.include("Types.Range(['preflight', 'refresh', 'retry', 'retryFailed', 'start', 'stop'])");
         expect(handler).to.include('preflightConfig: {');
         expect(handler).to.include('revision: configured.configRevision');

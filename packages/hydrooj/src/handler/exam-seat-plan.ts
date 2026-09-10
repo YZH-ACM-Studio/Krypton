@@ -136,12 +136,6 @@ abstract class ExamSeatPlanBaseHandler extends Handler {
         if (!isExamInfrastructureAdmin(this.user) && !this.user.hasPerm(PERM.PERM_CREATE_EXAM_EVENT)) {
             throw new PermissionError(PERM.PERM_CREATE_EXAM_EVENT);
         }
-        await Promise.all([
-            examEventService.ensureIndexes(),
-            examClassroomService.ensureIndexes(),
-            examSeatPlanService.ensureIndexes(),
-            examSeatOperationalProfileService.ensureIndexes(),
-        ]);
     }
 
     protected async event(eventId: ObjectId): Promise<ExamEventDoc> {

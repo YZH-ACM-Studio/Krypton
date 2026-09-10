@@ -19,6 +19,7 @@ describe('P2.4 roster and seat-plan HTTP boundary', () => {
         expect(source).to.include('const current = await this.event(eventId)');
         expect(source).to.include('assertCanManageExamEvent(domainId, event, this.user)');
         expect(source).to.include('PERM.PERM_USERBIND_MANAGE_STUDENTS');
+        expect(source).not.to.include('ensureIndexes()');
         expect(source).to.include('this.assertWritableEvent(current)');
         expect(source).to.include("['krypton', 'external'].includes(event.type)");
         expect(source).to.include("['draft', 'scheduled', 'archived'].includes(event.lifecycle)");

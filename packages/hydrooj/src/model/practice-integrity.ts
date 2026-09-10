@@ -304,13 +304,11 @@ export class PracticeIntegrityService {
         containerKind: PracticeContainerKind,
         containerId: ObjectId,
     ): Promise<PracticeIntegrityRevisionDoc | null> {
-        await this.ensureIndexes();
         assertContainerIdentity({ domainId, containerKind, containerId });
         return await this.revisions.find({ domainId, containerKind, containerId, state: 'published' }).sort({ revision: -1 }).limit(1).next();
     }
 
     async listLatestPublished(domainId: string): Promise<PracticeIntegrityRevisionDoc[]> {
-        await this.ensureIndexes();
         if (!domainId) throw new TypeError('invalid practice container identity');
         const published = await this.revisions.find({ domainId, state: 'published' }).sort({ revision: -1 }).toArray();
         const latest = new Map<string, PracticeIntegrityRevisionDoc>();
@@ -325,7 +323,6 @@ export class PracticeIntegrityService {
     }
 
     async getPolicyState(domainId: string, containerKind: PracticeContainerKind, containerId: ObjectId) {
-        await this.ensureIndexes();
         assertContainerIdentity({ domainId, containerKind, containerId });
         const [published, draft] = await Promise.all([
             this.getLatestPublished(domainId, containerKind, containerId),
@@ -335,7 +332,6 @@ export class PracticeIntegrityService {
     }
 
     async saveDraft(input: SaveDraftInput): Promise<PracticeIntegrityRevisionDoc> {
-        await this.ensureIndexes();
         assertContainerIdentity(input);
         assertPositiveInteger(input.actorUid, 'actorUid');
         if (!Number.isSafeInteger(input.expectedDraftVersion) || input.expectedDraftVersion < 0) {
@@ -383,7 +379,6 @@ export class PracticeIntegrityService {
     }
 
     async publishDraft(input: PublishDraftInput): Promise<PracticeIntegrityRevisionDoc> {
-        await this.ensureIndexes();
         assertContainerIdentity(input);
         assertPositiveInteger(input.actorUid, 'actorUid');
         assertPositiveInteger(input.expectedDraftVersion, 'expectedDraftVersion');
@@ -484,7 +479,6 @@ export class PracticeIntegrityService {
     }
 
     async issueContext(input: IssueContextInput): Promise<PracticeContextDoc> {
-        await this.ensureIndexes();
         assertContainerIdentity(input);
         assertPositiveInteger(input.uid, 'uid');
         assertPositiveInteger(input.scopeId, 'scopeId');
@@ -527,7 +521,6 @@ export class PracticeIntegrityService {
     }
 
     async assertContext(input: AssertContextInput): Promise<PracticeContextDoc> {
-        await this.ensureIndexes();
         assertContainerIdentity(input);
         if (!hasValidPracticeScope(input.containerKind, input.scopeKind)) {
             throw new PracticeIntegrityContextError('scope_container_mismatch');
@@ -573,7 +566,6 @@ export class PracticeIntegrityService {
     }
 
     async assertSubmissionContext(input: AssertSubmissionContextInput): Promise<PracticeContextDoc> {
-        await this.ensureIndexes();
         assertPositiveInteger(input.uid, 'uid');
         assertPositiveInteger(input.pid, 'pid');
         let contextId: ObjectId;

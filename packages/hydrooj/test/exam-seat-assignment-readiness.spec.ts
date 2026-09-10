@@ -99,7 +99,6 @@ function loadReadiness() {
     Module._load = function load(request: string, parent: NodeModule, isMain: boolean) {
         if (parent?.filename === readinessPath && request === './exam-seat-assignment') {
             return {
-                assertExamSeatAssignmentIntegrity: () => undefined,
                 examSeatIdentityKey: (seat: { classroomId: ObjectId; sourceSeatId: string }) =>
                     `${seat.classroomId.toHexString()}\0${seat.sourceSeatId}`,
                 isExamSeatAssignmentV2: (value: { schemaVersion?: number }) => value.schemaVersion === 2,
@@ -108,8 +107,6 @@ function loadReadiness() {
         }
         if (parent?.filename === readinessPath && request === './exam-seat-plan') {
             return {
-                assertExamRosterRevisionIntegrity: () => undefined,
-                assertExamSeatPlanIntegrity: () => undefined,
                 ExamSeatPlanError: PlanError,
                 isExamSeatPlanV2: (value: { schemaVersion?: number }) => value.schemaVersion === 2,
                 examSeatPlanService: {

@@ -14,6 +14,7 @@ describe('ExamEvent HTTP boundary contracts', () => {
     it('keeps raw decorator arguments separate and exposes only the narrow OJ routes', () => {
         expect(source).to.include("'/api/admin/exam-events'");
         expect(source).to.include("'/api/admin/exam-events/:eventId'");
+        expect(source).not.to.include('ensureIndexes()');
         expect(source).not.to.include('/admin/vigil');
         expect(source).not.to.include('dashboardToken');
         expect(source).to.match(/async post\(\s*_args: unknown,\s*schoolId: ObjectId,/);

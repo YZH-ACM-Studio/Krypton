@@ -19,7 +19,10 @@ describe('P2.5 seat assignment HTTP boundary', () => {
     it('re-reads event authorization and writable lifecycle inside the shared event boundary', () => {
         expect(source).to.include('withExamEventBoundary(domainId, eventId');
         expect(source).to.include('assertCanManageExamEvent(domainId, event, this.user)');
-        expect(source).to.include('PERM.PERM_USERBIND_MANAGE_STUDENTS');
+        expect(source).to.include('PERM.PERM_CREATE_EXAM_EVENT');
+        expect(source).to.include('isExamInfrastructureAdmin(this.user)');
+        expect(source).not.to.include('PERM_USERBIND_MANAGE_STUDENTS');
+        expect(source).not.to.include('ensureIndexes()');
         expect(source).to.include('this.assertWritableEvent(current)');
     });
 

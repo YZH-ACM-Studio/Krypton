@@ -1227,9 +1227,25 @@ export class ContestEditHandler extends Handler {
                 ...(allowVirtual != null ? { allowVirtual } : {}),
             });
             if (requestedPlannedTeamBatchId) {
-                await contestTeamBatch.writeCreatedContestPlannedBatch(authoritativeDomainId, tid, requestedPlannedTeamBatchId, {
-                    user: this.user,
-                });
+                try {
+                    await contestTeamBatch.writeCreatedContestPlannedBatch(authoritativeDomainId, tid, requestedPlannedTeamBatchId, {
+                        user: this.user,
+                    });
+                } catch (error) {
+                    try {
+                        await contest.del(authoritativeDomainId, tid);
+                    } catch (cleanupError) {
+                        logger.error(
+                            'Contest planned team-batch create write cleanup failed domain=%s contest=%s actor=%s error=%o cleanupError=%o',
+                            authoritativeDomainId,
+                            tid,
+                            this.user._id,
+                            error,
+                            cleanupError,
+                        );
+                    }
+                    throw error;
+                }
             }
         }
         const task = contestUnhideTask(authoritativeDomainId, tid);

@@ -30,6 +30,7 @@ class UnexpectedProblemWrite extends Error {}
 const calls = {
     contestAdds: [] as any[],
     contestDeletes: [] as any[],
+    contestDels: [] as any[],
     contestEdits: [] as any[],
     documentSets: [] as any[],
     events: [] as string[],
@@ -68,6 +69,8 @@ let failProblemEditOnce: boolean;
 let allowCanonicalProblemEdit: boolean;
 let failCanonicalProblemEditPid: number | null;
 let contestGetError: Error | null;
+let failTeamBatchWrite: Error | null;
+let failContestDel: Error | null;
 
 const contestStub: any = {
     RULES: { acm: { hidden: false, TEXT: 'ACM' } },
@@ -108,6 +111,8 @@ const contestStub: any = {
     async del(...args: any[]) {
         calls.events.push('contest.del');
         calls.contestDeletes.push(args);
+        calls.contestDels.push(args);
+        if (failContestDel) throw failContestDel;
         currentContest = null;
     },
 };
@@ -239,6 +244,7 @@ const contestTeamBatchStub = {
     },
     async writeCreatedContestPlannedBatch(...args: any[]) {
         calls.teamBatchWrites.push(args);
+        if (failTeamBatchWrite) throw failTeamBatchWrite;
         return {};
     },
     async setContestPlannedBatch(...args: any[]) {
@@ -478,6 +484,8 @@ beforeEach(() => {
     allowCanonicalProblemEdit = false;
     failCanonicalProblemEditPid = null;
     contestGetError = null;
+    failTeamBatchWrite = null;
+    failContestDel = null;
     scheduleTasks = [];
     nextScheduleId = 1;
     failScheduleAdd = false;
@@ -585,6 +593,7 @@ describe('contest team-batch pointer writes', () => {
         expect(calls.contestAdds[0][9]).not.to.have.property('plannedTeamBatchId');
         expect(calls.teamBatchWrites).to.deep.equal([['system', 'new-contest', plannedTeamBatchId, { user: handler.user }]]);
         expect(calls.teamBatchPlans).to.deep.equal([]);
+        expect(calls.contestDels).to.deep.equal([]);
         expect(handler.response.body).to.deep.equal({ tid: 'new-contest' });
     });
 
@@ -598,6 +607,58 @@ describe('contest team-batch pointer writes', () => {
         expect(calls.contestAdds[0][9]).not.to.have.property('plannedTeamBatchId');
         expect(calls.teamBatchWrites).to.deep.equal([]);
         expect(calls.teamBatchPlans).to.deep.equal([]);
+        expect(calls.contestDels).to.deep.equal([]);
+    });
+
+    it('deletes the created contest and fails postUpdate when the planned-batch write fails', async () => {
+        const handler = makeHandler();
+        handler.tdoc = undefined;
+        const plannedTeamBatchId = new ObjectId();
+        const writeError = new Error('planned write failed');
+        failTeamBatchWrite = writeError;
+
+        const error = await captureFailure(() =>
+            handler.postUpdate(
+                ...postUpdateArgs(null, {
+                    participationMode: 'team',
+                    plannedTeamBatchId,
+                }),
+            ),
+        );
+
+        expect(error).to.equal(writeError);
+        expect(calls.contestAdds).to.have.length(1);
+        expect(calls.teamBatchWrites).to.deep.equal([['system', 'new-contest', plannedTeamBatchId, { user: handler.user }]]);
+        expect(calls.contestDels).to.deep.equal([['system', 'new-contest']]);
+        expect(calls.contestEdits).to.deep.equal([]);
+        expect(calls.teamBatchPlans).to.deep.equal([]);
+        expect(handler.response.body).to.deep.equal({});
+        expect(handler.response.redirect).to.equal(undefined);
+    });
+
+    it('still throws the original planned-batch write error when orphan cleanup also fails', async () => {
+        const handler = makeHandler();
+        handler.tdoc = undefined;
+        const plannedTeamBatchId = new ObjectId();
+        const writeError = new Error('planned write failed');
+        const cleanupError = new Error('cleanup failed');
+        failTeamBatchWrite = writeError;
+        failContestDel = cleanupError;
+
+        const error = await captureFailure(() =>
+            handler.postUpdate(
+                ...postUpdateArgs(null, {
+                    participationMode: 'team',
+                    plannedTeamBatchId,
+                }),
+            ),
+        );
+
+        expect(error).to.equal(writeError);
+        expect(error).not.to.equal(cleanupError);
+        expect(calls.contestDels).to.deep.equal([['system', 'new-contest']]);
+        expect(calls.contestEdits).to.deep.equal([]);
+        expect(handler.response.redirect).to.equal(undefined);
     });
 
     it('keeps the existing-contest planned-batch edit on setContestPlannedBatch', async () => {
@@ -616,6 +677,7 @@ describe('contest team-batch pointer writes', () => {
         expect(calls.teamBatchWrites).to.deep.equal([]);
         expect(calls.teamBatchPlans).to.deep.equal([['system', 'contest', plannedTeamBatchId, null, { user: handler.user }]]);
         expect(calls.teamBatchClears).to.deep.equal([]);
+        expect(calls.contestDels).to.deep.equal([]);
     });
 
     it('clears finalized team-batch pointers through the contest-team boundary when switching to individual', async () => {
@@ -638,6 +700,7 @@ describe('contest team-batch pointer writes', () => {
         expect(calls.documentSets).to.deep.equal([]);
         expect(calls.teamBatchPlans).to.deep.equal([]);
         expect(calls.teamBatchWrites).to.deep.equal([]);
+        expect(calls.contestDels).to.deep.equal([]);
     });
 });
 

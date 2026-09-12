@@ -1215,6 +1215,7 @@ describe('P1.17 pre-contest team batches', () => {
         const { readFileSync } = require('node:fs');
         const handler = readFileSync(require.resolve('../src/handler/contest.ts'), 'utf8');
         expect(handler).to.include('contestTeamBatch.writeCreatedContestPlannedBatch');
+        expect(handler).to.include('await contest.del(authoritativeDomainId, tid)');
         expect(handler).to.include('contestTeamBatch.clearContestTeamBatchPointers');
         expect(handler).to.include('contestTeamBatch.setContestPlannedBatch');
         expect(handler).not.to.include('requestedPlannedTeamBatchId ? { plannedTeamBatchId: requestedPlannedTeamBatchId }');

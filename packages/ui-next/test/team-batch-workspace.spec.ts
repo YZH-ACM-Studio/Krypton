@@ -88,6 +88,7 @@ describe('p1.17 pre-contest team batch workspace contracts', () => {
     expect(contestHandler).to.include('contestTeamBatch.listBatches');
     expect(contestHandler).to.include('contestTeamBatch.setContestPlannedBatch');
     expect(contestHandler).to.include('contestTeamBatch.writeCreatedContestPlannedBatch');
+    expect(contestHandler).to.include('await contest.del(authoritativeDomainId, tid)');
     expect(contestHandler).to.include('contestTeamBatch.clearContestTeamBatchPointers');
     expect(contestHandler).to.include('contestTeamBatch.finalizePlannedBatchToContest');
     expect(contestHandler).not.to.include('contestTeamBatch.snapshotToContest(authoritativeDomainId');

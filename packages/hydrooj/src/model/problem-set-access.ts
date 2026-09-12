@@ -6,7 +6,17 @@ import { Context } from '../context';
 import db from '../service/db';
 import { courseKindClause, isProblemSetKind } from '../lib/training-kind';
 import { canonicalProblemSetAudience, isLegacyPublicProblemSet, problemSetAudienceOf } from '../lib/problem-set-audience';
-import { computePrerequisiteClosure, ProblemSetStageGraphError, prerequisitesCompleted, trainingNodeById } from '../lib/problem-set-stage';
+import {
+    computePrerequisiteClosure,
+    ProblemSetStageGraphError,
+    problemSetIntroPids,
+    problemSetStageIsAccessible,
+    prerequisitesCompleted,
+    serializeProblemSetIntro,
+    trainingNodeById,
+    type ProblemSetIntroProgressInput,
+    type ProblemSetIntroProjection,
+} from '../lib/problem-set-stage';
 import { PERM, PRIV } from './builtin';
 import * as document from './document';
 import { settleDomainCleanupOperations } from './domain-lifecycle-boundary';
@@ -71,6 +81,8 @@ function assertObjectId(value: ObjectId, field: string): ObjectId {
 }
 
 export { canonicalProblemSetAudience, isLegacyPublicProblemSet, problemSetAudienceOf };
+export { problemSetIntroPids, serializeProblemSetIntro };
+export type { ProblemSetIntroProgressInput, ProblemSetIntroProjection };
 
 export function canManageProblemSet(user: ProblemSetAccessUser, tdoc: Pick<TrainingDoc, 'owner'>): boolean {
     if (user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) return true;
@@ -285,10 +297,20 @@ export class ProblemSetAccessService {
         return result;
     }
 
+    introPids(tdoc: Pick<TrainingDoc, 'dag'>): number[] {
+        return problemSetIntroPids(tdoc);
+    }
+
+    serializeIntro(
+        tdoc: Pick<TrainingDoc, 'dag'>,
+        decision: ProblemSetAccessDecision,
+        progress: ProblemSetIntroProgressInput,
+    ): ProblemSetIntroProjection {
+        return serializeProblemSetIntro(tdoc, decision, progress);
+    }
+
     stageIsAccessible(decision: ProblemSetAccessDecision, stageId: number): boolean {
-        if (!decision.accessible) return false;
-        if (decision.stageAccess === 'all') return true;
-        return decision.stageAccess.includes(stageId);
+        return problemSetStageIsAccessible(decision, stageId);
     }
 
     async assertStageEnterable(

@@ -5,8 +5,9 @@ import { sortFiles } from '@hydrooj/utils/lib/utils';
 import { localizeErrorParameter, localizedErrorText, FileLimitExceededError, FileUploadError, NotFoundError, ValidationError } from '../error';
 import { Tdoc, TrainingDoc } from '../interface';
 import { problemSetAudienceOf } from '../lib/problem-set-audience';
+import { problemSetIntroPids, serializeProblemSetIntro } from '../lib/problem-set-stage';
 import { isProblemSetKind, withProblemSetKind } from '../lib/training-kind';
-import { PERM, PRIV, STATUS } from '../model/builtin';
+import { PERM, PRIV } from '../model/builtin';
 import { contextualCompletionService } from '../model/contextual-completion';
 import * as oplog from '../model/oplog';
 import { practiceIntegrityService } from '../model/practice-integrity';
@@ -173,7 +174,7 @@ class TrainingDetailHandler extends Handler {
         await this.ctx.parallel('training/get', tdoc, this);
         let enrollUsers: number[] = [];
         let shouldCompare = false;
-        const pids = training.getPids(tdoc.dag);
+        const pids = problemSetIntroPids(tdoc);
         if (this.user.hasPriv(PRIV.PRIV_USER_PROFILE) && this.ctx.setting.get('training.enrolled-users')) {
             enrollUsers = (
                 await training
@@ -204,70 +205,34 @@ class TrainingDetailHandler extends Handler {
                       : Promise.resolve(null),
               ])
             : [null, null];
-        const totalProblemCount = tdoc.dag.reduce((total, node) => total + new Set(node.pids).size, 0);
-        const donePids = new Set<number>();
-        const progPids = new Set<number>();
-        for (const pid in psdict) {
-            if (!+pid) continue;
-            const psdoc = psdict[pid];
-            if (!publishedIntegrity && psdoc.status) {
-                if (psdoc.status === STATUS.STATUS_ACCEPTED) {
-                    donePids.add(+pid);
-                } else progPids.add(+pid);
-            }
-        }
-        const nsdict = {};
-        const ndict = {};
-        const doneNids = new Set<number>();
-        let completedProblemCount = 0;
-        for (const node of tdoc.dag) {
-            ndict[node._id] = node;
-            const nodePids = new Set(node.pids);
-            const totalCount = nodePids.size;
-            const scopedDonePids = contextualDoneByScope ? nodePids.intersection(contextualDoneByScope.get(node._id) || new Set<number>()) : donePids;
-            if (contextualDoneByScope) for (const pid of scopedDonePids) donePids.add(pid);
-            const doneCount = nodePids.intersection(new Set(scopedDonePids)).size;
-            completedProblemCount += doneCount;
-            const hasAccess = problemSetAccessService.stageIsAccessible(access, node._id);
-            const isInvalid = training.isInvalid(node, doneNids);
-            const nsdoc = {
-                progress: totalCount ? Math.floor(100 * (doneCount / totalCount)) : 100,
-                isDone: training.isDone(node, doneNids, scopedDonePids),
-                isProgress: training.isProgress(node, doneNids, scopedDonePids, progPids),
-                isOpen: training.isOpen(node, doneNids, scopedDonePids, progPids),
-                isInvalid,
-                hasAccess,
-                lockReason: hasAccess ? (isInvalid ? 'prereq' : undefined) : 'no_access',
-                donePids: Array.from(scopedDonePids),
-                selfDonePids: selfContextualDoneByScope
-                    ? Array.from(nodePids.intersection(selfContextualDoneByScope.get(node._id) || new Set<number>()))
-                    : [],
-            };
-            if (nsdoc.isDone) doneNids.add(node._id);
-            nsdict[node._id] = nsdoc;
-        }
-        const computedStatus = {
-            doneNids: Array.from(doneNids),
-            donePids: Array.from(donePids),
-            done: doneNids.size === tdoc.dag.length,
+        const intro = serializeProblemSetIntro(tdoc, access, {
+            psdict,
+            publishedIntegrity,
+            contextualDoneByScope,
+            selfContextualDoneByScope,
+        });
+        const tsdoc = {
+            ...(await training.getStatus(domainId, tdoc.docId, uid)),
+            doneNids: intro.doneNids,
+            donePids: intro.donePids,
+            done: intro.done,
         };
-        const tsdoc = { ...(await training.getStatus(domainId, tdoc.docId, uid)), ...computedStatus };
         const groups = this.user.hasPerm(PERM.PERM_EDIT_DOMAIN) ? await user.listGroup(domainId) : [];
         this.response.body = {
             tdoc,
             tsdoc,
-            pids,
+            pids: intro.pids,
             pdict,
             psdict,
-            ndict,
-            nsdict,
+            ndict: intro.ndict,
+            nsdict: intro.nsdict,
             udoc,
             udict,
             selfPsdict,
             groups,
             missing,
-            completedProblemCount,
-            totalProblemCount,
+            completedProblemCount: intro.completedProblemCount,
+            totalProblemCount: intro.totalProblemCount,
             integrityControlled: !!publishedIntegrity,
             access,
         };

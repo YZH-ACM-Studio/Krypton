@@ -315,4 +315,45 @@ describe('P3.3 problem set access sources', () => {
             expect(error.params || []).to.include('未获得该阶段的访问权');
         }
     });
+
+    it('keeps intro dump of inaccessible stages and does not split discoverable from accessible', async () => {
+        const staged = {
+            ...hiddenSet,
+            dag: [
+                { _id: 1, title: 'A', requireNids: [], pids: [11] },
+                { _id: 2, title: 'Secret', requireNids: [1], pids: [12] },
+            ],
+        };
+        const access = service({
+            entitlements: [
+                {
+                    _id: new ObjectId(),
+                    domainId,
+                    uid,
+                    targetKind: 'problem_set_stage',
+                    targetId: otherSetId,
+                    stageId: 1,
+                    source: 'redemption',
+                    sourceId,
+                    createdAt: new Date(),
+                    revokedAt: null,
+                },
+            ],
+        });
+        const decision = await access.evaluate(domainId, user(), staged as any);
+        expect(decision.discoverable).to.equal(decision.accessible);
+        expect(decision.stageAccess).to.deep.equal([1]);
+        const intro = access.serializeIntro(staged as any, decision, {
+            psdict: {},
+            publishedIntegrity: null,
+            contextualDoneByScope: null,
+            selfContextualDoneByScope: null,
+        });
+        expect(access.introPids(staged as any)).to.deep.equal([11, 12]);
+        expect(intro.pids).to.deep.equal([11, 12]);
+        expect(intro.ndict[2]).to.include({ title: 'Secret' });
+        expect(intro.ndict[2].pids).to.deep.equal([12]);
+        expect(intro.nsdict[1].hasAccess).to.equal(true);
+        expect(intro.nsdict[2]).to.include({ hasAccess: false, lockReason: 'no_access' });
+    });
 });

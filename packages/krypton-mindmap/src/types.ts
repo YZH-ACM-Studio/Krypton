@@ -31,3 +31,26 @@ export interface KnowledgeMapDoc {
     createdAt: Date;
     updatedAt: Date;
 }
+
+export interface MindmapMaterializeOptions {
+    required?: boolean;
+    requirePublicMap?: boolean;
+    field?: 'knowledgeNodeIds' | 'mindmapNodeIds';
+    includePathVersion?: boolean;
+}
+
+export interface MindmapPathVersion {
+    id: string;
+    parentId: string | null;
+    topic: string;
+    updatedAt: string;
+}
+
+export interface MindmapMaterializeResult {
+    mapId: ObjectId;
+    mapTitle: string;
+    nodeIds: ObjectId[];
+    nodePaths: Array<{ id: string; label: string }>;
+    tags: string[];
+    pathVersion?: MindmapPathVersion[];
+}

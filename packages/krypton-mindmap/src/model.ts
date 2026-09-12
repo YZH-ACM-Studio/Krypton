@@ -4,7 +4,7 @@ import { localizeError, localizedErrorText, ObjectId, db } from 'hydrooj';
 import type { LocalizedErrorText } from 'hydrooj';
 import { insertMapWithRoot, mapsColl, nodesColl } from './db';
 import { MindmapConflictError, MindmapRequestError } from './error';
-import type { KnowledgeMapDoc, MindmapNode } from './types';
+import type { KnowledgeMapDoc, MindmapMaterializeOptions, MindmapMaterializeResult, MindmapNode, MindmapPathVersion } from './types';
 
 const logger = new Logger('krypton-mindmap.model');
 const documentColl = db.collection<any>('document');
@@ -255,6 +255,7 @@ function descendantsOf(nodeId: string, nodes: MindmapNode[]): Set<string> {
     return found;
 }
 
+/** Reference-protection union: zh-CN sort, untagged selections allowed, no root gate. Problem writes use materialize(). */
 function tagsForSelection(nodeIds: string[], byId: Map<string, MindmapNode>): string[] {
     const tags: string[] = [];
     for (const selectedId of nodeIds) {
@@ -632,6 +633,110 @@ export async function listAllNodes(mapId: ObjectId | string): Promise<MindmapNod
 
 export async function getNode(mapId: ObjectId | string, id: ObjectId | string): Promise<MindmapNode | null> {
     return await nodesColl.findOne({ _id: objectId(id), mapId: objectId(mapId, 'mapId') });
+}
+
+function normalizeMaterializeMapId(value: unknown): ObjectId {
+    const normalized = value instanceof ObjectId ? value.toHexString() : typeof value === 'string' ? value.trim() : '';
+    if (!normalized || !ObjectId.isValid(normalized)) throw new MindmapRequestError(localizedErrorText`knowledgeMapId 无效`);
+    return new ObjectId(normalized);
+}
+
+function normalizeMaterializeNodeIds(nodeIds: unknown, required: boolean, field: 'knowledgeNodeIds' | 'mindmapNodeIds'): string[] {
+    if (!Array.isArray(nodeIds)) throw new MindmapRequestError(localizedErrorText`${field} 无效`);
+    const normalized = nodeIds.map((value) => {
+        if (value instanceof ObjectId) return value.toHexString();
+        if (typeof value !== 'string') throw new MindmapRequestError(localizedErrorText`${field} 无效`);
+        const trimmed = value.trim();
+        if (!trimmed || !ObjectId.isValid(trimmed)) throw new MindmapRequestError(localizedErrorText`${field} 无效`);
+        return new ObjectId(trimmed).toHexString();
+    });
+    if (!normalized.length) {
+        if (required) throw new MindmapRequestError(localizedErrorText`${field} 无效`);
+        return [];
+    }
+    return [...new Set(normalized)].sort();
+}
+
+function buildMaterializePath(node: MindmapNode, byId: Map<string, MindmapNode>, expectedRootNodeId: ObjectId): MindmapNode[] {
+    const path: MindmapNode[] = [];
+    const visited = new Set<string>();
+    let current: MindmapNode | undefined = node;
+    while (current) {
+        const id = current._id.toHexString();
+        if (visited.has(id)) conflict(localizedErrorText`导图存在循环`, 'existing-cycle');
+        visited.add(id);
+        path.push(current);
+        if (!current.parentId) break;
+        current = byId.get(current.parentId.toHexString());
+        if (!current) conflict(localizedErrorText`导图祖先节点已删除`, 'ancestor-missing');
+    }
+    path.reverse();
+    if (!path[0] || !sameId(path[0]._id, expectedRootNodeId) || path[0].parentId !== null) {
+        conflict(localizedErrorText`导图节点不属于该图的唯一根节点`, 'root-mismatch');
+    }
+    return path;
+}
+
+/**
+ * Problem-write materialization: required mapId, selected nodes must belong to that
+ * map and carry their own tags, paths must terminate at the map root, and tags stay
+ * in first-seen insertion order. Does not apply tagsForSelection's zh-CN sort or the
+ * hydrooj sole-public-map fallback.
+ */
+export async function materialize(
+    mapIdInput: unknown,
+    nodeIdsInput: unknown,
+    options: MindmapMaterializeOptions = {},
+): Promise<MindmapMaterializeResult> {
+    const field = options.field === 'mindmapNodeIds' ? 'mindmapNodeIds' : 'knowledgeNodeIds';
+    const mapId = normalizeMaterializeMapId(mapIdInput);
+    const nodeIds = normalizeMaterializeNodeIds(nodeIdsInput, options.required === true, field);
+    const [map, nodes] = await Promise.all([getKnowledgeMap(mapId), listAllNodes(mapId)]);
+    const byId = new Map(nodes.map((node) => [node._id.toHexString(), node]));
+    if (nodeIds.length && nodeIds.some((id) => !byId.has(id))) {
+        conflict(localizedErrorText`所选知识节点已删除或不属于指定导图`, 'selection-not-in-map');
+    }
+    if (!map) conflict(localizedErrorText`所属导图已删除`, 'map-missing');
+    if (options.requirePublicMap && map.visibility !== 'public') {
+        conflict(localizedErrorText`所属导图当前不可用于题目归类`, 'map-not-public');
+    }
+    const tags: string[] = [];
+    const nodePaths: Array<{ id: string; label: string }> = [];
+    const pathVersion = new Map<string, MindmapPathVersion>();
+    for (const id of nodeIds) {
+        const node = byId.get(id);
+        if (!node || !Array.isArray(node.tags) || !node.tags.some((tag) => typeof tag === 'string' && tag.trim())) {
+            conflict(localizedErrorText`导图节点 ${id} 已删除或不可选`, 'node-not-selectable');
+        }
+        const nodePath = buildMaterializePath(node, byId, map.rootNodeId);
+        nodePaths.push({ id, label: nodePath.map((part) => part.topic).join(' / ') });
+        for (const pathNode of nodePath) {
+            if (options.includePathVersion) {
+                if (!(pathNode.updatedAt instanceof Date) || Number.isNaN(pathNode.updatedAt.getTime())) {
+                    throw new TypeError(`mindmap node ${pathNode._id.toHexString()} updatedAt must be a valid date`);
+                }
+                const pathNodeId = pathNode._id.toHexString();
+                pathVersion.set(pathNodeId, {
+                    id: pathNodeId,
+                    parentId: pathNode.parentId?.toHexString() || null,
+                    topic: pathNode.topic,
+                    updatedAt: pathNode.updatedAt.toISOString(),
+                });
+            }
+            for (const tag of Array.isArray(pathNode.tags) ? pathNode.tags : []) {
+                const normalized = typeof tag === 'string' ? tag.trim() : '';
+                if (normalized && !tags.includes(normalized)) tags.push(normalized);
+            }
+        }
+    }
+    return {
+        mapId,
+        mapTitle: map.title,
+        nodeIds: nodeIds.map((id) => new ObjectId(id)),
+        nodePaths,
+        tags,
+        ...(options.includePathVersion ? { pathVersion: [...pathVersion.values()].sort((left, right) => left.id.localeCompare(right.id)) } : {}),
+    };
 }
 
 export async function getNodeReferenceCounts(mapIdValue: ObjectId | string, nodes: MindmapNode[]): Promise<Record<string, number>> {

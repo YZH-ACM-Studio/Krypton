@@ -827,6 +827,27 @@ describe('mindmap reference safety', () => {
         expect(moved.parentId.equals(newParent._id)).to.equal(true);
     });
 
+    it('still compares referenced tag unions after zh-CN sort, not problem-write insertion order', async () => {
+        const oldParent = makeNode('old parent', config.rootNodeId, 10, ['中', '啊']);
+        const newParent = makeNode('new parent', config.rootNodeId, 20, ['啊', '中']);
+        nodes.push(oldParent, newParent);
+        const child = makeNode('child', oldParent._id, 10);
+        nodes.push(child);
+        documentResults = [{ domainId: 'system', docId: 11, pid: 'P11', knowledgeMapId: config._id, knowledgeNodeIds: [child._id] }];
+
+        const moved = await model.moveNode({
+            domainId: 'system',
+            actor: 1,
+            ...nodeMutationContext(),
+            id: child._id,
+            newParentId: newParent._id,
+            targetIndex: 0,
+            expectedUpdatedAt: child.updatedAt,
+            expectedParentUpdatedAt: newParent.updatedAt,
+        });
+        expect(moved.parentId.equals(newParent._id)).to.equal(true);
+    });
+
     it('allows same-parent reorder and root-side changes even when the node is referenced', async () => {
         const first = makeNode('first', config.rootNodeId, 10, ['first']);
         const second = makeNode('second', config.rootNodeId, 20, ['second']);
@@ -1130,5 +1151,130 @@ describe('mindmap structural mutations', () => {
             '其他操作修改',
         );
         expect(child.topic).to.equal('child');
+    });
+});
+
+describe('problem-write knowledge materialize', () => {
+    it('keeps first-seen ancestor insertion order and does not apply zh-CN sort', async () => {
+        nodes[0].tags = ['中'];
+        const leaf = makeNode('leaf', config.rootNodeId, 10, ['啊']);
+        nodes.push(leaf);
+
+        const result = await model.materialize(config._id, [leaf._id]);
+
+        expect(result.mapId.equals(config._id)).to.equal(true);
+        expect(result.mapTitle).to.equal('Test map');
+        expect(result.nodeIds.map(String)).to.deep.equal([leaf._id.toHexString()]);
+        expect(result.nodePaths).to.deep.equal([{ id: leaf._id.toHexString(), label: 'root / leaf' }]);
+        expect(result.tags).to.deep.equal(['中', '啊']);
+        expect([...result.tags].sort((left, right) => left.localeCompare(right, 'zh-CN'))).to.deep.equal(['啊', '中']);
+        expect(Object.hasOwn(result, 'pathVersion')).to.equal(false);
+    });
+
+    it('unions ancestor tags in sorted node-id order, not caller input order', async () => {
+        const earlier = makeNode('earlier', config.rootNodeId, 10, ['from-early']);
+        earlier._id = new ObjectId('64b000000000000000000001');
+        const later = makeNode('later', config.rootNodeId, 20, ['from-late']);
+        later._id = new ObjectId('64b000000000000000000002');
+        nodes[0].tags = ['root'];
+        nodes.push(earlier, later);
+
+        const result = await model.materialize(config._id, [later._id, earlier._id, earlier._id.toHexString()]);
+
+        expect(result.nodeIds.map(String)).to.deep.equal([earlier._id.toHexString(), later._id.toHexString()]);
+        expect(result.tags).to.deep.equal(['root', 'from-early', 'from-late']);
+        expect(result.nodePaths.map((path) => path.label)).to.deep.equal(['root / earlier', 'root / later']);
+    });
+
+    it('rejects a selected node that does not carry its own tags even when ancestors are tagged', async () => {
+        nodes[0].tags = ['root'];
+        const leaf = makeNode('leaf', config.rootNodeId, 10, ['  ']);
+        nodes.push(leaf);
+
+        await expectRejected(model.materialize(config._id, [leaf._id]), MindmapConflictError, '已删除或不可选');
+    });
+
+    it('rejects a path that does not terminate at the map root', async () => {
+        const leaf = makeNode('leaf', config.rootNodeId, 10, ['leaf']);
+        nodes.push(leaf);
+        config.rootNodeId = new ObjectId();
+
+        await expectRejected(model.materialize(config._id, [leaf._id]), MindmapConflictError, '唯一根节点');
+    });
+
+    it('requires an explicit map and never infers the sole public map', async () => {
+        await expectRejected(model.materialize(undefined, []), MindmapRequestError, 'knowledgeMapId');
+        await expectRejected(model.materialize('', [], { allowSolePublicMap: true } as any), MindmapRequestError, 'knowledgeMapId');
+        const empty = await model.materialize(config._id, []);
+        expect(empty.mapId.equals(config._id)).to.equal(true);
+        expect(empty.mapTitle).to.equal('Test map');
+        expect(empty.nodeIds).to.deep.equal([]);
+        expect(empty.nodePaths).to.deep.equal([]);
+        expect(empty.tags).to.deep.equal([]);
+        expect(Object.hasOwn(empty, 'pathVersion')).to.equal(false);
+        await expectRejected(model.materialize(config._id, [], { required: true }), MindmapRequestError, 'knowledgeNodeIds');
+        await expectRejected(model.materialize(config._id, [], { required: true, field: 'mindmapNodeIds' }), MindmapRequestError, 'mindmapNodeIds');
+    });
+
+    it('rejects nodes that belong to another map and hidden maps when public is required', async () => {
+        const foreignMap = {
+            _id: new ObjectId(),
+            title: 'Foreign',
+            rootNodeId: new ObjectId(),
+            visibility: 'public' as const,
+            layoutDirection: 'RIGHT' as const,
+            createdAt: new Date('2026-07-16T00:00:00.000Z'),
+            updatedAt: new Date('2026-07-16T00:00:00.000Z'),
+        };
+        const foreignRoot = makeNode('foreign-root', null, 0, ['foreign'], foreignMap._id);
+        foreignMap.rootNodeId = foreignRoot._id;
+        maps.push(foreignMap);
+        nodes.push(foreignRoot);
+        const local = makeNode('local', config.rootNodeId, 10, ['local']);
+        nodes.push(local);
+
+        await expectRejected(model.materialize(config._id, [foreignRoot._id]), MindmapConflictError, '不属于指定导图');
+        await expectRejected(model.materialize(new ObjectId(), [local._id]), MindmapConflictError, '不属于指定导图');
+        config.visibility = 'hidden';
+        const hidden = await model.materialize(config._id, [local._id]);
+        expect(hidden.tags).to.deep.equal(['local']);
+        await expectRejected(model.materialize(config._id, [local._id], { requirePublicMap: true }), MindmapConflictError, '不可用于题目归类');
+    });
+
+    it('fails closed on a missing ancestor, a cycle, and a deleted map', async () => {
+        const dangling = makeNode('dangling', new ObjectId(), 10, ['dangling']);
+        nodes.push(dangling);
+        await expectRejected(model.materialize(config._id, [dangling._id]), MindmapConflictError, '祖先节点已删除');
+
+        const cyclic = makeNode('cyclic', config.rootNodeId, 20, ['cyclic']);
+        cyclic.parentId = cyclic._id;
+        nodes.push(cyclic);
+        await expectRejected(model.materialize(config._id, [cyclic._id]), MindmapConflictError, '循环');
+
+        const mapId = config._id;
+        maps = [];
+        await expectRejected(model.materialize(mapId, []), MindmapConflictError, '所属导图已删除');
+    });
+
+    it('trims tags, skips blanks, and can emit a sorted path version', async () => {
+        nodes[0].tags = [' root ', '', 'root'];
+        const leaf = makeNode('leaf', config.rootNodeId, 10, [' leaf ']);
+        nodes.push(leaf);
+
+        const result = await model.materialize(config._id, [` ${leaf._id.toHexString()} `], { includePathVersion: true });
+        expect(result.tags).to.deep.equal(['root', 'leaf']);
+        expect(result.pathVersion?.map((entry) => entry.id)).to.deep.equal([nodes[0]._id.toHexString(), leaf._id.toHexString()].sort());
+        expect(result.pathVersion?.[0].updatedAt).to.match(/^\d{4}-\d{2}-\d{2}T/);
+
+        (leaf as any).updatedAt = 'not-a-date';
+        await expectRejected(model.materialize(config._id, [leaf._id], { includePathVersion: true }), TypeError, 'updatedAt must be a valid date');
+    });
+
+    it('rejects malformed node ids without guessing a map from public inventory', async () => {
+        await expectRejected(model.materialize(config._id, 'not-an-array'), MindmapRequestError, 'knowledgeNodeIds');
+        await expectRejected(model.materialize(config._id, ['']), MindmapRequestError, 'knowledgeNodeIds');
+        await expectRejected(model.materialize(config._id, ['not-an-object-id']), MindmapRequestError, 'knowledgeNodeIds');
+        await expectRejected(model.materialize(config._id, [123] as any), MindmapRequestError, 'knowledgeNodeIds');
+        await expectRejected(model.materialize(config._id, [null] as any), MindmapRequestError, 'knowledgeNodeIds');
     });
 });

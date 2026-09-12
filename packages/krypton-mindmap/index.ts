@@ -7,14 +7,16 @@ import { Context } from 'hydrooj';
 import { ensureIndexes } from './src/db';
 import { applyHandlers } from './src/handler';
 import { migrationScripts } from './src/migration';
-import { getPublicKnowledgeMap, getPublicKnowledgeMapSnapshot, listKnowledgeMaps } from './src/model';
+import { getPublicKnowledgeMap, getPublicKnowledgeMapSnapshot, listKnowledgeMaps, materialize } from './src/model';
 
 export * from './src/types';
+export { materialize };
 
 export const mindmapModel = {
     getPublicMap: getPublicKnowledgeMap,
     getPublicSnapshot: getPublicKnowledgeMapSnapshot,
     listPublicMaps: () => listKnowledgeMaps(false),
+    materialize,
 };
 
 export function apply(ctx: Context) {

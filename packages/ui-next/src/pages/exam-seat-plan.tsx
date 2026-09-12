@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { examTeacherErrorZh, examTeacherExactZh } from '@hydrooj/common';
 import { AlertTriangle, ArrowLeft, Download, GripVertical, LockKeyhole, Play, RefreshCw, Save, Search, Shuffle, Upload, ZoomIn, ZoomOut } from 'lucide-react';
 import { AdminPage } from '@/components/admin/admin-page';
 import { ForbiddenPanel } from '@/components/admin/forbidden';
@@ -1151,25 +1152,15 @@ const UNKNOWN_TEACHER_ERROR = '操作无法完成，请重试。';
 const SNAKE_CASE_TOKEN = /[a-z][a-z0-9]*(?:_[a-z0-9]+)+/;
 const HAS_CJK = /[\u3400-\u9fff]/;
 
-const TEACHER_CODE_LABELS: Record<string, string> = {
+const TEACHER_CODE_OVERRIDES: Record<string, string> = {
   active_session_conflict: '该终端已有活动考试会话',
   assignment_already_confirmed: '当前发布版本已经确认过预登录',
   assignment_reference_changed: '座位分配引用已变化',
   batch_not_found: '找不到该预登录批次',
   contest_not_enterable: '比赛尚未进入可预登录时间（约开赛前 60 分钟）',
-  constraint_conflict: '约束冲突',
-  detector_degraded: '检测不完整',
-  detector_failed: '检测失败',
-  detector_unsupported: '检测不受支持',
-  duplicate_fixed_seat: '多个学生被指定到同一座位',
-  duplicate_seat: '存在重复座位',
-  duplicate_uid: '存在重复学生',
   endpoint_capability_missing: '终端缺少预登录能力',
-  endpoint_credential_not_active: '终端凭据不是活动状态',
   endpoint_incompatible: '终端版本或协议不兼容',
-  endpoint_not_registered: '终端尚未登记',
   endpoint_offline: '终端离线',
-  endpoint_offline_before_send: '发送前终端已离线',
   exam_prelogin_activity_changed: '当前预登录条件已变化，请重新核对接线后再试',
   exam_prelogin_assignment_not_found: '找不到用于预登录的座位分配',
   exam_prelogin_assignment_not_published: '用于预登录的座位分配尚未发布',
@@ -1177,33 +1168,15 @@ const TEACHER_CODE_LABELS: Record<string, string> = {
   exam_prelogin_retry_blocked: '预登录失败重试被阻止',
   exam_prelogin_retry_readiness_invalid: '失败重试前的就绪检查结果无效',
   external_workspace_unavailable: '外部考试没有可用的 Contest 工作台',
-  forbidden_process_detected: '检测到禁用进程',
-  forbidden_window_detected: '检测到可疑前台窗口',
-  locked_manual_mismatch: '锁定座位与人工映射不一致',
-  locked_seat_unavailable: '锁定的座位当前不可分配',
-  locked_uid_missing: '锁定座位对应的学生已不在名单中',
-  manual_mapping_incomplete: '人工映射不完整',
-  manual_seat_unavailable: '人工指定的座位当前不可分配',
-  manual_uid_missing: '人工指定的学生已不在名单中',
-  monitoring_failed: '监测失败',
-  monitoring_unavailable: '监测不可用',
   network_execution_expired: '网络执行已到硬截止',
   network_execution_failed: '网络执行失败',
   network_execution_not_active: '网络尚未启动',
   network_execution_not_ready: '网络策略尚未在全部目标终端完成应用',
   network_execution_pending: '网络执行仍在进行',
-  page_launch_failed: '未能打开考试页面',
   preparation_fingerprint_changed: '终端预检指纹已变化，请重新运行终端预检',
-  process_launch_failed: '未能拉起考试客户端',
-  process_path_partial_access_denied: '无法读取部分系统进程路径',
-  process_path_partial_query_failed: '无法读取部分系统进程路径',
-  process_snapshot_failed: '无法获取系统进程快照',
-  process_snapshot_read_failed: '无法读取系统进程列表',
   ready: '已就绪',
-  result_not_bijective: '分配结果不是一一对应',
   seat_binding_changed: '座位绑定已变化',
   seat_facing_changed: '座位朝向已变化',
-  usb_storage_detected: '检测到可移动存储设备',
   user_binding_changed: '学生绑定已变化',
   vigil_delivery_unknown: '投递结果未知',
   workflow_fingerprint_changed: '准备工作流已变化，请重新运行终端预检',
@@ -1234,12 +1207,25 @@ const PRELOGIN_STATUS_LABELS: Record<PreloginDispatchStatus, string> = {
   sent: '已发送',
 };
 
+function catalogTeacherLabel(code: string): string | null {
+  if (examTeacherExactZh(code) == null) return null;
+  return examTeacherErrorZh(code);
+}
+
+function lookupTeacherLabel(code: string): string | null {
+  return TEACHER_CODE_OVERRIDES[code] || catalogTeacherLabel(code);
+}
+
 function teacherCodeLabel(code: string): string | null {
-  if (TEACHER_CODE_LABELS[code]) return TEACHER_CODE_LABELS[code];
+  const direct = lookupTeacherLabel(code);
+  if (direct) return direct;
   const stripped = code.replace(/^exam_prelogin_/, '');
-  if (stripped !== code && TEACHER_CODE_LABELS[stripped]) return TEACHER_CODE_LABELS[stripped];
+  if (stripped !== code) {
+    const strippedLabel = lookupTeacherLabel(stripped);
+    if (strippedLabel) return strippedLabel;
+  }
   const numbered = code.match(/^([a-z][a-z0-9]*(?:_[a-z0-9]+)+)_\d+$/);
-  if (numbered?.[1] && TEACHER_CODE_LABELS[numbered[1]]) return TEACHER_CODE_LABELS[numbered[1]];
+  if (numbered?.[1]) return lookupTeacherLabel(numbered[1]);
   return null;
 }
 
@@ -1318,27 +1304,28 @@ function parseRetryBlocked(message: string): { summary: string; items: string[];
   const match = source.match(/exam_prelogin_retry_blocked(?::(.*))?/);
   if (!match) return null;
   const rest = (match[1] || '').trim();
+  const summary = teacherCodeLabel('exam_prelogin_retry_blocked') || UNKNOWN_TEACHER_ERROR;
   const pairs = [...rest.matchAll(/([a-z][a-z0-9]*(?:_[a-z0-9]+)+)=(\d+)/g)];
   if (pairs.length) {
     const unknown = pairs.some(([, code]) => !teacherCodeLabel(code));
     return {
-      summary: TEACHER_CODE_LABELS.exam_prelogin_retry_blocked,
+      summary,
       items: pairs.map(([, code, count]) => `${formatTeacherCode(code)}：${count} 台`),
       raw: unknown ? rest : null,
     };
   }
   if (rest && HAS_CJK.test(rest) && !SNAKE_CASE_TOKEN.test(rest)) {
-    return { summary: TEACHER_CODE_LABELS.exam_prelogin_retry_blocked, items: [rest], raw: null };
+    return { summary, items: [rest], raw: null };
   }
   if (rest) {
     const label = teacherCodeLabel(rest);
     return {
-      summary: TEACHER_CODE_LABELS.exam_prelogin_retry_blocked,
+      summary,
       items: [label || UNKNOWN_TEACHER_ERROR],
       raw: label ? null : rest,
     };
   }
-  return { summary: TEACHER_CODE_LABELS.exam_prelogin_retry_blocked, items: [], raw: null };
+  return { summary, items: [], raw: null };
 }
 
 function presentTeacherError(message: string): { summary: string; items: string[]; raw: string | null } {

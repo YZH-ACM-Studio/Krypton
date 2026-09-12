@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { examTeacherErrorZh, examTeacherExactZh } from '@hydrooj/common';
 import {
   AlertTriangle,
   Archive,
@@ -289,28 +290,26 @@ const ENDPOINT_STATUS_LABELS: Record<ProjectionItem['status'], string> = {
 
 const DELIVERY_UNKNOWN_FAILURE_REASON = 'transport_send_failed_delivery_unknown';
 const UNKNOWN_TEACHER_ERROR = '操作无法完成，请重试。';
-const INFRA_CODE_LABELS: Record<string, string> = {
-  endpoint_offline: '终端离线',
-  endpoint_incompatible: '终端版本或协议不兼容',
+const INFRA_CODE_OVERRIDES: Record<string, string> = {
   endpoint_capability_missing: '终端缺少所需能力',
-  endpoint_not_registered: '终端尚未登记',
-  endpoint_credential_not_active: '终端凭据不是活动状态',
-  ready: '就绪',
-  transport_send_failed_delivery_unknown: '发送结果未知',
+  endpoint_incompatible: '终端版本或协议不兼容',
+  endpoint_offline: '终端离线',
   vigil_delivery_unknown: '投递结果未知',
   vigil_http_rejected: 'Vigil 拒绝了本次请求',
-  vigil_dispatch_incomplete: '命令尚未全部派发完成',
-  network_platform_clear_failed: '未能清理终端网络规则',
-  network_activity_not_active: '本机没有这场网络锁，整盘还原后需再点一次停止',
-  network_stop_reaffirmation_mismatch: '本机残留的停止证明和当前策略不一致，常见于整盘还原',
-  network_stop_managed_filters_without_activity: '本机没有活动记录，但仍有托管网络规则',
-  authorized_stop_empty_owner_pending: '已按空 owner 认领停止',
-  authorized_stop_empty_owner: '已按空 owner 认领停止',
-  initialized: '本机网络锁已初始化，当前没有活动',
 };
 
+function catalogTeacherLabel(code: string): string | null {
+  if (examTeacherExactZh(code) == null) return null;
+  return examTeacherErrorZh(code);
+}
+
+function lookupInfraLabel(reason: string): string | null {
+  return INFRA_CODE_OVERRIDES[reason] || catalogTeacherLabel(reason);
+}
+
 function teacherReasonLabel(reason: string): string {
-  if (INFRA_CODE_LABELS[reason]) return INFRA_CODE_LABELS[reason];
+  const label = lookupInfraLabel(reason);
+  if (label) return label;
   if (/[\u3400-\u9fff]/.test(reason)) return reason;
   if (!/[a-z][a-z0-9]*(?:_[a-z0-9]+)+/.test(reason)) return reason;
   return UNKNOWN_TEACHER_ERROR;
@@ -319,12 +318,13 @@ function teacherReasonLabel(reason: string): string {
 function presentInfraError(message: string): { summary: string; raw: string | null } {
   const trimmed = message.trim();
   const payload = trimmed.replace(/^(?:请求无效：)+/, '');
-  if (INFRA_CODE_LABELS[payload]) return { summary: INFRA_CODE_LABELS[payload], raw: null };
+  const exact = lookupInfraLabel(payload);
+  if (exact) return { summary: exact, raw: null };
   if (/[\u3400-\u9fff]/.test(payload) && !/[a-z][a-z0-9]*(?:_[a-z0-9]+)+/.test(payload)) return { summary: payload, raw: null };
   if (/[a-z][a-z0-9]*(?:_[a-z0-9]+)+/.test(payload) && !/[\u3400-\u9fff]/.test(payload)) {
     return { summary: UNKNOWN_TEACHER_ERROR, raw: payload };
   }
-  const replaced = payload.replace(/[a-z][a-z0-9]*(?:_[a-z0-9]+)+/g, (token) => INFRA_CODE_LABELS[token] || token);
+  const replaced = payload.replace(/[a-z][a-z0-9]*(?:_[a-z0-9]+)+/g, (token) => lookupInfraLabel(token) || token);
   if (/[a-z][a-z0-9]*(?:_[a-z0-9]+)+/.test(replaced)) return { summary: UNKNOWN_TEACHER_ERROR, raw: trimmed };
   return { summary: replaced, raw: null };
 }

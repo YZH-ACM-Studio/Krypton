@@ -209,6 +209,14 @@ const VIGIL_REJECTED: ExamTeacherErrorText = {
     zh: 'Vigil 拒绝了本次请求。',
     en: 'Vigil rejected this request.',
 };
+const AUTHORIZED_STOP_EMPTY_OWNER: ExamTeacherErrorText = {
+    zh: '已按空 owner 认领停止',
+    en: 'The stop was claimed with an empty owner.',
+};
+const PROCESS_PATH_PARTIAL: ExamTeacherErrorText = {
+    zh: '无法读取部分系统进程路径',
+    en: 'Some system process paths could not be read.',
+};
 
 const EXAM_TEACHER_ERROR_ENTRIES: Readonly<Record<string, ExamTeacherErrorText>> = Object.freeze({
     invalid_title: { zh: '考试标题无效。', en: 'The exam title is invalid.' },
@@ -300,6 +308,17 @@ const EXAM_TEACHER_ERROR_ENTRIES: Readonly<Record<string, ExamTeacherErrorText>>
     layout_fingerprint_changed: { zh: '教室布局内容已变化。', en: 'The classroom layout content has changed.' },
     seat_profile_revision_changed: { zh: '座位运行档案已变化。', en: 'The seat operational profile has changed.' },
     assignment_endpoint_duplicate: { zh: '同一终端被分配到多个座位。', en: 'The same endpoint is assigned to more than one seat.' },
+    constraint_conflict: { zh: '约束冲突', en: 'Constraint conflict.' },
+    duplicate_fixed_seat: { zh: '多个学生被指定到同一座位', en: 'Multiple students were assigned to the same seat.' },
+    duplicate_seat: { zh: '存在重复座位', en: 'There are duplicate seats.' },
+    duplicate_uid: { zh: '存在重复学生', en: 'There are duplicate students.' },
+    locked_manual_mismatch: { zh: '锁定座位与人工映射不一致', en: 'The locked seat does not match the manual mapping.' },
+    locked_seat_unavailable: { zh: '锁定的座位当前不可分配', en: 'The locked seat is not currently assignable.' },
+    locked_uid_missing: { zh: '锁定座位对应的学生已不在名单中', en: 'The student for the locked seat is no longer on the roster.' },
+    manual_mapping_incomplete: { zh: '人工映射不完整', en: 'The manual mapping is incomplete.' },
+    manual_seat_unavailable: { zh: '人工指定的座位当前不可分配', en: 'The manually chosen seat is not currently assignable.' },
+    manual_uid_missing: { zh: '人工指定的学生已不在名单中', en: 'The manually chosen student is no longer on the roster.' },
+    result_not_bijective: { zh: '分配结果不是一一对应', en: 'The assignment result is not one-to-one.' },
     assignment_reference_changed: ASSIGNMENT_REFERENCE_CHANGED,
     assignment_reference_drift: ASSIGNMENT_REFERENCE_CHANGED,
     assignment_revision_conflict: REVISION_CONFLICT,
@@ -331,6 +350,20 @@ const EXAM_TEACHER_ERROR_ENTRIES: Readonly<Record<string, ExamTeacherErrorText>>
     network_configuration_exists: { zh: '该考试活动已有网络配置。', en: 'This exam event already has a network configuration.' },
     monitoring_preflight_blocked: MONITORING_BLOCKED,
     monitoring_preflight_identity_mismatch: { zh: '监测预检返回的终端身份不一致。', en: 'Monitoring preflight returned mismatched endpoint identities.' },
+    detector_degraded: { zh: '检测不完整', en: 'Detection is incomplete.' },
+    detector_failed: { zh: '检测失败', en: 'Detection failed.' },
+    detector_unsupported: { zh: '检测不受支持', en: 'Detection is not supported.' },
+    forbidden_process_detected: { zh: '检测到禁用进程', en: 'A forbidden process was detected.' },
+    forbidden_window_detected: { zh: '检测到可疑前台窗口', en: 'A suspicious foreground window was detected.' },
+    monitoring_failed: { zh: '监测失败', en: 'Monitoring failed.' },
+    monitoring_unavailable: { zh: '监测不可用', en: 'Monitoring is unavailable.' },
+    page_launch_failed: { zh: '未能打开考试页面', en: 'Failed to open the exam page.' },
+    process_launch_failed: { zh: '未能拉起考试客户端', en: 'Failed to launch the exam client.' },
+    process_path_partial_access_denied: PROCESS_PATH_PARTIAL,
+    process_path_partial_query_failed: PROCESS_PATH_PARTIAL,
+    process_snapshot_failed: { zh: '无法获取系统进程快照', en: 'The system process snapshot could not be obtained.' },
+    process_snapshot_read_failed: { zh: '无法读取系统进程列表', en: 'The system process list could not be read.' },
+    usb_storage_detected: { zh: '检测到可移动存储设备', en: 'Removable storage was detected.' },
     request_id_conflict: REQUEST_ID_CONFLICT,
     request_id_invalid: { zh: '请求编号无效。', en: 'The request ID is invalid.' },
     batch_not_found: BATCH_NOT_FOUND,
@@ -349,6 +382,9 @@ const EXAM_TEACHER_ERROR_ENTRIES: Readonly<Record<string, ExamTeacherErrorText>>
     endpoint_capability_missing: ENDPOINT_CAPABILITY_MISSING,
     endpoint_incompatible: ENDPOINT_INCOMPATIBLE,
     endpoint_offline: ENDPOINT_OFFLINE,
+    endpoint_not_registered: { zh: '终端尚未登记', en: 'The endpoint is not registered yet.' },
+    endpoint_credential_not_active: { zh: '终端凭据不是活动状态', en: 'The endpoint credential is not active.' },
+    endpoint_offline_before_send: { zh: '发送前终端已离线', en: 'The endpoint went offline before send.' },
     external_workspace_unavailable: EXTERNAL_WORKSPACE,
     seat_facing_changed: SEAT_FACING_CHANGED,
     seat_binding_changed: SEAT_BINDING_CHANGED,
@@ -480,6 +516,25 @@ const EXAM_TEACHER_ERROR_ENTRIES: Readonly<Record<string, ExamTeacherErrorText>>
     vigil_http_rejected: VIGIL_REJECTED,
     vigil_protocol_invalid: { zh: 'Vigil 协议响应无效。', en: 'The Vigil protocol response is invalid.' },
     vigil_configuration_invalid: { zh: 'Vigil 配置无效。', en: 'The Vigil configuration is invalid.' },
+    vigil_dispatch_incomplete: { zh: '命令尚未全部派发完成', en: 'Not all commands have been dispatched.' },
+    transport_send_failed_delivery_unknown: { zh: '发送结果未知', en: 'The send result is unknown.' },
+    network_platform_clear_failed: { zh: '未能清理终端网络规则', en: 'Failed to clear endpoint network rules.' },
+    network_activity_not_active: {
+        zh: '本机没有这场网络锁，整盘还原后需再点一次停止',
+        en: 'This machine has no network lock for this activity. After a full disk restore, stop it once more.',
+    },
+    network_stop_reaffirmation_mismatch: {
+        zh: '本机残留的停止证明和当前策略不一致，常见于整盘还原',
+        en: 'The leftover stop proof on this machine does not match the current policy, often after a full disk restore.',
+    },
+    network_stop_managed_filters_without_activity: {
+        zh: '本机没有活动记录，但仍有托管网络规则',
+        en: 'This machine has no activity record, but still has managed network rules.',
+    },
+    authorized_stop_empty_owner: AUTHORIZED_STOP_EMPTY_OWNER,
+    authorized_stop_empty_owner_pending: AUTHORIZED_STOP_EMPTY_OWNER,
+    initialized: { zh: '本机网络锁已初始化，当前没有活动', en: 'The local network lock is initialized and currently inactive.' },
+    ready: { zh: '就绪', en: 'Ready.' },
 
     'domainId is invalid': { zh: '域编号无效。', en: 'The domain ID is invalid.' },
     'eventId must be an ObjectId': { zh: '考试活动编号无效。', en: 'The exam event ID is invalid.' },
@@ -606,6 +661,14 @@ export function examTeacherErrorZh(reason: string): string {
 
 export function examTeacherErrorEn(reason: string): string {
     return examTeacherError(reason).en;
+}
+
+/** Exact catalog copy only. Unknown codes and pattern fallbacks return null. */
+export function examTeacherExactZh(reason: string): string | null {
+    if (typeof reason !== 'string') return null;
+    const trimmed = reason.trim();
+    if (!trimmed) return null;
+    return EXAM_TEACHER_ERROR_ENTRIES[trimmed]?.zh ?? null;
 }
 
 export function examTeacherCatalogTranslations(): Readonly<Record<string, string>> {

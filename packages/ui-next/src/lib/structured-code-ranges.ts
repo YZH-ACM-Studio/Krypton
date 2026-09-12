@@ -1,11 +1,63 @@
 import type { ChangeDesc, Text } from '@codemirror/state';
 
-export interface StructuredLineRange {
-  key: string;
+export interface StructuredLineSpan {
   startLine: number;
   endLine: number;
+}
+
+export interface StructuredLineRange extends StructuredLineSpan {
+  key: string;
   state: 'public' | 'answer';
   invalid?: boolean;
+}
+
+export function overlaps(left: StructuredLineSpan, right: StructuredLineSpan) {
+  return left.startLine < right.endLine && right.startLine < left.endLine;
+}
+
+export function subtractPublicRanges<T extends StructuredLineSpan & { key: string }>(ranges: T[], removal: StructuredLineSpan): T[] {
+  return ranges.flatMap((range) => {
+    if (!overlaps(range, removal)) return [range];
+    const next: T[] = [];
+    if (range.startLine < removal.startLine) next.push({ ...range, endLine: removal.startLine });
+    if (removal.endLine < range.endLine) {
+      next.push({
+        ...range,
+        key: next.length ? `${range.key}:right:${removal.startLine}:${removal.endLine}` : range.key,
+        startLine: removal.endLine,
+      });
+    }
+    return next;
+  });
+}
+
+export function mergePublicRanges<T extends StructuredLineSpan & { invalid?: boolean }>(ranges: T[]): T[] {
+  const sorted = [...ranges].sort((a, b) => a.startLine - b.startLine || a.endLine - b.endLine);
+  const result: T[] = [];
+  for (const range of sorted) {
+    const previous = result.at(-1);
+    if (previous && !previous.invalid && !range.invalid && range.startLine <= previous.endLine) {
+      previous.endLine = Math.max(previous.endLine, range.endLine);
+    } else result.push({ ...range });
+  }
+  return result;
+}
+
+/** Mark every range whose key overlaps any pair in overlapSource, keeping prior invalid flags. */
+export function markOverlappingStructuredLineRangesInvalid<T extends StructuredLineSpan & { key: string; invalid?: boolean }>(
+  ranges: T[],
+  overlapSource: Array<StructuredLineSpan & { key: string }> = ranges,
+): Array<T & { invalid: boolean }> {
+  const conflicted = new Set<string>();
+  for (let left = 0; left < overlapSource.length; left++) {
+    for (let right = left + 1; right < overlapSource.length; right++) {
+      if (overlaps(overlapSource[left], overlapSource[right])) {
+        conflicted.add(overlapSource[left].key);
+        conflicted.add(overlapSource[right].key);
+      }
+    }
+  }
+  return ranges.map((range) => ({ ...range, invalid: !!range.invalid || conflicted.has(range.key) }));
 }
 
 function lineBoundary(doc: Text, line: number): number | null {

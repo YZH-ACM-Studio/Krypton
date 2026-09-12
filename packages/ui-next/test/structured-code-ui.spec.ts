@@ -181,7 +181,9 @@ describe('p3.21 shared structured-code workspace', () => {
     expect(editor).to.include('mapStructuredLineRanges');
     expect(editor).not.to.include('mapAuthorLineRanges');
     expect(ranges).to.include('changes.mapPos');
-    expect(workspace).to.include('conflicted.add');
+    expect(ranges).to.include('export function markOverlappingStructuredLineRangesInvalid');
+    expect(workspace).to.include('markOverlappingStructuredLineRangesInvalid');
+    expect(workspace).not.to.include('conflicted.add');
     expect(workspace).to.include('请删除后重新框选，系统不会猜测迁移');
     expect(workspace).not.to.include('disabled={saving || completionBlocked}');
     expect(workspace).to.include('disabled={saving}');

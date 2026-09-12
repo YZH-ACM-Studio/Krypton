@@ -21,6 +21,12 @@ import { readAntiAiMarkerDrafts, serializeAntiAiMarkerInput, type AntiAiMarkerDr
 import { cn } from '@/lib/cn';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { readProblemSaveSuccess } from '@/lib/problem-save-response';
+import {
+  markOverlappingStructuredLineRangesInvalid,
+  mergePublicRanges,
+  overlaps,
+  subtractPublicRanges,
+} from '@/lib/structured-code-ranges';
 import { structuredCodeCompletionIssues, type StructuredAuthorStage, type StructuredCodeCompletionIssue } from '@/lib/structured-code-readiness';
 
 interface StructuredEditorProblemDoc {
@@ -102,38 +108,6 @@ interface TestdataFile {
 
 function validSourceRange(source: string, range: Pick<RegionMeta, 'startLine' | 'endLine'>) {
   return range.startLine >= 0 && range.endLine > range.startLine && range.endLine <= source.split('\n').length;
-}
-
-function overlaps(left: { startLine: number; endLine: number }, right: { startLine: number; endLine: number }) {
-  return left.startLine < right.endLine && right.startLine < left.endLine;
-}
-
-function subtractPublicRanges(ranges: PublicRangeMeta[], removal: { startLine: number; endLine: number }): PublicRangeMeta[] {
-  return ranges.flatMap((range) => {
-    if (!overlaps(range, removal)) return [range];
-    const next: PublicRangeMeta[] = [];
-    if (range.startLine < removal.startLine) next.push({ ...range, endLine: removal.startLine });
-    if (removal.endLine < range.endLine) {
-      next.push({
-        ...range,
-        key: next.length ? `${range.key}:right:${removal.startLine}:${removal.endLine}` : range.key,
-        startLine: removal.endLine,
-      });
-    }
-    return next;
-  });
-}
-
-function mergePublicRanges(ranges: PublicRangeMeta[]): PublicRangeMeta[] {
-  const sorted = [...ranges].sort((a, b) => a.startLine - b.startLine || a.endLine - b.endLine);
-  const result: PublicRangeMeta[] = [];
-  for (const range of sorted) {
-    const previous = result.at(-1);
-    if (previous && !previous.invalid && !range.invalid && range.startLine <= previous.endLine) {
-      previous.endLine = Math.max(previous.endLine, range.endLine);
-    } else result.push({ ...range });
-  }
-  return result;
 }
 
 function caseFileOptions(files: TestdataFile[], current: string) {
@@ -404,20 +378,11 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
     const nextPublic = publicRanges.map((range) => ({ ...range, ...mappedByKey.get(range.key) }));
     const nextRegions = regions.map((region) => ({ ...region, ...mappedByKey.get(region.key) }));
     const all = [...nextPublic, ...nextRegions];
-    const conflicted = new Set<string>();
-    for (let left = 0; left < all.length; left++) {
-      for (let right = left + 1; right < all.length; right++) {
-        if (overlaps(all[left], all[right])) {
-          conflicted.add(all[left].key);
-          conflicted.add(all[right].key);
-        }
-      }
-    }
-    setPublicRanges(nextPublic.map((range) => ({ ...range, invalid: !!range.invalid || conflicted.has(range.key) })));
+    setPublicRanges(markOverlappingStructuredLineRangesInvalid(nextPublic, all));
     setRegions(
-      nextRegions
-        .map((region) => ({ ...region, invalid: !!region.invalid || conflicted.has(region.key) }))
-        .sort((a, b) => a.startLine - b.startLine || a.endLine - b.endLine || a.key.localeCompare(b.key)),
+      markOverlappingStructuredLineRangesInvalid(nextRegions, all).sort(
+        (a, b) => a.startLine - b.startLine || a.endLine - b.endLine || a.key.localeCompare(b.key),
+      ),
     );
   };
 

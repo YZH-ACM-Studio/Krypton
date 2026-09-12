@@ -215,12 +215,11 @@ export function compileProgrammingStatement(value: unknown): string {
 }
 
 export function deriveProgrammingStatementContent(statementInput: unknown, content?: unknown): string {
-    const statement = normalizeProgrammingStatement(statementInput);
-    const compiled = compileProgrammingStatement(statement);
     if (content !== undefined) {
         throw new ValidationError('content', null, localizedErrorText`结构化题面正文必须由服务端生成，不能直接提交`);
     }
-    return compiled;
+    const statement = normalizeProgrammingStatement(statementInput);
+    return compileProgrammingStatement(statement);
 }
 
 function validLimit(value: unknown, parse: (value: any) => number): boolean {

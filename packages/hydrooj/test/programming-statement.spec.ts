@@ -124,6 +124,26 @@ describe('programming statement canonical protocol', () => {
         }
     });
 
+    it('rejects caller-supplied content before validating an illegal statement', () => {
+        const illegal = { ...emptyProgrammingStatement(), schemaVersion: 2 };
+        expect(() => deriveProgrammingStatementContent(illegal)).to.throw(/schema/);
+        try {
+            deriveProgrammingStatementContent(illegal, 'injected markdown');
+            expect.fail('expected ValidationError');
+        } catch (error) {
+            expect(error).to.be.instanceOf(ValidationError);
+            expect((error as InstanceType<typeof ValidationError>).params[0]).to.equal('content');
+            expect((error as InstanceType<typeof ValidationError>).params[2]).to.equal('结构化题面正文必须由服务端生成，不能直接提交');
+        }
+        try {
+            deriveProgrammingStatementContent(illegal, '');
+            expect.fail('expected ValidationError');
+        } catch (error) {
+            expect(error).to.be.instanceOf(ValidationError);
+            expect((error as InstanceType<typeof ValidationError>).params[0]).to.equal('content');
+        }
+    });
+
     it('blocks publication until every section and live time/memory config are complete', () => {
         expect(() => assertProgrammingStatementComplete(emptyProgrammingStatement(), { time: '1s', memory: '256m' })).to.throw(/unresolved/);
         expect(() => assertProgrammingStatementComplete(completeStatement(), {})).to.throw(/time and memory/);

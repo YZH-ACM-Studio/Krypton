@@ -101,13 +101,13 @@ function sameRevisionRef(left: ExamNetworkRevisionRef, right: ExamNetworkRevisio
     return left.id.equals(right.id) && left.revision === right.revision && left.fingerprint === right.fingerprint;
 }
 
-async function resolveUpdatePreview(domainId: string, eventId: ObjectId, execution: ExamNetworkExecutionDoc | null) {
+async function resolveUpdatePreview(domainId: string, eventId: ObjectId, schoolId: ObjectId, execution: ExamNetworkExecutionDoc | null) {
     if (!execution) return null;
     const config = await examEventNetworkConfigColl.findOne({ domainId, eventId });
     if (!config?.policy || !config.target) return null;
     const [running, configured] = await Promise.all([
-        resolveConfig(domainId, eventId, { policyRef: execution.policyRef, targetRef: execution.targetRef }),
-        resolveConfig(domainId, eventId),
+        resolveConfig(domainId, eventId, schoolId, { policyRef: execution.policyRef, targetRef: execution.targetRef }),
+        resolveConfig(domainId, eventId, schoolId),
     ]);
     const policyChanged = !sameRevisionRef(execution.policyRef, configured.policyRef);
     const targetChanged = !sameRevisionRef(execution.targetRef, configured.targetRef);
@@ -152,6 +152,7 @@ export function readUnsignedIntBody(handler: Handler, key: string): number | und
 async function resolveConfig(
     domainId: string,
     eventId: ObjectId,
+    schoolId: ObjectId,
     refs?: { policyRef: ExamNetworkRevisionRef; targetRef: ExamNetworkRevisionRef },
 ): Promise<ResolvedExecutionConfig> {
     const config = await examEventNetworkConfigColl.findOne({ domainId, eventId });
@@ -159,25 +160,25 @@ async function resolveConfig(
     const targetRef = refs?.targetRef || config?.target;
     if (!config || !policyRef || !targetRef) throw new ExamNetworkExecutionError('network_configuration_incomplete');
     const [template, assignment] = await Promise.all([
-        examPolicyTemplateColl.findOne({ domainId, _id: policyRef.id }),
-        examTargetAssignmentColl.findOne({ domainId, _id: targetRef.id, eventId }),
+        examPolicyTemplateColl.findOne({ domainId, _id: policyRef.id, schoolId }),
+        examTargetAssignmentColl.findOne({ domainId, _id: targetRef.id, eventId, schoolId }),
     ]);
     if (!template) throw new ExamNetworkExecutionError('policy_revision_not_found');
     if (!assignment) throw new ExamNetworkExecutionError('target_revision_not_found');
     let policy: ExamPolicyRevision;
     let target: ExamTargetRevision;
     try {
-        // Keep the handler's unscoped-school success set: frozen loaders use stored document schoolIds.
+        // Frozen refs use ExamEvent.schoolId, the same identity beginApply freezes onto execution.
         [policy, target] = await Promise.all([
             loadExamPolicyRevisionByFrozenRef({
                 domainId,
-                schoolId: template.schoolId,
+                schoolId,
                 reference: policyRef,
             }),
             loadExamTargetRevisionByFrozenRef({
                 domainId,
                 eventId,
-                schoolId: assignment.schoolId,
+                schoolId,
                 reference: targetRef,
             }),
         ]);
@@ -255,12 +256,12 @@ class ExamNetworkExecutionHandler extends ExamNetworkExecutionBaseHandler {
     @param('eventId', Types.ObjectId)
     async get(_args: unknown, eventId: ObjectId) {
         const domainId = String(this.domain._id);
-        await this.loadEvent(eventId);
+        const event = await this.loadEvent(eventId);
         try {
             const execution = await examNetworkExecutionService.get(domainId, eventId);
             this.response.body = {
                 execution: serializeExecution(execution),
-                updatePreview: await resolveUpdatePreview(domainId, eventId, execution),
+                updatePreview: await resolveUpdatePreview(domainId, eventId, event.schoolId, execution),
             };
         } catch (error) {
             translateExecutionError(error);
@@ -292,7 +293,7 @@ class ExamNetworkExecutionHandler extends ExamNetworkExecutionBaseHandler {
                 }
                 const current = await examNetworkExecutionService.get(domainId, eventId);
                 if (action === 'preflight') {
-                    const configured = await resolveConfig(domainId, eventId);
+                    const configured = await resolveConfig(domainId, eventId, event.schoolId);
                     return {
                         preflight: await preflightExamNetworkOnVigil(configured.target.endpointIds),
                         preflightConfig: {
@@ -310,7 +311,7 @@ class ExamNetworkExecutionHandler extends ExamNetworkExecutionBaseHandler {
                     if (expectedConfigRevision === undefined || expectedConfigRevision < 1) {
                         throw new ExamNetworkExecutionError('expected_config_revision_required');
                     }
-                    const configured = await resolveConfig(domainId, eventId);
+                    const configured = await resolveConfig(domainId, eventId, event.schoolId);
                     if (configured.configRevision !== expectedConfigRevision) {
                         throw new ExamNetworkExecutionError('config_revision_conflict');
                     }
@@ -411,7 +412,7 @@ class ExamNetworkExecutionHandler extends ExamNetworkExecutionBaseHandler {
                     if (!current) throw new ExamNetworkExecutionError('execution_not_found');
                     if (event.lifecycle === 'archived') throw new ExamNetworkExecutionError('event_archived');
                     if (current.desiredState === 'active') {
-                        const configured = await resolveConfig(domainId, eventId);
+                        const configured = await resolveConfig(domainId, eventId, event.schoolId);
                         if (!sameRevisionRef(current.policyRef, configured.policyRef) || !sameRevisionRef(current.targetRef, configured.targetRef)) {
                             throw new ExamNetworkExecutionError('retry_requires_current_config');
                         }
@@ -457,7 +458,7 @@ class ExamNetworkExecutionHandler extends ExamNetworkExecutionBaseHandler {
                 try {
                     const payload = executionPayload(
                         execution,
-                        await resolveConfig(domainId, eventId, {
+                        await resolveConfig(domainId, eventId, event.schoolId, {
                             policyRef: execution.policyRef,
                             targetRef: execution.targetRef,
                         }),

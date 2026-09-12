@@ -68,11 +68,19 @@ describe('exam network execution HTTP contracts', () => {
     it('resolves frozen policy/target refs without retargeting start through live sources', () => {
         expect(handler).to.include('loadExamPolicyRevisionByFrozenRef');
         expect(handler).to.include('loadExamTargetRevisionByFrozenRef');
-        expect(handler).to.include('schoolId: template.schoolId');
-        expect(handler).to.include('schoolId: assignment.schoolId');
+        expect(handler).to.include('schoolId: event.schoolId');
+        expect(handler).to.not.include('schoolId: template.schoolId');
+        expect(handler).to.not.include('schoolId: assignment.schoolId');
+        expect(handler).to.include('examPolicyTemplateColl.findOne({ domainId, _id: policyRef.id, schoolId })');
+        expect(handler).to.include('examTargetAssignmentColl.findOne({ domainId, _id: targetRef.id, eventId, schoolId })');
+        expect(handler).to.include('resolveConfig(domainId, eventId, event.schoolId)');
+        expect(handler).to.include('resolveUpdatePreview(domainId, eventId, event.schoolId, execution)');
+        expect(handler.match(/resolveConfig\(domainId, eventId, event\.schoolId/g)?.length).to.equal(4);
         const startBlock = handler.slice(handler.indexOf("if (action === 'start')"), handler.indexOf("} else if (action === 'stop')"));
-        expect(startBlock).to.include('resolveConfig(domainId, eventId)');
+        expect(startBlock).to.include('resolveConfig(domainId, eventId, event.schoolId)');
         expect(startBlock).to.not.include('resolveExamTargetSources');
+        expect(handler).to.include("throw new ExamNetworkExecutionError('empty_target')");
+        expect(handler).to.include('throw new ExamNetworkExecutionError(error.reason)');
         expect(handler).to.include('executionId: execution._id.toHexString()');
         expect(handler).to.include('createdAt: execution.createdAt.toISOString()');
         expect(handler).to.not.include('deriveEndpointPolicyStatus(');

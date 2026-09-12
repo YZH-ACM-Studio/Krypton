@@ -5,7 +5,7 @@ import { Logger } from '@hydrooj/utils';
 import { localizedErrorText, ManagedProblemMetadataConflictError, ValidationError } from '../error';
 import type { ProblemDoc, TrainingNode } from '../interface';
 import {
-    compileProgrammingStatement,
+    deriveProgrammingStatementContent,
     emptyProgrammingStatement,
     normalizeProgrammingStatement,
     type ProgrammingStatement,
@@ -168,6 +168,48 @@ const TEMPLATE_BY_ID = new Map(MANAGED_SOURCE_TEMPLATES.map((template) => [templ
 const mindmapNodesColl = db.collection<MindmapNodeRecord>('mindmap.nodes');
 const knowledgeMapsColl = db.collection<KnowledgeMapRecord>('mindmap.maps');
 export const managedPidCountersColl = db.collection<PidCounterDoc>('problem.pid_counters');
+
+interface HydroMindmapMaterializeResult {
+    mapId: ObjectId;
+    mapTitle: string;
+    nodeIds: ObjectId[];
+    nodePaths: Array<{ id: string; label: string }>;
+    tags: string[];
+    pathVersion?: MindmapPathVersion[];
+}
+
+interface HydroMindmapMaterializeOptions {
+    required?: boolean;
+    requirePublicMap?: boolean;
+    field?: 'knowledgeNodeIds' | 'mindmapNodeIds';
+    includePathVersion?: boolean;
+}
+
+type HydroMindmapMaterialize = (mapId: unknown, nodeIds: unknown, options?: HydroMindmapMaterializeOptions) => Promise<HydroMindmapMaterializeResult>;
+
+function getMindmapMaterialize(): HydroMindmapMaterialize {
+    const hydro = globalThis as typeof globalThis & {
+        Hydro?: { model?: { mindmap?: { materialize?: HydroMindmapMaterialize } } };
+    };
+    const materialize = hydro.Hydro?.model?.mindmap?.materialize;
+    if (typeof materialize !== 'function') {
+        throw new TypeError('krypton-mindmap materialize is not registered');
+    }
+    return materialize;
+}
+
+function isNamedError(error: unknown, name: string): error is Error & { params?: unknown[] } {
+    return error instanceof Error && error.name === name;
+}
+
+function rethrowKnowledgeMaterializeError(error: unknown): never {
+    if (error instanceof TypeError) throw error;
+    if (isNamedError(error, 'MindmapConflictError')) {
+        const payload = Array.isArray(error.params) && error.params.length ? error.params[0] : error.message;
+        throw new ManagedProblemMetadataConflictError(payload as ConstructorParameters<typeof ManagedProblemMetadataConflictError>[0]);
+    }
+    throw error;
+}
 
 const MANAGED_PROBLEM_PID_INDEX = {
     key: { domainId: 1, docType: 1, pid: 1 },
@@ -454,58 +496,24 @@ async function materializeKnowledgeMindmapState(
         if (options.requireMap !== false) throw new ValidationError('knowledgeMapId');
         throw new TypeError('materializeKnowledgeMindmapState requires a knowledge map');
     }
-    if (nodeIds.length) {
-        const selected = await mindmapNodesColl
-            .find({ _id: { $in: nodeIds.map((id) => new ObjectId(id)) }, mapId }, { projection: { _id: 1, mapId: 1 } })
-            .toArray();
-        if (selected.length !== nodeIds.length) {
-            throw new ManagedProblemMetadataConflictError(localizedErrorText`所选知识节点已删除或不属于指定导图`);
-        }
+    try {
+        const result = await getMindmapMaterialize()(mapId, nodeIds, {
+            required: options.required === true,
+            requirePublicMap: options.requirePublicMap,
+            field: options.field || 'knowledgeNodeIds',
+            includePathVersion: options.includePathVersion === true,
+        });
+        return {
+            mapId: result.mapId,
+            mapTitle: result.mapTitle,
+            nodeIds: result.nodeIds,
+            nodePaths: result.nodePaths,
+            tags: result.tags,
+            pathVersion: result.pathVersion ?? [],
+        };
+    } catch (error) {
+        rethrowKnowledgeMaterializeError(error);
     }
-    const map = await knowledgeMapsColl.findOne({ _id: mapId }, { projection: { _id: 1, title: 1, rootNodeId: 1, visibility: 1 } });
-    if (!map) throw new ManagedProblemMetadataConflictError(localizedErrorText`所属导图已删除`);
-    if (options.requirePublicMap && map.visibility !== 'public') {
-        throw new ManagedProblemMetadataConflictError(localizedErrorText`所属导图当前不可用于题目归类`);
-    }
-    const nodes = await loadMindmapNodes(mapId);
-    const byId = new Map(nodes.map((node) => [node._id.toHexString(), node]));
-    const tags: string[] = [];
-    const nodePaths: Array<{ id: string; label: string }> = [];
-    const pathVersion = new Map<string, MindmapPathVersion>();
-    for (const id of nodeIds) {
-        const node = byId.get(id);
-        if (!node || !Array.isArray(node.tags) || !node.tags.some((tag) => typeof tag === 'string' && tag.trim())) {
-            throw new ManagedProblemMetadataConflictError(localizedErrorText`导图节点 ${id} 已删除或不可选`);
-        }
-        const nodePath = buildNodePath(node, byId, map.rootNodeId);
-        nodePaths.push({ id, label: nodePath.map((part) => part.topic).join(' / ') });
-        for (const pathNode of nodePath) {
-            if (options.includePathVersion) {
-                if (!(pathNode.updatedAt instanceof Date) || Number.isNaN(pathNode.updatedAt.getTime())) {
-                    throw new TypeError(`mindmap node ${pathNode._id.toHexString()} updatedAt must be a valid date`);
-                }
-                const pathNodeId = pathNode._id.toHexString();
-                pathVersion.set(pathNodeId, {
-                    id: pathNodeId,
-                    parentId: pathNode.parentId?.toHexString() || null,
-                    topic: pathNode.topic,
-                    updatedAt: pathNode.updatedAt.toISOString(),
-                });
-            }
-            for (const tag of Array.isArray(pathNode.tags) ? pathNode.tags : []) {
-                const normalized = typeof tag === 'string' ? tag.trim() : '';
-                if (normalized && !tags.includes(normalized)) tags.push(normalized);
-            }
-        }
-    }
-    return {
-        mapId,
-        mapTitle: map.title,
-        nodeIds: nodeIds.map((id) => new ObjectId(id)),
-        nodePaths,
-        tags,
-        pathVersion: [...pathVersion.values()].sort((left, right) => left.id.localeCompare(right.id)),
-    };
 }
 
 export async function materializeKnowledgeMindmapTags(
@@ -677,8 +685,7 @@ export async function prepareManagedProblemDraft(domainId: string, input: Manage
     let content: string;
     if (statementFormat === 'structured-v1') {
         programmingStatement = normalizeProgrammingStatement(input.programmingStatement ?? emptyProgrammingStatement());
-        content = compileProgrammingStatement(programmingStatement);
-        if (input.content !== undefined) throw new ValidationError('content', null, localizedErrorText`结构化编程题正文只能由服务端生成`);
+        content = deriveProgrammingStatementContent(programmingStatement, input.content);
     } else if (statementFormat === 'legacy-import-v1') {
         if (typeof input.content !== 'string') throw new ValidationError('content');
         if (input.programmingStatement !== undefined) throw new ValidationError('programmingStatement');

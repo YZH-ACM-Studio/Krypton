@@ -298,7 +298,8 @@ describe('P2.12 YAGNI lifecycle contract', () => {
         const authorizedEnd = source.indexOf('static async copy(', authorizedStart);
         const authorized = source.slice(authorizedStart, authorizedEnd);
 
-        expect(canonicalizer).to.include('结构化题面正文必须由服务端生成，不能直接提交');
+        expect(canonicalizer).to.include('deriveProgrammingStatementContent(');
+        expect(canonicalizer).to.include('结构化题面正文只能由 programmingStatement 生成');
         expect(canonicalizer).to.include('content, html: false');
         expect(source.match(/assertPublicProgrammingStatementReady\(current as ProblemDoc, \$set, \$unset\)/g)).to.have.length(2);
         expect(source).to.include('assertProgrammingStatementProjection(input.programmingStatement, input.config, input.content)');

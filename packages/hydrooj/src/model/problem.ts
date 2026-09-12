@@ -36,6 +36,7 @@ import {
     assertProgrammingStatementComplete,
     assertProgrammingStatementProjection,
     compileProgrammingStatement,
+    deriveProgrammingStatementContent,
     normalizeProgrammingStatement,
     ProgrammingStatementValidationError,
 } from '../lib/programming-statement';
@@ -455,12 +456,10 @@ function canonicalizeProgrammingStatementPatch(current: ProblemDoc, $set: Partia
     if (!Object.hasOwn($set, 'programmingStatement')) {
         throw new ValidationError('content', null, localizedErrorText`结构化题面正文只能由 programmingStatement 生成`);
     }
-    if (Object.hasOwn($set, 'content')) {
-        throw new ValidationError('content', null, localizedErrorText`结构化题面正文必须由服务端生成，不能直接提交`);
-    }
-    let programmingStatement: ProblemDoc['programmingStatement'];
     try {
-        programmingStatement = normalizeProgrammingStatement($set.programmingStatement);
+        const programmingStatement = normalizeProgrammingStatement($set.programmingStatement);
+        const content = deriveProgrammingStatementContent(programmingStatement, Object.hasOwn($set, 'content') ? $set.content : undefined);
+        return { ...$set, statementFormat: 'structured-v1', programmingStatement, content, html: false };
     } catch (error) {
         if (error instanceof ProgrammingStatementValidationError) {
             throw localizeErrorParameter(
@@ -472,8 +471,6 @@ function canonicalizeProgrammingStatementPatch(current: ProblemDoc, $set: Partia
         }
         throw error;
     }
-    const content = compileProgrammingStatement(programmingStatement);
-    return { ...$set, statementFormat: 'structured-v1', programmingStatement, content, html: false };
 }
 
 function captureProgrammingStatementWrite($set: Partial<ProblemDoc>) {

@@ -1,11 +1,12 @@
 import { expect } from 'chai';
-import { localizedErrorText } from '@hydrooj/framework';
+import { localizeError, localizedErrorText } from '@hydrooj/framework';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { beforeEach, describe, it } from 'node:test';
 import { ObjectId } from 'mongodb';
 import { managedProblemPatchCapability } from '../src/model/managed-problem-patch';
 
+const Module = require('module');
 (global as any).Hydro ||= { model: {} };
 
 class TestValidationError extends Error {
@@ -36,7 +37,10 @@ const collectionStub = (name: string) => {
     if (name === 'mindmap.nodes') {
         return {
             find(filter: any = {}) {
-                return {
+                const cursor = {
+                    sort() {
+                        return cursor;
+                    },
                     async toArray() {
                         return mindmapDocs
                             .filter(
@@ -47,6 +51,25 @@ const collectionStub = (name: string) => {
                             .map((node) => ({ ...node, tags: [...node.tags] }));
                     },
                 };
+                return cursor;
+            },
+        };
+    }
+    if (name === 'document') {
+        return {
+            find() {
+                const cursor = {
+                    project() {
+                        return cursor;
+                    },
+                    async toArray() {
+                        return [];
+                    },
+                };
+                return cursor;
+            },
+            async countDocuments() {
+                return 0;
             },
         };
     }
@@ -174,6 +197,64 @@ require.cache[documentPath] = {
 delete require.cache[modulePath];
 
 const authoring = require(modulePath) as typeof import('../src/model/managed-problem-authoring');
+
+const mindmapModelPath = require.resolve('../../krypton-mindmap/src/model.ts');
+const mindmapErrorPath = require.resolve('../../krypton-mindmap/src/error.ts');
+const mindmapDbPath = require.resolve('../../krypton-mindmap/src/db.ts');
+const originalLoad = Module._load;
+
+class MindmapRequestError extends Error {
+    name = 'MindmapRequestError';
+    params: unknown[];
+    constructor(message: unknown, details?: unknown) {
+        super(String(message));
+        this.params = [message, details];
+    }
+}
+
+class MindmapConflictError extends Error {
+    name = 'MindmapConflictError';
+    params: unknown[];
+    constructor(message: unknown, details?: unknown) {
+        super(String(message));
+        this.params = [message, details];
+    }
+}
+
+require.cache[mindmapErrorPath] = {
+    id: mindmapErrorPath,
+    filename: mindmapErrorPath,
+    loaded: true,
+    exports: { MindmapRequestError, MindmapConflictError },
+} as NodeModule;
+require.cache[mindmapDbPath] = {
+    id: mindmapDbPath,
+    filename: mindmapDbPath,
+    loaded: true,
+    exports: {
+        get nodesColl() {
+            return collectionStub('mindmap.nodes');
+        },
+        get mapsColl() {
+            return collectionStub('mindmap.maps');
+        },
+    },
+} as NodeModule;
+Module._load = function load(request: string, parent: NodeModule, isMain: boolean) {
+    if (parent?.filename === mindmapModelPath && request === 'hydrooj') {
+        return { localizeError, localizedErrorText, ObjectId, db: { collection: collectionStub } };
+    }
+    return originalLoad.call(this, request, parent, isMain);
+};
+try {
+    delete require.cache[mindmapModelPath];
+    const mindmapModel = require(mindmapModelPath) as { materialize: (...args: unknown[]) => Promise<unknown> };
+    (global as any).Hydro.model.mindmap = {
+        materialize: (...args: unknown[]) => mindmapModel.materialize(...args),
+    };
+} finally {
+    Module._load = originalLoad;
+}
 
 async function expectReject(work: Promise<unknown>, error: string | (new (...args: any[]) => Error)) {
     try {
@@ -419,6 +500,15 @@ describe('P2.14 managed problem source templates', () => {
         expect(publicProjection).to.include("'knowledgeMapId'");
         expect(publicProjection).to.include("'knowledgeNodeIds'");
         expect(source).to.include('static PROJECTION_MANAGED_EDITOR: Field[] = [');
+    });
+
+    it('derives structured Markdown and knowledge tags through the shared helpers', () => {
+        const authoringSource = readFileSync(resolve(process.cwd(), 'packages/hydrooj/src/model/managed-problem-authoring.ts'), 'utf8');
+        expect(authoringSource).to.include('deriveProgrammingStatementContent(');
+        expect(authoringSource).not.to.include('compileProgrammingStatement(');
+        expect(authoringSource).to.include('getMindmapMaterialize()(mapId, nodeIds');
+        expect(authoringSource).to.include('allowSolePublicMap');
+        expect(authoringSource).to.include('Hydro?.model?.mindmap?.materialize');
     });
 });
 

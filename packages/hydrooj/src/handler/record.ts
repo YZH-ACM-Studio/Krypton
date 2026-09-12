@@ -1,5 +1,5 @@
 import { omit, pick, throttle, uniqBy } from 'lodash';
-import { normalizeSubtasks } from '@hydrooj/common';
+import { normalizeSubtasks, type ProblemConfigFile } from '@hydrooj/common';
 import { readYamlCases } from '@hydrooj/common/cases';
 import { load as loadYaml } from 'js-yaml';
 import { Filter, ObjectId } from 'mongodb';
@@ -23,10 +23,17 @@ import { buildPersonalPracticeRecordQuery } from '../lib/contest-problem-status'
 import { buildExamModeRecordCodePayload, shouldUseLiveClientRecordCodeOnly } from '../lib/exam-mode-record';
 import { formatRecordJudgeMessages } from '../lib/record-judge-presentation';
 import { matchesRecordConnectionScope, RECORD_PRETEST_CONTEST_ID } from '../lib/record-connection-scope';
+import { parseConfig } from '../lib/testdataConfig';
 import { PERM, PRIV, STATUS, STATUS_TEXTS } from '../model/builtin';
 import * as contest from '../model/contest';
 import * as contestTeam from '../model/contest-team';
 import problem, { ProblemDoc } from '../model/problem';
+import {
+    PROBLEM_ACL_INTERNAL_FIELDS,
+    readContextViewableProblem,
+    type ProblemAclUser,
+    type ProblemViewContext,
+} from '../model/problem-access';
 import record from '../model/record';
 import {
     auditRecordScorePermissionRejection,
@@ -42,6 +49,56 @@ import { ConnectionHandler, param, subscribe, Types } from '../service/server';
 import { buildProjection, Time } from '../utils';
 import { canManageVirtualContest, virtualContestService, type VirtualContestAttemptDoc } from '../model/virtual-contest';
 import { ContestDetailBaseHandler } from './contest';
+
+const STABLE_VIEW_AUTHORIZATION_FIELDS = ['domainId', 'docId', 'owner', 'hidden', 'authoringMode', 'pidNamespaceId', 'managedAuthoring'] as const;
+
+function stableViewProjection(projection: readonly string[]) {
+    return Array.from(new Set([...projection, ...STABLE_VIEW_AUTHORIZATION_FIELDS, ...PROBLEM_ACL_INTERNAL_FIELDS]));
+}
+
+function stripUnrequestedStableViewFields(pdoc: ProblemDoc | null, requested: readonly string[]): ProblemDoc | null {
+    if (!pdoc) return null;
+    const wanted = new Set(requested);
+    for (const field of STABLE_VIEW_AUTHORIZATION_FIELDS) {
+        if (!wanted.has(field)) delete (pdoc as Record<string, unknown>)[field];
+    }
+    return pdoc;
+}
+
+async function parseProjectedConfig(pdoc: ProblemDoc, projection: readonly string[], rawConfig: boolean) {
+    if (rawConfig || !projection.includes('config')) return pdoc;
+    try {
+        pdoc.config = await parseConfig(pdoc.config as string | ProblemConfigFile, pdoc.data?.map((item) => item.name) || []);
+    } catch (error) {
+        pdoc.config = `Cannot parse: ${(error as Error).message}`;
+    }
+    return pdoc;
+}
+
+function createStableProblemRead(domainId: string, pid: string | number, projection: readonly string[], rawConfig = false) {
+    const readProjection = stableViewProjection(projection);
+    return async (filter?: Filter<ProblemDoc>) => {
+        if (!filter) return problem.get(domainId, pid, readProjection, rawConfig);
+        const [res] = await problem.getMulti(domainId, filter, readProjection).limit(1).toArray();
+        if (!res) return null;
+        return parseProjectedConfig(res, readProjection, rawConfig);
+    };
+}
+
+async function readRecordContextProblem(
+    domainId: string,
+    user: ProblemAclUser,
+    context: ProblemViewContext,
+    pid: string | number,
+    projection: readonly string[],
+    rawConfig = false,
+) {
+    const pdoc = await readContextViewableProblem(domainId, user, context, {
+        readDirectStable: createStableProblemRead(domainId, pid, projection, rawConfig),
+        readContainer: () => problem.get(domainId, pid, [...projection], rawConfig),
+    });
+    return stripUnrequestedStableViewFields(pdoc, projection);
+}
 
 async function getCurrentTeamForRecord(domainId: string, rdoc: RecordDoc, uid: number): Promise<contestTeam.ContestTeamDoc | null> {
     if (!(rdoc.contest instanceof ObjectId) || !(rdoc.contestTeamId instanceof ObjectId)) return null;
@@ -437,14 +494,17 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
             });
         if (liveClientRecordCodeOnly && rev) throw new PermissionError(PERM.PERM_VIEW_RECORD);
         const contextualProblemAccess = this.postContestPracticeRecordAccess || this.contestPretestRecordAccess;
-        const requiresDirectProblemAccess =
-            !contextualProblemAccess &&
-            !rdoc.virtualAttemptId &&
-            (!this.tdoc || (!this.teamRecordAccess && !this.tsdoc?.attend));
+        const problemViewContext = {
+            kind: 'record-detail' as const,
+            contextualProblemAccess,
+            virtualAttemptId: rdoc.virtualAttemptId,
+            tdoc: this.tdoc,
+            teamRecordAccess: this.teamRecordAccess,
+            tsdoc: this.tsdoc,
+        };
+        const detailProjection = problem.PROJECTION_LIST.concat('config');
         const [pdoc, self, udoc] = await Promise.all([
-            requiresDirectProblemAccess
-                ? problem.getViewableAuthorized(rdoc.domainId, rdoc.pid, this.user, problem.PROJECTION_LIST.concat('config'))
-                : problem.get(rdoc.domainId, rdoc.pid, problem.PROJECTION_LIST.concat('config')),
+            readRecordContextProblem(rdoc.domainId, this.user, problemViewContext, rdoc.pid, detailProjection),
             problem.getStatus(domainId, rdoc.pid, this.user._id),
             user.getById(domainId, rdoc.uid),
         ]);
@@ -502,9 +562,14 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
             const inActiveContest = this.tdoc ? !contest.isDone(this.tdoc, this.tsdoc) : false;
             const virtualAttemptOpen = this.virtualAttempt ? isVirtualAttemptOpen(this.virtualAttempt) : false;
             if (canViewDetail && !inActiveContest && !virtualAttemptOpen) {
-                const rawPdoc = requiresDirectProblemAccess
-                    ? await problem.getViewableAuthorized(rdoc.domainId, rdoc.pid, this.user, ['domainId', 'docId', 'config'], true)
-                    : await problem.get(rdoc.domainId, rdoc.pid, ['domainId', 'docId', 'config'], true);
+                const rawPdoc = await readRecordContextProblem(
+                    rdoc.domainId,
+                    this.user,
+                    problemViewContext,
+                    rdoc.pid,
+                    ['domainId', 'docId', 'config'],
+                    true,
+                );
                 const rawCfg = rawPdoc?.config;
                 const cfgObj: any = typeof rawCfg === 'string' ? loadYaml(rawCfg) : rawCfg;
                 if (cfgObj && typeof cfgObj === 'object') {
@@ -1005,12 +1070,16 @@ export class RecordDetailConnectionHandler extends ConnectionHandler {
             }
         }
         const contextualProblemAccess = this.postContestPracticeRecordAccess || this.contestPretestRecordAccess;
-        const requiresDirectProblemAccess =
-            !contextualProblemAccess &&
-            !rdoc.virtualAttemptId &&
-            (!rdoc.contest || (!this.teamRecordAccess && this.user._id !== rdoc.uid));
+        const problemViewContext = {
+            kind: 'record-detail-connection' as const,
+            contextualProblemAccess,
+            virtualAttemptId: rdoc.virtualAttemptId,
+            contest: rdoc.contest,
+            teamRecordAccess: this.teamRecordAccess,
+            recordUid: rdoc.uid,
+        };
         const [pdoc, self] = await Promise.all([
-            requiresDirectProblemAccess ? problem.getViewableAuthorized(rdoc.domainId, rdoc.pid, this.user) : problem.get(rdoc.domainId, rdoc.pid),
+            readRecordContextProblem(rdoc.domainId, this.user, problemViewContext, rdoc.pid, problem.PROJECTION_PUBLIC),
             problem.getStatus(domainId, rdoc.pid, this.user._id),
         ]);
 

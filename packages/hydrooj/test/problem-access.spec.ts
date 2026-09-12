@@ -336,7 +336,13 @@ const {
     canSubmitProblem,
     canImportProblems,
     canViewProblem,
+    canViewAllContestProblems,
     isProblemBankAdmin,
+    problemViewReadFace,
+    readContextViewableProblem,
+    readContextViewableProblems,
+    recordDetailConnectionRequiresDirectProblemAccess,
+    recordDetailRequiresDirectProblemAccess,
     readStableEditableProblem,
     readStableMaintainableProblem,
     readStableViewableProblem,
@@ -2382,6 +2388,343 @@ describe('P2.11 stable direct-problem reads', () => {
     });
 });
 
+describe('problem view context read adapters', () => {
+    function contestDoc(overrides: Record<string, unknown> = {}) {
+        const now = Date.now();
+        return {
+            owner: 7,
+            maintainer: [],
+            beginAt: new Date(now - 3600_000),
+            endAt: new Date(now + 3600_000),
+            rule: 'acm',
+            entryMode: 'open',
+            title: 'C',
+            content: '',
+            pids: [100],
+            attend: 1,
+            duration: 5,
+            ...overrides,
+        } as any;
+    }
+
+    function endedContestDoc() {
+        const now = Date.now();
+        return contestDoc({
+            beginAt: new Date(now - 7200_000),
+            endAt: new Date(now - 3600_000),
+        });
+    }
+
+    function trackingAdapters() {
+        const calls = { direct: 0, container: 0, directBatch: 0, containerBatch: 0 };
+        return {
+            calls,
+            adapters: {
+                readDirectStable: async (filter?: any) => {
+                    calls.direct++;
+                    if (!filter) return liveProblem ? structuredClone(liveProblem) : null;
+                    return matchesGuardedFilter(liveProblem, filter) ? structuredClone(liveProblem) : null;
+                },
+                readContainer: async () => {
+                    calls.container++;
+                    return liveProblem ? structuredClone(liveProblem) : null;
+                },
+            },
+            batch: {
+                readDirectStable: async (filter: any) => {
+                    calls.directBatch++;
+                    const docs = liveProblem ? [structuredClone(liveProblem)] : [];
+                    if (filter.docId?.$in) return docs.filter((doc) => filter.docId.$in.includes(doc.docId));
+                    return docs.filter((doc) => filter.$or?.some((term: any) => matchesGuardedFilter(doc, term)));
+                },
+                readContainer: async (pids: number[]) => {
+                    calls.containerBatch++;
+                    if (!liveProblem || !pids.includes(liveProblem.docId)) return [];
+                    return [structuredClone(liveProblem)];
+                },
+            },
+        };
+    }
+
+    async function readHidden(user: any, context: any) {
+        liveProblem = {
+            ...pdoc(100),
+            docType: TYPE_PROBLEM,
+            title: 'hidden',
+            aclMutationRevision: 2,
+            aclMutationLocks: [],
+        };
+        const tracked = trackingAdapters();
+        const result = await readContextViewableProblem('system', user, context, tracked.adapters);
+        const batch = await readContextViewableProblems('system', user, [100], context, tracked.batch);
+        return { result, batch, calls: tracked.calls };
+    }
+
+    it('copies ContestProblemListHandler canViewAllContestProblems, including system-admin manage', () => {
+        const student = makeUser('student');
+        const attendee = { attend: 1 };
+        expect(canViewAllContestProblems(student, contestDoc(), attendee)).to.equal(true);
+        expect(canViewAllContestProblems(student, contestDoc(), null)).to.equal(false);
+        expect(canViewAllContestProblems(student, endedContestDoc(), null)).to.equal(false);
+        expect(canViewAllContestProblems(student, endedContestDoc(), attendee)).to.equal(true);
+        expect(canViewAllContestProblems(makeUser('student', { extraPerms: [PERM.PERM_EDIT_CONTEST] }), endedContestDoc(), null)).to.equal(true);
+        expect(canViewAllContestProblems(makeUser('admin'), endedContestDoc(), null)).to.equal(true);
+        expect(canViewAllContestProblems(makeUser('student', { _id: 7 }), endedContestDoc(), null)).to.equal(true);
+        expect(canViewAllContestProblems(makeUser('student'), contestDoc({ owner: 9, maintainer: [42] }), null)).to.equal(true);
+    });
+
+    it('keeps the record detail and connection requiresDirectProblemAccess forks distinct', () => {
+        const viewer = makeUser('student');
+        expect(
+            recordDetailRequiresDirectProblemAccess({
+                contextualProblemAccess: false,
+                tdoc: { id: 'contest' },
+                teamRecordAccess: false,
+                tsdoc: { attend: 1 },
+            }),
+        ).to.equal(false);
+        expect(
+            recordDetailRequiresDirectProblemAccess({
+                contextualProblemAccess: false,
+                tdoc: { id: 'contest' },
+                teamRecordAccess: false,
+                tsdoc: null,
+            }),
+        ).to.equal(true);
+        expect(
+            recordDetailConnectionRequiresDirectProblemAccess(viewer, {
+                contextualProblemAccess: false,
+                contest: { id: 'contest' },
+                teamRecordAccess: false,
+                recordUid: viewer._id,
+            }),
+        ).to.equal(false);
+        expect(
+            recordDetailConnectionRequiresDirectProblemAccess(viewer, {
+                contextualProblemAccess: false,
+                contest: { id: 'contest' },
+                teamRecordAccess: false,
+                recordUid: 99,
+            }),
+        ).to.equal(true);
+        expect(
+            recordDetailRequiresDirectProblemAccess({
+                contextualProblemAccess: false,
+                tdoc: { id: 'contest' },
+                teamRecordAccess: false,
+                tsdoc: null,
+            }),
+        ).to.equal(
+            recordDetailConnectionRequiresDirectProblemAccess(viewer, {
+                contextualProblemAccess: false,
+                contest: { id: 'contest' },
+                teamRecordAccess: false,
+                recordUid: 99,
+            }),
+        );
+        expect(
+            recordDetailRequiresDirectProblemAccess({
+                contextualProblemAccess: false,
+                tdoc: { id: 'contest' },
+                teamRecordAccess: false,
+                tsdoc: { attend: 1 },
+            }),
+        ).to.not.equal(
+            recordDetailConnectionRequiresDirectProblemAccess(viewer, {
+                contextualProblemAccess: false,
+                contest: { id: 'contest' },
+                teamRecordAccess: false,
+                recordUid: 99,
+            }),
+        );
+    });
+
+    it('uses direct-stable for direct and referenced-card, and hides a hidden problem from a student', async () => {
+        const student = makeUser('student');
+        for (const kind of ['direct', 'referenced-card'] as const) {
+            const { result, batch, calls } = await readHidden(student, { kind });
+            expect(problemViewReadFace(student, { kind })).to.equal('direct-stable');
+            expect(result).to.equal(null);
+            expect(batch).to.deep.equal([]);
+            expect(calls.direct).to.be.greaterThan(0);
+            expect(calls.directBatch).to.be.greaterThan(0);
+            expect(calls.container).to.equal(0);
+            expect(calls.containerBatch).to.equal(0);
+        }
+    });
+
+    it('does not switch referenced-card to the contest container face for an attending student', async () => {
+        const student = makeUser('student');
+        const contestContext = { kind: 'contest-membership' as const, tdoc: contestDoc(), tsdoc: { attend: 1 } };
+        expect(problemViewReadFace(student, contestContext)).to.equal('container');
+        expect(problemViewReadFace(student, { kind: 'referenced-card' })).to.equal('direct-stable');
+
+        const contestRead = await readHidden(student, contestContext);
+        expect(contestRead.result?.docId).to.equal(100);
+        expect(contestRead.batch.map((doc) => doc.docId)).to.deep.equal([100]);
+        expect(contestRead.calls.container).to.equal(1);
+        expect(contestRead.calls.containerBatch).to.equal(1);
+        expect(contestRead.calls.direct).to.equal(0);
+
+        const cardRead = await readHidden(student, { kind: 'referenced-card' });
+        expect(cardRead.result).to.equal(null);
+        expect(cardRead.batch).to.deep.equal([]);
+        expect(cardRead.calls.direct).to.be.greaterThan(0);
+        expect(cardRead.calls.container).to.equal(0);
+    });
+
+    it('keeps homework membership on container even when the same user would fail canViewAllContestProblems', async () => {
+        const student = makeUser('student');
+        const ended = endedContestDoc();
+        expect(canViewAllContestProblems(student, ended, null)).to.equal(false);
+        expect(problemViewReadFace(student, { kind: 'contest-membership', tdoc: ended, tsdoc: null })).to.equal('direct-stable');
+        expect(problemViewReadFace(student, { kind: 'homework-membership' })).to.equal('container');
+
+        const homeworkRead = await readHidden(student, { kind: 'homework-membership' });
+        expect(homeworkRead.result?.docId).to.equal(100);
+        expect(homeworkRead.batch.map((doc) => doc.docId)).to.deep.equal([100]);
+        expect(homeworkRead.calls.container).to.equal(1);
+        expect(homeworkRead.calls.direct).to.equal(0);
+
+        const contestRead = await readHidden(student, { kind: 'contest-membership', tdoc: ended, tsdoc: null });
+        expect(contestRead.result).to.equal(null);
+        expect(contestRead.batch).to.deep.equal([]);
+        expect(contestRead.calls.direct).to.be.greaterThan(0);
+        expect(contestRead.calls.container).to.equal(0);
+    });
+
+    it('uses container for contest membership when the list-handler predicate is true', async () => {
+        const student = makeUser('student');
+        const { result, calls } = await readHidden(student, {
+            kind: 'contest-membership',
+            tdoc: contestDoc(),
+            tsdoc: { attend: 1 },
+        });
+        expect(result?.docId).to.equal(100);
+        expect(calls.container).to.equal(1);
+        expect(calls.direct).to.equal(0);
+    });
+
+    it('keeps ContestProblemListHandler on contest-membership and ContestDetailHandler off the list helper', () => {
+        const contestSource = readFileSync(resolve(process.cwd(), 'packages/hydrooj/src/handler/contest.ts'), 'utf8');
+        const listBody = contestSource.slice(
+            contestSource.indexOf('export class ContestProblemListHandler'),
+            contestSource.indexOf('export class ContestEditHandler'),
+        );
+        expect(listBody).to.include("kind: 'contest-membership'");
+        expect(listBody).to.include('problemViewReadFace(');
+        expect(listBody).not.to.match(/const canViewAllContestProblems/);
+        expect(listBody).not.to.include('PRIV.PRIV_EDIT_SYSTEM');
+
+        const detailBody = contestSource.slice(
+            contestSource.indexOf('export class ContestDetailHandler'),
+            contestSource.indexOf('export class ContestPrintHandler'),
+        );
+        expect(detailBody).to.include('canPeekProblems');
+        expect(detailBody).to.match(/canManageContest = this\.user\.own\(this\.tdoc\) \|\| this\.user\.hasPerm\(PERM\.PERM_EDIT_CONTEST\);/);
+        expect(detailBody).not.to.include('PRIV.PRIV_EDIT_SYSTEM');
+        expect(detailBody).not.to.include('problemViewReadFace(');
+        expect(detailBody).not.to.include('canViewAllContestProblems(');
+    });
+
+    it('uses managed-container pids only on direct-stable faces, not as a container substitute', async () => {
+        liveProblem = {
+            ...pdoc(100),
+            docType: TYPE_PROBLEM,
+            title: 'hidden',
+            aclMutationRevision: 2,
+            aclMutationLocks: [],
+        };
+        containerDocs = [{ domainId: 'system', docType: TYPE_CONTEST, owner: 42, rule: 'acm', pids: [100] }];
+        const manager = makeUser('hidden-viewer');
+        const student = makeUser('student', { _id: 99 });
+
+        const managerCard = trackingAdapters();
+        const managerCardResult = await readContextViewableProblem('system', manager, { kind: 'referenced-card' }, managerCard.adapters);
+        expect(managerCardResult?.docId).to.equal(100);
+        expect(managerCard.calls.direct).to.be.greaterThan(0);
+        expect(managerCard.calls.container).to.equal(0);
+
+        const studentCard = trackingAdapters();
+        const studentCardResult = await readContextViewableProblem('system', student, { kind: 'referenced-card' }, studentCard.adapters);
+        expect(studentCardResult).to.equal(null);
+        expect(studentCard.calls.direct).to.be.greaterThan(0);
+        expect(studentCard.calls.container).to.equal(0);
+
+        const studentHomework = trackingAdapters();
+        const studentHomeworkResult = await readContextViewableProblem('system', student, { kind: 'homework-membership' }, studentHomework.adapters);
+        expect(studentHomeworkResult?.docId).to.equal(100);
+        expect(studentHomework.calls.container).to.equal(1);
+        expect(studentHomework.calls.direct).to.equal(0);
+    });
+
+    it('keeps the record detail ternary on the current attend vs tdoc fork', async () => {
+        const student = makeUser('student');
+        const withoutContest = await readHidden(student, {
+            kind: 'record-detail',
+            contextualProblemAccess: false,
+            teamRecordAccess: false,
+        });
+        expect(withoutContest.result).to.equal(null);
+        expect(withoutContest.calls.direct).to.be.greaterThan(0);
+        expect(withoutContest.calls.container).to.equal(0);
+
+        const attending = await readHidden(student, {
+            kind: 'record-detail',
+            contextualProblemAccess: false,
+            tdoc: { id: 'contest' },
+            teamRecordAccess: false,
+            tsdoc: { attend: 1 },
+        });
+        expect(attending.result?.docId).to.equal(100);
+        expect(attending.calls.container).to.equal(1);
+        expect(attending.calls.direct).to.equal(0);
+
+        const contextual = await readHidden(student, {
+            kind: 'record-detail',
+            contextualProblemAccess: true,
+            teamRecordAccess: false,
+        });
+        expect(contextual.result?.docId).to.equal(100);
+        expect(contextual.calls.container).to.equal(1);
+    });
+
+    it('keeps the record connection ternary on contest plus record-owner, not tsdoc attend', async () => {
+        const student = makeUser('student');
+        const owner = await readHidden(student, {
+            kind: 'record-detail-connection',
+            contextualProblemAccess: false,
+            contest: { id: 'contest' },
+            teamRecordAccess: false,
+            recordUid: student._id,
+        });
+        expect(owner.result?.docId).to.equal(100);
+        expect(owner.calls.container).to.equal(1);
+        expect(owner.calls.direct).to.equal(0);
+
+        const outsider = await readHidden(student, {
+            kind: 'record-detail-connection',
+            contextualProblemAccess: false,
+            contest: { id: 'contest' },
+            teamRecordAccess: false,
+            recordUid: 99,
+        });
+        expect(outsider.result).to.equal(null);
+        expect(outsider.calls.direct).to.be.greaterThan(0);
+        expect(outsider.calls.container).to.equal(0);
+
+        const team = await readHidden(student, {
+            kind: 'record-detail-connection',
+            contextualProblemAccess: false,
+            contest: { id: 'contest' },
+            teamRecordAccess: true,
+            recordUid: 99,
+        });
+        expect(team.result?.docId).to.equal(100);
+        expect(team.calls.container).to.equal(1);
+    });
+});
+
 describe('P2.11 ACL reload observability', () => {
     it('fails closed with one client-safe 403 while logging and preserving the original server error', async () => {
         const raw = new Error('database unavailable');
@@ -2850,7 +3193,11 @@ describe('P2.11 stable direct-read entry contracts', () => {
         expect(recordSource).not.to.include('problem.canViewBy(');
         expect(recordSource).to.include('problem.getListViewableAuthorized(');
         expect(recordSource).to.include('problem.getViewableAuthorized(');
-        expect(referenceSource).to.include('problem.getListViewableAuthorized(');
+        expect(recordSource).to.include("kind: 'record-detail'");
+        expect(recordSource).to.include("kind: 'record-detail-connection'");
+        expect(referenceSource).to.include("kind: 'referenced-card'");
+        expect(referenceSource).to.include('readContextViewableProblems(');
+        expect(referenceSource).to.include('problem.getList(');
         expect(referenceSource).not.to.include('problem.canViewBy(');
         expect(homeSource).to.include('ProblemModel.getViewableAuthorized(');
         expect(userSource).to.include('problem.getListViewableAuthorized(');

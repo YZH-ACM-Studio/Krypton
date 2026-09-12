@@ -51,7 +51,7 @@ import { assertHomeworkAccess } from '../model/homework-access';
 import message from '../model/message';
 import * as oplog from '../model/oplog';
 import problem from '../model/problem';
-import { assertProblemBankSelection } from '../model/problem-access';
+import { assertProblemBankSelection, problemViewReadFace } from '../model/problem-access';
 import record from '../model/record';
 import ScheduleModel from '../model/schedule';
 import storage from '../model/storage';
@@ -466,6 +466,32 @@ export class ContestDetailBaseHandler extends Handler {
     }
 }
 
+function contestProblemTableUsesContainerFace(
+    tdoc: Tdoc,
+    tsdoc: { attend?: number } | null | undefined,
+    canManageContest: boolean,
+): boolean {
+    const postContestPractice = getPostContestPracticeState(tdoc, tsdoc);
+    return (
+        !postContestPractice.supported ||
+        canManageContest ||
+        (!!tsdoc?.attend && !contest.isDone(tdoc)) ||
+        postContestPractice.eligible
+    );
+}
+
+function readContestProblemTable(
+    domainId: string,
+    actor: Parameters<typeof problem.getListViewableAuthorized>[2],
+    pids: number[],
+    projection: Parameters<typeof problem.getList>[4],
+    useContainerFace: boolean,
+) {
+    return useContainerFace
+        ? problem.getList(domainId, pids, true, true, projection, true)
+        : problem.getListViewableAuthorized(domainId, pids, actor, projection, false, true);
+}
+
 export class ContestDetailHandler extends ContestDetailBaseHandler {
     @param('tid', Types.ObjectId)
     async prepare(_domainId: string, tid: ObjectId) {
@@ -476,6 +502,7 @@ export class ContestDetailHandler extends ContestDetailBaseHandler {
     async get(_domainId: string, tid: ObjectId) {
         const authoritativeDomainId = this.authoritativeDomainId();
         this.response.template = 'contest_detail.html';
+        // Detail manage is own or PERM_EDIT_CONTEST; system admin is not implied.
         const canManageContest = this.user.own(this.tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST);
         const postContestPractice = getPostContestPracticeState(this.tdoc, this.tsdoc);
         // Load contest problem dict so the new UI can render the problem table
@@ -487,34 +514,19 @@ export class ContestDetailHandler extends ContestDetailBaseHandler {
         // against below at line ~185, and that `ContestProblemListHandler`
         // already guards at line ~305).
         const canPeekProblems = (this.tsdoc?.attend && !contest.isNotStarted(this.tdoc)) || contest.isDone(this.tdoc) || canManageContest;
-        const canViewAllContestProblems =
-            !postContestPractice.supported ||
-            canManageContest ||
-            (!!this.tsdoc?.attend && !contest.isDone(this.tdoc)) ||
-            postContestPractice.eligible;
         const [udict, pdict, teamContext, teamCount] = await Promise.all([
             user.getList(authoritativeDomainId, [this.tdoc.owner]),
             canPeekProblems
-                ? canViewAllContestProblems
-                    ? problem.getList(
-                          authoritativeDomainId,
-                          this.tdoc.pids,
-                          true,
-                          true,
-                          // PROJECTION_CONTEST_LIST omits nSubmit/nAccept/difficulty/tag —
-                          // include them so the detail page can show real pass/submit
-                          // counts in its problem table.
-                          [...problem.PROJECTION_CONTEST_LIST, 'nSubmit', 'nAccept', 'difficulty', 'tag'],
-                          true,
-                      )
-                    : problem.getListViewableAuthorized(
-                          authoritativeDomainId,
-                          this.tdoc.pids,
-                          this.user,
-                          [...problem.PROJECTION_CONTEST_LIST, 'nSubmit', 'nAccept', 'difficulty', 'tag'],
-                          false,
-                          true,
-                      )
+                ? readContestProblemTable(
+                      authoritativeDomainId,
+                      this.user,
+                      this.tdoc.pids,
+                      // PROJECTION_CONTEST_LIST omits nSubmit/nAccept/difficulty/tag —
+                      // include them so the detail page can show real pass/submit
+                      // counts in its problem table.
+                      [...problem.PROJECTION_CONTEST_LIST, 'nSubmit', 'nAccept', 'difficulty', 'tag'],
+                      contestProblemTableUsesContainerFace(this.tdoc, this.tsdoc, canManageContest),
+                  )
                 : Promise.resolve({}),
             currentTeamContext(authoritativeDomainId, this.tdoc, this.user._id),
             contest.getParticipationMode(this.tdoc) === 'team'
@@ -764,16 +776,15 @@ export class ContestProblemListHandler extends ContestDetailBaseHandler {
         if (contest.isNotStarted(this.tdoc)) throw new ContestNotLiveError(authoritativeDomainId, tid);
         if (!this.tsdoc?.attend && !contest.isDone(this.tdoc)) throw new ContestNotAttendedError(authoritativeDomainId, tid);
         const postContestPractice = getPostContestPracticeState(this.tdoc, this.tsdoc);
-        const canManageContest = this.user.own(this.tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST) || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
-        const canViewAllContestProblems =
-            !postContestPractice.supported ||
-            canManageContest ||
-            (!!this.tsdoc?.attend && !contest.isDone(this.tdoc)) ||
-            postContestPractice.eligible;
+        const contestMembership = { kind: 'contest-membership' as const, tdoc: this.tdoc, tsdoc: this.tsdoc };
         const [pdict, udict, tcdocs, teamContext] = await Promise.all([
-            canViewAllContestProblems
-                ? problem.getList(authoritativeDomainId, this.tdoc.pids, true, true, problem.PROJECTION_CONTEST_LIST, true)
-                : problem.getListViewableAuthorized(authoritativeDomainId, this.tdoc.pids, this.user, problem.PROJECTION_CONTEST_LIST, false, true),
+            readContestProblemTable(
+                authoritativeDomainId,
+                this.user,
+                this.tdoc.pids,
+                problem.PROJECTION_CONTEST_LIST,
+                problemViewReadFace(this.user, contestMembership) === 'container',
+            ),
             user.getList(authoritativeDomainId, [this.tdoc.owner, this.user._id]),
             contest.getMultiClarification(authoritativeDomainId, tid, this.user._id),
             currentTeamContext(authoritativeDomainId, this.tdoc, this.user._id),

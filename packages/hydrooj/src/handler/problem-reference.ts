@@ -1,7 +1,11 @@
+import type { Filter } from 'mongodb';
 import { Logger } from '@hydrooj/utils';
-import problem from '../model/problem';
+import problem, { type ProblemDoc } from '../model/problem';
+import { PROBLEM_ACL_INTERNAL_FIELDS, readContextViewableProblems } from '../model/problem-access';
 
 const logger = new Logger('problem-reference');
+
+const STABLE_VIEW_AUTHORIZATION_FIELDS = ['domainId', 'docId', 'owner', 'hidden', 'authoringMode', 'pidNamespaceId', 'managedAuthoring'] as const;
 
 /** Normalize container JSON problem references without probing the problem table. */
 export function normalizeProblemDocIds(values: unknown): number[] {
@@ -13,6 +17,25 @@ export function normalizeProblemDocIds(values: unknown): number[] {
     return Array.from(new Set(pids));
 }
 
+function problemDocsFromGetList(dict: Record<string | number, ProblemDoc>, pids: number[]) {
+    const docs: ProblemDoc[] = [];
+    const seen = new Set<number>();
+    for (const pid of pids) {
+        const pdoc = dict[pid];
+        if (!pdoc || !Number.isSafeInteger(pdoc.docId) || seen.has(pdoc.docId)) continue;
+        seen.add(pdoc.docId);
+        docs.push(pdoc);
+    }
+    return docs;
+}
+
+function stripUnrequestedStableViewFields(pdoc: ProblemDoc, requested: ReadonlySet<string>) {
+    for (const field of STABLE_VIEW_AUTHORIZATION_FIELDS) {
+        if (!requested.has(field)) delete (pdoc as Record<string, unknown>)[field];
+    }
+    return pdoc;
+}
+
 /**
  * Resolve a container's already-known references, then apply the canonical
  * direct-view predicate. This preserves active verifier/maintainer access to
@@ -22,8 +45,24 @@ export async function getVisibleReferencedProblems(domainId: string, pids: numbe
     const startedAt = Date.now();
     // Training/course cards need summary statistics, not statements, config,
     // or files. Avoid returning hundreds of full problem payloads.
-    const projection = [...problem.PROJECTION_LIST, 'origStat'] as any;
-    const visible = await problem.getListViewableAuthorized(domainId, pids, user, projection, false, true);
+    const projection = [...problem.PROJECTION_LIST, 'origStat'];
+    const requested = new Set(projection);
+    const readProjection = Array.from(new Set([...projection, ...STABLE_VIEW_AUTHORIZATION_FIELDS, ...PROBLEM_ACL_INTERNAL_FIELDS]));
+    const docs = await readContextViewableProblems(
+        domainId,
+        user,
+        pids,
+        { kind: 'referenced-card' },
+        {
+            readDirectStable: async (filter: Filter<ProblemDoc>) => problem.getMulti(domainId, filter, readProjection).toArray(),
+            readContainer: async (requestedPids) => {
+                const dict = await problem.getList(domainId, requestedPids, true, false, projection, true);
+                return problemDocsFromGetList(dict, requestedPids);
+            },
+        },
+    );
+    const visible: Record<number, ProblemDoc> = {};
+    for (const pdoc of docs) visible[pdoc.docId] = stripUnrequestedStableViewFields(pdoc, requested);
     const elapsed = Date.now() - startedAt;
     if (elapsed >= 500) {
         logger.warn(

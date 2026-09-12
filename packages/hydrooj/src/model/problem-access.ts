@@ -9,11 +9,9 @@ import {
     UserFacingError,
     ValidationError,
 } from '../error';
-import {
-    assertProgrammingStatementComplete,
-    compileProgrammingStatement,
-    ProgrammingStatementValidationError,
-} from '../lib/programming-statement';
+import type { Tdoc } from '../interface';
+import { getPostContestPracticeState } from '../lib/contest-correction';
+import { assertProgrammingStatementComplete, compileProgrammingStatement, ProgrammingStatementValidationError } from '../lib/programming-statement';
 import { courseKindClause, isProblemSetKind } from '../lib/training-kind';
 import { PERM, PRIV } from './builtin';
 import { assertCodeEvaluationLifecyclePatch, assertProblemReadyForUse, CODE_EVALUATION_CANDIDATE_FILTER } from './code-evaluation-lifecycle';
@@ -1527,6 +1525,151 @@ export async function readStableViewableProblems(
         }
     }
     return requested.map((pid) => visible.get(pid)).filter((pdoc): pdoc is ProblemDoc => !!pdoc);
+}
+
+/**
+ * Current caller-context read face.
+ *
+ * `direct-stable` is `readStableViewableProblem(s)`. `container` is the
+ * existing `ProblemModel.get` / `getList(..., true)` path after that
+ * handler's membership gate. These faces are the replacement rules already
+ * used by handlers, not a new ACL.
+ */
+export type ProblemViewReadFace = 'direct-stable' | 'container';
+
+export type ProblemViewContext =
+    | { kind: 'direct' }
+    | { kind: 'referenced-card' }
+    | { kind: 'homework-membership' }
+    | { kind: 'contest-membership'; tdoc: Tdoc; tsdoc?: { attend?: number } | null }
+    | {
+          kind: 'record-detail';
+          contextualProblemAccess: boolean;
+          virtualAttemptId?: unknown;
+          tdoc?: unknown;
+          teamRecordAccess: boolean;
+          tsdoc?: { attend?: unknown } | null;
+      }
+    | {
+          kind: 'record-detail-connection';
+          contextualProblemAccess: boolean;
+          virtualAttemptId?: unknown;
+          contest?: unknown;
+          teamRecordAccess: boolean;
+          recordUid: number;
+      };
+
+export interface ProblemViewReadAdapters {
+    readDirectStable: StableProblemRead;
+    /** Current `ProblemModel.get` container face (no hidden filter). */
+    readContainer: () => Promise<ProblemDoc | null>;
+}
+
+export interface ProblemViewBatchReadAdapters {
+    readDirectStable: StableProblemBatchRead;
+    /** Current `ProblemModel.getList(..., true)` container face. */
+    readContainer: (pids: number[]) => Promise<ProblemDoc[]>;
+}
+
+/** `User.own(doc)` with one argument, as ContestProblemListHandler calls it. */
+function userOwnsContainerDoc(user: ProblemAclUser, doc: { owner: number; maintainer?: number[] }): boolean {
+    return doc.owner === user._id || (doc.maintainer || []).includes(user._id);
+}
+
+/** `contest.isDone(tdoc)` with no tsdoc, as ContestProblemListHandler calls it. */
+function contestIsDoneWithoutStatus(tdoc: Pick<Tdoc, 'endAt'>): boolean {
+    return tdoc.endAt <= new Date();
+}
+
+/**
+ * Copied from ContestProblemListHandler: choose container `getList(..., true)`
+ * vs `getListViewableAuthorized`.
+ */
+export function canViewAllContestProblems(user: ProblemAclUser, tdoc: Tdoc, tsdoc?: { attend?: number } | null): boolean {
+    const postContestPractice = getPostContestPracticeState(tdoc, tsdoc);
+    const canManageContest = userOwnsContainerDoc(user, tdoc) || user.hasPerm(PERM.PERM_EDIT_CONTEST) || user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
+    return (
+        !postContestPractice.supported || canManageContest || (!!tsdoc?.attend && !contestIsDoneWithoutStatus(tdoc)) || postContestPractice.eligible
+    );
+}
+
+/** Copied from RecordDetailHandler.requiresDirectProblemAccess. */
+export function recordDetailRequiresDirectProblemAccess(facts: {
+    contextualProblemAccess: boolean;
+    virtualAttemptId?: unknown;
+    tdoc?: unknown;
+    teamRecordAccess: boolean;
+    tsdoc?: { attend?: unknown } | null;
+}): boolean {
+    return !facts.contextualProblemAccess && !facts.virtualAttemptId && (!facts.tdoc || (!facts.teamRecordAccess && !facts.tsdoc?.attend));
+}
+
+/** Copied from RecordDetailConnectionHandler.requiresDirectProblemAccess. */
+export function recordDetailConnectionRequiresDirectProblemAccess(
+    user: ProblemAclUser,
+    facts: {
+        contextualProblemAccess: boolean;
+        virtualAttemptId?: unknown;
+        contest?: unknown;
+        teamRecordAccess: boolean;
+        recordUid: number;
+    },
+): boolean {
+    return !facts.contextualProblemAccess && !facts.virtualAttemptId && (!facts.contest || (!facts.teamRecordAccess && user._id !== facts.recordUid));
+}
+
+/** Select the current handler replacement rule for this view context. */
+export function problemViewReadFace(user: ProblemAclUser, context: ProblemViewContext): ProblemViewReadFace {
+    switch (context.kind) {
+        case 'direct':
+        case 'referenced-card':
+            return 'direct-stable';
+        case 'homework-membership':
+            return 'container';
+        case 'contest-membership':
+            return canViewAllContestProblems(user, context.tdoc, context.tsdoc) ? 'container' : 'direct-stable';
+        case 'record-detail':
+            return recordDetailRequiresDirectProblemAccess(context) ? 'direct-stable' : 'container';
+        case 'record-detail-connection':
+            return recordDetailConnectionRequiresDirectProblemAccess(user, context) ? 'direct-stable' : 'container';
+        default: {
+            const unexpected: never = context;
+            throw new TypeError(`unknown problem view context: ${(unexpected as { kind: string }).kind}`);
+        }
+    }
+}
+
+/**
+ * Read one problem using the replacement rule for `context`.
+ *
+ * Direct-stable goes through `readStableViewableProblem`. Container calls the
+ * injected `ProblemModel.get`-equivalent and does not apply `canViewProblem`.
+ */
+export async function readContextViewableProblem(
+    authoritativeDomainId: string,
+    user: ProblemAclUser,
+    context: ProblemViewContext,
+    adapters: ProblemViewReadAdapters,
+): Promise<ProblemDoc | null> {
+    if (problemViewReadFace(user, context) === 'container') return adapters.readContainer();
+    return readStableViewableProblem(authoritativeDomainId, user, adapters.readDirectStable);
+}
+
+/**
+ * Batch form of `readContextViewableProblem`.
+ *
+ * Direct-stable goes through `readStableViewableProblems`. Container calls the
+ * injected `ProblemModel.getList(..., true)`-equivalent.
+ */
+export async function readContextViewableProblems(
+    authoritativeDomainId: string,
+    user: ProblemAclUser,
+    pids: number[],
+    context: ProblemViewContext,
+    adapters: ProblemViewBatchReadAdapters,
+): Promise<ProblemDoc[]> {
+    if (problemViewReadFace(user, context) === 'container') return adapters.readContainer(pids);
+    return readStableViewableProblems(authoritativeDomainId, user, pids, adapters.readDirectStable);
 }
 
 /**

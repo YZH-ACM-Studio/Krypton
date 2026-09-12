@@ -1,5 +1,6 @@
 import { expect } from 'chai';
 import { localizedErrorText } from '@hydrooj/framework';
+import { ObjectId } from 'mongodb';
 import { readFileSync } from 'node:fs';
 import { beforeEach, describe, it } from 'node:test';
 
@@ -27,13 +28,19 @@ class TestValidationError extends Error {
 class UnexpectedProblemWrite extends Error {}
 
 const calls = {
+    contestAdds: [] as any[],
     contestDeletes: [] as any[],
     contestEdits: [] as any[],
     documentSets: [] as any[],
     events: [] as string[],
+    teamBatchClears: [] as any[],
+    teamBatchPlans: [] as any[],
+    teamBatchWrites: [] as any[],
     getListProjections: [] as any[],
     recalcClears: [] as any[],
     getLists: [] as any[],
+    getListViewableAuthorized: [] as any[],
+    problemViewReadFaces: [] as any[],
     maintains: [] as any[],
     publishes: [] as any[],
     modelDomains: [] as Array<{ model: string; domainId: string }>,
@@ -88,8 +95,9 @@ const contestStub: any = {
         calls.contestEdits.push(args);
         Object.assign(currentContest, args[2]);
     },
-    async add() {
+    async add(...args: any[]) {
         calls.events.push('contest.add');
+        calls.contestAdds.push(args);
         return 'new-contest';
     },
     async recalcStatus() {
@@ -118,6 +126,16 @@ const problemStub = {
             pids
                 .map((pid) => problemDocs.get(pid))
                 .filter(Boolean)
+                .map((doc) => [doc.docId, doc]),
+        );
+    },
+    async getListViewableAuthorized(domainId: string, pids: number[], _user: any, projection: string[]) {
+        calls.modelDomains.push({ model: 'problem.getListViewableAuthorized', domainId });
+        calls.getListViewableAuthorized.push({ domainId, pids: [...pids], projection: projection ? [...projection] : projection });
+        return Object.fromEntries(
+            pids
+                .map((pid) => problemDocs.get(pid))
+                .filter((doc) => doc && doc.hidden !== true)
                 .map((doc) => [doc.docId, doc]),
         );
     },
@@ -178,9 +196,58 @@ const userStub = {
     },
 };
 
+const { getPostContestPracticeState } = require('../src/lib/contest-correction');
+
 const problemAccessStub = {
     async assertProblemBankSelection(domainId: string, pids: number[], user: any, existingPids: number[]) {
         calls.selections.push({ domainId, pids: [...pids], user, existingPids: [...(existingPids || [])] });
+    },
+    problemViewReadFace(user: any, context: any) {
+        calls.problemViewReadFaces.push({
+            kind: context?.kind,
+            owner: context?.tdoc?.owner,
+            attend: context?.tsdoc?.attend ?? null,
+        });
+        if (context?.kind !== 'contest-membership') {
+            throw new TypeError(`unexpected problem view context: ${context?.kind}`);
+        }
+        const { tdoc, tsdoc } = context;
+        const postContestPractice = getPostContestPracticeState(tdoc, tsdoc);
+        const canManageContest =
+            tdoc.owner === user._id ||
+            (tdoc.maintainer || []).includes(user._id) ||
+            user.hasPerm(PERM.PERM_EDIT_CONTEST) ||
+            user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
+        const useContainer =
+            !postContestPractice.supported ||
+            canManageContest ||
+            (!!tsdoc?.attend && !(tdoc.endAt <= new Date())) ||
+            postContestPractice.eligible;
+        return useContainer ? 'container' : 'direct-stable';
+    },
+};
+
+const contestTeamBatchStub = {
+    canManageTeamBatches() {
+        return true;
+    },
+    async getBatch() {
+        return { batchId: 'batch', status: 'open', revision: 1 };
+    },
+    async listBatches() {
+        return [];
+    },
+    async writeCreatedContestPlannedBatch(...args: any[]) {
+        calls.teamBatchWrites.push(args);
+        return {};
+    },
+    async setContestPlannedBatch(...args: any[]) {
+        calls.teamBatchPlans.push(args);
+        return {};
+    },
+    async clearContestTeamBatchPointers(...args: any[]) {
+        calls.teamBatchClears.push(args);
+        return {};
     },
 };
 
@@ -281,6 +348,7 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     if (fromContest && request === '../model/contest') return contestStub;
     if (fromContest && request === '../model/problem') return problemStub;
     if (fromContest && request === '../model/problem-access') return problemAccessStub;
+    if (fromContest && request === '../model/contest-team-batch') return contestTeamBatchStub;
     if (fromContest && request === '../model/document') return documentStub;
     if (fromContest && request === '../model/discussion') return discussionStub;
     if (fromContest && request === '../model/record') return { __esModule: true, default: recordStub };
@@ -311,6 +379,20 @@ function makeUser() {
         hasPerm: (perm: bigint) => perm === PERM.PERM_EDIT_PROBLEM,
         hasPriv: () => false,
         own: () => true,
+    } as any;
+}
+
+function makeSystemAdminViewer() {
+    return {
+        _id: 99,
+        _problemAclLoaded: true,
+        _problemAclDomainId: 'system',
+        _aclFencedPids: new Set<number>(),
+        _pidNamespaceManagerIds: new Set<string>(),
+        timeZone: 'Asia/Shanghai',
+        hasPerm: () => false,
+        hasPriv: (priv: number) => priv === PRIV.PRIV_EDIT_SYSTEM,
+        own: () => false,
     } as any;
 }
 
@@ -422,6 +504,140 @@ describe('contest create landing route', () => {
 
         expect(calls.events).to.include('contest.edit');
         expect(handler.response.redirect).to.equal('contest_detail:contest');
+    });
+});
+
+function postUpdateArgs(
+    tid: any,
+    extras: {
+        pids?: string;
+        autoHide?: boolean;
+        participationMode?: 'individual' | 'team' | null;
+        plannedTeamBatchId?: any;
+    } = {},
+) {
+    return [
+        'forged-domain',
+        tid,
+        '2099-01-01',
+        '08:00',
+        2,
+        'Contest',
+        'Body',
+        'acm',
+        extras.pids ?? '',
+        false,
+        '',
+        extras.autoHide ?? false,
+        [],
+        null,
+        null,
+        [],
+        false,
+        false,
+        false,
+        null,
+        [],
+        false,
+        'open',
+        'strict',
+        false,
+        false,
+        'strict',
+        '',
+        '',
+        '',
+        false,
+        null,
+        false,
+        null,
+        null,
+        true,
+        false,
+        true,
+        null,
+        '',
+        'none',
+        [],
+        [],
+        extras.participationMode ?? null,
+        null,
+        '',
+        extras.plannedTeamBatchId ?? null,
+    ];
+}
+
+describe('contest team-batch pointer writes', () => {
+    it('writes a created planned batch after contest.add and does not spread the field into add', async () => {
+        const handler = makeHandler();
+        handler.tdoc = undefined;
+        handler.url = (name: string, params: { tid: string }) => `${name}:${params.tid}`;
+        const plannedTeamBatchId = new ObjectId();
+
+        await handler.postUpdate(
+            ...postUpdateArgs(null, {
+                participationMode: 'team',
+                plannedTeamBatchId,
+            }),
+        );
+
+        expect(calls.contestAdds).to.have.length(1);
+        expect(calls.contestAdds[0][9]).not.to.have.property('plannedTeamBatchId');
+        expect(calls.teamBatchWrites).to.deep.equal([['system', 'new-contest', plannedTeamBatchId, { user: handler.user }]]);
+        expect(calls.teamBatchPlans).to.deep.equal([]);
+        expect(handler.response.body).to.deep.equal({ tid: 'new-contest' });
+    });
+
+    it('does not write a created planned pointer when create omits the batch', async () => {
+        const handler = makeHandler();
+        handler.tdoc = undefined;
+
+        await handler.postUpdate(...postUpdateArgs(null, { participationMode: 'team' }));
+
+        expect(calls.contestAdds).to.have.length(1);
+        expect(calls.contestAdds[0][9]).not.to.have.property('plannedTeamBatchId');
+        expect(calls.teamBatchWrites).to.deep.equal([]);
+        expect(calls.teamBatchPlans).to.deep.equal([]);
+    });
+
+    it('keeps the existing-contest planned-batch edit on setContestPlannedBatch', async () => {
+        const handler = makeHandler();
+        const plannedTeamBatchId = new ObjectId();
+
+        await handler.postUpdate(
+            ...postUpdateArgs('contest', {
+                pids: '11,22',
+                participationMode: 'team',
+                plannedTeamBatchId,
+            }),
+        );
+
+        expect(calls.contestAdds).to.deep.equal([]);
+        expect(calls.teamBatchWrites).to.deep.equal([]);
+        expect(calls.teamBatchPlans).to.deep.equal([['system', 'contest', plannedTeamBatchId, null, { user: handler.user }]]);
+        expect(calls.teamBatchClears).to.deep.equal([]);
+    });
+
+    it('clears finalized team-batch pointers through the contest-team boundary when switching to individual', async () => {
+        const handler = makeHandler();
+        const teamBatchId = new ObjectId();
+        handler.tdoc.participationMode = 'team';
+        handler.tdoc.teamBatchId = teamBatchId;
+        handler.tdoc.teamBatchSnapshotHash = 'ab'.repeat(32);
+        handler.tdoc.teamBatchSnapshotAt = new Date('2099-01-01T00:00:00Z');
+        handler.tdoc.teamBatchSnapshotCount = 2;
+
+        await handler.postUpdate(
+            ...postUpdateArgs('contest', {
+                pids: '11,22',
+                participationMode: 'individual',
+            }),
+        );
+
+        expect(calls.teamBatchClears).to.deep.equal([['system', 'contest', { user: handler.user }]]);
+        expect(calls.documentSets).to.deep.equal([]);
+        expect(calls.teamBatchPlans).to.deep.equal([]);
+        expect(calls.teamBatchWrites).to.deep.equal([]);
     });
 });
 
@@ -1262,5 +1478,99 @@ describe('contest detail authoritative domain', () => {
             expect(body, start).not.to.match(/async\s+\w+\s*\(\s*(?:\{\s*)?domainId\b/);
             expect(body, start).not.to.match(/ensureExamModeAccess\(this,\s*_?domainId\b/);
         }
+    });
+});
+
+describe('contest hidden problem table reads', () => {
+    const tid = { toHexString: () => 'contest' } as any;
+
+    function contestSourceSection(start: string, end: string) {
+        const source = readFileSync(contestPath, 'utf8');
+        return source.slice(source.indexOf(start), source.indexOf(end));
+    }
+
+    it('routes ContestProblemListHandler through contest-membership after the live/attend gates', () => {
+        const listBody = contestSourceSection('export class ContestProblemListHandler', 'export class ContestEditHandler');
+        expect(listBody).to.include("kind: 'contest-membership'");
+        expect(listBody).to.include('problemViewReadFace(');
+        expect(listBody).to.include('readContestProblemTable(');
+        expect(listBody).not.to.match(/const canViewAllContestProblems/);
+        expect(listBody).not.to.include('PRIV.PRIV_EDIT_SYSTEM');
+    });
+
+    it('keeps ContestDetailHandler peek gate and manage without PRIV_EDIT_SYSTEM', () => {
+        const detailBody = contestSourceSection('export class ContestDetailHandler', 'export class ContestPrintHandler');
+        expect(detailBody).to.include('canPeekProblems');
+        expect(detailBody).to.match(/canManageContest = this\.user\.own\(this\.tdoc\) \|\| this\.user\.hasPerm\(PERM\.PERM_EDIT_CONTEST\);/);
+        expect(detailBody).to.include('contestProblemTableUsesContainerFace(');
+        expect(detailBody).not.to.include('PRIV.PRIV_EDIT_SYSTEM');
+        expect(detailBody).not.to.include('problemViewReadFace(');
+        expect(detailBody).not.to.include('canViewAllContestProblems(');
+    });
+
+    it('lets a system admin see hidden contest problems on the list but not on detail', async () => {
+        problemDocs.set(11, { domainId: 'system', docId: 11, owner: 42, allowed: true, hidden: true, title: 'Hidden' });
+        currentStatus = null;
+
+        const listHandler = makeDetailHandler((contestModule as any).ContestProblemListHandler);
+        listHandler.liveStatsEnabled = false;
+        listHandler.user = makeSystemAdminViewer();
+        await listHandler.__prepare('forged-domain', tid);
+        await listHandler.get('forged-domain', tid);
+
+        expect(calls.problemViewReadFaces).to.deep.equal([{ kind: 'contest-membership', owner: 42, attend: null }]);
+        expect(calls.getLists).to.have.length(1);
+        expect(calls.getListViewableAuthorized).to.have.length(0);
+        expect(listHandler.response.body.pdict[11]?.title).to.equal('Hidden');
+        expect(listHandler.response.body.visiblePids).to.deep.equal([11]);
+
+        calls.getLists.length = 0;
+        calls.getListViewableAuthorized.length = 0;
+        calls.problemViewReadFaces.length = 0;
+        calls.modelDomains.length = 0;
+
+        const detailHandler = makeDetailHandler((contestModule as any).ContestDetailHandler);
+        detailHandler.user = makeSystemAdminViewer();
+        await detailHandler.__prepare('forged-domain', tid);
+        await detailHandler.get('forged-domain', tid);
+
+        expect(calls.problemViewReadFaces).to.deep.equal([]);
+        expect(calls.getLists).to.have.length(0);
+        expect(calls.getListViewableAuthorized).to.have.length(1);
+        expect(detailHandler.response.body.canManageContest).to.equal(false);
+        expect(detailHandler.response.body.pdict).to.deep.equal({});
+        expect(detailHandler.response.body.pids).to.deep.equal([]);
+    });
+
+    it('still hides hidden contest problems from an ordinary outsider on both faces', async () => {
+        problemDocs.set(11, { domainId: 'system', docId: 11, owner: 42, allowed: true, hidden: true, title: 'Hidden' });
+        currentStatus = null;
+        const outsider = {
+            ...makeSystemAdminViewer(),
+            hasPriv: () => false,
+        };
+
+        const listHandler = makeDetailHandler((contestModule as any).ContestProblemListHandler);
+        listHandler.liveStatsEnabled = false;
+        listHandler.user = outsider;
+        await listHandler.__prepare('forged-domain', tid);
+        await listHandler.get('forged-domain', tid);
+        expect(calls.problemViewReadFaces[0]?.kind).to.equal('contest-membership');
+        expect(calls.getListViewableAuthorized).to.have.length(1);
+        expect(calls.getLists).to.have.length(0);
+        expect(listHandler.response.body.pdict).to.deep.equal({});
+        expect(listHandler.response.body.visiblePids).to.deep.equal([]);
+
+        calls.getLists.length = 0;
+        calls.getListViewableAuthorized.length = 0;
+
+        const detailHandler = makeDetailHandler((contestModule as any).ContestDetailHandler);
+        detailHandler.user = outsider;
+        await detailHandler.__prepare('forged-domain', tid);
+        await detailHandler.get('forged-domain', tid);
+        expect(calls.getListViewableAuthorized).to.have.length(1);
+        expect(calls.getLists).to.have.length(0);
+        expect(detailHandler.response.body.pdict).to.deep.equal({});
+        expect(detailHandler.response.body.pids).to.deep.equal([]);
     });
 });

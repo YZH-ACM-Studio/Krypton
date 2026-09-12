@@ -182,7 +182,14 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     if (fromHomework && request === '../model/discussion') return discussionStub;
     if (fromHomework && request === '../model/problem') return problemStub;
     if (fromHomework && request === '../model/problem-access') {
-        return { assertProblemBankSelection: async () => undefined };
+        return {
+            assertProblemBankSelection: async () => undefined,
+            async readContextViewableProblems(domainId: string, _user: unknown, pids: number[], context: { kind: string }, adapters: any) {
+                calls.push({ model: 'readContextViewableProblems', domainId });
+                if (context.kind !== 'homework-membership') throw new TypeError(context.kind);
+                return adapters.readContainer(pids);
+            },
+        };
     }
     if (fromHomework && request === '../model/record') return recordStub;
     if (fromHomework && request === '../model/storage') return {};
@@ -287,6 +294,7 @@ describe('homework authoritative domain', () => {
             'contest.getStatus',
             'discussion.getMulti',
             'user.getList',
+            'readContextViewableProblems',
             'problem.getList',
             'record.getList',
         ]);
@@ -307,6 +315,16 @@ describe('homework authoritative domain', () => {
             expect(body, start).not.to.match(/async\s+\w+\s*\(\s*(?:\{\s*)?domainId\b/);
             expect(body, start).not.to.match(/(?:contest|problem|user|discussion|record)\.\w+\(\s*_?domainId\b/);
         }
+    });
+
+    it('declares homework-membership and injects getList(..., true) as the container adapter', () => {
+        const source = readFileSync(homeworkPath, 'utf8');
+        expect(source).to.include("kind: 'homework-membership'");
+        expect(source).to.include('readContextViewableProblems(');
+        expect(source).to.include('problem.getList(authoritativeDomainId, pids, true, true, problem.PROJECTION_CONTEST_LIST)');
+        expect(source).not.to.include('canViewAllContestProblems');
+        expect(source).not.to.include('contest-membership');
+        expect(source).not.to.include('loadManagedContainerPids');
     });
 });
 

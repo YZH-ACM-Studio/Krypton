@@ -1,6 +1,7 @@
 import { expect } from 'chai';
 import { ObjectId } from 'mongodb';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { beforeEach, describe, it } from 'node:test';
 
 const Module = require('module');
@@ -165,11 +166,23 @@ const contestStub: any = {
 
 const problemStub: any = {
     PROJECTION_LIST: ['domainId', 'docId', 'pid', 'title', 'hidden'],
+    PROJECTION_PUBLIC: ['domainId', 'docId', 'pid', 'title', 'hidden'],
     PROJECTION_CONTEST_LIST: ['domainId', 'docId', 'pid', 'title'],
     default: {},
     async get(_domainId: string, pid: number) {
         calls.rawProblems.push(Number(pid));
         return Number(pid) === 7 ? hiddenProblem : { ...hiddenProblem, docId: Number(pid) };
+    },
+    getMulti() {
+        const value: any = {
+            limit() {
+                return value;
+            },
+            async toArray() {
+                return [hiddenProblem];
+            },
+        };
+        return value;
     },
     async getViewableAuthorized(_domainId: string, pid: number) {
         calls.viewableProblems.push(Number(pid));
@@ -268,7 +281,39 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
             },
         };
     }
+    if (fromRecordHandler && request === '../lib/testdataConfig') {
+        return {
+            parseConfig: async (config: unknown) => config,
+        };
+    }
     if (fromRecordHandler && request === '../model/problem') return { default: problemStub, ...problemStub };
+    if (fromRecordHandler && request === '../model/problem-access') {
+        return {
+            PROBLEM_ACL_INTERNAL_FIELDS: new Set(['aclMutationRevision', 'aclMutationLocks', 'aclWriteClaim']),
+            async readContextViewableProblem(_domainId: string, user: any, context: any, adapters: any) {
+                const face =
+                    context.kind === 'record-detail'
+                        ? !context.contextualProblemAccess &&
+                          !context.virtualAttemptId &&
+                          (!context.tdoc || (!context.teamRecordAccess && !context.tsdoc?.attend))
+                            ? 'direct-stable'
+                            : 'container'
+                        : context.kind === 'record-detail-connection'
+                          ? !context.contextualProblemAccess &&
+                            !context.virtualAttemptId &&
+                            (!context.contest || (!context.teamRecordAccess && user._id !== context.recordUid))
+                              ? 'direct-stable'
+                              : 'container'
+                          : (() => {
+                                throw new TypeError(context.kind);
+                            })();
+                if (face === 'container') return adapters.readContainer();
+                const pdoc = await adapters.readDirectStable();
+                calls.viewableProblems.push(Number(pdoc?.docId));
+                return viewableProblemAvailable ? pdoc : null;
+            },
+        };
+    }
     if (fromRecordHandler && request === '../model/record') return { default: recordStub, ...recordStub };
     if (fromRecordHandler && request === '../model/setting') return { langs: { 'cc.cc17': { display: 'C++ 17' } } };
     if (fromRecordHandler && request === '../model/storage') return { default: {} };
@@ -286,6 +331,29 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     }
     if (fromRecordHandler && request === './contest') return { ContestDetailBaseHandler: HandlerStub };
     if (fromRecordHandler && request === './judge') return { postJudge: async () => undefined };
+    if (fromRecordHandler && request === '../model/record-score-cancellation') {
+        return {
+            auditRecordScorePermissionRejection: async () => undefined,
+            cancelRecordScore: async () => ({ rdoc: {} }),
+            async getRecordScoreAction() {
+                return null;
+            },
+            recoverCanceledRecord: async () => ({ rdoc: {} }),
+        };
+    }
+    if (fromRecordHandler && request === '../model/virtual-contest') {
+        return {
+            canManageVirtualContest: () => false,
+            virtualContestService: {
+                async getAttempt() {
+                    return null;
+                },
+                async getOfficialAttempt() {
+                    return null;
+                },
+            },
+        };
+    }
     return originalLoad.call(this, request, parent, isMain);
 };
 
@@ -311,6 +379,7 @@ function makeHandler(Ctor: any): any {
     handler.user = makeUser();
     handler.response = { body: {} };
     handler.args = {};
+    (handler as any).translate = (value: string) => value;
     return handler as any;
 }
 
@@ -337,13 +406,14 @@ describe('post-contest practice record handlers', () => {
     it('queries only the current user ordinary records under an explicit practice scope', async () => {
         const handler = makeHandler(recordHandlerModule.RecordListHandler);
         handler.tsdoc = { attend: 1 };
-        await handler.get('d', 1, 7, tid, true, '42', undefined, undefined, true);
+        await handler.get('d', 1, 7, tid, true, false, '42', undefined, undefined, true);
 
         expect(calls.recordQueries[0]).to.deep.equal({
             uid: 42,
             pid: 7,
             contest: { $exists: false },
             contestTeamId: { $exists: false },
+            virtualAttemptId: { $exists: false },
             hackTarget: { $exists: false },
             input: { $exists: false },
         });
@@ -354,7 +424,7 @@ describe('post-contest practice record handlers', () => {
     it('keeps an ordinary tid list on immutable contest records', async () => {
         const handler = makeHandler(recordHandlerModule.RecordListHandler);
         handler.tsdoc = { attend: 1 };
-        await handler.get('d', 1, 7, tid, false, '42', undefined, undefined, true);
+        await handler.get('d', 1, 7, tid, false, false, '42', undefined, undefined, true);
 
         expect(calls.recordQueries[0]).to.deep.include({ contest: tid, uid: 42, pid: 7 });
         expect(handler.response.body.postContestPracticeActive).to.equal(false);
@@ -363,7 +433,7 @@ describe('post-contest practice record handlers', () => {
     it('rejects a forged problem outside the contest practice context', async () => {
         const handler = makeHandler(recordHandlerModule.RecordListHandler);
         handler.tsdoc = { attend: 1 };
-        await assert.rejects(handler.get('d', 1, 8, tid, true, '42', undefined, undefined, true), TestPermissionError);
+        await assert.rejects(handler.get('d', 1, 8, tid, true, false, '42', undefined, undefined, true), TestPermissionError);
     });
 
     it('opens an owner hidden record through the validated practice context', async () => {
@@ -402,7 +472,7 @@ describe('post-contest practice record handlers', () => {
     it('keeps the practice websocket on ordinary current-user records', async () => {
         const handler = makeHandler(recordHandlerModule.RecordMainConnectionHandler) as any;
         handler.args = { domainId: 'd' };
-        await handler.prepare('d', tid, true, 7, '42', undefined, undefined, false, false, false, true);
+        await handler.prepare('d', tid, true, false, 7, '42', undefined, undefined, false, false, false, true);
         expect(handler.practice).to.equal(true);
         expect(handler.tid).to.equal(undefined);
 
@@ -424,6 +494,21 @@ describe('post-contest practice record handlers', () => {
         expect(handler.postContestPracticeRecordAccess).to.equal(true);
         expect(handler.pdoc).to.equal(hiddenProblem);
         expect(calls.viewableProblems).to.deep.equal([]);
+    });
+
+    it('declares distinct record-detail and record-detail-connection contexts', () => {
+        const source = readFileSync(recordHandlerPath, 'utf8');
+        expect(source).to.include("kind: 'record-detail' as const");
+        expect(source).to.include("kind: 'record-detail-connection' as const");
+        expect(source).to.include('readContextViewableProblem(');
+        expect(source).to.include('readContainer: () => problem.get(');
+        expect(source).not.to.include('loadManagedContainerPids');
+        const detailIdx = source.indexOf("kind: 'record-detail' as const");
+        const connectionIdx = source.indexOf("kind: 'record-detail-connection' as const");
+        expect(connectionIdx).to.be.greaterThan(detailIdx);
+        expect(source.slice(detailIdx, detailIdx + 280)).to.include('tsdoc: this.tsdoc');
+        expect(source.slice(connectionIdx, connectionIdx + 280)).to.include('recordUid: rdoc.uid');
+        expect(source.slice(connectionIdx, connectionIdx + 280)).to.include('contest: rdoc.contest');
     });
 });
 

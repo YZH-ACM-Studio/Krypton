@@ -25,8 +25,8 @@ import {
     getHomeworkUserGroupIds,
     participantGroupObjectIds,
 } from '../model/homework-access';
-import problem from '../model/problem';
-import { assertProblemBankSelection } from '../model/problem-access';
+import problem, { type ProblemDoc } from '../model/problem';
+import { assertProblemBankSelection, readContextViewableProblems } from '../model/problem-access';
 import record from '../model/record';
 import storage from '../model/storage';
 import system from '../model/system';
@@ -92,6 +92,27 @@ function parseProblemDocIds(input: string) {
     const pids = tokens.map((i) => Number(i));
     if (!pids.every((i) => Number.isSafeInteger(i) && i > 0)) throw new ValidationError('pids');
     return pids;
+}
+
+function problemDocsFromGetList(dict: Record<string | number, ProblemDoc>, pids: number[]) {
+    const docs: ProblemDoc[] = [];
+    const seen = new Set<number>();
+    for (const pid of pids) {
+        const pdoc = dict[pid];
+        if (!pdoc || !Number.isSafeInteger(pdoc.docId) || seen.has(pdoc.docId)) continue;
+        seen.add(pdoc.docId);
+        docs.push(pdoc);
+    }
+    return docs;
+}
+
+function problemDictFromDocs(docs: ProblemDoc[]) {
+    const pdict: Record<string | number, ProblemDoc> = {};
+    for (const pdoc of docs) {
+        pdict[pdoc.docId] = pdoc;
+        if (pdoc.pid) pdict[pdoc.pid] = pdoc;
+    }
+    return pdict;
 }
 
 const validatePenaltyRules = (input: string) => {
@@ -202,7 +223,23 @@ class HomeworkDetailHandler extends Handler {
         ) {
             return;
         }
-        const pdict = await problem.getList(authoritativeDomainId, this.tdoc.pids, true, true, problem.PROJECTION_CONTEST_LIST);
+        const pdict = problemDictFromDocs(
+            await readContextViewableProblems(
+                authoritativeDomainId,
+                this.user,
+                this.tdoc.pids,
+                { kind: 'homework-membership' },
+                {
+                    readDirectStable: async () => {
+                        throw new TypeError('homework-membership must use the container face');
+                    },
+                    readContainer: async (pids) => {
+                        const dict = await problem.getList(authoritativeDomainId, pids, true, true, problem.PROJECTION_CONTEST_LIST);
+                        return problemDocsFromGetList(dict, pids);
+                    },
+                },
+            ),
+        );
         const psdict = {};
         let rdict = {};
         if (tsdoc) {

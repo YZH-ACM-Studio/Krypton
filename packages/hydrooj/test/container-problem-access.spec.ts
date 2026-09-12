@@ -1,6 +1,7 @@
 import { expect } from 'chai';
 import { localizeErrorParameter, localizedErrorText } from '@hydrooj/framework';
 import { ObjectId } from 'mongodb';
+import { readFileSync } from 'node:fs';
 import { beforeEach, describe, it } from 'node:test';
 
 const Module = require('module');
@@ -77,6 +78,7 @@ const calls = {
     getList: [] as any[],
     getListViewableAuthorized: [] as any[],
     getViewableAuthorized: [] as any[],
+    viewContexts: [] as any[],
     selections: [] as any[],
     storageDeletes: [] as any[],
     storagePuts: [] as any[],
@@ -138,13 +140,43 @@ const problemStub = {
         calls.getListViewableAuthorized.push({ domainId, pids: [...pids], projection: [...projection] });
         return problemDict(pids.map((pid) => problemDocs.get(pid)).filter((pdoc) => pdoc && this.canViewBy(pdoc, user)));
     },
+    getMulti(_domainId: string, filter: any) {
+        const docs = [...problemDocs.values()].filter((doc) => {
+            if (filter?.docId?.$in) return filter.docId.$in.includes(doc.docId);
+            if (filter?.docId !== undefined) return doc.docId === filter.docId;
+            return true;
+        });
+        const value: any = {
+            limit() {
+                return value;
+            },
+            async toArray() {
+                return docs;
+            },
+        };
+        return value;
+    },
 };
 
 const problemAccessStub = {
+    PROBLEM_ACL_INTERNAL_FIELDS: new Set(['aclMutationRevision', 'aclMutationLocks', 'aclWriteClaim']),
     async assertProblemBankSelection(domainId: string, pids: number[], user: any, existingPids: number[]) {
         calls.events.push(`selection:${pids.join(',')}`);
         calls.selections.push({ domainId, pids: [...pids], user, existingPids: [...existingPids] });
         if (denySelection) throw new TestPermissionError();
+    },
+    async readContextViewableProblem(_domainId: string, _user: any, context: { kind: string }, adapters: any) {
+        calls.viewContexts.push({ kind: context.kind, mode: 'one' });
+        if (context.kind === 'referenced-card' || context.kind === 'direct') return adapters.readDirectStable();
+        return adapters.readContainer();
+    },
+    async readContextViewableProblems(domainId: string, user: any, pids: number[], context: { kind: string }, adapters: any) {
+        calls.viewContexts.push({ domainId, kind: context.kind, pids: [...pids], mode: 'batch' });
+        if (context.kind === 'referenced-card' || context.kind === 'direct') {
+            const dict = await problemStub.getListViewableAuthorized(domainId, pids, user, ['domainId', 'docId']);
+            return pids.map((pid) => dict[pid]).filter(Boolean);
+        }
+        return adapters.readContainer(pids);
     },
 };
 
@@ -381,6 +413,13 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     if (fromSrc && request === '../model/practice-integrity') return practiceIntegrityStub;
     if (fromSrc && request === '../model/problem') return problemStub;
     if (fromSrc && request === '../model/problem-access') return problemAccessStub;
+    if (typeof request === 'string' && request.includes('krypton-collect')) {
+        return {
+            async listByCourseChapter() {
+                return [];
+            },
+        };
+    }
     if (fromSrc && request === '../model/storage') return storageStub;
     if (fromSrc && request === '../model/system') return { get: () => 1000 };
     if (fromSrc && request === '../model/problem-set-access') {
@@ -441,7 +480,16 @@ try {
     trainingModule = require(trainingPath);
     courseModule = require(coursePath);
 } finally {
-    Module._load = originalLoad;
+    Module._load = function load(request: string, parent: NodeModule, isMain: boolean) {
+        if (typeof request === 'string' && request.includes('krypton-collect')) {
+            return {
+                async listByCourseChapter() {
+                    return [];
+                },
+            };
+        }
+        return originalLoad.call(this, request, parent, isMain);
+    };
 }
 
 void trainingModule.apply({
@@ -520,6 +568,7 @@ beforeEach(() => {
     calls.getList.length = 0;
     calls.getListViewableAuthorized.length = 0;
     calls.getViewableAuthorized.length = 0;
+    calls.viewContexts.length = 0;
     calls.selections.length = 0;
     calls.storageDeletes.length = 0;
     calls.storagePuts.length = 0;
@@ -1034,7 +1083,8 @@ describe('P1.4 contextual practice progress', () => {
         const handler = makeHandler(trainingRoutes.training_detail);
         await handler.get('forged-domain', 'training');
 
-        expect(handler.response.body.nsdict[1]).to.include({ progress: 0, isDone: false, isProgress: false, isOpen: true });
+        expect(handler.response.body.nsdict[1]).to.include({ progress: 0, isDone: false, isOpen: true });
+        expect(handler.response.body.nsdict[1].isProgress).to.equal(0);
         expect(handler.response.body.nsdict[1].donePids).to.deep.equal([]);
     });
 
@@ -1431,6 +1481,8 @@ function registerReferencedProblemVisibilitySuite(label: 'training' | 'course', 
             problemDocs.set(11, { domainId: 'system', docId: 11, owner: 7, hidden: true, title: 'Hidden' });
             const user = makeUser({ _permitPids: new Set([11]) });
             expect(await render(user)).to.have.property('11');
+            expect(calls.viewContexts.at(-1)).to.include({ domainId: 'system', kind: 'referenced-card' });
+            expect(calls.getList).to.deep.equal([]);
         });
 
         it('shows a container manager the hung hidden problem without global hidden permission', async () => {
@@ -1441,6 +1493,8 @@ function registerReferencedProblemVisibilitySuite(label: 'training' | 'course', 
             });
             expect(await render(manager)).to.have.property('11');
             expect(await render(outsider)).not.to.have.property('11');
+            expect(calls.viewContexts.map((entry) => entry.kind)).to.deep.equal(['referenced-card', 'referenced-card']);
+            expect(calls.getList).to.deep.equal([]);
         });
 
         it('hides the referenced hidden problem immediately when fenced or revoked', async () => {
@@ -1467,9 +1521,23 @@ function registerReferencedProblemVisibilitySuite(label: 'training' | 'course', 
             await handler.get('forged-domain', 'container');
             expect(calls.containerGets.at(-1)?.domainId).to.equal('system');
             expect(calls.getListViewableAuthorized.at(-1)?.domainId).to.equal('system');
+            expect(calls.viewContexts.at(-1)).to.include({ domainId: 'system', kind: 'referenced-card' });
+            expect(calls.getList).to.deep.equal([]);
         });
     });
 }
+
+describe('referenced-card view context', () => {
+    it('declares referenced-card and injects getList(..., true) only as the unused container adapter', () => {
+        const source = readFileSync(require.resolve('../src/handler/problem-reference.ts'), 'utf8');
+        expect(source).to.include("kind: 'referenced-card'");
+        expect(source).to.include('readContextViewableProblems(');
+        expect(source).to.include('problem.getList(domainId, requestedPids, true, false, projection, true)');
+        expect(source).not.to.include('contest-membership');
+        expect(source).not.to.include('homework-membership');
+        expect(source).not.to.include('loadManagedContainerPids');
+    });
+});
 
 registerReferencedProblemVisibilitySuite('training', trainingRoutes, 'training_detail');
 registerReferencedProblemVisibilitySuite('course', courseRoutes, 'course_detail');
@@ -1561,6 +1629,31 @@ describe('P3.3 problem set access handler gates', () => {
         await visible.get('forged-domain', 'set');
         expect(calls.trainingStatusWrites).to.deep.equal([]);
         expect(visible.response.body.access.accessible).to.equal(true);
+        expect(Object.keys(visible.response.body).sort()).to.deep.equal(
+            [
+                'access',
+                'completedProblemCount',
+                'groups',
+                'integrityControlled',
+                'missing',
+                'ndict',
+                'nsdict',
+                'pdict',
+                'pids',
+                'psdict',
+                'selfPsdict',
+                'tdoc',
+                'totalProblemCount',
+                'tsdoc',
+                'udict',
+                'udoc',
+            ].sort(),
+        );
+        expect(visible.response.body.tdoc.dag[0].title).to.equal('Stage');
+        expect(visible.response.body.tdoc.dag[0].pids).to.deep.equal([11]);
+        expect(visible.response.body.ndict[1].title).to.equal('Stage');
+        expect(visible.response.body.ndict[1].pids).to.deep.equal([11]);
+        expect(visible.response.body.pids).to.deep.equal([11]);
 
         problemSetAccessDecision = { discoverable: false, accessible: false, enrolled: true, sources: [] };
         expect((await captureFailure(() => makeHandler(trainingRoutes.training_detail).get('forged-domain', 'set')))?.name).to.equal('NotFoundError');

@@ -33,7 +33,8 @@ import {
     listActiveSessionsForContest,
     refreshActiveTeamSessionRoles,
 } from './src/helpers';
-import { enforceBoundClientHandler, getBrowserLockoutDecision, invalidateLockoutCache, vigilGuardLockoutLayer } from './src/lockout';
+import { enforceBoundClientHandler, getBrowserLockoutDecision, vigilGuardLockoutLayer } from './src/lockout';
+import { getLockoutCacheGeneration, invalidateLockoutCache } from './src/lockout-cache';
 import { migrationScripts } from './src/migration';
 
 export * from './src/types';
@@ -45,6 +46,7 @@ export {
     deleteClientSessionByVigilSessionId,
     effectiveContestAccess,
     getBrowserLockoutDecision,
+    getLockoutCacheGeneration,
     hitsParticipantScope,
     invalidateLockoutCache,
     isValidClientSessionForContest,
@@ -70,6 +72,7 @@ export const vigilGuardModel = {
     refreshActiveTeamSessionRoles,
     effectiveContestAccess,
     getBrowserLockoutDecision,
+    getLockoutCacheGeneration,
     invalidateLockoutCache,
 };
 

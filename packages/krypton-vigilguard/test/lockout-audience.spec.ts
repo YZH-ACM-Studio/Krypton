@@ -665,6 +665,11 @@ describe('P1.28 browser-lockout runtime facts', () => {
         expect(userHandler).to.include('udoc.hasPerm(PERM.PERM_EDIT_CONTEST)');
         const pluginSource = readFileSync(resolve(__dirname, '../index.ts'), 'utf8');
         expect(pluginSource).to.include("ctx.on('handler/before-prepare', enforceBoundClientHandler)");
+        const cache = require(require.resolve('../src/lockout-cache.ts'));
+        expect(lockout.invalidateLockoutCache).to.equal(cache.invalidateLockoutCache);
+        expect(lockout.getLockoutCacheGeneration).to.equal(cache.getLockoutCacheGeneration);
+        expect(pluginSource).to.include('getLockoutCacheGeneration');
+        expect(pluginSource).to.include('Hydro.model.vigilguard = vigilGuardModel');
     });
 });
 

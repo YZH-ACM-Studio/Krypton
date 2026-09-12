@@ -21,10 +21,10 @@
  * Caching: step 5 is the expensive one — it reads the contest collection
  * plus only the canonical scope/status/team facts required by each contest.
  * Result is keyed by uid and lives for at most 120s in an in-process LRU
- * (`CACHE_TTL_MS`). An entry expires earlier at the next relevant lockout
+ * (`LOCKOUT_CACHE_TTL_MS`). An entry expires earlier at the next relevant lockout
  * window boundary, so a cached allow/deny never crosses blockStart/blockEnd.
  * Mutation paths (contest save, scope edit) call `invalidateLockoutCache()`
- * to bust affected entries.
+ * to bust affected entries and advance the cache generation.
  */
 import type { KoaContext } from '@hydrooj/framework';
 import { Logger } from '@hydrooj/utils';
@@ -36,7 +36,17 @@ import * as document from 'hydrooj/src/model/document';
 import userModel from 'hydrooj/src/model/user';
 import { clientSessionKeyFromSession, currentClientSession, hitsParticipantScope } from './helpers';
 import { isBrowserLockoutAudience } from './lockout-audience';
+import {
+    LOCKOUT_CACHE_TTL_MS,
+    commitLockoutCache,
+    getLockoutCacheGeneration,
+    invalidateLockoutCache,
+    readLockoutCache,
+    type LockoutCacheEntry,
+} from './lockout-cache';
 import type { ClientSessionDoc } from './types';
+
+export { getLockoutCacheGeneration, invalidateLockoutCache };
 
 const logger = new Logger('vigilguard.lockout');
 const BOUND_CLIENT_AUTHORITY = Symbol('krypton.vigilguard.bound-client-authority');
@@ -83,101 +93,6 @@ function matchesWhitelist(path: string): boolean {
         } else if (path === pat) return true;
     }
     return false;
-}
-
-// ── Cache ─────────────────────────────────────────────────────────────────
-
-const CACHE_TTL_MS = 120 * 1000;
-const CACHE_MAX = 5000;
-
-interface CacheEntry {
-    /** wall-clock cache expiry */
-    expiresAt: number;
-    /**
-     * The lockout decision at cache time:
-     *   - `null` ⇒ not locked
-     *   - `{ contestId, blockEnd, title }` ⇒ locked; the picked contest
-     *     is the one whose window the user is hitting (the one with the
-     *     soonest `blockEnd` — that's the most relevant "ETA" for the
-     *     notice page).
-     */
-    decision: null | { contestId: string; blockEnd: number; title: string };
-}
-
-interface ComputedDecision {
-    decision: CacheEntry['decision'];
-    expiresAt: number;
-}
-
-const lockoutCache = new Map<string, CacheEntry>();
-let lockoutCacheGeneration = 0;
-
-function cacheKey(domainId: string, uid: number): string {
-    return `${domainId}:${uid}`;
-}
-
-function cacheGet(key: string): CacheEntry | null {
-    const e = lockoutCache.get(key);
-    if (!e) return null;
-    if (e.expiresAt <= Date.now()) {
-        lockoutCache.delete(key);
-        return null;
-    }
-    return e;
-}
-
-function cacheSet(key: string, computed: ComputedDecision): void {
-    if (lockoutCache.size >= CACHE_MAX) {
-        // Evict ~20% oldest entries. Cheap heuristic; we keep ordering by
-        // insertion via Map's iteration order.
-        const toEvict = Math.floor(CACHE_MAX * 0.2);
-        let i = 0;
-        for (const k of lockoutCache.keys()) {
-            lockoutCache.delete(k);
-            if (++i >= toEvict) break;
-        }
-    }
-    lockoutCache.set(key, computed);
-}
-
-/**
- * Bust the lockout cache. Call this from contest save / scope edit
- * mutation paths so the next request sees the new state.
- *
- * If `domainId` and `uid` are both given, only that entry is dropped.
- * If only `domainId` is given, all entries in that domain are dropped.
- * No args ⇒ flush everything (e.g., system-wide policy change).
- */
-export function invalidateLockoutCache(domainId?: string, uid?: number): void {
-    // Advance before deleting entries so an in-flight cache miss cannot
-    // repopulate a decision computed from state that predates this mutation.
-    lockoutCacheGeneration += 1;
-    if (domainId && uid) {
-        lockoutCache.delete(cacheKey(domainId, uid));
-        return;
-    }
-    if (domainId) {
-        const prefix = `${domainId}:`;
-        for (const k of lockoutCache.keys()) {
-            if (k.startsWith(prefix)) lockoutCache.delete(k);
-        }
-        return;
-    }
-    lockoutCache.clear();
-}
-
-export async function getBrowserLockoutDecision(domainId: string, uid: number): Promise<CacheEntry['decision']> {
-    const key = cacheKey(domainId, uid);
-    for (;;) {
-        const entry = cacheGet(key);
-        if (entry) return entry.decision;
-        const generation = lockoutCacheGeneration;
-        const computed = await computeLockoutDecision(domainId, uid);
-        if (generation !== lockoutCacheGeneration) continue;
-        if (computed.expiresAt <= Date.now()) continue;
-        cacheSet(key, computed);
-        return computed.decision;
-    }
 }
 
 function requestPathInsideDomain(path: string, domainId: string): string {
@@ -280,6 +195,17 @@ export function enforceBoundClientHandler(handler: any): 'cleanup' | undefined {
 
 // ── Lockout decision ──────────────────────────────────────────────────────
 
+export async function getBrowserLockoutDecision(domainId: string, uid: number): Promise<LockoutCacheEntry['decision']> {
+    for (;;) {
+        const entry = readLockoutCache(domainId, uid);
+        if (entry) return entry.decision;
+        const generation = getLockoutCacheGeneration();
+        const computed = await computeLockoutDecision(domainId, uid);
+        if (!commitLockoutCache(domainId, uid, computed, generation)) continue;
+        return computed.decision;
+    }
+}
+
 async function resolveLegacyAssignMatch(domainId: string, tdoc: Tdoc, uid: number): Promise<boolean> {
     if ((tdoc as any).assign?.length) {
         const groups = await userModel.listGroup(domainId, uid);
@@ -294,7 +220,7 @@ async function resolveLegacyAssignMatch(domainId: string, tdoc: Tdoc, uid: numbe
  * in `domainId`. Returns the picked contest (soonest blockEnd) when
  * locked, else `null`.
  */
-async function computeLockoutDecision(domainId: string, uid: number): Promise<ComputedDecision> {
+async function computeLockoutDecision(domainId: string, uid: number): Promise<LockoutCacheEntry> {
     // Pull every client_required contest in the domain that's currently
     // in its lockout window. The condition is:
     //   tdoc.entryMode === 'client_required'
@@ -313,8 +239,8 @@ async function computeLockoutDecision(domainId: string, uid: number): Promise<Co
         endAt: { $gte: new Date(now - dayMs) },
     } as any);
 
-    let best: CacheEntry['decision'] = null;
-    let expiresAt = now + CACHE_TTL_MS;
+    let best: LockoutCacheEntry['decision'] = null;
+    let expiresAt = now + LOCKOUT_CACHE_TTL_MS;
     for await (const t of cursor) {
         const tdoc = t as any as Tdoc;
         if (tdoc.owner === uid || (tdoc.maintainer || []).includes(uid)) continue;

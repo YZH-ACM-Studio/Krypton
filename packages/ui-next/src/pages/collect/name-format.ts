@@ -30,6 +30,7 @@ const ALLOWED_TOKENS = new Set<string>(COLLECT_NAME_TOKENS);
 const INVALID_ZIP_PART_CHARS = /[\\/:*?"<>|\x00-\x1F]/g;
 
 export interface CollectNameContext {
+  /** Required by the plugin; optional here so a missing uid does not render unbound-UIDundefined. */
   uid?: number;
   studentId?: string;
   realName?: string;
@@ -102,7 +103,8 @@ function isNameToken(token: string): token is CollectNameToken {
 
 function tokenValue(token: CollectNameToken, ctx: CollectNameContext): string {
   const trimmedId = ctx.studentId?.trim() || '';
-  const studentId = trimmedId || (typeof ctx.uid === 'number' && Number.isFinite(ctx.uid) ? `unbound-UID${ctx.uid}` : trimmedId);
+  const studentId = trimmedId
+    || (typeof ctx.uid === 'number' && Number.isFinite(ctx.uid) ? `unbound-UID${ctx.uid}` : trimmedId);
   const realName = ctx.realName?.trim() || '';
   const originalName = ctx.originalName.trim() || `${COLLECT_MISSING_STEM}.${ctx.ext}`;
   switch (token) {

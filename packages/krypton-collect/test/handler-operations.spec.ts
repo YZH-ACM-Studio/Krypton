@@ -43,4 +43,17 @@ describe('collect Hydro operation methods', () => {
         expect(detail).to.include('async postConfirm');
         expect(detail).to.not.match(/async post\(/);
     });
+
+    it('derives assignedName through model assignedNameForFile and fileIndexInSlot', () => {
+        expect(handlerSource).not.to.match(/function currentFileIndex\(/);
+        expect(handlerSource).not.to.match(/function assignedNameFor\(/);
+        expect(handlerSource).to.include('assignedNameForFile');
+        expect(handlerSource).to.include('fileIndexInSlot');
+        const detail = sliceClass('CollectDetailHandler');
+        const stats = sliceClass('AdminCollectStatsHandler');
+        expect(detail).to.include('assignedNameForFile');
+        expect(detail).to.include('fileIndexInSlot');
+        expect(stats).to.include('assignedNameForFile');
+        expect(stats).to.include('fileIndexInSlot');
+    });
 });

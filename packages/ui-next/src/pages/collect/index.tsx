@@ -167,36 +167,6 @@ function filesForSlot(files: CollectCurrentFileView[], slotId: string): CollectC
   return files.filter((file) => file.slotId === slotId);
 }
 
-function fileAssignedExt(file: CollectCurrentFileView, slot: CollectSlotView): string {
-  if (file.ext) return file.ext;
-  const name = file.originalName.trim();
-  const dot = name.lastIndexOf('.');
-  if (dot > 0 && dot < name.length - 1) {
-    const ext = name.slice(dot + 1).toLowerCase();
-    if (ext) return ext === 'jpeg' ? 'jpg' : ext;
-  }
-  return slotPreviewExt(slot);
-}
-
-function assignedFileTitle(
-  file: CollectCurrentFileView,
-  slot: CollectSlotView,
-  index: number,
-  template: string,
-  identity: CollectStudentIdentity,
-): string {
-  if (file.assignedName) return file.assignedName;
-  return renderAssignedFileName(template, {
-    uid: identity.uid,
-    studentId: identity.studentId,
-    realName: identity.realName,
-    slotTitle: slot.title,
-    index,
-    ext: fileAssignedExt(file, slot),
-    originalName: file.originalName,
-  });
-}
-
 function nextUploadPreviewName(
   slot: CollectSlotView,
   nextIndex: number,
@@ -357,8 +327,6 @@ function SlotFiles({
   open,
   replacingFileId,
   busyFileId,
-  fileNameTemplate,
-  identity,
   onReplace,
   onDelete,
 }: {
@@ -368,8 +336,6 @@ function SlotFiles({
   open: boolean;
   replacingFileId: string | null;
   busyFileId: string | null;
-  fileNameTemplate: string;
-  identity: CollectStudentIdentity;
   onReplace: (fileId: string) => void;
   onDelete: (file: CollectCurrentFileView) => void;
 }) {
@@ -378,8 +344,8 @@ function SlotFiles({
   }
   return (
     <ul className="space-y-1.5">
-      {files.map((file, index) => {
-        const assignedName = assignedFileTitle(file, slot, index + 1, fileNameTemplate, identity);
+      {files.map((file) => {
+        const assignedName = file.assignedName || file.originalName;
         return (
           <li key={file.fileId} className="rounded-md border bg-card px-2.5 py-2 text-xs">
             <div className="flex items-center gap-2">
@@ -629,8 +595,6 @@ export function CollectDetailPage() {
                 open={open}
                 replacingFileId={replacingFileId}
                 busyFileId={busyFileId}
-                fileNameTemplate={data.fileNameTemplate}
-                identity={data.identity}
                 onReplace={(fileId) => setReplacingFileId((current) => (current === fileId ? null : fileId))}
                 onDelete={(file) => void deleteFile(file)}
               />

@@ -28,6 +28,7 @@ import {
     createRequest,
     deleteCurrentFile,
     deleteRequestIfEmpty,
+    fileIndexInSlot,
     getFileForDownload,
     getRequest,
     isAudienceMember,
@@ -195,21 +196,6 @@ function slotTitleOf(request: CollectRequestDoc, slotId: string): string {
     return request.slots.find((slot) => slot.id === slotId)?.title || slotId;
 }
 
-function currentFileIndex(files: Array<{ slotId: string; fileId: string }>, file: { slotId: string; fileId: string }): number {
-    const sameSlot = files.filter((row) => row.slotId === file.slotId);
-    const pos = sameSlot.findIndex((row) => row.fileId === file.fileId);
-    return pos >= 0 ? pos + 1 : 1;
-}
-
-function assignedNameFor(
-    request: CollectRequestDoc,
-    identity: { uid: number; studentId?: string; realName?: string },
-    file: { slotId: string; fileId: string; originalName: string; ext: string },
-    index: number,
-): string {
-    return assignedNameForFile(request, identity, { title: slotTitleOf(request, file.slotId) }, file, index);
-}
-
 async function lookupStudentIdentity(domainId: string, uid: number): Promise<CollectIdentity> {
     const ub = await userbindOrThrow();
     const student = await ub.findStudentByUserId(domainId, uid);
@@ -231,7 +217,13 @@ async function assignedDownloadName(
         uid: file.uid,
     });
     const currentFiles = submission?.currentFiles || [];
-    return assignedNameFor(request, { uid: file.uid, ...identity }, file, currentFileIndex(currentFiles, file));
+    return assignedNameForFile(
+        request,
+        { uid: file.uid, ...identity },
+        { title: slotTitleOf(request, file.slotId) },
+        file,
+        fileIndexInSlot(currentFiles, file.slotId, file.fileId),
+    );
 }
 
 function serializeRequest(doc: CollectRequestDoc, extras: {
@@ -315,11 +307,12 @@ class CollectDetailHandler extends CollectBaseHandler {
         const files = submission?.currentFiles || [];
         const currentFiles = files.map((file) => ({
             ...file,
-            assignedName: assignedNameFor(
+            assignedName: assignedNameForFile(
                 request,
                 { uid: this.user._id, ...identity },
+                { title: slotTitleOf(request, file.slotId) },
                 file,
-                currentFileIndex(files, file),
+                fileIndexInSlot(files, file.slotId, file.fileId),
             ),
             url: `/collect/${String(request._id)}/file/${file.fileId}`,
         }));
@@ -774,11 +767,12 @@ class AdminCollectStatsHandler extends CollectBaseHandler {
                 files: row.currentFiles.map((file) => ({
                     ...file,
                     originalName: file.originalName,
-                    assignedName: assignedNameFor(
+                    assignedName: assignedNameForFile(
                         request,
                         { uid: row.uid, studentId: row.studentId, realName: row.realName },
+                        { title: slotTitleOf(request, file.slotId) },
                         file,
-                        currentFileIndex(row.currentFiles, file),
+                        fileIndexInSlot(row.currentFiles, file.slotId, file.fileId),
                     ),
                     duplicateCount: file.duplicateCount,
                     duplicateStudentIds: file.duplicateStudentIds,

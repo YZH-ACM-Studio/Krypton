@@ -1286,23 +1286,33 @@ interface CollectSlotFileIndexRef {
     _id?: ObjectId | string;
 }
 
-/** 1-based index among that slot's current files. Prefers createdAt,_id from file docs; CollectCurrentFileRef has no createdAt so it sorts by fileId. */
+function hasFileCreatedAt(file: CollectSlotFileIndexRef): file is CollectSlotFileIndexRef & { createdAt: Date } {
+    return file.createdAt instanceof Date && !Number.isNaN(file.createdAt.getTime());
+}
+
+/** Same order as loadCurrentFiles: createdAt, then _id. */
+function compareLoadCurrentFilesOrder(left: CollectSlotFileIndexRef, right: CollectSlotFileIndexRef): number {
+    const leftAt = hasFileCreatedAt(left) ? left.createdAt.getTime() : 0;
+    const rightAt = hasFileCreatedAt(right) ? right.createdAt.getTime() : 0;
+    if (leftAt !== rightAt) return leftAt - rightAt;
+    return String(left._id ?? left.fileId).localeCompare(String(right._id ?? right.fileId));
+}
+
+/**
+ * 1-based index among that slot's current files.
+ * File docs (pack) sort like loadCurrentFiles (createdAt, _id).
+ * CollectCurrentFileRef has no createdAt; keep that array order so {index}
+ * matches pack. Do not re-sort by fileId.
+ */
 export function fileIndexInSlot(
     currentFilesForUid: ReadonlyArray<CollectSlotFileIndexRef>,
     slotId: string,
     fileId: string,
 ): number {
     const inSlot = currentFilesForUid.filter((file) => file.slotId === slotId);
-    const useCreatedAt = inSlot.every((file) => file.createdAt instanceof Date && !Number.isNaN(file.createdAt.getTime()));
-    const sorted = inSlot.slice().sort((left, right) => {
-        if (useCreatedAt) {
-            const delta = (left.createdAt as Date).getTime() - (right.createdAt as Date).getTime();
-            if (delta !== 0) return delta;
-            return String(left._id ?? left.fileId).localeCompare(String(right._id ?? right.fileId));
-        }
-        return left.fileId.localeCompare(right.fileId);
-    });
-    const index = sorted.findIndex((file) => file.fileId === fileId);
+    const useCreatedAt = inSlot.length > 0 && inSlot.every(hasFileCreatedAt);
+    const ordered = useCreatedAt ? inSlot.slice().sort(compareLoadCurrentFilesOrder) : inSlot;
+    const index = ordered.findIndex((file) => file.fileId === fileId);
     if (index < 0) throw new TypeError(`file ${fileId} is not among current files for slot ${slotId}`);
     return index + 1;
 }

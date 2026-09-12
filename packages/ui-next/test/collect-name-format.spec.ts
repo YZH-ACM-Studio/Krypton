@@ -43,4 +43,9 @@ describe('collect name-format preview', () => {
     expect(renderAssignedFileName('{studentId}_{realName}_{slotTitle}', PREVIEW)).to.equal('24000001_张三_实验报告.pdf');
     expect(renderAssignedFileName('{originalStem}_{index}.{ext}', PREVIEW)).to.equal('lab_1.pdf');
   });
+
+  it('uses unbound-UID{uid} when studentId is empty and uid is present', () => {
+    expect(renderAssignedFileName('{studentId}', { ...PREVIEW, studentId: '' })).to.equal('unbound-UID1.pdf');
+    expect(renderAssignedFileName('{studentId}', { ...PREVIEW, studentId: '  ' })).to.equal('unbound-UID1.pdf');
+  });
 });

@@ -289,7 +289,10 @@ describe('collect naming rev.2 source contracts', () => {
   });
 
   it('shows assignedName or 将保存为 on the student collect page', () => {
-    expect(student).to.match(/assignedName|将保存为/);
+    expect(student).to.include('file.assignedName || file.originalName');
+    expect(student).to.include('将保存为');
+    expect(student).to.include('nextUploadPreviewName');
+    expect(student).not.to.include('assignedFileTitle');
   });
 
   it('locks name-format tokens and the {originalName} default', () => {

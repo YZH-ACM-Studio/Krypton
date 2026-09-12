@@ -385,6 +385,53 @@ describe('krypton-collect model helpers', () => {
         expect(() => model.normalizeCollectQuotas({ maxFileBytes: 32 * 1024 * 1024 + 1 })).to.throw();
         expect(() => model.parseCollectDueAt('not-a-date')).to.throw();
     });
+
+    it('indexes slot files by createdAt then _id, and keeps array order without timestamps', () => {
+        const early = new Date('2026-01-01T00:00:00.000Z');
+        const late = new Date('2026-01-02T00:00:00.000Z');
+        const earlyId = new ObjectId('000000000000000000000001');
+        const lateId = new ObjectId('000000000000000000000002');
+        const stamped = [
+            { fileId: 'z-late', slotId: 'report', createdAt: late, _id: lateId },
+            { fileId: 'a-early', slotId: 'report', createdAt: early, _id: earlyId },
+            { fileId: 'other', slotId: 'extra', createdAt: early, _id: earlyId },
+        ];
+        expect(model.fileIndexInSlot(stamped, 'report', 'a-early')).to.equal(1);
+        expect(model.fileIndexInSlot(stamped, 'report', 'z-late')).to.equal(2);
+        expect(model.fileIndexInSlot(stamped, 'extra', 'other')).to.equal(1);
+
+        const sameTime = [
+            { fileId: 'z', slotId: 'report', createdAt: early, _id: lateId },
+            { fileId: 'a', slotId: 'report', createdAt: early, _id: earlyId },
+        ];
+        expect(model.fileIndexInSlot(sameTime, 'report', 'a')).to.equal(1);
+        expect(model.fileIndexInSlot(sameTime, 'report', 'z')).to.equal(2);
+
+        const unstamped = [
+            { fileId: 'z', slotId: 'report' },
+            { fileId: 'a', slotId: 'report' },
+        ];
+        expect(model.fileIndexInSlot(unstamped, 'report', 'z')).to.equal(1);
+        expect(model.fileIndexInSlot(unstamped, 'report', 'a')).to.equal(2);
+        expect(() => model.fileIndexInSlot(unstamped, 'report', 'missing')).to.throw(TypeError);
+    });
+
+    it('renders assigned names from the template and 1-based index', () => {
+        expect(model.assignedNameForFile(
+            { fileNameTemplate: '{originalStem}_{index}' },
+            { uid: 9, studentId: '24000001', realName: '张三' },
+            { title: '实验报告' },
+            { fileId: 'f1', originalName: 'lab.pdf', ext: 'pdf', slotId: 'report' },
+            2,
+        )).to.equal('lab_2.pdf');
+        expect(model.assignedNameForFile(
+            { fileNameTemplate: '{studentId}' },
+            { uid: 42, studentId: '', realName: '' },
+            { title: '实验报告' },
+            { fileId: 'f1', originalName: 'lab.pdf', ext: 'pdf', slotId: 'report' },
+            1,
+        )).to.equal('unbound-UID42.pdf');
+    });
 });
 
 describe('krypton-collect audience', () => {
@@ -752,6 +799,41 @@ describe('krypton-collect naming Rev.2', () => {
         expect(pack.entries).to.have.length(1);
         expect(pack.entries[0].name).to.equal('24000001_甲_实验报告.pdf');
         expect(pack.entries[0].name).to.not.include('/');
+    });
+
+    it('numbers {index} by createdAt among current files in a slot', async () => {
+        const published = await createPublished({
+            fileNameTemplate: '{originalStem}_{index}',
+            slots: [{ title: '实验报告', required: true, allowedExt: ['pdf'], maxFiles: 2 }],
+        });
+        const first = pdf('first-upload');
+        const second = pdf('second-upload');
+        await model.putStudentFile({
+            request: published,
+            uid: 101,
+            slotId: published.slots[0].id,
+            originalName: 'later-name.pdf',
+            size: first.length,
+            bytes: first,
+        });
+        await model.putStudentFile({
+            request: published,
+            uid: 101,
+            slotId: published.slots[0].id,
+            originalName: 'earlier-name.pdf',
+            size: second.length,
+            bytes: second,
+        });
+        const stored = filesColl.docs.filter((doc) => doc.current === true);
+        expect(stored).to.have.length(2);
+        const firstStored = stored.find((doc) => doc.originalName === 'later-name.pdf');
+        const secondStored = stored.find((doc) => doc.originalName === 'earlier-name.pdf');
+        if (!firstStored || !secondStored) expect.fail('expected both current files');
+        firstStored.createdAt = new Date('2026-01-02T00:00:00.000Z');
+        secondStored.createdAt = new Date('2026-01-01T00:00:00.000Z');
+        await model.confirmSubmit(published, 101);
+        const pack = await model.listPackEntries(await model.getRequest(domainId, published._id));
+        expect(pack.entries.map((entry) => entry.assignedName)).to.deep.equal(['earlier-name_1.pdf', 'later-name_2.pdf']);
     });
 
     it('locks fileNameTemplate after confirmSubmit', async () => {

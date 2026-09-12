@@ -4456,10 +4456,66 @@ describe('P3.19 program-fill and function HTTP boundaries', () => {
             queuePrivateStructuredConfig(handler.pdoc);
             await handler.post('forged', 'forged-lang', code, true, ['7 8\n'], undefined);
 
+            expect(calls.get.at(-1)).to.deep.equal(['system', 7, undefined, true]);
             expect(calls.recordAdd).to.have.length(1);
             expect(calls.recordAdd[0][3]).to.equal('cpp');
             expect(calls.recordAdd[0][4]).to.equal(code);
             expect(calls.recordAdd[0][6]).to.deep.include({ type: 'pretest', input: ['7 8\n'] });
+        } finally {
+            delete (settingStub.langs.cpp as any).pretest;
+            delete (settingStub.langs as any)['cpp.pretest'];
+        }
+    });
+
+    it('rejects compiled structured pretests when the raw template has only a student surface', async () => {
+        (settingStub.langs.cpp as any).pretest = 'cpp.pretest';
+        (settingStub.langs as any)['cpp.pretest'] = { disabled: false };
+        try {
+            const handler = makeHandler(ProblemSubmitHandler, {});
+            handler.pdoc = {
+                domainId: 'system',
+                docId: 7,
+                problemKind: 'function',
+                config: {
+                    type: 'function',
+                    langs: ['cpp'],
+                    template: {
+                        lang: 'cpp',
+                        surface: [
+                            { type: 'region', id: 'r_abcdefghijkl' },
+                            { type: 'region', id: 'r_mnopqrstuvwx' },
+                        ],
+                    },
+                },
+            };
+            getResults.push({
+                domainId: 'system',
+                docId: 7,
+                config: {
+                    type: 'function',
+                    langs: ['cpp'],
+                    template: {
+                        lang: 'cpp',
+                        surface: [
+                            { type: 'region', id: 'r_abcdefghijkl' },
+                            { type: 'region', id: 'r_mnopqrstuvwx' },
+                        ],
+                    },
+                },
+            });
+            const error = await captureFailure(() =>
+                handler.post(
+                    'forged',
+                    'forged-lang',
+                    JSON.stringify({ r_abcdefghijkl: 'first()', r_mnopqrstuvwx: 'second()' }),
+                    true,
+                    ['7 8\n'],
+                    undefined,
+                ),
+            );
+            expect(error).to.be.instanceOf(GenericError);
+            expect(calls.get.at(-1)).to.deep.equal(['system', 7, undefined, true]);
+            expect(calls.recordAdd).to.deep.equal([]);
         } finally {
             delete (settingStub.langs.cpp as any).pretest;
             delete (settingStub.langs as any)['cpp.pretest'];

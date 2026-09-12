@@ -15,6 +15,9 @@ describe('P3.19 paper structured submit contract', () => {
         }
         expect(source).to.include('parseStructuredRegionSubmission(kind, config.template, rawCode)');
         expect(source).to.include('validateStructuredCodeJudgeConfig(config');
+        const validator = source.slice(source.indexOf('function validatePaperRegionSubmission('), source.indexOf('class PaperBaseHandler'));
+        expect(validator).not.to.include('surface');
+        expect(validator).not.to.include('clientProblemConfig');
     });
 
     it('validates before every program-fill/function Record insertion', () => {

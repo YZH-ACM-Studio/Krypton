@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { parseMemoryMB, parseTimeMS } from '@hydrooj/utils';
-import { localizedErrorText } from '../error';
+import { localizedErrorText, ValidationError } from '../error';
 import type { LocalizedErrorText } from '../error';
 import { parseProblemConfigObject } from './problem-config';
 
@@ -212,6 +212,15 @@ export function compileProgrammingStatement(value: unknown): string {
     }
     if (statement.hints.state === 'present') blocks.push(block('提示', statement.hints.content));
     return `${blocks.join('\n\n')}${blocks.length ? '\n' : ''}`;
+}
+
+export function deriveProgrammingStatementContent(statementInput: unknown, content?: unknown): string {
+    const statement = normalizeProgrammingStatement(statementInput);
+    const compiled = compileProgrammingStatement(statement);
+    if (content !== undefined) {
+        throw new ValidationError('content', null, localizedErrorText`结构化题面正文必须由服务端生成，不能直接提交`);
+    }
+    return compiled;
 }
 
 function validLimit(value: unknown, parse: (value: any) => number): boolean {

@@ -1,10 +1,12 @@
 import { expect } from 'chai';
 import { describe, it } from 'node:test';
+import { ValidationError } from '../src/error';
 import {
     assertLegacyProgrammingStatementFingerprint,
     assertProgrammingStatementComplete,
     assertProgrammingStatementProjection,
     compileProgrammingStatement,
+    deriveProgrammingStatementContent,
     emptyProgrammingStatement,
     normalizeProgrammingStatement,
     previewLegacyProgrammingStatement,
@@ -101,6 +103,25 @@ describe('programming statement canonical protocol', () => {
         expect(markdown).to.include('```input1\n1\n```\n\n```output1\n2\n```');
         expect(markdown).to.include('```input2\n\n```\n\n```output2\ndone\n```');
         expect(markdown.indexOf('input1')).to.be.lessThan(markdown.indexOf('input2'));
+    });
+
+    it('derives Markdown identical to normalize then compile, and rejects caller-supplied content', () => {
+        const input = { ...completeStatement(), extra: true };
+        const derived = deriveProgrammingStatementContent(input);
+        expect(derived).to.equal(compileProgrammingStatement(normalizeProgrammingStatement(input)));
+        expect(deriveProgrammingStatementContent(emptyProgrammingStatement())).to.equal(
+            compileProgrammingStatement(normalizeProgrammingStatement(emptyProgrammingStatement())),
+        );
+        expect(() => deriveProgrammingStatementContent(input, derived)).to.throw(ValidationError);
+        expect(() => deriveProgrammingStatementContent(input, '')).to.throw(ValidationError);
+        try {
+            deriveProgrammingStatementContent(input, derived);
+            expect.fail('expected ValidationError');
+        } catch (error) {
+            expect(error).to.be.instanceOf(ValidationError);
+            expect((error as InstanceType<typeof ValidationError>).params[0]).to.equal('content');
+            expect((error as InstanceType<typeof ValidationError>).params[2]).to.equal('结构化题面正文必须由服务端生成，不能直接提交');
+        }
     });
 
     it('blocks publication until every section and live time/memory config are complete', () => {

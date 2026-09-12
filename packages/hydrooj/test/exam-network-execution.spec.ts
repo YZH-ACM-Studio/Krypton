@@ -247,6 +247,33 @@ describe('exam network execution canonical facts', () => {
         expect(await reason(() => service.applyProjection(extra))).to.equal('projection_target_mismatch');
     });
 
+    it('passes the frozen execution identity into the projection target loader', async () => {
+        let observed: { domainId: string; targetId: string; eventId?: string; schoolId?: string } | undefined;
+        const collection = new MemoryCollection();
+        const service = new executionModule.ExamNetworkExecutionService(
+            collection as never,
+            () => new Date('2026-08-11T02:00:00.000Z'),
+            () => executionId,
+            async (domainId, reference, identity) => {
+                observed = {
+                    domainId,
+                    targetId: reference.id.toHexString(),
+                    eventId: identity?.eventId.toHexString(),
+                    schoolId: identity?.schoolId.toHexString(),
+                };
+                return ['ep_one'];
+            },
+        );
+        const execution = await create(service);
+        await service.applyProjection(projection(execution));
+        expect(observed).to.deep.equal({
+            domainId: 'system',
+            targetId: targetId.toHexString(),
+            eventId: eventId.toHexString(),
+            schoolId: schoolId.toHexString(),
+        });
+    });
+
     it('allows a delivery-unknown operation to converge to a definite failure', async () => {
         const { service } = fixture();
         const execution = await create(service);

@@ -18,6 +18,8 @@ import {
     examEventNetworkConfigColl,
     examPolicyTemplateColl,
     examTargetAssignmentColl,
+    loadExamPolicyRevisionByFrozenRef,
+    loadExamTargetRevisionByFrozenRef,
     registerExamNetworkControlPlaneResolver,
     registerExamTargetResolver,
     requireExamNetworkControlPlaneResolver,
@@ -160,11 +162,35 @@ async function resolveConfig(
         examPolicyTemplateColl.findOne({ domainId, _id: policyRef.id }),
         examTargetAssignmentColl.findOne({ domainId, _id: targetRef.id, eventId }),
     ]);
-    const policy = template?.revisions.find((revision) => revision.revision === policyRef.revision);
-    const target = assignment?.revisions.find((revision) => revision.revision === targetRef.revision);
-    if (!policy || policy.fingerprint !== policyRef.fingerprint) throw new ExamNetworkExecutionError('policy_revision_not_found');
-    if (!target || target.targetFingerprint !== targetRef.fingerprint) throw new ExamNetworkExecutionError('target_revision_not_found');
-    if (!target.endpointIds.length) throw new ExamNetworkExecutionError('empty_target');
+    if (!template) throw new ExamNetworkExecutionError('policy_revision_not_found');
+    if (!assignment) throw new ExamNetworkExecutionError('target_revision_not_found');
+    let policy: ExamPolicyRevision;
+    let target: ExamTargetRevision;
+    try {
+        // Keep the handler's unscoped-school success set: frozen loaders use stored document schoolIds.
+        [policy, target] = await Promise.all([
+            loadExamPolicyRevisionByFrozenRef({
+                domainId,
+                schoolId: template.schoolId,
+                reference: policyRef,
+            }),
+            loadExamTargetRevisionByFrozenRef({
+                domainId,
+                eventId,
+                schoolId: assignment.schoolId,
+                reference: targetRef,
+            }),
+        ]);
+    } catch (error) {
+        if (error instanceof ExamNetworkConfigError) {
+            if (error.reason === 'target_revision_invalid') {
+                const matched = assignment.revisions.find((revision) => revision.revision === targetRef.revision);
+                if (!matched?.endpointIds?.length) throw new ExamNetworkExecutionError('empty_target');
+            }
+            throw new ExamNetworkExecutionError(error.reason);
+        }
+        throw error;
+    }
     return {
         configRevision: config.revision,
         policyRef: { id: new ObjectId(policyRef.id), revision: policyRef.revision, fingerprint: policyRef.fingerprint },

@@ -56,12 +56,26 @@ describe('exam network execution HTTP contracts', () => {
         expect(handler).to.include('examNetworkExecutionService.markFailed');
         expect(handler).to.include('classifyVigilBridgeFailure(error)');
         expect(model).to.include('projection_revision_conflict');
+        expect(model).to.include('loadExamTargetRevisionByFrozenRef');
         expect(handler).to.include('examNetworkExecutionService.beginRetry');
         expect(handler).to.include("retryMode: 'full_target'");
         expect(handler).to.include("throw new ExamNetworkExecutionError('retry_requires_current_config')");
         expect(handler).to.include("throwExamTeacherValidationError('examNetworkExecution'");
         expect(handler).to.include('logger.warn(\'Exam network execution rejected reason=%s\'');
         expect(handler).not.to.include("throw new ValidationError('examNetworkExecution', null, error.reason)");
+    });
+
+    it('resolves frozen policy/target refs without retargeting start through live sources', () => {
+        expect(handler).to.include('loadExamPolicyRevisionByFrozenRef');
+        expect(handler).to.include('loadExamTargetRevisionByFrozenRef');
+        expect(handler).to.include('schoolId: template.schoolId');
+        expect(handler).to.include('schoolId: assignment.schoolId');
+        const startBlock = handler.slice(handler.indexOf("if (action === 'start')"), handler.indexOf("} else if (action === 'stop')"));
+        expect(startBlock).to.include('resolveConfig(domainId, eventId)');
+        expect(startBlock).to.not.include('resolveExamTargetSources');
+        expect(handler).to.include('executionId: execution._id.toHexString()');
+        expect(handler).to.include('createdAt: execution.createdAt.toISOString()');
+        expect(handler).to.not.include('deriveEndpointPolicyStatus(');
     });
 
     it('accepts callbacks only through the existing Vigil service-token handler', () => {

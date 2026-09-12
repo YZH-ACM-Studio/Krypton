@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { Collection, ObjectId } from 'mongodb';
 import db from '../service/db';
 import type { VigilExamNetworkProjection, VigilExamNetworkProjectionItem } from '../service/vigil-bridge';
-import { ExamNetworkConfigError, ExamNetworkRevisionRef, loadExamTargetRevisionEndpointIds } from './exam-network-config';
+import { ExamNetworkConfigError, ExamNetworkRevisionRef, loadExamTargetRevisionByFrozenRef } from './exam-network-config';
 
 export type ExamNetworkExecutionOperation = 'apply' | 'stop';
 export type ExamNetworkDispatchStatus = 'dispatching' | 'failed' | 'received' | 'unknown';
@@ -57,7 +57,26 @@ export interface ExamNetworkExecutionDoc {
 
 type ExecutionCollection = Pick<Collection<ExamNetworkExecutionDoc>, 'createIndex' | 'deleteMany' | 'findOne' | 'findOneAndUpdate' | 'insertOne'>;
 
-type TargetEndpointResolver = (domainId: string, reference: ExamNetworkRevisionRef) => Promise<string[]>;
+interface TargetEndpointIdentity {
+    eventId: ObjectId;
+    schoolId: ObjectId;
+}
+type TargetEndpointResolver = (domainId: string, reference: ExamNetworkRevisionRef, identity?: TargetEndpointIdentity) => Promise<string[]>;
+
+async function resolveApplyProjectionTargetEndpointIds(
+    domainId: string,
+    reference: ExamNetworkRevisionRef,
+    identity?: TargetEndpointIdentity,
+): Promise<string[]> {
+    if (!identity) throw new TypeError('execution identity is required');
+    const target = await loadExamTargetRevisionByFrozenRef({
+        domainId,
+        eventId: identity.eventId,
+        schoolId: identity.schoolId,
+        reference,
+    });
+    return [...target.endpointIds].sort();
+}
 
 export class ExamNetworkExecutionError extends Error {
     constructor(public readonly reason: string) {
@@ -100,6 +119,94 @@ function isCompleteExecutionRequest(current: ExamNetworkExecutionDoc): boolean {
 
 export function isRetryableExamNetworkProjectionItem(item: Pick<VigilExamNetworkProjectionItem, 'status' | 'failureReason'>): boolean {
     return RETRYABLE_ENDPOINT_STATUSES.has(item.status) && item.failureReason !== DELIVERY_UNKNOWN_FAILURE_REASON;
+}
+
+export type EndpointPolicyOutcome = 'applied' | 'failed' | 'pending';
+
+export interface EndpointPolicyHeartbeatDiagnosis {
+    state: string;
+    policyRevision: number | null;
+    reason: string | null;
+}
+
+export interface EndpointPolicyStatus {
+    endpointId: string;
+    status: EndpointPolicyOutcome;
+    expectedPolicyRevision: number;
+    appliedPolicyRevision: number | null;
+    commandStatus: VigilExamNetworkProjectionItem['status'] | null;
+    failureReason: string | null;
+    heartbeat: EndpointPolicyHeartbeatDiagnosis | null;
+}
+
+export interface EndpointPolicyStatusSnapshot {
+    desiredState: ExamNetworkExecutionDoc['desiredState'];
+    operationStatus: ExamNetworkDispatchStatus;
+    dispatchStatus: ExamNetworkProjectionFact['dispatchStatus'] | null;
+    expectedPolicyRevision: number;
+    ready: boolean;
+    appliedCount: number;
+    failedCount: number;
+    pendingCount: number;
+    endpoints: EndpointPolicyStatus[];
+}
+
+function classifyEndpointPolicyOutcome(
+    item: VigilExamNetworkProjectionItem | undefined,
+    expectedPolicyRevision: number,
+): EndpointPolicyOutcome {
+    if (!item) return 'pending';
+    if (item.status === 'applied' && item.appliedPolicyRevision === expectedPolicyRevision) return 'applied';
+    if (item.status === 'expired' || item.status === 'failed' || item.status === 'offline' || item.status === 'rejected') return 'failed';
+    return 'pending';
+}
+
+// Heartbeat/networkPolicyState is diagnostic only; applied/ready use command fields.
+
+export function deriveEndpointPolicyStatus(
+    execution: ExamNetworkExecutionDoc,
+    endpointIds: readonly string[],
+): EndpointPolicyStatusSnapshot {
+    const expectedPolicyRevision = execution.networkPolicyRevision;
+    const itemsByEndpointId = new Map<string, VigilExamNetworkProjectionItem>();
+    for (const item of execution.projection?.items ?? []) {
+        if (!itemsByEndpointId.has(item.endpointId)) itemsByEndpointId.set(item.endpointId, item);
+    }
+    const endpoints: EndpointPolicyStatus[] = endpointIds.map((endpointId) => {
+        const item = itemsByEndpointId.get(endpointId);
+        const heartbeatState = item?.networkPolicyState;
+        return {
+            endpointId,
+            status: classifyEndpointPolicyOutcome(item, expectedPolicyRevision),
+            expectedPolicyRevision,
+            appliedPolicyRevision: item?.appliedPolicyRevision ?? null,
+            commandStatus: item?.status ?? null,
+            failureReason: item?.failureReason ?? null,
+            heartbeat: heartbeatState
+                ? {
+                      state: heartbeatState.state,
+                      policyRevision: heartbeatState.policyRevision ?? null,
+                      reason: heartbeatState.reason ?? null,
+                  }
+                : null,
+        };
+    });
+    const appliedCount = endpoints.filter((endpoint) => endpoint.status === 'applied').length;
+    const failedCount = endpoints.filter((endpoint) => endpoint.status === 'failed').length;
+    return {
+        desiredState: execution.desiredState,
+        operationStatus: execution.operation.status,
+        dispatchStatus: execution.projection?.dispatchStatus ?? null,
+        expectedPolicyRevision,
+        ready:
+            execution.operation.status === 'received' &&
+            execution.projection?.dispatchStatus === 'complete' &&
+            appliedCount === endpointIds.length,
+        appliedCount,
+        failedCount,
+        pendingCount: endpointIds.length - appliedCount - failedCount,
+        endpoints,
+    };
 }
 
 function canonicalWindow(startAt: Date, hardEndAt: Date): { startAt: Date; hardEndAt: Date } {
@@ -159,7 +266,7 @@ export class ExamNetworkExecutionService {
         private readonly executions: ExecutionCollection,
         private readonly now: () => Date = () => new Date(),
         private readonly idFactory: () => ObjectId = () => new ObjectId(),
-        private readonly targetEndpointResolver: TargetEndpointResolver = loadExamTargetRevisionEndpointIds,
+        private readonly targetEndpointResolver: TargetEndpointResolver = resolveApplyProjectionTargetEndpointIds,
     ) {}
 
     ensureIndexes(): Promise<void> {
@@ -493,7 +600,10 @@ export class ExamNetworkExecutionService {
         }
         let canonicalEndpointIds: string[];
         try {
-            canonicalEndpointIds = await this.targetEndpointResolver(current.domainId, current.targetRef);
+            canonicalEndpointIds = await this.targetEndpointResolver(current.domainId, current.targetRef, {
+                eventId: current.eventId,
+                schoolId: current.schoolId,
+            });
         } catch (error) {
             if (error instanceof ExamNetworkConfigError) throw new ExamNetworkExecutionError('projection_target_mismatch');
             throw error;

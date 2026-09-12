@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { test } from 'node:test';
 import { ObjectId } from 'mongodb';
 import type { ExamEventDoc } from '../src/model/exam-event';
@@ -538,4 +540,68 @@ test('workflow keeps one canonical 500-endpoint preparation without client-side 
     assert.equal(workflow.preparation.items.length, 500);
     assert.equal(workflow.monitoring.items.length, 500);
     assert.equal(monitoringCalls, 1);
+});
+
+test('workflow maps ready/reason/counts from deriveEndpointPolicyStatus without changing reason enums', async () => {
+    const failed = await loadWorkflowWithExecution(
+        activeExecution({
+            ...appliedProjection(),
+            items: [
+                {
+                    ...appliedProjection().items[0],
+                    status: 'offline',
+                    appliedPolicyRevision: null,
+                    failureReason: 'endpoint_offline',
+                    networkPolicyState: { state: 'active', activityId: `exam:${eventId.toHexString()}`, policyRevision: 3 },
+                },
+            ],
+        }),
+    );
+    assert.equal(failed.network.ready, false);
+    assert.equal(failed.network.reason, 'network_execution_failed');
+    assert.equal(failed.network.appliedCount, 0);
+    assert.equal(failed.network.failedCount, 1);
+    assert.equal(failed.network.pendingCount, 0);
+
+    const heartbeatPending = await loadWorkflowWithExecution(
+        activeExecution({
+            ...appliedProjection(),
+            items: [
+                {
+                    ...appliedProjection().items[0],
+                    status: 'sent',
+                    appliedPolicyRevision: null,
+                    networkPolicyState: { state: 'active', activityId: `exam:${eventId.toHexString()}`, policyRevision: 3 },
+                },
+            ],
+        }),
+    );
+    assert.equal(heartbeatPending.network.ready, false);
+    assert.equal(heartbeatPending.network.reason, 'network_execution_pending');
+    assert.equal(heartbeatPending.network.appliedCount, 0);
+    assert.equal(heartbeatPending.network.failedCount, 0);
+    assert.equal(heartbeatPending.network.pendingCount, 1);
+
+    await assert.rejects(
+        loadWorkflowWithExecution(
+            activeExecution({
+                ...appliedProjection(),
+                items: [
+                    appliedProjection().items[0],
+                    { ...appliedProjection().items[0], commandId: 'network-command-extra', endpointId: 'ep_extra' },
+                ],
+            }),
+        ),
+        /network_execution_invalid/,
+    );
+});
+
+test('workflow loads frozen network refs and maps readiness through deriveEndpointPolicyStatus', () => {
+    const source = readFileSync(resolve(__dirname, '../src/model/exam-prelogin-workflow.ts'), 'utf8');
+    assert.match(source, /loadExamNetworkRevisionsByFrozenRefs/);
+    assert.match(source, /deriveEndpointPolicyStatus/);
+    assert.match(source, /network_execution_failed/);
+    assert.match(source, /network_execution_pending/);
+    assert.doesNotMatch(source, /examPolicyTemplateColl\.findOne/);
+    assert.doesNotMatch(source, /examTargetAssignmentColl\.findOne/);
 });

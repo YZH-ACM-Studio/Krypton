@@ -181,6 +181,94 @@ function cloneSources(sources: ExamTargetSource[]): ExamTargetSource[] {
     return sources.map((source) => ({ kind: source.kind, ids: [...source.ids] }));
 }
 
+function assertRevisionRef(reference: ExamNetworkRevisionRef, field: string): void {
+    assertObjectId(reference.id, `${field}.id`);
+    assertRevision(reference.revision);
+    if (typeof reference.fingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(reference.fingerprint)) {
+        throw new TypeError(`${field}.fingerprint is invalid`);
+    }
+}
+
+function publishedRevisionEntries<T extends { revision: number }>(revisions: T[] | undefined, revision: number): T[] {
+    return revisions?.filter((item) => item.revision === revision) || [];
+}
+
+function clonePolicyRevision(revision: ExamPolicyRevision): ExamPolicyRevision {
+    return {
+        revision: revision.revision,
+        policy: clonePolicy(revision.policy),
+        fingerprint: revision.fingerprint,
+        publishedAt: new Date(revision.publishedAt),
+        publishedBy: revision.publishedBy,
+    };
+}
+
+function cloneTargetRevision(revision: ExamTargetRevision): ExamTargetRevision {
+    return {
+        revision: revision.revision,
+        sources: cloneSources(revision.sources),
+        sourceFingerprint: revision.sourceFingerprint,
+        targetFingerprint: revision.targetFingerprint,
+        endpointIds: [...revision.endpointIds],
+        targetCount: revision.targetCount,
+        publishedAt: new Date(revision.publishedAt),
+        publishedBy: revision.publishedBy,
+    };
+}
+
+function assertFrozenTargetEndpoints(revision: ExamTargetRevision): void {
+    const endpoints = revision.endpointIds;
+    if (
+        !Array.isArray(endpoints) ||
+        !endpoints.length ||
+        endpoints.length > 500 ||
+        new Set(endpoints).size !== endpoints.length ||
+        endpoints.some(
+            (endpointId) => typeof endpointId !== 'string' || !endpointId || endpointId !== endpointId.trim() || endpointId.length > 128,
+        ) ||
+        revision.targetCount !== endpoints.length
+    ) {
+        throw new ExamNetworkConfigError('target_revision_invalid');
+    }
+}
+
+async function loadPolicyRevisionByFrozenRefFrom(
+    templates: PolicyCollection,
+    domainId: string,
+    schoolId: ObjectId,
+    reference: ExamNetworkRevisionRef,
+): Promise<ExamPolicyRevision> {
+    assertDomainId(domainId);
+    assertObjectId(schoolId, 'schoolId');
+    assertRevisionRef(reference, 'policyRef');
+    const template = await templates.findOne({ domainId, _id: reference.id, schoolId });
+    const matched = publishedRevisionEntries(template?.revisions, reference.revision);
+    if (matched.length !== 1 || matched[0].fingerprint !== reference.fingerprint) {
+        throw new ExamNetworkConfigError('policy_revision_not_found');
+    }
+    return clonePolicyRevision(matched[0]);
+}
+
+async function loadTargetRevisionByFrozenRefFrom(
+    assignments: TargetCollection,
+    domainId: string,
+    eventId: ObjectId,
+    schoolId: ObjectId,
+    reference: ExamNetworkRevisionRef,
+): Promise<ExamTargetRevision> {
+    assertDomainId(domainId);
+    assertObjectId(eventId, 'eventId');
+    assertObjectId(schoolId, 'schoolId');
+    assertRevisionRef(reference, 'targetRef');
+    const assignment = await assignments.findOne({ domainId, _id: reference.id, eventId, schoolId });
+    const matched = publishedRevisionEntries(assignment?.revisions, reference.revision);
+    if (matched.length !== 1 || matched[0].targetFingerprint !== reference.fingerprint) {
+        throw new ExamNetworkConfigError('target_revision_not_found');
+    }
+    assertFrozenTargetEndpoints(matched[0]);
+    return cloneTargetRevision(matched[0]);
+}
+
 function exactObject(value: unknown, keys: string[], reason: string): Record<string, unknown> {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ExamNetworkConfigError(reason);
     const record = value as Record<string, unknown>;
@@ -771,12 +859,84 @@ export class ExamNetworkConfigService {
         ]);
         if (assignment || config) throw new ExamNetworkConfigError('network_configuration_exists');
     }
+
+    loadPolicyRevisionByFrozenRef(input: {
+        domainId: string;
+        schoolId: ObjectId;
+        reference: ExamNetworkRevisionRef;
+    }): Promise<ExamPolicyRevision> {
+        return loadPolicyRevisionByFrozenRefFrom(this.templates, input.domainId, input.schoolId, input.reference);
+    }
+
+    loadTargetRevisionByFrozenRef(input: {
+        domainId: string;
+        eventId: ObjectId;
+        schoolId: ObjectId;
+        reference: ExamNetworkRevisionRef;
+    }): Promise<ExamTargetRevision> {
+        return loadTargetRevisionByFrozenRefFrom(this.assignments, input.domainId, input.eventId, input.schoolId, input.reference);
+    }
+
+    async loadRevisionsByFrozenRefs(input: {
+        domainId: string;
+        eventId: ObjectId;
+        schoolId: ObjectId;
+        policy: ExamNetworkRevisionRef;
+        target: ExamNetworkRevisionRef;
+    }): Promise<{ policy: ExamPolicyRevision; target: ExamTargetRevision }> {
+        const [policy, target] = await Promise.all([
+            this.loadPolicyRevisionByFrozenRef({ domainId: input.domainId, schoolId: input.schoolId, reference: input.policy }),
+            this.loadTargetRevisionByFrozenRef({
+                domainId: input.domainId,
+                eventId: input.eventId,
+                schoolId: input.schoolId,
+                reference: input.target,
+            }),
+        ]);
+        return { policy, target };
+    }
 }
 
 export const examPolicyTemplateColl = db.collection<ExamPolicyTemplateDoc>('exam.policyTemplates');
 export const examTargetAssignmentColl = db.collection<ExamTargetAssignmentDoc>('exam.targetAssignments');
 export const examEventNetworkConfigColl = db.collection<ExamEventNetworkConfigDoc>('exam.eventNetworkConfigs');
 export const examNetworkConfigService = new ExamNetworkConfigService(examPolicyTemplateColl, examTargetAssignmentColl, examEventNetworkConfigColl);
+
+export function loadExamPolicyRevisionByFrozenRef(input: {
+    domainId: string;
+    schoolId: ObjectId;
+    reference: ExamNetworkRevisionRef;
+}): Promise<ExamPolicyRevision> {
+    return loadPolicyRevisionByFrozenRefFrom(examPolicyTemplateColl, input.domainId, input.schoolId, input.reference);
+}
+
+export function loadExamTargetRevisionByFrozenRef(input: {
+    domainId: string;
+    eventId: ObjectId;
+    schoolId: ObjectId;
+    reference: ExamNetworkRevisionRef;
+}): Promise<ExamTargetRevision> {
+    return loadTargetRevisionByFrozenRefFrom(examTargetAssignmentColl, input.domainId, input.eventId, input.schoolId, input.reference);
+}
+
+export async function loadExamNetworkRevisionsByFrozenRefs(input: {
+    domainId: string;
+    eventId: ObjectId;
+    schoolId: ObjectId;
+    policy: ExamNetworkRevisionRef;
+    target: ExamNetworkRevisionRef;
+}): Promise<{ policy: ExamPolicyRevision; target: ExamTargetRevision }> {
+    const [policy, target] = await Promise.all([
+        loadExamPolicyRevisionByFrozenRef({ domainId: input.domainId, schoolId: input.schoolId, reference: input.policy }),
+        loadExamTargetRevisionByFrozenRef({
+            domainId: input.domainId,
+            eventId: input.eventId,
+            schoolId: input.schoolId,
+            reference: input.target,
+        }),
+    ]);
+    return { policy, target };
+}
 
 export async function loadExamTargetRevisionEndpointIds(domainId: string, reference: ExamNetworkRevisionRef): Promise<string[]> {
     assertDomainId(domainId);

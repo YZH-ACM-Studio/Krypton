@@ -1,14 +1,8 @@
 import { createHash } from 'node:crypto';
 import { ObjectId } from 'mongodb';
 import { ExamEventDoc } from './exam-event';
-import {
-    ExamNetworkConfigError,
-    ExamNetworkRevisionRef,
-    examNetworkConfigService,
-    examPolicyTemplateColl,
-    examTargetAssignmentColl,
-} from './exam-network-config';
-import { ExamNetworkExecutionDoc, examNetworkExecutionService } from './exam-network-execution';
+import { ExamNetworkRevisionRef, examNetworkConfigService, loadExamNetworkRevisionsByFrozenRefs } from './exam-network-config';
+import { deriveEndpointPolicyStatus, ExamNetworkExecutionDoc, examNetworkExecutionService } from './exam-network-execution';
 import { ExamPreloginError, ExamPreloginPreparation, ExamPreloginWorkflowBinding } from './exam-prelogin';
 import { loadExamPreloginPreparation } from './exam-prelogin-loader';
 import { preflightExamMonitoringOnVigil, preflightExamPreloginOnVigil, VigilMonitoringPreflightItem } from '../service/vigil-bridge';
@@ -112,32 +106,14 @@ async function loadNetworkReferences(
 ): Promise<{ endpointIds: string[]; targetCount: number }> {
     const policy = canonicalRef(policyRef, 'network_policy_reference');
     const target = canonicalRef(targetRef, 'network_target_reference');
-    const [template, assignment] = await Promise.all([
-        examPolicyTemplateColl.findOne({ domainId: event.domainId, _id: policy.id, schoolId: event.schoolId }),
-        examTargetAssignmentColl.findOne({ domainId: event.domainId, _id: target.id, eventId: event._id, schoolId: event.schoolId }),
-    ]);
-    const policyRevision = template?.revisions.filter((revision) => revision.revision === policy.revision) || [];
-    const targetRevision = assignment?.revisions.filter((revision) => revision.revision === target.revision) || [];
-    if (policyRevision.length !== 1 || policyRevision[0].fingerprint !== policy.fingerprint) {
-        throw new ExamNetworkConfigError('policy_revision_not_found');
-    }
-    if (targetRevision.length !== 1 || targetRevision[0].targetFingerprint !== target.fingerprint) {
-        throw new ExamNetworkConfigError('target_revision_not_found');
-    }
-    const endpoints = targetRevision[0].endpointIds;
-    if (
-        !Array.isArray(endpoints) ||
-        !endpoints.length ||
-        endpoints.length > 500 ||
-        new Set(endpoints).size !== endpoints.length ||
-        endpoints.some(
-            (endpointId) => typeof endpointId !== 'string' || !endpointId || endpointId !== endpointId.trim() || endpointId.length > 128,
-        ) ||
-        targetRevision[0].targetCount !== endpoints.length
-    ) {
-        throw new ExamNetworkConfigError('target_revision_invalid');
-    }
-    return { endpointIds: [...endpoints], targetCount: endpoints.length };
+    const loaded = await loadExamNetworkRevisionsByFrozenRefs({
+        domainId: event.domainId,
+        eventId: event._id,
+        schoolId: event.schoolId,
+        policy,
+        target,
+    });
+    return { endpointIds: [...loaded.target.endpointIds], targetCount: loaded.target.targetCount };
 }
 
 function assertExecutionIdentity(event: ExamEventDoc, execution: ExamNetworkExecutionDoc): void {
@@ -155,20 +131,9 @@ function assertExecutionIdentity(event: ExamEventDoc, execution: ExamNetworkExec
     }
 }
 
-function activeExecutionReadiness(
-    execution: ExamNetworkExecutionDoc,
-    endpointIds: string[],
-): Pick<ExamPreloginWorkflowNetworkIdentity, 'appliedCount' | 'failedCount' | 'pendingCount' | 'ready' | 'reason'> {
+function assertActiveExecutionProjection(execution: ExamNetworkExecutionDoc, endpointIds: string[]): void {
     if (execution.operation.kind !== 'apply') throw new ExamPreloginError('network_execution_invalid');
-    if (!execution.projection) {
-        return {
-            ready: false,
-            reason: 'network_execution_pending',
-            appliedCount: 0,
-            failedCount: 0,
-            pendingCount: endpointIds.length,
-        };
-    }
+    if (!execution.projection) return;
     if (
         !Number.isSafeInteger(execution.projection.revision) ||
         execution.projection.revision < 1 ||
@@ -191,21 +156,20 @@ function activeExecutionReadiness(
     ) {
         throw new ExamPreloginError('network_execution_invalid');
     }
-    const appliedCount = execution.projection.items.filter(
-        (item) => item.status === 'applied' && item.appliedPolicyRevision === execution.networkPolicyRevision,
-    ).length;
-    const failedCount = execution.projection.items.filter(
-        (item) => item.status === 'expired' || item.status === 'failed' || item.status === 'offline' || item.status === 'rejected',
-    ).length;
-    const pendingCount = endpointIds.length - appliedCount - failedCount;
-    const ready =
-        execution.operation.status === 'received' && execution.projection.dispatchStatus === 'complete' && appliedCount === endpointIds.length;
+}
+
+function activeExecutionReadiness(
+    execution: ExamNetworkExecutionDoc,
+    endpointIds: string[],
+): Pick<ExamPreloginWorkflowNetworkIdentity, 'appliedCount' | 'failedCount' | 'pendingCount' | 'ready' | 'reason'> {
+    assertActiveExecutionProjection(execution, endpointIds);
+    const snapshot = deriveEndpointPolicyStatus(execution, endpointIds);
     return {
-        ready,
-        reason: ready ? 'ready' : failedCount ? 'network_execution_failed' : 'network_execution_pending',
-        appliedCount,
-        failedCount,
-        pendingCount,
+        ready: snapshot.ready,
+        reason: snapshot.ready ? 'ready' : snapshot.failedCount ? 'network_execution_failed' : 'network_execution_pending',
+        appliedCount: snapshot.appliedCount,
+        failedCount: snapshot.failedCount,
+        pendingCount: snapshot.pendingCount,
     };
 }
 

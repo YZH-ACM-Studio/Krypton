@@ -4,6 +4,7 @@ import { expect } from 'chai';
 import { ObjectId } from 'mongodb';
 import { localizeError, localizeErrorParameter, localizedErrorText, param as realParam, Types as realTypes } from '@hydrooj/framework';
 import { beforeEach, describe, it } from 'node:test';
+import { selectPracticeIssueTargets } from '../src/lib/practice-issue-targets';
 
 const Module = require('module');
 (global as any).Hydro ||= { model: {}, module: {} };
@@ -690,15 +691,72 @@ const practiceIntegrityAccessStub = {
         input.setRejectionReason?.('ok');
         return practiceContainer;
     },
+    async loadPracticeContainer() {
+        return practiceContainer;
+    },
     async preparePracticeIssue(input: any) {
         const tdoc = await practiceIntegrityAccessStub.assertPracticeTargetAccess(input);
         return { primaryContainer: tdoc };
+    },
+    async issuePracticeContext(input: any) {
+        const prepared = await practiceIntegrityAccessStub.preparePracticeIssue(input);
+        input.setRejectionReason?.('policy-read-failed');
+        const published = await practiceIntegrityStub.practiceIntegrityService.getLatestPublished(
+            input.domainId,
+            input.target.containerKind,
+            input.target.containerId,
+        );
+        const extraPublished = prepared.extra
+            ? await practiceIntegrityStub.practiceIntegrityService.getLatestPublished(
+                  input.domainId,
+                  prepared.extra.containerKind,
+                  prepared.extra.containerId,
+              )
+            : null;
+        const selected = selectPracticeIssueTargets({
+            primary: input.target,
+            extra: prepared.extra,
+            primaryPublished: published,
+            extraPublished,
+        });
+        if (!selected.controlled) return { controlled: false, prepared, selected };
+        input.setRejectionReason?.('published-revision-invalid');
+        const expectedIdentities = [selected.identity, ...(prepared.extra && selected.targets.length > 1 ? [prepared.extra] : [])];
+        selected.targets.forEach((target: any, index: number) => {
+            const expected = expectedIdentities[index];
+            const revision = target.revision;
+            if (
+                !expected ||
+                revision.domainId !== input.domainId ||
+                revision.containerKind !== expected.containerKind ||
+                !revision.containerId.equals(expected.containerId) ||
+                revision.state !== 'published'
+            ) {
+                throw new TypeError(`practice integrity published revision identity mismatch: ${revision._id}`);
+            }
+        });
+        input.setRejectionReason?.('context-issue-failed');
+        const context = await practiceIntegrityStub.practiceIntegrityService.issueContext({
+            domainId: input.domainId,
+            uid: input.user._id,
+            containerKind: selected.identity.containerKind,
+            containerId: selected.identity.containerId,
+            scopeKind: selected.identity.scopeKind,
+            scopeId: selected.identity.scopeId,
+            pid: input.pid,
+            mode: input.mode,
+            targets: selected.targets,
+        });
+        return { controlled: true, prepared, selected, context };
     },
     canManagePracticeContainer(user: any) {
         return user.canManagePractice === true;
     },
     canPreviewPracticeIntegrity(user: any) {
         return user.canPreviewPractice === true || user.canManagePractice === true;
+    },
+    async resolveInheritedPracticeEnforcement() {
+        return { prohibitExternalCodeInjection: false, removeIndependentSubmitForm: false };
     },
 };
 Module._load = function load(request: string, parent: NodeModule, isMain: boolean) {
@@ -710,11 +768,10 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
             parseProblemConfigObject: (pdoc: any) => (pdoc?.config && typeof pdoc.config === 'object' ? pdoc.config : null),
             parseStructuredRegionSubmission: (kind: string, template: any, rawCode: string) => {
                 const parsed = JSON.parse(rawCode);
-                const expected = (template.regions || template.surface.filter((segment: any) => segment.type === 'region'))
-                    .map((region: any) => region.id)
-                    .sort();
+                const expected = (template?.regions || []).map((region: any) => region.id).sort();
                 const actual = Object.keys(parsed).sort();
                 if (
+                    !expected.length ||
                     expected.join('\0') !== actual.join('\0') ||
                     actual.some((id) => typeof parsed[id] !== 'string') ||
                     (kind === 'program_fill' && actual.some((id) => /[\r\n]/.test(parsed[id])))
@@ -4236,6 +4293,28 @@ describe('P3.10 subjective problem HTTP boundaries', () => {
     });
 });
 
+function queuePrivateStructuredConfig(pdoc: any) {
+    const template = pdoc.config?.template || {};
+    const regions = Array.isArray(template.regions)
+        ? template.regions.map((region: any) => ({ id: region.id }))
+        : Array.isArray(template.surface)
+          ? template.surface.filter((segment: any) => segment.type === 'region').map((segment: any) => ({ id: segment.id }))
+          : [];
+    getResults.push({
+        domainId: pdoc.domainId,
+        docId: pdoc.docId,
+        config: {
+            type: pdoc.config.type,
+            ...(pdoc.config.mode ? { mode: pdoc.config.mode } : {}),
+            ...(pdoc.config.langs ? { langs: pdoc.config.langs } : {}),
+            template: {
+                ...(template.lang ? { lang: template.lang } : {}),
+                regions,
+            },
+        },
+    });
+}
+
 describe('P3.19 program-fill and function HTTP boundaries', () => {
     it('creates each kind through a fixed dedicated route', async () => {
         const programFill = makeHandler(ProblemCreateProgramFillHandler, broadProblemCreator());
@@ -4336,9 +4415,14 @@ describe('P3.19 program-fill and function HTTP boundaries', () => {
                 },
             },
         };
+        queuePrivateStructuredConfig(handler.pdoc);
         await handler.post('forged', 'forged-lang', JSON.stringify({ r_abcdefghijkl: 'body', r_mnopqrstuvwx: 'body' }), false, [], undefined);
         expect(calls.recordAdd.at(-1)[3]).to.equal('cpp');
+        expect(calls.get.at(-1)).to.deep.equal(['system', 7, undefined, true]);
+        expect(handler.pdoc.config.template).to.have.property('surface');
+        expect(handler.pdoc.config.template).not.to.have.property('source');
 
+        queuePrivateStructuredConfig(handler.pdoc);
         const error = await captureFailure(() =>
             handler.post('forged', 'cpp', JSON.stringify({ r_abcdefghijkl: 'body', extra: 'body' }), false, [], undefined),
         );
@@ -4369,6 +4453,7 @@ describe('P3.19 program-fill and function HTTP boundaries', () => {
             };
             const code = JSON.stringify({ r_abcdefghijkl: 'first()', r_mnopqrstuvwx: 'second()' });
 
+            queuePrivateStructuredConfig(handler.pdoc);
             await handler.post('forged', 'forged-lang', code, true, ['7 8\n'], undefined);
 
             expect(calls.recordAdd).to.have.length(1);
@@ -4413,6 +4498,7 @@ describe('P3.19 program-fill and function HTTP boundaries', () => {
                 template: { lang: 'cpp', surface: [{ type: 'region', id: 'r_abcdefghijkl' }] },
             },
         };
+        queuePrivateStructuredConfig(handler.pdoc);
         const error = await captureFailure(() => handler.post('forged', 'cpp', JSON.stringify({ r_abcdefghijkl: 'i++\nj++' }), false, [], undefined));
         expect(error).to.be.instanceOf(GenericError);
         expect(calls.recordAdd).to.deep.equal([]);
@@ -4439,11 +4525,13 @@ describe('P3.19 program-fill and function HTTP boundaries', () => {
             JSON.stringify({ r_abcdefghijkl: 'i++\nj++', r_mnopqrstuvwx: 'j++' }),
             JSON.stringify({ r_abcdefghijkl: 'i++', extra: 'hidden' }),
         ]) {
+            queuePrivateStructuredConfig(handler.pdoc);
             const error = await captureFailure(() => handler.post('forged', '_', code, false, [], undefined));
             expect(error).to.be.instanceOf(GenericError);
         }
         expect(calls.recordAdd).to.deep.equal([]);
 
+        queuePrivateStructuredConfig(handler.pdoc);
         await handler.post('forged', 'forged-lang', JSON.stringify({ r_abcdefghijkl: 'i++', r_mnopqrstuvwx: 'j++' }), false, [], undefined);
         expect(calls.recordAdd).to.have.length(1);
         expect(calls.recordAdd[0][3]).to.equal('_');
@@ -4487,6 +4575,7 @@ describe('P3.19 program-fill and function HTTP boundaries', () => {
                 handler.tsdoc = { attend: 1 };
             }
             const before = calls.recordAdd.length;
+            queuePrivateStructuredConfig(handler.pdoc);
             await handler.post('forged', 'forged-lang', code, false, [], context.tid as any);
             expect(calls.recordAdd, context.name).to.have.length(before + 1);
             expect(calls.recordAdd.at(-1)[3], context.name).to.equal('_');

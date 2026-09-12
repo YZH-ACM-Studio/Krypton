@@ -613,4 +613,14 @@ describe('practice integrity handlers', () => {
         expect(calls.issue[0].scopeKind).to.equal('stage');
         expect(calls.issue[0].targets).to.have.length(1);
     });
+
+    it('fails closed when a published revision identity does not match the selected target', async () => {
+        latestRevision = { ...latestRevision, domainId: 'other' };
+        const handler = makeHandler('practice_context');
+        const error = await capture(() => handler.postIssue(contextIssueArgs()));
+        expect(error).to.be.instanceOf(TypeError);
+        expect(error?.message).to.equal(`practice integrity published revision identity mismatch: ${revisionId}`);
+        expect(calls.issue).to.deep.equal([]);
+        expect(calls.logs.filter(([level]) => level === 'warn').at(-1)?.at(-1)).to.equal('published-revision-invalid');
+    });
 });

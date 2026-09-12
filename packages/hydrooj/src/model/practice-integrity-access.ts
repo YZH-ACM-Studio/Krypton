@@ -9,6 +9,7 @@ import {
     emptyInheritedPracticeEnforcement,
     type InheritedPracticeEnforcement,
 } from '../lib/practice-enforcement';
+import { selectPracticeIssueTargets, type PracticeIssueSelection } from '../lib/practice-issue-targets';
 import { isCourseKind, isProblemSetKind } from '../lib/training-kind';
 import { PERM, PRIV, STATUS } from './builtin';
 import { problemSetAccessService } from './problem-set-access';
@@ -16,7 +17,9 @@ import {
     canonicalPracticePolicy,
     practiceIntegrityService,
     type PracticeContainerKind,
+    type PracticeContextDoc,
     type PracticeContextMode,
+    type PracticeIntegrityRevisionDoc,
     type PracticeScopeKind,
 } from './practice-integrity';
 import problem from './problem';
@@ -207,6 +210,81 @@ export async function preparePracticeIssue(input: {
         checkProblem: false,
     });
     return { primaryContainer, extra };
+}
+
+type PublishedIssueSelection = PracticeIssueSelection<ObjectId, PracticeIntegrityRevisionDoc>;
+
+export type IssuePracticeContextResult =
+    | {
+          controlled: false;
+          prepared: PreparedPracticeIssue;
+          selected: Extract<PublishedIssueSelection, { controlled: false }>;
+      }
+    | {
+          controlled: true;
+          prepared: PreparedPracticeIssue;
+          selected: Extract<PublishedIssueSelection, { controlled: true }>;
+          context: PracticeContextDoc;
+      };
+
+function assertPublishedIssueIdentities(
+    domainId: string,
+    selected: Extract<PublishedIssueSelection, { controlled: true }>,
+    extra: PracticeAccessTarget | undefined,
+): void {
+    const expectedIdentities = [selected.identity, ...(extra && selected.targets.length > 1 ? [extra] : [])];
+    selected.targets.forEach((target, index) => {
+        const expected = expectedIdentities[index];
+        const revision = target.revision;
+        if (
+            !expected ||
+            revision.domainId !== domainId ||
+            revision.containerKind !== expected.containerKind ||
+            !revision.containerId.equals(expected.containerId) ||
+            revision.state !== 'published'
+        ) {
+            throw new TypeError(`practice integrity published revision identity mismatch: ${revision._id}`);
+        }
+    });
+}
+
+export async function issuePracticeContext(input: {
+    domainId: string;
+    user: User;
+    handler: PracticeAccessHandler;
+    target: PracticeAccessTarget;
+    pid: number;
+    mode: PracticeContextMode;
+    setRejectionReason?: (reason: string) => void;
+}): Promise<IssuePracticeContextResult> {
+    const prepared = await preparePracticeIssue(input);
+    input.setRejectionReason?.('policy-read-failed');
+    const published = await practiceIntegrityService.getLatestPublished(input.domainId, input.target.containerKind, input.target.containerId);
+    const extraPublished = prepared.extra
+        ? await practiceIntegrityService.getLatestPublished(input.domainId, prepared.extra.containerKind, prepared.extra.containerId)
+        : null;
+    const selected = selectPracticeIssueTargets<ObjectId, PracticeIntegrityRevisionDoc>({
+        primary: input.target,
+        extra: prepared.extra,
+        primaryPublished: published,
+        extraPublished,
+    });
+    if (!selected.controlled) return { controlled: false, prepared, selected };
+    input.setRejectionReason?.('published-revision-invalid');
+    assertPublishedIssueIdentities(input.domainId, selected, prepared.extra);
+    input.setRejectionReason?.('context-issue-failed');
+    const context = await practiceIntegrityService.issueContext({
+        domainId: input.domainId,
+        uid: input.user._id,
+        containerKind: selected.identity.containerKind,
+        containerId: selected.identity.containerId,
+        scopeKind: selected.identity.scopeKind,
+        scopeId: selected.identity.scopeId,
+        pid: input.pid,
+        mode: input.mode,
+        targets: selected.targets,
+    });
+    return { controlled: true, prepared, selected, context };
 }
 
 export async function practiceContainerContainsPid(

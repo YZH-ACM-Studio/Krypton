@@ -95,6 +95,8 @@ import {
     assertPracticeContextAccess,
     canManagePracticeContainer,
     canPreviewPracticeIntegrity,
+    issuePracticeContext,
+    loadPracticeContainer,
     preparePracticeIssue,
     resolveInheritedPracticeEnforcement,
 } from '../model/practice-integrity-access';
@@ -1651,7 +1653,40 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
         const target = { containerKind, containerId, scopeKind, scopeId };
         let rejectionReason = 'context-access-denied';
         try {
-            const prepared = await preparePracticeIssue({
+            rejectionReason = 'container-unavailable';
+            const tdoc = await loadPracticeContainer(this.pdoc.domainId, containerKind, containerId);
+            const canPreview = canPreviewPracticeIntegrity(this.user, this.pdoc, canManagePracticeContainer(this.user, tdoc, containerKind));
+            const entry = { containerKind, containerId: containerId.toHexString(), scopeKind, scopeId };
+            // Bypass must not mint a PracticeContext; issuePracticeContext would persist one.
+            if (canPreview && !preview) {
+                rejectionReason = 'context-access-denied';
+                const prepared = await preparePracticeIssue({
+                    domainId: this.pdoc.domainId,
+                    user: this.user,
+                    handler: this,
+                    target,
+                    pid: this.pdoc.docId,
+                    mode: 'student',
+                    setRejectionReason: (reason) => {
+                        rejectionReason = reason;
+                    },
+                });
+                rejectionReason = 'policy-read-failed';
+                const published = await practiceIntegrityService.getLatestPublished(this.pdoc.domainId, containerKind, containerId);
+                const extraPublished = prepared.extra
+                    ? await practiceIntegrityService.getLatestPublished(this.pdoc.domainId, prepared.extra.containerKind, prepared.extra.containerId)
+                    : null;
+                const selected = selectPracticeIssueTargets({
+                    primary: target,
+                    extra: prepared.extra,
+                    primaryPublished: published,
+                    extraPublished,
+                });
+                if (!selected.controlled) return { controlled: false, bypassed: false, previewAvailable: false, entry };
+                return { controlled: false, bypassed: true, previewAvailable: true, entry };
+            }
+            rejectionReason = 'context-access-denied';
+            const issued = await issuePracticeContext({
                 domainId: this.pdoc.domainId,
                 user: this.user,
                 handler: this,
@@ -1662,36 +1697,8 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
                     rejectionReason = reason;
                 },
             });
-            const tdoc = prepared.primaryContainer;
-            const canPreview = canPreviewPracticeIntegrity(this.user, this.pdoc, canManagePracticeContainer(this.user, tdoc, containerKind));
-            rejectionReason = 'policy-read-failed';
-            const published = await practiceIntegrityService.getLatestPublished(this.pdoc.domainId, containerKind, containerId);
-            const extraPublished = prepared.extra
-                ? await practiceIntegrityService.getLatestPublished(this.pdoc.domainId, prepared.extra.containerKind, prepared.extra.containerId)
-                : null;
-            const entry = { containerKind, containerId: containerId.toHexString(), scopeKind, scopeId };
-            const selected = selectPracticeIssueTargets({
-                primary: target,
-                extra: prepared.extra,
-                primaryPublished: published,
-                extraPublished,
-            });
-            if (!selected.controlled) return { controlled: false, bypassed: false, previewAvailable: false, entry };
-            if (canPreview && !preview) {
-                return { controlled: false, bypassed: true, previewAvailable: true, entry };
-            }
-            rejectionReason = 'context-issue-failed';
-            const context = await practiceIntegrityService.issueContext({
-                domainId: this.pdoc.domainId,
-                uid: this.user._id,
-                containerKind: selected.identity.containerKind,
-                containerId: selected.identity.containerId,
-                scopeKind: selected.identity.scopeKind,
-                scopeId: selected.identity.scopeId,
-                pid: this.pdoc.docId,
-                mode: preview ? 'preview' : 'student',
-                targets: selected.targets,
-            });
+            if (!issued.controlled) return { controlled: false, bypassed: false, previewAvailable: false, entry };
+            const context = issued.context;
             const contextId = context._id.toHexString();
             logger.info(
                 'Practice problem entry issued domain=%s contextId=%s uid=%d container=%s/%s scope=%s/%d pid=%d mode=%s revisions=%o stage=problem-entry result=success',
@@ -2495,9 +2502,12 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
             if (code.length > lengthLimit) throw new ValidationError('code');
         }
         if (structuredCode) {
+            const structuredKind = problemKind === 'program_fill' ? 'program_fill' : 'function';
+            const rawPdoc = await problem.get(domainId, this.pdoc.docId, undefined, true);
+            if (!rawPdoc) throw new ProblemNotFoundError(domainId, this.pdoc.docId);
+            const privateTemplate = parseProblemConfigObject(rawPdoc)?.template;
             try {
-                const structuredKind = problemKind === 'program_fill' ? 'program_fill' : 'function';
-                parseStructuredRegionSubmission(structuredKind, config.template, code);
+                parseStructuredRegionSubmission(structuredKind, privateTemplate, code);
             } catch (error: any) {
                 logger.error(
                     'Structured submission rejected domain=%s container=%s pid=%d kind=%s revision=%s uid=%d error=%o',

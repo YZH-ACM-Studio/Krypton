@@ -3,11 +3,10 @@ import { Logger } from '@hydrooj/utils';
 import { localizedErrorText, PermissionError, ValidationError } from '../error';
 import { PRIV } from '../model/builtin';
 import * as oplog from '../model/oplog';
-import { selectPracticeIssueTargets } from '../lib/practice-issue-targets';
 import {
     canManagePracticeContainer,
+    issuePracticeContext,
     loadPracticeContainer,
-    preparePracticeIssue,
     requiredPracticeManagePermission,
 } from '../model/practice-integrity-access';
 import {
@@ -206,7 +205,7 @@ class PracticeContextHandler extends Handler {
             rejectionReason = 'invalid-scope-kind';
             scopeKind = canonicalScopeKind(scopeKindRaw);
             rejectionReason = 'context-access-denied';
-            const prepared = await preparePracticeIssue({
+            const issued = await issuePracticeContext({
                 domainId,
                 user: this.user,
                 handler: this,
@@ -217,48 +216,11 @@ class PracticeContextHandler extends Handler {
                     rejectionReason = reason;
                 },
             });
-            rejectionReason = 'policy-read-failed';
-            const published = await practiceIntegrityService.getLatestPublished(domainId, containerKind, containerId);
-            const extraPublished = prepared.extra
-                ? await practiceIntegrityService.getLatestPublished(domainId, prepared.extra.containerKind, prepared.extra.containerId)
-                : null;
-            const selected = selectPracticeIssueTargets({
-                primary: { containerKind, containerId, scopeKind, scopeId },
-                extra: prepared.extra,
-                primaryPublished: published,
-                extraPublished,
-            });
-            if (!selected.controlled) {
+            if (!issued.controlled) {
                 this.response.body = { controlled: false };
                 return;
             }
-            rejectionReason = 'published-revision-invalid';
-            const expectedIdentities = [selected.identity, ...(prepared.extra && selected.targets.length > 1 ? [prepared.extra] : [])];
-            selected.targets.forEach((target, index) => {
-                const expected = expectedIdentities[index];
-                const revision = target.revision;
-                if (
-                    !expected ||
-                    revision.domainId !== domainId ||
-                    revision.containerKind !== expected.containerKind ||
-                    !revision.containerId.equals(expected.containerId) ||
-                    revision.state !== 'published'
-                ) {
-                    throw new TypeError(`practice integrity published revision identity mismatch: ${revision._id}`);
-                }
-            });
-            rejectionReason = 'context-issue-failed';
-            const context = await practiceIntegrityService.issueContext({
-                domainId,
-                uid: this.user._id,
-                containerKind: selected.identity.containerKind,
-                containerId: selected.identity.containerId,
-                scopeKind: selected.identity.scopeKind,
-                scopeId: selected.identity.scopeId,
-                pid,
-                mode: preview ? 'preview' : 'student',
-                targets: selected.targets,
-            });
+            const { selected, context } = issued;
             const contextId = context._id.toHexString();
             logger.info(
                 'Practice context issued domain=%s contextId=%s uid=%d container=%s/%s scope=%s/%d pid=%d revisions=%o stage=issue result=success',

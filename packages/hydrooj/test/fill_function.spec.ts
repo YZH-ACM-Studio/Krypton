@@ -412,6 +412,19 @@ describe('structured region submission', () => {
         expect(parseStructuredRegionSubmission('program_fill', one, JSON.stringify({ [FIRST_ID]: '' }))).to.deep.equal({ [FIRST_ID]: '' });
         expect(() => parseStructuredRegionSubmission('program_fill', one, JSON.stringify({ [FIRST_ID]: 'i++\nj++' }))).to.throw(/one line/);
     });
+
+    it('does not treat client surface as the private region-id source', () => {
+        const surfaceOnly = {
+            lang: 'cc.cc17',
+            surface: [{ type: 'region' as const, id: FIRST_ID }],
+        };
+        expect(() => parseStructuredRegionSubmission('function', surfaceOnly as any, JSON.stringify({ [FIRST_ID]: 'a' }))).to.throw(
+            /missing template region description/,
+        );
+        const both = { lang: 'cc.cc17', regions: [{ id: FIRST_ID }], surface: [{ type: 'region' as const, id: SECOND_ID }] };
+        expect(parseStructuredRegionSubmission('function', both as any, JSON.stringify({ [FIRST_ID]: 'a' }))).to.deep.equal({ [FIRST_ID]: 'a' });
+        expect(() => parseStructuredRegionSubmission('function', both as any, JSON.stringify({ [SECOND_ID]: 'a' }))).to.throw(/keys do not match/);
+    });
 });
 
 describe('hashes and fingerprints', () => {

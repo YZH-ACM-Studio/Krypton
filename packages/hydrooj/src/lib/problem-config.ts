@@ -376,17 +376,10 @@ export function validateStructuredCodeTestdataFiles(config: any, files: Array<{ 
 /** Parse and validate a student region payload before inserting a Record. */
 export function parseStructuredRegionSubmission(
     kind: 'program_fill' | 'function',
-    template:
-        | { lang?: string; regions?: Array<{ id: string }>; surface?: Array<{ type: 'code'; code: string } | { type: 'region'; id: string }> }
-        | null
-        | undefined,
+    template: { lang?: string; regions?: Array<{ id: string }> } | null | undefined,
     rawCode: string,
 ): Record<string, string> {
-    const regionDescriptors = Array.isArray(template?.regions)
-        ? template.regions
-        : Array.isArray(template?.surface)
-          ? template.surface.filter((segment): segment is { type: 'region'; id: string } => segment.type === 'region')
-          : [];
+    const regionDescriptors = Array.isArray(template?.regions) ? template.regions : [];
     if (!template || !regionDescriptors.length) {
         throw problemConfigError(localizedErrorText`${kind}: missing template region description`);
     }

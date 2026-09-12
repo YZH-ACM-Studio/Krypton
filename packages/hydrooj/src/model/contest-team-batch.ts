@@ -1107,6 +1107,115 @@ export async function setContestPlannedBatch(
     });
 }
 
+/**
+ * Write plannedTeamBatchId after contest.add. Create currently persists that
+ * field without start/record/team/finalized gates, so this entry must not reuse
+ * those setContestPlannedBatch checks.
+ */
+export async function writeCreatedContestPlannedBatch(
+    domainId: string,
+    contestId: ObjectId,
+    batchId: ObjectId,
+    actor: TeamBatchActor,
+): Promise<Tdoc> {
+    requireManager(actor);
+    const batch = await getBatch(domainId, batchId);
+    if (!batch) throw new ValidationError('plannedTeamBatchId');
+    return await withContestTeamBoundary(domainId, contestId, async () => {
+        const tdoc = await contest.get(domainId, contestId);
+        if (!tdoc) conflict('contest_not_found');
+        const currentBatchId = tdoc.plannedTeamBatchId ? new ObjectId(tdoc.plannedTeamBatchId) : null;
+        if (sameOptionalObjectId(currentBatchId, batchId)) return tdoc;
+        const auditBase = {
+            domainId,
+            actorUid: actor.user._id,
+            batchId,
+            contestId,
+            fromRevision: batch.revision,
+        };
+        try {
+            if (currentBatchId) conflict('contest_planned_batch_changed');
+            const updated = await document.coll.findOneAndUpdate(
+                {
+                    domainId,
+                    docType: document.TYPE_CONTEST,
+                    docId: contestId,
+                    ...exactStoredField('plannedTeamBatchId', tdoc.plannedTeamBatchId),
+                },
+                { $set: { plannedTeamBatchId: batchId } },
+                { returnDocument: 'after' },
+            );
+            if (!updated) conflict('contest_planned_batch_changed');
+            await auditSuccess('plan', {
+                ...auditBase,
+                toRevision: batch.revision,
+                stage: `create:${batch.status}`,
+            });
+            return updated;
+        } catch (error) {
+            await auditRejected('plan', auditBase, error);
+            throw error;
+        }
+    });
+}
+
+const CONTEST_TEAM_BATCH_POINTER_UNSET = {
+    teamBatchId: '',
+    plannedTeamBatchId: '',
+    teamBatchSnapshotHash: '',
+    teamBatchSnapshotAt: '',
+    teamBatchSnapshotCount: '',
+} as const;
+
+/**
+ * Unset the contest team-batch pointer fields used when switching to individual.
+ * setContestPlannedBatch cannot do this after a finalized snapshot exists.
+ */
+export async function clearContestTeamBatchPointers(
+    domainId: string,
+    contestId: ObjectId,
+    actor: TeamBatchActor,
+): Promise<Tdoc> {
+    return await withContestTeamBoundary(domainId, contestId, async () => {
+        const tdoc = await contest.get(domainId, contestId);
+        if (!tdoc) conflict('contest_not_found');
+        const auditBatchId = tdoc.teamBatchId
+            ? new ObjectId(tdoc.teamBatchId)
+            : tdoc.plannedTeamBatchId
+                ? new ObjectId(tdoc.plannedTeamBatchId)
+                : null;
+        const updated = await document.coll.findOneAndUpdate(
+            {
+                domainId,
+                docType: document.TYPE_CONTEST,
+                docId: contestId,
+            },
+            { $unset: CONTEST_TEAM_BATCH_POINTER_UNSET },
+            { returnDocument: 'after' },
+        );
+        if (!updated) conflict('contest_not_found');
+        console.info('[contest-team-batch] cleared contest team-batch pointers', {
+            domainId,
+            contestId: contestId.toHexString(),
+            actorUid: actor.user._id,
+            hadTeamBatchId: Boolean(tdoc.teamBatchId),
+            hadPlannedTeamBatchId: Boolean(tdoc.plannedTeamBatchId),
+        });
+        if (auditBatchId) {
+            await auditSuccess('plan', {
+                domainId,
+                actorUid: actor.user._id,
+                batchId: auditBatchId,
+                contestId,
+                fromRevision: 0,
+                toRevision: 0,
+                stage: 'clear-individual',
+            });
+        }
+        return updated;
+    });
+}
+
 interface SnapshotTrace {
     stage: string;
 }
@@ -1784,6 +1893,8 @@ global.Hydro.model.contestTeamBatch = {
     listClosedBatches,
     checkContestReadiness,
     setContestPlannedBatch,
+    writeCreatedContestPlannedBatch,
+    clearContestTeamBatchPointers,
     snapshotToContest,
     finalizePlannedBatchToContest,
 };

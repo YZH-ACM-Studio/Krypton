@@ -1085,4 +1085,139 @@ describe('P1.17 pre-contest team batches', () => {
         expect(contestTeams).to.have.length(0);
         expect(contestDocs[0].teamBatchId).to.equal(undefined);
     });
+
+    it('writes a created contest planned pointer without the existing-contest plan gates', async () => {
+        const open = await batchModel.createBatch('system', { user: actor(99, true) }, { name: 'Create Open' });
+        await batchModel.createTeam(
+            'system',
+            open.batchId,
+            { user: actor(99, true) },
+            { name: 'Create Team', captainUid: 10, memberUids: [10], managementMode: 'admin' },
+        );
+        contestDocs[0].beginAt = new Date('2000-01-01T00:00:00Z');
+        records.push({ domainId: 'system', contest: contestDocs[0].docId });
+        contestTeams.push({
+            _id: new ObjectId(),
+            teamId: new ObjectId(),
+            domainId: 'system',
+            contestId: contestDocs[0].docId,
+            name: 'Existing',
+            nameKey: 'existing',
+            captainUid: 13,
+            memberUids: [13],
+            active: true,
+        });
+        await rejects(
+            batchModel.setContestPlannedBatch('system', contestDocs[0].docId, open.batchId, null, { user: actor(99, true) }),
+            TestConflictError,
+        );
+        expect(contestDocs[0].plannedTeamBatchId).to.equal(undefined);
+
+        const written = await batchModel.writeCreatedContestPlannedBatch('system', contestDocs[0].docId, open.batchId, {
+            user: actor(99, true),
+        });
+        expect(written.plannedTeamBatchId.equals(open.batchId)).to.equal(true);
+        expect(contestDocs[0].plannedTeamBatchId.equals(open.batchId)).to.equal(true);
+        expect(contestTeams).to.have.length(1);
+        expect(audits.at(-1)).to.include({ operation: 'plan', result: 'success', stage: 'create:open' });
+
+        const repeated = await batchModel.writeCreatedContestPlannedBatch('system', contestDocs[0].docId, open.batchId, {
+            user: actor(99, true),
+        });
+        expect(repeated.plannedTeamBatchId.equals(open.batchId)).to.equal(true);
+
+        const closed = await createClosedBatch('Create Closed');
+        await rejects(
+            batchModel.writeCreatedContestPlannedBatch('system', contestDocs[0].docId, closed.batchId, { user: actor(99, true) }),
+            TestConflictError,
+        );
+        delete contestDocs[0].plannedTeamBatchId;
+        const writtenClosed = await batchModel.writeCreatedContestPlannedBatch('system', contestDocs[0].docId, closed.batchId, {
+            user: actor(99, true),
+        });
+        expect(writtenClosed.plannedTeamBatchId.equals(closed.batchId)).to.equal(true);
+        expect(contestTeams).to.have.length(1);
+
+        await rejects(
+            batchModel.writeCreatedContestPlannedBatch('system', contestDocs[0].docId, closed.batchId, { user: actor(10) }),
+            TestPermissionError,
+        );
+        await rejects(
+            batchModel.writeCreatedContestPlannedBatch('system', contestDocs[0].docId, new ObjectId(), { user: actor(99, true) }),
+            TestValidationError,
+        );
+        await rejects(
+            batchModel.writeCreatedContestPlannedBatch('another-domain', contestDocs[0].docId, closed.batchId, { user: actor(99, true) }),
+            TestValidationError,
+        );
+    });
+
+    it('lets explicit finalization consume a planned pointer written after create', async () => {
+        Object.assign(contestDocs[0], {
+            vigilEnabled: true,
+            entryMode: 'client_required',
+            rated: false,
+            endAt: new Date('2099-01-01T05:00:00Z'),
+            lockAt: new Date('2099-01-01T04:00:00Z'),
+        });
+        const batch = await createClosedBatch('Create Then Finalize');
+        await batchModel.writeCreatedContestPlannedBatch('system', contestDocs[0].docId, batch.batchId, { user: actor(99, true) });
+        const finalized = await batchModel.finalizePlannedBatchToContest('system', contestDocs[0].docId, batch.batchId, {
+            user: actor(99, true),
+        });
+        expect(finalized.alreadyApplied).to.equal(false);
+        expect(contestDocs[0].teamBatchId.equals(batch.batchId)).to.equal(true);
+        expect(contestDocs[0].plannedTeamBatchId).to.equal(undefined);
+        expect(contestTeams).to.have.length(2);
+        await rejects(
+            batchModel.finalizePlannedBatchToContest('system', contestDocs[0].docId, batch.batchId, { user: actor(99, true) }),
+            TestConflictError,
+        );
+    });
+
+    it('clears finalized team-batch pointers inside the contest-team boundary', async () => {
+        const batch = await createClosedBatch('Clear Pointers');
+        const snapshotAt = new Date('2099-01-01T00:00:00Z');
+        Object.assign(contestDocs[0], {
+            participationMode: 'individual',
+            teamBatchId: batch.batchId,
+            plannedTeamBatchId: batch.batchId,
+            teamBatchSnapshotHash: 'ab'.repeat(32),
+            teamBatchSnapshotAt: snapshotAt,
+            teamBatchSnapshotCount: 2,
+        });
+        await rejects(
+            batchModel.setContestPlannedBatch('system', contestDocs[0].docId, null, batch.batchId, { user: actor(99, true) }),
+            TestConflictError,
+        );
+        expect(contestDocs[0].teamBatchId.equals(batch.batchId)).to.equal(true);
+
+        batches.length = 0;
+        const cleared = await batchModel.clearContestTeamBatchPointers('system', contestDocs[0].docId, { user: actor(10) });
+        expect(cleared.teamBatchId).to.equal(undefined);
+        expect(cleared.plannedTeamBatchId).to.equal(undefined);
+        expect(cleared.teamBatchSnapshotHash).to.equal(undefined);
+        expect(cleared.teamBatchSnapshotAt).to.equal(undefined);
+        expect(cleared.teamBatchSnapshotCount).to.equal(undefined);
+        expect(contestDocs[0].teamBatchId).to.equal(undefined);
+        expect(contestDocs[0].plannedTeamBatchId).to.equal(undefined);
+        expect(contestDocs[0].teamBatchSnapshotHash).to.equal(undefined);
+        expect(contestDocs[0].teamBatchSnapshotAt).to.equal(undefined);
+        expect(contestDocs[0].teamBatchSnapshotCount).to.equal(undefined);
+        expect(audits.at(-1)).to.include({ operation: 'plan', result: 'success', stage: 'clear-individual' });
+
+        const repeated = await batchModel.clearContestTeamBatchPointers('system', contestDocs[0].docId, { user: actor(10) });
+        expect(repeated.teamBatchId).to.equal(undefined);
+        expect(repeated.plannedTeamBatchId).to.equal(undefined);
+    });
+
+    it('wires contest create and individual-switch through the exported pointer helpers', () => {
+        const { readFileSync } = require('node:fs');
+        const handler = readFileSync(require.resolve('../src/handler/contest.ts'), 'utf8');
+        expect(handler).to.include('contestTeamBatch.writeCreatedContestPlannedBatch');
+        expect(handler).to.include('contestTeamBatch.clearContestTeamBatchPointers');
+        expect(handler).to.include('contestTeamBatch.setContestPlannedBatch');
+        expect(handler).not.to.include('requestedPlannedTeamBatchId ? { plannedTeamBatchId: requestedPlannedTeamBatchId }');
+        expect(handler).not.to.include('document.set(authoritativeDomainId, document.TYPE_CONTEST, tid, undefined');
+    });
 });

@@ -1214,8 +1214,12 @@ export class ContestEditHandler extends Handler {
                 autoHidePendingPids: pendingAutoHideTargets,
                 autoHideProblemPids: prewriteAutoHideProblemPids,
                 ...(allowVirtual != null ? { allowVirtual } : {}),
-                ...(requestedPlannedTeamBatchId ? { plannedTeamBatchId: requestedPlannedTeamBatchId } : {}),
             });
+            if (requestedPlannedTeamBatchId) {
+                await contestTeamBatch.writeCreatedContestPlannedBatch(authoritativeDomainId, tid, requestedPlannedTeamBatchId, {
+                    user: this.user,
+                });
+            }
         }
         const task = contestUnhideTask(authoritativeDomainId, tid);
         if (autoHideActive && autoHide) {
@@ -1400,13 +1404,7 @@ export class ContestEditHandler extends Handler {
             );
         }
         if (effectiveParticipationMode === 'individual' && existingTeamBatchId) {
-            await document.set(authoritativeDomainId, document.TYPE_CONTEST, tid, undefined, {
-                teamBatchId: '',
-                plannedTeamBatchId: '',
-                teamBatchSnapshotHash: '',
-                teamBatchSnapshotAt: '',
-                teamBatchSnapshotCount: '',
-            });
+            await contestTeamBatch.clearContestTeamBatchPointers(authoritativeDomainId, tid, { user: this.user });
         }
         this.response.body = { tid };
         this.response.redirect = this.url(creatingContest ? 'contest_edit' : 'contest_detail', { tid });

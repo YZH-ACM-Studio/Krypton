@@ -87,8 +87,12 @@ describe('p1.17 pre-contest team batch workspace contracts', () => {
     expect(editor).to.include('value="finalize_team_batch"');
     expect(contestHandler).to.include('contestTeamBatch.listBatches');
     expect(contestHandler).to.include('contestTeamBatch.setContestPlannedBatch');
+    expect(contestHandler).to.include('contestTeamBatch.writeCreatedContestPlannedBatch');
+    expect(contestHandler).to.include('contestTeamBatch.clearContestTeamBatchPointers');
     expect(contestHandler).to.include('contestTeamBatch.finalizePlannedBatchToContest');
     expect(contestHandler).not.to.include('contestTeamBatch.snapshotToContest(authoritativeDomainId');
+    expect(contestHandler).not.to.include('requestedPlannedTeamBatchId ? { plannedTeamBatchId: requestedPlannedTeamBatchId }');
+    expect(contestHandler).not.to.include('document.set(authoritativeDomainId, document.TYPE_CONTEST, tid, undefined');
     expect(model).to.include("batch.status !== 'closed'");
     expect(model).to.include('plannedTeamBatchId: batchId');
     expect(model).to.include("$unset: { plannedTeamBatchId: '' }");

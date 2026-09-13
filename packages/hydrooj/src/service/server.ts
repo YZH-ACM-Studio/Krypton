@@ -94,7 +94,7 @@ export async function apply(ctx: Context) {
         keys: system.get('session.keys'),
         proxy: !!system.get('server.xproxy') || !!system.get('server.xff'),
         cors: system.get('server.cors') || '',
-        upload: system.get('server.upload') || '256m',
+        upload: system.get('server.upload') || '10g',
         port: argv.options.port || system.get('server.port'),
         host: argv.options.host || system.get('server.host'),
         xff: system.get('server.xff'),

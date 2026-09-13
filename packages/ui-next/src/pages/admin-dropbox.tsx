@@ -26,10 +26,11 @@ import { isSystemAdmin, PRIV } from '@/lib/perms';
 
 const DROPBOX_ENDPOINT = '/admin/dropbox';
 const DEFAULT_EXPIRE_DAYS = 7;
-const DEFAULT_MAX_FILE_BYTES = 512 * 1024 * 1024;
-const HARD_MAX_FILE_BYTES = 4 * 1024 * 1024 * 1024;
+const DEFAULT_MAX_FILE_BYTES = 10 * 1024 * 1024 * 1024;
+const HARD_MAX_FILE_BYTES = 10 * 1024 * 1024 * 1024;
 const EXPIRE_DAY_OPTIONS = [1, 3, 7, 14, 30] as const;
 const MIB = 1024 * 1024;
+const GIB = 1024 * 1024 * 1024;
 
 registerAdminNavSection({
   key: 'dropbox',
@@ -308,7 +309,9 @@ export function AdminDropboxPage() {
 
   const data = parsed.value;
   const canManage = systemAdmin && data.canManage;
-  const maxFileSizeLabel = Math.round(data.maxFileBytes / MIB);
+  const maxFileSizeLabel = data.maxFileBytes >= GIB
+    ? `${Math.round(data.maxFileBytes / GIB)} GiB`
+    : `${Math.round(data.maxFileBytes / MIB)} MiB`;
 
   return (
     <AdminPage
@@ -342,7 +345,7 @@ export function AdminDropboxPage() {
                 retryOnFailure={false}
                 onBatchComplete={() => window.location.reload()}
               />
-              <p className="mt-2 text-xs text-muted-foreground">单文件上限 {maxFileSizeLabel} MiB。可执行文件会被拒绝。</p>
+              <p className="mt-2 text-xs text-muted-foreground">单文件上限 {maxFileSizeLabel}。可执行文件会被拒绝。</p>
             </CardContent>
           </Card>
         ) : null}

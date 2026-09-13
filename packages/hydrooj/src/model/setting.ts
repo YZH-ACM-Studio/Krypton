@@ -351,7 +351,7 @@ SystemSetting(
             center: Schema.string().default('https://hydro.ac/center').description('Server Center').role('url').hidden(),
             name: Schema.string().default('Hydro').description('Server Name'),
             url: Schema.string().default('/').description('Server BaseURL'),
-            upload: Schema.string().default('256m').description('Max upload file size'),
+            upload: Schema.string().default('10g').description('Max upload file size'),
             cdn: Schema.string().default('/').description('CDN Prefix'),
             cdn_dynamic: Schema.boolean().default(false).description('Dynamic CDN'),
             ws: Schema.string().default('/').description('WebSocket Prefix'),

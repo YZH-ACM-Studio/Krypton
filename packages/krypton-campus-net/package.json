@@ -1,0 +1,11 @@
+{
+    "name": "@hydrooj/krypton-campus-net",
+    "version": "0.1.0",
+    "description": "Krypton OJ: campus-net EPortal autodial and Hydro root notify",
+    "main": "./index.ts",
+    "license": "AGPL-3.0-or-later",
+    "dependencies": {
+        "@hydrooj/utils": "workspace:^",
+        "hydrooj": "workspace:^"
+    }
+}

@@ -1,0 +1,20 @@
+[Unit]
+Description=Krypton campus-net probe and EPortal dial (oneshot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/opt/Krypton
+Environment=HOME=/root
+Environment=PATH=/root/.nix-profile/bin:/opt/Krypton/node_modules/.bin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# Optional; missing file is ignored. Create as root:root mode 0600 with
+# CAMPUS_NET_USERNAME and CAMPUS_NET_PASSWORD. Never put the password here.
+EnvironmentFile=-/root/.hydro/campus-net.env
+# Builtin addons are not in ~/.hydro/addon.json, so `hydrooj campus-net:tick`
+# cannot discover command.ts via getAddons(). `hydrooj cli` loads BUILTIN_ADDONS
+# and apply() dispatches campus-net:tick.
+ExecStart=/root/.nix-profile/bin/node /opt/Krypton/packages/hydrooj/bin/hydrooj.js cli campus-net:tick
+SyslogIdentifier=krypton-campus-net

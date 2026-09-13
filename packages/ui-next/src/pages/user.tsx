@@ -2,6 +2,7 @@
  * User detail page — redesigned (Q2):
  *   - Hero with large avatar + identity + KPI strip
  *   - Bio card directly under hero, rendered as full Markdown
+ *   - Optional 外站 Rating card (CF / 牛客 snapshots; not Hydro RP)
  *   - 65 : 35 split — left = problem-set / knowledge-node completions + attended contests,
  *     right = identity meta + contacts (with copy) + solution previews.
  */
@@ -12,6 +13,7 @@ import {
   BookOpen,
   Calendar,
   Clipboard,
+  Globe,
   Hash,
   ListChecks,
   Mail,
@@ -31,7 +33,7 @@ import { Separator } from '@/components/ui/separator';
 import { MarkdownEditor, MarkdownView } from '@/components/markdown-renderer';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useBootstrap } from '@/lib/bootstrap';
-import { formatDateTime, makeInitials, replaceRouteTokens } from '@/lib/format';
+import { formatDateTime, makeInitials, replaceRouteTokens, toDate } from '@/lib/format';
 
 interface UserProfileDocument {
   _id?: string | number;
@@ -103,6 +105,42 @@ interface ProfileCompletionItem {
   subtitle?: string;
 }
 
+type ExternalRatingSiteId = 'codeforces' | 'nowcoder';
+
+/** Client-safe CF / 牛客 snapshot. Not Hydro RP. */
+interface ExternalRatingSiteView {
+  handle?: string;
+  rating?: number | null;
+  fetchedAt?: unknown;
+  lastError?: string | null;
+  publicShow?: boolean;
+  stale?: boolean;
+}
+
+interface ExternalRatingSiteEntry extends ExternalRatingSiteView {
+  site?: string;
+  id?: string;
+}
+
+interface ExternalRatingViewerFlags {
+  isSelf?: boolean;
+  isTeacherOrAdmin?: boolean;
+  viewerIsTeacher?: boolean;
+}
+
+interface ExternalRatingPayload {
+  viewerIsSelf?: boolean;
+  viewerIsTeacher?: boolean;
+  isSelf?: boolean;
+  isTeacherOrAdmin?: boolean;
+  viewerRole?: string;
+  viewer?: ExternalRatingViewerFlags;
+  externalRatingCanEdit?: boolean;
+  codeforces?: ExternalRatingSiteView | null;
+  nowcoder?: ExternalRatingSiteView | null;
+  sites?: ExternalRatingSiteEntry[];
+}
+
 interface UserPageData {
   udoc?: UserProfileDocument;
   sdoc?: { updateAt?: unknown };
@@ -114,6 +152,13 @@ interface UserPageData {
   psdocs?: UserSolutionDocument[];
   pdict?: Record<string, { title?: string }>;
   isSelfProfile?: boolean;
+  viewerIsSelf?: boolean;
+  viewerIsTeacher?: boolean;
+  isSelf?: boolean;
+  isTeacherOrAdmin?: boolean;
+  viewerRole?: string;
+  /** Server-computed; true for bound self or teacher/admin. viewerIsTeacher is never sent. */
+  externalRatingCanEdit?: boolean;
   studentBinding?: UserStudentBinding | null;
   daily?: Record<string, number>;
   settings?: UserSetting[];
@@ -121,6 +166,169 @@ interface UserPageData {
   page_name?: string;
   sessions?: UserSession[];
   mdocs?: UserMessage[];
+  codeforces?: ExternalRatingSiteView | null;
+  nowcoder?: ExternalRatingSiteView | null;
+  externalRating?: ExternalRatingPayload | null;
+  externalRatings?: ExternalRatingPayload | null;
+}
+
+const EXTERNAL_RATING_SITE_IDS: ExternalRatingSiteId[] = ['codeforces', 'nowcoder'];
+
+const EXTERNAL_RATING_SITE_LABEL: Record<ExternalRatingSiteId, string> = {
+  codeforces: 'Codeforces',
+  nowcoder: '牛客',
+};
+
+const EXTERNAL_RATING_ERROR_TEXT: Record<string, string> = {
+  not_found: '未找到该用户',
+  timeout: '抓取超时',
+  http_error: '外站 HTTP 错误',
+  api_error: '外站接口错误',
+  parse_failed: '页面解析失败',
+  network_error: '网络错误',
+  network: '网络错误',
+  rate_limited: '刷新过于频繁',
+  invalid_handle: '账号不合法',
+  malformed: '返回数据无法解析',
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function readUnknownField(value: unknown, key: string): unknown {
+  if (!isRecord(value)) return undefined;
+  return value[key];
+}
+
+function isTrueFlag(value: unknown): boolean {
+  return value === true;
+}
+
+function readOptionalString(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const text = value.trim();
+  return text ? text : undefined;
+}
+
+function readOptionalRating(value: unknown): number | null | undefined {
+  if (value === null) return null;
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  return undefined;
+}
+
+function readExternalRatingSiteId(value: unknown): ExternalRatingSiteId | null {
+  if (value === 'codeforces' || value === 'nowcoder') return value;
+  return null;
+}
+
+function unwrapDateValue(value: unknown): unknown {
+  if (!isRecord(value) || !('$date' in value)) return value;
+  return value.$date;
+}
+
+function readExternalRatingSiteView(value: unknown): ExternalRatingSiteView | null {
+  if (!isRecord(value)) return null;
+  const view: ExternalRatingSiteView = {};
+  const handle = readOptionalString(value.handle);
+  const rating = readOptionalRating(value.rating);
+  const lastError = readOptionalString(value.lastError);
+  if (handle !== undefined) view.handle = handle;
+  if (rating !== undefined) view.rating = rating;
+  if (value.fetchedAt !== undefined) view.fetchedAt = value.fetchedAt;
+  if (lastError !== undefined) view.lastError = lastError;
+  if (value.publicShow === true) view.publicShow = true;
+  else if (value.publicShow === false) view.publicShow = false;
+  if (value.stale === true) view.stale = true;
+  return view;
+}
+
+function collectExternalRatingSites(payload: Record<string, unknown>): Array<{ id: ExternalRatingSiteId; view: ExternalRatingSiteView }> {
+  const found = new Map<ExternalRatingSiteId, ExternalRatingSiteView>();
+  const codeforces = readExternalRatingSiteView(payload.codeforces);
+  const nowcoder = readExternalRatingSiteView(payload.nowcoder);
+  if (codeforces) found.set('codeforces', codeforces);
+  if (nowcoder) found.set('nowcoder', nowcoder);
+  if (Array.isArray(payload.sites)) {
+    for (const item of payload.sites) {
+      if (!isRecord(item)) continue;
+      const id = readExternalRatingSiteId(item.site) ?? readExternalRatingSiteId(item.id);
+      if (!id || found.has(id)) continue;
+      const view = readExternalRatingSiteView(item);
+      if (view) found.set(id, view);
+    }
+  }
+  const sites: Array<{ id: ExternalRatingSiteId; view: ExternalRatingSiteView }> = [];
+  for (const id of EXTERNAL_RATING_SITE_IDS) {
+    const view = found.get(id);
+    if (view) sites.push({ id, view });
+  }
+  return sites;
+}
+
+function readViewerFlagSource(source: unknown): { viewerIsSelf: boolean; viewerIsTeacher: boolean } {
+  if (!isRecord(source)) return { viewerIsSelf: false, viewerIsTeacher: false };
+  const nestedViewer = isRecord(source.viewer) ? source.viewer : null;
+  return {
+    viewerIsSelf:
+      isTrueFlag(source.viewerIsSelf) || isTrueFlag(source.isSelf) || isTrueFlag(nestedViewer?.isSelf),
+    viewerIsTeacher:
+      isTrueFlag(source.viewerIsTeacher)
+      || isTrueFlag(source.isTeacherOrAdmin)
+      || isTrueFlag(nestedViewer?.isTeacherOrAdmin)
+      || isTrueFlag(nestedViewer?.viewerIsTeacher),
+  };
+}
+
+function readExternalRatingView(data: UserPageData): {
+  viewerIsSelf: boolean;
+  viewerIsTeacher: boolean;
+  canEdit: boolean;
+  sites: Array<{ id: ExternalRatingSiteId; view: ExternalRatingSiteView }>;
+} {
+  const raw: unknown = data.externalRating ?? data.externalRatings ?? readUnknownField(data.udoc, 'externalRating') ?? null;
+  const payload: Record<string, unknown> = isRecord(raw) ? { ...raw } : {};
+  const pageCodeforces: unknown = data.codeforces;
+  const pageNowcoder: unknown = data.nowcoder;
+  if (payload.codeforces == null && pageCodeforces != null) payload.codeforces = pageCodeforces;
+  if (payload.nowcoder == null && pageNowcoder != null) payload.nowcoder = pageNowcoder;
+  const fromPage = readViewerFlagSource(data);
+  const fromPayload = readViewerFlagSource(payload);
+  return {
+    viewerIsSelf: fromPage.viewerIsSelf || fromPayload.viewerIsSelf,
+    viewerIsTeacher: fromPage.viewerIsTeacher || fromPayload.viewerIsTeacher,
+    canEdit: isTrueFlag(data.externalRatingCanEdit) || isTrueFlag(payload.externalRatingCanEdit),
+    sites: collectExternalRatingSites(payload),
+  };
+}
+
+function hasExternalRatingSiteContent(view: ExternalRatingSiteView, includeError: boolean): boolean {
+  if (view.handle) return true;
+  if (typeof view.rating === 'number') return true;
+  if (toDate(unwrapDateValue(view.fetchedAt))) return true;
+  return includeError && !!view.lastError;
+}
+
+function isExternalRatingSiteVisible(view: ExternalRatingSiteView, canViewPrivate: boolean): boolean {
+  if (canViewPrivate) return hasExternalRatingSiteContent(view, true);
+  // Strangers never see lastError. Privileged snapshots require publicShow === true;
+  // the public projection already dropped hidden sites and omits the flag.
+  if (view.publicShow === false) return false;
+  if (view.publicShow === true) return hasExternalRatingSiteContent(view, false);
+  return hasExternalRatingSiteContent(view, false);
+}
+
+function formatExternalRatingValue(rating: number | null | undefined): string {
+  if (typeof rating === 'number') return String(Math.round(rating));
+  return '—';
+}
+
+function formatExternalRatingLastError(lastError: string): string {
+  return EXTERNAL_RATING_ERROR_TEXT[lastError] || lastError;
+}
+
+function codeforcesProfileUrl(handle: string): string {
+  return `https://codeforces.com/profile/${encodeURIComponent(handle)}`;
 }
 
 export function UserDetailPage() {
@@ -135,6 +343,18 @@ export function UserDetailPage() {
   const psdocs = data.psdocs || [];
   const pdict = data.pdict || {};
   const isSelfProfile = !!data.isSelfProfile || Number(udoc._id) === Number(bs.user.id);
+  const externalRatingView = readExternalRatingView(data);
+  const canViewPrivateExternalRating =
+    isSelfProfile
+    || data.externalRatingCanEdit === true
+    || externalRatingView.canEdit
+    || externalRatingView.viewerIsSelf
+    || externalRatingView.viewerIsTeacher
+    || data.viewerIsTeacher === true
+    || data.isTeacherOrAdmin === true;
+  const visibleExternalRatingSites = externalRatingView.sites.filter((site) =>
+    isExternalRatingSiteVisible(site.view, canViewPrivateExternalRating),
+  );
 
   const name = udoc.uname || 'User';
   const rp = Math.round(Number(udoc.rp || 0));
@@ -254,6 +474,29 @@ export function UserDetailPage() {
         <KpiCard label="提交" value={submitCount} icon={<Hash className="size-4 text-muted-foreground" />} />
         <KpiCard label="排名" value={udoc.rank ? `#${udoc.rank}` : '—'} icon={<Trophy className="size-4 text-muted-foreground" />} />
       </div>
+
+      {visibleExternalRatingSites.length ? (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex items-center gap-1.5">
+              <Globe className="size-4" />
+              外站 Rating
+            </CardTitle>
+            <p className="text-xs font-normal text-muted-foreground">Codeforces / 牛客快照，不是本站 RP</p>
+          </CardHeader>
+          <CardContent className={`grid gap-3 ${visibleExternalRatingSites.length > 1 ? 'sm:grid-cols-2' : 'max-w-xl'}`}>
+            {visibleExternalRatingSites.map((site) => (
+              <ExternalRatingSiteBlock
+                key={site.id}
+                siteId={site.id}
+                view={site.view}
+                canViewPrivate={canViewPrivateExternalRating}
+                locale={bs.locale}
+              />
+            ))}
+          </CardContent>
+        </Card>
+      ) : null}
 
       {/* 65 : 35 main grid */}
       <div className="grid gap-5 lg:grid-cols-[64fr_36fr]">
@@ -439,6 +682,59 @@ function KpiCard({ label, value, icon }: { label: string; value: React.ReactNode
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function ExternalRatingSiteBlock({
+  siteId,
+  view,
+  canViewPrivate,
+  locale,
+}: {
+  siteId: ExternalRatingSiteId;
+  view: ExternalRatingSiteView;
+  canViewPrivate: boolean;
+  locale: string;
+}) {
+  const handle = view.handle;
+  const fetchedAt = toDate(unwrapDateValue(view.fetchedAt));
+  const profileHref = siteId === 'codeforces' && handle ? codeforcesProfileUrl(handle) : null;
+  return (
+    <div className="min-w-0 rounded-md border bg-muted/20 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-sm font-medium">{EXTERNAL_RATING_SITE_LABEL[siteId]}</p>
+        {canViewPrivate && view.publicShow !== true ? (
+          <Badge variant="outline" className="text-[10px] text-muted-foreground">
+            未公开
+          </Badge>
+        ) : null}
+      </div>
+      <div className="mt-2 flex items-baseline justify-between gap-2">
+        {profileHref ? (
+          <a
+            href={profileHref}
+            target="_blank"
+            rel="noreferrer"
+            className="truncate font-mono text-sm hover:underline"
+            title={handle}
+          >
+            {handle}
+          </a>
+        ) : (
+          <span className="truncate font-mono text-sm">{handle || '—'}</span>
+        )}
+        <span className="shrink-0 text-xl font-semibold tabular-nums leading-none">{formatExternalRatingValue(view.rating)}</span>
+      </div>
+      {canViewPrivate || fetchedAt ? (
+        <p className="mt-2 text-[11px] text-muted-foreground">
+          抓取 {fetchedAt ? formatDateTime(fetchedAt, locale) : '—'}
+        </p>
+      ) : null}
+      {canViewPrivate && view.lastError ? (
+        <p className="mt-1 break-words text-[11px] text-destructive">失败 {formatExternalRatingLastError(view.lastError)}</p>
+      ) : null}
+      {!canViewPrivate && view.stale ? <p className="mt-1 text-[11px] text-muted-foreground">快照可能过期</p> : null}
+    </div>
   );
 }
 

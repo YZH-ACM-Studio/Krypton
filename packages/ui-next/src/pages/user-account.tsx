@@ -17,9 +17,11 @@ import {
   LogOut,
   Lock,
   Mail,
+  RefreshCw,
   Settings,
   Shield,
   Trash2,
+  Trophy,
   Upload,
   User as UserIcon,
 } from 'lucide-react';
@@ -35,7 +37,7 @@ import { MarkdownEditor } from '@/components/markdown-renderer';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useBootstrap } from '@/lib/bootstrap';
-import { formatDateTime } from '@/lib/format';
+import { formatDateTime, toDate } from '@/lib/format';
 import { cn } from '@/lib/cn';
 import { MessagesPanel } from './messages';
 
@@ -101,16 +103,116 @@ interface UserFileDoc {
   size?: number;
 }
 
+/** Owner-only CF / Nowcoder snapshot. Rating is server-owned and not editable. */
+interface ExternalRatingSiteOwnerView {
+  handle?: string | null;
+  rating?: number | null;
+  fetchedAt?: unknown;
+  lastError?: string | null;
+  publicShow?: boolean;
+}
+
+interface ExternalRatingAccountPayload {
+  bound?: boolean;
+  codeforces?: ExternalRatingSiteOwnerView | null;
+  nowcoder?: ExternalRatingSiteOwnerView | null;
+}
+
 interface UserAccountPageData {
   authenticators?: AuthenticatorDoc[];
   category?: string;
   current?: Record<string, unknown> & { avatarUrl?: string | null };
+  externalRating?: ExternalRatingAccountPayload | null;
+  /** Strict `true` from HomeSettings inject; missing hides the CF/Nowcoder section. */
+  externalRatingBound?: boolean;
   files?: UserFileDoc[];
   loginMethods?: LoginMethod[];
   messages?: unknown;
   relations?: OauthRelation[];
   sessions?: SessionDoc[];
   settings?: SettingDescriptor[];
+}
+
+const EXTERNAL_RATING_SAVE_ACTION = '/user/external-rating';
+const EXTERNAL_RATING_REFRESH_ACTION = '/user/external-rating/refresh';
+const EXTERNAL_RATING_REFRESH_FORM_ID = 'external-rating-refresh';
+
+const EXTERNAL_RATING_SETTING_KEYS = {
+  codeforcesHandle: 'codeforcesHandle',
+  nowcoderName: 'nowcoderName',
+  codeforcesRatingPublic: 'codeforcesRatingPublic',
+  nowcoderRatingPublic: 'nowcoderRatingPublic',
+} as const;
+
+const EXTERNAL_RATING_SETTING_KEY_SET = new Set<string>(Object.values(EXTERNAL_RATING_SETTING_KEYS));
+
+const EXTERNAL_RATING_ERROR_LABEL: Record<string, string> = {
+  not_found: '未找到该用户',
+  timeout: '抓取超时',
+  http_error: '外站 HTTP 错误',
+  api_error: '外站接口错误',
+  parse_failed: '页面解析失败',
+  network_error: '网络错误',
+  network: '网络错误',
+  rate_limited: '刷新过于频繁',
+  invalid_handle: '账号不合法',
+  malformed: '返回数据无法解析',
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isExternalRatingSetting(setting: SettingDescriptor): boolean {
+  return setting.family === 'setting_external_rating' || EXTERNAL_RATING_SETTING_KEY_SET.has(setting.key);
+}
+
+function readExternalRatingPayload(data: UserAccountPageData): ExternalRatingAccountPayload | null {
+  if (data.externalRating) return data.externalRating;
+  const nested = data.current?.externalRating;
+  if (!isRecord(nested)) return null;
+  const payload: ExternalRatingAccountPayload = {};
+  if (nested.bound === true) payload.bound = true;
+  if (nested.codeforces !== undefined) payload.codeforces = readSiteOwnerView(nested.codeforces);
+  if (nested.nowcoder !== undefined) payload.nowcoder = readSiteOwnerView(nested.nowcoder);
+  return payload;
+}
+
+function readSiteOwnerView(value: unknown): ExternalRatingSiteOwnerView {
+  if (!isRecord(value)) return {};
+  const view: ExternalRatingSiteOwnerView = {};
+  if (typeof value.handle === 'string') view.handle = value.handle;
+  else if (value.handle === null) view.handle = null;
+  if (typeof value.rating === 'number' && Number.isFinite(value.rating)) view.rating = value.rating;
+  else if (value.rating === null) view.rating = null;
+  if (value.fetchedAt !== undefined) view.fetchedAt = value.fetchedAt;
+  if (typeof value.lastError === 'string') view.lastError = value.lastError;
+  else if (value.lastError === null) view.lastError = null;
+  if (value.publicShow === true) view.publicShow = true;
+  return view;
+}
+
+function unwrapDateValue(value: unknown): unknown {
+  if (!isRecord(value) || !('$date' in value)) return value;
+  return value.$date;
+}
+
+function readOptionalText(value: unknown): string {
+  return typeof value === 'string' ? value : '';
+}
+
+function formatExternalRatingValue(rating: number | null | undefined): string {
+  if (typeof rating === 'number' && Number.isFinite(rating)) return String(Math.round(rating));
+  return '—';
+}
+
+function formatExternalRatingError(lastError: string | null | undefined): string | null {
+  if (!lastError) return null;
+  return EXTERNAL_RATING_ERROR_LABEL[lastError] ?? lastError;
+}
+
+function settingByKey(settings: SettingDescriptor[], key: string): SettingDescriptor | undefined {
+  return settings.find((setting) => setting.key === key);
 }
 
 function binaryIdToBase64(value: string | BinaryIdLike | null | undefined) {
@@ -227,11 +329,14 @@ function SettingsPanel() {
   const data = bs.page.data as UserAccountPageData;
   const settings: SettingDescriptor[] = data.settings || [];
   const current: Record<string, unknown> = data.current || {};
+  const showExternalRating = data.category === 'account' && data.externalRatingBound === true;
+  const externalRating = readExternalRatingPayload(data);
 
   // Group settings by family
   const families = new Map<string, SettingDescriptor[]>();
   for (const s of settings) {
     if (s.flag & 1) continue; // FLAG_HIDDEN
+    if (isExternalRatingSetting(s)) continue;
     const fam = s.family || 'general';
     if (!families.has(fam)) families.set(fam, []);
     families.get(fam)!.push(s);
@@ -244,6 +349,7 @@ function SettingsPanel() {
     setting_customize: '自定义',
     setting_storage: '存储',
     setting_basic: '基本',
+    setting_external_rating: '外站 Rating',
     general: '通用',
   };
 
@@ -261,7 +367,10 @@ function SettingsPanel() {
         </Card>
       ) : null}
       <Card>
-        <CardContent className="p-5">
+        <CardContent className="space-y-6 p-5">
+          {showExternalRating ? (
+            <form id={EXTERNAL_RATING_REFRESH_FORM_ID} method="post" action={EXTERNAL_RATING_REFRESH_ACTION} hidden />
+          ) : null}
           <form method="post" className="space-y-6">
             {Array.from(families.entries()).map(([fam, items]) => (
               <fieldset key={fam} className="space-y-4">
@@ -276,8 +385,157 @@ function SettingsPanel() {
               <Button type="submit">保存设置</Button>
             </div>
           </form>
+          {showExternalRating ? (
+            <form method="post" action={EXTERNAL_RATING_SAVE_ACTION} className="space-y-6">
+              <ExternalRatingSettingsFields settings={settings} current={current} payload={externalRating} locale={bs.locale} />
+            </form>
+          ) : null}
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+function ExternalRatingSettingsFields({
+  settings,
+  current,
+  payload,
+  locale,
+}: {
+  settings: SettingDescriptor[];
+  current: Record<string, unknown>;
+  payload: ExternalRatingAccountPayload | null;
+  locale: string;
+}) {
+  const codeforces = readSiteOwnerView(payload?.codeforces);
+  const nowcoder = readSiteOwnerView(payload?.nowcoder);
+  return (
+    <fieldset className="space-y-4">
+      <legend className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        <Trophy className="size-3.5" />
+        外站 Rating
+      </legend>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <p className="max-w-xl text-xs text-muted-foreground">
+          填写 Codeforces handle 与牛客用户名后点保存即可抓取。公开开关默认关闭，只影响公开资料和排行榜。Rating 由系统抓取，不可编辑。
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <Button type="submit" size="sm">
+            保存
+          </Button>
+          <Button type="submit" form={EXTERNAL_RATING_REFRESH_FORM_ID} variant="outline" size="sm" className="gap-1.5">
+            <RefreshCw className="size-3.5" />
+            刷新 rating
+          </Button>
+        </div>
+      </div>
+      <ExternalRatingSiteFields
+        siteLabel="Codeforces"
+        handleSetting={settingByKey(settings, EXTERNAL_RATING_SETTING_KEYS.codeforcesHandle)}
+        handleKey={EXTERNAL_RATING_SETTING_KEYS.codeforcesHandle}
+        handleLabel="Codeforces handle"
+        handlePlaceholder="tourist"
+        handleMaxLength={24}
+        publicSetting={settingByKey(settings, EXTERNAL_RATING_SETTING_KEYS.codeforcesRatingPublic)}
+        publicKey={EXTERNAL_RATING_SETTING_KEYS.codeforcesRatingPublic}
+        publicLabel="在公开资料和排行榜展示 Codeforces"
+        current={current}
+        snapshot={codeforces}
+        locale={locale}
+      />
+      <ExternalRatingSiteFields
+        siteLabel="牛客"
+        handleSetting={settingByKey(settings, EXTERNAL_RATING_SETTING_KEYS.nowcoderName)}
+        handleKey={EXTERNAL_RATING_SETTING_KEYS.nowcoderName}
+        handleLabel="牛客用户名"
+        handlePlaceholder="牛客用户名"
+        handleMaxLength={64}
+        publicSetting={settingByKey(settings, EXTERNAL_RATING_SETTING_KEYS.nowcoderRatingPublic)}
+        publicKey={EXTERNAL_RATING_SETTING_KEYS.nowcoderRatingPublic}
+        publicLabel="在公开资料和排行榜展示牛客"
+        current={current}
+        snapshot={nowcoder}
+        locale={locale}
+      />
+    </fieldset>
+  );
+}
+
+function ExternalRatingSiteFields({
+  siteLabel,
+  handleSetting,
+  handleKey,
+  handleLabel,
+  handlePlaceholder,
+  handleMaxLength,
+  publicSetting,
+  publicKey,
+  publicLabel,
+  current,
+  snapshot,
+  locale,
+}: {
+  siteLabel: string;
+  handleSetting: SettingDescriptor | undefined;
+  handleKey: string;
+  handleLabel: string;
+  handlePlaceholder: string;
+  handleMaxLength: number;
+  publicSetting: SettingDescriptor | undefined;
+  publicKey: string;
+  publicLabel: string;
+  current: Record<string, unknown>;
+  snapshot: ExternalRatingSiteOwnerView;
+  locale: string;
+}) {
+  const handleName = handleSetting?.key || handleKey;
+  const publicName = publicSetting?.key || publicKey;
+  const handleDisabled = !!((handleSetting?.flag ?? 0) & 2);
+  const publicDisabled = !!((publicSetting?.flag ?? 0) & 2);
+  const handleValue = readOptionalText(current[handleName]) || readOptionalText(snapshot.handle);
+  const publicChecked = snapshot.publicShow === true;
+  const fetchedAt = toDate(unwrapDateValue(snapshot.fetchedAt));
+  const lastError = formatExternalRatingError(snapshot.lastError);
+  return (
+    <div className="space-y-4 rounded-md border bg-muted/10 p-4">
+      <p className="text-sm font-medium">{siteLabel}</p>
+      <div className="grid gap-1.5 sm:grid-cols-[200px_1fr] sm:items-start">
+        <div>
+          <label className="text-sm font-medium">{handleLabel}</label>
+          <p className="text-[11px] leading-tight text-muted-foreground">留空则清空该站账号</p>
+        </div>
+        <Input
+          name={handleName}
+          defaultValue={handleValue}
+          disabled={handleDisabled}
+          placeholder={handlePlaceholder}
+          maxLength={handleMaxLength}
+          autoComplete="off"
+          spellCheck={false}
+          className="max-w-sm"
+        />
+      </div>
+      <div className="grid gap-1.5 sm:grid-cols-[200px_1fr] sm:items-start">
+        <div>
+          <label className="text-sm font-medium">{publicLabel}</label>
+          <p className="text-[11px] leading-tight text-muted-foreground">默认关闭。打开后公开资料和排行榜可以展示该站 rating。</p>
+        </div>
+        <label className="inline-flex cursor-pointer items-center gap-2">
+          <Checkbox name={publicName} value="on" defaultChecked={publicChecked} disabled={publicDisabled} />
+          <span className="text-sm text-muted-foreground">展示</span>
+        </label>
+      </div>
+      <div className="grid gap-1.5 sm:grid-cols-[200px_1fr] sm:items-start">
+        <div>
+          <p className="text-sm font-medium">{siteLabel} rating</p>
+          <p className="text-[11px] leading-tight text-muted-foreground">由系统抓取，不可编辑</p>
+        </div>
+        <div className="space-y-1">
+          <p className="text-sm font-medium tabular-nums">{formatExternalRatingValue(snapshot.rating)}</p>
+          <p className="text-[11px] text-muted-foreground">{fetchedAt ? `最近抓取 ${formatDateTime(fetchedAt, locale)}` : '尚未抓取'}</p>
+          {lastError ? <p className="text-[11px] text-destructive">失败：{lastError}</p> : null}
+        </div>
+      </div>
     </div>
   );
 }
@@ -321,8 +579,9 @@ function SettingField({ setting, value }: { setting: SettingDescriptor; value: u
       <div>
         {setting.type === 'boolean' || setting.type === 'checkbox' ? (
           <label className="inline-flex cursor-pointer items-center gap-2">
-            <Checkbox name={setting.key} defaultChecked={!!value} disabled={isDisabled} />
+            <Checkbox name={setting.key} value="on" defaultChecked={!!value} disabled={isDisabled} />
             <span className="text-sm text-muted-foreground">{setting.ui || '启用'}</span>
+            {!isDisabled ? <input type="hidden" name={`booleanKeys.${setting.key}`} value="on" /> : null}
           </label>
         ) : setting.type === 'select' ? (
           <SimpleSelect

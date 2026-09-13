@@ -14,11 +14,16 @@ import { useBootstrap, type GenericUserDoc } from '@/lib/bootstrap';
 import { formatPlainTextSummary, makeInitials, replaceRouteTokens } from '@/lib/format';
 import { cn } from '@/lib/cn';
 
+type ExternalRatingSiteId = 'codeforces' | 'nowcoder';
+
+/** Ranking serializer may attach a public CF / Nowcoder number, or omit the site. */
 interface RankingUser extends GenericUserDoc {
   avatarUrl?: string;
   nAccept?: number;
   rank?: number | string;
   rpInfo?: Record<string, unknown>;
+  externalRating?: unknown;
+  externalRatings?: unknown;
 }
 
 interface RankingPageData {
@@ -30,12 +35,112 @@ interface RankingPageData {
   rpDefinitions?: Record<string, { hidden?: boolean }>;
   self?: RankingUser | null;
   studentDict?: Record<string, { studentId: string; realName: string }>;
+  /** Optional uid → public rating map. Handler name is externalRatingByUid. */
+  externalRatingByUid?: unknown;
+  externalRating?: unknown;
+  externalRatings?: unknown;
 }
 
 const RP_LABELS: Record<string, string> = {
   problem: '题目 RP',
   contest: '比赛 RP',
 };
+
+const EXTERNAL_RATING_SITE_IDS: ExternalRatingSiteId[] = ['codeforces', 'nowcoder'];
+
+const EXTERNAL_RATING_SITE_LABEL: Record<ExternalRatingSiteId, string> = {
+  codeforces: 'CF',
+  nowcoder: '牛客',
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function readIncludedPublicRating(raw: unknown): { included: boolean; rating?: number } {
+  if (raw === undefined) return { included: false };
+  if (raw === null) return { included: true };
+  if (typeof raw === 'number' && Number.isFinite(raw)) return { included: true, rating: raw };
+  if (isRecord(raw)) {
+    // Canonical / owner snapshots keep publicShow and lastError. Ranking only
+    // renders serializer-cropped public numbers, never those private fields.
+    if ('publicShow' in raw || 'lastError' in raw) return { included: false };
+    if ('rating' in raw) return readIncludedPublicRating(raw.rating);
+  }
+  return { included: false };
+}
+
+function wrappedRatingView(source: unknown): Record<string, unknown> | null {
+  if (!isRecord(source)) return null;
+  if (isRecord(source.externalRating)) return source.externalRating;
+  if (isRecord(source.externalRatings)) return source.externalRatings;
+  return null;
+}
+
+function perRowRatingView(user: RankingUser): unknown {
+  if (user.externalRating !== undefined) return user.externalRating;
+  if (user.externalRatings !== undefined) return user.externalRatings;
+  return undefined;
+}
+
+function readPublicRatingFromView(view: unknown, site: ExternalRatingSiteId): { included: boolean; rating?: number } {
+  if (view === undefined) return { included: false };
+  const nested = wrappedRatingView(view);
+  const siteMap = nested ?? (isRecord(view) ? view : null);
+  if (!siteMap) return { included: false };
+  return readIncludedPublicRating(siteMap[site]);
+}
+
+function readPublicRatingDicts(data: RankingPageData): unknown[] {
+  return [data.externalRatingByUid, data.externalRatings, data.externalRating];
+}
+
+function readPagePublicRating(
+  user: RankingUser,
+  site: ExternalRatingSiteId,
+  pageDicts: unknown[],
+): { included: boolean; rating?: number } {
+  const uid = String(user._id);
+  for (const dict of pageDicts) {
+    if (!isRecord(dict) || !Object.prototype.hasOwnProperty.call(dict, uid)) continue;
+    return readPublicRatingFromView(dict[uid], site);
+  }
+  return { included: false };
+}
+
+function readUserPublicRating(
+  user: RankingUser,
+  site: ExternalRatingSiteId,
+  pageDicts: unknown[],
+): { included: boolean; rating?: number } {
+  const perRow = perRowRatingView(user);
+  if (perRow !== undefined) {
+    const fromPerRow = readPublicRatingFromView(perRow, site);
+    if (fromPerRow.included) return fromPerRow;
+  } else {
+    const fromTopLevel = readIncludedPublicRating(user[site]);
+    if (fromTopLevel.included) return fromTopLevel;
+  }
+  return readPagePublicRating(user, site, pageDicts);
+}
+
+function formatPublicRating(rating: number | undefined): string {
+  return typeof rating === 'number' ? String(Math.round(rating)) : '—';
+}
+
+function publicRatingRowProps(
+  user: RankingUser,
+  pageDicts: unknown[],
+  showCfRating: boolean,
+  showNowcoderRating: boolean,
+) {
+  return {
+    showCfRating,
+    showNowcoderRating,
+    cfRating: readUserPublicRating(user, 'codeforces', pageDicts).rating,
+    nowcoderRating: readUserPublicRating(user, 'nowcoder', pageDicts).rating,
+  };
+}
 
 function medalColor(rank: number) {
   if (rank === 1) return 'text-yellow-500';
@@ -60,6 +165,10 @@ function RankingRow({
   current,
   onShowBio,
   studentInfo,
+  showCfRating,
+  showNowcoderRating,
+  cfRating,
+  nowcoderRating,
 }: {
   user: RankingUser;
   rank: number | string;
@@ -68,6 +177,10 @@ function RankingRow({
   onShowBio?: (user: RankingUser) => void;
   /** Admin-only column. When undefined, the cell is suppressed. */
   studentInfo?: { studentId: string; realName: string } | null;
+  showCfRating: boolean;
+  showNowcoderRating: boolean;
+  cfRating?: number;
+  nowcoderRating?: number;
 }) {
   const bs = useBootstrap();
   const numericRank = typeof rank === 'number' ? rank : Number(rank);
@@ -114,6 +227,16 @@ function RankingRow({
           {getRpDetail(user, key)}
         </TableCell>
       ))}
+      {showCfRating ? (
+        <TableCell className="hidden text-right tabular-nums text-sm text-muted-foreground md:table-cell">
+          {formatPublicRating(cfRating)}
+        </TableCell>
+      ) : null}
+      {showNowcoderRating ? (
+        <TableCell className="hidden text-right tabular-nums text-sm text-muted-foreground md:table-cell">
+          {formatPublicRating(nowcoderRating)}
+        </TableCell>
+      ) : null}
       <TableCell className="text-right tabular-nums">{user.nAccept ?? 0}</TableCell>
       <TableCell className="max-w-64 text-sm">
         {bioPreview ? (
@@ -149,6 +272,11 @@ export function RankingPage() {
   const self = data.self || null;
   const studentDict = data.studentDict || {};
   const hasStudentColumn = Object.keys(studentDict).length > 0;
+  const publicRatingDicts = readPublicRatingDicts(data);
+  const visibleUsers = self ? [self, ...rows] : rows;
+  const hasCfRatingColumn = visibleUsers.some((user) => readUserPublicRating(user, 'codeforces', publicRatingDicts).included);
+  const hasNowcoderRatingColumn = visibleUsers.some((user) => readUserPublicRating(user, 'nowcoder', publicRatingDicts).included);
+  const extraRatingColumns = (hasCfRatingColumn ? 1 : 0) + (hasNowcoderRatingColumn ? 1 : 0);
   const [bioUser, setBioUser] = useState<RankingUser | null>(null);
 
   return (
@@ -173,6 +301,15 @@ export function RankingPage() {
                       {RP_LABELS[key] || key}
                     </TableHead>
                   ))}
+                  {EXTERNAL_RATING_SITE_IDS.map((site) => {
+                    const show = site === 'codeforces' ? hasCfRatingColumn : hasNowcoderRatingColumn;
+                    if (!show) return null;
+                    return (
+                      <TableHead key={site} className="hidden w-20 text-right md:table-cell">
+                        {EXTERNAL_RATING_SITE_LABEL[site]}
+                      </TableHead>
+                    );
+                  })}
                   <TableHead className="w-20 text-right">AC</TableHead>
                   <TableHead className="min-w-40">简介</TableHead>
                 </TableRow>
@@ -186,11 +323,15 @@ export function RankingPage() {
                     current
                     onShowBio={setBioUser}
                     studentInfo={hasStudentColumn ? (studentDict[String(self._id)] ?? null) : undefined}
+                    {...publicRatingRowProps(self, publicRatingDicts, hasCfRatingColumn, hasNowcoderRatingColumn)}
                   />
                 ) : null}
                 {rows.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={5 + rpKeys.length + (hasStudentColumn ? 1 : 0)} className="py-8 text-center text-sm text-muted-foreground">
+                    <TableCell
+                      colSpan={5 + rpKeys.length + extraRatingColumns + (hasStudentColumn ? 1 : 0)}
+                      className="py-8 text-center text-sm text-muted-foreground"
+                    >
                       暂无排名数据
                     </TableCell>
                   </TableRow>
@@ -203,6 +344,7 @@ export function RankingPage() {
                       rpKeys={rpKeys}
                       onShowBio={setBioUser}
                       studentInfo={hasStudentColumn ? (studentDict[String(user._id)] ?? null) : undefined}
+                      {...publicRatingRowProps(user, publicRatingDicts, hasCfRatingColumn, hasNowcoderRatingColumn)}
                     />
                   ))
                 )}

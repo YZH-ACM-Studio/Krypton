@@ -1,0 +1,12 @@
+{
+    "name": "@hydrooj/krypton-admin-dropbox",
+    "version": "0.1.0",
+    "description": "Krypton OJ: system-admin temporary dropbox (upload/list/download/delete, configurable expiry)",
+    "main": "./index.ts",
+    "license": "AGPL-3.0-or-later",
+    "dependencies": {
+        "@hydrooj/utils": "workspace:^",
+        "hydrooj": "workspace:^",
+        "mongodb": "^7.1.1"
+    }
+}

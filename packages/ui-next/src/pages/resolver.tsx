@@ -1,11 +1,8 @@
 import { useBootstrap } from '@/lib/bootstrap';
 import { AdminAccountDetailPage, AdminAccountsPage } from '@/pages/admin-accounts';
 import { DomainDashboardPage, ManageDashboardPage, StatusPage } from '@/pages/admin';
-import {
-  AdminCollectEditPage,
-  AdminCollectListPage,
-  AdminCollectStatsPage,
-} from '@/pages/admin-collect';
+import { AdminCollectEditPage, AdminCollectListPage, AdminCollectStatsPage } from '@/pages/admin-collect';
+import { AdminDropboxPage } from '@/pages/admin-dropbox';
 import {
   AdminTasksAssignPage,
   AdminTasksCandidatesPage,
@@ -324,6 +321,9 @@ const PAGE_MAP: Record<string, PageComponent> = {
   'admin_collect.html': AdminCollectListPage,
   'admin_collect_edit.html': AdminCollectEditPage,
   'admin_collect_stats.html': AdminCollectStatsPage,
+
+  // krypton-admin-dropbox
+  'admin_dropbox.html': AdminDropboxPage,
 
   // krypton-announcement
   'announce_list.html': AnnounceListPage,

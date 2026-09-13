@@ -41,6 +41,9 @@ const BUILTIN_ADDONS = [
     path.resolve(__dirname, '..', '..', 'krypton-rankboard'),
     path.resolve(__dirname, '..', '..', 'krypton-mindmap'),
     path.resolve(__dirname, '..', '..', 'krypton-collect'),
+    path.resolve(__dirname, '..', '..', 'krypton-external-rating'),
+    path.resolve(__dirname, '..', '..', 'krypton-campus-net'),
+    path.resolve(__dirname, '..', '..', 'krypton-admin-dropbox'),
 ].filter((dir) => fs.existsSync(path.join(dir, 'package.json')));
 
 if (process.env.NIX_PROFILES) {

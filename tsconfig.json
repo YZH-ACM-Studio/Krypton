@@ -70,10 +70,19 @@
       "path": "packages/import-qduoj"
     },
     {
+      "path": "packages/krypton-admin-dropbox"
+    },
+    {
       "path": "packages/krypton-announcement"
     },
     {
+      "path": "packages/krypton-campus-net"
+    },
+    {
       "path": "packages/krypton-collect"
+    },
+    {
+      "path": "packages/krypton-external-rating"
     },
     {
       "path": "packages/krypton-mindmap"

@@ -324,6 +324,15 @@
       "name": "@hydrooj/import-qduoj",
       "version": "1.6.0-beta.3",
     },
+    "packages/krypton-admin-dropbox": {
+      "name": "@hydrooj/krypton-admin-dropbox",
+      "version": "0.1.0",
+      "dependencies": {
+        "@hydrooj/utils": "workspace:^",
+        "hydrooj": "workspace:^",
+        "mongodb": "^7.1.1",
+      },
+    },
     "packages/krypton-announcement": {
       "name": "@hydrooj/krypton-announcement",
       "version": "0.1.0",
@@ -333,6 +342,14 @@
         "mongodb": "^7.1.1",
       },
     },
+    "packages/krypton-campus-net": {
+      "name": "@hydrooj/krypton-campus-net",
+      "version": "0.1.0",
+      "dependencies": {
+        "@hydrooj/utils": "workspace:^",
+        "hydrooj": "workspace:^",
+      },
+    },
     "packages/krypton-collect": {
       "name": "@hydrooj/krypton-collect",
       "version": "0.1.0",
@@ -340,6 +357,14 @@
         "@hydrooj/utils": "workspace:^",
         "hydrooj": "workspace:^",
         "mongodb": "^7.1.1",
+      },
+    },
+    "packages/krypton-external-rating": {
+      "name": "@hydrooj/krypton-external-rating",
+      "version": "0.1.0",
+      "dependencies": {
+        "@hydrooj/utils": "workspace:^",
+        "hydrooj": "workspace:^",
       },
     },
     "packages/krypton-mindmap": {
@@ -1296,9 +1321,15 @@
 
     "@hydrooj/import-qduoj": ["@hydrooj/import-qduoj@workspace:packages/import-qduoj"],
 
+    "@hydrooj/krypton-admin-dropbox": ["@hydrooj/krypton-admin-dropbox@workspace:packages/krypton-admin-dropbox"],
+
     "@hydrooj/krypton-announcement": ["@hydrooj/krypton-announcement@workspace:packages/krypton-announcement"],
 
+    "@hydrooj/krypton-campus-net": ["@hydrooj/krypton-campus-net@workspace:packages/krypton-campus-net"],
+
     "@hydrooj/krypton-collect": ["@hydrooj/krypton-collect@workspace:packages/krypton-collect"],
+
+    "@hydrooj/krypton-external-rating": ["@hydrooj/krypton-external-rating@workspace:packages/krypton-external-rating"],
 
     "@hydrooj/krypton-mindmap": ["@hydrooj/krypton-mindmap@workspace:packages/krypton-mindmap"],
 

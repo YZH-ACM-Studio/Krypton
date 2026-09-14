@@ -196,6 +196,15 @@
 - 阶段进入必须同时满足来源访问权和 DAG 先修完成。兑换一个阶段只授予该阶段及其传递先修的访问权，不创建 AC、不标记完成。整集来源等价于当前全部阶段可访问。
 - 兑换码只保存版本化 HMAC 摘要，明文仅创建响应出现一次。单次码和限量通用码用条件更新计数，失败不得发出 entitlement。停用只阻止未来兑换；单人撤销只删除指定兑换来源。
 
+## 课程视频协议
+
+- 课程视频是 `TrainingNode.videos` / `TrainingSection.videos` 上的一等槽，不塞进讲义 Markdown，不复用课件下载列表。每章/每节最多 8 条；本站只收 mp4/webm，单文件 512MiB。
+- 学生完成口径：已确认视频全部看完，且若有题则题也要做完。无题无视频才是 100%。未确认片长的视频对学生不可见、不计入完成。
+- 看完 = 允许速度（≤1.5×）下时间轴有效覆盖 ≥95%，或未覆盖 ≤3 秒。禁止向前拖；页面 hidden 暂停。播放事件是浏览器上报，文案不得写成「已证明看完」。
+- 观看汇总唯一集合 `course.videoProgress`，身份 `(domainId, courseId, videoId, contentRevision, uid)`。不写 dag，不写 TrainingStatus。换片必须显式 `requireRewatch`；要求重看则升 revision。
+- 播放走鉴权 Range、inline，禁止附件下载和 `/storage` 签名附件。统计名单只含课上班级已绑定学生；无班级拒绝出名单。复制课程复制视频文件不复制观看。
+- 不进 Contest / Record / Rating / 题集 / 考试壳 / Vigil。v1 不做外链、转码、HLS。
+
 ## 课程引用题集协议
 
 - 课程章节可保存 `{problemSetId, stageIds?}` 实时引用，不复制 pids。题集仍是阶段和成员的唯一事实源。从课程引用入口签发的 `PracticeContext` 可包含课程→题集链；从题集独立入口不得反向完成引用它的课程。

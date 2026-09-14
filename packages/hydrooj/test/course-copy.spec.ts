@@ -26,7 +26,9 @@ describe('course copy write path', () => {
         expect(handler).to.include('async postCopy(');
         expect(handler).to.include("await oplog.log(this, 'course.copy'");
         expect(handler).to.include('copiedCourseTitle');
-        expect(handler).to.include('parseChaptersJson(authoritativeDomainId, JSON.stringify(courseChapterEditorPayload(this.tdoc)))');
+        expect(handler).to.include(
+            'parseChaptersJson(authoritativeDomainId, JSON.stringify(courseChapterEditorPayload(this.tdoc)), this.tdoc.dag || [])',
+        );
         expect(handler).to.include('PERM.PERM_CREATE_COURSE');
         expect(handler).to.include("this.url('course_edit', { tid: newTid })");
         const postCopy = handler.slice(handler.indexOf('async postCopy('), handler.indexOf('async postDelete('));

@@ -10,6 +10,7 @@ export interface CourseRecord {
   description?: string;
   content?: string;
   courseGroupIds?: Array<string | number>;
+  courseVideoDueAt?: string | Date | null;
   dag?: unknown[];
   enroll?: boolean;
   pid?: string | number;
@@ -23,11 +24,35 @@ export interface CourseFile {
   size?: number;
 }
 
+export interface CourseStudentVideo {
+  id: string;
+  title: string;
+  durationMs: number;
+  contentRevision: number;
+  playUrl: string;
+  lastPosition: number;
+  coverageRatio: number;
+  completed: boolean;
+  completedAt: string | null;
+}
+
+export interface CourseAuthorVideo {
+  id: string;
+  title: string;
+  filename: string;
+  ext: 'mp4' | 'webm';
+  size: number;
+  durationMs: number;
+  confirmed: boolean;
+  contentRevision: number;
+}
+
 export interface CourseSection {
   _id: number;
   title: string;
   content: string;
   pids: number[];
+  videos?: CourseStudentVideo[];
   completedPids: number[];
   progress: number;
   doneCount: number;
@@ -41,6 +66,7 @@ export interface CourseChapter {
   pids: number[];
   /** Unsectioned chapter problems plus live-referenced set members. */
   loosePids: number[];
+  videos?: CourseStudentVideo[];
   sections: CourseSection[];
   /**
    * Chapter problems the viewer has finished, from the same scoped source
@@ -61,6 +87,7 @@ export interface SectionDraft {
   title: string;
   content: string;
   pids: string[];
+  videos: CourseAuthorVideo[];
 }
 
 export interface ChapterDraft {
@@ -68,6 +95,7 @@ export interface ChapterDraft {
   title: string;
   content: string;
   pids: string[];
+  videos: CourseAuthorVideo[];
   sections: SectionDraft[];
   tids: string;
   problemSetId?: string;

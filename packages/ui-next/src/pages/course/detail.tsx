@@ -31,6 +31,7 @@ import { useChapterQuery } from './chapter-query';
 import { CourseMindmapView } from './mindmap';
 import type { CourseChapter, CourseFile, CourseMindmapData, CourseRecord } from './types';
 import { CourseMark, CourseProgressRing, CourseSectionHeader, riseStyle } from './ui';
+import { CourseVideoPlaylist } from './video-player';
 
 const COURSE_COLLECT_STATUSES = ['draft', 'published', 'closed', 'archived'] as const;
 type CourseCollectStatus = (typeof COURSE_COLLECT_STATUSES)[number];
@@ -357,7 +358,7 @@ export function CourseDetailPage() {
   // Course-level totals, derived from the same scoped chapter figures.
   const totalProblems = chapters.reduce((sum, chapter) => sum + chapter.totalCount, 0);
   const doneProblems = chapters.reduce((sum, chapter) => sum + chapter.doneCount, 0);
-  const overallProgress = totalProblems ? Math.floor((100 * doneProblems) / totalProblems) : 0;
+  const overallProgress = totalProblems ? Math.floor((100 * doneProblems) / totalProblems) : 100;
   const finishedChapters = chapters.filter((chapter) => chapter.totalCount > 0 && chapter.doneCount === chapter.totalCount).length;
 
   const selectFromMobile = (chapterId: number, sectionId?: number | null) => {
@@ -401,6 +402,11 @@ export function CourseDetailPage() {
                 </a>
               </Button>
             ) : null}
+            {data.canManage ? (
+              <Button asChild variant="outline" size="sm" className="h-10 gap-1.5">
+                <a href={`/course/${tid}/videos`}>观看统计</a>
+              </Button>
+            ) : null}
             {data.canManage && data.canCreate ? (
               <form method="post" action={`/course/${tid}/edit`}>
                 <input type="hidden" name="operation" value="copy" />
@@ -409,7 +415,7 @@ export function CourseDetailPage() {
                   variant="outline"
                   size="sm"
                   className="h-10 gap-1.5"
-                  title="复制已保存的章节与设置到新课程，不复制课件、报名和真实性策略。"
+                  title="复制已保存的章节、设置和视频到新课程，不复制观看记录、课件、报名和真实性策略。"
                 >
                   <Copy className="size-3.5" strokeWidth={1.75} />
                   复制为新课程
@@ -574,6 +580,7 @@ export function CourseDetailPage() {
 
             {activeSection ? (
               <>
+                <CourseVideoPlaylist courseId={tid} videos={activeSection.videos || []} />
                 {activeSection.content ? (
                   <section data-course-slot="chapterContent" aria-labelledby="chapter-content-title" className="space-y-3">
                     <CourseSectionHeader id="chapter-content-title" title="小节讲义" />
@@ -593,18 +600,19 @@ export function CourseDetailPage() {
                   title="小节小测"
                   count={`${activeSection.doneCount}/${activeSection.totalCount}`}
                 />
-                {!activeSection.content && !activeSection.pids.length ? (
+                {!activeSection.content && !activeSection.pids.length && !(activeSection.videos || []).length ? (
                   <section className="krypton-course-inset px-6 py-14 text-center">
                     <span aria-hidden="true" className="mx-auto grid size-11 place-items-center rounded-xl bg-background/70 text-muted-foreground">
                       <Paperclip className="size-5" strokeWidth={1.5} />
                     </span>
                     <p className="krypton-course-section mt-4">该小节暂无内容</p>
-                    <p className="krypton-course-meta mt-1">讲义和题目都还没有挂上来。</p>
+                    <p className="krypton-course-meta mt-1">讲义、视频和题目都还没有挂上来。</p>
                   </section>
                 ) : null}
               </>
             ) : (
               <>
+                <CourseVideoPlaylist courseId={tid} videos={activeChapter.videos || []} />
                 {activeChapter.content ? (
                   <section data-course-slot="chapterContent" aria-labelledby="chapter-content-title" className="space-y-3">
                     <CourseSectionHeader id="chapter-content-title" title="章节讲义" />

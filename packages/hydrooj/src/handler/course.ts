@@ -28,6 +28,7 @@ import {
 import { TrainingDoc, TrainingNode } from '../interface';
 import { PERM, PRIV, STATUS } from '../model/builtin';
 import { contextualCompletionService } from '../model/contextual-completion';
+import { deleteCourseVideoProgress, loadUserCourseProgress } from '../model/course-video-progress';
 import * as contest from '../model/contest';
 import * as oplog from '../model/oplog';
 import { practiceIntegrityService } from '../model/practice-integrity';
@@ -38,8 +39,17 @@ import system from '../model/system';
 import * as training from '../model/training';
 import user from '../model/user';
 import { Handler, param, post, Types } from '../service/server';
+import { canManageCourse, courseAccessibleTo, courseUserGroupIds } from '../lib/course-access';
 import { courseNodePids, parseCourseSections } from '../lib/course-chapter';
 import { copiedCourseTitle } from '../lib/course-copy';
+import {
+    parseCourseVideos,
+    reconcileCourseDagVideos,
+    rewriteCourseVideosForCopy,
+    courseVideoStoragePath,
+    studentVisibleVideos,
+    courseUnitProgress,
+} from '../lib/course-video';
 import { liveReferencedPids } from '../lib/course-live-ref';
 import { resolveProblemKnowledgeNodeIds } from '../lib/problem-tag-canonical';
 import { courseKindClause, isCourseKind, isProblemSetKind } from '../lib/training-kind';
@@ -74,6 +84,7 @@ function courseChapterEditorPayload(tdoc: TrainingDoc) {
         tids: (node.tids || []).map((item) => String(item)),
         problemSetId: node.problemSetId ? String(node.problemSetId) : '',
         stageIds: node.stageIds || [],
+        ...(node.videos?.length ? { videos: node.videos } : {}),
     }));
 }
 
@@ -297,31 +308,12 @@ async function buildCourseMindmapView(
 }
 
 /** 当前用户所属的 userbind 班级 id 集合；查询失败必须向上抛出。 */
-async function userGroupIds(domainId: string, uid: number): Promise<Set<string>> {
-    const userbind = (global as any).Hydro?.model?.userbind;
-    if (typeof userbind?.findStudentByUserId !== 'function') {
-        throw new TypeError('userbind.findStudentByUserId is unavailable');
-    }
-    try {
-        const student = await userbind.findStudentByUserId(domainId, uid);
-        return new Set((student?.groupIds || []).map((g: ObjectId) => String(g)));
-    } catch (error) {
-        logger.error('Course user-group lookup failed domain=%s uid=%d error=%o', domainId, uid, error);
-        throw error;
-    }
-}
-
-/** 课程对当前用户是否可见：全域课程(空 groupIds)或用户属于其某个班级。 */
-function courseVisibleTo(tdoc: TrainingDoc, myGroups: Set<string>, canManage: boolean): boolean {
-    if (canManage) return true;
-    const groups = tdoc.courseGroupIds || [];
-    if (!groups.length) return true;
-    return groups.some((g) => myGroups.has(String(g)));
-}
-
-async function courseAccessibleTo(domainId: string, uid: number, tdoc: TrainingDoc, myGroups: Set<string>, canManage: boolean): Promise<boolean> {
-    if (courseVisibleTo(tdoc, myGroups, canManage)) return true;
-    return problemSetAccessService.hasActiveEntitlement(domainId, uid, 'course', tdoc.docId);
+function parseCourseVideoDueAt(raw: string): Date | null {
+    const value = String(raw || '').trim();
+    if (!value) return null;
+    const at = new Date(value);
+    if (Number.isNaN(at.getTime())) throw new ValidationError('courseVideoDueAt', null, localizedErrorText`视频观看截止时间无效`);
+    return at;
 }
 
 function courseFilePrefix(domainId: string, tid: ObjectId): string {
@@ -334,7 +326,7 @@ function listedCourseFile(tdoc: TrainingDoc, filename: string) {
     return file;
 }
 
-async function parseChaptersJson(domainId: string, raw: string): Promise<TrainingNode[]> {
+async function parseChaptersJson(domainId: string, raw: string, previous: TrainingNode[] = []): Promise<TrainingNode[]> {
     const parsed: TrainingNode[] = [];
     try {
         const chapters = JSON.parse(raw);
@@ -353,6 +345,7 @@ async function parseChaptersJson(domainId: string, raw: string): Promise<Trainin
             }
             const pids = normalizeProblemDocIds(Array.isArray(node.pids) ? node.pids : []);
             const sections = parseCourseSections(+node._id, node.sections, normalizeProblemDocIds);
+            const videos = parseCourseVideos(`章节 ${node._id}`, node.videos);
             const sectionPidSet = new Set(sections.flatMap((section) => section.pids));
             for (const pid of pids) {
                 if (sectionPidSet.has(pid)) {
@@ -399,12 +392,17 @@ async function parseChaptersJson(domainId: string, raw: string): Promise<Trainin
                 ...(tids.length ? { tids } : {}),
                 ...(problemSetId ? { problemSetId } : {}),
                 ...(stageIds?.length ? { stageIds } : {}),
+                ...(videos.length ? { videos } : {}),
             });
         }
     } catch (e: any) {
         throw localizeErrorParameter(new ValidationError('chapters', null, e.message), 2, 'The course structure is invalid: {0}', e.message);
     }
-    return parsed;
+    try {
+        return reconcileCourseDagVideos(parsed, previous);
+    } catch (e: any) {
+        throw localizeErrorParameter(new ValidationError('chapters', null, e.message), 2, 'The course structure is invalid: {0}', e.message);
+    }
 }
 
 class CourseMainHandler extends Handler {
@@ -420,7 +418,7 @@ class CourseMainHandler extends Handler {
         // 可见性下推进 mongo query，使分页计数准确（对抗性审查 #5）：全域
         // 课程(空/无 courseGroupIds)或用户所属班级的课程。管理者看全部。
         if (!canManageAll) {
-            const myGroups = await userGroupIds(domainId, this.user._id);
+            const myGroups = await courseUserGroupIds(domainId, this.user._id);
             // 容错构造（对齐 post 路径）：畸形 id 跳过，避免整个列表页 500。
             const groupOids = Array.from(myGroups)
                 .map((s) => {
@@ -570,10 +568,10 @@ class CourseDetailHandler extends Handler {
         const tdoc = await training.get(domainId, tid);
         if (!isCourseKind(tdoc.kind)) throw new ValidationError('tid', null, localizedErrorText`Not a course`);
         const activeView = view === 'mindmap' ? 'mindmap' : 'overview';
-        const canManage = this.user.own(tdoc) || this.user.hasPerm(PERM.PERM_EDIT_COURSE) || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
+        const canManage = canManageCourse(this.user, tdoc, PERM.PERM_EDIT_COURSE);
         // 可见性拦截（非管理者且不属于课程班级 → 拒绝）。
         if (!canManage && (tdoc.courseGroupIds || []).length) {
-            const myGroups = await userGroupIds(domainId, this.user._id);
+            const myGroups = await courseUserGroupIds(domainId, this.user._id);
             if (!(await courseAccessibleTo(domainId, this.user._id, tdoc, myGroups, false))) {
                 throw new ValidationError('tid', null, localizedErrorText`你不在该课程的可见范围内`);
             }
@@ -622,6 +620,13 @@ class CourseDetailHandler extends Handler {
             activeView === 'overview' && publishedIntegrity && this.user.hasPriv(PRIV.PRIV_USER_PROFILE)
                 ? await contextualCompletionService.getCompletedByScope(domainId, this.user._id, 'course', tdoc.docId)
                 : null;
+        const videoProgressDocs =
+            activeView === 'overview' && this.user.hasPriv(PRIV.PRIV_USER_PROFILE)
+                ? await loadUserCourseProgress(domainId, tdoc.docId, this.user._id)
+                : [];
+        const videoProgressByKey = new Map(
+            videoProgressDocs.map((doc) => [`${doc.videoId}:${doc.contentRevision}`, doc] as const),
+        );
         const cdict: Record<string, any> = {};
         for (const c of ctdocs) cdict[String(c.docId)] = c;
         // 逐章节进度（线性，无先修）。
@@ -630,11 +635,26 @@ class CourseDetailHandler extends Handler {
             if (!+pid) continue;
             if (psdict[pid].status === STATUS.STATUS_ACCEPTED) donePids.add(+pid);
         }
+        const serializeVideos = (videos: typeof tdoc.dag[0]['videos']) =>
+            studentVisibleVideos(videos).map((item) => {
+                const progress = videoProgressByKey.get(`${item.id}:${item.contentRevision}`);
+                const coverageMs = progress?.coverageMs || 0;
+                return {
+                    id: item.id,
+                    title: item.title,
+                    durationMs: item.durationMs,
+                    contentRevision: item.contentRevision,
+                    playUrl: `/course/${tid}/video/${item.id}/play`,
+                    lastPosition: progress?.lastPosition || 0,
+                    coverageRatio: item.durationMs ? Math.min(1, coverageMs / item.durationMs) : 0,
+                    completed: Boolean(progress?.completedAt),
+                    completedAt: progress?.completedAt ? progress.completedAt.toISOString() : null,
+                };
+            });
         const chapters =
             activeView === 'overview'
                 ? tdoc.dag.map((node) => {
                       const livePids = Array.from(new Set([...courseNodePids(node), ...(referencedPidsByChapter.get(node._id) || [])]));
-                      const total = livePids.length;
                       const completed = contextualDoneByScope ? contextualDoneByScope.get(node._id) || new Set<number>() : donePids;
                       // Per-problem marks and the chapter counter read the same
                       // scoped set, so the list can never disagree with the
@@ -646,32 +666,50 @@ class CourseDetailHandler extends Handler {
                       const loosePids = Array.from(
                           new Set([...node.pids.filter((pid) => !sectionPidSet.has(pid)), ...liveRefPids.filter((pid) => !sectionPidSet.has(pid))]),
                       );
+                      const chapterVideos = serializeVideos(node.videos);
+                      const sections = (node.sections || []).map((section) => {
+                          const donePidsInSection = section.pids.filter((pid) => completed.has(pid));
+                          const sectionVideos = serializeVideos(section.videos);
+                          const unit = courseUnitProgress(
+                              sectionVideos.filter((item) => item.completed).length,
+                              sectionVideos.length,
+                              donePidsInSection.length,
+                              section.pids.length,
+                          );
+                          return {
+                              _id: section._id,
+                              title: section.title,
+                              content: section.content || '',
+                              pids: section.pids,
+                              completedPids: donePidsInSection,
+                              videos: sectionVideos,
+                              progress: unit.progress,
+                              doneCount: unit.doneCount,
+                              totalCount: unit.totalCount,
+                          };
+                      });
+                      const allVideos = [...chapterVideos, ...sections.flatMap((section) => section.videos)];
+                      const unit = courseUnitProgress(
+                          allVideos.filter((item) => item.completed).length,
+                          allVideos.length,
+                          donePidsInChapter.length,
+                          livePids.length,
+                      );
                       return {
                           _id: node._id,
                           title: node.title,
                           content: node.content || '',
                           pids: livePids,
                           loosePids,
-                          sections: (node.sections || []).map((section) => {
-                              const donePidsInSection = section.pids.filter((pid) => completed.has(pid));
-                              return {
-                                  _id: section._id,
-                                  title: section.title,
-                                  content: section.content || '',
-                                  pids: section.pids,
-                                  completedPids: donePidsInSection,
-                                  progress: section.pids.length ? Math.floor(100 * (donePidsInSection.length / section.pids.length)) : 0,
-                                  doneCount: donePidsInSection.length,
-                                  totalCount: section.pids.length,
-                              };
-                          }),
+                          videos: chapterVideos,
+                          sections,
                           completedPids: donePidsInChapter,
                           tids: (node.tids || []).map((t) => String(t)),
                           problemSetId: node.problemSetId ? String(node.problemSetId) : '',
                           stageIds: node.stageIds || [],
-                          progress: total ? Math.floor(100 * (donePidsInChapter.length / total)) : 100,
-                          doneCount: donePidsInChapter.length,
-                          totalCount: total,
+                          progress: unit.progress,
+                          doneCount: unit.doneCount,
+                          totalCount: unit.totalCount,
                       };
                   })
                 : [];
@@ -776,7 +814,7 @@ class CourseDetailHandler extends Handler {
         if (!isCourseKind(tdoc.kind)) throw new ValidationError('tid', null, localizedErrorText`Not a course`);
         // 可见范围外不允许报名。
         if ((tdoc.courseGroupIds || []).length) {
-            const myGroups = await userGroupIds(domainId, this.user._id);
+            const myGroups = await courseUserGroupIds(domainId, this.user._id);
             const canManage = this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
             if (!(await courseAccessibleTo(domainId, this.user._id, tdoc, myGroups, canManage))) {
                 throw new PermissionError(PERM.PERM_VIEW_TRAINING);
@@ -864,6 +902,7 @@ class CourseEditHandler extends Handler {
     @param('term', Types.String, true)
     @param('courseGroupIds', Types.CommaSeperatedArray, true)
     @param('mindmapId', Types.String, true)
+    @param('courseVideoDueAt', Types.String, true)
     async post(
         _domainId: string,
         tid: ObjectId,
@@ -874,6 +913,7 @@ class CourseEditHandler extends Handler {
         term = '',
         courseGroupIds: string[] = [],
         mindmapId = '',
+        courseVideoDueAtRaw = '',
     ) {
         // Framework runs `post` before `postAssign`/`postDelete`; those POSTs omit the save payload.
         if (this.args?.operation || this.request.body?.operation) return;
@@ -882,7 +922,8 @@ class CourseEditHandler extends Handler {
         if (chaptersJson === undefined) throw new ValidationError('chapters');
         const authoritativeDomainId = String(this.domain?._id);
         problem.assertProblemAclDomain(this.user, authoritativeDomainId);
-        const dag = await parseChaptersJson(authoritativeDomainId, chaptersJson);
+        const dag = await parseChaptersJson(authoritativeDomainId, chaptersJson, this.tdoc?.dag || []);
+        const courseVideoDueAt = parseCourseVideoDueAt(courseVideoDueAtRaw);
         const selectedMindmapId = await resolveCourseMindmapId(authoritativeDomainId, tid || null, this.user._id, String(mindmapId || ''));
         const pids = training.getPids(dag);
         const existingPids = training.getPids(this.tdoc?.dag || []);
@@ -902,6 +943,7 @@ class CourseEditHandler extends Handler {
                 courseGroupIds: groupIds,
                 term,
                 ...(selectedMindmapId ? { mindmapId: selectedMindmapId } : {}),
+                ...(courseVideoDueAt ? { courseVideoDueAt } : {}),
             });
             await oplog.log(this, 'course.create', { tid, title, mindmapId: selectedMindmapId?.toHexString() || null });
         } else {
@@ -917,8 +959,12 @@ class CourseEditHandler extends Handler {
                     term,
                     courseGroupIds: groupIds,
                     ...(selectedMindmapId ? { mindmapId: selectedMindmapId } : {}),
+                    ...(courseVideoDueAt ? { courseVideoDueAt } : {}),
                 },
-                selectedMindmapId ? {} : { mindmapId: 1 },
+                {
+                    ...(selectedMindmapId ? {} : { mindmapId: 1 }),
+                    ...(courseVideoDueAt ? {} : { courseVideoDueAt: 1 }),
+                },
             );
             await oplog.log(this, 'course.edit', {
                 tid,
@@ -948,8 +994,9 @@ class CourseEditHandler extends Handler {
         }
         const title = copiedCourseTitle(this.tdoc.title || '');
         if (!title) throw new ValidationError('title', null, localizedErrorText`课程名称无效`);
-        const dag = await parseChaptersJson(authoritativeDomainId, JSON.stringify(courseChapterEditorPayload(this.tdoc)));
-        const pids = training.getPids(dag);
+        const dag = await parseChaptersJson(authoritativeDomainId, JSON.stringify(courseChapterEditorPayload(this.tdoc)), this.tdoc.dag || []);
+        const { dag: copiedDag, copies } = rewriteCourseVideosForCopy(dag);
+        const pids = training.getPids(copiedDag);
         await assertProblemBankSelection(authoritativeDomainId, pids, this.user, training.getPids(this.tdoc.dag || []));
         const mindmapRaw =
             this.tdoc.mindmapId === undefined || this.tdoc.mindmapId === null ? '' : storedObjectIdString(this.tdoc.mindmapId, 'course.mindmapId');
@@ -962,27 +1009,62 @@ class CourseEditHandler extends Handler {
                 throw new ValidationError('courseGroupIds', null, localizedErrorText`课程可见范围无效`);
             }
         });
-        const newTid = await training.add(authoritativeDomainId, title, this.tdoc.content || '', this.user._id, dag, this.tdoc.description || '', 0, {
-            kind: 'course',
-            courseGroupIds: groupIds,
-            term: this.tdoc.term || '',
-            ...(selectedMindmapId ? { mindmapId: selectedMindmapId } : {}),
-        });
+        let newTid: ObjectId | null = null;
+        const copiedPaths: string[] = [];
+        try {
+            newTid = await training.add(
+                authoritativeDomainId,
+                title,
+                this.tdoc.content || '',
+                this.user._id,
+                copiedDag,
+                this.tdoc.description || '',
+                0,
+                {
+                    kind: 'course',
+                    courseGroupIds: groupIds,
+                    term: this.tdoc.term || '',
+                    ...(selectedMindmapId ? { mindmapId: selectedMindmapId } : {}),
+                    ...(this.tdoc.courseVideoDueAt ? { courseVideoDueAt: this.tdoc.courseVideoDueAt } : {}),
+                },
+            );
+            for (const { from, to } of copies) {
+                const src = courseVideoStoragePath(authoritativeDomainId, String(tid), from.id, from.contentRevision, from.ext);
+                const dst = courseVideoStoragePath(authoritativeDomainId, String(newTid), to.id, to.contentRevision, to.ext);
+                await storage.copy(src, dst);
+                copiedPaths.push(dst);
+            }
+        } catch (error) {
+            logger.error(
+                'Course copy failed domain=%s from=%s to=%s videos=%d copied=%d error=%o',
+                authoritativeDomainId,
+                tid,
+                newTid,
+                copies.length,
+                copiedPaths.length,
+                error,
+            );
+            if (copiedPaths.length) await storage.del(copiedPaths, this.user._id);
+            if (newTid) await training.del(authoritativeDomainId, newTid);
+            throw error;
+        }
         const filesSkipped = (this.tdoc.files || []).length;
         await oplog.log(this, 'course.copy', {
             from: tid,
             to: newTid,
             title,
             filesSkipped,
+            videosCopied: copies.length,
             mindmapId: selectedMindmapId?.toHexString() || null,
         });
         logger.info(
-            'Course copied domain=%s from=%s to=%s actor=%d filesSkipped=%d mindmap=%s result=success',
+            'Course copied domain=%s from=%s to=%s actor=%d filesSkipped=%d videosCopied=%d mindmap=%s result=success',
             authoritativeDomainId,
             tid,
             newTid,
             this.user._id,
             filesSkipped,
+            copies.length,
             selectedMindmapId || 'none',
         );
         this.response.body = { tid: newTid };
@@ -995,12 +1077,14 @@ class CourseEditHandler extends Handler {
         const tdoc = await training.get(domainId, tid);
         if (!isCourseKind(tdoc.kind)) throw new ValidationError('tid', null, localizedErrorText`Not a course`);
         if (!this.user.own(tdoc)) this.checkPerm(PERM.PERM_EDIT_COURSE);
+        const stored = await storage.list(courseFilePrefix(domainId, tid));
         await Promise.all([
             training.del(domainId, tid),
             storage.del(
-                (tdoc.files || []).map((file) => `${courseFilePrefix(domainId, tid)}${file.name}`),
+                stored.map((file) => file.path),
                 this.user._id,
             ),
+            deleteCourseVideoProgress(domainId, tid),
         ]);
         await oplog.log(this, 'course.delete', { tid });
         this.response.redirect = this.url('course_main');
@@ -1116,7 +1200,7 @@ class CourseFileDownloadHandler extends Handler {
         const file = listedCourseFile(tdoc, filename);
         const canManage = this.user.own(tdoc) || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
         if (!canManage && (tdoc.courseGroupIds || []).length) {
-            const myGroups = await userGroupIds(domainId, this.user._id);
+            const myGroups = await courseUserGroupIds(domainId, this.user._id);
             if (!(await courseAccessibleTo(domainId, this.user._id, tdoc, myGroups, false))) {
                 throw new PermissionError(PERM.PERM_VIEW_TRAINING);
             }

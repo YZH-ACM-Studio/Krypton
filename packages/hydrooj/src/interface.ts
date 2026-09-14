@@ -379,11 +379,24 @@ export type ScoreboardRow = ScoreboardNode[] & { raw?: any };
 
 export type PenaltyRules = Dictionary<number>;
 
+export interface CourseVideo {
+    id: string;
+    title: string;
+    filename: string;
+    ext: 'mp4' | 'webm';
+    size: number;
+    sha256: string;
+    durationMs: number;
+    confirmed: boolean;
+    contentRevision: number;
+}
+
 export interface TrainingSection {
     _id: number;
     title: string;
     content?: string;
     pids: number[];
+    videos?: CourseVideo[];
 }
 
 export interface TrainingNode {
@@ -406,6 +419,7 @@ export interface TrainingNode {
     problemSetId?: ObjectId;
     /** When omitted, the chapter references the whole problem set. */
     stageIds?: number[];
+    videos?: CourseVideo[];
 }
 
 export interface Tdoc extends Document {
@@ -552,6 +566,8 @@ export interface TrainingDoc extends Omit<Tdoc, 'docType'> {
     mindmapId?: ObjectId;
     /** 课程学期等元信息（自由文本），仅展示用。仅 course。 */
     term?: string;
+    /** 课程视频观看可选截止。缺省无逾期。仅 course。 */
+    courseVideoDueAt?: Date;
     /**
      * Problem-set discovery audience. Missing means public legacy behaviour.
      * `public:false` with empty groupIds is redeem/course-only.

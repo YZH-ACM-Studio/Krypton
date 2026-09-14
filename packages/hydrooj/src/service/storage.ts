@@ -174,6 +174,21 @@ class RemoteStorageService {
         }
     }
 
+    async getRange(target: string, start: number, end: number) {
+        target = convertPath(target);
+        const res = await this.client.send(
+            new GetObjectCommand({
+                Bucket: this.bucket,
+                Key: target,
+                Range: `bytes=${start}-${end}`,
+            }),
+        );
+        if (!res.Body) throw new Error(`File not found: ${target}`);
+        const p = new PassThrough();
+        (res.Body as Readable).pipe(p);
+        return p;
+    }
+
     async get(target: string, path?: string) {
         target = convertPath(target);
         const res = await this.client.send(
@@ -326,6 +341,12 @@ class LocalStorageService {
         if (!existsSync(target)) throw new Error(`File not found: ${target}`);
         if (path) await copyFile(target, path);
         return createReadStream(target);
+    }
+
+    async getRange(target: string, start: number, end: number) {
+        target = resolve(this.dir, convertPath(target));
+        if (!existsSync(target)) throw new Error(`File not found: ${target}`);
+        return createReadStream(target, { start, end });
     }
 
     async del(target: MaybeArray<string>) {

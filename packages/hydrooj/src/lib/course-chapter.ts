@@ -1,4 +1,5 @@
 import type { TrainingNode, TrainingSection } from '../interface';
+import { parseCourseVideos } from './course-video';
 
 export function courseNodePids(node: Pick<TrainingNode, 'pids' | 'sections'>): number[] {
     return Array.from(new Set([...(node.pids || []), ...((node.sections || []).flatMap((section) => section.pids || []))]));
@@ -19,7 +20,7 @@ export function parseCourseSections(
             throw new Error(`章节 ${chapterId} 含无效小节`);
         }
         const node = item as Record<string, unknown>;
-        const extraKeys = Object.keys(node).filter((key) => !['content', 'pids', 'title', '_id'].includes(key));
+        const extraKeys = Object.keys(node).filter((key) => !['content', 'pids', 'title', '_id', 'videos'].includes(key));
         if (extraKeys.length) {
             throw new Error(`章节 ${chapterId} 的小节含未知字段 ${extraKeys.join(', ')}`);
         }
@@ -40,11 +41,13 @@ export function parseCourseSections(
             if (seenPids.has(pid)) throw new Error(`章节 ${chapterId} 的题目不能属于多个小节`);
             seenPids.add(pid);
         }
+        const videos = parseCourseVideos(`章节 ${chapterId} 小节 ${id}`, node.videos);
         sections.push({
             _id: id,
             title,
             ...(node.content ? { content: String(node.content) } : {}),
             pids,
+            ...(videos.length ? { videos } : {}),
         });
     }
     return sections;

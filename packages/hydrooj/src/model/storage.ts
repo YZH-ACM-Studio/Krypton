@@ -50,6 +50,16 @@ export class StorageModel {
         return await storage.get(value?.link || value?._id || path, savePath);
     }
 
+    static async getRange(path: string, start: number, end: number) {
+        const value = await StorageModel.coll.findOneAndUpdate(
+            { path, autoDelete: null },
+            { $set: { lastUsage: new Date() } },
+            { returnDocument: 'after' },
+        );
+        if (!value) throw new Error(`File not found: ${path}`);
+        return await storage.getRange(value.link || value._id, start, end);
+    }
+
     static async rename(path: string, newPath: string, operator: null | number = 1) {
         return await StorageModel.coll.updateOne(
             { path, autoDelete: null },
@@ -190,15 +200,17 @@ async function cleanFiles() {
 
 export async function apply(ctx: Context) {
     ctx.on('domain/delete', async (domainId) => {
-        const [problemFiles, contestFiles, trainingFiles] = await Promise.all([
+        const [problemFiles, contestFiles, trainingFiles, courseFiles] = await Promise.all([
             StorageModel.list(`problem/${domainId}`),
             StorageModel.list(`contest/${domainId}`),
             StorageModel.list(`training/${domainId}`),
+            StorageModel.list(`course/${domainId}`),
         ]);
         await StorageModel.del(
             problemFiles
                 .concat(contestFiles)
                 .concat(trainingFiles)
+                .concat(courseFiles)
                 .map((i) => i.path),
         );
     });

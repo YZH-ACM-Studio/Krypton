@@ -121,9 +121,10 @@ describe('p3.8 course workspace', () => {
       title: '第一章',
       content: '',
       pids: ['11', '12'],
+      videos: [],
       sections: [
-        { _id: 1, title: '引入', content: '', pids: ['13'] },
-        { _id: 2, title: '练习', content: '', pids: ['14'] },
+        { _id: 1, title: '引入', content: '', pids: ['13'], videos: [] },
+        { _id: 2, title: '练习', content: '', pids: ['14'], videos: [] },
       ],
       tids: '',
       problemSetId: '',

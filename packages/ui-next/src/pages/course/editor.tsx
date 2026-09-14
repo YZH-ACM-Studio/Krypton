@@ -39,10 +39,32 @@ import { CourseAssignForm } from './assign';
 import { claimChapterProblemIds } from './chapter-draft';
 import { ChapterOutline } from './chapter-outline';
 import { useChapterQuery } from './chapter-query';
-import type { ChapterDraft, CourseFile, CourseRecord, SectionDraft } from './types';
+import type { ChapterDraft, CourseAuthorVideo, CourseFile, CourseRecord, SectionDraft } from './types';
 import { CourseMark, CourseSectionHeader } from './ui';
+import { CourseVideoEditor } from './video-editor';
 
 type SaveState = 'idle' | 'dirty' | 'saving';
+
+function readAuthorVideos(raw: unknown): CourseAuthorVideo[] {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) throw new TypeError('Invalid course video payload');
+  return raw.map((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) throw new TypeError('Invalid course video payload');
+    const rec = item as Record<string, unknown>;
+    if (typeof rec.id !== 'string' || typeof rec.title !== 'string') throw new TypeError('Invalid course video payload');
+    if (rec.ext !== 'mp4' && rec.ext !== 'webm') throw new TypeError('Invalid course video payload');
+    return {
+      id: rec.id,
+      title: rec.title,
+      filename: typeof rec.filename === 'string' ? rec.filename : 'video.mp4',
+      ext: rec.ext,
+      size: typeof rec.size === 'number' ? rec.size : 0,
+      durationMs: typeof rec.durationMs === 'number' ? rec.durationMs : 0,
+      confirmed: rec.confirmed === true,
+      contentRevision: typeof rec.contentRevision === 'number' ? rec.contentRevision : 1,
+    };
+  });
+}
 
 function initialChapterDrafts(serialized?: string): ChapterDraft[] {
   if (!serialized) return [];
@@ -53,18 +75,28 @@ function initialChapterDrafts(serialized?: string): ChapterDraft[] {
     title: String(chapter.title || ''),
     content: String(chapter.content || ''),
     pids: Array.isArray(chapter.pids) ? chapter.pids.map(String) : [],
+    videos: readAuthorVideos(chapter.videos),
     sections: Array.isArray(chapter.sections)
       ? chapter.sections.map((section: SectionDraft) => ({
           _id: Number(section._id),
           title: String(section.title || ''),
           content: String(section.content || ''),
           pids: Array.isArray(section.pids) ? section.pids.map(String) : [],
+          videos: readAuthorVideos((section as { videos?: unknown }).videos),
         }))
       : [],
     tids: Array.isArray(chapter.tids) ? chapter.tids.map(String).join(',') : '',
     problemSetId: chapter.problemSetId ? String(chapter.problemSetId) : '',
     stageIds: Array.isArray(chapter.stageIds) ? chapter.stageIds.map(String).join(',') : '',
   }));
+}
+
+function dueAtInputValue(raw: unknown): string {
+  if (!raw) return '';
+  const date = new Date(String(raw));
+  if (Number.isNaN(date.getTime())) return '';
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 function parseRefs(value: string): string[] {
@@ -234,7 +266,7 @@ export function CourseEditPage() {
   const [chapters, setChapters] = useState<ChapterDraft[]>(
     parsedChapters.length
       ? parsedChapters
-      : [{ _id: 1, title: '第一章', content: '', pids: [], sections: [], tids: '', problemSetId: '', stageIds: '' }],
+      : [{ _id: 1, title: '第一章', content: '', pids: [], videos: [], sections: [], tids: '', problemSetId: '', stageIds: '' }],
   );
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set((course.courseGroupIds || []).map(String)));
   const [selectedMindmapId, setSelectedMindmapId] = useState(String(course.mindmapId || ''));
@@ -273,6 +305,7 @@ export function CourseEditPage() {
         title: `第 ${current.length + 1} 章`,
         content: '',
         pids: [],
+        videos: [],
         sections: [],
         tids: '',
         problemSetId: '',
@@ -336,7 +369,7 @@ export function CourseEditPage() {
         const sectionId = Math.max(0, ...chapter.sections.map((section) => section._id)) + 1;
         return {
           ...chapter,
-          sections: [...chapter.sections, { _id: sectionId, title: `第 ${chapter.sections.length + 1} 节`, content: '', pids: [] }],
+          sections: [...chapter.sections, { _id: sectionId, title: `第 ${chapter.sections.length + 1} 节`, content: '', pids: [], videos: [] }],
         };
       }),
     );
@@ -384,8 +417,8 @@ export function CourseEditPage() {
           }
         : {}),
       tids: parseRefs(chapter.tids),
-      ...(chapter.problemSetId.trim() ? { problemSetId: chapter.problemSetId.trim() } : {}),
-      ...(parseRefs(chapter.stageIds).length ? { stageIds: parseRefs(chapter.stageIds).map(Number) } : {}),
+      ...((chapter.problemSetId || '').trim() ? { problemSetId: (chapter.problemSetId || '').trim() } : {}),
+      ...(parseRefs(chapter.stageIds || '').length ? { stageIds: parseRefs(chapter.stageIds || '').map(Number) } : {}),
     })),
   );
   const activeGroups = (data.groups || []).filter((group) => !group.archivedAt || selectedGroups.has(group._id));
@@ -635,6 +668,18 @@ export function CourseEditPage() {
             />
           </section>
 
+          {isEdit && tid ? (
+            <CourseVideoEditor
+              courseId={tid}
+              chapterId={activeChapter._id}
+              sectionId={null}
+              videos={activeChapter.videos || []}
+              onChange={(videos) => updateChapter(activeChapter._id, { videos })}
+            />
+          ) : (
+            <p className="krypton-course-meta">保存课程后即可给本章上传视频。</p>
+          )}
+
           <section className="space-y-3" aria-labelledby="chapter-problems-title">
             <CourseSectionHeader
               id="chapter-problems-title"
@@ -715,6 +760,15 @@ export function CourseEditPage() {
                       onChange={(content) => updateSection(activeChapter._id, section._id, { content })}
                       minHeight={160}
                     />
+                    {isEdit && tid ? (
+                      <CourseVideoEditor
+                        courseId={tid}
+                        chapterId={activeChapter._id}
+                        sectionId={section._id}
+                        videos={section.videos || []}
+                        onChange={(videos) => updateSection(activeChapter._id, section._id, { videos })}
+                      />
+                    ) : null}
                     <ProblemPicker value={section.pids} onChange={(pids) => updateSectionPids(activeChapter._id, section._id, pids)} />
                   </article>
                 ))}
@@ -793,6 +847,16 @@ export function CourseEditPage() {
             <label className="block space-y-1.5">
               <span className="text-xs font-medium">学期</span>
               <Input name="term" defaultValue={course.term || ''} className="min-h-11 text-base sm:text-sm" placeholder="2026 秋" />
+            </label>
+            <label className="block space-y-1.5">
+              <span className="text-xs font-medium">视频看完截止（可选）</span>
+              <Input
+                type="datetime-local"
+                name="courseVideoDueAt"
+                defaultValue={dueAtInputValue(course.courseVideoDueAt)}
+                className="min-h-11 text-base sm:text-sm"
+              />
+              <span className="krypton-course-meta">到期后仍能看完，名单会标逾期。</span>
             </label>
           </SettingsGroup>
 

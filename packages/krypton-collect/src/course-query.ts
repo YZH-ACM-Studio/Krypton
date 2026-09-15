@@ -97,3 +97,13 @@ export async function listByCourseChapter(
         })))
         .map((doc) => serializeCourseCollectRequest(doc, chapterId));
 }
+
+export async function existsByCourse(domainId: string, courseId: ObjectId | string): Promise<boolean> {
+    if (typeof domainId !== 'string' || !domainId) throw new TypeError('domainId is required');
+    const courseObjectId = canonicalObjectId(courseId, 'courseId');
+    const doc = await requestsColl.findOne(
+        { domainId, 'courseRef.courseId': courseObjectId },
+        { projection: { _id: 1 } },
+    );
+    return Boolean(doc);
+}

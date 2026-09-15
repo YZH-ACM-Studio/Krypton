@@ -2,6 +2,7 @@ import { ObjectId } from 'mongodb';
 import { Logger } from '@hydrooj/utils';
 import { localizedErrorText, PermissionError, TrainingNotFoundError, ValidationError } from '../error';
 import type { TrainingNode, User } from '../interface';
+import { courseAccessibleTo, courseUserGroupIds, isCourseHidden } from '../lib/course-access';
 import { courseNodePids } from '../lib/course-chapter';
 import { liveReferencedPids } from '../lib/course-live-ref';
 import {
@@ -93,13 +94,11 @@ async function completedProblemSetNodeIds(domainId: string, uid: number, tdoc: a
 }
 
 async function assertCourseVisible(domainId: string, user: User, tdoc: any, canManage: boolean): Promise<void> {
-    if (canManage || !(tdoc.courseGroupIds || []).length) return;
-    const findStudent = global.Hydro?.model?.userbind?.findStudentByUserId;
-    if (typeof findStudent !== 'function') throw new TypeError('userbind.findStudentByUserId is unavailable');
-    const student = await findStudent(domainId, user._id);
-    const groups = new Set((student?.groupIds || []).map((groupId: ObjectId) => String(groupId)));
-    if ((tdoc.courseGroupIds || []).some((groupId: ObjectId) => groups.has(String(groupId)))) return;
-    if (await problemSetAccessService.hasActiveEntitlement(domainId, user._id, 'course', tdoc.docId)) return;
+    if (canManage) return;
+    if (isCourseHidden(tdoc)) throw new ValidationError('tid', null, localizedErrorText`该课程已隐藏`);
+    if (!(tdoc.courseGroupIds || []).length) return;
+    const groups = await courseUserGroupIds(domainId, user._id);
+    if (await courseAccessibleTo(domainId, user._id, tdoc, groups, false)) return;
     throw new PermissionError(PERM.PERM_VIEW_TRAINING);
 }
 

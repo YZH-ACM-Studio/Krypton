@@ -35,6 +35,7 @@ describe('course copy write path', () => {
         expect(postCopy).to.include("kind: 'course'");
         expect(postCopy).to.include('assertProblemBankSelection');
         expect(postCopy).to.include('training.getPids(this.tdoc.dag || [])');
+        expect(postCopy).to.include('courseHidden: isCourseHidden(this.tdoc)');
         expect(postCopy).not.to.include('pin:');
         expect(postCopy).not.to.include('maintainer');
         expect(postCopy).not.to.include('files:');

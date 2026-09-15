@@ -569,6 +569,11 @@ export interface TrainingDoc extends Omit<Tdoc, 'docType'> {
     /** 课程视频观看可选截止。缺省无逾期。仅 course。 */
     courseVideoDueAt?: Date;
     /**
+     * 对学生隐藏。缺省或 false = 按班级范围发现和进入。
+     * true 时学生列表、直链、视频、课件、报名都 fail closed；管理者仍可编。
+     */
+    courseHidden?: boolean;
+    /**
      * Problem-set discovery audience. Missing means public legacy behaviour.
      * `public:false` with empty groupIds is redeem/course-only.
      */

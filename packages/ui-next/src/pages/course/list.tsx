@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { BookOpen, Layers, Pencil, Plus, Search, UserPlus, Users } from 'lucide-react';
+import { BookOpen, EyeOff, Layers, Pencil, Plus, Search, UserPlus, Users } from 'lucide-react';
 import type { DomainUserOption } from '@/components/domain-user-search';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -8,7 +8,6 @@ import { Input } from '@/components/ui/input';
 import { Pagination } from '@/components/ui/pagination';
 import { useBootstrap } from '@/lib/bootstrap';
 import { formatPlainTextSummary } from '@/lib/format';
-import { cn } from '@/lib/cn';
 import { CourseAssignDialog } from './assign';
 import type { CourseRecord } from './types';
 import { CourseMark } from './ui';
@@ -27,6 +26,22 @@ function summaryOf(course: CourseRecord): string {
 
 function ScopeBadge({ course }: { course: CourseRecord }) {
   const restricted = (course.courseGroupIds || []).length > 0;
+  if (course.courseHidden) {
+    return (
+      <span className="inline-flex flex-wrap items-center gap-1">
+        <Badge variant="secondary" className="gap-1 font-normal">
+          <EyeOff className="size-3" strokeWidth={1.75} />
+          已隐藏
+        </Badge>
+        {restricted ? (
+          <Badge variant="outline" className="gap-1 font-normal">
+            <Users className="size-3" strokeWidth={1.75} />
+            指定班级
+          </Badge>
+        ) : null}
+      </span>
+    );
+  }
   return restricted ? (
     <Badge variant="secondary" className="gap-1 font-normal">
       <Users className="size-3" strokeWidth={1.75} />

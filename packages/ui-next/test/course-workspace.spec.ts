@@ -78,6 +78,7 @@ describe('p3.8 course workspace', () => {
     const handler = readFileSync(resolve(root, '../hydrooj/src/handler/course.ts'), 'utf8');
     const list = readFileSync(resolve(root, 'src/pages/course/list.tsx'), 'utf8');
     const detail = readFileSync(resolve(root, 'src/pages/course/detail.tsx'), 'utf8');
+    const editor = readFileSync(resolve(root, 'src/pages/course/editor.tsx'), 'utf8');
     expect(handler).to.include('const [tdocs, tpcount, tcount]');
     expect(handler).to.include('canCreate,');
     expect(handler).to.include('canAssign,');
@@ -100,6 +101,15 @@ describe('p3.8 course workspace', () => {
     expect(detail).not.to.include('创建本章小测');
     expect(handler).to.include("view === 'roster'");
     expect(handler).to.include('canViewRoster');
+    expect(handler).to.include('courseHidden');
+    expect(handler).to.include('existsByCourse');
+    expect(handler).to.include('该课程已隐藏');
+    expect(handler).to.include('课程仍有文件收集，不能删除');
+    expect(editor).to.include('对学生隐藏');
+    expect(editor).to.include('name="operation" value="delete"');
+    expect(editor).to.include('删除课程');
+    expect(list).to.include('已隐藏');
+    expect(detail).to.include('已对学生隐藏');
     expect(detail).to.not.include('chapters.map((ch');
   });
 

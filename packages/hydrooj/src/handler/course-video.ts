@@ -10,7 +10,7 @@ import {
 } from '../error';
 import type { CourseVideo, TrainingDoc } from '../interface';
 import { PERM, PRIV } from '../model/builtin';
-import { canManageCourse, courseAccessibleTo, courseUserGroupIds } from '../lib/course-access';
+import { canManageCourse, courseAccessibleTo, courseUserGroupIds, isCourseHidden } from '../lib/course-access';
 import { csvTable } from '../lib/course-video-csv';
 import {
     COURSE_VIDEO_MAX_BYTES,
@@ -51,6 +51,7 @@ async function loadCourse(domainId: string, tid: ObjectId): Promise<TrainingDoc>
 async function assertCanView(handler: Handler, domainId: string, tdoc: TrainingDoc) {
     const canManage = canManageCourse(handler.user, tdoc, PERM.PERM_EDIT_COURSE);
     if (canManage) return { canManage, myGroups: new Set<string>() };
+    if (isCourseHidden(tdoc)) throw new ValidationError('tid', null, localizedErrorText`该课程已隐藏`);
     if ((tdoc.courseGroupIds || []).length) {
         const myGroups = await courseUserGroupIds(domainId, handler.user._id);
         if (!(await courseAccessibleTo(domainId, handler.user._id, tdoc, myGroups, false))) {

@@ -4,6 +4,7 @@
  * 课程与题集共用 docType 40（TrainingDoc），靠 `kind: 'course'` 区分；
  * 复用 training model 的报名 / 进度 / 章节题目跟踪。课程额外有：
  *   - `courseGroupIds`：可见范围（userbind 班级；空 = 全域可见）
+ *   - `courseHidden`：对学生隐藏（缺省可见）
  *   - 章节 `tids`：引用制挂已有比赛/作业（比赛在比赛模块独立创建）
  *   - `term`：学期等元信息
  *
@@ -39,7 +40,7 @@ import system from '../model/system';
 import * as training from '../model/training';
 import user from '../model/user';
 import { Handler, param, post, Types } from '../service/server';
-import { canManageCourse, courseAccessibleTo, courseUserGroupIds } from '../lib/course-access';
+import { canManageCourse, courseAccessibleTo, courseUserGroupIds, isCourseHidden } from '../lib/course-access';
 import { courseNodePids, parseCourseSections } from '../lib/course-chapter';
 import { copiedCourseTitle } from '../lib/course-copy';
 import {
@@ -432,10 +433,11 @@ class CourseMainHandler extends Handler {
             const entitledIds = await problemSetAccessService.listActiveTargetIds(domainId, this.user._id, 'course');
             query.$or = [
                 { owner: this.user._id },
-                { courseGroupIds: { $exists: false } },
-                { courseGroupIds: { $size: 0 } },
-                ...(groupOids.length ? [{ courseGroupIds: { $in: groupOids } }] : []),
-                ...(entitledIds.length ? [{ docId: { $in: entitledIds } }] : []),
+                { maintainer: this.user._id },
+                { courseHidden: { $ne: true }, courseGroupIds: { $exists: false } },
+                { courseHidden: { $ne: true }, courseGroupIds: { $size: 0 } },
+                ...(groupOids.length ? [{ courseHidden: { $ne: true }, courseGroupIds: { $in: groupOids } }] : []),
+                ...(entitledIds.length ? [{ courseHidden: { $ne: true }, docId: { $in: entitledIds } }] : []),
             ];
         }
         const [tdocs, tpcount, tcount] = await this.paginate(training.getMulti(domainId, query), page, 'training');
@@ -494,6 +496,7 @@ interface CollectCourseQueryModule {
             viewer?: { _id: number; hasPerm(p: bigint): boolean; hasPriv(p: number): boolean };
         },
     ) => Promise<unknown>;
+    existsByCourse?: (domainId: string, courseId: ObjectId) => Promise<boolean>;
 }
 
 function isNodeModuleNotFound(error: unknown): boolean {
@@ -571,11 +574,13 @@ class CourseDetailHandler extends Handler {
         const canManage = canManageCourse(this.user, tdoc, PERM.PERM_EDIT_COURSE);
         const canViewRoster = this.user.hasPerm(PERM.PERM_USERBIND_MANAGE_STUDENTS);
         if (activeView === 'roster' && !canViewRoster) throw new PermissionError(PERM.PERM_USERBIND_MANAGE_STUDENTS);
-        // 可见性拦截（非管理者且不属于课程班级 → 拒绝）。
-        if (!canManage && (tdoc.courseGroupIds || []).length) {
-            const myGroups = await courseUserGroupIds(domainId, this.user._id);
-            if (!(await courseAccessibleTo(domainId, this.user._id, tdoc, myGroups, false))) {
-                throw new ValidationError('tid', null, localizedErrorText`你不在该课程的可见范围内`);
+        if (!canManage) {
+            if (isCourseHidden(tdoc)) throw new ValidationError('tid', null, localizedErrorText`该课程已隐藏`);
+            if ((tdoc.courseGroupIds || []).length) {
+                const myGroups = await courseUserGroupIds(domainId, this.user._id);
+                if (!(await courseAccessibleTo(domainId, this.user._id, tdoc, myGroups, false))) {
+                    throw new ValidationError('tid', null, localizedErrorText`你不在该课程的可见范围内`);
+                }
             }
         }
         const referencedPidsByChapter = new Map<number, number[]>();
@@ -815,11 +820,11 @@ class CourseDetailHandler extends Handler {
         this.checkPriv(PRIV.PRIV_USER_PROFILE);
         const tdoc = await training.get(domainId, tid);
         if (!isCourseKind(tdoc.kind)) throw new ValidationError('tid', null, localizedErrorText`Not a course`);
-        // 可见范围外不允许报名。
-        if ((tdoc.courseGroupIds || []).length) {
+        const canManage = canManageCourse(this.user, tdoc, PERM.PERM_EDIT_COURSE);
+        if (!canManage && isCourseHidden(tdoc)) throw new ValidationError('tid', null, localizedErrorText`该课程已隐藏`);
+        if (!canManage && (tdoc.courseGroupIds || []).length) {
             const myGroups = await courseUserGroupIds(domainId, this.user._id);
-            const canManage = this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
-            if (!(await courseAccessibleTo(domainId, this.user._id, tdoc, myGroups, canManage))) {
+            if (!(await courseAccessibleTo(domainId, this.user._id, tdoc, myGroups, false))) {
                 throw new PermissionError(PERM.PERM_VIEW_TRAINING);
             }
         }
@@ -906,6 +911,7 @@ class CourseEditHandler extends Handler {
     @param('courseGroupIds', Types.CommaSeperatedArray, true)
     @param('mindmapId', Types.String, true)
     @param('courseVideoDueAt', Types.String, true)
+    @param('courseHidden', Types.Boolean, true)
     async post(
         _domainId: string,
         tid: ObjectId,
@@ -917,6 +923,7 @@ class CourseEditHandler extends Handler {
         courseGroupIds: string[] = [],
         mindmapId = '',
         courseVideoDueAtRaw = '',
+        courseHidden = false,
     ) {
         // Framework runs `post` before `postAssign`/`postDelete`; those POSTs omit the save payload.
         if (this.args?.operation || this.request.body?.operation) return;
@@ -945,6 +952,7 @@ class CourseEditHandler extends Handler {
                 kind: 'course',
                 courseGroupIds: groupIds,
                 term,
+                courseHidden: Boolean(courseHidden),
                 ...(selectedMindmapId ? { mindmapId: selectedMindmapId } : {}),
                 ...(courseVideoDueAt ? { courseVideoDueAt } : {}),
             });
@@ -961,6 +969,7 @@ class CourseEditHandler extends Handler {
                     description,
                     term,
                     courseGroupIds: groupIds,
+                    courseHidden: Boolean(courseHidden),
                     ...(selectedMindmapId ? { mindmapId: selectedMindmapId } : {}),
                     ...(courseVideoDueAt ? { courseVideoDueAt } : {}),
                 },
@@ -1027,6 +1036,7 @@ class CourseEditHandler extends Handler {
                     kind: 'course',
                     courseGroupIds: groupIds,
                     term: this.tdoc.term || '',
+                    courseHidden: isCourseHidden(this.tdoc),
                     ...(selectedMindmapId ? { mindmapId: selectedMindmapId } : {}),
                     ...(this.tdoc.courseVideoDueAt ? { courseVideoDueAt: this.tdoc.courseVideoDueAt } : {}),
                 },
@@ -1080,6 +1090,10 @@ class CourseEditHandler extends Handler {
         const tdoc = await training.get(domainId, tid);
         if (!isCourseKind(tdoc.kind)) throw new ValidationError('tid', null, localizedErrorText`Not a course`);
         if (!this.user.own(tdoc)) this.checkPerm(PERM.PERM_EDIT_COURSE);
+        const collect = loadCollectCourseQuery();
+        if (typeof collect?.existsByCourse === 'function' && (await collect.existsByCourse(domainId, tid))) {
+            throw new ValidationError('tid', null, localizedErrorText`课程仍有文件收集，不能删除`);
+        }
         const stored = await storage.list(courseFilePrefix(domainId, tid));
         await Promise.all([
             training.del(domainId, tid),
@@ -1201,7 +1215,8 @@ class CourseFileDownloadHandler extends Handler {
         const tdoc = await training.get(domainId, tid);
         if (!isCourseKind(tdoc.kind)) throw new NotFoundError(localizedErrorText`course`);
         const file = listedCourseFile(tdoc, filename);
-        const canManage = this.user.own(tdoc) || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
+        const canManage = canManageCourse(this.user, tdoc, PERM.PERM_EDIT_COURSE);
+        if (!canManage && isCourseHidden(tdoc)) throw new ValidationError('tid', null, localizedErrorText`该课程已隐藏`);
         if (!canManage && (tdoc.courseGroupIds || []).length) {
             const myGroups = await courseUserGroupIds(domainId, this.user._id);
             if (!(await courseAccessibleTo(domainId, this.user._id, tdoc, myGroups, false))) {

@@ -8,6 +8,7 @@ import {
   ClipboardPlus,
   Copy,
   Download,
+  EyeOff,
   FileText,
   FolderInput,
   ListTree,
@@ -345,6 +346,12 @@ export function CourseDetailPage() {
             {course.term ? ` · ${course.term}` : ''}
           </p>
         </div>
+        {data.canManage && course.courseHidden ? (
+          <Badge variant="secondary" className="gap-1 font-normal">
+            <EyeOff className="size-3" strokeWidth={1.75} />
+            已对学生隐藏
+          </Badge>
+        ) : null}
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           {data.canManage ? (
             <Button asChild size="sm" className="h-9 gap-1.5">

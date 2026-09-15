@@ -1576,6 +1576,8 @@ const CHINESE_ERROR_MESSAGE_ENGLISH_TRANSLATIONS: Readonly<Record<string, string
         'The contest does not exist or has been deleted. Contact the exam staff to verify the exam setup.',
     'Vigil 返回的比赛 ID 无效，请联系考务重新发起登录。': 'Vigil returned an invalid contest ID. Contact the exam staff to restart sign-in.',
     你不在该课程的可见范围内: 'You are outside the visibility scope of this course.',
+    该课程已隐藏: 'This course is hidden.',
+    课程仍有文件收集，不能删除: 'This course still has file-collection requests and cannot be deleted.',
     '小节 id 无效': 'The subsection id is invalid.',
     视频观看截止时间无效: 'The video due time is invalid.',
     视频时长超出范围: 'The video duration is out of range.',

@@ -4,6 +4,7 @@ import {
   Copy,
   Download,
   FileText,
+  EyeOff,
   Layers,
   Link2,
   ListTree,
@@ -21,6 +22,7 @@ import { MarkdownEditor } from '@/components/markdown-renderer';
 import { ProblemPicker } from '@/components/problem-picker';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { MultiSelect } from '@/components/ui/multi-select';
 import { SimpleSelect } from '@/components/ui/select';
@@ -200,6 +202,7 @@ export function CourseEditPage() {
       : [{ _id: 1, title: '第一章', content: '', pids: [], videos: [], sections: [], tids: '', problemSetId: '', stageIds: '' }],
   );
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set((course.courseGroupIds || []).map(String)));
+  const [courseHidden, setCourseHidden] = useState(course.courseHidden === true);
   const [selectedMindmapId, setSelectedMindmapId] = useState(String(course.mindmapId || ''));
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [saveError, setSaveError] = useState('');
@@ -523,6 +526,22 @@ export function CourseEditPage() {
             复制为新课程
           </Button>
         ) : null}
+        {isEdit ? (
+          <form
+            method="post"
+            action={`/course/${tid}/edit`}
+            onSubmit={(event) => {
+              const title = course.title || '该课程';
+              if (!confirm(`确定删除课程「${title}」？课件、视频和观看记录会一并删除，不能恢复。`)) event.preventDefault();
+            }}
+          >
+            <input type="hidden" name="operation" value="delete" />
+            <Button type="submit" variant="destructive" size="sm" formNoValidate disabled={copying} className="h-10 shrink-0 gap-1.5">
+              <Trash2 className="size-3.5" strokeWidth={1.75} />
+              删除课程
+            </Button>
+          </form>
+        ) : null}
         <Button
           form="course-editor-form"
           type="submit"
@@ -786,6 +805,25 @@ export function CourseEditPage() {
             <p className="text-xs text-muted-foreground">
               {selectedGroups.size ? `已选 ${selectedGroups.size} 个班级` : '未选班级时，课程对全站可见。'}
             </p>
+            <input type="hidden" name="courseHidden" value={courseHidden ? 'true' : 'false'} />
+            <label className="flex min-h-10 cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2.5">
+              <Checkbox
+                checked={courseHidden}
+                onCheckedChange={(checked) => {
+                  setCourseHidden(checked);
+                  markDirty();
+                }}
+                className="mt-0.5"
+                aria-label="对学生隐藏"
+              />
+              <span className="min-w-0">
+                <span className="flex items-center gap-1.5 text-sm font-medium">
+                  <EyeOff className="size-3.5 text-muted-foreground" strokeWidth={1.75} />
+                  对学生隐藏
+                </span>
+                <span className="mt-0.5 block text-xs text-muted-foreground">隐藏后学生看不到列表，也无法打开链接。老师仍可编辑。</span>
+              </span>
+            </label>
           </SettingsGroup>
 
           {isEdit && tid ? (

@@ -10,6 +10,7 @@ export interface CourseRecord {
   description?: string;
   content?: string;
   courseGroupIds?: Array<string | number>;
+  courseHidden?: boolean;
   courseVideoDueAt?: string | Date | null;
   dag?: unknown[];
   enroll?: boolean;

@@ -20,15 +20,22 @@ export async function courseUserGroupIds(domainId: string, uid: number): Promise
     }
 }
 
+export function isCourseHidden(tdoc: Pick<TrainingDoc, 'courseHidden'>): boolean {
+    return tdoc.courseHidden === true;
+}
+
 export function courseVisibleTo(tdoc: TrainingDoc, myGroups: Set<string>, canManage: boolean): boolean {
     if (canManage) return true;
+    if (isCourseHidden(tdoc)) return false;
     const groups = tdoc.courseGroupIds || [];
     if (!groups.length) return true;
     return groups.some((g) => myGroups.has(String(g)));
 }
 
 export async function courseAccessibleTo(domainId: string, uid: number, tdoc: TrainingDoc, myGroups: Set<string>, canManage: boolean): Promise<boolean> {
-    if (courseVisibleTo(tdoc, myGroups, canManage)) return true;
+    if (canManage) return true;
+    if (isCourseHidden(tdoc)) return false;
+    if (courseVisibleTo(tdoc, myGroups, false)) return true;
     return problemSetAccessService.hasActiveEntitlement(domainId, uid, 'course', tdoc.docId);
 }
 

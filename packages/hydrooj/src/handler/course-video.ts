@@ -402,6 +402,7 @@ function videoStatus(doc: CourseVideoProgressDoc | undefined, dueAt?: Date) {
 interface CourseVideoRoster {
     tdoc: { docId: ObjectId; title: string; courseVideoDueAt: Date | null };
     videos: Array<{ id: string; title: string; chapterId: number; sectionId: number | null; durationMs: number }>;
+    rosterUnavailable?: 'no_groups';
     members: Array<{
         uid: number;
         studentId: string;
@@ -430,7 +431,12 @@ async function buildCourseVideoRoster(handler: Handler, domainId: string, tid: O
     assertCanManage(handler, tdoc);
     const groups = tdoc.courseGroupIds || [];
     if (!groups.length) {
-        throw new ValidationError('courseGroupIds', null, localizedErrorText`未指定班级，无法出观看名单`);
+        return {
+            tdoc: { docId: tdoc.docId, title: tdoc.title, courseVideoDueAt: tdoc.courseVideoDueAt || null },
+            videos: [],
+            members: [],
+            rosterUnavailable: 'no_groups',
+        };
     }
     const ub = global.Hydro?.model?.userbind;
     if (typeof ub?.findBoundStudentsByGroupIds !== 'function') {
@@ -504,6 +510,9 @@ class CourseVideoCsvHandler extends Handler {
         const domainId = String(this.domain?._id);
         problem.assertProblemAclDomain(this.user, domainId);
         const body = await buildCourseVideoRoster(this, domainId, tid);
+        if (body.rosterUnavailable === 'no_groups') {
+            throw new ValidationError('courseGroupIds', null, localizedErrorText`未指定班级，无法出观看名单`);
+        }
         const headers = ['学号', '姓名'];
         for (const video of body.videos) {
             headers.push(

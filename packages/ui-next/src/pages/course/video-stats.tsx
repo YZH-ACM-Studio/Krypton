@@ -1,5 +1,6 @@
 import { ArrowLeft, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
 import { useBootstrap } from '@/lib/bootstrap';
 import { coveragePercent } from '@/lib/course-video-watch';
 
@@ -80,26 +81,41 @@ export function CourseVideoStatsPage() {
   const title = typeof data.tdoc.title === 'string' ? data.tdoc.title : '课程';
   const videos = readVideos(data.videos);
   const members = readMembers(data.members);
+  const noGroups = data.rosterUnavailable === 'no_groups';
 
   return (
     <main className="w-full min-w-0 pb-10">
-      <header className="mb-6 flex flex-wrap items-center gap-3 border-b border-border/60 pb-5">
+      <header className="mb-6 flex flex-wrap items-center gap-3 border-b pb-5">
         <Button asChild variant="ghost" size="icon" className="-ml-2 size-10">
           <a href={`/course/${tid}`} aria-label="返回课程">
             <ArrowLeft className="size-4" strokeWidth={1.75} />
           </a>
         </Button>
         <div className="min-w-0 flex-1">
-          <p className="krypton-course-eyebrow">观看统计 · 按播放规则看完，不是监考证明</p>
-          <h1 className="krypton-course-title mt-1 truncate">{title}</h1>
+          <p className="text-sm text-muted-foreground">观看统计</p>
+          <h1 className="truncate text-xl font-semibold tracking-tight">{title}</h1>
         </div>
-        <Button asChild variant="outline" size="sm" className="h-10 gap-1.5">
-          <a href={`/course/${tid}/videos.csv`}>
-            <Download className="size-3.5" strokeWidth={1.75} />
-            导出 CSV
-          </a>
-        </Button>
+        {noGroups ? null : (
+          <Button asChild variant="outline" size="sm" className="h-9 gap-1.5">
+            <a href={`/course/${tid}/videos.csv`}>
+              <Download className="size-3.5" strokeWidth={1.75} />
+              导出 CSV
+            </a>
+          </Button>
+        )}
       </header>
+      {noGroups ? (
+        <Card>
+          <CardContent className="flex flex-col items-start gap-3 p-6">
+            <p className="text-sm font-medium">没有绑定班级，无法出观看名单</p>
+            <p className="text-sm text-muted-foreground">全站可见的课不会把所有用户列进统计。请先在编辑页选择可见班级。</p>
+            <Button asChild size="sm">
+              <a href={`/course/${tid}/edit`}>去设置班级</a>
+            </Button>
+          </CardContent>
+        </Card>
+      ) : (
+        <>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[48rem] text-left text-sm">
           <thead>
@@ -136,7 +152,9 @@ export function CourseVideoStatsPage() {
           </tbody>
         </table>
       </div>
-      {!members.length ? <p className="krypton-course-meta mt-6">名单为空。</p> : null}
+      {!members.length ? <p className="mt-6 text-sm text-muted-foreground">名单为空。</p> : null}
+        </>
+      )}
     </main>
   );
 }

@@ -36,6 +36,10 @@ _Avoid_: 依赖学生 GUI 进程的短租约、没有硬结束时间的永久锁
 某台目标终端对一次执行会话的期望修订、实际应用修订和成功或失败结果，是 WebUI 判断策略是否真正生效的依据。
 _Avoid_: 把服务端已发送当成终端已应用、只显示整批成功
 
+**终端 DNS 转发器（`NetworkDnsForwarder`）**:
+Endpoint Service 在网络锁活动期间于 loopback:53 运行的本机 DNS 转发器；只转发策略内域名并把观察到的地址先提交为 WFP 许可再应答，其它名字直接拒绝。它是域名规则在 Windows 上的唯一实现来源。
+_Avoid_: Windows Firewall Dynamic Keyword、ETW DNS 事件订阅、HTTPS 代理、任何按 URL 路径过滤的能力
+
 **终端目标快照（`EndpointTargetSnapshot`）**:
 策略启用时由教室、座位分配或用户组选择编译出的明确终端集合；范围变化只有发布新 revision 才能影响活动中的执行目标。
 _Avoid_: 执行期间实时查询用户组、座位变化后静默增删终端

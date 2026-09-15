@@ -99,8 +99,8 @@ class CourseVideoWriteHandler extends Handler {
     @param('tid', Types.ObjectId)
     @param('chapterId', Types.PositiveInt)
     @param('sectionId', Types.Int, true)
-    @param('title', Types.Title)
-    async postUpload(_domainId: string, tid: ObjectId, chapterId: number, sectionIdRaw = 0, title: string) {
+    @param('title', Types.String, true)
+    async postUpload(_domainId: string, tid: ObjectId, chapterId: number, sectionIdRaw = 0, title = '') {
         const file = this.request.files?.file;
         if (!file) throw new ValidationError('file');
         if (file.size > COURSE_VIDEO_MAX_BYTES) throw new FileLimitExceededError('size');
@@ -109,9 +109,10 @@ class CourseVideoWriteHandler extends Handler {
         const sha256 = await hashFileSha256(file.filepath);
         const id = courseVideoId();
         const contentRevision = 1;
+        const fromFile = String(original).replace(/\.[^.]+$/, '').trim();
         const video: CourseVideo = {
             id,
-            title: title.trim(),
+            title: title.trim() || fromFile || '视频',
             filename: String(original),
             ext,
             size: file.size,

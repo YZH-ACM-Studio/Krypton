@@ -179,6 +179,7 @@ describe('course video wiring', () => {
         expect(video).to.include("ctx.Route('course_videos'");
         expect(video).to.include("ctx.Route('course_videos_csv'");
         expect(video).to.include('requireRewatch');
+        expect(video).to.include("@param('title', Types.String, true)");
         expect(course).to.include('courseVideoDueAt');
         expect(course).to.include('rewriteCourseVideosForCopy');
         expect(video).to.include('getRange');

@@ -54,7 +54,9 @@ describe('p3.8 course workspace', () => {
     expect(detail).not.to.include('max-w-[76rem]');
     expect(editor).not.to.include('col-span-full');
     expect(editor).not.to.include('课程简介在页面底部整幅编辑');
-    expect(editor).to.match(/<section className="min-w-0 space-y-7"[\s\S]*course-description-title[\s\S]*章节内容/);
+    expect(editor).to.match(/<section className="min-w-0 space-y-5"[\s\S]*course-description-title[\s\S]*章节内容/);
+    expect(editor).to.include('TabsTrigger value="video"');
+    expect(editor).to.include('CourseVideoEditor');
   });
 
   it('uses server capabilities, true totals, enrollment status, and one active chapter', () => {

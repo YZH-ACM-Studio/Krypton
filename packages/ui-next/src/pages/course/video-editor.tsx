@@ -1,12 +1,13 @@
 import { useRef, useState } from 'react';
+import { Film, Trash2 } from 'lucide-react';
 import { FileUploader } from '@/components/uploader';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Input } from '@/components/ui/input';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { cn } from '@/lib/cn';
 import type { CourseAuthorVideo } from './types';
-import { CourseSectionHeader } from './ui';
 
 const MAX_BYTES = 512 * 1024 * 1024;
 
@@ -31,20 +32,28 @@ function asVideo(value: unknown): CourseAuthorVideo {
   };
 }
 
+function durationLabel(ms: number): string {
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  return minutes ? `${minutes}:${String(rest).padStart(2, '0')}` : `${seconds}秒`;
+}
+
 export function CourseVideoEditor({
   courseId,
   chapterId,
   sectionId,
   videos,
   onChange,
+  locked,
 }: {
   courseId: string;
   chapterId: number;
   sectionId: number | null;
   videos: CourseAuthorVideo[];
   onChange: (videos: CourseAuthorVideo[]) => void;
+  locked?: boolean;
 }) {
-  const [title, setTitle] = useState('课程视频');
   const [error, setError] = useState('');
   const [pending, setPending] = useState<CourseAuthorVideo | null>(null);
   const previewRef = useRef<HTMLVideoElement | null>(null);
@@ -78,97 +87,119 @@ export function CourseVideoEditor({
     try {
       await postForm({ operation: 'delete', videoId: video.id });
       onChange(videos.filter((item) => item.id !== video.id));
+      if (pending?.id === video.id) setPending(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '删除失败');
+      setError(err instanceof Error ? err.message : '无法删除视频');
     }
   };
 
+  if (locked) {
+    return (
+      <Card>
+        <CardContent className="flex flex-col items-center gap-2 px-6 py-12 text-center">
+          <Film className="size-8 text-muted-foreground" strokeWidth={1.5} />
+          <p className="text-sm font-medium">先保存课程，再上传视频</p>
+          <p className="text-sm text-muted-foreground">保存后这一章就可以拖入 mp4 / webm。</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
-    <section className="space-y-3" aria-labelledby={`course-video-editor-${chapterId}-${sectionId || 0}`}>
-      <CourseSectionHeader
-        id={`course-video-editor-${chapterId}-${sectionId || 0}`}
-        title={sectionId == null ? '章节视频' : '小节视频'}
-        description="本站 mp4/webm，单文件 512MB。确认片长后学生才能看到。最多 8 条。"
-        count={videos.length}
-      />
+    <div className="space-y-3">
       {error ? (
-        <p role="alert" className="text-xs text-destructive">
+        <p role="alert" className="text-sm text-destructive">
           {error}
         </p>
       ) : null}
       {videos.length ? (
-        <ol className="space-y-2">
+        <ul className="space-y-2">
           {videos.map((video) => (
-            <li key={video.id} className="krypton-course-row flex min-h-11 items-center gap-2 px-2 py-1.5 text-xs">
-              <span className="min-w-0 flex-1 truncate font-medium">{video.title}</span>
-              <span className={cn('krypton-course-meta', video.confirmed ? '' : 'text-amber-700 dark:text-amber-400')}>
-                {video.confirmed ? `${Math.round(video.durationMs / 1000)} 秒` : '待确认片长'}
-              </span>
-              <Button type="button" variant="ghost" size="sm" className="h-8" onClick={() => setPending(video)}>
-                预览
-              </Button>
-              <ReplaceVideoButton
-                endpoint={endpoint}
-                video={video}
-                onReplaced={(next) => {
-                  onChange(videos.map((item) => (item.id === next.id ? next : item)));
-                  setPending(next);
-                }}
-                onError={setError}
-              />
-              <Button type="button" variant="ghost" size="sm" className="h-8 text-destructive" onClick={() => void remove(video)}>
-                删除
-              </Button>
+            <li key={video.id}>
+              <Card>
+                <CardContent className="flex items-center gap-3 p-3">
+                  <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
+                    <Film className="size-4" strokeWidth={1.75} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium">{video.title}</p>
+                    <p className="truncate text-xs text-muted-foreground">{video.filename}</p>
+                  </div>
+                  {video.confirmed ? (
+                    <Badge variant="secondary">{durationLabel(video.durationMs)}</Badge>
+                  ) : (
+                    <Badge variant="outline">待确认</Badge>
+                  )}
+                  <Button type="button" variant="outline" size="sm" className="h-8" onClick={() => setPending(video)}>
+                    预览
+                  </Button>
+                  <ReplaceVideoButton
+                    endpoint={endpoint}
+                    video={video}
+                    onReplaced={(next) => {
+                      onChange(videos.map((item) => (item.id === next.id ? next : item)));
+                      setPending(next);
+                    }}
+                    onError={setError}
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="size-8 text-destructive hover:bg-destructive/10"
+                    onClick={() => void remove(video)}
+                    aria-label={`删除${video.title}`}
+                  >
+                    <Trash2 className="size-3.5" strokeWidth={1.75} />
+                  </Button>
+                </CardContent>
+              </Card>
             </li>
           ))}
-        </ol>
+        </ul>
       ) : null}
       {videos.length < 8 ? (
-        <div className="space-y-2">
-          <label className="block space-y-1 text-xs">
-            新视频标题
-            <Input value={title} onChange={(event) => setTitle(event.target.value)} className="min-h-10" />
-          </label>
-          <FileUploader
-            endpoint={endpoint}
-            maxFiles={1}
-            maxFileSize={MAX_BYTES}
-            uploadConcurrency={1}
-            retryOnFailure={false}
-            accept={['video/mp4', 'video/webm', '.mp4', '.webm']}
-            meta={{
-              operation: 'upload',
-              chapterId: String(chapterId),
-              sectionId: sectionId == null ? '0' : String(sectionId),
-              title,
-            }}
-            onUploaded={(_name, body) => {
-              const next = asVideo(body?.video);
-              onChange([...videos, next]);
-              setPending(next);
-            }}
-          />
-        </div>
+        <FileUploader
+          key={`${chapterId}-${sectionId || 0}`}
+          endpoint={endpoint}
+          maxFiles={1}
+          maxFileSize={MAX_BYTES}
+          uploadConcurrency={1}
+          retryOnFailure={false}
+          accept={['video/mp4', 'video/webm', '.mp4', '.webm']}
+          meta={{
+            operation: 'upload',
+            chapterId: String(chapterId),
+            sectionId: sectionId == null ? '0' : String(sectionId),
+          }}
+          onUploaded={(_name, body) => {
+            const next = asVideo(body?.video);
+            onChange([...videos, next]);
+            setPending(next);
+          }}
+        />
       ) : (
-        <p className="krypton-course-meta">已到 8 条上限。</p>
+        <p className="text-sm text-muted-foreground">本章最多 8 个视频。</p>
       )}
       {pending ? (
-        <div className="krypton-course-inset space-y-2 p-3">
-          <p className="text-xs font-medium">确认片长：{pending.title}</p>
-          <video
-            ref={previewRef}
-            className="w-full rounded-md bg-black"
-            src={`/course/${courseId}/video/${pending.id}/play`}
-            controls
-            preload="metadata"
-            onLoadedMetadata={(event) => {
-              const durationMs = Math.round(event.currentTarget.duration * 1000);
-              if (!pending.confirmed && durationMs > 0) void confirmDuration(pending, durationMs).catch((err) => setError(err.message));
-            }}
-          />
-        </div>
+        <Card>
+          <CardContent className="space-y-2 p-3">
+            <p className="text-sm font-medium">{pending.confirmed ? '预览' : '打开预览以确认时长'}</p>
+            <video
+              ref={previewRef}
+              className={cn('w-full rounded-lg bg-black')}
+              src={`/course/${courseId}/video/${pending.id}/play`}
+              controls
+              preload="metadata"
+              onLoadedMetadata={(event) => {
+                const durationMs = Math.round(event.currentTarget.duration * 1000);
+                if (!pending.confirmed && durationMs > 0) void confirmDuration(pending, durationMs).catch((err) => setError(err.message));
+              }}
+            />
+          </CardContent>
+        </Card>
       ) : null}
-    </section>
+    </div>
   );
 }
 
@@ -188,15 +219,15 @@ function ReplaceVideoButton({
   if (!open) {
     return (
       <Button type="button" variant="ghost" size="sm" className="h-8" onClick={() => setOpen(true)}>
-        换片
+        替换
       </Button>
     );
   }
   return (
-    <div className="space-y-2 rounded-md border p-2">
+    <div className="min-w-52 space-y-2 rounded-lg border bg-background p-2">
       <label className="flex items-center gap-2 text-xs">
         <Checkbox checked={requireRewatch} onChange={() => setRequireRewatch((current) => !current)} />
-        要求重看
+        替换后要求重看
       </label>
       <FileUploader
         endpoint={endpoint}
@@ -211,10 +242,13 @@ function ReplaceVideoButton({
             onReplaced(asVideo(body?.video));
             setOpen(false);
           } catch (err) {
-            onError(err instanceof Error ? err.message : '换片失败');
+            onError(err instanceof Error ? err.message : '无法替换视频');
           }
         }}
       />
+      <Button type="button" variant="ghost" size="sm" className="h-8 w-full" onClick={() => setOpen(false)}>
+        取消
+      </Button>
     </div>
   );
 }

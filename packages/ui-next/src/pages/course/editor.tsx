@@ -1,14 +1,11 @@
 import {
-  ArrowDown,
   ArrowLeft,
-  ArrowUp,
   Check,
-  ClipboardPlus,
   Copy,
   Download,
-  ExternalLink,
   FileText,
   Layers,
+  Link2,
   ListTree,
   Loader2,
   Network,
@@ -16,19 +13,16 @@ import {
   Save,
   Shield,
   Trash2,
-  Trophy,
   Users,
   Video,
-  X,
 } from 'lucide-react';
-import { type FormEvent, type ReactNode, useEffect, useMemo, useState } from 'react';
+import { type FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { MarkdownEditor } from '@/components/markdown-renderer';
 import { ProblemPicker } from '@/components/problem-picker';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import { MultiSelect } from '@/components/ui/multi-select';
 import { SimpleSelect } from '@/components/ui/select';
 import { Sheet, SheetBody, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs-compound';
@@ -40,6 +34,7 @@ import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presente
 import { PracticeIntegrityPolicyPanel } from '@/components/practice-integrity-policy-panel';
 import { CourseAssignForm } from './assign';
 import { claimChapterProblemIds } from './chapter-draft';
+import { ChapterLinks } from './chapter-links';
 import { ChapterOutline } from './chapter-outline';
 import { useChapterQuery } from './chapter-query';
 import type { ChapterDraft, CourseAuthorVideo, CourseFile, CourseRecord, SectionDraft } from './types';
@@ -155,84 +150,6 @@ function SettingsGroup({
   );
 }
 
-/**
- * Referenced contests and homework.
- *
- * The previous editor asked authors to hand-maintain a comma-joined string
- * of ObjectIds in a monospace box, so a single stray comma silently broke
- * the whole chapter. Ids become removable chips here while the submitted
- * value stays the exact same comma-joined string the handler parses.
- */
-function ContestRefInput({ value, onChange }: { value: string; onChange: (next: string) => void }) {
-  const [draft, setDraft] = useState('');
-  const refs = parseRefs(value);
-
-  const commit = () => {
-    const additions = parseRefs(draft).filter((item) => !refs.includes(item));
-    if (additions.length) onChange([...refs, ...additions].join(','));
-    setDraft('');
-  };
-
-  return (
-    <div className="space-y-2">
-      {refs.length ? (
-        <ul className="flex flex-wrap gap-1.5">
-          {refs.map((ref) => (
-            <li key={ref}>
-              <span className="krypton-course-inset inline-flex min-h-9 items-center gap-1.5 py-1 pl-2.5 pr-1">
-                <Trophy className="size-3 shrink-0 text-muted-foreground" strokeWidth={1.75} />
-                <span className="font-mono text-[11px]">{ref}</span>
-                <button
-                  type="button"
-                  onClick={() => onChange(refs.filter((item) => item !== ref).join(','))}
-                  aria-label={`移除引用 ${ref}`}
-                  className={cn(
-                    'grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground',
-                    'transition-colors duration-150 hover:bg-destructive/10 hover:text-destructive',
-                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary motion-reduce:transition-none',
-                  )}
-                >
-                  <X className="size-3" strokeWidth={2} />
-                </button>
-              </span>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      <div className="flex gap-2">
-        <Input
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          onBlur={commit}
-          onKeyDown={(event) => {
-            if (event.key !== 'Enter') return;
-            event.preventDefault();
-            commit();
-          }}
-          className="min-h-11 font-mono text-base sm:text-xs"
-          placeholder="粘贴比赛 id 后回车"
-          aria-label="添加比赛或作业引用"
-        />
-        <Button type="button" variant="outline" size="icon" className="size-11 shrink-0" onClick={commit} aria-label="添加引用">
-          <Plus className="size-4" strokeWidth={2} />
-        </Button>
-      </div>
-      <a
-        href="/contest/create"
-        target="_blank"
-        rel="noreferrer"
-        className={cn(
-          'inline-flex items-center gap-1 text-xs font-medium text-primary',
-          'hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-        )}
-      >
-        前往比赛模块创建
-        <ExternalLink className="size-3" strokeWidth={1.75} />
-      </a>
-    </div>
-  );
-}
-
 function SaveIndicator({ state }: { state: SaveState }) {
   return (
     <div aria-live="polite" className="krypton-course-meta inline-flex items-center gap-1.5">
@@ -291,8 +208,11 @@ export function CourseEditPage() {
   const [chapterTab, setChapterTab] = useState('video');
   const [courseFiles, setCourseFiles] = useState<CourseFile[]>(data.files || []);
   const [fileError, setFileError] = useState('');
+  const pendingSectionSelect = useRef<{ chapterId: number; sectionId: number } | null>(null);
   const { activeId, activeSectionId, selectChapter, selectSection } = useChapterQuery(chapters);
   const activeChapter = chapters.find((chapter) => chapter._id === activeId) || chapters[0];
+  const editingSection =
+    activeSectionId == null ? null : activeChapter.sections.find((section) => section._id === activeSectionId) || null;
 
   useEffect(() => {
     if (saveState !== 'dirty') return undefined;
@@ -300,6 +220,20 @@ export function CourseEditPage() {
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
   }, [saveState]);
+
+  useEffect(() => {
+    const pending = pendingSectionSelect.current;
+    if (!pending) return;
+    const chapter = chapters.find((item) => item._id === pending.chapterId);
+    if (!chapter?.sections.some((section) => section._id === pending.sectionId)) return;
+    pendingSectionSelect.current = null;
+    selectSection(pending.chapterId, pending.sectionId);
+    setChapterTab('video');
+  }, [chapters, selectSection]);
+
+  useEffect(() => {
+    if (activeSectionId != null && chapterTab === 'links') setChapterTab('video');
+  }, [activeSectionId, chapterTab]);
 
   const markDirty = () => {
     setSaveError('');
@@ -378,15 +312,19 @@ export function CourseEditPage() {
   };
 
   const addSection = (chapterId: number) => {
+    const chapter = chapters.find((item) => item._id === chapterId);
+    if (!chapter) return;
+    const sectionId = Math.max(0, ...chapter.sections.map((section) => section._id)) + 1;
+    pendingSectionSelect.current = { chapterId, sectionId };
     setChapters((current) =>
-      current.map((chapter) => {
-        if (chapter._id !== chapterId) return chapter;
-        const sectionId = Math.max(0, ...chapter.sections.map((section) => section._id)) + 1;
-        return {
-          ...chapter,
-          sections: [...chapter.sections, { _id: sectionId, title: `第 ${chapter.sections.length + 1} 节`, content: '', pids: [], videos: [] }],
-        };
-      }),
+      current.map((item) =>
+        item._id === chapterId
+          ? {
+              ...item,
+              sections: [...item.sections, { _id: sectionId, title: `第 ${item.sections.length + 1} 节`, content: '', pids: [], videos: [] }],
+            }
+          : item,
+      ),
     );
     markDirty();
   };
@@ -407,6 +345,7 @@ export function CourseEditPage() {
   };
 
   const removeSection = (chapterId: number, sectionId: number) => {
+    if (activeId === chapterId && activeSectionId === sectionId) selectChapter(chapterId, true);
     setChapters((current) =>
       current.map((chapter) =>
         chapter._id === chapterId ? { ...chapter, sections: chapter.sections.filter((section) => section._id !== sectionId) } : chapter,
@@ -530,7 +469,7 @@ export function CourseEditPage() {
       return;
     }
     selectSection(chapterId, sectionId);
-    setChapterTab('sections');
+    if (chapterTab === 'links') setChapterTab('video');
   };
 
   const selectFromMobile = (chapterId: number, sectionId?: number | null) => {
@@ -538,7 +477,13 @@ export function CourseEditPage() {
     setOutlineOpen(false);
   };
 
-  const videoCount = (activeChapter.videos || []).length + activeChapter.sections.reduce((sum, section) => sum + (section.videos || []).length, 0);
+  const sectionIndex = editingSection
+    ? activeChapter.sections.findIndex((section) => section._id === editingSection._id)
+    : -1;
+  const unitVideos = editingSection ? editingSection.videos || [] : activeChapter.videos || [];
+  const unitPids = editingSection ? editingSection.pids : activeChapter.pids;
+  const videoCount = unitVideos.length;
+  const sectionCount = chapters.reduce((sum, chapter) => sum + chapter.sections.length, 0);
 
   return (
     <main className="w-full min-w-0 pb-10">
@@ -601,11 +546,10 @@ export function CourseEditPage() {
         action={formAction}
         onSubmit={submit}
         onChange={markDirty}
-        className="grid min-w-0 gap-6 lg:grid-cols-[17rem_minmax(0,1fr)] xl:grid-cols-[17rem_minmax(0,1fr)_21rem] xl:gap-7"
+        className="grid min-w-0 gap-6 lg:grid-cols-[18rem_minmax(0,1fr)] xl:grid-cols-[18rem_minmax(0,1fr)_21rem] xl:gap-7"
       >
         {isEdit ? <input type="hidden" name="tid" value={tid} /> : null}
         <input type="hidden" name="chapters" value={chaptersJson} />
-        <input type="hidden" name="courseGroupIds" value={Array.from(selectedGroups).join(',')} />
         <input type="hidden" name="description" value={course.description || ''} />
 
         <aside className="hidden self-start lg:sticky lg:top-20 lg:block">
@@ -617,7 +561,9 @@ export function CourseEditPage() {
                 </span>
                 <div>
                   <p className="text-[13px] font-semibold leading-4">章节目录</p>
-                  <p className="krypton-course-meta">{chapters.length} 章</p>
+                  <p className="krypton-course-meta">
+                    {chapters.length} 章{sectionCount ? ` · ${sectionCount} 节` : ''}
+                  </p>
                 </div>
               </div>
               <Button type="button" variant="ghost" size="sm" className="h-9 gap-1 px-2" onClick={addChapter}>
@@ -633,6 +579,9 @@ export function CourseEditPage() {
                 onSelect={openChapter}
                 onMove={moveChapter}
                 onRemove={removeChapter}
+                onAddSection={addSection}
+                onMoveSection={moveSection}
+                onRemoveSection={removeSection}
               />
             </div>
           </div>
@@ -654,17 +603,34 @@ export function CourseEditPage() {
           <Card>
             <CardContent className="p-4 sm:p-5">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                第 {activeIndex + 1} 章 / 共 {chapters.length} 章
+                {editingSection ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => selectChapter(activeChapter._id)}
+                      className="hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      第 {activeIndex + 1} 章
+                    </button>
+                    {` · 第 ${sectionIndex + 1} 节`}
+                  </>
+                ) : (
+                  `第 ${activeIndex + 1} 章 / 共 ${chapters.length} 章`
+                )}
               </p>
               <label className="mt-2 block">
                 <span id="active-chapter-title" className="sr-only">
-                  章节标题
+                  {editingSection ? '小节标题' : '章节标题'}
                 </span>
                 <input
-                  value={activeChapter.title}
-                  onChange={(event) => updateChapter(activeChapter._id, { title: event.target.value })}
+                  value={editingSection ? editingSection.title : activeChapter.title}
+                  onChange={(event) =>
+                    editingSection
+                      ? updateSection(activeChapter._id, editingSection._id, { title: event.target.value })
+                      : updateChapter(activeChapter._id, { title: event.target.value })
+                  }
                   required
-                  placeholder="章节标题"
+                  placeholder={editingSection ? '小节标题' : '章节标题'}
                   className={cn(
                     'w-full rounded-md border-0 bg-transparent px-0 text-2xl font-semibold tracking-tight',
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
@@ -676,7 +642,7 @@ export function CourseEditPage() {
           </Card>
 
           <Tabs value={chapterTab} onValueChange={setChapterTab} className="space-y-4">
-            <TabsList className="grid h-10 w-full grid-cols-5">
+            <TabsList className={cn('grid h-10 w-full', editingSection ? 'grid-cols-3' : 'grid-cols-4')}>
               <TabsTrigger value="video" className="gap-1.5">
                 <Video className="size-3.5" strokeWidth={1.75} />
                 视频
@@ -685,25 +651,28 @@ export function CourseEditPage() {
               <TabsTrigger value="notes">讲义</TabsTrigger>
               <TabsTrigger value="problems">
                 题目
-                {activeChapter.pids.length ? <span className="tabular-nums text-muted-foreground">{activeChapter.pids.length}</span> : null}
+                {unitPids.length ? <span className="tabular-nums text-muted-foreground">{unitPids.length}</span> : null}
               </TabsTrigger>
-              <TabsTrigger value="sections">
-                小节
-                {activeChapter.sections.length ? (
-                  <span className="tabular-nums text-muted-foreground">{activeChapter.sections.length}</span>
-                ) : null}
-              </TabsTrigger>
-              <TabsTrigger value="more">更多</TabsTrigger>
+              {editingSection ? null : (
+                <TabsTrigger value="links" className="gap-1.5">
+                  <Link2 className="size-3.5" strokeWidth={1.75} />
+                  关联
+                </TabsTrigger>
+              )}
             </TabsList>
 
             <TabsContent value="video" className="space-y-3">
               <CourseVideoEditor
-                key={`chapter-video-${activeChapter._id}`}
+                key={editingSection ? `section-video-${activeChapter._id}-${editingSection._id}` : `chapter-video-${activeChapter._id}`}
                 courseId={tid}
                 chapterId={activeChapter._id}
-                sectionId={null}
-                videos={activeChapter.videos || []}
-                onChange={(videos) => updateChapter(activeChapter._id, { videos })}
+                sectionId={editingSection ? editingSection._id : null}
+                videos={unitVideos}
+                onChange={(videos) =>
+                  editingSection
+                    ? updateSection(activeChapter._id, editingSection._id, { videos })
+                    : updateChapter(activeChapter._id, { videos })
+                }
                 locked={!isEdit || !tid}
               />
             </TabsContent>
@@ -711,156 +680,49 @@ export function CourseEditPage() {
             <TabsContent value="notes">
               <section data-course-slot="chapterContent" aria-labelledby="chapter-content-title">
                 <h3 id="chapter-content-title" className="sr-only">
-                  章节讲义
+                  {editingSection ? '小节讲义' : '章节讲义'}
                 </h3>
                 <MarkdownEditor
-                  key={activeChapter._id}
-                  value={activeChapter.content}
-                  onChange={(content) => updateChapter(activeChapter._id, { content })}
+                  key={editingSection ? `${activeChapter._id}-${editingSection._id}` : activeChapter._id}
+                  value={editingSection ? editingSection.content : activeChapter.content}
+                  onChange={(content) =>
+                    editingSection
+                      ? updateSection(activeChapter._id, editingSection._id, { content })
+                      : updateChapter(activeChapter._id, { content })
+                  }
                   minHeight={280}
                 />
               </section>
             </TabsContent>
 
             <TabsContent value="problems">
-              <ProblemPicker value={activeChapter.pids} onChange={(pids) => updateChapterPids(activeChapter._id, pids)} />
+              <ProblemPicker
+                value={unitPids}
+                onChange={(pids) =>
+                  editingSection
+                    ? updateSectionPids(activeChapter._id, editingSection._id, pids)
+                    : updateChapterPids(activeChapter._id, pids)
+                }
+              />
             </TabsContent>
 
-            <TabsContent value="sections" className="space-y-3">
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-sm text-muted-foreground">把一章拆成若干讲。每节都可以单独上传视频。</p>
-                <Button type="button" variant="outline" size="sm" className="h-9 gap-1" onClick={() => addSection(activeChapter._id)}>
-                  <Plus className="size-3.5" strokeWidth={2} />
-                  添加小节
-                </Button>
-              </div>
-              {activeChapter.sections.length ? (
-                <div className="space-y-4">
-                  {activeChapter.sections.map((section, sectionIndex) => (
-                    <article
-                      key={section._id}
-                      className={cn('space-y-4 rounded-xl border bg-card p-4 shadow-sm', activeSectionId === section._id ? 'ring-2 ring-ring' : '')}
-                    >
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-xs tabular-nums text-muted-foreground">
-                          {activeIndex + 1}.{sectionIndex + 1}
-                        </span>
-                        <Input
-                          value={section.title}
-                          onChange={(event) => updateSection(activeChapter._id, section._id, { title: event.target.value })}
-                          required
-                          placeholder="小节标题"
-                          className="min-h-10 min-w-40 flex-1"
-                        />
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="size-8"
-                          disabled={sectionIndex === 0}
-                          onClick={() => moveSection(activeChapter._id, section._id, -1)}
-                          aria-label={`上移${section.title}`}
-                        >
-                          <ArrowUp className="size-3.5" strokeWidth={1.75} />
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="size-8"
-                          disabled={sectionIndex === activeChapter.sections.length - 1}
-                          onClick={() => moveSection(activeChapter._id, section._id, 1)}
-                          aria-label={`下移${section.title}`}
-                        >
-                          <ArrowDown className="size-3.5" strokeWidth={1.75} />
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="size-8 text-destructive hover:bg-destructive/10"
-                          onClick={() => removeSection(activeChapter._id, section._id)}
-                          aria-label={`删除${section.title}`}
-                        >
-                          <Trash2 className="size-3.5" strokeWidth={1.75} />
-                        </Button>
-                      </div>
-                      <CourseVideoEditor
-                        key={`section-video-${activeChapter._id}-${section._id}`}
-                        courseId={tid}
-                        chapterId={activeChapter._id}
-                        sectionId={section._id}
-                        videos={section.videos || []}
-                        onChange={(videos) => updateSection(activeChapter._id, section._id, { videos })}
-                        locked={!isEdit || !tid}
-                      />
-                      <details className="rounded-lg border">
-                        <summary className="cursor-pointer list-none px-3 py-2 text-sm font-medium [&::-webkit-details-marker]:hidden">
-                          讲义与题目
-                        </summary>
-                        <div className="space-y-3 border-t p-3">
-                          <MarkdownEditor
-                            key={`${activeChapter._id}-${section._id}`}
-                            value={section.content}
-                            onChange={(content) => updateSection(activeChapter._id, section._id, { content })}
-                            minHeight={160}
-                          />
-                          <ProblemPicker value={section.pids} onChange={(pids) => updateSectionPids(activeChapter._id, section._id, pids)} />
-                        </div>
-                      </details>
-                    </article>
-                  ))}
-                </div>
-              ) : (
-                <Card>
-                  <CardContent className="py-10 text-center text-sm text-muted-foreground">还没有小节。消防课一类的内容可以按节拆开，每节一个视频。</CardContent>
-                </Card>
-              )}
-            </TabsContent>
-
-            <TabsContent value="more" className="space-y-4">
-              <section className="space-y-3" aria-labelledby="chapter-contests-title">
-                <h3 id="chapter-contests-title" className="text-sm font-medium">
-                  比赛或作业
-                </h3>
-                <ContestRefInput value={activeChapter.tids} onChange={(tids) => updateChapter(activeChapter._id, { tids })} />
-              </section>
-              <section className="space-y-3" aria-labelledby="chapter-problem-set-title">
-                <h3 id="chapter-problem-set-title" className="text-sm font-medium">
-                  题集
-                </h3>
-                <label className="space-y-1 text-sm">
-                  题集 ID
-                  <Input
-                    value={activeChapter.problemSetId}
-                    onChange={(event) => updateChapter(activeChapter._id, { problemSetId: event.target.value })}
-                    placeholder="可选"
-                  />
-                </label>
-                <label className="space-y-1 text-sm">
-                  阶段 ID
-                  <Input
-                    value={activeChapter.stageIds}
-                    onChange={(event) => updateChapter(activeChapter._id, { stageIds: event.target.value })}
-                    placeholder="逗号分隔，可空"
-                  />
-                </label>
-              </section>
-              <section data-course-slot="quiz" className="flex flex-wrap items-center gap-3">
-                {isEdit && data.canCreateQuiz && saveState === 'idle' ? (
-                  <Button asChild type="button" variant="outline" className="h-10 gap-1.5">
-                    <a href={`/homework/create?fromCourse=${encodeURIComponent(tid)}&chapter=${activeChapter._id}`}>
-                      <ClipboardPlus className="size-4" strokeWidth={1.75} />
-                      为本章建小测
-                    </a>
-                  </Button>
-                ) : isEdit && data.canCreateQuiz ? (
-                  <p className="text-sm text-muted-foreground">请先保存，再创建小测。</p>
-                ) : !isEdit ? (
-                  <p className="text-sm text-muted-foreground">保存课程后可创建小测。</p>
-                ) : null}
-              </section>
-            </TabsContent>
+            {editingSection ? null : (
+              <TabsContent value="links">
+                <ChapterLinks
+                  courseId={tid}
+                  chapterId={activeChapter._id}
+                  tids={activeChapter.tids}
+                  problemSetId={activeChapter.problemSetId || ''}
+                  stageIds={activeChapter.stageIds || ''}
+                  onChangeTids={(tids) => updateChapter(activeChapter._id, { tids })}
+                  onChangeProblemSet={(nextProblemSetId, nextStageIds) =>
+                    updateChapter(activeChapter._id, { problemSetId: nextProblemSetId, stageIds: nextStageIds })
+                  }
+                  canCreateQuiz={Boolean(isEdit && data.canCreateQuiz)}
+                  quizNeedsSave={saveState !== 'idle'}
+                />
+              </TabsContent>
+            )}
           </Tabs>
         </section>
 
@@ -907,41 +769,23 @@ export function CourseEditPage() {
           </SettingsGroup>
 
           <SettingsGroup title="可见班级" icon={Users}>
-            <ScrollArea className="krypton-course-inset max-h-52">
-              <div className="space-y-0.5 p-1.5">
-                {activeGroups.length ? (
-                  activeGroups.map((group) => (
-                    <label
-                      key={group._id}
-                      className={cn(
-                        'flex min-h-10 cursor-pointer items-center gap-2.5 rounded-lg px-2 text-xs',
-                        'transition-colors duration-150 hover:bg-background/70 motion-reduce:transition-none',
-                      )}
-                    >
-                      <Checkbox
-                        checked={selectedGroups.has(group._id)}
-                        onChange={() => {
-                          setSelectedGroups((current) => {
-                            const next = new Set(current);
-                            if (next.has(group._id)) next.delete(group._id);
-                            else next.add(group._id);
-                            return next;
-                          });
-                          markDirty();
-                        }}
-                      />
-                      <span className="min-w-0 truncate">
-                        {group.name}
-                        {group.archivedAt ? '（已归档）' : ''}
-                      </span>
-                    </label>
-                  ))
-                ) : (
-                  <p className="px-2 py-3 text-sm text-muted-foreground">没有班级时，课程对全站可见。</p>
-                )}
-              </div>
-            </ScrollArea>
-            {selectedGroups.size ? <p className="text-sm text-muted-foreground">已选 {selectedGroups.size} 个</p> : null}
+            <MultiSelect<(typeof activeGroups)[number]>
+              options={activeGroups}
+              value={activeGroups.filter((group) => selectedGroups.has(group._id))}
+              onChange={(next) => {
+                setSelectedGroups(new Set(next.map((group) => group._id)));
+                markDirty();
+              }}
+              getKey={(group) => group._id}
+              getLabel={(group) => (group.archivedAt ? `${group.name}（已归档）` : group.name)}
+              name="courseGroupIds"
+              placeholder="搜索班级"
+              emptyText="没有匹配的班级"
+              minHeight={44}
+            />
+            <p className="text-xs text-muted-foreground">
+              {selectedGroups.size ? `已选 ${selectedGroups.size} 个班级` : '未选班级时，课程对全站可见。'}
+            </p>
           </SettingsGroup>
 
           {isEdit && tid ? (
@@ -1037,6 +881,9 @@ export function CourseEditPage() {
               onSelect={selectFromMobile}
               onMove={moveChapter}
               onRemove={removeChapter}
+              onAddSection={addSection}
+              onMoveSection={moveSection}
+              onRemoveSection={removeSection}
             />
           </SheetBody>
         </SheetContent>

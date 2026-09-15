@@ -38,10 +38,12 @@ describe('p3.8 course workspace', () => {
     expect(() => readFileSync(resolve(root, 'src/pages/course.tsx'))).to.throw();
     const detail = readFileSync(resolve(root, 'src/pages/course/detail.tsx'), 'utf8');
     const editor = readFileSync(resolve(root, 'src/pages/course/editor.tsx'), 'utf8');
-    for (const slot of ['chapterContent', 'files', 'quiz']) {
+    for (const slot of ['chapterContent', 'files']) {
       expect(detail).to.include(`data-course-slot="${slot}"`);
       expect(editor).to.include(`data-course-slot="${slot}"`);
     }
+    expect(detail).to.include('data-course-slot="quiz"');
+    expect(editor).to.include("from './chapter-links'");
     expect(editor).to.include('data-course-slot="collaborators"');
     expect(editor).to.include('CourseAssignForm');
     const assign = readFileSync(resolve(root, 'src/pages/course/assign.tsx'), 'utf8');
@@ -56,7 +58,20 @@ describe('p3.8 course workspace', () => {
     expect(editor).not.to.include('课程简介在页面底部整幅编辑');
     expect(editor).to.match(/<section className="min-w-0 space-y-5"[\s\S]*course-description-title[\s\S]*章节内容/);
     expect(editor).to.include('TabsTrigger value="video"');
+    expect(editor).to.include('TabsTrigger value="links"');
+    expect(editor).not.to.include('TabsTrigger value="more"');
+    expect(editor).not.to.include('TabsTrigger value="sections"');
     expect(editor).to.include('CourseVideoEditor');
+    expect(editor).to.include('onAddSection');
+    expect(editor).to.include('<MultiSelect');
+    expect(editor).to.include('name="courseGroupIds"');
+    const outline = readFileSync(resolve(root, 'src/pages/course/chapter-outline.tsx'), 'utf8');
+    expect(outline).to.include('添加小节');
+    expect(outline).to.include('onAddSection');
+    const links = readFileSync(resolve(root, 'src/pages/course/chapter-links.tsx'), 'utf8');
+    expect(links).to.include('data-course-slot="quiz"');
+    expect(links).to.include('搜索比赛或作业标题');
+    expect(links).to.include('搜索题集标题');
   });
 
   it('uses server capabilities, true totals, enrollment status, and one active chapter', () => {
@@ -79,6 +94,12 @@ describe('p3.8 course workspace', () => {
     expect(detail).to.include('const activeChapter = chapters.find');
     expect(detail).to.include('selectSection');
     expect(detail).to.include('本章小节');
+    expect(detail).to.include('view=roster');
+    expect(detail).to.include('布置收集');
+    expect(detail).to.include('创建小测');
+    expect(detail).not.to.include('创建本章小测');
+    expect(handler).to.include("view === 'roster'");
+    expect(handler).to.include('canViewRoster');
     expect(detail).to.not.include('chapters.map((ch');
   });
 
@@ -102,10 +123,9 @@ describe('p3.8 course workspace', () => {
   it('edits and renders chapter markdown through the chapterContent slot', () => {
     const editor = readFileSync(resolve(root, 'src/pages/course/editor.tsx'), 'utf8');
     const detail = readFileSync(resolve(root, 'src/pages/course/detail.tsx'), 'utf8');
-    expect(editor).to.include('key={activeChapter._id}');
-    expect(editor).to.include('value={activeChapter.content}');
+    expect(editor).to.include('activeChapter.content');
+    expect(editor).to.include('editingSection.content');
     expect(editor).to.include('{ content }');
-    expect(editor).to.include('添加小节');
     expect(editor).to.include("from './chapter-draft'");
     expect(editor).to.include("claimChapterProblemIds(chapter, 'loose', pids)");
     expect(editor).to.include('claimChapterProblemIds(chapter, sectionId, pids)');
@@ -165,13 +185,16 @@ describe('p3.8 course workspace', () => {
   it('connects both quiz slots to the course-homework prefill route', () => {
     const detail = readFileSync(resolve(root, 'src/pages/course/detail.tsx'), 'utf8');
     const editor = readFileSync(resolve(root, 'src/pages/course/editor.tsx'), 'utf8');
-    for (const source of [detail, editor]) {
-      expect(source).to.include('/homework/create?fromCourse=');
-      expect(source).to.match(/&chapter=\$\{activeChapter\._id\}/);
-    }
+    const links = readFileSync(resolve(root, 'src/pages/course/chapter-links.tsx'), 'utf8');
+    expect(detail).to.include('/homework/create?fromCourse=');
+    expect(detail).to.match(/&chapter=\$\{activeChapter\._id\}/);
+    expect(links).to.include('/homework/create?fromCourse=');
+    expect(links).to.match(/&chapter=\$\{chapterId\}/);
     expect(detail).to.include('data.canCreateQuiz');
-    expect(editor).to.include("isEdit && data.canCreateQuiz && saveState === 'idle'");
+    expect(editor).to.include('canCreateQuiz={Boolean(isEdit && data.canCreateQuiz)}');
+    expect(editor).to.include("quizNeedsSave={saveState !== 'idle'}");
     expect(editor).to.include('请先保存课程修改');
+    expect(links).to.include('请先保存课程修改，再创建小测。');
   });
 
   it('keeps course context and participant groups in the homework form post', () => {

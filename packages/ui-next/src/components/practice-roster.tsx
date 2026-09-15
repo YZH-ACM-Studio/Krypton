@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { SimpleSelect } from '@/components/ui/select';
+import { cn } from '@/lib/cn';
 
 export interface PracticeRosterMember {
   uid: number;
@@ -107,12 +108,14 @@ export function PracticeRosterCard({
   title,
   truncated,
   visibleGroupIds,
+  className,
 }: {
   members: PracticeRosterMember[];
   problems?: PracticeRosterProblem[];
   title: string;
   truncated?: boolean;
   visibleGroupIds?: string[];
+  className?: string;
 }) {
   const [query, setQuery] = useState('');
   const [groupFilter, setGroupFilter] = useState('');
@@ -169,7 +172,7 @@ export function PracticeRosterCard({
   };
 
   return (
-    <Card className="mt-4">
+    <Card className={cn('mt-4', className)}>
       <CardHeader className="pb-2">
         <div className="flex flex-wrap items-center gap-2">
           <CardTitle className="text-sm">参加名单</CardTitle>

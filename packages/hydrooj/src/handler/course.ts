@@ -567,8 +567,10 @@ class CourseDetailHandler extends Handler {
         problem.assertProblemAclDomain(this.user, domainId);
         const tdoc = await training.get(domainId, tid);
         if (!isCourseKind(tdoc.kind)) throw new ValidationError('tid', null, localizedErrorText`Not a course`);
-        const activeView = view === 'mindmap' ? 'mindmap' : 'overview';
+        const activeView = view === 'mindmap' ? 'mindmap' : view === 'roster' ? 'roster' : 'overview';
         const canManage = canManageCourse(this.user, tdoc, PERM.PERM_EDIT_COURSE);
+        const canViewRoster = this.user.hasPerm(PERM.PERM_USERBIND_MANAGE_STUDENTS);
+        if (activeView === 'roster' && !canViewRoster) throw new PermissionError(PERM.PERM_USERBIND_MANAGE_STUDENTS);
         // 可见性拦截（非管理者且不属于课程班级 → 拒绝）。
         if (!canManage && (tdoc.courseGroupIds || []).length) {
             const myGroups = await courseUserGroupIds(domainId, this.user._id);
@@ -584,11 +586,11 @@ class CourseDetailHandler extends Handler {
         // 解析章节引用的所有比赛。
         const allTids = Array.from(new Set<string>(tdoc.dag.flatMap((n) => (n.tids || []).map((t) => String(t))))).map((s) => new ObjectId(s));
         const overviewData =
-            activeView === 'overview'
+            activeView === 'overview' || activeView === 'roster'
                 ? Promise.all([
                       getVisibleReferencedProblems(domainId, pids, this.user),
-                      this.user.hasPriv(PRIV.PRIV_USER_PROFILE) ? problem.getListStatus(domainId, this.user._id, pids) : {},
-                      allTids.length
+                      activeView === 'overview' && this.user.hasPriv(PRIV.PRIV_USER_PROFILE) ? problem.getListStatus(domainId, this.user._id, pids) : {},
+                      activeView === 'overview' && allTids.length
                           ? contest
                                 .getMulti(domainId, { docId: { $in: allTids } })
                                 .project({ docId: 1, title: 1, rule: 1, beginAt: 1, endAt: 1 })
@@ -746,8 +748,9 @@ class CourseDetailHandler extends Handler {
             view: activeView,
             courseMindmap,
             integrityControlled: !!publishedIntegrity,
+            canViewRoster,
         };
-        if (activeView === 'overview' && this.user.hasPerm(PERM.PERM_USERBIND_MANAGE_STUDENTS)) {
+        if (activeView === 'roster') {
             const ub = global.Hydro?.model?.userbind;
             const courseGroups = tdoc.courseGroupIds || [];
             let memberUids: number[] = [];

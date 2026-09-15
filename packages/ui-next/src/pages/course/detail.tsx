@@ -13,6 +13,7 @@ import {
   ListTree,
   Pencil,
   Trophy,
+  Users,
 } from 'lucide-react';
 import { useState } from 'react';
 import { MarkdownView } from '@/components/markdown-renderer';
@@ -163,61 +164,39 @@ function ProblemList({
 function CollectRequestList({
   requests,
   canManage,
-  canCreate,
-  courseId,
-  chapterId,
 }: {
   requests: CourseCollectRequest[];
   canManage: boolean;
-  canCreate: boolean;
-  courseId: string;
-  chapterId: number;
 }) {
-  if (!requests.length && !canCreate) return null;
+  if (!requests.length) return <div data-course-slot="collect" />;
   return (
     <section data-course-slot="collect" aria-labelledby="course-collect-title" className="space-y-3">
-      {requests.length ? (
-        <>
-          <h3 id="course-collect-title" className="text-sm font-medium">
-            文件收集
-          </h3>
-          <ul className="grid gap-2 sm:grid-cols-2">
-            {requests.map((request) => {
-              const href = canManage ? `/admin/collect/${request._id}` : `/collect/${request._id}`;
-              return (
-                <li key={request._id}>
-                  <a href={href} className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                    <Card className="transition-colors hover:bg-muted/40">
-                      <CardContent className="flex min-h-11 items-center gap-3 p-3">
-                        <FolderInput className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.75} />
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-sm font-medium">{request.title}</span>
-                          <span className="text-xs text-muted-foreground">
-                            {collectStatusLabel(request.status, request.dueAt)} · <DateTime value={request.dueAt} mode="datetime" />
-                          </span>
-                        </span>
-                        <ChevronRight className="size-4 shrink-0 text-muted-foreground/50" strokeWidth={1.75} />
-                      </CardContent>
-                    </Card>
-                  </a>
-                </li>
-              );
-            })}
-          </ul>
-        </>
-      ) : (
-        <h3 id="course-collect-title" className="sr-only">
-          文件收集
-        </h3>
-      )}
-      {canCreate ? (
-        <Button asChild variant="ghost" size="sm" className="h-9 gap-1.5">
-          <a href={`/admin/collect/create?fromCourse=${encodeURIComponent(courseId)}&chapter=${chapterId}`}>
-            <FolderInput className="size-4" strokeWidth={1.75} />
-            布置文件收集
-          </a>
-        </Button>
-      ) : null}
+      <h3 id="course-collect-title" className="text-sm font-medium">
+        文件收集
+      </h3>
+      <ul className="grid gap-2 sm:grid-cols-2">
+        {requests.map((request) => {
+          const href = canManage ? `/admin/collect/${request._id}` : `/collect/${request._id}`;
+          return (
+            <li key={request._id}>
+              <a href={href} className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                <Card className="transition-colors hover:bg-muted/40">
+                  <CardContent className="flex min-h-11 items-center gap-3 p-3">
+                    <FolderInput className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.75} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium">{request.title}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {collectStatusLabel(request.status, request.dueAt)} · <DateTime value={request.dueAt} mode="datetime" />
+                      </span>
+                    </span>
+                    <ChevronRight className="size-4 shrink-0 text-muted-foreground/50" strokeWidth={1.75} />
+                  </CardContent>
+                </Card>
+              </a>
+            </li>
+          );
+        })}
+      </ul>
     </section>
   );
 }
@@ -314,9 +293,10 @@ export function CourseDetailPage() {
     canDownloadFiles: boolean;
     tsdoc?: CourseRecord;
     files: CourseFile[];
-    view: 'overview' | 'mindmap';
+    view: 'overview' | 'mindmap' | 'roster';
     courseMindmap: CourseMindmapData | null;
     integrityControlled?: boolean;
+    canViewRoster?: boolean;
     members?: PracticeRosterMember[];
     membersTruncated?: boolean;
     rosterProblems?: PracticeRosterProblem[];
@@ -330,7 +310,7 @@ export function CourseDetailPage() {
   const activeChapter = chapters.find((chapter) => chapter._id === activeId) || chapters[0];
   const chapterSections = activeChapter?.sections || [];
   const activeSection = chapterSections.find((section) => section._id === activeSectionId) || null;
-  const activeView = data.view === 'mindmap' ? 'mindmap' : 'overview';
+  const activeView = data.view === 'mindmap' ? 'mindmap' : data.view === 'roster' ? 'roster' : 'overview';
   const [outlineOpen, setOutlineOpen] = useState(false);
   const chapterIndex = chapters.findIndex((chapter) => chapter._id === activeChapter?._id);
 
@@ -441,6 +421,18 @@ export function CourseDetailPage() {
         >
           知识导图
         </a>
+        {data.canViewRoster ? (
+          <a
+            href={`/course/${tid}?view=roster`}
+            className={cn(
+              'inline-flex items-center gap-1.5 rounded-md px-3 py-1 text-sm font-medium',
+              activeView === 'roster' && 'bg-background text-foreground shadow',
+            )}
+          >
+            <Users className="size-3.5" strokeWidth={1.75} />
+            名单
+          </a>
+        ) : null}
       </div>
 
       {activeView === 'mindmap' ? (
@@ -449,6 +441,15 @@ export function CourseDetailPage() {
           data={data.courseMindmap || null}
           canManage={data.canManage}
           integrityControlled={data.integrityControlled === true}
+        />
+      ) : activeView === 'roster' ? (
+        <PracticeRosterCard
+          className="mt-0"
+          members={Array.isArray(data.members) ? data.members : []}
+          problems={Array.isArray(data.rosterProblems) ? data.rosterProblems : []}
+          title={course.title || '课程'}
+          truncated={!!data.membersTruncated}
+          visibleGroupIds={Array.isArray(data.rosterGroupIds) ? data.rosterGroupIds : undefined}
         />
       ) : !chapters.length ? (
         <Card>
@@ -510,20 +511,40 @@ export function CourseDetailPage() {
                   切换章节
                 </Button>
               </div>
-              {(activeSection ? activeSection.totalCount : activeChapter.totalCount) ? (
-                <div className="flex shrink-0 items-center gap-3">
-                  <CourseProgressRing
-                    value={activeSection ? activeSection.progress : activeChapter.progress}
-                    size={48}
-                    thickness={5}
-                    label={`${activeSection ? '本小节' : '本章'}完成进度 ${activeSection ? activeSection.progress : activeChapter.progress}%`}
-                  />
-                  <p className="text-sm tabular-nums text-muted-foreground">
-                    {activeSection ? activeSection.doneCount : activeChapter.doneCount}/
-                    {activeSection ? activeSection.totalCount : activeChapter.totalCount}
-                  </p>
-                </div>
-              ) : null}
+              <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                {(activeSection ? activeSection.totalCount : activeChapter.totalCount) ? (
+                  <div className="flex items-center gap-3 pr-1">
+                    <CourseProgressRing
+                      value={activeSection ? activeSection.progress : activeChapter.progress}
+                      size={48}
+                      thickness={5}
+                      label={`${activeSection ? '本小节' : '本章'}完成进度 ${activeSection ? activeSection.progress : activeChapter.progress}%`}
+                    />
+                    <p className="text-sm tabular-nums text-muted-foreground">
+                      {activeSection ? activeSection.doneCount : activeChapter.doneCount}/
+                      {activeSection ? activeSection.totalCount : activeChapter.totalCount}
+                    </p>
+                  </div>
+                ) : null}
+                {!activeSection && data.canCreateCollect ? (
+                  <Button asChild variant="outline" size="sm" className="h-9 gap-1.5">
+                    <a href={`/admin/collect/create?fromCourse=${encodeURIComponent(tid)}&chapter=${activeChapter._id}`}>
+                      <FolderInput className="size-3.5" strokeWidth={1.75} />
+                      布置收集
+                    </a>
+                  </Button>
+                ) : null}
+                <span data-course-slot="quiz">
+                  {!activeSection && data.canCreateQuiz ? (
+                    <Button asChild variant="outline" size="sm" className="h-9 gap-1.5">
+                      <a href={`/homework/create?fromCourse=${encodeURIComponent(tid)}&chapter=${activeChapter._id}`}>
+                        <ClipboardPlus className="size-3.5" strokeWidth={1.75} />
+                        创建小测
+                      </a>
+                    </Button>
+                  ) : null}
+                </span>
+              </div>
             </div>
 
             {activeSection ? (
@@ -637,9 +658,6 @@ export function CourseDetailPage() {
             <CollectRequestList
               requests={collectRequests.filter((request) => request.chapterId === activeChapter._id)}
               canManage={data.canManage}
-              canCreate={data.canCreateCollect === true}
-              courseId={tid}
-              chapterId={activeChapter._id}
             />
             {data.canDownloadFiles && data.files?.length ? (
               <section data-course-slot="files" aria-labelledby="course-files-title" className="space-y-3">
@@ -664,17 +682,6 @@ export function CourseDetailPage() {
             ) : (
               <div data-course-slot="files" />
             )}
-            <section data-course-slot="quiz">
-              {data.canCreateQuiz ? (
-                <Button asChild variant="ghost" size="sm" className="h-9 gap-1.5">
-                  <a href={`/homework/create?fromCourse=${encodeURIComponent(tid)}&chapter=${activeChapter._id}`}>
-                    <ClipboardPlus className="size-4" strokeWidth={1.75} />
-                    创建本章小测
-                  </a>
-                </Button>
-              ) : null}
-            </section>
-
             {!course.content &&
             !activeChapter.content &&
             !(activeChapter.videos || []).length &&
@@ -697,16 +704,6 @@ export function CourseDetailPage() {
           </article>
         </div>
       )}
-
-      {activeView === 'overview' && Array.isArray(data.members) ? (
-        <PracticeRosterCard
-          members={data.members}
-          problems={Array.isArray(data.rosterProblems) ? data.rosterProblems : []}
-          title={course.title || '课程'}
-          truncated={!!data.membersTruncated}
-          visibleGroupIds={Array.isArray(data.rosterGroupIds) ? data.rosterGroupIds : undefined}
-        />
-      ) : null}
 
       <Sheet open={outlineOpen} onOpenChange={setOutlineOpen}>
         <SheetContent side="left" className="w-[22rem] max-w-[calc(100vw-1rem)]">

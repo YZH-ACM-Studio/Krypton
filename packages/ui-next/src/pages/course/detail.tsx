@@ -29,8 +29,16 @@ import { cn } from '@/lib/cn';
 import { practiceProblemEntryUrl } from '@/lib/practice-integrity';
 import { ChapterOutline } from './chapter-outline';
 import { useChapterQuery } from './chapter-query';
+import { CourseExamCard } from './course-exam-card';
 import { CourseMindmapView } from './mindmap';
-import type { CourseChapter, CourseFile, CourseMindmapData, CourseRecord } from './types';
+import {
+  readCourseExam,
+  readCourseExamContest,
+  type CourseChapter,
+  type CourseFile,
+  type CourseMindmapData,
+  type CourseRecord,
+} from './types';
 import { CourseMark, CourseProgressRing } from './ui';
 import { CourseVideoPlaylist } from './video-player';
 
@@ -302,10 +310,13 @@ export function CourseDetailPage() {
     membersTruncated?: boolean;
     rosterProblems?: PracticeRosterProblem[];
     rosterGroupIds?: string[];
+    courseExamContest?: unknown;
   };
   const course = data.tdoc || {};
   const tid = String(course.docId || course._id);
   const chapters = data.chapters || [];
+  const courseExam = readCourseExam(course.courseExam);
+  const courseExamContest = readCourseExamContest(data.courseExamContest);
   const collectRequests = readCourseCollectRequests(data.collectRequests);
   const { activeId, activeSectionId, selectChapter, selectSection } = useChapterQuery(chapters);
   const activeChapter = chapters.find((chapter) => chapter._id === activeId) || chapters[0];
@@ -441,6 +452,16 @@ export function CourseDetailPage() {
           </a>
         ) : null}
       </div>
+
+      {activeView === 'overview' ? (
+        <CourseExamCard
+          exam={courseExam}
+          contest={courseExamContest}
+          chapters={chapters}
+          canManage={data.canManage}
+          className="mb-6"
+        />
+      ) : null}
 
       {activeView === 'mindmap' ? (
         <CourseMindmapView

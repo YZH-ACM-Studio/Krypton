@@ -491,6 +491,12 @@ export async function apply(ctx: Context) {
         { key: { domainId: 1, docType: 1, rule: 1, docId: -1 }, name: 'contestRule', sparse: true },
         // For training
         { key: { domainId: 1, docType: 1, 'dag.pids': 1 }, name: 'training', sparse: true },
+        {
+            key: { domainId: 1, 'courseExam.contestId': 1 },
+            name: 'courseExamContest',
+            unique: true,
+            partialFilterExpression: { docType: TYPE_TRAINING, kind: 'course', 'courseExam.contestId': { $exists: true } },
+        },
     );
     await db.ensureIndexes(
         collStatus,

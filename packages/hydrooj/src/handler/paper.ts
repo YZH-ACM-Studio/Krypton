@@ -42,6 +42,7 @@ import {
 } from 'hydrooj';
 import { ContestClientFinishedError, ContestNotLiveError, ContestTeamConflictError } from '../error';
 import { getPostContestPracticeState, isPostContestPracticeRule } from '../lib/contest-correction';
+import { assertCourseExamWatchGate } from '../lib/course-exam-gate';
 import { buildExamModeRecordCodePayload } from '../lib/exam-mode-record';
 import * as contest from '../model/contest';
 import * as contestTeam from '../model/contest-team';
@@ -214,6 +215,7 @@ class PaperBaseHandler extends Handler {
         if (!isAdminBypass && contest.isClientRequired(this.tdoc) && contest.isClientFinished(tsdoc)) {
             throw new ContestClientFinishedError();
         }
+        await assertCourseExamWatchGate({ domainId: authoritativeDomainId, user: this.user, contest: this.tdoc });
         if (!isAdminBypass && contest.isOngoing(this.tdoc, tsdoc)) {
             if (!tsdoc?.attend) {
                 try {
@@ -389,6 +391,7 @@ async function ensureExamModeAccess(handler: Handler | ConnectionHandler, domain
     if (!isAdminBypass && contest.isClientRequired(tdoc) && contest.isClientFinished(tsdoc)) {
         throw new ContestClientFinishedError();
     }
+    await assertCourseExamWatchGate({ domainId, user: handler.user, contest: tdoc });
     if (!isAdminBypass && contest.isOngoing(tdoc, tsdoc)) {
         if (!tsdoc?.attend) {
             await contest.attend(domainId, tid, handler.user._id, { subscribe: 1 });

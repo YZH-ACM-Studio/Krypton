@@ -1,5 +1,19 @@
 import type { KnowledgeMap, MindmapNode } from '../mindmap/types';
 
+export type CourseExamGate = 'percent' | 'chapter' | 'all';
+
+export interface CourseExamBinding {
+  contestId?: string;
+  gate?: CourseExamGate;
+  percent?: number;
+  chapterId?: number;
+}
+
+export interface CourseExamContestPreview {
+  docId: string;
+  title: string;
+}
+
 export interface CourseRecord {
   _id?: string | number;
   docId?: string | number;
@@ -11,6 +25,7 @@ export interface CourseRecord {
   content?: string;
   courseGroupIds?: Array<string | number>;
   courseHidden?: boolean;
+  courseExam?: CourseExamBinding;
   courseVideoDueAt?: string | Date | null;
   dag?: unknown[];
   enroll?: boolean;
@@ -18,6 +33,51 @@ export interface CourseRecord {
   rule?: string;
   uname?: string;
   mindmapId?: string | number;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** Accept a hex string or Mongo extended-JSON `{ $oid }`. */
+export function readCourseExamDocumentId(value: unknown): string {
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  if (typeof value === 'number' && Number.isSafeInteger(value)) return String(value);
+  if (isPlainRecord(value) && typeof value.$oid === 'string' && value.$oid.trim()) return value.$oid.trim();
+  throw new TypeError('缺少有效 id');
+}
+
+export function readCourseExam(value: unknown): CourseExamBinding | null {
+  if (value === undefined || value === null) return null;
+  if (!isPlainRecord(value)) throw new TypeError('courseExam must be an object');
+  const contestId = readCourseExamDocumentId(value.contestId);
+  const gate = value.gate;
+  if (gate !== 'percent' && gate !== 'chapter' && gate !== 'all') {
+    throw new TypeError('courseExam.gate is invalid');
+  }
+  if (gate === 'percent') {
+    const percent = value.percent;
+    if (typeof percent !== 'number' || !Number.isInteger(percent) || percent < 1 || percent > 100) {
+      throw new TypeError('courseExam.percent is invalid');
+    }
+    return { contestId, gate, percent };
+  }
+  if (gate === 'chapter') {
+    const chapterId = value.chapterId;
+    if (typeof chapterId !== 'number' || !Number.isSafeInteger(chapterId)) {
+      throw new TypeError('courseExam.chapterId is invalid');
+    }
+    return { contestId, gate, chapterId };
+  }
+  return { contestId, gate };
+}
+
+export function readCourseExamContest(value: unknown): CourseExamContestPreview | null {
+  if (value === undefined || value === null) return null;
+  if (!isPlainRecord(value)) throw new TypeError('courseExamContest must be an object');
+  const docId = readCourseExamDocumentId(value.docId ?? value._id);
+  const title = typeof value.title === 'string' && value.title.trim() ? value.title.trim() : '结业考试';
+  return { docId, title };
 }
 
 export interface CourseFile {

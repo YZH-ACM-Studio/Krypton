@@ -1,7 +1,9 @@
 import { ObjectId } from 'mongodb';
 import { localizedErrorText, NotFoundError, OplogModel, ValidationError } from 'hydrooj';
 import type { Handler } from 'hydrooj';
+import { assertCourseExamWatchGate } from './course-exam-gate';
 import * as contestModel from '../model/contest';
+import user from '../model/user';
 
 export async function ensureVigilContestParticipation(handler: Handler, domainId: string, contestId: string | undefined, uid: number): Promise<void> {
     if (!contestId || !ObjectId.isValid(contestId)) throw new ValidationError('contestId');
@@ -9,6 +11,10 @@ export async function ensureVigilContestParticipation(handler: Handler, domainId
     const tid = new ObjectId(contestId);
     const tdoc = await contestModel.get(domainId, tid);
     if (!tdoc) throw new NotFoundError(localizedErrorText`Contest`, contestId);
+
+    const actor = await user.getById(domainId, uid);
+    if (!actor) throw new ValidationError('uid');
+    await assertCourseExamWatchGate({ domainId, user: actor, contest: tdoc });
 
     let tsdoc = await contestModel.getStatus(domainId, tid, uid);
     let autoAttended = false;

@@ -574,6 +574,17 @@ export interface TrainingDoc extends Omit<Tdoc, 'docType'> {
      */
     courseHidden?: boolean;
     /**
+     * 结业考试绑定。缺字段 = 未绑定。exact-key：
+     * `{ contestId, gate:'percent'|'chapter'|'all', percent?, chapterId? }`。
+     * percent 仅 gate=percent（1–100）；chapterId 仅 gate=chapter。
+     */
+    courseExam?: {
+        contestId: ObjectId;
+        gate: 'percent' | 'chapter' | 'all';
+        percent?: number;
+        chapterId?: number;
+    };
+    /**
      * Problem-set discovery audience. Missing means public legacy behaviour.
      * `public:false` with empty groupIds is redeem/course-only.
      */

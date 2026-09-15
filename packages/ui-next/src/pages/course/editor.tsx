@@ -14,6 +14,7 @@ import {
   Save,
   Shield,
   Trash2,
+  Trophy,
   Users,
   Video,
 } from 'lucide-react';
@@ -39,7 +40,16 @@ import { claimChapterProblemIds } from './chapter-draft';
 import { ChapterLinks } from './chapter-links';
 import { ChapterOutline } from './chapter-outline';
 import { useChapterQuery } from './chapter-query';
-import type { ChapterDraft, CourseAuthorVideo, CourseFile, CourseRecord, SectionDraft } from './types';
+import { CourseExamSettings } from './course-exam-settings';
+import {
+  readCourseExam,
+  readCourseExamContest,
+  type ChapterDraft,
+  type CourseAuthorVideo,
+  type CourseFile,
+  type CourseRecord,
+  type SectionDraft,
+} from './types';
 import { CourseMark } from './ui';
 import { CourseVideoEditor } from './video-editor';
 
@@ -191,10 +201,13 @@ export function CourseEditPage() {
     maintainerUsers?: DomainUserOption[];
     files: CourseFile[];
     mindmaps: Array<{ _id: string; title: string; visibility: 'public' }>;
+    courseExamContest?: unknown;
   };
   const isEdit = data.page_name === 'course_edit';
   const course = data.tdoc || {};
   const tid = String(course.docId || course._id || '');
+  const courseExam = readCourseExam(course.courseExam);
+  const courseExamContest = readCourseExamContest(data.courseExamContest);
   const parsedChapters = useMemo(() => initialChapterDrafts(data.chapters), [data.chapters]);
   const [chapters, setChapters] = useState<ChapterDraft[]>(
     parsedChapters.length
@@ -784,6 +797,20 @@ export function CourseEditPage() {
               ariaLabel="选择课程知识导图"
               className="min-h-11"
               contentClassName="[&_[role=option]]:min-h-10"
+            />
+          </SettingsGroup>
+
+          <SettingsGroup
+            id="course-exam-settings"
+            title="结业考试"
+            icon={Trophy}
+            description="绑定一场本域选择题考试。学生看完设定范围的视频后才能参加。"
+          >
+            <CourseExamSettings
+              chapters={chapters}
+              initialExam={courseExam}
+              initialContest={courseExamContest}
+              onDirty={markDirty}
             />
           </SettingsGroup>
 

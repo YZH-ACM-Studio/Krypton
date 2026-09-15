@@ -5,6 +5,7 @@
  * 复用 training model 的报名 / 进度 / 章节题目跟踪。课程额外有：
  *   - `courseGroupIds`：可见范围（userbind 班级；空 = 全域可见）
  *   - `courseHidden`：对学生隐藏（缺省可见）
+ *   - `courseExam`：可选结业考试绑定（一门课一场 exam；复制不带绑定）
  *   - 章节 `tids`：引用制挂已有比赛/作业（比赛在比赛模块独立创建）
  *   - `term`：学期等元信息
  *
@@ -18,6 +19,7 @@ import { Filter, ObjectId } from 'mongodb';
 import { Logger } from '@hydrooj/utils';
 import { sortFiles } from '@hydrooj/utils/lib/utils';
 import {
+    ContestNotFoundError,
     localizeErrorParameter,
     localizedErrorText,
     FileLimitExceededError,
@@ -41,6 +43,7 @@ import * as training from '../model/training';
 import user from '../model/user';
 import { Handler, param, post, Types } from '../service/server';
 import { canManageCourse, courseAccessibleTo, courseUserGroupIds, isCourseHidden } from '../lib/course-access';
+import { isCourseExamDuplicateKey, parseCourseExamForm, resolveCourseExamForSave } from '../lib/course-exam';
 import { courseNodePids, parseCourseSections } from '../lib/course-chapter';
 import { copiedCourseTitle } from '../lib/course-copy';
 import {
@@ -73,6 +76,28 @@ function canAssignCourse(actor: { hasPerm: (...perm: bigint[]) => boolean; hasPr
 
 function canCreateCourse(actor: { hasPerm: (...perm: bigint[]) => boolean; hasPriv: (priv: number) => boolean }) {
     return actor.hasPriv(PRIV.PRIV_EDIT_SYSTEM) || actor.hasPerm(PERM.PERM_CREATE_COURSE);
+}
+
+async function hydrateCourseExamContest(
+    domainId: string,
+    tdoc?: Pick<TrainingDoc, 'courseExam'>,
+): Promise<{ docId: string; title: string } | undefined> {
+    const contestId = tdoc?.courseExam?.contestId;
+    if (!contestId) return undefined;
+    const docId = contestId instanceof ObjectId ? contestId.toHexString() : String(contestId);
+    let oid: ObjectId;
+    try {
+        oid = contestId instanceof ObjectId ? contestId : new ObjectId(docId);
+    } catch {
+        return { docId, title: '' };
+    }
+    try {
+        const cdoc = await contest.get(domainId, oid);
+        return { docId, title: typeof cdoc.title === 'string' ? cdoc.title : '' };
+    } catch (error) {
+        if (error instanceof ContestNotFoundError) return { docId, title: '' };
+        throw error;
+    }
 }
 
 function courseChapterEditorPayload(tdoc: TrainingDoc) {
@@ -755,6 +780,8 @@ class CourseDetailHandler extends Handler {
             integrityControlled: !!publishedIntegrity,
             canViewRoster,
         };
+        const courseExamContest = await hydrateCourseExamContest(domainId, tdoc);
+        if (courseExamContest) this.response.body.courseExamContest = courseExamContest;
         if (activeView === 'roster') {
             const ub = global.Hydro?.model?.userbind;
             const courseGroups = tdoc.courseGroupIds || [];
@@ -891,6 +918,8 @@ class CourseEditHandler extends Handler {
         if (this.tdoc) {
             this.response.body.tdoc = this.tdoc;
             this.response.body.chapters = JSON.stringify(courseChapterEditorPayload(this.tdoc), null, 2);
+            const courseExamContest = await hydrateCourseExamContest(authoritativeDomainId, this.tdoc);
+            if (courseExamContest) this.response.body.courseExamContest = courseExamContest;
             if (this.response.body.canAssign) {
                 const assignUsers = await loadCourseAssignUsers(authoritativeDomainId, [this.tdoc.owner, ...(this.tdoc.maintainer || [])]);
                 this.response.body.expectedOwner = this.tdoc.owner;
@@ -912,6 +941,10 @@ class CourseEditHandler extends Handler {
     @param('mindmapId', Types.String, true)
     @param('courseVideoDueAt', Types.String, true)
     @param('courseHidden', Types.Boolean, true)
+    @param('courseExamContestId', Types.String, true)
+    @param('courseExamGate', Types.String, true)
+    @param('courseExamPercent', Types.Int, true)
+    @param('courseExamChapterId', Types.Int, true)
     async post(
         _domainId: string,
         tid: ObjectId,
@@ -924,6 +957,10 @@ class CourseEditHandler extends Handler {
         mindmapId = '',
         courseVideoDueAtRaw = '',
         courseHidden = false,
+        courseExamContestId?: string,
+        courseExamGate?: string,
+        courseExamPercent?: number,
+        courseExamChapterId?: number,
     ) {
         // Framework runs `post` before `postAssign`/`postDelete`; those POSTs omit the save payload.
         if (this.args?.operation || this.request.body?.operation) return;
@@ -947,50 +984,75 @@ class CourseEditHandler extends Handler {
                 }
             })
             .filter((x): x is ObjectId => !!x);
-        if (!tid) {
-            tid = await training.add(authoritativeDomainId, title, content, this.user._id, dag, description, 0, {
-                kind: 'course',
-                courseGroupIds: groupIds,
-                term,
-                courseHidden: Boolean(courseHidden),
-                ...(selectedMindmapId ? { mindmapId: selectedMindmapId } : {}),
-                ...(courseVideoDueAt ? { courseVideoDueAt } : {}),
-            });
-            await oplog.log(this, 'course.create', { tid, title, mindmapId: selectedMindmapId?.toHexString() || null });
-        } else {
-            const previousMindmapId = storedOptionalObjectIdString(this.tdoc?.mindmapId, 'course.mindmapId');
-            await training.edit(
-                authoritativeDomainId,
-                tid,
-                {
-                    title,
-                    content,
-                    dag,
-                    description,
-                    term,
+        const parsedExam = parseCourseExamForm({
+            contestId: courseExamContestId,
+            gate: courseExamGate,
+            percent: courseExamPercent,
+            chapterId: courseExamChapterId,
+        });
+        const courseExam = parsedExam
+            ? await resolveCourseExamForSave({
+                  domainId: authoritativeDomainId,
+                  courseId: tid || null,
+                  dag,
+                  binding: parsedExam,
+              })
+            : null;
+        try {
+            if (!tid) {
+                tid = await training.add(authoritativeDomainId, title, content, this.user._id, dag, description, 0, {
+                    kind: 'course',
                     courseGroupIds: groupIds,
+                    term,
                     courseHidden: Boolean(courseHidden),
                     ...(selectedMindmapId ? { mindmapId: selectedMindmapId } : {}),
                     ...(courseVideoDueAt ? { courseVideoDueAt } : {}),
-                },
-                {
-                    ...(selectedMindmapId ? {} : { mindmapId: 1 }),
-                    ...(courseVideoDueAt ? {} : { courseVideoDueAt: 1 }),
-                },
-            );
-            await oplog.log(this, 'course.edit', {
-                tid,
-                title,
-                previousMindmapId,
-                mindmapId: selectedMindmapId?.toHexString() || null,
-            });
+                    ...(courseExam ? { courseExam } : {}),
+                });
+                await oplog.log(this, 'course.create', { tid, title, mindmapId: selectedMindmapId?.toHexString() || null });
+            } else {
+                const previousMindmapId = storedOptionalObjectIdString(this.tdoc?.mindmapId, 'course.mindmapId');
+                await training.edit(
+                    authoritativeDomainId,
+                    tid,
+                    {
+                        title,
+                        content,
+                        dag,
+                        description,
+                        term,
+                        courseGroupIds: groupIds,
+                        courseHidden: Boolean(courseHidden),
+                        ...(selectedMindmapId ? { mindmapId: selectedMindmapId } : {}),
+                        ...(courseVideoDueAt ? { courseVideoDueAt } : {}),
+                        ...(courseExam ? { courseExam } : {}),
+                    },
+                    {
+                        ...(selectedMindmapId ? {} : { mindmapId: 1 }),
+                        ...(courseVideoDueAt ? {} : { courseVideoDueAt: 1 }),
+                        ...(courseExam ? {} : { courseExam: 1 }),
+                    },
+                );
+                await oplog.log(this, 'course.edit', {
+                    tid,
+                    title,
+                    previousMindmapId,
+                    mindmapId: selectedMindmapId?.toHexString() || null,
+                });
+            }
+        } catch (error) {
+            if (isCourseExamDuplicateKey(error)) {
+                throw new ValidationError('courseExamContestId', null, localizedErrorText`这场考试已绑定其它课程`);
+            }
+            throw error;
         }
         logger.info(
-            'Course saved domain=%s tid=%s actor=%d mindmap=%s result=success',
+            'Course saved domain=%s tid=%s actor=%d mindmap=%s courseExam=%s result=success',
             authoritativeDomainId,
             tid,
             this.user._id,
             selectedMindmapId || 'none',
+            courseExam ? courseExam.contestId.toHexString() : 'none',
         );
         this.response.body = { tid };
         this.response.redirect = this.url('course_detail', { tid });
@@ -1039,6 +1101,7 @@ class CourseEditHandler extends Handler {
                     courseHidden: isCourseHidden(this.tdoc),
                     ...(selectedMindmapId ? { mindmapId: selectedMindmapId } : {}),
                     ...(this.tdoc.courseVideoDueAt ? { courseVideoDueAt: this.tdoc.courseVideoDueAt } : {}),
+                    // Do not spread tdoc.courseExam: copied courses must start unbound.
                 },
             );
             for (const { from, to } of copies) {

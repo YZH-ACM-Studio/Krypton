@@ -11,6 +11,7 @@ const calls: Array<{ action: string; domainId?: string; uid?: number; subscribe?
 let attended = false;
 let persistAttendance = true;
 let contestExists = true;
+let userExists = true;
 
 class TestValidationError extends Error {}
 class TestNotFoundError extends Error {}
@@ -39,6 +40,19 @@ const contestStub = {
     },
 };
 
+const userStub = {
+    getById: async (_domainId: string, id: number) => {
+        calls.push({ action: 'get-user', uid: id });
+        if (!userExists) return null;
+        return {
+            _id: id,
+            own: () => false,
+            hasPerm: () => false,
+            hasPriv: () => false,
+        };
+    },
+};
+
 const modulePath = require.resolve('../src/lib/vigil-integration-attendance.ts');
 const originalLoad = Module._load;
 Module._load = function load(request: string, parent: NodeModule, isMain: boolean) {
@@ -56,6 +70,19 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
             };
         }
         if (request === '../model/contest') return contestStub;
+        if (request === '../model/user') return { default: userStub, ...userStub };
+        if (request === './course-exam-gate') {
+            return {
+                assertCourseExamWatchGate: async (params: { user?: { _id?: number } }) => {
+                    const gateUid = params?.user?._id;
+                    const attendedUid = [...calls].reverse().find((call) => call.action === 'get-user')?.uid;
+                    if (!Number.isSafeInteger(gateUid) || gateUid <= 0 || gateUid !== attendedUid) {
+                        throw new Error(`watch gate user ${String(gateUid)} does not match attended uid ${String(attendedUid)}`);
+                    }
+                    calls.push({ action: 'watch-gate', uid: gateUid });
+                },
+            };
+        }
     }
     return originalLoad.call(this, request, parent, isMain);
 };
@@ -73,6 +100,7 @@ beforeEach(() => {
     attended = false;
     persistAttendance = true;
     contestExists = true;
+    userExists = true;
     (global as any).Hydro = {
         model: {
             vigilguard: {
@@ -95,6 +123,8 @@ describe('P1.28 Vigil Client attendance transition', () => {
 
         expect(calls).to.deep.equal([
             { action: 'get', domainId: 'system' },
+            { action: 'get-user', uid: 64 },
+            { action: 'watch-gate', uid: 64 },
             { action: 'status-missing', domainId: 'system', uid: 64 },
             { action: 'attend', domainId: 'system', uid: 64, subscribe: 1 },
             { action: 'status-attended', domainId: 'system', uid: 64 },
@@ -110,6 +140,8 @@ describe('P1.28 Vigil Client attendance transition', () => {
 
         expect(calls).to.deep.equal([
             { action: 'get', domainId: 'system' },
+            { action: 'get-user', uid: 65 },
+            { action: 'watch-gate', uid: 65 },
             { action: 'status-attended', domainId: 'system', uid: 65 },
             { action: 'invalidate', domainId: 'system', uid: 65 },
             { action: 'set-status', domainId: 'system', uid: 65 },
@@ -159,5 +191,22 @@ describe('P1.28 Vigil Client attendance transition', () => {
 
         expect(error).to.be.instanceOf(TestNotFoundError);
         expect(calls).to.deep.equal([{ action: 'get', domainId: 'system' }]);
+    });
+
+    it('fails closed if the attended student cannot be loaded', async () => {
+        userExists = false;
+        let error: unknown;
+        try {
+            await attendance.ensureVigilContestParticipation({} as any, 'system', contestId.toHexString(), 69);
+        } catch (caught) {
+            error = caught;
+        }
+
+        expect(error).to.be.instanceOf(TestValidationError);
+        expect(calls).to.deep.equal([
+            { action: 'get', domainId: 'system' },
+            { action: 'get-user', uid: 69 },
+        ]);
+        expect(calls.some(({ action }) => action === 'watch-gate' || action === 'status-missing' || action === 'attend')).to.equal(false);
     });
 });

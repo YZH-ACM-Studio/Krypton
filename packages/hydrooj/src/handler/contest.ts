@@ -29,6 +29,7 @@ import {
 } from '../error';
 import { FileInfo, ScoreboardConfig, Tdoc } from '../interface';
 import { canUsePostContestPractice, getPostContestPracticeState } from '../lib/contest-correction';
+import { assertCourseExamWatchGate } from '../lib/course-exam-gate';
 import { assertIndividualContestUnrankAllowed } from '../lib/contest-unrank';
 import { isContestGloballyEnded } from '../lib/virtual-contest';
 import { virtualContestService } from '../model/virtual-contest';
@@ -589,6 +590,7 @@ export class ContestDetailHandler extends ContestDetailBaseHandler {
         if (unrank) assertIndividualContestUnrankAllowed(this.tdoc.rule, contest.getParticipationMode(this.tdoc));
         const payload: { subscribe: number; unrank?: boolean } = { subscribe: 1 };
         if (unrank) payload.unrank = true;
+        await assertCourseExamWatchGate({ domainId: authoritativeDomainId, user: this.user, contest: this.tdoc });
         await contest.attend(authoritativeDomainId, tid, this.user._id, payload);
         logger.info('contest attend domain=%s contest=%s uid=%d unrank=%s stage=create', authoritativeDomainId, tid, this.user._id, unrank);
         this.back();

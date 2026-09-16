@@ -25,6 +25,7 @@ import {
 } from './practice-integrity';
 import problem from './problem';
 import * as training from './training';
+import { studentDirectory } from '../service/student-directory';
 
 const logger = new Logger('practice-integrity-access');
 
@@ -326,9 +327,7 @@ async function isInheritedAudience(
     if (containerKind === 'course') {
         const groups = tdoc.courseGroupIds || [];
         if (groups.length) {
-            const findStudent = global.Hydro?.model?.userbind?.findStudentByUserId;
-            if (typeof findStudent !== 'function') throw new TypeError('userbind.findStudentByUserId is unavailable');
-            const student = await findStudent(domainId, user._id);
+            const student = await studentDirectory().findStudentByUserId(domainId, user._id);
             const studentGroups = new Set((student?.groupIds || []).map((groupId: ObjectId) => String(groupId)));
             return groups.some((groupId: ObjectId) => studentGroups.has(String(groupId)));
         }

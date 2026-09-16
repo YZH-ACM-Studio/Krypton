@@ -12,6 +12,7 @@ import {
     ResolvedExamRoster,
 } from './exam-seat-plan';
 import UserModel from './user';
+import { type StudentDirectory, studentDirectory } from '../service/student-directory';
 
 export type ExamRosterSelection = { kind: 'contestAudience' } | { kind: 'userbindGroups'; groupIds: ObjectId[] } | { kind: 'userbindSchool' };
 
@@ -19,17 +20,9 @@ function sha256(value: unknown): string {
     return createHash('sha256').update(JSON.stringify(value), 'utf8').digest('hex');
 }
 
-function requireUserbind() {
-    const userbind = global.Hydro.model.userbind;
-    if (!userbind || typeof userbind.loadExamRosterUserbindSnapshot !== 'function') {
-        throw new ExamSeatPlanError('userbind_roster_resolver_unavailable');
-    }
-    return userbind;
-}
-
 async function loadUserbindSnapshot(domainId: string, schoolId: ObjectId, groupIds: ObjectId[] | null) {
     try {
-        return await requireUserbind().loadExamRosterUserbindSnapshot(domainId, schoolId, groupIds);
+        return await studentDirectory().loadExamRosterUserbindSnapshot(domainId, schoolId, groupIds);
     } catch (error) {
         if (
             error instanceof Error &&
@@ -51,7 +44,7 @@ function canonicalObjectIds(values: unknown, field: string): ObjectId[] {
 }
 
 function snapshotToSource(
-    snapshot: Awaited<ReturnType<NonNullable<typeof global.Hydro.model.userbind>['loadExamRosterUserbindSnapshot']>>,
+    snapshot: Awaited<ReturnType<StudentDirectory['loadExamRosterUserbindSnapshot']>>,
     kind: ExamRosterResolutionSource['kind'],
     contestId: ObjectId | null,
 ): ExamRosterResolutionSource {

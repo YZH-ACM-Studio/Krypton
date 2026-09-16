@@ -38,6 +38,7 @@ import storage from '../model/storage';
 import * as training from '../model/training';
 import user from '../model/user';
 import { Handler, param, Types } from '../service/server';
+import { studentDirectory } from '../service/student-directory';
 import { isCourseKind } from '../lib/training-kind';
 
 const logger = new Logger('course-video');
@@ -328,11 +329,7 @@ class CourseVideoProgressHandler extends Handler {
         if (located.video.contentRevision !== contentRevision) {
             throw new ValidationError('contentRevision', null, localizedErrorText`视频已更新，请刷新后重看`);
         }
-        const userbind = (global as any).Hydro?.model?.userbind;
-        if (typeof userbind?.findStudentByUserId !== 'function') {
-            throw new TypeError('userbind.findStudentByUserId is unavailable');
-        }
-        const student = await userbind.findStudentByUserId(domainId, this.user._id);
+        const student = await studentDirectory().findStudentByUserId(domainId, this.user._id);
         if (!student || !Number.isSafeInteger(student.boundUserId) || student.boundUserId < 2) {
             throw new ValidationError('uid', null, localizedErrorText`未绑定学号，不能记录观看`);
         }
@@ -439,11 +436,7 @@ async function buildCourseVideoRoster(handler: Handler, domainId: string, tid: O
             rosterUnavailable: 'no_groups',
         };
     }
-    const ub = global.Hydro?.model?.userbind;
-    if (typeof ub?.findBoundStudentsByGroupIds !== 'function') {
-        throw new TypeError('userbind.findBoundStudentsByGroupIds is unavailable');
-    }
-    const bound = await ub.findBoundStudentsByGroupIds(
+    const bound = await studentDirectory().findBoundStudentsByGroupIds(
         domainId,
         groups.map((id) => (id instanceof ObjectId ? id : new ObjectId(String(id)))),
     );

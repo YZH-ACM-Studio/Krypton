@@ -2,6 +2,8 @@ import { expect } from 'chai';
 import { readFileSync } from 'node:fs';
 import { beforeEach, describe, it } from 'node:test';
 import { ObjectId } from 'mongodb';
+import { InMemoryStudentDirectory, studentRecord } from '../src/lib/testing/in-memory-student-directory';
+import { registerStudentDirectory } from '../src/service/student-directory';
 
 const Module = require('module');
 
@@ -61,21 +63,23 @@ const groupB = new ObjectId('bbbbbbbbbbbbbbbbbbbbbbbb');
 const courseId = new ObjectId('cccccccccccccccccccccccc');
 const homeworkId = new ObjectId('dddddddddddddddddddddddd');
 
-(global as any).Hydro = {
-    model: {
-        userbind: {
-            async findStudentByUserId() {
-                return { groupIds: studentGroupIds };
-            },
-            async listUserGroups() {
-                return [
-                    { _id: groupA, name: 'A 班' },
-                    { _id: groupB, name: 'B 班' },
-                ];
-            },
-        },
-    },
-};
+const groupSchoolId = new ObjectId('eeeeeeeeeeeeeeeeeeeeeeee');
+
+class HomeworkScopeDirectory extends InMemoryStudentDirectory {
+    async findStudentByUserId(domainId: string, userId: number) {
+        return studentRecord({ domainId, boundUserId: userId, groupIds: studentGroupIds });
+    }
+
+    async listUserGroups(domainId: string) {
+        return [
+            { _id: groupA, domainId, schoolId: groupSchoolId, name: 'A 班' },
+            { _id: groupB, domainId, schoolId: groupSchoolId, name: 'B 班' },
+        ];
+    }
+}
+registerStudentDirectory(new HomeworkScopeDirectory());
+
+(global as any).Hydro = { model: {} };
 const { homeworkParticipantScopeAllows } = require('../src/model/homework-access.ts');
 
 const contestStub: any = {

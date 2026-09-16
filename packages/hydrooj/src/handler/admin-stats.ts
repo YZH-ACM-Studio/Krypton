@@ -21,6 +21,7 @@ import {
 import { isProblemSetKind, withProblemSetKind } from '../lib/training-kind';
 import { problemSetAccessService } from '../model/problem-set-access';
 import { Handler, param, Types } from '../service/server';
+import { studentDirectory } from '../service/student-directory';
 import { PRIV, STATUS } from '../model/builtin';
 import * as contest from '../model/contest';
 import * as document from '../model/document';
@@ -80,7 +81,7 @@ class AdminStatsHandler extends Handler {
         let groups: any[] = [];
         let userSearchResults: any[] = [];
         let selectedUser: any = null;
-        const userbind = (global as any).Hydro?.model?.userbind;
+        const userbind = studentDirectory();
 
         if (selectedContestId) {
             selectedContest = await contest.get(domainId, selectedContestId);
@@ -109,7 +110,6 @@ class AdminStatsHandler extends Handler {
                           })
                           .toArray()
                     : [];
-            if (!userbind?.findStudentsByUserIds) throw new Error('userbind.findStudentsByUserIds is required for admin training statistics');
             const [udict, studentDict] = await Promise.all([
                 UserModel.getListForRender(domainId, memberUids, false),
                 userbind.findStudentsByUserIds(domainId, memberUids),
@@ -148,7 +148,7 @@ class AdminStatsHandler extends Handler {
                         .project({ docId: 1 })
                         .toArray(),
                     training.getMultiStatus(domainId, { uid, enroll: 1 }).project({ docId: 1 }).toArray(),
-                    userbind?.findStudentsByUserIds ? userbind.findStudentsByUserIds(domainId, [uid]) : {},
+                    userbind.findStudentsByUserIds(domainId, [uid]),
                 ]);
                 const [attendedContests, enrolledTrainings] = await Promise.all([
                     contest
@@ -177,9 +177,6 @@ class AdminStatsHandler extends Handler {
                 };
             }
         } else if (view === 'group') {
-            if (!userbind?.listUserGroups || !userbind?.findBoundStudentsByGroupIds) {
-                throw new Error('userbind group statistics bridge is unavailable');
-            }
             groups = await userbind.listUserGroups(domainId);
             const parsedGroupIds = groupIds.map((value) => {
                 try {

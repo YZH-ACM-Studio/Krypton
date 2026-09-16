@@ -1,6 +1,8 @@
 import { expect } from 'chai';
 import { beforeEach, describe, it } from 'node:test';
 import { ObjectId } from 'mongodb';
+import { InMemoryStudentDirectory, studentRecord } from '../src/lib/testing/in-memory-student-directory';
+import { registerStudentDirectory } from '../src/service/student-directory';
 
 const Module = require('module');
 (global as any).Hydro ||= { model: {}, module: {} };
@@ -24,6 +26,13 @@ let enrolled = false;
 let setAccessible = false;
 let livePids: number[] = [];
 let getError: Error | null = null;
+
+class InheritGroupDirectory extends InMemoryStudentDirectory {
+    async findStudentByUserId(domainId: string, userId: number) {
+        return studentRecord({ domainId, boundUserId: userId, groupIds: studentGroups });
+    }
+}
+registerStudentDirectory(new InheritGroupDirectory());
 
 const originalLoad = Module._load;
 Module._load = function load(request: string, parent: NodeModule, isMain: boolean) {
@@ -140,11 +149,6 @@ describe('inherited practice enforcement resolver', () => {
         setAccessible = false;
         livePids = [];
         getError = null;
-        (global as any).Hydro.model.userbind = {
-            async findStudentByUserId() {
-                return { groupIds: studentGroups };
-            },
-        };
         containers[String(courseId)] = {
             docId: courseId,
             kind: 'course',

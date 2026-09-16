@@ -34,6 +34,7 @@ import { buildVigilContestRoleResolution, type VigilContestRoleResolution } from
 import system from '../model/system';
 import db from '../service/db';
 import { executeRecordingDelete, previewRecordingDelete, parseVigilExamNetworkProjection } from '../service/vigil-bridge';
+import { studentDirectory } from '../service/student-directory';
 import { ensureVigilContestParticipation } from '../lib/vigil-integration-attendance';
 import {
     ExamNetworkExecutionError,
@@ -371,16 +372,7 @@ class VigilLookupStudentHandler extends VigilApiHandler {
     @param('ojContestId', Types.String, true)
     @param('tid', Types.String, true)
     async post(_args: any, domainId: string, studentId: string, realName: string, contestId?: string, ojContestId?: string, tid?: string) {
-        const userbind = (global as any).Hydro?.model?.userbind;
-        if (!userbind?.lookupStudent) {
-            this.response.body = {
-                found: false,
-                eligibleContests: [],
-                reason: 'userbind_not_loaded',
-            };
-            return;
-        }
-        const result = await userbind.lookupStudent(domainId, studentId, realName, {
+        const result = await studentDirectory().lookupStudent(domainId, studentId, realName, {
             contestId: contestId || ojContestId || tid,
         });
 

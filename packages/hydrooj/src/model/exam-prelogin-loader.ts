@@ -12,6 +12,7 @@ import type { ExamEventDoc } from './exam-event';
 import { endpointSeatBindingService } from './endpoint-seat-binding';
 import { assertExamRosterRevisionIntegrity, assertExamSeatPlanIntegrity, examSeatPlanService, isExamSeatPlanV2 } from './exam-seat-plan';
 import UserModel from './user';
+import { studentDirectory } from '../service/student-directory';
 
 function compareText(left: string, right: string): number {
     return left < right ? -1 : left > right ? 1 : 0;
@@ -238,8 +239,7 @@ export async function loadExamPreloginPreparation(
                 : [],
         );
     }
-    const userbind = global.Hydro.model.userbind;
-    if (!userbind || typeof userbind.findStudentByUserId !== 'function') throw new TypeError('userbind student resolver is unavailable');
+    const userbind = studentDirectory();
     const [studentRows, eligibilityRows] = await Promise.all([
         Promise.all(
             assignments.map(async (entry) => {
@@ -435,8 +435,7 @@ export async function validateExamPreloginTicketCurrent(
         ) {
             throw new TypeError('exam_prelogin_activity_changed');
         }
-        const userbind = global.Hydro.model.userbind;
-        if (!userbind || typeof userbind.findStudentByUserId !== 'function') throw new TypeError('userbind student resolver is unavailable');
+        const userbind = studentDirectory();
         const [student, eligibility, readiness] = await Promise.all([
             userbind.findStudentByUserId(event.domainId, ticket.uid) as Promise<{
                 _id?: unknown;

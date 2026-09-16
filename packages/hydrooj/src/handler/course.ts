@@ -42,6 +42,7 @@ import system from '../model/system';
 import * as training from '../model/training';
 import user from '../model/user';
 import { Handler, param, post, Types } from '../service/server';
+import { studentDirectory } from '../service/student-directory';
 import { canManageCourse, courseAccessibleTo, courseUserGroupIds, isCourseHidden } from '../lib/course-access';
 import { isCourseExamDuplicateKey, parseCourseExamForm, resolveCourseExamForSave } from '../lib/course-exam';
 import { courseNodePids, parseCourseSections } from '../lib/course-chapter';
@@ -783,14 +784,11 @@ class CourseDetailHandler extends Handler {
         const courseExamContest = await hydrateCourseExamContest(domainId, tdoc);
         if (courseExamContest) this.response.body.courseExamContest = courseExamContest;
         if (activeView === 'roster') {
-            const ub = global.Hydro?.model?.userbind;
+            const ub = studentDirectory();
             const courseGroups = tdoc.courseGroupIds || [];
             let memberUids: number[] = [];
             let membersTruncated = false;
             if (courseGroups.length) {
-                if (typeof ub?.findBoundStudentsByGroupIds !== 'function') {
-                    throw new TypeError('userbind.findBoundStudentsByGroupIds is unavailable');
-                }
                 const boundStudents = await ub.findBoundStudentsByGroupIds(
                     domainId,
                     courseGroups.map((groupId) => (groupId instanceof ObjectId ? groupId : new ObjectId(String(groupId)))),
@@ -810,10 +808,6 @@ class CourseDetailHandler extends Handler {
             for (const node of tdoc.dag || []) {
                 scopePids.set(node._id, new Set([...courseNodePids(node), ...(referencedPidsByChapter.get(node._id) || [])]));
             }
-            if (memberUids.length && typeof ub?.findStudentsByUserIds !== 'function') {
-                throw new TypeError('userbind.findStudentsByUserIds is unavailable');
-            }
-            if (typeof ub?.listUserGroups !== 'function') throw new TypeError('userbind.listUserGroups is unavailable');
             const [memberUdict, students, ubGroups, completedPidsByUid] = await Promise.all([
                 user.getListForRender(domainId, memberUids, false),
                 memberUids.length ? ub.findStudentsByUserIds(domainId, memberUids) : {},
@@ -887,7 +881,7 @@ class CourseEditHandler extends Handler {
         const authoritativeDomainId = String(this.domain?._id);
         problem.assertProblemAclDomain(this.user, authoritativeDomainId);
         const [groups, mindmaps] = await Promise.all([
-            (global as any).Hydro?.model?.userbind?.listUserGroups ? (global as any).Hydro.model.userbind.listUserGroups(authoritativeDomainId) : [],
+            studentDirectory().listUserGroups(authoritativeDomainId),
             listCourseMindmapOptions(),
         ]);
         if (this.tdoc && this.tdoc.mindmapId !== undefined && this.tdoc.mindmapId !== null) {

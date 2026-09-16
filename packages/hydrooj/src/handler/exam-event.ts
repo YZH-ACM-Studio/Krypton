@@ -26,6 +26,7 @@ import { examNetworkConfigService, ExamNetworkConfigError } from '../model/exam-
 import { examSeatAssignmentService } from '../model/exam-seat-assignment';
 import { ExamSeatPlanError, examSeatPlanService } from '../model/exam-seat-plan';
 import { getExamPreloginService } from '../service/exam-prelogin';
+import { studentDirectory } from '../service/student-directory';
 
 function auditContext(handler: ExamEventBaseHandler): ExamEventAuditContext {
     return {
@@ -128,10 +129,7 @@ export function translateExamEventError(error: unknown): never {
 }
 
 async function availableSchools(domainId: string, actor: typeof Handler.prototype.user) {
-    const userbind = global.Hydro.model.userbind;
-    if (!userbind || typeof userbind.listSchools !== 'function' || typeof userbind.getSchool !== 'function') {
-        throw new TypeError('userbind school bridge is unavailable');
-    }
+    const userbind = studentDirectory();
     const schools = isExamInfrastructureAdmin(actor)
         ? await userbind.listSchools(domainId)
         : await Promise.all((await resolveExamEventSchoolScope(domainId, actor)).map((schoolId) => userbind.getSchool(domainId, schoolId)));

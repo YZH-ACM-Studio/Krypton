@@ -33,18 +33,14 @@ import system from '../model/system';
 import * as training from '../model/training';
 import user from '../model/user';
 import { Handler, param, post, Types } from '../service/server';
+import { studentDirectory } from '../service/student-directory';
 import { ContestCodeHandler, ContestFileDownloadHandler, ContestScoreboardHandler } from './contest';
 
 const logger = new Logger('homework');
 
-async function listHomeworkScopeGroups(domainId: string, required: boolean): Promise<any[]> {
-    const userbind = (global as any).Hydro?.model?.userbind;
-    if (typeof userbind?.listUserGroups !== 'function') {
-        if (required) throw new TypeError('userbind.listUserGroups is unavailable');
-        return [];
-    }
+async function listHomeworkScopeGroups(domainId: string): Promise<any[]> {
     try {
-        return await userbind.listUserGroups(domainId);
+        return await studentDirectory().listUserGroups(domainId);
     } catch (error) {
         logger.error('Homework group catalog lookup failed domain=%s error=%o', domainId, error);
         throw error;
@@ -301,7 +297,7 @@ class HomeworkEditHandler extends Handler {
               ? 'groups'
               : 'none';
         const participantGroupIds = quizContext ? courseGroupIds : (tdoc?.participantGroupIds || []).map(String);
-        const scopeGroups = await listHomeworkScopeGroups(authoritativeDomainId, !!quizContext || participantScopeMode === 'groups');
+        const scopeGroups = await listHomeworkScopeGroups(authoritativeDomainId);
         const formDoc =
             tdoc ||
             (quizContext

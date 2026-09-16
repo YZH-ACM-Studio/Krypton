@@ -54,6 +54,7 @@ import { markManualPending } from '../model/manual-grade';
 import record from '../model/record';
 import { ConnectionHandler, subscribe } from '../service/server';
 import { closeSessionOnVigil } from '../service/vigil-bridge';
+import { studentDirectory } from '../service/student-directory';
 import { ContestPrintHandler, ContestProblemListHandler, ContestScoreboardHandler } from './contest';
 import { DiscussionDetailHandler } from './discussion';
 import { ProblemDetailHandler } from './problem';
@@ -337,10 +338,8 @@ async function resolveExamModeTeamContext(
 async function resolveExamModeStudent(handler: any, domainId: string): Promise<{ studentId: string; realName: string } | null> {
     const uid = handler?.user?._id;
     if (!uid) return null;
-    const userbind = (global as any).Hydro?.model?.userbind;
-    if (!userbind?.findStudentByUserId) return null;
     try {
-        const rec = await userbind.findStudentByUserId(domainId, uid);
+        const rec = await studentDirectory().findStudentByUserId(domainId, uid);
         if (!rec) return null;
         return {
             studentId: String(rec.studentId || ''),

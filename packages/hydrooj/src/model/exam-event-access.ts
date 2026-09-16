@@ -2,6 +2,7 @@ import { ObjectId } from 'mongodb';
 import { PermissionError, ValidationError } from '../error';
 import { PERM, PRIV } from './builtin';
 import type { ExamEventDoc } from './exam-event';
+import { studentDirectory } from '../service/student-directory';
 
 export interface ExamEventActor {
     _id: number;
@@ -14,16 +15,8 @@ export function isExamInfrastructureAdmin(actor: ExamEventActor): boolean {
     return actor.hasPriv(PRIV.PRIV_EDIT_SYSTEM) || actor.hasPerm(PERM.PERM_MANAGE_EXAM_INFRASTRUCTURE);
 }
 
-function requireUserbind() {
-    const userbind = global.Hydro.model.userbind;
-    if (!userbind || typeof userbind.getSchool !== 'function' || typeof userbind.findStudentByUserId !== 'function') {
-        throw new TypeError('userbind school bridge is unavailable');
-    }
-    return userbind;
-}
-
 export async function resolveExamEventSchoolScope(domainId: string, actor: ExamEventActor): Promise<ObjectId[]> {
-    const userbind = requireUserbind();
+    const userbind = studentDirectory();
     const values: ObjectId[] = [];
     for (const schoolId of actor.parentSchoolId || []) {
         if (schoolId instanceof ObjectId) values.push(schoolId);
@@ -36,7 +29,7 @@ export async function resolveExamEventSchoolScope(domainId: string, actor: ExamE
 }
 
 export async function assertExamEventSchoolAccess(domainId: string, schoolId: ObjectId, actor: ExamEventActor): Promise<void> {
-    const userbind = requireUserbind();
+    const userbind = studentDirectory();
     if (!(await userbind.getSchool(domainId, schoolId))) throw new ValidationError('schoolId');
     if (isExamInfrastructureAdmin(actor)) return;
     if (!actor.hasPerm(PERM.PERM_CREATE_EXAM_EVENT)) throw new PermissionError(PERM.PERM_CREATE_EXAM_EVENT);

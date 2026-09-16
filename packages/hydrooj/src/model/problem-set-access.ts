@@ -4,6 +4,7 @@ import { localizedErrorText, NotFoundError, TrainingNotFoundError, ValidationErr
 import type { TrainingDoc } from '../interface';
 import { Context } from '../context';
 import db from '../service/db';
+import { studentDirectory } from '../service/student-directory';
 import { courseKindClause, isProblemSetKind } from '../lib/training-kind';
 import { canonicalProblemSetAudience, isLegacyPublicProblemSet, problemSetAudienceOf } from '../lib/problem-set-audience';
 import {
@@ -99,9 +100,7 @@ function courseVisibleTo(course: Pick<TrainingDoc, 'owner' | 'courseGroupIds'>, 
 
 async function defaultFindStudentGroupIds(domainId: string, uid: number): Promise<Set<string>> {
     if (!uid || uid <= 1) return new Set();
-    const findStudent = global.Hydro?.model?.userbind?.findStudentByUserId;
-    if (typeof findStudent !== 'function') throw new TypeError('userbind.findStudentByUserId is unavailable');
-    const student = await findStudent(domainId, uid);
+    const student = await studentDirectory().findStudentByUserId(domainId, uid);
     return new Set((student?.groupIds || []).map((groupId: ObjectId) => String(groupId)));
 }
 

@@ -3,6 +3,7 @@ import { Logger } from '@hydrooj/utils';
 import { localizedErrorText, NotAssignedError } from '../error';
 import { Tdoc } from '../interface';
 import { PERM, PRIV } from './builtin';
+import { studentDirectory } from '../service/student-directory';
 
 const logger = new Logger('homework-access');
 
@@ -16,12 +17,8 @@ export function canBypassHomeworkAccess(user: any, tdoc?: Tdoc): boolean {
 }
 
 export async function getHomeworkUserGroupIds(domainId: string, uid: number): Promise<Set<string>> {
-    const userbind = (global as any).Hydro?.model?.userbind;
-    if (typeof userbind?.findStudentByUserId !== 'function') {
-        throw new TypeError('userbind.findStudentByUserId is unavailable');
-    }
     try {
-        const student = await userbind.findStudentByUserId(domainId, uid);
+        const student = await studentDirectory().findStudentByUserId(domainId, uid);
         return new Set((student?.groupIds || []).map((groupId: ObjectId) => String(groupId)));
     } catch (error) {
         logger.error('Homework user-group lookup failed domain=%s uid=%d error=%o', domainId, uid, error);

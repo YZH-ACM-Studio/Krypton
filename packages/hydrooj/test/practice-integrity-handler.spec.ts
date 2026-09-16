@@ -2,6 +2,8 @@ import { expect } from 'chai';
 import { localizedErrorText } from '@hydrooj/framework';
 import { beforeEach, describe, it } from 'node:test';
 import { ObjectId } from 'mongodb';
+import { InMemoryStudentDirectory, studentRecord } from '../src/lib/testing/in-memory-student-directory';
+import { registerStudentDirectory } from '../src/service/student-directory';
 
 const Module = require('module');
 (global as any).Hydro ||= { model: {}, module: {} };
@@ -67,6 +69,13 @@ let problemMaintainer = false;
 let trainingHookError: Error | null = null;
 let saveError: Error | null = null;
 let publishError: Error | null = null;
+
+class PracticeGroupDirectory extends InMemoryStudentDirectory {
+    async findStudentByUserId(domainId: string, userId: number) {
+        return studentRecord({ domainId, boundUserId: userId, groupIds });
+    }
+}
+registerStudentDirectory(new PracticeGroupDirectory());
 
 const trainingStub = {
     async get(domainId: string, id: ObjectId) {
@@ -328,11 +337,6 @@ beforeEach(() => {
     trainingHookError = null;
     saveError = null;
     publishError = null;
-    (global as any).Hydro.model.userbind = {
-        async findStudentByUserId() {
-            return { groupIds };
-        },
-    };
     currentContainer = {
         docId: containerId,
         kind: 'course',

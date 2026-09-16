@@ -35,6 +35,7 @@ import { DOMAIN_SETTINGS, DOMAIN_SETTINGS_BY_KEY } from '../model/setting';
 import system from '../model/system';
 import user from '../model/user';
 import { Handler, Mutation, param, post, Query, query, requireSudo, Types } from '../service/server';
+import { studentDirectory } from '../service/student-directory';
 
 const logger = new Logger('domain-permission');
 
@@ -77,12 +78,11 @@ class DomainRankHandler extends Handler {
               }
             : null;
         // Admin-only column data: studentId / realName looked up via userbind
-        // for all visible users. Populated only when viewer has system priv
-        // and the userbind plugin is loaded (defensive null-check).
+        // for all visible users. Populated only when viewer has system priv.
         let studentDict: Record<string, { studentId: string; realName: string }> = {};
-        if (this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM) && global.Hydro?.model?.userbind?.findStudentsByUserIds) {
+        if (this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) {
             const uids = dudocs.map((d) => d.uid).filter((u) => u && u > 1);
-            const students = await global.Hydro.model.userbind.findStudentsByUserIds(domainId, uids);
+            const students = await studentDirectory().findStudentsByUserIds(domainId, uids);
             studentDict = Object.fromEntries(
                 Object.entries(students).map(([uid, s]: [string, any]) => [uid, { studentId: s.studentId, realName: s.realName }]),
             );

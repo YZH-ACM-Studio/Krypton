@@ -58,17 +58,13 @@ import ScheduleModel from '../model/schedule';
 import storage from '../model/storage';
 import user from '../model/user';
 import { Handler, param, post, Type, Types } from '../service/server';
+import { studentDirectory } from '../service/student-directory';
 
 const logger = new Logger('contest-handler');
 
 async function listContestScopeGroups(domainId: string, required: boolean): Promise<any[]> {
-    const userbind = (global as any).Hydro?.model?.userbind;
-    if (typeof userbind?.listUserGroups !== 'function') {
-        if (required) throw new TypeError('userbind.listUserGroups is unavailable');
-        return [];
-    }
     try {
-        return await userbind.listUserGroups(domainId);
+        return await studentDirectory().listUserGroups(domainId);
     } catch (error) {
         logger.error('Contest group catalog lookup failed domain=%s error=%o', domainId, error);
         if (required) throw error;
@@ -956,8 +952,7 @@ export class ContestEditHandler extends Handler {
         // metadata; we already gate on PERM_EDIT_CONTEST / CREATE.
         let scopeSchools: any[] = [];
         try {
-            const userbind = (global as any).Hydro?.model?.userbind;
-            if (userbind?.listSchools) scopeSchools = await userbind.listSchools(authoritativeDomainId);
+            scopeSchools = await studentDirectory().listSchools(authoritativeDomainId);
         } catch {
             /* best-effort */
         }
@@ -2142,11 +2137,11 @@ export async function apply(ctx: Context) {
                     // leak to ordinary contestants (the frontend hides the columns
                     // when the dict is empty).
                     let studentDict: Record<string, { studentId: string; realName: string }> = {};
-                    if (this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM) && global.Hydro?.model?.userbind?.findStudentsByUserIds) {
+                    if (this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) {
                         const uids = Object.keys(udict)
                             .map(Number)
                             .filter((u) => u && u > 1);
-                        const students = await global.Hydro.model.userbind.findStudentsByUserIds(tdoc.domainId, uids);
+                        const students = await studentDirectory().findStudentsByUserIds(tdoc.domainId, uids);
                         studentDict = Object.fromEntries(
                             Object.entries(students).map(([uid, s]: [string, any]) => [uid, { studentId: s.studentId, realName: s.realName }]),
                         );

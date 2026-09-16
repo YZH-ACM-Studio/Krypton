@@ -3,16 +3,13 @@ import { ObjectId } from 'mongodb';
 import type { TrainingDoc } from '../interface';
 import { PRIV } from '../model/builtin';
 import { problemSetAccessService } from '../model/problem-set-access';
+import { studentDirectory } from '../service/student-directory';
 
 const logger = new Logger('course-access');
 
 export async function courseUserGroupIds(domainId: string, uid: number): Promise<Set<string>> {
-    const userbind = (global as any).Hydro?.model?.userbind;
-    if (typeof userbind?.findStudentByUserId !== 'function') {
-        throw new TypeError('userbind.findStudentByUserId is unavailable');
-    }
     try {
-        const student = await userbind.findStudentByUserId(domainId, uid);
+        const student = await studentDirectory().findStudentByUserId(domainId, uid);
         return new Set((student?.groupIds || []).map((g: ObjectId) => String(g)));
     } catch (error) {
         logger.error('Course user-group lookup failed domain=%s uid=%d error=%o', domainId, uid, error);

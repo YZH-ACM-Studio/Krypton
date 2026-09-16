@@ -1,6 +1,8 @@
 import { expect } from 'chai';
 import { ObjectId } from 'mongodb';
 import { beforeEach, describe, it } from 'node:test';
+import { InMemoryStudentDirectory } from '../src/lib/testing/in-memory-student-directory';
+import { registerStudentDirectory } from '../src/service/student-directory';
 
 class EmptyCollection {
     createIndex() {
@@ -112,13 +114,14 @@ function mutableModel(): Record<string, unknown> {
     return global.Hydro.model as unknown as Record<string, unknown>;
 }
 
+const directory = new InMemoryStudentDirectory();
+registerStudentDirectory(directory);
+
 beforeEach(() => {
     contestAssignGroups = [];
     userStateRows = [];
-    mutableModel().userbind = {
-        loadExamRosterUserbindSnapshot: async (_domainId: string, _schoolId: ObjectId, groupIds: ObjectId[] | null) =>
-            snapshot(groupIds, [{ uid: 101, record: 1 }]),
-    };
+    directory.loadExamRosterUserbindSnapshot = async (_domainId: string, _schoolId: ObjectId, groupIds: ObjectId[] | null) =>
+        snapshot(groupIds, [{ uid: 101, record: 1 }]);
     mutableModel().contestTeam = { listTeams: async () => [] };
 });
 
@@ -150,11 +153,9 @@ describe('P2.4 Contest audience compilation', () => {
 
     it('rejects an invite-code audience because later attendees can still change it', async () => {
         let userbindReads = 0;
-        mutableModel().userbind = {
-            loadExamRosterUserbindSnapshot: async () => {
-                userbindReads++;
-                return snapshot([groupId], [{ uid: 101, record: 1 }]);
-            },
+        directory.loadExamRosterUserbindSnapshot = async () => {
+            userbindReads++;
+            return snapshot([groupId], [{ uid: 101, record: 1 }]);
         };
         mutableModel().contest = {
             get: async () => ({
@@ -184,14 +185,12 @@ describe('P2.4 Contest audience compilation', () => {
 
     it('uses only finalized active team members and does not reapply individual group scope', async () => {
         let observedGroupIds: ObjectId[] | null | undefined;
-        mutableModel().userbind = {
-            loadExamRosterUserbindSnapshot: async (_domainId: string, _schoolId: ObjectId, groupIds: ObjectId[] | null) => {
-                observedGroupIds = groupIds;
-                return snapshot(groupIds, [
-                    { uid: 201, record: 1 },
-                    { uid: 202, record: 2 },
-                ]);
-            },
+        directory.loadExamRosterUserbindSnapshot = async (_domainId: string, _schoolId: ObjectId, groupIds: ObjectId[] | null) => {
+            observedGroupIds = groupIds;
+            return snapshot(groupIds, [
+                { uid: 201, record: 1 },
+                { uid: 202, record: 2 },
+            ]);
         };
         mutableModel().contest = {
             get: async () => ({
@@ -229,13 +228,11 @@ describe('P2.4 Contest audience compilation', () => {
             { _id: 201, priv: 4 },
             { _id: 202, priv: 4 },
         ];
-        mutableModel().userbind = {
-            loadExamRosterUserbindSnapshot: async (_domainId: string, _schoolId: ObjectId, groupIds: ObjectId[] | null) =>
-                snapshot(groupIds, [
-                    { uid: 201, record: 1 },
-                    { uid: 202, record: 2 },
-                ]),
-        };
+        directory.loadExamRosterUserbindSnapshot = async (_domainId: string, _schoolId: ObjectId, groupIds: ObjectId[] | null) =>
+            snapshot(groupIds, [
+                { uid: 201, record: 1 },
+                { uid: 202, record: 2 },
+            ]);
         mutableModel().contest = {
             get: async () => ({
                 _id: contestId,
@@ -298,15 +295,13 @@ describe('P2.4 Contest audience compilation', () => {
             { _id: 202, priv: 4 },
         ];
         let userbindReads = 0;
-        mutableModel().userbind = {
-            loadExamRosterUserbindSnapshot: async (_domainId: string, _schoolId: ObjectId, groupIds: ObjectId[] | null) => {
-                userbindReads++;
-                const base = snapshot(groupIds, [
-                    { uid: 201, record: 1 },
-                    { uid: 202, record: 2 },
-                ]);
-                return userbindReads <= 2 ? base : { ...base, fingerprint: 'e'.repeat(64) };
-            },
+        directory.loadExamRosterUserbindSnapshot = async (_domainId: string, _schoolId: ObjectId, groupIds: ObjectId[] | null) => {
+            userbindReads++;
+            const base = snapshot(groupIds, [
+                { uid: 201, record: 1 },
+                { uid: 202, record: 2 },
+            ]);
+            return userbindReads <= 2 ? base : { ...base, fingerprint: 'e'.repeat(64) };
         };
         mutableModel().contest = {
             get: async () => ({
@@ -364,10 +359,8 @@ describe('P2.4 Contest audience compilation', () => {
 
     it('rejects a team contest whose stored roster is not contestAudience', async () => {
         userStateRows = [{ _id: 101, priv: 4 }];
-        mutableModel().userbind = {
-            loadExamRosterUserbindSnapshot: async (_domainId: string, _schoolId: ObjectId, groupIds: ObjectId[] | null) =>
-                snapshot(groupIds, [{ uid: 101, record: 1 }]),
-        };
+        directory.loadExamRosterUserbindSnapshot = async (_domainId: string, _schoolId: ObjectId, groupIds: ObjectId[] | null) =>
+            snapshot(groupIds, [{ uid: 101, record: 1 }]);
         mutableModel().contest = {
             get: async () => ({
                 _id: contestId,
@@ -424,13 +417,11 @@ describe('P2.4 Contest audience compilation', () => {
             { _id: 201, priv: 4 },
             { _id: 202, priv: 4 },
         ];
-        mutableModel().userbind = {
-            loadExamRosterUserbindSnapshot: async (_domainId: string, _schoolId: ObjectId, groupIds: ObjectId[] | null) =>
-                snapshot(groupIds, [
-                    { uid: 201, record: 1 },
-                    { uid: 202, record: 2 },
-                ]),
-        };
+        directory.loadExamRosterUserbindSnapshot = async (_domainId: string, _schoolId: ObjectId, groupIds: ObjectId[] | null) =>
+            snapshot(groupIds, [
+                { uid: 201, record: 1 },
+                { uid: 202, record: 2 },
+            ]);
         mutableModel().contest = {
             get: async () => ({
                 _id: contestId,
@@ -489,13 +480,11 @@ describe('P2.4 Contest audience compilation', () => {
             { _id: 201, priv: 4 },
             { _id: 202, priv: 0 },
         ];
-        mutableModel().userbind = {
-            loadExamRosterUserbindSnapshot: async (_domainId: string, _schoolId: ObjectId, groupIds: ObjectId[] | null) =>
-                snapshot(groupIds, [
-                    { uid: 201, record: 1 },
-                    { uid: 202, record: 2 },
-                ]),
-        };
+        directory.loadExamRosterUserbindSnapshot = async (_domainId: string, _schoolId: ObjectId, groupIds: ObjectId[] | null) =>
+            snapshot(groupIds, [
+                { uid: 201, record: 1 },
+                { uid: 202, record: 2 },
+            ]);
         mutableModel().contest = {
             get: async () => ({
                 _id: contestId,
@@ -545,11 +534,9 @@ describe('P2.4 Contest audience compilation', () => {
 
     it('rejects an empty active team before reading userbind PII', async () => {
         let userbindReads = 0;
-        mutableModel().userbind = {
-            loadExamRosterUserbindSnapshot: async () => {
-                userbindReads++;
-                return snapshot(null, []);
-            },
+        directory.loadExamRosterUserbindSnapshot = async () => {
+            userbindReads++;
+            return snapshot(null, []);
         };
         mutableModel().contest = {
             get: async () => ({
@@ -612,11 +599,9 @@ describe('P2.4 Contest audience compilation', () => {
 
     it('rejects a forged cross-domain Contest identity before reading userbind PII', async () => {
         let userbindReads = 0;
-        mutableModel().userbind = {
-            loadExamRosterUserbindSnapshot: async () => {
-                userbindReads++;
-                return snapshot(null, []);
-            },
+        directory.loadExamRosterUserbindSnapshot = async () => {
+            userbindReads++;
+            return snapshot(null, []);
         };
         mutableModel().contest = {
             get: async () => ({ _id: contestId, docId: contestId, domainId: 'other-domain' }),
@@ -634,11 +619,9 @@ describe('P2.4 Contest audience compilation', () => {
 
     it('rejects an unknown participation mode before reading userbind PII', async () => {
         let userbindReads = 0;
-        mutableModel().userbind = {
-            loadExamRosterUserbindSnapshot: async () => {
-                userbindReads++;
-                return snapshot(null, []);
-            },
+        directory.loadExamRosterUserbindSnapshot = async () => {
+            userbindReads++;
+            return snapshot(null, []);
         };
         mutableModel().contest = {
             get: async () => ({
@@ -665,11 +648,9 @@ describe('P2.4 Contest audience compilation', () => {
 
     it('rejects a malformed invite-code fact before reading userbind PII', async () => {
         let userbindReads = 0;
-        mutableModel().userbind = {
-            loadExamRosterUserbindSnapshot: async () => {
-                userbindReads++;
-                return snapshot(null, []);
-            },
+        directory.loadExamRosterUserbindSnapshot = async () => {
+            userbindReads++;
+            return snapshot(null, []);
         };
         mutableModel().contest = {
             get: async () => ({
@@ -697,11 +678,9 @@ describe('P2.4 Contest audience compilation', () => {
 
     it('rejects falsy malformed audience configuration instead of defaulting it', async () => {
         let userbindReads = 0;
-        mutableModel().userbind = {
-            loadExamRosterUserbindSnapshot: async () => {
-                userbindReads++;
-                return snapshot(null, []);
-            },
+        directory.loadExamRosterUserbindSnapshot = async () => {
+            userbindReads++;
+            return snapshot(null, []);
         };
         for (const malformed of [{ participantScopeMode: '' }, { assign: 0 }, { participantSchoolIds: null }]) {
             mutableModel().contest = {
@@ -756,11 +735,9 @@ describe('P2.4 Contest audience compilation', () => {
     it('rejects a fully public Contest before reading mutable attendance or userbind facts', async () => {
         let attendanceReads = 0;
         let userbindReads = 0;
-        mutableModel().userbind = {
-            loadExamRosterUserbindSnapshot: async () => {
-                userbindReads++;
-                return snapshot(null, []);
-            },
+        directory.loadExamRosterUserbindSnapshot = async () => {
+            userbindReads++;
+            return snapshot(null, []);
         };
         mutableModel().contest = {
             get: async () => ({
@@ -790,13 +767,11 @@ describe('P2.4 Contest audience compilation', () => {
     });
 
     it('propagates cross-school group rejection without converting it to an empty roster', async () => {
-        mutableModel().userbind = {
-            loadExamRosterUserbindSnapshot: async () => {
-                throw Object.assign(new Error('group_school_mismatch'), {
-                    name: 'ExamRosterUserbindSourceError',
-                    reason: 'group_school_mismatch',
-                });
-            },
+        directory.loadExamRosterUserbindSnapshot = async () => {
+            throw Object.assign(new Error('group_school_mismatch'), {
+                name: 'ExamRosterUserbindSourceError',
+                reason: 'group_school_mismatch',
+            });
         };
         let reason: string | null = null;
         let translated = false;

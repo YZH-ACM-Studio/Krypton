@@ -3,19 +3,24 @@ import { localizeErrorParameter, localizedErrorText } from '@hydrooj/framework';
 import { ObjectId } from 'mongodb';
 import { readFileSync } from 'node:fs';
 import { beforeEach, describe, it } from 'node:test';
+import { InMemoryStudentDirectory, studentRecord } from '../src/lib/testing/in-memory-student-directory';
+import { registerStudentDirectory } from '../src/service/student-directory';
 
 const Module = require('module');
 (global as any).Hydro ||= { model: {}, module: {} };
-let boundGroupIds: string[] = [];
+const courseGroupA = new ObjectId();
+const courseGroupB = new ObjectId();
+let boundGroupIds: ObjectId[] = [];
 let boundGroupError: Error | null = null;
 let publicMindmaps: any[] = [];
 const publicMindmapSnapshots = new Map<string, any>();
-(global as any).Hydro.model.userbind = {
-    async findStudentByUserId() {
+class CourseGroupDirectory extends InMemoryStudentDirectory {
+    async findStudentByUserId(domainId: string, userId: number) {
         if (boundGroupError) throw boundGroupError;
-        return { groupIds: boundGroupIds };
-    },
-};
+        return studentRecord({ domainId, boundUserId: userId, groupIds: boundGroupIds });
+    }
+}
+registerStudentDirectory(new CourseGroupDirectory());
 (global as any).Hydro.model.mindmap = {
     async getPublicMap(id: unknown) {
         return publicMindmaps.find((map) => String(map._id) === String(id)) || null;
@@ -1284,7 +1289,7 @@ describe('P3.6 protected course files', () => {
         title: 'Course',
         content: '',
         description: '',
-        courseGroupIds: ['group-a'],
+        courseGroupIds: [courseGroupA],
         dag: [],
         files: [{ _id: 'slides.pdf', name: 'slides.pdf', size: 12 }],
         ...overrides,
@@ -1319,7 +1324,7 @@ describe('P3.6 protected course files', () => {
 
     it('allows an in-scope student to download only a file declared by that course', async () => {
         currentContainer = courseWithFile();
-        boundGroupIds = ['group-a'];
+        boundGroupIds = [courseGroupA];
         const handler = makeHandler(courseRoutes.course_file_download);
         await handler.get('forged-domain', 'course', 'slides.pdf');
 
@@ -1330,7 +1335,7 @@ describe('P3.6 protected course files', () => {
 
     it('rejects an out-of-scope student before signing any storage URL', async () => {
         currentContainer = courseWithFile();
-        boundGroupIds = ['group-b'];
+        boundGroupIds = [courseGroupB];
         const handler = makeHandler(courseRoutes.course_file_download);
         const error = await captureFailure(() => handler.get('forged-domain', 'course', 'slides.pdf'));
 

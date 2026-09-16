@@ -47,6 +47,7 @@ import storage from '../model/storage';
 import system from '../model/system';
 import user from '../model/user';
 import { ConnectionHandler, param, subscribe, Types } from '../service/server';
+import { studentDirectory } from '../service/student-directory';
 import { buildProjection, Time } from '../utils';
 import { canManageVirtualContest, virtualContestService, type VirtualContestAttemptDoc } from '../model/virtual-contest';
 import { ContestDetailBaseHandler } from './contest';
@@ -320,12 +321,11 @@ export class RecordListHandler extends ContestDetailBaseHandler {
             rdocs = rdocs.map((i) => contest.applyProjection(tdoc, i, this.user));
         }
         // Admin extra column: 学号 / 姓名. Only populated when the viewer has
-        // PRIV_EDIT_SYSTEM and krypton-userbind is loaded; otherwise the dict
-        // stays empty and the UI hides the column.
+        // PRIV_EDIT_SYSTEM; otherwise the dict stays empty and the UI hides the column.
         let studentDict: Record<string, { studentId: string; realName: string }> = {};
-        if (this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM) && global.Hydro?.model?.userbind?.findStudentsByUserIds) {
+        if (this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) {
             const uids = Array.from(new Set(rdocs.map((r) => r.uid))).filter((u) => u && u > 1);
-            const students = await global.Hydro.model.userbind.findStudentsByUserIds(domainId, uids);
+            const students = await studentDirectory().findStudentsByUserIds(domainId, uids);
             studentDict = Object.fromEntries(
                 Object.entries(students).map(([uid, s]: [string, any]) => [uid, { studentId: s.studentId, realName: s.realName }]),
             );
@@ -605,8 +605,8 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
             /* malformed config → no hints, never break the page */
         }
         let recordStudent: { studentId: string; realName: string } | null = null;
-        if (this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM) && global.Hydro?.model?.userbind?.findStudentsByUserIds && rdoc.uid > 1) {
-            const students = await global.Hydro.model.userbind.findStudentsByUserIds(domainId, [rdoc.uid]);
+        if (this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM) && rdoc.uid > 1) {
+            const students = await studentDirectory().findStudentsByUserIds(domainId, [rdoc.uid]);
             const student = students[String(rdoc.uid)];
             if (student) {
                 recordStudent = {

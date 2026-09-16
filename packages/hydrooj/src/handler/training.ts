@@ -19,6 +19,7 @@ import { canManageProblemSet, problemSetAccessService } from '../model/problem-s
 import * as training from '../model/training';
 import user from '../model/user';
 import { Handler, param, post, Types } from '../service/server';
+import { studentDirectory } from '../service/student-directory';
 import { getVisibleReferencedProblems, normalizeProblemDocIds } from './problem-reference';
 import { loadCompletedPidsByUid } from '../lib/practice-roster-load';
 import { assemblePracticeRosterMembers, PRACTICE_ROSTER_ENROLL_LIMIT, serializePracticeRosterProblems } from '../lib/practice-roster';
@@ -252,12 +253,8 @@ class TrainingDetailHandler extends Handler {
                 .limit(PRACTICE_ROSTER_ENROLL_LIMIT)
                 .toArray();
             const memberUids = enrollDocs.map((x) => +x.uid);
-            const ub = global.Hydro?.model?.userbind;
+            const ub = studentDirectory();
             const scopePids = new Map<number, ReadonlySet<number>>(tdoc.dag.map((node) => [node._id, new Set(node.pids)]));
-            if (memberUids.length && typeof ub?.findStudentsByUserIds !== 'function') {
-                throw new TypeError('userbind.findStudentsByUserIds is unavailable');
-            }
-            if (typeof ub?.listUserGroups !== 'function') throw new TypeError('userbind.listUserGroups is unavailable');
             const [memberUdict, students, ubGroups, completedPidsByUid] = await Promise.all([
                 user.getListForRender(domainId, memberUids, false),
                 memberUids.length ? ub.findStudentsByUserIds(domainId, memberUids) : {},
@@ -332,9 +329,7 @@ class TrainingEditHandler extends Handler {
 
     async get() {
         const authoritativeDomainId = String(this.domain?._id);
-        const groups = (global as any).Hydro?.model?.userbind?.listUserGroups
-            ? await (global as any).Hydro.model.userbind.listUserGroups(authoritativeDomainId)
-            : [];
+        const groups = await studentDirectory().listUserGroups(authoritativeDomainId);
         this.response.template = 'problem_set_edit.html';
         this.response.body = {
             page_name: this.tdoc ? 'problem_set_edit' : 'problem_set_create',

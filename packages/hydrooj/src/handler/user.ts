@@ -50,6 +50,7 @@ import token from '../model/token';
 import * as training from '../model/training';
 import user, { deleteUserCache } from '../model/user';
 import { Handler, param, post, Query, Types } from '../service/server';
+import { studentDirectory } from '../service/student-directory';
 
 async function successfulAuth(this: Handler, udoc: User) {
     if (udoc._id !== 0) await user.setById(udoc._id, { loginat: new Date(), loginip: this.request.ip });
@@ -764,8 +765,8 @@ const UserApi = {
                 udocs.pop();
                 udocs.unshift(udoc);
             }
-            const userbind = global.Hydro?.model?.userbind;
-            if (!arg.exact && canViewStudentIdentity && userbind?.searchBoundStudents) {
+            const userbind = studentDirectory();
+            if (!arg.exact && canViewStudentIdentity) {
                 const studentMatches = await userbind.searchBoundStudents(arg.domainId, arg.search, limit);
                 const missingUids = studentMatches
                     .map((student) => student.boundUserId)
@@ -779,7 +780,7 @@ const UserApi = {
                 }
             }
             const students =
-                canViewStudentIdentity && userbind?.findStudentsByUserIds
+                canViewStudentIdentity
                     ? await userbind.findStudentsByUserIds(
                           arg.domainId,
                           udocs.map((candidate) => candidate._id),

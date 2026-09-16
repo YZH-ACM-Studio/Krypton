@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { beforeEach, test } from 'node:test';
 import { ObjectId } from 'mongodb';
+import { InMemoryStudentDirectory, studentRecord } from '../src/lib/testing/in-memory-student-directory';
+import { registerStudentDirectory } from '../src/service/student-directory';
 
 const domainId = 'system';
 const eventId = new ObjectId('64b200000000000000000001');
@@ -188,11 +190,9 @@ stub('../src/model/user.ts', {
     },
 });
 
+registerStudentDirectory(new InMemoryStudentDirectory({ students: [studentRecord({ _id: studentRecordId, domainId, schoolId, boundUserId: 42 })] }));
 (global as unknown as { Hydro: { model: Record<string, unknown> } }).Hydro = {
     model: {
-        userbind: {
-            findStudentByUserId: async () => ({ _id: studentRecordId, schoolId, boundUserId: 42 }),
-        },
         vigilguard: { hitsParticipantScope: async () => true },
     },
 };

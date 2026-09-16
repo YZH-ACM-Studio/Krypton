@@ -3,6 +3,8 @@ import { ObjectId } from 'mongodb';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { beforeEach, describe, it } from 'node:test';
+import { InMemoryStudentDirectory, studentRecord } from '../src/lib/testing/in-memory-student-directory';
+import { registerStudentDirectory } from '../src/service/student-directory';
 
 const Module = require('module');
 (global as any).Hydro ||= { model: {}, module: {} };
@@ -383,6 +385,16 @@ function makeHandler(Ctor: any): any {
     return handler as any;
 }
 
+class RecordingStudentDirectory extends InMemoryStudentDirectory {
+    async findStudentsByUserIds(domainId: string, uids: number[]) {
+        calls.studentQueries.push({ domainId, uids });
+        return super.findStudentsByUserIds(domainId, uids);
+    }
+}
+registerStudentDirectory(
+    new RecordingStudentDirectory({ students: [studentRecord({ domainId: 'd', boundUserId: 42, studentId: '240000042', realName: '学生甲' })] }),
+);
+
 beforeEach(() => {
     calls.recordQueries.length = 0;
     calls.rawProblems.length = 0;
@@ -394,12 +406,6 @@ beforeEach(() => {
     clientRequired = false;
     ongoing = false;
     viewableProblemAvailable = false;
-    (global as any).Hydro.model.userbind = {
-        async findStudentsByUserIds(domainId: string, uids: number[]) {
-            calls.studentQueries.push({ domainId, uids });
-            return { 42: { studentId: '240000042', realName: '学生甲' } };
-        },
-    };
 });
 
 describe('post-contest practice record handlers', () => {
@@ -428,6 +434,19 @@ describe('post-contest practice record handlers', () => {
 
         expect(calls.recordQueries[0]).to.deep.include({ contest: tid, uid: 42, pid: 7 });
         expect(handler.response.body.postContestPracticeActive).to.equal(false);
+    });
+
+    it('adds bound student identity to the ordinary record list only for a system admin', async () => {
+        const handler = makeHandler(recordHandlerModule.RecordListHandler);
+        await handler.get('d', 1, undefined, undefined, false, false, '42', undefined, undefined, true);
+        expect(handler.response.body.studentDict).to.deep.equal({});
+        expect(calls.studentQueries).to.deep.equal([]);
+
+        const adminHandler = makeHandler(recordHandlerModule.RecordListHandler);
+        adminHandler.user.hasPriv = (privilege: number) => privilege === PRIV.PRIV_EDIT_SYSTEM;
+        await adminHandler.get('d', 1, undefined, undefined, false, false, '42', undefined, undefined, true);
+        expect(adminHandler.response.body.studentDict).to.deep.equal({ 42: { studentId: '240000042', realName: '学生甲' } });
+        expect(calls.studentQueries).to.deep.equal([{ domainId: 'd', uids: [42] }]);
     });
 
     it('rejects a forged problem outside the contest practice context', async () => {

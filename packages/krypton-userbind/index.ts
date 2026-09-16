@@ -7,7 +7,7 @@
  * Loaded as a built-in addon — see packages/hydrooj/src/loader.ts.
  */
 // Side-effect imports: register binding-path methods + export/import methods on userBindModel.
-import { Context, SettingModel } from 'hydrooj';
+import { Context, registerStudentDirectory, SettingModel } from 'hydrooj';
 import { registerCommands } from './src/cli';
 import { applyHandlers } from './src/handler';
 import { applyLegacyRedirects } from './src/legacy-redirects';
@@ -34,6 +34,8 @@ export function apply(ctx: Context) {
     // packages/hydrooj/src/init.ts (no Proxy on `model`) — so each plugin
     // that wants to be addressable this way must assign it explicitly.
     if ((global as any).Hydro?.model) (global as any).Hydro.model.userbind = userBindModel;
+    // hydrooj core reads the roster only through this registered StudentDirectory.
+    registerStudentDirectory(userBindModel);
 
     ctx.inject(['setting'], (c) => {
         c.setting.SystemSetting(

@@ -38,6 +38,7 @@ import system from '../model/system';
 import token from '../model/token';
 import user, { handleMailLower } from '../model/user';
 import { Handler, param, Types } from '../service/server';
+import { studentDirectory } from '../service/student-directory';
 
 const logger = new Logger('admin-account');
 
@@ -446,14 +447,10 @@ function parseListQuery(args: any): ListQuery {
 async function listAccountRows(handler: Handler, query: ListQuery): Promise<{ rows: AccountListRow[]; bindingAvailable: boolean }> {
     const rawUsers = await user.coll.find({ _id: { $gt: 0 } }, { projection: ACCOUNT_PROJECTION }).toArray();
     const uids = rawUsers.map((row) => row._id);
-    const userbind = (global as any).Hydro?.model?.userbind;
-    const bindingAvailable = typeof userbind?.findStudentsByUserIds === 'function';
-    if (query.binding !== 'all' && !bindingAvailable) throw new Error('userbind.findStudentsByUserIds is required for binding-status filters');
-
     const [systemUsers, oauthRows, bindingDict] = await Promise.all([
         domain.collUser.find({ domainId: 'system', uid: { $in: uids } }, { projection: { uid: 1, displayName: 1 } }).toArray(),
         handler.ctx.oauth.coll.find({ uid: { $in: uids } }, { projection: { uid: 1, platform: 1 } }).toArray(),
-        bindingAvailable ? userbind.findStudentsByUserIds('system', uids) : {},
+        studentDirectory().findStudentsByUserIds('system', uids),
     ]);
     const displayNames = new Map(systemUsers.map((row) => [row.uid, String(row.displayName || '')]));
     const oauthByUid = new Map<number, string[]>();
@@ -510,7 +507,7 @@ async function listAccountRows(handler: Handler, query: ListQuery): Promise<{ ro
         groupMembers,
         roleMembers,
     });
-    return { rows, bindingAvailable };
+    return { rows, bindingAvailable: true };
 }
 
 async function getAccountDetail(handler: Handler, uid: number) {
@@ -538,9 +535,7 @@ async function getAccountDetail(handler: Handler, uid: number) {
             .find({ uids: uid }, { projection: { domainId: 1, name: 1 } })
             .sort({ domainId: 1, name: 1 })
             .toArray(),
-        (global as any).Hydro?.model?.userbind?.findStudentsByUserIds
-            ? (global as any).Hydro.model.userbind.findStudentsByUserIds('system', [uid])
-            : null,
+        studentDirectory().findStudentsByUserIds('system', [uid]),
         RecordModel.coll.countDocuments({ domainId: 'system', contest: { $exists: false }, uid }),
         RecordModel.coll.countDocuments({ domainId: 'system', contest: { $exists: false }, uid, status: STATUS.STATUS_ACCEPTED }),
         document.coll.countDocuments({ domainId: 'system', docType: document.TYPE_PROBLEM, owner: uid }),
@@ -637,7 +632,7 @@ async function getAccountDetail(handler: Handler, uid: number) {
             role: membership.role || 'default',
         })),
         groups: groups.map((group) => ({ domainId: group.domainId, name: group.name })),
-        binding: bindingDict === null ? { available: false, student: null } : { available: true, student: bindingDict[String(uid)] || null },
+        binding: { available: true, student: bindingDict[String(uid)] || null },
         related: {
             submissionCount,
             acceptedCount,

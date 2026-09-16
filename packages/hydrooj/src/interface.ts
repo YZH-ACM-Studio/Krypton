@@ -11,6 +11,7 @@ import type { PrintTaskStatus } from './model/contest';
 import type { DocStatusType } from './model/document';
 import type { OauthMap } from './model/oauth';
 import type { ProblemDoc } from './model/problem';
+import type { StudentDirectory } from './service/student-directory';
 
 export * from '@hydrooj/common/types';
 
@@ -1003,52 +1004,8 @@ declare module './service/db' {
     }
 }
 
-export interface UserbindModelBridge {
-    listSchools(domainId: string): Promise<Array<{ _id: ObjectId; domainId: string; name: string }>>;
-    listUserGroups(
-        domainId: string,
-        schoolId?: ObjectId,
-    ): Promise<Array<{ _id: ObjectId; domainId: string; schoolId: ObjectId; name: string; archivedAt?: Date | null }>>;
-    getSchool(domainId: string, schoolId: ObjectId): Promise<{ _id: ObjectId; domainId: string; name: string } | null>;
-    findStudentByUserId(domainId: string, userId: number): Promise<{ schoolId?: ObjectId; groupIds?: ObjectId[] } | null>;
-    findStudentsByUserIds(domainId: string, userIds: number[]): Promise<Record<string, { studentId: string; realName: string }>>;
-    searchBoundStudents(
-        domainId: string,
-        query: string,
-        limit?: number,
-    ): Promise<Array<{ boundUserId: number; studentId: string; realName: string }>>;
-    findBoundStudentsByGroupIds(
-        domainId: string,
-        groupIds: ObjectId[],
-    ): Promise<Array<{ boundUserId: number | null; groupIds: ObjectId[]; studentId: string; realName: string }>>;
-    loadExamRosterUserbindSnapshot(
-        domainId: string,
-        schoolId: ObjectId,
-        selectedGroupIds: ObjectId[] | null,
-    ): Promise<{
-        domainId: string;
-        schoolId: ObjectId;
-        schoolName: string;
-        selectionKind: 'groups' | 'school';
-        selectedGroupIds: ObjectId[];
-        groups: Array<{
-            groupId: ObjectId;
-            schoolId: ObjectId;
-            name: string;
-            archivedAt: Date | null;
-            fingerprint: string;
-        }>;
-        students: Array<{
-            studentRecordId: ObjectId;
-            schoolId: ObjectId;
-            studentId: string;
-            realName: string;
-            groupIds: ObjectId[];
-            boundUserId: number | null;
-        }>;
-        fingerprint: string;
-    }>;
-}
+/** @deprecated Read the student roster through `studentDirectory()` from `service/student-directory`. */
+export type UserbindModelBridge = StudentDirectory;
 
 export interface Model {
     blacklist: typeof import('./model/blacklist').default;
@@ -1128,7 +1085,7 @@ export interface Model {
     storage: typeof import('./model/storage').default;
     rp: typeof import('./script/rating').RpTypes;
     /** Optional bridge exposed when @hydrooj/krypton-userbind is loaded. */
-    userbind?: UserbindModelBridge;
+    userbind?: StudentDirectory;
 }
 
 export interface GeoIP {

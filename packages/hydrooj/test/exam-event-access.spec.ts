@@ -2,6 +2,8 @@ import { describe, it } from 'node:test';
 import { expect } from 'chai';
 import { ObjectId } from 'mongodb';
 import type { ExamEventDoc } from '../src/model/exam-event';
+import { InMemoryStudentDirectory } from '../src/lib/testing/in-memory-student-directory';
+import { registerStudentDirectory } from '../src/service/student-directory';
 
 const hydro = ((global as unknown as { Hydro?: { model?: Record<string, unknown> } }).Hydro ||= { model: {} });
 hydro.model ||= {};
@@ -33,14 +35,14 @@ const users = new Map([
     [1, root],
 ]);
 
-hydro.model.userbind = {
-    getSchool: async (domainId: string, schoolId: ObjectId) =>
-        domainId === 'system' && [schoolA, schoolB].some((candidate) => candidate.equals(schoolId))
-            ? { _id: schoolId, domainId, name: schoolId.equals(schoolA) ? 'A' : 'B' }
-            : null,
-    listSchools: async () => [],
-    findStudentByUserId: async () => null,
-};
+registerStudentDirectory(
+    new InMemoryStudentDirectory({
+        schools: [
+            { _id: schoolA, domainId: 'system', name: 'A' },
+            { _id: schoolB, domainId: 'system', name: 'B' },
+        ],
+    }),
+);
 hydro.model.user = { getById: async (_domainId: string, uid: number) => users.get(uid) || null };
 hydro.model.contest = {
     get: async (domainId: string, contestId: ObjectId) => {

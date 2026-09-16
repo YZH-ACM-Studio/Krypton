@@ -41,6 +41,8 @@ export * as JudgeHandler from './handler/judge';
 export { JudgeResultCallbackContext, postJudge } from './handler/judge';
 export { Collections } from './service/db';
 export { ConnectionHandler, Handler, requireSudo } from './service/server';
+export { registerStudentDirectory, studentDirectory, StudentDirectoryUnavailableError, withStudentDirectory } from './service/student-directory';
+export type { StudentDirectory } from './service/student-directory';
 export { Context, Fiber, FiberState, Service } from './context';
 export { buildContent } from './lib/content';
 export { default as mime } from './lib/mime';

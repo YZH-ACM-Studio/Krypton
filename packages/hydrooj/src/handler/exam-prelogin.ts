@@ -26,6 +26,7 @@ import { examSeatAssignmentService, isExamSeatAssignmentV2 } from '../model/exam
 import { ExamSeatAssignmentReadinessError } from '../model/exam-seat-assignment-readiness';
 import { getExamPreloginService, isExamPreloginV2WriterEnabled, isExamPreloginWorkflowWriterEnabled } from '../service/exam-prelogin';
 import { parseVigilExamPreloginProjection, preflightExamPreloginOnVigil } from '../service/vigil-bridge';
+import { studentDirectory } from '../service/student-directory';
 
 const logger = new Logger('exam-prelogin');
 
@@ -241,11 +242,7 @@ async function serializeBatch(batch: ExamPreloginBatchDoc) {
 
 async function serializeRedemption(ticket: ExamPreloginTicketDoc) {
     if (ticket.state !== 'redeemed' || !ticket.redeemedAt) throw new ExamPreloginError('ticket_not_redeemed');
-    const userbind = (global as { Hydro?: { model?: { userbind?: { findStudentByUserId?: (domainId: string, uid: number) => Promise<unknown> } } } }).Hydro?.model?.userbind;
-    if (!userbind || typeof userbind.findStudentByUserId !== 'function') {
-        throw new ExamPreloginError('userbind_student_resolver_unavailable');
-    }
-    const student = await userbind.findStudentByUserId(ticket.domainId, ticket.uid) as {
+    const student = await studentDirectory().findStudentByUserId(ticket.domainId, ticket.uid) as {
         _id?: unknown;
         boundUserId?: unknown;
         studentId?: unknown;

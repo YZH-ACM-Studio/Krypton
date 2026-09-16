@@ -1,15 +1,18 @@
 import { expect } from 'chai';
 import { beforeEach, describe, it } from 'node:test';
 import { ObjectId as MongoObjectId } from 'mongodb';
+import { InMemoryStudentDirectory, studentRecord } from '../src/lib/testing/in-memory-student-directory';
+import { registerStudentDirectory } from '../src/service/student-directory';
 
 const Module = require('module');
 (global as any).Hydro ||= { model: {}, module: {} };
 let homeworkGroupIds: MongoObjectId[] = [];
-(global as any).Hydro.model.userbind = {
-    async findStudentByUserId() {
-        return { groupIds: homeworkGroupIds };
-    },
-};
+class HomeworkGroupDirectory extends InMemoryStudentDirectory {
+    async findStudentByUserId(domainId: string, userId: number) {
+        return studentRecord({ domainId, boundUserId: userId, groupIds: homeworkGroupIds });
+    }
+}
+registerStudentDirectory(new HomeworkGroupDirectory());
 const homeworkAccessModule = require('../src/model/homework-access.ts');
 const actualBuiltin = require('../src/model/builtin.ts');
 

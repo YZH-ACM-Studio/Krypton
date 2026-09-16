@@ -37,6 +37,7 @@ import {
     isExamSeatPlanV2,
 } from '../model/exam-seat-plan';
 import { classifyVigilBridgeFailure, preflightExamNetworkOnVigil } from '../service/vigil-bridge';
+import { studentDirectory } from '../service/student-directory';
 
 const logger = new Logger('exam-seat-assignment');
 
@@ -279,8 +280,7 @@ abstract class ExamSeatAssignmentBaseHandler extends Handler {
     }
 
     protected async rosterGroups(event: ExamEventDoc): Promise<Array<{ groupId: string; name: string }>> {
-        const userbind = global.Hydro.model.userbind;
-        if (!userbind || typeof userbind.listUserGroups !== 'function') throw new ExamSeatAssignmentError('userbind_group_resolver_unavailable');
+        const userbind = studentDirectory();
         const groups = await userbind.listUserGroups(event.domainId, event.schoolId);
         return groups
             .map((group) => {

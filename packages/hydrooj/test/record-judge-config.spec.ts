@@ -131,6 +131,13 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     if (request === './builtin') return { STATUS: { STATUS_WAITING: 0 } };
     if (request === './domain') return { get: async () => ({ isTrusted: true }) };
     if (request === './message') return {};
+    if (request === './practice-integrity') {
+        return {
+            assertTrustedPracticeContextBinding() {
+                throw new Error('record judge config fixtures carry no practice context');
+            },
+        };
+    }
     if (request === './problem') {
         return {
             claimStructureLockForSubmission: async (_domainId: string, _pid: number, lockStructure = true) => {

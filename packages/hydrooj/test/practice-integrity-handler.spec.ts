@@ -182,6 +182,7 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     const fromHandler = parent?.filename?.endsWith('/packages/hydrooj/src/handler/practice-integrity.ts');
     const fromPracticeAccess = parent?.filename?.endsWith('/packages/hydrooj/src/model/practice-integrity-access.ts');
     const fromLiveRef = parent?.filename?.endsWith('/packages/hydrooj/src/lib/course-live-ref.ts');
+    const fromCourseAccess = parent?.filename?.endsWith('/packages/hydrooj/src/lib/course-access.ts');
     const fromPracticeModule = fromHandler || fromPracticeAccess;
     if (fromHandler && request === '@hydrooj/utils') {
         return {
@@ -219,7 +220,11 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
         };
     }
     if ((fromHandler && request === '../model/problem') || (fromPracticeAccess && request === './problem')) return problemStub;
-    if ((fromHandler && request === '../model/problem-set-access') || (fromPracticeAccess && request === './problem-set-access')) {
+    if (
+        (fromHandler && request === '../model/problem-set-access') ||
+        (fromPracticeAccess && request === './problem-set-access') ||
+        (fromCourseAccess && request === '../model/problem-set-access')
+    ) {
         return {
             canManageProblemSet() {
                 return false;

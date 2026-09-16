@@ -402,6 +402,16 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     if (fromSrc && request === '../model/builtin') return { PERM, PRIV, STATUS };
     if (fromSrc && request === '../model/contest') return contestStub;
     if (fromSrc && request === '../model/contextual-completion') return contextualCompletionStub;
+    if (fromSrc && request === '../model/course-video-progress') {
+        return {
+            async deleteCourseVideoProgress() {
+                return undefined;
+            },
+            async loadUserCourseProgress() {
+                return [];
+            },
+        };
+    }
     if (fromSrc && request === '../model/document') return { getMultiStatus: () => cursor(), TYPE_PROBLEM: 10 };
     if (fromSrc && request === '../model/oplog') {
         return {
@@ -795,7 +805,7 @@ describe('P3.20 course mindmap binding and projection', () => {
         };
         await editor.post('forged-domain', 'course', 'Course', '', JSON.stringify([{ _id: 1, title: '第一章', pids: [], tids: [] }]), '', '', [], '');
         expect(calls.edit.at(-1)[2].dag[0].title).to.equal('第一章');
-        expect(calls.edit.at(-1)[3]).to.deep.equal({ mindmapId: 1 });
+        expect(calls.edit.at(-1)[3]).to.deep.equal({ mindmapId: 1, courseVideoDueAt: 1, courseExam: 1 });
     });
 });
 

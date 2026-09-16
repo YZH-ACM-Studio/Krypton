@@ -301,7 +301,7 @@ describe('post-contest submission integration', () => {
     it('uses an explicit flag instead of treating every legacy correction mode as personal practice', () => {
         const source = readFileSync(resolve(process.cwd(), 'packages/hydrooj/src/handler/problem.ts'), 'utf8');
         expect(source).to.include("const postContestPracticeActive = !this.virtualAttempt && postContestProblemMode === 'correction'");
-        expect(source).to.include('psdoc: !tid ? this.psdoc : personalPracticePsdoc');
+        expect(source).to.match(/psdoc: !tid\s+\?[^;]+?: personalPracticePsdoc,/);
         expect(source).to.include('postContestPracticeActive,');
     });
 });

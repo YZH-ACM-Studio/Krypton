@@ -350,6 +350,13 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     const fromContest = parent?.filename === contestPath;
     if (fromContest && request === '../context') return { Context: class {}, Service: ServiceStub };
     if (fromContest && request === '../error') return errors;
+    if (fromContest && request === '../lib/course-exam-gate') {
+        return {
+            async assertCourseExamWatchGate() {
+                return undefined;
+            },
+        };
+    }
     if (fromContest && request === '../model/builtin') return { PERM, PRIV, STATUS: {} };
     if (fromContest && request === '../model/contest') return contestStub;
     if (fromContest && request === '../model/problem') return problemStub;

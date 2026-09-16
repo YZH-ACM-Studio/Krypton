@@ -29,6 +29,7 @@ const originalLoad = Module._load;
 Module._load = function load(request: string, parent: NodeModule, isMain: boolean) {
     const fromAccess = parent?.filename?.includes('practice-integrity-access');
     const fromLiveRef = parent?.filename?.includes('course-live-ref');
+    const fromCourseAccess = parent?.filename?.includes('/lib/course-access');
     if (fromAccess && request === './builtin') return { PERM, PRIV, STATUS: { STATUS_ACCEPTED: 1 } };
     if (fromAccess && request === '../error') {
         return {
@@ -48,7 +49,7 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
             },
         };
     }
-    if (fromAccess && request === './problem-set-access') {
+    if ((fromAccess && request === './problem-set-access') || (fromCourseAccess && request === '../model/problem-set-access')) {
         return {
             problemSetAccessService: {
                 async evaluate() {

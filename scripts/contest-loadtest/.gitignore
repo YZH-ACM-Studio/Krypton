@@ -1,0 +1,12 @@
+*.flv
+*.mp4
+*.log
+reports/
+samples/
+identities/
+__pycache__/
+*.pyc
+.DS_Store
+users.csv
+*.csv
+!users.example.csv

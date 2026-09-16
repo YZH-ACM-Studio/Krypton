@@ -1,0 +1,2 @@
+# One 24-hex contest ObjectId per line. Those IDs will never be targeted.
+# Put the real school-contest id here before a live run.

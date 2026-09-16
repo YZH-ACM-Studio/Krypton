@@ -4,19 +4,16 @@ import { serializeRanking } from '../src/serialize';
 import {
     emptyUserExternalRatingState,
     type ExternalRatingErrorCode,
+    type ExternalRatingSiteSnapshot,
+    type UserExternalRatingState,
 } from '../src/types';
 
 const FETCHED_AT = new Date('2026-09-13T08:00:00.000Z');
 const LAST_ERROR: ExternalRatingErrorCode = 'timeout';
 const NOWCODER_LAST_ERROR: ExternalRatingErrorCode = 'parse_failed';
 
-interface SiteInput {
-    handle: string;
-    rating: number | null;
-    fetchedAt: Date | null;
-    lastError: ExternalRatingErrorCode | null;
-    publicShow?: boolean;
-}
+/** Wire-shaped input: `publicShow` may be absent, which the parser defaults to hidden. */
+type SiteInput = Omit<ExternalRatingSiteSnapshot, 'publicShow'> & { publicShow?: boolean };
 
 function site(partial: Partial<SiteInput> & Pick<SiteInput, 'handle' | 'rating'>): SiteInput {
     return {
@@ -27,8 +24,10 @@ function site(partial: Partial<SiteInput> & Pick<SiteInput, 'handle' | 'rating'>
     };
 }
 
-function state(codeforces: SiteInput, nowcoder: SiteInput) {
-    return { codeforces, nowcoder };
+function state(codeforces: SiteInput, nowcoder: SiteInput): UserExternalRatingState {
+    // The serializers parse their argument, so an absent `publicShow` is a legal
+    // input shape even though the canonical state type always carries the flag.
+    return { codeforces, nowcoder } as UserExternalRatingState;
 }
 
 const hiddenBoth = state(

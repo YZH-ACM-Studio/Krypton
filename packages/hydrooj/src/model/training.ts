@@ -21,6 +21,10 @@ import { canonicalProblemSetAudience } from '../lib/problem-set-audience';
 
 const logger = new Logger('training');
 
+// Re-exported because `global.Hydro.model.training` publishes them and the
+// declared model type is `typeof import('./model/training')`.
+export { isCourseKind, isProblemSetKind, problemSetKindClause, withProblemSetKind };
+
 export function getStatus(domainId: string, tid: ObjectId, uid: number) {
     return document.getStatus(domainId, document.TYPE_TRAINING, tid, uid);
 }
@@ -572,7 +576,7 @@ export const getMulti = (domainId: string, query: Filter<TrainingDoc> = {}) =>
 
 export async function getList(domainId: string, tids: ObjectId[]) {
     const tdocs = await getMulti(domainId, { _id: { $in: Array.from(new Set(tids)) } }).toArray();
-    const r = {};
+    const r: Record<string, TrainingDoc> = {};
     for (const tdoc of tdocs) r[tdoc.docId.toString()] = tdoc;
     return r;
 }
@@ -590,6 +594,7 @@ global.Hydro.model.training = {
     withProblemSetKind,
     add,
     edit,
+    assignCourseOwnership,
     ensureProblemBatchChapter,
     assertProblemBatchChapterAudit,
     attachContestToCourseChapter,

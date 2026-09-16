@@ -1,11 +1,11 @@
 import { expect } from 'chai';
-import { ObjectId } from 'mongodb';
+import { Document, ObjectId } from 'mongodb';
 import { describe, it, beforeEach } from 'node:test';
 import { localizeErrorParameter, localizedErrorText, NotFoundError, SystemError, ValidationError } from '@hydrooj/framework';
 import type { BindingRequest, School, StudentRecord } from '../src/types';
 
 class FakeCollection {
-    docs: Array<Record<string, unknown>> = [];
+    docs: Document[] = [];
 
     clear() {
         this.docs.length = 0;
@@ -27,7 +27,7 @@ class FakeCollection {
         return cursor;
     }
 
-    async insertOne(doc: Record<string, unknown>) {
+    async insertOne(doc: Document) {
         this.docs.push(cloneDoc(doc));
         return { insertedId: doc._id };
     }
@@ -50,8 +50,8 @@ class FakeCollection {
     }
 }
 
-function cloneDoc<T extends Record<string, unknown>>(doc: T): T {
-    const out: Record<string, unknown> = { ...doc };
+function cloneDoc<T extends Document>(doc: T): T {
+    const out: Document = { ...doc };
     for (const key of Object.keys(out)) {
         if (Array.isArray(out[key])) out[key] = [...(out[key] as unknown[])];
     }
@@ -78,7 +78,7 @@ function isOperator(value: unknown): value is Record<string, unknown> {
     return Object.keys(value as object).some((key) => key.startsWith('$'));
 }
 
-function matchesFilter(doc: Record<string, unknown>, filter: Record<string, unknown>): boolean {
+function matchesFilter(doc: Document, filter: Record<string, unknown>): boolean {
     for (const [key, value] of Object.entries(filter || {})) {
         if (key === '$or') {
             const clauses = value as Array<Record<string, unknown>>;
@@ -96,7 +96,7 @@ function matchesFilter(doc: Record<string, unknown>, filter: Record<string, unkn
     return true;
 }
 
-function applyAddToSet(doc: Record<string, unknown>, addToSet: Record<string, unknown>) {
+function applyAddToSet(doc: Document, addToSet: Record<string, unknown>) {
     for (const [key, raw] of Object.entries(addToSet)) {
         const values = raw && typeof raw === 'object' && '$each' in (raw as object) ? ((raw as { $each: unknown[] }).$each ?? []) : [raw];
         if (!Array.isArray(doc[key])) doc[key] = doc[key] == null ? [] : [doc[key]];
@@ -107,7 +107,7 @@ function applyAddToSet(doc: Record<string, unknown>, addToSet: Record<string, un
     }
 }
 
-function applyUpdate(doc: Record<string, unknown>, update: Record<string, unknown>) {
+function applyUpdate(doc: Document, update: Record<string, unknown>) {
     if (update.$set && typeof update.$set === 'object') Object.assign(doc, update.$set);
     if (update.$addToSet && typeof update.$addToSet === 'object') applyAddToSet(doc, update.$addToSet as Record<string, unknown>);
 }

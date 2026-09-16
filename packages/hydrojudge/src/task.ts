@@ -191,7 +191,9 @@ export class JudgeTask {
                 count: this.request.config.type === 'objective' ? answerCount : 0,
                 time: 0,
                 memory: 0,
-                subtasks: this.request.config.subtasks || [],
+                // Config-only judges (objective / text program_fill) never read
+                // subtasks, so the authored shape is carried through unnormalized.
+                subtasks: (this.request.config.subtasks || []) as unknown as ParsedConfig['subtasks'],
                 detail: this.session.config.detail,
             } as ParsedConfig;
         } else {

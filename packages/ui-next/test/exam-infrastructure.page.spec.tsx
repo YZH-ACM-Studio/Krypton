@@ -123,7 +123,14 @@ function updatePreviewFixture(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function detailFetch(execution: unknown, endpointIds: string[] = [], event = EVENT, preparation: unknown = PREPARATION_SUMMARY) {
+type ExamEventFixture = Omit<typeof EVENT, 'type' | 'contestId'> & { type: string; contestId: string | null };
+
+function detailFetch(
+  execution: unknown,
+  endpointIds: string[] = [],
+  event: ExamEventFixture = EVENT,
+  preparation: unknown = PREPARATION_SUMMARY,
+) {
   return vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
     if (url === `/api/admin/exam-events/${EVENT.eventId}`) {
@@ -509,9 +516,9 @@ describe('exam infrastructure workspace', () => {
     const load = detailFetch(null, ['missing-endpoint']);
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      vi.fn(async (input: RequestInfo | URL) => {
         if (String(input) === '/api/admin/exam-infrastructure/classrooms') return json({ classrooms: [] });
-        return load(input, init);
+        return load(input);
       }),
     );
     setEventPanel('targets');
@@ -697,11 +704,11 @@ describe('exam infrastructure workspace', () => {
     const load = detailFetch(null, [], kryptonEvent);
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      vi.fn(async (input: RequestInfo | URL) => {
         if (String(input) === `/contest/${contestId}`) {
           return new Response('<html>not json</html>', { status: 200, headers: { 'Content-Type': 'text/html' } });
         }
-        return load(input, init);
+        return load(input);
       }),
     );
     const user = userEvent.setup();

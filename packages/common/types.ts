@@ -304,7 +304,11 @@ export interface JudgeRequest extends Omit<RecordPayload, 'testCases'> {
 }
 
 export interface TestCase {
-    id?: number;
+    /**
+     * Numeric index for testdata-backed cases; objective problems report the
+     * raw answer key when it is not an `N-M` pair (see hydrojudge/judge/objective).
+     */
+    id?: number | string;
     subtaskId?: number;
     score?: number;
     time: number;

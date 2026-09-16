@@ -13,7 +13,7 @@ function stubFetch(impl: typeof fetch): void {
     globalThis.fetch = impl;
 }
 
-function toUrl(input: RequestInfo | URL): URL {
+function toUrl(input: Parameters<typeof fetch>[0]): URL {
     if (input instanceof URL) return input;
     if (typeof input === 'string') return new URL(input);
     return new URL(input.url);

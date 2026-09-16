@@ -3,6 +3,12 @@ import { describe, it } from 'node:test';
 import { ObjectId } from 'mongodb';
 import { param, Types, ValidationError } from '@hydrooj/framework';
 
+/** The `@param` decorator rewrites the method to accept the raw args object. */
+function invokeDecoratedPost(handler: { post: unknown }, args: Record<string, unknown>): Promise<unknown> {
+    const post = handler.post as (payload: Record<string, unknown>) => Promise<unknown>;
+    return post.call(handler, args);
+}
+
 describe('course assign HTTP dispatch', () => {
     const assignArgs = {
         domainId: 'system',
@@ -24,11 +30,11 @@ describe('course assign HTTP dispatch', () => {
         }
         const handler = new RequiredTitlePost();
         try {
-            await handler.post(assignArgs as any);
+            await invokeDecoratedPost(handler, assignArgs);
             throw new Error('expected ValidationError');
         } catch (error) {
             expect(error).to.be.instanceOf(ValidationError);
-            expect((error as ValidationError).params[0]).to.equal('title');
+            expect((error as InstanceType<typeof ValidationError>).params[0]).to.equal('title');
         }
     });
 
@@ -50,6 +56,6 @@ describe('course assign HTTP dispatch', () => {
             }
         }
         const handler = new OptionalTitlePost();
-        expect(await handler.post(assignArgs as any)).to.equal('skipped');
+        expect(await invokeDecoratedPost(handler, assignArgs)).to.equal('skipped');
     });
 });

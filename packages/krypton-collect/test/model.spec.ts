@@ -94,9 +94,7 @@ function memoryCollection(uniqueKeys: string[][]) {
             for (const keys of uniqueKeys) {
                 const key = keyOf(copy, keys);
                 if (docs.some((existing) => keyOf(existing, keys) === key)) {
-                    const error = new Error('E11000 duplicate key');
-                    (error as { code: number }).code = 11000;
-                    throw error;
+                    throw Object.assign(new Error('E11000 duplicate key'), { code: 11000 });
                 }
             }
             docs.push(copy);

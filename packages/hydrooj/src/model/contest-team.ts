@@ -1206,6 +1206,7 @@ global.Hydro.model.contestTeam = {
     buildExamModeTeamContext,
     createTeam,
     updateTeam,
+    setTeamUnrank,
     createInvite,
     acceptInvite,
     declineInvite,

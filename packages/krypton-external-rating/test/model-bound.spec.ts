@@ -108,11 +108,15 @@ interface ModelApi {
     }): Promise<SavedState>;
 }
 
-type HydroGlobal = typeof globalThis & {
-    Hydro?: { model?: { userbind?: { findStudentByUserId?: typeof findStudentByUserId } } };
-};
+// Mirrors the production view in src/model.ts: the bridge is read as `unknown`
+// and narrowed at runtime, so the fake does not have to satisfy the full
+// hydrooj-declared bridge interface. Intentionally not intersected with
+// `typeof globalThis`, which would re-impose that interface here.
+interface HydroGlobal {
+    Hydro?: { model?: { userbind?: unknown } };
+}
 
-const hydroGlobal = globalThis as HydroGlobal;
+const hydroGlobal: HydroGlobal = globalThis;
 const originalHydro = hydroGlobal.Hydro;
 
 let model: ModelApi;

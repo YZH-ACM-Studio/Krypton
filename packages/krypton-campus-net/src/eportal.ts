@@ -223,6 +223,10 @@ function sanitizeNetworkError(error: unknown): EPortalLoginError {
     return new EPortalLoginError('eportal login network error', 'eportal_login_network');
 }
 
+function isErrorLike(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null;
+}
+
 function collectErrorFacts(error: unknown): { names: string[]; codes: string[]; messages: string[] } {
     const names: string[] = [];
     const codes: string[] = [];
@@ -237,7 +241,7 @@ function collectErrorFacts(error: unknown): { names: string[]; codes: string[]; 
             messages.push(current);
             continue;
         }
-        if (typeof current !== 'object') continue;
+        if (!isErrorLike(current)) continue;
         if (typeof current.name === 'string') names.push(current.name);
         if (typeof current.code === 'string') codes.push(current.code);
         if (typeof current.message === 'string') messages.push(current.message);

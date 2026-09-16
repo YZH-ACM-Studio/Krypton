@@ -1,5 +1,6 @@
 import type { Filter } from 'mongodb';
 import { Logger } from '@hydrooj/utils';
+import type { ProblemDict } from '../interface';
 import problem, { type ProblemDoc } from '../model/problem';
 import { PROBLEM_ACL_INTERNAL_FIELDS, readContextViewableProblems } from '../model/problem-access';
 
@@ -17,7 +18,7 @@ export function normalizeProblemDocIds(values: unknown): number[] {
     return Array.from(new Set(pids));
 }
 
-function problemDocsFromGetList(dict: Record<string | number, ProblemDoc>, pids: number[]) {
+function problemDocsFromGetList(dict: ProblemDict, pids: number[]) {
     const docs: ProblemDoc[] = [];
     const seen = new Set<number>();
     for (const pid of pids) {
@@ -31,7 +32,7 @@ function problemDocsFromGetList(dict: Record<string | number, ProblemDoc>, pids:
 
 function stripUnrequestedStableViewFields(pdoc: ProblemDoc, requested: ReadonlySet<string>) {
     for (const field of STABLE_VIEW_AUTHORIZATION_FIELDS) {
-        if (!requested.has(field)) delete (pdoc as Record<string, unknown>)[field];
+        if (!requested.has(field)) delete pdoc[field];
     }
     return pdoc;
 }
@@ -45,9 +46,13 @@ export async function getVisibleReferencedProblems(domainId: string, pids: numbe
     const startedAt = Date.now();
     // Training/course cards need summary statistics, not statements, config,
     // or files. Avoid returning hundreds of full problem payloads.
-    const projection = [...problem.PROJECTION_LIST, 'origStat'];
+    const projection = [...problem.PROJECTION_LIST, 'origStat'] as (keyof ProblemDoc)[];
     const requested = new Set(projection);
-    const readProjection = Array.from(new Set([...projection, ...STABLE_VIEW_AUTHORIZATION_FIELDS, ...PROBLEM_ACL_INTERNAL_FIELDS]));
+    // ACL coordination fields are persisted but absent from ProblemDoc; they are
+    // projected out again by stripUnrequestedStableViewFields.
+    const readProjection = Array.from(
+        new Set([...projection, ...STABLE_VIEW_AUTHORIZATION_FIELDS, ...PROBLEM_ACL_INTERNAL_FIELDS]),
+    ) as (keyof ProblemDoc)[];
     const docs = await readContextViewableProblems(
         domainId,
         user,

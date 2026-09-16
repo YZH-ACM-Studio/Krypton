@@ -4,7 +4,7 @@ import { expect } from 'chai';
 import { ObjectId } from 'mongodb';
 import { localizeError, localizeErrorParameter, localizedErrorText, param as realParam, Types as realTypes } from '@hydrooj/framework';
 import { beforeEach, describe, it } from 'node:test';
-import { selectPracticeIssueTargets } from '../src/lib/practice-issue-targets';
+import { selectPracticeIssueTargets, type PracticeIssueIdentity } from '../src/lib/practice-issue-targets';
 
 const Module = require('module');
 (global as any).Hydro ||= { model: {}, module: {} };
@@ -694,7 +694,8 @@ const practiceIntegrityAccessStub = {
     async loadPracticeContainer() {
         return practiceContainer;
     },
-    async preparePracticeIssue(input: any) {
+    // Mirrors PreparedPracticeIssue: the course→set chain may add an `extra` target.
+    async preparePracticeIssue(input: any): Promise<{ primaryContainer: any; extra?: PracticeIssueIdentity<unknown> }> {
         const tdoc = await practiceIntegrityAccessStub.assertPracticeTargetAccess(input);
         return { primaryContainer: tdoc };
     },

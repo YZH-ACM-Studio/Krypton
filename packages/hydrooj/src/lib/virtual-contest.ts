@@ -48,7 +48,7 @@ export function isContestGloballyEnded(tdoc: Pick<Tdoc, 'endAt'>, now = new Date
     return tdoc.endAt.getTime() <= now.getTime();
 }
 
-export function virtualContestDurationMs(tdoc: Pick<Tdoc, 'beginAt' | 'endAt' | 'duration'>): number {
+export function virtualContestDurationMs(tdoc: Pick<Tdoc, 'beginAt' | 'endAt'> & { duration?: number }): number {
     if (!(tdoc.beginAt instanceof Date) || Number.isNaN(tdoc.beginAt.getTime())) throw new TypeError('Contest beginAt must be a valid Date.');
     if (!(tdoc.endAt instanceof Date) || Number.isNaN(tdoc.endAt.getTime())) throw new TypeError('Contest endAt must be a valid Date.');
     if (tdoc.beginAt.getTime() >= tdoc.endAt.getTime()) throw new TypeError('Contest beginAt must be before endAt.');

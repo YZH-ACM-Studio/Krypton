@@ -53,15 +53,17 @@ import { ContestDetailBaseHandler } from './contest';
 
 const STABLE_VIEW_AUTHORIZATION_FIELDS = ['domainId', 'docId', 'owner', 'hidden', 'authoringMode', 'pidNamespaceId', 'managedAuthoring'] as const;
 
-function stableViewProjection(projection: readonly string[]) {
-    return Array.from(new Set([...projection, ...STABLE_VIEW_AUTHORIZATION_FIELDS, ...PROBLEM_ACL_INTERNAL_FIELDS]));
+function stableViewProjection(projection: readonly (keyof ProblemDoc)[]): (keyof ProblemDoc)[] {
+    // ACL coordination fields are persisted but absent from ProblemDoc; they are
+    // projected out again by stripUnrequestedStableViewFields.
+    return Array.from(new Set([...projection, ...STABLE_VIEW_AUTHORIZATION_FIELDS, ...PROBLEM_ACL_INTERNAL_FIELDS])) as (keyof ProblemDoc)[];
 }
 
-function stripUnrequestedStableViewFields(pdoc: ProblemDoc | null, requested: readonly string[]): ProblemDoc | null {
+function stripUnrequestedStableViewFields(pdoc: ProblemDoc | null, requested: readonly (keyof ProblemDoc)[]): ProblemDoc | null {
     if (!pdoc) return null;
     const wanted = new Set(requested);
     for (const field of STABLE_VIEW_AUTHORIZATION_FIELDS) {
-        if (!wanted.has(field)) delete (pdoc as Record<string, unknown>)[field];
+        if (!wanted.has(field)) delete pdoc[field];
     }
     return pdoc;
 }
@@ -76,7 +78,7 @@ async function parseProjectedConfig(pdoc: ProblemDoc, projection: readonly strin
     return pdoc;
 }
 
-function createStableProblemRead(domainId: string, pid: string | number, projection: readonly string[], rawConfig = false) {
+function createStableProblemRead(domainId: string, pid: string | number, projection: readonly (keyof ProblemDoc)[], rawConfig = false) {
     const readProjection = stableViewProjection(projection);
     return async (filter?: Filter<ProblemDoc>) => {
         if (!filter) return problem.get(domainId, pid, readProjection, rawConfig);
@@ -91,7 +93,7 @@ async function readRecordContextProblem(
     user: ProblemAclUser,
     context: ProblemViewContext,
     pid: string | number,
-    projection: readonly string[],
+    projection: readonly (keyof ProblemDoc)[],
     rawConfig = false,
 ) {
     const pdoc = await readContextViewableProblem(domainId, user, context, {

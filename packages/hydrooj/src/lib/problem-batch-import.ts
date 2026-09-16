@@ -251,7 +251,7 @@ function countLiteralCjkUnicodeEscapes(value: unknown): number {
     }
     if (Array.isArray(value)) return value.reduce((count, item) => count + countLiteralCjkUnicodeEscapes(item), 0);
     if (isPlainObject(value)) {
-        return Object.values(value).reduce((count, item) => count + countLiteralCjkUnicodeEscapes(item), 0);
+        return Object.values(value).reduce<number>((count, item) => count + countLiteralCjkUnicodeEscapes(item), 0);
     }
     return 0;
 }

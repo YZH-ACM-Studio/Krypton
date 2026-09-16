@@ -50,6 +50,7 @@ import {
     EXTERNAL_RATING_CLIENT_HANDLE_KEY,
     EXTERNAL_RATING_CLIENT_PUBLIC_SHOW_KEY,
     EXTERNAL_RATING_SITES,
+    ExternalRatingTypeError,
     USER_EXTERNAL_RATING_KEY,
     emptyUserExternalRatingState,
     isExternalRatingSiteId,
@@ -58,7 +59,6 @@ import {
     type UserExternalRatingState,
 } from './types';
 import {
-    ExternalRatingTypeError,
     assertClientMayNotSetSnapshotFields,
     normalizeCfHandle,
     normalizeNowcoderName,

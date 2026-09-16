@@ -199,6 +199,10 @@ function makeRequest(overrides: Partial<CollectRequestDoc> = {}): CollectRequest
         maxFileBytes: COLLECT_HARD_MAX_FILE_BYTES,
         maxTotalBytes: COLLECT_HARD_MAX_TOTAL_BYTES,
         maxFiles: COLLECT_HARD_MAX_FILES,
+        // Canonical defaults from src/name-format; inlined because importing that
+        // module here would pull `hydrooj` in before the loader stubs are installed.
+        fileNameTemplate: '{originalName}',
+        packLayout: 'nested',
         courseRef: null,
         createdAt: now,
         updatedAt: now,

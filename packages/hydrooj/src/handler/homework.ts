@@ -13,7 +13,7 @@ import {
     PermissionError,
     ValidationError,
 } from '../error';
-import { PenaltyRules, Tdoc, TrainingDoc, TrainingNode } from '../interface';
+import { PenaltyRules, ProblemDict, Tdoc, TrainingDoc, TrainingNode } from '../interface';
 import { isCourseKind } from '../lib/training-kind';
 import { PERM, PRIV } from '../model/builtin';
 import * as contest from '../model/contest';
@@ -94,7 +94,7 @@ function parseProblemDocIds(input: string) {
     return pids;
 }
 
-function problemDocsFromGetList(dict: Record<string | number, ProblemDoc>, pids: number[]) {
+function problemDocsFromGetList(dict: ProblemDict, pids: number[]) {
     const docs: ProblemDoc[] = [];
     const seen = new Set<number>();
     for (const pid of pids) {

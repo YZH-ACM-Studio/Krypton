@@ -1,7 +1,13 @@
 import { describe, it } from 'node:test';
 import { expect } from 'chai';
 import { ObjectId } from 'mongodb';
-import type { ExamPolicyRevision, ExamTargetRevision } from '../src/model/exam-network-config';
+import type {
+    ExamEventNetworkConfigDoc,
+    ExamPolicyRevision,
+    ExamPolicyTemplateDoc,
+    ExamTargetAssignmentDoc,
+    ExamTargetRevision,
+} from '../src/model/exam-network-config';
 
 function cloneValue<T>(value: T): T {
     if (value instanceof ObjectId) return new ObjectId(value) as T;
@@ -17,7 +23,7 @@ function same(left: unknown, right: unknown): boolean {
     return left === right;
 }
 
-class MemoryCollection<T extends Record<string, unknown>> {
+class MemoryCollection<T extends { _id: ObjectId }> {
     docs: T[] = [];
 
     async createIndex() {
@@ -26,7 +32,7 @@ class MemoryCollection<T extends Record<string, unknown>> {
 
     async insertOne(doc: T) {
         this.docs.push(cloneValue(doc));
-        return { insertedId: (doc as { _id: ObjectId })._id };
+        return { insertedId: doc._id };
     }
 
     async findOne(filter: Record<string, unknown>) {
@@ -55,7 +61,7 @@ class MemoryCollection<T extends Record<string, unknown>> {
     }
 }
 
-const collections = new Map<string, MemoryCollection<Record<string, unknown>>>();
+const collections = new Map<string, MemoryCollection<{ _id: ObjectId }>>();
 const dbPath = require.resolve('../src/service/db.ts');
 const previousDbCache = require.cache[dbPath];
 require.cache[dbPath] = {
@@ -66,7 +72,7 @@ require.cache[dbPath] = {
         __esModule: true,
         default: {
             collection: (name: string) => {
-                const collection = new MemoryCollection<Record<string, unknown>>();
+                const collection = new MemoryCollection<{ _id: ObjectId }>();
                 collections.set(name, collection);
                 return collection;
             },
@@ -119,16 +125,16 @@ function targetRevision(overrides: Partial<ExamTargetRevision> = {}): ExamTarget
 }
 
 function fixture() {
-    const templates = new MemoryCollection<Record<string, unknown>>();
-    const assignments = new MemoryCollection<Record<string, unknown>>();
-    const configs = new MemoryCollection<Record<string, unknown>>();
+    const templates = new MemoryCollection<ExamPolicyTemplateDoc>();
+    const assignments = new MemoryCollection<ExamTargetAssignmentDoc>();
+    const configs = new MemoryCollection<ExamEventNetworkConfigDoc>();
     const service = new configModule.ExamNetworkConfigService(templates as never, assignments as never, configs as never);
     return { service, templates, assignments, configs };
 }
 
 async function seed(target: {
-    templates: MemoryCollection<Record<string, unknown>>;
-    assignments: MemoryCollection<Record<string, unknown>>;
+    templates: MemoryCollection<ExamPolicyTemplateDoc>;
+    assignments: MemoryCollection<ExamTargetAssignmentDoc>;
 }, extra?: { policyRevisions?: ExamPolicyRevision[]; targetRevisions?: ExamTargetRevision[]; schoolId?: ObjectId; eventId?: ObjectId }) {
     const policyRevisions = extra?.policyRevisions || [policyRevision()];
     const targetRevisions = extra?.targetRevisions || [targetRevision()];

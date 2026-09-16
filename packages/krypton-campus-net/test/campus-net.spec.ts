@@ -178,8 +178,9 @@ describe('campus-net notify', () => {
         const { tick } = loadCampusNetModules();
 
         const sent: unknown[] = [];
+        const initial: { connectivity: 'up' | 'down'; dialFailNotified: boolean } = { connectivity: 'up', dialFailNotified: false };
         const store = {
-            state: { connectivity: 'up' as const, dialFailNotified: false },
+            state: initial,
             async load() {
                 return this.state;
             },

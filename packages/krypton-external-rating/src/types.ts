@@ -279,11 +279,17 @@ export function snapshotAfterFetchFailure(
     };
 }
 
+// The repository compiles with `strictNullChecks: false`, so a falsy `ok` test
+// cannot discard the success member. Narrow through an explicit predicate.
+function isFetchSuccess(result: ExternalRatingFetchResult): result is ExternalRatingFetchSuccess {
+    return result.ok;
+}
+
 export function applyFetchResult(snapshot: ExternalRatingSiteSnapshot, result: ExternalRatingFetchResult): ExternalRatingSiteSnapshot {
     if (!sameExternalRatingHandle(result.site, snapshot.handle, result.handle)) {
         fail('handle', 'fetch result handle does not match snapshot handle');
     }
-    if (result.ok) return snapshotAfterFetchSuccess(snapshot, result.rating, result.fetchedAt);
+    if (isFetchSuccess(result)) return snapshotAfterFetchSuccess(snapshot, result.rating, result.fetchedAt);
     return snapshotAfterFetchFailure(snapshot, result.error);
 }
 

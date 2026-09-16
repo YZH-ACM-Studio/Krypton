@@ -492,6 +492,7 @@ global.Hydro.model.discussion = {
     getNodes,
     getVnode,
     getListVnodes,
+    discussionParentVisible,
     filterDiscussionsByVnodes,
     checkVNodeVisibility,
 };

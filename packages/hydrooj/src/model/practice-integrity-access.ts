@@ -268,7 +268,7 @@ export async function issuePracticeContext(input: {
         primaryPublished: published,
         extraPublished,
     });
-    if (!selected.controlled) return { controlled: false, prepared, selected };
+    if (selected.controlled === false) return { controlled: false, prepared, selected };
     input.setRejectionReason?.('published-revision-invalid');
     assertPublishedIssueIdentities(input.domainId, selected, prepared.extra);
     input.setRejectionReason?.('context-issue-failed');

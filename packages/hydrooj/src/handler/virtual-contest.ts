@@ -203,7 +203,7 @@ export class VirtualContestScoreboardHandler extends ContestDetailBaseHandler {
             columns,
             ...(await Promise.all(
                 ranked.map(([rank, attempt]) => {
-                    const udoc = udict[attempt.uid] || { _id: attempt.uid, uname: `#${attempt.uid}` };
+                    const udoc = udict[attempt.uid] || { _id: attempt.uid, uname: `#${attempt.uid}`, mail: '', avatar: '' };
                     return rule.scoreboardRow(scoreboardConfig, (s: string) => s, boardDoc, pdict, udoc, rank, {
                         uid: attempt.uid,
                         accept: attempt.accept,

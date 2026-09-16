@@ -1118,6 +1118,11 @@ export interface Model {
         'examSeatAssignmentColl' | 'examSeatAssignmentPublicationColl' | 'examSeatAssignmentService'
     >;
     examPrelogin: Pick<typeof import('./model/exam-prelogin'), 'examPreloginBatchColl' | 'examPreloginTicketColl'>;
+    virtualContest: Pick<typeof import('./model/virtual-contest'), 'virtualContestService' | 'canManageVirtualContest'>;
+    redemption: Pick<
+        typeof import('./model/redemption'),
+        'redemptionService' | 'normalizeRedemptionCode' | 'canCreateRedemption' | 'canManageAllRedemptions'
+    >;
     user: typeof import('./model/user').default;
     oauth: typeof import('./model/oauth').default;
     storage: typeof import('./model/storage').default;

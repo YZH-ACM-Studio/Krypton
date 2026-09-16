@@ -46,7 +46,7 @@ interface NowcoderApi {
 }
 
 const originalFetch = globalThis.fetch;
-globalThis.fetch = async (input: RequestInfo | URL) => {
+globalThis.fetch = async (input: Parameters<typeof fetch>[0]) => {
     throw new Error(`unexpected live network call: ${String(input)}`);
 };
 
@@ -188,7 +188,7 @@ function expectNowcoderRatingIndexCall(url: string): void {
 beforeEach(() => {
     stub = null;
     fetchCalls.length = 0;
-    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
         const url = typeof input === 'string' || input instanceof URL ? String(input) : input.url;
         fetchCalls.push(url);
         if (!stub) throw new Error(`unexpected live network call: ${url}`);

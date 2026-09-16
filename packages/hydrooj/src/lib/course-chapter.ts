@@ -1,7 +1,8 @@
 import type { TrainingNode, TrainingSection } from '../interface';
 import { parseCourseVideos } from './course-video';
 
-export function courseNodePids(node: Pick<TrainingNode, 'pids' | 'sections'>): number[] {
+/** Reads only the pid arrays, so callers may pass any chapter-shaped projection. */
+export function courseNodePids<T extends { pids?: number[]; sections?: { pids?: number[] }[] }>(node: T): number[] {
     return Array.from(new Set([...(node.pids || []), ...((node.sections || []).flatMap((section) => section.pids || []))]));
 }
 

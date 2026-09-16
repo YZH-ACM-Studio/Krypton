@@ -253,7 +253,7 @@ class TrainingDetailHandler extends Handler {
                 .toArray();
             const memberUids = enrollDocs.map((x) => +x.uid);
             const ub = global.Hydro?.model?.userbind;
-            const scopePids = new Map(tdoc.dag.map((node) => [node._id, new Set(node.pids)]));
+            const scopePids = new Map<number, ReadonlySet<number>>(tdoc.dag.map((node) => [node._id, new Set(node.pids)]));
             if (memberUids.length && typeof ub?.findStudentsByUserIds !== 'function') {
                 throw new TypeError('userbind.findStudentsByUserIds is unavailable');
             }

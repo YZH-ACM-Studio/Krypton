@@ -6,7 +6,7 @@ import {
     serializePublic,
     serializeRanking,
 } from '../src/serialize';
-import type { ExternalRatingErrorCode } from '../src/types';
+import type { ExternalRatingErrorCode, ExternalRatingSiteSnapshot, UserExternalRatingState } from '../src/types';
 
 const FETCHED_AT = new Date('2026-09-13T08:00:00.000Z');
 const FETCHED_AT_ISO = '2026-09-13T08:00:00.000Z';
@@ -18,13 +18,8 @@ const SELF = { isSelf: true, isTeacherOrAdmin: false };
 const TEACHER = { isSelf: false, isTeacherOrAdmin: true };
 const ADMIN = { isSelf: false, isTeacherOrAdmin: true };
 
-interface SiteInput {
-    handle: string;
-    rating: number | null;
-    fetchedAt: Date | null;
-    lastError: ExternalRatingErrorCode | null;
-    publicShow?: boolean;
-}
+/** Wire-shaped input: `publicShow` may be absent, which the parser defaults to hidden. */
+type SiteInput = Omit<ExternalRatingSiteSnapshot, 'publicShow'> & { publicShow?: boolean };
 
 function site(partial: Partial<SiteInput> & Pick<SiteInput, 'handle' | 'rating'>): SiteInput {
     return {
@@ -35,8 +30,10 @@ function site(partial: Partial<SiteInput> & Pick<SiteInput, 'handle' | 'rating'>
     };
 }
 
-function state(codeforces: SiteInput, nowcoder: SiteInput) {
-    return { codeforces, nowcoder };
+function state(codeforces: SiteInput, nowcoder: SiteInput): UserExternalRatingState {
+    // The serializers parse their argument, so an absent `publicShow` is a legal
+    // input shape even though the canonical state type always carries the flag.
+    return { codeforces, nowcoder } as UserExternalRatingState;
 }
 
 const hiddenBoth = state(
@@ -113,10 +110,10 @@ describe('P2.3 external rating visibility serializer', () => {
     });
 
     it('lets teachers and admins see the same owner snapshot as self', () => {
-        const ownerView = serializeForViewer(hiddenBoth, SELF);
+        const ownerView = serializeOwnerOrTeacher(hiddenBoth);
+        expect(serializeForViewer(hiddenBoth, SELF)).to.deep.equal(ownerView);
         expect(serializeForViewer(hiddenBoth, TEACHER)).to.deep.equal(ownerView);
         expect(serializeForViewer(hiddenBoth, ADMIN)).to.deep.equal(ownerView);
-        expect(serializeOwnerOrTeacher(hiddenBoth)).to.deep.equal(ownerView);
         expect(ownerView.codeforces.lastError).to.equal(LAST_ERROR);
         expect(ownerView.nowcoder.lastError).to.equal(NOWCODER_LAST_ERROR);
         expect(ownerView.codeforces.publicShow).to.equal(false);

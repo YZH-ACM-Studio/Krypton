@@ -162,7 +162,8 @@ export function MultiSelect<T>({
         if (atMax) return;
         onChange([...value, item]);
       }
-      // Refocus input so user can continue typing
+      setQuery('');
+      setHighlightedIndex(0);
       requestAnimationFrame(() => inputRef.current?.focus());
     },
     [disabled, getKey, selectedKeys, value, onChange, atMax],

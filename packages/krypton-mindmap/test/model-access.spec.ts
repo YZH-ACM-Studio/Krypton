@@ -50,6 +50,7 @@ interface MapDocument {
     rootNodeId: InstanceType<typeof ObjectId>;
     visibility: 'hidden' | 'public';
     layoutDirection: 'RIGHT' | 'DOWN';
+    isDefault?: boolean;
     createdAt: Date;
     updatedAt: Date;
 }
@@ -152,7 +153,21 @@ const mapsColl = {
         const map = maps.find((entry) => matchesNode(entry as any, filter));
         if (!map) return { matchedCount: 0, modifiedCount: 0 };
         if (update.$set) Object.assign(map, update.$set);
+        if (update.$unset) for (const key of Object.keys(update.$unset)) delete (map as any)[key];
         return { matchedCount: 1, modifiedCount: 1 };
+    },
+    async updateMany(filter: Record<string, unknown>, update: any) {
+        const excluded = filter._id && typeof filter._id === 'object' && filter._id !== null && '$ne' in (filter._id as object)
+            ? (filter._id as { $ne: InstanceType<typeof ObjectId> }).$ne
+            : null;
+        let matched = 0;
+        for (const map of maps) {
+            if (filter.isDefault === true && map.isDefault !== true) continue;
+            if (excluded && equalValue(map._id, excluded)) continue;
+            if (update.$unset) for (const key of Object.keys(update.$unset)) delete (map as any)[key];
+            matched += 1;
+        }
+        return { matchedCount: matched, modifiedCount: matched };
     },
     async insertOne(map: MapDocument) {
         maps.push(map);
@@ -475,6 +490,39 @@ describe('knowledge map lifecycle', () => {
         expect(nodes.find((node) => node._id.equals(config.rootNodeId))!.topic).to.equal('root');
         expect((await model.listKnowledgeMaps(false)).map((map) => map.title)).to.deep.equal(['Test map']);
         expect((await model.listKnowledgeMaps(true)).map((map) => map.title)).to.deep.equal(['Test map', '面向对象']);
+    });
+
+    it('makes a public map the unique default and refuses to default a hidden map', async () => {
+        const other = await model.createKnowledgeMap({ domainId: 'system', actor: 2, title: '学校安全', rootTopic: '安全' });
+        await model.updateKnowledgeMap({
+            domainId: 'system',
+            actor: 2,
+            id: other._id,
+            expectedUpdatedAt: other.updatedAt,
+            patch: { visibility: 'public' },
+        });
+        const otherPublic = maps.find((map) => map._id.equals(other._id))!;
+        otherPublic.isDefault = true;
+        const updated = await model.updateKnowledgeMap({
+            domainId: 'system',
+            actor: 2,
+            id: config._id,
+            expectedUpdatedAt: config.updatedAt,
+            patch: { isDefault: true },
+        });
+        expect(updated.isDefault).to.equal(true);
+        expect(maps.find((map) => map._id.equals(other._id))!.isDefault).to.equal(undefined);
+        await expectRejected(
+            model.updateKnowledgeMap({
+                domainId: 'system',
+                actor: 2,
+                id: maps.find((map) => map.title === '学校安全')!._id,
+                expectedUpdatedAt: maps.find((map) => map.title === '学校安全')!.updatedAt,
+                patch: { visibility: 'hidden', isDefault: true },
+            }),
+            MindmapRequestError,
+            '隐藏导图不能设为默认',
+        );
     });
 
     it('rejects cross-map create and move parents and stale map versions before writing', async () => {

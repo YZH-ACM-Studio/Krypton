@@ -6,6 +6,8 @@ import { insertMapWithRoot, mapsColl, nodesColl } from './db';
 import { MindmapConflictError, MindmapRequestError } from './error';
 import type { KnowledgeMapDoc, MindmapMaterializeOptions, MindmapMaterializeResult, MindmapNode, MindmapPathVersion } from './types';
 
+export { ALGORITHM_KNOWLEDGE_MAP_TITLE, pickDefaultKnowledgeMap } from './default-map';
+
 const logger = new Logger('krypton-mindmap.model');
 const documentColl = db.collection<any>('document');
 const HYDRO_PROBLEM_DOCTYPE = 10;
@@ -545,7 +547,7 @@ export async function updateKnowledgeMap(
     input: MutationContext & {
         id: ObjectId | string;
         expectedUpdatedAt: Date;
-        patch: { title?: unknown; layoutDirection?: unknown; visibility?: unknown };
+        patch: { title?: unknown; layoutDirection?: unknown; visibility?: unknown; isDefault?: unknown };
     },
 ): Promise<KnowledgeMapDoc> {
     const mapId = objectId(input.id, 'mapId');
@@ -553,10 +555,11 @@ export async function updateKnowledgeMap(
     if (!current) conflict(localizedErrorText`导图不存在，请刷新后重试`, 'map-missing');
     const keys = Object.keys(input.patch);
     if (!keys.length) throw new MindmapRequestError(localizedErrorText`没有可保存的导图字段`);
-    if (keys.some((key) => !['title', 'layoutDirection', 'visibility'].includes(key))) {
+    if (keys.some((key) => !['title', 'layoutDirection', 'visibility', 'isDefault'].includes(key))) {
         throw new MindmapRequestError(localizedErrorText`请求包含不可编辑的导图字段`);
     }
     const set: Record<string, unknown> = { updatedAt: nextVersion(input.expectedUpdatedAt) };
+    const unset: Record<string, ''> = {};
     if (Object.hasOwn(input.patch, 'title')) set.title = canonicalMapTitle(input.patch.title);
     if (Object.hasOwn(input.patch, 'layoutDirection')) {
         if (input.patch.layoutDirection !== 'RIGHT' && input.patch.layoutDirection !== 'DOWN') {
@@ -583,7 +586,26 @@ export async function updateKnowledgeMap(
         }
         set.visibility = input.patch.visibility;
     }
-    const result = await mapsColl.updateOne({ _id: mapId, updatedAt: input.expectedUpdatedAt }, { $set: set });
+    const nextVisibility = typeof set.visibility === 'string' ? set.visibility : current.visibility;
+    if (Object.hasOwn(input.patch, 'isDefault')) {
+        if (input.patch.isDefault !== true && input.patch.isDefault !== false) {
+            throw new MindmapRequestError(localizedErrorText`默认导图标记无效`);
+        }
+        if (input.patch.isDefault === true && nextVisibility !== 'public') {
+            throw new MindmapRequestError(localizedErrorText`隐藏导图不能设为默认`);
+        }
+        if (input.patch.isDefault === true) set.isDefault = true;
+        else unset.isDefault = '';
+    } else if (nextVisibility === 'hidden' && current.isDefault === true) {
+        unset.isDefault = '';
+    }
+    if (set.isDefault === true) {
+        await mapsColl.updateMany({ isDefault: true, _id: { $ne: mapId } }, { $unset: { isDefault: '' } });
+    }
+    const result = await mapsColl.updateOne(
+        { _id: mapId, updatedAt: input.expectedUpdatedAt },
+        Object.keys(unset).length ? { $set: set, $unset: unset } : { $set: set },
+    );
     if (result.matchedCount !== 1) await staleOrMissingMap(mapId);
     const updated = await mapsColl.findOne({ _id: mapId });
     if (!updated) throw new Error(`mindmap disappeared after update map=${mapId}`);

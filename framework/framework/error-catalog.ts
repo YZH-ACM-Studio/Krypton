@@ -1839,6 +1839,8 @@ const CHINESE_ERROR_MESSAGE_ENGLISH_TRANSLATIONS: Readonly<Record<string, string
     '{0}包含不支持的字段：{1}': '{0} contains unsupported fields: {1}',
     只有根节点的直接分支可以设置左右方向: 'Only direct branches of the root node may set a left or right direction.',
     导图公开状态无效: 'The knowledge-map visibility state is invalid.',
+    默认导图标记无效: 'The default knowledge-map flag is invalid.',
+    隐藏导图不能设为默认: 'A hidden knowledge map cannot be the default.',
     导图名称不能为空: 'The knowledge-map name cannot be empty.',
     '导图名称不能超过 100 个字符': 'The knowledge-map name cannot exceed 100 characters.',
     导图名称必填: 'The knowledge-map name is required.',

@@ -28,6 +28,8 @@ export interface KnowledgeMapDoc {
     rootNodeId: ObjectId;
     visibility: 'hidden' | 'public';
     layoutDirection: 'RIGHT' | 'DOWN';
+    /** Missing or false = not the public landing default. At most one public map may be true. */
+    isDefault?: boolean;
     createdAt: Date;
     updatedAt: Date;
 }

@@ -16,6 +16,7 @@ import {
     getNodeReferenceCounts,
     listAllNodes,
     listKnowledgeMaps,
+    pickDefaultKnowledgeMap,
     listProblemsForNode,
     moveNode,
     searchProblemsForAdmin,
@@ -57,6 +58,7 @@ function serializeMap(config: KnowledgeMapDoc) {
         ...config,
         _id: config._id.toHexString(),
         rootNodeId: config.rootNodeId ? config.rootNodeId.toHexString() : null,
+        isDefault: config.isDefault === true,
         ...(config.createdAt ? { createdAt: new Date(config.createdAt).toISOString() } : {}),
         ...(config.updatedAt ? { updatedAt: new Date(config.updatedAt).toISOString() } : {}),
     };
@@ -65,7 +67,7 @@ function serializeMap(config: KnowledgeMapDoc) {
 async function adminSnapshot(requestedMapId?: ObjectId | string) {
     const maps = await listKnowledgeMaps(true);
     const requested = requestedMapId ? String(requestedMapId) : null;
-    const config = requested ? maps.find((map) => map._id.toHexString() === requested) : maps[0];
+    const config = requested ? maps.find((map) => map._id.toHexString() === requested) : pickDefaultKnowledgeMap(maps);
     if (requested && !config) throw new NotFoundError(localizedErrorText`mindmap`, requested);
     const serializedMaps = await Promise.all(maps.map(async (map) => ({ ...serializeMap(map), usage: await getKnowledgeMapUsage(map._id) })));
     if (!config) return { nodes: [], config: null, maps: serializedMaps, referenceCounts: {} };
@@ -116,7 +118,7 @@ class MindmapPage extends Handler {
     async get(_args: unknown, mapId?: ObjectId) {
         const exposeProblemMetadata = canExposeProblemMetadata(this.user as any, String(this.domain?._id || ''));
         const maps = await listKnowledgeMaps(false);
-        const config = mapId ? maps.find((map) => map._id.equals(mapId)) : maps[0];
+        const config = mapId ? maps.find((map) => map._id.equals(mapId)) : pickDefaultKnowledgeMap(maps);
         if (mapId && !config) throw new NotFoundError(localizedErrorText`mindmap`, String(mapId));
         const nodes = config ? await listAllNodes(config._id) : [];
         this.response.template = 'mindmap_main.html';

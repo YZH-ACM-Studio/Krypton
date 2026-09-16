@@ -3,6 +3,7 @@ import { AlertCircle, Check, ChevronLeft, Circle, Eye, EyeOff, Loader2, Network,
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { MiniTabs } from '@/components/ui/mini-tabs';
@@ -291,7 +292,7 @@ export function AdminMindmapPage() {
                 onValueChange={(mapId) => requestMapAction({ kind: 'switch', mapId })}
                 options={snapshot.maps.map((map) => ({
                   value: map._id,
-                  label: `${map.title} · ${map.visibility === 'public' ? '已公开' : '隐藏'}`,
+                  label: `${map.title} · ${map.visibility === 'public' ? '已公开' : '隐藏'}${map.isDefault ? ' · 默认' : ''}`,
                 }))}
                 placeholder="尚未创建导图"
                 className="h-10 rounded-xl border-0 bg-muted/55 shadow-none"
@@ -800,20 +801,32 @@ function MapSettingsDialog({
   busy: boolean;
   onClose: () => void;
   onDelete: () => void;
-  onSubmit: (fields: { title: string; layoutDirection: 'RIGHT' | 'DOWN'; visibility: 'hidden' | 'public' }) => Promise<boolean>;
+  onSubmit: (fields: {
+    title: string;
+    layoutDirection: 'RIGHT' | 'DOWN';
+    visibility: 'hidden' | 'public';
+    isDefault: boolean;
+  }) => Promise<boolean>;
 }) {
   const [title, setTitle] = useState('');
   const [layoutDirection, setLayoutDirection] = useState<'RIGHT' | 'DOWN'>('RIGHT');
   const [visibility, setVisibility] = useState<'hidden' | 'public'>('hidden');
+  const [isDefault, setIsDefault] = useState(false);
 
   useEffect(() => {
     if (!open || !map) return;
     setTitle(map.title);
     setLayoutDirection(map.layoutDirection);
     setVisibility(map.visibility);
+    setIsDefault(map.isDefault === true);
   }, [map, open]);
 
-  const dirty = !!map && (title.trim() !== map.title || layoutDirection !== map.layoutDirection || visibility !== map.visibility);
+  const dirty =
+    !!map &&
+    (title.trim() !== map.title ||
+      layoutDirection !== map.layoutDirection ||
+      visibility !== map.visibility ||
+      isDefault !== (map.isDefault === true));
   return (
     <Dialog open={open && !!map} onOpenChange={(nextOpen) => !nextOpen && !busy && onClose()}>
       <DialogContent className="w-full sm:w-[560px]" onClose={busy ? undefined : onClose}>
@@ -849,7 +862,11 @@ function MapSettingsDialog({
               <label className="text-xs font-medium">可见性</label>
               <SimpleSelect
                 value={visibility}
-                onValueChange={(value) => setVisibility(value as 'hidden' | 'public')}
+                onValueChange={(value) => {
+                  const next = value as 'hidden' | 'public';
+                  setVisibility(next);
+                  if (next !== 'public') setIsDefault(false);
+                }}
                 options={[
                   { value: 'hidden', label: '隐藏，仅管理员可见' },
                   { value: 'public', label: '公开，学生可见' },
@@ -858,6 +875,26 @@ function MapSettingsDialog({
               />
             </div>
           </div>
+          <label className="flex min-h-10 cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2.5">
+            <Checkbox
+              checked={isDefault}
+              disabled={visibility !== 'public'}
+              onCheckedChange={(checked) => {
+                if (visibility !== 'public') return;
+                setIsDefault(checked);
+              }}
+              className="mt-0.5"
+              aria-label="作为公开页默认导图"
+            />
+            <span className="min-w-0">
+              <span className="block text-sm font-medium">作为公开页默认导图</span>
+              <span className="mt-0.5 block text-xs text-muted-foreground">
+                {visibility === 'public'
+                  ? '打开 /mindmap 且未指定导图时显示这一张。同时只能有一张默认。'
+                  : '先公开这张导图，才能设为默认。'}
+              </span>
+            </span>
+          </label>
           <div className="grid grid-cols-3 gap-2 rounded-2xl bg-muted/45 p-3 text-center">
             <MapUsageMetric label="节点" value={map?.usage?.nodes} />
             <MapUsageMetric label="题目" value={map?.usage?.problems} />
@@ -885,7 +922,14 @@ function MapSettingsDialog({
           <Button
             className="min-h-10"
             disabled={busy || !dirty || !title.trim()}
-            onClick={() => void onSubmit({ title: title.trim(), layoutDirection, visibility })}
+            onClick={() =>
+              void onSubmit({
+                title: title.trim(),
+                layoutDirection,
+                visibility,
+                isDefault: visibility === 'public' && isDefault,
+              })
+            }
           >
             {busy ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />} 保存设置
           </Button>

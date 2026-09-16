@@ -216,7 +216,10 @@ export function MindmapPage() {
             <SimpleSelect
               value={config._id}
               onValueChange={(mapId) => window.location.assign(`/mindmap?map=${encodeURIComponent(mapId)}`)}
-              options={data.maps.map((map) => ({ value: map._id, label: map.title }))}
+              options={data.maps.map((map) => ({
+                value: map._id,
+                label: map.isDefault ? `${map.title}（默认）` : map.title,
+              }))}
               ariaLabel="切换知识导图"
               className="min-h-10 w-40 max-w-[48%] sm:w-56"
               contentClassName="[&_[role=option]]:min-h-10"

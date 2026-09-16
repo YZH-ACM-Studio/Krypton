@@ -83,7 +83,10 @@ const sensitiveProblems = [
     },
 ];
 
+const { pickDefaultKnowledgeMap } = require('../src/default-map');
+
 const modelStub = {
+    pickDefaultKnowledgeMap,
     async createKnowledgeMap(...args: any[]) {
         calls.createMap.push(args);
         if (mutationFailure) throw mutationFailure;
@@ -511,6 +514,64 @@ describe('mindmap page bootstrap metadata boundary', () => {
         expect(response.body.nodes[0].problemIds).to.deep.equal([]);
         expectNoProblemDisclosure(response.body);
         expect(calls.loggerError).to.deep.equal([]);
+    });
+
+    it('opens the algorithm map by default instead of the first title-sorted public map', async () => {
+        const safetyId = new ObjectId();
+        const algorithmId = new ObjectId();
+        const safetyRoot = new ObjectId();
+        const algorithmRoot = new ObjectId();
+        const now = new Date('2026-09-16T00:00:00.000Z');
+        bootstrapMaps = [
+            {
+                _id: safetyId,
+                title: '学校安全',
+                rootNodeId: safetyRoot,
+                visibility: 'public',
+                layoutDirection: 'RIGHT',
+                createdAt: now,
+                updatedAt: now,
+            },
+            {
+                _id: algorithmId,
+                title: '算法知识图谱',
+                rootNodeId: algorithmRoot,
+                visibility: 'public',
+                layoutDirection: 'RIGHT',
+                createdAt: now,
+                updatedAt: now,
+            },
+        ];
+        bootstrapNodes = [
+            {
+                _id: safetyRoot,
+                mapId: safetyId,
+                parentId: null,
+                topic: '安全根',
+                tags: [],
+                problemIds: [],
+                order: 0,
+                createdAt: now,
+                updatedAt: now,
+            },
+            {
+                _id: algorithmRoot,
+                mapId: algorithmId,
+                parentId: null,
+                topic: '算法根',
+                tags: [],
+                problemIds: [],
+                order: 0,
+                createdAt: now,
+                updatedAt: now,
+            },
+        ];
+
+        const { response } = await dispatchMindmapPage();
+        expect(response.body.config._id).to.equal(algorithmId.toHexString());
+        expect(response.body.config.title).to.equal('算法知识图谱');
+        expect(response.body.config.isDefault).to.equal(false);
+        expect(response.body.nodes.map((node: { topic: string }) => node.topic)).to.deep.equal(['算法根']);
     });
 
     it('preserves visible tags but never exposes manual problem ids in the public bootstrap', async () => {

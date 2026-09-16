@@ -19,6 +19,7 @@ export interface KnowledgeMap {
   rootNodeId: string | null;
   visibility: 'hidden' | 'public';
   layoutDirection: 'RIGHT' | 'DOWN';
+  isDefault?: boolean;
   createdAt: string;
   updatedAt: string;
 }

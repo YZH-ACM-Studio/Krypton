@@ -21,6 +21,10 @@ export async function ensureIndexes(): Promise<void> {
             { unique: true, partialFilterExpression: { parentId: null }, name: 'mindmap_one_root_per_map' },
         ),
         mapsColl.createIndex({ visibility: 1, title: 1, _id: 1 }),
+        mapsColl.createIndex(
+            { isDefault: 1 },
+            { unique: true, partialFilterExpression: { isDefault: true }, name: 'mindmap_one_default_map' },
+        ),
     ]);
 }
 
@@ -154,6 +158,7 @@ async function buildTreeFromCategories(cats: Map<string, string[]>): Promise<Obj
         title: '算法知识图谱',
         rootNodeId: root._id,
         visibility: 'public',
+        isDefault: true,
         layoutDirection: 'RIGHT',
         createdAt: now,
         updatedAt: now,

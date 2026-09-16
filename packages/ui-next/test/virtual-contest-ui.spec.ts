@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 const root = resolve(import.meta.dirname, '..');
 
-describe('P4.3 virtual contest UI', () => {
+describe('p4.3 virtual contest UI', () => {
   it('keeps start-virtual and post-contest practice as separate entries', () => {
     const contests = readFileSync(resolve(root, 'src/pages/contests.tsx'), 'utf8');
     expect(contests).to.include('开始虚拟参赛');
@@ -14,7 +14,9 @@ describe('P4.3 virtual contest UI', () => {
     const page = readFileSync(resolve(root, 'src/pages/virtual-contest.tsx'), 'utf8');
     expect(page).to.include('不启动考试客户端');
     expect(page).to.include('virtual=1');
+    // eslint-disable-next-line no-template-curly-in-string
     expect(page).to.include('?tid=${encodeURIComponent(tid)}&virtual=1');
+    // eslint-disable-next-line no-template-curly-in-string
     expect(page).to.include('?tid=${encodeURIComponent(tid)}');
     expect(page).to.include('继续赛后练习');
     expect(page).to.include('这是普通浏览器里的自律计时训练');
@@ -23,12 +25,14 @@ describe('P4.3 virtual contest UI', () => {
 
   it('keeps VP submit, records, and remaining time on the isolated problem page', () => {
     const detail = readFileSync(resolve(root, 'src/pages/problem-detail.tsx'), 'utf8');
+    // eslint-disable-next-line no-template-curly-in-string
     expect(detail).to.include('?tid=${tid}&virtual=1');
     expect(detail).to.include('virtual: virtualContestActive');
     expect(detail).to.include('虚拟参赛');
     expect(detail).to.include('virtualRemainingMs');
     expect(detail).not.to.include('强防作弊');
     const submit = readFileSync(resolve(root, 'src/pages/problem-submit.tsx'), 'utf8');
+    // eslint-disable-next-line no-template-curly-in-string
     expect(submit).to.include('?tid=${tid}&virtual=1');
     const records = readFileSync(resolve(root, 'src/pages/records.tsx'), 'utf8');
     expect(records).to.include("virtual: virtualRecords ? '1' : ''");

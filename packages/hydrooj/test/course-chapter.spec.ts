@@ -47,6 +47,7 @@ describe('course chapter sections', () => {
         expect(training).to.include('for (const section of tdoc.dag[i].sections || [])');
         expect(readSrc('src/handler/training.ts')).to.include('题集阶段不支持小节');
         expect(readSrc('src/handler/course.ts')).to.include('liveRefPids.filter((pid) => !sectionPidSet.has(pid))');
+        // eslint-disable-next-line no-template-curly-in-string
         expect(readSrc('src/handler/course.ts')).to.include('章节 ${node._id} 的题目必须是数组');
         expect(readSrc('src/handler/course.ts')).to.include('不能同时属于小节');
         expect(readSrc('src/model/problem-lifecycle.ts')).to.include("{ 'dag.sections.pids': pid }");

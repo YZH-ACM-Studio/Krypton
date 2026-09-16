@@ -310,7 +310,7 @@ function lookupInfraLabel(reason: string): string | null {
 function teacherReasonLabel(reason: string): string {
   const label = lookupInfraLabel(reason);
   if (label) return label;
-  if (/[\u3400-\u9fff]/.test(reason)) return reason;
+  if (/[\u3400-\u9FFF]/.test(reason)) return reason;
   if (!/[a-z][a-z0-9]*(?:_[a-z0-9]+)+/.test(reason)) return reason;
   return UNKNOWN_TEACHER_ERROR;
 }
@@ -320,8 +320,8 @@ function presentInfraError(message: string): { summary: string; raw: string | nu
   const payload = trimmed.replace(/^(?:请求无效：)+/, '');
   const exact = lookupInfraLabel(payload);
   if (exact) return { summary: exact, raw: null };
-  if (/[\u3400-\u9fff]/.test(payload) && !/[a-z][a-z0-9]*(?:_[a-z0-9]+)+/.test(payload)) return { summary: payload, raw: null };
-  if (/[a-z][a-z0-9]*(?:_[a-z0-9]+)+/.test(payload) && !/[\u3400-\u9fff]/.test(payload)) {
+  if (/[\u3400-\u9FFF]/.test(payload) && !/[a-z][a-z0-9]*(?:_[a-z0-9]+)+/.test(payload)) return { summary: payload, raw: null };
+  if (/[a-z][a-z0-9]*(?:_[a-z0-9]+)+/.test(payload) && !/[\u3400-\u9FFF]/.test(payload)) {
     return { summary: UNKNOWN_TEACHER_ERROR, raw: payload };
   }
   const replaced = payload.replace(/[a-z][a-z0-9]*(?:_[a-z0-9]+)+/g, (token) => lookupInfraLabel(token) || token);

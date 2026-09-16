@@ -141,7 +141,7 @@ function requestPayload(handler: Handler): Record<string, unknown> {
 
 function fieldPresent(handler: Handler, key: string): boolean {
     for (const record of requestRecords(handler)) {
-        if (Object.prototype.hasOwnProperty.call(record, key)) return true;
+        if (Object.hasOwn(record, key)) return true;
     }
     return false;
 }
@@ -150,7 +150,7 @@ function firstPresentValue(handler: Handler, keys: readonly string[]): { present
     for (const key of keys) {
         if (!fieldPresent(handler, key)) continue;
         for (const record of requestRecords(handler)) {
-            if (Object.prototype.hasOwnProperty.call(record, key)) return { present: true, value: record[key] };
+            if (Object.hasOwn(record, key)) return { present: true, value: record[key] };
         }
     }
     return { present: false, value: undefined };
@@ -220,7 +220,7 @@ function parseWriteInput(
             }
         }
 
-        const nestedHandlePresent = nested ? Object.prototype.hasOwnProperty.call(nested, 'handle') : false;
+        const nestedHandlePresent = nested ? Object.hasOwn(nested, 'handle') : false;
         const flatHandle = firstPresentValue(handler, HANDLE_FIELD_ALIASES[site]);
         const handlePresent = nestedHandlePresent || flatHandle.present;
         if (handlePresent) {
@@ -230,7 +230,7 @@ function parseWriteInput(
             hasHandleWrite = true;
         }
 
-        const nestedPublicPresent = nested ? Object.prototype.hasOwnProperty.call(nested, 'publicShow') : false;
+        const nestedPublicPresent = nested ? Object.hasOwn(nested, 'publicShow') : false;
         const flatPublic = firstPresentValue(handler, PUBLIC_FIELD_ALIASES[site]);
         const publicPresent = nestedPublicPresent || flatPublic.present;
         if (publicPresent) {

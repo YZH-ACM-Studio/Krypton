@@ -38,7 +38,7 @@ describe('programming problem reactions', () => {
         const model = readSrc('src/model/problem.ts');
         expect(model).to.include("[...ProblemModel.PROJECTION_PUBLIC, 'reactions']");
         expect(model).to.include('static async setReaction');
-        expect(model).to.include("static PROJECTION_PUBLIC: Field[] = [");
+        expect(model).to.include('static PROJECTION_PUBLIC: Field[] = [');
         expect(model).to.include("effectiveProblemKind(pdoc) !== 'programming'");
         const handler = readSrc('src/handler/problem.ts');
         expect(handler).to.include("'managedAuthoring', 'reactions'");

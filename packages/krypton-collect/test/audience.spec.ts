@@ -38,12 +38,12 @@ async function findBoundStudentsByGroupIds(targetDomainId: string, groupIds: Obj
     if (!groupIds.length) return [];
     const wanted = new Set(groupIds.map((id) => String(id)));
     return boundStudents.filter(
-        (student) => student.domainId === targetDomainId && student.groupIds.some((id) => wanted.has(String(id))),
+        (row) => row.domainId === targetDomainId && row.groupIds.some((id) => wanted.has(String(id))),
     );
 }
 
 async function findStudentByUserId(targetDomainId: string, userId: number): Promise<AudienceStudent | null> {
-    return boundStudents.find((student) => student.domainId === targetDomainId && student.boundUserId === userId) ?? null;
+    return boundStudents.find((row) => row.domainId === targetDomainId && row.boundUserId === userId) ?? null;
 }
 
 const userBindModel = {
@@ -58,7 +58,7 @@ const userBindModel = {
     },
 };
 
-type HydroHolder = { Hydro?: { model?: { userbind?: unknown } } };
+interface HydroHolder { Hydro?: { model?: { userbind?: unknown } } }
 const hydroHolder = globalThis as HydroHolder;
 const previousHydro = hydroHolder.Hydro;
 hydroHolder.Hydro = { model: { userbind: userBindModel } };

@@ -100,7 +100,9 @@ describe('p3.15 programming editor workspace correction', () => {
     const detail = read('packages/ui-next/src/pages/problem-detail.tsx');
     expect(handler).to.include('canSubmitProblem: problem.canSubmitProblem(udoc, pdoc)');
     expect(shell).to.include('canSubmit = false');
+    // eslint-disable-next-line no-template-curly-in-string
     expect(shell).to.include('`${problemUrl}?ide=1`');
+    // eslint-disable-next-line no-template-curly-in-string
     expect(shell).to.include('`${problemUrl}/submit`');
     expect(shell).to.include('IDE');
     expect(shell).to.include('提交');

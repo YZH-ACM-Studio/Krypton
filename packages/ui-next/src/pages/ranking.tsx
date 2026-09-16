@@ -102,7 +102,7 @@ function readPagePublicRating(
 ): { included: boolean; rating?: number } {
   const uid = String(user._id);
   for (const dict of pageDicts) {
-    if (!isRecord(dict) || !Object.prototype.hasOwnProperty.call(dict, uid)) continue;
+    if (!isRecord(dict) || !Object.hasOwn(dict, uid)) continue;
     return readPublicRatingFromView(dict[uid], site);
   }
   return { included: false };

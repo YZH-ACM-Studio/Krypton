@@ -122,7 +122,7 @@ function logStage(stage: string, actor: number, id?: ObjectId | string, size?: n
     logger.info(
         'id=%s size=%s actor=%s stage=%s',
         id == null ? '-' : String(id),
-        size == null ? '-' : size,
+        size ?? '-',
         actor,
         stage,
     );
@@ -132,7 +132,7 @@ function logStageError(stage: string, actor: number, id?: ObjectId | string, siz
     logger.error(
         'id=%s size=%s actor=%s stage=%s',
         id == null ? '-' : String(id),
-        size == null ? '-' : size,
+        size ?? '-',
         actor,
         stage,
     );
@@ -218,7 +218,7 @@ function configuredMaxFileBytes(): number {
     }
     const raw = SystemModel.get(ADMIN_DROPBOX_MAX_FILE_BYTES_SETTING);
     if (raw == null || raw === '') return ADMIN_DROPBOX_DEFAULT_MAX_FILE_BYTES;
-    const value = typeof raw === 'number' ? raw : typeof raw === 'string' && /^-?\d+$/.test(raw) ? Number(raw) : NaN;
+    const value = typeof raw === 'number' ? raw : typeof raw === 'string' && /^-?\d+$/.test(raw) ? Number(raw) : Number.NaN;
     if (!isValidMaxFileBytes(value)) {
         throw new TypeError('admin-dropbox.maxFileBytes is invalid');
     }
@@ -406,7 +406,7 @@ function normalizeInput(file: AdminDropboxFileInput): {
             : undefined;
     const sources = [bytes ? 1 : 0, stream ? 1 : 0, tempPath ? 1 : 0].reduce((sum, item) => sum + item, 0);
     if (sources !== 1) rejectFile('缺少文件内容');
-    const claimedSize = rec.size == null ? undefined : rec.size;
+    const claimedSize = rec.size ?? undefined;
     if (claimedSize != null && (!Number.isInteger(claimedSize) || claimedSize <= 0)) rejectFile('空文件');
     return { bytes, stream, tempPath, claimedSize };
 }
@@ -542,6 +542,7 @@ export async function create(
         note: resolvedNote,
     };
     let inserted = false;
+    let cleanupError: unknown = null;
     try {
         await withDropboxLock(dropboxFileLockKey(actor.domainId, String(_id)), async () => {
             logStage('put', actor._id, _id, inspected.size);
@@ -562,16 +563,19 @@ export async function create(
             }
             logStage('insert', actor._id, _id, inspected.size);
         });
-        return doc;
     } finally {
         if (inspected.ownedTempPath) {
             try {
                 await unlinkQuiet(inspected.ownedTempPath, actor._id, _id, inspected.size);
             } catch (error) {
-                if (!inserted) throw error;
+                // A cleanup failure must not mask the upload failure that caused it,
+                // and must not fail a request whose document was already stored.
+                cleanupError = error;
             }
         }
     }
+    if (cleanupError && !inserted) throw cleanupError;
+    return doc;
 }
 
 export async function list(

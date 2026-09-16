@@ -1,3 +1,4 @@
+// eslint-disable-next-line no-control-regex
 const CSV_INVISIBLE_PREFIX = /[\u0000-\u001F\u007F\u200B-\u200D\uFEFF\u00AD\u2060\u2800]/g;
 
 export function csvCell(value: string | number): string {

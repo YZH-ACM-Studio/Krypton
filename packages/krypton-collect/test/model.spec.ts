@@ -851,10 +851,10 @@ describe('krypton-collect naming Rev.2', () => {
             size: second.length,
             bytes: second,
         });
-        const stored = filesColl.docs.filter((doc) => doc.current === true);
-        expect(stored).to.have.length(2);
-        const firstStored = stored.find((doc) => doc.originalName === 'later-name.pdf');
-        const secondStored = stored.find((doc) => doc.originalName === 'earlier-name.pdf');
+        const currentFiles = filesColl.docs.filter((doc) => doc.current === true);
+        expect(currentFiles).to.have.length(2);
+        const firstStored = currentFiles.find((doc) => doc.originalName === 'later-name.pdf');
+        const secondStored = currentFiles.find((doc) => doc.originalName === 'earlier-name.pdf');
         if (!firstStored || !secondStored) expect.fail('expected both current files');
         firstStored.createdAt = new Date('2026-01-02T00:00:00.000Z');
         secondStored.createdAt = new Date('2026-01-01T00:00:00.000Z');

@@ -61,7 +61,7 @@ function walkTsFiles(dir: string, acc: string[]) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const full = join(dir, entry.name);
     if (entry.isDirectory()) walkTsFiles(full, acc);
-    else if (/\.(ts|tsx)$/.test(entry.name)) acc.push(full);
+    else if (/\.(?:ts|tsx)$/.test(entry.name)) acc.push(full);
   }
 }
 
@@ -163,6 +163,7 @@ describe('collect page wiring contracts', () => {
   });
 
   it('includes collect-capabilities in all three prepare.js typecheck surfaces', () => {
+    // eslint-disable-next-line no-template-curly-in-string
     expect(prepare).to.include('packages/ui-next/collect-capabilities.${ext}');
     expect(prepare).to.include("'packages/ui-next/collect-capabilities.ts'");
     expect(prepare).to.include("'collect-capabilities.ts'");
@@ -248,7 +249,7 @@ describe('collect teacher payload contracts', () => {
     expect(admin).to.include('requireCourseExamComplete');
     expect(admin).to.include('须先完成课程结业考试才能提交');
     expect(admin).to.include('disabled={!canEdit || (!selectedCourse?.hasExam && !requireCourseExamComplete)}');
-    expect(admin).to.include("name=\"requireCourseExamComplete\"");
+    expect(admin).to.include('name="requireCourseExamComplete"');
     expect(handler).to.include('assertCollectExamCompleteForStudent');
   });
 

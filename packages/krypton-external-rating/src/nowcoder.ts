@@ -168,7 +168,8 @@ function normalizeName(name: string): string {
     if (normalized.length > NOWCODER_MAX_NAME_CHARS) {
         throwMalformed(normalized, `Nowcoder username exceeds ${NOWCODER_MAX_NAME_CHARS} characters`);
     }
-    if (/[\u0000-\u001f]/.test(normalized)) {
+    // eslint-disable-next-line no-control-regex
+    if (/[\u0000-\u001F]/.test(normalized)) {
         throwMalformed(normalized, 'Nowcoder username must not contain control characters');
     }
     return normalized;
@@ -236,7 +237,7 @@ export function parseNowcoderRatingIndexHtml(html: string, name: string): { rati
         throwMalformed(name, 'Nowcoder response is not the ACM rating-index HTML');
     }
 
-    const tableMatch = html.match(/<table\b[^>]*\brating-data\b[^>]*>([\s\S]*?)<\/table>/i);
+    const tableMatch = html.match(/<table\b[^>]+\brating-data\b[^>]*>([\s\S]*?)<\/table>/i);
     const emptyBoard = /<div class="empty-tip-mod"[\s\S]*?<p>\s*暂无数据\s*<\/p>/i.test(html);
     if (!tableMatch) {
         if (emptyBoard) throwNotFound(name);
@@ -244,7 +245,7 @@ export function parseNowcoderRatingIndexHtml(html: string, name: string): { rati
     }
 
     const exactMatches: { uid: string; rating: number }[] = [];
-    const rowRe = /<tr\b[^>]*\bdata-uid="(\d+)"[^>]*>([\s\S]*?)<\/tr>/gi;
+    const rowRe = /<tr\b[^>]+\bdata-uid="(\d+)"[^>]*>([\s\S]*?)<\/tr>/gi;
     let sawRow = false;
     for (const row of tableMatch[1].matchAll(rowRe)) {
         sawRow = true;

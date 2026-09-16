@@ -6,8 +6,8 @@ const Module = require('module');
 const authPath = require.resolve('../src/auth.ts');
 const originalLoad = Module._load;
 
-type CollectAuthUser = { _id: number; hasPerm(p: bigint): boolean; hasPriv(p: number): boolean };
-type CollectRequest = { ownerUid: number; collaboratorUids: number[] };
+interface CollectAuthUser { _id: number; hasPerm(p: bigint): boolean; hasPriv(p: number): boolean }
+interface CollectRequest { ownerUid: number; collaboratorUids: number[] }
 
 interface CollectAuth {
     canCreateCollect(user: CollectAuthUser): boolean;

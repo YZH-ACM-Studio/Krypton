@@ -371,7 +371,7 @@ describe('P3.6 redemption codes', () => {
 
     it('hides a deleted target as a missing code and refuses a revoked source on retry', async () => {
         const redemption = service();
-        const created = await redemption.createBatch({
+        await redemption.createBatch({
             domainId,
             user: actor(),
             targetKind: 'problem_set',

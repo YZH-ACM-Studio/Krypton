@@ -13,7 +13,7 @@ import {
 
 const root = resolve(import.meta.dirname, '..');
 
-describe('P3.4 problem set access UI', () => {
+describe('p3.4 problem set access UI', () => {
   it('splits catalog, enrolled, and redemption-only sources without treating enroll as authorization', () => {
     const catalog = [{ kind: 'public' as const }, { kind: 'group' as const, groupId: 'g1' }];
     const redemption = [{ kind: 'redemption' as const, entitlementId: 'e1' }];

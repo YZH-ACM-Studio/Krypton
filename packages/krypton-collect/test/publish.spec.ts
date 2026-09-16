@@ -104,7 +104,7 @@ const userBindModel = {
     },
 };
 
-type HydroHolder = { Hydro?: { model?: { userbind?: unknown } } };
+interface HydroHolder { Hydro?: { model?: { userbind?: unknown } } }
 const hydroHolder = globalThis as HydroHolder;
 const previousHydro = hydroHolder.Hydro;
 hydroHolder.Hydro = { model: { userbind: userBindModel } };

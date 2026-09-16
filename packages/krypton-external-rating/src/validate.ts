@@ -50,7 +50,7 @@ function isServerOwnedKey(key: string): key is ExternalRatingServerOwnedKey {
 
 function rejectSnapshotField(field: ExternalRatingServerOwnedKey): never {
     if (typeof ExternalRatingSnapshotFieldError !== 'function') {
-        throw new Error(`客户端不能设置外站快照字段 ${field}`);
+        throw new TypeError(`客户端不能设置外站快照字段 ${field}`);
     }
     throw new ExternalRatingSnapshotFieldError(field);
 }

@@ -111,7 +111,7 @@ export function parseEportalLoginBody(body: string): EPortalLoginSuccess {
     }
 
     const trimmed = body.trim();
-    if (/^</.test(trimmed) || /<html/i.test(trimmed)) {
+    if (trimmed.startsWith('<') || /<html/i.test(trimmed)) {
         throw new EPortalLoginError('eportal login returned HTML, not JSONP', 'eportal_login_html');
     }
 
@@ -170,7 +170,7 @@ function parseJsonpOrJson(body: string): unknown {
         throw new EPortalLoginError('eportal login returned unparseable JSONP', 'eportal_login_unparseable');
     }
     const callback = body.slice(0, open).trim();
-    if (!/^[A-Za-z_][\w]*$/.test(callback)) {
+    if (!/^[A-Za-z_]\w*$/.test(callback)) {
         throw new EPortalLoginError('eportal login returned unparseable JSONP', 'eportal_login_unparseable');
     }
     const trailing = body.slice(close + 1).trim();

@@ -20,7 +20,7 @@ describe('P4 virtual contest wiring contracts', () => {
         expect(judge).to.include('if (rdoc.contest || rdoc.virtualAttemptId) return');
         expect(judge).to.include('virtualAttemptId: { $exists: false }');
         const records = readSrc('src/handler/record.ts');
-        expect(records).to.include("virtualAttemptId: { $exists: false }");
+        expect(records).to.include('virtualAttemptId: { $exists: false }');
         expect(records).to.include('assertVirtualContestRecordAccess');
         expect(records).to.include('确认后才能重测虚拟参赛记录');
         const judgeops = readSrc('src/handler/judgeops.ts');

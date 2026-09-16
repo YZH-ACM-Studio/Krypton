@@ -36,7 +36,7 @@ function parseRedeemResult(value: unknown): RedeemResultView {
     batchId,
     targetKind: typeof result.targetKind === 'string' ? result.targetKind : null,
     title: typeof result.title === 'string' && result.title ? result.title : null,
-    href: typeof result.href === 'string' && /^\/(course|problem-sets)\/[A-Za-z0-9]+$/.test(result.href) ? result.href : null,
+    href: typeof result.href === 'string' && /^\/(?:course|problem-sets)\/[A-Za-z0-9]+$/.test(result.href) ? result.href : null,
   };
 }
 

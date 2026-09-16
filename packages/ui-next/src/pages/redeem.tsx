@@ -26,7 +26,7 @@ export function RedeemPage() {
           {data.result?.ok ? (
             <p className="rounded-md border border-green-300 bg-green-50 px-3 py-2 text-sm text-green-800 dark:bg-green-950/40 dark:text-green-200">
               兑换成功{typeof data.result.title === 'string' && data.result.title ? `：${data.result.title}` : '。可以打开对应内容继续学习。'}
-              {typeof data.result.href === 'string' && /^\/(course|problem-sets)\/[A-Za-z0-9]+$/.test(data.result.href) ? (
+              {typeof data.result.href === 'string' && /^\/(?:course|problem-sets)\/[A-Za-z0-9]+$/.test(data.result.href) ? (
                 <>
                   {' '}
                   <a href={data.result.href} className="font-medium underline-offset-2 hover:underline">

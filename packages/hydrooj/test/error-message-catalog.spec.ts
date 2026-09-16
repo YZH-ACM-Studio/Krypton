@@ -1266,7 +1266,7 @@ describe('P2.43 error message catalog', () => {
         );
         assert.match(
             accountHandlerSource,
-            /if \(error\.message === `单次最多操作 \$\{ACCOUNT_BULK_LIMIT\} 个账号`\) \{\s*throw new BadRequestError\(localizedErrorText`单次最多操作 \$\{ACCOUNT_BULK_LIMIT\} 个账号`\);/s,
+            /if \(error\.message === `单次最多操作 \$\{ACCOUNT_BULK_LIMIT\} 个账号`\) \{\s*throw new BadRequestError\(localizedErrorText`单次最多操作 \$\{ACCOUNT_BULK_LIMIT\} 个账号`\);/,
         );
 
         const invalidUidList = new BadRequestError(localizedErrorText`UID 列表包含无效值`);
@@ -1283,6 +1283,7 @@ describe('P2.43 error message catalog', () => {
 
         const paperSource = readFileSync(resolve(workspaceRoot, 'packages/hydrooj/src/handler/paper.ts'), 'utf8');
         const tryStart = paperSource.indexOf('try {', paperSource.indexOf('function validatePaperRegionSubmission('));
+        // eslint-disable-next-line no-template-curly-in-string
         const missingPayload = paperSource.indexOf('throw new Error(`${kind}: region payload is required`)', tryStart);
         const catchStart = paperSource.indexOf('} catch (error: any) {', tryStart);
         assert.ok(tryStart >= 0 && missingPayload > tryStart && catchStart > missingPayload);

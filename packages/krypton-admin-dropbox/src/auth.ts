@@ -6,7 +6,7 @@
  */
 import { PRIV } from 'hydrooj';
 
-export type AdminDropboxAuthUser = { hasPriv(p: number): boolean };
+export interface AdminDropboxAuthUser { hasPriv(p: number): boolean }
 
 export function canUseAdminDropbox(user: AdminDropboxAuthUser): boolean {
     return user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);

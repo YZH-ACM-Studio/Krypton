@@ -118,7 +118,6 @@ export function parseCampusNetTickArgv(argv: readonly string[]): CampusNetTickCl
     const options: CampusNetTickCliOptions = {};
     const args = argv.slice(2);
     for (let i = 0; i < args.length; i++) {
-        const arg = args[i];
         const envFile = readFlagValue(args, i, '--env-file');
         if (envFile.matched) {
             options.envFile = envFile.value;

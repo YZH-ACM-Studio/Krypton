@@ -63,7 +63,7 @@ describe('force-bind handler source contracts', () => {
     it('binds or queues through bindByRosterOrQueue instead of always submitting a request', () => {
         expect(handlerSource).to.include('bindByRosterOrQueue');
         expect(userBindHandler).to.include('bindByRosterOrQueue');
-        expect(userBindHandler).to.include("userbind.bind.roster_match");
+        expect(userBindHandler).to.include('userbind.bind.roster_match');
         expect(userBindHandler).to.include('user_bind_success.html');
         expect(userBindHandler).to.not.include('submitBindingRequest');
     });

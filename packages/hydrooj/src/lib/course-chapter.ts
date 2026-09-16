@@ -1,4 +1,4 @@
-import type { TrainingNode, TrainingSection } from '../interface';
+import type { TrainingSection } from '../interface';
 import { parseCourseVideos } from './course-video';
 
 /** Reads only the pid arrays, so callers may pass any chapter-shaped projection. */

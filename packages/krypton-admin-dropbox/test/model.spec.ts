@@ -133,8 +133,8 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
                 async exists(path: string) {
                     return stored.has(path);
                 },
-                async signDownloadLink(path: string, filename: string) {
-                    return `https://signed.test/${path}?name=${encodeURIComponent(filename)}`;
+                async signDownloadLink(path: string, downloadName: string) {
+                    return `https://signed.test/${path}?name=${encodeURIComponent(downloadName)}`;
                 },
             },
             SystemModel: {

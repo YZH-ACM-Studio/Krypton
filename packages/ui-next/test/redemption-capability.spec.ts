@@ -5,7 +5,7 @@ import { resolveRedemptionManageCapability } from '../redemption-capabilities.ts
 
 const root = resolve(import.meta.dirname, '..');
 
-describe('P3.7 redemption manage capability', () => {
+describe('p3.7 redemption manage capability', () => {
   it('fails closed without permission methods and opens for create or system admin', () => {
     const errors: unknown[] = [];
     expect(

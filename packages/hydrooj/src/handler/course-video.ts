@@ -37,7 +37,7 @@ import problem from '../model/problem';
 import storage from '../model/storage';
 import * as training from '../model/training';
 import user from '../model/user';
-import { Handler, param, post, Types } from '../service/server';
+import { Handler, param, Types } from '../service/server';
 import { isCourseKind } from '../lib/training-kind';
 
 const logger = new Logger('course-video');

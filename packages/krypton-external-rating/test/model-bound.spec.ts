@@ -17,6 +17,8 @@ class PermissionError extends ForbiddenError {
     name = 'PermissionError';
 }
 
+// CreateError is a factory, not a constructor.
+// eslint-disable-next-line unicorn/throw-new-error
 const UserNotFoundError = CreateError('UserNotFoundError', NotFoundError, 'User {0} not found.');
 
 interface StudentRow {
@@ -77,11 +79,11 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     return originalLoad.call(this, request, parent, isMain);
 };
 
-type ExternalRatingActor = {
+interface ExternalRatingActor {
     _id: number;
     hasPerm(perm: bigint): boolean;
     hasPriv(priv: number): boolean;
-};
+}
 
 interface SiteSnapshot {
     handle: string;

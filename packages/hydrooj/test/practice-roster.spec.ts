@@ -11,8 +11,8 @@ describe('practice roster assembly', () => {
             memberUids: [8, 9],
             udict: { 8: { uname: 'alice' }, 9: { uname: 'bob' } },
             students: {
-                '8': { realName: '爱丽丝', studentId: '20260001', groupIds: [groupA, groupB] },
-                '9': { realName: '鲍勃', studentId: '20260002', groupIds: [] },
+                8: { realName: '爱丽丝', studentId: '20260001', groupIds: [groupA, groupB] },
+                9: { realName: '鲍勃', studentId: '20260002', groupIds: [] },
             },
             groupNameById: new Map([
                 [String(groupA), '计科'],

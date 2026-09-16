@@ -1150,7 +1150,7 @@ function riskEdgeKey(edge: AssignmentV2RiskEdge): string {
 
 const UNKNOWN_TEACHER_ERROR = '操作无法完成，请重试。';
 const SNAKE_CASE_TOKEN = /[a-z][a-z0-9]*(?:_[a-z0-9]+)+/;
-const HAS_CJK = /[\u3400-\u9fff]/;
+const HAS_CJK = /[\u3400-\u9FFF]/;
 
 const TEACHER_CODE_OVERRIDES: Record<string, string> = {
   active_session_conflict: '该终端已有活动考试会话',
@@ -1289,8 +1289,8 @@ function isExplicitTeacherFailure(message: string): boolean {
 function parseFieldValidationInner(message: string): string | null {
   const payload = message.replace(/^(?:请求无效：)+/, '').trim();
   const wrapped =
-    payload.match(/字段\s+.+?\s+验证失败。[（(]([\s\S]+?)[）)]/)
-    || payload.match(/Field\s+.+?\s+validation failed\.\s*\(([\s\S]+?)\)/);
+    payload.match(/字段\s\S[\s\S]*?验证失败。[（(]([\s\S]+?)[）)]/)
+    || payload.match(/Field\s\S[\s\S]*?validation failed\.\s*\(([\s\S]+?)\)/);
   const inner = wrapped?.[1]?.trim();
   return inner || null;
 }
@@ -1450,7 +1450,7 @@ const riskReasonLabel: Record<AssignmentV2RiskEdge['reason'], string> = {
 
 type SeatPlanStepId = 'adjust' | 'classrooms' | 'generate' | 'launch' | 'lock' | 'network' | 'preflight' | 'publish' | 'roster';
 
-type SeatPlanStepDef = { id: SeatPlanStepId; ariaLabel: string; label: string };
+interface SeatPlanStepDef { id: SeatPlanStepId; ariaLabel: string; label: string }
 
 const KRYPTON_SEAT_PLAN_STEPS: SeatPlanStepDef[] = [
   { id: 'roster', label: '名单', ariaLabel: '冻结名单' },
@@ -2759,6 +2759,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
     try {
       const current = preloginTargetFactsFresh ? preloginTargetDraft : await loadPreloginTargetDraft();
       stage = 'save';
+      // eslint-disable-next-line ts/no-shadow
       let draft = current;
       if (draft?.sourceAssignmentId !== publishedPreparationAssignment.assignmentId) {
         await post(`${path}/target-assignment`, {
@@ -2872,6 +2873,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
       });
       startAccepted = true;
       const deadline = Date.now() + 30000;
+      // eslint-disable-next-line ts/no-shadow
       let latest = await loadPreloginFacts();
       while (Date.now() < deadline) {
         if (latest.workflow.network.source === 'execution' && latest.workflow.network.ready) {

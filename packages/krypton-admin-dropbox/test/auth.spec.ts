@@ -13,7 +13,7 @@ const errorsPath = require.resolve('../src/errors.ts');
 const handlerSource = readFileSync(resolve(__dirname, '../src/handler.ts'), 'utf8');
 const originalLoad = Module._load;
 
-type DropboxAuthUser = { _id: number; hasPriv(p: number): boolean };
+interface DropboxAuthUser { _id: number; hasPriv(p: number): boolean }
 interface DropboxAuth {
     canUseAdminDropbox(user: DropboxAuthUser): boolean;
 }
@@ -164,7 +164,7 @@ describe('krypton-admin-dropbox auth', () => {
     it('is mounted at /admin/dropbox with checkPriv, not /collect or exam-mode', () => {
         expect(handlerSource).to.include("'/admin/dropbox'");
         expect(handlerSource).to.include('checkPriv(PRIV.PRIV_EDIT_SYSTEM)');
-        expect(handlerSource).to.include("admin_dropbox.html");
+        expect(handlerSource).to.include('admin_dropbox.html');
         expect(handlerSource).to.include('async postUploadFile');
         expect(handlerSource).to.include('async postDelete');
         expect(handlerSource).not.to.match(/['"`]\/collect/);

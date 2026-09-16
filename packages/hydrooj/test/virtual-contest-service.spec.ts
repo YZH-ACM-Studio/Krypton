@@ -165,7 +165,7 @@ describe('P4.1 virtual contest attempt machine', () => {
         expect(first.status).to.equal('active');
         expect(first.endAt.getTime() - first.startAt.getTime()).to.equal(endAt.getTime() - beginAt.getTime());
         await expectReject(svc.start({ domainId, sourceContestId: contestId, uid }));
-        await expectReject(svc.start({ domainId, sourceContestId: contestId, uid: uid }));
+        await expectReject(svc.start({ domainId, sourceContestId: contestId, uid }));
     });
 
     it('allows cancel before the first record and restart, then locks after a submission', async () => {

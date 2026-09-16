@@ -180,7 +180,7 @@ function applyHandleWrites(current: UserExternalRatingState, handles: unknown): 
     assertOnlySiteKeys(handles, 'handles');
     let next = current;
     for (const site of EXTERNAL_RATING_SITES) {
-        if (!Object.prototype.hasOwnProperty.call(handles, site)) continue;
+        if (!Object.hasOwn(handles, site)) continue;
         const raw = handles[site];
         if (raw === undefined) continue;
         const handle = normalizeSiteHandle(site, raw);
@@ -198,7 +198,7 @@ function applyFlagWrites(current: UserExternalRatingState, flags: unknown): User
     assertOnlySiteKeys(flags, 'flags');
     let next = current;
     for (const site of EXTERNAL_RATING_SITES) {
-        if (!Object.prototype.hasOwnProperty.call(flags, site)) continue;
+        if (!Object.hasOwn(flags, site)) continue;
         const raw = flags[site];
         if (raw === undefined) continue;
         assertClientMayNotSetSnapshotFields(raw);
@@ -210,7 +210,7 @@ function applyFlagWrites(current: UserExternalRatingState, flags: unknown): User
                 throw new ValidationError(`flags.${site}.${key}`, null, localizedErrorText`未知公开开关字段`);
             }
         }
-        if (!Object.prototype.hasOwnProperty.call(raw, 'publicShow')) continue;
+        if (!Object.hasOwn(raw, 'publicShow')) continue;
         const publicShow = parsePublicFlag(raw.publicShow);
         if (publicShow === true && isHandleUnset(next[site].handle)) {
             throw new ValidationError(`${site}.publicShow`, null, localizedErrorText`未填写账号不能公开`);

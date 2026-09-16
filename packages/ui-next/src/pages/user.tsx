@@ -208,7 +208,7 @@ function isTrueFlag(value: unknown): boolean {
 function readOptionalString(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const text = value.trim();
-  return text ? text : undefined;
+  return text || undefined;
 }
 
 function readOptionalRating(value: unknown): number | null | undefined {

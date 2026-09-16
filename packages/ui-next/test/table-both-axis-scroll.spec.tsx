@@ -61,7 +61,7 @@ describe('both-axis table scroll', () => {
     const tableAt = problemDetail.indexOf('className="min-w-[620px] w-full text-xs"');
     expect(tableAt, 'IDE records table').to.be.greaterThan(-1);
     const recordsWrap = problemDetail.slice(Math.max(0, tableAt - 1600), tableAt);
-    expect(recordsWrap).to.match(/<ScrollArea\b[^>]*orientation="both"/);
+    expect(recordsWrap).to.match(/<ScrollArea\b[^>]+orientation="both"/);
 
     const training = source('src/pages/training.tsx');
     const rosterAt = training.indexOf('placeholder="搜索用户名/姓名/学号/班级"');
@@ -72,6 +72,6 @@ describe('both-axis table scroll', () => {
     expect(roster).to.include('学号');
     expect(roster).to.include('班级组');
     expect(roster).to.include('进度');
-    expect(roster).to.match(/<ScrollArea\b[^>]*orientation="both"/);
+    expect(roster).to.match(/<ScrollArea\b[^>]+orientation="both"/);
   });
 });

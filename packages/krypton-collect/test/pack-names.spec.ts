@@ -95,14 +95,14 @@ describe('collect pack naming', () => {
 
 describe('collect csv formula neutralization', () => {
     it('prefixes Excel formula starters even after leading whitespace', () => {
-        expect(csvCell('=HYPERLINK("https://example.invalid")')).to.equal(`"'=HYPERLINK(""https://example.invalid"")"`);
+        expect(csvCell('=HYPERLINK("https://example.invalid")')).to.equal('"\'=HYPERLINK(""https://example.invalid"")"');
         expect(csvCell('+24000002')).to.equal("'+24000002");
-        expect(csvCell(' @SUM(1,1)')).to.equal(`"' @SUM(1,1)"`);
+        expect(csvCell(' @SUM(1,1)')).to.equal('"\' @SUM(1,1)"');
         expect(csvCell('-1+1')).to.equal("'-1+1");
-        expect(csvCell('\tbad')).to.equal(`"'\tbad"`);
+        expect(csvCell('\tbad')).to.equal('"\'\tbad"');
         expect(csvCell('张三')).to.equal('张三');
         expect(csvCell(42)).to.equal('42');
-        expect(csvCell('\u200b=HYPERLINK("https://example.invalid")')).to.equal(`"'\u200b=HYPERLINK(""https://example.invalid"")"`);
+        expect(csvCell('\u200B=HYPERLINK("https://example.invalid")')).to.equal('"\'\u200B=HYPERLINK(""https://example.invalid"")"');
     });
 
     it('quotes commas, quotes, and line breaks after neutralization', () => {

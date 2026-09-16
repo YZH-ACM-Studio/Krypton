@@ -25,15 +25,27 @@ const documentStub = {
     async getSub() {
         return [null, null];
     },
-    async push() {},
-    async setSub() {},
-    async deleteSub() {},
+    async push() {
+        /* no-op */
+    },
+    async setSub() {
+        /* no-op */
+    },
+    async deleteSub() {
+        /* no-op */
+    },
 };
 
 const storageStub = {
-    async put() {},
-    async rename() {},
-    async del() {},
+    async put() {
+        /* no-op */
+    },
+    async rename() {
+        /* no-op */
+    },
+    async del() {
+        /* no-op */
+    },
     async get() {
         return Buffer.from('data');
     },
@@ -129,6 +141,7 @@ async function captureFailure(run: () => Promise<unknown>): Promise<unknown> {
 
 describe('problem testdata observer completion contract', () => {
     for (const [label, expectedEvent, mutate] of mutations) {
+        // eslint-disable-next-line ts/no-loop-func
         it(`${label} waits for the final observer and propagates its error`, async () => {
             observerEvents.length = 0;
             let releaseLastObserver!: () => void;

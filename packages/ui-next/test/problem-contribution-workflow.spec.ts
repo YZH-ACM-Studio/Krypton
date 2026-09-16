@@ -91,7 +91,9 @@ describe('p2.25 contribution assignment and task UI', () => {
 
   it('lets data and tag testers open the problem IDE and submit from the inbox', () => {
     const inbox = read('packages/ui-next/src/pages/permits/inbox.tsx');
+    // eslint-disable-next-line no-template-curly-in-string
     expect(inbox).to.include('${problemHref}?ide=1');
+    // eslint-disable-next-line no-template-curly-in-string
     expect(inbox).to.include('${problemHref}/submit');
     expect(inbox).to.include('<SendProblemToCph href={problemHref} compact />');
     expect(inbox).to.include('IDE');

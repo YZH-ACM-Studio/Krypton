@@ -70,10 +70,9 @@ export function parseFileNameTemplate(raw: unknown): string {
     if (!template) reject('文件名格式不能为空');
     if (template.length > TEMPLATE_MAX) reject('文件名格式过长');
     TOKEN_RE.lastIndex = 0;
-    let match: RegExpExecArray | null;
     let cursor = 0;
     const re = new RegExp(TOKEN_RE.source, 'g');
-    while ((match = re.exec(template))) {
+    for (const match of template.matchAll(re)) {
         const literal = template.slice(cursor, match.index);
         if (INVALID_ZIP_PART_CHARS.test(literal)) reject('文件名格式含有非法字符');
         INVALID_ZIP_PART_CHARS.lastIndex = 0;

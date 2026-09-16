@@ -72,6 +72,7 @@ describe('admin dropbox collect isolation contracts', () => {
     expect(page).not.to.match(/endpoint=\{?['"`][^'"`]*collect/);
     expect(handler).to.include("'/admin/dropbox'");
     expect(handler).to.include("'/admin/dropbox/:id'");
+    // eslint-disable-next-line no-template-curly-in-string
     expect(handler).to.include('downloadUrl: `/admin/dropbox/${id}`');
     expect(handler).not.to.match(/['"`]\/collect/);
   });

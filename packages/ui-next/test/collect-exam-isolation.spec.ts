@@ -23,7 +23,7 @@ function listFiles(dir: string): string[] {
 
 function isCollectSourceFile(path: string): boolean {
   const name = path.split('/').pop() || '';
-  return /(^|[-_])collect/i.test(name) && /\.(ts|tsx)$/.test(name);
+  return /(?:^|[-_])collect/i.test(name) && /\.(?:ts|tsx)$/.test(name);
 }
 
 function standaloneTemplates(routerSource: string): string[] {

@@ -183,7 +183,7 @@ export function parseCampusNetState(raw: string): CampusNetPersistedState {
         throw new Error('campus-net state file connectivity is not up|down');
     }
     if (typeof parsed.dialFailNotified !== 'boolean') {
-        throw new Error('campus-net state file dialFailNotified is not boolean');
+        throw new TypeError('campus-net state file dialFailNotified is not boolean');
     }
     return { connectivity, dialFailNotified: parsed.dialFailNotified };
 }

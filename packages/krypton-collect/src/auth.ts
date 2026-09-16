@@ -14,7 +14,7 @@
 import { PERM, PRIV } from 'hydrooj';
 import type { CollectRequestDoc } from './types';
 
-type CollectAuthUser = { _id: number; hasPerm(p: bigint): boolean; hasPriv(p: number): boolean };
+interface CollectAuthUser { _id: number; hasPerm(p: bigint): boolean; hasPriv(p: number): boolean }
 
 export function canManageAllCollect(user: CollectAuthUser): boolean {
     return user.hasPriv(PRIV.PRIV_EDIT_SYSTEM) || user.hasPerm(PERM.PERM_MANAGE_COLLECT);

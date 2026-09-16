@@ -345,12 +345,12 @@ export function assertNoClientSnapshotWrite(input: unknown, field: string): void
     const record = asPlainObject(input, field);
     assertNoHydroRpFields(record, field);
     for (const key of EXTERNAL_RATING_SERVER_OWNED_KEYS) {
-        if (Object.prototype.hasOwnProperty.call(record, key)) {
+        if (Object.hasOwn(record, key)) {
             fail(`${field}.${key}`, `${key} is server-owned and is not client-writable`);
         }
     }
     for (const site of EXTERNAL_RATING_SITES) {
-        if (!Object.prototype.hasOwnProperty.call(record, site) || record[site] == null) continue;
+        if (!Object.hasOwn(record, site) || record[site] == null) continue;
         assertNoClientSnapshotWrite(record[site], `${field}.${site}`);
     }
 }
@@ -386,13 +386,13 @@ function assertAllowedKeys(record: Record<string, unknown>, allowed: readonly st
 
 function assertRequiredKeys(record: Record<string, unknown>, required: readonly string[], field: string): void {
     for (const key of required) {
-        if (!Object.prototype.hasOwnProperty.call(record, key)) fail(`${field}.${key}`, `${key} is required`);
+        if (!Object.hasOwn(record, key)) fail(`${field}.${key}`, `${key} is required`);
     }
 }
 
 function assertNoHydroRpFields(record: Record<string, unknown>, field: string): void {
     for (const key of HYDRO_RP_FIELD_KEYS) {
-        if (Object.prototype.hasOwnProperty.call(record, key)) {
+        if (Object.hasOwn(record, key)) {
             fail(`${field}.${key}`, 'Hydro RP fields are not part of external rating');
         }
     }

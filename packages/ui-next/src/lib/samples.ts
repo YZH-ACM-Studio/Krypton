@@ -84,7 +84,7 @@ function* iterateSampleBlocks(md: string): Generator<{ kind: 'input' | 'output';
 }
 
 function* iterateHydroHtmlSampleBlocks(html: string): Generator<{ kind: 'input' | 'output'; id: number; body: string }> {
-  const re = /<(?:code|pre)[^>]*class="[^"]*language-(input|output)(\d*)[^"]*"[^>]*>([\s\S]*?)<\/(?:code|pre)>/gi;
+  const re = /<(?:code|pre)[^>]*class="[^"]*language-(input|output)(\d*)(?!\d)[^"]*"[^>]*>([\s\S]*?)<\/(?:code|pre)>/gi;
   for (let m = re.exec(html); m !== null; m = re.exec(html)) {
     const kind = m[1].toLowerCase() as 'input' | 'output';
     const id = m[2] ? Number.parseInt(m[2], 10) : 1;
@@ -95,14 +95,14 @@ function* iterateHydroHtmlSampleBlocks(html: string): Generator<{ kind: 'input' 
 
 function headingKind(label: string): 'input' | 'output' | null {
   const normalized = label.replace(/\s+/g, ' ').trim().toLowerCase();
-  if (/^(输入样例|样例输入|sample input)$/.test(normalized)) return 'input';
-  if (/^(输出样例|样例输出|sample output)$/.test(normalized)) return 'output';
+  if (/^(?:输入样例|样例输入|sample input)$/.test(normalized)) return 'input';
+  if (/^(?:输出样例|样例输出|sample output)$/.test(normalized)) return 'output';
   return null;
 }
 
 function* iterateHeadingSampleBlocks(md: string): Generator<{ kind: 'input' | 'output'; id: number; body: string }> {
   const re =
-    /(?:^|\n)(?:#{1,6}\s*|\*{0,2})(输入样例|样例输入|输出样例|样例输出|Sample\s+Input|Sample\s+Output)\s*(\d*)(?:\*{0,2})[^\n]*\n+```[^\n]*\n([\s\S]*?)\n```/gi;
+    /(?:^|\n)(?:#{1,6}\s*|\*{0,2})(输入样例|样例输入|输出样例|样例输出|Sample\s+Input|Sample\s+Output)[^\S\n]*(?![^\S\n])(\d*)(?!\d)[^\n]*\n+```[^\n]*\n([\s\S]*?)\n```/gi;
   for (let m = re.exec(md); m !== null; m = re.exec(md)) {
     const kind = headingKind(m[1]);
     if (!kind) continue;

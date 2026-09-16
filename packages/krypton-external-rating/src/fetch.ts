@@ -204,7 +204,7 @@ export async function fetchBoth(
     newHandles?: Partial<Record<ExternalRatingSiteId, string>>,
 ): Promise<UserExternalRatingState> {
     const updates = await Promise.all(EXTERNAL_RATING_SITES.map(async (site) => {
-        if (newHandles && Object.prototype.hasOwnProperty.call(newHandles, site)) {
+        if (newHandles && Object.hasOwn(newHandles, site)) {
             const next = await applyFetch(state, site, newHandles[site] ?? '', now);
             return { site, snapshot: next[site] };
         }

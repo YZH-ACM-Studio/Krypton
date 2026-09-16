@@ -172,20 +172,20 @@ describe('course video csv', () => {
 describe('course video wiring', () => {
     it('registers dedicated video routes and does not use attachment downloads for playback', () => {
         const course = readSrc('src/handler/course.ts');
-        const video = readSrc('src/handler/course-video.ts');
-        expect(video).to.include("ctx.Route('course_video_upload'");
-        expect(video).to.include("ctx.Route('course_video_play'");
-        expect(video).to.include("ctx.Route('course_video_progress'");
-        expect(video).to.include("ctx.Route('course_videos'");
-        expect(video).to.include("ctx.Route('course_videos_csv'");
-        expect(video).to.include("rosterUnavailable: 'no_groups'");
-        expect(video).to.include('未指定班级，无法出观看名单');
-        expect(video).to.include('requireRewatch');
-        expect(video).to.include("@param('title', Types.String, true)");
+        const videoSource = readSrc('src/handler/course-video.ts');
+        expect(videoSource).to.include("ctx.Route('course_video_upload'");
+        expect(videoSource).to.include("ctx.Route('course_video_play'");
+        expect(videoSource).to.include("ctx.Route('course_video_progress'");
+        expect(videoSource).to.include("ctx.Route('course_videos'");
+        expect(videoSource).to.include("ctx.Route('course_videos_csv'");
+        expect(videoSource).to.include("rosterUnavailable: 'no_groups'");
+        expect(videoSource).to.include('未指定班级，无法出观看名单');
+        expect(videoSource).to.include('requireRewatch');
+        expect(videoSource).to.include("@param('title', Types.String, true)");
         expect(course).to.include('courseVideoDueAt');
         expect(course).to.include('rewriteCourseVideosForCopy');
-        expect(video).to.include('getRange');
-        expect(video).not.to.match(/video\/:videoId\/play[\s\S]{0,800}signDownloadLink/);
+        expect(videoSource).to.include('getRange');
+        expect(videoSource).not.to.match(/video\/:videoId\/play[\s\S]{0,800}signDownloadLink/);
         const postCopy = course.slice(course.indexOf('async postCopy('), course.indexOf('async postDelete('));
         expect(postCopy).to.include('rewriteCourseVideosForCopy');
         expect(postCopy).to.include('storage.copy');

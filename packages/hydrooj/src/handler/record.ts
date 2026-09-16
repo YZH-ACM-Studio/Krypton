@@ -90,6 +90,7 @@ function createStableProblemRead(domainId: string, pid: string | number, project
 
 async function readRecordContextProblem(
     domainId: string,
+    // eslint-disable-next-line ts/no-shadow
     user: ProblemAclUser,
     context: ProblemViewContext,
     pid: string | number,

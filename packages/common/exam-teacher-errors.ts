@@ -623,16 +623,16 @@ function lookupEntry(reason: string): ExamTeacherErrorText | undefined {
 }
 
 function restIsLocationDetail(rest: string): boolean {
-    return /^(?:[A-Za-z0-9_-]+)(?::(?:[A-Fa-f0-9/._-]+|uid=\d+))*$/.test(rest);
+    return /^[A-Za-z0-9_-]+(?::(?:[A-Fa-f0-9/._-]+|uid=\d+))*$/.test(rest);
 }
 
 function patternFallback(reason: string): ExamTeacherErrorText | undefined {
-    if (/_duplicate$/.test(reason)) return DATA_DUPLICATE;
-    if (/_mismatch$/.test(reason)) return DATA_MISMATCH;
-    if (/_conflict$/.test(reason)) return REVISION_CONFLICT;
-    if (/_changed$/.test(reason) || /_drift$/.test(reason)) return FINGERPRINT_CHANGED;
-    if (/_not_found$/.test(reason) || /_missing$/.test(reason)) return NOT_FOUND;
-    if (/_invalid$/.test(reason) || / is invalid$/.test(reason) || / must be an ObjectId$/.test(reason)) return DATA_INVALID;
+    if (reason.endsWith('_duplicate')) return DATA_DUPLICATE;
+    if (reason.endsWith('_mismatch')) return DATA_MISMATCH;
+    if (reason.endsWith('_conflict')) return REVISION_CONFLICT;
+    if (reason.endsWith('_changed') || reason.endsWith('_drift')) return FINGERPRINT_CHANGED;
+    if (reason.endsWith('_not_found') || reason.endsWith('_missing')) return NOT_FOUND;
+    if (reason.endsWith('_invalid') || reason.endsWith(' is invalid') || reason.endsWith(' must be an ObjectId')) return DATA_INVALID;
     return undefined;
 }
 

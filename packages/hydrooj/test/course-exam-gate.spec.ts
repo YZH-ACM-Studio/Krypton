@@ -45,7 +45,7 @@ function extractFunction(source: string, name: string) {
     const start = source.search(new RegExp(`(?:export\\s+)?(?:async\\s+)?function\\s+${name}\\b`));
     if (start < 0) throw new Error(`missing function ${name}`);
     const header = source.slice(start);
-    const body = header.match(/\)\s*(?::\s*[^{=]+)?\{/);
+    const body = header.match(/\)\s*(?::[^{=]+)?\{/);
     if (!body || body.index == null) throw new Error(`missing body for ${name}`);
     return extractBalanced(source, start + body.index);
 }
@@ -159,7 +159,7 @@ function readProgress(result: unknown) {
     const total = row.total ?? row.totalCount;
     const passed = row.passed ?? row.ok ?? row.allowed;
     if (typeof done !== 'number' || typeof total !== 'number' || typeof passed !== 'boolean') {
-        throw new Error(`unexpected progress shape: ${JSON.stringify(result)}`);
+        throw new TypeError(`unexpected progress shape: ${JSON.stringify(result)}`);
     }
     return {
         done,
@@ -179,17 +179,17 @@ describe('P6 course exam gate', () => {
     });
 
     it('2. homework / non-exam bindings are rejected', () => {
-        const resolve = functionSource('resolveCourseExamForSave');
-        expect(resolve).to.match(/rule\s*!==\s*['"]exam['"]|rule\s*===?\s*['"]exam['"]/);
-        expect(resolve).to.include('该考试不是选择题考试');
+        const resolveSource = functionSource('resolveCourseExamForSave');
+        expect(resolveSource).to.match(/rule\s*!==\s*['"]exam['"]|rule\s*===?\s*['"]exam['"]/);
+        expect(resolveSource).to.include('该考试不是选择题考试');
         expect(readHydrooj('src/handler/course.ts')).to.include('resolveCourseExamForSave');
     });
 
     it('3. two courses with the same contestId fail closed on save and read', () => {
-        const resolve = functionSource('resolveCourseExamForSave');
+        const resolveSource = functionSource('resolveCourseExamForSave');
         const handler = readHydrooj('src/handler/course.ts');
-        expect(resolve).to.include('findCoursesBoundToExam');
-        expect(resolve).to.include('这场考试已绑定其它课程');
+        expect(resolveSource).to.include('findCoursesBoundToExam');
+        expect(resolveSource).to.include('这场考试已绑定其它课程');
         expect(handler).to.include('isCourseExamDuplicateKey');
         expect(handler).to.include('这场考试已绑定其它课程');
         const gate = functionSource('assertCourseExamWatchGate');
@@ -239,7 +239,7 @@ describe('P6 course exam gate', () => {
     it('8. total===0 confirmed videos fail closed', () => {
         const compute = functionSource('computeCourseExamWatchProgress');
         expect(compute).to.match(/total\s*===?\s*0/);
-        expect(compute).not.to.match(/total\s*===?\s*0[^;{]{0,80}return\s*\{\s*[^}]*passed:\s*true/);
+        expect(compute).not.to.match(/total\s*===?\s*0[^;{]{0,80}return\s*\{[^}]*passed:\s*true/);
     });
 
     it('9. percent/chapter/all count confirmed chapter+section videos, not problems, and percent uses floor', () => {
@@ -640,4 +640,3 @@ if (typeof resolveFn === 'function' && typeof parseFn === 'function') {
         });
     });
 }
-

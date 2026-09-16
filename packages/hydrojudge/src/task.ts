@@ -15,6 +15,12 @@ import { compilerText, Lock, md5 } from './utils';
 
 const logger = new Logger('judge');
 
+export function usesConfigOnlyJudgeData(config: { type?: string; mode?: string } | null | undefined): boolean {
+    if (!config || typeof config !== 'object') return false;
+    if (config.type === 'objective') return true;
+    return config.type === 'program_fill' && config.mode === 'text';
+}
+
 const testlibFile = {
     src: findFileSync('@hydrooj/hydrojudge/vendor/testlib/testlib.h'),
 };
@@ -177,15 +183,15 @@ export class JudgeTask {
     }
 
     async doSubmission() {
-        const textProgramFill = this.request.config.type === 'program_fill' && this.request.config.mode === 'text';
-        if (textProgramFill) {
+        if (usesConfigOnlyJudgeData(this.request.config)) {
             this.folder = '';
+            const answerCount = Object.keys(this.request.config.answers || {}).length;
             this.config = {
                 ...this.request.config,
-                count: 0,
+                count: this.request.config.type === 'objective' ? answerCount : 0,
                 time: 0,
                 memory: 0,
-                subtasks: [],
+                subtasks: this.request.config.subtasks || [],
                 detail: this.session.config.detail,
             } as ParsedConfig;
         } else {

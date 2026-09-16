@@ -23,6 +23,7 @@ import { buildPersonalPracticeRecordQuery } from '../lib/contest-problem-status'
 import { buildExamModeRecordCodePayload, shouldUseLiveClientRecordCodeOnly } from '../lib/exam-mode-record';
 import { formatRecordJudgeMessages } from '../lib/record-judge-presentation';
 import { matchesRecordConnectionScope, RECORD_PRETEST_CONTEST_ID } from '../lib/record-connection-scope';
+import { clientProblemConfig, parseProblemConfigObject } from '../lib/problem-config';
 import { parseConfig } from '../lib/testdataConfig';
 import { PERM, PRIV, STATUS, STATUS_TEXTS } from '../model/builtin';
 import * as contest from '../model/contest';
@@ -539,6 +540,10 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
             }
         }
         if (!pdoc) throw new PermissionError(PERM.PERM_VIEW_PROBLEM_HIDDEN);
+        if (['single', 'multi', 'true_false', 'blank', 'subjective'].includes(String(pdoc.problemKind || ''))) {
+            const rawObjective = await readRecordContextProblem(rdoc.domainId, this.user, problemViewContext, rdoc.pid, ['config'], true);
+            pdoc.config = clientProblemConfig(parseProblemConfigObject(rawObjective) || { type: 'objective' });
+        }
         if (!canViewCode) {
             rdoc.code = '';
             rdoc.files = {};

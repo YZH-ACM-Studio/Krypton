@@ -29,11 +29,14 @@ export async function judge({ next, end, config, code }: Context) {
         const ansInfo = config.answers[key] as [string | string[], number] | Record<string, number>;
         // eslint-disable-next-line ts/no-loop-func
         const report = (status: STATUS, score: number, message: string) => {
-            const [subtaskId, caseId] = key.split('-').map(Number);
+            const parts = key.split('-').map(Number);
+            const numeric = parts.length === 2 && parts.every((part) => Number.isSafeInteger(part));
+            const subtaskId = numeric ? parts[0] : 0;
+            const caseId = numeric ? parts[1] : key;
             totalScore += score;
             totalStatus = Math.max(totalStatus, status);
             subtasks[subtaskId] ||= { score, status };
-            if (subtasks[subtaskId].status && caseId) {
+            if (numeric && subtasks[subtaskId].status && parts[1]) {
                 subtasks[subtaskId].score += score;
                 subtasks[subtaskId].status = Math.max(subtasks[subtaskId].status, status);
             }

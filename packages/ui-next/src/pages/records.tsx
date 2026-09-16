@@ -42,6 +42,7 @@ import {
   type RecordDetailTab,
 } from '@/lib/record-detail-workspace';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
+import { ObjectiveRecordResult, isObjectiveRecordProblem } from '@/pages/record-objective';
 
 type RecordScoreAction =
   | { kind: 'cancel'; expectedStatus: number; expectedJudgeAt: string; contestId?: string; contestTeamId?: string }
@@ -100,6 +101,9 @@ interface RecordDocument {
 
 interface RecordProblemSummary {
   title?: string;
+  content?: unknown;
+  problemKind?: unknown;
+  config?: unknown;
 }
 
 interface RecordLanguageContext {
@@ -1077,6 +1081,58 @@ export function RecordDetailPage() {
       setCopyState('failed');
     }
   };
+
+  if (isObjectiveRecordProblem(pdoc)) {
+    return (
+      <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
+        <ObjectiveRecordResult
+          pdoc={pdoc}
+          rdoc={rdoc}
+          code={code}
+          problemUrl={problemUrl}
+          listHref={recordListUrl}
+          username={recordIdentity.username}
+          student={recordIdentity.student}
+          submittedAt={formatRecordTime(rdoc._id, locale)}
+        />
+        {recordScoreAction ? (
+          <Card className={recordScoreAction.kind === 'cancel' ? 'border-destructive/25' : ''}>
+            <CardContent className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold">{recordScoreAction.kind === 'cancel' ? '成绩管理' : '恢复已取消记录'}</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {recordScoreAction.kind === 'cancel'
+                    ? '仅取消这一条记录的计分，并同步重算它影响到的题目状态与比赛榜单。'
+                    : '使用当前题目配置重新评测；结果通过正常评测链重新进入计分。'}
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant={recordScoreAction.kind === 'cancel' ? 'destructive' : 'default'}
+                className="shrink-0"
+                onClick={() => setScoreActionOpen(true)}
+              >
+                {recordScoreAction.kind === 'cancel' ? '取消本条成绩' : '重新评测并恢复'}
+              </Button>
+            </CardContent>
+          </Card>
+        ) : null}
+        <RecordScoreActionDialog
+          open={scoreActionOpen && !!recordScoreAction}
+          record={rdoc}
+          action={recordScoreAction}
+          endpoint={recordUrl}
+          problemTitle={String(pdoc.title || rdoc.pid || '')}
+          username={recordIdentity.username}
+          onOpenChange={setScoreActionOpen}
+          onSuccess={(payload) => {
+            if (payload.rdoc) setRdoc((current) => ({ ...current, ...payload.rdoc }));
+            setRecordScoreAction(payload.recordScoreAction || null);
+          }}
+        />
+      </motion.div>
+    );
+  }
 
   return (
     <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>

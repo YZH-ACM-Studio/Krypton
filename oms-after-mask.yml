@@ -1,0 +1,118 @@
+- generic [ref=e1]:
+  - generic [ref=e3]:
+    - generic [ref=e44]:
+      - generic [ref=e45]:
+        - heading "下载 OMS 客户端" [level=1] [ref=e46]
+        - paragraph [ref=e47]: 下载适合您系统的客户端版本，开始安全可靠的在线考试体验
+      - generic [ref=e48]:
+        - generic [ref=e49]: macOS 版本现处于试用阶段。如有需要，请申请测试资格。
+        - button "申请测试资格" [ref=e51] [cursor=pointer]
+      - generic [ref=e52]:
+        - generic [ref=e53]:
+          - generic [ref=e54]:
+            - generic [ref=e55]:
+              - generic [ref=e56]:
+                - img [ref=e57]
+                - generic [ref=e59]: 版本 2.x（推荐）
+              - generic [ref=e60]: 最新版本
+            - paragraph [ref=e61]: 适用于 Windows 10 版本1809 及以上系统（含 Windows 11）
+          - generic [ref=e63]:
+            - generic [ref=e66]:
+              - checkbox "我已阅读并同意《免责声明》和《用户使用协议及隐私收集说明》" [checked] [ref=e67] [cursor=pointer]:
+                - generic:
+                  - img
+              - generic [ref=e69] [cursor=pointer]:
+                - text: 我已阅读并同意
+                - link "《免责声明》" [ref=e70]:
+                  - /url: /home/agreements#announcement
+                - text: 和
+                - link "《用户使用协议及隐私收集说明》" [ref=e71]:
+                  - /url: /home/agreements#agreement
+            - generic [ref=e73]:
+              - button "下载 2.1.3 版本（64位）压缩包(.zip)" [active] [ref=e74] [cursor=pointer]:
+                - img
+                - text: 下载 2.1.3 版本（64位）压缩包(.zip)
+              - button "下载 2.1.3 版本（64位）安装包(.exe)" [ref=e75] [cursor=pointer]:
+                - img
+                - text: 下载 2.1.3 版本（64位）安装包(.exe)
+        - generic [ref=e76]:
+          - generic [ref=e77]:
+            - generic [ref=e78]:
+              - generic [ref=e79]:
+                - img [ref=e80]
+                - generic [ref=e82]: 版本 1.x（兼容版本）
+              - generic [ref=e83]: 兼容旧系统
+            - paragraph [ref=e84]: 适用于 Windows 8 及以下系统，需要额外安装 .NET Framework 4.5.2 安装包
+          - generic [ref=e88]:
+            - button "下载 1.1.35 版本（64位）压缩包(.zip)" [ref=e89] [cursor=pointer]:
+              - img
+              - text: 下载 1.1.35 版本（64位）压缩包(.zip)
+            - button "下载 1.1.35 版本（32位）压缩包(.zip)" [ref=e90] [cursor=pointer]:
+              - img
+              - text: 下载 1.1.35 版本（32位）压缩包(.zip)
+            - button "下载 1.1.35 版本（64位）安装包(.exe)" [ref=e91] [cursor=pointer]:
+              - img
+              - text: 下载 1.1.35 版本（64位）安装包(.exe)
+            - button "下载 1.1.35 版本（32位）安装包(.exe)" [ref=e92] [cursor=pointer]:
+              - img
+              - text: 下载 1.1.35 版本（32位）安装包(.exe)
+            - button "下载 .NET Framework 4.5.2 安装包(.exe)" [ref=e93] [cursor=pointer]:
+              - img
+              - text: 下载 .NET Framework 4.5.2 安装包(.exe)
+      - generic [ref=e94]:
+        - generic [ref=e96]:
+          - img [ref=e97]
+          - generic [ref=e99]: 安装说明
+        - generic [ref=e100]:
+          - paragraph [ref=e101]: 1. 下载压缩包(.zip)后，请先解压到本地，再打开程序。请勿直接在压缩包中打开程序。
+          - paragraph [ref=e102]: 2. 下载完成后，请关闭杀毒软件的实时防护功能，避免误报影响安装。
+          - paragraph [ref=e103]: 3. 安装过程中请保持网络连接，系统可能需要下载必要的运行库。
+          - paragraph [ref=e104]: 4. 首次运行时，请允许程序访问摄像头和麦克风权限。
+          - paragraph [ref=e105]: 5. 如遇到问题，请查阅自测流程和故障排除页面获取帮助。
+          - paragraph [ref=e106]:
+            - text: 6. macOS 版本目前为试用版，如需测试请申请测试资格：
+            - link "申请 macOS OMS客户端测试资格" [ref=e107] [cursor=pointer]:
+              - /url: https://docs.qq.com/form/page/DUnNhQUpYdEZ3cnJX#/fill
+    - banner [ref=e10]:
+      - generic [ref=e12]:
+        - link "OMS监考系统 Online Monitoring System" [ref=e14] [cursor=pointer]:
+          - /url: /
+          - img [ref=e16]
+          - generic [ref=e18]:
+            - heading "OMS监考系统" [level=1] [ref=e19]
+            - paragraph [ref=e20]: Online Monitoring System
+        - navigation [ref=e21]:
+          - link "下载" [ref=e22] [cursor=pointer]:
+            - /url: /home/downloads
+            - img [ref=e23]
+            - generic [ref=e26]: 下载
+          - link "更新日志" [ref=e27] [cursor=pointer]:
+            - /url: /home/changelog
+            - img [ref=e28]
+            - generic [ref=e31]: 更新日志
+          - link "自测" [ref=e32] [cursor=pointer]:
+            - /url: /home/self-test
+            - img [ref=e33]
+            - generic [ref=e35]: 自测
+          - link "常见问题" [ref=e36] [cursor=pointer]:
+            - /url: /home/faq
+            - img [ref=e37]
+            - generic [ref=e39]: 常见问题
+        - button "登录系统" [ref=e41] [cursor=pointer]
+  - iframe [ref=e110]:
+    - dialog "验证码" [ref=f1e2]:
+      - generic [ref=f1e3]: 安全验证
+      - generic [ref=f1e4]:
+        - generic "拖动下方滑块完成拼图" [ref=f1e7]
+        - generic [ref=f1e8]:
+          - generic "AI生成背景"
+          - generic "拖动下方滑块完成拼图" [ref=f1e12] [cursor=pointer]:
+            - generic: '&nbsp;'
+            - img "slider"
+          - generic "拖动下方滑块完成拼图" [ref=f1e13] [cursor=pointer]
+          - generic "拖动下方滑块完成拼图" [ref=f1e14]
+        - generic [ref=f1e15]:
+          - generic [ref=f1e16]:
+            - button "问题反馈" [ref=f1e19] [cursor=pointer]
+            - button "刷新验证" [ref=f1e22] [cursor=pointer]
+          - button "关闭验证" [ref=f1e24] [cursor=pointer]

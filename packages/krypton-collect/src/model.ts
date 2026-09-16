@@ -100,6 +100,7 @@ export interface CreateCollectRequestInput {
     fileNameTemplate?: string;
     packLayout?: 'nested' | 'flat';
     courseRef?: { courseId: ObjectId | string; chapterId: number } | null;
+    requireCourseExamComplete?: unknown;
 }
 
 export interface UpdateCollectRequestPatch {
@@ -115,6 +116,7 @@ export interface UpdateCollectRequestPatch {
     fileNameTemplate?: string;
     packLayout?: 'nested' | 'flat';
     courseRef?: { courseId: ObjectId | string; chapterId: number } | null;
+    requireCourseExamComplete?: unknown;
 }
 
 export interface PutStudentFileInput {
@@ -384,6 +386,22 @@ function parseCourseRef(value: unknown): CollectCourseRef | null {
     return { courseId: asObjectId(rec.courseId, 'courseId'), chapterId: rec.chapterId as number };
 }
 
+export function parseRequireCourseExamComplete(value: unknown): boolean {
+    if (value === undefined || value === null || value === '') return false;
+    if (value === true || value === 1 || value === '1' || value === 'true' || value === 'on') return true;
+    if (value === false || value === 0 || value === '0' || value === 'false' || value === 'off') return false;
+    throw new CollectForbiddenError('结业考试门槛标记不合法');
+}
+
+function assertRequireCourseExamCompleteAllowed(
+    courseRef: CollectCourseRef | null,
+    enabled: boolean,
+): void {
+    if (enabled && !courseRef) {
+        throw new CollectForbiddenError('须先关联课程才能要求先完成结业考试');
+    }
+}
+
 function parseRequestId(id: ObjectId | string): ObjectId {
     if (id instanceof ObjectId) return id;
     if (typeof id === 'string' && OBJECT_ID_RE.test(id)) return new ObjectId(id);
@@ -588,6 +606,7 @@ export async function createRequest(
         fileNameTemplate: parseFileNameTemplate(input.fileNameTemplate),
         packLayout: parsePackLayout(input.packLayout),
         courseRef: parseCourseRef(input.courseRef),
+        requireCourseExamComplete: parseRequireCourseExamComplete(input.requireCourseExamComplete),
         createdAt: now,
         updatedAt: now,
         publishedAt: null,
@@ -596,6 +615,7 @@ export async function createRequest(
         lastNudgeAt: null,
         lastNudgeBy: 0,
     };
+    assertRequireCourseExamCompleteAllowed(doc.courseRef, doc.requireCourseExamComplete === true);
     await requestsColl.insertOne(doc);
     return doc;
 }
@@ -629,6 +649,9 @@ async function applyRequestUpdate(
     if (patch.schoolId !== undefined) set.schoolId = asObjectId(patch.schoolId, 'schoolId');
     if (patch.groupIds !== undefined) set.groupIds = asObjectIdList(patch.groupIds, 'groupIds');
     if (patch.courseRef !== undefined) set.courseRef = parseCourseRef(patch.courseRef);
+    if (patch.requireCourseExamComplete !== undefined) {
+        set.requireCourseExamComplete = parseRequireCourseExamComplete(patch.requireCourseExamComplete);
+    }
 
     const nextSlots = patch.slots !== undefined ? normalizeCollectSlots(patch.slots) : current.slots;
     const nextQuotas = normalizeCollectQuotas({
@@ -666,6 +689,12 @@ async function applyRequestUpdate(
         const groupIds = set.groupIds || current.groupIds;
         await assertGroupsBelongToSchool(domainId, schoolId, groupIds);
     }
+
+    const nextCourseRef = patch.courseRef !== undefined ? set.courseRef ?? null : current.courseRef;
+    const nextRequire = patch.requireCourseExamComplete !== undefined
+        ? set.requireCourseExamComplete === true
+        : current.requireCourseExamComplete === true;
+    assertRequireCourseExamCompleteAllowed(nextCourseRef, nextRequire);
 
     return casRequest(domainId, current._id, expectedRevision, set, current.status);
 }

@@ -18,6 +18,14 @@ export interface CollectListItem {
   status: CollectRequestStatus;
   submitted: boolean;
   filled: boolean;
+  examLocked: boolean;
+}
+
+export interface CollectExamGate {
+  required: boolean;
+  locked: boolean;
+  examHref?: string;
+  message?: string;
 }
 
 export interface CollectListPayload {
@@ -70,6 +78,7 @@ export interface CollectDetailPayload {
   member: boolean;
   submitted: boolean;
   filled: boolean;
+  examGate: CollectExamGate;
   slots: CollectSlotView[];
   currentFiles: CollectCurrentFileView[];
   history?: CollectHistoryFileView[];
@@ -138,6 +147,11 @@ function parseListItem(value: unknown, index: number): CollectParseResult<Collec
   if (!status) return { ok: false, error: `requests[${index}] 的 status 无效` };
   if (typeof value.submitted !== 'boolean') return { ok: false, error: `requests[${index}] 缺少 submitted` };
   if (typeof value.filled !== 'boolean') return { ok: false, error: `requests[${index}] 缺少 filled` };
+  let examLocked = false;
+  if (value.examLocked !== undefined) {
+    if (typeof value.examLocked !== 'boolean') return { ok: false, error: `requests[${index}] 的 examLocked 无效` };
+    examLocked = value.examLocked;
+  }
   return {
     ok: true,
     value: {
@@ -147,8 +161,38 @@ function parseListItem(value: unknown, index: number): CollectParseResult<Collec
       status,
       submitted: value.submitted,
       filled: value.filled,
+      examLocked,
     },
   };
+}
+
+function parseExamHref(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string' || !value.trim()) return undefined;
+  const href = value.trim();
+  if (!href.startsWith('/exam-mode/')) return undefined;
+  return href;
+}
+
+function parseExamGate(value: unknown): CollectParseResult<CollectExamGate> {
+  if (value === undefined) return { ok: true, value: { required: false, locked: false } };
+  if (!isRecord(value)) return { ok: false, error: 'examGate 不是对象' };
+  const extra = Object.keys(value).filter((key) => !['required', 'locked', 'examHref', 'message'].includes(key));
+  if (extra.length) return { ok: false, error: 'examGate 含未知字段' };
+  if (typeof value.required !== 'boolean') return { ok: false, error: 'examGate.required 无效' };
+  if (typeof value.locked !== 'boolean') return { ok: false, error: 'examGate.locked 无效' };
+  if (!value.required && value.locked) return { ok: false, error: 'examGate 状态冲突' };
+  const gate: CollectExamGate = { required: value.required, locked: value.locked };
+  if (value.examHref !== undefined) {
+    const href = parseExamHref(value.examHref);
+    if (!href) return { ok: false, error: 'examGate.examHref 无效' };
+    gate.examHref = href;
+  }
+  if (value.message !== undefined) {
+    if (typeof value.message !== 'string' || !value.message.trim()) return { ok: false, error: 'examGate.message 无效' };
+    gate.message = value.message.trim();
+  }
+  return { ok: true, value: gate };
 }
 
 export function parseCollectListPayload(data: unknown): CollectParseResult<CollectListPayload> {
@@ -280,6 +324,7 @@ function unwrapDetailSource(data: unknown): unknown {
     fileNameTemplate: data.fileNameTemplate !== undefined ? data.fileNameTemplate : request.fileNameTemplate,
     packLayout: data.packLayout !== undefined ? data.packLayout : request.packLayout,
     identity: data.identity !== undefined ? data.identity : request.identity,
+    examGate: data.examGate !== undefined ? data.examGate : request.examGate,
   };
 }
 
@@ -360,6 +405,8 @@ export function parseCollectDetailPayload(data: unknown): CollectParseResult<Col
   if (!packLayout.ok) return packLayout;
   const identity = parseStudentIdentity(source.identity);
   if (!identity.ok) return identity;
+  const examGate = parseExamGate(source.examGate);
+  if (!examGate.ok) return examGate;
   const payload: CollectDetailPayload = {
     _id,
     title: source.title.trim(),
@@ -369,6 +416,7 @@ export function parseCollectDetailPayload(data: unknown): CollectParseResult<Col
     member: source.member,
     submitted: source.submitted,
     filled,
+    examGate: examGate.value,
     slots,
     currentFiles,
     fileNameTemplate: fileNameTemplate.value,

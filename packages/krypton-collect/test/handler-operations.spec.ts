@@ -42,6 +42,12 @@ describe('collect Hydro operation methods', () => {
         expect(detail).to.include('async postDeleteFile');
         expect(detail).to.include('async postConfirm');
         expect(detail).to.not.match(/async post\(/);
+        const applyAt = detail.indexOf('async applyStudentPost');
+        const gateAt = detail.indexOf('assertCollectExamCompleteForStudent');
+        const uploadAt = detail.indexOf("operation === 'upload_file'");
+        expect(applyAt).to.be.at.least(0);
+        expect(gateAt, 'student writes must re-check the optional exam-complete gate').to.be.greaterThan(applyAt);
+        expect(uploadAt).to.be.greaterThan(gateAt);
     });
 
     it('derives assignedName through model assignedNameForFile and fileIndexInSlot', () => {

@@ -539,6 +539,35 @@ describe('krypton-collect requests', () => {
         const updated = await model.setCollaborators(domainId, draft._id, teacher, draft.revision, [teacher._id, collaborator._id, collaborator._id]);
         expect(updated.collaboratorUids).to.deep.equal([collaborator._id]);
     });
+
+    it('defaults requireCourseExamComplete off and rejects enabling it without a course', async () => {
+        const created = await createDraft();
+        expect(created.requireCourseExamComplete).to.equal(false);
+        await expectReject(
+            () => createDraft({ requireCourseExamComplete: true }),
+            'CollectForbiddenError',
+            '须先关联课程',
+        );
+        const courseId = new ObjectId();
+        const gated = await createDraft({
+            requireCourseExamComplete: true,
+            courseRef: { courseId, chapterId: 1 },
+        });
+        expect(gated.requireCourseExamComplete).to.equal(true);
+        expect(String(gated.courseRef?.courseId)).to.equal(String(courseId));
+        await expectReject(
+            () => model.updateRequest(domainId, gated._id, teacher, gated.revision, { courseRef: null }),
+            'CollectForbiddenError',
+            '须先关联课程',
+        );
+        const cleared = await model.updateRequest(domainId, gated._id, teacher, gated.revision, {
+            courseRef: null,
+            requireCourseExamComplete: false,
+        });
+        expect(cleared.requireCourseExamComplete).to.equal(false);
+        expect(cleared.courseRef).to.equal(null);
+        expect(() => model.parseRequireCourseExamComplete('yes')).to.throw();
+    });
 });
 
 describe('krypton-collect lists', () => {

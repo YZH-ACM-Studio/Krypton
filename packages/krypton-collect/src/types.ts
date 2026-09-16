@@ -48,6 +48,7 @@ export interface CollectRequestDoc {
     fileNameTemplate: string;
     packLayout: 'nested' | 'flat';
     courseRef: CollectCourseRef | null;
+    requireCourseExamComplete?: boolean;
     createdAt: Date;
     updatedAt: Date;
     publishedAt: Date | null;

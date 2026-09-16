@@ -239,6 +239,17 @@ describe('collect teacher payload contracts', () => {
     expect(student).to.include("label: '未交文件'");
     expect(student).not.to.include("label: '待交文件'");
     expect(student).to.include('open = !closed && data.member');
+    expect(student).to.include('writable = open && !examLocked');
+    expect(student).to.include('须先完成课程结业考试才能提交');
+    expect(student).to.include('去考试');
+  });
+
+  it('exposes an optional 考完才能交 checkbox only for courses with a bound exam', () => {
+    expect(admin).to.include('requireCourseExamComplete');
+    expect(admin).to.include('须先完成课程结业考试才能提交');
+    expect(admin).to.include('disabled={!canEdit || (!selectedCourse?.hasExam && !requireCourseExamComplete)}');
+    expect(admin).to.include("name=\"requireCourseExamComplete\"");
+    expect(handler).to.include('assertCollectExamCompleteForStudent');
   });
 
   it('binds file-name template, pack layout, assigned names, duplicates, and submitted CSV', () => {

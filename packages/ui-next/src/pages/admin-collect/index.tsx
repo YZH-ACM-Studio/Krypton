@@ -81,6 +81,7 @@ interface CourseChapterRef {
 interface CourseRef {
   _id: string;
   title: string;
+  hasExam: boolean;
   chapters: CourseChapterRef[];
 }
 
@@ -109,6 +110,7 @@ interface CollectRequestView {
   fileNameTemplate: string;
   packLayout: CollectPackLayout;
   courseRef: { courseId: string; chapterId: string } | null;
+  requireCourseExamComplete: boolean;
   ownerUid: number;
   canEdit: boolean;
 }
@@ -364,6 +366,7 @@ function parseCourseRefOption(value: unknown): CourseRef {
   return {
     _id: asId(rec._id, '课程'),
     title: asString(rec.title, '课程名称'),
+    hasExam: optionalBoolean(rec.hasExam, false, '是否已绑定结业考试'),
     chapters: rec.chapters.map((item) => {
       const chapter = asRecord(item, '章节');
       return { _id: asId(chapter._id, '章节'), title: asString(chapter.title, '章节名称') };
@@ -488,6 +491,7 @@ function parseRequestView(value: unknown, currentUid: number): CollectRequestVie
     fileNameTemplate: parseFileNameTemplate(rec.fileNameTemplate),
     packLayout: parsePackLayout(rec.packLayout),
     courseRef: parseCourseRef(rec.courseRef),
+    requireCourseExamComplete: optionalBoolean(rec.requireCourseExamComplete, false, '须先完成结业考试'),
     ownerUid,
     canEdit: optionalBoolean(rec.canEdit, ownerUid === currentUid, '编辑权限'),
   };
@@ -887,6 +891,7 @@ export function AdminCollectEditPage() {
   const [collaborators, setCollaborators] = useState<DomainUserOption[]>(data.collaborators);
   const [courseId, setCourseId] = useState(initial?.courseRef?.courseId || data.fromCourse || query.courseId);
   const [chapterId, setChapterId] = useState(initial?.courseRef?.chapterId || data.chapter || query.chapterId);
+  const [requireCourseExamComplete, setRequireCourseExamComplete] = useState(initial?.requireCourseExamComplete === true);
   const [maxFileMib, setMaxFileMib] = useState(bytesToMib(initial?.maxFileBytes || HARD_MAX_FILE_BYTES));
   const [maxTotalMib, setMaxTotalMib] = useState(bytesToMib(initial?.maxTotalBytes || HARD_MAX_TOTAL_BYTES));
   const [maxFiles, setMaxFiles] = useState(initial?.maxFiles || HARD_MAX_FILES);
@@ -1010,6 +1015,7 @@ export function AdminCollectEditPage() {
         <input type="hidden" name="groupIds" value={groupIds.join(',')} />
         <input type="hidden" name="courseId" value={courseId} />
         <input type="hidden" name="chapterId" value={chapterId} />
+        <input type="hidden" name="requireCourseExamComplete" value={requireCourseExamComplete ? '1' : '0'} />
 
         <Card>
           <CardHeader>
@@ -1326,6 +1332,7 @@ export function AdminCollectEditPage() {
                       setCourseId(next);
                       const course = data.courses.find((item) => item._id === next);
                       if (!course || !course.chapters.some((chapter) => chapter._id === chapterId)) setChapterId('');
+                      if (!course?.hasExam) setRequireCourseExamComplete(false);
                     }}
                     disabled={!canEdit}
                     className="min-h-10"
@@ -1348,6 +1355,26 @@ export function AdminCollectEditPage() {
                   />
                 </FormField>
               </FormRow>
+              <label className="flex min-h-10 cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2.5">
+                <Checkbox
+                  checked={requireCourseExamComplete}
+                  disabled={!canEdit || (!selectedCourse?.hasExam && !requireCourseExamComplete)}
+                  onCheckedChange={(checked) => {
+                    if (checked && !selectedCourse?.hasExam) return;
+                    setRequireCourseExamComplete(checked);
+                  }}
+                  className="mt-0.5"
+                  aria-label="须先完成课程结业考试才能提交"
+                />
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium">须先完成课程结业考试才能提交</span>
+                  <span className="mt-0.5 block text-xs text-muted-foreground">
+                    {selectedCourse?.hasExam
+                      ? '开启后学生必须先交卷，才能上传或确认这份收集。不是每门课都要开。'
+                      : '先给课程绑定结业考试后才能开启。'}
+                  </span>
+                </span>
+              </label>
             </FormSection>
           </CardContent>
         </Card>

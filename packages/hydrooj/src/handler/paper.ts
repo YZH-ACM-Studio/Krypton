@@ -797,6 +797,19 @@ export async function finalizePaperForUser(
         if (manualRids.has(String(rid))) continue;
         await contest.updateStatus(domainId, tid, uid, rid, 0);
     }
+    const tsdoc = await contest.getStatus(domainId, tid, uid);
+    if (!(tsdoc?.paperFinalizedAt instanceof Date) || Number.isNaN(tsdoc.paperFinalizedAt.getTime())) {
+        const paperFinalizedAt = new Date();
+        await contest.setStatus(domainId, tid, uid, { paperFinalizedAt });
+        logger.info(
+            'Paper finalized domain=%s tid=%s uid=%d rids=%d paperFinalizedAt=%s result=success',
+            domainId,
+            String(tid),
+            uid,
+            rids.length,
+            paperFinalizedAt.toISOString(),
+        );
+    }
     return rids;
 }
 

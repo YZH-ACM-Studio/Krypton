@@ -1,6 +1,8 @@
-import { localizedErrorText, ValidationError } from '../error';
+import { ObjectId } from 'mongodb';
+import { ContestNotFoundError, localizedErrorText, ValidationError } from '../error';
 import * as contest from '../model/contest';
 import { findCoursesBoundToExam, readStoredCourseExam, type CourseExamBinding } from './course-exam';
+import { isCourseExamCompleteFromStatus } from './course-exam-complete';
 import { isCourseVideoComplete, listCourseVideos, studentVisibleVideos } from './course-video';
 
 export interface CourseExamWatchProgress {
@@ -116,4 +118,20 @@ export async function assertCourseExamWatchGate(params: {
         }
         throw new ValidationError('courseExam', null, localizedErrorText`还不能参加考试，还需看完 ${progress.remaining} 个视频`);
     }
+}
+
+export async function hasCompletedCourseExam(params: {
+    domainId: string;
+    contestId: ObjectId;
+    uid: number;
+}): Promise<boolean> {
+    let tdoc;
+    try {
+        tdoc = await contest.get(params.domainId, params.contestId);
+    } catch (error) {
+        if (error instanceof ContestNotFoundError) return false;
+        throw error;
+    }
+    const tsdoc = await contest.getStatus(params.domainId, params.contestId, params.uid);
+    return isCourseExamCompleteFromStatus(tdoc, tsdoc);
 }

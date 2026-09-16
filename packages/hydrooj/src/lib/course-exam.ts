@@ -114,6 +114,11 @@ export function readStoredCourseExam(raw: unknown): CourseExamBinding {
     });
 }
 
+export function tryReadStoredCourseExam(raw: unknown): CourseExamBinding | null {
+    if (raw == null) return null;
+    return readStoredCourseExam(raw);
+}
+
 export async function findCoursesBoundToExam(domainId: string, contestId: ObjectId): Promise<TrainingDoc[]> {
     return document.getMulti(domainId, document.TYPE_TRAINING, { kind: 'course', 'courseExam.contestId': contestId }).toArray();
 }

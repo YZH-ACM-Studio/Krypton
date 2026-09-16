@@ -16,6 +16,7 @@ import {
   FolderUp,
   Hourglass,
   Loader2,
+  Lock,
   Trash2,
 } from 'lucide-react';
 import { FileUploader } from '@/components/uploader';
@@ -290,7 +291,15 @@ export function CollectListPage() {
                 <CardContent className="flex h-full flex-col gap-3">
                   <div className="flex min-h-10 items-start justify-between gap-2">
                     <h3 className="line-clamp-2 font-semibold">{item.title}</h3>
-                    <SubmitStatusBadge submitted={item.submitted} />
+                    <div className="flex shrink-0 flex-col items-end gap-1">
+                      <SubmitStatusBadge submitted={item.submitted} />
+                      {item.examLocked && !item.submitted ? (
+                        <Badge variant="outline" className="gap-1 text-muted-foreground">
+                          <Lock className="size-3" />
+                          须先考试
+                        </Badge>
+                      ) : null}
+                    </div>
                   </div>
                   <div className="space-y-1.5 rounded-md border bg-muted/20 p-2.5 text-xs">
                     <div className="flex min-w-0 items-start gap-1.5 text-muted-foreground">
@@ -466,9 +475,11 @@ export function CollectDetailPage() {
   const dueAtMs = collectDueMs(data.dueAt);
   const closed = dueAtMs === null || isCollectWindowClosed(data.status, dueAtMs, now);
   const open = !closed && data.member;
+  const examLocked = data.examGate.locked;
+  const writable = open && !examLocked;
 
   const confirm = async () => {
-    if (confirming || !open || data.submitted || !data.filled) return;
+    if (confirming || !writable || data.submitted || !data.filled) return;
     setConfirming(true);
     setActionError('');
     try {
@@ -481,7 +492,7 @@ export function CollectDetailPage() {
   };
 
   const deleteFile = async (file: CollectCurrentFileView) => {
-    if (!open || busyFileId) return;
+    if (!writable || busyFileId) return;
     setBusyFileId(file.fileId);
     setActionError('');
     try {
@@ -528,7 +539,7 @@ export function CollectDetailPage() {
                 <a href={`/admin/collect/${encodeURIComponent(data._id)}`}>进度</a>
               </Button>
             ) : null}
-            {open && !data.submitted ? (
+            {writable && !data.submitted ? (
               <Button type="button" size="sm" disabled={!data.filled || confirming} onClick={() => void confirm()}>
                 {confirming ? <Loader2 className="mr-1 size-4 animate-spin" /> : null}
                 确认提交
@@ -539,7 +550,20 @@ export function CollectDetailPage() {
         {closed ? (
           <p className="mt-3 rounded-md border border-border bg-muted/60 px-3 py-2 text-xs text-muted-foreground">收集已截止</p>
         ) : null}
-        {open && !data.submitted && !data.filled ? (
+        {examLocked ? (
+          <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+            {data.examGate.message || '须先完成课程结业考试才能提交'}
+            {data.examGate.examHref ? (
+              <>
+                {' '}
+                <a href={data.examGate.examHref} className="font-medium underline underline-offset-2">
+                  去考试
+                </a>
+              </>
+            ) : null}
+          </p>
+        ) : null}
+        {writable && !data.submitted && !data.filled ? (
           <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
             请先为每个必填槽上传文件，再点确认提交。
           </p>
@@ -592,13 +616,13 @@ export function CollectDetailPage() {
                 requestId={data._id}
                 slot={slot}
                 files={files}
-                open={open}
+                open={writable}
                 replacingFileId={replacingFileId}
                 busyFileId={busyFileId}
                 onReplace={(fileId) => setReplacingFileId((current) => (current === fileId ? null : fileId))}
                 onDelete={(file) => void deleteFile(file)}
               />
-              {open && files.length < slot.maxFiles ? (
+              {writable && files.length < slot.maxFiles ? (
                 <div className="space-y-2">
                   <p className="text-xs text-muted-foreground">
                     将保存为 {nextUploadPreviewName(slot, files.length + 1, data.fileNameTemplate, data.identity)}
@@ -620,7 +644,7 @@ export function CollectDetailPage() {
         );
       })}
 
-      {open && !data.submitted ? (
+      {writable && !data.submitted ? (
         <div className="flex justify-end">
           <Button type="button" disabled={!data.filled || confirming} onClick={() => void confirm()}>
             {confirming ? <Loader2 className="mr-1 size-4 animate-spin" /> : null}

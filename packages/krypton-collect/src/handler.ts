@@ -18,6 +18,12 @@ import {
     param,
 } from 'hydrooj';
 import { canCreateCollect, canEditCollect, canViewCollect } from './auth';
+import {
+    assertCanEnableRequireCourseExamComplete,
+    assertCollectExamCompleteForStudent,
+    resolveCollectExamGate,
+    type CollectExamGateCache,
+} from './course-exam-complete';
 import { filesColl, submissionsColl } from './db';
 import { CollectForbiddenError, CollectNotFoundError } from './errors';
 import {
@@ -41,6 +47,7 @@ import {
     listSubmittedCsvRows,
     nudgeUnsubmitted,
     parseCollectDueAt,
+    parseRequireCourseExamComplete,
     publishRequest,
     putStudentFile,
     reopenRequest,
@@ -156,13 +163,23 @@ async function loadCatalog(domainId: string) {
             name: row.name,
             ...(row.archivedAt ? { archivedAt: row.archivedAt.toISOString() } : {}),
         })),
-        courses: courseDocs.map((doc) => ({
-            _id: String(doc.docId || doc._id),
-            title: String(doc.title || '未命名课程'),
-            chapters: Array.isArray(doc.dag)
-                ? doc.dag.map((node) => ({ _id: String(node._id), title: String(node.title || '未命名章节') }))
-                : [],
-        })),
+        courses: courseDocs.map((doc) => {
+            const exam = doc.courseExam;
+            const hasExam = Boolean(
+                exam
+                && typeof exam === 'object'
+                && !Array.isArray(exam)
+                && (exam as { contestId?: unknown }).contestId,
+            );
+            return {
+                _id: String(doc.docId || doc._id),
+                title: String(doc.title || '未命名课程'),
+                hasExam,
+                chapters: Array.isArray(doc.dag)
+                    ? doc.dag.map((node) => ({ _id: String(node._id), title: String(node.title || '未命名章节') }))
+                    : [],
+            };
+        }),
     };
 }
 
@@ -252,6 +269,7 @@ function serializeRequest(doc: CollectRequestDoc, extras: {
         courseRef: doc.courseRef
             ? { courseId: String(doc.courseRef.courseId), chapterId: doc.courseRef.chapterId }
             : null,
+        requireCourseExamComplete: doc.requireCourseExamComplete === true,
         hasSubmissions: extras.hasSubmissions === true,
         hasFiles: extras.hasFiles === true,
         canEdit: extras.canEdit === true,
@@ -272,11 +290,14 @@ class CollectListHandler extends CollectBaseHandler {
         const docs = await listRequestsForStudent(domainId, this.user._id);
         const mine = await submissionsColl.find({ domainId, uid: this.user._id }).toArray();
         const byId = new Map(mine.map((row) => [String(row.requestId), row]));
+        const examCache: CollectExamGateCache = { completedByContest: new Map() };
+        const examGates = await Promise.all(docs.map((doc) => resolveCollectExamGate(domainId, this.user._id, doc, examCache)));
         this.response.template = 'collect_main.html';
         this.response.body = {
-            requests: docs.map((doc) => {
+            requests: docs.map((doc, index) => {
                 const submission = byId.get(String(doc._id));
                 const filled = requiredSlotsFilled(doc.slots, submission?.currentFiles || []);
+                const examGate = examGates[index];
                 return {
                     _id: String(doc._id),
                     title: doc.title,
@@ -284,6 +305,7 @@ class CollectListHandler extends CollectBaseHandler {
                     status: doc.status,
                     submitted: submission?.status === 'submitted',
                     filled,
+                    examLocked: examGate.locked,
                 };
             }),
         };
@@ -316,6 +338,7 @@ class CollectDetailHandler extends CollectBaseHandler {
             ),
             url: `/collect/${String(request._id)}/file/${file.fileId}`,
         }));
+        const examGate = await resolveCollectExamGate(domainId, this.user._id, request);
         this.response.template = 'collect_detail.html';
         this.response.body = {
             _id: String(request._id),
@@ -326,6 +349,7 @@ class CollectDetailHandler extends CollectBaseHandler {
             member,
             submitted: submission?.status === 'submitted',
             filled: requiredSlotsFilled(request.slots, files),
+            examGate,
             slots: request.slots,
             fileNameTemplate: requestFileNameTemplate(request.fileNameTemplate),
             packLayout: requestPackLayout(request.packLayout),
@@ -372,6 +396,7 @@ class CollectDetailHandler extends CollectBaseHandler {
         }
         const request = await getRequest(authoritativeDomainId, id);
         if (request.status === 'draft' || request.status === 'archived') throw new CollectNotFoundError();
+        await assertCollectExamCompleteForStudent(authoritativeDomainId, this.user._id, request);
         if (operation === 'upload_file' || operation === 'replace_file') {
             await this.limitRate('collect_upload', 60, 20);
             const uploaded = this.request.files?.file as { filepath?: string; size?: number; originalFilename?: string; name?: string } | undefined;
@@ -668,6 +693,12 @@ class AdminCollectEditHandler extends CollectBaseHandler {
         const courseRef = courseId && Number.isInteger(chapterId) && chapterId >= 0
             ? { courseId, chapterId }
             : null;
+        const requireCourseExamComplete = parseRequireCourseExamComplete(body.requireCourseExamComplete);
+        await assertCanEnableRequireCourseExamComplete(
+            domainId,
+            courseRef ? { courseId: new ObjectId(courseId), chapterId } : null,
+            requireCourseExamComplete,
+        );
         const patch: CreateCollectRequestInput & UpdateCollectRequestPatch = {
             title,
             description,
@@ -679,6 +710,7 @@ class AdminCollectEditHandler extends CollectBaseHandler {
             maxTotalBytes,
             maxFiles,
             courseRef,
+            requireCourseExamComplete,
             fileNameTemplate: body.fileNameTemplate,
             packLayout: body.packLayout,
         };

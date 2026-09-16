@@ -19,9 +19,12 @@ import { BlankRenderer, FillProgramRenderer, MultiChoiceRenderer, SingleChoiceRe
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/cn';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
+
+type ConfirmState = { kind: 'clear' } | { kind: 'submit'; missing: number };
 
 export interface ObjectiveClientQuestion {
   key: string;
@@ -135,6 +138,7 @@ export function ObjectiveAnswerPanel({
   const [answers, setAnswers] = useState<AnswerMap>(() => loadDraft(storageKey));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [confirm, setConfirm] = useState<ConfirmState | null>(null);
   const loadedKey = useRef(storageKey);
 
   // storageKey 变化（切题）时重载草稿。
@@ -158,7 +162,6 @@ export function ObjectiveAnswerPanel({
   };
 
   const clearAll = () => {
-    if (!window.confirm('清空本题全部已选答案？')) return;
     setAnswers({});
     try {
       window.localStorage.removeItem(storageKey);
@@ -171,11 +174,6 @@ export function ObjectiveAnswerPanel({
   const answeredCount = questions.filter((q) => answered(answers[q.key])).length;
 
   const submit = async () => {
-    const missing = questions.length - answeredCount;
-
-    if (missing > 0 && !window.confirm(`还有 ${missing} 道题未作答，确认提交？`)) return;
-
-    if (missing === 0 && !window.confirm('确认提交全部答案？')) return;
     setSubmitting(true);
     setError('');
     try {
@@ -225,7 +223,7 @@ export function ObjectiveAnswerPanel({
             共 {questions.length} 题 · {totalScore} 分 · 已答 {answeredCount}/{questions.length}
           </span>
           <div className="flex-1" />
-          <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs" onClick={clearAll} disabled={submitting}>
+          <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs" onClick={() => setConfirm({ kind: 'clear' })} disabled={submitting}>
             <RotateCcw className="size-3" />
             清空
           </Button>
@@ -309,7 +307,11 @@ export function ObjectiveAnswerPanel({
           ) : (
             <>
               <span className="text-xs text-muted-foreground">草稿已自动保存在本机，提交后以评测记录为准。</span>
-              <Button onClick={submit} disabled={submitting || !signedIn} className="gap-1.5">
+              <Button
+                onClick={() => setConfirm({ kind: 'submit', missing: questions.length - answeredCount })}
+                disabled={submitting || !signedIn}
+                className="gap-1.5"
+              >
                 {submitting ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
                 {signedIn ? '提交答案' : '登录后可提交'}
               </Button>
@@ -317,6 +319,55 @@ export function ObjectiveAnswerPanel({
           )}
         </div>
       </CardContent>
+      <Dialog open={!!confirm} onOpenChange={(open) => { if (!open && !submitting) setConfirm(null); }}>
+        <DialogContent
+          className="w-[min(28rem,calc(100vw-1.5rem))]"
+          onClose={() => {
+            if (!submitting) setConfirm(null);
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>{confirm?.kind === 'clear' ? '清空已选答案' : '确认提交答案'}</DialogTitle>
+          </DialogHeader>
+          <DialogBody className="space-y-3 px-6 py-5">
+            <p className="text-sm leading-6 text-muted-foreground">
+              {confirm?.kind === 'clear'
+                ? '将清除本题在本机保存的全部作答草稿，无法撤销。'
+                : confirm && confirm.kind === 'submit' && confirm.missing > 0
+                  ? `还有 ${confirm.missing} 道题未作答。提交后以评测记录为准，本机草稿会被清除。`
+                  : '提交后以评测记录为准，本机草稿会被清除。'}
+            </p>
+          </DialogBody>
+          <div className="flex shrink-0 justify-end gap-2 border-t px-6 py-4">
+            <Button type="button" variant="outline" disabled={submitting} onClick={() => setConfirm(null)}>
+              取消
+            </Button>
+            {confirm?.kind === 'clear' ? (
+              <Button
+                type="button"
+                variant="destructive"
+                onClick={() => {
+                  clearAll();
+                  setConfirm(null);
+                }}
+              >
+                确认清空
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                disabled={submitting}
+                onClick={() => {
+                  setConfirm(null);
+                  void submit();
+                }}
+              >
+                {submitting ? '提交中…' : '确认提交'}
+              </Button>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }

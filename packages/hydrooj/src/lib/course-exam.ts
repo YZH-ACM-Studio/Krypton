@@ -4,6 +4,7 @@ import { ContestNotFoundError, localizedErrorText, ValidationError } from '../er
 import type { Tdoc, TrainingDoc, TrainingNode } from '../interface';
 import * as contest from '../model/contest';
 import * as document from '../model/document';
+import { listCourseVideos, studentVisibleVideos } from './course-video';
 
 const logger = new Logger('course-exam');
 
@@ -123,6 +124,76 @@ export async function findCoursesBoundToExam(domainId: string, contestId: Object
     return document.getMulti(domainId, document.TYPE_TRAINING, { kind: 'course', 'courseExam.contestId': contestId }).toArray();
 }
 
+export type CourseExamBindRejectReason =
+    | 'client_required'
+    | 'assign_set'
+    | 'empty_pids'
+    | 'no_confirmed_videos'
+    | 'no_chapter_confirmed_videos'
+    | 'site_wide_scoped'
+    | 'scope_uncovered';
+
+function objectIdHex(value: ObjectId): string {
+    if (!(value instanceof ObjectId)) {
+        throw new TypeError('course exam group id must be an ObjectId');
+    }
+    return value.toHexString();
+}
+
+/** Pure bind-time client / video / scope decision. Does not touch Mongo. */
+export function decideCourseExamBindConstraints(input: {
+    isClientRequired: boolean;
+    hasAssign: boolean;
+    hasPids: boolean;
+    studentVisibleCount: number;
+    gate: CourseExamGateKind;
+    courseGroupIds: readonly ObjectId[];
+    participantScopeMode?: Tdoc['participantScopeMode'];
+    participantGroupIds?: readonly ObjectId[];
+}): CourseExamBindRejectReason | null {
+    if (input.isClientRequired) return 'client_required';
+    if (input.hasAssign) return 'assign_set';
+    if (!input.hasPids) return 'empty_pids';
+    if (!input.studentVisibleCount) {
+        return input.gate === 'chapter' ? 'no_chapter_confirmed_videos' : 'no_confirmed_videos';
+    }
+    const courseGroupIds = input.courseGroupIds || [];
+    const mode = input.participantScopeMode;
+    if (mode !== 'schools' && mode !== 'groups') return null;
+    if (!courseGroupIds.length) return 'site_wide_scoped';
+    if (mode === 'schools') return 'scope_uncovered';
+    const allowed = new Set((input.participantGroupIds || []).map(objectIdHex));
+    for (const groupId of courseGroupIds) {
+        if (!allowed.has(objectIdHex(groupId))) return 'scope_uncovered';
+    }
+    return null;
+}
+
+function throwCourseExamBindReason(reason: CourseExamBindRejectReason): never {
+    if (reason === 'client_required') {
+        throw new ValidationError('courseExamContestId', null, localizedErrorText`结业考试不能使用客户端入场`);
+    }
+    if (reason === 'assign_set') {
+        throw new ValidationError('courseExamContestId', null, localizedErrorText`结业考试不能使用比赛分配名单`);
+    }
+    if (reason === 'empty_pids') {
+        throw new ValidationError('courseExamContestId', null, localizedErrorText`结业考试不能绑定空试卷`);
+    }
+    if (reason === 'no_confirmed_videos') {
+        throw new ValidationError('courseExam', null, localizedErrorText`课程还没有已确认视频，不能设置观看门槛`);
+    }
+    if (reason === 'no_chapter_confirmed_videos') {
+        throw new ValidationError('courseExamChapterId', null, localizedErrorText`指定章节没有已确认视频，不能设置观看门槛`);
+    }
+    if (reason === 'site_wide_scoped') {
+        throw new ValidationError('courseExamContestId', null, localizedErrorText`全站可见的课程不能绑定限定范围的结业考试`);
+    }
+    if (reason === 'scope_uncovered') {
+        throw new ValidationError('courseExamContestId', null, localizedErrorText`结业考试的参赛范围必须覆盖课程可见班级`);
+    }
+    throw new ValidationError('courseExam', null, localizedErrorText`结业考试门槛无效`);
+}
+
 export function isCourseExamDuplicateKey(error: unknown): boolean {
     if (!error || typeof error !== 'object') return false;
     const value = error as {
@@ -147,6 +218,7 @@ export async function resolveCourseExamForSave(params: {
     courseId: ObjectId | null;
     dag: TrainingNode[];
     binding: CourseExamBinding;
+    courseGroupIds: ObjectId[];
 }): Promise<CourseExamBinding> {
     const binding = readStoredCourseExam(params.binding);
     let tdoc: Tdoc;
@@ -187,6 +259,28 @@ export async function resolveCourseExamForSave(params: {
             conflict.docId,
         );
         throw new ValidationError('courseExamContestId', null, localizedErrorText`这场考试已绑定其它课程`);
+    }
+    const listed = listCourseVideos(params.dag || []);
+    const scoped = binding.gate === 'chapter' ? listed.filter((item) => item.chapterId === binding.chapterId) : listed;
+    const reason = decideCourseExamBindConstraints({
+        isClientRequired: contest.isClientRequired(tdoc),
+        hasAssign: Array.isArray(tdoc.assign) && tdoc.assign.length > 0,
+        hasPids: Array.isArray(tdoc.pids) && tdoc.pids.some((pid) => typeof pid === 'number' && Number.isSafeInteger(pid)),
+        studentVisibleCount: studentVisibleVideos(scoped.map((item) => item.video)).length,
+        gate: binding.gate,
+        courseGroupIds: params.courseGroupIds || [],
+        participantScopeMode: tdoc.participantScopeMode,
+        participantGroupIds: tdoc.participantGroupIds,
+    });
+    if (reason) {
+        logger.warn(
+            'Course exam binding rejected domain=%s contest=%s course=%s reason=%s',
+            params.domainId,
+            binding.contestId,
+            params.courseId,
+            reason,
+        );
+        throwCourseExamBindReason(reason);
     }
     return binding;
 }

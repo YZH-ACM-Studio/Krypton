@@ -2413,6 +2413,14 @@ const CHINESE_ERROR_MESSAGE_ENGLISH_TRANSLATIONS: Readonly<Record<string, string
     'Vigil 拒绝了本次请求。': 'Vigil rejected this request.',
     'Vigil 配置无效。': 'The Vigil configuration is invalid.',
     'Vigil 协议响应无效。': 'The Vigil protocol response is invalid.',
+    结业考试不能使用客户端入场: 'A course-completion exam cannot use client-required entry.',
+    结业考试不能使用比赛分配名单: 'A course-completion exam cannot use a contest assignment list.',
+    结业考试不能绑定空试卷: 'A course-completion exam cannot be bound to an empty paper.',
+    '课程还没有已确认视频，不能设置观看门槛': 'This course has no confirmed videos, so a watch gate cannot be set.',
+    '指定章节没有已确认视频，不能设置观看门槛': 'The selected chapter has no confirmed videos, so a watch gate cannot be set.',
+    结业考试的参赛范围必须覆盖课程可见班级: 'The exam participant scope must cover every class that can see this course.',
+    全站可见的课程不能绑定限定范围的结业考试: 'A site-wide course cannot be bound to a scoped completion exam.',
+    '仍有收集要求先完成结业考试，不能解除绑定': 'File collection still requires completing the course exam, so the binding cannot be removed.',
 });
 
 export const ERROR_MESSAGE_TRANSLATIONS: Readonly<Record<string, ErrorMessageTranslation>> = Object.freeze({

@@ -54,6 +54,7 @@ import {
     courseVideoStoragePath,
     studentVisibleVideos,
     courseUnitProgress,
+    isCourseVideoComplete,
 } from '../lib/course-video';
 import { liveReferencedPids } from '../lib/course-live-ref';
 import { resolveProblemKnowledgeNodeIds } from '../lib/problem-tag-canonical';
@@ -82,7 +83,8 @@ function canCreateCourse(actor: { hasPerm: (...perm: bigint[]) => boolean; hasPr
 async function hydrateCourseExamContest(
     domainId: string,
     tdoc?: Pick<TrainingDoc, 'courseExam'>,
-): Promise<{ docId: string; title: string } | undefined> {
+    uid?: number,
+): Promise<{ docId: string; title: string; endAt?: string; attend?: boolean; missing?: boolean } | undefined> {
     const contestId = tdoc?.courseExam?.contestId;
     if (!contestId) return undefined;
     const docId = contestId instanceof ObjectId ? contestId.toHexString() : String(contestId);
@@ -90,13 +92,26 @@ async function hydrateCourseExamContest(
     try {
         oid = contestId instanceof ObjectId ? contestId : new ObjectId(docId);
     } catch {
-        return { docId, title: '' };
+        return { docId, title: '', missing: true };
     }
     try {
         const cdoc = await contest.get(domainId, oid);
-        return { docId, title: typeof cdoc.title === 'string' ? cdoc.title : '' };
+        const endAt = cdoc.endAt instanceof Date && !Number.isNaN(cdoc.endAt.getTime())
+            ? cdoc.endAt.toISOString()
+            : undefined;
+        let attend = false;
+        if (typeof uid === 'number' && uid > 0) {
+            const tsdoc = await contest.getStatus(domainId, oid, uid);
+            attend = Boolean(tsdoc?.attend);
+        }
+        return {
+            docId,
+            title: typeof cdoc.title === 'string' ? cdoc.title : '',
+            ...(endAt ? { endAt } : {}),
+            ...(attend ? { attend: true } : {}),
+        };
     } catch (error) {
-        if (error instanceof ContestNotFoundError) return { docId, title: '' };
+        if (error instanceof ContestNotFoundError) return { docId, title: '', missing: true };
         throw error;
     }
 }
@@ -523,6 +538,7 @@ interface CollectCourseQueryModule {
         },
     ) => Promise<unknown>;
     existsByCourse?: (domainId: string, courseId: ObjectId) => Promise<boolean>;
+    existsRequiringCourseExam?: (domainId: string, courseId: ObjectId) => Promise<boolean>;
 }
 
 function isNodeModuleNotFound(error: unknown): boolean {
@@ -680,7 +696,7 @@ class CourseDetailHandler extends Handler {
                     playUrl: `/course/${tid}/video/${item.id}/play`,
                     lastPosition: progress?.lastPosition || 0,
                     coverageRatio: item.durationMs ? Math.min(1, coverageMs / item.durationMs) : 0,
-                    completed: Boolean(progress?.completedAt),
+                    completed: Boolean(progress?.completedAt) || (progress ? isCourseVideoComplete(progress.ranges || [], item.durationMs) : false),
                     completedAt: progress?.completedAt ? progress.completedAt.toISOString() : null,
                 };
             });
@@ -781,7 +797,7 @@ class CourseDetailHandler extends Handler {
             integrityControlled: !!publishedIntegrity,
             canViewRoster,
         };
-        const courseExamContest = await hydrateCourseExamContest(domainId, tdoc);
+        const courseExamContest = await hydrateCourseExamContest(domainId, tdoc, this.user._id);
         if (courseExamContest) this.response.body.courseExamContest = courseExamContest;
         if (activeView === 'roster') {
             const ub = studentDirectory();
@@ -990,8 +1006,15 @@ class CourseEditHandler extends Handler {
                   courseId: tid || null,
                   dag,
                   binding: parsedExam,
+                  courseGroupIds: groupIds,
               })
             : null;
+        if (tid && !parsedExam && this.tdoc?.courseExam) {
+            const collect = loadCollectCourseQuery();
+            if (typeof collect?.existsRequiringCourseExam === 'function' && (await collect.existsRequiringCourseExam(authoritativeDomainId, tid))) {
+                throw new ValidationError('courseExam', null, localizedErrorText`仍有收集要求先完成结业考试，不能解除绑定`);
+            }
+        }
         try {
             if (!tid) {
                 tid = await training.add(authoritativeDomainId, title, content, this.user._id, dag, description, 0, {

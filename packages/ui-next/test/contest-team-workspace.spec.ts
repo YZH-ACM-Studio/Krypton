@@ -78,6 +78,7 @@ describe('p1.12 team assembly workspace contracts', () => {
     expect(handler).to.include('nameKey: { $regex: teamNameSearch(teamSearch) }');
     expect(page).to.include('name="teamSearch"');
     expect(handler).to.include('emergencyTeamConfirmation(team.teamId, team.revision)');
+    expect(handler).to.include('canEmergencyEdit: this.canManage && started');
     expect(page).to.include('高风险赛中调整');
     expect(page).to.include('已有成绩绑定稳定 teamId，不会转移或重算');
     expect(handler).not.to.match(/presence|onlineUsers|socketPresence/i);

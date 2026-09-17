@@ -25,13 +25,21 @@ interface DiscussionDocument {
   pin?: boolean;
 }
 
+interface DiscussionPermissions {
+  canDeleteDiscussion?: unknown;
+  canHighlightDiscussion?: unknown;
+  canPinDiscussion?: unknown;
+}
+
 interface DiscussionCreatePageData {
   vnode?: DiscussionNode;
   examMode?: { urls?: { discussion?: string } };
+  permissions?: DiscussionPermissions;
 }
 
 interface DiscussionEditPageData {
   ddoc?: DiscussionDocument;
+  permissions?: DiscussionPermissions;
 }
 
 /* ---------- Discussion Create ---------- */
@@ -41,6 +49,8 @@ export function DiscussionCreatePage() {
   const data = bs.page.data as DiscussionCreatePageData;
   const vnode = data.vnode || {};
   const backUrl = data.examMode?.urls?.discussion || null;
+  const canHighlightDiscussion = data.permissions?.canHighlightDiscussion === true;
+  const canPinDiscussion = data.permissions?.canPinDiscussion === true;
 
   return (
     <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
@@ -77,16 +87,22 @@ export function DiscussionCreatePage() {
               <MarkdownEditor name="content" value="" minHeight={320} />
             </div>
 
-            <div className="flex items-center gap-4">
-              <label className="flex items-center gap-2 text-sm">
-                <Checkbox name="highlight" value="true" />
-                高亮
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <Checkbox name="pin" value="true" />
-                置顶
-              </label>
-            </div>
+            {canHighlightDiscussion || canPinDiscussion ? (
+              <div className="flex items-center gap-4">
+                {canHighlightDiscussion ? (
+                  <label className="flex items-center gap-2 text-sm">
+                    <Checkbox name="highlight" value="true" />
+                    高亮
+                  </label>
+                ) : null}
+                {canPinDiscussion ? (
+                  <label className="flex items-center gap-2 text-sm">
+                    <Checkbox name="pin" value="true" />
+                    置顶
+                  </label>
+                ) : null}
+              </div>
+            ) : null}
 
             <Button type="submit">
               <Save className="mr-1 size-4" />
@@ -105,6 +121,9 @@ export function DiscussionEditPage() {
   const bs = useBootstrap();
   const data = bs.page.data as DiscussionEditPageData;
   const ddoc = data.ddoc || {};
+  const canDeleteDiscussion = data.permissions?.canDeleteDiscussion === true;
+  const canHighlightDiscussion = data.permissions?.canHighlightDiscussion === true;
+  const canPinDiscussion = data.permissions?.canPinDiscussion === true;
   const detailUrl = replaceRouteTokens(bs.urls.discussionDetail, { DID: String(ddoc._id) });
 
   return (
@@ -133,16 +152,22 @@ export function DiscussionEditPage() {
               <MarkdownEditor name="content" value={ddoc.content || ''} minHeight={320} />
             </div>
 
-            <div className="flex items-center gap-4">
-              <label className="flex items-center gap-2 text-sm">
-                <Checkbox name="highlight" value="true" defaultChecked={ddoc.highlight} />
-                高亮
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <Checkbox name="pin" value="true" defaultChecked={ddoc.pin} />
-                置顶
-              </label>
-            </div>
+            {canHighlightDiscussion || canPinDiscussion ? (
+              <div className="flex items-center gap-4">
+                {canHighlightDiscussion ? (
+                  <label className="flex items-center gap-2 text-sm">
+                    <Checkbox name="highlight" value="true" defaultChecked={ddoc.highlight} />
+                    高亮
+                  </label>
+                ) : null}
+                {canPinDiscussion ? (
+                  <label className="flex items-center gap-2 text-sm">
+                    <Checkbox name="pin" value="true" defaultChecked={ddoc.pin} />
+                    置顶
+                  </label>
+                ) : null}
+              </div>
+            ) : null}
 
             <Separator />
 
@@ -151,22 +176,23 @@ export function DiscussionEditPage() {
                 <Save className="mr-1 size-4" />
                 保存
               </Button>
-              <Button
-                type="submit"
-                name="operation"
-                value="delete"
-                variant="destructive"
-                size="sm"
-                formNoValidate
-                onClick={(e) => {
-                  if (!confirm('确定要删除此讨论吗？')) e.preventDefault();
-                }}
-              >
+            </div>
+          </form>
+          {canDeleteDiscussion ? (
+            <form
+              method="post"
+              className="flex items-center"
+              onSubmit={(e) => {
+                if (!confirm('确定要删除此讨论吗？')) e.preventDefault();
+              }}
+            >
+              <input type="hidden" name="operation" value="delete" />
+              <Button type="submit" variant="destructive" size="sm">
                 <Trash2 className="mr-1 size-3" />
                 删除
               </Button>
-            </div>
-          </form>
+            </form>
+          ) : null}
         </CardContent>
       </Card>
     </motion.div>

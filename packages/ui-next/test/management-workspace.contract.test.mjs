@@ -97,6 +97,7 @@ it('main sidebar exposes exactly one complete userbind entry inside the system-a
 it('domain dashboard drops the forbidden shortcut while student self-service stays registered', () => {
     assert.doesNotMatch(domainAdmin, /学生 \/ 班级 \/ 学校（用户绑定）/);
     assert.doesNotMatch(domainAdmin, /href: '\/admin\/userbind'/);
+    assert.match(domainAdmin, /label: '入域申请', href: '\/domain\/join_applications'/);
 
     for (const component of ['UserBindPage', 'UserBindApplicationsPage', 'UserBindLandingPage', 'UserBindClaimPage']) {
         assert.match(userbind, new RegExp(`export function ${component}\\(`));

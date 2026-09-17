@@ -98,6 +98,13 @@ describe('task management workspace contracts', () => {
   it('exposes one capability-gated management entry while preserving the public task entry', () => {
     expect(sidebar.match(/label: '任务管理'/g) || []).to.have.lengthOf(1);
     expect(sidebar).to.include('bs.user.canManageTasks');
+    const taskCenter = source('packages/ui-next/src/pages/tasks/index.tsx');
+    expect(taskCenter).to.include('bs.user.canManageTasks');
+    expect(taskCenter).to.include('href="/admin/tasks"');
+    expect(taskCenter).to.include('export function TaskMyPage');
+    const myPage = taskCenter.slice(taskCenter.indexOf('export function TaskMyPage'));
+    expect(myPage).to.include('bs.user.canManageTasks');
+    expect(myPage).to.include('href="/admin/tasks"');
     expect(sidebar).to.match(/label: '任务'[\s\S]*?href: '\/tasks'[\s\S]*?'tasks_center\.html', 'tasks_my\.html', 'tasks_detail\.html'/);
     for (const template of [
       'admin_tasks.html',

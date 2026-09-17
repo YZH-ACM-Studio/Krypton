@@ -304,6 +304,7 @@ export function CourseDetailPage() {
     files: CourseFile[];
     view: 'overview' | 'mindmap' | 'roster';
     courseMindmap: CourseMindmapData | null;
+    staleReferencedProblemSetIds?: string[];
     integrityControlled?: boolean;
     canViewRoster?: boolean;
     members?: PracticeRosterMember[];
@@ -452,6 +453,12 @@ export function CourseDetailPage() {
           </a>
         ) : null}
       </div>
+
+      {Array.isArray(data.staleReferencedProblemSetIds) && data.staleReferencedProblemSetIds.length ? (
+        <p role="alert" className="mb-6 rounded-lg border border-amber-500/35 bg-amber-500/[0.06] px-3 py-2 text-sm text-amber-800 dark:text-amber-300">
+          有 {data.staleReferencedProblemSetIds.length} 个章节引用的题集已不可用，这些章节的引用题目暂时不会出现在进度里。
+        </p>
+      ) : null}
 
       {activeView === 'overview' ? (
         <CourseExamCard

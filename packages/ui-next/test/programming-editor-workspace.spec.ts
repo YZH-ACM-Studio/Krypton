@@ -84,8 +84,15 @@ describe('p3.15 programming editor workspace correction', () => {
     expect(edit).to.include('/permits/inbox');
     for (const role of ['出题人', '验题人', '维护者']) expect(edit).to.include(role);
     expect(edit).to.include('<ManagedReviewPanel');
+    expect(edit).to.include('{!isCreate && persistedStructureRevision != null ? (');
+    expect(edit).to.include("if (!pdoc.problemKind) fd.set('expectedStructureRevision', String(persistedStructureRevision ?? 0))");
+    expect(edit).not.to.include('pdoc.problemKind && persistedStructureRevision');
     expect(bank).to.include('<ManagedPublishProtocolFields');
     expect(bank).to.include('expectedStructureRevision={pdoc.structureRevision}');
+    expect(bank).to.match(
+      /\{pdoc\.managedAuthoring\?\.metadataStatus === 'draft' \? \(\s*<label[\s\S]*?name="finalHidden" value="true"[\s\S]*?审核后保持隐藏[\s\S]*?\) : null\}/,
+    );
+    expect(edit).not.to.include('name="finalHidden"');
     expect(edit).to.include('const canEditTags = !isCreate && capabilities.canEditTags === true');
     expect(edit).to.include('{!isCreate && canEditTags ? (');
     expect(edit).to.include('requestTagNormalizationPreview');

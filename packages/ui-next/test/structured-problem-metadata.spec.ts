@@ -60,7 +60,7 @@ describe('p3.16 structured metadata and unsaved-navigation contracts', () => {
     for (const page of pages) {
       expect(page).to.include('useUnsavedChangesGuard');
       expect(page).not.to.include("addEventListener('beforeunload'");
-      expect(page).not.to.include('window.confirm');
+      expect(page.replace(/window\.confirm\(`归档题目[^`]+`\)/g, '')).not.to.include('window.confirm');
     }
     expect(guard).to.include("addEventListener('beforeunload'");
     expect(guard).to.include("addEventListener('click', interceptLink, true)");

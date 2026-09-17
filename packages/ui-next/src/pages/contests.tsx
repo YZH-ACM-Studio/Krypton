@@ -119,6 +119,7 @@ interface ContestsPageData {
   canExportScoreboardImage?: boolean;
   canExportScoreboardPrivateIdentity?: boolean;
   canManageContest?: boolean;
+  canUnlockScoreboard?: boolean;
   canViewRecord?: boolean;
   currentUserId?: unknown;
   examMode?: {
@@ -931,7 +932,7 @@ export function ContestDetailPage() {
                   组建队伍、处理邀请与查看成员
                 </DetailAction>
               ) : null}
-              {!isExam ? (
+              {!isExam || canManageContest ? (
                 <DetailAction href={`${detailUrl}/clarification`} icon={<MessageSquare className="size-4" />} title="澄清答疑">
                   查看公告与提交提问
                 </DetailAction>
@@ -1010,7 +1011,7 @@ export function ContestDetailPage() {
                   比赛队伍
                 </SidebarLink>
               ) : null}
-              {!isExam ? (
+              {!isExam || canManageContest ? (
                 <SidebarLink href={`${detailUrl}/clarification`} icon={<MessageSquare className="size-3.5" />}>
                   澄清答疑
                 </SidebarLink>
@@ -1018,7 +1019,7 @@ export function ContestDetailPage() {
               <SidebarLink href={discussionUrl} icon={<MessageSquare className="size-3.5" />}>
                 讨论
               </SidebarLink>
-              {tdoc.allowViewCode ? (
+              {canManageContest ? (
                 <SidebarLink href={`${detailUrl}/code`} icon={<Code className="size-3.5" />}>
                   代码浏览
                 </SidebarLink>
@@ -1033,17 +1034,21 @@ export function ContestDetailPage() {
                   全部提交
                 </SidebarLink>
               ) : null}
-              {isACM ? (
+              {canManageContest ? (
                 <SidebarLink href={`${detailUrl}/balloon`} icon={<Flag className="size-3.5" />}>
                   气球
                 </SidebarLink>
               ) : null}
-              <SidebarLink href={`${detailUrl}/print`} icon={<FileText className="size-3.5" />}>
-                打印题面
-              </SidebarLink>
-              <SidebarLink href={`${detailUrl}/user`} icon={<Users className="size-3.5" />}>
-                参赛选手
-              </SidebarLink>
+              {tdoc.allowPrint ? (
+                <SidebarLink href={`${detailUrl}/print`} icon={<FileText className="size-3.5" />}>
+                  打印题面
+                </SidebarLink>
+              ) : null}
+              {canManageContest ? (
+                <SidebarLink href={`${detailUrl}/user`} icon={<Users className="size-3.5" />}>
+                  参赛选手
+                </SidebarLink>
+              ) : null}
             </CardContent>
           </Card>
 
@@ -1056,7 +1061,7 @@ export function ContestDetailPage() {
                 {data.files.map((f: { name?: string }) => (
                   <a
                     key={f.name}
-                    href={`${detailUrl}/file/contest/${f.name}`}
+                    href={`${detailUrl}/file/private/${encodeURIComponent(f.name || '')}`}
                     className="flex items-center gap-1.5 text-xs text-primary hover:underline"
                   >
                     <Download className="size-3" />
@@ -1593,7 +1598,17 @@ export function ContestScoreboardPage() {
 
       {tdoc.lockAt && !tdoc.unlocked ? (
         <Card className="border-amber-200 bg-amber-50/60 dark:border-amber-900/60 dark:bg-amber-950/20">
-          <CardContent className="p-4 text-sm text-amber-800 dark:text-amber-200">排行榜已封榜，封榜后的提交可能会暂时显示为待定。</CardContent>
+          <CardContent className="p-4 text-sm text-amber-800 dark:text-amber-200">
+            <p>排行榜已封榜，封榜后的提交可能会暂时显示为待定。</p>
+            {data.canUnlockScoreboard ? (
+              <form method="post" className="mt-3">
+                <input type="hidden" name="operation" value="unlock" />
+                <Button type="submit" size="sm" variant="outline">
+                  解除封榜
+                </Button>
+              </form>
+            ) : null}
+          </CardContent>
         </Card>
       ) : null}
 

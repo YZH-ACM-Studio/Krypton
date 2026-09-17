@@ -193,7 +193,7 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
     (() => {
       const userCtx = { priv: bs.user.priv ?? 0, role: bs.user.role, signedIn: bs.user.signedIn };
       const adminItems: NavItem[] = [];
-      if (canSeeAdminAffordance(userCtx, 'domainAdmin')) {
+      if (canSeeAdminAffordance(userCtx, 'domainAdmin') || bs.user.canManageDomainPermissions) {
         adminItems.push({
           label: '域管理',
           href: bs.urls.domainDashboard,

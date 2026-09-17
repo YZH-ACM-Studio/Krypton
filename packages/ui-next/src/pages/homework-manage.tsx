@@ -424,14 +424,25 @@ export function HomeworkEditPage() {
                 <Save className="mr-1 size-4" />
                 {isEdit ? '保存修改' : '创建作业'}
               </Button>
-              {isEdit && (
-                <Button type="submit" name="operation" value="delete" variant="destructive" size="sm" formNoValidate onClick={confirmDelete}>
-                  <Trash2 className="mr-1 size-3" />
-                  删除
+              {isEdit ? (
+                <Button asChild variant="outline" size="sm">
+                  <a href={`/homework/${String(tdoc.docId || tdoc._id)}/file`}>
+                    <FolderOpen className="mr-1 size-3" />
+                    文件
+                  </a>
                 </Button>
-              )}
+              ) : null}
             </div>
           </form>
+          {isEdit ? (
+            <form method="post" className="flex items-center" onSubmit={confirmDelete}>
+              <input type="hidden" name="operation" value="delete" />
+              <Button type="submit" variant="destructive" size="sm">
+                <Trash2 className="mr-1 size-3" />
+                删除
+              </Button>
+            </form>
+          ) : null}
         </CardContent>
       </Card>
     </motion.div>

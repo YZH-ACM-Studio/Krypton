@@ -3,7 +3,7 @@
  * difficulty, visibility, PID, with sidebar navigation and delete.
  */
 
-import { AlertCircle, ArrowRight, CheckCircle2, Download, Eye, EyeOff, FileText, Loader2, Lock, Save, ShieldCheck, Tag, Trash2 } from 'lucide-react';
+import { AlertCircle, Archive, ArrowRight, CheckCircle2, Download, Eye, EyeOff, FileText, Loader2, Lock, Save, ShieldCheck, Tag, Trash2 } from 'lucide-react';
 import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { type ContentValue, MarkdownEditor, MarkdownView } from '@/components/markdown-renderer';
 import { DomainUserSearchOption, type DomainUserOption, domainUserSearchLabel, loadDomainUsers } from '@/components/domain-user-search';
@@ -62,6 +62,7 @@ interface ProblemEditFile {
 
 interface ProblemEditDocument {
   antiAiMarkers?: unknown;
+  archivedAt?: unknown;
   authoringMode?: string;
   content?: ContentValue;
   data?: ProblemEditFile[];
@@ -92,6 +93,7 @@ interface ProblemEditDocument {
 }
 
 interface ProblemAuthoringCapabilities {
+  canArchive?: boolean;
   canDelete?: boolean;
   canEditContent?: boolean;
   canEditData?: boolean;
@@ -929,6 +931,7 @@ export function ProblemEditPage() {
   const canEditDraftMetadata = isCreate || capabilities.canEditDraftMetadata === true;
   const canPublish = !isCreate && capabilities.canPublish === true;
   const canDelete = !isCreate && capabilities.canDelete === true;
+  const canArchive = !isCreate && capabilities.canArchive === true && !pdoc.archivedAt;
   const canManageCollaborators = !isCreate && capabilities.canManageCollaborators === true;
   const canManageContributions = !isCreate && capabilities.canManageContributions === true;
   const canReviewManaged = managed && !isCreate && capabilities.canPublish === true;
@@ -1282,12 +1285,6 @@ export function ProblemEditPage() {
   };
 
   const handleSave = async (e: React.FormEvent<HTMLFormElement>) => {
-    const submitter = (e.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
-    if (submitter?.value === 'delete') {
-      navigationGuard.allowNavigation();
-      setSaveState('saving');
-      return;
-    }
     e.preventDefault();
     if (!canEditContent) {
       setSaveError('当前贡献范围不能修改题面或基础信息。');
@@ -1525,7 +1522,7 @@ export function ProblemEditPage() {
             aria-busy={saveState === 'saving'}
             className="space-y-6"
           >
-            {!isCreate && pdoc.problemKind && persistedStructureRevision ? (
+            {!isCreate && persistedStructureRevision != null ? (
               <input type="hidden" name="expectedStructureRevision" value={String(persistedStructureRevision)} />
             ) : null}
             {isCreate && managed ? <input type="hidden" name="managed" value="true" /> : null}
@@ -2291,35 +2288,6 @@ export function ProblemEditPage() {
               ) : null}
             </section>
 
-            {!isCreate && canDelete ? (
-              <section aria-labelledby="danger-heading" className="rounded-2xl border border-destructive/25 bg-destructive/[0.025] p-5">
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <h2 id="danger-heading" className="text-sm font-semibold text-destructive">
-                      危险操作
-                    </h2>
-                    <p className="mt-1 text-xs text-muted-foreground">删除将同时移除题目文件、提交记录和讨论。</p>
-                  </div>
-                  {!showDeleteConfirm ? (
-                    <Button type="button" variant="destructive" size="sm" onClick={() => setShowDeleteConfirm(true)}>
-                      <Trash2 className="mr-1 size-3.5" />
-                      删除题目
-                    </Button>
-                  ) : (
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-xs font-medium text-destructive">确认永久删除？</span>
-                      <Button type="submit" name="operation" value="delete" variant="destructive" size="sm">
-                        确认删除
-                      </Button>
-                      <Button type="button" variant="outline" size="sm" onClick={() => setShowDeleteConfirm(false)}>
-                        取消
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              </section>
-            ) : null}
-
             {canEditContent ? (
               <footer className="flex flex-col gap-3 border-t border-border/70 pt-5 sm:flex-row sm:items-center sm:justify-between">
                 <div className="min-w-0">{saveError ? <p className="text-sm text-destructive">{saveError}</p> : status}</div>
@@ -2336,6 +2304,65 @@ export function ProblemEditPage() {
               </footer>
             ) : null}
           </form>
+            {!isCreate && canDelete ? (
+              <form
+                method="post"
+                className="rounded-2xl border border-destructive/25 bg-destructive/[0.025] p-5"
+                onSubmit={() => {
+                  navigationGuard.allowNavigation();
+                }}
+              >
+                <input type="hidden" name="operation" value="delete" />
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h2 id="danger-heading" className="text-sm font-semibold text-destructive">
+                      危险操作
+                    </h2>
+                    <p className="mt-1 text-xs text-muted-foreground">删除将同时移除题目文件、提交记录和讨论。</p>
+                  </div>
+                  {!showDeleteConfirm ? (
+                    <Button type="button" variant="destructive" size="sm" onClick={() => setShowDeleteConfirm(true)}>
+                      <Trash2 className="mr-1 size-3.5" />
+                      删除题目
+                    </Button>
+                  ) : (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs font-medium text-destructive">确认永久删除？</span>
+                      <Button type="submit" variant="destructive" size="sm">
+                        确认删除
+                      </Button>
+                      <Button type="button" variant="outline" size="sm" onClick={() => setShowDeleteConfirm(false)}>
+                        取消
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </form>
+            ) : null}
+            {!isCreate && canArchive ? (
+              <form
+                method="post"
+                action={String(bs.urls.problems || '/p')}
+                className="rounded-2xl border border-amber-500/25 bg-amber-500/[0.04] p-5"
+                onSubmit={(event) => {
+                  if (!window.confirm(`归档题目「${pdoc.title || pid}」？归档后将强制隐藏。`)) event.preventDefault();
+                }}
+              >
+                <input type="hidden" name="operation" value="archive" />
+                <input type="hidden" name="pid" value={String(pdoc.docId)} />
+                <input type="hidden" name="reason" value="Archived from problem editor" />
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h2 className="text-sm font-semibold">归档题目</h2>
+                    <p className="mt-1 text-xs text-muted-foreground">归档后强制隐藏。可从题库归档列表继续查看。</p>
+                  </div>
+                  <Button type="submit" variant="outline" size="sm">
+                    <Archive className="mr-1 size-3.5" />
+                    归档
+                  </Button>
+                </div>
+              </form>
+            ) : null}
         </div>
       )}
       <Dialog

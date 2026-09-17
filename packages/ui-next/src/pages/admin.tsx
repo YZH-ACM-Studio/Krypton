@@ -11,6 +11,7 @@ import { formatDateTime } from '@/lib/format';
 interface DomainDashboardData {
   domain?: { _id?: string; name?: string; owner?: string | number };
   owner?: { _id?: string | number; uname?: string };
+  canDeleteDomain?: boolean;
   pcount?: number;
   ucount?: number;
   rcount?: number;
@@ -53,7 +54,7 @@ export function DomainDashboardPage() {
   const domain: NonNullable<DomainDashboardData['domain']> = data.domain || { _id: bs.domain.id, name: bs.domain.name };
   const owner = data.owner || {};
   const ownerId = owner._id ?? domain.owner;
-  const isOwner = String(bs.user.id) === String(ownerId ?? '');
+  const canDeleteDomain = data.canDeleteDomain === true;
 
   return (
     <AdminPage
@@ -92,6 +93,7 @@ export function DomainDashboardPage() {
             {(
               [
               { label: '编辑域信息', href: '/domain/edit' },
+              { label: '入域申请', href: '/domain/join_applications' },
               { label: '域用户管理', href: '/domain/user' },
               { label: '角色与权限', href: bs.urls.domainPermission },
               { label: '域权限用户组', href: '/domain/group', hint: 'Hydro 自带，按 UID 分组授权' },
@@ -149,7 +151,7 @@ export function DomainDashboardPage() {
               初始化讨论节点
             </Button>
           </form>
-          {isOwner && (
+          {canDeleteDomain && (
             <form
               method="post"
               onSubmit={(event) => {

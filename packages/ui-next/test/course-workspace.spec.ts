@@ -179,6 +179,8 @@ describe('p3.8 course workspace', () => {
     expect(handler).to.include("ctx.Route('course_file_download', '/course/:tid/file/:filename'");
     expect(handler).to.include("@post('filename', Types.Filename)");
     expect(handler).to.include('listedCourseFile(tdoc, filename)');
+    const download = handler.slice(handler.indexOf('class CourseFileDownloadHandler'));
+    expect(download.indexOf('await assertCourseAccessible')).to.be.lessThan(download.indexOf('listedCourseFile(tdoc, filename)'));
     expect(training).to.include('assertProblemSet(tdoc)');
     const trainingManage = readFileSync(resolve(root, 'src/pages/training-manage.tsx'), 'utf8');
     expect(trainingManage).to.include("Object.hasOwn(node, 'sections')");
@@ -202,6 +204,9 @@ describe('p3.8 course workspace', () => {
     expect(links).to.match(/&chapter=\$\{chapterId\}/);
     expect(detail).to.include('data.canCreateQuiz');
     expect(editor).to.include('canCreateQuiz={Boolean(isEdit && data.canCreateQuiz)}');
+    const courseHandler = readFileSync(resolve(root, '../hydrooj/src/handler/course.ts'), 'utf8');
+    expect(courseHandler).to.include('canCreateQuiz: canManage && canCreateCourseQuiz(this.user)');
+    expect(courseHandler).to.include('canCreateQuiz: !!this.tdoc && canCreateCourseQuiz(this.user)');
     expect(editor).to.include("quizNeedsSave={saveState !== 'idle'}");
     expect(editor).to.include('请先保存课程修改');
     expect(links).to.include('请先保存课程修改，再创建小测。');
@@ -225,13 +230,30 @@ describe('p3.8 course workspace', () => {
     const editor = readFileSync(resolve(root, 'src/pages/course/editor.tsx'), 'utf8');
     const detail = readFileSync(resolve(root, 'src/pages/course/detail.tsx'), 'utf8');
     const mindmap = readFileSync(resolve(root, 'src/pages/course/mindmap.tsx'), 'utf8');
-    expect(handler).to.include("activeView === 'mindmap' && tdoc.mindmapId");
+    expect(handler).to.include("activeView === 'mindmap' && tdoc.mindmapId !== undefined && tdoc.mindmapId !== null");
     expect(handler).to.include('buildCourseMindmapView');
     expect(handler).to.include('getListViewableAuthorized');
     expect(handler).to.include('resolveProblemKnowledgeNodeIds');
     expect(editor).to.include('name="mindmapId"');
     expect(editor).to.include('不绑定知识导图');
     expect(editor).to.include('已公开');
+    expect(handler).to.include('staleReferencedProblemSetIds');
+    expect(handler).to.include('liveReferencedPidsForCourseGet');
+    expect(detail).to.include('staleReferencedProblemSetIds');
+    expect(handler).to.include('course references an unavailable public mindmap');
+    const editHandler = handler.slice(handler.indexOf('class CourseEditHandler'), handler.indexOf('class CourseFilesHandler'));
+    expect(editHandler).to.include('canManageCourse(this.user, this.tdoc, PERM.PERM_EDIT_COURSE)');
+    expect(editHandler).to.include('await assertCourseAccessible(authoritativeDomainId, this.user._id, this.tdoc)');
+    expect(editHandler).to.include('await assertCourseAccessible(domainId, this.user._id, tdoc)');
+    expect(editHandler).not.to.include('if (!this.user.own(this.tdoc)) this.checkPerm(PERM.PERM_EDIT_COURSE)');
+    const filesHandler = handler.slice(
+      handler.indexOf('class CourseFilesHandler'),
+      handler.indexOf('class CourseFileDownloadHandler'),
+    );
+    expect(filesHandler).to.include('canManageCourse(this.user, this.tdoc, PERM.PERM_EDIT_COURSE)');
+    expect(filesHandler).to.include('await assertCourseAccessible(this.domainId, this.user._id, this.tdoc)');
+    expect(readFileSync(resolve(root, '../hydrooj/src/lib/course-access.ts'), 'utf8')).to.include('throw new TrainingNotFoundError(domainId, tdoc.docId)');
+    expect(handler).to.match(/Course editor found unavailable mindmap[\s\S]{0,400}throw new TypeError/);
     expect(detail).to.match(/\/course\/\$\{tid\}\?view=mindmap/);
     expect(detail).to.include('<CourseMindmapView');
     expect(detail).to.include('integrityControlled={data.integrityControlled === true}');
@@ -240,6 +262,9 @@ describe('p3.8 course workspace', () => {
     expect(mindmap).to.match(/\?chapter=\$\{encodeURIComponent/);
     expect(mindmap).not.to.include('fetch(');
     expect(mindmap).not.to.include('loadNodeProblems');
+    const videoStats = readFileSync(resolve(root, 'src/pages/course/video-stats.tsx'), 'utf8');
+    expect(videoStats).to.include("data.rosterUnavailable === 'invalid_groups'");
+    expect(videoStats).to.include('课程绑定的班级引用已失效，无法出观看名单');
   });
 
   it('attributes live-ref mindmap problems to the referencing course chapter', () => {

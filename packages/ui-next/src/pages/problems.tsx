@@ -762,6 +762,15 @@ export function ProblemsPage() {
                                 }))}
                               />
                             </label>
+                            {pdoc.managedAuthoring?.metadataStatus === 'draft' ? (
+                              <label className="flex min-h-10 items-center gap-2 rounded-xl border border-border/75 px-3 text-sm sm:col-span-2">
+                                <Checkbox name="finalHidden" value="true" />
+                                <span>
+                                  <span className="block font-medium">审核后保持隐藏</span>
+                                  <span className="block text-xs text-muted-foreground">确认元数据与训练归属，但暂不向普通用户公开。</span>
+                                </span>
+                              </label>
+                            ) : null}
                             <Button type="submit" className="min-h-10">
                               {pdoc.managedAuthoring?.metadataStatus === 'draft' ? '确认并发布' : '重新公开'}
                             </Button>

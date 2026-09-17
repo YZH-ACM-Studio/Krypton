@@ -92,11 +92,13 @@ interface RecordDocument {
   pid?: string | number;
   progress?: string | number;
   score?: number;
+  sourceContestId?: unknown;
   status?: number;
   subtasks?: unknown;
   testCases?: RecordCase[];
   time?: number;
   uid?: string | number;
+  virtualAttemptId?: unknown;
 }
 
 interface RecordProblemSummary {
@@ -132,12 +134,14 @@ interface RecordsPageData extends RecordLanguageContext {
   rdocs?: RecordDocument[];
   recordDetailTid?: unknown;
   recordScoreActions?: Record<string, RecordScoreAction>;
+  canRejudgeVirtual?: boolean;
   statistics?: RecordStatistics | null;
   statisticsScope?: string;
   statusTexts?: RecordStatusTexts;
   studentDict?: Record<string, { studentId: string; realName: string }>;
   tdoc?: { docId?: unknown };
   udict?: Record<string, GenericUserDoc>;
+  notification?: Array<{ name?: string }>;
 }
 
 interface RecordExamModeData {
@@ -160,6 +164,7 @@ interface RecordDetailPageData extends RecordLanguageContext {
   practiceTid?: unknown;
   rdoc?: RecordDocument;
   recordScoreAction?: RecordScoreAction | null;
+  canRejudgeVirtual?: boolean;
   recordStudent?: { studentId?: unknown; realName?: unknown } | null;
   rev?: string;
   tdoc?: { docId?: unknown };
@@ -260,6 +265,14 @@ function normalizeId(value: unknown): string {
     return String((value as { $oid?: unknown }).$oid || '');
   }
   return String(value);
+}
+
+function virtualRejudgeHref(record: Pick<RecordDocument, 'virtualAttemptId' | 'sourceContestId'> | null | undefined): string {
+  if (!record) return '';
+  const attemptId = normalizeId(record.virtualAttemptId);
+  const tid = normalizeId(record.sourceContestId);
+  if (!attemptId || !tid) return '';
+  return `/contest/${encodeURIComponent(tid)}/virtual/rejudge?attemptId=${encodeURIComponent(attemptId)}`;
 }
 
 function formatJudgeText(text: unknown): string {
@@ -589,6 +602,76 @@ function RecordScoreActionDialog({
   );
 }
 
+function VirtualRejudgeCard({ record }: { record: RecordDocument }) {
+  const vpHref = virtualRejudgeHref(record);
+  if (!vpHref) return null;
+  return (
+    <Card>
+      <CardContent className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-sm font-semibold">虚拟参赛重测</p>
+          <p className="mt-1 text-sm text-muted-foreground">虚拟参赛记录不能从本页直接重测，请到确认页核对 Record ID 后再提交。</p>
+        </div>
+        <Button asChild className="shrink-0">
+          <a href={vpHref}>前往确认重测</a>
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+function RecordScoreManageCard({
+  action,
+  record,
+  onOpen,
+}: {
+  action: RecordScoreAction;
+  record: RecordDocument;
+  onOpen: () => void;
+}) {
+  const vpHref = virtualRejudgeHref(record);
+  const useVirtualRejudge = action.kind === 'rejudge' && !!vpHref;
+  return (
+    <Card className={action.kind === 'cancel' ? 'border-destructive/25' : ''}>
+      <CardContent className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-sm font-semibold">
+            {action.kind === 'cancel' ? '成绩管理' : useVirtualRejudge ? '虚拟参赛重测' : '恢复已取消记录'}
+          </p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {action.kind === 'cancel'
+              ? '仅取消这一条记录的计分，并同步重算它影响到的题目状态与比赛榜单。'
+              : useVirtualRejudge
+                ? '虚拟参赛记录不能从本页直接重测，请到确认页核对 Record ID 后再提交。'
+                : '使用当前题目配置和测试数据重新评测；结果通过正常评测链重新进入计分。'}
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          {useVirtualRejudge ? (
+            <Button asChild className="shrink-0">
+              <a href={vpHref}>前往确认重测</a>
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              variant={action.kind === 'cancel' ? 'destructive' : 'default'}
+              className="shrink-0"
+              onClick={onOpen}
+            >
+              {action.kind === 'cancel' ? '取消本条成绩' : '重新评测并恢复'}
+            </Button>
+          )}
+          {action.kind === 'cancel' && vpHref ? (
+            <Button asChild variant="outline" className="shrink-0">
+              <a href={vpHref}>确认虚拟重测</a>
+            </Button>
+          ) : null}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export function RecordsPage() {
   const bs = useBootstrap();
   const data = bs.page.data as RecordsPageData;
@@ -598,6 +681,8 @@ export function RecordsPage() {
   // arrive via the WS hook below and merge by `_id`.
   const [rdocs, setRdocs] = useState<RecordDocument[]>(initialRdocs);
   const [recordScoreActions, setRecordScoreActions] = useState<Record<string, RecordScoreAction>>(data.recordScoreActions || {});
+  const canRejudgeVirtual = data.canRejudgeVirtual === true;
+  const showRecordManage = Object.keys(recordScoreActions).length > 0 || canRejudgeVirtual;
   const [scoreActionRid, setScoreActionRid] = useState('');
   const page = Number(data.page) || 1;
   const locale = bs.locale;
@@ -681,6 +766,17 @@ export function RecordsPage() {
 
   return (
     <motion.div className="space-y-4" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
+      {(data.notification || []).map((item, index) =>
+        item?.name ? (
+          <p
+            key={`${item.name}-${index}`}
+            role="status"
+            className="rounded-xl border border-amber-500/35 bg-amber-500/[0.06] px-4 py-3 text-sm text-amber-800 dark:text-amber-300"
+          >
+            {item.name}
+          </p>
+        ) : null,
+      )}
       {postContestPracticeActive ? (
         <div className="rounded-xl border border-sky-500/25 bg-sky-500/[0.06] px-4 py-3 text-sm text-muted-foreground">
           这里只显示你在该题上的普通个人提交，不计入原比赛成绩、罚时或排行榜。
@@ -782,14 +878,14 @@ export function RecordsPage() {
                 <TableHead className="w-24 text-right">时间</TableHead>
                 <TableHead className="w-24 text-right">内存</TableHead>
                 <TableHead className="w-28 text-right">提交时间</TableHead>
-                {Object.keys(recordScoreActions).length ? <TableHead className="w-28 text-right">管理</TableHead> : null}
+                {showRecordManage ? <TableHead className="w-28 text-right">管理</TableHead> : null}
               </TableRow>
             </TableHeader>
             <TableBody>
               {rdocs.length === 0 ? (
                 <TableRow>
                   <TableCell
-                    colSpan={8 + (hasStudentColumn ? 1 : 0) + (Object.keys(recordScoreActions).length ? 1 : 0)}
+                    colSpan={8 + (hasStudentColumn ? 1 : 0) + (showRecordManage ? 1 : 0)}
                     className="py-8 text-center text-sm text-muted-foreground"
                   >
                     暂无提交记录
@@ -808,6 +904,8 @@ export function RecordsPage() {
                     tid: practiceTid,
                     virtual: virtualAttemptOpen,
                   });
+                  const scoreAction = recordScoreActions[String(r._id)];
+                  const vpHref = virtualRejudgeHref(r);
                   return (
                     <TableRow key={String(r._id)}>
                       <TableCell>
@@ -848,11 +946,28 @@ export function RecordsPage() {
                       <TableCell className="text-right tabular-nums text-xs text-muted-foreground">{r.time != null ? `${r.time}ms` : '—'}</TableCell>
                       <TableCell className="text-right tabular-nums text-xs text-muted-foreground">{formatMemory(r.memory)}</TableCell>
                       <TableCell className="text-right text-xs text-muted-foreground">{formatRecordTime(r._id || r.judgeAt, locale)}</TableCell>
-                      {Object.keys(recordScoreActions).length ? (
+                      {showRecordManage ? (
                         <TableCell className="text-right">
-                          {recordScoreActions[String(r._id)] ? (
-                            <Button type="button" size="sm" variant="ghost" onClick={() => setScoreActionRid(String(r._id))}>
-                              {recordScoreActions[String(r._id)].kind === 'cancel' ? '取消成绩' : '重新评测'}
+                          {scoreAction ? (
+                            <div className="flex justify-end gap-1">
+                              {scoreAction.kind === 'rejudge' && vpHref ? (
+                                <Button asChild size="sm" variant="ghost">
+                                  <a href={vpHref}>确认重测</a>
+                                </Button>
+                              ) : (
+                                <Button type="button" size="sm" variant="ghost" onClick={() => setScoreActionRid(String(r._id))}>
+                                  {scoreAction.kind === 'cancel' ? '取消成绩' : '重新评测'}
+                                </Button>
+                              )}
+                              {scoreAction.kind === 'cancel' && vpHref ? (
+                                <Button asChild size="sm" variant="ghost">
+                                  <a href={vpHref}>确认重测</a>
+                                </Button>
+                              ) : null}
+                            </div>
+                          ) : canRejudgeVirtual && vpHref ? (
+                            <Button asChild size="sm" variant="ghost">
+                              <a href={vpHref}>确认重测</a>
                             </Button>
                           ) : null}
                         </TableCell>
@@ -983,6 +1098,7 @@ export function RecordDetailPage() {
   // so the user sees judging move from "Pending" → "Judging" → final.
   const [rdoc, setRdoc] = useState<RecordDocument>(initialRdoc);
   const [recordScoreAction, setRecordScoreAction] = useState<RecordScoreAction | null>(data.recordScoreAction || null);
+  const canRejudgeVirtual = data.canRejudgeVirtual === true;
   const [scoreActionOpen, setScoreActionOpen] = useState(false);
   const pdoc = data.pdoc || {};
   const code = data.code || rdoc.code || '';
@@ -1096,26 +1212,9 @@ export function RecordDetailPage() {
           submittedAt={formatRecordTime(rdoc._id, locale)}
         />
         {recordScoreAction ? (
-          <Card className={recordScoreAction.kind === 'cancel' ? 'border-destructive/25' : ''}>
-            <CardContent className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="text-sm font-semibold">{recordScoreAction.kind === 'cancel' ? '成绩管理' : '恢复已取消记录'}</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {recordScoreAction.kind === 'cancel'
-                    ? '仅取消这一条记录的计分，并同步重算它影响到的题目状态与比赛榜单。'
-                    : '使用当前题目配置重新评测；结果通过正常评测链重新进入计分。'}
-                </p>
-              </div>
-              <Button
-                type="button"
-                variant={recordScoreAction.kind === 'cancel' ? 'destructive' : 'default'}
-                className="shrink-0"
-                onClick={() => setScoreActionOpen(true)}
-              >
-                {recordScoreAction.kind === 'cancel' ? '取消本条成绩' : '重新评测并恢复'}
-              </Button>
-            </CardContent>
-          </Card>
+          <RecordScoreManageCard action={recordScoreAction} record={rdoc} onOpen={() => setScoreActionOpen(true)} />
+        ) : canRejudgeVirtual ? (
+          <VirtualRejudgeCard record={rdoc} />
         ) : null}
         <RecordScoreActionDialog
           open={scoreActionOpen && !!recordScoreAction}
@@ -1409,26 +1508,9 @@ export function RecordDetailPage() {
       )}
 
       {detailMode !== 'exam-code' && recordScoreAction ? (
-        <Card className={recordScoreAction.kind === 'cancel' ? 'border-destructive/25' : ''}>
-          <CardContent className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-sm font-semibold">{recordScoreAction.kind === 'cancel' ? '成绩管理' : '恢复已取消记录'}</p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {recordScoreAction.kind === 'cancel'
-                  ? '仅取消这一条记录的计分，并同步重算它影响到的题目状态与比赛榜单。'
-                  : '使用当前题目配置和测试数据重新评测；结果通过正常评测链重新进入计分。'}
-              </p>
-            </div>
-            <Button
-              type="button"
-              variant={recordScoreAction.kind === 'cancel' ? 'destructive' : 'default'}
-              className="shrink-0"
-              onClick={() => setScoreActionOpen(true)}
-            >
-              {recordScoreAction.kind === 'cancel' ? '取消本条成绩' : '重新评测并恢复'}
-            </Button>
-          </CardContent>
-        </Card>
+        <RecordScoreManageCard action={recordScoreAction} record={rdoc} onOpen={() => setScoreActionOpen(true)} />
+      ) : detailMode !== 'exam-code' && canRejudgeVirtual ? (
+        <VirtualRejudgeCard record={rdoc} />
       ) : null}
 
       <RecordScoreActionDialog

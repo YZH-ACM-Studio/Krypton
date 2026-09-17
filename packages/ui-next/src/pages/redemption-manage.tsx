@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { SimpleSelect } from '@/components/ui/select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
 import { useBootstrap } from '@/lib/bootstrap';
 
@@ -38,6 +39,12 @@ interface PlainCode {
   weak: boolean;
 }
 
+interface ActiveEntitlement {
+  entitlementId: string;
+  sourceId: string;
+  target: string;
+}
+
 interface RedemptionManageData {
   batches?: RedemptionBatch[];
   canManageAll?: boolean;
@@ -46,7 +53,22 @@ interface RedemptionManageData {
   plaintext?: PlainCode[];
   csv?: string;
   batch?: RedemptionBatch;
+  lookupUid?: number;
+  entitlements?: ActiveEntitlement[];
   revokeResult?: { revokedCount?: number; remainingSources?: Array<{ kind?: string; entitlementId?: string; groupId?: string; courseId?: string }> };
+}
+
+function parseActiveEntitlements(value: unknown): ActiveEntitlement[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw new Error('权益列表格式不正确');
+  return value.map((item) => {
+    if (!item || typeof item !== 'object') throw new Error('权益格式不正确');
+    const rec = item as Record<string, unknown>;
+    if (typeof rec.entitlementId !== 'string' || !rec.entitlementId) throw new Error('权益 ID 格式不正确');
+    if (typeof rec.sourceId !== 'string' || !rec.sourceId) throw new Error('来源 ID 格式不正确');
+    if (typeof rec.target !== 'string' || !rec.target) throw new Error('权益目标格式不正确');
+    return { entitlementId: rec.entitlementId, sourceId: rec.sourceId, target: rec.target };
+  });
 }
 
 function downloadCsv(name: string, csv: string) {
@@ -60,6 +82,10 @@ export function RedemptionCodeManagePage() {
   const bs = useBootstrap();
   const data = bs.page.data as RedemptionManageData;
   const [targetKind, setTargetKind] = useState('problem_set');
+  const lookupUid = typeof data.lookupUid === 'number' && Number.isSafeInteger(data.lookupUid) && data.lookupUid > 0 ? data.lookupUid : 0;
+  const entitlements = parseActiveEntitlements(data.entitlements);
+  const [revokeUid, setRevokeUid] = useState(lookupUid ? String(lookupUid) : '');
+  const [revokeEntitlementId, setRevokeEntitlementId] = useState('');
   if (!bs.user.canManageRedemptionCodes) return <ForbiddenPanel message="你没有管理兑换码的权限。" />;
 
   const batches = Array.isArray(data.batches) ? data.batches : [];
@@ -200,33 +226,84 @@ export function RedemptionCodeManagePage() {
         <CardHeader>
           <CardTitle className="text-base">停用码 / 撤销单人兑换来源</CardTitle>
         </CardHeader>
-        <CardContent className="grid gap-4 md:grid-cols-2">
-          <form method="post" className="space-y-2">
-            <input type="hidden" name="operation" value="disable" />
+        <CardContent className="space-y-4">
+          <form method="get" action="/manage/redemption-codes" className="flex flex-wrap items-end gap-2">
             <label className="space-y-1 text-sm">
-              码 ID
-              <Input name="codeId" required />
+              查找用户权益
+              <Input name="uid" defaultValue={lookupUid ? String(lookupUid) : ''} required />
             </label>
-            <p className="text-xs text-muted-foreground">停用只阻止未来兑换，不追回已发权益。</p>
             <Button type="submit" variant="outline">
-              停用
+              查找
             </Button>
           </form>
-          <form method="post" className="space-y-2">
-            <input type="hidden" name="operation" value="revoke" />
-            <label className="space-y-1 text-sm">
-              用户 UID
-              <Input name="uid" required />
-            </label>
-            <label className="space-y-1 text-sm">
-              权益 ID
-              <Input name="entitlementId" required />
-            </label>
-            <p className="text-xs text-muted-foreground">只撤销这一项兑换来源，公开/用户组/课程和其他兑换仍然有效。</p>
-            <Button type="submit" variant="destructive">
-              撤销该来源
-            </Button>
-          </form>
+          {lookupUid ? (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>权益 ID</TableHead>
+                  <TableHead>来源 ID</TableHead>
+                  <TableHead>目标</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {entitlements.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={3} className="text-sm text-muted-foreground">
+                      该用户没有有效兑换权益。
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  entitlements.map((row) => (
+                    <TableRow
+                      key={row.entitlementId}
+                      className="cursor-pointer"
+                      onClick={() => {
+                        setRevokeUid(String(lookupUid));
+                        setRevokeEntitlementId(row.entitlementId);
+                      }}
+                    >
+                      <TableCell className="font-mono text-xs">{row.entitlementId}</TableCell>
+                      <TableCell className="font-mono text-xs">{row.sourceId}</TableCell>
+                      <TableCell className="text-xs">{row.target}</TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          ) : null}
+          <div className="grid gap-4 md:grid-cols-2">
+            <form method="post" className="space-y-2">
+              <input type="hidden" name="operation" value="disable" />
+              <label className="space-y-1 text-sm">
+                码 ID
+                <Input name="codeId" required />
+              </label>
+              <p className="text-xs text-muted-foreground">停用只阻止未来兑换，不追回已发权益。</p>
+              <Button type="submit" variant="outline">
+                停用
+              </Button>
+            </form>
+            <form method="post" className="space-y-2">
+              <input type="hidden" name="operation" value="revoke" />
+              <label className="space-y-1 text-sm">
+                用户 UID
+                <Input name="uid" required value={revokeUid} onChange={(event) => setRevokeUid(event.target.value)} />
+              </label>
+              <label className="space-y-1 text-sm">
+                权益 ID
+                <Input
+                  name="entitlementId"
+                  required
+                  value={revokeEntitlementId}
+                  onChange={(event) => setRevokeEntitlementId(event.target.value)}
+                />
+              </label>
+              <p className="text-xs text-muted-foreground">只撤销这一项兑换来源，公开/用户组/课程和其他兑换仍然有效。</p>
+              <Button type="submit" variant="destructive">
+                撤销该来源
+              </Button>
+            </form>
+          </div>
         </CardContent>
       </Card>
     </AdminPage>

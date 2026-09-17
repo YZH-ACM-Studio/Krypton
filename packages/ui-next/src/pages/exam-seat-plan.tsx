@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { examTeacherErrorZh, examTeacherExactZh } from '@hydrooj/common';
-import { AlertTriangle, ArrowLeft, Download, GripVertical, LockKeyhole, Play, RefreshCw, Save, Search, Shuffle, Upload, ZoomIn, ZoomOut } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Download, GripVertical, LockKeyhole, Play, RefreshCw, Save, Search, Shuffle, Square, Upload, ZoomIn, ZoomOut } from 'lucide-react';
 import { AdminPage } from '@/components/admin/admin-page';
 import { ForbiddenPanel } from '@/components/admin/forbidden';
 import { Badge } from '@/components/ui/badge';
@@ -230,6 +230,12 @@ interface AssignmentWorkspace {
   endpointState: 'available' | 'not-required' | 'unavailable';
   endpointItems: EndpointPreflightItem[];
   publishedRosterDrift: PublishedRosterDrift | null;
+  publicationWarning: 'assignment_publication_reference_drift' | null;
+  classroomWarning:
+    | 'classroom_sources_unavailable'
+    | 'assignment_classroom_reference_unavailable'
+    | 'seat_plan_classroom_unavailable'
+    | null;
   latestSeatPlanState: 'current' | 'layout-drift' | 'not-ready';
   rosterGroups: Array<{ groupId: string; name: string }>;
   classrooms: Array<{ classroomId: string; name: string; layoutRevision: number; seatCount: number }>;
@@ -1760,15 +1766,36 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
       endpointState: state,
       endpointItems: array(preflight.items, '终端预检').map(parsePreflightItem),
       publishedRosterDrift: parsePublishedRosterDrift(assignmentsPayload.publishedRosterDrift),
+      publicationWarning:
+        assignmentsPayload.publicationWarning == null
+          ? null
+          : text(assignmentsPayload.publicationWarning, '发布引用') === 'assignment_publication_reference_drift'
+            ? 'assignment_publication_reference_drift'
+            : (() => {
+                throw new Error('发布引用警告格式不正确');
+              })(),
+      classroomWarning: (() => {
+        const raw = assignmentsPayload.classroomWarning ?? plansPayload.classroomWarning;
+        if (raw == null) return null;
+        const code = text(raw, '教室引用');
+        if (
+          code === 'classroom_sources_unavailable' ||
+          code === 'assignment_classroom_reference_unavailable' ||
+          code === 'seat_plan_classroom_unavailable'
+        ) {
+          return code;
+        }
+        throw new Error('教室引用警告格式不正确');
+      })(),
       latestSeatPlanState,
       rosterGroups: array(assignmentsPayload.rosterGroups, '名单用户组').map(parseRosterGroup),
       classrooms: array(assignmentsPayload.classrooms, '候选教室').map(parseClassroomSummary),
     };
     const displayedAssignment = next.assignments[0];
-    if (displayedAssignment && next.source?.seatPlanRevision !== displayedAssignment.seatPlan.revision) {
+    if (displayedAssignment && next.source && next.source.seatPlanRevision !== displayedAssignment.seatPlan.revision) {
       throw new Error('分配来源与当前显示版本不一致');
     }
-    if (displayedAssignment && next.source?.schemaVersion !== displayedAssignment.schemaVersion) {
+    if (displayedAssignment && next.source && next.source.schemaVersion !== displayedAssignment.schemaVersion) {
       throw new Error('分配来源 schema 与当前显示版本不一致');
     }
     const nextPublishedAssignment = next.assignments.find((assignment) => assignment.published) || null;
@@ -2960,6 +2987,44 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
     }
   }, [loadPreloginFacts, path, preloginFactsCurrent, preloginWorkflow, refreshWorkspace, writePreloginUrl]);
 
+  const stopPreloginNetwork = useCallback(async () => {
+    if (!preloginFactsCurrent || !preloginWorkflow || preloginWorkflow.network.source !== 'execution') {
+      return;
+    }
+    if (
+      !window.confirm(
+        '停止网络策略？停止命令仍需逐机执行且终端必须在线。离线终端不会被记成已释放；已整盘还原的机器先在本机运行 --network-lock-recover。',
+      )
+    ) {
+      return;
+    }
+    setPreloginBusy(true);
+    setPreloginError(null);
+    setPreloginFactsFresh(false);
+    try {
+      await post(`${path}/network-execution`, { action: 'stop', expectedRevision: preloginWorkflow.network.executionRevision });
+      await loadPreloginFacts();
+    } catch (reason) {
+      const operationError = reason instanceof Error ? reason.message : String(reason);
+      try {
+        await loadPreloginFacts();
+        setPreloginError(`${operationError}；网络停止结果未知，已重读当前执行事实，请核对后继续。`);
+      } catch (recoveryReason) {
+        const recoveryError = recoveryReason instanceof Error ? recoveryReason.message : String(recoveryReason);
+        const refreshed = await refreshWorkspace();
+        setPreloginError(
+          refreshed
+            ? `${operationError}；当前执行事实重读失败（${recoveryError}），已重读名单与考试活动，请核对后继续。`
+            : `${operationError}；网络停止结果未知且执行、名单事实均重读失败：${recoveryError}`,
+        );
+      }
+    } finally {
+      setActiveStep('lock');
+      writePreloginUrl({ step: 'lock' });
+      setPreloginBusy(false);
+    }
+  }, [loadPreloginFacts, path, preloginFactsCurrent, preloginWorkflow, refreshWorkspace, writePreloginUrl]);
+
   const confirmPrelogin = useCallback(async () => {
     if (
       !publishedPreparationAssignment ||
@@ -3273,6 +3338,16 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
             className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive"
             message={error}
           />
+        ) : null}
+        {workspace?.publicationWarning === 'assignment_publication_reference_drift' ? (
+          <div role="alert" className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-800 dark:text-amber-200">
+            已发布座位分配的引用已变化。页面仍可打开，请重新检查并发布新版本。
+          </div>
+        ) : null}
+        {workspace?.classroomWarning ? (
+          <div role="alert" className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-800 dark:text-amber-200">
+            教室数据暂不可用，页面仍可打开。请检查教室布局后再写入。
+          </div>
         ) : null}
         {workspace?.publishedRosterDrift?.changed ? (
           <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
@@ -4366,7 +4441,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
               <CardTitle>启动网络策略</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <p className="text-sm text-muted-foreground">可重复执行启动与重试；必须在预检事实仍然有效时进行。</p>
+              <p className="text-sm text-muted-foreground">可重复执行启动、重试与停止；必须在预检事实仍然有效时进行。</p>
               {preloginFactsCurrent && preloginWorkflow ? (
                 <p className="text-sm text-muted-foreground">
                   {preloginWorkflow.network.source === 'execution'
@@ -4400,6 +4475,12 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                     {preloginFactsCurrent && preloginWorkflow?.network.source === 'config' ? (
                       <Button disabled={preloginBusy} onClick={() => void startPreloginNetwork()}>
                         <Play className="size-4" /> 启动网络策略
+                      </Button>
+                    ) : null}
+                    {preloginFactsCurrent && preloginWorkflow?.network.source === 'execution' ? (
+                      <Button variant="destructive" disabled={preloginBusy} onClick={() => void stopPreloginNetwork()}>
+                        <Square className="size-4" />
+                        停止
                       </Button>
                     ) : null}
                     {nextStepButton}

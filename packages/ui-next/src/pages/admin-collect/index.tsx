@@ -138,6 +138,7 @@ interface CollectListPageData {
 interface CollectEditPageData {
   request: CollectRequestView | null;
   hasSubmissions: boolean;
+  hasFiles: boolean;
   canEdit: boolean;
   schools: SchoolRef[];
   groups: GroupRef[];
@@ -191,6 +192,7 @@ interface CollectStatsPageData {
   submittedCount: number;
   missingCount: number;
   rows: ProgressRow[];
+  hasFiles: boolean;
   canNudge: boolean;
   canPack: boolean;
 }
@@ -504,6 +506,7 @@ function parseEditPageData(value: unknown, currentUid: number): CollectEditPageD
   return {
     request,
     hasSubmissions: optionalBoolean(rec.hasSubmissions, false, '是否已有提交'),
+    hasFiles: optionalBoolean(rec.hasFiles, rec.hasSubmissions === true, '是否已有文件'),
     canEdit: optionalBoolean(rec.canEdit, request ? request.canEdit : true, '编辑权限'),
     schools: parseSchoolRefs(rec.schools),
     groups: parseGroupRefs(rec.groups),
@@ -610,6 +613,11 @@ function parseStatsPageData(value: unknown, currentUid: number): CollectStatsPag
     missingCount:
       rec.missingCount === undefined ? current.length - derivedSubmitted : asNonNegativeInt(rec.missingCount, '未交人数'),
     rows,
+    hasFiles: optionalBoolean(
+      rec.hasFiles,
+      rows.some((row) => row.status === 'submitted' || row.files.length > 0 || row.history.length > 0),
+      '是否已有文件',
+    ),
     canNudge: optionalBoolean(rec.canNudge, true, '催交权限'),
     canPack: optionalBoolean(rec.canPack, true, '打包权限'),
   };
@@ -684,13 +692,6 @@ function serializeSlots(slots: SlotDraft[]) {
   });
 }
 
-function readCreateQuery(): { courseId: string; chapterId: string } {
-  const params = new URLSearchParams(window.location.search);
-  return {
-    courseId: params.get('fromCourse') || '',
-    chapterId: params.get('chapter') || '',
-  };
-}
 
 /**
  * 用户组下拉选项：常规选择器过滤已归档组；
@@ -871,7 +872,6 @@ export function AdminCollectEditPage() {
   const data = parseEditPageData(bs.page.data, bs.user.id);
   const initial = data.request;
   const isEdit = initial !== null;
-  const query = isEdit ? { courseId: '', chapterId: '' } : readCreateQuery();
   const canEdit = data.canEdit;
   const slotsLocked = data.hasSubmissions;
 
@@ -889,8 +889,8 @@ export function AdminCollectEditPage() {
   const [slotNonce, setSlotNonce] = useState(1);
   const [slots, setSlots] = useState<SlotDraft[]>(() => (initial?.slots.length ? initial.slots : [defaultSlot('new-0')]));
   const [collaborators, setCollaborators] = useState<DomainUserOption[]>(data.collaborators);
-  const [courseId, setCourseId] = useState(initial?.courseRef?.courseId || data.fromCourse || query.courseId);
-  const [chapterId, setChapterId] = useState(initial?.courseRef?.chapterId || data.chapter || query.chapterId);
+  const [courseId, setCourseId] = useState(initial?.courseRef?.courseId || data.fromCourse || '');
+  const [chapterId, setChapterId] = useState(initial?.courseRef?.chapterId || data.chapter || '');
   const [requireCourseExamComplete, setRequireCourseExamComplete] = useState(initial?.requireCourseExamComplete === true);
   const [maxFileMib, setMaxFileMib] = useState(bytesToMib(initial?.maxFileBytes || HARD_MAX_FILE_BYTES));
   const [maxTotalMib, setMaxTotalMib] = useState(bytesToMib(initial?.maxTotalBytes || HARD_MAX_TOTAL_BYTES));
@@ -1016,7 +1016,6 @@ export function AdminCollectEditPage() {
         <input type="hidden" name="courseId" value={courseId} />
         <input type="hidden" name="chapterId" value={chapterId} />
         <input type="hidden" name="requireCourseExamComplete" value={requireCourseExamComplete ? '1' : '0'} />
-
         <Card>
           <CardHeader>
             <CardTitle className="text-sm">基本信息</CardTitle>
@@ -1384,16 +1383,6 @@ export function AdminCollectEditPage() {
             <Button type="button" variant="ghost" asChild className="min-h-10">
               <a href="/admin/collect">取消</a>
             </Button>
-            {isEdit && status === 'published' ? (
-              <Button type="submit" name="operation" value="close" variant="outline" className="min-h-10">
-                关闭
-              </Button>
-            ) : null}
-            {isEdit && status === 'closed' ? (
-              <Button type="submit" name="operation" value="reopen" variant="outline" className="min-h-10">
-                重新开放
-              </Button>
-            ) : null}
             <Button type="submit" name="operation" value={isEdit ? 'update' : 'create'} className="min-h-10">
               <Save className="mr-1 size-3.5" />
               保存
@@ -1407,6 +1396,62 @@ export function AdminCollectEditPage() {
           </div>
         ) : null}
       </form>
+      {canEdit && isEdit && status === 'published' ? (
+        <form method="post" action={formAction} className="flex justify-end">
+          <input type="hidden" name="id" value={initial._id} />
+          <input type="hidden" name="revision" value={String(initial.revision)} />
+          <input type="hidden" name="operation" value="close" />
+          <Button type="submit" variant="outline" className="min-h-10">
+            关闭
+          </Button>
+        </form>
+      ) : null}
+      {canEdit && isEdit && status === 'closed' ? (
+        <form method="post" action={formAction} className="flex justify-end">
+          <input type="hidden" name="id" value={initial._id} />
+          <input type="hidden" name="revision" value={String(initial.revision)} />
+          <input type="hidden" name="operation" value="reopen" />
+          <Button type="submit" variant="outline" className="min-h-10">
+            重新开放
+          </Button>
+        </form>
+      ) : null}
+      {canEdit && isEdit && !data.hasFiles && status !== 'archived' ? (
+        <form method="post" action={formAction} className="flex justify-end">
+          <input type="hidden" name="id" value={initial._id} />
+          <input type="hidden" name="revision" value={String(initial.revision)} />
+          <input type="hidden" name="operation" value="delete" />
+          <Button
+            type="submit"
+            variant="destructive"
+            className="min-h-10"
+            onClick={(event) => {
+              if (!window.confirm(`确定删除文件收集「${title || initial?.title || ''}」？`)) event.preventDefault();
+            }}
+          >
+            <Trash2 className="mr-1 size-3.5" />
+            删除
+          </Button>
+        </form>
+      ) : null}
+      {canEdit && isEdit && data.hasFiles && status !== 'archived' ? (
+        <form method="post" action={formAction} className="flex justify-end">
+          <input type="hidden" name="id" value={initial._id} />
+          <input type="hidden" name="revision" value={String(initial.revision)} />
+          <input type="hidden" name="operation" value="archive" />
+          <Button
+            type="submit"
+            variant="outline"
+            className="min-h-10"
+            onClick={(event) => {
+              if (!window.confirm(`归档「${title || initial?.title || ''}」后不能再收文件，已交文件保留。`)) event.preventDefault();
+            }}
+          >
+            <Archive className="mr-1 size-3.5" />
+            归档
+          </Button>
+        </form>
+      ) : null}
     </ModuleWorkspace>
   );
 }
@@ -1473,6 +1518,38 @@ export function AdminCollectStatsPage() {
               <FileDown className="mr-1 size-4" />
               {packing ? '打包中…' : '打包下载'}
             </Button>
+          ) : null}
+          {data.request.canEdit && !data.hasFiles && data.request.status !== 'archived' ? (
+            <form method="post" action={`/admin/collect/${data.request._id}`}>
+              <input type="hidden" name="operation" value="delete" />
+              <Button
+                type="submit"
+                variant="destructive"
+                className="min-h-10"
+                onClick={(event) => {
+                  if (!window.confirm(`确定删除文件收集「${data.request.title}」？`)) event.preventDefault();
+                }}
+              >
+                <Trash2 className="mr-1 size-4" />
+                删除
+              </Button>
+            </form>
+          ) : null}
+          {data.request.canEdit && data.hasFiles && data.request.status !== 'archived' ? (
+            <form method="post" action={`/admin/collect/${data.request._id}`}>
+              <input type="hidden" name="operation" value="archive" />
+              <Button
+                type="submit"
+                variant="outline"
+                className="min-h-10"
+                onClick={(event) => {
+                  if (!window.confirm(`归档「${data.request.title}」后不能再收文件，已交文件保留。`)) event.preventDefault();
+                }}
+              >
+                <Archive className="mr-1 size-4" />
+                归档
+              </Button>
+            </form>
           ) : null}
           {data.request.canEdit ? (
             <Button asChild variant="outline" className="min-h-10">

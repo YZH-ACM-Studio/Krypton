@@ -33,6 +33,8 @@ interface HomeworkPageData {
   pids?: Array<string | number>;
   pdict?: Record<string, HomeworkProblem>;
   canGradeSubjective?: boolean;
+  canEditHomework?: boolean;
+  canDeleteHomework?: boolean;
 }
 
 function hwState(h: HomeworkDocument) {
@@ -149,11 +151,37 @@ export function HomeworkDetailPage() {
             <Badge variant={st.variant}>{st.label}</Badge>
           </div>
         </div>
-        {data.canGradeSubjective ? (
-          <Button asChild variant="outline">
-            <a href={`/manage/grading/${String(tdoc.docId)}`}>主观题阅卷</a>
-          </Button>
-        ) : null}
+        <div className="flex flex-wrap gap-2">
+          {data.canEditHomework ? (
+            <Button asChild variant="outline">
+              <a href={`/homework/${String(tdoc.docId)}/edit`}>编辑作业</a>
+            </Button>
+          ) : null}
+          {data.canDeleteHomework ? (
+            <Button asChild variant="outline">
+              <a href={`/homework/${String(tdoc.docId)}/file`}>文件</a>
+            </Button>
+          ) : null}
+          {data.canGradeSubjective ? (
+            <Button asChild variant="outline">
+              <a href={`/manage/grading/${String(tdoc.docId)}`}>主观题阅卷</a>
+            </Button>
+          ) : null}
+          {data.canDeleteHomework ? (
+            <form
+              method="post"
+              action={`/homework/${String(tdoc.docId)}/edit`}
+              onSubmit={(event) => {
+                if (!window.confirm('确定要删除此作业吗？')) event.preventDefault();
+              }}
+            >
+              <input type="hidden" name="operation" value="delete" />
+              <Button type="submit" variant="destructive">
+                删除
+              </Button>
+            </form>
+          ) : null}
+        </div>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">

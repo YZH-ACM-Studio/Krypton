@@ -1,5 +1,5 @@
 import { buildClientStructuredCodeSurface, type ClientStructuredCodeSegment } from '@hydrooj/common';
-import { ArrowLeft, ArrowRight, CheckCircle2, Copy, Eye, EyeOff, FileCode2, PencilLine, Plus, Save, Trash2 } from 'lucide-react';
+import { Archive, ArrowLeft, ArrowRight, CheckCircle2, Copy, Eye, EyeOff, FileCode2, PencilLine, Plus, Save, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { MarkdownEditor } from '@/components/markdown-renderer';
 import { useProblemDataWriteGuard, type ProblemDataWriteGuardState } from '@/components/problem-data-write-guard';
@@ -31,6 +31,7 @@ import { structuredCodeCompletionIssues, type StructuredAuthorStage, type Struct
 
 interface StructuredEditorProblemDoc {
   antiAiMarkers?: unknown;
+  archivedAt?: unknown;
   pid?: string | number;
   docId?: string | number;
   title?: string;
@@ -79,7 +80,7 @@ interface StructuredEditorPageData {
   knowledgeMindmapOptions?: KnowledgeMindmapOption[];
   canUseCustomPid?: unknown;
   statementWriteGuard?: ProblemDataWriteGuardState;
-  problemAuthoringCapabilities?: { canDelete?: boolean };
+  problemAuthoringCapabilities?: { canArchive?: boolean; canDelete?: boolean };
 }
 interface RegionMeta {
   key: string;
@@ -289,6 +290,7 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
     stages.findIndex((stage) => stage.id === activeStage),
   );
   const canDelete = !isCreate && data.problemAuthoringCapabilities?.canDelete === true;
+  const canArchive = !isCreate && data.problemAuthoringCapabilities?.canArchive === true && !pdoc.archivedAt;
 
   const structuredConfig = useMemo(
     () => ({
@@ -1111,6 +1113,30 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
           )}
         </footer>
       </form>
+      {!isCreate && canArchive ? (
+        <form
+          method="post"
+          action={String(bs.urls.problems || '/p')}
+          className="mt-6 rounded-xl border border-amber-500/25 bg-amber-500/[0.04] p-4"
+          onSubmit={(event) => {
+            if (!window.confirm(`归档题目「${pdoc.title || pid}」？归档后将强制隐藏。`)) event.preventDefault();
+          }}
+        >
+          <input type="hidden" name="operation" value="archive" />
+          <input type="hidden" name="pid" value={String(pdoc.docId)} />
+          <input type="hidden" name="reason" value="Archived from structured editor" />
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold">归档题目</h3>
+              <p className="mt-1 text-xs text-muted-foreground">归档后强制隐藏。可从题库归档列表继续查看。</p>
+            </div>
+            <Button type="submit" variant="outline" size="sm">
+              <Archive className="size-3.5" />
+              归档
+            </Button>
+          </div>
+        </form>
+      ) : null}
       {statementGuard.dialog}
       {navigationGuard.guardDialog}
     </main>

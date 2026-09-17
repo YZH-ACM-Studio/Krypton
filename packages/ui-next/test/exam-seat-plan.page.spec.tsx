@@ -556,6 +556,21 @@ describe('p2.5 exam seat assignment workspace', () => {
     expect(screen.getByText('离线')).toBeInTheDocument();
   });
 
+  it('keeps the seat workspace open when classroom sources are unavailable', async () => {
+    vi.stubGlobal(
+      'fetch',
+      fetchFixture([], {
+        ...ASSIGNMENT_RESPONSE,
+        source: null,
+        classrooms: [],
+        classroomWarning: 'assignment_classroom_reference_unavailable',
+      }),
+    );
+    renderPageAtStep('adjust');
+    expect(await screen.findByText('教室数据暂不可用，页面仍可打开。请检查教室布局后再写入。')).toBeInTheDocument();
+    expect(screen.getByText('张三')).toBeInTheDocument();
+  });
+
   it('operates a cross-classroom v2 revision without colliding identical source seat ids or reopening v1 mutations', async () => {
     const user = userEvent.setup();
     const postBodies: Record<string, unknown>[] = [];
@@ -2354,6 +2369,7 @@ describe('p2.5 exam seat assignment workspace', () => {
     expect(screen.queryByRole('button', { name: '一键预启动全部终端' })).not.toBeInTheDocument();
     await goToSeatPlanStep(user, '启动网络');
     expect(screen.queryByRole('button', { name: '下一步' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '停止' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '启动网络策略' }));
     await waitFor(() => expect(screen.getByRole('button', { name: '一键预启动全部终端' })).toBeEnabled());
     expect(posts.find((entry) => entry.url.endsWith('/network-execution'))?.body).toMatchObject({
@@ -2415,6 +2431,68 @@ describe('p2.5 exam seat assignment workspace', () => {
       expectedRevision: 7,
     });
     expect(prepareCalls).toBe(2);
+  });
+
+  it('stops an active network execution on the lock step after confirmation', async () => {
+    const preparation = preloginPreparation();
+    const active = preloginWorkflow();
+    const stopped = preloginWorkflow(2, 'config');
+    let prepareCalls = 0;
+    const posts: Array<{ body: Record<string, unknown>; url: string }> = [];
+    const confirm = vi.spyOn(window, 'confirm');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (init?.method === 'POST') {
+          const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+          posts.push({ body, url });
+          if (url.endsWith('/prelogin/prepare')) {
+            prepareCalls += 1;
+            return json({
+              preparation,
+              workflow: prepareCalls === 1 ? active : stopped,
+              v2WriterEnabled: true,
+              workflowWriterEnabled: true,
+            });
+          }
+          if (url.endsWith('/network-execution')) return json({ execution: {} });
+        }
+        if (url.endsWith('/seat-plans')) return json(PLAN_RESPONSE);
+        if (url.endsWith('/seat-assignments')) return json(PUBLISHED_ASSIGNMENT_RESPONSE);
+        if (url.endsWith('/prelogin-latest')) return json({ batch: null });
+        const assigned = assignedNetworkResponse(url);
+        if (assigned) return assigned;
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+    renderPageAtStep('preflight');
+    await openPreflightAfterAssignedNetwork(user);
+
+    await user.click(await screen.findByRole('button', { name: '运行终端预检' }));
+    await goToSeatPlanStep(user, '启动网络');
+    expect(screen.getByRole('button', { name: '停止' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: '启动网络策略' })).not.toBeInTheDocument();
+
+    confirm.mockReturnValueOnce(false);
+    await user.click(screen.getByRole('button', { name: '停止' }));
+    expect(posts.some((entry) => entry.url.endsWith('/network-execution'))).toBe(false);
+
+    confirm.mockReturnValueOnce(true);
+    await user.click(screen.getByRole('button', { name: '停止' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '启动网络策略' })).toBeEnabled());
+
+    expect(confirm).toHaveBeenCalledWith(
+      '停止网络策略？停止命令仍需逐机执行且终端必须在线。离线终端不会被记成已释放；已整盘还原的机器先在本机运行 --network-lock-recover。',
+    );
+    expect(posts.find((entry) => entry.url.endsWith('/network-execution'))?.body).toMatchObject({
+      action: 'stop',
+      expectedRevision: 7,
+    });
+    expect(prepareCalls).toBe(2);
+    expect(screen.queryByRole('button', { name: '停止' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '下一步' })).not.toBeInTheDocument();
   });
 
   it('recovers the same confirm request after the HTTP response is lost', async () => {
@@ -3264,6 +3342,7 @@ describe('p2.5 exam seat assignment workspace', () => {
     expect(screen.queryByRole('button', { name: '下一步' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '一键预启动全部终端' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '重试当前网络请求' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '停止' })).toBeEnabled();
   });
 
   it('rejects a launch URL to network when a historical batch exists but the current publication has no network', async () => {

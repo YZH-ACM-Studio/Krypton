@@ -99,6 +99,24 @@ export function MyVerifyInboxPage() {
     window.location.reload();
   }
 
+  async function revokeViaContest(tid: string) {
+    if (!confirm('退出该比赛的验题角色？')) return;
+    setActionError('');
+    const fd = new FormData();
+    fd.set('uid', String(bs.user.id));
+    const r = await fetchHydroResponse(`/contest/${tid}/verifiers/remove`, {
+      method: 'POST',
+      body: fd,
+      credentials: 'include',
+      headers: { Accept: 'application/json' },
+    });
+    if (!r.ok) {
+      setActionError(await readHydroResponseError(r, '退出协作失败'));
+      return;
+    }
+    window.location.reload();
+  }
+
   async function complete(row: ContributionRow) {
     const key = `${row.pid}:${row.scope}`;
     setCompleting(key);
@@ -227,7 +245,7 @@ export function MyVerifyInboxPage() {
             <CardContent className="p-0">
               <ul className="divide-y">
                 {rows.map((p) => (
-                  <PermitRowItem key={p._id} permit={p} pdict={data.pdict} udict={data.udict} onRevoke={() => revoke(p.pid, p._id)} />
+                  <PermitRowItem key={p._id} permit={p} pdict={data.pdict} udict={data.udict} onRevoke={() => revokeViaContest(tid)} />
                 ))}
               </ul>
             </CardContent>

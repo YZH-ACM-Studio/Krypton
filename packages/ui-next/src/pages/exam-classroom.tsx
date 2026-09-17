@@ -48,6 +48,7 @@ import { SimpleSelect } from '@/components/ui/select';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
+import { isSystemAdmin } from '@/lib/perms';
 import { createRequestId } from '@/lib/request-id';
 
 type SeatStatus = 'conflict' | 'identity-change' | 'offline' | 'online' | 'unbound' | 'unknown';
@@ -232,8 +233,11 @@ interface ConfirmPlan {
   confirmLabel: string;
   destructive?: boolean;
   facts: Array<{ label: string; value: string }>;
-  run: () => Promise<void>;
+  reasonDefault?: string;
+  run: (input?: { reason: string }) => Promise<void>;
 }
+
+const DEFAULT_REPLACEMENT_REVOKE_REASON = '换机后吊销旧终端';
 
 interface CanvasGeometry {
   width: number;
@@ -746,33 +750,67 @@ function Notice({ error, message }: { error?: string | null; message?: string | 
 function ConfirmActionDialog({ plan, busy, error, close }: { plan: ConfirmPlan | null; busy: boolean; error: string | null; close: () => void }) {
   return (
     <Dialog open={Boolean(plan)} onOpenChange={(open) => !open && !busy && close()}>
-      {plan ? (
-        <DialogContent className="w-[min(560px,calc(100vw-1.5rem))]" onClose={busy ? undefined : close}>
-          <DialogHeader>
-            <DialogTitle>{plan.title}</DialogTitle>
-            <p className="mt-1 pr-8 text-sm leading-6 text-muted-foreground">{plan.description}</p>
-          </DialogHeader>
-          <DialogBody className="space-y-3 px-6 py-5">
-            <Notice error={error} />
-            {plan.facts.map((fact) => (
-              <div key={fact.label} className="grid gap-1 rounded-lg border bg-muted/20 px-3 py-2 sm:grid-cols-[9rem_1fr]">
-                <span className="text-xs font-medium text-muted-foreground">{fact.label}</span>
-                <span className="break-words text-sm">{fact.value}</span>
-              </div>
-            ))}
-          </DialogBody>
-          <div className="flex justify-end gap-2 border-t px-6 py-4">
-            <Button type="button" variant="outline" disabled={busy} autoFocus onClick={close}>
-              取消
-            </Button>
-            <Button type="button" variant={plan.destructive ? 'destructive' : 'default'} disabled={busy} onClick={() => void plan.run()}>
-              {busy ? <CircleDashed className="size-4 animate-spin" aria-hidden="true" /> : null}
-              {plan.confirmLabel}
-            </Button>
-          </div>
-        </DialogContent>
-      ) : null}
+      {plan ? <ConfirmActionDialogContent key={plan.title} plan={plan} busy={busy} error={error} close={close} /> : null}
     </Dialog>
+  );
+}
+
+function ConfirmActionDialogContent({
+  plan,
+  busy,
+  error,
+  close,
+}: {
+  plan: ConfirmPlan;
+  busy: boolean;
+  error: string | null;
+  close: () => void;
+}) {
+  const [reason, setReason] = useState(plan.reasonDefault ?? '');
+  const trimmedReason = reason.trim();
+  const reasonReady = plan.reasonDefault === undefined || (trimmedReason.length > 0 && trimmedReason.length <= 500);
+  return (
+    <DialogContent className="w-[min(560px,calc(100vw-1.5rem))]" onClose={busy ? undefined : close}>
+      <DialogHeader>
+        <DialogTitle>{plan.title}</DialogTitle>
+        <p className="mt-1 pr-8 text-sm leading-6 text-muted-foreground">{plan.description}</p>
+      </DialogHeader>
+      <DialogBody className="space-y-3 px-6 py-5">
+        <Notice error={error} />
+        {plan.facts.map((fact) => (
+          <div key={fact.label} className="grid gap-1 rounded-lg border bg-muted/20 px-3 py-2 sm:grid-cols-[9rem_1fr]">
+            <span className="text-xs font-medium text-muted-foreground">{fact.label}</span>
+            <span className="break-words text-sm">{fact.value}</span>
+          </div>
+        ))}
+        {plan.reasonDefault !== undefined ? (
+          <label className="grid gap-1">
+            <span className="text-xs font-medium text-muted-foreground">吊销原因</span>
+            <Input
+              aria-label="吊销原因"
+              value={reason}
+              maxLength={500}
+              disabled={busy}
+              onChange={(event) => setReason(event.target.value)}
+            />
+          </label>
+        ) : null}
+      </DialogBody>
+      <div className="flex justify-end gap-2 border-t px-6 py-4">
+        <Button type="button" variant="outline" disabled={busy} autoFocus onClick={close}>
+          取消
+        </Button>
+        <Button
+          type="button"
+          variant={plan.destructive ? 'destructive' : 'default'}
+          disabled={busy || !reasonReady}
+          onClick={() => void plan.run({ reason: trimmedReason })}
+        >
+          {busy ? <CircleDashed className="size-4 animate-spin" aria-hidden="true" /> : null}
+          {plan.confirmLabel}
+        </Button>
+      </div>
+    </DialogContent>
   );
 }
 
@@ -1407,11 +1445,14 @@ function RecentOperations({ state }: { state: ClassroomState }) {
 }
 
 function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
+  const bootstrap = useBootstrap();
+  const canRevokeEndpoint = isSystemAdmin(bootstrap.user.priv);
   const [state, setState] = useState<ClassroomState | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [pendingRevoke, setPendingRevoke] = useState<{ endpointId: string; seatLabel: string } | null>(null);
   const [query, setQuery] = useState('');
   const [zoom, setZoom] = useState(1);
   const [clock, setClock] = useState(Date.now());
@@ -1773,6 +1814,12 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
             );
             setPlan(null);
             setMessage(`${view.seat.label || view.seat.sourceSeatId} 已完成换机。`);
+            if (canRevokeEndpoint) {
+              setPendingRevoke({
+                endpointId: oldEndpointId,
+                seatLabel: view.seat.label || view.seat.sourceSeatId,
+              });
+            }
             await load(true);
           } catch (cause) {
             setPlanError(cause instanceof Error ? cause.message : '确认换机失败');
@@ -1786,6 +1833,40 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
     } finally {
       setBusy(false);
     }
+  };
+
+  const requestOldEndpointRevoke = (target: { endpointId: string; seatLabel: string }) => {
+    setPlan({
+      title: '吊销旧终端凭据',
+      description: `换机完成后旧终端仍然有效。确认吊销 ${target.endpointId} 的凭据后，该终端将无法再用于考试。`,
+      confirmLabel: '确认吊销',
+      destructive: true,
+      reasonDefault: DEFAULT_REPLACEMENT_REVOKE_REASON,
+      facts: [
+        { label: '实体座位', value: target.seatLabel },
+        { label: '旧 Endpoint', value: target.endpointId },
+      ],
+      run: async (input) => {
+        const reason = input?.reason.trim() ?? '';
+        if (!reason) return;
+        setPlanBusy(true);
+        setPlanError(null);
+        try {
+          await postJson(
+            `/api/admin/endpoint-credentials/${encodeURIComponent(target.endpointId)}/revoke`,
+            { reason },
+            '吊销旧终端失败',
+          );
+          setPlan(null);
+          setPendingRevoke(null);
+          setMessage(`已吊销旧终端 ${target.endpointId}。`);
+        } catch (cause) {
+          setPlanError(cause instanceof Error ? cause.message : '吊销旧终端失败');
+        } finally {
+          setPlanBusy(false);
+        }
+      },
+    });
   };
 
   const cancelPairing = async (view: SeatView) => {
@@ -1874,6 +1955,12 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
             <Button variant="outline" disabled={busy} onClick={() => void requestUnbind(undoView, true)}>
               <RotateCcw className="size-4" aria-hidden="true" />
               撤销刚完成的绑定
+            </Button>
+          ) : null}
+          {canRevokeEndpoint && pendingRevoke ? (
+            <Button variant="destructive" disabled={busy} onClick={() => requestOldEndpointRevoke(pendingRevoke)}>
+              <Ban className="size-4" aria-hidden="true" />
+              吊销旧终端
             </Button>
           ) : null}
           <Button variant="outline" disabled={busy} onClick={() => void load()}>
@@ -2135,6 +2222,7 @@ export function ClassroomLauncher({ schools }: { schools: ClassroomLauncherSchoo
   const [loading, setLoading] = useState(false);
   const [requested, setRequested] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [classroomWarning, setClassroomWarning] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open || requested) return;
@@ -2143,7 +2231,16 @@ export function ClassroomLauncher({ schools }: { schools: ClassroomLauncherSchoo
     void apiObject('/api/admin/exam-infrastructure/classrooms', undefined, '加载教室列表失败')
       .then((payload) => {
         if (!Array.isArray(payload.classrooms)) throw new Error('教室列表响应格式不正确');
+        const warning =
+          payload.classroomWarning == null
+            ? null
+            : payload.classroomWarning === 'classroom_sources_unavailable'
+              ? 'classroom_sources_unavailable'
+              : (() => {
+                  throw new Error('教室列表警告格式不正确');
+                })();
         setClassrooms(payload.classrooms.map(parseClassroomSummary));
+        setClassroomWarning(warning);
         setError(null);
       })
       .catch((cause) => setError(cause instanceof Error ? cause.message : '加载教室列表失败'))
@@ -2174,6 +2271,11 @@ export function ClassroomLauncher({ schools }: { schools: ClassroomLauncherSchoo
           </DialogHeader>
           <DialogBody className="space-y-4 px-6 py-5">
             <Notice error={error} />
+            {classroomWarning === 'classroom_sources_unavailable' ? (
+              <div role="alert" className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
+                教室数据暂不可用，页面仍可打开。请检查教室布局后再写入。
+              </div>
+            ) : null}
             <label className="relative block">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
               <span className="sr-only">搜索教室</span>

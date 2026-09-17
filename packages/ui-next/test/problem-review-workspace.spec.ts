@@ -106,6 +106,10 @@ it('namespace review exposes only the approved metadata, return, visibility and 
   assert.match(review, /保存审核信息/);
   assert.match(review, /退回修改/);
   assert.match(review, /\{metadataDraft \? \(\s*<label[\s\S]*?name="finalHidden" value="true"[\s\S]*?审核后保持隐藏[\s\S]*?\) : null\}/);
+  assert.match(
+    problems,
+    /\{pdoc\.managedAuthoring\?\.metadataStatus === 'draft' \? \(\s*<label[\s\S]*?name="finalHidden" value="true"[\s\S]*?审核后保持隐藏[\s\S]*?\) : null\}/,
+  );
   assert.doesNotMatch(review, /生成 canonical 标签|未找到 canonical 出题人/);
   assert.match(review, /生成系统标签/);
   assert.match(review, /未找到出题人/);

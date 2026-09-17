@@ -41,5 +41,8 @@ describe('p4.3 virtual contest UI', () => {
     expect(records).to.include('virtual: virtualRecords');
     expect(records).to.include('virtual: virtualAttemptOpen');
     expect(records).to.include('virtual: true');
+    expect(records).to.include('/contest/${encodeURIComponent(tid)}/virtual/rejudge?attemptId=${encodeURIComponent(attemptId)}');
+    expect(records).to.include('virtualAttemptId');
+    expect(records).to.include('sourceContestId');
   });
 });

@@ -84,5 +84,11 @@ describe('p1.13 team scoring and record-access contracts', () => {
     expect(contestsPage).to.include('imageExportRows');
     expect(managePage).to.include('恢复正式');
     expect(managePage).not.to.include('不计排名');
+    expect(managePage).to.include("tdoc.participationMode === 'team' || Boolean(tdoc.teamBatchId)");
+    expect(managePage).to.include('/contest/${tid}/teams');
+    expect(managePage).to.include('团队赛请到');
+    expect(managePage).to.include("const canStar = !isTeamMode && ['acm', 'oi', 'ioi', 'strictioi'].includes(String(tdoc.rule || '').toLowerCase())");
+    expect(managePage).to.match(/\{canStar \? \(\s*<label[\s\S]{0,200}<Checkbox name="unrank"/);
+    expect(managePage).to.match(/\{canStar \? \(\s*<form method="post"[\s\S]{0,200}name="operation" value="rank"/);
   });
 });

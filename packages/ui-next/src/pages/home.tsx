@@ -216,12 +216,14 @@ export function KryptonHomePage() {
                 </div>
               ) : null}
               <div className="flex flex-wrap gap-2">
-                <Button asChild>
-                  <a href={bs.urls.problems}>
-                    开始刷题
-                    <ArrowRight className="size-4" />
-                  </a>
-                </Button>
+                {bs.user.canBrowseProblemBank === true ? (
+                  <Button asChild>
+                    <a href={bs.urls.problems}>
+                      开始刷题
+                      <ArrowRight className="size-4" />
+                    </a>
+                  </Button>
+                ) : null}
                 <Button asChild variant="outline">
                   <a href={bs.urls.contests}>查看比赛</a>
                 </Button>
@@ -229,6 +231,7 @@ export function KryptonHomePage() {
             </div>
 
             {/* Search panel */}
+            {bs.user.canBrowseProblemBank === true ? (
             <div className="flex flex-col gap-3 rounded-lg border bg-card p-4">
               <p className="text-sm font-medium">快速搜索</p>
               <form
@@ -268,6 +271,7 @@ export function KryptonHomePage() {
                 </div>
               ) : null}
             </div>
+            ) : null}
           </CardContent>
         </Card>
       </motion.section>

@@ -219,12 +219,31 @@ describe('collect teacher payload contracts', () => {
     expect(handler).to.include('hasFiles');
     expect(handler).to.include("canNudge: request.status === 'published' || request.status === 'closed'");
     expect(handler).to.include('canPack: true');
-    expect(handler).to.include('serializeRequest(request, { canEdit })');
+    expect(handler).to.include('serializeRequest(request, { canEdit, hasFiles })');
+    expect(admin).to.include('initial?.courseRef?.courseId || data.fromCourse || \'\'');
+    expect(admin).not.to.include('query.courseId');
     expect(admin).to.include('rec.prefillSchoolId');
     expect(admin).not.to.include('prefillSchoolId: rec.schoolId');
     expect(admin).to.include('hasFiles: optionalBoolean(rec.hasFiles');
     expect(admin).to.include('!item.hasFiles');
     expect(admin).to.include('item.hasFiles && item.status');
+    expect(admin).to.include('const slotsLocked = data.hasSubmissions');
+    expect(admin).to.include("!data.hasFiles && status !== 'archived'");
+    expect(admin).to.include("data.hasFiles && status !== 'archived'");
+    expect(admin).to.include('value="delete"');
+    expect(admin).to.include('value="archive"');
+    const saveForm = admin.slice(
+      admin.indexOf('<form method="post" action={formAction} className="space-y-4">'),
+      admin.indexOf('      </form>'),
+    );
+    expect(saveForm).not.to.include('value="delete"');
+    expect(saveForm).not.to.include('value="archive"');
+    expect(saveForm).not.to.include('value="close"');
+    expect(saveForm).not.to.include('value="reopen"');
+    expect(admin).to.include('value="close"');
+    expect(admin).to.include('value="reopen"');
+    expect(admin).to.include("!data.hasFiles && data.request.status !== 'archived'");
+    expect(admin).to.include("data.hasFiles && data.request.status !== 'archived'");
     expect(admin).to.include("chapter: asOptionalId(rec.chapter, '来源章节')");
   });
 

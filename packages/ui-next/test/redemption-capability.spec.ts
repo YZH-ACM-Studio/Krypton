@@ -46,6 +46,10 @@ describe('p3.7 redemption manage capability', () => {
     expect(training).to.include('RedeemDialogButton');
     expect(manage).to.include('仅此一次');
     expect(manage).to.include('撤销该来源');
+    expect(manage).to.include('method="get" action="/manage/redemption-codes"');
+    expect(manage).to.include('查找用户权益');
+    expect(manage).to.include('setRevokeEntitlementId(row.entitlementId)');
+    expect(manage).not.to.include('row.code');
     expect(redeem).to.include('name="code"');
   });
 });

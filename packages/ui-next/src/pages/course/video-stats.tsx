@@ -82,6 +82,9 @@ export function CourseVideoStatsPage() {
   const videos = readVideos(data.videos);
   const members = readMembers(data.members);
   const noGroups = data.rosterUnavailable === 'no_groups';
+  const invalidGroups = data.rosterUnavailable === 'invalid_groups';
+  const rosterBlocked = noGroups || invalidGroups;
+  const rosterWarning = typeof data.rosterWarning === 'string' ? data.rosterWarning : null;
 
   return (
     <main className="w-full min-w-0 pb-10">
@@ -95,7 +98,7 @@ export function CourseVideoStatsPage() {
           <p className="text-sm text-muted-foreground">观看统计</p>
           <h1 className="truncate text-xl font-semibold tracking-tight">{title}</h1>
         </div>
-        {noGroups ? null : (
+        {rosterBlocked ? null : (
           <Button asChild variant="outline" size="sm" className="h-9 gap-1.5">
             <a href={`/course/${tid}/videos.csv`}>
               <Download className="size-3.5" strokeWidth={1.75} />
@@ -104,11 +107,22 @@ export function CourseVideoStatsPage() {
           </Button>
         )}
       </header>
-      {noGroups ? (
+      {rosterWarning && !rosterBlocked ? (
+        <p role="alert" className="mb-6 rounded-lg border border-amber-500/35 bg-amber-500/[0.06] px-3 py-2 text-sm text-amber-800 dark:text-amber-300">
+          {rosterWarning}
+        </p>
+      ) : null}
+      {rosterBlocked ? (
         <Card>
           <CardContent className="flex flex-col items-start gap-3 p-6">
-            <p className="text-sm font-medium">没有绑定班级，无法出观看名单</p>
-            <p className="text-sm text-muted-foreground">全站可见的课不会把所有用户列进统计。请先在编辑页选择可见班级。</p>
+            <p className="text-sm font-medium">
+              {invalidGroups ? '课程绑定的班级引用已失效，无法出观看名单' : '没有绑定班级，无法出观看名单'}
+            </p>
+            <p className="text-sm text-muted-foreground">
+              {invalidGroups
+                ? '请先在编辑页重新选择可见班级。'
+                : '全站可见的课不会把所有用户列进统计。请先在编辑页选择可见班级。'}
+            </p>
             <Button asChild size="sm">
               <a href={`/course/${tid}/edit`}>去设置班级</a>
             </Button>

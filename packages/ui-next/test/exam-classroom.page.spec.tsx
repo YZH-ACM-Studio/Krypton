@@ -1,21 +1,22 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BootstrapProvider, type KryptonBootstrap } from '../src/lib/bootstrap.tsx';
 import { clearAdminNavRegistry, registerAdminNavSection } from '../src/lib/admin-nav-registry.ts';
+import { PRIV } from '../src/lib/perms.ts';
 import { ExamClassroomPage } from '../src/pages/exam-classroom.tsx';
 
 const CLASSROOM_ID = '66b800000000000000000701';
 const SCHOOL_ID = '66b800000000000000000702';
 
-function bootstrap(allowed = true): KryptonBootstrap {
+function bootstrap(allowed = true, priv = 0): KryptonBootstrap {
   return {
     appName: 'Krypton',
     siteName: 'Krypton OJ',
     locale: 'zh_CN',
     theme: 'light',
     generatedAt: '2026-08-11T00:00:00.000Z',
-    user: { id: 2, name: 'teacher', signedIn: true, priv: 0, canManageExamInfrastructure: allowed } as KryptonBootstrap['user'],
+    user: { id: 2, name: 'teacher', signedIn: true, priv, canManageExamInfrastructure: allowed } as KryptonBootstrap['user'],
     domain: { id: 'system', name: '主域', bulletin: '', avatar: '' },
     urls: { home: '/' } as KryptonBootstrap['urls'],
     udict: {},
@@ -23,9 +24,9 @@ function bootstrap(allowed = true): KryptonBootstrap {
   };
 }
 
-function renderPage(allowed = true) {
+function renderPage(allowed = true, priv = 0) {
   return render(
-    <BootstrapProvider bootstrap={bootstrap(allowed)}>
+    <BootstrapProvider bootstrap={bootstrap(allowed, priv)}>
       <ExamClassroomPage />
     </BootstrapProvider>,
   );
@@ -550,6 +551,7 @@ describe('exam classroom endpoint binding workspace', () => {
     expect(await screen.findAllByText('ep_replaced_000001')).not.toHaveLength(0);
 
     expect(screen.queryByRole('button', { name: '撤销刚完成的绑定' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '吊销旧终端' })).not.toBeInTheDocument();
 
     vi.mocked(fetch).mockResolvedValueOnce(
       json(
@@ -562,6 +564,219 @@ describe('exam classroom endpoint binding workspace', () => {
     await user.click(screen.getByRole('button', { name: '刷新状态' }));
     expect(await screen.findAllByText('ep_external_0000003')).not.toHaveLength(0);
     expect(screen.queryByRole('button', { name: '撤销刚完成的绑定' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '吊销旧终端' })).not.toBeInTheDocument();
+  });
+
+  it('lets a system admin revoke the old endpoint after confirmReplacement without auto-revoking', async () => {
+    window.history.replaceState({}, '', `/admin/exam-infrastructure/classrooms/${CLASSROOM_ID}?seat=seat-1`);
+    const oldEndpointId = 'ep_online_00000001';
+    const newEndpointId = 'ep_replaced_000001';
+    const windowId = '66b800000000000000000720';
+    const claimedWindow = {
+      windowId,
+      status: 'open',
+      revision: 2,
+      expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
+      entries: [
+        {
+          sourceSeatId: 'seat-1',
+          mode: 'replace',
+          status: 'claimed',
+          revision: 2,
+          codeHint: '01',
+          expectedBindingRevision: 1,
+          claimedEndpointId: newEndpointId,
+          claimedAt: '2026-08-11T01:10:00.000Z',
+          bindingRevision: null,
+          completedAt: null,
+        },
+      ],
+      createdAt: '2026-08-11T01:00:00.000Z',
+      createdBy: 2,
+      closedAt: null,
+      closedBy: null,
+    };
+    const replacedBinding = {
+      ...binding('seat-1', newEndpointId, 2),
+      history: [
+        {
+          revision: 1,
+          action: 'bind',
+          actorUid: 2,
+          at: '2026-08-11T01:00:00.000Z',
+          endpointId: oldEndpointId,
+          previousEndpointId: null,
+        },
+        {
+          revision: 2,
+          action: 'replace',
+          actorUid: 2,
+          at: '2026-08-11T01:12:00.000Z',
+          endpointId: newEndpointId,
+          previousEndpointId: oldEndpointId,
+        },
+      ],
+    };
+    let confirmed = false;
+    const posts: Array<{ url: string; body: Record<string, unknown> }> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (init?.method === 'POST') {
+          const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+          posts.push({ url, body });
+          if (url.includes('/endpoint-credentials/') && url.endsWith('/revoke')) {
+            return json({ ok: true, endpointId: oldEndpointId });
+          }
+          if (body.action === 'previewReplacement') {
+            return json({
+              preview: {
+                references: [],
+                windowId,
+                entryRevision: 2,
+                bindingRevision: 1,
+                confirmationFingerprint: 'c'.repeat(64),
+                oldEndpointId,
+                newEndpointId,
+              },
+            });
+          }
+          if (body.action === 'confirmReplacement') {
+            confirmed = true;
+            return json({ ok: true });
+          }
+          throw new Error(`unexpected POST ${url}`);
+        }
+        return json(
+          stateFixture({
+            bindings: confirmed ? [replacedBinding, binding('seat-2', 'ep_offline_0000002')] : stateFixture().bindings,
+            pairingWindow: confirmed
+              ? {
+                  ...claimedWindow,
+                  revision: 3,
+                  entries: [
+                    {
+                      ...claimedWindow.entries[0],
+                      status: 'bound',
+                      revision: 3,
+                      bindingRevision: 2,
+                      completedAt: '2026-08-11T01:12:01.000Z',
+                    },
+                  ],
+                }
+              : claimedWindow,
+            endpointPreflight: {
+              state: 'available',
+              items: [
+                {
+                  endpointId: confirmed ? newEndpointId : oldEndpointId,
+                  ready: true,
+                  reason: 'ready',
+                  credentialStatus: 'active',
+                  online: true,
+                  compatible: true,
+                  serviceVersion: '0.4.0',
+                  protocolVersion: 2,
+                },
+                stateFixture().endpointPreflight.items[1],
+              ],
+            },
+          }),
+        );
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage(true, PRIV.PRIV_EDIT_SYSTEM);
+
+    await user.click(await screen.findByRole('button', { name: '确认换机' }));
+    const replacementDialog = await screen.findByRole('dialog', { name: '确认终端换机' });
+    await user.click(within(replacementDialog).getByRole('button', { name: '确认换机' }));
+    expect(await screen.findByText('A-01 已完成换机。')).toBeInTheDocument();
+    expect(posts.filter((item) => item.url.includes('/endpoint-credentials/'))).toHaveLength(0);
+
+    await user.click(screen.getByRole('button', { name: '吊销旧终端' }));
+    const revokeDialog = await screen.findByRole('dialog', { name: '吊销旧终端凭据' });
+    expect(
+      within(revokeDialog).getByText(`换机完成后旧终端仍然有效。确认吊销 ${oldEndpointId} 的凭据后，该终端将无法再用于考试。`),
+    ).toBeInTheDocument();
+    expect(within(revokeDialog).getByRole('textbox', { name: '吊销原因' })).toHaveValue('换机后吊销旧终端');
+    await user.click(within(revokeDialog).getByRole('button', { name: '确认吊销' }));
+
+    await waitFor(() => expect(posts.filter((item) => item.url.includes('/endpoint-credentials/'))).toHaveLength(1));
+    expect(posts.at(-1)).toEqual({
+      url: `/api/admin/endpoint-credentials/${oldEndpointId}/revoke`,
+      body: { reason: '换机后吊销旧终端' },
+    });
+    expect(await screen.findByText(`已吊销旧终端 ${oldEndpointId}。`)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '吊销旧终端' })).not.toBeInTheDocument();
+  });
+
+  it('hides the post-replacement revoke control without PRIV_EDIT_SYSTEM', async () => {
+    window.history.replaceState({}, '', `/admin/exam-infrastructure/classrooms/${CLASSROOM_ID}?seat=seat-1`);
+    const windowId = '66b800000000000000000720';
+    const claimedWindow = {
+      windowId,
+      status: 'open',
+      revision: 2,
+      expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
+      entries: [
+        {
+          sourceSeatId: 'seat-1',
+          mode: 'replace',
+          status: 'claimed',
+          revision: 2,
+          codeHint: '01',
+          expectedBindingRevision: 1,
+          claimedEndpointId: 'ep_replaced_000001',
+          claimedAt: '2026-08-11T01:10:00.000Z',
+          bindingRevision: null,
+          completedAt: null,
+        },
+      ],
+      createdAt: '2026-08-11T01:00:00.000Z',
+      createdBy: 2,
+      closedAt: null,
+      closedBy: null,
+    };
+    const posts: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (init?.method === 'POST') {
+          const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+          posts.push(url);
+          if (body.action === 'previewReplacement') {
+            return json({
+              preview: {
+                references: [],
+                windowId,
+                entryRevision: 2,
+                bindingRevision: 1,
+                confirmationFingerprint: 'c'.repeat(64),
+                oldEndpointId: 'ep_online_00000001',
+                newEndpointId: 'ep_replaced_000001',
+              },
+            });
+          }
+          if (body.action === 'confirmReplacement') {
+            return json({ ok: true });
+          }
+          throw new Error(`unexpected POST ${url}`);
+        }
+        return json(stateFixture({ pairingWindow: claimedWindow }));
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: '确认换机' }));
+    const replacementDialog = await screen.findByRole('dialog', { name: '确认终端换机' });
+    await user.click(within(replacementDialog).getByRole('button', { name: '确认换机' }));
+    expect(await screen.findByText('A-01 已完成换机。')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '吊销旧终端' })).not.toBeInTheDocument();
+    expect(posts.some((url) => url.includes('/endpoint-credentials/'))).toBe(false);
   });
 
   it('renders a dense 500-seat classroom from one aggregated state request', async () => {

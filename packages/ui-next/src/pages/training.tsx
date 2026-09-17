@@ -124,6 +124,7 @@ interface TrainingPageData {
   tsdoc?: TrainingStatusDoc;
   udoc?: { uname?: string };
   access?: ProblemSetAccessDecision | Record<string, ProblemSetAccessDecision | undefined>;
+  canManage?: boolean;
 }
 
 /* ────────────────────────────────────────────────────────────────── */
@@ -626,7 +627,7 @@ export function TrainingDetailPage() {
   const selectedStatus = selectedNid != null ? nsdict[selectedNid] || {} : {};
   const selectedEnterable = selected ? isStageEnterable(selectedStatus) : false;
   const selectedLock = selected ? stageLockReason(selectedStatus) : null;
-  const isOwner = data.tdoc?.owner === bs.user?.id;
+  const canManage = data.canManage === true;
   const trainingUrl = replaceRouteTokens(bs.urls.trainingDetail, { TID: String(tdoc.docId) });
   const [problemQuery, setProblemQuery] = useState('');
   const problemSearch = useMemo(
@@ -714,10 +715,26 @@ export function TrainingDetailPage() {
               </a>
             </Button>
           ) : null}
-          {isOwner ? (
-            <Button asChild variant="outline" size="sm">
-              <a href={`${trainingUrl}/edit`}>编辑</a>
-            </Button>
+          {canManage ? (
+            <>
+              <Button asChild variant="outline" size="sm">
+                <a href={`${trainingUrl}/edit`}>编辑</a>
+              </Button>
+              <Button asChild variant="outline" size="sm">
+                <a href={`${trainingUrl}/file`}>文件</a>
+              </Button>
+              <form
+                method="post"
+                onSubmit={(event) => {
+                  if (!window.confirm(`确定删除题集「${tdoc.title || ''}」？`)) event.preventDefault();
+                }}
+              >
+                <input type="hidden" name="operation" value="delete" />
+                <Button type="submit" variant="outline" size="sm">
+                  删除
+                </Button>
+              </form>
+            </>
           ) : null}
         </div>
       </div>

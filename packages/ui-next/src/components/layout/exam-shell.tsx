@@ -304,7 +304,7 @@ export function ExamContestShell({ children }: { children: ReactNode }) {
   const urls = examMode.urls || {};
   const beginAt = examMode.beginAt ? Date.parse(examMode.beginAt) : Number.NaN;
   const beforeStart = Number.isFinite(beginAt) && Date.now() < beginAt && !examMode.previewMode;
-  const lockedBeforeStart = new Set<ExamSection>(['problems', 'print']);
+  const lockedBeforeStart = new Set<ExamSection>();
   const items = CLIENT_WORKSPACE_SIDEBAR.filter((item) => item.key !== 'print' || examMode.allowPrint);
   const teamContext = readTeamExamModeContext(examMode);
   const teamRoleTid = String(examMode.tid || '');

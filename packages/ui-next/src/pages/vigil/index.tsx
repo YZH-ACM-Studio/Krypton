@@ -94,7 +94,7 @@ function OfflineBanner({ err, onRetry }: { err: VigilOfflineError; onRetry: () =
   const [showDetail, setShowDetail] = useState(false);
   const reasonHints: Record<VigilOfflineError['reason'], string> = {
     not_configured:
-      '反作弊服务地址尚未配置。vigil.baseUrl 是 Mongo system 集合中的键，不会出现在系统设置页面。请管理员用 mongosh 写入该键，然后重启 hydrooj。',
+      '反作弊服务地址尚未配置。请到系统设置 → 反作弊填写 vigil.baseUrl，保存后重启 hydrooj。',
     network: '反作弊服务无法访问 — 检查 KVS 服务器是否在线，以及网络连通性。',
     non_json: '反作弊服务返回了非预期的响应（可能是 URL 配置错误，请求被 OJ 兜底）。',
     token_failed:

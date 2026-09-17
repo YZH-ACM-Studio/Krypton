@@ -78,6 +78,12 @@ export function AdminMindmapPage() {
   const busy = saveState === 'saving';
 
   useEffect(() => {
+    if (!initial.staleMapId) return;
+    const href = initial.config ? `/admin/mindmap?map=${encodeURIComponent(initial.config._id)}` : '/admin/mindmap';
+    window.history.replaceState(null, '', href);
+  }, [initial.config, initial.staleMapId]);
+
+  useEffect(() => {
     if (!selectedId) return;
     setPreviewCollapsed((current) => {
       const next = new Set(current);
@@ -253,6 +259,11 @@ export function AdminMindmapPage() {
     <ReactFlowProvider>
       <div className="flex h-[calc(100dvh-4.5rem)] min-h-[42rem] w-full min-w-0 flex-col gap-4 overflow-hidden sm:h-[calc(100dvh-6rem)] xl:h-[calc(100dvh-7rem)]">
         <header className="shrink-0 space-y-3">
+          {initial.staleMapId ? (
+            <p role="alert" className="rounded-lg border border-amber-500/35 bg-amber-500/[0.06] px-3 py-2 text-sm text-amber-800 dark:text-amber-300">
+              当前链接里的导图已不可用，已打开默认或第一张可用导图。
+            </p>
+          ) : null}
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-3">
               <a

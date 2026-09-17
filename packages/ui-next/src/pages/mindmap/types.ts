@@ -55,4 +55,5 @@ export interface MindmapSnapshot {
   config: KnowledgeMap | null;
   maps: KnowledgeMapOption[];
   referenceCounts: Record<string, number>;
+  staleMapId?: string | null;
 }

@@ -9,6 +9,7 @@ import { Pagination } from '@/components/ui/pagination';
 import { MarkdownEditor, MarkdownView } from '@/components/markdown-renderer';
 import { useBootstrap } from '@/lib/bootstrap';
 import { formatDateTime, makeInitials } from '@/lib/format';
+import { hasPriv, PRIV } from '@/lib/perms';
 
 interface BlogPost {
   _id?: string | number;
@@ -113,7 +114,8 @@ export function BlogDetailPage() {
   const post = data.ddoc || {};
   const udoc = data.udoc || {};
   const ownerId = udoc._id || post.owner || bs.user.id;
-  const canEdit = bs.user.signedIn && (Number(bs.user.id) === Number(ownerId) || Boolean(bs.user.priv));
+  const canEdit =
+    bs.user.signedIn && (Number(bs.user.id) === Number(ownerId) || hasPriv(bs.user.priv, PRIV.PRIV_EDIT_SYSTEM));
 
   return (
     <BlogShell title={post.title || '博客文章'} udoc={udoc}>
@@ -168,21 +170,6 @@ export function BlogEditPage() {
           <MarkdownEditor name="content" value={post.content || ''} minHeight={500} preferredLang={bs.locale} />
         </div>
         <div className="flex flex-wrap justify-end gap-2">
-          {isEdit ? (
-            <Button
-              type="submit"
-              name="operation"
-              value="delete"
-              variant="outline"
-              className="gap-2"
-              onClick={(event) => {
-                if (!window.confirm('确认删除这篇博客？')) event.preventDefault();
-              }}
-            >
-              <Trash2 className="size-4" />
-              删除
-            </Button>
-          ) : null}
           <Button type="button" variant="outline" onClick={() => window.history.back()}>
             取消
           </Button>
@@ -192,6 +179,21 @@ export function BlogEditPage() {
           </Button>
         </div>
       </form>
+      {isEdit ? (
+        <form
+          method="post"
+          className="flex justify-end"
+          onSubmit={(event) => {
+            if (!window.confirm('确认删除这篇博客？')) event.preventDefault();
+          }}
+        >
+          <input type="hidden" name="operation" value="delete" />
+          <Button type="submit" variant="outline" className="gap-2">
+            <Trash2 className="size-4" />
+            删除
+          </Button>
+        </form>
+      ) : null}
     </BlogShell>
   );
 }

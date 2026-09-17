@@ -171,39 +171,6 @@ function detailFetch(
       });
     }
     if (url.startsWith('/api/admin/exam-policy-templates')) return json({ templates: [] });
-    if (url === '/api/admin/exam-infrastructure/classrooms') {
-      return json({
-        classrooms: endpointIds.length
-          ? [
-              {
-                classroomId: '66b800000000000000000701',
-                schoolId: event.schoolId,
-                name: '未命名教室',
-                layoutRevision: 1,
-                seatCount: endpointIds.length,
-              },
-            ]
-          : [],
-      });
-    }
-    if (url.includes('/seat-bindings')) {
-      return json({
-        classroom: {
-          name: '未命名教室',
-          layout: {
-            seats: endpointIds.map((_id, index) => ({
-              sourceSeatId: `seat-${index + 1}`,
-              label: `A${String(index + 1).padStart(2, '0')}`,
-            })),
-          },
-        },
-        bindings: endpointIds.map((endpointId, index) => ({
-          sourceSeatId: `seat-${index + 1}`,
-          status: 'active',
-          endpointId,
-        })),
-      });
-    }
     if (url.endsWith('/target-assignment')) {
       return json({
         assignment: {
@@ -222,6 +189,21 @@ function detailFetch(
           ],
           latestPublishedRevision: 1,
         },
+        classrooms: endpointIds.length
+          ? [
+              {
+                classroomId: '66b800000000000000000701',
+                schoolId: event.schoolId,
+                name: '未命名教室',
+                layoutRevision: 1,
+                seatCount: endpointIds.length,
+              },
+            ]
+          : [],
+        boundEndpoints: endpointIds.map((endpointId, index) => ({
+          endpointId,
+          label: `未命名教室 / A${String(index + 1).padStart(2, '0')}`,
+        })),
       });
     }
     if (url.endsWith('/network-config')) {
@@ -233,7 +215,7 @@ function detailFetch(
         },
       });
     }
-    if (url.endsWith('/network-execution')) return json({ execution, updatePreview: null });
+    if (url.endsWith('/network-execution')) return json({ execution, updatePreview: null, updatePreviewWarning: null });
     throw new Error(`unexpected request: ${url}`);
   });
 }
@@ -538,7 +520,19 @@ describe('exam infrastructure workspace', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
-        if (String(input) === '/api/admin/exam-infrastructure/classrooms') return json({ classrooms: [] });
+        if (String(input).endsWith('/target-assignment')) {
+          return json({
+            assignment: {
+              assignmentId: '66b800000000000000000612',
+              revision: 1,
+              draft: { version: 1, sources: [{ kind: 'endpoint', ids: ['missing-endpoint'] }] },
+              revisions: [],
+              latestPublishedRevision: null,
+            },
+            classrooms: [],
+            boundEndpoints: [],
+          });
+        }
         return load(input);
       }),
     );
@@ -566,25 +560,19 @@ describe('exam infrastructure workspace', () => {
           },
         });
       }
-      if (url === '/api/admin/exam-infrastructure/classrooms') {
+      if (url.endsWith('/target-assignment')) {
         return json({
-          classrooms: [{ classroomId, schoolId: EVENT.schoolId, name: '北实 201 机房', layoutRevision: 1, seatCount: 2 }],
-        });
-      }
-      if (url.endsWith(`/classrooms/${classroomId}/seat-bindings`)) {
-        return json({
-          classroom: {
-            name: '北实 201 机房',
-            layout: {
-              seats: [
-                { sourceSeatId: 'seat-1', label: 'A01' },
-                { sourceSeatId: 'seat-2', label: 'A02' },
-              ],
-            },
+          assignment: {
+            assignmentId: '66b800000000000000000612',
+            revision: 1,
+            draft: { version: 1, sources: [{ kind: 'endpoint', ids: ['endpoint-001'] }] },
+            revisions: [],
+            latestPublishedRevision: null,
           },
-          bindings: [
-            { sourceSeatId: 'seat-1', status: 'active', endpointId: 'endpoint-001' },
-            { sourceSeatId: 'seat-2', status: 'active', endpointId: 'endpoint-002' },
+          classrooms: [{ classroomId, schoolId: EVENT.schoolId, name: '北实 201 机房', layoutRevision: 1, seatCount: 2 }],
+          boundEndpoints: [
+            { endpointId: 'endpoint-001', label: '北实 201 机房 / A01' },
+            { endpointId: 'endpoint-002', label: '北实 201 机房 / A02' },
           ],
         });
       }
@@ -1014,6 +1002,32 @@ describe('exam infrastructure workspace', () => {
     expect(within(card as HTMLElement).getByText('策略 r2')).not.toBeVisible();
     expect(within(card as HTMLElement).getByText('批次策略 r6')).not.toBeVisible();
     expect(within(card as HTMLElement).getByText('名单 r4')).not.toBeVisible();
+  });
+
+  it('keeps the event and basics panel usable when seat publication has drifted', async () => {
+    const preparation = {
+      assignment: null,
+      publicationRevision: 3,
+      batch: {
+        id: '66b800000000000000000622',
+        revision: 2,
+        projectionRevision: 7,
+        state: 'dispatched',
+        ticketCount: 98,
+        workflow: { executionRevision: 9, policyRevision: 6, targetRevision: 8 },
+      },
+      warning: 'assignment_publication_reference_drift',
+    };
+    vi.stubGlobal('fetch', detailFetch(null, [], EVENT, preparation));
+    renderPage({ eventId: EVENT.eventId });
+
+    expect(await screen.findByRole('heading', { name: '校赛网络保障' })).toBeInTheDocument();
+    expect(screen.getByText('已发布座位分配的引用已变化，座位发布摘要暂不可用，但活动基本信息仍可编辑。')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '基本信息' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '编辑' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '归档' })).toBeEnabled();
+    expect(screen.queryByText('考试活动不存在或无权访问')).not.toBeInTheDocument();
+    expect(screen.queryByText('assignment_publication_reference_drift')).not.toBeInTheDocument();
   });
 
   it('renders the full 500-endpoint canonical projection without collapsing rows', async () => {

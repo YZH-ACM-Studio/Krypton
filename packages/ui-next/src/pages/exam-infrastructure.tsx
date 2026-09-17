@@ -161,6 +161,7 @@ interface ExamPreparationSummary {
       targetRevision: number;
     } | null;
   } | null;
+  warning?: string;
 }
 
 interface TargetPreview {
@@ -517,7 +518,8 @@ function parsePreparationSummary(value: unknown): ExamPreparationSummary {
         : null,
     };
   }
-  return { assignment, publicationRevision: asNumber(summary.publicationRevision, '考试准备摘要'), batch };
+  const warning = summary.warning === undefined || summary.warning === null ? undefined : asString(summary.warning, '考试准备摘要');
+  return { assignment, publicationRevision: asNumber(summary.publicationRevision, '考试准备摘要'), batch, ...(warning ? { warning } : {}) };
 }
 
 function parseProjectionItem(value: unknown): ProjectionItem {
@@ -554,7 +556,7 @@ function parseProjectionItem(value: unknown): ProjectionItem {
 }
 
 function parseNetworkUpdatePreview(value: unknown): NetworkUpdatePreview | null {
-  if (value === null) return null;
+  if (value == null) return null;
   const preview = asRecord(value, '热更新预览');
   const policyDiff = asRecord(preview.policyDiff, '策略差异');
   const targetDiff = asRecord(preview.targetDiff, '目标差异');
@@ -1893,31 +1895,33 @@ function PolicySection({
   );
 }
 
-function parseBoundEndpoints(payload: Record<string, unknown>): BoundEndpointOption[] {
-  const classroom = asRecord(payload.classroom, '教室工作台');
-  const layout = asRecord(classroom.layout, '教室布局');
-  if (!Array.isArray(layout.seats) || !Array.isArray(payload.bindings)) throw new Error('教室工作台响应格式不正确');
-  const seats = new Map<string, string>();
-  for (const item of layout.seats) {
-    const seat = asRecord(item, '座位布局');
-    seats.set(asString(seat.sourceSeatId, '座位布局'), asString(seat.label, '座位布局'));
-  }
-  const name = asString(classroom.name, '教室');
-  if (!name) throw new Error('教室工作台响应格式不正确');
+function parseClassroomSummaries(value: unknown): ClassroomSummary[] {
+  if (value == null) return [];
+  if (!Array.isArray(value)) throw new Error('教室列表响应格式不正确');
+  return value.map((item) => {
+    const classroom = asRecord(item, '教室列表');
+    return {
+      classroomId: asString(classroom.classroomId, '教室列表'),
+      schoolId: asString(classroom.schoolId, '教室列表'),
+      name: asString(classroom.name, '教室列表'),
+      layoutRevision: asNumber(classroom.layoutRevision, '教室列表'),
+      seatCount: asNumber(classroom.seatCount, '教室列表'),
+    };
+  });
+}
+
+function parseBoundEndpointOptions(value: unknown): BoundEndpointOption[] {
+  if (value == null) return [];
+  if (!Array.isArray(value)) throw new Error('终端列表响应格式不正确');
   const endpoints: BoundEndpointOption[] = [];
   const seen = new Set<string>();
-  for (const item of payload.bindings) {
-    const binding = asRecord(item, '终端绑定');
-    const status = asString(binding.status, '终端绑定');
-    if (status !== 'active') continue;
-    const endpointId = optionalString(binding.endpointId, '终端绑定');
-    if (!endpointId) continue;
-    const sourceSeatId = asString(binding.sourceSeatId, '终端绑定');
-    const label = seats.get(sourceSeatId);
-    if (label === undefined) throw new Error('教室工作台响应格式不正确');
-    if (seen.has(endpointId)) throw new Error('教室工作台响应格式不正确');
+  for (const item of value) {
+    const endpoint = asRecord(item, '终端列表');
+    const endpointId = asString(endpoint.endpointId, '终端列表');
+    const label = asString(endpoint.label, '终端列表');
+    if (seen.has(endpointId)) throw new Error('终端列表响应格式不正确');
     seen.add(endpointId);
-    endpoints.push({ endpointId, label: `${name} / ${label}` });
+    endpoints.push({ endpointId, label });
   }
   return endpoints;
 }
@@ -1948,6 +1952,8 @@ function TargetSection({
   assignment,
   preparation,
   config,
+  classrooms,
+  boundEndpoints,
   readOnly,
   reload,
   requestConfirm,
@@ -1957,6 +1963,8 @@ function TargetSection({
   assignment: TargetAssignment | null;
   preparation: ExamPreparationSummary | null;
   config: NetworkConfig | null;
+  classrooms: ClassroomSummary[];
+  boundEndpoints: BoundEndpointOption[];
   readOnly: boolean;
   reload: () => Promise<void>;
   requestConfirm: (plan: ConfirmPlan) => void;
@@ -1990,10 +1998,8 @@ function TargetSection({
   const [selectedEndpointIds, setSelectedEndpointIds] = useState<string[]>(draftEndpointIds);
   const [classroomId, setClassroomId] = useState(initialClassroomId);
   const [examSeatAssignmentId, setExamSeatAssignmentId] = useState(initialAssignmentId);
-  const [classrooms, setClassrooms] = useState<ClassroomSummary[]>([]);
-  const [boundEndpoints, setBoundEndpoints] = useState<BoundEndpointOption[]>([]);
-  const [bindingsLoaded, setBindingsLoaded] = useState(false);
-  const [bindingError, setBindingError] = useState<string | null>(null);
+  const bindingsLoaded = true;
+  const bindingError = null;
   const [preview, setPreview] = useState<TargetPreview | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -2003,49 +2009,6 @@ function TargetSection({
     setClassroomId(initialClassroomId());
     setExamSeatAssignmentId(initialAssignmentId());
   }, [assignment?.revision, preparation?.assignment?.id, preparation?.assignment?.revision]);
-  useEffect(() => {
-    let current = true;
-    setBindingsLoaded(false);
-    setBindingError(null);
-    void apiObject('/api/admin/exam-infrastructure/classrooms', undefined, '加载教室列表失败')
-      .then(async (payload) => {
-        if (!Array.isArray(payload.classrooms)) throw new Error('教室列表响应格式不正确');
-        const parsed = payload.classrooms.map((value) => {
-          const classroom = asRecord(value, '教室列表');
-          return {
-            classroomId: asString(classroom.classroomId, '教室列表'),
-            schoolId: asString(classroom.schoolId, '教室列表'),
-            name: asString(classroom.name, '教室列表'),
-            layoutRevision: asNumber(classroom.layoutRevision, '教室列表'),
-            seatCount: asNumber(classroom.seatCount, '教室列表'),
-          };
-        });
-        if (!current) return;
-        setClassrooms(parsed);
-        const schoolRooms = parsed.filter((classroom) => classroom.schoolId === schoolId);
-        const states = await Promise.all(
-          schoolRooms.map((room) =>
-            apiObject(
-              `/api/admin/exam-infrastructure/classrooms/${encodeURIComponent(room.classroomId)}/seat-bindings`,
-              undefined,
-              '加载座位绑定失败',
-            ).then(parseBoundEndpoints),
-          ),
-        );
-        if (!current) return;
-        setBoundEndpoints(states.flat());
-        setBindingsLoaded(true);
-      })
-      .catch((cause) => {
-        if (!current) return;
-        setBoundEndpoints([]);
-        setBindingError(cause instanceof Error ? cause.message : '加载教室列表失败');
-        setBindingsLoaded(true);
-      });
-    return () => {
-      current = false;
-    };
-  }, [schoolId]);
   const selectedEndpoints = selectedEndpointIds
     .map((endpointId) => boundEndpoints.find((item) => item.endpointId === endpointId))
     .filter((item): item is BoundEndpointOption => Boolean(item));
@@ -2364,6 +2327,7 @@ function ExecutionSection({
   assignment,
   execution,
   updatePreview,
+  updatePreviewWarning,
   reload,
   requestConfirm,
 }: {
@@ -2372,6 +2336,7 @@ function ExecutionSection({
   assignment: TargetAssignment | null;
   execution: NetworkExecution | null;
   updatePreview: NetworkUpdatePreview | null;
+  updatePreviewWarning: string | null;
   reload: () => Promise<void>;
   requestConfirm: (plan: ConfirmPlan) => void;
 }) {
@@ -2476,6 +2441,11 @@ function ExecutionSection({
       </CardHeader>
       <CardContent className="space-y-4">
         <MutationNotice error={error} />
+        {updatePreviewWarning ? (
+          <MutationNotice
+            error={lookupInfraLabel(updatePreviewWarning) || '当前执行引用的策略或目标已变化，热更新预览暂不可用。'}
+          />
+        ) : null}
         {!config?.policy || !config.target ? (
           <EmptyState icon={AlertTriangle} title="网络配置尚未完成" description="先分配一个已发布策略版本和目标快照，再进行预检。" />
         ) : (
@@ -2821,6 +2791,9 @@ function EventDetailPage({ eventId }: { eventId: string }) {
   const [execution, setExecution] = useState<NetworkExecution | null>(null);
   const [preparation, setPreparation] = useState<ExamPreparationSummary | null>(null);
   const [updatePreview, setUpdatePreview] = useState<NetworkUpdatePreview | null>(null);
+  const [updatePreviewWarning, setUpdatePreviewWarning] = useState<string | null>(null);
+  const [classrooms, setClassrooms] = useState<ClassroomSummary[]>([]);
+  const [boundEndpoints, setBoundEndpoints] = useState<BoundEndpointOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [plan, setPlan] = useState<ConfirmPlan | null>(null);
@@ -2854,9 +2827,16 @@ function EventDetailPage({ eventId }: { eventId: string }) {
     setTemplates(policyPayload.templates.map(parseTemplate));
     setSuggestedPolicy(policyPayload.suggestedPolicy == null ? null : parsePolicy(policyPayload.suggestedPolicy));
     setAssignment(parseAssignment(targetPayload.assignment));
+    setClassrooms(parseClassroomSummaries(targetPayload.classrooms));
+    setBoundEndpoints(parseBoundEndpointOptions(targetPayload.boundEndpoints));
     setConfig(parseConfig(configPayload.config));
     setExecution(parseExecution(executionPayload.execution));
     setUpdatePreview(parseNetworkUpdatePreview(executionPayload.updatePreview));
+    setUpdatePreviewWarning(
+      executionPayload.updatePreviewWarning == null
+        ? null
+        : asString(executionPayload.updatePreviewWarning, '热更新预览'),
+    );
   }, [eventId]);
   useEffect(() => {
     let current = true;
@@ -2928,6 +2908,11 @@ function EventDetailPage({ eventId }: { eventId: string }) {
       description={`活动版本 ${event.revision} · 配置版本 ${config?.revision || 0} · 所有写入仍由服务端 CAS 与权限边界确认。`}
     >
       <div className="space-y-4 pb-10">
+        {preparation?.warning === 'assignment_publication_reference_drift' ? (
+          <MutationNotice error="已发布座位分配的引用已变化，座位发布摘要暂不可用，但活动基本信息仍可编辑。" />
+        ) : preparation?.warning ? (
+          <MutationNotice error="预登录批次摘要暂不可用，但活动基本信息仍可编辑。" />
+        ) : null}
         <EventStepNav panel={panel} onChange={goToPanel} />
         <Card>
           <CardContent className="flex flex-wrap items-center justify-between gap-3 pt-6">
@@ -2978,6 +2963,8 @@ function EventDetailPage({ eventId }: { eventId: string }) {
             assignment={assignment}
             preparation={preparation}
             config={config}
+            classrooms={classrooms}
+            boundEndpoints={boundEndpoints}
             readOnly={event.lifecycle === 'archived'}
             reload={reload}
             requestConfirm={runPlan}
@@ -2990,6 +2977,7 @@ function EventDetailPage({ eventId }: { eventId: string }) {
             assignment={assignment}
             execution={execution}
             updatePreview={updatePreview}
+            updatePreviewWarning={updatePreviewWarning}
             reload={reload}
             requestConfirm={runPlan}
           />

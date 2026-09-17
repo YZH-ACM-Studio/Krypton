@@ -30,6 +30,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Pagination } from '@/components/ui/pagination';
@@ -106,6 +107,9 @@ interface VNodeDoc {
 type VNodeCollection = VNodeDoc[] | Record<string, VNodeDoc[] | Record<string, VNodeDoc>>;
 
 interface DiscussionsPageData {
+  all?: unknown;
+  canViewHidden?: unknown;
+  page_name?: unknown;
   dcount?: number;
   ddoc?: DiscussionDoc;
   ddocs?: DiscussionDoc[];
@@ -128,6 +132,17 @@ interface DiscussionsPageData {
     type?: string | number;
   };
   vnodes?: VNodeCollection;
+}
+
+function withDiscussQuery(baseUrl: string, params: Record<string, string | undefined>) {
+  const [path, query = ''] = baseUrl.split('?');
+  const search = new URLSearchParams(query);
+  for (const [key, value] of Object.entries(params)) {
+    if (value) search.set(key, value);
+    else search.delete(key);
+  }
+  const next = search.toString();
+  return next ? `${path}?${next}` : path;
 }
 
 function getUser(udict: Record<string, GenericUserDoc>, uid: string | number | undefined) {
@@ -211,9 +226,14 @@ export function DiscussionsPage() {
   const locale = bs.locale;
   const examUrls: DiscussionExamUrls = data.examMode?.urls || {};
   const inExamMode = !!data.examMode?.enabled;
-  const discussionsBase = examUrls.discussion || bs.urls.discussions;
+  const discussionsBase =
+    examUrls.discussion || (data.page_name === 'discussion_node' ? window.location.pathname : bs.urls.discussions);
   const discussionDetailRoute = examUrls.discussionDetail || bs.urls.discussionDetail;
-  const createUrl = examUrls.discussionCreate || `${bs.urls.discussions}/create`;
+  const createUrl =
+    examUrls.discussionCreate || (data.page_name === 'discussion_node' ? `${discussionsBase}/create` : '');
+  const canViewHidden = data.canViewHidden === true;
+  const showingHidden = !!data.all;
+  const discussionsListUrl = withDiscussQuery(discussionsBase, { all: showingHidden ? '1' : undefined });
 
   // Sort key (client-side reordering on the current page; server-side sort
   // would require a query param the backend may not support).
@@ -239,9 +259,11 @@ export function DiscussionsPage() {
           <h1 className="text-xl font-semibold">{vnode.title ? `讨论 · ${vnode.title}` : '讨论'}</h1>
           <p className="text-sm text-muted-foreground">{data.dcount || ddocs.length} 条讨论</p>
         </div>
-        <Button asChild>
-          <a href={createUrl}>发起讨论</a>
-        </Button>
+        {createUrl ? (
+          <Button asChild>
+            <a href={createUrl}>发起讨论</a>
+          </Button>
+        ) : null}
       </div>
 
       {/* Layout: 220px node sidebar | main */}
@@ -285,6 +307,18 @@ export function DiscussionsPage() {
                   { value: 'views', label: '浏览数' },
                 ]}
               />
+              {canViewHidden ? (
+                <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Checkbox
+                    size="sm"
+                    checked={showingHidden}
+                    onCheckedChange={(checked) => {
+                      window.location.href = withDiscussQuery(discussionsBase, { all: checked ? '1' : undefined });
+                    }}
+                  />
+                  显示隐藏讨论
+                </label>
+              ) : null}
             </CardContent>
           </Card>
 
@@ -307,7 +341,7 @@ export function DiscussionsPage() {
             </Card>
           )}
 
-          <Pagination current={page} total={dpcount} baseUrl={discussionsBase} />
+          <Pagination current={page} total={dpcount} baseUrl={discussionsListUrl} />
         </div>
       </div>
     </motion.div>

@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 describe('p2.40 record score cancellation UI', () => {
   const source = readFileSync(resolve(import.meta.dirname, '../src/pages/records.tsx'), 'utf8');
+  const handler = readFileSync(resolve(import.meta.dirname, '../../hydrooj/src/handler/record.ts'), 'utf8');
 
   it('uses one custom dialog for list and detail operations', () => {
     expect(source).to.include('function RecordScoreActionDialog');
@@ -24,5 +25,19 @@ describe('p2.40 record score cancellation UI', () => {
   it('keeps management controls out of the Exam Mode code-only branch', () => {
     expect(source).to.include("detailMode !== 'exam-code' && recordScoreAction");
     expect(source).to.include("disabled: !rdoc._id || detailMode === 'exam-code'");
+  });
+
+  it('sends VP records to the confirmation rejudge page instead of the record POST', () => {
+    expect(source).to.include('function virtualRejudgeHref');
+    expect(source).to.include('/contest/${encodeURIComponent(tid)}/virtual/rejudge?attemptId=${encodeURIComponent(attemptId)}');
+    expect(source).to.include('action.kind === \'rejudge\' && !!vpHref');
+    expect(source).to.include('action.kind === \'cancel\' && vpHref');
+    expect(source).to.include('function VirtualRejudgeCard');
+    expect(source).to.include('canRejudgeVirtual && vpHref');
+    expect(source).not.to.include('window.location.href = `/record/');
+    expect(handler).to.include('canRejudgeVirtual: Boolean(');
+    expect(handler).to.include('canManageVirtualContest(this.user, tdoc)');
+    expect(handler).to.include('canManageVirtualContest(this.user, this.tdoc)');
+    expect(handler).not.to.match(/async GET\(/);
   });
 });

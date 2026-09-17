@@ -1,5 +1,6 @@
 import {
   AlertTriangle,
+  Archive,
   BarChart3,
   BookOpen,
   CheckCircle2,
@@ -83,6 +84,7 @@ interface ProblemConfig {
 
 /** Subset of the serialized problem document this page reads. */
 interface ProblemDoc {
+  archivedAt?: unknown;
   docId?: number;
   pid?: string;
   title?: string;
@@ -155,6 +157,7 @@ interface RawRecordDoc {
 
 interface ProblemDetailPageData {
   authorUdocs?: ProblemAuthorView[];
+  canArchiveProblem?: boolean;
   canEditProblem?: boolean;
   canPreviewSubjective?: boolean;
   canRejudgeProblem?: boolean;
@@ -1057,6 +1060,7 @@ export function ProblemDetailPage() {
   const authorUdocs: ProblemAuthorView[] = Array.isArray(data.authorUdocs) ? data.authorUdocs : [];
   const dataContributorUdocs: ProblemAuthorView[] = Array.isArray(data.dataContributorUdocs) ? data.dataContributorUdocs : [];
   const canEditProblem = data.canEditProblem === true;
+  const canArchiveProblem = data.canArchiveProblem === true && !pdoc.archivedAt;
   const canRejudgeProblem = data.canRejudgeProblem === true;
   const psdoc: ProblemStatusDoc = data.psdoc || {};
   const config: ProblemConfig = pdoc.config && typeof pdoc.config === 'object' ? pdoc.config : {};
@@ -1838,6 +1842,23 @@ export function ProblemDetailPage() {
               </a>
             </Button>
           </ProblemEditGate>
+          {canArchiveProblem && !inContest ? (
+            <form
+              method="post"
+              action={bs.urls.problems}
+              onSubmit={(event) => {
+                if (!window.confirm(`归档题目「${pdoc.title || pid}」？归档后将强制隐藏。`)) event.preventDefault();
+              }}
+            >
+              <input type="hidden" name="operation" value="archive" />
+              <input type="hidden" name="pid" value={String(pdoc.docId)} />
+              <input type="hidden" name="reason" value="Archived from problem detail" />
+              <Button type="submit" size="sm" variant="ghost">
+                <Archive className="mr-1 size-3.5" />
+                归档
+              </Button>
+            </form>
+          ) : null}
         </div>
       </div>
 

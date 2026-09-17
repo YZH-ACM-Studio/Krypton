@@ -1,8 +1,7 @@
-import { Bell, HelpCircle, Lock, MessageSquare, Send } from 'lucide-react';
+import { Bell, HelpCircle, MessageSquare, Send } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { DateTime } from '@/components/ui/datetime';
 import { MarkdownEditor, MarkdownView } from '@/components/markdown-renderer';
 import { ExamContestShell } from '@/components/layout/exam-shell';
 import { useBootstrap } from '@/lib/bootstrap';
@@ -40,6 +39,7 @@ interface ClarificationDocument {
 }
 
 interface ExamContestPageData {
+  canSubmitClarification?: boolean;
   examMode?: { contentTemplate?: string };
   tdoc?: ExamContestDocument;
   pdict?: Record<string, ExamContestProblem>;
@@ -115,36 +115,38 @@ function ExamAnnouncementsPage() {
         <p className="text-sm text-muted-foreground">{tdoc.title}</p>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Send className="size-4" />
-            提交提问
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form method="post" className="space-y-3">
-            <input type="hidden" name="operation" value="clarification" />
-            <label className="block space-y-1.5 text-sm">
-              <span className="font-medium">主题</span>
-              <select name="subject" className="h-9 rounded-md border bg-background px-3 text-sm" defaultValue="0">
-                <option value="0">比赛整体</option>
-                <option value="-1">技术问题</option>
-                {pids.map((pid, index) => (
-                  <option key={String(pid)} value={String(pid)}>
-                    {String.fromCharCode(65 + index)}. {pdict[String(pid)]?.title || `P${pid}`}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <MarkdownEditor name="content" value="" minHeight={150} preferredLang={bs.locale} />
-            <Button type="submit" size="sm">
-              <Send className="mr-1 size-3.5" />
-              发送
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
+      {data.canSubmitClarification === true && data.previewMode !== true ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Send className="size-4" />
+              提交提问
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <form method="post" className="space-y-3">
+              <input type="hidden" name="operation" value="clarification" />
+              <label className="block space-y-1.5 text-sm">
+                <span className="font-medium">主题</span>
+                <select name="subject" className="h-9 rounded-md border bg-background px-3 text-sm" defaultValue="0">
+                  <option value="0">比赛整体</option>
+                  <option value="-1">技术问题</option>
+                  {pids.map((pid, index) => (
+                    <option key={String(pid)} value={String(pid)}>
+                      {String.fromCharCode(65 + index)}. {pdict[String(pid)]?.title || `P${pid}`}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <MarkdownEditor name="content" value="" minHeight={150} preferredLang={bs.locale} />
+              <Button type="submit" size="sm">
+                <Send className="mr-1 size-3.5" />
+                发送
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+      ) : null}
 
       <section className="space-y-3">
         <div>
@@ -183,40 +185,7 @@ function ExamAnnouncementsPage() {
   );
 }
 
-const START_GATED_TEMPLATES = new Set(['contest_problemlist.html', 'problem_detail.html', 'contest_print.html']);
-
-function isContestBeforeStart(tdoc: ExamContestDocument) {
-  const begin = new Date(tdoc.beginAt!).getTime();
-  return Number.isFinite(begin) && Date.now() < begin;
-}
-
-function BeforeStartGate({ tdoc }: { tdoc: ExamContestDocument }) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base">
-          <Lock className="size-4 text-blue-500" />
-          考试尚未开始
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-2 text-sm text-muted-foreground">
-        <p>题目、题面和打印将在开赛后开放。</p>
-        {tdoc?.beginAt && (
-          <p>
-            开始时间：
-            <DateTime value={tdoc.beginAt} />
-          </p>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-function renderExamContestContent(template: string, data: ExamContestPageData) {
-  if (START_GATED_TEMPLATES.has(template) && isContestBeforeStart(data.tdoc || {}) && !data.previewMode) {
-    return <BeforeStartGate tdoc={data.tdoc || {}} />;
-  }
-
+function renderExamContestContent(template: string, _data: ExamContestPageData) {
   switch (template) {
     case 'contest_workspace.html':
       return <ContestWorkspaceContent />;

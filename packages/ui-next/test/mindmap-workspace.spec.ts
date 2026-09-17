@@ -47,6 +47,8 @@ describe('p2.16 and P2.28 mindmap workspace contracts', () => {
     expect(publicPage).to.include('ariaLabel="切换知识导图"');
     expect(publicPage).to.include('/mindmap?map=');
     expect(canvas).to.include('nodesDraggable={false}');
+    expect(adminPage).to.include('staleMapId');
+    expect(adminPage).to.include('当前链接里的导图已不可用');
     expect(adminPage).to.include('<MindmapOutline');
     expect(adminPage).to.include('<MindmapCanvas');
     expect(adminPage).to.include('<MindmapInspector');
@@ -90,6 +92,9 @@ describe('p2.16 and P2.28 mindmap workspace contracts', () => {
     expect(createDialog.match(/className="min-h-10"/g) || []).to.have.lengthOf(2);
     expect(deleteDialog.match(/className="min-h-10"/g) || []).to.have.lengthOf(2);
     expect(resolver).to.include("'admin_mindmap.html': AdminMindmapPage");
+    const handler = read('packages/krypton-mindmap/src/handler.ts');
+    expect(handler).to.include('staleMapId');
+    expect(handler).not.to.include('if (requested && !config) throw new NotFoundError');
     expect(sidebar).to.include("href: '/admin/mindmap'");
     expect(combined).not.to.match(/\b(?:prompt|confirm|alert)\s*\(/);
     expect(combined).not.to.match(/localStorage|autosave|undo/i);

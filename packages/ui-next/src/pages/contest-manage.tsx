@@ -388,6 +388,7 @@ interface ContestExamModePageData {
     enabled?: boolean;
     urls?: ExamModeUrls;
   } | null;
+  previewMode?: boolean;
 }
 
 interface ContestEditPageData {
@@ -505,6 +506,7 @@ function hasFixedAutomaticSeatAudience(tdoc: ContestDoc): boolean {
 }
 
 interface ContestProblemListPageData extends ContestExamModePageData {
+  canSubmitClarification?: boolean;
   canViewContestRecord?: boolean;
   canViewRecord?: boolean;
   liveStats?: Record<string, ContestLiveProblemStat>;
@@ -546,6 +548,7 @@ interface ContestClarificationPageData {
 
 interface ContestPrintPageData {
   canEdit?: boolean;
+  canSubmitPrint?: boolean;
   isAdmin?: boolean;
   tdoc?: ContestDoc;
 }
@@ -570,7 +573,6 @@ interface ManagementItem {
 }
 
 function managementItems(tdoc: ContestDoc, contestUrl: string, canGradeSubjective: boolean): ManagementItem[] {
-  const isACM = tdoc.rule === 'acm';
   const items: ManagementItem[] = [
     { key: 'overview', label: '概览与文件', href: `${contestUrl}/management`, icon: LayoutDashboard },
     { key: 'edit', label: '编辑比赛', href: `${contestUrl}/edit`, icon: Settings },
@@ -583,7 +585,7 @@ function managementItems(tdoc: ContestDoc, contestUrl: string, canGradeSubjectiv
       icon: ClipboardCheck,
       show: canGradeSubjective,
     },
-    { key: 'balloon', label: '气球分发', href: `${contestUrl}/balloon`, icon: Trophy, show: isACM },
+    { key: 'balloon', label: '气球分发', href: `${contestUrl}/balloon`, icon: Trophy },
     { key: 'print', label: '打印服务', href: `${contestUrl}/print`, icon: Printer, show: !!tdoc.allowPrint },
     { key: 'scoreboard', label: '排行榜', href: `${contestUrl}/scoreboard`, icon: Trophy },
     { key: 'records', label: '全部提交', href: `/record?tid=${encodeURIComponent(contestId(tdoc))}`, icon: Send },
@@ -1604,24 +1606,23 @@ export function ContestEditPage() {
                     复制为新比赛
                   </Button>
                 )}
-                {isEdit && (
-                  <Button
-                    type="submit"
-                    name="operation"
-                    value="delete"
-                    variant="destructive"
-                    size="sm"
-                    formNoValidate
-                    onClick={(e) => {
-                      if (!confirm('确定要删除此比赛吗？')) e.preventDefault();
-                    }}
-                  >
-                    <Trash2 className="mr-1 size-3" />
-                    删除比赛
-                  </Button>
-                )}
               </div>
             </form>
+            {isEdit ? (
+              <form
+                method="post"
+                className="flex items-center"
+                onSubmit={(e) => {
+                  if (!confirm('确定要删除此比赛吗？')) e.preventDefault();
+                }}
+              >
+                <input type="hidden" name="operation" value="delete" />
+                <Button type="submit" variant="destructive" size="sm">
+                  <Trash2 className="mr-1 size-3" />
+                  删除比赛
+                </Button>
+              </form>
+            ) : null}
           </CardContent>
         </Card>
         {isEdit && typeof editableContestId === 'string' ? (
@@ -2702,7 +2703,7 @@ export function ContestProblemListPage() {
       ) : null}
 
       {/* Submit clarification */}
-      {workspaceTab === 'clarifications' ? (
+      {workspaceTab === 'clarifications' && data.canSubmitClarification === true && data.previewMode !== true ? (
         <Card>
           <CardHeader>
             <CardTitle className="text-base">提交答疑</CardTitle>
@@ -2760,6 +2761,8 @@ export function ContestUserPage() {
   const udict: Record<string, GenericUserDoc> = bs.udict || data.udict || {};
   const tid = tdoc.docId || tdoc._id;
   const contestUrl = replaceRouteTokens(bs.urls.contestDetail, { TID: String(tid) });
+  const isTeamMode = tdoc.participationMode === 'team' || Boolean(tdoc.teamBatchId);
+  const canStar = !isTeamMode && ['acm', 'oi', 'ioi', 'strictioi'].includes(String(tdoc.rule || '').toLowerCase());
   const [userTab, setUserTab] = useState<'list' | 'add'>('list');
   const [selectedUsers, setSelectedUsers] = useState<UserOption[]>([]);
   const searchUsers = useCallback(
@@ -2804,6 +2807,15 @@ export function ContestUserPage() {
 
       <ContestManagementChrome tdoc={tdoc} active="users">
         <div className="space-y-4">
+          {isTeamMode ? (
+            <p className="text-sm text-muted-foreground">
+              团队赛请到
+              <a href={`/contest/${tid}/teams`} className="text-primary underline-offset-4 hover:underline">
+                队伍页
+              </a>
+              设置打星。
+            </p>
+          ) : null}
           <MiniTabs
             value={userTab}
             onValueChange={setUserTab}
@@ -2850,10 +2862,12 @@ export function ContestUserPage() {
                     />
                   </div>
                   <div className="flex flex-wrap items-center justify-between gap-3">
-                    <label className="flex items-center gap-2 text-sm">
-                      <Checkbox name="unrank" value="true" />
-                      打星参赛（不计正式名次）
-                    </label>
+                    {canStar ? (
+                      <label className="flex items-center gap-2 text-sm">
+                        <Checkbox name="unrank" value="true" />
+                        打星参赛（不计正式名次）
+                      </label>
+                    ) : null}
                     <Button type="submit" disabled={selectedUsers.length === 0}>
                       <UserPlus className="mr-1 size-4" />
                       添加选手
@@ -2908,13 +2922,15 @@ export function ContestUserPage() {
                             {ts.endAt ? formatDateTime(ts.endAt, bs.locale) : '-'}
                           </TableCell>
                           <TableCell className="text-center">
-                            <form method="post" className="inline">
-                              <input type="hidden" name="operation" value="rank" />
-                              <input type="hidden" name="uid" value={String(ts.uid)} />
-                              <Button type="submit" variant="ghost" size="sm" className="h-7 text-xs">
-                                {ts.unrank ? '恢复正式' : '打星'}
-                              </Button>
-                            </form>
+                            {canStar ? (
+                              <form method="post" className="inline">
+                                <input type="hidden" name="operation" value="rank" />
+                                <input type="hidden" name="uid" value={String(ts.uid)} />
+                                <Button type="submit" variant="ghost" size="sm" className="h-7 text-xs">
+                                  {ts.unrank ? '恢复正式' : '打星'}
+                                </Button>
+                              </form>
+                            ) : null}
                           </TableCell>
                         </TableRow>
                       );
@@ -3305,7 +3321,8 @@ export function ContestPrintPage() {
   const tid = tdoc.docId || tdoc._id;
   const urls = examModeUrls(bs);
   const contestUrl = urls?.overview || replaceRouteTokens(bs.urls.contestDetail, { TID: String(tid) });
-  const isPrintAdmin = Boolean(data.isAdmin || data.canEdit || String(bs.user.id) === String(tdoc.owner));
+  const isPrintAdmin = data.isAdmin === true;
+  const canSubmitPrint = data.canSubmitPrint === true;
   const [tasks, setTasks] = useState<PrintTaskDoc[]>([]);
   const [udict, setUdict] = useState<Record<string, GenericUserDoc>>({});
   const [loadingTasks, setLoadingTasks] = useState(false);
@@ -3444,10 +3461,10 @@ export function ContestPrintPage() {
       <PrintChrome>
         <div className="space-y-4">
           <MiniTabs
-            value={printTab}
+            value={printTab === 'submit' && !canSubmitPrint ? 'queue' : printTab}
             onValueChange={setPrintTab}
             items={[
-              { value: 'submit', label: '提交打印', icon: Upload },
+              ...(canSubmitPrint ? [{ value: 'submit' as const, label: '提交打印', icon: Upload }] : []),
               { value: 'queue', label: '打印队列', count: tasks.length, icon: FileText },
               { value: 'kiosk', label: '打印亭', icon: Printer, disabled: !isPrintAdmin },
             ]}
@@ -3455,7 +3472,7 @@ export function ContestPrintPage() {
             aria-label="打印服务"
           />
 
-          {printTab === 'submit' ? (
+          {canSubmitPrint && printTab === 'submit' ? (
             <Card>
               <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <CardTitle className="flex items-center gap-2 text-base">

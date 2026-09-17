@@ -545,7 +545,8 @@ function NodeParamSummary({ node, preset, task, refs }: { node: TaskGraphNode; p
 // ─── Task Center ──────────────────────────────────────────────────────────
 
 export function TaskCenterPage() {
-  const data = useBootstrap().page.data as {
+  const bs = useBootstrap();
+  const data = bs.page.data as {
     tasks: TaskDoc[];
     assignmentMap: Record<string, AssignmentSummary>;
     canManage: boolean;
@@ -602,14 +603,14 @@ export function TaskCenterPage() {
               我的任务
             </a>
           </Button>
-          {data.canManage && (
+          {bs.user.canManageTasks ? (
             <Button asChild variant="default" size="sm">
               <a href="/admin/tasks">
                 <Trophy className="mr-1 size-4" />
                 管理任务
               </a>
             </Button>
-          )}
+          ) : null}
         </div>
       </motion.header>
 
@@ -719,10 +720,10 @@ export function TaskCenterPage() {
 // ─── My Tasks ────────────────────────────────────────────────────────────
 
 export function TaskMyPage() {
-  const data = useBootstrap().page.data as {
+  const bs = useBootstrap();
+  const data = bs.page.data as {
     assignments: TaskAssignment[];
     tasks: Record<string, TaskDoc>;
-    canManage: boolean;
   };
   const assignments = data.assignments || [];
   const now = useLiveNow(assignments.length > 0);
@@ -751,12 +752,22 @@ export function TaskMyPage() {
           </div>
           <p className="text-sm text-muted-foreground">已认领或分配给你的任务。进度会在你提交代码 / 完成 exam / 加入用户组时自动更新。</p>
         </div>
-        <Button asChild variant="outline" size="sm">
-          <a href="/tasks">
-            <ClipboardList className="mr-1 size-4" />
-            任务中心
-          </a>
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button asChild variant="outline" size="sm">
+            <a href="/tasks">
+              <ClipboardList className="mr-1 size-4" />
+              任务中心
+            </a>
+          </Button>
+          {bs.user.canManageTasks ? (
+            <Button asChild variant="default" size="sm">
+              <a href="/admin/tasks">
+                <Trophy className="mr-1 size-4" />
+                管理任务
+              </a>
+            </Button>
+          ) : null}
+        </div>
       </motion.header>
 
       <MiniTabs

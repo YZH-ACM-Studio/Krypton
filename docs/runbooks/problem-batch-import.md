@@ -110,7 +110,7 @@ cd /opt/Krypton
   --report /absolute/path/to/batch.execution.json
 ```
 
-`verify` 逐题读取并核对：作者唯一 active author permit、PID、来源、系统/导图标签、题面、资源和 testdata SHA-256、解析后的 config/cases、origStat 审计、hidden/metadataStatus，以及训练章节绝对位置、成员次序和章节审计。origStat 与章节审计使用稳定 `requestId`；origStat 或最新首章节创建在业务写已成功但审计响应丢失时可续跑补齐。历史章节已经清空却没有同一批次、章节、操作者和 `replacePids` 的成功审计时必须 fail closed，禁止凭“存在草稿且章节为空”猜测为已执行；该极小窗口需保留现场并人工处置。
+`verify` 逐题读取并核对：作者唯一 active author permit、PID / `pidNamespaceId`、`authoringMode` / `problemKind`、batchImport 身份与指纹、来源、导图节点、题面、资源和 testdata SHA-256、解析后的 config/cases、origStat 审计、`metadataStatus`，以及训练章节绝对位置、成员次序和章节审计。导入完成后，管理员通过产品接口改写的 title、difficulty、hidden/visibility 和 canonical tags（含 formal-title / tag-normalize）不是 `BATCH_IMPORT_VERIFY_FAILED`。verify 不会把生产标题写回 manifest。origStat 与章节审计使用稳定 `requestId`；origStat 或最新首章节创建在业务写已成功但审计响应丢失时可续跑补齐。历史章节已经清空却没有同一批次、章节、操作者和 `replacePids` 的成功审计时必须 fail closed，禁止凭“存在草稿且章节为空”猜测为已执行；该极小窗口需保留现场并人工处置。
 
 进程中断或任一步失败时：
 

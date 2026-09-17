@@ -6,7 +6,6 @@ import {
 } from '../model/managed-problem-source';
 import {
     canonicalJson,
-    problemBatchFinalHidden,
     ProblemBatchImportError,
     type ProblemBatchProductionFacts,
     sha256,
@@ -136,9 +135,10 @@ function canonicalChapter(chapter: any, index: number) {
     return { _id: id, title, requireNids, pids };
 }
 
-export function problemBatchDocumentState(pdoc: ProblemBatchFactProblem, finalHidden = false): 'draft' | 'published' {
+export function problemBatchDocumentState(pdoc: ProblemBatchFactProblem, _finalHidden = false): 'draft' | 'published' {
     if (pdoc.hidden === true && pdoc.managedAuthoring?.metadataStatus === 'draft') return 'draft';
-    if (pdoc.hidden === finalHidden && pdoc.managedAuthoring?.metadataStatus === 'confirmed') return 'published';
+    // Confirmed problems stay published after later admin visibility edits.
+    if (pdoc.managedAuthoring?.metadataStatus === 'confirmed') return 'published';
     fail(`batch problem has an invalid lifecycle state: ${pdoc.docId}`);
 }
 
@@ -288,7 +288,7 @@ export async function buildProblemBatchProductionFacts(
                 fingerprint: entry.fingerprint,
                 pid: pdoc.pid,
                 knowledgeMapId,
-                state: problemBatchDocumentState(pdoc, problemBatchFinalHidden(batch.manifest, entry)),
+                state: problemBatchDocumentState(pdoc),
                 docId: pdoc.docId,
             });
         } else {

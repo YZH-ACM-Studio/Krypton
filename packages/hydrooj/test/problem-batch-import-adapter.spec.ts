@@ -624,6 +624,52 @@ describe('P2.23 Hydro production batch adapter', () => {
         expect(problemDocs[0]).to.include({ hidden: false });
     });
 
+    it('does not fail verify after legal admin title, difficulty, hidden, or tag edits', async () => {
+        const batch = await validateProblemBatchManifest(manifestPath);
+        const adapter = new HydroProblemBatchImportAdapter();
+        const plan = await preflightProblemBatchImport(batch, adapter);
+        await adapter.apply(batch, plan, createProblemBatchExecutionReport(plan, 2), async () => {});
+
+        problemDocs[0].title = 'Admin formal title';
+        problemDocs[0].difficulty = 9;
+        problemDocs[0].hidden = true;
+        problemDocs[0].tag = ['formal-title', 'tag-normalize'];
+
+        const verified = await adapter.verify(batch, plan);
+
+        expect(verified.ok).to.equal(true);
+        expect(verified.problems[0]).to.include({ pid: 'NK1064', hidden: true, metadataStatus: 'confirmed' });
+        expect(problemDocs[0].title).to.equal('Admin formal title');
+        expect(problemDocs[0].difficulty).to.equal(9);
+        expect(problemDocs[0].tag).to.deep.equal(['formal-title', 'tag-normalize']);
+    });
+
+    it('still fails verify when pid or testdata identity drifts', async () => {
+        const batch = await validateProblemBatchManifest(manifestPath);
+        const adapter = new HydroProblemBatchImportAdapter();
+        const plan = await preflightProblemBatchImport(batch, adapter);
+        await adapter.apply(batch, plan, createProblemBatchExecutionReport(plan, 2), async () => {});
+        const originalPid = problemDocs[0].pid;
+        const originalData = clone(problemDocs[0].data);
+
+        problemDocs[0].pid = 'NK9999';
+        try {
+            await adapter.verify(batch, plan);
+            expect.fail('expected pid drift to fail verify');
+        } catch (error) {
+            expect(error).to.have.property('message').that.includes('planned PID or fingerprint changed after preflight');
+        }
+        problemDocs[0].pid = originalPid;
+
+        problemDocs[0].data = originalData.filter((file: { name: string }) => file.name !== '1.in');
+        try {
+            await adapter.verify(batch, plan);
+            expect.fail('expected testdata identity drift to fail verify');
+        } catch (error) {
+            expect(error).to.have.property('code', 'BATCH_IMPORT_FILE_CONFLICT');
+        }
+    });
+
     it('replaces an exact historical placeholder in place and omits unavailable contest statistics', async () => {
         const manifest = JSON.parse(await fsp.readFile(manifestPath, 'utf8'));
         manifest.batchId = 'fixture-historical-2021-spring';

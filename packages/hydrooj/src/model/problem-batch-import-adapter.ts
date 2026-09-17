@@ -31,7 +31,6 @@ import { withProblemSetKind } from '../lib/training-kind';
 import storageService from '../service/storage';
 import * as document from './document';
 import {
-    deriveManagedSourceTags,
     listManagedMindmapOptions,
     managedPidCountersColl,
     materializeManagedMindmapTags,
@@ -534,12 +533,10 @@ async function verifyImportedProblem(
             cause: error instanceof Error ? error.message : String(error),
         });
     }
+    // Title, difficulty, hidden, and canonical tags are admin-operational after import.
     if (
         pdoc.pid !== plannedPid ||
         pdoc.pidNamespaceId !== expectedPidNamespaceId ||
-        pdoc.title !== entry.title ||
-        pdoc.difficulty !== entry.difficulty ||
-        pdoc.hidden !== problemBatchFinalHidden(batch.manifest, entry) ||
         pdoc.problemKind !== 'programming' ||
         pdoc.authoringMode !== 'managed' ||
         pdoc.managedAuthoring?.metadataStatus !== 'confirmed' ||
@@ -551,7 +548,7 @@ async function verifyImportedProblem(
         pdoc.hasBatchImportIdentity !== true ||
         !isDeepStrictEqual(normalizeManagedSourceMeta(pdoc.sourceMeta), normalizeManagedSourceMeta(batch.manifest.source))
     ) {
-        fail(`${entry.sourceProblemCode}: published problem metadata differs from the plan`, 'BATCH_IMPORT_VERIFY_FAILED');
+        fail(`${entry.sourceProblemCode}: published problem identity differs from the plan`, 'BATCH_IMPORT_VERIFY_FAILED');
     }
     if (entry.origStat) {
         if (
@@ -569,9 +566,6 @@ async function verifyImportedProblem(
     if ((pdoc as ProblemDoc & { aclWriteClaim?: unknown }).aclWriteClaim) {
         fail(`${entry.sourceProblemCode}: a durable write claim remains`, 'BATCH_IMPORT_VERIFY_FAILED');
     }
-    const knowledge = await materializeManagedMindmapTags(entry.mindmapNodeIds, plannedKnowledgeMapId);
-    const expectedTags = [...new Set([...deriveManagedSourceTags(batch.manifest.source), ...knowledge.tags])];
-    if (!equal(pdoc.tag, expectedTags)) fail(`${entry.sourceProblemCode}: canonical tags differ from the plan`, 'BATCH_IMPORT_VERIFY_FAILED');
     await assertDraftReady(batch, entry, pdoc, plannedKnowledgeMapId);
     return {
         sourceProblemCode: entry.sourceProblemCode,

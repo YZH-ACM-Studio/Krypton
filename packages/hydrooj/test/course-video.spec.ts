@@ -190,4 +190,18 @@ describe('course video wiring', () => {
         expect(postCopy).to.include('rewriteCourseVideosForCopy');
         expect(postCopy).to.include('storage.copy');
     });
+
+    it('records progress with the same course access as viewing and only rejects unbound students', () => {
+        const videoSource = readSrc('src/handler/course-video.ts');
+        const start = videoSource.indexOf('class CourseVideoProgressHandler');
+        const end = videoSource.indexOf('function overdueLabel');
+        expect(start).to.be.greaterThan(-1);
+        expect(end).to.be.greaterThan(start);
+        const progress = videoSource.slice(start, end);
+        expect(progress).to.match(/assertCanView|courseAccessibleTo/);
+        expect(progress).to.include('findStudentByUserId');
+        expect(progress).to.include('未绑定学号，不能记录观看');
+        const afterStudent = progress.slice(progress.indexOf('findStudentByUserId'));
+        expect(afterStudent).not.to.match(/groups\.some/);
+    });
 });

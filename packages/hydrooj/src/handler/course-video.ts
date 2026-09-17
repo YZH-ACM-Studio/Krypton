@@ -331,14 +331,8 @@ class CourseVideoProgressHandler extends Handler {
         }
         const student = await studentDirectory().findStudentByUserId(domainId, this.user._id);
         if (!student || !Number.isSafeInteger(student.boundUserId) || student.boundUserId < 2) {
+            logger.warn('Course video progress rejected domain=%s tid=%s uid=%d video=%s reason=unbound', domainId, tid, this.user._id, videoId);
             throw new ValidationError('uid', null, localizedErrorText`未绑定学号，不能记录观看`);
-        }
-        const groups = tdoc.courseGroupIds || [];
-        if (groups.length) {
-            const mine = new Set((student.groupIds || []).map((id: ObjectId) => String(id)));
-            if (!groups.some((id) => mine.has(String(id)))) {
-                throw new PermissionError(PERM.PERM_VIEW_TRAINING);
-            }
         }
         let coveredRaw: unknown = this.request.body?.covered;
         if (coveredRaw === undefined || coveredRaw === null || coveredRaw === '') coveredRaw = null;

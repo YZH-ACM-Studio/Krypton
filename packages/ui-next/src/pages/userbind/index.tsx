@@ -12,15 +12,16 @@ import {
   Copy,
   GraduationCap,
   Inbox,
-  KeyRound,
   LinkIcon,
   ListChecks,
   Mail,
+  Pencil,
   Plus,
   RefreshCw,
   Search,
   ShieldCheck,
   UserCheck,
+  UserMinus,
   UserPlus,
   Users,
 } from 'lucide-react';
@@ -41,6 +42,7 @@ import { SimpleSelect } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { TableAction, TableActions } from '@/components/ui/table-actions';
 import { type ImportResult, ImportResultPanel, RosterImporter } from '@/components/userbind/roster-importer';
+import { currentUserbindReturnTo, RenameEntityDialog, StudentRosterActions } from '@/components/userbind/roster-admin-actions';
 import { useBootstrap } from '@/lib/bootstrap';
 import { PRIV } from '@/lib/perms';
 
@@ -303,6 +305,7 @@ export function AdminUserbindSchoolsPage() {
     createdAt: string;
   }>;
   const [createOpen, setCreateOpen] = useState(false);
+  const [renameSchool, setRenameSchool] = useState<{ _id: string; name: string } | null>(null);
 
   return (
     <ModuleWorkspace
@@ -322,7 +325,7 @@ export function AdminUserbindSchoolsPage() {
               <TableRow>
                 <TableHead className="pl-5">名称</TableHead>
                 <TableHead className="w-48">创建时间</TableHead>
-                <TableHead className="w-32">操作</TableHead>
+                <TableHead className="w-48">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -346,6 +349,9 @@ export function AdminUserbindSchoolsPage() {
                     <TableCell>
                       <TableActions>
                         <TableAction href={`/admin/userbind/schools/${s._id}`}>查看</TableAction>
+                        <TableAction onClick={() => setRenameSchool(s)} icon={Pencil}>
+                          重命名
+                        </TableAction>
                       </TableActions>
                     </TableCell>
                   </TableRow>
@@ -357,6 +363,18 @@ export function AdminUserbindSchoolsPage() {
       </Card>
 
       <CreateSchoolDialog open={createOpen} onClose={() => setCreateOpen(false)} />
+      {renameSchool ? (
+        <RenameEntityDialog
+          key={renameSchool._id}
+          open
+          onClose={() => setRenameSchool(null)}
+          title="重命名学校"
+          action="/admin/userbind/schools"
+          hidden={{ schoolId: renameSchool._id }}
+          currentName={renameSchool.name}
+          fieldLabel="学校名称"
+        />
+      ) : null}
     </ModuleWorkspace>
   );
 }
@@ -545,8 +563,18 @@ export function AdminUserbindSchoolDetailPage() {
   const schoolStudentsClearHref = `${schoolStudentsHref}?tab=students`;
   const studentPaginationParams = buildStudentFilterParams(studentFilterValues, { tab: 'students' });
   const studentPaginationBaseUrl = `${schoolStudentsHref}?${studentPaginationParams.toString()}`;
+  const [renameSchoolOpen, setRenameSchoolOpen] = useState(false);
   return (
-    <ModuleWorkspace {...USERBIND_WORKSPACE_PROPS} title={`学校 - ${data.school.name}`}>
+    <ModuleWorkspace
+      {...USERBIND_WORKSPACE_PROPS}
+      title={`学校 - ${data.school.name}`}
+      actions={
+        <Button type="button" variant="outline" size="sm" onClick={() => setRenameSchoolOpen(true)}>
+          <Pencil className="size-3.5" />
+          重命名
+        </Button>
+      }
+    >
       <MiniTabs
         items={[
           {
@@ -597,6 +625,7 @@ export function AdminUserbindSchoolDetailPage() {
                     <TableHead className="w-40">绑定状态</TableHead>
                     <TableHead className="w-40">建档时间</TableHead>
                     <TableHead className="w-40">绑定时间</TableHead>
+                    <TableHead className="w-56">操作</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -618,11 +647,18 @@ export function AdminUserbindSchoolDetailPage() {
                       <TableCell className="text-xs text-muted-foreground">
                         <DateTime value={s.boundAt} />
                       </TableCell>
+                      <TableCell>
+                        <StudentRosterActions
+                          student={s}
+                          returnTo={currentUserbindReturnTo(`/admin/userbind/schools/${data.school._id}?tab=students`)}
+                          showInviteToken={false}
+                        />
+                      </TableCell>
                     </TableRow>
                   ))}
                   {data.students.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={6} className="py-8 text-center text-sm text-muted-foreground">
+                      <TableCell colSpan={7} className="py-8 text-center text-sm text-muted-foreground">
                         <StudentListEmptyState clearHref={schoolStudentsClearHref} />
                       </TableCell>
                     </TableRow>
@@ -734,6 +770,18 @@ export function AdminUserbindSchoolDetailPage() {
           </CardContent>
         </Card>
       )}
+      {renameSchoolOpen ? (
+        <RenameEntityDialog
+          key={data.school._id}
+          open
+          onClose={() => setRenameSchoolOpen(false)}
+          title="重命名学校"
+          action="/admin/userbind/schools"
+          hidden={{ schoolId: data.school._id }}
+          currentName={data.school.name}
+          fieldLabel="学校名称"
+        />
+      ) : null}
     </ModuleWorkspace>
   );
 }
@@ -747,6 +795,7 @@ export function AdminUserbindGroupsPage() {
   };
   const schoolNameById = new Map(data.schools.map((s) => [s._id, s.name]));
   const [createOpen, setCreateOpen] = useState(false);
+  const [renameGroup, setRenameGroup] = useState<{ _id: string; name: string } | null>(null);
   // 归档（软删除）：默认隐藏已归档组；只有已归档的组才能永久删除（PLAN §9）。
   const [showArchived, setShowArchived] = useState(false);
   const archivedCount = data.groups.filter((g) => g.archivedAt).length;
@@ -783,7 +832,7 @@ export function AdminUserbindGroupsPage() {
               <TableRow>
                 <TableHead className="pl-5">名称</TableHead>
                 <TableHead>所属学校</TableHead>
-                <TableHead className="w-56">操作</TableHead>
+                <TableHead className="w-72">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -801,6 +850,9 @@ export function AdminUserbindGroupsPage() {
                   <TableCell>
                     <TableActions>
                       <TableAction href={`/admin/userbind/groups/${g._id}`}>查看</TableAction>
+                      <TableAction onClick={() => setRenameGroup(g)} icon={Pencil}>
+                        重命名
+                      </TableAction>
                       {g.archivedAt ? (
                         <>
                           <TableAction formAction="/admin/userbind/groups" hidden={{ operation: 'unarchive', groupId: g._id }}>
@@ -845,6 +897,18 @@ export function AdminUserbindGroupsPage() {
       </Card>
 
       <CreateGroupDialog open={createOpen} onClose={() => setCreateOpen(false)} schools={data.schools} />
+      {renameGroup ? (
+        <RenameEntityDialog
+          key={renameGroup._id}
+          open
+          onClose={() => setRenameGroup(null)}
+          title="重命名用户组"
+          action="/admin/userbind/groups"
+          hidden={{ groupId: renameGroup._id }}
+          currentName={renameGroup.name}
+          fieldLabel="用户组名称"
+        />
+      ) : null}
     </ModuleWorkspace>
   );
 }
@@ -937,6 +1001,7 @@ export function AdminUserbindGroupDetailPage() {
   const activeTab = data.tab || 'overview';
   const groupHref = `/admin/userbind/groups/${data.group._id}`;
   const isArchived = !!data.group.archivedAt;
+  const [renameGroupOpen, setRenameGroupOpen] = useState(false);
   return (
     <ModuleWorkspace
       {...USERBIND_WORKSPACE_PROPS}
@@ -952,6 +1017,12 @@ export function AdminUserbindGroupDetailPage() {
       }
       description={
         isArchived ? `${data.school?.name || ''}（已归档：不可添加成员/生成邀请，可移除成员；清空后可在列表页永久删除）` : data.school?.name
+      }
+      actions={
+        <Button type="button" variant="outline" size="sm" onClick={() => setRenameGroupOpen(true)}>
+          <Pencil className="size-3.5" />
+          重命名
+        </Button>
       }
     >
       <div className="flex flex-col gap-4">
@@ -1090,6 +1161,7 @@ export function AdminUserbindGroupDetailPage() {
                       <TableHead className="pl-5">学号</TableHead>
                       <TableHead>姓名</TableHead>
                       <TableHead>绑定用户</TableHead>
+                      <TableHead className="w-28">操作</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -1125,13 +1197,33 @@ export function AdminUserbindGroupDetailPage() {
                               </Badge>
                             )}
                           </TableCell>
+                          <TableCell>
+                            <div className="flex flex-wrap items-center justify-end gap-1">
+                              <StudentRosterActions
+                                student={m}
+                                returnTo={currentUserbindReturnTo(`${groupHref}?tab=members`)}
+                                showInviteToken={false}
+                              />
+                              <TableActions>
+                                <TableAction
+                                  formAction=""
+                                  variant="destructive"
+                                  icon={UserMinus}
+                                  confirm={`确认将「${m.studentId} ${m.realName}」移出用户组「${data.group.name}」？${isArchived ? '已归档用户组仍可移除成员。' : ''}`}
+                                  hidden={{ operation: 'remove', studentIds: m._id }}
+                                >
+                                  移出
+                                </TableAction>
+                              </TableActions>
+                            </div>
+                          </TableCell>
                         </TableRow>
                       );
                     })}
                     {data.members.length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={3} className="py-6 text-center text-sm text-muted-foreground">
-                          该组暂无成员。使用「添加人员」分页批量加入。
+                        <TableCell colSpan={4} className="py-6 text-center text-sm text-muted-foreground">
+                          {isArchived ? '该组暂无成员。已归档用户组不能再添加人员。' : '该组暂无成员。使用「添加人员」分页批量加入。'}
                         </TableCell>
                       </TableRow>
                     )}
@@ -1167,6 +1259,18 @@ export function AdminUserbindGroupDetailPage() {
           </>
         )}
       </div>
+      {renameGroupOpen ? (
+        <RenameEntityDialog
+          key={data.group._id}
+          open
+          onClose={() => setRenameGroupOpen(false)}
+          title="重命名用户组"
+          action="/admin/userbind/groups"
+          hidden={{ groupId: data.group._id }}
+          currentName={data.group.name}
+          fieldLabel="用户组名称"
+        />
+      ) : null}
     </ModuleWorkspace>
   );
 }
@@ -1225,7 +1329,7 @@ export function AdminUserbindStudentsPage() {
                 <TableHead className="w-40">绑定状态</TableHead>
                 <TableHead className="w-40">建档时间</TableHead>
                 <TableHead className="w-40">绑定时间</TableHead>
-                <TableHead className="w-32">操作</TableHead>
+                <TableHead className="w-56">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -1256,13 +1360,7 @@ export function AdminUserbindStudentsPage() {
                     <DateTime value={s.boundAt} />
                   </TableCell>
                   <TableCell>
-                    {!s.boundUserId && (
-                      <TableActions>
-                        <TableAction formAction="" hidden={{ operation: 'generateStudentToken', studentRecordId: s._id }} icon={KeyRound}>
-                          单人令牌
-                        </TableAction>
-                      </TableActions>
-                    )}
+                    <StudentRosterActions student={s} returnTo={currentUserbindReturnTo('/admin/userbind/students')} />
                   </TableCell>
                 </TableRow>
               ))}
@@ -1531,6 +1629,12 @@ export function AdminUserbindRequestsPage() {
       rejectReason: string | null;
       sourceTokenId: string | null;
       targetUserGroupId: string | null;
+      approvalIssue?: {
+        kind: 'name_mismatch' | 'occupied';
+        studentRecordId: string;
+        rosterRealName: string;
+        boundUserId: number | null;
+      } | null;
     }>;
     total: number;
     page: number;
@@ -1574,7 +1678,35 @@ export function AdminUserbindRequestsPage() {
                   <TableCell className="pl-5 font-mono text-xs">UID {r.userId}</TableCell>
                   <TableCell className="text-sm">{data.schoolMap[r.schoolId] || r.schoolId.slice(0, 8)}</TableCell>
                   <TableCell className="font-mono text-sm">{r.studentIdInput}</TableCell>
-                  <TableCell>{r.realNameInput}</TableCell>
+                  <TableCell>
+                    <div className="space-y-1">
+                      <div>{r.realNameInput}</div>
+                      {r.status === 'pending' && r.approvalIssue?.kind === 'name_mismatch' ? (
+                        <p className="max-w-xs text-xs text-amber-700 dark:text-amber-300">
+                          花名册中该学号的姓名是「{r.approvalIssue.rosterRealName}」，与申请姓名不一致。请先
+                          <a
+                            href={`/admin/userbind/students?q=${encodeURIComponent(r.studentIdInput)}&schoolId=${r.schoolId}`}
+                            className="underline"
+                          >
+                            编辑学生记录
+                          </a>
+                          的姓名，或驳回申请。不要直接改写申请内容。
+                        </p>
+                      ) : null}
+                      {r.status === 'pending' && r.approvalIssue?.kind === 'occupied' ? (
+                        <p className="max-w-xs text-xs text-amber-700 dark:text-amber-300">
+                          该学号已绑定账号 UID {r.approvalIssue.boundUserId}。请先到
+                          <a
+                            href={`/admin/userbind/students?q=${encodeURIComponent(r.studentIdInput)}&schoolId=${r.schoolId}`}
+                            className="underline"
+                          >
+                            学生记录
+                          </a>
+                          解绑，或驳回申请。不要直接改写申请内容。
+                        </p>
+                      ) : null}
+                    </div>
+                  </TableCell>
                   <TableCell>
                     {r.claimTempUserId ? (
                       <Badge variant="outline" className="text-[10px]">

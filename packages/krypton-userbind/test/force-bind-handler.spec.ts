@@ -92,6 +92,18 @@ describe('force-bind handler source contracts', () => {
         expect(forceBindSource).to.include("'/home/messages'");
     });
 
+    it('keeps /admin/userbind behind PRIV_EDIT_SYSTEM and does not mention PERM_USERBIND_MANAGE_STUDENTS', () => {
+        expect(handlerSource).to.not.include('PERM_USERBIND_MANAGE_STUDENTS');
+        expect(handlerSource).to.include("ctx.Route('admin_userbind', '/admin/userbind', AdminOverviewHandler, PRIV.PRIV_EDIT_SYSTEM)");
+        expect(handlerSource).to.include("ctx.Route('admin_userbind_students', '/admin/userbind/students', AdminStudentsHandler, PRIV.PRIV_EDIT_SYSTEM)");
+        expect(handlerSource).to.include('async postUnbind(');
+        expect(handlerSource).to.include('async postDeleteStudent(');
+        expect(handlerSource).to.include('async postUpdateStudent(');
+        expect(handlerSource).to.include('userbind.student.unbind');
+        expect(handlerSource).to.include('diagnoseBindingRequestApproval');
+        expect(handlerSource).to.not.include('PERM.PERM_USERBIND');
+    });
+
     it('consumes student invite tokens through bindMatchedStudent CAS', () => {
         const consume = sliceBetween(
             bindingSource,

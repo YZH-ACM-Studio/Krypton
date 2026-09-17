@@ -97,3 +97,20 @@ describe('force-bind userbind page contracts', () => {
     expect(userBindPage).not.to.match(/role\s*===\s*['"]teacher['"]/);
   });
 });
+
+describe('userbind admin roster write surfaces', () => {
+  const userbind = source('packages/ui-next/src/pages/userbind/index.tsx');
+  const actions = source('packages/ui-next/src/components/userbind/roster-admin-actions.tsx');
+
+  it('exposes unbind, edit, delete, rename and group member remove without opening /admin/userbind to teachers', () => {
+    expect(actions).to.include("operation: 'unbind'");
+    expect(actions).to.include('expectedBoundUserId');
+    expect(actions).to.include('value="updateStudent"');
+    expect(actions).to.include("operation: 'deleteStudent'");
+    expect(userbind).to.include('RenameEntityDialog');
+    expect(userbind).to.include("operation: 'remove'");
+    expect(userbind).to.include('approvalIssue');
+    expect(userbind).to.include('requiredPriv: PRIV.PRIV_EDIT_SYSTEM');
+    expect(userbind).not.to.include('PERM_USERBIND_MANAGE_STUDENTS');
+  });
+});

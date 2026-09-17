@@ -40,6 +40,7 @@ import type {
 } from './types';
 
 const logger = new Logger('userbind.vigil-eligibility');
+const rosterLogger = new Logger('userbind');
 
 function randomTokenId(): string {
     return randomBytes(32).toString('hex');
@@ -249,7 +250,11 @@ export async function bindMatchedStudent(
     await UserModel.coll.updateOne(
         { _id: userId },
         {
-            $set: { studentId: record.studentId, realName: record.realName },
+            $set: {
+                studentId: record.studentId,
+                realName: record.realName,
+                boundStudentRecordId: record._id,
+            },
             $addToSet: {
                 parentSchoolId: school._id,
                 ...(groupIdsToAdd.length > 0 ? { parentUserGroupId: { $each: groupIdsToAdd } as any } : {}),
@@ -258,6 +263,123 @@ export async function bindMatchedStudent(
     );
     const refreshed = await studentsColl.findOne({ _id: record._id });
     return { studentRecord: refreshed!, school };
+}
+
+export interface UnbindStudentResult {
+    studentRecordId: ObjectId;
+    unboundUserId: number;
+}
+
+/**
+ * Admin-only inverse of `bindMatchedStudent`. CAS-refuses if the current
+ * `boundUserId` is not the expected uid. Clears the Hydro user fields that
+ * bind wrote (`studentId`, `realName`, and the school/group mirrors).
+ */
+export async function unbindStudent(
+    domainId: string,
+    studentRecordId: ObjectId,
+    expectedBoundUserId: number,
+): Promise<UnbindStudentResult> {
+    if (!Number.isSafeInteger(expectedBoundUserId) || expectedBoundUserId <= 0) {
+        throw new ValidationError('expectedBoundUserId', null, localizedErrorText`解绑时必须指定当前绑定的账号 UID`);
+    }
+
+    const record = await studentsColl.findOne({ domainId, _id: studentRecordId });
+    if (!record) throw new NotFoundError(localizedErrorText`Student record`);
+    if (record.boundUserId && record.boundUserId !== expectedBoundUserId) {
+        throw new ValidationError('expectedBoundUserId', null, localizedErrorText`该学生记录当前绑定的账号已变化，请刷新后再解绑`);
+    }
+
+    if (record.boundUserId) {
+        const casResult = await studentsColl.updateOne(
+            { domainId, _id: studentRecordId, boundUserId: expectedBoundUserId },
+            { $set: { boundUserId: null, boundAt: null } },
+        );
+        if (casResult.matchedCount === 0) {
+            throw new ValidationError('expectedBoundUserId', null, localizedErrorText`该学生记录当前绑定的账号已变化，请刷新后再解绑`);
+        }
+    }
+
+    const liveBinding = await studentsColl.findOne({ boundUserId: expectedBoundUserId });
+    if (liveBinding) {
+        rosterLogger.info(
+            'Skipped profile cleanup after unbind because uid=%d still owns studentRecordId=%s',
+            expectedBoundUserId,
+            liveBinding._id.toHexString(),
+        );
+        return { studentRecordId, unboundUserId: expectedBoundUserId };
+    }
+
+    const pull: Record<string, unknown> = { parentSchoolId: record.schoolId };
+    if (record.groupIds.length > 0) {
+        pull.parentUserGroupId = { $in: record.groupIds };
+    }
+    const claim = `unbind:${studentRecordId.toHexString()}`;
+    const claimed = await UserModel.coll.updateOne(
+        {
+            _id: expectedBoundUserId,
+            $or: [{ boundStudentRecordId: studentRecordId }, { boundStudentRecordId: null, studentId: record.studentId }],
+        } as any,
+        { $set: { boundStudentRecordId: claim } } as any,
+    );
+    if (claimed.matchedCount === 0) {
+        return { studentRecordId, unboundUserId: expectedBoundUserId };
+    }
+    const rebound = await studentsColl.findOne({ boundUserId: expectedBoundUserId });
+    if (rebound) {
+        rosterLogger.info(
+            'Skipped profile cleanup after unbind claim because uid=%d rebound to studentRecordId=%s',
+            expectedBoundUserId,
+            rebound._id.toHexString(),
+        );
+        return { studentRecordId, unboundUserId: expectedBoundUserId };
+    }
+    await UserModel.coll.updateOne(
+        { _id: expectedBoundUserId, boundStudentRecordId: claim } as any,
+        {
+            $unset: { studentId: '', realName: '', boundStudentRecordId: '' },
+            $pull: pull,
+        } as any,
+    );
+    rosterLogger.info(
+        'Unbound student record domain=%s studentRecordId=%s uid=%d',
+        domainId,
+        studentRecordId.toHexString(),
+        expectedBoundUserId,
+    );
+
+    return { studentRecordId, unboundUserId: expectedBoundUserId };
+}
+
+export type BindingRequestApprovalIssue =
+    | { kind: 'name_mismatch'; studentRecordId: ObjectId; rosterRealName: string; boundUserId: number | null }
+    | { kind: 'occupied'; studentRecordId: ObjectId; rosterRealName: string; boundUserId: number };
+
+/** Read-only diagnosis for the approve UI. Does not rewrite the request. */
+export async function diagnoseBindingRequestApproval(req: BindingRequest): Promise<BindingRequestApprovalIssue | null> {
+    const record = await studentsColl.findOne({
+        domainId: req.domainId,
+        schoolId: req.schoolId,
+        studentId: req.studentIdInput,
+    });
+    if (!record) return null;
+    if (record.realName !== req.realNameInput) {
+        return {
+            kind: 'name_mismatch',
+            studentRecordId: record._id,
+            rosterRealName: record.realName,
+            boundUserId: record.boundUserId,
+        };
+    }
+    if (record.boundUserId && record.boundUserId !== req.userId) {
+        return {
+            kind: 'occupied',
+            studentRecordId: record._id,
+            rosterRealName: record.realName,
+            boundUserId: record.boundUserId,
+        };
+    }
+    return null;
 }
 
 export type BindByRosterResult =
@@ -475,14 +597,17 @@ export async function approveBindingRequest(requestId: ObjectId, reviewerUid: nu
         };
         await studentsColl.insertOne(record);
     } else if (record.realName !== req.realNameInput) {
-        // Existing record found but name differs — flag for the admin
         throw new ValidationError(
             'realName',
             null,
-            localizedErrorText`Found existing record with studentId ${req.studentIdInput} but different realName "${record.realName}"; resolve manually.`,
+            localizedErrorText`花名册中该学号的姓名与申请姓名不一致。请先编辑学生记录中的姓名，或驳回申请，不要直接改写申请内容。`,
         );
     } else if (record.boundUserId && record.boundUserId !== req.userId) {
-        throw new ValidationError('studentRecord', null, localizedErrorText`Student record already bound to another uid (${record.boundUserId}).`);
+        throw new ValidationError(
+            'studentRecord',
+            null,
+            localizedErrorText`该学号已绑定其他账号。请先解绑该学生记录，或驳回申请，不要直接改写申请内容。`,
+        );
     }
 
     // Special path: claim temp user — instead of binding the requester user,
@@ -800,6 +925,8 @@ userBindModel.generateUserGroupInviteToken = generateUserGroupInviteToken;
 userBindModel.consumeInviteToken = consumeInviteToken;
 userBindModel.consumeStudentInviteToken = consumeStudentInviteToken;
 userBindModel.bindMatchedStudent = bindMatchedStudent;
+userBindModel.unbindStudent = unbindStudent;
+userBindModel.diagnoseBindingRequestApproval = diagnoseBindingRequestApproval;
 userBindModel.bindByRosterOrQueue = bindByRosterOrQueue;
 userBindModel.joinUserGroup = joinUserGroup;
 userBindModel.getInviteToken = getInviteToken;

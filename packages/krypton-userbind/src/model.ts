@@ -222,6 +222,7 @@ async function autoBindStudentRecords(
                     $set: {
                         studentId: record.studentId,
                         realName: record.realName,
+                        boundStudentRecordId: record._id,
                     } as any,
                     $addToSet: userAddToSet as any,
                 },
@@ -265,14 +266,14 @@ export async function updateSchool(domainId: string, id: ObjectId, patch: { name
     const setOps: Partial<School> = {};
     if (typeof patch.name === 'string') {
         const name = patch.name.trim();
-        if (!name) throw new ValidationError('name');
+        if (!name) throw new ValidationError('name', null, localizedErrorText`学校名称不能为空`);
         setOps.name = name;
     }
     if (Object.keys(setOps).length === 0) return;
     try {
         await schoolsColl.updateOne({ domainId, _id: id }, { $set: setOps });
     } catch (e: any) {
-        if (e?.code === 11000) throw new ValidationError('name', null, localizedErrorText`School name already exists in this domain`);
+        if (e?.code === 11000) throw new ValidationError('name', null, localizedErrorText`该域中已存在同名学校`);
         throw e;
     }
 }
@@ -382,14 +383,14 @@ export async function updateUserGroup(domainId: string, id: ObjectId, patch: { n
     const setOps: Partial<UserGroup> = {};
     if (typeof patch.name === 'string') {
         const name = patch.name.trim();
-        if (!name) throw new ValidationError('name');
+        if (!name) throw new ValidationError('name', null, localizedErrorText`用户组名称不能为空`);
         setOps.name = name;
     }
     if (Object.keys(setOps).length === 0) return;
     try {
         await userGroupsColl.updateOne({ domainId, _id: id }, { $set: setOps });
     } catch (e: any) {
-        if (e?.code === 11000) throw new ValidationError('name', null, localizedErrorText`Group name already exists in this school`);
+        if (e?.code === 11000) throw new ValidationError('name', null, localizedErrorText`该学校中已存在同名用户组`);
         throw e;
     }
 }
@@ -963,11 +964,16 @@ export async function deleteStudent(domainId: string, id: ObjectId): Promise<voi
     const doc = await studentsColl.findOne({ domainId, _id: id });
     if (!doc) return;
     if (doc.boundUserId) {
-        throw new ValidationError('student', null, localizedErrorText`Cannot delete a student record that is bound to a user; unbind first`);
+        throw new ValidationError('student', null, localizedErrorText`无法删除已绑定的学生记录，请先解绑`);
     }
     // Drop any pending tokens for this student.
     await bindTokensColl.deleteMany({ studentRecordId: id, used: false });
-    await studentsColl.deleteOne({ domainId, _id: id });
+    const deleted = await studentsColl.deleteOne({ domainId, _id: id, boundUserId: null });
+    if (deleted.deletedCount === 0) {
+        const latest = await studentsColl.findOne({ domainId, _id: id });
+        if (!latest) return;
+        throw new ValidationError('student', null, localizedErrorText`无法删除已绑定的学生记录，请先解绑`);
+    }
 }
 
 export async function assignStudentsToGroup(domainId: string, groupId: ObjectId, studentRecordIds: ObjectId[]): Promise<void> {
@@ -1088,6 +1094,16 @@ export const userBindModel = {
         userId: number,
         extraGroupId?: ObjectId,
     ) => Promise<{ studentRecord: StudentRecord; school: School }>,
+    unbindStudent: null as unknown as (
+        domainId: string,
+        studentRecordId: ObjectId,
+        expectedBoundUserId: number,
+    ) => Promise<{ studentRecordId: ObjectId; unboundUserId: number }>,
+    diagnoseBindingRequestApproval: null as unknown as (req: BindingRequest) => Promise<
+        | { kind: 'name_mismatch'; studentRecordId: ObjectId; rosterRealName: string; boundUserId: number | null }
+        | { kind: 'occupied'; studentRecordId: ObjectId; rosterRealName: string; boundUserId: number }
+        | null
+    >,
     bindByRosterOrQueue: null as unknown as (
         domainId: string,
         schoolId: ObjectId,

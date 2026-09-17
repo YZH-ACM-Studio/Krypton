@@ -30,6 +30,13 @@ async function currentCanonicalBinding(domainId: string, userId: number) {
     };
 }
 
+function safeUserbindReturnTo(raw: string | undefined, fallback: string): string {
+    const value = (raw || '').trim();
+    if (!value.startsWith('/admin/userbind')) return fallback;
+    if (value.includes('://') || value.includes('\\') || value.includes('\n')) return fallback;
+    return value;
+}
+
 // ─── Admin handlers ───────────────────────────────────────────────────────
 
 class UserbindAdminHandler extends Handler {
@@ -443,6 +450,7 @@ class AdminGroupDetailHandler extends UserbindAdminHandler {
     async postRemove({ domainId }: { domainId: string }, groupId: ObjectId, studentIds: string[]) {
         const ids = studentIds.map((s) => new ObjectId(s));
         await userBindModel.removeStudentsFromGroup(domainId, groupId, ids);
+        await OplogModel.log(this, 'userbind.group.remove_members', { groupId, count: ids.length });
         this.response.redirect = `${this.url('admin_userbind_group_detail', { groupId })}?tab=members`;
     }
 
@@ -600,21 +608,31 @@ class AdminStudentsHandler extends UserbindAdminHandler {
     }
 
     /**
-     * Inline edit a student record's mutable fields. Currently used for
-     * `enrollmentYear` override — empty string clears it (sets to null).
-     * Future: also expose realName here when needed.
+     * Inline edit a student record's mutable fields. Empty `enrollmentYear`
+     * clears it to null. `realName` is optional; omitted or blank leaves it unchanged.
      */
     @param('studentRecordId', Types.ObjectId)
     @param('enrollmentYear', Types.String, true)
+    @param('clearEnrollmentYear', Types.Boolean, true)
     @param('realName', Types.String, true)
-    async postUpdateStudent({ domainId }: { domainId: string }, studentRecordId: ObjectId, enrollmentYear: string, realName: string) {
+    @param('returnTo', Types.String, true)
+    async postUpdateStudent(
+        { domainId }: { domainId: string },
+        studentRecordId: ObjectId,
+        enrollmentYear: string,
+        clearEnrollmentYear: boolean,
+        realName: string,
+        returnTo?: string,
+    ) {
         const patch: {
             enrollmentYear?: number | null;
             realName?: string;
         } = {};
-        if (enrollmentYear !== undefined) {
+        if (clearEnrollmentYear) {
+            patch.enrollmentYear = null;
+        } else if (enrollmentYear !== undefined) {
             const trimmed = (enrollmentYear || '').trim();
-            patch.enrollmentYear = trimmed === '' ? null : Number.parseInt(trimmed, 10);
+            patch.enrollmentYear = Number.parseInt(trimmed, 10);
         }
         if (realName) patch.realName = realName;
         await userBindModel.updateStudent(domainId, studentRecordId, patch);
@@ -622,7 +640,32 @@ class AdminStudentsHandler extends UserbindAdminHandler {
             studentRecordId,
             fields: Object.keys(patch),
         });
-        this.response.body = { success: true };
+        this.response.redirect = safeUserbindReturnTo(returnTo, this.url('admin_userbind_students'));
+    }
+
+    @param('studentRecordId', Types.ObjectId)
+    @param('expectedBoundUserId', Types.Int)
+    @param('returnTo', Types.String, true)
+    async postUnbind(
+        { domainId }: { domainId: string },
+        studentRecordId: ObjectId,
+        expectedBoundUserId: number,
+        returnTo?: string,
+    ) {
+        const result = await userBindModel.unbindStudent(domainId, studentRecordId, expectedBoundUserId);
+        await OplogModel.log(this, 'userbind.student.unbind', {
+            studentRecordId: result.studentRecordId,
+            unboundUserId: result.unboundUserId,
+        });
+        this.response.redirect = safeUserbindReturnTo(returnTo, this.url('admin_userbind_students'));
+    }
+
+    @param('studentRecordId', Types.ObjectId)
+    @param('returnTo', Types.String, true)
+    async postDeleteStudent({ domainId }: { domainId: string }, studentRecordId: ObjectId, returnTo?: string) {
+        await userBindModel.deleteStudent(domainId, studentRecordId);
+        await OplogModel.log(this, 'userbind.student.delete', { studentRecordId });
+        this.response.redirect = safeUserbindReturnTo(returnTo, this.url('admin_userbind_students'));
     }
 }
 
@@ -730,9 +773,27 @@ class AdminRequestsHandler extends UserbindAdminHandler {
         const schoolMap: Record<string, string> = {};
         for (const s of schools) schoolMap[s._id.toString()] = s.name;
 
+        const requests = await Promise.all(
+            docs.map(async (req) => {
+                if (req.status !== 'pending') return { ...req, approvalIssue: null };
+                const issue = await userBindModel.diagnoseBindingRequestApproval(req);
+                return {
+                    ...req,
+                    approvalIssue: issue
+                        ? {
+                              kind: issue.kind,
+                              studentRecordId: issue.studentRecordId,
+                              rosterRealName: issue.rosterRealName,
+                              boundUserId: issue.boundUserId,
+                          }
+                        : null,
+                };
+            }),
+        );
+
         this.response.template = 'admin_userbind_requests.html';
         this.response.body = {
-            requests: docs,
+            requests,
             total,
             page,
             pageSize: limit,

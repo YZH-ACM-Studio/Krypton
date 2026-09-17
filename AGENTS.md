@@ -201,10 +201,14 @@
 ## 课程结业考试协议
 
 - 一门 `kind:'course'` 最多绑定一场本域 `rule:'exam'` 比赛；一场 exam 最多被一门课绑定。绑定唯一写在 `TrainingDoc.courseExam`：`{ contestId, gate:'percent'|'chapter'|'all', percent?, chapterId? }` exact-key。缺字段 = 未绑定。禁止绑 homework/ACM/其它规则，禁止 Vigil ExamEvent，禁止第二套考试集合和解锁令牌。
+- 绑定拒绝 `client_required`、非空 Hydro `assign`、空试卷、零已确认视频、`participantScopeMode:'schools'`、以及 `groups` 范围未覆盖全部 `courseGroupIds`（课程无班级 ⇒ exam 必须 unscoped）。不把课程班级复制进 `assign`。
 - 门槛只认已确认视频看完（与课程视频完成口径相同），不算题目。`percent` 为 1–100 条数比 `floor`；无已确认视频对学生 fail closed。`chapter` 含该章及小节视频；`all` 为本课全部已确认视频。未知字段、错规则、错域、缺赛、章已删、或其它课已占用同一 contestId，保存与进入都 fail closed，禁止读成未绑定。
 - 进入判定唯一函数，必须在 exam-mode auto-attend 之前执行。0 门课绑定则本函数放行；>1 门 fail closed。学生还须能进该课（含未隐藏）、符合该 exam 自身时间窗与参赛范围。未 attend 每次现场算；已 attend 本场不因观看回退。课程管理者或该考试管理者旁路。课程隐藏时学生不能进绑定考试。
 - 比赛列表不因门槛隐藏这场 exam。复制课程不复制绑定。删除课不删除比赛。不把课程班级同步进 assign。不改 Vigil 协议。
-- 「考完」只认该场 `ContestStatus.paperFinalizedAt`（由 paper finalize 写入）。文件收集可另开可选门槛 `requireCourseExamComplete`，见文件收集协议；不是每门课默认要求。
+- 该课任一收集仍开启 `requireCourseExamComplete` 时拒绝解绑 `courseExam`。
+- 学生课程页收集卡片按 live audience 过滤。
+- 视频进度写入走 `courseAccessibleTo`（兑换权益可记进度）；仍须已绑定学生。
+- 「考完」只认该场 `ContestStatus.paperFinalizedAt`（或旧 finalize 的 journal 覆盖该场全部 `pids`）。写入只走 `finalizePaperForUser`。`endAt+60s` grace 之后，若该场 `rule === 'exam'`、`ContestStatus.attend` 且已有有效 `startAt`、试卷 `pids` 非空、且尚未考完，考完读路径（`hasCompletedCourseExam` / collect gate）必须调用同一 `finalizePaperForUser`（空白答卷允许）。禁止第二套完成集合、后台任务、或对未绑定考试做请求路径回填。从未 attend / 没有 `startAt` / 空试卷不得自动 finalize。文件收集可另开可选门槛 `requireCourseExamComplete`，见文件收集协议；不是每门课默认要求。
 
 ## 课程隐藏与删除协议
 
@@ -255,7 +259,7 @@
 - 打包 CSV：未交按每个必填槽给出预期文件名；已交含 assigned、original 与 sha256。当前文件 sha256 重复只作为教师进度提示。
 - 只挂普通浏览器 `/collect`、`/admin/collect`、`/api/collect/*`。禁止考试壳、`/paper`、Vigil Client 或封锁白名单。`docs/PLAN-2026-10-08-file-collect.md` 的 P2.1–P2.15 不是 Vigil 协议单元，完成本地实现不授权部署或连接真实考试机。
 - `requireCourseExamComplete` 是可选硬门槛，缺字段或 `false` 不拦截。仅当收集绑定了 `courseRef` 且该课存在 `courseExam` 时允许开启；未绑定课程或课程无结业考试时开启必须 fail closed。学生上传/替换/删除/确认都要现场重查，禁止客户端自证。
-- 「考完」只认绑定 exam 的 `ContestStatus.paperFinalizedAt`；缺该字段时，仅当 journal 覆盖该场全部 `pids` 才算完成（旧 finalize 兼容）。空试卷、缺赛、错规则、课程解绑均不得放行。不为此新增完成集合、后台任务或回填。已交文件不因后来开启门槛而删除。
+- 「考完」与结业考试协议同一 settle-on-read：只认绑定 exam 的 `ContestStatus.paperFinalizedAt`（缺该字段时，仅当 journal 覆盖该场全部 `pids` 才算完成）。写入只走 `finalizePaperForUser`；`endAt+60s` 后该场 `rule === 'exam'`、已 attend 且已有 `startAt`、试卷非空、尚未完成则读路径调用同一 finalize（空白答卷允许）。窗口已到 `endAt` 且从未 attend → 门槛锁定，不展示「去考试」；不得把时间到点当成考完。缺赛、错规则、空试卷、课程解绑均不得放行。不为此新增完成集合、后台任务或回填。已交文件不因后来开启门槛而删除。
 
 ## 真实性训练可信完成协议
 

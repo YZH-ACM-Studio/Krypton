@@ -2,8 +2,8 @@ import { ObjectId } from 'mongodb';
 import { Logger } from '@hydrooj/utils';
 import { localizedErrorText, ValidationError } from '../error';
 import { PERM, PRIV } from '../model/builtin';
-import { ACCESS_ENTITLEMENT_WHOLE_SET_STAGE } from '../model/problem-set-access';
-import { canCreateRedemption, canManageAllRedemptions, redemptionService, type RedemptionTargetKind } from '../model/redemption';
+import { ACCESS_ENTITLEMENT_WHOLE_SET_STAGE, problemSetAccessService } from '../model/problem-set-access';
+import { canCreateRedemption, canManageAllRedemptions, redemptionLookupSourceIds, redemptionService, type RedemptionTargetKind } from '../model/redemption';
 import * as training from '../model/training';
 import { Handler, param, Types } from '../service/server';
 import { isCourseKind } from '../lib/training-kind';
@@ -46,8 +46,35 @@ class RedemptionManageHandler extends Handler {
         this.response.addHeader('Cache-Control', 'no-store');
     }
 
-    async get() {
-        await this.renderManage();
+    @param('uid', Types.PositiveInt, true)
+    async get(_domainId: string, uid?: number) {
+        if (!uid) {
+            await this.renderManage();
+            return;
+        }
+        const domainId = String(this.domain?._id);
+        const rows = await problemSetAccessService.listActiveForUser(domainId, uid);
+        const batches = await redemptionService.listBatches(domainId, this.user);
+        const allowedSourceIds = redemptionLookupSourceIds(batches);
+        const scoped = rows.filter((row) => row.source === 'redemption' && allowedSourceIds.has(String(row.sourceId)));
+        logger.info(
+            'Redemption entitlements listed domain=%s actor=%d uid=%d count=%d stage=lookup result=success',
+            domainId,
+            this.user._id,
+            uid,
+            scoped.length,
+        );
+        await this.renderManage({
+            lookupUid: uid,
+            entitlements: scoped.map((row) => ({
+                entitlementId: String(row._id),
+                sourceId: String(row.sourceId),
+                target:
+                    row.targetKind === 'problem_set_stage'
+                        ? `${row.targetKind}/${row.targetId}/${row.stageId}`
+                        : `${row.targetKind}/${row.targetId}`,
+            })),
+        });
     }
 
     @param('note', Types.String, true)

@@ -2,7 +2,7 @@ import { ObjectId } from 'mongodb';
 import { Logger } from '@hydrooj/utils';
 import { localizedErrorText, PermissionError, TrainingNotFoundError, ValidationError } from '../error';
 import type { TrainingNode, User } from '../interface';
-import { courseAccessibleTo, courseUserGroupIds, isCourseHidden } from '../lib/course-access';
+import { assertCourseAccessible, courseAccessibleTo, courseUserGroupIds, isCourseHidden } from '../lib/course-access';
 import { courseNodePids } from '../lib/course-chapter';
 import { liveReferencedPids } from '../lib/course-live-ref';
 import {
@@ -62,6 +62,21 @@ export function requiredPracticeManagePermission(user: User, tdoc: any, containe
     return user.own(tdoc) ? PERM.PERM_EDIT_TRAINING_SELF : PERM.PERM_EDIT_TRAINING;
 }
 
+export async function assertCanManagePracticeOrHide(
+    domainId: string,
+    user: User,
+    tdoc: any,
+    containerKind: PracticeContainerKind,
+) {
+    if (canManagePracticeContainer(user, tdoc, containerKind)) return;
+    if (containerKind === 'course') {
+        await assertCourseAccessible(domainId, user._id, tdoc);
+    } else {
+        await problemSetAccessService.assertAccessible(domainId, user, tdoc);
+    }
+    throw new PermissionError(requiredPracticeManagePermission(user, tdoc, containerKind));
+}
+
 export async function loadPracticeContainer(domainId: string, containerKind: PracticeContainerKind, containerId: ObjectId) {
     const tdoc = await training.get(domainId, containerId);
     if (!tdoc || String(tdoc.docId) !== containerId.toHexString()) {
@@ -100,7 +115,7 @@ async function assertCourseVisible(domainId: string, user: User, tdoc: any, canM
     if (!(tdoc.courseGroupIds || []).length) return;
     const groups = await courseUserGroupIds(domainId, user._id);
     if (await courseAccessibleTo(domainId, user._id, tdoc, groups, false)) return;
-    throw new PermissionError(PERM.PERM_VIEW_TRAINING);
+    throw new TrainingNotFoundError(domainId, tdoc.docId);
 }
 
 export async function assertPracticeTargetAccess(input: {

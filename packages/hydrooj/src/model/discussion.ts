@@ -1,17 +1,18 @@
 import { omit } from 'lodash';
 import { Filter, ObjectId } from 'mongodb';
 import { Context } from '../context';
-import { localizeError, DiscussionNodeNotFoundError, DocumentNotFoundError, TrainingNotFoundError } from '../error';
+import { localizeError, ContestNotFoundError, DiscussionNodeNotFoundError, DocumentNotFoundError, NotAssignedError, TrainingNotFoundError } from '../error';
 import { isProblemSetKind } from '../lib/training-kind';
 import { DiscussionHistoryDoc, DiscussionReplyDoc, DiscussionTailReplyDoc, Document } from '../interface';
 import bus from '../service/bus';
 import db from '../service/db';
 import { NumberKeys } from '../typeutils';
 import { buildProjection } from '../utils';
-import { PERM } from './builtin';
+import { PERM, PRIV } from './builtin';
 import * as contest from './contest';
 import * as document from './document';
 import problem from './problem';
+import { assertHomeworkAccess, canBypassHomeworkAccess } from './homework-access';
 import { problemSetAccessService } from './problem-set-access';
 import * as training from './training';
 import { User } from './user';
@@ -316,6 +317,10 @@ export function flushNodes(domainId: string) {
     return document.deleteMulti(domainId, document.TYPE_DISCUSSION_NODE);
 }
 
+function isTrainingDiscussionAccessError(error: unknown): boolean {
+    return error instanceof TrainingNotFoundError || (error instanceof Error && error.name === 'TrainingNotFoundError');
+}
+
 export async function getVnode(domainId: string, type: number, id: string, userOrUid?: User | number) {
     if (type === document.TYPE_PROBLEM) {
         if (typeof userOrUid !== 'object') throw new TypeError('problem discussion vnode reads require the current user');
@@ -332,7 +337,9 @@ export async function getVnode(domainId: string, type: number, id: string, userO
         try {
             tdoc = await training.get(domainId, _id);
         } catch (error) {
-            if (error instanceof TrainingNotFoundError) throw new DiscussionNodeNotFoundError(domainId, `training/${id}`);
+            if (error instanceof TrainingNotFoundError || (error instanceof Error && error.name === 'TrainingNotFoundError')) {
+                throw new DiscussionNodeNotFoundError(domainId, `training/${id}`);
+            }
             throw error;
         }
         if (!tdoc) throw new DiscussionNodeNotFoundError(domainId, `training/${id}`);
@@ -340,7 +347,7 @@ export async function getVnode(domainId: string, type: number, id: string, userO
         try {
             await problemSetAccessService.assertAccessible(domainId, userOrUid, tdoc);
         } catch (error) {
-            if (error instanceof TrainingNotFoundError) throw new DiscussionNodeNotFoundError(domainId, `training/${id}`);
+            if (isTrainingDiscussionAccessError(error)) throw new DiscussionNodeNotFoundError(domainId, `training/${id}`);
             throw error;
         }
         const tsdoc = await training.getStatus(domainId, _id, userOrUid._id);
@@ -355,8 +362,32 @@ export async function getVnode(domainId: string, type: number, id: string, userO
     if (type === document.TYPE_CONTEST) {
         if (!ObjectId.isValid(id)) throw new DiscussionNodeNotFoundError(domainId, `contest/${id}`);
         const _id = new ObjectId(id);
-        const tdoc = await contest.get(domainId, _id);
+        let tdoc;
+        try {
+            tdoc = await contest.get(domainId, _id);
+        } catch (error) {
+            if (error instanceof ContestNotFoundError) throw new DiscussionNodeNotFoundError(domainId, `contest/${id}`);
+            if (error instanceof Error && error.name === 'ContestNotFoundError') {
+                throw new DiscussionNodeNotFoundError(domainId, `contest/${id}`);
+            }
+            throw error;
+        }
         if (!tdoc) throw new DiscussionNodeNotFoundError(domainId, `contest/${id}`);
+        if (contest.RULES[tdoc.rule]?.hidden) {
+            if (typeof userOrUid !== 'object') throw new TypeError('homework discussion vnode reads require the current user');
+            try {
+                await assertHomeworkAccess(domainId, tdoc, userOrUid);
+            } catch (error) {
+                if (
+                    error instanceof NotAssignedError
+                    || error instanceof ContestNotFoundError
+                    || (error instanceof Error && (error.name === 'NotAssignedError' || error.name === 'ContestNotFoundError'))
+                ) {
+                    throw new DiscussionNodeNotFoundError(domainId, `contest/${id}`);
+                }
+                throw error;
+            }
+        }
         const uid = typeof userOrUid === 'number' ? userOrUid : userOrUid?._id;
         if (uid) {
             const tsdoc = await contest.getStatus(domainId, _id, uid);
@@ -393,8 +424,13 @@ export async function getListVnodes(domainId: string, ddocs: any, user: User) {
             throw error;
         }
         res[ddoc.parentType] ||= {};
-        if (ddoc.parentType !== document.TYPE_PROBLEM && !user.hasPerm(PERM.PERM_VIEW_PROBLEM_HIDDEN) && vnode.hidden) return;
-        if (vnode.assign?.length && new Set(vnode.assign).intersection(new Set(user.group || [])).size) return;
+        if (
+            ddoc.parentType !== document.TYPE_PROBLEM
+            && vnode.hidden
+            && !user.hasPerm(PERM.PERM_VIEW_PROBLEM_HIDDEN)
+            && !user.hasPerm(PERM.PERM_MOD_BADGE)
+        ) return;
+        if (!checkVNodeVisibility(ddoc.parentType, vnode, user)) return;
         res[ddoc.parentType][ddoc.parentId] = vnode;
     }
     await Promise.all(ddocs.map((ddoc) => task(ddoc)));
@@ -420,9 +456,27 @@ export function filterDiscussionsByVnodes<T extends Pick<DiscussionDoc, 'parentT
 export function checkVNodeVisibility(type: number, vnode: any, user: User) {
     if (type === document.TYPE_PROBLEM) {
         if (!problem.canViewBy(vnode, user)) return false;
+    } else if (
+        vnode.hidden
+        && !user.own(vnode)
+        && !user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)
+        && !user.hasPerm(PERM.PERM_MOD_BADGE)
+        && !(type === document.TYPE_CONTEST && user.hasPerm(PERM.PERM_EDIT_CONTEST))
+        && !(type === document.TYPE_CONTEST && contest.RULES[vnode.rule]?.hidden && canBypassHomeworkAccess(user, vnode))
+        && !(type === document.TYPE_TRAINING && user.hasPerm(PERM.PERM_EDIT_TRAINING))
+    ) {
+        return false;
     }
     if ([document.TYPE_CONTEST, document.TYPE_TRAINING].includes(type as any)) {
-        if (!user.own(vnode) && vnode.assign?.length && !new Set(vnode.assign).intersection(new Set(user.group)).size) return false;
+        if (
+            user.own(vnode)
+            || user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)
+            || user.hasPerm(PERM.PERM_MOD_BADGE)
+            || (type === document.TYPE_CONTEST && user.hasPerm(PERM.PERM_EDIT_CONTEST))
+            || (type === document.TYPE_CONTEST && contest.RULES[vnode.rule]?.hidden && canBypassHomeworkAccess(user, vnode))
+            || (type === document.TYPE_TRAINING && user.hasPerm(PERM.PERM_EDIT_TRAINING))
+        ) return true;
+        if (vnode.assign?.length && !new Set(vnode.assign).intersection(new Set(user.group || [])).size) return false;
     }
     return true;
 }

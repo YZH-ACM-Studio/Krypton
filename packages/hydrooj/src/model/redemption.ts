@@ -6,6 +6,7 @@ import type { TrainingDoc } from '../interface';
 import { Context } from '../context';
 import db from '../service/db';
 import { studentDirectory } from '../service/student-directory';
+import { assertCourseAccessible } from '../lib/course-access';
 import { isCourseKind, isProblemSetKind } from '../lib/training-kind';
 import { computePrerequisiteClosure, ProblemSetStageGraphError } from '../lib/problem-set-stage';
 import { PERM, PRIV } from './builtin';
@@ -200,10 +201,29 @@ export function canManageAllRedemptions(user: RedemptionActor): boolean {
     return user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
 }
 
+export function redemptionLookupSourceIds(batches: Array<{ hints?: Array<{ codeId: ObjectId }> }>): Set<string> {
+    return new Set(batches.flatMap((batch) => (batch.hints || []).map((hint) => String(hint.codeId))));
+}
+
 function canManageTarget(user: RedemptionActor, tdoc: TrainingDoc, targetKind: RedemptionTargetKind): boolean {
     if (user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) return true;
     if (targetKind === 'course') return user.hasPerm(PERM.PERM_EDIT_COURSE) || user.own(tdoc);
     return user.hasPerm(PERM.PERM_EDIT_TRAINING) || (user.own(tdoc) && user.hasPerm(PERM.PERM_EDIT_TRAINING_SELF));
+}
+
+async function assertCanManageTargetOrHide(
+    domainId: string,
+    user: RedemptionActor,
+    tdoc: TrainingDoc,
+    targetKind: RedemptionTargetKind,
+) {
+    if (canManageTarget(user, tdoc, targetKind)) return;
+    if (targetKind === 'course') {
+        await assertCourseAccessible(domainId, user._id, tdoc);
+    } else {
+        await problemSetAccessService.assertAccessible(domainId, user, tdoc);
+    }
+    throw new ForbiddenError(localizedErrorText`没有兑换目标的管理权限`);
 }
 
 export class RedemptionService {
@@ -408,7 +428,7 @@ export class RedemptionService {
         await this.assertManagePermission(input.user);
         const stageId = input.stageId ?? ACCESS_ENTITLEMENT_WHOLE_SET_STAGE;
         const tdoc = await this.resolveTarget(input.domainId, input.targetKind, input.targetId, stageId);
-        if (!canManageTarget(input.user, tdoc, input.targetKind)) throw new ForbiddenError(localizedErrorText`没有兑换目标的管理权限`);
+        await assertCanManageTargetOrHide(input.domainId, input.user, tdoc, input.targetKind);
         const maxUses = input.kind === 'single' ? 1 : input.maxUses;
         if (!Number.isSafeInteger(maxUses) || (maxUses as number) < 1) throw new ValidationError('maxUses', null, localizedErrorText`兑换次数上限无效`);
         const manualCodes = (input.manualCodes || []).map((code) => normalizeRedemptionCode(code));
@@ -557,7 +577,7 @@ export class RedemptionService {
                 const targetId = input.targetId || batch.targetId;
                 const stageId = input.stageId ?? batch.stageId;
                 const tdoc = await this.resolveTarget(input.domainId, targetKind, targetId, stageId);
-                if (!canManageTarget(input.user, tdoc, targetKind)) throw new ForbiddenError(localizedErrorText`没有兑换目标的管理权限`);
+                await assertCanManageTargetOrHide(input.domainId, input.user, tdoc, targetKind);
                 $set.targetKind = targetKind;
                 $set.targetId = targetId;
                 $set.stageId = stageId;

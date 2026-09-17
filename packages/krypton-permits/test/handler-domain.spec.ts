@@ -183,6 +183,9 @@ const hydroojStub = {
             throw new Error('unexpected contest edit');
         },
     },
+    ContestNotFoundError: class ContestNotFoundError extends Error {
+        name = 'ContestNotFoundError';
+    },
     Handler: framework.Handler,
     NotFoundError: Error,
     ObjectId,
@@ -772,7 +775,7 @@ describe('permit handler authoritative domain boundary', () => {
         await handler.post({ domainId: 'system' }, 42, permitId, 'retry-1');
 
         expect(calls.problemGet).to.deep.equal([
-            ['system', 42, handler.user],
+            ['system', 42],
             ['system', 42],
         ]);
         expect(calls.permitFind[0]).to.include({ domainId: 'system', pid: 42 });
@@ -794,7 +797,7 @@ describe('permit handler authoritative domain boundary', () => {
     it('discards a loaded roster when maintainer access is revoked before the final stable check', async () => {
         const handler = makeHandler('problem_permit_grant');
         const secretRow = { uid: 8, grantedBy: 1, role: 'verifier' };
-        stableProblemResults = [pdoc, null];
+        rawProblemResults = [pdoc, null];
         rosterProvider = async () => [secretRow];
 
         const error = await capture(() => handler.get({ domainId: 'system' }, 42));
@@ -803,15 +806,15 @@ describe('permit handler authoritative domain boundary', () => {
         expect(handler.response.body).to.equal(undefined);
         expect(calls.permitList).to.deep.equal([['system', 42]]);
         expect(calls.problemGet).to.deep.equal([
-            ['system', 42, handler.user],
-            ['system', 42, handler.user],
+            ['system', 42],
+            ['system', 42],
         ]);
     });
 
     it('returns a concurrently granted roster row only after a second stable maintainer check', async () => {
         const handler = makeHandler('problem_permit_grant');
         const granted = { uid: 9, grantedBy: 1, role: 'maintainer' };
-        stableProblemResults = [pdoc, pdoc];
+        rawProblemResults = [pdoc, pdoc];
         maintainResults = [true, true];
         rosterProvider = async () => [granted];
 
@@ -824,7 +827,7 @@ describe('permit handler authoritative domain boundary', () => {
 
     it('rejects when the problem remains viewable but the final maintainer capability was downgraded', async () => {
         const handler = makeHandler('problem_permit_grant');
-        stableProblemResults = [pdoc, pdoc];
+        rawProblemResults = [pdoc, pdoc];
         maintainResults = [true, false];
         rosterProvider = async () => [{ uid: 10, grantedBy: 1, role: 'verifier' }];
 
@@ -838,8 +841,7 @@ describe('permit handler authoritative domain boundary', () => {
     it('lets a managed maintainer grant author but not maintainer', async () => {
         const managed = { ...pdoc, authoringMode: 'managed' };
         const handler = makeHandler('problem_permit_grant');
-        stableProblemResults = [managed];
-        rawProblemResults = [managed];
+        rawProblemResults = [managed, managed];
         manageMaintainerResults = [false];
         manageCollaboratorResults = [true];
 
@@ -849,7 +851,7 @@ describe('permit handler authoritative domain boundary', () => {
         expect(calls.writeClaim[0][4]).to.include({ capability: 'collaborators' });
         expect(calls.oplog[0][1]).to.equal('problem.permit.grant');
 
-        stableProblemResults = [managed];
+        rawProblemResults = [managed, managed];
         manageMaintainerResults = [false];
         manageCollaboratorResults = [true];
         const error = await capture(() => handler.post({ domainId: 'system' }, 42, 8, undefined, 'maintainer', '', 'grant-maintainer'));
@@ -873,7 +875,7 @@ describe('permit handler authoritative domain boundary', () => {
 
         const revokeHandler = makeHandler('problem_permit_revoke');
         permitRow = { _id: permitId, domainId: 'system', pid: 42, uid: 8, active: true, role: 'maintainer' };
-        stableProblemResults = [managed];
+        rawProblemResults = [managed];
         manageMaintainerResults = [false];
         const error = await capture(() => revokeHandler.post({ domainId: 'system' }, 42, permitId, 'deny-revoke'));
 
@@ -882,7 +884,7 @@ describe('permit handler authoritative domain boundary', () => {
         expect(calls.oplog.at(-1)?.[1]).to.equal('problem.permit.denied');
 
         permitRow = { _id: permitId, domainId: 'system', pid: 42, uid: 1, active: true, role: 'maintainer' };
-        stableProblemResults = [managed];
+        rawProblemResults = [managed];
         manageMaintainerResults = [false];
         const selfError = await capture(() => revokeHandler.post({ domainId: 'system' }, 42, permitId, 'deny-self-revoke'));
         expect(selfError?.name).to.equal('PermissionError');
@@ -901,7 +903,7 @@ describe('permit handler authoritative domain boundary', () => {
     it('rejects managed multi-user grants before acquiring a claim or changing any role', async () => {
         const managed = { ...pdoc, authoringMode: 'managed' };
         const handler = makeHandler('problem_permit_grant');
-        stableProblemResults = [managed];
+        rawProblemResults = [managed];
 
         const error = await capture(() => handler.post({ domainId: 'system' }, 42, 8, ['9'], 'author', '', 'managed-batch'));
 
@@ -972,7 +974,7 @@ describe('permit handler authoritative domain boundary', () => {
         const managed = { ...pdoc, authoringMode: 'managed' };
         const handler = makeHandler('problem_permit_revoke');
         permitRow = { _id: permitId, domainId: 'system', pid: 42, uid: 1, active: true, role: 'author' };
-        stableProblemResults = [managed];
+        rawProblemResults = [managed];
         permitSourceRows = [{ domainId: 'system', pid: 42, uid: 1, active: true, role: 'maintainer' }];
         manageMaintainerResults = [false];
 
@@ -988,7 +990,7 @@ describe('permit handler authoritative domain boundary', () => {
         const managed = { ...pdoc, authoringMode: 'managed' };
         const grantHandler = makeHandler('problem_permit_grant');
         grantHandler.request.body = { uid: '8', role: 'author', tag: 'forged' };
-        stableProblemResults = [managed];
+        rawProblemResults = [managed];
 
         const grantError = await capture(() => grantHandler.post({ domainId: 'system' }, 42, 8, undefined, 'author', '', 'mixed-grant'));
         expect(grantError).to.be.instanceOf(Error);
@@ -997,9 +999,18 @@ describe('permit handler authoritative domain boundary', () => {
 
         const revokeHandler = makeHandler('problem_permit_revoke');
         revokeHandler.request.body = { permitId: permitId.toHexString(), role: 'author' };
-        stableProblemResults = [managed];
+        rawProblemResults = [managed];
         const revokeError = await capture(() => revokeHandler.post({ domainId: 'system' }, 42, permitId, 'mixed-revoke'));
         expect(revokeError).to.be.instanceOf(Error);
         expect(calls.revoke).to.have.lengthOf(0);
+    });
+
+    it('keeps the verify inbox when a viaContest contest is gone', () => {
+        const { readFileSync } = require('node:fs');
+        const { resolve } = require('node:path');
+        const source = readFileSync(resolve(__dirname, '../src/handler.ts'), 'utf8');
+        expect(source).to.include('ContestNotFoundError');
+        expect(source).to.include("error.name === 'ContestNotFoundError'");
+        expect(source).to.include('Permit inbox contest lookup failed');
     });
 });

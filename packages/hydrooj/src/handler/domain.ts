@@ -132,7 +132,11 @@ class DomainDashboardHandler extends ManageHandler {
     async get() {
         const owner = await user.getById(this.domain._id, this.domain.owner);
         this.response.template = 'domain_dashboard.html';
-        this.response.body = { domain: this.domain, owner };
+        this.response.body = {
+            domain: this.domain,
+            owner,
+            canDeleteDomain: this.domain.owner === this.user._id && this.domain._id !== 'system',
+        };
     }
 
     async postInitDiscussionNode({ domainId }) {

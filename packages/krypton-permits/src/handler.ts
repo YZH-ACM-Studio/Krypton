@@ -22,6 +22,7 @@ import {
     localizeError,
     localizedErrorText,
     ContestModel,
+    ContestNotFoundError,
     Handler,
     NotFoundError,
     ObjectId,
@@ -141,6 +142,22 @@ function canManageContestVerifiers(user: any, tdoc: any): boolean {
     return false;
 }
 
+async function hideAssignRestrictedContest(domainId: string, tdoc: any, actor: any) {
+    if (actor.own(tdoc) || actor.hasPerm(PERM.PERM_EDIT_CONTEST) || actor.hasPerm(PERM.PERM_VIEW_HIDDEN_CONTEST)) return;
+    if (!tdoc.assign?.length) return;
+    const groups = await UserModel.listGroup(domainId, actor._id);
+    if (!new Set(tdoc.assign).intersection(new Set(groups.map((item: { name: string }) => item.name))).size) {
+        throw contestNotFound();
+    }
+}
+
+async function loadPermitProblem(domainId: string, pid: number, user: any) {
+    await ProblemModel.refreshProblemAcl(user, domainId);
+    const pdoc = await ProblemModel.get(domainId, pid);
+    if (!pdoc) throw problemNotFound();
+    return pdoc;
+}
+
 function authoritativeDomainId(handler: Handler, args: { domainId?: unknown }): string {
     const domainId = String((handler as any).domain?._id || '');
     if (!domainId || (args.domainId !== undefined && String(args.domainId) !== domainId)) {
@@ -153,8 +170,7 @@ class ProblemPermitGrantHandler extends Handler {
     @param('pid', Types.UnsignedInt)
     async get(args: { domainId?: unknown }, pid: number) {
         const domainId = authoritativeDomainId(this, args);
-        const pdoc = await ProblemModel.getViewableAuthorized(domainId, pid, this.user);
-        if (!pdoc) throw problemNotFound();
+        const pdoc = await loadPermitProblem(domainId, pid, this.user);
         const grantableRoles = grantableProblemRoles(this.user, pdoc);
         if (!grantableRoles.length) {
             throw new PermissionError(localizedErrorText`无权查看此题目的权限列表`);
@@ -162,7 +178,8 @@ class ProblemPermitGrantHandler extends Handler {
         const permits = await permitsModel.listForProblem(domainId, pdoc.docId);
         const uids = Array.from(new Set([...permits.map((p) => p.uid), ...permits.map((p) => p.grantedBy)]));
         const udict = await UserModel.getList(domainId, uids);
-        const confirmedPdoc = await ProblemModel.getViewableAuthorized(domainId, pdoc.docId, this.user);
+        await ProblemModel.refreshProblemAcl(this.user, domainId);
+        const confirmedPdoc = await ProblemModel.get(domainId, pdoc.docId);
         const confirmedGrantableRoles = confirmedPdoc ? grantableProblemRoles(this.user, confirmedPdoc) : [];
         if (!confirmedPdoc || confirmedPdoc.docId !== pdoc.docId || !confirmedGrantableRoles.length) {
             throw new PermissionError(localizedErrorText`无权查看此题目的权限列表`);
@@ -200,8 +217,7 @@ class ProblemPermitGrantHandler extends Handler {
         if (!targetUids.length) {
             throw new ValidationError('uid', null, localizedErrorText`请选择至少一个目标用户`);
         }
-        const pdoc = await ProblemModel.getViewableAuthorized(domainId, pid, this.user);
-        if (!pdoc) throw problemNotFound();
+        const pdoc = await loadPermitProblem(domainId, pid, this.user);
         assertManagedPermitBody(this, pdoc, ['uid', 'uids', 'role', 'note', 'requestId']);
         if (pdoc.authoringMode === 'managed' && targetUids.length !== 1) {
             await logManagedPermitDenied(this, pdoc, 'grant', role as PermitRole);
@@ -320,8 +336,7 @@ class ProblemPermitRevokeHandler extends Handler {
     @param('requestId', Types.String, true)
     async post(args: { domainId?: unknown }, pid: number, permitId: ObjectId, requestId: string | undefined) {
         const domainId = authoritativeDomainId(this, args);
-        const pdoc = await ProblemModel.getViewableAuthorized(domainId, pid, this.user);
-        if (!pdoc) throw problemNotFound();
+        const pdoc = await loadPermitProblem(domainId, pid, this.user);
         assertManagedPermitBody(this, pdoc, ['permitId', 'requestId']);
         const row = await permitsColl.findOne({
             domainId,
@@ -488,15 +503,14 @@ class ProblemContributionHandler extends Handler {
     @param('pid', Types.UnsignedInt)
     async get(args: { domainId?: unknown }, pid: number) {
         const domainId = authoritativeDomainId(this, args);
-        const pdoc = await ProblemModel.getViewableAuthorized(domainId, pid, this.user);
-        if (!pdoc) throw problemNotFound();
+        const pdoc = await loadPermitProblem(domainId, pid, this.user);
         if (!ProblemModel.canManageProblemContributions(this.user, pdoc)) {
             throw new PermissionError(localizedErrorText`无权查看此题目的贡献分工`);
         }
         const rows = await permitsModel.listContributionsForProblem(domainId, pdoc.docId);
         const uids = [...new Set(rows.flatMap((row) => [row.uid, row.assignedBy, row.updatedBy]))];
         const udict = await UserModel.getList(domainId, uids);
-        const confirmed = await ProblemModel.getViewableAuthorized(domainId, pdoc.docId, this.user);
+        const confirmed = await loadPermitProblem(domainId, pdoc.docId, this.user);
         if (!confirmed || !ProblemModel.canManageProblemContributions(this.user, confirmed)) {
             throw new PermissionError(localizedErrorText`无权查看此题目的贡献分工`);
         }
@@ -515,8 +529,7 @@ class ProblemContributionHandler extends Handler {
         }
         const target = await UserModel.getById(domainId, uid);
         if (!target) throw new ValidationError('uid', null, localizedErrorText`目标用户不存在`);
-        const pdoc = await ProblemModel.getViewableAuthorized(domainId, pid, this.user);
-        if (!pdoc) throw problemNotFound();
+        const pdoc = await loadPermitProblem(domainId, pid, this.user);
         const mutationId = deriveContributionMutationId(requestId, 'problem-contribution-assign', domainId, pdoc.docId, uid, scope);
         if (!ProblemModel.canManageProblemContributions(this.user, pdoc)) {
             await auditContributionDenied(this, pdoc, uid, scope, 'authorize-assign', mutationId);
@@ -600,8 +613,7 @@ class ProblemContributionRevokeHandler extends Handler {
     async post(args: { domainId?: unknown }, pid: number, uid: number, scope: string, requestId: string) {
         const domainId = authoritativeDomainId(this, args);
         if (!CONTRIBUTION_SCOPES.includes(scope as ProblemContributionScope)) throw new ValidationError('scope');
-        const pdoc = await ProblemModel.getViewableAuthorized(domainId, pid, this.user);
-        if (!pdoc) throw problemNotFound();
+        const pdoc = await loadPermitProblem(domainId, pid, this.user);
         const mutationId = deriveContributionMutationId(requestId, 'problem-contribution-revoke', domainId, pdoc.docId, uid, scope);
         if (!ProblemModel.canManageProblemContributions(this.user, pdoc)) {
             await auditContributionDenied(this, pdoc, uid, scope, 'authorize-revoke', mutationId);
@@ -1000,8 +1012,7 @@ class ProblemContributionStatusHandler extends Handler {
         const domainId = authoritativeDomainId(this, args);
         if (!CONTRIBUTION_SCOPES.includes(scope as ProblemContributionScope)) throw new ValidationError('scope');
         if (!CONTRIBUTION_STATUSES.includes(status as ProblemContributionStatus)) throw new ValidationError('status');
-        const pdoc = await ProblemModel.getViewableAuthorized(domainId, pid, this.user);
-        if (!pdoc) throw problemNotFound();
+        const pdoc = await loadPermitProblem(domainId, pid, this.user);
         const managerAction = status === 'pending';
         const targetUid = uid ?? this.user._id;
         if (managerAction && uid === undefined) throw new ValidationError('uid', null, localizedErrorText`重开任务必须指定目标用户`);
@@ -1084,6 +1095,7 @@ class ContestVerifierAddHandler extends Handler {
         }
         const tdoc = await ContestModel.get(domainId, tid);
         if (!tdoc) throw contestNotFound();
+        await hideAssignRestrictedContest(domainId, tdoc, this.user);
         if (!canManageContestVerifiers(this.user, tdoc)) {
             throw new PermissionError(localizedErrorText`无权管理此比赛的验题人`);
         }
@@ -1153,6 +1165,7 @@ class ContestVerifierRemoveHandler extends Handler {
         const tdoc = await ContestModel.get(domainId, tid);
         if (!tdoc) throw contestNotFound();
         const isSelf = uid === this.user._id;
+        await hideAssignRestrictedContest(domainId, tdoc, this.user);
         if (!isSelf && !canManageContestVerifiers(this.user, tdoc)) {
             throw new PermissionError(localizedErrorText`无权移除该验题人`);
         }
@@ -1185,7 +1198,7 @@ class MyVerifyInboxHandler extends Handler {
             const pdoc = await ProblemModel.getViewableAuthorized(domainId, pid, this.user, ProblemModel.PROJECTION_LIST);
             if (pdoc) fixedPdict[pid] = pdoc;
         }
-        const visibleContributions = contributions.filter((row) => fixedPdict[row.pid]);
+        const visibleContributions = contributions;
         const granterUids = Array.from(
             new Set([...rows.map((r) => r.grantedBy), ...visibleContributions.flatMap((row) => [row.assignedBy, row.updatedBy])]),
         );
@@ -1194,8 +1207,13 @@ class MyVerifyInboxHandler extends Handler {
         const contestIds = Array.from(new Set(rows.map((r) => r.viaContest?.toHexString()).filter(Boolean) as string[]));
         const tdict: Record<string, any> = {};
         for (const tidHex of contestIds) {
-            const t = await ContestModel.get(domainId, new ObjectId(tidHex));
-            if (t) tdict[tidHex] = { _id: t._id, title: t.title };
+            try {
+                const t = await ContestModel.get(domainId, new ObjectId(tidHex));
+                if (t) tdict[tidHex] = { _id: t._id, title: t.title };
+            } catch (error) {
+                if (!(error instanceof ContestNotFoundError) && !(error instanceof Error && error.name === 'ContestNotFoundError')) throw error;
+                logger.error('Permit inbox contest lookup failed domain=%s tid=%s error=%o', domainId, tidHex, error);
+            }
         }
         this.response.template = 'my_verify_inbox.html';
         this.response.body = { permits: rows, contributions: visibleContributions, pdict: fixedPdict, udict, tdict };
@@ -1203,14 +1221,14 @@ class MyVerifyInboxHandler extends Handler {
 }
 
 export function applyHandlers(ctx: Context) {
-    ctx.Route('problem_permit_grant', '/p/:pid/permits', ProblemPermitGrantHandler, PERM.PERM_VIEW_PROBLEM);
-    ctx.Route('problem_permit_revoke', '/p/:pid/permits/revoke', ProblemPermitRevokeHandler, PERM.PERM_VIEW_PROBLEM);
-    ctx.Route('problem_contribution', '/p/:pid/contributions', ProblemContributionHandler, PERM.PERM_VIEW_PROBLEM);
+    ctx.Route('problem_permit_grant', '/p/:pid/permits', ProblemPermitGrantHandler);
+    ctx.Route('problem_permit_revoke', '/p/:pid/permits/revoke', ProblemPermitRevokeHandler);
+    ctx.Route('problem_contribution', '/p/:pid/contributions', ProblemContributionHandler);
     ctx.Route('problem_contribution_bulk', '/problem-contributions/bulk', ProblemContributionBulkHandler, PRIV.PRIV_USER_PROFILE);
-    ctx.Route('problem_contribution_revoke', '/p/:pid/contributions/revoke', ProblemContributionRevokeHandler, PERM.PERM_VIEW_PROBLEM);
-    ctx.Route('problem_contribution_status', '/p/:pid/contributions/status', ProblemContributionStatusHandler, PERM.PERM_VIEW_PROBLEM);
-    ctx.Route('contest_verifier_add', '/contest/:tid/verifiers', ContestVerifierAddHandler, PERM.PERM_VIEW_CONTEST);
-    ctx.Route('contest_verifier_remove', '/contest/:tid/verifiers/remove', ContestVerifierRemoveHandler, PERM.PERM_VIEW_CONTEST);
+    ctx.Route('problem_contribution_revoke', '/p/:pid/contributions/revoke', ProblemContributionRevokeHandler);
+    ctx.Route('problem_contribution_status', '/p/:pid/contributions/status', ProblemContributionStatusHandler);
+    ctx.Route('contest_verifier_add', '/contest/:tid/verifiers', ContestVerifierAddHandler);
+    ctx.Route('contest_verifier_remove', '/contest/:tid/verifiers/remove', ContestVerifierRemoveHandler);
     // Not /tasks/verify — that would collide with krypton-tasks's
     // `/tasks/:tid` (TaskDetailHandler) route: hydro routes by registration
     // order, and "verify" would be parsed as a tid ObjectId, failing

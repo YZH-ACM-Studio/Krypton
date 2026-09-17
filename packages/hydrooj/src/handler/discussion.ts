@@ -17,6 +17,10 @@ import * as oplog from '../model/oplog';
 import user from '../model/user';
 import { Handler, param, Types } from '../service/server';
 
+function canBypassDiscussionView(user: { hasPerm(...perm: bigint[]): boolean; hasPriv(...priv: number[]): boolean }) {
+    return user.hasPriv(PRIV.PRIV_EDIT_SYSTEM) || user.hasPerm(PERM.PERM_EDIT_DISCUSSION) || user.hasPerm(PERM.PERM_CREATE_DISCUSSION);
+}
+
 export const typeMapper = {
     problem: document.TYPE_PROBLEM,
     contest: document.TYPE_CONTEST,
@@ -37,7 +41,6 @@ class DiscussionHandler extends Handler {
     @param('drid', Types.ObjectId, true)
     @param('drrid', Types.ObjectId, true)
     async _prepare(domainId: string, type: string, name: string, did: ObjectId, drid: ObjectId, drrid: ObjectId) {
-        this.checkPerm(PERM.PERM_VIEW_DISCUSSION);
         if (did) {
             this.ddoc = await discussion.get(domainId, did);
             if (!this.ddoc) throw new DiscussionNotFoundError(domainId, did);
@@ -53,6 +56,9 @@ class DiscussionHandler extends Handler {
                     throw localizeError(new DocumentNotFoundError(domainId, drid), 'Document {0} not found.', drid);
                 }
             }
+        }
+        if (!canBypassDiscussionView(this.user) && !(this.ddoc && this.user.own(this.ddoc))) {
+            this.checkPerm(PERM.PERM_VIEW_DISCUSSION);
         }
         // TODO(twd2): exclude problem/contest discussions?
         // TODO(iceboy): continuation based pagination.
@@ -71,6 +77,7 @@ class DiscussionMainHandler extends Handler {
     @param('page', Types.PositiveInt, true)
     @param('all', Types.Boolean)
     async get(domainId: string, page = 1, all = false) {
+        if (!canBypassDiscussionView(this.user)) this.checkPerm(PERM.PERM_VIEW_DISCUSSION);
         // Limit to known types
         const parentType = { $in: Object.keys(typeMapper).map((i) => typeMapper[i]) };
         all &&= this.user.hasPerm(PERM.PERM_MOD_BADGE);
@@ -94,6 +101,8 @@ class DiscussionMainHandler extends Handler {
             vndict,
             vnode: {},
             vnodes,
+            all,
+            canViewHidden: this.user.hasPerm(PERM.PERM_MOD_BADGE),
         };
     }
 }
@@ -102,12 +111,17 @@ class DiscussionNodeHandler extends DiscussionHandler {
     @param('type', Types.Range(Object.keys(typeMapper)))
     @param('name', Types.String)
     @param('page', Types.PositiveInt, true)
-    async get(domainId: string, type: string, _name: string, page = 1) {
+    @param('all', Types.Boolean)
+    async get(domainId: string, type: string, _name: string, page = 1, all = false) {
+        all &&= this.user.hasPerm(PERM.PERM_MOD_BADGE);
         let name: ObjectId | string | number;
         if (ObjectId.isValid(_name)) name = new ObjectId(_name);
         else if (isSafeInteger(Number.parseInt(_name, 10))) name = Number.parseInt(_name, 10);
         else name = _name;
-        const hidden = this.user.own(this.vnode) || this.user.hasPerm(PERM.PERM_EDIT_DISCUSSION) ? {} : { hidden: false };
+        const canSeeHidden = this.user.hasPerm(PERM.PERM_MOD_BADGE)
+            ? all
+            : this.user.own(this.vnode) || this.user.hasPerm(PERM.PERM_EDIT_DISCUSSION);
+        const hidden = canSeeHidden ? {} : { hidden: false };
         const [ddocs, dpcount] = await this.paginate(
             discussion.getMulti(domainId, { parentType: typeMapper[type], parentId: name, ...hidden }),
             page,
@@ -127,6 +141,8 @@ class DiscussionNodeHandler extends DiscussionHandler {
             vnode: this.vnode,
             page_name: 'discussion_node',
             vnodes,
+            all,
+            canViewHidden: this.user.hasPerm(PERM.PERM_MOD_BADGE),
         };
     }
 }
@@ -140,7 +156,14 @@ class DiscussionCreateHandler extends DiscussionHandler {
             ['discussion_create', null],
         ];
         this.response.template = 'discussion_create.html';
-        this.response.body = { path, vnode: this.vnode };
+        this.response.body = {
+            path,
+            vnode: this.vnode,
+            permissions: {
+                canHighlightDiscussion: this.user.hasPerm(PERM.PERM_HIGHLIGHT_DISCUSSION),
+                canPinDiscussion: this.user.hasPerm(PERM.PERM_PIN_DISCUSSION),
+            },
+        };
     }
 
     @param('type', Types.Range(Object.keys(typeMapper)))
@@ -412,7 +435,16 @@ class DiscussionRawHandler extends DiscussionHandler {
 class DiscussionEditHandler extends DiscussionHandler {
     async get() {
         this.response.template = 'discussion_edit.html';
-        this.response.body = { ddoc: this.ddoc };
+        this.response.body = {
+            ddoc: this.ddoc,
+            permissions: {
+                canDeleteDiscussion:
+                    this.user.hasPerm(PERM.PERM_DELETE_DISCUSSION) ||
+                    (this.user.own(this.ddoc) && this.user.hasPerm(PERM.PERM_DELETE_DISCUSSION_SELF)),
+                canHighlightDiscussion: this.user.hasPerm(PERM.PERM_HIGHLIGHT_DISCUSSION),
+                canPinDiscussion: this.user.hasPerm(PERM.PERM_PIN_DISCUSSION),
+            },
+        };
     }
 
     @param('did', Types.ObjectId)
@@ -465,7 +497,7 @@ class DiscussionEditHandler extends DiscussionHandler {
 }
 
 export async function apply(ctx) {
-    ctx.Route('discussion_main', '/discuss', DiscussionMainHandler, PERM.PERM_VIEW_DISCUSSION);
+    ctx.Route('discussion_main', '/discuss', DiscussionMainHandler);
     ctx.Route('discussion_detail', '/discuss/:did', DiscussionDetailHandler);
     ctx.Route('discussion_edit', '/discuss/:did/edit', DiscussionEditHandler);
     ctx.Route('discussion_raw', '/discuss/:did/raw', DiscussionRawHandler);

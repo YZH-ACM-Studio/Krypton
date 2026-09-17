@@ -96,7 +96,7 @@ require.cache[trainingPath] = {
     },
 } as NodeModule;
 delete require.cache[redemptionPath];
-const { RedemptionService, normalizeRedemptionCode, redemptionCodeIsWeak } = require(redemptionPath) as typeof import('../src/model/redemption');
+const { RedemptionService, normalizeRedemptionCode, redemptionCodeIsWeak, redemptionLookupSourceIds } = require(redemptionPath) as typeof import('../src/model/redemption');
 
 const domainId = 'system';
 const setId = new ObjectId();
@@ -408,6 +408,61 @@ describe('P3.6 redemption codes', () => {
             expect(String(error.message || error.params || '')).to.not.include(String(setId));
         } finally {
             currentTarget = { domainId, docId: setId, owner: uid, kind: 'problem_set', dag: [{ _id: 1, title: 'A', requireNids: [], pids: [11] }] };
+        }
+    });
+
+    it('scopes lookup source ids to the actor batch code ids', async () => {
+        const redemption = service();
+        const own = await redemption.createBatch({
+            domainId,
+            user: actor(),
+            targetKind: 'problem_set',
+            targetId: setId,
+            kind: 'single',
+            manualCodes: ['LookupOwn1'],
+        });
+        const other = await redemption.createBatch({
+            domainId,
+            user: actor({ _id: 99, perms: [PERM.PERM_CREATE_REDEMPTION_CODE, PERM.PERM_EDIT_TRAINING] }),
+            targetKind: 'problem_set',
+            targetId: setId,
+            kind: 'single',
+            manualCodes: ['LookupOther1'],
+        });
+        const ownIds = redemptionLookupSourceIds(await redemption.listBatches(domainId, actor()));
+        expect(ownIds.has(String(own.plaintext[0].codeId))).to.equal(true);
+        expect(ownIds.has(String(other.plaintext[0].codeId))).to.equal(false);
+        const admin = actor({
+            _id: 1,
+            hasPerm: () => false,
+            hasPriv: (priv: number) => priv === PRIV.PRIV_EDIT_SYSTEM,
+        });
+        const allIds = redemptionLookupSourceIds(await redemption.listBatches(domainId, admin));
+        expect(allIds.has(String(own.plaintext[0].codeId))).to.equal(true);
+        expect(allIds.has(String(other.plaintext[0].codeId))).to.equal(true);
+    });
+
+    it('refuses another creator without canManageAll from revoking a source', async () => {
+        const redemption = service();
+        await redemption.createBatch({
+            domainId,
+            user: actor(),
+            targetKind: 'problem_set',
+            targetId: setId,
+            kind: 'single',
+            manualCodes: ['RevokeOther1'],
+        });
+        const first = await redemption.redeem({ domainId, uid, user: actor(), code: 'RevokeOther1' });
+        try {
+            await redemption.revokeUserSource({
+                domainId,
+                user: actor({ _id: 99 }),
+                uid,
+                entitlementId: first.entitlementIds[0],
+            });
+            expect.fail('expected forbidden');
+        } catch (error: any) {
+            expect(error.name).to.equal('ForbiddenError');
         }
     });
 });

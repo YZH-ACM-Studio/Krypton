@@ -67,13 +67,17 @@ function serializeMap(config: KnowledgeMapDoc) {
 async function adminSnapshot(requestedMapId?: ObjectId | string) {
     const maps = await listKnowledgeMaps(true);
     const requested = requestedMapId ? String(requestedMapId) : null;
-    const config = requested ? maps.find((map) => map._id.toHexString() === requested) : pickDefaultKnowledgeMap(maps);
-    if (requested && !config) throw new NotFoundError(localizedErrorText`mindmap`, requested);
+    const requestedConfig = requested ? maps.find((map) => map._id.toHexString() === requested) : null;
+    const staleMapId = requested && !requestedConfig ? requested : null;
+    if (staleMapId) {
+        logger.error('Mindmap admin found unavailable map id map=%s', staleMapId);
+    }
+    const config = requestedConfig || pickDefaultKnowledgeMap(maps);
     const serializedMaps = await Promise.all(maps.map(async (map) => ({ ...serializeMap(map), usage: await getKnowledgeMapUsage(map._id) })));
-    if (!config) return { nodes: [], config: null, maps: serializedMaps, referenceCounts: {} };
+    if (!config) return { nodes: [], config: null, maps: serializedMaps, referenceCounts: {}, staleMapId };
     const nodes = await listAllNodes(config._id);
     const referenceCounts = await getNodeReferenceCounts(config._id, nodes);
-    return { nodes: nodes.map(serializeNode), config: serializeMap(config), maps: serializedMaps, referenceCounts };
+    return { nodes: nodes.map(serializeNode), config: serializeMap(config), maps: serializedMaps, referenceCounts, staleMapId };
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

@@ -3,7 +3,8 @@ import { beforeEach, describe, it } from 'node:test';
 import { ObjectId } from 'mongodb';
 
 const Module = require('module');
-(global as any).Hydro ||= { model: {}, module: {} };
+(global as any).Hydro ||= { model: {}, module: {}, ui: {} };
+(global as any).Hydro.ui ||= {};
 
 const PERM = {
     PERM_EDIT_COURSE: 1n,
@@ -105,6 +106,23 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
                         expiresAt: new Date('2026-08-09T08:15:00Z'),
                     };
                 },
+            },
+        };
+    }
+    if (fromAccess && request === '../lib/course-access') {
+        return {
+            isCourseHidden: (tdoc: { courseHidden?: boolean }) => tdoc.courseHidden === true,
+            async courseUserGroupIds() {
+                return new Set<string>();
+            },
+            async courseAccessibleTo() {
+                return true;
+            },
+            async assertCourseAccessible() {
+                return undefined;
+            },
+            canManageCourse() {
+                return false;
             },
         };
     }

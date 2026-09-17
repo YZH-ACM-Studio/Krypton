@@ -433,6 +433,22 @@ SystemSetting(
         'exam.preloginWorkflowWriterEnabled',
         'Enable P2.9 workflow-bearing pre-login batches only after the compatibility-reader deployment gate has passed.',
     ),
+    Setting(
+        'setting_vigil',
+        'vigil.baseUrl',
+        '',
+        'text',
+        'vigil.baseUrl',
+        'Vigil Server base URL used by OJ service-token calls. Restart hydrooj after change.',
+    ),
+    Setting(
+        'setting_vigil',
+        'vigil.processWhitelistGlobal',
+        '',
+        'textarea',
+        'vigil.processWhitelistGlobal',
+        'Comma-separated extra process names merged into every contest Vigil whitelist. Restart hydrooj after change.',
+    ),
     // problem.hideBank remains only for configuration compatibility.
     // @deprecated This setting is not an authorization switch. P2.11 always
     // enforces the server-side ProblemModel capability and Mongo scope.

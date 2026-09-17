@@ -1,13 +1,12 @@
 import { ObjectId } from 'mongodb';
 import { Logger } from '@hydrooj/utils';
-import { localizedErrorText, PermissionError, ValidationError } from '../error';
+import { localizedErrorText, ValidationError } from '../error';
 import { PRIV } from '../model/builtin';
 import * as oplog from '../model/oplog';
 import {
-    canManagePracticeContainer,
+    assertCanManagePracticeOrHide,
     issuePracticeContext,
     loadPracticeContainer,
-    requiredPracticeManagePermission,
 } from '../model/practice-integrity-access';
 import {
     canonicalPracticePolicy,
@@ -80,9 +79,7 @@ class PracticeIntegrityPolicyHandler extends Handler {
         const domainId = String(this.domain?._id);
         const containerKind = canonicalContainerKind(containerKindRaw);
         const tdoc = await loadPracticeContainer(domainId, containerKind, containerId);
-        if (!canManagePracticeContainer(this.user, tdoc, containerKind)) {
-            throw new PermissionError(requiredPracticeManagePermission(this.user, tdoc, containerKind));
-        }
+        await assertCanManagePracticeOrHide(domainId, this.user, tdoc, containerKind);
         const state = await practiceIntegrityService.getPolicyState(domainId, containerKind, containerId);
         this.response.body = { published: serializeRevision(state.published), draft: serializeRevision(state.draft) };
     }
@@ -105,9 +102,7 @@ class PracticeIntegrityPolicyHandler extends Handler {
         const domainId = String(this.domain?._id);
         const containerKind = canonicalContainerKind(containerKindRaw);
         const tdoc = await loadPracticeContainer(domainId, containerKind, containerId);
-        if (!canManagePracticeContainer(this.user, tdoc, containerKind)) {
-            throw new PermissionError(requiredPracticeManagePermission(this.user, tdoc, containerKind));
-        }
+        await assertCanManagePracticeOrHide(domainId, this.user, tdoc, containerKind);
         try {
             const draft = await practiceIntegrityService.saveDraft({
                 domainId,
@@ -146,9 +141,7 @@ class PracticeIntegrityPolicyHandler extends Handler {
         const domainId = String(this.domain?._id);
         const containerKind = canonicalContainerKind(containerKindRaw);
         const tdoc = await loadPracticeContainer(domainId, containerKind, containerId);
-        if (!canManagePracticeContainer(this.user, tdoc, containerKind)) {
-            throw new PermissionError(requiredPracticeManagePermission(this.user, tdoc, containerKind));
-        }
+        await assertCanManagePracticeOrHide(domainId, this.user, tdoc, containerKind);
         try {
             const published = await practiceIntegrityService.publishDraft({
                 domainId,
@@ -195,9 +188,7 @@ class PracticeIntegrityPolicyHandler extends Handler {
         const domainId = String(this.domain?._id);
         const containerKind = canonicalContainerKind(containerKindRaw);
         const tdoc = await loadPracticeContainer(domainId, containerKind, containerId);
-        if (!canManagePracticeContainer(this.user, tdoc, containerKind)) {
-            throw new PermissionError(requiredPracticeManagePermission(this.user, tdoc, containerKind));
-        }
+        await assertCanManagePracticeOrHide(domainId, this.user, tdoc, containerKind);
         try {
             const published = await practiceIntegrityService.saveAndPublish({
                 domainId,

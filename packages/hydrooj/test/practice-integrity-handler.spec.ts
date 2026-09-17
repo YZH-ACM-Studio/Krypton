@@ -33,6 +33,10 @@ class TestValidationError extends Error {
     }
 }
 
+class TestTrainingNotFoundError extends Error {
+    name = 'TrainingNotFoundError';
+}
+
 class TestConflictError extends Error {
     name = 'PracticeIntegrityConflictError';
 
@@ -220,6 +224,7 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
         return {
             localizedErrorText,
             PermissionError: TestPermissionError,
+            TrainingNotFoundError: TestTrainingNotFoundError,
             ValidationError: TestValidationError,
         };
     }
@@ -521,7 +526,7 @@ describe('practice integrity handlers', () => {
         groupIds = [new ObjectId('66b700000000000000000021')];
         const handler = makeHandler('practice_context');
         const error = await capture(() => handler.postIssue(contextIssueArgs()));
-        expect(error).to.be.instanceOf(TestPermissionError);
+        expect(error).to.be.instanceOf(TestTrainingNotFoundError);
         expect(calls.issue).to.deep.equal([]);
     });
 

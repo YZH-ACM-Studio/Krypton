@@ -718,6 +718,24 @@ describe('mindmap administrator HTTP boundary', () => {
         expect(calls.getReferenceCounts).to.have.lengthOf(1);
     });
 
+    it('keeps the admin workspace open when the requested map id is gone', async () => {
+        const staleMapId = 'aaaaaaaaaaaaaaaaaaaaaaaa';
+        const response = await dispatchAdminRoute({
+            route: 'admin_mindmap',
+            path: '/admin/mindmap',
+            user: makeAdminUser(),
+            json: false,
+            args: { map: staleMapId },
+            query: { map: staleMapId },
+        });
+
+        expect(response.status).to.equal(200);
+        expect(response.template).to.equal('admin_mindmap.html');
+        expect(response.body.staleMapId).to.equal(staleMapId);
+        expect(response.body.config._id).to.equal(bootstrapMaps[0]._id.toHexString());
+        expect(response.body.maps).to.have.lengthOf(1);
+    });
+
     it('uses the authoritative domain for administrator problem search and association queries', async () => {
         const nodeId = bootstrapNodes[0]._id.toHexString();
         const mapId = bootstrapMaps[0]._id.toHexString();

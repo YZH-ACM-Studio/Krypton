@@ -20,7 +20,6 @@ import {
     randomstring,
     Schema,
     SolutionModel,
-    SystemModel,
     Types,
     ValidationError,
     yaml,
@@ -30,6 +29,14 @@ import {
 const knownRemoteMapping = {
     bas: 'ybtbas',
 };
+
+function fpsImportLimit(handler: Handler): number {
+    const limit = handler.ctx.setting.get('fps-importer.limit');
+    if (typeof limit !== 'number' || !Number.isFinite(limit) || limit < 1) {
+        throw new ValidationError('limit', null, localizedErrorText`FPS 导入大小限制未配置`);
+    }
+    return limit;
+}
 
 class FpsProblemImportHandler extends Handler {
     async get() {
@@ -121,7 +128,7 @@ class FpsProblemImportHandler extends Handler {
         const knowledge = await ProblemModel.resolveProgrammingKnowledgeMap(knowledgeMapId);
         const tasks = [];
         try {
-            if (file.size > SystemModel.get('import-fps.limit')) throw new FileTooLargeError();
+            if (file.size > fpsImportLimit(this)) throw new FileTooLargeError();
             const content = await fs.readFile(file.filepath, 'utf-8');
             const result = await xml2js.parseStringPromise(content);
             tasks.push(result);
@@ -138,7 +145,7 @@ class FpsProblemImportHandler extends Handler {
             for (const entry of entries) {
                 try {
                     if (entry.directory === true) continue;
-                    if (entry.uncompressedSize > SystemModel.get('import-fps.limit')) throw new FileTooLargeError();
+                    if (entry.uncompressedSize > fpsImportLimit(this)) throw new FileTooLargeError();
                     const content = entry.getData(new Zip.TextWriter());
                     const result = await xml2js.parseStringPromise(content);
                     tasks.push(result);
@@ -167,7 +174,8 @@ export async function apply(ctx: Context) {
         'problem.import.fps.hint1':
             '我们推荐的最大导入大小为 64MiB，若文件超出此大小，强烈建议您在本机使用 EasyFPSViewer 等工具将其拆分或是移除测试数据后单独上传。',
         'problem.import.fps.hint2': '由于 xml 格式无法随机读写，解析需要消耗大量内存，在内存过小的机器上导入大型题目包很可能导致崩溃或死机。',
-        'problem.import.fps.hint3': '若您确有需要，此限制可在系统设置中更改。我们建议您使用 Hydro 自带的 zip 格式存储或是交换题目。',
+        'problem.import.fps.hint3':
+            '若您确有需要，此限制可在系统配置（/manage/config）的 FPS Importer 插件项中更改。我们建议您使用 Hydro 自带的 zip 格式存储或是交换题目。',
     });
     ctx.i18n.load('en', {
         'From FPS File': 'Import from FPS File',
@@ -178,7 +186,7 @@ we strongly recommend that you use tools such as EasyFPSViewer to split it or re
             'Since the xml format cannot be read randomly, parsing requires a large amount of memory. \
 Importing a large problem set on a machine with insufficient memory may cause a crash or freeze.',
         'problem.import.fps.hint3':
-            'If you really need it, this limit can be changed in the system settings. \
+            'If you really need it, this limit can be changed in the system configuration (/manage/config) under the FPS Importer plugin. \
 We strongly recommend that you use the zip format to store or exchange problemsets.',
     });
 }

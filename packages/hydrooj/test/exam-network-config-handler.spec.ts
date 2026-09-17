@@ -47,6 +47,7 @@ describe('Exam network control HTTP contracts', () => {
     });
 
     it('writes one success oplog after mutation and logs immutable identities without endpoint commands', () => {
+        expect(source).to.include('...(collaborators !== undefined ? { collaboratorUids: collaborators } : {})');
         expect(source).to.include('runAuditedExamNetworkMutation(');
         expect(auditSource).not.to.include("result: 'started'");
         expect(auditSource).to.include("result: 'success'");

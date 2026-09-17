@@ -343,7 +343,7 @@ class ExamPolicyTemplateDetailHandler extends ExamNetworkBaseHandler {
                         actorUid: this.user._id,
                         ...(Object.hasOwn(body, 'name') ? { name: body.name as string } : {}),
                         ...(Object.hasOwn(body, 'policy') ? { policy: body.policy } : {}),
-                        ...(collaborators ? { collaboratorUids: collaborators } : {}),
+                        ...(collaborators !== undefined ? { collaboratorUids: collaborators } : {}),
                     });
                 },
                 (template) => policyTemplateAuditFacts(action, template),

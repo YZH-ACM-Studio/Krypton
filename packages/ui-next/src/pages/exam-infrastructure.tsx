@@ -101,6 +101,7 @@ interface PolicyTemplate {
   name: string;
   status: 'active' | 'archived';
   revision: number;
+  collaboratorUids: number[];
   draft: { version: number; policy: NetworkPolicy; fingerprint: string };
   revisions: PolicyRevision[];
   latestPublishedRevision: number | null;
@@ -425,11 +426,15 @@ function parseTemplate(value: unknown): PolicyTemplate {
   const status = asString(template.status, '策略模板');
   if (status !== 'active' && status !== 'archived') throw new Error('策略模板响应格式不正确');
   if (!Array.isArray(template.revisions)) throw new Error('策略模板响应格式不正确');
+  if (!Array.isArray(template.collaboratorUids) || template.collaboratorUids.some((uid) => !Number.isSafeInteger(uid))) {
+    throw new Error('策略模板响应格式不正确');
+  }
   return {
     templateId: asString(template.templateId, '策略模板'),
     name: asString(template.name, '策略模板'),
     status,
     revision: asNumber(template.revision, '策略模板'),
+    collaboratorUids: [...template.collaboratorUids] as number[],
     draft: { version: asNumber(draft.version, '策略草稿'), policy: parsePolicy(draft.policy), fingerprint: asString(draft.fingerprint, '策略草稿') },
     revisions: template.revisions.map((item) => {
       const revision = asRecord(item, '策略版本');
@@ -1587,26 +1592,32 @@ function PolicySection({
   reload: () => Promise<void>;
   requestConfirm: (plan: ConfirmPlan) => void;
 }) {
+  const bs = useBootstrap();
   const [selectedId, setSelectedId] = useState('');
+  const activeTemplates = templates.filter((template) => template.status === 'active');
   const selected =
     selectedId === '__new__'
       ? null
-      : templates.find((template) => template.templateId === selectedId) ||
-        templates.find((template) => template.templateId === config?.policy?.id) ||
-        templates[0] ||
+      : activeTemplates.find((template) => template.templateId === selectedId) ||
+        activeTemplates.find((template) => template.templateId === config?.policy?.id) ||
+        activeTemplates[0] ||
         null;
   const [name, setName] = useState('');
   const [hosts, setHosts] = useState('');
   const [ips, setIps] = useState('');
   const [ports, setPorts] = useState('');
+  const [collaborators, setCollaborators] = useState<DomainUserOption[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const hydrateSeq = useRef(0);
   useEffect(() => {
+    const seq = ++hydrateSeq.current;
     if (!selected) {
       setName('');
       setHosts(suggestedPolicy?.hosts.join('\n') || '');
       setIps(suggestedPolicy?.ips.join('\n') || '');
       setPorts(suggestedPolicy?.ports.join(', ') || '');
+      setCollaborators([]);
       return;
     }
     setSelectedId(selected.templateId);
@@ -1614,17 +1625,32 @@ function PolicySection({
     setHosts(selected.draft.policy.hosts.join('\n'));
     setIps(selected.draft.policy.ips.join('\n'));
     setPorts(selected.draft.policy.ports.join(', '));
-  }, [selected?.templateId, selected?.revision, suggestedPolicy]);
+    setCollaborators(collaboratorsFromUids(selected.collaboratorUids));
+    void hydrateCollaborators(bs.domain.id, selected.collaboratorUids).then((next) => {
+      if (seq === hydrateSeq.current) setCollaborators(next);
+    });
+  }, [bs.domain.id, selected?.collaboratorUids?.join(','), selected?.revision, selected?.templateId, suggestedPolicy]);
   const policy = (): NetworkPolicy => ({ hosts: splitValues(hosts), ips: splitValues(ips), ports: splitValues(ports).map((value) => Number(value)) });
-  const dirty =
-    Boolean(selected) && JSON.stringify({ name, policy: policy() }) !== JSON.stringify({ name: selected?.name, policy: selected?.draft.policy });
+  const collaboratorUids = collaborators.map((user) => user._id);
+  const dirty = selected
+    ? JSON.stringify({
+        name,
+        policy: policy(),
+        collaboratorUids: [...collaboratorUids].sort((left, right) => left - right),
+      }) !==
+      JSON.stringify({
+        name: selected.name,
+        policy: selected.draft.policy,
+        collaboratorUids: [...selected.collaboratorUids].sort((left, right) => left - right),
+      })
+    : false;
   const create = async () => {
     setBusy(true);
     setError(null);
     try {
       const payload = await postJson(
         `/api/admin/exam-policy-templates?eventId=${encodeURIComponent(eventId)}`,
-        { eventId, name, policy: policy(), collaboratorUids: [] },
+        { eventId, name, policy: policy(), collaboratorUids },
         '创建策略失败',
       );
       const created = parseTemplate(payload.template);
@@ -1643,7 +1669,15 @@ function PolicySection({
     try {
       await postJson(
         `/api/admin/exam-policy-templates/${selected.templateId}?eventId=${encodeURIComponent(eventId)}`,
-        { eventId, templateId: selected.templateId, action: 'saveDraft', expectedRevision: selected.revision, name, policy: policy() },
+        {
+          eventId,
+          templateId: selected.templateId,
+          action: 'saveDraft',
+          expectedRevision: selected.revision,
+          name,
+          policy: policy(),
+          collaboratorUids,
+        },
         '保存策略草稿失败',
       );
       await reload();
@@ -1664,6 +1698,21 @@ function PolicySection({
         `/api/admin/exam-policy-templates/${selected.templateId}?eventId=${encodeURIComponent(eventId)}`,
         { eventId, templateId: selected.templateId, action: 'publish', expectedRevision: selected.revision },
         '发布策略失败',
+      );
+      await reload();
+    } finally {
+      setBusy(false);
+    }
+  };
+  const archive = async () => {
+    if (!selected) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await postJson(
+        `/api/admin/exam-policy-templates/${selected.templateId}?eventId=${encodeURIComponent(eventId)}`,
+        { eventId, templateId: selected.templateId, action: 'archive', expectedRevision: selected.revision },
+        '归档策略失败',
       );
       await reload();
     } finally {
@@ -1709,9 +1758,7 @@ function PolicySection({
               onValueChange={setSelectedId}
               options={[
                 { value: '__new__', label: '新建策略' },
-                ...templates
-                  .filter((template) => template.status === 'active')
-                  .map((template) => ({ value: template.templateId, label: template.name })),
+                ...activeTemplates.map((template) => ({ value: template.templateId, label: template.name })),
               ]}
             />
           </FormField>
@@ -1726,6 +1773,9 @@ function PolicySection({
             maxLength={120}
             placeholder="例如：CSP 考试网络"
           />
+        </FormField>
+        <FormField label="协作者" hint="可选。服务端会重新校验学校范围。基础设施管理员可以管理任意模板。">
+          <CollaboratorSelect domainId={bs.domain.id} value={collaborators} onChange={setCollaborators} disabled={readOnly} />
         </FormField>
         <FormRow columns={3}>
           <FormField label="允许域名" htmlFor="policy-hosts" hint="每行一个精确域名或 *.example.com">
@@ -1773,6 +1823,33 @@ function PolicySection({
             >
               <Upload className="size-4" />
               发布版本
+            </Button>
+          ) : null}
+          {selected ? (
+            <Button
+              size="sm"
+              variant="destructive"
+              disabled={readOnly || busy}
+              onClick={() =>
+                requestConfirm({
+                  title: '归档此策略模板？',
+                  description: '归档后该模板不再出现在活动策略选择器中。已发布的不可变版本会保留，不会删除历史修订。',
+                  confirmLabel: '确认归档',
+                  tone: 'destructive',
+                  facts: [
+                    { label: '模板', value: selected.name },
+                    { label: '模板版本', value: `${selected.revision} → ${selected.revision + 1}` },
+                    {
+                      label: '已发布版本',
+                      value: selected.latestPublishedRevision ? `v${selected.latestPublishedRevision}` : '无',
+                    },
+                  ],
+                  run: archive,
+                })
+              }
+            >
+              <Archive className="size-4" />
+              归档模板
             </Button>
           ) : null}
           {dirty ? <span className="text-xs text-amber-700 dark:text-amber-300">有未保存修改</span> : null}

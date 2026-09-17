@@ -98,6 +98,27 @@ function projectionItem(index: number, overrides: Record<string, unknown> = {}) 
   };
 }
 
+function policyTemplateFixture(overrides: Record<string, unknown> = {}) {
+  return {
+    templateId: '66b800000000000000000611',
+    name: '考试策略',
+    status: 'active',
+    revision: 2,
+    collaboratorUids: [] as number[],
+    draft: { version: 2, policy: { hosts: [], ips: [], ports: [] }, fingerprint: 'c'.repeat(64) },
+    revisions: [
+      {
+        revision: 1,
+        policy: { hosts: [], ips: [], ports: [443] },
+        fingerprint: 'a'.repeat(64),
+        publishedAt: '2026-08-11T02:00:00.000Z',
+      },
+    ],
+    latestPublishedRevision: 1,
+    ...overrides,
+  };
+}
+
 function updatePreviewFixture(overrides: Record<string, unknown> = {}) {
   return {
     executionRevision: 3,
@@ -640,26 +661,7 @@ describe('exam infrastructure workspace', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         if (!init?.method && String(input).startsWith('/api/admin/exam-policy-templates')) {
-          return json({
-            templates: [
-              {
-                templateId: '66b800000000000000000611',
-                name: '考试策略',
-                status: 'active',
-                revision: 2,
-                draft: { version: 2, policy: { hosts: [], ips: [], ports: [] }, fingerprint: 'c'.repeat(64) },
-                revisions: [
-                  {
-                    revision: 1,
-                    policy: { hosts: [], ips: [], ports: [443] },
-                    fingerprint: 'a'.repeat(64),
-                    publishedAt: '2026-08-11T02:00:00.000Z',
-                  },
-                ],
-                latestPublishedRevision: 1,
-              },
-            ],
-          });
+          return json({ templates: [policyTemplateFixture()] });
         }
         return load(input);
       }),
@@ -673,6 +675,198 @@ describe('exam infrastructure workspace', () => {
     await user.click(publishButton);
     expect(screen.getByRole('dialog', { name: '发布不可变策略版本？' })).toHaveTextContent('放宽终端可访问范围');
     expect(screen.getByText('端口：全部端口')).toBeInTheDocument();
+  });
+
+  it('fails closed when a policy template omits collaboratorUids', async () => {
+    const load = detailFetch(null);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).startsWith('/api/admin/exam-policy-templates')) {
+          const { collaboratorUids: _ignored, ...template } = policyTemplateFixture();
+          return json({ templates: [template] });
+        }
+        return load(input);
+      }),
+    );
+    setEventPanel('policy');
+    renderPage({ eventId: EVENT.eventId });
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('策略模板响应格式不正确');
+    expect(screen.queryByLabelText('协作者')).not.toBeInTheDocument();
+  });
+
+  it('posts selected collaborator UIDs when creating a policy template', async () => {
+    const created = policyTemplateFixture({
+      templateId: '66b800000000000000000699',
+      name: '机房策略',
+      revision: 1,
+      collaboratorUids: [3],
+      revisions: [],
+      latestPublishedRevision: null,
+    });
+    const posts: Record<string, unknown>[] = [];
+    const load = detailFetch(null);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (init?.method === 'POST' && url.startsWith('/api/admin/exam-policy-templates') && !url.includes('/66b8')) {
+          posts.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+          return json({ template: created });
+        }
+        if (url.startsWith('/api/admin/exam-policy-templates')) {
+          return json({ templates: posts.length ? [created] : [] });
+        }
+        return load(input, init);
+      }),
+    );
+    const user = userEvent.setup();
+    setEventPanel('policy');
+    renderPage({ eventId: EVENT.eventId });
+
+    await user.type(await screen.findByLabelText(/^策略名称/), '机房策略');
+    const collaborator = screen.getByLabelText('协作者');
+    await user.click(within(collaborator).getByRole('textbox'));
+    await user.keyboard('3');
+    await user.click(await screen.findByRole('button', { name: /协助教师/ }));
+    expect(within(collaborator).getByText('协助教师')).toBeInTheDocument();
+    expect(within(collaborator).queryByText('UID 3')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '创建策略' }));
+
+    await waitFor(() => expect(posts).toHaveLength(1));
+    expect(posts[0]).toMatchObject({
+      eventId: EVENT.eventId,
+      name: '机房策略',
+      collaboratorUids: [3],
+    });
+    expect(posts[0].action).toBeUndefined();
+  });
+
+  it('persists collaborator UIDs on saveDraft and hydrates existing names', async () => {
+    const template = policyTemplateFixture({ collaboratorUids: [3] });
+    const saved = { ...template, revision: 3, collaboratorUids: [3, 4] };
+    const load = detailFetch(null);
+    let submitted: Record<string, unknown> | null = null;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes('/api/users')) {
+          return json([
+            { _id: 3, uname: 'helper', displayName: '协助教师' },
+            { _id: 4, uname: 'second', displayName: '第二教师' },
+          ]);
+        }
+        if (init?.method === 'POST' && url.includes(`/exam-policy-templates/${template.templateId}`)) {
+          submitted = JSON.parse(String(init.body)) as Record<string, unknown>;
+          return json({ template: saved });
+        }
+        if (url.startsWith('/api/admin/exam-policy-templates')) {
+          return json({ templates: [submitted ? saved : template] });
+        }
+        return load(input, init);
+      }),
+    );
+    const user = userEvent.setup();
+    setEventPanel('policy');
+    renderPage({ eventId: EVENT.eventId });
+
+    expect(await screen.findByText('协助教师')).toBeInTheDocument();
+    expect(screen.queryByText('UID 3')).not.toBeInTheDocument();
+    const collaborator = screen.getByLabelText('协作者');
+    await user.click(within(collaborator).getByRole('textbox'));
+    await user.keyboard('4');
+    await user.click(await screen.findByRole('button', { name: /第二教师/ }));
+    await user.click(screen.getByRole('button', { name: '保存草稿' }));
+    await waitFor(() => expect(submitted).not.toBeNull());
+    expect(submitted).toMatchObject({
+      action: 'saveDraft',
+      expectedRevision: 2,
+      collaboratorUids: [3, 4],
+    });
+  });
+
+  it('drops an archived policy template from the active picker', async () => {
+    const active = policyTemplateFixture({ name: '现行策略' });
+    const archived = policyTemplateFixture({
+      templateId: '66b800000000000000000698',
+      name: '旧版策略',
+      status: 'archived',
+      collaboratorUids: [3],
+    });
+    const load = detailFetch(null);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).startsWith('/api/admin/exam-policy-templates')) {
+          return json({ templates: [active, archived] });
+        }
+        return load(input);
+      }),
+    );
+    const user = userEvent.setup();
+    setEventPanel('policy');
+    renderPage({ eventId: EVENT.eventId });
+
+    await user.click(await screen.findByLabelText('策略模板'));
+    expect(screen.getByRole('option', { name: '现行策略' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '新建策略' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: '旧版策略' })).not.toBeInTheDocument();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(await screen.findByRole('button', { name: '归档模板' })).toBeInTheDocument();
+  });
+
+  it('archives the selected active template without deleting published revisions', async () => {
+    const active = policyTemplateFixture();
+    const archived = { ...active, status: 'archived', revision: 3 };
+    const other = policyTemplateFixture({
+      templateId: '66b800000000000000000697',
+      name: '备用策略',
+      collaboratorUids: [],
+      revisions: [],
+      latestPublishedRevision: null,
+      revision: 1,
+    });
+    const posts: Record<string, unknown>[] = [];
+    const load = detailFetch(null);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (init?.method === 'POST' && url.includes(`/exam-policy-templates/${active.templateId}`)) {
+          posts.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+          return json({ template: archived });
+        }
+        if (url.startsWith('/api/admin/exam-policy-templates')) {
+          return json({ templates: posts.length ? [archived, other] : [active, other] });
+        }
+        return load(input, init);
+      }),
+    );
+    const user = userEvent.setup();
+    setEventPanel('policy');
+    renderPage({ eventId: EVENT.eventId });
+
+    const archiveButton = await screen.findByRole('button', { name: '归档模板' });
+    await user.click(archiveButton);
+    const dialog = screen.getByRole('dialog', { name: '归档此策略模板？' });
+    expect(dialog).toHaveTextContent('已发布的不可变版本会保留');
+    expect(dialog).toHaveTextContent('不会删除历史修订');
+    await user.click(screen.getByRole('button', { name: '确认归档' }));
+    await waitFor(() => expect(posts).toEqual([
+      {
+        eventId: EVENT.eventId,
+        templateId: active.templateId,
+        action: 'archive',
+        expectedRevision: 2,
+      },
+    ]));
+    expect(screen.queryByRole('button', { name: /考试策略/ })).not.toBeInTheDocument();
+    await user.click(screen.getByLabelText('策略模板'));
+    expect(screen.queryByRole('option', { name: '考试策略' })).not.toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '备用策略' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '新建策略' })).toBeInTheDocument();
   });
 
   it('moves keyboard focus into the basic-information editor', async () => {

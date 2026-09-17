@@ -637,6 +637,78 @@ function ContestManagementChrome({ tdoc, active, children }: { tdoc: ContestDoc;
   );
 }
 
+function VigilContestResyncControl({ tid, domainId }: { tid: string; domainId: string }) {
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null);
+
+  const run = async () => {
+    setBusy(true);
+    setMessage(null);
+    const fallback = '请求失败';
+    try {
+      const response = await fetchHydroResponse(
+        `/d/${encodeURIComponent(domainId)}/api/admin/vigilguard/resync/${encodeURIComponent(tid)}`,
+        {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+          },
+          body: new URLSearchParams(),
+        },
+        fallback,
+      );
+      let payload: unknown;
+      try {
+        payload = await response.json();
+      } catch (cause) {
+        throw new Error(`${fallback}：响应不是有效 JSON`, { cause });
+      }
+      const rec = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : null;
+      if (response.ok && rec?.ok === true) {
+        setMessage({
+          tone: 'ok',
+          text:
+            rec.vigilEnabled === true
+              ? '已将当前已保存的比赛配置重新推送到 Vigil。'
+              : '已请求 Vigil 删除本场比赛配置。',
+        });
+        return;
+      }
+      const errorText = typeof rec?.error === 'string' && rec.error.trim() ? rec.error : fallback;
+      throw new Error(errorText);
+    } catch (error) {
+      setMessage({
+        tone: 'err',
+        text: error instanceof Error && error.message ? error.message : fallback,
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2 rounded-md border bg-muted/20 p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="space-y-1">
+          <h3 className="text-sm font-medium">重新同步到 Vigil</h3>
+          <p className="text-xs text-muted-foreground">
+            将已保存的比赛配置重新推送到 Vigil。未保存的修改不会包含在内。自动推送失败时，可以在不重新编辑比赛的情况下重试。
+          </p>
+        </div>
+        <Button type="button" size="sm" variant="outline" className="shrink-0 gap-1.5" disabled={busy} onClick={run}>
+          <RefreshCw className={`size-3.5${busy ? ' animate-spin' : ''}`} />
+          {busy ? '正在同步…' : '重新同步到 Vigil'}
+        </Button>
+      </div>
+      {message ? (
+        <p className={message.tone === 'err' ? 'text-xs text-destructive' : 'text-xs text-emerald-700 dark:text-emerald-300'}>{message.text}</p>
+      ) : null}
+    </div>
+  );
+}
+
 export function ContestEditPage() {
   const bs = useBootstrap();
   const data = bs.page.data as ContestEditPageData;
@@ -1274,6 +1346,9 @@ export function ContestEditPage() {
                   <span className="ml-auto text-[11px] text-muted-foreground">开启后比赛的会话会被推送到 Vigil Server</span>
                 </label>
                 <input type="hidden" name="vigilEnabled" value={vigilEnabled ? 'true' : 'false'} />
+                {isEdit && isSystemAdmin(bs.user.priv) && typeof editableContestId === 'string' && editableContestId ? (
+                  <VigilContestResyncControl tid={editableContestId} domainId={bs.domain.id} />
+                ) : null}
 
                 {vigilEnabled && (
                   <>

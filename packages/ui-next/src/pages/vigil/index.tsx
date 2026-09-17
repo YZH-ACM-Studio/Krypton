@@ -93,10 +93,12 @@ import { RecordingDeleteDialog } from '@/pages/vigil/recording-delete-dialog';
 function OfflineBanner({ err, onRetry }: { err: VigilOfflineError; onRetry: () => void }) {
   const [showDetail, setShowDetail] = useState(false);
   const reasonHints: Record<VigilOfflineError['reason'], string> = {
-    not_configured: '反作弊服务地址尚未配置。请管理员到 系统设置 → vigil.baseUrl 处填写并保存。',
+    not_configured:
+      '反作弊服务地址尚未配置。vigil.baseUrl 是 Mongo system 集合中的键，不会出现在系统设置页面。请管理员用 mongosh 写入该键，然后重启 hydrooj。',
     network: '反作弊服务无法访问 — 检查 KVS 服务器是否在线，以及网络连通性。',
     non_json: '反作弊服务返回了非预期的响应（可能是 URL 配置错误，请求被 OJ 兜底）。',
-    token_failed: 'OJ 端获取访问令牌失败 — 检查 vigil.dashboardToken 配置和 OJ 服务状态。',
+    token_failed:
+      'OJ 端获取访问令牌失败。该令牌来自 Mongo system 键 vigil.dashboardToken，不是系统设置项。请检查该键以及 OJ 服务状态。',
     server_5xx: '反作弊服务返回 5xx — 服务端异常，请查看 KVS 日志。',
   };
   return (
@@ -109,9 +111,6 @@ function OfflineBanner({ err, onRetry }: { err: VigilOfflineError; onRetry: () =
           <div className="flex flex-wrap items-center gap-2 pt-2">
             <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs" onClick={onRetry}>
               <RefreshCw className="size-3" /> 重试
-            </Button>
-            <Button asChild size="sm" variant="ghost" className="h-7 text-xs">
-              <a href="/manage/setting?find=vigil">前往配置</a>
             </Button>
             {err.detail && (
               <button

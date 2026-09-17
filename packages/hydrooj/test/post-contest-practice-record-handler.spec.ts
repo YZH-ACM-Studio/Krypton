@@ -331,7 +331,13 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
             Time: { week: 7 * 24 * 60 * 60 * 1000, getObjectID: () => rid },
         };
     }
-    if (fromRecordHandler && request === './contest') return { ContestDetailBaseHandler: HandlerStub };
+    if (fromRecordHandler && request === './contest') {
+        return {
+            ContestDetailBaseHandler: HandlerStub,
+            async hideAssignRestrictedContest() {},
+            async assertHomeworkAccessOrHide() {},
+        };
+    }
     if (fromRecordHandler && request === './judge') return { postJudge: async () => undefined };
     if (fromRecordHandler && request === '../model/record-score-cancellation') {
         return {

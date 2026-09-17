@@ -22,7 +22,7 @@ import { Context, Handler, OplogModel, param, Types } from 'hydrooj';
 import type { ScoreboardConfig } from '../interface';
 import { requireAuthToken } from '../lib/auth-token';
 import * as contest from '../model/contest';
-import { PERM } from '../model/builtin';
+import { PERM, PRIV } from '../model/builtin';
 import system from '../model/system';
 
 const CHANNEL = 'contest';
@@ -160,7 +160,9 @@ class ContestUnlockHandler extends ContestApiHandler {
 class ContestScoreboardHandler extends ContestApiHandler {
     @param('tid', Types.ObjectId)
     async get(_args: any, tid: ObjectId) {
-        this.checkPerm(PERM.PERM_VIEW_CONTEST_SCOREBOARD);
+        if (!this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM) && !this.user.hasPerm(PERM.PERM_EDIT_CONTEST)) {
+            this.checkPerm(PERM.PERM_VIEW_CONTEST_SCOREBOARD);
+        }
         const domainId = contestDomain();
         const tdoc = await contest.get(domainId, tid);
         const config: ScoreboardConfig = {

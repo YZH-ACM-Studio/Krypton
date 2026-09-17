@@ -49,7 +49,9 @@ describe('P4 virtual contest wiring contracts', () => {
 
     it('keeps VP on ordinary browser routes without Vigil session creation', () => {
         const handler = readSrc('src/handler/virtual-contest.ts');
-        expect(handler).to.include("ctx.Route('contest_virtual', '/contest/:tid/virtual'");
+        expect(handler).to.include("ctx.Route('contest_virtual', '/contest/:tid/virtual', VirtualContestHandler)");
+        expect(handler).to.include('requireContestViewUnlessEditor(this, this.tdoc)');
+        expect(handler).not.to.include('VirtualContestHandler, PERM.PERM_VIEW_CONTEST');
         expect(handler).not.to.include('vigil');
         expect(handler).not.to.include('client_required');
     });

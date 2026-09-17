@@ -59,6 +59,7 @@ export class TeamBatchListHandler extends Handler {
 
     @param('page', Types.PositiveInt, true)
     async get(_domainId: string, page = 1) {
+        if (!teamBatch.canManageTeamBatches(this.user)) this.checkPerm(PERM.PERM_VIEW_CONTEST);
         const [batches, pageCount, total] = await this.paginate(teamBatch.getMultiBatch(this.domainId()), page, 20);
         const summaries = await Promise.all(
             batches.map(async (batch) => {
@@ -128,6 +129,7 @@ export class TeamBatchDetailHandler extends Handler {
         if (!batch) throw new ValidationError('batchId');
         this.batch = batch;
         this.canManage = teamBatch.canManageTeamBatches(this.user);
+        if (!this.canManage) this.checkPerm(PERM.PERM_VIEW_CONTEST);
     }
 
     private async searchEligibleUsers(batchId: ObjectId, query: string): Promise<PublicTeamUser[]> {
@@ -462,6 +464,6 @@ export class TeamBatchDetailHandler extends Handler {
 }
 
 export async function apply(ctx: Context) {
-    ctx.Route('team_batches', '/teams', TeamBatchListHandler, PERM.PERM_VIEW_CONTEST);
-    ctx.Route('team_batch_detail', '/teams/:batchId', TeamBatchDetailHandler, PERM.PERM_VIEW_CONTEST);
+    ctx.Route('team_batches', '/teams', TeamBatchListHandler);
+    ctx.Route('team_batch_detail', '/teams/:batchId', TeamBatchDetailHandler);
 }

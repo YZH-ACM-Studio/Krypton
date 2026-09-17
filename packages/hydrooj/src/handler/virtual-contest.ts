@@ -14,7 +14,7 @@ import {
 } from '../model/virtual-contest';
 import * as oplog from '../model/oplog';
 import { param, Types } from '../service/server';
-import { ContestDetailBaseHandler } from './contest';
+import { ContestDetailBaseHandler, requireContestViewUnlessEditor } from './contest';
 
 const logger = new Logger('virtual-contest-handler');
 
@@ -59,6 +59,7 @@ function assertAttemptContest(attempt: { sourceContestId: ObjectId }, tid: Objec
 
 export class VirtualContestHandler extends ContestDetailBaseHandler {
     async prepare() {
+        requireContestViewUnlessEditor(this, this.tdoc);
         if (contest.RULES[this.tdoc.rule]?.hidden) throw new ContestNotFoundError(this.tdoc.docId);
     }
 
@@ -157,6 +158,11 @@ export class VirtualContestHandler extends ContestDetailBaseHandler {
 }
 
 export class VirtualContestScoreboardHandler extends ContestDetailBaseHandler {
+    async prepare() {
+        requireContestViewUnlessEditor(this, this.tdoc);
+        if (contest.RULES[this.tdoc.rule]?.hidden) throw new ContestNotFoundError(this.tdoc.docId);
+    }
+
     @param('tid', Types.ObjectId)
     async get(_domainId: string, tid: ObjectId) {
         this.checkPriv(PRIV.PRIV_USER_PROFILE);
@@ -316,7 +322,7 @@ export class VirtualContestRejudgeHandler extends ContestDetailBaseHandler {
 }
 
 export async function apply(ctx: any) {
-    ctx.Route('contest_virtual', '/contest/:tid/virtual', VirtualContestHandler, PERM.PERM_VIEW_CONTEST);
-    ctx.Route('contest_virtual_scoreboard', '/contest/:tid/virtual/scoreboard', VirtualContestScoreboardHandler, PERM.PERM_VIEW_CONTEST);
-    ctx.Route('contest_virtual_rejudge', '/contest/:tid/virtual/rejudge', VirtualContestRejudgeHandler, PERM.PERM_VIEW_CONTEST);
+    ctx.Route('contest_virtual', '/contest/:tid/virtual', VirtualContestHandler);
+    ctx.Route('contest_virtual_scoreboard', '/contest/:tid/virtual/scoreboard', VirtualContestScoreboardHandler);
+    ctx.Route('contest_virtual_rejudge', '/contest/:tid/virtual/rejudge', VirtualContestRejudgeHandler);
 }

@@ -18,6 +18,19 @@ describe('P3.19 paper structured submit contract', () => {
         const validator = source.slice(source.indexOf('function validatePaperRegionSubmission('), source.indexOf('class PaperBaseHandler'));
         expect(validator).not.to.include('surface');
         expect(validator).not.to.include('clientProblemConfig');
+        const prepare = source.slice(source.indexOf('class PaperBaseHandler'), source.indexOf('// ── Krypton: client-required gate'));
+        expect(prepare).to.include("this.tdoc.rule !== 'exam'");
+        expect(prepare).to.include('throw new ContestNotFoundError(authoritativeDomainId, tid)');
+        expect(prepare).not.to.include('Paper mode is only for exam-rule contests');
+        const paperPrepare = source.slice(source.indexOf('class PaperBaseHandler'), source.indexOf('async getProblemDict'));
+        expect(paperPrepare).to.include('await hideAssignRestrictedContest(authoritativeDomainId, this.tdoc, this.user)');
+        const paperGate = paperPrepare.slice(paperPrepare.indexOf("result.reason === 'scope_miss'"), paperPrepare.indexOf("result.reason === 'client_only'"));
+        expect(paperGate).to.include('throw new ContestNotFoundError(authoritativeDomainId, tid)');
+        expect(paperGate).not.to.include('PermissionError(PERM.PERM_ATTEND_CONTEST)');
+        const examAccess = source.slice(source.indexOf('async function ensureExamModeAccess'), source.indexOf('async function redirectEndedProgrammingWorkspaceBeforeClientAccess'));
+        expect(examAccess).to.include('await hideAssignRestrictedContest(domainId, tdoc, handler.user)');
+        expect(examAccess).to.include("result.reason === 'scope_miss' && !canUsePostContestPractice(tdoc, tsdoc)");
+        expect(examAccess).to.include('throw new ContestNotFoundError(domainId, tid)');
     });
 
     it('validates before every program-fill/function Record insertion', () => {

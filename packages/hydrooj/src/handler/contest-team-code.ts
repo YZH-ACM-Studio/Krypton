@@ -1,7 +1,7 @@
 import { Logger } from '@hydrooj/utils';
 import { ObjectId } from 'mongodb';
 import { Context } from '../context';
-import { localizedErrorText, ContestNotFoundError, NotFoundError, PermissionError } from '../error';
+import { localizedErrorText, ContestNotFoundError, NotAssignedError, NotFoundError, PermissionError } from '../error';
 import { PERM, PRIV } from '../model/builtin';
 import * as contest from '../model/contest';
 import * as contestTeam from '../model/contest-team';
@@ -11,6 +11,7 @@ import user from '../model/user';
 import bus from '../service/bus';
 import { getTeamCodePresenceOnVigil } from '../service/vigil-bridge';
 import { Handler, param, Types } from '../service/server';
+import { hideAssignRestrictedContest } from './contest';
 
 const logger = new Logger('contest-team-code');
 const TeamCodeSource = [
@@ -65,9 +66,17 @@ export class ContestTeamCodeHandler extends Handler {
         this.canManage = contestTeam.canManageContestTeams(this.user, this.tdoc);
         this.team = await contestTeam.getTeamByMember(this.domainId, tid, this.user._id);
         if (this.canManage) return;
+        await hideAssignRestrictedContest(this.domainId, this.tdoc, this.user);
         this.checkPerm(PERM.PERM_VIEW_CONTEST);
         this.checkPerm(PERM.PERM_ATTEND_CONTEST);
-        await contestTeam.assertContestTeamEligibility(this.domainId, this.tdoc, this.user._id);
+        try {
+            await contestTeam.assertContestTeamEligibility(this.domainId, this.tdoc, this.user._id);
+        } catch (error) {
+            if (error instanceof NotAssignedError || (error instanceof Error && error.name === 'NotAssignedError')) {
+                throw new ContestNotFoundError(this.domainId, tid);
+            }
+            throw error;
+        }
         if (!this.team) throw new PermissionError(PERM.PERM_ATTEND_CONTEST);
 
         const vigilguard = (global as any).Hydro?.model?.vigilguard;
@@ -76,6 +85,7 @@ export class ContestTeamCodeHandler extends Handler {
         }
         const sid = vigilguard.clientSessionKeyFromSession((this as any).session);
         const access = await vigilguard.effectiveContestAccess(this.domainId, this.tdoc, this.user._id, sid);
+        if (!access.ok && access.reason === 'scope_miss') throw new ContestNotFoundError(this.domainId, tid);
         if (!access.ok) throw new PermissionError(PERM.PERM_ATTEND_CONTEST);
     }
 

@@ -1,16 +1,18 @@
 import { ObjectId } from 'mongodb';
 import { effectiveProblemKind } from '@hydrooj/common';
 import { Context } from '../context';
-import { localizedErrorText, NotFoundError, PermissionError, ValidationError } from '../error';
+import { ContestNotFoundError, localizedErrorText, NotAssignedError, NotFoundError, PermissionError, ValidationError } from '../error';
 import type { Tdoc } from '../interface';
 import { parseProblemConfigObject } from '../lib/problem-config';
 import { PRIV } from '../model/builtin';
 import * as contest from '../model/contest';
+import { assertHomeworkAccess } from '../model/homework-access';
 import { gradeLatestManualRecord, MANUAL_GRADE_RULES } from '../model/manual-grade';
 import problem from '../model/problem';
 import record from '../model/record';
 import user from '../model/user';
 import { Handler, param, Types } from '../service/server';
+import { hideAssignRestrictedContest } from './contest';
 
 export class ManualGradingHandler extends Handler {
     tdoc: Tdoc;
@@ -22,6 +24,18 @@ export class ManualGradingHandler extends Handler {
         if (!this.tdoc) throw new NotFoundError(localizedErrorText`Contest`);
         if (!MANUAL_GRADE_RULES.includes(this.tdoc.rule as any)) throw new ValidationError('rule');
         if (this.tdoc.owner !== this.user._id && !this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) {
+            if (this.tdoc.rule === 'homework') {
+                try {
+                    await assertHomeworkAccess(domainId, this.tdoc, this.user);
+                } catch (error) {
+                    if (error instanceof NotAssignedError || (error instanceof Error && error.name === 'NotAssignedError')) {
+                        throw new ContestNotFoundError(domainId, tid);
+                    }
+                    throw error;
+                }
+            } else {
+                await hideAssignRestrictedContest(domainId, this.tdoc, this.user);
+            }
             throw new PermissionError(PRIV.PRIV_EDIT_SYSTEM);
         }
     }

@@ -72,6 +72,41 @@ async function listContestScopeGroups(domainId: string, required: boolean): Prom
     }
 }
 
+export function requireContestViewUnlessEditor(handler: { user: any; checkPerm(perm: bigint): void }, tdoc?: Tdoc) {
+    if (handler.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM) || handler.user.hasPerm(PERM.PERM_EDIT_CONTEST) || (tdoc && handler.user.own(tdoc))) {
+        return;
+    }
+    handler.checkPerm(PERM.PERM_VIEW_CONTEST);
+}
+
+function canAutoHideContestProblems(user: { hasPerm(...perm: bigint[]): boolean; hasPriv(...priv: number[]): boolean }) {
+    return user.hasPerm(PERM.PERM_EDIT_PROBLEM) || user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
+}
+
+export function canBrowseAssignRestrictedContests(user: { hasPerm(...perm: bigint[]): boolean }) {
+    return user.hasPerm(PERM.PERM_EDIT_CONTEST) || user.hasPerm(PERM.PERM_VIEW_HIDDEN_CONTEST);
+}
+
+export async function hideAssignRestrictedContest(domainId: string, tdoc: Tdoc, actor: any) {
+    if (actor.own(tdoc) || actor.hasPerm(PERM.PERM_EDIT_CONTEST) || actor.hasPerm(PERM.PERM_VIEW_HIDDEN_CONTEST)) return;
+    if (!tdoc.assign?.length) return;
+    const groups = await user.listGroup(domainId, actor._id);
+    if (!new Set(tdoc.assign).intersection(new Set(groups.map((i: { name: string }) => i.name))).size) {
+        throw new ContestNotFoundError(domainId, tdoc.docId);
+    }
+}
+
+export async function assertHomeworkAccessOrHide(domainId: string, tdoc: Tdoc, user: any) {
+    try {
+        await assertHomeworkAccess(domainId, tdoc, user);
+    } catch (error) {
+        if (error instanceof NotAssignedError || (error instanceof Error && error.name === 'NotAssignedError')) {
+            throw new ContestNotFoundError(domainId, tdoc.docId);
+        }
+        throw error;
+    }
+}
+
 function serializedContestEdit(_target: unknown, _key: string, descriptor: PropertyDescriptor) {
     const original = descriptor.value;
     descriptor.value = async function contestEditBoundary(this: ContestEditHandler, ...args: any[]) {
@@ -289,16 +324,18 @@ export class ContestListHandler extends Handler {
     @param('q', Types.String, true)
     async get(_domainId: string, rule = '', group = '', page = 1, q = '') {
         const authoritativeDomainId = String(this.domain?._id);
+        requireContestViewUnlessEditor(this);
         if (rule && contest.RULES[rule].hidden) throw new BadRequestError();
+        const canBrowseAssignRestricted = canBrowseAssignRestrictedContests(this.user);
         const groups = (
-            await user.listGroup(authoritativeDomainId, this.user.hasPerm(PERM.PERM_VIEW_HIDDEN_CONTEST) ? undefined : this.user._id)
+            await user.listGroup(authoritativeDomainId, canBrowseAssignRestricted ? undefined : this.user._id)
         ).map((i) => i.name);
         if (group && !groups.includes(group)) throw new NotAssignedError(group);
         const rules = Object.keys(contest.RULES).filter((i) => !contest.RULES[i].hidden);
         const escaped = escapeRegExp(q.toLowerCase());
         const $regex = new RegExp(q.length >= 2 ? escaped : `\\A${escaped}`, 'gim');
         const filter = {
-            ...(this.user.hasPerm(PERM.PERM_VIEW_HIDDEN_CONTEST) && !group
+            ...(canBrowseAssignRestricted && !group
                 ? {}
                 : {
                       $or: [{ maintainer: this.user._id }, { owner: this.user._id }, { assign: { $in: groups } }, { assign: { $size: 0 } }],
@@ -349,19 +386,21 @@ export class ContestDetailBaseHandler extends Handler {
             contest.get(authoritativeDomainId, tid),
             contest.getStatus(authoritativeDomainId, tid, this.user._id),
         ]);
+        if (!this.tdoc) throw new ContestNotFoundError(authoritativeDomainId, tid);
         const postContestPracticeEligible = canUsePostContestPractice(this.tdoc, this.tsdoc);
         if (this.tdoc.rule === 'homework') {
-            await assertHomeworkAccess(authoritativeDomainId, this.tdoc, this.user);
+            await assertHomeworkAccessOrHide(authoritativeDomainId, this.tdoc, this.user);
         } else {
             if (
                 this.tdoc.assign?.length &&
                 !postContestPracticeEligible &&
                 !this.user.own(this.tdoc) &&
+                !this.user.hasPerm(PERM.PERM_EDIT_CONTEST) &&
                 !this.user.hasPerm(PERM.PERM_VIEW_HIDDEN_CONTEST)
             ) {
                 const groups = await user.listGroup(authoritativeDomainId, this.user._id);
                 if (!new Set(this.tdoc.assign).intersection(new Set(groups.map((i) => i.name))).size) {
-                    throw new NotAssignedError(localizedErrorText`contest`, tid);
+                    throw new ContestNotFoundError(authoritativeDomainId, tid);
                 }
             }
             // ── Krypton: client-required contest gate ────────────────────────
@@ -400,7 +439,7 @@ export class ContestDetailBaseHandler extends Handler {
                     const result = await vg.effectiveContestAccess(authoritativeDomainId, this.tdoc, this.user._id, sid);
                     if (!result.ok) {
                         if (result.reason === 'scope_miss' && !postContestPracticeEligible) {
-                            throw new NotAssignedError(localizedErrorText`contest`, tid);
+                            throw new ContestNotFoundError(authoritativeDomainId, tid);
                         }
                         if (result.reason === 'client_only' && !contestDone) {
                             throw new ContestClientRequiredError();
@@ -422,7 +461,7 @@ export class ContestDetailBaseHandler extends Handler {
 
     @param('tid', Types.ObjectId, true)
     async after(_domainId: string, tid: ObjectId) {
-        if (!tid || this.tdoc.rule === 'homework') return;
+        if (!tid || !this.tdoc || this.tdoc.rule === 'homework') return;
         if (this.request.json || !this.response.template) return;
         const pdoc = 'pdoc' in this ? (this as any).pdoc : {};
         this.response.body.overrideNav = [
@@ -493,6 +532,7 @@ export class ContestDetailHandler extends ContestDetailBaseHandler {
     @param('tid', Types.ObjectId)
     async prepare(_domainId: string, tid: ObjectId) {
         if (contest.RULES[this.tdoc.rule].hidden) throw new ContestNotFoundError(this.authoritativeDomainId(), tid);
+        requireContestViewUnlessEditor(this, this.tdoc);
     }
 
     @param('tid', Types.ObjectId)
@@ -613,7 +653,11 @@ export class ContestPrintHandler extends ContestDetailBaseHandler {
     }
 
     async get() {
-        this.response.body = { tdoc: this.tdoc };
+        this.response.body = {
+            tdoc: this.tdoc,
+            isAdmin: this.user.own(this.tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST),
+            canSubmitPrint: !!this.tsdoc?.attend && contest.isOngoing(this.tdoc, this.tsdoc),
+        };
         this.response.template = 'contest_print.html';
     }
 
@@ -766,13 +810,15 @@ export class ContestProblemListHandler extends ContestDetailBaseHandler {
     @param('tid', Types.ObjectId)
     async prepare(_domainId: string, tid: ObjectId) {
         if (contest.RULES[this.tdoc.rule].hidden) throw new ContestNotFoundError(this.authoritativeDomainId(), tid);
+        requireContestViewUnlessEditor(this, this.tdoc);
     }
 
     @param('tid', Types.ObjectId)
     async get(_domainId: string, tid: ObjectId) {
         const authoritativeDomainId = this.authoritativeDomainId();
-        if (contest.isNotStarted(this.tdoc)) throw new ContestNotLiveError(authoritativeDomainId, tid);
-        if (!this.tsdoc?.attend && !contest.isDone(this.tdoc)) throw new ContestNotAttendedError(authoritativeDomainId, tid);
+        const canManageContest = this.user.own(this.tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST);
+        if (contest.isNotStarted(this.tdoc) && !canManageContest) throw new ContestNotLiveError(authoritativeDomainId, tid);
+        if (!this.tsdoc?.attend && !contest.isDone(this.tdoc) && !canManageContest) throw new ContestNotAttendedError(authoritativeDomainId, tid);
         const postContestPractice = getPostContestPracticeState(this.tdoc, this.tsdoc);
         const contestMembership = { kind: 'contest-membership' as const, tdoc: this.tdoc, tsdoc: this.tsdoc };
         const [pdict, udict, tcdocs, teamContext] = await Promise.all([
@@ -798,6 +844,7 @@ export class ContestProblemListHandler extends ContestDetailBaseHandler {
             team: teamContext.team,
             teamStatus: publicTeamStatus(teamContext.status),
             postContestPractice,
+            canSubmitClarification: !!this.tsdoc?.attend && contest.isOngoing(this.tdoc),
         };
         // P1.4：仅 ACM 下发本场每题统计；上方两道 throw（未开赛/未报名且未结束）
         // 已保证可见性门槛（与题目可见同 gate）。
@@ -916,6 +963,7 @@ export class ContestEditHandler extends Handler {
             this.tdoc = await contest.get(authoritativeDomainId, tid);
             if (!this.tdoc) throw new ContestNotFoundError(authoritativeDomainId, tid);
             if (contest.RULES[this.tdoc.rule].hidden) throw new ContestNotFoundError(authoritativeDomainId, tid);
+            await hideAssignRestrictedContest(authoritativeDomainId, this.tdoc, this.user);
             if (!this.user.own(this.tdoc)) this.checkPerm(PERM.PERM_EDIT_CONTEST);
             else this.checkPerm(PERM.PERM_EDIT_CONTEST_SELF);
         } else this.checkPerm(PERM.PERM_CREATE_CONTEST);
@@ -972,7 +1020,7 @@ export class ContestEditHandler extends Handler {
             urlForFile: (filename: string) => this.url('contest_file_download', { tid, filename, type: 'public' }),
             scopeSchools,
             scopeGroups,
-            canAutoHideProblems: this.user.hasPerm(PERM.PERM_EDIT_PROBLEM),
+            canAutoHideProblems: canAutoHideContestProblems(this.user),
             activeTeamCount,
             recordCount,
             participationRevision,
@@ -1122,7 +1170,7 @@ export class ContestEditHandler extends Handler {
         const autoHideRecoveryRequired =
             !!trackedAutoHidePids.size && (!autoHide || !autoHideActive || Array.from(trackedAutoHidePids).some((pid) => !pids.includes(pid)));
         if ((!this.tdoc && autoHide) || autoHideStateChanged || pendingAutoHidePids.size || autoHideRecoveryRequired) {
-            this.checkPerm(PERM.PERM_EDIT_PROBLEM);
+            if (!this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) this.checkPerm(PERM.PERM_EDIT_PROBLEM);
         }
         const pendingNeedsUnhide = !!pendingAutoHidePids.size && !persistedAutoHideActive;
         if (pendingNeedsUnhide && autoHide && autoHideActive) {
@@ -1493,7 +1541,7 @@ export class ContestEditHandler extends Handler {
               ? this.tdoc.pids
               : [];
         if (trackedAutoHidePids.length) {
-            this.checkPerm(PERM.PERM_EDIT_PROBLEM);
+            if (!this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) this.checkPerm(PERM.PERM_EDIT_PROBLEM);
             await assertCanPublishAutoHiddenProblems(authoritativeDomainId, trackedAutoHidePids, this.user);
             await unhideContestProblems(authoritativeDomainId, tid, trackedAutoHidePids, 'delete-contest', this.user._id);
         }
@@ -1536,6 +1584,19 @@ export class ContestEditHandler extends Handler {
 }
 
 export class ContestManagementBaseHandler extends ContestDetailBaseHandler {
+    @param('tid', Types.ObjectId)
+    async __prepare(_domainId: string, tid: ObjectId) {
+        try {
+            await super.__prepare(_domainId, tid);
+        } catch (error) {
+            if (error instanceof NotAssignedError || (error instanceof Error && error.name === 'NotAssignedError')) {
+                throw new ContestNotFoundError(this.authoritativeDomainId(), tid);
+            }
+            throw error;
+        }
+        if (contest.RULES[this.tdoc.rule].hidden) throw new ContestNotFoundError(this.authoritativeDomainId(), tid);
+    }
+
     async prepare() {
         if (!this.user.own(this.tdoc)) this.checkPerm(PERM.PERM_EDIT_CONTEST);
     }
@@ -1548,6 +1609,21 @@ export class ContestCodeHandler extends Handler {
         const authoritativeDomainId = String(this.domain?._id);
         await this.limitRate('contest_code', 60, 10);
         const tdoc = await contest.get(authoritativeDomainId, tid);
+        if (contest.RULES[tdoc.rule].hidden && !contest.RULES[tdoc.rule].features?.includes('download')) {
+            throw new ContestNotFoundError(authoritativeDomainId, tid);
+        }
+        if (tdoc.rule === 'homework') await assertHomeworkAccessOrHide(authoritativeDomainId, tdoc, this.user);
+        else await hideAssignRestrictedContest(authoritativeDomainId, tdoc, this.user);
+        if (!this.user.own(tdoc) && !this.user.hasPerm(PERM.PERM_EDIT_CONTEST) && !this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) {
+            const vg = (global as any).Hydro?.model?.vigilguard;
+            if (vg?.effectiveContestAccess) {
+                const sid = vg.clientSessionKeyFromSession
+                    ? vg.clientSessionKeyFromSession((this as any).session)
+                    : (this as any).session?.sessionId || (this as any).session?._id || '';
+                const result = await vg.effectiveContestAccess(authoritativeDomainId, tdoc, this.user._id, sid);
+                if (!result.ok && result.reason === 'scope_miss') throw new ContestNotFoundError(authoritativeDomainId, tid);
+            }
+        }
         const teamMode = contest.getParticipationMode(tdoc) === 'team';
         const statusSources = teamMode
             ? (await contest.getTeamScoreboardEntries(tdoc)).map(({ team, status }) => ({
@@ -1555,7 +1631,6 @@ export class ContestCodeHandler extends Handler {
                   status,
               }))
             : (await contest.getAndListStatus(authoritativeDomainId, tid))[1].map((status) => ({ identity: `U${status.uid}`, status }));
-        if (tdoc.rule === 'homework') await assertHomeworkAccess(authoritativeDomainId, tdoc, this.user);
         if (!this.user.own(tdoc)) {
             if (!this.user.hasPriv(PRIV.PRIV_READ_RECORD_CODE)) {
                 this.checkPerm(PERM.PERM_READ_RECORD_CODE);
@@ -1831,9 +1906,12 @@ export class ContestFileDownloadHandler extends ContestDetailBaseHandler {
     @param('type', Types.Range(['public', 'private']), true)
     async get(_domainId: string, tid: ObjectId, filename: string, noDisposition = false, type = 'private') {
         const authoritativeDomainId = this.authoritativeDomainId();
+        requireContestViewUnlessEditor(this, this.tdoc);
         if (contest.RULES[this.tdoc.rule].hidden && !contest.RULES[this.tdoc.rule].features?.includes('download')) {
             throw new ContestNotFoundError(authoritativeDomainId, tid);
         }
+        const published = type === 'private' ? this.tdoc.privateFiles : this.tdoc.files;
+        if (!(published || []).some((file) => file.name === filename)) throw new NotFoundError(filename);
         if (type === 'private' && !this.user.own(this.tdoc) && !this.user.hasPerm(PERM.PERM_EDIT_CONTEST)) {
             if (!this.tsdoc?.attend) throw new ContestNotAttendedError(authoritativeDomainId, tid);
             if (!contest.isOngoing(this.tdoc) && !contest.isDone(this.tdoc)) throw new ContestNotLiveError(authoritativeDomainId, tid);
@@ -1918,9 +1996,6 @@ export class ContestBalloonHandler extends ContestManagementBaseHandler {
         const bdocs = await contest
             .getMultiBalloon(authoritativeDomainId, tid, {
                 ...(todo ? { sent: { $exists: false } } : {}),
-                ...(!this.tdoc.lockAt || this.user.hasPerm(PERM.PERM_VIEW_CONTEST_HIDDEN_SCOREBOARD)
-                    ? {}
-                    : { _id: { $lt: Time.getObjectID(this.tdoc.lockAt) } }),
             })
             .sort({ _id: -1 })
             .toArray();
@@ -2027,6 +2102,11 @@ export class ContestScoreboardHandler extends ContestDetailBaseHandler {
             }
         }
         await view.display.call(this, args);
+        const canManageContest = this.user.own(this.tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST);
+        this.response.body.canManageContest = canManageContest;
+        this.response.body.canUnlockScoreboard = Boolean(
+            canManageContest && contest.isDone(this.tdoc) && this.tdoc.lockAt && !this.tdoc.unlocked,
+        );
     }
 
     @param('tid', Types.ObjectId)
@@ -2096,19 +2176,19 @@ declare module 'cordis' {
 
 export async function apply(ctx: Context) {
     ctx.Route('contest_create', '/contest/create', ContestEditHandler);
-    ctx.Route('contest_main', '/contest', ContestListHandler, PERM.PERM_VIEW_CONTEST);
-    ctx.Route('contest_detail', '/contest/:tid', ContestDetailHandler, PERM.PERM_VIEW_CONTEST);
-    ctx.Route('contest_problemlist', '/contest/:tid/problems', ContestProblemListHandler, PERM.PERM_VIEW_CONTEST);
-    ctx.Route('contest_edit', '/contest/:tid/edit', ContestEditHandler, PERM.PERM_VIEW_CONTEST);
+    ctx.Route('contest_main', '/contest', ContestListHandler);
+    ctx.Route('contest_detail', '/contest/:tid', ContestDetailHandler);
+    ctx.Route('contest_problemlist', '/contest/:tid/problems', ContestProblemListHandler);
+    ctx.Route('contest_edit', '/contest/:tid/edit', ContestEditHandler);
     ctx.Route('contest_print', '/contest/:tid/print', ContestPrintHandler, PERM.PERM_VIEW_CONTEST);
     // Support for DOMJudge printfile
     ctx.Route('contest_print_alt', '/contest/:tid/api/printing/team', ContestPrintHandler, PERM.PERM_VIEW_CONTEST);
     ctx.Route('contest_manage', '/contest/:tid/management', ContestManagementHandler);
     ctx.Route('contest_clarification', '/contest/:tid/clarification', ContestClarificationHandler);
     ctx.Route('contest_code', '/contest/:tid/code', ContestCodeHandler, PERM.PERM_VIEW_CONTEST);
-    ctx.Route('contest_file_download', '/contest/:tid/file/:type/:filename', ContestFileDownloadHandler, PERM.PERM_VIEW_CONTEST);
-    ctx.Route('contest_user', '/contest/:tid/user', ContestUserHandler, PERM.PERM_VIEW_CONTEST);
-    ctx.Route('contest_balloon', '/contest/:tid/balloon', ContestBalloonHandler, PERM.PERM_VIEW_CONTEST);
+    ctx.Route('contest_file_download', '/contest/:tid/file/:type/:filename', ContestFileDownloadHandler);
+    ctx.Route('contest_user', '/contest/:tid/user', ContestUserHandler);
+    ctx.Route('contest_balloon', '/contest/:tid/balloon', ContestBalloonHandler);
     ctx.worker.addHandler('contest', runContestScheduleTask);
     ctx.plugin(ScoreboardService);
     await ctx.inject(['scoreboard'], ({ Route, scoreboard }) => {
@@ -2292,7 +2372,7 @@ export async function apply(ctx: Context) {
                     await this.limitRate('scoreboard_download', 60, 3);
                     const [, rows] = await contest.getScoreboard.call(this, tdoc.domainId, tdoc._id, {
                         isExport: true,
-                        lockAt: this.tdoc.lockAt,
+                        ...(this.tdoc.lockAt && !this.tdoc.unlocked ? { lockAt: this.tdoc.lockAt } : {}),
                         showDisplayName: this.user.hasPerm(PERM.PERM_VIEW_USER_PRIVATE_INFO),
                     });
                     this.binary(await this.renderHTML('contest_scoreboard_download_html.html', { rows, tdoc }), `${this.tdoc.title}.html`);
@@ -2309,7 +2389,7 @@ export async function apply(ctx: Context) {
                     await this.limitRate('scoreboard_download', 60, 3);
                     const [, rows] = await contest.getScoreboard.call(this, tdoc.domainId, tdoc._id, {
                         isExport: true,
-                        lockAt: this.tdoc.lockAt,
+                        ...(this.tdoc.lockAt && !this.tdoc.unlocked ? { lockAt: this.tdoc.lockAt } : {}),
                         showDisplayName: this.user.hasPerm(PERM.PERM_VIEW_USER_PRIVATE_INFO),
                     });
                     this.binary(

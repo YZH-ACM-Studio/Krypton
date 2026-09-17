@@ -1,4 +1,4 @@
-import { omit, pick, throttle, uniqBy } from 'lodash';
+import { omit, pick, throttle } from 'lodash';
 import { normalizeSubtasks, type ProblemConfigFile } from '@hydrooj/common';
 import { readYamlCases } from '@hydrooj/common/cases';
 import { load as loadYaml } from 'js-yaml';
@@ -50,7 +50,27 @@ import { ConnectionHandler, param, subscribe, Types } from '../service/server';
 import { studentDirectory } from '../service/student-directory';
 import { buildProjection, Time } from '../utils';
 import { canManageVirtualContest, virtualContestService, type VirtualContestAttemptDoc } from '../model/virtual-contest';
-import { ContestDetailBaseHandler } from './contest';
+import { assertHomeworkAccessOrHide, ContestDetailBaseHandler, hideAssignRestrictedContest } from './contest';
+
+function isContestNotFoundError(error: unknown): boolean {
+    return error instanceof ContestNotFoundError || (error instanceof Error && error.name === 'ContestNotFoundError');
+}
+
+async function hideLoadedContest(domainId: string, tdoc: Tdoc, actor: any) {
+    if (actor.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) return;
+    if (tdoc.rule === 'homework') await assertHomeworkAccessOrHide(domainId, tdoc, actor);
+    else await hideAssignRestrictedContest(domainId, tdoc, actor);
+}
+
+function canRejudgeVirtualOnList(
+    actor: { hasPerm(...perm: bigint[]): boolean; hasPriv(...priv: number[]): boolean; own: (doc: { owner?: number }) => boolean },
+    tdoc: Tdoc | undefined,
+    rdocs: RecordDoc[],
+): boolean {
+    if (!rdocs.some((rdoc) => rdoc.virtualAttemptId)) return false;
+    if (actor.hasPriv(PRIV.PRIV_EDIT_SYSTEM) || actor.hasPerm(PERM.PERM_EDIT_CONTEST)) return true;
+    return Boolean(tdoc && canManageVirtualContest(actor, tdoc));
+}
 
 const STABLE_VIEW_AUTHORIZATION_FIELDS = ['domainId', 'docId', 'owner', 'hidden', 'authoringMode', 'pidNamespaceId', 'managedAuthoring'] as const;
 
@@ -142,6 +162,16 @@ async function assertVirtualContestRecordAccess(
 }
 
 export class RecordListHandler extends ContestDetailBaseHandler {
+    async __prepare(args: { tid?: ObjectId }) {
+        if (!args?.tid) return;
+        try {
+            await ContestDetailBaseHandler.prototype.__prepare.call(this, args);
+        } catch (error) {
+            if (this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM) && this.tdoc && isContestNotFoundError(error)) return;
+            throw error;
+        }
+    }
+
     @param('page', Types.PositiveInt, true)
     @param('pid', Types.ProblemId, true)
     @param('tid', Types.ObjectId, true)
@@ -196,7 +226,8 @@ export class RecordListHandler extends ContestDetailBaseHandler {
             else invalid = true;
         }
         if (tid) {
-            tdoc = await contest.get(domainId, tid);
+            tdoc = this.tdoc || await contest.get(domainId, tid);
+            if (tdoc) await hideLoadedContest(domainId, tdoc, this.user);
             this.tdoc = tdoc;
             if (!tdoc) throw localizeError(new ContestNotFoundError(domainId, pid), 'Contest {0} not found.', tid);
             if (virtual) {
@@ -308,14 +339,12 @@ export class RecordListHandler extends ContestDetailBaseHandler {
                             false,
                             problem.PROJECTION_CONTEST_LIST,
                         )
-                      : this.user.hasPerm(PERM.PERM_VIEW_PROBLEM)
-                        ? problem.getListViewableAuthorized(
-                              domainId,
-                              rdocs.map((rdoc) => rdoc.pid),
-                              this.user,
-                              problem.PROJECTION_LIST,
-                          )
-                        : Object.fromEntries(uniqBy(rdocs, 'pid').map((rdoc) => [rdoc.pid, { ...problem.default, pid: rdoc.pid }])),
+                      : problem.getListViewableAuthorized(
+                            domainId,
+                            rdocs.map((rdoc) => rdoc.pid),
+                            this.user,
+                            problem.PROJECTION_LIST,
+                        ),
               ]);
         if (this.tdoc && !postContestPracticeActive && !virtual && !this.user.own(this.tdoc) && !this.user.hasPerm(PERM.PERM_EDIT_CONTEST)) {
             rdocs = rdocs.map((i) => contest.applyProjection(tdoc, i, this.user));
@@ -351,6 +380,7 @@ export class RecordListHandler extends ContestDetailBaseHandler {
             postContestPracticeActive,
             recordDetailTid: postContestPracticeActive || virtual ? tid : undefined,
             recordScoreActions,
+            canRejudgeVirtual: canRejudgeVirtualOnList(this.user, tdoc, rdocs),
             langs,
             statusTexts: STATUS_TEXTS,
         };
@@ -641,6 +671,7 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
             // visibility-filtered above). Keyed by 1-based case order.
             testHints,
             ...(this.user.hasPerm(PERM.PERM_REJUDGE) ? { recordScoreAction } : {}),
+            canRejudgeVirtual: Boolean(rdoc.virtualAttemptId && this.tdoc && canManageVirtualContest(this.user, this.tdoc)),
         };
         const teamMemberCannotDownload =
             !!this.tdoc &&
@@ -793,6 +824,7 @@ export class RecordMainConnectionHandler extends ConnectionHandler {
         if (virtual) {
             this.tdoc = await contest.get(domainId, tid);
             if (!this.tdoc) throw new ContestNotFoundError(domainId, tid);
+            await hideLoadedContest(domainId, this.tdoc, this.user);
             const attempt = await virtualContestService.getOfficialAttempt(domainId, tid, this.user._id);
             if (!attempt) throw new ValidationError('virtual', null, localizedErrorText`虚拟参赛尚未开始`);
             const canManage = canManageVirtualContest(this.user, this.tdoc);
@@ -802,6 +834,7 @@ export class RecordMainConnectionHandler extends ConnectionHandler {
         } else if (tid) {
             this.tdoc = await contest.get(domainId, tid);
             if (!this.tdoc) throw new ContestNotFoundError(domainId, tid);
+            await hideLoadedContest(domainId, this.tdoc, this.user);
             this.practiceTsdoc = practice ? await contest.getStatus(domainId, tid, this.user._id) : undefined;
             this.practice = practice && canUsePostContestPractice(this.tdoc, this.practiceTsdoc);
             if (practice && !this.practice) throw new PermissionError(PERM.PERM_VIEW_RECORD);
@@ -944,7 +977,6 @@ export class RecordMainConnectionHandler extends ConnectionHandler {
             rdoc.contest || this.practice ? problem.get(rdoc.domainId, rdoc.pid) : problem.getViewableAuthorized(rdoc.domainId, rdoc.pid, this.user),
         ]);
         const tdoc = this.tid || this.practice ? this.tdoc : null;
-        if (pdoc && !rdoc.contest && !this.practice && !this.user.hasPerm(PERM.PERM_VIEW_PROBLEM)) pdoc = null;
         if (this.applyProjection && rdoc.contest?.toString() !== '0'.repeat(24)) rdoc = contest.applyProjection(tdoc, rdoc, this.user);
         rdoc = omit(rdoc, ['scoreCancellation']) as RecordDoc;
         if (this.pretest) {
@@ -1016,10 +1048,12 @@ export class RecordDetailConnectionHandler extends ConnectionHandler {
             if (practice) throw new PermissionError(PERM.PERM_VIEW_RECORD);
             await assertVirtualContestRecordAccess(domainId, rdoc, this.user);
             this.tdoc = await contest.get(domainId, rdoc.sourceContestId);
+            await hideLoadedContest(domainId, this.tdoc, this.user);
             this.canViewCode = rdoc.uid === this.user._id || this.user.hasPriv(PRIV.PRIV_READ_RECORD_CODE);
         } else if (practice) {
             if (!tid || realContestRecord) throw new PermissionError(PERM.PERM_VIEW_RECORD);
             this.tdoc = await contest.get(domainId, tid);
+            await hideLoadedContest(domainId, this.tdoc, this.user);
             const tsdoc = await contest.getStatus(domainId, tid, this.user._id);
             const ordinaryRecord = rdoc.contest === undefined;
             const pretestRecord = rdoc.contest instanceof ObjectId && record.RECORD_PRETEST.equals(rdoc.contest);
@@ -1042,6 +1076,7 @@ export class RecordDetailConnectionHandler extends ConnectionHandler {
             this.practiceRecordPid = rdoc.pid;
         } else if (tid && rdoc.contest instanceof ObjectId && record.RECORD_PRETEST.equals(rdoc.contest)) {
             this.tdoc = await contest.get(domainId, tid);
+            await hideLoadedContest(domainId, this.tdoc, this.user);
             const tsdoc = await contest.getStatus(domainId, tid, this.user._id);
             if (
                 !this.tdoc ||
@@ -1055,6 +1090,7 @@ export class RecordDetailConnectionHandler extends ConnectionHandler {
             this.contestPretestRecordAccess = true;
         } else if (realContestRecord) {
             this.tdoc = await contest.get(domainId, rdoc.contest);
+            await hideLoadedContest(domainId, this.tdoc, this.user);
             this.liveClientRecordCodeOnly = shouldUseLiveClientRecordCodeOnly({
                 clientRequired: contest.isClientRequired(this.tdoc),
                 ongoing: contest.isOngoing(this.tdoc),

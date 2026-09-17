@@ -8,6 +8,7 @@ import * as contest from '../model/contest';
 import * as contestTeam from '../model/contest-team';
 import message from '../model/message';
 import { Handler, param, Types } from '../service/server';
+import { hideAssignRestrictedContest } from './contest';
 
 function parseMemberUids(value: string): number[] {
     const tokens = String(value || '')
@@ -86,9 +87,17 @@ export class ContestTeamsHandler extends Handler {
         }
         this.canManage = contestTeam.canManageContestTeams(this.user, this.tdoc);
         if (!this.canManage) {
+            await hideAssignRestrictedContest(this.domainId(), this.tdoc, this.user);
             this.checkPerm(PERM.PERM_VIEW_CONTEST);
             this.checkPerm(PERM.PERM_ATTEND_CONTEST);
-            await contestTeam.assertContestTeamEligibility(this.domainId(), this.tdoc, this.user._id);
+            try {
+                await contestTeam.assertContestTeamEligibility(this.domainId(), this.tdoc, this.user._id);
+            } catch (error) {
+                if (error instanceof NotAssignedError || (error instanceof Error && error.name === 'NotAssignedError')) {
+                    throw new ContestNotFoundError(this.domainId(), tid);
+                }
+                throw error;
+            }
         }
     }
 
@@ -180,6 +189,7 @@ export class ContestTeamsHandler extends Handler {
             users,
             capabilities: {
                 canManage: this.canManage,
+                canEmergencyEdit: this.canManage && started,
                 canCreate: !started && !ownTeam,
                 canInvite: !started && ownTeam?.managementMode === 'self' && ownTeam.captainUid === this.user._id && ownTeam.memberUids.length < 3,
                 canEditOwn: !started && !!ownTeam && (this.canManage || ownTeam.captainUid === this.user._id),
@@ -387,5 +397,5 @@ export class ContestTeamsHandler extends Handler {
 }
 
 export async function apply(ctx: Context) {
-    ctx.Route('contest_teams', '/contest/:tid/teams', ContestTeamsHandler, PERM.PERM_VIEW_CONTEST);
+    ctx.Route('contest_teams', '/contest/:tid/teams', ContestTeamsHandler);
 }

@@ -1548,6 +1548,12 @@ describe('contest detail authoritative domain', () => {
             expect(body, start).not.to.match(/async\s+\w+\s*\(\s*(?:\{\s*)?domainId\b/);
             expect(body, start).not.to.match(/ensureExamModeAccess\(this,\s*_?domainId\b/);
         }
+        expect(source).to.include('function bounceExamOverview');
+        expect(source).to.include('!canManageContest && (contest.isNotStarted(this.tdoc) || (!tsdoc?.attend && !contest.isDone(this.tdoc)))');
+        expect(source).to.include('contest.canShowScoreboard.call(this, this.tdoc, true)');
+        const printBody = source.slice(source.indexOf('class ExamModePrintHandler'), source.indexOf('class ExamModeRecordDetailHandler'));
+        expect(printBody).to.include('!this.user.hasPerm(PERM.PERM_EDIT_CONTEST) && !tsdoc?.attend');
+        expect(printBody).not.to.include('isAdminBypass');
     });
 });
 
@@ -1564,8 +1570,12 @@ describe('contest hidden problem table reads', () => {
         expect(listBody).to.include("kind: 'contest-membership'");
         expect(listBody).to.include('problemViewReadFace(');
         expect(listBody).to.include('readContestProblemTable(');
+        expect(listBody).to.include('canManageContest = this.user.own(this.tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST)');
+        expect(listBody).to.include('if (contest.isNotStarted(this.tdoc) && !canManageContest) throw new ContestNotLiveError');
+        expect(listBody).to.include('!this.tsdoc?.attend && !contest.isDone(this.tdoc) && !canManageContest');
         expect(listBody).not.to.match(/const canViewAllContestProblems/);
         expect(listBody).not.to.include('PRIV.PRIV_EDIT_SYSTEM');
+        expect(listBody).not.to.match(/async GET\(/);
     });
 
     it('keeps ContestDetailHandler peek gate and manage without PRIV_EDIT_SYSTEM', () => {

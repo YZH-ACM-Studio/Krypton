@@ -44,6 +44,9 @@ describe('P3.10 subjective lifecycle contract', () => {
         const source = readFileSync(resolve(root, 'src/handler/manual-grading.ts'), 'utf8');
         expect(source).to.include('this.tdoc.owner !== this.user._id');
         expect(source).to.include('this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)');
+        expect(source).to.include("this.tdoc.rule === 'homework'");
+        expect(source).to.include('assertHomeworkAccess(domainId, this.tdoc, this.user)');
+        expect(source).to.include('hideAssignRestrictedContest(domainId, this.tdoc, this.user)');
         expect(source).not.to.include('this.user.own(this.tdoc)');
         expect(source).not.to.include('getMaintainableAuthorized');
     });

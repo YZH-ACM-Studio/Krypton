@@ -40,8 +40,8 @@ import {
     validateStructuredCodeJudgeConfig,
     ValidationError,
 } from 'hydrooj';
-import { ContestClientFinishedError, ContestNotLiveError, ContestTeamConflictError } from '../error';
-import { getPostContestPracticeState, isPostContestPracticeRule } from '../lib/contest-correction';
+import { ContestClientFinishedError, ContestNotAttendedError, ContestNotFoundError, ContestNotLiveError, ContestTeamConflictError } from '../error';
+import { canUsePostContestPractice, getPostContestPracticeState, isPostContestPracticeRule } from '../lib/contest-correction';
 import { COURSE_EXAM_FINALIZE_GRACE_MS } from '../lib/course-exam-complete';
 import { assertCourseExamWatchGate } from '../lib/course-exam-gate';
 import { buildExamModeRecordCodePayload } from '../lib/exam-mode-record';
@@ -56,7 +56,7 @@ import record from '../model/record';
 import { ConnectionHandler, subscribe } from '../service/server';
 import { closeSessionOnVigil } from '../service/vigil-bridge';
 import { studentDirectory } from '../service/student-directory';
-import { ContestPrintHandler, ContestProblemListHandler, ContestScoreboardHandler } from './contest';
+import { ContestPrintHandler, ContestProblemListHandler, ContestScoreboardHandler, hideAssignRestrictedContest } from './contest';
 import { DiscussionDetailHandler } from './discussion';
 import { ProblemDetailHandler } from './problem';
 import { RecordDetailHandler } from './record';
@@ -164,9 +164,23 @@ function validatePaperRegionSubmission(
     return { code: rawCode, lang: kind === 'program_fill' && config.mode === 'text' ? '_' : (config.template.lang as string) };
 }
 
+async function hideAssignUnlessPostContest(domainId: string, tdoc: any, user: any) {
+    const tsdoc = await contest.getStatus(domainId, tdoc.docId, user._id);
+    if (!canUsePostContestPractice(tdoc, tsdoc)) await hideAssignRestrictedContest(domainId, tdoc, user);
+    return tsdoc;
+}
+
+function assertPaperProblemsReadable(handler: PaperBaseHandler) {
+    const canManageContest = handler.user.own(handler.tdoc) || handler.user.hasPerm(PERM.PERM_EDIT_CONTEST);
+    if (canManageContest) return;
+    if (contest.isNotStarted(handler.tdoc)) throw new ContestNotLiveError(handler.tid);
+    if (!handler.tsdoc?.attend && !contest.isDone(handler.tdoc)) throw new ContestNotAttendedError(handler.tid);
+}
+
 class PaperBaseHandler extends Handler {
     tdoc: any;
     tid: ObjectId;
+    tsdoc: any;
 
     @param('tid', Types.ObjectId)
     async _prepare(_domainId: string, tid: ObjectId) {
@@ -175,7 +189,11 @@ class PaperBaseHandler extends Handler {
         this.tdoc = await contest.get(authoritativeDomainId, tid);
         if (!this.tdoc) throw new NotFoundError(localizedErrorText`Contest`);
         if (this.tdoc.rule !== 'exam') {
-            throw new ValidationError('rule', null, localizedErrorText`Paper mode is only for exam-rule contests`);
+            throw new ContestNotFoundError(authoritativeDomainId, tid);
+        }
+        this.tsdoc = await contest.getStatus(authoritativeDomainId, tid, this.user._id);
+        if (!canUsePostContestPractice(this.tdoc, this.tsdoc)) {
+            await hideAssignRestrictedContest(authoritativeDomainId, this.tdoc, this.user);
         }
         // ── Krypton: client-required gate ────────────────────────────
         // Paper mode's _prepare is its own (it doesn't extend
@@ -204,7 +222,7 @@ class PaperBaseHandler extends Handler {
                     // upstream; falling back to PERM_ATTEND_CONTEST is the
                     // simplest "deny" path here.
                     if (result.reason === 'scope_miss') {
-                        throw new PermissionError(PERM.PERM_ATTEND_CONTEST);
+                        throw new ContestNotFoundError(authoritativeDomainId, tid);
                     }
                     if (result.reason === 'client_only') {
                         throw new PermissionError(PERM.PERM_ATTEND_CONTEST);
@@ -213,7 +231,7 @@ class PaperBaseHandler extends Handler {
             }
         }
 
-        let tsdoc = await contest.getStatus(authoritativeDomainId, tid, this.user._id);
+        let tsdoc = this.tsdoc;
         if (!isAdminBypass && contest.isClientRequired(this.tdoc) && contest.isClientFinished(tsdoc)) {
             throw new ContestClientFinishedError();
         }
@@ -232,6 +250,7 @@ class PaperBaseHandler extends Handler {
                 await contest.setStatus(authoritativeDomainId, tid, this.user._id, { startAt: new Date() });
             }
         }
+        this.tsdoc = tsdoc;
     }
 
     /** Resolve the contest's problem list to {pid, pdoc} map. */
@@ -380,14 +399,20 @@ async function ensureExamModeAccess(handler: Handler | ConnectionHandler, domain
         const sess = await vg.currentClientSession(sessionKey);
         previewMode = !sess || !sess.contestId?.equals?.(tdoc.docId);
     }
+    let tsdoc = await contest.getStatus(domainId, tid, handler.user._id);
+    if (!canUsePostContestPractice(tdoc, tsdoc)) await hideAssignRestrictedContest(domainId, tdoc, handler.user);
     if (!isAdminBypass && vg?.effectiveContestAccess) {
         const result = await vg.effectiveContestAccess(domainId, tdoc, handler.user._id, sessionKey);
-        if (!result.ok) throw new PermissionError(PERM.PERM_ATTEND_CONTEST);
+        if (!result.ok) {
+            if (result.reason === 'scope_miss' && !canUsePostContestPractice(tdoc, tsdoc)) {
+                throw new ContestNotFoundError(domainId, tid);
+            }
+            if (result.reason !== 'scope_miss') throw new PermissionError(PERM.PERM_ATTEND_CONTEST);
+        }
     }
 
     const teamContext = await resolveExamModeTeamContext(handler, domainId, tdoc, isAdminBypass);
 
-    let tsdoc = await contest.getStatus(domainId, tid, handler.user._id);
     if (!isAdminBypass && contest.isClientRequired(tdoc) && contest.isClientFinished(tsdoc)) {
         throw new ContestClientFinishedError();
     }
@@ -453,6 +478,7 @@ async function gradeObjectiveDraft(
 
 class PaperLayoutHandler extends PaperBaseHandler {
     async get({ domainId }: { domainId: string }) {
+        assertPaperProblemsReadable(this);
         const pdict = await this.getProblemDict();
         // Build the cell map: each entry describes one answerable slot.
         const cells: Array<{
@@ -562,6 +588,7 @@ class PaperLayoutHandler extends PaperBaseHandler {
 
 class PaperDraftListHandler extends PaperBaseHandler {
     async get({ domainId }: { domainId: string }) {
+        assertPaperProblemsReadable(this);
         const drafts = await PaperDraftModel.getDraftsForUser(domainId, this.tid, this.user._id);
         const pdict = await this.getProblemDict();
         const staleness: Record<string, boolean> = {};
@@ -989,11 +1016,13 @@ class ExamModeEntryHandler extends Handler {
  * letting the inherited base handler throw ContestNotLiveError (which
  * unwraps to the OJ-chrome error page and breaks the exam-shell).
  */
+function bounceExamOverview(handler: any, tid: ObjectId): true {
+    handler.response.redirect = `/exam-mode/${tid.toHexString()}`;
+    return true;
+}
+
 function bounceIfNotStarted(handler: any, tdoc: any, tid: ObjectId): boolean {
-    if (tdoc && contest.isNotStarted(tdoc)) {
-        handler.response.redirect = `/exam-mode/${tid.toHexString()}`;
-        return true;
-    }
+    if (tdoc && contest.isNotStarted(tdoc)) return bounceExamOverview(handler, tid);
     return false;
 }
 
@@ -1018,7 +1047,11 @@ class ExamModeProblemListHandler extends ContestProblemListHandler {
         if (await redirectEndedProgrammingWorkspaceBeforeClientAccess(this, authoritativeDomainId, this.tdoc, tid)) return;
         const { previewMode, tsdoc, isAdminBypass, teamContext } = await ensureExamModeAccess(this, authoritativeDomainId, tid, this.tdoc);
         this.tsdoc = tsdoc;
-        if (bounceIfNotStarted(this, this.tdoc, tid)) return;
+        const canManageContest = this.user.own(this.tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST);
+        if (!canManageContest && (contest.isNotStarted(this.tdoc) || (!tsdoc?.attend && !contest.isDone(this.tdoc)))) {
+            bounceExamOverview(this, tid);
+            return;
+        }
         if (redirectEndedProgrammingWorkspace(this, this.tdoc, tsdoc, tid, isAdminBypass)) return;
         await super.get(authoritativeDomainId, tid);
         await decorateExamMode(this, this.tdoc, 'problems', 'contest_problemlist.html', previewMode, teamContext);
@@ -1034,7 +1067,11 @@ class ExamModeAnnouncementsHandler extends ContestProblemListHandler {
         const authoritativeDomainId = this.authoritativeDomainId();
         const { previewMode, tsdoc, teamContext } = await ensureExamModeAccess(this, authoritativeDomainId, tid, this.tdoc);
         this.tsdoc = tsdoc;
-        if (bounceIfNotStarted(this, this.tdoc, tid)) return;
+        const canManageContest = this.user.own(this.tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST);
+        if (!canManageContest && (contest.isNotStarted(this.tdoc) || (!tsdoc?.attend && !contest.isDone(this.tdoc)))) {
+            bounceExamOverview(this, tid);
+            return;
+        }
         await super.get(authoritativeDomainId, tid);
         await decorateExamMode(this, this.tdoc, 'announcements', 'exam_announcements.html', previewMode, teamContext);
     }
@@ -1056,7 +1093,7 @@ class ExamModeProblemDetailHandler extends ProblemDetailHandler {
         // dropped onto the bare OJ chrome. Instead, bounce back to the
         // exam-mode overview which IS wrapped in exam-shell and shows a
         // friendly "等待开始" view.
-        if (this.tdoc && contest.isNotStarted(this.tdoc)) {
+        if (!isAdminBypass && this.tdoc && contest.isNotStarted(this.tdoc)) {
             this.response.redirect = `/exam-mode/${tid.toHexString()}`;
             return;
         }
@@ -1089,7 +1126,13 @@ class ExamModeScoreboardHandler extends ContestScoreboardHandler {
     @param('view', Types.String, true)
     async get(_domainId: string, tid: ObjectId, viewId = 'default') {
         const authoritativeDomainId = this.authoritativeDomainId();
-        if (bounceIfNotStarted(this, this.tdoc, tid)) return;
+        if (
+            !this.user.own(this.tdoc) &&
+            (contest.isNotStarted(this.tdoc) || !contest.canShowScoreboard.call(this, this.tdoc, true))
+        ) {
+            bounceExamOverview(this, tid);
+            return;
+        }
         await super.get(authoritativeDomainId, tid, viewId);
         if (this.response.template !== 'contest_scoreboard.html') return;
         const { previewMode, teamContext } = await ensureExamModeAccess(this, authoritativeDomainId, tid, this.tdoc);
@@ -1103,7 +1146,10 @@ class ExamModePrintHandler extends ContestPrintHandler {
         const authoritativeDomainId = this.authoritativeDomainId();
         const { tsdoc } = await ensureExamModeAccess(this, authoritativeDomainId, tid, this.tdoc);
         this.tsdoc = tsdoc;
-        if (bounceIfNotStarted(this, this.tdoc, tid)) return;
+        if (!this.user.own(this.tdoc) && !this.user.hasPerm(PERM.PERM_EDIT_CONTEST) && !tsdoc?.attend) {
+            bounceExamOverview(this, tid);
+            return;
+        }
         await super.prepare({ domainId: authoritativeDomainId }, tid);
     }
 
@@ -1144,19 +1190,32 @@ class ExamModeDiscussionListHandler extends Handler {
     async prepare(_domainId: string, tid: ObjectId) {
         const authoritativeDomainId = String(this.domain?._id);
         this.checkPriv(PRIV.PRIV_USER_PROFILE);
-        this.checkPerm(PERM.PERM_VIEW_DISCUSSION);
         this.tdoc = await contest.get(authoritativeDomainId, tid);
         if (!this.tdoc) throw new NotFoundError(localizedErrorText`Contest`);
+        await hideAssignUnlessPostContest(authoritativeDomainId, this.tdoc, this.user);
+        if (
+            !this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM) &&
+            !this.user.hasPerm(PERM.PERM_EDIT_DISCUSSION) &&
+            !this.user.hasPerm(PERM.PERM_EDIT_CONTEST) &&
+            !this.user.own(this.tdoc)
+        ) {
+            this.checkPerm(PERM.PERM_VIEW_DISCUSSION);
+        }
         await ensureExamModeAccess(this, authoritativeDomainId, tid, this.tdoc);
     }
 
     @param('tid', Types.ObjectId)
     @param('page', Types.PositiveInt, true)
-    async get(_domainId: string, tid: ObjectId, page = 1) {
+    @param('all', Types.Boolean)
+    async get(_domainId: string, tid: ObjectId, page = 1, all = false) {
         const authoritativeDomainId = String(this.domain?._id);
         const { previewMode, teamContext } = await ensureExamModeAccess(this, authoritativeDomainId, tid, this.tdoc);
-        const vnode = await discussion.getVnode(authoritativeDomainId, document.TYPE_CONTEST, tid.toHexString(), this.user._id);
-        const hidden = this.user.own(vnode) || this.user.hasPerm(PERM.PERM_EDIT_DISCUSSION) ? {} : { hidden: false };
+        const vnode = await discussion.getVnode(authoritativeDomainId, document.TYPE_CONTEST, tid.toHexString(), this.user);
+        all &&= this.user.hasPerm(PERM.PERM_MOD_BADGE);
+        const canSeeHidden = this.user.hasPerm(PERM.PERM_MOD_BADGE)
+            ? all
+            : this.user.own(vnode) || this.user.hasPerm(PERM.PERM_EDIT_DISCUSSION);
+        const hidden = canSeeHidden ? {} : { hidden: false };
         const [ddocs, dpcount] = await this.paginate(
             discussion.getMulti(authoritativeDomainId, { parentType: document.TYPE_CONTEST, parentId: tid, ...hidden }),
             page,
@@ -1176,6 +1235,8 @@ class ExamModeDiscussionListHandler extends Handler {
             vnode,
             vnodes: [],
             page_name: 'discussion_node',
+            all,
+            canViewHidden: this.user.hasPerm(PERM.PERM_MOD_BADGE),
         };
         await decorateExamMode(this, this.tdoc, 'discussion', 'discussion_main_or_node.html', previewMode, teamContext);
     }
@@ -1192,14 +1253,21 @@ class ExamModeDiscussionCreateHandler extends Handler {
         this.checkPerm(PERM.PERM_CREATE_DISCUSSION);
         this.tdoc = await contest.get(authoritativeDomainId, tid);
         if (!this.tdoc) throw new NotFoundError(localizedErrorText`Contest`);
+        await hideAssignUnlessPostContest(authoritativeDomainId, this.tdoc, this.user);
         await ensureExamModeAccess(this, authoritativeDomainId, tid, this.tdoc);
-        this.vnode = await discussion.getVnode(authoritativeDomainId, document.TYPE_CONTEST, tid.toHexString(), this.user._id);
+        this.vnode = await discussion.getVnode(authoritativeDomainId, document.TYPE_CONTEST, tid.toHexString(), this.user);
     }
 
     async get() {
         const tid = this.tdoc.docId;
         const { previewMode, teamContext } = await ensureExamModeAccess(this, String(this.domain?._id), tid, this.tdoc);
-        this.response.body = { vnode: this.vnode };
+        this.response.body = {
+            vnode: this.vnode,
+            permissions: {
+                canHighlightDiscussion: this.user.hasPerm(PERM.PERM_HIGHLIGHT_DISCUSSION),
+                canPinDiscussion: this.user.hasPerm(PERM.PERM_PIN_DISCUSSION),
+            },
+        };
         await decorateExamMode(this, this.tdoc, 'discussion', 'discussion_create.html', previewMode, teamContext);
     }
 
@@ -1238,6 +1306,7 @@ class ExamModeDiscussionDetailHandler extends DiscussionDetailHandler {
         const authoritativeDomainId = String(this.domain?._id);
         this.tdoc = await contest.get(authoritativeDomainId, tid);
         if (!this.tdoc) throw new NotFoundError(localizedErrorText`Contest`);
+        await hideAssignUnlessPostContest(authoritativeDomainId, this.tdoc, this.user);
         await ensureExamModeAccess(this, authoritativeDomainId, tid, this.tdoc);
         if (this.ddoc?.parentType !== document.TYPE_CONTEST || !(this.ddoc.parentId as any)?.equals?.(tid)) {
             throw new NotFoundError(localizedErrorText`Discussion`);
@@ -1271,6 +1340,7 @@ class ExamModeTeamRoleConnectionHandler extends ConnectionHandler {
         this.domainId = authoritativeDomainId;
         const tdoc = await contest.get(authoritativeDomainId, tid);
         if (!tdoc) throw new NotFoundError(localizedErrorText`Contest`);
+        await hideAssignUnlessPostContest(authoritativeDomainId, tdoc, this.user);
         let teamContext: ContestTeamExamModeContext | null;
         try {
             ({ teamContext } = await ensureExamModeAccess(this, authoritativeDomainId, tid, tdoc));

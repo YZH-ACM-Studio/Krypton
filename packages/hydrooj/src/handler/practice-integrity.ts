@@ -54,7 +54,7 @@ function conflictAsValidation(error: unknown): never {
 }
 
 function logPolicyFailure(
-    operation: 'draft-save' | 'publish',
+    operation: 'draft-save' | 'publish' | 'save-and-publish',
     domainId: string,
     actorUid: number,
     containerKind: PracticeContainerKind,
@@ -173,6 +173,56 @@ class PracticeIntegrityPolicyHandler extends Handler {
             this.response.body = { published: serializeRevision(published) };
         } catch (error) {
             logPolicyFailure('publish', domainId, this.user._id, containerKind, containerId, error);
+            conflictAsValidation(error);
+        }
+    }
+
+    @param('containerKind', Types.String)
+    @param('containerId', Types.ObjectId)
+    @param('prohibitExternalCodeInjection', Types.Boolean)
+    @param('removeIndependentSubmitForm', Types.Boolean)
+    @param('antiAiCopyInjection', Types.Boolean)
+    @param('expectedDraftVersion', Types.UnsignedInt)
+    async postSaveAndPublish(
+        _args: unknown,
+        containerKindRaw: string,
+        containerId: ObjectId,
+        prohibitExternalCodeInjection: boolean,
+        removeIndependentSubmitForm: boolean,
+        antiAiCopyInjection: boolean,
+        expectedDraftVersion: number,
+    ) {
+        const domainId = String(this.domain?._id);
+        const containerKind = canonicalContainerKind(containerKindRaw);
+        const tdoc = await loadPracticeContainer(domainId, containerKind, containerId);
+        if (!canManagePracticeContainer(this.user, tdoc, containerKind)) {
+            throw new PermissionError(requiredPracticeManagePermission(this.user, tdoc, containerKind));
+        }
+        try {
+            const published = await practiceIntegrityService.saveAndPublish({
+                domainId,
+                containerKind,
+                containerId,
+                policy: canonicalPracticePolicy({ prohibitExternalCodeInjection, removeIndependentSubmitForm, antiAiCopyInjection }),
+                actorUid: this.user._id,
+                expectedDraftVersion,
+            });
+            await oplog.log(this, 'practice.integrity.saveAndPublish', {
+                containerKind,
+                containerId,
+                revision: published.revision,
+            });
+            logger.info(
+                'Practice integrity policy saved and published domain=%s actor=%d container=%s/%s revision=%d stage=save-and-publish result=success',
+                domainId,
+                this.user._id,
+                containerKind,
+                containerId,
+                published.revision,
+            );
+            this.response.body = { published: serializeRevision(published) };
+        } catch (error) {
+            logPolicyFailure('save-and-publish', domainId, this.user._id, containerKind, containerId, error);
             conflictAsValidation(error);
         }
     }

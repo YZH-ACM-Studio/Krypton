@@ -146,6 +146,16 @@ const practiceIntegrityService = {
             publishedAt: new Date('2026-08-09T08:01:00Z'),
         };
     },
+    async saveAndPublish(input: any) {
+        const draft = await practiceIntegrityService.saveDraft(input);
+        return await practiceIntegrityService.publishDraft({
+            domainId: input.domainId,
+            containerKind: input.containerKind,
+            containerId: input.containerId,
+            actorUid: input.actorUid,
+            expectedDraftVersion: draft.draftVersion,
+        });
+    },
     async issueContext(input: any) {
         calls.issue.push(input);
         return {
@@ -404,6 +414,9 @@ describe('practice integrity handlers', () => {
         expect(error).to.be.instanceOf(TestPermissionError);
         expect((error as TestPermissionError).required).to.equal(PERM.PERM_EDIT_COURSE);
         expect(calls.save).to.deep.equal([]);
+        expect(await capture(() => handler.postSaveAndPublish(policySaveArgs()))).to.be.instanceOf(TestPermissionError);
+        expect(calls.save).to.deep.equal([]);
+        expect(calls.publish).to.deep.equal([]);
 
         currentContainer = { ...currentContainer, kind: 'training', owner: 42 };
         const owner = makeHandler('practice_integrity_policy');
@@ -439,6 +452,47 @@ describe('practice integrity handlers', () => {
         saveError = new TestConflictError('draft_version_mismatch');
         const handler = makeHandler('practice_integrity_policy');
         expect(await capture(() => handler.postSave(policySaveArgs({ expectedDraftVersion: 1 })))).to.be.instanceOf(TestValidationError);
+        expect(calls.logs.at(-1)?.at(-1)).to.equal('draft_version_mismatch');
+    });
+
+    it('saves the next draft then publishes it in one teacher action without skipping CAS', async () => {
+        currentContainer.owner = 42;
+        const handler = makeHandler('practice_integrity_policy');
+        await handler.postSaveAndPublish(policySaveArgs({ removeIndependentSubmitForm: true, expectedDraftVersion: 0 }));
+        expect(calls.save).to.deep.equal([
+            {
+                domainId: 'system',
+                containerKind: 'course',
+                containerId,
+                policy: {
+                    prohibitExternalCodeInjection: true,
+                    removeIndependentSubmitForm: true,
+                    antiAiCopyInjection: false,
+                },
+                actorUid: 42,
+                expectedDraftVersion: 0,
+            },
+        ]);
+        expect(calls.publish).to.deep.equal([
+            {
+                domainId: 'system',
+                containerKind: 'course',
+                containerId,
+                actorUid: 42,
+                expectedDraftVersion: 1,
+            },
+        ]);
+        expect(handler.response.body.published).to.include({ revision: 1, state: 'published' });
+        expect(handler.response.body.published).not.to.have.property('draftVersion');
+        expect(calls.oplog.at(-1)?.[1]).to.equal('practice.integrity.saveAndPublish');
+    });
+
+    it('does not publish when the composed save hits a draft CAS conflict', async () => {
+        currentContainer.owner = 42;
+        saveError = new TestConflictError('draft_version_mismatch');
+        const handler = makeHandler('practice_integrity_policy');
+        expect(await capture(() => handler.postSaveAndPublish(policySaveArgs({ expectedDraftVersion: 3 })))).to.be.instanceOf(TestValidationError);
+        expect(calls.publish).to.deep.equal([]);
         expect(calls.logs.at(-1)?.at(-1)).to.equal('draft_version_mismatch');
     });
 

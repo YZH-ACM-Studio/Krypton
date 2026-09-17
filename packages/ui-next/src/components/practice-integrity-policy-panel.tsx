@@ -49,18 +49,35 @@ function asRevision(value: unknown): PolicyRevisionView | null {
   };
 }
 
+function samePolicy(left: PracticeIntegrityPolicyView, right: PracticeIntegrityPolicyView): boolean {
+  return (
+    left.prohibitExternalCodeInjection === right.prohibitExternalCodeInjection &&
+    left.removeIndependentSubmitForm === right.removeIndependentSubmitForm &&
+    left.antiAiCopyInjection === right.antiAiCopyInjection
+  );
+}
+
+type PolicyWriteOperation = 'save' | 'publish' | 'saveAndPublish';
+
+function writeFailureMessage(operation: PolicyWriteOperation): string {
+  return operation === 'save' ? '保存真实性策略失败' : '发布真实性策略失败';
+}
+
 export function PracticeIntegrityPolicyPanel({ containerKind, containerId }: { containerKind: 'course' | 'problemSet'; containerId: string }) {
   const endpoint = `/practice-integrity/${containerKind}/${containerId}`;
   const [published, setPublished] = useState<PolicyRevisionView | null>(null);
   const [draft, setDraft] = useState<PolicyRevisionView | null>(null);
   const [policy, setPolicy] = useState<PracticeIntegrityPolicyView>(EMPTY_POLICY);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState<'save' | 'publish' | null>(null);
+  const [ready, setReady] = useState(false);
+  const [busy, setBusy] = useState<PolicyWriteOperation | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const writesDisabled = loading || !ready || busy !== null;
 
   const load = async () => {
     setLoading(true);
+    setReady(false);
     setError('');
     const response = await fetchHydroResponse(
       endpoint,
@@ -74,6 +91,7 @@ export function PracticeIntegrityPolicyPanel({ containerKind, containerId }: { c
     setPublished(nextPublished);
     setDraft(nextDraft);
     setPolicy(nextDraft?.policy || nextPublished?.policy || EMPTY_POLICY);
+    setReady(true);
   };
 
   useEffect(() => {
@@ -90,14 +108,15 @@ export function PracticeIntegrityPolicyPanel({ containerKind, containerId }: { c
     };
   }, [endpoint]);
 
-  const postPolicy = async (operation: 'save' | 'publish') => {
+  const postPolicy = async (operation: PolicyWriteOperation) => {
     setBusy(operation);
     setError('');
     setNotice('');
+    const failure = writeFailureMessage(operation);
     try {
       const body = new URLSearchParams({
         operation,
-        expectedDraftVersion: String(operation === 'publish' ? draft?.draftVersion || 0 : draft?.draftVersion || 0),
+        expectedDraftVersion: String(draft?.draftVersion || 0),
         prohibitExternalCodeInjection: policy.prohibitExternalCodeInjection ? 'true' : 'false',
         removeIndependentSubmitForm: policy.removeIndependentSubmitForm ? 'true' : 'false',
         antiAiCopyInjection: policy.antiAiCopyInjection ? 'true' : 'false',
@@ -110,31 +129,36 @@ export function PracticeIntegrityPolicyPanel({ containerKind, containerId }: { c
           credentials: 'same-origin',
           headers: { Accept: 'application/json' },
         },
-        operation === 'publish' ? '发布真实性策略失败' : '保存真实性策略失败',
+        failure,
       );
       if (!response.ok) {
-        throw new Error(await readHydroResponseError(response, operation === 'publish' ? '发布真实性策略失败' : '保存真实性策略失败'));
+        throw new Error(await readHydroResponseError(response, failure));
       }
       const payload = (await response.json()) as { published?: unknown; draft?: unknown };
-      if (operation === 'publish') {
-        const nextPublished = asRevision(payload.published);
-        if (!nextPublished) throw new TypeError('发布结果无效');
-        setPublished(nextPublished);
-        setDraft(null);
-        setPolicy(nextPublished.policy);
-        setNotice(`已发布第 ${nextPublished.revision} 版，学生现在会按该版生效。`);
-      } else {
+      if (operation === 'save') {
         const nextDraft = asRevision(payload.draft);
         if (!nextDraft) throw new TypeError('草稿保存结果无效');
         setDraft(nextDraft);
         setPolicy(nextDraft.policy);
-        setNotice('草稿已保存。学生在你点「发布」之前不会受影响。');
+        setNotice('草稿已保存。学生在你点「发布到学生」之前不会受影响。');
+        return;
       }
+      const nextPublished = asRevision(payload.published);
+      if (!nextPublished) throw new TypeError('发布结果无效');
+      setPublished(nextPublished);
+      setDraft(null);
+      setPolicy(nextPublished.policy);
+      setNotice(`已发布第 ${nextPublished.revision} 版，学生现在会按该版生效。`);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : operation === 'publish' ? '发布真实性策略失败' : '保存真实性策略失败');
+      setError(cause instanceof Error ? cause.message : failure);
     } finally {
       setBusy(null);
     }
+  };
+
+  const publishToStudents = () => {
+    const needsSave = !draft || !samePolicy(policy, draft.policy);
+    void postPolicy(needsSave ? 'saveAndPublish' : 'publish');
   };
 
   const toggle = (field: keyof PracticeIntegrityPolicyView) => {
@@ -158,7 +182,7 @@ export function PracticeIntegrityPolicyPanel({ containerKind, containerId }: { c
       <label className="flex items-start gap-2.5 text-sm">
         <Checkbox
           checked={policy.prohibitExternalCodeInjection}
-          disabled={loading || busy !== null}
+          disabled={writesDisabled}
           onCheckedChange={() => toggle('prohibitExternalCodeInjection')}
         />
         <span>
@@ -169,7 +193,7 @@ export function PracticeIntegrityPolicyPanel({ containerKind, containerId }: { c
       <label className="flex items-start gap-2.5 text-sm">
         <Checkbox
           checked={policy.removeIndependentSubmitForm}
-          disabled={loading || busy !== null}
+          disabled={writesDisabled}
           onCheckedChange={() => toggle('removeIndependentSubmitForm')}
         />
         <span>
@@ -178,18 +202,18 @@ export function PracticeIntegrityPolicyPanel({ containerKind, containerId }: { c
         </span>
       </label>
       <label className="flex items-start gap-2.5 text-sm">
-        <Checkbox checked={policy.antiAiCopyInjection} disabled={loading || busy !== null} onCheckedChange={() => toggle('antiAiCopyInjection')} />
+        <Checkbox checked={policy.antiAiCopyInjection} disabled={writesDisabled} onCheckedChange={() => toggle('antiAiCopyInjection')} />
         <span>
           防 AI 复制注入
           <span className="mt-0.5 block text-xs text-muted-foreground">只在从本课或本题集入口进入题目时生效；题库直达和作业不会注入。</span>
         </span>
       </label>
       <div className="flex flex-wrap gap-2">
-        <Button type="button" variant="outline" size="sm" disabled={loading || busy !== null} onClick={() => void postPolicy('save')}>
-          {busy === 'save' ? '保存中…' : '保存草稿'}
+        <Button type="button" size="sm" disabled={writesDisabled} onClick={publishToStudents}>
+          {busy === 'publish' || busy === 'saveAndPublish' ? '发布中…' : '发布到学生'}
         </Button>
-        <Button type="button" size="sm" disabled={loading || busy !== null || !draft} onClick={() => void postPolicy('publish')}>
-          {busy === 'publish' ? '发布中…' : '发布'}
+        <Button type="button" variant="outline" size="sm" disabled={writesDisabled} onClick={() => void postPolicy('save')}>
+          {busy === 'save' ? '保存中…' : '仅保存草稿'}
         </Button>
       </div>
     </div>

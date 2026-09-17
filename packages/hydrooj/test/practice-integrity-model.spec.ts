@@ -280,6 +280,60 @@ describe('practice integrity canonical model', () => {
         expect(conflict).to.be.instanceOf(PracticeIntegrityConflictError);
     });
 
+    it('saveAndPublish allocates published+1 then flips state without mutating earlier published docs', async () => {
+        const { service, revisions, setNow } = makeService();
+        const first = await service.saveAndPublish({
+            domainId: 'system',
+            containerKind: 'course',
+            containerId: courseId,
+            policy: strictPolicy,
+            actorUid: 2,
+            expectedDraftVersion: 0,
+        });
+        expect(first).to.include({ revision: 1, state: 'published' });
+        expect(first).not.to.have.property('draftVersion');
+        const firstPublishedAt = first.publishedAt;
+        const firstId = first._id;
+
+        setNow(new Date('2026-08-09T09:00:00.000Z'));
+        const offPolicy = {
+            prohibitExternalCodeInjection: false,
+            removeIndependentSubmitForm: false,
+            antiAiCopyInjection: false,
+        };
+        const turnedOff = await service.saveAndPublish({
+            domainId: 'system',
+            containerKind: 'course',
+            containerId: courseId,
+            policy: offPolicy,
+            actorUid: 2,
+            expectedDraftVersion: 0,
+        });
+        expect(turnedOff).to.include({ revision: 2, state: 'published' });
+        expect(turnedOff.policy).to.deep.equal(offPolicy);
+        expect(String(turnedOff._id)).to.not.equal(String(firstId));
+
+        const previous = revisions.docs.find((doc) => String(doc._id) === String(firstId));
+        expect(previous).to.include({ revision: 1, state: 'published' });
+        expect(previous?.policy).to.deep.equal(strictPolicy);
+        expect(previous?.publishedAt).to.deep.equal(firstPublishedAt);
+        expect(revisions.docs.filter((doc) => doc.state === 'draft')).to.have.length(0);
+
+        const stale = await capture(() =>
+            service.saveAndPublish({
+                domainId: 'system',
+                containerKind: 'course',
+                containerId: courseId,
+                policy: offPolicy,
+                actorUid: 2,
+                expectedDraftVersion: 4,
+            }),
+        );
+        expect(stale).to.be.instanceOf(PracticeIntegrityConflictError);
+        expect(revisions.docs.filter((doc) => doc.state === 'published')).to.have.length(2);
+        expect(revisions.docs.find((doc) => String(doc._id) === String(firstId))?.policy).to.deep.equal(strictPolicy);
+    });
+
     it('lets exactly one concurrent publish win', async () => {
         const { service } = makeService();
         await service.saveDraft({

@@ -173,8 +173,12 @@ describe('practice integrity client boundary', () => {
     expect(courseEditor).to.include('containerKind="course"');
     expect(setEditor).to.include('PracticeIntegrityPolicyPanel');
     expect(setEditor).to.include('containerKind="problemSet"');
-    expect(panel).to.include("operation === 'publish' ? '发布真实性策略失败' : '保存真实性策略失败'");
+    expect(panel).to.include("const needsSave = !draft || !samePolicy(policy, draft.policy);");
+    expect(panel).to.include("void postPolicy(needsSave ? 'saveAndPublish' : 'publish')");
+    expect(panel).to.include('发布到学生');
+    expect(panel).to.include('仅保存草稿');
     expect(panel).to.include('expectedDraftVersion');
+    expect(panel).not.to.include('disabled={loading || busy !== null || !draft}');
   });
 
   it('flushes dedicated submit-page drafts and preserves an intentional empty cache value', () => {

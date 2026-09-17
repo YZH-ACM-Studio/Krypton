@@ -378,6 +378,20 @@ export class PracticeIntegrityService {
         return created;
     }
 
+    async saveAndPublish(input: SaveDraftInput): Promise<PracticeIntegrityRevisionDoc> {
+        const draft = await this.saveDraft(input);
+        if (draft.draftVersion === undefined) {
+            throw new Error(`practice integrity draft missing draftVersion after save: ${draft._id}`);
+        }
+        return await this.publishDraft({
+            domainId: input.domainId,
+            containerKind: input.containerKind,
+            containerId: input.containerId,
+            actorUid: input.actorUid,
+            expectedDraftVersion: draft.draftVersion,
+        });
+    }
+
     async publishDraft(input: PublishDraftInput): Promise<PracticeIntegrityRevisionDoc> {
         assertContainerIdentity(input);
         assertPositiveInteger(input.actorUid, 'actorUid');

@@ -57,8 +57,16 @@ export * from './lib/auth-token';
 export * from './lib/problem-config';
 export * from './lib/exam-lock';
 export { tryReadStoredCourseExam } from './lib/course-exam';
-export { isCourseExamCompleteFromStatus } from './lib/course-exam-complete';
-export { hasCompletedCourseExam } from './lib/course-exam-gate';
+export {
+    COURSE_EXAM_FINALIZE_GRACE_MS,
+    isCourseExamCompleteFromStatus,
+    isCourseExamEnded,
+    isCourseExamWindowClosed,
+    shouldSettleCourseExam,
+    buildCourseExamCompletionResolution,
+} from './lib/course-exam-complete';
+export type { CourseExamCompletionLockKind, CourseExamCompletionResolution } from './lib/course-exam-complete';
+export { hasCompletedCourseExam, resolveCourseExamCompletion } from './lib/course-exam-gate';
 export { UiContextBase } from './service/layers/base';
 export * from '@hydrooj/framework/decorators';
 export * from '@hydrooj/framework/validator';

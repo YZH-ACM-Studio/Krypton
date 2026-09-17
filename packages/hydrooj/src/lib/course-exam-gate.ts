@@ -1,9 +1,19 @@
+import { Logger } from '@hydrooj/utils';
 import { ObjectId } from 'mongodb';
 import { ContestNotFoundError, localizedErrorText, ValidationError } from '../error';
 import * as contest from '../model/contest';
 import { findCoursesBoundToExam, readStoredCourseExam, type CourseExamBinding } from './course-exam';
-import { isCourseExamCompleteFromStatus } from './course-exam-complete';
+import {
+    buildCourseExamCompletionResolution,
+    isCourseExamCompleteFromStatus,
+    isCourseExamEnded,
+    isCourseExamWindowClosed,
+    shouldSettleCourseExam,
+    type CourseExamCompletionResolution,
+} from './course-exam-complete';
 import { isCourseVideoComplete, listCourseVideos, studentVisibleVideos } from './course-video';
+
+const logger = new Logger('course-exam-gate');
 
 export interface CourseExamWatchProgress {
     done: number;
@@ -120,18 +130,80 @@ export async function assertCourseExamWatchGate(params: {
     }
 }
 
-export async function hasCompletedCourseExam(params: {
+export async function resolveCourseExamCompletion(params: {
     domainId: string;
     contestId: ObjectId;
     uid: number;
-}): Promise<boolean> {
+    now?: Date;
+}): Promise<CourseExamCompletionResolution> {
+    const now = params.now ?? new Date();
     let tdoc;
     try {
         tdoc = await contest.get(params.domainId, params.contestId);
     } catch (error) {
-        if (error instanceof ContestNotFoundError) return false;
+        if (error instanceof ContestNotFoundError) {
+            return buildCourseExamCompletionResolution({
+                missingContest: true,
+                complete: false,
+                attended: false,
+                windowClosed: false,
+                contestId: params.contestId,
+            });
+        }
         throw error;
     }
-    const tsdoc = await contest.getStatus(params.domainId, params.contestId, params.uid);
-    return isCourseExamCompleteFromStatus(tdoc, tsdoc);
+    let tsdoc = await contest.getStatus(params.domainId, params.contestId, params.uid);
+    const attended = Boolean(tsdoc?.attend);
+    const started = tsdoc?.startAt instanceof Date && !Number.isNaN(tsdoc.startAt.getTime());
+    const windowClosed = isCourseExamWindowClosed(tdoc.endAt, now);
+    const ended = isCourseExamEnded(tdoc.endAt, now);
+    let complete = isCourseExamCompleteFromStatus(tdoc, tsdoc);
+    const hasPids = Array.isArray(tdoc.pids) && tdoc.pids.some((pid: unknown) => typeof pid === 'number' && Number.isSafeInteger(pid));
+
+    if (shouldSettleCourseExam({
+        complete,
+        attend: attended,
+        started,
+        windowClosed,
+        examRule: tdoc.rule === 'exam',
+        hasPids,
+    })) {
+        const latest = await contest.getStatus(params.domainId, params.contestId, params.uid);
+        const alreadyFinalized = latest?.paperFinalizedAt instanceof Date && !Number.isNaN(latest.paperFinalizedAt.getTime());
+        let wrote = false;
+        if (!alreadyFinalized) {
+            const { finalizePaperForUser } = await import('../handler/paper');
+            await finalizePaperForUser(params.domainId, params.contestId, params.uid, { tdoc });
+            tsdoc = await contest.getStatus(params.domainId, params.contestId, params.uid);
+            wrote = tsdoc?.paperFinalizedAt instanceof Date && !Number.isNaN(tsdoc.paperFinalizedAt.getTime());
+        } else {
+            tsdoc = latest;
+        }
+        complete = isCourseExamCompleteFromStatus(tdoc, tsdoc);
+        logger.info(
+            'Course exam completion domain=%s contest=%s uid=%d stage=settle-on-read wrote=%s',
+            params.domainId,
+            String(params.contestId),
+            params.uid,
+            wrote,
+        );
+    }
+
+    return buildCourseExamCompletionResolution({
+        complete,
+        attended,
+        windowClosed,
+        ended,
+        contestId: params.contestId,
+    });
+}
+
+export async function hasCompletedCourseExam(params: {
+    domainId: string;
+    contestId: ObjectId;
+    uid: number;
+    now?: Date;
+}): Promise<boolean> {
+    const resolved = await resolveCourseExamCompletion(params);
+    return resolved.complete;
 }

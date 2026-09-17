@@ -42,6 +42,7 @@ import {
 } from 'hydrooj';
 import { ContestClientFinishedError, ContestNotLiveError, ContestTeamConflictError } from '../error';
 import { getPostContestPracticeState, isPostContestPracticeRule } from '../lib/contest-correction';
+import { COURSE_EXAM_FINALIZE_GRACE_MS } from '../lib/course-exam-complete';
 import { assertCourseExamWatchGate } from '../lib/course-exam-gate';
 import { buildExamModeRecordCodePayload } from '../lib/exam-mode-record';
 import * as contest from '../model/contest';
@@ -730,6 +731,10 @@ export async function finalizePaperForUser(
     const tdoc = options.tdoc || (await contest.get(domainId, tid));
     if (!tdoc) throw new NotFoundError(localizedErrorText`Contest`);
     if (tdoc.rule !== 'exam') return [];
+    const existing = await contest.getStatus(domainId, tid, uid);
+    if (existing?.paperFinalizedAt instanceof Date && !Number.isNaN(existing.paperFinalizedAt.getTime())) {
+        return [];
+    }
 
     const drafts = await PaperDraftModel.getDraftsForUser(domainId, tid, uid);
     const pdict: Record<number, any> = {};
@@ -815,8 +820,7 @@ export async function finalizePaperForUser(
 class PaperFinalizeHandler extends PaperBaseHandler {
     async post({ domainId }: { domainId: string }) {
         const now = Date.now();
-        const grace = 60 * 1000;
-        if (now > this.tdoc.endAt.getTime() + grace) {
+        if (now > this.tdoc.endAt.getTime() + COURSE_EXAM_FINALIZE_GRACE_MS) {
             throw new ValidationError('contest', null, localizedErrorText`Contest finalize window has closed`);
         }
 

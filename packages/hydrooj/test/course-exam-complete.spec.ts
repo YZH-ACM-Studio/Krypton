@@ -2,7 +2,14 @@ import { expect } from 'chai';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, it } from 'node:test';
-import { isCourseExamCompleteFromStatus } from '../src/lib/course-exam-complete';
+import {
+    COURSE_EXAM_FINALIZE_GRACE_MS,
+    buildCourseExamCompletionResolution,
+    isCourseExamCompleteFromStatus,
+    isCourseExamEnded,
+    isCourseExamWindowClosed,
+    shouldSettleCourseExam,
+} from '../src/lib/course-exam-complete';
 
 const hydroojRoot = resolve(__dirname, '..');
 
@@ -32,9 +39,118 @@ describe('course exam completion', () => {
     it('fails closed for non-exam contests, empty papers, invalid dates, and missing status', () => {
         expect(isCourseExamCompleteFromStatus({ rule: 'oi', pids: [1] }, { paperFinalizedAt: new Date() })).to.equal(false);
         expect(isCourseExamCompleteFromStatus({ rule: 'exam', pids: [] }, { journal: [{ pid: 1 }] })).to.equal(false);
+        expect(isCourseExamCompleteFromStatus({ rule: 'exam', pids: [] }, { paperFinalizedAt: new Date() })).to.equal(false);
         expect(isCourseExamCompleteFromStatus({ rule: 'exam', pids: [1] }, { paperFinalizedAt: new Date('invalid') })).to.equal(false);
         expect(isCourseExamCompleteFromStatus({ rule: 'exam', pids: [1] }, null)).to.equal(false);
         expect(isCourseExamCompleteFromStatus(null, { paperFinalizedAt: new Date() })).to.equal(false);
+    });
+
+    it('treats the window as closed only after endAt plus the shared grace', () => {
+        const endAt = new Date('2026-09-17T00:00:00.000Z');
+        expect(COURSE_EXAM_FINALIZE_GRACE_MS).to.equal(60_000);
+        expect(isCourseExamWindowClosed(endAt, new Date(endAt.getTime() + COURSE_EXAM_FINALIZE_GRACE_MS))).to.equal(false);
+        expect(isCourseExamWindowClosed(endAt, new Date(endAt.getTime() + COURSE_EXAM_FINALIZE_GRACE_MS + 1))).to.equal(true);
+        expect(isCourseExamWindowClosed(undefined, new Date('2026-09-17T01:00:00.000Z'))).to.equal(false);
+        expect(isCourseExamWindowClosed(new Date('invalid'), new Date('2026-09-17T01:00:00.000Z'))).to.equal(false);
+        expect(isCourseExamEnded(endAt, endAt)).to.equal(true);
+        expect(isCourseExamEnded(endAt, new Date(endAt.getTime() - 1))).to.equal(false);
+    });
+
+    it('allows settle only when incomplete, already attended, started, exam-rule, has pids, and the window is closed', () => {
+        const ready = { complete: false, attend: true, started: true, windowClosed: true, examRule: true, hasPids: true };
+        expect(shouldSettleCourseExam(ready)).to.equal(true);
+        expect(shouldSettleCourseExam({ ...ready, complete: true })).to.equal(false);
+        expect(shouldSettleCourseExam({ ...ready, attend: false })).to.equal(false);
+        expect(shouldSettleCourseExam({ ...ready, started: false })).to.equal(false);
+        expect(shouldSettleCourseExam({ ...ready, windowClosed: false })).to.equal(false);
+        expect(shouldSettleCourseExam({ ...ready, examRule: false })).to.equal(false);
+        expect(shouldSettleCourseExam({ ...ready, hasPids: false })).to.equal(false);
+    });
+
+    it('builds lockKind and examHref from completion facts without IO', () => {
+        const contestId = '64a000000000000000000801';
+        expect(buildCourseExamCompletionResolution({
+            missingContest: true,
+            complete: false,
+            attended: false,
+            windowClosed: false,
+            contestId,
+        })).to.deep.equal({
+            complete: false,
+            attended: false,
+            windowClosed: false,
+            lockKind: 'missing_contest',
+        });
+        expect(buildCourseExamCompletionResolution({
+            complete: true,
+            attended: true,
+            windowClosed: true,
+            contestId,
+        })).to.deep.equal({
+            complete: true,
+            attended: true,
+            windowClosed: true,
+            lockKind: 'none',
+        });
+        expect(buildCourseExamCompletionResolution({
+            complete: false,
+            attended: true,
+            windowClosed: false,
+            contestId,
+        })).to.deep.equal({
+            complete: false,
+            attended: true,
+            windowClosed: false,
+            examHref: `/exam-mode/${contestId}`,
+            lockKind: 'open',
+        });
+        expect(buildCourseExamCompletionResolution({
+            complete: false,
+            attended: false,
+            windowClosed: true,
+            contestId,
+        })).to.deep.equal({
+            complete: false,
+            attended: false,
+            windowClosed: true,
+            lockKind: 'never_attended_closed',
+        });
+        expect(buildCourseExamCompletionResolution({
+            complete: false,
+            attended: true,
+            windowClosed: true,
+            contestId,
+        })).to.deep.equal({
+            complete: false,
+            attended: true,
+            windowClosed: true,
+            lockKind: 'closed_incomplete',
+        });
+        expect(buildCourseExamCompletionResolution({
+            complete: false,
+            attended: false,
+            windowClosed: false,
+            ended: true,
+            contestId,
+        })).to.deep.equal({
+            complete: false,
+            attended: false,
+            windowClosed: false,
+            lockKind: 'never_attended_closed',
+        });
+        expect(buildCourseExamCompletionResolution({
+            complete: false,
+            attended: true,
+            windowClosed: false,
+            ended: true,
+            contestId,
+        })).to.deep.equal({
+            complete: false,
+            attended: true,
+            windowClosed: false,
+            examHref: `/exam-mode/${contestId}`,
+            lockKind: 'open',
+        });
     });
 
     it('writes paperFinalizedAt from finalizePaperForUser after creating records', () => {
@@ -44,22 +160,26 @@ describe('course exam completion', () => {
         expect(start).to.be.at.least(0);
         expect(end).to.be.greaterThan(start);
         const finalize = source.slice(start, end);
-        const setAt = finalize.indexOf('paperFinalizedAt');
         const updateAt = finalize.indexOf('contest.updateStatus');
+        const writeAt = finalize.lastIndexOf('contest.setStatus');
         const returnAt = finalize.lastIndexOf('return rids');
-        expect(setAt, 'finalize must persist paperFinalizedAt').to.be.at.least(0);
+        expect(finalize, 'already-finalized papers must not mint records').to.match(/paperFinalizedAt instanceof Date[\s\S]*return \[\]/);
         expect(finalize).to.include('contest.setStatus');
         expect(updateAt).to.be.at.least(0);
-        expect(setAt).to.be.greaterThan(updateAt);
-        expect(returnAt).to.be.greaterThan(setAt);
+        expect(writeAt, 'finalize must persist paperFinalizedAt').to.be.greaterThan(updateAt);
+        expect(returnAt).to.be.greaterThan(writeAt);
     });
 
     it('exports the completion helpers used by file-collect', () => {
         const api = readHydrooj('src/plugin-api.ts');
         expect(api).to.include("export { tryReadStoredCourseExam } from './lib/course-exam'");
-        expect(api).to.include("export { isCourseExamCompleteFromStatus } from './lib/course-exam-complete'");
-        expect(api).to.include("export { hasCompletedCourseExam } from './lib/course-exam-gate'");
+        expect(api).to.include('isCourseExamCompleteFromStatus');
+        expect(api).to.include('isCourseExamEnded');
+        expect(api).to.include("from './lib/course-exam-complete'");
+        expect(api).to.include('resolveCourseExamCompletion');
+        expect(api).to.include("export { hasCompletedCourseExam, resolveCourseExamCompletion } from './lib/course-exam-gate'");
         expect(readHydrooj('src/lib/course-exam.ts')).to.include('export function tryReadStoredCourseExam');
         expect(readHydrooj('src/lib/course-exam-gate.ts')).to.include('export async function hasCompletedCourseExam');
+        expect(readHydrooj('src/lib/course-exam-gate.ts')).to.include('export async function resolveCourseExamCompletion');
     });
 });

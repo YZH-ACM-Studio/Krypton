@@ -22,10 +22,15 @@ describe('Exam network control HTTP contracts', () => {
             expect(source).not.to.include(forbidden);
         }
         expect(source).not.to.include('ensureIndexes()');
+        expect(source).to.match(/async get\(_args: unknown, eventId: ObjectId\)/);
+        expect(source).not.to.match(/async GET\(/);
+        expect(source).to.include('loadTargetPickerSources(event.domainId, event.schoolId)');
+        expect(source).to.include('boundEndpoints');
     });
 
     it('rechecks event/template/school permissions and never accepts browser endpoint facts', () => {
         expect(source).to.include('assertCanManageExamEvent');
+        expect(source).to.include('hideUnavailableExamEvent');
         expect(source).to.include('loadTemplateForEvent');
         expect(source).to.include('assertExamEventCollaborators');
         expect(source).to.include('requireExamTargetResolver()');

@@ -6,6 +6,7 @@ import { PERM } from '../model/builtin';
 import { AUDITED_EVENT_FIELDS, ExamEventAuditContext, runAuditedExamEventMutation } from '../model/exam-event-audit';
 import {
     assertCanManageExamEvent,
+    hideUnavailableExamEvent,
     assertExamEventCollaborators,
     assertExamEventContestAccess,
     assertExamEventSchoolAccess,
@@ -23,8 +24,9 @@ import {
 import { withExamEventBoundary } from '../model/exam-event-boundary';
 import { EXAM_EVENT_PATCH_FIELDS, parseExamEventUpdatePatch } from '../model/exam-event-request';
 import { examNetworkConfigService, ExamNetworkConfigError } from '../model/exam-network-config';
-import { examSeatAssignmentService } from '../model/exam-seat-assignment';
+import { ExamSeatAssignmentError, examSeatAssignmentService } from '../model/exam-seat-assignment';
 import { ExamSeatPlanError, examSeatPlanService } from '../model/exam-seat-plan';
+import { ExamPreloginError } from '../model/exam-prelogin';
 import { getExamPreloginService } from '../service/exam-prelogin';
 import { studentDirectory } from '../service/student-directory';
 
@@ -70,11 +72,24 @@ function serializeEvent(event: ExamEventDoc) {
     };
 }
 
+const logger = new Logger('exam-event');
+
 async function loadPreparationSummary(domainId: string, eventId: ObjectId) {
-    const [publication, batch] = await Promise.all([
-        examSeatAssignmentService.getPublication(domainId, eventId),
-        getExamPreloginService().getLatestBatch(domainId, eventId),
-    ]);
+    const publication = await examSeatAssignmentService.getPublication(domainId, eventId);
+    let batch = null;
+    let warning: string | undefined;
+    try {
+        batch = await getExamPreloginService().getLatestBatch(domainId, eventId);
+    } catch (error) {
+        if (!(error instanceof ExamPreloginError)) throw error;
+        logger.error(
+            'Exam event latest prelogin batch invalid domain=%s eventId=%s reason=%s',
+            domainId,
+            eventId.toHexString(),
+            error.reason,
+        );
+        warning = error.reason;
+    }
     let assignment = null;
     if (publication) {
         const published = await examSeatAssignmentService.getRevision(domainId, eventId, publication.assignment.revision);
@@ -83,18 +98,25 @@ async function loadPreparationSummary(domainId: string, eventId: ObjectId) {
             !published._id.equals(publication.assignment.assignmentId) ||
             published.fingerprint !== publication.assignment.fingerprint
         ) {
-            throw new ExamEventError('assignment_publication_reference_drift');
+            logger.error(
+                'Exam event assignment publication reference drifted domain=%s eventId=%s reason=%s',
+                domainId,
+                eventId.toHexString(),
+                'assignment_publication_reference_drift',
+            );
+            warning = 'assignment_publication_reference_drift';
+        } else {
+            assignment = {
+                id: published._id.toHexString(),
+                revision: published.revision,
+                fingerprint: published.fingerprint,
+                roster: {
+                    id: published.roster.rosterId.toHexString(),
+                    revision: published.roster.revision,
+                    fingerprint: published.roster.fingerprint,
+                },
+            };
         }
-        assignment = {
-            id: published._id.toHexString(),
-            revision: published.revision,
-            fingerprint: published.fingerprint,
-            roster: {
-                id: published.roster.rosterId.toHexString(),
-                revision: published.roster.revision,
-                fingerprint: published.roster.fingerprint,
-            },
-        };
     }
     return {
         assignment,
@@ -115,13 +137,17 @@ async function loadPreparationSummary(domainId: string, eventId: ObjectId) {
                       : null,
               }
             : null,
+        ...(warning ? { warning } : {}),
     };
 }
 
-const logger = new Logger('exam-event');
-
 export function translateExamEventError(error: unknown): never {
-    if (error instanceof ExamNetworkConfigError || error instanceof ExamSeatPlanError || error instanceof ExamEventError) {
+    if (
+        error instanceof ExamNetworkConfigError ||
+        error instanceof ExamSeatPlanError ||
+        error instanceof ExamSeatAssignmentError ||
+        error instanceof ExamEventError
+    ) {
         logger.warn('Exam event rejected reason=%s', error.reason);
         throwExamTeacherValidationError('examEvent', error.reason);
     }
@@ -226,21 +252,25 @@ class ExamEventCollectionHandler extends ExamEventBaseHandler {
 class ExamEventDetailHandler extends ExamEventBaseHandler {
     private async load(eventId: ObjectId): Promise<ExamEventDoc> {
         const event = await examEventService.get(String(this.domain._id), eventId);
-        if (!event) throw new ValidationError('eventId');
+        hideUnavailableExamEvent(String(this.domain._id), event, this.user);
         await assertCanManageExamEvent(String(this.domain._id), event, this.user);
         return event;
     }
 
     @param('eventId', Types.ObjectId)
     async get(_args: unknown, eventId: ObjectId) {
-        const event = await this.load(eventId);
-        const domainId = String(this.domain._id);
-        this.response.body = {
-            event: serializeEvent(event),
-            schools: await availableSchools(domainId, this.user),
-            capability: { canManageAll: isExamInfrastructureAdmin(this.user) },
-            preparation: await loadPreparationSummary(domainId, eventId),
-        };
+        try {
+            const event = await this.load(eventId);
+            const domainId = String(this.domain._id);
+            this.response.body = {
+                event: serializeEvent(event),
+                schools: await availableSchools(domainId, this.user),
+                capability: { canManageAll: isExamInfrastructureAdmin(this.user) },
+                preparation: await loadPreparationSummary(domainId, eventId),
+            };
+        } catch (error) {
+            translateExamEventError(error);
+        }
     }
 
     @param('eventId', Types.ObjectId)
@@ -269,7 +299,8 @@ class ExamEventDetailHandler extends ExamEventBaseHandler {
                     if (contestId) await assertExamEventContestAccess(domainId, contestId, this.user);
                     const nextSchoolId = schoolId || current.schoolId;
                     await assertExamEventSchoolAccess(domainId, nextSchoolId, this.user);
-                    if (schoolId && !schoolId.equals(current.schoolId)) {
+                    const schoolChanged = Boolean(schoolId && !schoolId.equals(current.schoolId));
+                    if (schoolChanged) {
                         await Promise.all([
                             examNetworkConfigService.assertEventSchoolChangeAllowed(domainId, eventId),
                             examSeatPlanService.assertEventSchoolChangeAllowed(domainId, eventId),
@@ -277,12 +308,18 @@ class ExamEventDetailHandler extends ExamEventBaseHandler {
                         ]);
                     }
                     const collaborators = collaboratorUids === undefined ? undefined : canonicalCollaboratorUids(current.ownerUid, collaboratorUids);
-                    await assertExamEventCollaborators(
-                        domainId,
-                        nextSchoolId,
-                        current.ownerUid,
-                        collaborators === undefined ? current.collaboratorUids : collaborators,
-                    );
+                    const collaboratorsChanged =
+                        collaborators !== undefined &&
+                        (collaborators.length !== current.collaboratorUids.length ||
+                            collaborators.some((uid, index) => uid !== current.collaboratorUids[index]));
+                    if (!isExamInfrastructureAdmin(this.user) || schoolChanged || collaboratorsChanged) {
+                        await assertExamEventCollaborators(
+                            domainId,
+                            nextSchoolId,
+                            current.ownerUid,
+                            collaborators === undefined ? current.collaboratorUids : collaborators,
+                        );
+                    }
                     mutation = () =>
                         examEventService.update({
                             domainId,
@@ -330,7 +367,7 @@ class ExamInfrastructureDetailPageHandler extends ExamEventBaseHandler {
     @param('eventId', Types.ObjectId)
     async get(_args: unknown, eventId: ObjectId) {
         const event = await examEventService.get(String(this.domain._id), eventId);
-        if (!event) throw new ValidationError('eventId');
+        hideUnavailableExamEvent(String(this.domain._id), event, this.user);
         await assertCanManageExamEvent(String(this.domain._id), event, this.user);
         this.response.template = 'admin_exam_event.html';
         this.response.body = { eventId: eventId.toHexString() };

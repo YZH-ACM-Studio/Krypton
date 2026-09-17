@@ -18,6 +18,7 @@ describe('P2.4 roster and seat-plan HTTP boundary', () => {
         expect(source).to.include('withExamEventBoundary(domainId, eventId');
         expect(source).to.include('const current = await this.event(eventId)');
         expect(source).to.include('assertCanManageExamEvent(domainId, event, this.user)');
+        expect(source).to.include('hideUnavailableExamEvent(domainId, event, this.user)');
         expect(source).to.include('PERM.PERM_USERBIND_MANAGE_STUDENTS');
         expect(source).not.to.include('ensureIndexes()');
         expect(source).to.include('this.assertWritableEvent(current)');
@@ -75,9 +76,11 @@ describe('P2.4 roster and seat-plan HTTP boundary', () => {
 
     it('translates teacher-facing HTTP errors into Chinese and keeps reason codes in logs', () => {
         expect(source).to.include("throwExamTeacherValidationError('examSeatPlan'");
+        expect(source).to.include("throwExamTeacherValidationError('examSeatPlan', 'seat_plan_classroom_missing')");
         expect(source).to.include("throwExamTeacherValidationError('eventId', 'event_canonical_invalid')");
         expect(source).to.include("throwExamTeacherValidationError('eventId', 'event_archived')");
         expect(source).to.include('logger.warn(\'Exam seat plan rejected reason=%s\'');
+        expect(source).to.include('logger.warn(\'Exam seat plan classroom integrity rejected\'');
         expect(source).not.to.include('Invalid request:');
     });
 
@@ -93,6 +96,9 @@ describe('P2.4 roster and seat-plan HTTP boundary', () => {
         expect(getHandler).to.include('await this.assertStoredSeatPlanReferences(event, latestPlan)');
         expect(getHandler).to.include('rosterRevisions: rosters.map((roster) => serializeRoster(roster, event.revision))');
         expect(getHandler).to.include('seatPlans: plans.map((plan) => serializePlan(plan, event.revision))');
+        expect(getHandler).to.include("classroomWarning = 'seat_plan_classroom_unavailable'");
+        expect(getHandler).to.include('isClassroomIntegrityError(error)');
+        expect(getHandler).to.include('translate(error)');
         expect(source).to.include('examClassroomService.get(event.domainId, classroomRef.classroomId, true)');
         expect(source).to.include('examClassroomService.layout(classroom, classroomRef.layoutRevision)');
         expect(source).to.include('examSeatOperationalProfileService.getRevision');

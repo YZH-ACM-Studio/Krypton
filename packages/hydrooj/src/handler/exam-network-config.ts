@@ -2,9 +2,12 @@ import { lookup } from 'node:dns/promises';
 import { Logger } from '@hydrooj/utils';
 import { ObjectId } from 'mongodb';
 import { Context, Handler, param, PermissionError, Types, ValidationError } from 'hydrooj';
+import { ClassSigninClassroomMigrationError } from '../lib/classsignin-classroom-migration';
 import { throwExamTeacherValidationError } from '../lib/exam-teacher-http-error';
 import { PERM } from '../model/builtin';
-import { assertCanManageExamEvent, assertExamEventCollaborators, isExamInfrastructureAdmin } from '../model/exam-event-access';
+import { examClassroomService } from '../model/exam-classroom';
+import { endpointSeatBindingService } from '../model/endpoint-seat-binding';
+import { assertCanManageExamEvent, assertExamEventCollaborators, hideUnavailableExamEvent, isExamInfrastructureAdmin } from '../model/exam-event-access';
 import { ExamEventDoc, examEventService } from '../model/exam-event';
 import { withExamEventBoundary } from '../model/exam-event-boundary';
 import {
@@ -132,6 +135,37 @@ function serializePreview(preview: TargetPreview) {
     return preview;
 }
 
+async function loadTargetPickerSources(domainId: string, schoolId: ObjectId) {
+    const classrooms = (await examClassroomService.listDomain(domainId, false, 500).toArray()).filter((classroom) =>
+        classroom.schoolId.equals(schoolId),
+    );
+    const boundEndpoints: Array<{ endpointId: string; label: string }> = [];
+    const seen = new Set<string>();
+    for (const classroom of classrooms) {
+        const seats = new Map(
+            examClassroomService.layout(classroom, classroom.layoutRevision).snapshot.seats.map((seat) => [seat.sourceSeatId, seat.label]),
+        );
+        const bindings = await endpointSeatBindingService.listClassroomBindings(domainId, classroom._id);
+        for (const binding of bindings) {
+            if (binding.status !== 'active' || !binding.endpointId) continue;
+            const seatLabel = seats.get(binding.sourceSeatId);
+            if (seatLabel === undefined || seen.has(binding.endpointId)) continue;
+            seen.add(binding.endpointId);
+            boundEndpoints.push({ endpointId: binding.endpointId, label: `${classroom.name} / ${seatLabel}` });
+        }
+    }
+    return {
+        classrooms: classrooms.map((classroom) => ({
+            classroomId: classroom._id.toHexString(),
+            schoolId: classroom.schoolId.toHexString(),
+            name: classroom.name,
+            layoutRevision: classroom.layoutRevision,
+            seatCount: examClassroomService.layout(classroom, classroom.layoutRevision).snapshot.seats.length,
+        })),
+        boundEndpoints,
+    };
+}
+
 const logger = new Logger('exam-network-config');
 
 export function translateExamNetworkError(error: unknown): never {
@@ -152,6 +186,10 @@ export function translateExamNetworkError(error: unknown): never {
     if (error instanceof ExamNetworkConfigError || error instanceof ExamNetworkPolicyError) {
         logger.warn('Exam network rejected reason=%s', error.reason);
         throwExamTeacherValidationError('examNetwork', error.reason);
+    }
+    if (error instanceof ClassSigninClassroomMigrationError || (error instanceof Error && error.name === 'ClassSigninClassroomMigrationError')) {
+        logger.warn('Exam network lookup rejected');
+        throwExamTeacherValidationError('examNetwork', 'classroom_unavailable');
     }
     throw error;
 }
@@ -190,18 +228,26 @@ abstract class ExamNetworkBaseHandler extends Handler {
     }
 
     protected async loadEvent(eventId: ObjectId): Promise<ExamEventDoc> {
-        const event = await examEventService.get(String(this.domain._id), eventId);
-        if (!event) throw new ValidationError('eventId');
-        await assertCanManageExamEvent(String(this.domain._id), event, this.user);
-        return event;
+        try {
+            const event = await examEventService.get(String(this.domain._id), eventId);
+            hideUnavailableExamEvent(String(this.domain._id), event, this.user);
+            await assertCanManageExamEvent(String(this.domain._id), event, this.user);
+            return event;
+        } catch (error) {
+            translateExamNetworkError(error);
+        }
     }
 
     protected async loadTemplateForEvent(event: ExamEventDoc, templateId: ObjectId): Promise<ExamPolicyTemplateDoc> {
         const template = await examNetworkConfigService.getTemplate(event.domainId, templateId);
-        if (!template) throw new ValidationError('templateId');
-        if (!template.schoolId.equals(event.schoolId)) throw new PermissionError(PERM.PERM_CREATE_EXAM_EVENT);
-        if (!isExamInfrastructureAdmin(this.user) && template.ownerUid !== this.user._id && !template.collaboratorUids.includes(this.user._id)) {
-            throw new PermissionError(PERM.PERM_CREATE_EXAM_EVENT);
+        if (
+            !template ||
+            !template.schoolId.equals(event.schoolId) ||
+            (!isExamInfrastructureAdmin(this.user) &&
+                template.ownerUid !== this.user._id &&
+                !template.collaboratorUids.includes(this.user._id))
+        ) {
+            throw new ValidationError('templateId');
         }
         return template;
     }
@@ -363,7 +409,13 @@ class ExamTargetAssignmentHandler extends ExamNetworkBaseHandler {
             examNetworkConfigService.getAssignment(event.domainId, eventId),
             examNetworkConfigService.getEventConfig(event.domainId, eventId),
         ]);
-        this.response.body = { assignment: assignment ? serializeAssignment(assignment) : null, config: serializeConfig(config) };
+        const picker = await loadTargetPickerSources(event.domainId, event.schoolId);
+        this.response.body = {
+            assignment: assignment ? serializeAssignment(assignment) : null,
+            config: serializeConfig(config),
+            classrooms: picker.classrooms,
+            boundEndpoints: picker.boundEndpoints,
+        };
     }
 
     @param('eventId', Types.ObjectId)

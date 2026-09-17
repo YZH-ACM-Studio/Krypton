@@ -21,6 +21,7 @@ describe('ExamEvent HTTP boundary contracts', () => {
         expect(source).to.include("@param('title', Types.String)");
         expect(source).not.to.include("@param('title', Types.Title)");
         expect(source).to.match(/async get\(_args: unknown, eventId: ObjectId\)/);
+        expect(source).not.to.match(/async GET\(/);
         expect(source).to.match(/async post\(\s*_args: unknown,\s*eventId: ObjectId,/);
     });
 
@@ -30,6 +31,7 @@ describe('ExamEvent HTTP boundary contracts', () => {
         expect(source).to.include("this.response.template = 'admin_exam_infrastructure.html'");
         expect(source).to.include("this.response.template = 'admin_exam_event.html'");
         expect(source).to.match(/class ExamInfrastructureDetailPageHandler[\s\S]*assertCanManageExamEvent/);
+        expect(source).to.include('hideUnavailableExamEvent');
         expect(source.match(/class ExamInfrastructure[\s\S]*?async post/g) || []).to.have.length(0);
     });
 
@@ -67,6 +69,38 @@ describe('ExamEvent HTTP boundary contracts', () => {
     it('does not expose a hard-delete mutation before reference models exist', () => {
         expect(source).not.to.match(/action['"], Types\.Range\(\[[^\]]*delete/);
         expect(source).not.to.include('deleteOne(');
+    });
+
+    it('returns a preparation warning instead of failing event GET when publication drifted', () => {
+        const loadFn = source.slice(source.indexOf('async function loadPreparationSummary'), source.indexOf('export function translateExamEventError'));
+        expect(loadFn).not.to.include('throw new ExamEventError');
+        expect(source).not.to.include("throw new ExamEventError('assignment_publication_reference_drift')");
+        expect(loadFn).to.include('logger.error(');
+        expect(loadFn).to.include("warning = 'assignment_publication_reference_drift'");
+        expect(loadFn).to.include('error instanceof ExamPreloginError');
+        expect(loadFn).to.include('warning = error.reason');
+        expect(loadFn).to.include('publicationRevision: publication?.revision || 0');
+        expect(loadFn).to.include('batch: batch');
+        expect(loadFn).to.include('...(warning ? { warning } : {})');
+        const seatSource = readFileSync(resolve(__dirname, '../src/handler/exam-seat-assignment.ts'), 'utf8');
+        const seatGet = seatSource.slice(
+            seatSource.indexOf('class ExamSeatAssignmentCollectionHandler'),
+            seatSource.indexOf("@param('action', Types.Range(['adjust', 'adjustV2', 'generate', 'generateV2', 'publish', 'rerandomize', 'rerandomizeV2']))"),
+        );
+        expect(seatGet).to.include("publicationWarning = 'assignment_publication_reference_drift'");
+        expect(seatGet).not.to.include("throw new ExamSeatAssignmentError('assignment_publication_reference_drift')");
+        expect(seatSource).to.include("throw new ExamSeatAssignmentError('assignment_publication_reference_drift')");
+    });
+
+    it('skips stale-owner collaborator revalidation only for infrastructure admins on unchanged school and collaborators', () => {
+        const updateSlice = source.slice(
+            source.indexOf('const patch = parseExamEventUpdatePatch(body)'),
+            source.indexOf('mutation = () =>\n                        examEventService.update'),
+        );
+        expect(updateSlice).to.include('if (!isExamInfrastructureAdmin(this.user) || schoolChanged || collaboratorsChanged)');
+        expect(updateSlice).to.include('await assertExamEventCollaborators(');
+        expect(updateSlice).to.include('current.ownerUid');
+        expect(source.indexOf('assertExamEventCollaborators(domainId, schoolId, this.user._id, collaborators)')).to.be.greaterThan(-1);
     });
 });
 

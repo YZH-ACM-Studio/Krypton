@@ -13,6 +13,7 @@ describe('exam network execution HTTP contracts', () => {
     it('keeps human execution control on the ExamEvent permission boundary', () => {
         expect(handler).to.include("'/api/admin/exam-events/:eventId/network-execution'");
         expect(handler).to.include('assertCanManageExamEvent(domainId, event, this.user)');
+        expect(handler).to.include('hideUnavailableExamEvent(domainId, event, this.user)');
         expect(handler).to.include('withExamEventBoundary(domainId, eventId');
         expect(handler).not.to.include('ensureIndexes()');
         expect(handler).to.include("Types.Range(['preflight', 'refresh', 'retry', 'retryFailed', 'start', 'stop'])");
@@ -75,6 +76,10 @@ describe('exam network execution HTTP contracts', () => {
         expect(handler).to.include('examTargetAssignmentColl.findOne({ domainId, _id: targetRef.id, eventId, schoolId })');
         expect(handler).to.include('resolveConfig(domainId, eventId, event.schoolId)');
         expect(handler).to.include('resolveUpdatePreview(domainId, eventId, event.schoolId, execution)');
+        expect(handler).to.match(/async get\(_args: unknown, eventId: ObjectId\)/);
+        expect(handler).not.to.match(/async GET\(/);
+        expect(handler).to.include('Execution GET update preview failed');
+        expect(handler).to.include('updatePreviewWarning: updatePreview.warning');
         expect(handler.match(/resolveConfig\(domainId, eventId, event\.schoolId/g)?.length).to.equal(4);
         const startBlock = handler.slice(handler.indexOf("if (action === 'start')"), handler.indexOf("} else if (action === 'stop')"));
         expect(startBlock).to.include('resolveConfig(domainId, eventId, event.schoolId)');

@@ -151,6 +151,23 @@ describe('P2.4 Contest audience compilation', () => {
         expect(source.sourceFingerprint).to.match(/^[a-f0-9]{64}$/);
     });
 
+    it('degrades a missing contest to public GET state and still fail-closes roster resolve', async () => {
+        const { ContestNotFoundError } = require('../src/error') as typeof import('../src/error');
+        mutableModel().contest = {
+            get: async () => {
+                throw new ContestNotFoundError(domainId, contestId);
+            },
+        };
+        expect(await resolverModule.getExamContestAudienceState(event())).to.equal('public');
+        let reason: string | null = null;
+        try {
+            await resolverModule.loadExamRosterResolutionSource(event(), { kind: 'contestAudience' });
+        } catch (error) {
+            reason = (error as { reason?: string }).reason || null;
+        }
+        expect(reason).to.equal('contest_not_found');
+    });
+
     it('rejects an invite-code audience because later attendees can still change it', async () => {
         let userbindReads = 0;
         directory.loadExamRosterUserbindSnapshot = async () => {

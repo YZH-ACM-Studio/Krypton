@@ -1,11 +1,12 @@
 import { Logger } from '@hydrooj/utils';
 import { ObjectId } from 'mongodb';
 import { Context, Handler, OplogModel, param, PermissionError, Types, ValidationError } from 'hydrooj';
+import { ClassSigninClassroomMigrationError } from '../lib/classsignin-classroom-migration';
 import { throwExamTeacherValidationError } from '../lib/exam-teacher-http-error';
 import { PERM } from '../model/builtin';
 import { examClassroomService } from '../model/exam-classroom';
 import { examSeatOperationalProfileService } from '../model/exam-seat-operational-profile';
-import { assertCanManageExamEvent, isExamInfrastructureAdmin } from '../model/exam-event-access';
+import { assertCanManageExamEvent, hideUnavailableExamEvent, isExamInfrastructureAdmin } from '../model/exam-event-access';
 import { withExamEventBoundary } from '../model/exam-event-boundary';
 import { ExamEventDoc, examEventService } from '../model/exam-event';
 import {
@@ -32,10 +33,21 @@ function exactBody(value: unknown, keys: string[]): void {
     if (Object.keys(body).length !== keys.length || keys.some((key) => !Object.hasOwn(body, key))) throw new ValidationError('body');
 }
 
+function isClassroomIntegrityError(error: unknown): boolean {
+    if (error instanceof ClassSigninClassroomMigrationError) return true;
+    return error instanceof Error && error.name === 'ClassSigninClassroomMigrationError';
+}
+
 function translate(error: unknown): never {
-    if (!(error instanceof ExamSeatPlanError)) throw error;
-    logger.warn('Exam seat plan rejected reason=%s', error.reason);
-    throwExamTeacherValidationError('examSeatPlan', error.reason);
+    if (error instanceof ExamSeatPlanError) {
+        logger.warn('Exam seat plan rejected reason=%s', error.reason);
+        throwExamTeacherValidationError('examSeatPlan', error.reason);
+    }
+    if (isClassroomIntegrityError(error)) {
+        logger.warn('Exam seat plan classroom integrity rejected');
+        throwExamTeacherValidationError('examSeatPlan', 'seat_plan_classroom_missing');
+    }
+    throw error;
 }
 
 function serializeSource(source: ExamRosterRevisionDoc['source']) {
@@ -141,7 +153,7 @@ abstract class ExamSeatPlanBaseHandler extends Handler {
     protected async event(eventId: ObjectId): Promise<ExamEventDoc> {
         const domainId = String(this.domain._id);
         const event = await examEventService.get(domainId, eventId);
-        if (!event) throw new ValidationError('eventId');
+        hideUnavailableExamEvent(domainId, event, this.user);
         if (!['krypton', 'external'].includes(event.type) || !['draft', 'scheduled', 'archived'].includes(event.lifecycle)) {
             throwExamTeacherValidationError('eventId', 'event_canonical_invalid');
         }
@@ -219,38 +231,50 @@ abstract class ExamSeatPlanBaseHandler extends Handler {
 class ExamSeatPlanCollectionHandler extends ExamSeatPlanBaseHandler {
     @param('eventId', Types.ObjectId)
     async get(_args: unknown, eventId: ObjectId) {
-        const event = await this.event(eventId);
-        const [rosters, plans, contestAudienceState] = await Promise.all([
-            examSeatPlanService.listRosterRevisions(event.domainId, eventId).toArray(),
-            examSeatPlanService.listSeatPlans(event.domainId, eventId).toArray(),
-            getExamContestAudienceState(event),
-        ]);
-        const latestRoster = rosters[0];
-        if (latestRoster) {
-            assertExamRosterRevisionIntegrity(latestRoster);
-            if (!latestRoster.schoolId.equals(event.schoolId)) throw new ExamSeatPlanError('roster_school_mismatch');
+        try {
+            const event = await this.event(eventId);
+            const [rosters, plans, contestAudienceState] = await Promise.all([
+                examSeatPlanService.listRosterRevisions(event.domainId, eventId).toArray(),
+                examSeatPlanService.listSeatPlans(event.domainId, eventId).toArray(),
+                getExamContestAudienceState(event),
+            ]);
+            const latestRoster = rosters[0];
+            if (latestRoster) {
+                assertExamRosterRevisionIntegrity(latestRoster);
+                if (!latestRoster.schoolId.equals(event.schoolId)) throw new ExamSeatPlanError('roster_school_mismatch');
+            }
+            let classroomWarning: string | null = null;
+            const latestPlan = plans[0];
+            if (latestPlan) {
+                assertExamSeatPlanIntegrity(latestPlan);
+                if (!latestPlan.schoolId.equals(event.schoolId)) throw new ExamSeatPlanError('seat_plan_school_mismatch');
+                try {
+                    await this.assertStoredSeatPlanReferences(event, latestPlan);
+                } catch (error) {
+                    if (!isClassroomIntegrityError(error)) throw error;
+                    logger.error('Seat plan GET stored classroom reference failed domain=%s event=%s', event.domainId, eventId);
+                    classroomWarning = 'seat_plan_classroom_unavailable';
+                }
+            }
+            this.response.body = {
+                event: {
+                    eventId: event._id.toHexString(),
+                    revision: event.revision,
+                    type: event.type,
+                    lifecycle: event.lifecycle,
+                    schoolId: event.schoolId.toHexString(),
+                    contestId: event.contestId?.toHexString() || null,
+                    contestAudienceState,
+                    startAt: event.startAt.toISOString(),
+                    endAt: event.endAt.toISOString(),
+                },
+                rosterRevisions: rosters.map((roster) => serializeRoster(roster, event.revision)),
+                seatPlans: plans.map((plan) => serializePlan(plan, event.revision)),
+                classroomWarning,
+            };
+        } catch (error) {
+            translate(error);
         }
-        const latestPlan = plans[0];
-        if (latestPlan) {
-            assertExamSeatPlanIntegrity(latestPlan);
-            if (!latestPlan.schoolId.equals(event.schoolId)) throw new ExamSeatPlanError('seat_plan_school_mismatch');
-            await this.assertStoredSeatPlanReferences(event, latestPlan);
-        }
-        this.response.body = {
-            event: {
-                eventId: event._id.toHexString(),
-                revision: event.revision,
-                type: event.type,
-                lifecycle: event.lifecycle,
-                schoolId: event.schoolId.toHexString(),
-                contestId: event.contestId?.toHexString() || null,
-                contestAudienceState,
-                startAt: event.startAt.toISOString(),
-                endAt: event.endAt.toISOString(),
-            },
-            rosterRevisions: rosters.map((roster) => serializeRoster(roster, event.revision)),
-            seatPlans: plans.map((plan) => serializePlan(plan, event.revision)),
-        };
     }
 
     @param('eventId', Types.ObjectId)

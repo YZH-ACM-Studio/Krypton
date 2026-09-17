@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { ObjectId } from 'mongodb';
+import { ContestNotFoundError } from '../error';
 import type { Tdoc } from '../interface';
 import { PRIV } from './builtin';
 import type { ExamEventDoc } from './exam-event';
@@ -117,7 +118,16 @@ export type ExamContestAudienceState = 'fixed' | 'not-applicable' | 'public';
 
 async function contestAudienceContext(event: ExamEventDoc) {
     if (event.type !== 'krypton' || !event.contestId) return null;
-    const contest = await global.Hydro.model.contest.get(event.domainId, event.contestId);
+    let contest: Tdoc;
+    try {
+        contest = await global.Hydro.model.contest.get(event.domainId, event.contestId);
+    } catch (error) {
+        if (error instanceof ContestNotFoundError || (error instanceof Error && error.name === 'ContestNotFoundError')) {
+            throw new ExamSeatPlanError('contest_not_found');
+        }
+        throw error;
+    }
+    if (!contest) throw new ExamSeatPlanError('contest_not_found');
     assertContestIdentity(event, contest);
     const config = contestAudienceConfiguration(contest);
     if (contest._code !== undefined && typeof contest._code !== 'string') throw new ExamSeatPlanError('contest_audience_invalid');
@@ -137,8 +147,18 @@ async function contestAudienceContext(event: ExamEventDoc) {
 }
 
 export async function getExamContestAudienceState(event: ExamEventDoc): Promise<ExamContestAudienceState> {
-    const context = await contestAudienceContext(event);
-    return context?.state || 'not-applicable';
+    try {
+        const context = await contestAudienceContext(event);
+        return context?.state || 'not-applicable';
+    } catch (error) {
+        if (
+            error instanceof ExamSeatPlanError &&
+            (error.reason === 'contest_not_found' || error.reason === 'contest_team_roster_not_finalized')
+        ) {
+            return 'public';
+        }
+        throw error;
+    }
 }
 
 async function attendedUserIds(domainId: string, contestId: ObjectId): Promise<number[]> {

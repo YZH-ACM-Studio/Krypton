@@ -3,7 +3,7 @@ import { ObjectId } from 'mongodb';
 import { Context, Handler, OplogModel, param, PermissionError, requireServiceToken, Types, ValidationError } from 'hydrooj';
 import { throwExamTeacherValidationError } from '../lib/exam-teacher-http-error';
 import { PERM } from '../model/builtin';
-import { assertCanManageExamEvent, isExamInfrastructureAdmin } from '../model/exam-event-access';
+import { assertCanManageExamEvent, hideUnavailableExamEvent, isExamInfrastructureAdmin } from '../model/exam-event-access';
 import { ExamEventDoc, examEventService } from '../model/exam-event';
 import { withExamEventBoundary } from '../model/exam-event-boundary';
 import { ExamNetworkConfigError } from '../model/exam-network-config';
@@ -291,7 +291,7 @@ abstract class ExamPreloginManagerHandler extends Handler {
     protected async event(eventId: ObjectId): Promise<ExamEventDoc> {
         const domainId = String(this.domain._id);
         const event = await examEventService.get(domainId, eventId);
-        if (!event) throw new ValidationError('eventId');
+        hideUnavailableExamEvent(domainId, event, this.user);
         await assertCanManageExamEvent(domainId, event, this.user);
         return event;
     }

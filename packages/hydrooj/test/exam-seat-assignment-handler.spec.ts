@@ -19,6 +19,7 @@ describe('P2.5 seat assignment HTTP boundary', () => {
     it('re-reads event authorization and writable lifecycle inside the shared event boundary', () => {
         expect(source).to.include('withExamEventBoundary(domainId, eventId');
         expect(source).to.include('assertCanManageExamEvent(domainId, event, this.user)');
+        expect(source).to.include('hideUnavailableExamEvent(domainId, event, this.user)');
         expect(source).to.include('PERM.PERM_CREATE_EXAM_EVENT');
         expect(source).to.include('isExamInfrastructureAdmin(this.user)');
         expect(source).not.to.include('PERM_USERBIND_MANAGE_STUDENTS');
@@ -87,7 +88,9 @@ describe('P2.5 seat assignment HTTP boundary', () => {
     });
 
     it('reuses the existing userbind read model for the fresh-event preparation step', () => {
-        expect(source).to.include('userbind.listUserGroups(event.domainId, event.schoolId)');
+        expect(source).to.include('studentDirectory().listUserGroups(event.domainId, event.schoolId)');
+        expect(source).to.include('Seat assignment skipped invalid userbind group');
+        expect(source).not.to.include("throw new ExamSeatAssignmentError('userbind_group_canonical_invalid')");
         expect(source).to.include('examClassroomService.listDomain(domainId, false, 500)');
         expect(source).to.include('!classroom.schoolId.equals(event.schoolId)');
         expect(source).to.include('endpointSeatBindingService.listClassroomBindings(domainId, classroomId)');
@@ -120,8 +123,19 @@ describe('P2.5 seat assignment HTTP boundary', () => {
         expect(getHandler).to.include('assertExamSeatAssignmentIntegrity(latestAssignment)');
         expect(getHandler).to.include('await this.assertStoredReferences(event, latestAssignment)');
         expect(getHandler).to.include('await this.assertStoredReferences(event, published)');
-        expect(getHandler).to.include("throw new ExamSeatAssignmentError('assignment_publication_reference_drift')");
-        expect(getHandler).to.include('assignments.map((assignment) => serializeAssignment(assignment, publication?.assignment.revision || null))');
+        expect(getHandler).to.include("publicationWarning = 'assignment_publication_reference_drift'");
+        expect(getHandler).not.to.include("throw new ExamSeatAssignmentError('assignment_publication_reference_drift')");
+        expect(getHandler).to.include('serializeAssignment(assignment, publicationWarning ? null : publication?.assignment.revision || null)');
+        expect(getHandler).to.include('translate(error)');
+        expect(getHandler).to.include("classroomWarning = classroomWarning || 'assignment_classroom_reference_unavailable'");
+        expect(getHandler).to.include('isClassroomIntegrityError(error)');
+        expect(source).to.include("warning: 'classroom_sources_unavailable'");
+        expect(source).to.include('listAssignmentClassrooms(domainId, eventId)');
+        expect(getHandler).to.include('inspectCurrentExamSeatAssignmentV2Roster(event, publishedAssignment)');
+        expect(getHandler).to.include('error instanceof ExamSeatAssignmentReadinessError || error instanceof ExamSeatPlanError');
+        expect(getHandler).to.include("publishedRosterDrift = { changed: true, sourceChangedWithoutParticipantDiff: true, items: [] }");
+        expect(source).to.include("throw new ExamSeatAssignmentError('assignment_publication_reference_drift')");
+        expect(source).to.include('assignmentRevision === publication.assignment.revision');
         expect(source).to.include('examClassroomService.get(domainId, classroomRef.classroomId, true)');
         expect(source).to.include('seatFactMatchesBindingHistory(domainId, event.schoolId, fact, binding || null)');
     });
@@ -134,9 +148,17 @@ describe('P2.5 seat assignment HTTP boundary', () => {
 
     it('translates teacher-facing HTTP errors into Chinese and keeps reason codes in logs', () => {
         expect(source).to.include("throwExamTeacherValidationError('examSeatAssignment'");
+        expect(source).to.include("throwExamTeacherValidationError('examSeatAssignment', 'assignment_classroom_missing')");
         expect(source).to.include("throwExamTeacherValidationError('eventId', 'event_canonical_invalid')");
         expect(source).to.include('logger.warn(\'Exam seat assignment rejected reason=%s\'');
+        expect(source).to.include('logger.warn(\'Exam seat assignment classroom integrity rejected\'');
         expect(source).not.to.include('Invalid request:');
+        const classroomGet = source.slice(
+            source.indexOf('class ExamSeatAssignmentClassroomSourceHandler'),
+            source.indexOf('class ExamSeatAssignmentPageHandler'),
+        );
+        expect(classroomGet).to.include('translate(error)');
+        expect(classroomGet).to.include('examClassroomService.get(domainId, classroomId)');
     });
 
     it('publishes only the strict latest v2 assignment for the strict latest v2 plan', () => {

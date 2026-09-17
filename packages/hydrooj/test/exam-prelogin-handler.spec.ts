@@ -31,6 +31,7 @@ describe('P2.6 exam pre-login HTTP boundaries', () => {
         expect(source).to.include('currentWorkflow.fingerprint !== workflowFingerprint');
         expect(source).to.include('currentWorkflow.hardErrorCount > 0');
         expect(source).to.include('assertCanManageExamEvent(domainId, event, this.user)');
+        expect(source).to.include('hideUnavailableExamEvent(domainId, event, this.user)');
         expect(source).to.include('service.confirm');
         expect(source).to.include('service.resumeDispatching(existing)');
         expect(source).to.include('loadExamPreloginDispatchRecovery(current, existing)');

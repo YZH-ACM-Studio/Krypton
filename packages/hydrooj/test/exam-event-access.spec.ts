@@ -8,6 +8,7 @@ import { registerStudentDirectory } from '../src/service/student-directory';
 const hydro = ((global as unknown as { Hydro?: { model?: Record<string, unknown> } }).Hydro ||= { model: {} });
 hydro.model ||= {};
 const { PERM, PRIV } = require('../src/model/builtin.ts') as typeof import('../src/model/builtin');
+const { ContestNotFoundError } = require('../src/error.ts') as typeof import('../src/error');
 
 const schoolA = new ObjectId('66b800000000000000000301');
 const schoolB = new ObjectId('66b800000000000000000302');
@@ -46,7 +47,7 @@ registerStudentDirectory(
 hydro.model.user = { getById: async (_domainId: string, uid: number) => users.get(uid) || null };
 hydro.model.contest = {
     get: async (domainId: string, contestId: ObjectId) => {
-        if (domainId !== 'system' || contestId.toHexString().endsWith('999')) throw new Error('contest_not_found');
+        if (domainId !== 'system' || contestId.toHexString().endsWith('999')) throw new ContestNotFoundError(domainId, contestId);
         return { owner: 2, maintainer: [3] };
     },
 };
@@ -86,6 +87,15 @@ async function rejects(run: () => Promise<unknown>) {
 }
 
 describe('ExamEvent school and role authorization', () => {
+    it('hides missing and foreign events as the same eventId validation', () => {
+        expect(() => access.hideUnavailableExamEvent('system', null, owner)).to.throw().with.property('name', 'ValidationError');
+        expect(() => access.hideUnavailableExamEvent('system', event(), otherSchool)).to.throw().with.property('name', 'ValidationError');
+        expect(() => access.hideUnavailableExamEvent('other', event(), owner)).to.throw().with.property('name', 'ValidationError');
+        expect(() => access.hideUnavailableExamEvent('system', event(), owner)).not.to.throw();
+        expect(() => access.hideUnavailableExamEvent('system', event(), collaborator)).not.to.throw();
+        expect(() => access.hideUnavailableExamEvent('system', event({ ownerUid: 42, collaboratorUids: [] }), administrator)).not.to.throw();
+    });
+
     it('allows only owner/collaborator inside the canonical userbind school', async () => {
         await access.assertCanManageExamEvent('system', event(), owner);
         await access.assertCanManageExamEvent('system', event(), collaborator);
@@ -116,26 +126,20 @@ describe('ExamEvent school and role authorization', () => {
             'PermissionError',
         );
         expect(await rejects(() => access.assertExamEventContestAccess('system', new ObjectId('66b800000000000000000999'), owner))).to.have.property(
-            'message',
-            'contest_not_found',
+            'name',
+            'ContestNotFoundError',
         );
     });
 
-    it('rechecks linked Contest existence and the canonical self-edit permission on every event access', async () => {
+    it('rechecks linked Contest ownership on manage, but a missing linked Contest does not hide the event', async () => {
         const contestId = new ObjectId('66b800000000000000000501');
         const linked = event({ type: 'krypton', contestId });
         await access.assertCanManageExamEvent('system', linked, owner);
         expect(
             await rejects(() => access.assertCanManageExamEvent('system', linked, actor(2, [PERM.PERM_CREATE_EXAM_EVENT], [], [schoolA]))),
         ).to.have.property('name', 'PermissionError');
-        expect(
-            await rejects(() =>
-                access.assertCanManageExamEvent(
-                    'system',
-                    event({ type: 'krypton', contestId: new ObjectId('66b800000000000000000999') }),
-                    administrator,
-                ),
-            ),
-        ).to.have.property('message', 'contest_not_found');
+        const dangling = event({ type: 'krypton', contestId: new ObjectId('66b800000000000000000999') });
+        await access.assertCanManageExamEvent('system', dangling, administrator);
+        await access.assertCanManageExamEvent('system', dangling, owner);
     });
 });

@@ -1,6 +1,7 @@
 import { Logger } from '@hydrooj/utils';
 import { ObjectId } from 'mongodb';
 import { Context, Handler, OplogModel, param, PermissionError, Types, ValidationError } from 'hydrooj';
+import { ClassSigninClassroomMigrationError } from '../lib/classsignin-classroom-migration';
 import { throwExamTeacherValidationError } from '../lib/exam-teacher-http-error';
 import { PERM } from '../model/builtin';
 import { examClassroomService } from '../model/exam-classroom';
@@ -22,11 +23,11 @@ import {
 import * as contestModel from '../model/contest';
 import { listTeams as listContestTeams } from '../model/contest-team';
 import { ExamEventDoc, examEventService } from '../model/exam-event';
-import { assertCanManageExamEvent, isExamInfrastructureAdmin } from '../model/exam-event-access';
+import { assertCanManageExamEvent, hideUnavailableExamEvent, isExamInfrastructureAdmin } from '../model/exam-event-access';
 import { withExamEventBoundary } from '../model/exam-event-boundary';
 import { endpointSeatBindingService } from '../model/endpoint-seat-binding';
 import { examSeatOperationalProfileService } from '../model/exam-seat-operational-profile';
-import { inspectCurrentExamSeatAssignmentV2Roster } from '../model/exam-seat-assignment-readiness';
+import { ExamSeatAssignmentReadinessError, inspectCurrentExamSeatAssignmentV2Roster } from '../model/exam-seat-assignment-readiness';
 import { assertExamContestAudienceRosterCurrent, getExamContestAudienceState, resolveExamRosterForEvent } from '../model/exam-roster-resolver';
 import {
     ExamRosterRevisionDoc,
@@ -47,12 +48,31 @@ function exactBody(value: unknown, keys: string[]): void {
     if (Object.keys(body).length !== keys.length || keys.some((key) => !Object.hasOwn(body, key))) throw new ValidationError('body');
 }
 
+function isClassroomIntegrityError(error: unknown): boolean {
+    if (error instanceof ClassSigninClassroomMigrationError) return true;
+    return error instanceof Error && error.name === 'ClassSigninClassroomMigrationError';
+}
+
 function translate(error: unknown): never {
     if (error instanceof ExamSeatAssignmentError || error instanceof ExamSeatPlanError) {
         logger.warn('Exam seat assignment rejected reason=%s', error.reason);
         throwExamTeacherValidationError('examSeatAssignment', error.reason);
     }
+    if (isClassroomIntegrityError(error)) {
+        logger.warn('Exam seat assignment classroom integrity rejected');
+        throwExamTeacherValidationError('examSeatAssignment', 'assignment_classroom_missing');
+    }
     throw error;
+}
+
+async function listAssignmentClassrooms(domainId: string, eventId: ObjectId) {
+    try {
+        return { classrooms: await examClassroomService.listDomain(domainId, false, 500).toArray(), warning: null as string | null };
+    } catch (error) {
+        if (!isClassroomIntegrityError(error)) throw error;
+        logger.error('Seat assignment GET classroom catalog failed domain=%s event=%s', domainId, eventId);
+        return { classrooms: [], warning: 'classroom_sources_unavailable' };
+    }
 }
 
 function requestV2Mappings(value: unknown): ExamSeatAssignmentV2Mapping[] {
@@ -267,7 +287,7 @@ abstract class ExamSeatAssignmentBaseHandler extends Handler {
     protected async event(eventId: ObjectId): Promise<ExamEventDoc> {
         const domainId = String(this.domain._id);
         const event = await examEventService.get(domainId, eventId);
-        if (!event) throw new ValidationError('eventId');
+        hideUnavailableExamEvent(domainId, event, this.user);
         if (!['krypton', 'external'].includes(event.type) || !['draft', 'scheduled', 'archived'].includes(event.lifecycle)) {
             throwExamTeacherValidationError('eventId', 'event_canonical_invalid');
         }
@@ -280,8 +300,7 @@ abstract class ExamSeatAssignmentBaseHandler extends Handler {
     }
 
     protected async rosterGroups(event: ExamEventDoc): Promise<Array<{ groupId: string; name: string }>> {
-        const userbind = studentDirectory();
-        const groups = await userbind.listUserGroups(event.domainId, event.schoolId);
+        const groups = await studentDirectory().listUserGroups(event.domainId, event.schoolId);
         return groups
             .map((group) => {
                 if (
@@ -295,7 +314,13 @@ abstract class ExamSeatAssignmentBaseHandler extends Handler {
                     group.name.length > 128 ||
                     (group.archivedAt !== undefined && group.archivedAt !== null && !(group.archivedAt instanceof Date))
                 ) {
-                    throw new ExamSeatAssignmentError('userbind_group_canonical_invalid');
+                    logger.error(
+                        'Seat assignment skipped invalid userbind group domain=%s event=%s group=%s',
+                        event.domainId,
+                        event._id,
+                        group?._id,
+                    );
+                    return null;
                 }
                 return group.archivedAt ? null : { groupId: group._id.toHexString(), name: group.name };
             })
@@ -669,21 +694,31 @@ abstract class ExamSeatAssignmentBaseHandler extends Handler {
 class ExamSeatAssignmentCollectionHandler extends ExamSeatAssignmentBaseHandler {
     @param('eventId', Types.ObjectId)
     async get(_args: unknown, eventId: ObjectId) {
+        try {
         const event = await this.event(eventId);
         const domainId = String(this.domain._id);
-        const [assignments, publication, seatPlans, rosterGroups, classrooms] = await Promise.all([
+        const [assignments, publication, seatPlans, rosterGroups, classroomCatalog] = await Promise.all([
             examSeatAssignmentService.listRevisions(domainId, eventId).toArray(),
             examSeatAssignmentService.getPublication(domainId, eventId),
             examSeatPlanService.listSeatPlans(domainId, eventId).toArray(),
             this.rosterGroups(event),
-            examClassroomService.listDomain(domainId, false, 500).toArray(),
+            listAssignmentClassrooms(domainId, eventId),
         ]);
+        let classroomWarning = classroomCatalog.warning;
+        const classrooms = classroomCatalog.classrooms;
         const latestAssignment = assignments[0];
         if (latestAssignment) {
             assertExamSeatAssignmentIntegrity(latestAssignment);
-            await this.assertStoredReferences(event, latestAssignment);
+            try {
+                await this.assertStoredReferences(event, latestAssignment);
+            } catch (error) {
+                if (!isClassroomIntegrityError(error)) throw error;
+                logger.error('Seat assignment GET stored classroom reference failed domain=%s event=%s', domainId, eventId);
+                classroomWarning = classroomWarning || 'assignment_classroom_reference_unavailable';
+            }
         }
         let publishedAssignment: ExamSeatAssignmentRevisionDoc | null = null;
+        let publicationWarning: string | null = null;
         if (publication) {
             const published = await examSeatAssignmentService.getRevision(domainId, eventId, publication.assignment.revision);
             if (
@@ -691,15 +726,41 @@ class ExamSeatAssignmentCollectionHandler extends ExamSeatAssignmentBaseHandler 
                 !published._id.equals(publication.assignment.assignmentId) ||
                 published.fingerprint !== publication.assignment.fingerprint
             ) {
-                throw new ExamSeatAssignmentError('assignment_publication_reference_drift');
+                logger.error(
+                    'Seat assignment GET found publication drift domain=%s event=%s revision=%s',
+                    domainId,
+                    eventId,
+                    publication.assignment.revision,
+                );
+                publicationWarning = 'assignment_publication_reference_drift';
+            } else {
+                if (!latestAssignment || !latestAssignment._id.equals(published._id)) {
+                    try {
+                        await this.assertStoredReferences(event, published);
+                    } catch (error) {
+                        if (!isClassroomIntegrityError(error)) throw error;
+                        logger.error('Seat assignment GET published classroom reference failed domain=%s event=%s', domainId, eventId);
+                        classroomWarning = classroomWarning || 'assignment_classroom_reference_unavailable';
+                    }
+                }
+                publishedAssignment = published;
             }
-            if (!latestAssignment || !latestAssignment._id.equals(published._id)) await this.assertStoredReferences(event, published);
-            publishedAssignment = published;
         }
-        const publishedRosterDrift =
-            publishedAssignment && isExamSeatAssignmentV2(publishedAssignment)
-                ? await inspectCurrentExamSeatAssignmentV2Roster(event, publishedAssignment)
-                : null;
+        let publishedRosterDrift = null;
+        if (publishedAssignment && isExamSeatAssignmentV2(publishedAssignment)) {
+            try {
+                publishedRosterDrift = await inspectCurrentExamSeatAssignmentV2Roster(event, publishedAssignment);
+            } catch (error) {
+                if (!(error instanceof ExamSeatAssignmentReadinessError || error instanceof ExamSeatPlanError)) throw error;
+                logger.error(
+                    'Seat assignment GET published roster inspect failed domain=%s event=%s reason=%s',
+                    domainId,
+                    eventId,
+                    error.reason,
+                );
+                publishedRosterDrift = { changed: true, sourceChangedWithoutParticipantDiff: true, items: [] };
+            }
+        }
         let latestSeatPlanState: 'current' | 'layout-drift' | 'not-ready' = 'not-ready';
         let latestPlanSource: AssignmentSource | null = null;
         if (seatPlans[0]?.roster) {
@@ -707,43 +768,78 @@ class ExamSeatAssignmentCollectionHandler extends ExamSeatAssignmentBaseHandler 
             if (isExamSeatPlanV2(latestPlan)) {
                 const currentFacts = await Promise.all(
                     latestPlan.classrooms.map(async (classroomRef) => {
-                        const classroom = await examClassroomService.get(domainId, classroomRef.classroomId);
-                        if (
-                            !classroom ||
-                            !classroom.schoolId.equals(event.schoolId) ||
-                            classroom.layoutRevision !== classroomRef.layoutRevision ||
-                            examClassroomService.layout(classroom).snapshot.fingerprint !== classroomRef.layoutFingerprint
-                        ) {
-                            return false;
+                        try {
+                            const classroom = await examClassroomService.get(domainId, classroomRef.classroomId);
+                            if (
+                                !classroom ||
+                                !classroom.schoolId.equals(event.schoolId) ||
+                                classroom.layoutRevision !== classroomRef.layoutRevision ||
+                                examClassroomService.layout(classroom).snapshot.fingerprint !== classroomRef.layoutFingerprint
+                            ) {
+                                return false;
+                            }
+                            const profile = await examSeatOperationalProfileService.getCurrent(domainId, classroomRef.classroomId);
+                            return profile.revision === classroomRef.profileRevision && profile.fingerprint === classroomRef.profileFingerprint;
+                        } catch (error) {
+                            if (isClassroomIntegrityError(error)) return false;
+                            throw error;
                         }
-                        const profile = await examSeatOperationalProfileService.getCurrent(domainId, classroomRef.classroomId);
-                        return profile.revision === classroomRef.profileRevision && profile.fingerprint === classroomRef.profileFingerprint;
                     }),
                 );
                 latestSeatPlanState = currentFacts.every(Boolean) ? 'current' : 'layout-drift';
             } else {
-                latestPlanSource = await this.source(event, latestPlan.revision, false);
-                const activeClassroom = await examClassroomService.get(domainId, latestPlanSource.seatPlan.classroomId);
-                latestSeatPlanState =
-                    activeClassroom &&
-                    activeClassroom.schoolId.equals(event.schoolId) &&
-                    activeClassroom.layoutRevision === latestPlanSource.seatPlan.layoutRevision
-                        ? 'current'
-                        : 'layout-drift';
+                try {
+                    latestPlanSource = await this.source(event, latestPlan.revision, false);
+                    const activeClassroom = await examClassroomService.get(domainId, latestPlanSource.seatPlan.classroomId);
+                    latestSeatPlanState =
+                        activeClassroom &&
+                        activeClassroom.schoolId.equals(event.schoolId) &&
+                        activeClassroom.layoutRevision === latestPlanSource.seatPlan.layoutRevision
+                            ? 'current'
+                            : 'layout-drift';
+                } catch (error) {
+                    if (!isClassroomIntegrityError(error)) throw error;
+                    logger.error('Seat assignment GET latest plan classroom failed domain=%s event=%s', domainId, eventId);
+                    classroomWarning = classroomWarning || 'assignment_classroom_reference_unavailable';
+                    latestSeatPlanState = 'layout-drift';
+                }
             }
         }
         let currentSource: AssignmentDisplaySource | null = null;
         if (latestAssignment) {
-            currentSource = isExamSeatAssignmentV2(latestAssignment)
-                ? this.displaySourceFromV2(latestAssignment)
-                : this.displaySourceFromV1(await this.source(event, latestAssignment.seatPlan.revision, false));
+            try {
+                currentSource = isExamSeatAssignmentV2(latestAssignment)
+                    ? this.displaySourceFromV2(latestAssignment)
+                    : this.displaySourceFromV1(await this.source(event, latestAssignment.seatPlan.revision, false));
+            } catch (error) {
+                if (!isClassroomIntegrityError(error)) throw error;
+                logger.error('Seat assignment GET current source classroom failed domain=%s event=%s', domainId, eventId);
+                classroomWarning = classroomWarning || 'assignment_classroom_reference_unavailable';
+            }
         } else if (latestPlanSource) currentSource = this.displaySourceFromV1(latestPlanSource);
         const endpointIds = currentSource?.seats.flatMap((seat) => (seat.endpointId ? [seat.endpointId] : [])) || [];
         const endpointPreflight: { state: 'available' | 'not-required' | 'unavailable'; items: unknown[] } = endpointIds.length
             ? { state: 'unavailable', items: [] }
             : { state: 'not-required', items: [] };
+        const classroomSummaries = classrooms.flatMap((classroom) => {
+            if (!classroom.schoolId.equals(event.schoolId)) return [];
+            try {
+                return [{
+                    classroomId: classroom._id.toHexString(),
+                    name: classroom.name,
+                    layoutRevision: classroom.layoutRevision,
+                    seatCount: examClassroomService.layout(classroom, classroom.layoutRevision).snapshot.seats.length,
+                }];
+            } catch (error) {
+                if (!isClassroomIntegrityError(error)) throw error;
+                classroomWarning = classroomWarning || 'classroom_sources_unavailable';
+                return [];
+            }
+        });
         this.response.body = {
-            assignments: assignments.map((assignment) => serializeAssignment(assignment, publication?.assignment.revision || null)),
+            assignments: assignments.map((assignment) =>
+                serializeAssignment(assignment, publicationWarning ? null : publication?.assignment.revision || null),
+            ),
             publication: publication
                 ? {
                       revision: publication.revision,
@@ -757,17 +853,15 @@ class ExamSeatAssignmentCollectionHandler extends ExamSeatAssignmentBaseHandler 
             source: currentSource,
             endpointPreflight,
             publishedRosterDrift,
+            publicationWarning,
+            classroomWarning,
             latestSeatPlanState,
             rosterGroups,
-            classrooms: classrooms
-                .filter((classroom) => classroom.schoolId.equals(event.schoolId))
-                .map((classroom) => ({
-                    classroomId: classroom._id.toHexString(),
-                    name: classroom.name,
-                    layoutRevision: classroom.layoutRevision,
-                    seatCount: examClassroomService.layout(classroom, classroom.layoutRevision).snapshot.seats.length,
-                })),
+            classrooms: classroomSummaries,
         };
+        } catch (error) {
+            translate(error);
+        }
     }
 
     @param('eventId', Types.ObjectId)
@@ -809,6 +903,18 @@ class ExamSeatAssignmentCollectionHandler extends ExamSeatAssignmentBaseHandler 
                     ]);
                     if (!assignment) throw new ExamSeatAssignmentError('assignment_not_found');
                     if (!isExamSeatAssignmentV2(assignment)) throw new ExamSeatAssignmentError('assignment_v2_writer_required');
+                    const publication = await examSeatAssignmentService.getPublication(domainId, eventId);
+                    if (publication) {
+                        const stored = await examSeatAssignmentService.getRevision(domainId, eventId, publication.assignment.revision);
+                        if (
+                            (!stored ||
+                                !stored._id.equals(publication.assignment.assignmentId) ||
+                                stored.fingerprint !== publication.assignment.fingerprint) &&
+                            assignmentRevision === publication.assignment.revision
+                        ) {
+                            throw new ExamSeatAssignmentError('assignment_publication_reference_drift');
+                        }
+                    }
                     if (
                         !latestAssignment ||
                         !isExamSeatAssignmentV2(latestAssignment) ||
@@ -999,31 +1105,35 @@ class ExamSeatAssignmentClassroomSourceHandler extends ExamSeatAssignmentBaseHan
     @param('eventId', Types.ObjectId)
     @param('classroomId', Types.ObjectId)
     async get(_args: unknown, eventId: ObjectId, classroomId: ObjectId) {
-        const event = await this.event(eventId);
-        const domainId = String(this.domain._id);
-        const classroom = await examClassroomService.get(domainId, classroomId);
-        if (!classroom || !classroom.schoolId.equals(event.schoolId)) throw new ValidationError('classroomId');
-        const layout = examClassroomService.layout(classroom, classroom.layoutRevision).snapshot;
-        const bindings = await endpointSeatBindingService.listClassroomBindings(domainId, classroomId);
-        const activeBySeat = new Map(
-            bindings.filter((binding) => binding.status === 'active' && binding.endpointId).map((binding) => [binding.sourceSeatId, binding]),
-        );
-        this.response.body = {
-            classroomId: classroom._id.toHexString(),
-            layoutRevision: classroom.layoutRevision,
-            layoutFingerprint: layout.fingerprint,
-            seats: layout.seats.map((seat) => {
-                const binding = activeBySeat.get(seat.sourceSeatId);
-                return {
-                    sourceSeatId: seat.sourceSeatId,
-                    label: seat.label,
-                    status: seat.status,
-                    bindingId: binding?._id.toHexString() || null,
-                    bindingRevision: binding?.revision || null,
-                    endpointId: binding?.endpointId || null,
-                };
-            }),
-        };
+        try {
+            const event = await this.event(eventId);
+            const domainId = String(this.domain._id);
+            const classroom = await examClassroomService.get(domainId, classroomId);
+            if (!classroom || !classroom.schoolId.equals(event.schoolId)) throw new ValidationError('classroomId');
+            const layout = examClassroomService.layout(classroom, classroom.layoutRevision).snapshot;
+            const bindings = await endpointSeatBindingService.listClassroomBindings(domainId, classroomId);
+            const activeBySeat = new Map(
+                bindings.filter((binding) => binding.status === 'active' && binding.endpointId).map((binding) => [binding.sourceSeatId, binding]),
+            );
+            this.response.body = {
+                classroomId: classroom._id.toHexString(),
+                layoutRevision: classroom.layoutRevision,
+                layoutFingerprint: layout.fingerprint,
+                seats: layout.seats.map((seat) => {
+                    const binding = activeBySeat.get(seat.sourceSeatId);
+                    return {
+                        sourceSeatId: seat.sourceSeatId,
+                        label: seat.label,
+                        status: seat.status,
+                        bindingId: binding?._id.toHexString() || null,
+                        bindingRevision: binding?.revision || null,
+                        endpointId: binding?.endpointId || null,
+                    };
+                }),
+            };
+        } catch (error) {
+            translate(error);
+        }
     }
 }
 

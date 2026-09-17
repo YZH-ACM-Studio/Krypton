@@ -1,7 +1,7 @@
 import { Logger } from '@hydrooj/utils';
 import { ObjectId } from 'mongodb';
 import { Context, Handler, OplogModel, param, PermissionError, requireServiceToken, Types, ValidationError } from 'hydrooj';
-import type { ExamClassroomDoc } from '../lib/classsignin-classroom-migration';
+import { ClassSigninClassroomMigrationError, type ExamClassroomDoc } from '../lib/classsignin-classroom-migration';
 import { PERM } from '../model/builtin';
 import { examClassroomService } from '../model/exam-classroom';
 import { isExamInfrastructureAdmin } from '../model/exam-event-access';
@@ -181,7 +181,16 @@ function errorStatus(reason: string): number {
     return 409;
 }
 
+function isClassroomIntegrityError(error: unknown): boolean {
+    if (error instanceof ClassSigninClassroomMigrationError) return true;
+    return error instanceof Error && error.name === 'ClassSigninClassroomMigrationError';
+}
+
 function translate(error: unknown): never {
+    if (isClassroomIntegrityError(error)) {
+        logger.warn('Endpoint seat binding classroom integrity rejected');
+        throw new ValidationError('classroomId');
+    }
     if (!(error instanceof EndpointSeatBindingError)) throw error;
     throw new ValidationError('endpointSeatBinding', null, error.reason);
 }
@@ -206,43 +215,48 @@ abstract class EndpointSeatAdminHandler extends Handler {
 class EndpointSeatClassroomStateHandler extends EndpointSeatAdminHandler {
     @param('classroomId', Types.ObjectId)
     async get(_args: unknown, classroomId: ObjectId) {
-        const classroom = await this.classroom(classroomId);
-        const [state, seatOperationalProfile] = await Promise.all([
-            endpointSeatBindingService.getClassroomState(String(this.domain._id), classroomId),
-            examSeatOperationalProfileService.getCurrent(String(this.domain._id), classroomId),
-        ]);
-        const endpointIds = state.bindings
-            .filter((binding) => binding.status === 'active' && binding.endpointId)
-            .map((binding) => binding.endpointId!)
-            .sort();
-        const endpointPreflight: { state: 'available' | 'not-required' | 'unavailable'; items: unknown[] } = endpointIds.length
-            ? { state: 'unavailable', items: [] }
-            : { state: 'not-required', items: [] };
-        this.response.body = {
-            classroom: {
-                classroomId: classroom._id.toHexString(),
-                schoolId: classroom.schoolId.toHexString(),
-                name: classroom.name,
-                layoutRevision: classroom.layoutRevision,
-                layout: serializeLayout(classroom),
-            },
-            bindings: state.bindings.map(serializeBinding),
-            pairingWindow: state.pairingWindow ? serializeWindow(state.pairingWindow) : null,
-            references: state.references.map(serializeReference),
-            endpointPreflight,
-            seatOperationalProfile: serializeSeatOperationalProfile(seatOperationalProfile),
-        };
+        try {
+            const classroom = await this.classroom(classroomId);
+            const [state, seatOperationalProfile] = await Promise.all([
+                endpointSeatBindingService.getClassroomState(String(this.domain._id), classroomId),
+                examSeatOperationalProfileService.getCurrent(String(this.domain._id), classroomId),
+            ]);
+            const endpointIds = state.bindings
+                .filter((binding) => binding.status === 'active' && binding.endpointId)
+                .map((binding) => binding.endpointId!)
+                .sort();
+            const endpointPreflight: { state: 'available' | 'not-required' | 'unavailable'; items: unknown[] } = endpointIds.length
+                ? { state: 'unavailable', items: [] }
+                : { state: 'not-required', items: [] };
+            this.response.body = {
+                classroom: {
+                    classroomId: classroom._id.toHexString(),
+                    schoolId: classroom.schoolId.toHexString(),
+                    name: classroom.name,
+                    layoutRevision: classroom.layoutRevision,
+                    layout: serializeLayout(classroom),
+                },
+                bindings: state.bindings.map(serializeBinding),
+                pairingWindow: state.pairingWindow ? serializeWindow(state.pairingWindow) : null,
+                references: state.references.map(serializeReference),
+                endpointPreflight,
+                seatOperationalProfile: serializeSeatOperationalProfile(seatOperationalProfile),
+            };
+        } catch (error) {
+            translate(error);
+        }
     }
 }
 
 class EndpointSeatOperationalProfileHandler extends EndpointSeatAdminHandler {
     @param('classroomId', Types.ObjectId)
     async get(_args: unknown, classroomId: ObjectId) {
-        await this.classroom(classroomId);
         try {
+            await this.classroom(classroomId);
             const profile = await examSeatOperationalProfileService.getCurrent(String(this.domain._id), classroomId);
             this.response.body = { profile: serializeSeatOperationalProfile(profile) };
         } catch (error) {
+            if (isClassroomIntegrityError(error)) translate(error);
             translateSeatOperationalProfile(error);
         }
     }
@@ -253,9 +267,9 @@ class EndpointSeatOperationalProfileHandler extends EndpointSeatAdminHandler {
     @param('layoutFingerprint', Types.String)
     @param('entries', Types.Any)
     async post(_args: unknown, classroomId: ObjectId, expectedRevision: number, layoutRevision: number, layoutFingerprint: string, entries: unknown) {
-        await this.classroom(classroomId);
         exactBody(this.request.body, ['entries', 'expectedRevision', 'layoutFingerprint', 'layoutRevision']);
         try {
+            await this.classroom(classroomId);
             const profile = await examSeatOperationalProfileService.replaceCurrent({
                 domainId: String(this.domain._id),
                 classroomId,
@@ -277,6 +291,7 @@ class EndpointSeatOperationalProfileHandler extends EndpointSeatAdminHandler {
             });
             this.response.body = { profile: serializeSeatOperationalProfile(profile) };
         } catch (error) {
+            if (isClassroomIntegrityError(error)) translate(error);
             if (error instanceof ExamSeatOperationalProfileError) {
                 logger.warn(
                     'Seat operational profile mutation rejected domainId=%s classroomId=%s layoutRevision=%d expectedRevision=%d actorUid=%d reason=%s',
@@ -298,12 +313,13 @@ class EndpointSeatOperationalProfileRevisionHandler extends EndpointSeatAdminHan
     @param('layoutRevision', Types.PositiveInt)
     @param('revision', Types.UnsignedInt)
     async get(_args: unknown, classroomId: ObjectId, layoutRevision: number, revision: number) {
-        await this.classroom(classroomId, true);
         try {
+            await this.classroom(classroomId, true);
             const profile = await examSeatOperationalProfileService.getRevision(String(this.domain._id), classroomId, layoutRevision, revision);
             if (!profile) throw new ValidationError('revision');
             this.response.body = { profile: serializeSeatOperationalProfile(profile) };
         } catch (error) {
+            if (isClassroomIntegrityError(error)) translate(error);
             translateSeatOperationalProfile(error);
         }
     }
@@ -311,25 +327,43 @@ class EndpointSeatOperationalProfileRevisionHandler extends EndpointSeatAdminHan
 
 class EndpointSeatClassroomCollectionHandler extends EndpointSeatAdminHandler {
     async get() {
-        const classrooms = await examClassroomService.listDomain(String(this.domain._id), false, 500).toArray();
-        this.response.body = {
-            classrooms: classrooms.map((classroom) => ({
-                classroomId: classroom._id.toHexString(),
-                schoolId: classroom.schoolId.toHexString(),
-                name: classroom.name,
-                layoutRevision: classroom.layoutRevision,
-                seatCount: examClassroomService.layout(classroom, classroom.layoutRevision).snapshot.seats.length,
-            })),
-        };
+        try {
+            const classrooms = await examClassroomService.listDomain(String(this.domain._id), false, 500).toArray();
+            let classroomWarning: string | null = null;
+            const summaries = classrooms.flatMap((classroom) => {
+                try {
+                    return [{
+                        classroomId: classroom._id.toHexString(),
+                        schoolId: classroom.schoolId.toHexString(),
+                        name: classroom.name,
+                        layoutRevision: classroom.layoutRevision,
+                        seatCount: examClassroomService.layout(classroom, classroom.layoutRevision).snapshot.seats.length,
+                    }];
+                } catch (error) {
+                    if (!isClassroomIntegrityError(error)) throw error;
+                    classroomWarning = classroomWarning || 'classroom_sources_unavailable';
+                    return [];
+                }
+            });
+            this.response.body = { classrooms: summaries, classroomWarning };
+        } catch (error) {
+            if (!isClassroomIntegrityError(error)) throw error;
+            logger.error('Endpoint seat classroom catalog GET failed');
+            this.response.body = { classrooms: [], classroomWarning: 'classroom_sources_unavailable' };
+        }
     }
 }
 
 class EndpointSeatClassroomPageHandler extends EndpointSeatAdminHandler {
     @param('classroomId', Types.ObjectId)
     async get(_args: unknown, classroomId: ObjectId) {
-        await this.classroom(classroomId);
-        this.response.template = 'admin_exam_classroom.html';
-        this.response.body = { classroomId: classroomId.toHexString() };
+        try {
+            await this.classroom(classroomId);
+            this.response.template = 'admin_exam_classroom.html';
+            this.response.body = { classroomId: classroomId.toHexString() };
+        } catch (error) {
+            translate(error);
+        }
     }
 }
 
@@ -351,8 +385,8 @@ class EndpointSeatPairingWindowHandler extends EndpointSeatAdminHandler {
         sourceSeatIds: string[] = [],
         replacementSeatIds: string[] = [],
     ) {
-        await this.classroom(classroomId);
         try {
+            await this.classroom(classroomId);
             if (action === 'open') {
                 exactBody(this.request.body, ['action', 'expectedRevision', 'expiresAt', 'replacementSeatIds', 'requestId', 'sourceSeatIds']);
                 const opened = await endpointSeatBindingService.openPairingWindow({
@@ -426,9 +460,9 @@ class EndpointSeatBindingDetailHandler extends EndpointSeatAdminHandler {
         confirmationFingerprint = '',
         requestId = '',
     ) {
-        await this.classroom(classroomId);
         const identity = { domainId: String(this.domain._id), classroomId, sourceSeatId };
         try {
+            await this.classroom(classroomId);
             if (action === 'previewUnbind') {
                 exactBody(this.request.body, ['action']);
                 const preview = await endpointSeatBindingService.previewUnbind(identity);

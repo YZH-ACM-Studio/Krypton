@@ -1,5 +1,5 @@
 import { ObjectId } from 'mongodb';
-import { PermissionError, ValidationError } from '../error';
+import { ContestNotFoundError, PermissionError, ValidationError } from '../error';
 import { PERM, PRIV } from './builtin';
 import type { ExamEventDoc } from './exam-event';
 import { studentDirectory } from '../service/student-directory';
@@ -37,6 +37,18 @@ export async function assertExamEventSchoolAccess(domainId: string, schoolId: Ob
     if (!schoolIds.some((candidate) => candidate.equals(schoolId))) throw new PermissionError(PERM.PERM_CREATE_EXAM_EVENT);
 }
 
+export function hideUnavailableExamEvent(
+    domainId: string,
+    event: ExamEventDoc | null | undefined,
+    actor: ExamEventActor,
+): asserts event is ExamEventDoc {
+    if (!event || event.domainId !== domainId) throw new ValidationError('eventId');
+    if (isExamInfrastructureAdmin(actor)) return;
+    if (event.ownerUid !== actor._id && !event.collaboratorUids.includes(actor._id)) {
+        throw new ValidationError('eventId');
+    }
+}
+
 export async function assertCanManageExamEvent(domainId: string, event: ExamEventDoc, actor: ExamEventActor): Promise<void> {
     if (event.domainId !== domainId) throw new PermissionError(PERM.PERM_CREATE_EXAM_EVENT);
     if (!isExamInfrastructureAdmin(actor)) {
@@ -46,7 +58,14 @@ export async function assertCanManageExamEvent(domainId: string, event: ExamEven
         }
         await assertExamEventSchoolAccess(domainId, event.schoolId, actor);
     }
-    if (event.contestId) await assertExamEventContestAccess(domainId, event.contestId, actor);
+    if (event.contestId) {
+        try {
+            await assertExamEventContestAccess(domainId, event.contestId, actor);
+        } catch (error) {
+            if (error instanceof ContestNotFoundError || (error instanceof Error && error.name === 'ContestNotFoundError')) return;
+            throw error;
+        }
+    }
 }
 
 export async function assertExamEventCollaborators(

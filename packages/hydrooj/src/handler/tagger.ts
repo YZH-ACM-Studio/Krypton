@@ -7,9 +7,13 @@
  * See docs/PLAN-2026-06-08-problem-tagger.md.
  *
  * Blast radius is bounded BY CONSTRUCTION: title-only writes use the normal
- * authorized edit entrypoint, while knowledge-tag writes use the canonical
+ * authorized edit entrypoint (`{ title }`, so a confirmed managed title is
+ * classified as formal-title), while knowledge-tag writes use the canonical
  * map/node preview + fingerprint CAS entrypoint. content / hidden / pid /
  * difficulty / testdata are physically unreachable through these routes.
+ * Confirmed managed formal titles additionally require
+ * canEditManagedFormalTitle (PRIV_EDIT_SYSTEM / problem-bank admin). Namespace
+ * managers cannot correct a published title in place through this route.
  *
  * Endpoints (all require X-Service-Token, channel `tagger`, fixed domain):
  *   GET  /api/tagger/problems  → canonical problem summaries (excludes hidden)
@@ -186,6 +190,17 @@ function objectIdString(value: unknown, field: string): string {
 
 function sameStrings(left: readonly string[], right: readonly string[]): boolean {
     return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function isConfirmedManagedProblem(pdoc: { authoringMode?: unknown; managedAuthoring?: { metadataStatus?: unknown } }): boolean {
+    return pdoc.authoringMode === 'managed' && pdoc.managedAuthoring?.metadataStatus === 'confirmed';
+}
+
+/** Title apply uses the same actor split as problem edit, not a second title field. */
+function canApplyTaggerTitle(user: unknown, pdoc: Parameters<typeof problem.canMaintainProblem>[1]): boolean {
+    return isConfirmedManagedProblem(pdoc)
+        ? problem.canEditManagedFormalTitle(user as any, pdoc)
+        : problem.canMaintainProblem(user as any, pdoc);
 }
 
 function canonicalProblemFields(pdoc: any) {
@@ -593,7 +608,12 @@ class TaggerApplyHandler extends TaggerApiHandler {
                     'knowledgeNodeIds',
                 ]);
                 const canEdit =
-                    old && (canonicalEdit ? problem.canEditProblemTags(this.user as any, old) : problem.canMaintainProblem(this.user as any, old));
+                    old &&
+                    (canonicalEdit
+                        ? problem.canEditProblemTags(this.user as any, old)
+                        : hasTitle
+                          ? canApplyTaggerTitle(this.user, old)
+                          : problem.canMaintainProblem(this.user as any, old));
                 if (!old || !canEdit) {
                     results.push({ docId, ok: false, error: 'not_found' });
                     continue;
@@ -655,12 +675,23 @@ class TaggerApplyHandler extends TaggerApiHandler {
                         results.push({ docId, ok: false, error: 'empty_title' });
                         continue;
                     }
-                    await problem.editAuthorized(domainId, docId, { title }, this.user as any);
+                    const draftManaged = old.authoringMode === 'managed' && old.managedAuthoring?.metadataStatus === 'draft';
+                    const titlePatch = draftManaged
+                        ? {
+                              title: `待审核 · ${title}`,
+                              managedAuthoring: {
+                                  ...old.managedAuthoring,
+                                  workingTitle: title,
+                                  metadataStatus: 'draft',
+                              },
+                          }
+                        : { title };
+                    await problem.editAuthorized(domainId, docId, titlePatch, this.user as any);
                     changes.push({
                         docId,
                         pid: old.pid,
                         before: { tag: currentTags, title: old.title || '' },
-                        after: { tag: currentTags, title },
+                        after: { tag: currentTags, title: titlePatch.title },
                     });
                 }
                 results.push({ docId, ok: true });

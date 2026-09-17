@@ -115,6 +115,17 @@ const problemStub = {
             (user.admin || pdoc.owner === user._id || user._maintainedPids.has(pdoc.docId) || user._tagContributionPids.has(pdoc.docId))
         );
     },
+    canEditManagedFormalTitle(user: any, pdoc: any) {
+        calls.events.push(`formal-title:${pdoc.docId}`);
+        return (
+            pdoc.authoringMode === 'managed' &&
+            pdoc.managedAuthoring?.metadataStatus === 'confirmed' &&
+            user._problemAclLoaded === true &&
+            user._problemAclDomainId === pdoc.domainId &&
+            !user._aclFencedPids.has(pdoc.docId) &&
+            user.admin === true
+        );
+    },
     async edit(domainId: string, docId: number, _patch: unknown) {
         calls.events.push(`raw-edit:${docId}`);
         throw new Error('raw problem.edit is forbidden for tagger writes');
@@ -775,6 +786,143 @@ describe('P2.11 tagger mutation gates', () => {
                 domainId: 'system',
                 docId: 7,
                 patch: { title: 'new' },
+                requestedUnset: {},
+                options: {},
+            },
+        ]);
+        expect(calls.events).to.deep.equal(['maintain:7', 'editAuthorized:7']);
+    });
+
+    it('lets only a problem-bank administrator correct a confirmed managed title in place', async () => {
+        getDocs.set(7, {
+            domainId: 'system',
+            docId: 7,
+            owner: 99,
+            pid: 'P7',
+            title: 'Formal title',
+            tag: [],
+            authoringMode: 'managed',
+            managedAuthoring: { metadataStatus: 'confirmed' },
+        });
+        tokenUser = makeUser(42, undefined, {
+            admin: true,
+            _permitPids: new Set([999]),
+            _authoredPids: new Set([999]),
+            _maintainedPids: new Set([999]),
+            _aclFencedPids: new Set([999]),
+            _problemAclDomainId: 'stale-domain',
+            _problemAclLoaded: true,
+        });
+        const handler = makeHandler('tagger_apply');
+        await handler.prepare();
+
+        await handler.post({}, [{ docId: 7, title: 'Corrected formal title' }]);
+
+        expect(handler.response.body.results).to.deep.equal([{ docId: 7, ok: true }]);
+        expect(calls.edits).to.deep.equal([
+            {
+                domainId: 'system',
+                docId: 7,
+                patch: { title: 'Corrected formal title' },
+                requestedUnset: {},
+                options: {},
+            },
+        ]);
+        expect(calls.events).to.deep.equal(['formal-title:7', 'editAuthorized:7']);
+    });
+
+    it('does not let a maintainer correct a confirmed managed formal title through tagger', async () => {
+        getDocs.set(7, {
+            domainId: 'system',
+            docId: 7,
+            owner: 99,
+            pid: 'P7',
+            title: 'Formal title',
+            tag: [],
+            authoringMode: 'managed',
+            managedAuthoring: { metadataStatus: 'confirmed' },
+        });
+        const handler = makeHandler('tagger_apply');
+        await handler.prepare();
+
+        await handler.post({}, [{ docId: 7, title: 'Forged formal title' }]);
+
+        expect(handler.response.body.results).to.deep.equal([{ docId: 7, ok: false, error: 'not_found' }]);
+        expect(calls.edits).to.deep.equal([]);
+        expect(calls.events).to.deep.equal(['formal-title:7']);
+        expect(calls.maintain).to.deep.equal([]);
+    });
+
+    it('does not let a namespace manager or editAll grant correct a confirmed managed title in place', async () => {
+        installAclLoader(async () => ({
+            permitPids: new Set([7]),
+            authoredPids: new Set(),
+            maintainedPids: new Set([7]),
+            dataContributionPids: new Set(),
+            tagContributionPids: new Set(),
+            fencedPids: new Set(),
+            ownsLegacyProblems: false,
+        }));
+        (global as any).Hydro.model.pidNamespaces = {
+            async loadAclForUser(domainId: string, uid: number) {
+                calls.namespaceLoads.push({ domainId, uid });
+                return {
+                    authorNamespaceIds: new Set<string>(),
+                    managerNamespaceIds: new Set(['ns-pat']),
+                    editAllNamespaceIds: new Set(['ns-pat']),
+                };
+            },
+        };
+        getDocs.set(7, {
+            domainId: 'system',
+            docId: 7,
+            owner: 99,
+            pid: 'P7',
+            title: 'Formal title',
+            tag: [],
+            authoringMode: 'managed',
+            pidNamespaceId: 'ns-pat',
+            hidden: true,
+            managedAuthoring: { metadataStatus: 'confirmed' },
+        });
+        const handler = makeHandler('tagger_apply');
+        await handler.prepare();
+
+        await handler.post({}, [{ docId: 7, title: 'Manager in-place title' }]);
+
+        expect(handler.user._pidNamespaceManagerIds.has('ns-pat')).to.equal(true);
+        expect(handler.user._pidNamespaceEditAllIds.has('ns-pat')).to.equal(true);
+        expect(handler.user._maintainedPids.has(7)).to.equal(true);
+        expect(handler.response.body.results).to.deep.equal([{ docId: 7, ok: false, error: 'not_found' }]);
+        expect(calls.edits).to.deep.equal([]);
+        expect(calls.events).to.deep.equal(['formal-title:7']);
+    });
+
+    it('still uses maintain authorization for a managed draft working title', async () => {
+        getDocs.set(7, {
+            domainId: 'system',
+            docId: 7,
+            owner: 99,
+            pid: 'P7',
+            title: '待审核 · old',
+            tag: [],
+            authoringMode: 'managed',
+            managedAuthoring: { metadataStatus: 'draft', workingTitle: 'old' },
+        });
+        const handler = makeHandler('tagger_apply');
+        await handler.prepare();
+
+        await handler.post({}, [{ docId: 7, title: 'new working' }]);
+
+        expect(handler.response.body.results).to.deep.equal([{ docId: 7, ok: true }]);
+        expect(calls.edits).to.deep.equal([
+            {
+                domainId: 'system',
+                docId: 7,
+                patch: {
+                    title: '待审核 · new working',
+                    managedAuthoring: { metadataStatus: 'draft', workingTitle: 'new working' },
+                },
                 requestedUnset: {},
                 options: {},
             },

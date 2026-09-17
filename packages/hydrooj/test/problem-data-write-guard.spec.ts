@@ -350,12 +350,11 @@ describe('P2.24 active contest data-write guard', () => {
         expect(innerWorkCalls).to.equal(0);
     });
 
-    it('does not let namespace edit-all bypass a historical structure lock while preserving established maintainer semantics', async () => {
+    it('does not let namespace edit-all write testdata after a first-submit structure lock', async () => {
         problemStructureLockedAt = new Date('2026-07-23T04:06:16.019Z');
 
         expect(await captureFailure(() => run({ namespaceEditAll: true }))).to.be.instanceOf(StubError);
         expect(innerWorkCalls).to.equal(0);
-
         expect(await run({ existingMaintainer: true })).to.equal('written');
         expect(innerWorkCalls).to.equal(1);
     });

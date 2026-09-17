@@ -79,6 +79,11 @@ it('review workspace reuses publication protocol and keeps the queue deliberatel
   assert.match(review, /<Pagination/);
   assert.match(review, /工作标题/);
   assert.match(review, /正式标题/);
+  assert.match(review, /旧题号不会退回编号计数器。/);
+  assert.doesNotMatch(review, /回收到 counter/);
+  assert.match(review, /重新公开不会改正式标题。题库管理员请到题目编辑页更正。/);
+  assert.match(review, /<input type="hidden" name="formalTitle" value=\{pdoc\.title \|\| ''\} \/>/);
+  assert.match(problems, /重新公开不会改正式标题。题库管理员请到题目编辑页更正。/);
   assert.match(review, /查看/);
   assert.match(review, /编辑/);
   assert.doesNotMatch(review, /批量通过|驳回理由|审核历史|领取任务/);
@@ -100,8 +105,15 @@ it('namespace review exposes only the approved metadata, return, visibility and 
   assert.match(review, /name="returnNote"/);
   assert.match(review, /保存审核信息/);
   assert.match(review, /退回修改/);
-  assert.match(review, /name="finalHidden" value="true"/);
+  assert.match(review, /\{metadataDraft \? \(\s*<label[\s\S]*?name="finalHidden" value="true"[\s\S]*?审核后保持隐藏[\s\S]*?\) : null\}/);
+  assert.doesNotMatch(review, /生成 canonical 标签|未找到 canonical 出题人/);
+  assert.match(review, /生成系统标签/);
+  assert.match(review, /未找到出题人/);
+  assert.match(problems, /出题人 UID/);
+  assert.match(problems, /出题人 · \{ownerNames/);
+  assert.doesNotMatch(problems, /Owner UID|Owner ·/);
   assert.match(review, /name="operation" value="managedNamespaceCorrect"/);
+  assert.match(review, /\{metadataDraft && canCorrectPidNamespaces \? \(/);
   assert.match(review, /canCorrectPidNamespaces/);
   assert.match(problemModel, /static async updateManagedProgrammingReview/);
   assert.match(problemModel, /static async correctManagedProgrammingPidNamespace/);

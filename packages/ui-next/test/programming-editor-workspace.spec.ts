@@ -169,8 +169,17 @@ describe('p3.15 programming editor workspace correction', () => {
 
     expect(edit).to.include('<ManagedProblemTrainingStatus');
     expect(edit).to.include('data.managedTrainingPlacements');
-    expect(edit).to.include('该题已完成审核并发布');
+    expect(edit).to.include('该题已完成审核；有发布权限时可以直接调整可见性，不必再走审核队列。');
     expect(edit).to.include('托管草稿保持隐藏；命名空间负责人或管理员从审核队列确认元数据并发布。');
+    expect(edit).to.include('const canToggleVisibility = canPublish && !(managed && managedMetadataDraft);');
+    expect(edit).to.include('disabled={!canToggleVisibility}');
+    expect(edit).to.include(
+      "const canCorrectManagedPidNamespace = !isCreate && data.canCorrectManagedPidNamespace === true && pdoc.managedAuthoring?.metadataStatus === 'draft';",
+    );
+    expect(edit).to.include('name="operation" value="managedNamespaceCorrect"');
+    expect(edit).to.include('旧题号不会退回编号计数器。');
+    expect(edit).not.to.include('回收到 counter');
+    expect(edit).not.to.include('题目当前不是隐藏状态，无需邀请验题人');
   });
 
   it('creates a managed shell first and starts structured statement editing only after a stable PID exists', () => {
@@ -182,7 +191,9 @@ describe('p3.15 programming editor workspace correction', () => {
     expect(edit).to.match(/\{!isCreate\s*\?\s*\(\s*<div className="p-5">/);
     expect(edit).to.include('<ProgrammingStatementEditor');
     expect(edit).to.include("fd.set('programmingStatement', JSON.stringify(programmingStatement))");
-    expect(edit).to.include('const canAssignManagedTraining = isCreate && data.canAssignManagedTraining === true;');
+    expect(edit).to.include(
+      "const canAssignManagedTraining = data.canAssignManagedTraining === true && (isCreate || pdoc.managedAuthoring?.metadataStatus === 'draft');",
+    );
     expect(edit).to.include('<ManagedProgrammingTrainingControl allowed={canAssignManagedTraining}>');
     expect(edit).to.include('PID、系统标签与隐藏状态均由服务端固定。');
   });

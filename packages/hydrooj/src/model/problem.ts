@@ -1670,6 +1670,88 @@ export class ProblemModel {
         );
     }
 
+    /** Bind or clear pending training on an existing hidden managed draft. Bank admin only. */
+    static async setManagedProgrammingPendingTrainingPlacement(input: {
+        domainId: string;
+        docId: number;
+        expectedStructureRevision: number;
+        actor: number;
+        user: ProblemAclUser;
+        trainingId?: string;
+        chapterId?: number;
+    }): Promise<ProblemDoc> {
+        assertStructureRevision(input.expectedStructureRevision);
+        if (input.user._id !== input.actor) throw new PermissionError(PERM.PERM_EDIT_PROBLEM);
+        if (!ProblemModel.canAssignManagedAuthor(input.user)) throw new PermissionError(PERM.PERM_EDIT_PROBLEM);
+        return ProblemModel.withAuthorizedWriteClaim(
+            input.domainId,
+            input.docId,
+            input.user,
+            'managed-draft-training-placement',
+            async (claim) => {
+                const pdoc = await document.coll.findOne({
+                    domainId: input.domainId,
+                    docType: document.TYPE_PROBLEM,
+                    docId: input.docId,
+                    problemKind: 'programming',
+                    authoringMode: 'managed',
+                    hidden: true,
+                    structureRevision: input.expectedStructureRevision,
+                    structureLockedAt: { $exists: false },
+                    'managedAuthoring.metadataStatus': 'draft',
+                    'aclWriteClaim.requestId': claim.requestId,
+                    'aclWriteClaim.actor': claim.actor,
+                    'aclWriteClaim.operation': claim.operation,
+                    'aclWriteClaim.capability': claim.capability,
+                    'aclWriteClaim.state': 'active',
+                });
+                if (!pdoc?.sourceMeta || !pdoc.managedAuthoring) {
+                    throw new ManagedProblemMetadataConflictError(localizedErrorText`托管草稿状态已变化`);
+                }
+                const placementInput = input.trainingId?.trim()
+                    ? { trainingId: input.trainingId.trim(), chapterId: input.chapterId }
+                    : undefined;
+                const placement = await validateManagedTrainingPlacement(input.domainId, pdoc.sourceMeta.template, placementInput);
+                const nextManagedAuthoring = { ...pdoc.managedAuthoring };
+                if (placement) nextManagedAuthoring.pendingTrainingPlacement = placement;
+                else delete nextManagedAuthoring.pendingTrainingPlacement;
+                const updated = await document.coll.findOneAndUpdate(
+                    {
+                        domainId: input.domainId,
+                        docType: document.TYPE_PROBLEM,
+                        docId: input.docId,
+                        hidden: true,
+                        structureRevision: input.expectedStructureRevision,
+                        structureLockedAt: { $exists: false },
+                        'managedAuthoring.metadataStatus': 'draft',
+                        'aclWriteClaim.requestId': claim.requestId,
+                        'aclWriteClaim.actor': claim.actor,
+                        'aclWriteClaim.operation': claim.operation,
+                        'aclWriteClaim.capability': claim.capability,
+                        'aclWriteClaim.state': 'active',
+                    },
+                    { $set: { managedAuthoring: nextManagedAuthoring } },
+                    { returnDocument: 'after' },
+                );
+                if (!updated) throw new ProblemStructureConflictError(input.docId);
+                await OplogModel.add({
+                    type: 'problem.managed.draft-placement',
+                    domainId: input.domainId,
+                    operator: input.actor,
+                    problemId: input.docId,
+                    trainingId: placement?.trainingId,
+                    chapterId: placement?.chapterId,
+                    cleared: !placement,
+                    revision: input.expectedStructureRevision,
+                    result: 'success',
+                    time: new Date(),
+                } as any);
+                return updated as ProblemDoc;
+            },
+            { capability: 'publish' },
+        );
+    }
+
     /**
      * Reveal one already-confirmed managed problem when an auto-hide contest
      * ends. A submission lock protects evaluated content and test data; it
@@ -2300,6 +2382,7 @@ export class ProblemModel {
                                 authoringMode: 1,
                                 pidNamespaceId: 1,
                                 hidden: 1,
+                                title: 1,
                                 archivedAt: 1,
                                 sourceMeta: 1,
                                 managedAuthoring: 1,
@@ -2329,6 +2412,15 @@ export class ProblemModel {
                         throw new ManagedProblemMetadataConflictError(localizedErrorText`题目命名空间已变化，请刷新后重试`);
                     }
                     const isConfirmedRepublish = pdoc.managedAuthoring.metadataStatus === 'confirmed';
+                    const currentTitle = String(pdoc.title || '').trim();
+                    if (isConfirmedRepublish && formalTitle !== currentTitle) {
+                        throw new ValidationError(
+                            'formalTitle',
+                            null,
+                            localizedErrorText`重新公开不能改正式标题。题库管理员请到题目编辑页更正。`,
+                        );
+                    }
+                    const nextTitle = isConfirmedRepublish ? currentTitle : formalTitle;
                     if (pdoc.structureRevision !== input.expectedStructureRevision || (!isConfirmedRepublish && pdoc.structureLockedAt)) {
                         throw new ProblemStructureConflictError(input.docId);
                     }
@@ -2402,8 +2494,8 @@ export class ProblemModel {
                         workingTitle: pdoc.managedAuthoring.workingTitle,
                         selectedMindmapNodeIds: prepared.selectedMindmapNodeIds,
                         metadataStatus: 'confirmed',
-                        approvedBy: input.actor,
-                        approvedAt,
+                        approvedBy: isConfirmedRepublish ? pdoc.managedAuthoring.approvedBy : input.actor,
+                        approvedAt: isConfirmedRepublish ? pdoc.managedAuthoring.approvedAt : approvedAt,
                     };
                     const liveCommitted = await withLivePidNamespaceGrant(claim, async () => {
                         let committed: ProblemDoc;
@@ -2412,7 +2504,7 @@ export class ProblemModel {
                                 domainId: input.domainId,
                                 docId: input.docId,
                                 claim: { requestId: claim.requestId, actor: claim.actor, operation: claim.operation, capability: 'publish' },
-                                title: formalTitle,
+                                title: nextTitle,
                                 difficulty: input.difficulty,
                                 tags: prepared.tags,
                                 knowledgeMapId: prepared.knowledgeMapId,

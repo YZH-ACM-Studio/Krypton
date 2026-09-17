@@ -582,6 +582,28 @@ function assertManagedPublicationRevision(pdoc: ProblemDoc) {
     }
 }
 
+async function publishConfirmedManagedUnhide(handler: Handler, pdoc: ProblemDoc) {
+    if (pdoc.authoringMode !== 'managed' || pdoc.hidden !== true || pdoc.managedAuthoring?.metadataStatus !== 'confirmed') {
+        throw new ValidationError('hidden', null, localizedErrorText`托管草稿必须从统一题库审核入口发布`);
+    }
+    assertManagedPublicationRevision(pdoc);
+    await assertProblemWriteCapability(handler, pdoc, problem.canPublishProblem(handler.user, pdoc), 'publish', 'publish');
+    const result = await problem.publishManagedProgrammingProblem({
+        domainId: pdoc.domainId,
+        docId: pdoc.docId,
+        formalTitle: String(pdoc.title || '').trim(),
+        difficulty: Number.isSafeInteger(pdoc.difficulty) ? Number(pdoc.difficulty) : 0,
+        expectedStructureRevision: pdoc.structureRevision!,
+        actor: handler.user._id,
+        user: handler.user,
+        finalHidden: false,
+    });
+    if (result.state === 'committed_with_error') {
+        throw new ValidationError('hidden', null, localizedErrorText`题目已经公开，但发布收尾未完成。请刷新题目后处理，不要重复取消隐藏。`);
+    }
+    return result.pdoc;
+}
+
 async function requireStableCapabilityProblem(
     udoc: User,
     pdoc: ProblemDoc,
@@ -1143,7 +1165,8 @@ export class ProblemMainHandler extends Handler {
             const pdoc = await problem.get(domainId, pid);
             if (!pdoc) throw new ProblemNotFoundError(domainId, pid);
             if (pdoc.authoringMode === 'managed') {
-                throw new ValidationError('hidden', null, localizedErrorText`托管草稿必须从统一题库审核入口发布`);
+                await publishConfirmedManagedUnhide(this, pdoc);
+                continue;
             }
             await assertProblemWriteCapability(this, pdoc, problem.canPublishProblem(this.user, pdoc), 'publish', 'publish');
 
@@ -2734,6 +2757,12 @@ export class ProblemEditHandler extends ProblemManageHandler {
         const problemKind = effectiveProblemKind(this.pdoc);
         if (problemKind === 'programming') {
             const canReviewManaged = this.pdoc.authoringMode === 'managed' && capabilities.canPublish;
+            const managedDraftHidden =
+                this.pdoc.authoringMode === 'managed' &&
+                this.pdoc.hidden === true &&
+                this.pdoc.managedAuthoring?.metadataStatus === 'draft';
+            const canAssignManagedTraining = managedDraftHidden && problem.canAssignManagedAuthor(this.user);
+            const canCorrectManagedPidNamespace = managedDraftHidden && problem.isProblemBankAdmin(this.user);
             const canLoadManagedWorkflow = this.pdoc.authoringMode === 'managed' && (capabilities.canEditContent || canReviewManaged);
             const [
                 knowledgeMaps,
@@ -2742,15 +2771,23 @@ export class ProblemEditHandler extends ProblemManageHandler {
                 managedTrainingPlacements,
                 managedReviewPreview,
                 pendingContributionFacts,
+                pidNamespaces,
             ] = await Promise.all([
                 capabilities.canEditTags ? listKnowledgeMapsForProblemSelection() : Promise.resolve([]),
                 capabilities.canEditTags ? listKnowledgeMindmapOptions() : Promise.resolve([]),
-                canLoadManagedWorkflow ? listManagedTrainingOptions(this.pdoc.domainId) : Promise.resolve([]),
+                canLoadManagedWorkflow || canAssignManagedTraining
+                    ? listManagedTrainingOptions(this.pdoc.domainId)
+                    : Promise.resolve([]),
                 canLoadManagedWorkflow ? listManagedProblemTrainingPlacements(this.pdoc.domainId, this.pdoc.docId) : Promise.resolve([]),
                 canReviewManaged ? managedProblemReviewPreview(this.pdoc) : Promise.resolve(undefined),
                 canReviewManaged ? pendingProblemContributionReviewFacts(this.pdoc.domainId, [this.pdoc.docId]) : Promise.resolve(undefined),
+                canCorrectManagedPidNamespace
+                    ? listCreatablePidNamespaces(this.pdoc.domainId, this.user).then((namespaces) => namespaces.map(pidNamespaceClientOption))
+                    : Promise.resolve([]),
             ]);
             Object.assign(this.response.body, {
+                canAssignManagedTraining,
+                canCorrectManagedPidNamespace,
                 ...(capabilities.canEditTags
                     ? {
                           programmingMindmapOptions,
@@ -2763,6 +2800,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
                           managedSourceTemplates: MANAGED_SOURCE_TEMPLATES,
                           managedTrainingOptions,
                           managedTrainingPlacements,
+                          ...(pidNamespaces.length ? { pidNamespaces } : {}),
                           ...(capabilities.canEditTags ? { managedMindmapOptions: programmingMindmapOptions } : {}),
                           ...(managedReviewPreview ? { managedReviewPreview } : {}),
                           ...(pendingContributionFacts
@@ -2869,6 +2907,8 @@ export class ProblemEditHandler extends ProblemManageHandler {
     @post('conversionFingerprint', Types.String, true)
     @post('conversionUnclassified', Types.Content, true)
     @post('formalTitle', Types.Title, true)
+    @post('trainingId', Types.String, true)
+    @post('chapterId', Types.String, true)
     async post(
         _domainId: string,
         pid: string | number,
@@ -2892,6 +2932,8 @@ export class ProblemEditHandler extends ProblemManageHandler {
         conversionFingerprint?: string,
         parsedConversionUnclassified?: string,
         formalTitle?: string,
+        trainingId?: string,
+        chapterId?: string,
     ) {
         // The framework invokes `post` before `postDelete` for operation requests.
         // Deletion has its own capability and reference checks, so it must not
@@ -2928,7 +2970,17 @@ export class ProblemEditHandler extends ProblemManageHandler {
                 'structuredConfig',
                 'metadataOnly',
                 'activeContainerConfirmation',
+                'trainingId',
+                'chapterId',
             ]);
+            if (Object.hasOwn(body, 'trainingId') || Object.hasOwn(body, 'chapterId')) {
+                if (this.pdoc.managedAuthoring?.metadataStatus !== 'draft' || this.pdoc.hidden !== true) {
+                    throw new ValidationError('trainingId', null, localizedErrorText`只有隐藏的托管草稿可以绑定待挂训练`);
+                }
+                if (!problem.canAssignManagedAuthor(this.user)) {
+                    throw new ValidationError('trainingId', null, localizedErrorText`当前角色不能绑定待挂训练`);
+                }
+            }
             const unknownFields = Object.keys(body).filter((field) => !allowed.has(field));
             if (unknownFields.length) {
                 throw new ValidationError('fields', null, localizedErrorText`托管题编辑不接受字段：${unknownFields.join(', ')}`);
@@ -3057,8 +3109,8 @@ export class ProblemEditHandler extends ProblemManageHandler {
                 problemKind,
                 metadata: {
                     title: title || this.pdoc.title,
-                    hidden,
-                    difficulty: difficulty ?? this.pdoc.difficulty ?? 0,
+                    ...(Object.hasOwn(body, 'hidden') ? { hidden } : {}),
+                    ...(Object.hasOwn(body, 'difficulty') ? { difficulty: difficulty ?? this.pdoc.difficulty ?? 0 } : {}),
                     ...(structuredKnowledge
                         ? {
                               tag: structuredKnowledge.tags,
@@ -3105,9 +3157,9 @@ export class ProblemEditHandler extends ProblemManageHandler {
             Object.assign($update, {
                 title,
                 pid: newPid,
-                hidden,
-                difficulty: difficulty ?? 0,
-                lockHidden: !!lockHidden,
+                ...(Object.hasOwn(body, 'hidden') ? { hidden } : {}),
+                ...(Object.hasOwn(body, 'difficulty') ? { difficulty: difficulty ?? 0 } : {}),
+                ...(Object.hasOwn(body, 'lockHidden') ? { lockHidden: !!lockHidden } : {}),
                 ...(structuredKnowledge
                     ? {
                           tag: structuredKnowledge.tags,
@@ -3152,6 +3204,44 @@ export class ProblemEditHandler extends ProblemManageHandler {
             if (Object.hasOwn(body, 'difficulty')) $update.difficulty = difficulty ?? 0;
             if (Object.hasOwn(body, 'lockHidden')) $update.lockHidden = !!lockHidden;
         }
+        let wantsConfirmedUnhide = false;
+        if (managed && Object.hasOwn(body, 'hidden') && hidden === false && this.pdoc.hidden === true) {
+            if (this.pdoc.managedAuthoring?.metadataStatus === 'confirmed') {
+                wantsConfirmedUnhide = true;
+                delete ($update as { hidden?: boolean }).hidden;
+            } else {
+                throw new ValidationError('hidden', null, localizedErrorText`托管草稿必须从统一题库审核入口发布`);
+            }
+        }
+        const wantsDraftPlacement =
+            managed &&
+            this.pdoc.managedAuthoring?.metadataStatus === 'draft' &&
+            (Object.hasOwn(body, 'trainingId') || Object.hasOwn(body, 'chapterId'));
+        const applyManagedEditSideEffects = async (saved: ProblemDoc) => {
+            let next = saved;
+            if (wantsDraftPlacement) {
+                if (!Number.isSafeInteger(next.structureRevision) || next.structureRevision! < 1) {
+                    throw new Error(`Managed draft placement candidate ${domainId}/${this.pdoc.docId} is missing an exact structure revision`);
+                }
+                const parsedChapterId = chapterId === undefined || chapterId === '' ? undefined : Number(chapterId);
+                if (parsedChapterId !== undefined && !Number.isSafeInteger(parsedChapterId)) {
+                    throw new ValidationError('chapterId', null, localizedErrorText`训练章节编号无效`);
+                }
+                next = await problem.setManagedProgrammingPendingTrainingPlacement({
+                    domainId,
+                    docId: this.pdoc.docId,
+                    expectedStructureRevision: next.structureRevision,
+                    actor: this.user._id,
+                    user: this.user,
+                    trainingId,
+                    chapterId: parsedChapterId,
+                });
+            }
+            if (wantsConfirmedUnhide) {
+                next = await publishConfirmedManagedUnhide(this, { ...this.pdoc, ...next });
+            }
+            return next;
+        };
         if (structuredStatementSave) {
             if (!programmingStatementInput) throw new ValidationError('programmingStatement');
             let programmingStatement: unknown;
@@ -3161,7 +3251,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
                 throw new ValidationError('programmingStatement', null, localizedErrorText`结构化题面 JSON 无效`);
             }
             if (!expectedStructureRevision) throw new ValidationError('expectedStructureRevision');
-            const pdoc = await problem.saveProgrammingStatement({
+            let pdoc = await problem.saveProgrammingStatement({
                 domainId,
                 pid: this.pdoc.docId,
                 user: this.user,
@@ -3172,6 +3262,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
                 ...(conversionUnclassified !== undefined ? { conversionUnclassified } : {}),
                 metadata: $update,
             });
+            pdoc = await applyManagedEditSideEffects(pdoc);
             const responsePid = pdoc.pid || pdoc.docId;
             this.response.body = {
                 ok: true,
@@ -3213,17 +3304,21 @@ export class ProblemEditHandler extends ProblemManageHandler {
             return;
         }
         if (editorProblemKind || structuredConfig || completeCodeEvaluationDraft) throw new ValidationError('problemKind');
-        const pdoc = await problem.editAuthorized(
-            domainId,
-            this.pdoc.docId,
-            $update,
-            this.user,
-            {},
-            {
-                expectedStructureRevision,
-                activeContainerConfirmation: statementConfirmation,
-            },
-        );
+        let pdoc = this.pdoc;
+        if (Object.keys($update).length || (!wantsConfirmedUnhide && !wantsDraftPlacement)) {
+            pdoc = await problem.editAuthorized(
+                domainId,
+                this.pdoc.docId,
+                $update,
+                this.user,
+                {},
+                {
+                    expectedStructureRevision,
+                    activeContainerConfirmation: statementConfirmation,
+                },
+            );
+        }
+        pdoc = await applyManagedEditSideEffects(pdoc);
         const responsePid = newPid || pdoc.docId;
         this.response.body = { ok: true, pid: responsePid, problemKind };
         this.response.redirect = this.url('problem_detail', { pid: responsePid });

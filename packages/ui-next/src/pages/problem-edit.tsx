@@ -26,7 +26,7 @@ import { useFormDirtyState, useUnsavedChangesGuard } from '@/components/unsaved-
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { MultiSelect } from '@/components/ui/multi-select';
 import { SimpleSelect } from '@/components/ui/select';
@@ -129,6 +129,7 @@ interface ProblemEditPageData {
   problemAuthoringCapabilities?: ProblemAuthoringCapabilities;
   canAssignManagedAuthor?: boolean;
   canAssignManagedTraining?: boolean;
+  canCorrectManagedPidNamespace?: boolean;
   programmingTagState?: ProgrammingTagState;
   additional_file?: ProblemEditFile[];
   testdata?: ProblemEditFile[];
@@ -216,7 +217,7 @@ const PERMIT_ROLE_LABELS: Record<PermitRole, string> = {
   maintainer: '维护者',
 };
 
-function PermitsPanel({ pid, pdocId, hidden, managed }: { pid: string; pdocId?: number; hidden: boolean; managed: boolean }) {
+function PermitsPanel({ pid, pdocId }: { pid: string; pdocId?: number }) {
   const bs = useBootstrap();
   const [permits, setPermits] = useState<PermitRow[]>([]);
   const [udict, setUdict] = useState<Record<string, { _id: number; uname: string }>>({});
@@ -350,16 +351,13 @@ function PermitsPanel({ pid, pdocId, hidden, managed }: { pid: string; pdocId?: 
             size="sm"
             variant="outline"
             onClick={() => setOpen(true)}
-            disabled={!loaded || !grantableRoles.length || (!hidden && !managed)}
+            disabled={!loaded || !grantableRoles.length}
           >
             添加协作者
           </Button>
         </div>
       </header>
       <div className="space-y-2 p-5">
-        {!hidden && !managed ? (
-          <p className="text-xs text-muted-foreground">题目当前不是隐藏状态，无需邀请验题人。把题目设为「隐藏」并保存后即可邀请。</p>
-        ) : null}
         {loadError ? (
           <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
             {loadError}
@@ -773,6 +771,130 @@ function ContributionsPanel({ pid, pdocId, structureRevision }: { pid: string; p
   );
 }
 
+function ManagedNamespaceCorrection({
+  pdoc,
+  action,
+  namespaces,
+  sourceTemplates,
+}: {
+  pdoc: ProblemEditDocument;
+  action: string;
+  namespaces: PidNamespaceOption[];
+  sourceTemplates: ManagedSourceTemplateOption[];
+}) {
+  const candidates = namespaces.filter(
+    (namespace) => namespace.namespaceId !== String(pdoc.pidNamespaceId || '') && namespace.sourceTemplates.length,
+  );
+  const [open, setOpen] = useState(false);
+  const [namespaceId, setNamespaceId] = useState(candidates[0]?.namespaceId || '');
+  const initialNamespace = candidates.find((namespace) => namespace.namespaceId === namespaceId);
+  const [template, setTemplate] = useState(initialNamespace?.sourceTemplates[0] || '');
+  const [year, setYear] = useState(String(pdoc.sourceMeta?.year || new Date().getFullYear()));
+  const [season, setSeason] = useState(String(pdoc.sourceMeta?.season || 'spring'));
+  const [level, setLevel] = useState(String(pdoc.sourceMeta?.level || 'L1'));
+  const [round, setRound] = useState(String(pdoc.sourceMeta?.round || 1));
+  const selectedNamespace = candidates.find((namespace) => namespace.namespaceId === namespaceId);
+  const availableTemplates = sourceTemplates.filter((candidate) => selectedNamespace?.sourceTemplates.includes(candidate.id));
+  const templateDefinition = availableTemplates.find((candidate) => candidate.id === template);
+  if (!candidates.length || !pdoc.docId || !Number.isSafeInteger(pdoc.structureRevision) || (pdoc.structureRevision || 0) < 1) return null;
+  return (
+    <>
+      <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)}>
+        纠正命名空间
+      </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="w-full sm:w-[620px]">
+          <DialogHeader>
+            <DialogTitle>纠正题号命名空间</DialogTitle>
+          </DialogHeader>
+          <form method="post" action={action}>
+            <DialogBody className="space-y-4 p-5">
+              <input type="hidden" name="operation" value="managedNamespaceCorrect" />
+              <input type="hidden" name="pid" value={String(pdoc.docId)} />
+              <input type="hidden" name="expectedStructureRevision" value={String(pdoc.structureRevision)} />
+              <div className="rounded-xl border border-amber-500/35 bg-amber-500/[0.06] px-4 py-3 text-sm leading-6 text-muted-foreground">
+                仅首次审核前可执行。系统将消耗目标命名空间的新题号并写入审计；旧题号不会退回编号计数器。
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="space-y-1.5">
+                  <span className="text-sm font-medium">目标命名空间</span>
+                  <SimpleSelect
+                    name="targetPidNamespaceId"
+                    value={namespaceId}
+                    onValueChange={(value) => {
+                      setNamespaceId(value);
+                      const next = candidates.find((candidate) => candidate.namespaceId === value);
+                      setTemplate(next?.sourceTemplates[0] || '');
+                    }}
+                    options={candidates.map((namespace) => ({
+                      value: namespace.namespaceId,
+                      label: `${namespace.name} · ${namespace.pidPattern}`,
+                    }))}
+                  />
+                </label>
+                <label className="space-y-1.5">
+                  <span className="text-sm font-medium">来源模板</span>
+                  <SimpleSelect
+                    name="template"
+                    value={template}
+                    onValueChange={setTemplate}
+                    options={availableTemplates.map((candidate) => ({ value: candidate.id, label: candidate.label }))}
+                  />
+                </label>
+                <label className="space-y-1.5">
+                  <span className="text-sm font-medium">年份</span>
+                  <Input name="year" type="number" min={2000} max={2100} value={year} onChange={(event) => setYear(event.target.value)} required />
+                </label>
+                {templateDefinition?.fields.includes('season') ? (
+                  <label className="space-y-1.5">
+                    <span className="text-sm font-medium">季度</span>
+                    <SimpleSelect
+                      name="season"
+                      value={season}
+                      onValueChange={setSeason}
+                      options={[
+                        { value: 'spring', label: '春季' },
+                        { value: 'summer', label: '夏季' },
+                        { value: 'autumn', label: '秋季' },
+                        { value: 'winter', label: '冬季' },
+                      ]}
+                    />
+                  </label>
+                ) : null}
+                {templateDefinition?.fields.includes('level') ? (
+                  <label className="space-y-1.5">
+                    <span className="text-sm font-medium">题目等级</span>
+                    <SimpleSelect
+                      name="level"
+                      value={level}
+                      onValueChange={setLevel}
+                      options={['L1', 'L2', 'L3'].map((value) => ({ value, label: value }))}
+                    />
+                  </label>
+                ) : null}
+                {templateDefinition?.fields.includes('round') ? (
+                  <label className="space-y-1.5">
+                    <span className="text-sm font-medium">场次</span>
+                    <Input name="round" type="number" min={1} max={99} value={round} onChange={(event) => setRound(event.target.value)} required />
+                  </label>
+                ) : null}
+              </div>
+            </DialogBody>
+            <div className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3">
+              <Button type="button" variant="outline" className="min-h-11" onClick={() => setOpen(false)}>
+                取消
+              </Button>
+              <Button type="submit" className="min-h-11" disabled={!namespaceId || !template}>
+                分配新题号并纠正
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
 /* ---------- Main edit page ---------- */
 
 export function ProblemEditPage() {
@@ -784,7 +906,8 @@ export function ProblemEditPage() {
   const managedExisting = pdoc.authoringMode === 'managed' || capabilities.managed === true;
   const managed = managedExisting || isCreate;
   const canAssignManagedAuthor = isCreate && data.canAssignManagedAuthor === true;
-  const canAssignManagedTraining = isCreate && data.canAssignManagedTraining === true;
+  const canAssignManagedTraining = data.canAssignManagedTraining === true && (isCreate || pdoc.managedAuthoring?.metadataStatus === 'draft');
+  const canCorrectManagedPidNamespace = !isCreate && data.canCorrectManagedPidNamespace === true && pdoc.managedAuthoring?.metadataStatus === 'draft';
   const initialProgrammingTagState: ProgrammingTagState = data.programmingTagState || {
     mode: 'managed',
     knowledgeMapId: String(pdoc.knowledgeMapId || ''),
@@ -813,6 +936,7 @@ export function ProblemEditPage() {
   const requestedSection = typeof window === 'undefined' ? '' : new URLSearchParams(window.location.search).get('section');
   const showCollaboration = requestedSection === 'collaboration' && collaborationEnabled;
   const managedMetadataDraft = pdoc.managedAuthoring?.metadataStatus === 'draft';
+  const canToggleVisibility = canPublish && !(managed && managedMetadataDraft);
   const canSubmitManagedWorkingTitle = isCreate || (managedMetadataDraft && canEditDraftMetadata);
   const canSubmitManagedFormalTitle =
     managed && !isCreate && pdoc.managedAuthoring?.metadataStatus === 'confirmed' && capabilities.canEditFormalTitle === true;
@@ -1193,6 +1317,17 @@ export function ProblemEditPage() {
     const fd = new FormData(form);
     // Send the formal title only when it was edited, so a stale page never writes back an older title.
     if (canSubmitManagedFormalTitle && String(fd.get('formalTitle') ?? '') === (pdoc.title || '')) fd.delete('formalTitle');
+    if (fd.get('hidden') !== null && fd.get('hidden') === String(!!pdoc.hidden)) fd.delete('hidden');
+    if (fd.get('lockHidden') !== null && fd.get('lockHidden') === String(!!pdoc.lockHidden)) fd.delete('lockHidden');
+    if (fd.get('difficulty') !== null && Number(fd.get('difficulty')) === Number(pdoc.difficulty || 0)) fd.delete('difficulty');
+    if (!isCreate && canAssignManagedTraining) {
+      const persistedTraining = String(pdoc.managedAuthoring?.pendingTrainingPlacement?.trainingId || '');
+      const persistedChapter = String(pdoc.managedAuthoring?.pendingTrainingPlacement?.chapterId || '');
+      if (selectedTrainingId === persistedTraining && selectedChapterId === persistedChapter) {
+        fd.delete('trainingId');
+        fd.delete('chapterId');
+      }
+    }
     if (structuredSave && antiAiMarkers.some((marker) => !marker.anchor.path.startsWith('programmingStatement.'))) {
       setSaveError('旧题面的防 AI 标记不能猜测迁移到结构化区块；请取消转换，删除这些标记后再转换。');
       setSaveState('error');
@@ -1343,7 +1478,7 @@ export function ProblemEditPage() {
     >
       {showCollaboration ? (
         <div className="space-y-6">
-          {canManageCollaborators ? <PermitsPanel pid={String(pid)} pdocId={pdoc.docId} hidden={!!pdoc.hidden} managed={managed} /> : null}
+          {canManageCollaborators ? <PermitsPanel pid={String(pid)} pdocId={pdoc.docId} /> : null}
           {canManageContributions ? <ContributionsPanel pid={String(pid)} pdocId={pdoc.docId} structureRevision={pdoc.structureRevision} /> : null}
           {canReviewManaged ? (
             <ManagedReviewPanel
@@ -1636,7 +1771,9 @@ export function ProblemEditPage() {
                           ? '先选择获授权的题号命名空间，再填写对应来源和知识导图节点；PID 与系统标签仅由服务端计算。'
                           : '选择可用题号命名空间和知识导图节点；PID、系统标签与隐藏状态均由服务端固定。'
                         : managedMetadataDraft
-                          ? '来源、题号命名空间、PID 与系统标签已锁定；发布前由命名空间负责人或管理员审核。'
+                          ? canAssignManagedTraining || canCorrectManagedPidNamespace
+                            ? '来源与系统标签已锁定；管理员可在此补挂训练或纠正题号命名空间。发布前仍由命名空间负责人或管理员审核。'
+                            : '来源、题号命名空间、PID 与系统标签已锁定；发布前由命名空间负责人或管理员审核。'
                           : '来源、PID 与系统标签已锁定；该题已完成审核并发布。'}
                     </p>
                   </header>
@@ -1884,7 +2021,62 @@ export function ProblemEditPage() {
                           </div>
                         ))}
                       </div>
-                      {canEditContent || canReviewManaged ? (
+                      {canCorrectManagedPidNamespace ? (
+                        <div className="flex items-start justify-end">
+                          <ManagedNamespaceCorrection
+                            pdoc={pdoc}
+                            action={String(bs.urls.problems || '/p')}
+                            namespaces={pidNamespaces}
+                            sourceTemplates={sourceTemplates}
+                          />
+                        </div>
+                      ) : null}
+                      {canAssignManagedTraining ? (
+                        <div className="md:col-span-2">
+                          <ManagedProgrammingTrainingControl allowed={canAssignManagedTraining}>
+                            <div className="grid gap-4 md:grid-cols-2">
+                              <div className="space-y-1.5">
+                                <label className="text-sm font-medium" htmlFor="managed-training-existing">
+                                  待挂训练（可选）
+                                </label>
+                                <SimpleSelect
+                                  id="managed-training-existing"
+                                  name="trainingId"
+                                  value={selectedTrainingId}
+                                  onValueChange={(value) => {
+                                    setSelectedTrainingId(value);
+                                    setSelectedChapterId('');
+                                    markDirty();
+                                  }}
+                                  options={[
+                                    { value: '', label: '暂不加入训练' },
+                                    ...eligibleTrainings.map((training) => ({ value: training.id, label: training.title })),
+                                  ]}
+                                />
+                              </div>
+                              <div className="space-y-1.5">
+                                <label className="text-sm font-medium" htmlFor="managed-chapter-existing">
+                                  现有章节
+                                </label>
+                                <SimpleSelect
+                                  id="managed-chapter-existing"
+                                  name={selectedTrainingId ? 'chapterId' : undefined}
+                                  value={selectedChapterId}
+                                  onValueChange={(value) => {
+                                    setSelectedChapterId(value);
+                                    markDirty();
+                                  }}
+                                  disabled={!selectedTraining}
+                                  options={[
+                                    { value: '', label: selectedTraining ? '请选择章节' : '先选择训练' },
+                                    ...(selectedTraining?.chapters || []).map((chapter) => ({ value: String(chapter.id), label: chapter.title })),
+                                  ]}
+                                />
+                              </div>
+                            </div>
+                          </ManagedProgrammingTrainingControl>
+                        </div>
+                      ) : canEditContent || canReviewManaged ? (
                         <ManagedProblemTrainingStatus
                           metadataStatus={pdoc.managedAuthoring?.metadataStatus}
                           pendingPlacement={pdoc.managedAuthoring?.pendingTrainingPlacement}
@@ -2068,15 +2260,15 @@ export function ProblemEditPage() {
                       {managed
                         ? managedMetadataDraft
                           ? '托管草稿保持隐藏；命名空间负责人或管理员从审核队列确认元数据并发布。'
-                          : '该题已完成审核并发布；可见性由命名空间负责人或管理员按权限维护。'
+                          : '该题已完成审核；有发布权限时可以直接调整可见性，不必再走审核队列。'
                         : '发布与维护权限沿用现有模型。'}
                     </p>
                   </header>
                   <div className="grid gap-4 p-5 sm:grid-cols-2">
-                    {!isCreate && canPublish ? <input type="hidden" name="hidden" value={hiddenValue ? 'true' : 'false'} /> : null}
+                    {canToggleVisibility ? <input type="hidden" name="hidden" value={hiddenValue ? 'true' : 'false'} /> : null}
                     {!isCreate && canPublish ? <input type="hidden" name="lockHidden" value={lockHiddenValue ? 'true' : 'false'} /> : null}
                     <label className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-xl bg-muted/45 px-3">
-                      <Checkbox checked={hiddenValue} disabled={!canPublish} onCheckedChange={setHiddenValue} aria-label="隐藏题目" />
+                      <Checkbox checked={hiddenValue} disabled={!canToggleVisibility} onCheckedChange={setHiddenValue} aria-label="隐藏题目" />
                       <span className="flex items-center gap-1.5 text-sm">
                         {hiddenValue ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
                         隐藏题目

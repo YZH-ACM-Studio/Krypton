@@ -829,12 +829,20 @@ describe('managed programming publication service seam', () => {
 
     it('re-publishes a confirmed problem after its first contest submission locked the structure', async () => {
         const lockedAt = new Date('2026-07-23T04:06:16.019Z');
+        const approvedAt = new Date('2026-07-01T00:00:00.000Z');
         currentDraft = {
             ...publishedDoc,
             hidden: true,
+            title: '正式标题',
             structureRevision: 3,
             structureLockedAt: lockedAt,
             structureLockReason: 'first_submission',
+            managedAuthoring: {
+                ...publishedDoc.managedAuthoring,
+                metadataStatus: 'confirmed',
+                approvedBy: 99,
+                approvedAt,
+            },
         };
 
         const result = await publish({ expectedStructureRevision: 3 });
@@ -847,9 +855,35 @@ describe('managed programming publication service seam', () => {
             structureLockReason: 'first_submission',
         });
         expect(publicationCommits[0]).to.include({
+            title: '正式标题',
             expectedMetadataStatus: 'confirmed',
             expectedStructureRevision: 3,
         });
+        expect(publicationCommits[0].managedAuthoring).to.include({ approvedBy: 99, approvedAt });
+    });
+
+    it('rejects a confirmed republish that changes the formal title', async () => {
+        currentDraft = {
+            ...publishedDoc,
+            hidden: true,
+            title: '正式标题',
+            structureRevision: 3,
+            managedAuthoring: {
+                ...publishedDoc.managedAuthoring,
+                metadataStatus: 'confirmed',
+                approvedBy: 99,
+            },
+        };
+
+        let failure: unknown;
+        try {
+            await publish({ expectedStructureRevision: 3, formalTitle: '经理改的标题' });
+        } catch (error) {
+            failure = error;
+        }
+
+        expect(failure).to.be.instanceOf(TestValidationError);
+        expect(publicationCommits).to.deep.equal([]);
     });
 
     it('auto-reveals a confirmed contest problem without removing its first-submission lock', async () => {

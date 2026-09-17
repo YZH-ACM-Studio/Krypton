@@ -267,7 +267,7 @@ function FilterForm({
       </label>
       {canFilterOwner ? (
         <label className="space-y-1.5">
-          <span className="text-xs font-medium text-muted-foreground">Owner UID</span>
+          <span className="text-xs font-medium text-muted-foreground">出题人 UID</span>
           <Input name="owner" type="number" min={1} defaultValue={filters.owner || ''} placeholder="全部" className="min-h-11" />
         </label>
       ) : null}
@@ -663,7 +663,7 @@ export function ProblemsPage() {
                         ) : null}
                       </div>
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                        <span>Owner · {ownerNames[String(pdoc.owner)] || `UID ${pdoc.owner}`}</span>
+                        <span>出题人 · {ownerNames[String(pdoc.owner)] || `UID ${pdoc.owner}`}</span>
                         <span className="inline-flex items-center gap-1">
                           {pdoc.hidden ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
                           {pdoc.hidden ? '隐藏' : '已发布'}
@@ -732,19 +732,24 @@ export function ProblemsPage() {
                             <ManagedPublishProtocolFields docId={pdoc.docId} expectedStructureRevision={pdoc.structureRevision} />
                             <input type="hidden" name="pendingContributionsConfirmed" value="false" />
                             <input type="hidden" name="pendingContributionFingerprint" value={pendingContributionFingerprintByDocId[docId] || ''} />
-                            <label className="space-y-1.5">
-                              <span className="text-xs font-medium text-muted-foreground">正式标题</span>
-                              <Input
-                                name="formalTitle"
-                                defaultValue={
-                                  pdoc.managedAuthoring?.metadataStatus === 'draft'
-                                    ? pdoc.managedAuthoring?.workingTitle || ''
-                                    : pdoc.title || pdoc.managedAuthoring?.workingTitle || ''
-                                }
-                                required
-                                className="min-h-10"
-                              />
-                            </label>
+                            {pdoc.managedAuthoring?.metadataStatus === 'draft' ? (
+                              <label className="space-y-1.5">
+                                <span className="text-xs font-medium text-muted-foreground">正式标题</span>
+                                <Input
+                                  name="formalTitle"
+                                  defaultValue={pdoc.managedAuthoring?.workingTitle || ''}
+                                  required
+                                  className="min-h-10"
+                                />
+                              </label>
+                            ) : (
+                              <div className="space-y-1.5">
+                                <span className="text-xs font-medium text-muted-foreground">正式标题</span>
+                                <p className="text-sm font-medium">{pdoc.title || '未命名题目'}</p>
+                                <p className="text-xs text-muted-foreground">重新公开不会改正式标题。题库管理员请到题目编辑页更正。</p>
+                                <input type="hidden" name="formalTitle" value={pdoc.title || ''} />
+                              </div>
+                            )}
                             <label className="space-y-1.5">
                               <span className="text-xs font-medium text-muted-foreground">难度</span>
                               <SimpleSelect

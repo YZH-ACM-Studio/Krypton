@@ -193,7 +193,7 @@ function ReviewMetadataEditor({
             minHeight={44}
           />
           <p className="text-xs leading-5 text-muted-foreground">
-            节点归属固定在“{options[0]?.mapTitle || '当前导图'}”；发布时服务端会重新读取节点并生成 canonical 标签。
+            节点归属固定在“{options[0]?.mapTitle || '当前导图'}”；发布时服务端会重新读取节点并生成系统标签。
           </p>
         </div>
         <div className="flex flex-wrap justify-end gap-2">
@@ -280,7 +280,7 @@ function NamespaceCorrection({
               <input type="hidden" name="pid" value={String(pdoc.docId)} />
               <input type="hidden" name="expectedStructureRevision" value={String(pdoc.structureRevision)} />
               <div className="rounded-xl border border-amber-500/35 bg-amber-500/[0.06] px-4 py-3 text-sm leading-6 text-muted-foreground">
-                仅首次审核前可执行。系统将消耗目标命名空间的新题号并写入审计；旧题号不会回收到 counter。
+                仅首次审核前可执行。系统将消耗目标命名空间的新题号并写入审计；旧题号不会退回编号计数器。
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <label className="space-y-1.5">
@@ -529,7 +529,7 @@ export function ProblemReviewPage() {
                         出题人 ·{' '}
                         {authors.length
                           ? authors.map((author) => `${author.uname || `UID ${author._id}`}（UID ${author._id}）`).join(' / ')
-                          : '未找到 canonical 出题人'}
+                          : '未找到出题人'}
                       </p>
                     </div>
                     <div className="flex shrink-0 flex-wrap gap-1">
@@ -612,15 +612,24 @@ export function ProblemReviewPage() {
                     <ManagedPublishProtocolFields docId={pdoc.docId} expectedStructureRevision={pdoc.structureRevision} />
                     <input type="hidden" name="pendingContributionsConfirmed" value="false" />
                     <input type="hidden" name="pendingContributionFingerprint" value={pendingContributionFingerprintByDocId[docId] || ''} />
-                    <label className="space-y-1.5">
-                      <span className="text-xs font-medium text-muted-foreground">正式标题</span>
-                      <Input
-                        name="formalTitle"
-                        defaultValue={metadataDraft ? pdoc.managedAuthoring?.workingTitle || '' : pdoc.title || ''}
-                        required
-                        className="min-h-11"
-                      />
-                    </label>
+                    {metadataDraft ? (
+                      <label className="space-y-1.5">
+                        <span className="text-xs font-medium text-muted-foreground">正式标题</span>
+                        <Input
+                          name="formalTitle"
+                          defaultValue={pdoc.managedAuthoring?.workingTitle || ''}
+                          required
+                          className="min-h-11"
+                        />
+                      </label>
+                    ) : (
+                      <div className="space-y-1.5">
+                        <span className="text-xs font-medium text-muted-foreground">正式标题</span>
+                        <p className="text-sm font-medium">{pdoc.title || '未命名题目'}</p>
+                        <p className="text-xs text-muted-foreground">重新公开不会改正式标题。题库管理员请到题目编辑页更正。</p>
+                        <input type="hidden" name="formalTitle" value={pdoc.title || ''} />
+                      </div>
+                    )}
                     <label className="space-y-1.5">
                       <span className="text-xs font-medium text-muted-foreground">难度</span>
                       <SimpleSelect
@@ -633,13 +642,15 @@ export function ProblemReviewPage() {
                         }))}
                       />
                     </label>
-                    <label className="flex min-h-11 items-center gap-2 rounded-xl border border-border/75 px-3 text-sm sm:col-span-2">
-                      <Checkbox name="finalHidden" value="true" />
-                      <span>
-                        <span className="block font-medium">审核后保持隐藏</span>
-                        <span className="block text-xs text-muted-foreground">确认元数据与训练归属，但暂不向普通用户公开。</span>
-                      </span>
-                    </label>
+                    {metadataDraft ? (
+                      <label className="flex min-h-11 items-center gap-2 rounded-xl border border-border/75 px-3 text-sm sm:col-span-2">
+                        <Checkbox name="finalHidden" value="true" />
+                        <span>
+                          <span className="block font-medium">审核后保持隐藏</span>
+                          <span className="block text-xs text-muted-foreground">确认元数据与训练归属，但暂不向普通用户公开。</span>
+                        </span>
+                      </label>
+                    ) : null}
                     <Button type="submit" className="min-h-11">
                       {metadataDraft ? '确认并发布' : '重新公开'}
                     </Button>

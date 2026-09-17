@@ -254,14 +254,19 @@ export function ManagedReviewPanel({
               <ManagedPublishProtocolFields docId={pdoc.docId ?? ''} expectedStructureRevision={Number(pdoc.structureRevision)} />
               <input type="hidden" name="pendingContributionsConfirmed" value="false" />
               <input type="hidden" name="pendingContributionFingerprint" value={pendingContributionFingerprint} />
-              <label className="space-y-1.5">
-                <span className="text-sm font-medium">正式标题</span>
-                <Input
-                  name="formalTitle"
-                  defaultValue={metadataDraft ? pdoc.managedAuthoring?.workingTitle || '' : pdoc.title || pdoc.managedAuthoring?.workingTitle || ''}
-                  required
-                />
-              </label>
+              {metadataDraft ? (
+                <label className="space-y-1.5">
+                  <span className="text-sm font-medium">正式标题</span>
+                  <Input name="formalTitle" defaultValue={pdoc.managedAuthoring?.workingTitle || ''} required />
+                </label>
+              ) : (
+                <div className="space-y-1.5">
+                  <span className="text-sm font-medium">正式标题</span>
+                  <p className="text-sm font-medium">{pdoc.title || '未命名题目'}</p>
+                  <p className="text-xs text-muted-foreground">重新公开不会改正式标题。题库管理员请到题目编辑页更正。</p>
+                  <input type="hidden" name="formalTitle" value={pdoc.title || ''} />
+                </div>
+              )}
               <label className="space-y-1.5">
                 <span className="text-sm font-medium">难度</span>
                 <SimpleSelect

@@ -110,6 +110,13 @@ export function managedProblemPatchCapability(
     if (contentPatch) {
         return { capability: 'content', requestedFields, changedFields, immutableFields, publishes };
     }
+    const confirmedOperationalMetadata =
+        current.managedAuthoring?.metadataStatus === 'confirmed' &&
+        !publishes &&
+        requestedFields.every((field) => MANAGED_CONTENT_FIELDS.has(field) || field === 'difficulty');
+    if (confirmedOperationalMetadata) {
+        return { capability: 'metadata', requestedFields, changedFields, immutableFields, publishes };
+    }
     if (managedDraftPatch && requestedFields.every((field) => MANAGED_CONTENT_FIELDS.has(field) || MANAGED_DRAFT_METADATA_FIELDS.has(field))) {
         return { capability: 'metadata', requestedFields, changedFields, immutableFields, publishes };
     }

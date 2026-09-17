@@ -69,6 +69,7 @@ const calls = {
     provider: [] as any[],
     permits: [] as any[],
     publish: [] as any[],
+    placements: [] as any[],
     random: [] as any[],
     refresh: [] as any[],
     recordAdd: [] as any[],
@@ -251,6 +252,20 @@ const problemStub = {
         calls.archive.push(args);
         return { domainId: args[0], docId: args[1], archivedAt: new Date() };
     },
+    async setManagedProgrammingPendingTrainingPlacement(input: any) {
+        calls.placements.push(input);
+        return {
+            domainId: input.domainId,
+            docId: input.docId,
+            pid: `P${input.docId}`,
+            hidden: true,
+            authoringMode: 'managed',
+            structureRevision: input.expectedStructureRevision,
+            title: 'Formal title',
+            difficulty: 3,
+            managedAuthoring: { metadataStatus: 'draft' },
+        };
+    },
     async publishManagedProgrammingProblem(input: any) {
         if (input.user?.admin !== true && input.user?.canReviewNamespaces !== true) {
             throw new TestPermissionError(PERM.PERM_EDIT_PROBLEM);
@@ -275,7 +290,19 @@ const problemStub = {
     },
     async editAuthorized(...args: any[]) {
         calls.edit.push(args);
-        return { domainId: args[0], docId: args[1] };
+        const patch = args[2] || {};
+        const options = args[5] || {};
+        return {
+            domainId: args[0],
+            docId: args[1],
+            pid: `P${args[1]}`,
+            title: patch.title ?? 'Formal title',
+            difficulty: patch.difficulty ?? 3,
+            hidden: Object.hasOwn(patch, 'hidden') ? patch.hidden : true,
+            authoringMode: 'managed',
+            structureRevision: options.expectedStructureRevision,
+            ...(patch.managedAuthoring ? { managedAuthoring: patch.managedAuthoring } : {}),
+        };
     },
     async saveProgrammingStatement(input: any) {
         calls.statementSaves.push(input);
@@ -1343,10 +1370,43 @@ describe('P2.11 enumeration entry gates', () => {
         expect(denied).to.be.instanceOf(TestPermissionError);
         expect(calls.publish).to.have.lengthOf(2);
 
-        getResults = [{ domainId: 'system', docId: 7, authoringMode: 'managed', hidden: true }];
+        getResults = [
+            {
+                domainId: 'system',
+                docId: 7,
+                authoringMode: 'managed',
+                hidden: true,
+                managedAuthoring: { metadataStatus: 'draft' },
+            },
+        ];
         const bypass = await captureFailure(() => admin.postUnhide('forged', [7]));
         expect(bypass).to.be.instanceOf(GenericError);
         expect(calls.publish).to.have.lengthOf(2);
+
+        getResults = [
+            {
+                domainId: 'system',
+                docId: 11,
+                title: '已审核标题',
+                difficulty: 4,
+                authoringMode: 'managed',
+                hidden: true,
+                structureRevision: 6,
+                managedAuthoring: { metadataStatus: 'confirmed' },
+            },
+        ];
+        const reveal = makeHandler(ProblemMainHandler, { canBrowse: true, admin: true, canPublish: true });
+        await reveal.postUnhide('forged', [11]);
+        expect(calls.publish).to.have.lengthOf(3);
+        expect(calls.publish[2]).to.deep.include({
+            domainId: 'system',
+            docId: 11,
+            formalTitle: '已审核标题',
+            difficulty: 4,
+            expectedStructureRevision: 6,
+            actor: 42,
+            finalHidden: false,
+        });
     });
 
     it('does not let a namespace manager hide an already-public managed problem', async () => {
@@ -2842,6 +2902,237 @@ describe('P2.13 managed programming edit boundary', () => {
         await handler.get();
 
         expect(handler.response.body.managedTrainingPlacements).to.deep.equal(managedTrainingPlacementResults);
+    });
+
+    it('lets a bank administrator bind pending training on an existing hidden draft', async () => {
+        const handler = managedHandler();
+        handler.pdoc.statementFormat = 'legacy-import-v1';
+        handler.user.admin = true;
+        handler.request.body = {
+            content: 'New statement',
+            trainingId: 'training-1',
+            chapterId: '40',
+            expectedStructureRevision: '2',
+        };
+
+        await handler.post(
+            'forged',
+            'P7',
+            undefined,
+            'New statement',
+            undefined,
+            true,
+            [],
+            undefined,
+            [],
+            undefined,
+            undefined,
+            2,
+            '',
+            '',
+            false,
+            false,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            'training-1',
+            '40',
+        );
+
+        expect(calls.edit[0][2]).to.deep.equal({ content: 'New statement', html: false });
+        expect(calls.edit[0][5]).to.include({ expectedStructureRevision: 2 });
+        expect(calls.placements).to.have.lengthOf(1);
+        expect(calls.placements[0]).to.deep.include({
+            domainId: 'system',
+            docId: 7,
+            expectedStructureRevision: calls.edit[0][5].expectedStructureRevision,
+            actor: 42,
+            trainingId: 'training-1',
+            chapterId: 40,
+        });
+        expect(calls.publish).to.deep.equal([]);
+    });
+
+    it('does not bind training on a confirmed managed problem from the editor', async () => {
+        const handler = managedHandler();
+        handler.pdoc.statementFormat = 'legacy-import-v1';
+        handler.pdoc.managedAuthoring.metadataStatus = 'confirmed';
+        handler.user.admin = true;
+        handler.request.body = {
+            content: 'New statement',
+            trainingId: 'training-1',
+            chapterId: '40',
+            expectedStructureRevision: '2',
+        };
+
+        const error = await captureFailure(() =>
+            handler.post(
+                'forged',
+                'P7',
+                undefined,
+                'New statement',
+                undefined,
+                true,
+                [],
+                undefined,
+                [],
+                undefined,
+                undefined,
+                2,
+                '',
+                '',
+                false,
+                false,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                'training-1',
+                '40',
+            ),
+        );
+        expect(error).to.be.instanceOf(GenericError);
+        expect(calls.edit).to.deep.equal([]);
+        expect(calls.placements).to.deep.equal([]);
+        expect(calls.publish).to.deep.equal([]);
+    });
+
+    it('refuses training fields from a non-admin before any draft save', async () => {
+        const handler = managedHandler();
+        handler.pdoc.statementFormat = 'legacy-import-v1';
+        handler.request.body = {
+            content: 'New statement',
+            trainingId: 'training-1',
+            expectedStructureRevision: '2',
+        };
+
+        const error = await captureFailure(() =>
+            handler.post('forged', 'P7', undefined, 'New statement', undefined, true, [], undefined, [], undefined, undefined, 2),
+        );
+        expect(error).to.be.instanceOf(GenericError);
+        expect(calls.edit).to.deep.equal([]);
+        expect(calls.placements).to.deep.equal([]);
+    });
+
+    it('does not unhide an ordinary hidden problem when hidden is omitted', async () => {
+        const handler = makeHandler(ProblemEditHandler, { canPublish: true, canEditContent: true });
+        handler.pdoc = {
+            domainId: 'system',
+            docId: 7,
+            pid: 'P7',
+            title: 'Ordinary',
+            content: 'Old statement',
+            hidden: true,
+            difficulty: 5,
+            lockHidden: true,
+            problemKind: 'programming',
+            statementFormat: 'legacy-import-v1',
+            structureRevision: 2,
+        };
+        handler.canEditLoadedProblem = true;
+        handler.request.body = { title: 'Ordinary', content: 'New statement', expectedStructureRevision: '2' };
+
+        await handler.post('forged', 'P7', 'Ordinary', 'New statement', undefined, false, [], undefined, [], undefined, undefined, 2);
+
+        expect(calls.edit[0][2]).to.deep.equal({
+            content: 'New statement',
+            html: false,
+            title: 'Ordinary',
+            pid: 'P7',
+        });
+    });
+
+    it('publishes a confirmed hidden managed problem from the editor instead of a raw unhide', async () => {
+        const handler = managedHandler();
+        handler.pdoc.statementFormat = 'legacy-import-v1';
+        handler.user.admin = true;
+        handler.user.canPublish = true;
+        handler.pdoc.managedAuthoring.metadataStatus = 'confirmed';
+        handler.request.body = { content: 'New statement', hidden: 'false', expectedStructureRevision: '2' };
+
+        await handler.post('forged', 'P7', undefined, 'New statement', undefined, false, [], undefined, [], undefined, undefined, 2);
+
+        expect(calls.edit[0][2]).to.deep.equal({ content: 'New statement', html: false });
+        expect(calls.edit[0][5]).to.include({ expectedStructureRevision: 2 });
+        expect(calls.publish).to.have.lengthOf(1);
+        expect(calls.publish[0]).to.deep.include({
+            domainId: 'system',
+            docId: 7,
+            formalTitle: 'Formal title',
+            difficulty: 3,
+            expectedStructureRevision: calls.edit[0][5].expectedStructureRevision,
+            actor: 42,
+            finalHidden: false,
+        });
+    });
+
+    it('still refuses to unhide a managed draft from the editor', async () => {
+        const handler = managedHandler();
+        handler.pdoc.statementFormat = 'legacy-import-v1';
+        handler.user.admin = true;
+        handler.user.canPublish = true;
+        handler.request.body = { content: 'New statement', hidden: 'false', expectedStructureRevision: '2' };
+
+        const error = await captureFailure(() =>
+            handler.post('forged', 'P7', undefined, 'New statement', undefined, false, [], undefined, [], undefined, undefined, 2),
+        );
+        expect(error).to.be.instanceOf(GenericError);
+        expect(calls.edit).to.deep.equal([]);
+        expect(calls.publish).to.deep.equal([]);
+    });
+
+    it('exposes draft training and namespace-correction capabilities on the editor page', async () => {
+        const handler = makeHandler(ProblemEditHandler, { admin: true, canEditContent: true, canPublish: true });
+        handler.pdoc = {
+            domainId: 'system',
+            docId: 7,
+            pid: 'P7',
+            problemKind: 'programming',
+            authoringMode: 'managed',
+            hidden: true,
+            structureRevision: 2,
+            managedAuthoring: { metadataStatus: 'draft', selectedMindmapNodeIds: [] },
+        };
+
+        await handler.get();
+
+        expect(handler.response.body.canAssignManagedTraining).to.equal(true);
+        expect(handler.response.body.canCorrectManagedPidNamespace).to.equal(true);
+        expect(handler.response.body.pidNamespaces.length).to.be.greaterThan(1);
+
+        const confirmed = makeHandler(ProblemEditHandler, { admin: true, canEditContent: true, canPublish: true });
+        confirmed.pdoc = {
+            ...handler.pdoc,
+            hidden: true,
+            managedAuthoring: { metadataStatus: 'confirmed', selectedMindmapNodeIds: [] },
+        };
+        await confirmed.get();
+        expect(confirmed.response.body.canAssignManagedTraining).to.equal(false);
+        expect(confirmed.response.body.canCorrectManagedPidNamespace).to.equal(false);
+        expect(confirmed.response.body.pidNamespaces).to.equal(undefined);
+
+        const published = makeHandler(ProblemEditHandler, { admin: true, canEditContent: true, canPublish: true });
+        published.pdoc = {
+            ...handler.pdoc,
+            hidden: false,
+            managedAuthoring: { metadataStatus: 'confirmed', selectedMindmapNodeIds: [] },
+        };
+        await published.get();
+        expect(published.response.body.canAssignManagedTraining).to.equal(false);
+        expect(published.response.body.canCorrectManagedPidNamespace).to.equal(false);
+        expect(published.response.body.pidNamespaces).to.equal(undefined);
+
+        const author = makeHandler(ProblemEditHandler, { canEditContent: true });
+        author.pdoc = handler.pdoc;
+        await author.get();
+        expect(author.response.body.canAssignManagedTraining).to.equal(false);
+        expect(author.response.body.canCorrectManagedPidNamespace).to.equal(false);
+        expect(author.response.body.pidNamespaces).to.equal(undefined);
     });
 
     it('lets the published author update content and difficulty while keeping the confirmed formal title locked', async () => {

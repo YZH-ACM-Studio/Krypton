@@ -380,6 +380,28 @@ describe('P2.14 managed generic patch guard', () => {
         expect(uncoupledDraftTitle.immutableFields).to.include('title');
     });
 
+    it('classifies a confirmed difficulty-only write as metadata and lockHidden as publish', () => {
+        const confirmed = {
+            ...draft,
+            hidden: false,
+            title: '正式标题',
+            difficulty: 3,
+            managedAuthoring: { ...draft.managedAuthoring, metadataStatus: 'confirmed' },
+        };
+        const difficultyGuard = managedProblemPatchCapability(confirmed, { difficulty: 7 } as any, {});
+        expect(difficultyGuard.capability).to.equal('metadata');
+        expect(difficultyGuard.publishes).to.equal(false);
+        expect(difficultyGuard.immutableFields).to.deep.equal([]);
+
+        const lockGuard = managedProblemPatchCapability(confirmed, { lockHidden: true } as any, {});
+        expect(lockGuard.capability).to.equal('publish');
+        expect(lockGuard.publishes).to.equal(false);
+
+        const reveal = managedProblemPatchCapability({ ...confirmed, hidden: true }, { difficulty: 7, hidden: false } as any, {});
+        expect(reveal.capability).to.equal('publish');
+        expect(reveal.publishes).to.equal(true);
+    });
+
     it('keeps an unclassified draft working-title update in metadata capability', () => {
         const unclassifiedDraft = {
             ...draft,

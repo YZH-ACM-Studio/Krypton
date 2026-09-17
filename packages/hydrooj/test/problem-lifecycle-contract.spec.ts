@@ -551,7 +551,7 @@ describe('P2.12 YAGNI lifecycle contract', () => {
         expect(claimedEdit).to.include('programmingStatement: 1');
     });
 
-    it('keeps managed PID, kind, system tags, source metadata, and confirmed title outside generic edits', () => {
+    it('keeps managed PID, kind, system tags, source metadata, and non-administrator confirmed title outside generic edits', () => {
         const source = readFileSync(resolve(root, 'src/model/managed-problem-patch.ts'), 'utf8');
         const guardStart = source.indexOf('export function managedProblemPatchCapability(');
         const guardEnd = source.indexOf('interface MindmapNodeRecord', guardStart);
@@ -560,8 +560,11 @@ describe('P2.12 YAGNI lifecycle contract', () => {
             expect(source).to.include(`    '${field}',`);
         }
         expect(guard).to.include("field.includes('.') || MANAGED_CANONICAL_FIELDS.has(field)");
-        expect(guard).to.include("if (requestedFields.includes('title')) immutableFields.push('title')");
+        expect(guard).to.include("if (requestedFields.includes('title') && !formalTitleCorrection) immutableFields.push('title')");
         expect(guard).to.include("if (requestedFields.includes('managedAuthoring')) immutableFields.push('managedAuthoring')");
         expect(guard.indexOf('if (!managedDraftPatch)')).to.be.lessThan(guard.indexOf("immutableFields.push('title')"));
+        expect(guard).to.include("current.managedAuthoring?.metadataStatus === 'confirmed'");
+        expect(guard.indexOf('const formalTitleCorrection')).to.be.lessThan(guard.indexOf("immutableFields.push('title')"));
+        expect(guard).to.include("return { capability: 'formal-title', requestedFields, changedFields, immutableFields, publishes }");
     });
 });

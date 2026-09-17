@@ -55,6 +55,7 @@
 - 自命题 P5 在具备基础出题权限时默认可用；其它命名空间必须同时具备基础出题权限与该命名空间 author/manager 授权，`PERM_CREATE_PROBLEM` 不得绕过 namespace gate。
 - `author` 只控制该命名空间的新题创建，`manager` 只增加普通出题人并审核/退回/发布隐藏托管题，`editAll` 独立控制该命名空间全部题目的内容、数据、配置和元数据维护。manager 不隐含 editAll；仅全站管理员可授予 manager 或 editAll。
 - editAll 不得绕过比赛/考试进行中保护、归档保护、首次提交结构锁、结构 revision/CAS 或专用发布流程；撤销 namespace 授权只影响后续 namespace 能力，不回收既有 per-problem 角色。
+- 已审核（`metadataStatus:'confirmed'`）托管题的正式标题只允许全站题库管理员（`PRIV_EDIT_SYSTEM`）通过普通元数据写入口（编辑页的独立 `formalTitle` 字段、以管理员身份调用的 tagger 应用接口）直接修改，服务端以独立的 `formal-title` 写入能力校验，且该写入不得同时公开题目；编辑页的 `title` 字段仍只承载草稿工作标题，已审核题收到 `title` 必须拒绝；出题人、维护者、manager 与 editAll 均不得直接修改，manager 只在隐藏题目的审核发布流程中确定正式标题。
 - P2.39 迁移只允许按备份、只读 plan、计数与非目标哈希、SHA fingerprint、人工确认、CAS apply、verify、审计顺序执行；禁止请求路径静默回填或修改未在计划中精确列出的题目。
 
 ## 团队 ACM 赛前组队协议

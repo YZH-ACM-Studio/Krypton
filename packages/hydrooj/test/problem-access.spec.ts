@@ -323,6 +323,7 @@ const {
     canCreateManagedProgrammingDraft,
     canCloneProblem,
     canDeleteProblem,
+    canEditManagedFormalTitle,
     canEditProblemContent,
     canEditProblemData,
     canEditProblemMetadata,
@@ -335,10 +336,12 @@ const {
     canPublishProblem,
     canSubmitProblem,
     canImportProblems,
+    canUseProblemWriteCapability,
     canViewProblem,
     canViewAllContestProblems,
     isProblemBankAdmin,
     problemViewReadFace,
+    problemWriteCapabilityAllows,
     readContextViewableProblem,
     readContextViewableProblems,
     recordDetailConnectionRequiresDirectProblemAccess,
@@ -981,6 +984,79 @@ describe('P2.13 managed programming authoring matrix', () => {
         expect(tagClaim).not.to.have.property('managedAuthorDraftOnly');
         expect(guardedUpdateCalls.at(-1)?.filter).not.to.have.property('maintainer');
         expect(await clear(tagClaim)).to.equal(true);
+    });
+
+    it('lets only a site administrator correct a confirmed formal title in place', async () => {
+        const acquire = (access as any).acquireProblemWriteClaim;
+        const clear = (access as any).clearProblemWriteClaim;
+        const commit = (access as any).commitProblemWriteClaimUpdate;
+        const draft = managedPdoc(100, 7, true, [77]);
+        const confirmed = {
+            ...draft,
+            hidden: false,
+            pidNamespaceId: 'ns-pat',
+            managedAuthoring: { ...draft.managedAuthoring, metadataStatus: 'confirmed' },
+        };
+        const admin = makeUser('admin');
+        const author = makeUser('student', { _permitPids: new Set([100]), _authoredPids: new Set([100]) });
+        const maintainer = makeUser('student', { _permitPids: new Set([100]), _maintainedPids: new Set([100]), _id: 77 });
+        const manager = makeUser('student', { _pidNamespaceManagerIds: new Set(['ns-pat']) });
+        const editAll = makeUser('student', { _pidNamespaceEditAllIds: new Set(['ns-pat']) });
+
+        expect(canEditManagedFormalTitle(admin, confirmed)).to.equal(true);
+        expect(canEditManagedFormalTitle(admin, { ...confirmed, hidden: true })).to.equal(true);
+        expect(canEditManagedFormalTitle(admin, draft)).to.equal(false);
+        expect(canEditManagedFormalTitle(admin, pdoc(200))).to.equal(false);
+        expect(canEditManagedFormalTitle(makeUser('admin', { _problemAclLoaded: false }), confirmed)).to.equal(false);
+        expect(canEditManagedFormalTitle(makeUser('admin', { _aclFencedPids: new Set([100]) }), confirmed)).to.equal(false);
+        for (const user of [author, maintainer, manager, editAll, makeUser('creator')]) {
+            expect(canEditManagedFormalTitle(user, confirmed)).to.equal(false);
+            expect(canUseProblemWriteCapability(user, confirmed, 'formal-title')).to.equal(false);
+        }
+        // The namespace manager may publish the hidden problem from review, yet
+        // that publish grant never implies an in-place formal-title correction.
+        expect(canPublishProblem(manager, { ...confirmed, hidden: true })).to.equal(true);
+        expect(canEditManagedFormalTitle(manager, { ...confirmed, hidden: true })).to.equal(false);
+        for (const granted of ['maintain', 'content', 'metadata', 'publish'] as const) {
+            expect(problemWriteCapabilityAllows(granted, 'formal-title'), granted).to.equal(false);
+        }
+
+        liveProblem = {
+            ...confirmed,
+            docType: TYPE_PROBLEM,
+            title: 'Formal title',
+            aclMutationRevision: 2,
+            aclMutationLocks: [],
+        };
+        for (const [role, user] of Object.entries({ author, maintainer, manager, editAll })) {
+            const denied = await acquire(user, structuredClone(liveProblem), `${role}-formal-title`, 'metadata-edit', { capability: 'formal-title' });
+            expect(denied, role).to.equal(null);
+        }
+        expect(liveProblem.aclWriteClaim).to.equal(undefined);
+
+        const publishClaim = await acquire(admin, structuredClone(liveProblem), 'admin-publish-title', 'metadata-edit', { capability: 'publish' });
+        const publishTitle = await captureFailure(() => commit(publishClaim, { title: 'Forged through publish' }, {}, 'publish'));
+        expect(publishTitle).to.have.property('name', 'ValidationError');
+        expect(liveProblem.title).to.equal('Formal title');
+        expect(await clear(publishClaim)).to.equal(true);
+
+        const titleClaim = await acquire(admin, structuredClone(liveProblem), 'admin-formal-title', 'metadata-edit', { capability: 'formal-title' });
+        expect(titleClaim?.capability).to.equal('formal-title');
+        expect(await commit(titleClaim, { title: 'Corrected formal title', content: 'statement' }, {}, 'formal-title')).to.not.equal(null);
+        expect(liveProblem).to.include({ title: 'Corrected formal title', content: 'statement' });
+        const canonicalTitle = await captureFailure(() => commit(titleClaim, { title: 'Again', sourceMeta: { template: 'self' } }, {}, 'formal-title'));
+        expect(canonicalTitle).to.have.property('name', 'ValidationError');
+        expect(liveProblem.title).to.equal('Corrected formal title');
+        expect(await clear(titleClaim)).to.equal(true);
+
+        liveProblem.hidden = true;
+        const hiddenClaim = await acquire(admin, structuredClone(liveProblem), 'admin-hidden-title', 'metadata-edit', { capability: 'formal-title' });
+        const revealing = await captureFailure(() => commit(hiddenClaim, { title: 'Revealed title', hidden: false }, {}, 'formal-title'));
+        expect(revealing).to.have.property('name', 'ValidationError');
+        expect(loggerWarnCalls.at(-1)?.[0]).to.include('Managed claim commit rejected');
+        expect(loggerWarnCalls.at(-1)?.slice(5)).to.deep.equal(['formal-title', 'formal-title', ['title', 'hidden'], true]);
+        expect(liveProblem).to.include({ hidden: true, title: 'Corrected formal title' });
+        expect(await clear(hiddenClaim)).to.equal(true);
     });
 });
 

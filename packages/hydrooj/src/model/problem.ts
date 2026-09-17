@@ -82,6 +82,7 @@ import {
     canCreateManagedProgrammingDraft as canCreateManagedProgrammingDraftAccess,
     canCloneProblem as canCloneProblemAccess,
     canDeleteProblem as canDeleteProblemAccess,
+    canEditManagedFormalTitle as canEditManagedFormalTitleAccess,
     canEditProblemContent as canEditProblemContentAccess,
     canEditProblemData as canEditProblemDataAccess,
     canEditProblemMetadata as canEditProblemMetadataAccess,
@@ -1044,6 +1045,10 @@ export class ProblemModel {
 
     static canPublishProblem(user: ProblemAclUser, pdoc: ProblemDoc) {
         return canPublishProblemAccess(user, pdoc);
+    }
+
+    static canEditManagedFormalTitle(user: ProblemAclUser, pdoc: ProblemDoc) {
+        return canEditManagedFormalTitleAccess(user, pdoc);
     }
 
     static canArchiveProblem(user: ProblemAclUser, pdoc: ProblemDoc) {

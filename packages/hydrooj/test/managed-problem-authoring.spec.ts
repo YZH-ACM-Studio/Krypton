@@ -341,6 +341,45 @@ describe('P2.14 managed generic patch guard', () => {
         expect(confirmedGuard.immutableFields).to.have.members(['title', 'managedAuthoring']);
     });
 
+    it('classifies an in-place confirmed formal-title correction as the administrator-only capability', () => {
+        const confirmed = {
+            ...draft,
+            hidden: false,
+            title: '正式标题',
+            managedAuthoring: { ...draft.managedAuthoring, metadataStatus: 'confirmed' },
+        };
+        const correction = managedProblemPatchCapability(
+            confirmed,
+            { title: '更正后的正式标题', content: '题面', html: false, difficulty: 2, hidden: false, lockHidden: false } as any,
+            {},
+        );
+        expect(correction.capability).to.equal('formal-title');
+        expect(correction.immutableFields).to.deep.equal([]);
+        expect(correction.publishes).to.equal(false);
+
+        // Callers reject `publishes`, so a hidden reviewed problem is never made public by a title correction.
+        const hiddenRevealing = managedProblemPatchCapability({ ...confirmed, hidden: true }, { title: '更正后的正式标题', hidden: false }, {});
+        expect(hiddenRevealing.capability).to.equal('formal-title');
+        expect(hiddenRevealing.publishes).to.equal(true);
+
+        const rejected: Array<[Record<string, unknown>, Record<string, unknown>]> = [
+            [{ title: '   ' }, {}],
+            [{ title: '更正后的正式标题', managedAuthoring: confirmed.managedAuthoring }, {}],
+            [{ title: '更正后的正式标题', sourceMeta: confirmed.sourceMeta }, {}],
+            [{ title: '更正后的正式标题', archivedAt: new Date() }, {}],
+            [{}, { title: '' }],
+        ];
+        for (const [set, unset] of rejected) {
+            const guard = managedProblemPatchCapability(confirmed, set as any, unset);
+            expect(guard.capability, Object.keys({ ...set, ...unset }).join(',')).to.not.equal('formal-title');
+            expect(guard.immutableFields, Object.keys({ ...set, ...unset }).join(',')).to.include('title');
+        }
+
+        const uncoupledDraftTitle = managedProblemPatchCapability(draft, { title: '绕过工作标题' }, {});
+        expect(uncoupledDraftTitle.capability).to.not.equal('formal-title');
+        expect(uncoupledDraftTitle.immutableFields).to.include('title');
+    });
+
     it('keeps an unclassified draft working-title update in metadata capability', () => {
         const unclassifiedDraft = {
             ...draft,

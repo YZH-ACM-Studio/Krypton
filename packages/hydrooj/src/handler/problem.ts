@@ -559,6 +559,7 @@ function problemAuthoringCapabilities(udoc: User, pdoc: ProblemDoc) {
         canEditData: problem.canEditProblemData(udoc, pdoc),
         canEditTags: problem.canEditProblemTags(udoc, pdoc),
         canEditDraftMetadata: problem.canEditProblemMetadata(udoc, pdoc),
+        canEditFormalTitle: problem.canEditManagedFormalTitle(udoc, pdoc),
         canSubmitProblem: problem.canSubmitProblem(udoc, pdoc),
         canManageCollaborators: problem.canManageProblemCollaborators(udoc, pdoc),
         canManageContributions: problem.canManageProblemContributions(udoc, pdoc),
@@ -2867,6 +2868,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
     @post('antiAiMarkers', Types.String, true)
     @post('conversionFingerprint', Types.String, true)
     @post('conversionUnclassified', Types.Content, true)
+    @post('formalTitle', Types.Title, true)
     async post(
         _domainId: string,
         pid: string | number,
@@ -2889,6 +2891,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
         antiAiMarkersInput?: string,
         conversionFingerprint?: string,
         parsedConversionUnclassified?: string,
+        formalTitle?: string,
     ) {
         // The framework invokes `post` before `postDelete` for operation requests.
         // Deletion has its own capability and reference checks, so it must not
@@ -2908,6 +2911,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
         if (managed) {
             const allowed = new Set([
                 'title',
+                'formalTitle',
                 'content',
                 'programmingStatement',
                 'antiAiMarkers',
@@ -3123,6 +3127,17 @@ export class ProblemEditHandler extends ProblemManageHandler {
                 if (!workingTitle) throw new ValidationError('title');
                 $update.title = `待审核 · ${workingTitle}`;
                 nextManagedAuthoring = { ...nextManagedAuthoring!, workingTitle };
+            }
+            // A reviewed formal title travels in its own field, so a page loaded
+            // while the problem was still a draft can never overwrite it.
+            if (Object.hasOwn(body, 'formalTitle')) {
+                if (!problem.canEditManagedFormalTitle(this.user, this.pdoc)) {
+                    await auditManagedWriteDenied(this, this.pdoc, 'edit', 'fields', ['formalTitle']);
+                    throw new ValidationError('formalTitle', null, localizedErrorText`正式标题只能从统一题库审核入口确认`);
+                }
+                const correctedTitle = formalTitle?.trim();
+                if (!correctedTitle) throw new ValidationError('formalTitle');
+                if (correctedTitle !== this.pdoc.title) $update.title = correctedTitle;
             }
             if (managedKnowledge) {
                 nextManagedAuthoring = {

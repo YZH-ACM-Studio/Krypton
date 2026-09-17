@@ -96,6 +96,7 @@ interface ProblemAuthoringCapabilities {
   canEditContent?: boolean;
   canEditData?: boolean;
   canEditDraftMetadata?: boolean;
+  canEditFormalTitle?: boolean;
   canEditTags?: boolean;
   canSubmitProblem?: boolean;
   canManageCollaborators?: boolean;
@@ -813,6 +814,9 @@ export function ProblemEditPage() {
   const showCollaboration = requestedSection === 'collaboration' && collaborationEnabled;
   const managedMetadataDraft = pdoc.managedAuthoring?.metadataStatus === 'draft';
   const canSubmitManagedWorkingTitle = isCreate || (managedMetadataDraft && canEditDraftMetadata);
+  const canSubmitManagedFormalTitle =
+    managed && !isCreate && pdoc.managedAuthoring?.metadataStatus === 'confirmed' && capabilities.canEditFormalTitle === true;
+  const canSubmitManagedTitle = canSubmitManagedWorkingTitle || canSubmitManagedFormalTitle;
   const filesBase = pdoc.docId ? `${problemUrl}/files` : '';
   const statementLimits = data.programmingStatementLimits;
   const statementLimitsPreview = statementLimits?.complete ? (
@@ -1187,6 +1191,8 @@ export function ProblemEditPage() {
     }
     const form = e.currentTarget;
     const fd = new FormData(form);
+    // Send the formal title only when it was edited, so a stale page never writes back an older title.
+    if (canSubmitManagedFormalTitle && String(fd.get('formalTitle') ?? '') === (pdoc.title || '')) fd.delete('formalTitle');
     if (structuredSave && antiAiMarkers.some((marker) => !marker.anchor.path.startsWith('programmingStatement.'))) {
       setSaveError('旧题面的防 AI 标记不能猜测迁移到结构化区块；请取消转换，删除这些标记后再转换。');
       setSaveState('error');
@@ -1325,7 +1331,7 @@ export function ProblemEditPage() {
     <ProblemEditorWorkspace
       page={showCollaboration ? 'collaboration' : 'edit'}
       problemUrl={problemUrl}
-      title={(managed && pdoc.managedAuthoring?.workingTitle) || pdoc.title || '新建编程题'}
+      title={(managed && managedMetadataDraft && pdoc.managedAuthoring?.workingTitle) || pdoc.title || '新建编程题'}
       pid={String(pid)}
       isCreate={isCreate}
       editEnabled={isCreate || canEditContent || canEditTags}
@@ -1405,10 +1411,12 @@ export function ProblemEditPage() {
                     </label>
                     <Input
                       id="edit-title"
-                      name={canEditContent && (!managed || canSubmitManagedWorkingTitle) ? 'title' : undefined}
+                      name={canEditContent && (!managed || canSubmitManagedTitle) ? (canSubmitManagedFormalTitle ? 'formalTitle' : 'title') : undefined}
                       defaultValue={managed && !isCreate && managedMetadataDraft ? pdoc.managedAuthoring?.workingTitle || '' : pdoc.title || ''}
-                      placeholder={managed ? '用于审核协作，不会直接作为正式标题发布' : '题目标题'}
-                      readOnly={!canEditContent || (managed ? !canSubmitManagedWorkingTitle : !canEditDraftMetadata)}
+                      placeholder={
+                        managed ? (canSubmitManagedFormalTitle ? '题目正式标题' : '用于审核协作，不会直接作为正式标题发布') : '题目标题'
+                      }
+                      readOnly={!canEditContent || (managed ? !canSubmitManagedTitle : !canEditDraftMetadata)}
                       required={canEditContent}
                     />
                   </div>

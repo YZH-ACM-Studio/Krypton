@@ -29,6 +29,8 @@ const MANAGED_CONTENT_FIELDS = new Set([
     'html',
 ]);
 const MANAGED_DRAFT_METADATA_FIELDS = new Set(['title', 'difficulty', 'managedAuthoring', 'pidNamespaceReview']);
+/** Editor fields that may accompany a direct formal-title correction. */
+const MANAGED_FORMAL_TITLE_PATCH_FIELDS = new Set(['title', 'difficulty', 'hidden', 'lockHidden']);
 const MANAGED_ARCHIVE_FIELDS = new Set(['archivedAt', 'archivedBy', 'archiveReason']);
 const MANAGED_CANONICAL_FIELDS = new Set([
     'authoringMode',
@@ -85,12 +87,24 @@ export function managedProblemPatchCapability(
             typeof proposedAuthoring?.workingTitle === 'string' &&
             $set.title === `待审核 · ${proposedAuthoring.workingTitle.trim()}`);
     const managedDraftPatch = managedDraftAuthoringPatch && titleCoupled;
+    // A reviewed problem's formal title is corrected in place only by an
+    // ordinary editor save under the administrator-only formal-title capability.
+    const formalTitleCorrection =
+        titleRequested &&
+        current.managedAuthoring?.metadataStatus === 'confirmed' &&
+        typeof $set.title === 'string' &&
+        !!$set.title.trim() &&
+        !Object.hasOwn($unset, 'title') &&
+        requestedFields.every((field) => MANAGED_CONTENT_FIELDS.has(field) || MANAGED_FORMAL_TITLE_PATCH_FIELDS.has(field));
     // Generic managed writes never need Mongo dotted paths. Reject every one
     // before capability evaluation so canonical subfields cannot be forged.
     const immutableFields = requestedFields.filter((field) => field.includes('.') || MANAGED_CANONICAL_FIELDS.has(field));
     if (!managedDraftPatch) {
-        if (requestedFields.includes('title')) immutableFields.push('title');
+        if (requestedFields.includes('title') && !formalTitleCorrection) immutableFields.push('title');
         if (requestedFields.includes('managedAuthoring')) immutableFields.push('managedAuthoring');
+    }
+    if (formalTitleCorrection) {
+        return { capability: 'formal-title', requestedFields, changedFields, immutableFields, publishes };
     }
     const contentPatch = !requestedFields.length || requestedFields.every((field) => MANAGED_CONTENT_FIELDS.has(field));
     if (contentPatch) {

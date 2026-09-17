@@ -197,6 +197,7 @@ const problemStub = {
     pendingProblemContributionFingerprint: () => 'pending-fingerprint',
     canManageProblemMaintainers: (user: any) => user.canManageMaintainers ?? maintainResult,
     canPublishProblem: (user: any) => user.canPublish ?? maintainResult,
+    canEditManagedFormalTitle: (user: any, pdoc: any) => user.canEditFormalTitle === true && pdoc?.managedAuthoring?.metadataStatus === 'confirmed',
     canArchiveProblem: (user: any) => user.canArchive ?? maintainResult,
     canDeleteProblem: (user: any) => user.canDelete ?? maintainResult,
     canCloneProblem: (user: any) => user.canClone ?? maintainResult,
@@ -2864,6 +2865,108 @@ describe('P2.13 managed programming edit boundary', () => {
         expect(calls.oplog.at(-1)?.[2]?.fields).to.deep.equal(['title']);
     });
 
+    it('accepts a reviewed formal title only in its own administrator field and never from a draft-page title', async () => {
+        const formalArgs = (formalTitle: string, content: string) =>
+            ['forged', 'P7', undefined, content, undefined, false, [], undefined, [], undefined, undefined, 2, '', '', false, false, undefined, undefined, undefined, undefined, undefined, formalTitle] as const;
+        const handler = managedHandler();
+        handler.user.canEditMetadata = true;
+        handler.user.canEditFormalTitle = true;
+        handler.pdoc.hidden = false;
+        handler.pdoc.managedAuthoring.metadataStatus = 'confirmed';
+
+        handler.request.body = { content: 'New statement', formalTitle: '  Corrected title  ', expectedStructureRevision: '2' };
+        await handler.post(...formalArgs('  Corrected title  ', 'New statement'));
+        expect(calls.edit[0][2]).to.deep.equal({ content: 'New statement', html: false, title: 'Corrected title' });
+
+        calls.edit.length = 0;
+        handler.request.body = { content: 'Newer statement', formalTitle: 'Formal title', expectedStructureRevision: '2' };
+        await handler.post(...formalArgs('Formal title', 'Newer statement'));
+        expect(calls.edit[0][2]).to.deep.equal({ content: 'Newer statement', html: false });
+
+        calls.edit.length = 0;
+        handler.request.body = { content: 'Blank title', formalTitle: '   ', expectedStructureRevision: '2' };
+        const blank = await captureFailure(() => handler.post(...formalArgs('   ', 'Blank title')));
+        expect(blank).to.be.instanceOf(GenericError);
+        expect(calls.edit).to.deep.equal([]);
+
+        // A page loaded while the problem was still a draft posts its working title; the reviewed problem rejects it.
+        handler.request.body = { content: 'Stale draft save', title: 'Old working title', expectedStructureRevision: '2' };
+        const staleDraftPage = await captureFailure(() =>
+            handler.post('forged', 'P7', 'Old working title', 'Stale draft save', undefined, false, [], undefined, [], undefined, undefined, 2),
+        );
+        expect(staleDraftPage).to.be.instanceOf(GenericError);
+        expect(calls.edit).to.deep.equal([]);
+        expect(calls.oplog.at(-1)?.[2]?.fields).to.deep.equal(['title']);
+
+        const author = managedHandler();
+        author.user.canEditMetadata = true;
+        author.pdoc.hidden = false;
+        author.pdoc.managedAuthoring.metadataStatus = 'confirmed';
+        author.request.body = { content: 'Author statement', formalTitle: 'Author title', expectedStructureRevision: '2' };
+        const authorDenied = await captureFailure(() => author.post(...formalArgs('Author title', 'Author statement')));
+        expect(authorDenied).to.be.instanceOf(GenericError);
+        expect(calls.edit).to.deep.equal([]);
+        expect(calls.oplog.at(-1)?.[2]?.fields).to.deep.equal(['formalTitle']);
+    });
+
+    it('keeps the coupled working title on an administrator draft and forwards a corrected formal title on structured saves', async () => {
+        const programmingStatement = JSON.stringify(structuredStatement);
+        const structuredArgs = (title: string | undefined, formalTitle?: string) =>
+            [
+                'forged',
+                'P7',
+                title,
+                undefined,
+                undefined,
+                false,
+                [],
+                undefined,
+                [],
+                undefined,
+                undefined,
+                2,
+                '',
+                '',
+                false,
+                false,
+                undefined,
+                programmingStatement,
+                undefined,
+                undefined,
+                undefined,
+                formalTitle,
+            ] as const;
+
+        const draftHandler = managedHandler();
+        draftHandler.pdoc.statementFormat = 'structured-v1';
+        draftHandler.pdoc.programmingStatement = structuredStatement;
+        draftHandler.user.canEditMetadata = true;
+        draftHandler.user.canEditFormalTitle = true;
+        draftHandler.request.body = { title: 'Renamed draft', programmingStatement, expectedStructureRevision: '2' };
+        await draftHandler.post(...structuredArgs('Renamed draft'));
+        expect(calls.statementSaves.at(-1).metadata).to.deep.equal({
+            title: '待审核 · Renamed draft',
+            managedAuthoring: { workingTitle: 'Renamed draft', selectedMindmapNodeIds: ['node-1'], metadataStatus: 'draft' },
+        });
+        const savesBeforePremature = calls.statementSaves.length;
+        draftHandler.request.body = { formalTitle: 'Premature formal title', programmingStatement, expectedStructureRevision: '2' };
+        const premature = await captureFailure(() => draftHandler.post(...structuredArgs(undefined, 'Premature formal title')));
+        expect(premature).to.be.instanceOf(GenericError);
+        expect(calls.statementSaves).to.have.lengthOf(savesBeforePremature);
+
+        const handler = managedHandler();
+        handler.pdoc.hidden = false;
+        handler.pdoc.statementFormat = 'structured-v1';
+        handler.pdoc.programmingStatement = structuredStatement;
+        handler.pdoc.managedAuthoring.metadataStatus = 'confirmed';
+        handler.user.canEditMetadata = true;
+        handler.user.canEditFormalTitle = true;
+        handler.request.body = { formalTitle: 'Corrected formal title', programmingStatement, expectedStructureRevision: '2' };
+        await handler.post(...structuredArgs(undefined, 'Corrected formal title'));
+        expect(calls.edit).to.deep.equal([]);
+        expect(calls.statementSaves.at(-1).metadata).to.deep.equal({ title: 'Corrected formal title' });
+    });
+
     it('rejects forbidden managed fields as one audited request even when the value is unchanged', async () => {
         const handler = managedHandler();
         handler.request.body = { content: 'New statement', title: 'Formal title', pid: 'P7' };
@@ -3581,6 +3684,7 @@ describe('P3.15 files workspace capability contract', () => {
                     canEditContent: true,
                     canEditTags: true,
                     canEditDraftMetadata: true,
+                    canEditFormalTitle: false,
                     canManageCollaborators: false,
                     canPublish: false,
                 },
@@ -3597,13 +3701,14 @@ describe('P3.15 files workspace capability contract', () => {
                     canDelete: false,
                     canClone: false,
                 },
-                expected: { canEditContent: true, canManageCollaborators: true, canPublish: false },
+                expected: { canEditContent: true, canEditFormalTitle: false, canManageCollaborators: true, canPublish: false },
             },
             {
                 role: 'administrator',
                 user: {
                     canEditContent: true,
                     canEditMetadata: true,
+                    canEditFormalTitle: true,
                     canManageCollaborators: true,
                     canManageMaintainers: true,
                     canPublish: true,
@@ -3611,7 +3716,7 @@ describe('P3.15 files workspace capability contract', () => {
                     canDelete: true,
                     canClone: true,
                 },
-                expected: { canEditContent: true, canManageCollaborators: true, canPublish: true },
+                expected: { canEditContent: true, canEditFormalTitle: true, canManageCollaborators: true, canPublish: true },
             },
         ];
 

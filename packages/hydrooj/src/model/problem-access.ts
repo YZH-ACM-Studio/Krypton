@@ -62,6 +62,7 @@ export type ProblemWriteCapability =
     | 'data'
     | 'tag'
     | 'publish'
+    | 'formal-title'
     | 'archive'
     | 'hard-delete'
     | 'clone';
@@ -1276,6 +1277,16 @@ export function canPublishProblem(user: ProblemAclUser, pdoc: ProblemDoc): boole
     return canPublishProblemByProblemRole(user, pdoc) || pidNamespaceCapabilityForProblem(user, pdoc, 'publish') === 'manager';
 }
 
+/**
+ * Directly correcting a reviewed managed problem's formal title follows the
+ * problem-role publish authority (the site problem-bank administrator), so it
+ * can never exceed it. PID namespace managers still set the formal title only
+ * while publishing a hidden problem from review.
+ */
+export function canEditManagedFormalTitle(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
+    return pdoc.authoringMode === 'managed' && pdoc.managedAuthoring?.metadataStatus === 'confirmed' && canPublishProblemByProblemRole(user, pdoc);
+}
+
 export function canArchiveProblem(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
     return pdoc.authoringMode === 'managed' ? canPublishProblemByProblemRole(user, pdoc) : canMaintainProblem(user, pdoc);
 }
@@ -1297,6 +1308,7 @@ export function canUseProblemWriteCapability(user: ProblemAclUser, pdoc: Problem
     if (capability === 'data') return canEditProblemData(user, pdoc);
     if (capability === 'tag') return canEditProblemTags(user, pdoc);
     if (capability === 'publish') return canPublishProblem(user, pdoc);
+    if (capability === 'formal-title') return canEditManagedFormalTitle(user, pdoc);
     if (capability === 'archive') return canArchiveProblem(user, pdoc);
     if (capability === 'hard-delete') return canDeleteProblem(user, pdoc);
     if (capability === 'clone') return canCloneProblem(user, pdoc);
@@ -1311,6 +1323,7 @@ function canUseProblemWriteCapabilityByProblemRole(user: ProblemAclUser, pdoc: P
     if (capability === 'data') return canEditProblemDataByProblemRole(user, pdoc);
     if (capability === 'tag') return canEditProblemTagsByProblemRole(user, pdoc);
     if (capability === 'publish') return canPublishProblemByProblemRole(user, pdoc);
+    if (capability === 'formal-title') return canEditManagedFormalTitle(user, pdoc);
     if (capability === 'archive') {
         return pdoc.authoringMode === 'managed' ? canPublishProblemByProblemRole(user, pdoc) : canMaintainProblem(user, pdoc);
     }
@@ -1335,6 +1348,7 @@ export function problemWriteCapabilityAllows(granted: ProblemWriteCapability, re
     if (granted === 'content') return ['data', 'tag'].includes(required);
     if (granted === 'metadata') return ['content', 'data', 'tag'].includes(required);
     if (granted === 'publish') return ['content', 'metadata', 'data', 'tag'].includes(required);
+    if (granted === 'formal-title') return ['content', 'metadata', 'data', 'tag'].includes(required);
     return false;
 }
 

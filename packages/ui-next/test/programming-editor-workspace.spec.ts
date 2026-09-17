@@ -129,7 +129,9 @@ describe('p3.15 programming editor workspace correction', () => {
     for (const name of ['difficulty', 'content', 'hidden', 'lockHidden']) {
       expect(edit).to.include(`name="${name}"`);
     }
-    expect(edit).to.include("name={canEditContent && (!managed || canSubmitManagedWorkingTitle) ? 'title' : undefined}");
+    expect(edit).to.include(
+      "name={canEditContent && (!managed || canSubmitManagedTitle) ? (canSubmitManagedFormalTitle ? 'formalTitle' : 'title') : undefined}",
+    );
     expect(edit).to.include("const managedMetadataDraft = pdoc.managedAuthoring?.metadataStatus === 'draft'");
     expect(edit).to.match(/managedMetadataDraft\s*\? pdoc\.managedAuthoring\?\.workingTitle \|\| ''\s*: pdoc\.title \|\| ''/);
     expect(edit).to.include("name={canEditContent && pidEditable ? 'pid' : undefined}");
@@ -183,6 +185,23 @@ describe('p3.15 programming editor workspace correction', () => {
     expect(edit).to.include('const canAssignManagedTraining = isCreate && data.canAssignManagedTraining === true;');
     expect(edit).to.include('<ManagedProgrammingTrainingControl allowed={canAssignManagedTraining}>');
     expect(edit).to.include('PID、系统标签与隐藏状态均由服务端固定。');
+  });
+
+  it('submits a reviewed managed formal title only for the administrator capability and only after an edit', () => {
+    const edit = read('packages/ui-next/src/pages/problem-edit.tsx');
+
+    expect(edit).to.include('const canSubmitManagedWorkingTitle = isCreate || (managedMetadataDraft && canEditDraftMetadata);');
+    expect(edit).to.include(
+      "managed && !isCreate && pdoc.managedAuthoring?.metadataStatus === 'confirmed' && capabilities.canEditFormalTitle === true;",
+    );
+    expect(edit).to.include('const canSubmitManagedTitle = canSubmitManagedWorkingTitle || canSubmitManagedFormalTitle;');
+    expect(edit).to.include('readOnly={!canEditContent || (managed ? !canSubmitManagedTitle : !canEditDraftMetadata)}');
+    const titleDrop =
+      "if (canSubmitManagedFormalTitle && String(fd.get('formalTitle') ?? '') === (pdoc.title || '')) fd.delete('formalTitle');";
+    expect(edit).to.include(titleDrop);
+    expect(edit.indexOf('const fd = new FormData(form);')).to.be.lessThan(edit.indexOf(titleDrop));
+    expect(edit.indexOf(titleDrop)).to.be.lessThan(edit.indexOf('const editRes = await fetchHydroResponse('));
+    expect(edit).to.include("title={(managed && managedMetadataDraft && pdoc.managedAuthoring?.workingTitle) || pdoc.title || '新建编程题'}");
   });
 
   it('serializes both checkbox states explicitly so administrators can clear them', () => {

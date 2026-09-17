@@ -242,7 +242,10 @@ describe('collect teacher payload contracts', () => {
     expect(student).to.include('open = !closed && data.member');
     expect(student).to.include('writable = open && !examLocked');
     expect(student).to.include('须先完成课程结业考试才能提交');
-    expect(student).to.include('去考试');
+    expect(student).to.include('data.examGate.message');
+    expect(student).to.include('考试已结束且未参加，无法提交');
+    expect(student).to.match(/data\.examGate\.examHref \?[\s\S]*去考试/);
+    expect(student.match(/去考试/g) || []).to.have.lengthOf(1);
   });
 
   it('exposes an optional 考完才能交 checkbox only for courses with a bound exam', () => {

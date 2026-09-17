@@ -8,6 +8,7 @@ import { ObjectId } from 'hydrooj';
 import type { Filter } from 'mongodb';
 import { canViewCollect } from './auth';
 import { requestsColl } from './db';
+import { isAudienceMember } from './model';
 import type { CollectRequestDoc, CollectRequestStatus } from './types';
 
 export interface CourseCollectRequestView {
@@ -88,14 +89,25 @@ export async function listByCourseChapter(
             courseRef: 1,
             ownerUid: 1,
             collaboratorUids: 1,
+            schoolId: 1,
+            groupIds: 1,
         })
         .toArray();
-    return docs
-        .filter((doc) => doc.status !== 'draft' || (viewer && canViewCollect(viewer, {
-            ownerUid: doc.ownerUid,
-            collaboratorUids: doc.collaboratorUids || [],
-        })))
-        .map((doc) => serializeCourseCollectRequest(doc, chapterId));
+    const visible = docs.filter((doc) => doc.status !== 'draft' || (viewer && canViewCollect(viewer, {
+        ownerUid: doc.ownerUid,
+        collaboratorUids: doc.collaboratorUids || [],
+    })));
+    // includeDraft is the manager path: show every chapter request. Students
+    // (viewer + published/closed) only see live-audience rows. No viewer keeps
+    // the published/closed list unchanged.
+    if (includeDraft || !viewer) {
+        return visible.map((doc) => serializeCourseCollectRequest(doc, chapterId));
+    }
+    const allowed: CollectRequestDoc[] = [];
+    for (const doc of visible) {
+        if (await isAudienceMember(domainId, viewer._id, doc)) allowed.push(doc);
+    }
+    return allowed.map((doc) => serializeCourseCollectRequest(doc, chapterId));
 }
 
 export async function existsByCourse(domainId: string, courseId: ObjectId | string): Promise<boolean> {
@@ -103,6 +115,21 @@ export async function existsByCourse(domainId: string, courseId: ObjectId | stri
     const courseObjectId = canonicalObjectId(courseId, 'courseId');
     const doc = await requestsColl.findOne(
         { domainId, 'courseRef.courseId': courseObjectId },
+        { projection: { _id: 1 } },
+    );
+    return Boolean(doc);
+}
+
+export async function existsRequiringCourseExam(domainId: string, courseId: ObjectId | string): Promise<boolean> {
+    if (typeof domainId !== 'string' || !domainId) throw new TypeError('domainId is required');
+    const courseObjectId = canonicalObjectId(courseId, 'courseId');
+    const doc = await requestsColl.findOne(
+        {
+            domainId,
+            'courseRef.courseId': courseObjectId,
+            requireCourseExamComplete: true,
+            status: { $in: ['draft', 'published', 'closed'] },
+        },
         { projection: { _id: 1 } },
     );
     return Boolean(doc);

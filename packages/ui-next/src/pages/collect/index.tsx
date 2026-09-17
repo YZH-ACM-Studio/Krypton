@@ -552,6 +552,7 @@ export function CollectDetailPage() {
         ) : null}
         {examLocked ? (
           <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+            {/* 考试已结束且未参加，无法提交 is shown via examGate.message when the server sends it. */}
             {data.examGate.message || '须先完成课程结业考试才能提交'}
             {data.examGate.examHref ? (
               <>

@@ -4,7 +4,7 @@
  */
 import { Logger } from '@hydrooj/utils';
 import {
-    hasCompletedCourseExam,
+    resolveCourseExamCompletion,
     TrainingModel,
     TrainingNotFoundError,
     tryReadStoredCourseExam,
@@ -15,6 +15,8 @@ import type { CollectCourseRef, CollectRequestDoc } from './types';
 const logger = new Logger('collect-exam-complete');
 
 export const COLLECT_EXAM_COMPLETE_REQUIRED_MESSAGE = '须先完成课程结业考试才能提交';
+export const COLLECT_EXAM_COMPLETE_CLOSED_MESSAGE = '考试已结束且未参加，无法提交';
+export const COLLECT_EXAM_COMPLETE_SETTLE_FAILED_MESSAGE = '考试已结束且未能交卷，无法提交';
 export const COLLECT_EXAM_COMPLETE_UNBOUND_MESSAGE = '该收集要求先完成结业考试，但课程未绑定考试';
 export const COLLECT_EXAM_COMPLETE_NEED_COURSE_MESSAGE = '须先关联课程才能要求先完成结业考试';
 export const COLLECT_EXAM_COMPLETE_NEED_EXAM_MESSAGE = '该课程未绑定结业考试，不能开启此门槛';
@@ -27,7 +29,45 @@ export interface CollectExamGateView {
 }
 
 export interface CollectExamGateCache {
-    completedByContest: Map<string, Promise<boolean>>;
+    completedByContest: Map<string, Promise<CollectExamGateView>>;
+}
+
+export interface CollectCourseExamCompletion {
+    complete: boolean;
+    lockKind: string;
+}
+
+export function mapCourseExamCompletionToCollectGate(
+    result: CollectCourseExamCompletion,
+    contestId: { toHexString(): string },
+): CollectExamGateView {
+    if (result.complete === true) {
+        return { required: true, locked: false, examHref: examHrefFor(contestId) };
+    }
+    if (result.lockKind === 'missing_contest') return unboundGate();
+    if (result.lockKind === 'never_attended_closed') {
+        return {
+            required: true,
+            locked: true,
+            message: COLLECT_EXAM_COMPLETE_CLOSED_MESSAGE,
+        };
+    }
+    if (result.lockKind === 'closed_incomplete') {
+        return {
+            required: true,
+            locked: true,
+            message: COLLECT_EXAM_COMPLETE_SETTLE_FAILED_MESSAGE,
+        };
+    }
+    if (result.lockKind === 'open') {
+        return {
+            required: true,
+            locked: true,
+            examHref: examHrefFor(contestId),
+            message: COLLECT_EXAM_COMPLETE_REQUIRED_MESSAGE,
+        };
+    }
+    throw new TypeError(`unsupported course exam lockKind: ${result.lockKind}`);
 }
 
 export function requestRequiresCourseExamComplete(
@@ -89,23 +129,29 @@ export async function resolveCollectExamGate(
         return unboundGate();
     }
     const contestKey = binding.contestId.toHexString();
-    const completedByContest = cache?.completedByContest || new Map<string, Promise<boolean>>();
+    const completedByContest = cache?.completedByContest || new Map<string, Promise<CollectExamGateView>>();
     let pending = completedByContest.get(contestKey);
     if (!pending) {
-        pending = hasCompletedCourseExam({ domainId, contestId: binding.contestId, uid });
+        pending = loadContestExamGate(domainId, uid, binding.contestId);
         completedByContest.set(contestKey, pending);
         if (cache) cache.completedByContest = completedByContest;
     }
-    const completed = await pending;
-    if (completed) {
-        return { required: true, locked: false, examHref: examHrefFor(binding.contestId) };
+    return pending;
+}
+
+async function loadContestExamGate(
+    domainId: string,
+    uid: number,
+    contestId: { toHexString(): string },
+): Promise<CollectExamGateView> {
+    const raw = await resolveCourseExamCompletion({ domainId, contestId, uid });
+    if (!raw || typeof raw !== 'object' || typeof raw.complete !== 'boolean') {
+        throw new TypeError('resolveCourseExamCompletion must return { complete, lockKind }');
     }
-    return {
-        required: true,
-        locked: true,
-        examHref: examHrefFor(binding.contestId),
-        message: COLLECT_EXAM_COMPLETE_REQUIRED_MESSAGE,
-    };
+    return mapCourseExamCompletionToCollectGate({
+        complete: raw.complete,
+        lockKind: typeof raw.lockKind === 'string' ? raw.lockKind : '',
+    }, contestId);
 }
 
 export async function assertCollectExamCompleteForStudent(

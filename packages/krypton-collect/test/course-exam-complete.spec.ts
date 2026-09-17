@@ -51,6 +51,7 @@ describe('collect optional course-exam-complete gate', () => {
         expect(modelSource).to.include('须先关联课程才能要求先完成结业考试');
         expect(helperSource).to.include('resolveCourseExamCompletion');
         expect(helperSource).to.include('tryReadStoredCourseExam');
+        expect(helperSource).to.include("error.name === 'TrainingNotFoundError'");
         expect(helperSource).to.include('须先完成课程结业考试才能提交');
         expect(helperSource).to.include('该课程未绑定结业考试，不能开启此门槛');
         expect(helperSource).not.to.match(/canEditCollect|PERM_EDIT_COURSE|role\s*===?\s*['"]default['"]/);

@@ -316,6 +316,67 @@ describe('P3.3 problem set access sources', () => {
         }
     });
 
+    it('lists only active redemption entitlements for one uid', async () => {
+        const activeId = new ObjectId();
+        const revokedId = new ObjectId();
+        const otherUidId = new ObjectId();
+        const otherSourceId = new ObjectId();
+        const access = service({
+            entitlements: [
+                {
+                    _id: activeId,
+                    domainId,
+                    uid,
+                    targetKind: 'problem_set',
+                    targetId: otherSetId,
+                    stageId: ACCESS_ENTITLEMENT_WHOLE_SET_STAGE,
+                    source: 'redemption',
+                    sourceId,
+                    createdAt: new Date(),
+                    revokedAt: null,
+                },
+                {
+                    _id: otherSourceId,
+                    domainId,
+                    uid,
+                    targetKind: 'problem_set',
+                    targetId: setId,
+                    stageId: ACCESS_ENTITLEMENT_WHOLE_SET_STAGE,
+                    source: 'group',
+                    sourceId: new ObjectId(),
+                    createdAt: new Date(),
+                    revokedAt: null,
+                } as any,
+                {
+                    _id: revokedId,
+                    domainId,
+                    uid,
+                    targetKind: 'course',
+                    targetId: courseId,
+                    stageId: ACCESS_ENTITLEMENT_WHOLE_SET_STAGE,
+                    source: 'redemption',
+                    sourceId,
+                    createdAt: new Date(),
+                    revokedAt: new Date(),
+                },
+                {
+                    _id: otherUidId,
+                    domainId,
+                    uid: uid + 1,
+                    targetKind: 'problem_set',
+                    targetId: setId,
+                    stageId: ACCESS_ENTITLEMENT_WHOLE_SET_STAGE,
+                    source: 'redemption',
+                    sourceId,
+                    createdAt: new Date(),
+                    revokedAt: null,
+                },
+            ],
+        });
+        const listed = await access.listActiveForUser(domainId, uid);
+        expect(listed.map((row) => String(row._id))).to.deep.equal([String(activeId)]);
+    });
+
     it('keeps intro dump of inaccessible stages and does not split discoverable from accessible', async () => {
         const staged = {
             ...hiddenSet,

@@ -1,5 +1,6 @@
 import { Logger } from '@hydrooj/utils';
 import { ObjectId } from 'mongodb';
+import { TrainingNotFoundError } from '../error';
 import type { TrainingDoc } from '../interface';
 import { PRIV } from '../model/builtin';
 import { problemSetAccessService } from '../model/problem-set-access';
@@ -42,4 +43,11 @@ export function canManageCourse(
     PERM_EDIT_COURSE: bigint,
 ): boolean {
     return user.own(tdoc) || user.hasPerm(PERM_EDIT_COURSE) || user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
+}
+
+export async function assertCourseAccessible(domainId: string, uid: number, tdoc: TrainingDoc) {
+    const myGroups = await courseUserGroupIds(domainId, uid);
+    if (!(await courseAccessibleTo(domainId, uid, tdoc, myGroups, false))) {
+        throw new TrainingNotFoundError(domainId, tdoc.docId);
+    }
 }

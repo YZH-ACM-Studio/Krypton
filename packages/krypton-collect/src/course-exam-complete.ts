@@ -94,7 +94,7 @@ async function loadCourseExamBinding(domainId: string, courseId: CollectCourseRe
         if (course.kind !== 'course') return null;
         return tryReadStoredCourseExam(course.courseExam);
     } catch (error) {
-        if (error instanceof TrainingNotFoundError) return null;
+        if (error instanceof TrainingNotFoundError || (error instanceof Error && error.name === 'TrainingNotFoundError')) return null;
         throw error;
     }
 }

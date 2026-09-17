@@ -26,6 +26,7 @@ import {
     FileUploadError,
     NotFoundError,
     PermissionError,
+    TrainingNotFoundError,
     ValidationError,
 } from '../error';
 import { TrainingDoc, TrainingNode } from '../interface';
@@ -43,7 +44,7 @@ import * as training from '../model/training';
 import user from '../model/user';
 import { Handler, param, post, Types } from '../service/server';
 import { studentDirectory } from '../service/student-directory';
-import { canManageCourse, courseAccessibleTo, courseUserGroupIds, isCourseHidden } from '../lib/course-access';
+import { assertCourseAccessible, canManageCourse, courseUserGroupIds, isCourseHidden } from '../lib/course-access';
 import { isCourseExamDuplicateKey, parseCourseExamForm, resolveCourseExamForSave } from '../lib/course-exam';
 import { courseNodePids, parseCourseSections } from '../lib/course-chapter';
 import { copiedCourseTitle } from '../lib/course-copy';
@@ -80,6 +81,10 @@ function canCreateCourse(actor: { hasPerm: (...perm: bigint[]) => boolean; hasPr
     return actor.hasPriv(PRIV.PRIV_EDIT_SYSTEM) || actor.hasPerm(PERM.PERM_CREATE_COURSE);
 }
 
+function canCreateCourseQuiz(actor: { hasPerm: (...perm: bigint[]) => boolean; hasPriv: (priv: number) => boolean }) {
+    return actor.hasPriv(PRIV.PRIV_EDIT_SYSTEM) || actor.hasPerm(PERM.PERM_CREATE_HOMEWORK);
+}
+
 async function hydrateCourseExamContest(
     domainId: string,
     tdoc?: Pick<TrainingDoc, 'courseExam'>,
@@ -111,7 +116,38 @@ async function hydrateCourseExamContest(
             ...(attend ? { attend: true } : {}),
         };
     } catch (error) {
-        if (error instanceof ContestNotFoundError) return { docId, title: '', missing: true };
+        if (error instanceof ContestNotFoundError || (error instanceof Error && error.name === 'ContestNotFoundError')) {
+            return { docId, title: '', missing: true };
+        }
+        throw error;
+    }
+}
+
+function isStaleReferencedProblemSetError(error: unknown): boolean {
+    if (error instanceof TrainingNotFoundError || error instanceof ValidationError) return true;
+    return error instanceof Error && (error.name === 'TrainingNotFoundError' || error.name === 'ValidationError');
+}
+
+async function liveReferencedPidsForCourseGet(
+    domainId: string,
+    tid: ObjectId,
+    node: TrainingNode,
+): Promise<{ pids: number[]; stale: boolean }> {
+    if (!node.problemSetId) return { pids: [], stale: false };
+    try {
+        return { pids: await liveReferencedPids(domainId, node), stale: false };
+    } catch (error) {
+        if (isStaleReferencedProblemSetError(error)) {
+            logger.error(
+                'Course detail found unavailable problem-set reference domain=%s tid=%s chapter=%s problemSetId=%s error=%s',
+                domainId,
+                tid,
+                node._id,
+                String(node.problemSetId),
+                error instanceof Error ? error.message : error,
+            );
+            return { pids: [], stale: true };
+        }
         throw error;
     }
 }
@@ -303,7 +339,7 @@ async function buildCourseMindmapView(
     const snapshot = await courseMindmapService().getPublicSnapshot(expectedMapId);
     if (!snapshot) {
         logger.error('Course mindmap binding is unavailable domain=%s tid=%s map=%s', domainId, tdoc.docId, expectedMapId);
-        throw new TypeError(`course references an unavailable public mindmap domain=${domainId} tid=${tdoc.docId} map=${expectedMapId}`);
+        return null;
     }
     const serialized = serializeCourseMindmapSnapshot(snapshot, expectedMapId);
     const nodeIds = new Set(serialized.nodes.map((node) => node._id));
@@ -327,9 +363,14 @@ async function buildCourseMindmapView(
         if (!selectedNodeIds.length) continue;
         for (const nodeId of selectedNodeIds) {
             if (!nodeIds.has(nodeId)) {
-                throw new TypeError(
-                    `course problem references a missing mindmap node domain=${domainId} tid=${tdoc.docId} docId=${docId} node=${nodeId}`,
+                logger.error(
+                    'Course problem references a missing mindmap node domain=%s tid=%s docId=%s node=%s',
+                    domainId,
+                    tdoc.docId,
+                    docId,
+                    nodeId,
                 );
+                return null;
             }
             usedNodeIds.add(nodeId);
         }
@@ -611,27 +652,26 @@ class CourseDetailHandler extends Handler {
         const domainId = String(this.domain?._id);
         problem.assertProblemAclDomain(this.user, domainId);
         const tdoc = await training.get(domainId, tid);
-        if (!isCourseKind(tdoc.kind)) throw new ValidationError('tid', null, localizedErrorText`Not a course`);
+        if (!isCourseKind(tdoc.kind)) throw new TrainingNotFoundError(domainId, tid);
         const activeView = view === 'mindmap' ? 'mindmap' : view === 'roster' ? 'roster' : 'overview';
         const canManage = canManageCourse(this.user, tdoc, PERM.PERM_EDIT_COURSE);
         const canViewRoster = this.user.hasPerm(PERM.PERM_USERBIND_MANAGE_STUDENTS);
-        if (activeView === 'roster' && !canViewRoster) throw new PermissionError(PERM.PERM_USERBIND_MANAGE_STUDENTS);
         if (!canManage) {
             if (isCourseHidden(tdoc)) throw new ValidationError('tid', null, localizedErrorText`该课程已隐藏`);
-            if ((tdoc.courseGroupIds || []).length) {
-                const myGroups = await courseUserGroupIds(domainId, this.user._id);
-                if (!(await courseAccessibleTo(domainId, this.user._id, tdoc, myGroups, false))) {
-                    throw new ValidationError('tid', null, localizedErrorText`你不在该课程的可见范围内`);
-                }
-            }
+            await assertCourseAccessible(domainId, this.user._id, tdoc);
+        }
+        if (activeView === 'roster' && !canViewRoster && !canManage) {
+            throw new PermissionError(PERM.PERM_USERBIND_MANAGE_STUDENTS);
         }
         const referencedPidsByChapter = new Map<number, number[]>();
+        const staleReferencedProblemSetIds: string[] = [];
         for (const node of tdoc.dag || []) {
-            referencedPidsByChapter.set(node._id, await liveReferencedPids(domainId, node));
+            const live = await liveReferencedPidsForCourseGet(domainId, tid, node);
+            referencedPidsByChapter.set(node._id, live.pids);
+            if (live.stale) staleReferencedProblemSetIds.push(String(node.problemSetId));
         }
         const pids = Array.from(new Set([...training.getPids(tdoc.dag), ...Array.from(referencedPidsByChapter.values()).flat()]));
-        // 解析章节引用的所有比赛。
-        const allTids = Array.from(new Set<string>(tdoc.dag.flatMap((n) => (n.tids || []).map((t) => String(t))))).map((s) => new ObjectId(s));
+        const allTids = Array.from(new Set<string>((tdoc.dag || []).flatMap((n) => (n.tids || []).map((t) => String(t))))).map((s) => new ObjectId(s));
         const overviewData =
             activeView === 'overview' || activeView === 'roster'
                 ? Promise.all([
@@ -781,7 +821,7 @@ class CourseDetailHandler extends Handler {
             canManage,
             tsdoc,
             canCreate: canCreateCourse(this.user),
-            canCreateQuiz: canManage && this.user.hasPerm(PERM.PERM_CREATE_HOMEWORK),
+            canCreateQuiz: canManage && canCreateCourseQuiz(this.user),
             canCreateCollect:
                 collectResult.available &&
                 canManage &&
@@ -794,12 +834,17 @@ class CourseDetailHandler extends Handler {
             files: activeView === 'overview' && canDownloadFiles ? sortFiles(tdoc.files || []) : [],
             view: activeView,
             courseMindmap,
+            staleReferencedProblemSetIds,
             integrityControlled: !!publishedIntegrity,
             canViewRoster,
         };
         const courseExamContest = await hydrateCourseExamContest(domainId, tdoc, this.user._id);
         if (courseExamContest) this.response.body.courseExamContest = courseExamContest;
-        if (activeView === 'roster') {
+        if (activeView === 'roster' && !canViewRoster && canManage) {
+            this.response.body.rosterWarning = '花名册需要学生档案管理权限，已隐藏名单。';
+            this.response.body.members = [];
+        }
+        if (activeView === 'roster' && canViewRoster) {
             const ub = studentDirectory();
             const courseGroups = tdoc.courseGroupIds || [];
             let memberUids: number[] = [];
@@ -856,14 +901,11 @@ class CourseDetailHandler extends Handler {
     async postEnroll(domainId: string, tid: ObjectId) {
         this.checkPriv(PRIV.PRIV_USER_PROFILE);
         const tdoc = await training.get(domainId, tid);
-        if (!isCourseKind(tdoc.kind)) throw new ValidationError('tid', null, localizedErrorText`Not a course`);
+        if (!isCourseKind(tdoc.kind)) throw new TrainingNotFoundError(domainId, tid);
         const canManage = canManageCourse(this.user, tdoc, PERM.PERM_EDIT_COURSE);
         if (!canManage && isCourseHidden(tdoc)) throw new ValidationError('tid', null, localizedErrorText`该课程已隐藏`);
         if (!canManage && (tdoc.courseGroupIds || []).length) {
-            const myGroups = await courseUserGroupIds(domainId, this.user._id);
-            if (!(await courseAccessibleTo(domainId, this.user._id, tdoc, myGroups, false))) {
-                throw new PermissionError(PERM.PERM_VIEW_TRAINING);
-            }
+            await assertCourseAccessible(domainId, this.user._id, tdoc);
         }
         await training.enroll(domainId, tdoc.docId, this.user._id);
         this.back();
@@ -879,8 +921,11 @@ class CourseEditHandler extends Handler {
         problem.assertProblemAclDomain(this.user, authoritativeDomainId);
         if (tid) {
             this.tdoc = await training.get(authoritativeDomainId, tid);
-            if (!isCourseKind(this.tdoc.kind)) throw new ValidationError('tid', null, localizedErrorText`Not a course`);
-            if (!this.user.own(this.tdoc)) this.checkPerm(PERM.PERM_EDIT_COURSE);
+            if (!isCourseKind(this.tdoc.kind)) throw new TrainingNotFoundError(authoritativeDomainId, tid);
+            if (!canManageCourse(this.user, this.tdoc, PERM.PERM_EDIT_COURSE)) {
+                await assertCourseAccessible(authoritativeDomainId, this.user._id, this.tdoc);
+                throw new PermissionError(PERM.PERM_EDIT_COURSE);
+            }
         } else if (!this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) {
             if (!this.user.hasPerm(PERM.PERM_CREATE_COURSE)) {
                 logger.warn(
@@ -918,9 +963,9 @@ class CourseEditHandler extends Handler {
         this.response.body = {
             page_name: this.tdoc ? 'course_edit' : 'course_create',
             groups: groups.map((g: any) => ({ _id: String(g._id), name: g.name, archivedAt: g.archivedAt || null })),
-            canManageFiles: !!this.tdoc && (this.user.own(this.tdoc) || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)),
+            canManageFiles: !!this.tdoc && canManageCourse(this.user, this.tdoc, PERM.PERM_EDIT_COURSE),
             canCreate: canCreateCourse(this.user),
-            canCreateQuiz: !!this.tdoc && this.user.hasPerm(PERM.PERM_CREATE_HOMEWORK),
+            canCreateQuiz: !!this.tdoc && canCreateCourseQuiz(this.user),
             canAssign: !!this.tdoc && canAssignCourse(this.user),
             files: sortFiles(this.tdoc?.files || []),
             mindmaps,
@@ -1081,7 +1126,7 @@ class CourseEditHandler extends Handler {
         problem.assertProblemAclDomain(this.user, authoritativeDomainId);
         if (!canCreateCourse(this.user)) this.checkPerm(PERM.PERM_CREATE_COURSE);
         if (!this.tdoc?.docId?.equals(tid) || !isCourseKind(this.tdoc.kind)) {
-            throw new ValidationError('tid', null, localizedErrorText`Not a course`);
+            throw new TrainingNotFoundError(authoritativeDomainId, tid);
         }
         const title = copiedCourseTitle(this.tdoc.title || '');
         if (!title) throw new ValidationError('title', null, localizedErrorText`课程名称无效`);
@@ -1168,8 +1213,11 @@ class CourseEditHandler extends Handler {
     async postDelete(_domainId: string, tid: ObjectId) {
         const domainId = String(this.domain?._id);
         const tdoc = await training.get(domainId, tid);
-        if (!isCourseKind(tdoc.kind)) throw new ValidationError('tid', null, localizedErrorText`Not a course`);
-        if (!this.user.own(tdoc)) this.checkPerm(PERM.PERM_EDIT_COURSE);
+        if (!isCourseKind(tdoc.kind)) throw new TrainingNotFoundError(domainId, tid);
+        if (!canManageCourse(this.user, tdoc, PERM.PERM_EDIT_COURSE)) {
+            await assertCourseAccessible(domainId, this.user._id, tdoc);
+            throw new PermissionError(PERM.PERM_EDIT_COURSE);
+        }
         const collect = loadCollectCourseQuery();
         if (typeof collect?.existsByCourse === 'function' && (await collect.existsByCourse(domainId, tid))) {
             throw new ValidationError('tid', null, localizedErrorText`课程仍有文件收集，不能删除`);
@@ -1234,7 +1282,10 @@ class CourseFilesHandler extends Handler {
         this.domainId = String(this.domain?._id);
         this.tdoc = await training.get(this.domainId, tid);
         if (!isCourseKind(this.tdoc.kind)) throw new NotFoundError(localizedErrorText`course`);
-        if (!this.user.own(this.tdoc)) this.checkPriv(PRIV.PRIV_EDIT_SYSTEM);
+        if (!canManageCourse(this.user, this.tdoc, PERM.PERM_EDIT_COURSE)) {
+            await assertCourseAccessible(this.domainId, this.user._id, this.tdoc);
+            throw new PermissionError(PERM.PERM_EDIT_COURSE);
+        }
     }
 
     async get() {
@@ -1294,15 +1345,12 @@ class CourseFileDownloadHandler extends Handler {
         const domainId = String(this.domain?._id);
         const tdoc = await training.get(domainId, tid);
         if (!isCourseKind(tdoc.kind)) throw new NotFoundError(localizedErrorText`course`);
-        const file = listedCourseFile(tdoc, filename);
         const canManage = canManageCourse(this.user, tdoc, PERM.PERM_EDIT_COURSE);
-        if (!canManage && isCourseHidden(tdoc)) throw new ValidationError('tid', null, localizedErrorText`该课程已隐藏`);
-        if (!canManage && (tdoc.courseGroupIds || []).length) {
-            const myGroups = await courseUserGroupIds(domainId, this.user._id);
-            if (!(await courseAccessibleTo(domainId, this.user._id, tdoc, myGroups, false))) {
-                throw new PermissionError(PERM.PERM_VIEW_TRAINING);
-            }
+        if (!canManage) {
+            if (isCourseHidden(tdoc)) throw new ValidationError('tid', null, localizedErrorText`该课程已隐藏`);
+            await assertCourseAccessible(domainId, this.user._id, tdoc);
         }
+        const file = listedCourseFile(tdoc, filename);
         const target = `${courseFilePrefix(domainId, tid)}${filename}`;
         this.response.addHeader('Cache-Control', 'private');
         await oplog.log(this, 'course.file.download', { tid, filename, size: file.size || 0 });
@@ -1311,9 +1359,9 @@ class CourseFileDownloadHandler extends Handler {
 }
 
 export async function apply(ctx) {
-    ctx.Route('course_main', '/course', CourseMainHandler, PERM.PERM_VIEW_TRAINING);
+    ctx.Route('course_main', '/course', CourseMainHandler);
     ctx.Route('course_create', '/course/create', CourseEditHandler);
-    ctx.Route('course_detail', '/course/:tid', CourseDetailHandler, PERM.PERM_VIEW_TRAINING);
+    ctx.Route('course_detail', '/course/:tid', CourseDetailHandler);
     ctx.Route('course_edit', '/course/:tid/edit', CourseEditHandler);
     ctx.Route('course_files', '/course/:tid/file', CourseFilesHandler);
     ctx.Route('course_file_download', '/course/:tid/file/:filename', CourseFileDownloadHandler);

@@ -513,6 +513,17 @@ export class ProblemSetAccessService {
         return rows.map((row) => row.targetId);
     }
 
+    async listActiveForUser(domainId: string, uid: number): Promise<AccessEntitlementDoc[]> {
+        return this.entitlements
+            .find({
+                domainId,
+                uid,
+                source: 'redemption',
+                revokedAt: null,
+            } as Filter<AccessEntitlementDoc>)
+            .toArray();
+    }
+
     async listActiveBySource(domainId: string, uid: number, sourceId: ObjectId): Promise<AccessEntitlementDoc[]> {
         return this.entitlements
             .find({

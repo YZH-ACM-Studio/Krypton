@@ -14,6 +14,7 @@ import {
     ValidationError,
 } from '../error';
 import { PenaltyRules, ProblemDict, Tdoc, TrainingDoc, TrainingNode } from '../interface';
+import { assertCourseAccessible, canManageCourse } from '../lib/course-access';
 import { isCourseKind } from '../lib/training-kind';
 import { PERM, PRIV } from '../model/builtin';
 import * as contest from '../model/contest';
@@ -37,6 +38,63 @@ import { studentDirectory } from '../service/student-directory';
 import { ContestCodeHandler, ContestFileDownloadHandler, ContestScoreboardHandler } from './contest';
 
 const logger = new Logger('homework');
+
+function canCreateHomework(actor: { hasPerm(...perm: bigint[]): boolean; hasPriv(...priv: number[]): boolean }) {
+    return actor.hasPriv(PRIV.PRIV_EDIT_SYSTEM) || actor.hasPerm(PERM.PERM_CREATE_HOMEWORK);
+}
+
+function canEditHomework(
+    actor: { own(doc: Tdoc): boolean; hasPerm(...perm: bigint[]): boolean; hasPriv(...priv: number[]): boolean },
+    tdoc: Tdoc,
+) {
+    return (
+        actor.hasPriv(PRIV.PRIV_EDIT_SYSTEM) ||
+        (actor.own(tdoc) ? actor.hasPerm(PERM.PERM_EDIT_HOMEWORK_SELF) : actor.hasPerm(PERM.PERM_EDIT_HOMEWORK))
+    );
+}
+
+function assertCanEditHomework(
+    actor: { own(doc: Tdoc): boolean; hasPerm(...perm: bigint[]): boolean; hasPriv(...priv: number[]): boolean },
+    tdoc: Tdoc,
+) {
+    if (canEditHomework(actor, tdoc)) return;
+    throw new PermissionError(actor.own(tdoc) ? PERM.PERM_EDIT_HOMEWORK_SELF : PERM.PERM_EDIT_HOMEWORK);
+}
+
+function canDeleteHomework(
+    actor: { own(doc: Tdoc): boolean; hasPerm(...perm: bigint[]): boolean; hasPriv(...priv: number[]): boolean },
+    tdoc: Tdoc,
+) {
+    return actor.hasPriv(PRIV.PRIV_EDIT_SYSTEM) || actor.own(tdoc) || actor.hasPerm(PERM.PERM_EDIT_HOMEWORK);
+}
+
+function assertCanDeleteHomework(
+    actor: { own(doc: Tdoc): boolean; hasPerm(...perm: bigint[]): boolean; hasPriv(...priv: number[]): boolean },
+    tdoc: Tdoc,
+) {
+    if (canDeleteHomework(actor, tdoc)) return;
+    throw new PermissionError(PERM.PERM_EDIT_HOMEWORK);
+}
+
+async function assertHomeworkManageOrHide(
+    domainId: string,
+    tdoc: Tdoc,
+    user: any,
+    allowed: boolean,
+    deny: () => void,
+) {
+    if (tdoc.rule !== 'homework') throw new ContestNotFoundError(domainId, tdoc.docId);
+    if (allowed) return;
+    try {
+        await assertHomeworkAccess(domainId, tdoc, user);
+    } catch (error) {
+        if (error instanceof NotAssignedError || (error instanceof Error && error.name === 'NotAssignedError')) {
+            throw new ContestNotFoundError(domainId, tdoc.docId);
+        }
+        throw error;
+    }
+    deny();
+}
 
 async function listHomeworkScopeGroups(domainId: string): Promise<any[]> {
     try {
@@ -71,7 +129,8 @@ async function loadCourseQuizContext(
 ): Promise<{ course: TrainingDoc; chapter: TrainingNode }> {
     const course = await training.get(domainId, courseId);
     if (!isCourseKind(course.kind)) throw new ValidationError('fromCourse');
-    if (!handlerUser.own(course) && !handlerUser.hasPerm(PERM.PERM_EDIT_COURSE) && !handlerUser.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) {
+    if (!canManageCourse(handlerUser, course, PERM.PERM_EDIT_COURSE)) {
+        await assertCourseAccessible(domainId, handlerUser._id, course);
         throw new PermissionError(PERM.PERM_EDIT_COURSE);
     }
     const chapter = course.dag.find((node) => node._id === chapterId);
@@ -208,6 +267,8 @@ class HomeworkDetailHandler extends Handler {
             dpcount,
             dcount,
             canGradeSubjective: this.tdoc.owner === this.user._id || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM),
+            canEditHomework: canEditHomework(this.user, this.tdoc),
+            canDeleteHomework: canDeleteHomework(this.user, this.tdoc),
         };
         this.response.body.tdoc.content = this.response.body.tdoc.content
             .replace(/\(file:\/\//g, `(./${this.tdoc.docId}/file/public/`)
@@ -276,9 +337,11 @@ class HomeworkEditHandler extends Handler {
         problem.assertProblemAclDomain(this.user, authoritativeDomainId);
         if (tid && (fromCourse || chapter)) throw new ValidationError('fromCourse', 'chapter');
         const tdoc = tid ? await contest.get(authoritativeDomainId, tid) : null;
-        if (!tid) this.checkPerm(PERM.PERM_CREATE_HOMEWORK);
-        else if (!this.user.own(tdoc)) this.checkPerm(PERM.PERM_EDIT_HOMEWORK);
-        else this.checkPerm(PERM.PERM_EDIT_HOMEWORK_SELF);
+        if (tid) {
+            await assertHomeworkManageOrHide(authoritativeDomainId, tdoc, this.user, canEditHomework(this.user, tdoc), () => {
+                assertCanEditHomework(this.user, tdoc);
+            });
+        } else if (!canCreateHomework(this.user)) this.checkPerm(PERM.PERM_CREATE_HOMEWORK);
         const extensionDays = tid ? Math.round((tdoc.endAt.getTime() - tdoc.penaltySince.getTime()) / (Time.day / 100)) / 100 : 1;
         const beginAt = tid
             ? moment(tdoc.beginAt).tz(this.user.timeZone)
@@ -286,7 +349,8 @@ class HomeworkEditHandler extends Handler {
         const penaltySince = tid
             ? moment(tdoc.penaltySince).tz(this.user.timeZone)
             : beginAt.clone().add(7, 'days').tz(this.user.timeZone).hour(23).minute(59).millisecond(0);
-        const quizContext = fromCourse ? await loadCourseQuizContext(authoritativeDomainId, fromCourse, chapter, this.user) : null;
+        let quizContext: { course: TrainingDoc; chapter: TrainingNode } | null = null;
+        if (fromCourse) quizContext = await loadCourseQuizContext(authoritativeDomainId, fromCourse, chapter, this.user);
         if (!fromCourse && chapter) throw new ValidationError('chapter');
         const courseGroupIds = (quizContext?.course.courseGroupIds || []).map(String);
         const participantScopeMode = quizContext
@@ -385,9 +449,11 @@ class HomeworkEditHandler extends Handler {
         const pids = parseProblemDocIds(_pids);
         const tdoc = tid ? await contest.get(authoritativeDomainId, tid) : null;
         if (tid && (fromCourse || chapter)) throw new ValidationError('fromCourse', 'chapter');
-        if (!tid) this.checkPerm(PERM.PERM_CREATE_HOMEWORK);
-        else if (!this.user.own(tdoc)) this.checkPerm(PERM.PERM_EDIT_HOMEWORK);
-        else this.checkPerm(PERM.PERM_EDIT_HOMEWORK_SELF);
+        if (tid) {
+            await assertHomeworkManageOrHide(authoritativeDomainId, tdoc, this.user, canEditHomework(this.user, tdoc), () => {
+                assertCanEditHomework(this.user, tdoc);
+            });
+        } else if (!canCreateHomework(this.user)) this.checkPerm(PERM.PERM_CREATE_HOMEWORK);
         const beginAt = moment.tz(`${beginAtDate} ${beginAtTime}`, this.user.timeZone);
         if (!beginAt.isValid()) throw new ValidationError('beginAtDate', 'beginAtTime');
         const penaltySince = moment.tz(`${penaltySinceDate} ${penaltySinceTime}`, this.user.timeZone);
@@ -475,7 +541,9 @@ class HomeworkEditHandler extends Handler {
     async postDelete(_domainId: string, tid: ObjectId) {
         const authoritativeDomainId = String(this.domain?._id);
         const tdoc = await contest.get(authoritativeDomainId, tid);
-        if (!this.user.own(tdoc)) this.checkPerm(PERM.PERM_EDIT_HOMEWORK);
+        await assertHomeworkManageOrHide(authoritativeDomainId, tdoc, this.user, canDeleteHomework(this.user, tdoc), () => {
+            assertCanDeleteHomework(this.user, tdoc);
+        });
         await Promise.all([
             record.updateMulti(authoritativeDomainId, { domainId: authoritativeDomainId, contest: tid }, undefined, undefined, { contest: '' }),
             contest.del(authoritativeDomainId, tid),
@@ -492,14 +560,23 @@ export class HomeworkFilesHandler extends Handler {
     async prepare(_domainId: string, tid: ObjectId) {
         const authoritativeDomainId = String(this.domain?._id);
         this.tdoc = await contest.get(authoritativeDomainId, tid);
-        if (!this.user.own(this.tdoc)) this.checkPerm(PERM.PERM_EDIT_HOMEWORK);
-        else this.checkPerm(PERM.PERM_EDIT_HOMEWORK_SELF);
+        await assertHomeworkManageOrHide(
+            authoritativeDomainId,
+            this.tdoc,
+            this.user,
+            this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM) || this.user.own(this.tdoc) || this.user.hasPerm(PERM.PERM_EDIT_HOMEWORK),
+            () => {
+                throw new PermissionError(PERM.PERM_EDIT_HOMEWORK);
+            },
+        );
     }
 
     @param('tid', Types.ObjectId)
     async get(_domainId: string, tid: ObjectId) {
         const authoritativeDomainId = String(this.domain?._id);
-        if (!this.user.own(this.tdoc)) this.checkPerm(PERM.PERM_EDIT_HOMEWORK);
+        if (!this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM) && !this.user.own(this.tdoc) && !this.user.hasPerm(PERM.PERM_EDIT_HOMEWORK)) {
+            throw new PermissionError(PERM.PERM_EDIT_HOMEWORK);
+        }
         this.response.body = {
             tdoc: this.tdoc,
             tsdoc: await contest.getStatus(authoritativeDomainId, this.tdoc.docId, this.user._id),
@@ -547,14 +624,20 @@ export class HomeworkFilesHandler extends Handler {
     }
 }
 
+class HomeworkFileDownloadHandler extends ContestFileDownloadHandler {
+    async prepare() {
+        if (this.tdoc.rule !== 'homework') throw new ContestNotFoundError(this.authoritativeDomainId(), this.tdoc.docId);
+    }
+}
+
 export async function apply(ctx) {
-    ctx.Route('homework_main', '/homework', HomeworkMainHandler, PERM.PERM_VIEW_HOMEWORK);
+    ctx.Route('homework_main', '/homework', HomeworkMainHandler);
     ctx.Route('homework_create', '/homework/create', HomeworkEditHandler);
-    ctx.Route('homework_detail', '/homework/:tid', HomeworkDetailHandler, PERM.PERM_VIEW_HOMEWORK);
+    ctx.Route('homework_detail', '/homework/:tid', HomeworkDetailHandler);
     ctx.Route('homework_code', '/homework/:tid/code', ContestCodeHandler, PERM.PERM_VIEW_HOMEWORK);
     ctx.Route('homework_edit', '/homework/:tid/edit', HomeworkEditHandler);
-    ctx.Route('homework_files', '/homework/:tid/file', HomeworkFilesHandler, PERM.PERM_VIEW_HOMEWORK);
-    ctx.Route('homework_file_download', '/homework/:tid/file/:type/:filename', ContestFileDownloadHandler, PERM.PERM_VIEW_HOMEWORK);
+    ctx.Route('homework_files', '/homework/:tid/file', HomeworkFilesHandler);
+    ctx.Route('homework_file_download', '/homework/:tid/file/:type/:filename', HomeworkFileDownloadHandler);
     await ctx.inject(['scoreboard'], ({ Route }) => {
         Route('homework_scoreboard', '/homework/:tid/scoreboard', ContestScoreboardHandler, PERM.PERM_VIEW_HOMEWORK_SCOREBOARD);
         Route('homework_scoreboard_view', '/homework/:tid/scoreboard/:view', ContestScoreboardHandler, PERM.PERM_VIEW_HOMEWORK_SCOREBOARD);

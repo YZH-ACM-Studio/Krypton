@@ -59,6 +59,14 @@ import { emptyTaskGraph } from './types';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
+async function loadTaskDirectoryCatalog(domainId: string): Promise<{ schools: unknown[]; userGroups: unknown[] }> {
+    const [schools, userGroups] = await Promise.all([
+        userBindModel.listSchools(domainId),
+        userBindModel.listUserGroups(domainId),
+    ]);
+    return { schools, userGroups };
+}
+
 function taskNotFound() {
     return localizeError(new NotFoundError('任务不存在'), '任务不存在');
 }
@@ -547,7 +555,7 @@ export class AdminTasksListHandler extends Handler {
         const src = await taskModel.getTask(authoritativeDomainId, tid);
         if (!src) throw taskNotFound();
         if (!canModifyTask(this.user as any, src)) {
-            throw new ValidationError('tid', null, localizedErrorText`无权复制`);
+            throw taskNotFound();
         }
         await validateTagAcCountGraph(authoritativeDomainId, src.graph, this.user._id);
         const problemIds = Array.from(collectTaskParamRefs(src.graph).problemIds);
@@ -563,7 +571,7 @@ export class AdminTasksListHandler extends Handler {
         const t = await taskModel.getTask(domainId, tid);
         if (!t) throw taskNotFound();
         if (!canModifyTask(this.user as any, t)) {
-            throw new ValidationError('tid', null, localizedErrorText`无权删除`);
+            throw taskNotFound();
         }
         await taskModel.deleteTask(domainId, tid);
         await OplogModel.log(this, 'tasks.delete', { taskId: tid });
@@ -585,15 +593,14 @@ export class AdminTasksEditHandler extends Handler {
             task = await taskModel.getTask(authoritativeDomainId, tid);
             if (!task) throw taskNotFound();
             if (!canModifyTask(this.user as any, task)) {
-                throw new ValidationError('tid', null, localizedErrorText`无权编辑`);
+                throw taskNotFound();
             }
         }
         // Bootstrap small-cardinality picker sources so the right-side editor
         // can use dropdowns (no manual ObjectId entry). Problems are too many
         // to bootstrap — see admin_tasks_api_problems for autocomplete.
-        const [schools, userGroups, contestDocs, homeworkDocs, trainingDocs, tagOptions] = await Promise.all([
-            userBindModel.listSchools(authoritativeDomainId),
-            userBindModel.listUserGroups(authoritativeDomainId),
+        const [{ schools, userGroups }, contestDocs, homeworkDocs, trainingDocs, tagOptions] = await Promise.all([
+            loadTaskDirectoryCatalog(authoritativeDomainId),
             DocumentModel.coll
                 .find({ domainId: authoritativeDomainId, docType: DocumentModel.TYPE_CONTEST })
                 .project({ docId: 1, title: 1, beginAt: 1, rule: 1 })
@@ -684,7 +691,7 @@ export class AdminTasksEditHandler extends Handler {
             const existing = await taskModel.getTask(authoritativeDomainId, tid);
             if (!existing) throw taskNotFound();
             if (!canModifyTask(this.user as any, existing)) {
-                throw new ValidationError('tid', null, localizedErrorText`无权编辑`);
+                throw taskNotFound();
             }
             await validateTagAcCountGraph(authoritativeDomainId, data.graph as TaskGraph, this.user._id);
             const existingProblemIds = Array.from(collectTaskParamRefs(existing.graph).problemIds);
@@ -728,13 +735,12 @@ class AdminTasksAssignHandler extends Handler {
         const task = await taskModel.getTask(domainId, tid);
         if (!task) throw taskNotFound();
         if (!canModifyTask(this.user as any, task)) {
-            throw new ValidationError('tid', null, localizedErrorText`无权分配`);
+            throw taskNotFound();
         }
         const assignments = await taskModel.getTaskAssignments(domainId, tid);
         const uids = Array.from(new Set(assignments.map((a) => a.userId)));
         const udict = await UserModel.getList(domainId, uids);
-        const schools = await userBindModel.listSchools(domainId);
-        const userGroups = await userBindModel.listUserGroups(domainId);
+        const { schools, userGroups } = await loadTaskDirectoryCatalog(domainId);
         this.response.template = 'admin_tasks_assign.html';
         this.response.body = {
             task,
@@ -754,7 +760,7 @@ class AdminTasksAssignHandler extends Handler {
         const task = await taskModel.getTask(domainId, tid);
         if (!task) throw taskNotFound();
         if (!canModifyTask(this.user as any, task)) {
-            throw new ValidationError('tid', null, localizedErrorText`无权分配`);
+            throw taskNotFound();
         }
         let uids: number[] = [];
         if (scope === 'uid' && uid) uids = [uid];
@@ -797,7 +803,7 @@ class AdminTasksAssignHandler extends Handler {
         const task = await taskModel.getTask(domainId, tid);
         if (!task) throw taskNotFound();
         if (!canModifyTask(this.user as any, task)) {
-            throw new ValidationError('tid', null, localizedErrorText`无权覆盖`);
+            throw taskNotFound();
         }
         await taskModel.overridePointCompletion(domainId, aid, pointId, this.user._id, reason || '', completed);
         await OplogModel.log(this, 'tasks.override', { aid, pointId, completed });
@@ -828,7 +834,7 @@ class AdminTasksOverrideHandler extends Handler {
         const task = await taskModel.getTask(domainId, tid);
         if (!task) throw taskNotFound();
         if (!canModifyTask(this.user as any, task)) {
-            throw new ValidationError('tid', null, localizedErrorText`无权覆盖`);
+            throw taskNotFound();
         }
         await taskModel.overridePointCompletion(domainId, aid, pointId, this.user._id, reason || '', completed);
         await OplogModel.log(this, 'tasks.override', { aid, pointId, completed });
@@ -847,7 +853,7 @@ export class AdminTasksStatsHandler extends Handler {
         const task = await taskModel.getTask(domainId, tid);
         if (!task) throw taskNotFound();
         if (!canModifyTask(this.user as any, task)) {
-            throw new ValidationError('tid', null, localizedErrorText`无权查看`);
+            throw taskNotFound();
         }
         const assignments = await taskModel.getTaskAssignments(domainId, tid, {
             status: { $ne: 'cancelled' },
@@ -944,7 +950,7 @@ export class AdminTasksStatsHandler extends Handler {
     async postRecheckAll({ domainId }: { domainId: string }, tid: ObjectId) {
         const task = await taskModel.getTask(domainId, tid);
         if (!task) throw taskNotFound();
-        if (!canModifyTask(this.user as any, task)) throw new ValidationError('tid', null, localizedErrorText`无权操作`);
+        if (!canModifyTask(this.user as any, task)) throw taskNotFound();
         const assignments = await taskModel.getTaskAssignments(domainId, tid, { status: { $ne: 'cancelled' } });
         let rechecked = 0;
         for (const a of assignments) {
@@ -989,19 +995,17 @@ class AdminTasksCandidatesHandler extends Handler {
         const task = await taskModel.getTask(domainId, tid);
         if (!task) throw taskNotFound();
         if (!canModifyTask(this.user as any, task)) {
-            throw new ValidationError('tid', null, localizedErrorText`无权查看候选池`);
+            throw taskNotFound();
         }
 
         const assignments = await taskModel.getTaskAssignments(domainId, tid, {
             status: { $in: ['qualified', 'admitted', 'completed'] },
         });
         const uids = assignments.map((a) => a.userId);
-        const [udict, students, schools, userGroups] = await Promise.all([
+        const [udict, students, { schools, userGroups }] = await Promise.all([
             UserModel.getList(domainId, uids),
-            // Fetch student records in bulk to enrich rows with realName/school/year.
             Promise.all(uids.map((uid) => userBindModel.findStudentByUserId(domainId, uid))),
-            userBindModel.listSchools(domainId),
-            userBindModel.listUserGroups(domainId),
+            loadTaskDirectoryCatalog(domainId),
         ]);
         const studentByUid: Record<number, any> = {};
         uids.forEach((uid, i) => {
@@ -1051,7 +1055,7 @@ class AdminTasksCandidatesHandler extends Handler {
         const task = await taskModel.getTask(domainId, tid);
         if (!task) throw taskNotFound();
         if (!canModifyTask(this.user as any, task)) {
-            throw new ValidationError('tid', null, localizedErrorText`无权操作候选池`);
+            throw taskNotFound();
         }
         const aids = this.parseAids(aidsCsv);
         if (!aids.length) throw new ValidationError('aids', null, localizedErrorText`未选中任何分配`);
@@ -1254,7 +1258,7 @@ class AdminScoresHandler extends Handler {
             scores = await cspScoreColl.find(filter).sort({ round: -1, studentDocId: 1 }).limit(500).toArray();
         } else if (tab === 'stay') {
             stayEvents = await taskModel.listStayEvents(domainId, year ? { year } : {});
-            schools = await userBindModel.listSchools(domainId);
+            schools = (await loadTaskDirectoryCatalog(domainId)).schools;
         }
         // Scores are keyed by studentDocId — join student records for display
         // (学号/姓名/学校) plus bound OJ users for uname. Stay events remain

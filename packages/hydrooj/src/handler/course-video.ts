@@ -5,6 +5,7 @@ import {
     FileUploadError,
     NotFoundError,
     PermissionError,
+    TrainingNotFoundError,
     ValidationError,
     localizedErrorText,
 } from '../error';
@@ -56,15 +57,20 @@ async function assertCanView(handler: Handler, domainId: string, tdoc: TrainingD
     if ((tdoc.courseGroupIds || []).length) {
         const myGroups = await courseUserGroupIds(domainId, handler.user._id);
         if (!(await courseAccessibleTo(domainId, handler.user._id, tdoc, myGroups, false))) {
-            throw new PermissionError(PERM.PERM_VIEW_TRAINING);
+            throw new TrainingNotFoundError(domainId, tdoc.docId);
         }
         return { canManage, myGroups };
     }
     return { canManage, myGroups: new Set<string>() };
 }
 
-function assertCanManage(handler: Handler, tdoc: TrainingDoc) {
-    if (!canManageCourse(handler.user, tdoc, PERM.PERM_EDIT_COURSE)) throw new PermissionError(PERM.PERM_EDIT_COURSE);
+async function assertCanManage(handler: Handler, domainId: string, tdoc: TrainingDoc) {
+    if (canManageCourse(handler.user, tdoc, PERM.PERM_EDIT_COURSE)) return;
+    const myGroups = await courseUserGroupIds(domainId, handler.user._id);
+    if (!(await courseAccessibleTo(domainId, handler.user._id, tdoc, myGroups, false))) {
+        throw new TrainingNotFoundError(domainId, tdoc.docId);
+    }
+    throw new PermissionError(PERM.PERM_EDIT_COURSE);
 }
 
 function parseSectionId(raw: number): number | null {
@@ -95,7 +101,7 @@ class CourseVideoWriteHandler extends Handler {
         this.domainId = String(this.domain?._id);
         problem.assertProblemAclDomain(this.user, this.domainId);
         this.tdoc = await loadCourse(this.domainId, tid);
-        assertCanManage(this, this.tdoc);
+        await assertCanManage(this, this.domainId, this.tdoc);
     }
 
     @param('tid', Types.ObjectId)
@@ -268,8 +274,9 @@ class CourseVideoPlayHandler extends Handler {
         if (!located.video.confirmed && !canManage) throw new NotFoundError(localizedErrorText`video`);
         const target = courseVideoStoragePath(domainId, String(tid), videoId, located.video.contentRevision, located.video.ext);
         const meta = await storage.getMeta(target);
-        const size = Number(meta?.size || located.video.size);
-        if (!Number.isSafeInteger(size) || size <= 0) throw new FileUploadError();
+        if (!meta) throw new NotFoundError(localizedErrorText`video`);
+        const size = Number(meta.size || located.video.size);
+        if (!Number.isSafeInteger(size) || size <= 0) throw new NotFoundError(localizedErrorText`video`);
         let start = 0;
         let end = size - 1;
         const range = String(this.request.headers.range || '');
@@ -296,7 +303,12 @@ class CourseVideoPlayHandler extends Handler {
         this.response.addHeader('Content-Disposition', 'inline');
         this.response.addHeader('X-Content-Type-Options', 'nosniff');
         this.response.addHeader('Cache-Control', 'private, no-store');
-        this.response.body = await storage.getRange(target, start, end);
+        try {
+            this.response.body = await storage.getRange(target, start, end);
+        } catch (error) {
+            logger.error('Course video blob missing domain=%s tid=%s videoId=%s error=%o', domainId, tid, videoId, error);
+            throw new NotFoundError(localizedErrorText`video`);
+        }
     }
 }
 
@@ -420,7 +432,7 @@ interface CourseVideoRoster {
 
 async function buildCourseVideoRoster(handler: Handler, domainId: string, tid: ObjectId): Promise<CourseVideoRoster> {
     const tdoc = await loadCourse(domainId, tid);
-    assertCanManage(handler, tdoc);
+    await assertCanManage(handler, domainId, tdoc);
     const groups = tdoc.courseGroupIds || [];
     if (!groups.length) {
         return {
@@ -534,8 +546,8 @@ class CourseVideoCsvHandler extends Handler {
 
 export async function apply(ctx) {
     ctx.Route('course_video_upload', '/course/:tid/video', CourseVideoWriteHandler);
-    ctx.Route('course_video_play', '/course/:tid/video/:videoId/play', CourseVideoPlayHandler, PERM.PERM_VIEW_TRAINING);
-    ctx.Route('course_video_progress', '/course/:tid/video/:videoId/progress', CourseVideoProgressHandler, PERM.PERM_VIEW_TRAINING);
+    ctx.Route('course_video_play', '/course/:tid/video/:videoId/play', CourseVideoPlayHandler);
+    ctx.Route('course_video_progress', '/course/:tid/video/:videoId/progress', CourseVideoProgressHandler);
     ctx.Route('course_videos', '/course/:tid/videos', CourseVideoStatsHandler);
     ctx.Route('course_videos_csv', '/course/:tid/videos.csv', CourseVideoCsvHandler);
 }

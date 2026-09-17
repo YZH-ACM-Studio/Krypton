@@ -2,7 +2,7 @@ import assert from 'assert';
 import { escapeRegExp, pick } from 'lodash';
 import { Filter, ObjectId } from 'mongodb';
 import { sortFiles } from '@hydrooj/utils/lib/utils';
-import { localizeErrorParameter, localizedErrorText, FileLimitExceededError, FileUploadError, NotFoundError, ValidationError } from '../error';
+import { localizeErrorParameter, localizedErrorText, FileLimitExceededError, FileUploadError, NotFoundError, PermissionError, ValidationError } from '../error';
 import { Tdoc, TrainingDoc } from '../interface';
 import { problemSetAudienceOf } from '../lib/problem-set-audience';
 import { problemSetIntroPids, serializeProblemSetIntro } from '../lib/problem-set-stage';
@@ -236,6 +236,7 @@ class TrainingDetailHandler extends Handler {
             totalProblemCount: intro.totalProblemCount,
             integrityControlled: !!publishedIntegrity,
             access,
+            canManage: canManageProblemSet(this.user, tdoc),
         };
         this.response.body.tdoc.description = this.response.body.tdoc.description
             .replace(/\(file:\/\//g, `(./${tdoc.docId}/file/`)
@@ -300,7 +301,10 @@ class TrainingDetailHandler extends Handler {
     async postDelete(domainId: string, tid: ObjectId) {
         const tdoc = await training.get(domainId, tid);
         assertProblemSet(tdoc);
-        if (!this.user.own(tdoc)) this.checkPerm(PERM.PERM_EDIT_TRAINING);
+        if (!canManageProblemSet(this.user, tdoc)) {
+            await problemSetAccessService.assertAccessible(domainId, this.user, tdoc);
+            throw new PermissionError(PERM.PERM_EDIT_TRAINING);
+        }
         await Promise.all([
             training.del(domainId, tid),
             storage.del(tdoc.files?.map((i) => `training/${domainId}/${tid}/${i.name}`) || [], this.user._id),
@@ -321,15 +325,17 @@ class TrainingEditHandler extends Handler {
             assertProblemSet(this.tdoc);
             if (!canManageProblemSet(this.user, this.tdoc)) {
                 await problemSetAccessService.assertAccessible(authoritativeDomainId, this.user, this.tdoc);
+                throw new PermissionError(PERM.PERM_EDIT_TRAINING);
             }
-            if (!this.user.own(this.tdoc)) this.checkPerm(PERM.PERM_EDIT_TRAINING);
-            else this.checkPerm(PERM.PERM_EDIT_TRAINING_SELF);
-        } else this.checkPerm(PERM.PERM_CREATE_TRAINING);
+        } else if (!this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) {
+            this.checkPerm(PERM.PERM_CREATE_TRAINING);
+        }
     }
 
     async get() {
         const authoritativeDomainId = String(this.domain?._id);
         const groups = await studentDirectory().listUserGroups(authoritativeDomainId);
+        const audience = this.tdoc ? problemSetAudienceOf(this.tdoc) : { public: true, groupIds: [] as string[] };
         this.response.template = 'problem_set_edit.html';
         this.response.body = {
             page_name: this.tdoc ? 'problem_set_edit' : 'problem_set_create',
@@ -338,7 +344,7 @@ class TrainingEditHandler extends Handler {
                 name: group.name,
                 archivedAt: group.archivedAt || null,
             })),
-            audience: this.tdoc ? problemSetAudienceOf(this.tdoc) : { public: true, groupIds: [] },
+            audience,
         };
         if (this.tdoc) {
             this.response.body.tdoc = this.tdoc;
@@ -404,14 +410,12 @@ export class TrainingFilesHandler extends Handler {
         assertProblemSet(this.tdoc);
         if (!canManageProblemSet(this.user, this.tdoc)) {
             await problemSetAccessService.assertAccessible(domainId, this.user, this.tdoc);
+            throw new PermissionError(PERM.PERM_EDIT_TRAINING);
         }
-        if (!this.user.own(this.tdoc)) this.checkPerm(PERM.PERM_EDIT_TRAINING);
-        else this.checkPerm(PERM.PERM_EDIT_TRAINING_SELF);
     }
 
     @param('tid', Types.ObjectId)
     async get(domainId: string, tid: ObjectId) {
-        if (!this.user.own(this.tdoc)) this.checkPerm(PERM.PERM_EDIT_TRAINING);
         const tsdoc = await training.getStatus(domainId, this.tdoc.docId, this.user._id);
         const publishedIntegrity = await practiceIntegrityService.getLatestPublished(domainId, 'problemSet', this.tdoc.docId);
         const contextualProgress = publishedIntegrity
@@ -532,12 +536,12 @@ class TrainingCompatRedirectHandler extends Handler {
 }
 
 export async function apply(ctx) {
-    ctx.Route('training_main', '/problem-sets', TrainingMainHandler, PERM.PERM_VIEW_TRAINING);
+    ctx.Route('training_main', '/problem-sets', TrainingMainHandler);
     ctx.Route('training_create', '/problem-sets/create', TrainingEditHandler);
-    ctx.Route('training_detail', '/problem-sets/:tid', TrainingDetailHandler, PERM.PERM_VIEW_TRAINING);
+    ctx.Route('training_detail', '/problem-sets/:tid', TrainingDetailHandler);
     ctx.Route('training_edit', '/problem-sets/:tid/edit', TrainingEditHandler);
-    ctx.Route('training_files', '/problem-sets/:tid/file', TrainingFilesHandler, PERM.PERM_VIEW_TRAINING);
-    ctx.Route('training_file_download', '/problem-sets/:tid/file/:filename', TrainingFileDownloadHandler, PERM.PERM_VIEW_TRAINING);
+    ctx.Route('training_files', '/problem-sets/:tid/file', TrainingFilesHandler);
+    ctx.Route('training_file_download', '/problem-sets/:tid/file/:filename', TrainingFileDownloadHandler);
     ctx.Route('training_compat_main', '/training', TrainingCompatRedirectHandler);
     ctx.Route('training_compat_create', '/training/create', TrainingCompatRedirectHandler);
     ctx.Route('training_compat_detail', '/training/:tid', TrainingCompatRedirectHandler);

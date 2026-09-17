@@ -76,6 +76,20 @@ function actorOf(handler: Handler) {
     };
 }
 
+async function assertCanViewCollectOrHide(
+    user: { _id: number; hasPerm(perm: bigint): boolean; hasPriv(priv: number): boolean },
+    request: CollectRequestDoc,
+    domainId: string,
+    forbiddenMessage: string,
+) {
+    if (canViewCollect(user, request)) return;
+    const member = await isAudienceMember(domainId, user._id, request);
+    if (request.status === 'draft' || request.status === 'archived' || !member) {
+        throw new CollectNotFoundError();
+    }
+    throw new CollectForbiddenError(forbiddenMessage);
+}
+
 async function assertNotBoundClient(handler: Handler): Promise<void> {
     const session = handler.session as { sessionId?: string; _id?: string; sid?: string } | undefined;
     const sid = String(session?.sessionId || session?._id || session?.sid || '');
@@ -557,6 +571,7 @@ class AdminCollectListHandler extends CollectBaseHandler {
         const actor = actorOf(this);
         if (!id) throw new CollectNotFoundError();
         const current = await getRequest(domainId, id);
+        await assertCanViewCollectOrHide(this.user, current, domainId, '无权查看该收集');
         if (operation === 'publish') {
             const published = await publishRequest(domainId, id, actor, current.revision);
             const audience = await resolveAudience(published.domainId, published.schoolId, published.groupIds);
@@ -611,7 +626,7 @@ class AdminCollectEditHandler extends CollectBaseHandler {
         let hasFiles = false;
         if (id) {
             const request = await getRequest(domainId, id);
-            if (!canViewCollect(this.user, request)) throw new CollectForbiddenError('无权查看该收集');
+            await assertCanViewCollectOrHide(this.user, request, domainId, '无权查看该收集');
             const [submitted, file] = await Promise.all([
                 submissionsColl.findOne({ domainId, requestId: request._id, status: 'submitted' }),
                 filesColl.findOne({ domainId, requestId: request._id }),
@@ -660,12 +675,23 @@ class AdminCollectEditHandler extends CollectBaseHandler {
         return this.applyEditPost(id, 'reopen');
     }
 
+    @param('id', Types.ObjectId, true)
+    async postArchive(_domainId: string, id?: ObjectId) {
+        return this.applyEditPost(id, 'archive');
+    }
+
+    @param('id', Types.ObjectId, true)
+    async postDelete(_domainId: string, id?: ObjectId) {
+        return this.applyEditPost(id, 'delete');
+    }
+
     async applyEditPost(id: ObjectId | undefined, operation: string) {
         const domainId = domainIdOf(this);
         const body = this.request.body || {};
-        if (operation === 'close' || operation === 'reopen') {
+        if (operation === 'close' || operation === 'reopen' || operation === 'archive' || operation === 'delete') {
             if (!id) throw new CollectNotFoundError();
             const current = await getRequest(domainId, id);
+            await assertCanViewCollectOrHide(this.user, current, domainId, '无权查看该收集');
             const revision = Number(body.revision || current.revision);
             if (operation === 'close') {
                 await closeRequest(domainId, id, actorOf(this), revision);
@@ -673,9 +699,21 @@ class AdminCollectEditHandler extends CollectBaseHandler {
                 this.back();
                 return;
             }
-            await reopenRequest(domainId, id, actorOf(this), revision);
-            await OplogModel.log(this, 'collect.reopen', { requestId: String(id) });
-            this.back();
+            if (operation === 'reopen') {
+                await reopenRequest(domainId, id, actorOf(this), revision);
+                await OplogModel.log(this, 'collect.reopen', { requestId: String(id) });
+                this.back();
+                return;
+            }
+            if (operation === 'archive') {
+                await archiveRequest(domainId, id, actorOf(this), revision);
+                await OplogModel.log(this, 'collect.archive', { requestId: String(id) });
+                this.back();
+                return;
+            }
+            await deleteRequestIfEmpty(domainId, id, actorOf(this), revision);
+            await OplogModel.log(this, 'collect.delete', { requestId: String(id) });
+            this.response.redirect = '/admin/collect';
             return;
         }
         const title = String(body.title || '');
@@ -737,6 +775,7 @@ class AdminCollectEditHandler extends CollectBaseHandler {
         }
         if (!id) throw new CollectNotFoundError();
         const current = await getRequest(domainId, id);
+        await assertCanViewCollectOrHide(this.user, current, domainId, '无权查看该收集');
         const revision = Number(body.revision || current.revision);
         if (operation === 'update') {
             const updated = await updateRequest(domainId, id, actorOf(this), revision, patch);
@@ -770,9 +809,14 @@ class AdminCollectStatsHandler extends CollectBaseHandler {
     @param('id', Types.ObjectId)
     async get(_domainId: string, id: ObjectId) {
         const request = await getRequest(domainIdOf(this), id);
-        if (!canViewCollect(this.user, request)) throw new CollectForbiddenError('无权查看该收集');
-        const rows = await listProgress(request);
+        await assertCanViewCollectOrHide(this.user, request, domainIdOf(this), '无权查看该收集');
+        const [rows, file] = await Promise.all([
+            listProgress(request),
+            filesColl.findOne({ domainId: request.domainId, requestId: request._id }),
+        ]);
         const canEdit = canEditCollect(this.user, request);
+        const submitted = rows.some((row) => row.status === 'submitted');
+        const hasFiles = !!file || submitted;
         const historyDocs = await filesColl
             .find({ domainId: request.domainId, requestId: request._id, current: false })
             .sort({ createdAt: -1, _id: -1 })
@@ -785,8 +829,9 @@ class AdminCollectStatsHandler extends CollectBaseHandler {
         }
         this.response.template = 'admin_collect_stats.html';
         this.response.body = {
-            request: serializeRequest(request, { canEdit }),
+            request: serializeRequest(request, { canEdit, hasFiles }),
             canEdit,
+            hasFiles,
             canNudge: request.status === 'published' || request.status === 'closed',
             canPack: true,
             rows: rows.map((row) => ({
@@ -825,10 +870,29 @@ class AdminCollectStatsHandler extends CollectBaseHandler {
     @param('id', Types.ObjectId)
     async postNudge(_domainId: string, id: ObjectId) {
         const request = await getRequest(domainIdOf(this), id);
+        await assertCanViewCollectOrHide(this.user, request, domainIdOf(this), '无权查看该收集');
         const uids = await nudgeUnsubmitted(request, actorOf(this));
         await notifyUids(uids, request.title, collectUrl(this, request._id));
         await OplogModel.log(this, 'collect.nudge', { requestId: String(id), count: uids.length });
         this.back();
+    }
+
+    @param('id', Types.ObjectId)
+    async postArchive(_domainId: string, id: ObjectId) {
+        const request = await getRequest(domainIdOf(this), id);
+        await assertCanViewCollectOrHide(this.user, request, domainIdOf(this), '无权查看该收集');
+        await archiveRequest(request.domainId, id, actorOf(this), request.revision);
+        await OplogModel.log(this, 'collect.archive', { requestId: String(id) });
+        this.back();
+    }
+
+    @param('id', Types.ObjectId)
+    async postDelete(_domainId: string, id: ObjectId) {
+        const request = await getRequest(domainIdOf(this), id);
+        await assertCanViewCollectOrHide(this.user, request, domainIdOf(this), '无权查看该收集');
+        await deleteRequestIfEmpty(request.domainId, id, actorOf(this), request.revision);
+        await OplogModel.log(this, 'collect.delete', { requestId: String(id) });
+        this.response.redirect = '/admin/collect';
     }
 }
 
@@ -836,16 +900,14 @@ class AdminCollectPackHandler extends CollectBaseHandler {
     @param('id', Types.ObjectId)
     async get(_domainId: string, id: ObjectId) {
         const request = await getRequest(domainIdOf(this), id);
-        if (!canViewCollect(this.user, request)) throw new CollectForbiddenError('无权打包');
+        await assertCanViewCollectOrHide(this.user, request, domainIdOf(this), '无权打包');
         const { entries } = await listPackEntries(request);
-        const [signed, csvRows] = await Promise.all([
-            Promise.all(entries.map(async (entry) => {
-                const file = await getFileForDownload(request, actorOf(this), entry.fileId);
-                const url = await StorageModel.signDownloadLink(file.storagePath, entry.assignedName, false, 'user');
-                return { name: entry.name, url, sha256: entry.sha256, size: entry.size };
-            })),
-            listExpectedMissingRows(request),
-        ]);
+        const csvRows = await listExpectedMissingRows(request);
+        const signed = await Promise.all(entries.map(async (entry) => {
+            const file = await getFileForDownload(request, actorOf(this), entry.fileId);
+            const url = await StorageModel.signDownloadLink(file.storagePath, entry.assignedName, false, 'user');
+            return { name: entry.name, url, sha256: entry.sha256, size: entry.size };
+        }));
         const submittedRows = listSubmittedCsvRows(entries);
         await OplogModel.log(this, 'collect.pack_download', {
             requestId: String(id),
@@ -866,7 +928,7 @@ class AdminCollectFileDownloadHandler extends CollectBaseHandler {
     @param('fileId', Types.String)
     async get(_domainId: string, id: ObjectId, fileId: string) {
         const request = await getRequest(domainIdOf(this), id);
-        if (!canViewCollect(this.user, request)) throw new CollectForbiddenError('无权下载');
+        await assertCanViewCollectOrHide(this.user, request, domainIdOf(this), '无权下载');
         const file = await getFileForDownload(request, actorOf(this), fileId);
         const identity = await lookupStudentIdentity(request.domainId, file.uid);
         const assignedName = await assignedDownloadName(request, file, identity);

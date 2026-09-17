@@ -395,6 +395,9 @@ const errors = {
     ProblemNotFoundError: TestProblemNotFoundError,
     ValidationError: TestValidationError,
     PermissionError: TestPermissionError,
+    TrainingNotFoundError: class TestTrainingNotFoundError extends Error {
+        name = 'TrainingNotFoundError';
+    },
 };
 
 const trainingRoutes: Record<string, any> = {};
@@ -679,9 +682,8 @@ describe('P3.20 course mindmap binding and projection', () => {
 
         currentContainer = { ...currentContainer, mindmapId: MAP_A };
         const unavailable = makeHandler(courseRoutes.course_detail);
-        const error = await captureFailure(() => unavailable.get('forged-domain', 'course', 'mindmap'));
-        expect(error).to.be.instanceOf(TypeError);
-        expect(error?.message).to.include('unavailable public mindmap');
+        await unavailable.get('forged-domain', 'course', 'mindmap');
+        expect(unavailable.response.body.courseMindmap).to.equal(null);
         expect(calls.mindmapSnapshots).to.deep.equal([MAP_A]);
     });
 
@@ -705,6 +707,26 @@ describe('P3.20 course mindmap binding and projection', () => {
         expect(handler.response.body.view).to.equal('overview');
         expect(handler.response.body.courseMindmap).to.equal(null);
         expect(calls.mindmapSnapshots).to.deep.equal([]);
+    });
+
+    it('keeps course GET open when a referenced problem set is gone', async () => {
+        currentContainer = {
+            domainId: 'system',
+            docId: 'course',
+            owner: 7,
+            kind: 'course',
+            title: 'Course',
+            content: '',
+            description: '',
+            courseGroupIds: [],
+            dag: [
+                { _id: 1, title: 'Missing', pids: [], requireNids: [], problemSetId: 'aaaaaaaaaaaaaaaaaaaaaaaa' },
+            ],
+        };
+        const handler = makeHandler(courseRoutes.course_detail);
+        await handler.get('forged-domain', 'course');
+        expect(handler.response.body.staleReferencedProblemSetIds).to.deep.equal(['aaaaaaaaaaaaaaaaaaaaaaaa']);
+        expect(handler.response.body.chapters.map((chapter: { pids: number[] }) => chapter.pids)).to.deep.equal([[]]);
     });
 
     it('projects only visible in-course problems with direct nodes from the bound map', async () => {
@@ -848,13 +870,14 @@ describe('P3.8 course workspace capabilities', () => {
     });
 
     it('lets course editors CAS-assign owner and maintainers and rejects owners without edit-all', async () => {
-        currentContainer = { domainId: 'system', docId: 'course', owner: 7, maintainer: [8], kind: 'course', title: 'Own', dag: [] };
+        currentContainer = { domainId: 'system', docId: 'course', owner: 42, maintainer: [8], kind: 'course', title: 'Own', dag: [] };
         const ownerOnly = makeHandler(courseRoutes.course_edit);
         await ownerOnly.prepare('forged-domain', 'course');
         const denied = await captureFailure(() => ownerOnly.postAssign('forged-domain', 'course', 7, 42, [8]));
         expect(denied?.name).to.equal('PermissionError');
         expect(calls.assign).to.deep.equal([]);
 
+        currentContainer = { domainId: 'system', docId: 'course', owner: 7, maintainer: [8], kind: 'course', title: 'Own', dag: [] };
         const editor = makeHandler(
             courseRoutes.course_edit,
             makeUser({
@@ -997,6 +1020,17 @@ describe('P3.8 course workspace capabilities', () => {
         const allowed = makeHandler(courseRoutes.course_detail, allowedUser);
         await allowed.get('forged-domain', 'course');
         expect(allowed.response.body.canCreateQuiz).to.equal(true);
+
+        const privUser = makeUser({
+            _id: 99,
+            own: () => false,
+            hasPerm: () => false,
+            hasPriv: (priv: number) => priv === PRIV.PRIV_USER_PROFILE || priv === PRIV.PRIV_EDIT_SYSTEM,
+        });
+        const priv = makeHandler(courseRoutes.course_detail, privUser);
+        await priv.get('forged-domain', 'course');
+        expect(priv.response.body.canManage).to.equal(true);
+        expect(priv.response.body.canCreateQuiz).to.equal(true);
     });
 });
 
@@ -1310,8 +1344,12 @@ describe('P3.6 protected course files', () => {
 
     it('allows only the owner or a system administrator to manage files', async () => {
         currentContainer = courseWithFile();
-        const regular = makeHandler(courseRoutes.course_files);
-        expect((await captureFailure(() => regular.prepare('forged-domain', 'course')))?.name).to.equal('PermissionError');
+        const stranger = makeHandler(courseRoutes.course_files);
+        expect((await captureFailure(() => stranger.prepare('forged-domain', 'course')))?.name).to.equal('TrainingNotFoundError');
+
+        boundGroupIds = [courseGroupA];
+        const student = makeHandler(courseRoutes.course_files);
+        expect((await captureFailure(() => student.prepare('forged-domain', 'course')))?.name).to.equal('PermissionError');
 
         const admin = makeHandler(
             courseRoutes.course_files,
@@ -1333,13 +1371,24 @@ describe('P3.6 protected course files', () => {
         expect(handler.response.redirect).to.equal('/signed');
     });
 
+    it('rejects a hidden course with the same student-facing hidden error as detail', async () => {
+        currentContainer = courseWithFile({ courseHidden: true });
+        boundGroupIds = [courseGroupA];
+        const handler = makeHandler(courseRoutes.course_file_download);
+        const error = await captureFailure(() => handler.get('forged-domain', 'course', 'slides.pdf'));
+
+        expect(error?.name).to.equal('ValidationError');
+        expect(String(error?.message || '')).to.include('该课程已隐藏');
+        expect(calls.storageSigns).to.have.length(0);
+    });
+
     it('rejects an out-of-scope student before signing any storage URL', async () => {
         currentContainer = courseWithFile();
         boundGroupIds = [courseGroupB];
         const handler = makeHandler(courseRoutes.course_file_download);
         const error = await captureFailure(() => handler.get('forged-domain', 'course', 'slides.pdf'));
 
-        expect(error?.name).to.equal('PermissionError');
+        expect(error?.name).to.equal('TrainingNotFoundError');
         expect(calls.storageSigns).to.have.length(0);
     });
 
@@ -1607,10 +1656,10 @@ describe('P3.1 training kind canonical handlers', () => {
         for (const kind of [undefined, 'training', 'problem_set', 'other']) {
             currentContainer = { ...base, kind };
             expect((await captureFailure(() => makeHandler(courseRoutes.course_detail).get('forged-domain', 'set')))?.name).to.equal(
-                'ValidationError',
+                'TrainingNotFoundError',
             );
             expect((await captureFailure(() => makeHandler(courseRoutes.course_edit).prepare('forged-domain', 'set')))?.name).to.equal(
-                'ValidationError',
+                'TrainingNotFoundError',
             );
             expect((await captureFailure(() => makeHandler(courseRoutes.course_files).prepare('forged-domain', 'set')))?.name).to.equal(
                 'NotFoundError',
@@ -1619,10 +1668,10 @@ describe('P3.1 training kind canonical handlers', () => {
                 'NotFoundError',
             );
             expect((await captureFailure(() => makeHandler(courseRoutes.course_detail).postEnroll('forged-domain', 'set')))?.name).to.equal(
-                'ValidationError',
+                'TrainingNotFoundError',
             );
             expect((await captureFailure(() => makeHandler(courseRoutes.course_edit).postDelete('forged-domain', 'set')))?.name).to.equal(
-                'ValidationError',
+                'TrainingNotFoundError',
             );
         }
     });
@@ -1647,6 +1696,7 @@ describe('P3.3 problem set access handler gates', () => {
         expect(Object.keys(visible.response.body).sort()).to.deep.equal(
             [
                 'access',
+                'canManage',
                 'completedProblemCount',
                 'groups',
                 'integrityControlled',

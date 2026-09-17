@@ -199,6 +199,16 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     if (fromHomework && request === '../model/storage') return {};
     if (fromHomework && request === '../model/system') return { get: () => 1024 };
     if (fromHomework && request === '../model/training') return trainingStub;
+    if (fromHomework && request === '../lib/course-access') {
+        return {
+            canManageCourse(user: any, tdoc: any, perm: unknown) {
+                return user.own(tdoc) || user.hasPerm(perm) || user.hasPriv('PRIV_EDIT_SYSTEM');
+            },
+            async assertCourseAccessible() {
+                return undefined;
+            },
+        };
+    }
     if (fromHomework && request === '../model/user') return userStub;
     if (fromHomework && request === '../service/server') return serverStub;
     if (fromHomework && request === './contest') return contestHandlerStub;
@@ -452,6 +462,81 @@ describe('P3.7 course homework scope', () => {
         expect(courseAttaches).to.deep.equal([]);
     });
 
+    it('lets PRIV open homework create without CREATE_HOMEWORK', async () => {
+        const handler = makeHandler(routes.homework_create, {
+            hasPerm: () => false,
+            hasPriv: (priv: string) => priv === 'PRIV_EDIT_SYSTEM',
+        });
+        handler.checkPerm = () => {
+            throw new Error('CREATE_HOMEWORK should not be required for PRIV');
+        };
+        await handler.get('forged-domain');
+        expect(handler.response.body.page_name).to.equal('homework_create');
+    });
+
+    it('rejects homework create GET when the course shortcut is stale', async () => {
+        const missingCourse = makeHandler(routes.homework_create);
+        currentCourse = { ...currentCourse, kind: 'problem_set' };
+        let missingCourseError: any;
+        try {
+            await missingCourse.get('forged-domain', undefined, courseId, 3);
+        } catch (caught) {
+            missingCourseError = caught;
+        }
+        expect(missingCourseError?.name).to.equal('ValidationError');
+
+        currentCourse = {
+            domainId: 'system',
+            docId: courseId,
+            owner: 42,
+            kind: 'course',
+            title: '程序设计',
+            courseGroupIds: [groupA],
+            dag: [{ _id: 3, title: '循环', pids: [], requireNids: [], tids: [] }],
+        };
+        const missingChapter = makeHandler(routes.homework_create);
+        let missingChapterError: any;
+        try {
+            await missingChapter.get('forged-domain', undefined, courseId, 9);
+        } catch (caught) {
+            missingChapterError = caught;
+        }
+        expect(missingChapterError?.name).to.equal('ValidationError');
+    });
+
+    it('still rejects a stale course shortcut on homework create POST', async () => {
+        const handler = makeHandler(routes.homework_create);
+        currentCourse = { ...currentCourse, kind: 'problem_set' };
+        let error: any;
+        try {
+            await handler.postUpdate(
+                'forged-domain',
+                undefined,
+                '2026-07-13',
+                '00:00',
+                '2026-07-20',
+                '23:59',
+                1,
+                { 1: 0.9 },
+                '程序设计 · 循环',
+                '',
+                '101',
+                false,
+                [],
+                [],
+                [],
+                'none',
+                [],
+                courseId,
+                3,
+            );
+        } catch (caught) {
+            error = caught;
+        }
+        expect(error?.name).to.equal('ValidationError');
+        expect(contestAdds).to.deep.equal([]);
+    });
+
     it('keeps ordinary homework unrestricted when participant scope is none', () => {
         expect(homeworkParticipantScopeAllows({ participantScopeMode: 'none' } as any, new Set())).to.equal(true);
         expect(homeworkParticipantScopeAllows({} as any, new Set())).to.equal(true);
@@ -527,7 +612,80 @@ describe('P3.7 course homework scope', () => {
         const contest = readFileSync(require.resolve('../src/handler/contest.ts'), 'utf8');
         expect(homework).to.include('buildHomeworkListAccessFilter(');
         expect(homework).to.include('assertHomeworkAccess(authoritativeDomainId, this.tdoc, this.user)');
+        expect(homework).to.include('canManageCourse(handlerUser, course, PERM.PERM_EDIT_COURSE)');
+        expect(homework).to.include('assertCourseAccessible(domainId, handlerUser._id, course)');
+        expect(homework).to.include('else if (!canCreateHomework(this.user)) this.checkPerm(PERM.PERM_CREATE_HOMEWORK)');
+        expect(homework).to.include('canDeleteHomework: canDeleteHomework(this.user, this.tdoc)');
+        expect(homework).to.include('throw error;');
+        expect(homework).not.to.include("HomeworkMainHandler, PERM.PERM_VIEW_HOMEWORK");
+        expect(homework).not.to.include("HomeworkDetailHandler, PERM.PERM_VIEW_HOMEWORK");
+        expect(homework).not.to.include("HomeworkFilesHandler, PERM.PERM_VIEW_HOMEWORK");
+        expect(homework).not.to.include("ContestFileDownloadHandler, PERM.PERM_VIEW_HOMEWORK");
+        expect(homework).to.include('class HomeworkFileDownloadHandler extends ContestFileDownloadHandler');
+        expect(homework).to.include("this.tdoc.rule !== 'homework'");
+        expect(homework).to.include('HomeworkFileDownloadHandler');
+        expect(homework).to.include("ContestCodeHandler, PERM.PERM_VIEW_HOMEWORK");
+        expect(homework).to.include('async function assertHomeworkManageOrHide(');
+        expect(homework).to.include("tdoc.rule !== 'homework'");
+        expect(homework).to.include('assertHomeworkAccess(domainId, tdoc, user)');
+        expect(homework).to.include("error.name === 'NotAssignedError'");
+        const editSection = homework.slice(homework.indexOf('class HomeworkEditHandler'), homework.indexOf('export class HomeworkFilesHandler'));
+        const filesSection = homework.slice(homework.indexOf('export class HomeworkFilesHandler'), homework.indexOf('export async function apply'));
+        expect(editSection).to.include('assertHomeworkManageOrHide(authoritativeDomainId, tdoc, this.user, canEditHomework(this.user, tdoc)');
+        expect(editSection).to.include('assertHomeworkManageOrHide(authoritativeDomainId, tdoc, this.user, canDeleteHomework(this.user, tdoc)');
+        expect(filesSection).not.to.include('assertCanEditHomework');
+        expect(filesSection).to.include('assertHomeworkManageOrHide(');
+        expect(filesSection).to.include('PERM.PERM_EDIT_HOMEWORK');
+        const management = contest.slice(
+            contest.indexOf('export class ContestManagementBaseHandler'),
+            contest.indexOf('export class ContestCodeHandler'),
+        );
+        expect(management).to.include('async __prepare(');
+        expect(management).to.include('NotAssignedError');
+        expect(management).to.include('contest.RULES[this.tdoc.rule].hidden');
+        expect(management).to.include('throw new ContestNotFoundError(this.authoritativeDomainId(), tid)');
         expect(home).to.include('buildHomeworkListAccessFilter(');
-        expect(contest.match(/assertHomeworkAccess\(/g)).to.have.length(2);
+        expect(contest).to.include('async function assertHomeworkAccessOrHide(');
+        expect(contest.match(/assertHomeworkAccess\(/g)).to.have.length(1);
+        const hideAssign = contest.slice(
+            contest.indexOf('async function hideAssignRestrictedContest'),
+            contest.indexOf('async function assertHomeworkAccessOrHide'),
+        );
+        expect(hideAssign).to.include('PERM.PERM_EDIT_CONTEST');
+        expect(hideAssign).to.include('PERM.PERM_VIEW_HIDDEN_CONTEST');
+        expect(hideAssign).not.to.include('PRIV.PRIV_EDIT_SYSTEM');
+        const detailPrepare = contest.slice(
+            contest.indexOf('export class ContestDetailBaseHandler'),
+            contest.indexOf('const isAdminBypass = this.user.own(this.tdoc)'),
+        );
+        expect(detailPrepare).to.include('!this.user.hasPerm(PERM.PERM_EDIT_CONTEST)');
+        expect(detailPrepare).to.include('!this.user.hasPerm(PERM.PERM_VIEW_HIDDEN_CONTEST)');
+        expect(detailPrepare).to.include('throw new ContestNotFoundError(authoritativeDomainId, tid)');
+        expect(detailPrepare).not.to.include('NotAssignedError');
+        expect(detailPrepare).not.to.include('PRIV.PRIV_EDIT_SYSTEM');
+        const scopeMiss = contest.slice(contest.indexOf("result.reason === 'scope_miss'"), contest.indexOf("result.reason === 'client_only'"));
+        expect(scopeMiss).to.include('throw new ContestNotFoundError(authoritativeDomainId, tid)');
+        expect(contest).to.include('else await hideAssignRestrictedContest(authoritativeDomainId, tdoc, this.user)');
+        const fileDownload = contest.slice(
+            contest.indexOf('export class ContestFileDownloadHandler'),
+            contest.indexOf('export class ContestUserHandler'),
+        );
+        expect(fileDownload).to.include('requireContestViewUnlessEditor(this, this.tdoc)');
+        expect(fileDownload).to.include('throw new NotFoundError(filename)');
+        expect(fileDownload.indexOf('throw new NotFoundError(filename)')).to.be.lessThan(
+            fileDownload.indexOf("type === 'private' && !this.user.own(this.tdoc)"),
+        );
+        const codeHandler = contest.slice(contest.indexOf('export class ContestCodeHandler'), contest.indexOf('export class ContestManagementHandler'));
+        expect(codeHandler.indexOf('contest.RULES[tdoc.rule].hidden')).to.be.lessThan(codeHandler.indexOf('getAndListStatus'));
+        expect(codeHandler.indexOf('hideAssignRestrictedContest(authoritativeDomainId, tdoc, this.user)')).to.be.lessThan(
+            codeHandler.indexOf('getAndListStatus'),
+        );
+        expect(contest).to.include('export function requireContestViewUnlessEditor');
+        expect(readFileSync(require.resolve('../src/handler/contest-team-batch.ts'), 'utf8')).not.to.include(
+            "TeamBatchListHandler, PERM.PERM_VIEW_CONTEST",
+        );
+        const records = readFileSync(require.resolve('../src/handler/record.ts'), 'utf8');
+        expect(records).to.include('this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM) && this.tdoc && isContestNotFoundError(error)');
+        expect(records).to.include("error.name === 'ContestNotFoundError'");
     });
 });

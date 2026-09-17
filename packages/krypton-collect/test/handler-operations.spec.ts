@@ -18,8 +18,19 @@ describe('collect Hydro operation methods', () => {
         expect(edit).to.include('async postCreate');
         expect(edit).to.include('async postUpdate');
         expect(edit).to.include('async postPublish');
+        expect(edit).to.include('async postArchive');
+        expect(edit).to.include('async postDelete');
         expect(edit).to.include("applyEditPost(id, 'create')");
         expect(edit).to.not.match(/async post\(/);
+        const applyAt = edit.indexOf('async applyEditPost');
+        const archiveAt = edit.indexOf("operation === 'archive'");
+        const deleteAt = edit.indexOf("operation === 'delete'");
+        const slotsAt = edit.indexOf('const slots = parseSlotsJson');
+        expect(applyAt).to.be.at.least(0);
+        expect(archiveAt).to.be.greaterThan(applyAt);
+        expect(deleteAt).to.be.greaterThan(applyAt);
+        expect(slotsAt).to.be.greaterThan(archiveAt);
+        expect(slotsAt).to.be.greaterThan(deleteAt);
     });
 
     it('maps list and stats form operations to Hydro post* methods', () => {
@@ -32,6 +43,8 @@ describe('collect Hydro operation methods', () => {
         expect(list).to.include('async postDelete');
         expect(list).to.not.match(/async post\(/);
         expect(stats).to.include('async postNudge');
+        expect(stats).to.include('async postArchive');
+        expect(stats).to.include('async postDelete');
         expect(stats).to.not.match(/async post\(/);
     });
 
@@ -61,5 +74,26 @@ describe('collect Hydro operation methods', () => {
         expect(detail).to.include('fileIndexInSlot');
         expect(stats).to.include('assignedNameForFile');
         expect(stats).to.include('fileIndexInSlot');
+    });
+
+    it('hides collect existence from non-viewers who are not the audience', () => {
+        expect(handlerSource).to.include('async function assertCanViewCollectOrHide(');
+        expect(handlerSource).to.include("request.status === 'draft' || request.status === 'archived'");
+        expect(handlerSource).to.include('isAudienceMember(domainId, user._id, request)');
+        const download = sliceClass('CollectFileDownloadHandler');
+        expect(download).to.include('CollectNotFoundError');
+        const edit = sliceClass('AdminCollectEditHandler');
+        const stats = sliceClass('AdminCollectStatsHandler');
+        const pack = sliceClass('AdminCollectPackHandler');
+        const adminFile = sliceClass('AdminCollectFileDownloadHandler');
+        expect(edit).to.include("assertCanViewCollectOrHide(this.user, request, domainId, '无权查看该收集')");
+        expect(edit).to.include("assertCanViewCollectOrHide(this.user, current, domainId, '无权查看该收集')");
+        const list = sliceClass('AdminCollectListHandler');
+        expect(list).to.include("assertCanViewCollectOrHide(this.user, current, domainId, '无权查看该收集')");
+        expect(stats).to.include("assertCanViewCollectOrHide(this.user, request, domainIdOf(this), '无权查看该收集')");
+        expect(stats).to.include('async postNudge');
+        expect(stats).to.include("assertCanViewCollectOrHide(this.user, request, domainIdOf(this), '无权查看该收集')");
+        expect(pack).to.include("assertCanViewCollectOrHide(this.user, request, domainIdOf(this), '无权打包')");
+        expect(adminFile).to.include("assertCanViewCollectOrHide(this.user, request, domainIdOf(this), '无权下载')");
     });
 });

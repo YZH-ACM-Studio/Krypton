@@ -174,8 +174,10 @@ describe('course video wiring', () => {
         const course = readSrc('src/handler/course.ts');
         const videoSource = readSrc('src/handler/course-video.ts');
         expect(videoSource).to.include("ctx.Route('course_video_upload'");
-        expect(videoSource).to.include("ctx.Route('course_video_play'");
-        expect(videoSource).to.include("ctx.Route('course_video_progress'");
+        expect(videoSource).to.include("ctx.Route('course_video_play', '/course/:tid/video/:videoId/play', CourseVideoPlayHandler);");
+        expect(videoSource).to.include("ctx.Route('course_video_progress', '/course/:tid/video/:videoId/progress', CourseVideoProgressHandler);");
+        expect(videoSource).not.to.include('CourseVideoPlayHandler, PERM.PERM_VIEW_TRAINING');
+        expect(videoSource).not.to.include('CourseVideoProgressHandler, PERM.PERM_VIEW_TRAINING');
         expect(videoSource).to.include("ctx.Route('course_videos'");
         expect(videoSource).to.include("ctx.Route('course_videos_csv'");
         expect(videoSource).to.include("rosterUnavailable: 'no_groups'");
@@ -185,6 +187,9 @@ describe('course video wiring', () => {
         expect(course).to.include('courseVideoDueAt');
         expect(course).to.include('rewriteCourseVideosForCopy');
         expect(videoSource).to.include('getRange');
+        expect(videoSource).to.include('if (!meta) throw new NotFoundError');
+        expect(videoSource).to.include('throw new TrainingNotFoundError(domainId, tdoc.docId)');
+        expect(videoSource).not.to.include('PERM.PERM_VIEW_TRAINING');
         expect(videoSource).not.to.match(/video\/:videoId\/play[\s\S]{0,800}signDownloadLink/);
         const postCopy = course.slice(course.indexOf('async postCopy('), course.indexOf('async postDelete('));
         expect(postCopy).to.include('rewriteCourseVideosForCopy');
@@ -201,6 +206,7 @@ describe('course video wiring', () => {
         expect(progress).to.match(/assertCanView|courseAccessibleTo/);
         expect(progress).to.include('findStudentByUserId');
         expect(progress).to.include('未绑定学号，不能记录观看');
+        expect(progress).to.include('studentDirectory()');
         const afterStudent = progress.slice(progress.indexOf('findStudentByUserId'));
         expect(afterStudent).not.to.match(/groups\.some/);
     });

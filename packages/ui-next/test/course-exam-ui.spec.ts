@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { collectCourseExamVideos, computeCourseExamWatchState } from '../src/pages/course/course-exam-card';
+import { canEnterCourseExam, collectCourseExamVideos, computeCourseExamWatchState, COURSE_EXAM_ENTER_GRACE_MS } from '../src/pages/course/course-exam-watch';
 import type { CourseChapter, CourseExamBinding, CourseStudentVideo } from '../src/pages/course/types';
 
 const uiRoot = resolve(import.meta.dirname, '..');
@@ -87,6 +87,26 @@ describe('course exam UI source contracts', () => {
     expect(card).to.include('/exam-mode/');
     expect(card).to.include('预览考试');
     expect(card).to.include('看完后才能参加考试');
+    expect(card).to.include('老师还没开放视频，还不能参加考试');
+    expect(card).to.include('state.locked && state.remaining === 0 && state.remainingVideos.length === 0');
+    expect(card).not.to.include('还需看完 0');
+    expect(card).to.include('canEnterCourseExam');
+    expect(card).to.include('考试已结束');
+    expect(card).to.include('考试不存在');
+    expect(card).to.include('!canEnter && windowClosed');
+    expect(card).to.match(/canEnter \? \([\s\S]*进入考试/);
+  });
+
+  it('settings hint names binding rejects without new fields or courseGroupIds', () => {
+    const settings = readUi('src/pages/course/course-exam-settings.tsx');
+    expect(settings).to.include('绑定会被拒绝：client_required 考试、比赛分配名单、空试卷、没有已确认视频，或考试范围未覆盖课程班级。');
+    expect(settings).not.to.include('courseGroupIds');
+    expect(settings).not.to.include('已证明看完');
+    expect([...settings.matchAll(/name="/g)]).to.have.lengthOf(4);
+    expect(settings).to.include('name="courseExamContestId"');
+    expect(settings).to.include('name="courseExamGate"');
+    expect(settings).to.include('name="courseExamPercent"');
+    expect(settings).to.include('name="courseExamChapterId"');
   });
 
   it('quoted Chinese-comma catalog keys stay quoted for the remaining-video sentence', () => {
@@ -150,10 +170,35 @@ describe('computeCourseExamWatchState', () => {
     expect(percentFail.remaining).to.be.greaterThan(0);
   });
 
+  it('lets attended students enter and hides the link after the grace window', () => {
+    const endAt = '2026-09-17T00:00:00.000Z';
+    const endMs = Date.parse(endAt);
+    expect(COURSE_EXAM_ENTER_GRACE_MS).to.equal(60_000);
+    expect(canEnterCourseExam({ watchLocked: true, attend: true, endAt, now: endMs })).to.equal(true);
+    expect(canEnterCourseExam({ watchLocked: false, attend: false, endAt, now: endMs })).to.equal(false);
+    expect(canEnterCourseExam({ watchLocked: false, attend: false, missing: true })).to.equal(false);
+    expect(canEnterCourseExam({
+      watchLocked: false,
+      attend: false,
+      endAt,
+      now: endMs + COURSE_EXAM_ENTER_GRACE_MS + 1,
+    })).to.equal(false);
+    expect(canEnterCourseExam({
+      watchLocked: true,
+      attend: true,
+      endAt,
+      now: endMs + COURSE_EXAM_ENTER_GRACE_MS + 1,
+    })).to.equal(false);
+    expect(canEnterCourseExam({ watchLocked: true, attend: false })).to.equal(false);
+    expect(canEnterCourseExam({ watchLocked: false, attend: false })).to.equal(true);
+  });
+
   it('fail-closes when the confirmed/student-visible list is empty', () => {
     const allGate: CourseExamBinding = { contestId: 'exam', gate: 'all' };
     const percentGate: CourseExamBinding = { contestId: 'exam', gate: 'percent', percent: 100 };
-    expect(computeCourseExamWatchState([], allGate).locked).to.equal(true);
-    expect(computeCourseExamWatchState([], percentGate).locked).to.equal(true);
+    const emptyAll = computeCourseExamWatchState([], allGate);
+    const emptyPercent = computeCourseExamWatchState([], percentGate);
+    expect(emptyAll).to.deep.equal({ locked: true, remaining: 0, remainingVideos: [] });
+    expect(emptyPercent).to.deep.equal({ locked: true, remaining: 0, remainingVideos: [] });
   });
 });

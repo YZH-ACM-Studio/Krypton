@@ -12,6 +12,9 @@ export interface CourseExamBinding {
 export interface CourseExamContestPreview {
   docId: string;
   title: string;
+  endAt?: string;
+  attend?: boolean;
+  missing?: boolean;
 }
 
 export interface CourseRecord {
@@ -77,7 +80,16 @@ export function readCourseExamContest(value: unknown): CourseExamContestPreview 
   if (!isPlainRecord(value)) throw new TypeError('courseExamContest must be an object');
   const docId = readCourseExamDocumentId(value.docId ?? value._id);
   const title = typeof value.title === 'string' && value.title.trim() ? value.title.trim() : '结业考试';
-  return { docId, title };
+  const endAt = typeof value.endAt === 'string' && value.endAt.trim() ? value.endAt.trim() : undefined;
+  const attend = value.attend === true;
+  const missing = value.missing === true;
+  return {
+    docId,
+    title,
+    ...(endAt ? { endAt } : {}),
+    ...(attend ? { attend: true } : {}),
+    ...(missing ? { missing: true } : {}),
+  };
 }
 
 export interface CourseFile {

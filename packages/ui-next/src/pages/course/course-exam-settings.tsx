@@ -115,6 +115,7 @@ export function CourseExamSettings({
           minHeight={44}
         />
         <p className="text-xs text-muted-foreground">最多绑定一场本域选择题考试。不选则取消结业考试。</p>
+        <p className="text-xs text-muted-foreground">绑定会被拒绝：client_required 考试、比赛分配名单、空试卷、没有已确认视频，或考试范围未覆盖课程班级。</p>
       </div>
 
       <input type="hidden" name="courseExamContestId" value={examId} />

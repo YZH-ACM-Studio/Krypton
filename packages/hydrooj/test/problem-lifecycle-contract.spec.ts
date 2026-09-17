@@ -567,4 +567,16 @@ describe('P2.12 YAGNI lifecycle contract', () => {
         expect(guard.indexOf('const formalTitleCorrection')).to.be.lessThan(guard.indexOf("immutableFields.push('title')"));
         expect(guard).to.include("return { capability: 'formal-title', requestedFields, changedFields, immutableFields, publishes }");
     });
+
+    it('treats a missing problemKind as programming when saving a structured statement, without loosening revision CAS', () => {
+        const source = readFileSync(resolve(root, 'src/model/problem.ts'), 'utf8');
+        const saveStart = source.indexOf('static async saveProgrammingStatement(');
+        const saveEnd = source.indexOf('static async editAuthorized(', saveStart);
+        const save = source.slice(saveStart, saveEnd);
+        expect(saveStart).to.be.greaterThan(-1);
+        expect(saveEnd).to.be.greaterThan(saveStart);
+        expect(save).to.include("if (effectiveProblemKind(current) !== 'programming') throw new ValidationError('problemKind')");
+        expect(save).to.include('assertStructureRevision(input.expectedStructureRevision)');
+        expect(save).not.to.include('parseProblemKind(current.problemKind)');
+    });
 });

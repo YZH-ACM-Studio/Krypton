@@ -2004,6 +2004,9 @@ describe('P2.11 concrete-problem viewing', () => {
         expect(canViewProblem(makeUser('hidden-viewer'), managed)).to.equal(false);
         expect(canViewProblem(makeUser('student', { _permitPids: new Set([100]) }), managed)).to.equal(true);
         expect(canViewProblem(makeUser('admin'), managed)).to.equal(true);
+        expect(canViewProblem(makeUser('admin', { hasPerm: () => false }), pdoc(100, 7, false))).to.equal(true);
+        expect(canViewProblem(makeUser('admin', { hasPerm: () => false }), managed)).to.equal(true);
+        expect(canViewProblem(makeUser('student', { hasPerm: () => false }), pdoc(100, 7, false))).to.equal(false);
     });
 
     it('fails closed for public, owner, and administrator access when ACL preload fails', () => {

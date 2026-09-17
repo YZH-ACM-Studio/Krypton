@@ -4664,7 +4664,7 @@ export class ProblemModel {
             },
         );
         if (!current) throw new ProblemNotFoundError(input.domainId, input.pid);
-        if (parseProblemKind(current.problemKind) !== 'programming') throw new ValidationError('problemKind');
+        if (effectiveProblemKind(current) !== 'programming') throw new ValidationError('problemKind');
         if (current.statementFormat !== undefined && !['structured-v1', 'legacy-import-v1'].includes(current.statementFormat)) {
             throw new ValidationError('statementFormat');
         }

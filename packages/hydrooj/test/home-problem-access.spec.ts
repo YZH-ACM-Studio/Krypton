@@ -229,6 +229,20 @@ describe('P2.11 homepage problem enumeration', () => {
         expect(calls.getListStatus).to.have.lengthOf(1);
     });
 
+    it('lists starred problems for bank browsers without VIEW_PROBLEM', async () => {
+        starredStatuses = [{ docId: 7 }];
+        starredDocs = { 7: { domainId: 'system', docId: 7 } };
+        const handler = makeHandler(
+            makeUser({
+                hasPerm: () => false,
+                canBrowseProblemBank: true,
+                viewableProblemIds: new Set([7]),
+            }),
+        );
+
+        expect(await handler.getStarredProblems('system', 50)).to.deep.equal([[starredDocs[7]]]);
+    });
+
     it('resolves only known starred ids through the stable direct-read boundary', async () => {
         starredStatuses = [{ docId: 7 }, { docId: 8 }, { docId: 9 }];
         starredDocs = {

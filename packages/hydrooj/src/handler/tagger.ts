@@ -314,7 +314,6 @@ class TaggerApiHandler extends Handler {
 class TaggerProblemsHandler extends TaggerApiHandler {
     async get() {
         const scope = await this.problemBankScope();
-        this.checkPerm(PERM.PERM_VIEW_PROBLEM);
         const domainId = taggerDomain();
         const pdocs = await problem
             .getMulti(domainId, { $and: [scope, { hidden: { $ne: true } }] }, [
@@ -346,7 +345,6 @@ class TaggerProblemsHandler extends TaggerApiHandler {
 class TaggerVocabHandler extends TaggerApiHandler {
     async get() {
         const scope = await this.problemBankScope();
-        this.checkPerm(PERM.PERM_VIEW_PROBLEM);
         const domainId = taggerDomain();
         const agg = await document.coll
             .aggregate([
@@ -381,7 +379,6 @@ class TaggerAuditHandler extends TaggerApiHandler {
         // canonical author scope restricts those rows to owned/maintained docs;
         // a global hidden-view permission must not widen the problem bank.
         const scope = await this.problemBankScope();
-        this.checkPerm(PERM.PERM_VIEW_PROBLEM);
         const domainId = taggerDomain();
         const pdocs = await problem
             .getMulti(domainId, scope, [
@@ -430,7 +427,6 @@ class TaggerMindmapHandler extends TaggerApiHandler {
     @param('mapId', Types.String)
     async get(_args: any, mapId: string) {
         await this.problemBankScope();
-        this.checkPerm(PERM.PERM_VIEW_PROBLEM);
         const domainId = taggerDomain();
         let canonicalMapId: string;
         try {
@@ -460,7 +456,6 @@ class TaggerProblemContextHandler extends TaggerApiHandler {
     @param('docId', Types.UnsignedInt)
     async get(_args: any, docId: number) {
         const scope = await this.problemBankScope();
-        this.checkPerm(PERM.PERM_VIEW_PROBLEM);
         const domainId = taggerDomain();
         const docs = await problem
             .getMulti(domainId, { $and: [scope, { docId, tag: { $in: ['L2', 'PAT甲级'] } }] }, [
@@ -500,7 +495,6 @@ class TaggerProblemContextHandler extends TaggerApiHandler {
 class TaggerApplyHandler extends TaggerApiHandler {
     @param('items', Types.Any)
     async post(_args: any, items: any) {
-        this.checkPerm(PERM.PERM_EDIT_PROBLEM);
         if (!Array.isArray(items)) {
             this.response.status = 400;
             this.response.body = { error: 'items_must_be_array' };
@@ -723,7 +717,6 @@ class TaggerRetagHandler extends TaggerApiHandler {
     @param('dryRun', Types.Any, true)
     async post(_args: any, from: any, to: any, dryRun: any) {
         const scope = await this.problemBankScope();
-        this.checkPerm(PERM.PERM_EDIT_PROBLEM);
         const fromTags = normalizeTags(from);
         if (!fromTags.length) {
             this.response.status = 400;

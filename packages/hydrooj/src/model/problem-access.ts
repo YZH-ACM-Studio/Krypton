@@ -1423,7 +1423,7 @@ function isManagedAuthorDraftOnly(user: ProblemAclUser, pdoc: ProblemDoc, capabi
 /** Canonical direct-problem view check used by ProblemModel.canViewBy. */
 export function canViewProblem(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
     if (!hasLoadedAclForProblem(user, pdoc)) return false;
-    if (!user.hasPerm(PERM.PERM_VIEW_PROBLEM)) return false;
+    if (!user.hasPerm(PERM.PERM_VIEW_PROBLEM) && !isProblemBankAdmin(user)) return false;
     if (isAclFenced(user, pdoc.docId)) return false;
     if (!pdoc.hidden) return true;
     if (isProblemBankAdmin(user)) return true;

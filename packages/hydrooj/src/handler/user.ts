@@ -429,21 +429,19 @@ class UserDetailHandler extends Handler {
         const acInfo: Record<string, number> = {};
         let problemSetCompletions: ProfileCompletionItem[] = [];
         let knowledgeNodeCompletions: ProfileCompletionItem[] = [];
-        if (this.user.hasPerm(PERM.PERM_VIEW_PROBLEM)) {
-            const psdocs = await problem.getMultiStatus(domainId, { uid, status: STATUS.STATUS_ACCEPTED }).toArray();
-            pdocs.push(
-                ...Object.values(
-                    await problem.getListViewableAuthorized(
-                        domainId,
-                        psdocs.map((i) => i.docId),
-                        this.user,
-                        [...problem.PROJECTION_LIST, 'knowledgeNodeIds'],
-                        false,
-                        true,
-                    ),
+        const psdocs = await problem.getMultiStatus(domainId, { uid, status: STATUS.STATUS_ACCEPTED }).toArray();
+        pdocs.push(
+            ...Object.values(
+                await problem.getListViewableAuthorized(
+                    domainId,
+                    psdocs.map((i) => i.docId),
+                    this.user,
+                    [...problem.PROJECTION_LIST, 'knowledgeNodeIds'],
+                    false,
+                    true,
                 ),
-            );
-        }
+            ),
+        );
         for (const pdoc of pdocs) {
             for (const tag of pdoc.tag) {
                 if (acInfo[tag]) acInfo[tag]++;
@@ -582,14 +580,12 @@ class UserDetailHandler extends Handler {
         if (this.user.hasPerm(PERM.PERM_VIEW_PROBLEM_SOLUTION)) {
             const psdocs = await SolutionModel.getByUser(domainId, uid).limit(10).toArray();
             this.response.body.psdocs = psdocs;
-            if (this.user.hasPerm(PERM.PERM_VIEW_PROBLEM)) {
-                this.response.body.pdict = await problem.getListViewableAuthorized(
-                    domainId,
-                    psdocs.map((i) => i.parentId),
-                    this.user,
-                    problem.PROJECTION_LIST,
-                );
-            }
+            this.response.body.pdict = await problem.getListViewableAuthorized(
+                domainId,
+                psdocs.map((i) => i.parentId),
+                this.user,
+                problem.PROJECTION_LIST,
+            );
         }
         this.UiContext.extraTitleContent = udoc.uname;
     }
@@ -779,13 +775,12 @@ const UserApi = {
                     }
                 }
             }
-            const students =
-                canViewStudentIdentity
-                    ? await userbind.findStudentsByUserIds(
-                          arg.domainId,
-                          udocs.map((candidate) => candidate._id),
-                      )
-                    : {};
+            const students = canViewStudentIdentity
+                ? await userbind.findStudentsByUserIds(
+                      arg.domainId,
+                      udocs.map((candidate) => candidate._id),
+                  )
+                : {};
             for (const i in udocs) {
                 udocs[i].avatarUrl = avatar(udocs[i].avatar);
             }

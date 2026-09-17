@@ -190,6 +190,14 @@ const problemStub = {
     },
     canEditProblemData: (user: any) => user.canEditData ?? user.canEditContent ?? maintainResult,
     canEditProblemTags: (user: any) => user.canEditTags ?? user.canEditContent ?? maintainResult,
+    canOpenProblemWorkspace(user: any) {
+        return (
+            (user.canEditContent ?? maintainResult) ||
+            (user.canEditData ?? user.canEditContent ?? maintainResult) ||
+            (user.canEditTags ?? user.canEditContent ?? maintainResult) ||
+            (user.canManageContributions ?? maintainResult)
+        );
+    },
     canEditProblemMetadata: (user: any) => user.canEditMetadata ?? maintainResult,
     canSubmitProblem: (user: any) =>
         user.hasPerm?.(PERM.PERM_SUBMIT_PROBLEM) === true || user.canSubmitManagedDraft === true || user.canSubmitContribution === true,
@@ -1336,8 +1344,8 @@ describe('P2.11 enumeration entry gates', () => {
             admin: true,
             hasPriv: () => false,
         });
-        const error = await captureFailure(() => invalid.get('system', 1, '', 20, false, false));
-        expect(error.message).to.equal('Managed publication candidate system/9 is missing an exact structure revision');
+        await invalid.get('system', 1, '', 20, false, false);
+        expect(invalid.response.body.managedReviewableByDocId).to.deep.equal({ 9: false });
     });
 
     it('publishes managed drafts only through an administrator or namespace-manager review service', async () => {
@@ -2702,6 +2710,77 @@ describe('P2.13 managed programming edit boundary', () => {
             programmingStatement: structuredStatement,
             metadata: {},
         });
+    });
+
+    it('forwards expectedStructureRevision 0 to the structured save boundary instead of treating it as missing', async () => {
+        const handler = managedHandler();
+        handler.pdoc.statementFormat = 'structured-v1';
+        handler.pdoc.programmingStatement = structuredStatement;
+        const programmingStatement = JSON.stringify(structuredStatement);
+        handler.request.body = { programmingStatement, expectedStructureRevision: '0' };
+
+        await handler.post(
+            'forged',
+            'P7',
+            undefined,
+            undefined,
+            undefined,
+            false,
+            [],
+            undefined,
+            [],
+            undefined,
+            undefined,
+            0,
+            '',
+            '',
+            false,
+            false,
+            undefined,
+            programmingStatement,
+        );
+
+        expect(calls.edit).to.deep.equal([]);
+        expect(calls.statementSaves).to.have.lengthOf(1);
+        expect(calls.statementSaves[0]).to.deep.include({
+            domainId: 'system',
+            pid: 7,
+            expectedStructureRevision: 0,
+            programmingStatement: structuredStatement,
+        });
+    });
+
+    it('still rejects a structured save when expectedStructureRevision is omitted', async () => {
+        const handler = managedHandler();
+        handler.pdoc.statementFormat = 'structured-v1';
+        handler.pdoc.programmingStatement = structuredStatement;
+        const programmingStatement = JSON.stringify(structuredStatement);
+        handler.request.body = { programmingStatement };
+
+        const error = await captureFailure(() =>
+            handler.post(
+                'forged',
+                'P7',
+                undefined,
+                undefined,
+                undefined,
+                false,
+                [],
+                undefined,
+                [],
+                undefined,
+                undefined,
+                undefined,
+                '',
+                '',
+                false,
+                false,
+                undefined,
+                programmingStatement,
+            ),
+        );
+        expect(error).to.be.instanceOf(GenericError);
+        expect(calls.statementSaves).to.deep.equal([]);
     });
 
     it('forwards the explicit cleared-unclassified confirmation for legacy statement conversion', async () => {

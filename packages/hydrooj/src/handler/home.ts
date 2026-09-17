@@ -65,7 +65,7 @@ export class HomeHandler extends Handler {
     }
 
     async getHomework(domainId: string, limit = 5) {
-        if (!this.user.hasPerm(PERM.PERM_VIEW_HOMEWORK)) return [[], {}];
+        if (!this.user.hasPerm(PERM.PERM_VIEW_HOMEWORK) && !canBypassHomeworkAccess(this.user)) return [[], {}];
         const canBypass = canBypassHomeworkAccess(this.user);
         const groups = (await user.listGroup(domainId, canBypass ? undefined : this.user._id)).map((i) => i.name);
         const participantGroups = canBypass ? [] : participantGroupObjectIds(await getHomeworkUserGroupIds(domainId, this.user._id));
@@ -91,14 +91,22 @@ export class HomeHandler extends Handler {
     }
 
     async getContest(domainId: string, limit = 10) {
-        if (!this.user.hasPerm(PERM.PERM_VIEW_CONTEST)) return [[], {}];
+        if (
+            !this.user.hasPerm(PERM.PERM_VIEW_CONTEST) &&
+            !this.user.hasPerm(PERM.PERM_EDIT_CONTEST) &&
+            !this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)
+        ) {
+            return [[], {}];
+        }
         const rules = Object.keys(contest.RULES).filter((i) => !contest.RULES[i].hidden);
-        const groups = (await user.listGroup(domainId, this.user.hasPerm(PERM.PERM_VIEW_HIDDEN_CONTEST) ? undefined : this.user._id)).map(
+        const canBrowseAssignRestricted =
+            this.user.hasPerm(PERM.PERM_EDIT_CONTEST) || this.user.hasPerm(PERM.PERM_VIEW_HIDDEN_CONTEST);
+        const groups = (await user.listGroup(domainId, canBrowseAssignRestricted ? undefined : this.user._id)).map(
             (i) => i.name,
         );
         const q = {
             rule: { $in: rules },
-            ...(this.user.hasPerm(PERM.PERM_VIEW_HIDDEN_CONTEST)
+            ...(canBrowseAssignRestricted
                 ? {}
                 : {
                       $or: [{ maintainer: this.user._id }, { owner: this.user._id }, { assign: { $in: groups } }, { assign: { $size: 0 } }],
@@ -114,7 +122,13 @@ export class HomeHandler extends Handler {
     }
 
     async getTraining(domainId: string, limit = 10) {
-        if (!this.user.hasPerm(PERM.PERM_VIEW_TRAINING)) return [[], {}];
+        if (
+            !this.user.hasPerm(PERM.PERM_VIEW_TRAINING) &&
+            !this.user.hasPerm(PERM.PERM_EDIT_TRAINING) &&
+            !this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)
+        ) {
+            return [[], {}];
+        }
         const listed = await training
             .getMulti(domainId, withProblemSetKind({}) as Filter<TrainingDoc>)
             .sort({ pin: -1, _id: 1 })
@@ -151,8 +165,15 @@ export class HomeHandler extends Handler {
     }
 
     async getDiscussion(domainId: string, limit = 20) {
-        if (!this.user.hasPerm(PERM.PERM_VIEW_DISCUSSION)) return [[], {}];
-        const ddocs = await discussion.getMulti(domainId).limit(limit).toArray();
+        if (
+            !this.user.hasPerm(PERM.PERM_VIEW_DISCUSSION) &&
+            !this.user.hasPerm(PERM.PERM_EDIT_DISCUSSION) &&
+            !this.user.hasPerm(PERM.PERM_CREATE_DISCUSSION) &&
+            !this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)
+        ) {
+            return [[], {}];
+        }
+        const ddocs = await discussion.getMulti(domainId, { hidden: false }).limit(limit).toArray();
         const vndict = await discussion.getListVnodes(domainId, ddocs, this.user);
         const visible = discussion.filterDiscussionsByVnodes(ddocs, vndict);
         this.collectUser(visible.map((ddoc) => ddoc.owner));
@@ -174,7 +195,12 @@ export class HomeHandler extends Handler {
 
     async getStarredProblems(domainId: string, limit = 50) {
         const currentDomainId = this.problemAccessDomain(domainId);
-        if (!currentDomainId || !this.user.hasPerm(PERM.PERM_VIEW_PROBLEM)) return [[], {}];
+        if (
+            !currentDomainId ||
+            (!this.user.hasPerm(PERM.PERM_VIEW_PROBLEM) && !ProblemModel.canBrowseProblemBank(this.user as any))
+        ) {
+            return [[], {}];
+        }
         const psdocs = await ProblemModel.getMultiStatus(currentDomainId, { uid: this.user._id, star: true }).sort('_id', 1).limit(limit).toArray();
         const pdocs = [];
         for (const psdoc of psdocs) {
@@ -186,7 +212,7 @@ export class HomeHandler extends Handler {
 
     async getRecentProblems(domainId: string, limit = 10) {
         const currentDomainId = this.problemAccessDomain(domainId);
-        if (!currentDomainId || !this.user.hasPerm(PERM.PERM_VIEW_PROBLEM) || !ProblemModel.canBrowseProblemBank(this.user as any)) return [[], {}];
+        if (!currentDomainId || !ProblemModel.canBrowseProblemBank(this.user as any)) return [[], {}];
         const pdocs = await ProblemModel.getMulti(currentDomainId, {
             $and: [ProblemModel.buildProblemBankScope(this.user as any), { hidden: false }],
         })

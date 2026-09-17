@@ -48,11 +48,54 @@ export function getNodes(name: UIInjectableFields) {
 }
 
 inject('Nav', 'homepage', { prefix: 'homepage' });
-inject('Nav', 'problem_main', { prefix: 'problem' }, PERM.PERM_VIEW_PROBLEM);
-inject('Nav', 'training_main', { prefix: 'problem_set' }, PERM.PERM_VIEW_TRAINING);
-inject('Nav', 'contest_main', { prefix: 'contest' }, PERM.PERM_VIEW_CONTEST);
-inject('Nav', 'homework_main', { prefix: 'homework' }, PERM.PERM_VIEW_HOMEWORK);
-inject('Nav', 'discussion_main', { prefix: 'discussion' }, PERM.PERM_VIEW_DISCUSSION);
+inject(
+    'Nav',
+    'problem_main',
+    { prefix: 'problem' },
+    (handler) =>
+        handler.user.hasPerm(PERM.PERM_VIEW_PROBLEM) ||
+        handler.user.hasPerm(PERM.PERM_VIEW_PROBLEM_BANK) ||
+        handler.user.hasPerm(PERM.PERM_CREATE_PROBLEM) ||
+        handler.user.hasPerm(PERM.PERM_CREATE_PROGRAMMING_DRAFT) ||
+        handler.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM),
+);
+inject(
+    'Nav',
+    'training_main',
+    { prefix: 'problem_set' },
+    (handler) =>
+        handler.user.hasPerm(PERM.PERM_VIEW_TRAINING) ||
+        handler.user.hasPerm(PERM.PERM_EDIT_TRAINING) ||
+        handler.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM),
+);
+inject(
+    'Nav',
+    'contest_main',
+    { prefix: 'contest' },
+    (handler) =>
+        handler.user.hasPerm(PERM.PERM_VIEW_CONTEST) ||
+        handler.user.hasPerm(PERM.PERM_EDIT_CONTEST) ||
+        handler.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM),
+);
+inject(
+    'Nav',
+    'homework_main',
+    { prefix: 'homework' },
+    (handler) =>
+        handler.user.hasPerm(PERM.PERM_VIEW_HOMEWORK) ||
+        handler.user.hasPerm(PERM.PERM_EDIT_HOMEWORK) ||
+        handler.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM),
+);
+inject(
+    'Nav',
+    'discussion_main',
+    { prefix: 'discussion' },
+    (handler) =>
+        handler.user.hasPerm(PERM.PERM_VIEW_DISCUSSION) ||
+        handler.user.hasPerm(PERM.PERM_EDIT_DISCUSSION) ||
+        handler.user.hasPerm(PERM.PERM_CREATE_DISCUSSION) ||
+        handler.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM),
+);
 inject(
     'Nav',
     'record_main',

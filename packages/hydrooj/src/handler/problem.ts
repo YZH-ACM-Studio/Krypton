@@ -33,6 +33,7 @@ import {
     FileLimitExceededError,
     FileTooLargeError,
     HackFailedError,
+    ManagedProblemMetadataConflictError,
     NoProblemError,
     NotFoundError,
     PermissionError,
@@ -135,7 +136,7 @@ import storage from '../model/storage';
 import system from '../model/system';
 import user from '../model/user';
 import { Handler, param, post, Query, query, route, Types } from '../service/server';
-import { ContestDetailBaseHandler } from './contest';
+import { canBrowseAssignRestrictedContests, ContestDetailBaseHandler } from './contest';
 
 export const parseCategory = (value: string) =>
     value
@@ -576,10 +577,19 @@ function isManagedPublicationCandidate(pdoc: ProblemDoc) {
     return pdoc.managedAuthoring?.metadataStatus === 'draft' || pdoc.managedAuthoring?.metadataStatus === 'confirmed';
 }
 
+function hasManagedPublicationRevision(pdoc: ProblemDoc) {
+    return Number.isSafeInteger(pdoc.structureRevision) && pdoc.structureRevision! >= 1;
+}
+
 function assertManagedPublicationRevision(pdoc: ProblemDoc) {
-    if (!Number.isSafeInteger(pdoc.structureRevision) || pdoc.structureRevision! < 1) {
+    if (!hasManagedPublicationRevision(pdoc)) {
         throw new Error(`Managed publication candidate ${pdoc.domainId}/${pdoc.docId} is missing an exact structure revision`);
     }
+}
+
+function isStaleKnowledgeMapError(error: unknown): boolean {
+    if (error instanceof ManagedProblemMetadataConflictError) return true;
+    return error instanceof Error && (error.name === 'MindmapConflictError' || error.name === 'ManagedProblemMetadataConflictError');
 }
 
 async function publishConfirmedManagedUnhide(handler: Handler, pdoc: ProblemDoc) {
@@ -841,15 +851,17 @@ export class ProblemMainHandler extends Handler {
         const canManageNamespaces = canManagePidNamespaces(this.user, domainId);
         if (owner && !isBankAdmin) throw new PermissionError(PERM.PERM_CREATE_PROBLEM);
         if (managedReview === 'pending' && !canReviewManaged) throw new PermissionError(PERM.PERM_EDIT_PROBLEM);
-        const canFilterContest = this.user.hasPerm(PERM.PERM_VIEW_CONTEST);
+        const canFilterContest =
+            this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST) || this.user.hasPerm(PERM.PERM_VIEW_CONTEST);
         if (contestId && !canFilterContest) throw new PermissionError(PERM.PERM_VIEW_CONTEST);
         let contestAccessFilter: Filter<any> | null = null;
         if (canFilterContest) {
-            const contestGroups = (await user.listGroup(domainId, this.user.hasPerm(PERM.PERM_VIEW_HIDDEN_CONTEST) ? undefined : this.user._id)).map(
+            const canBrowseAssignRestricted = canBrowseAssignRestrictedContests(this.user);
+            const contestGroups = (await user.listGroup(domainId, canBrowseAssignRestricted ? undefined : this.user._id)).map(
                 (item) => item.name,
             );
             contestAccessFilter = {
-                ...(this.user.hasPerm(PERM.PERM_VIEW_HIDDEN_CONTEST)
+                ...(canBrowseAssignRestricted
                     ? {}
                     : {
                           $or: [
@@ -954,13 +966,21 @@ export class ProblemMainHandler extends Handler {
         const ownerIds = quick ? [] : Array.from(new Set(pdocs.map((pdoc) => pdoc.owner)));
         const ownerDict = ownerIds.length ? await user.getList(domainId, ownerIds) : {};
         const ownerNames = Object.fromEntries(pdocs.map((pdoc) => [pdoc.owner, ownerDict[pdoc.owner]?.uname || `UID ${pdoc.owner}`]));
-        const canManageByDocId = Object.fromEntries((quick ? [] : pdocs).map((pdoc) => [pdoc.docId, problem.canEditProblemContent(this.user, pdoc)]));
+        const canManageByDocId = Object.fromEntries((quick ? [] : pdocs).map((pdoc) => [pdoc.docId, problem.canOpenProblemWorkspace(this.user, pdoc)]));
         const canArchiveByDocId = Object.fromEntries((quick ? [] : pdocs).map((pdoc) => [pdoc.docId, problem.canArchiveProblem(this.user, pdoc)]));
         const canCloneByDocId = Object.fromEntries((quick ? [] : pdocs).map((pdoc) => [pdoc.docId, problem.canCloneProblem(this.user, pdoc)]));
         const managedReviewableByDocId = Object.fromEntries(
             (quick ? [] : pdocs).map((pdoc) => {
                 if (!isManagedPublicationCandidate(pdoc)) return [pdoc.docId, false];
-                assertManagedPublicationRevision(pdoc);
+                if (!hasManagedPublicationRevision(pdoc)) {
+                    logger.warn(
+                        'Managed publication candidate missing structure revision on list domain=%s pid=%d actor=%d stage=list result=skipped',
+                        pdoc.domainId,
+                        pdoc.docId,
+                        this.user._id,
+                    );
+                    return [pdoc.docId, false];
+                }
                 return [pdoc.docId, problem.canPublishProblem(this.user, pdoc)];
             }),
         );
@@ -1071,7 +1091,7 @@ export class ProblemMainHandler extends Handler {
         const ddoc = await domain.get(target);
         if (!ddoc) throw localizeError(new NotFoundError(target), 'Resource {0} not found.', target);
         const dudoc = await user.getById(target, this.user._id);
-        if (!dudoc.hasPerm(PERM.PERM_CREATE_PROBLEM)) throw new PermissionError(PERM.PERM_CREATE_PROBLEM);
+        if (!problem.canCreateAllProblemKinds(dudoc)) throw new PermissionError(PERM.PERM_CREATE_PROBLEM);
         if (!pids.length) throw new ValidationError('pids');
         if (cloneLang) {
             if (pids.length !== 1) throw new ValidationError('cloneLang');
@@ -1791,9 +1811,20 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
         virtual = false,
     ) {
         const domainId = String(this.domain?._id);
-        this.pdoc = tid
-            ? await problem.get(domainId, pid)
-            : await problem.getViewableAuthorized(domainId, pid, this.user, [...problem.PROJECTION_PUBLIC, 'managedAuthoring', 'reactions']);
+        if (tid) {
+            this.pdoc = await problem.get(domainId, pid);
+        } else {
+            await problem.refreshProblemAcl(this.user, domainId);
+            this.pdoc = await problem.getViewableAuthorized(domainId, pid, this.user, [
+                ...problem.PROJECTION_PUBLIC,
+                'managedAuthoring',
+                'reactions',
+            ]);
+            if (!this.pdoc) {
+                const workspace = await problem.get(domainId, pid, [...problem.PROJECTION_PUBLIC, 'managedAuthoring', 'reactions']);
+                if (workspace && problem.canOpenProblemWorkspace(this.user, workspace)) this.pdoc = workspace;
+            }
+        }
         if (!this.pdoc) throw new ProblemNotFoundError(domainId, pid);
         this.canSubmitLoadedProblem = tid ? this.user.hasPerm(PERM.PERM_SUBMIT_PROBLEM) : problem.canSubmitProblem(this.user, this.pdoc);
         const canManageContest =
@@ -1822,7 +1853,7 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
                 this.virtualAttempt = await virtualContestService.assertActiveForUser(domainId, attempt._id, this.user._id, this.pdoc.docId);
             } else {
                 if (!this.tdoc?.pids?.includes(this.pdoc.docId)) throw new ContestNotFoundError(domainId, tid);
-                if (contest.isNotStarted(this.tdoc)) throw new ContestNotLiveError(tid);
+                if (contest.isNotStarted(this.tdoc) && !canManageContest) throw new ContestNotLiveError(tid);
                 // Krypton: a privileged viewer (contest owner / editor / system admin)
                 // who opened a problem from an external scoreboard hasn't "attended"
                 // the live contest. Don't block them — let them view it (contest
@@ -1943,11 +1974,24 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
                 ? materializeKnowledgeMindmapTags(this.knowledgeNodeIdsForDetail, {
                       knowledgeMapId: this.pdoc.knowledgeMapId,
                       requireMap: true,
-                  }).then((knowledge) => ({
-                      id: String(knowledge.mapId),
-                      title: knowledge.mapTitle,
-                      nodes: knowledge.nodePaths,
-                  }))
+                  })
+                      .then((knowledge) => ({
+                          id: String(knowledge.mapId),
+                          title: knowledge.mapTitle,
+                          nodes: knowledge.nodePaths,
+                      }))
+                      .catch((error) => {
+                          if (!isStaleKnowledgeMapError(error)) throw error;
+                          logger.warn(
+                              'Stale knowledge map omitted from problem detail domain=%s pid=%d map=%s actor=%d stage=detail result=omitted error=%o',
+                              this.pdoc.domainId,
+                              this.pdoc.docId,
+                              this.pdoc.knowledgeMapId,
+                              this.user._id,
+                              error,
+                          );
+                          return null;
+                      })
                 : Promise.resolve(null),
         ]);
         const responsePdoc: ProblemDoc & { programmingStatementView?: ReturnType<typeof programmingStatementClientView> } = { ...this.pdoc };
@@ -2070,6 +2114,7 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
                 problem.canEditProblemData(this.user, this.pdoc) ||
                 problem.canEditProblemTags(this.user, this.pdoc) ||
                 problem.canManageProblemContributions(this.user, this.pdoc),
+            canArchiveProblem: !tid && !this.virtualAttempt && problem.canArchiveProblem(this.user, this.pdoc),
             ...(this.practicePageContext ? { practiceIntegrity: this.practicePageContext } : {}),
             ...(inheritedPracticeEnforcementIsActive(this.practiceEnforcement) ? { practiceEnforcement: this.practiceEnforcement } : {}),
             ...(this.virtualAttempt
@@ -2179,7 +2224,7 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
             ).map((tdocs) =>
                 tdocs.filter(
                     (tdoc) =>
-                        this.user.hasPerm(PERM.PERM_VIEW_HIDDEN_CONTEST) ||
+                        canBrowseAssignRestrictedContests(this.user) ||
                         !tdoc.assign?.length ||
                         new Set(tdoc.assign).intersection(new Set(this.user.group)).size,
                 ),
@@ -3250,7 +3295,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
             } catch {
                 throw new ValidationError('programmingStatement', null, localizedErrorText`结构化题面 JSON 无效`);
             }
-            if (!expectedStructureRevision) throw new ValidationError('expectedStructureRevision');
+            if (expectedStructureRevision == null) throw new ValidationError('expectedStructureRevision');
             let pdoc = await problem.saveProgrammingStatement({
                 domainId,
                 pid: this.pdoc.docId,
@@ -3611,7 +3656,6 @@ export class ProblemConfigHandler extends ProblemManageHandler {
                     configFile[0].name,
                     error,
                 );
-                throw error;
             }
         }
         this.response.template = 'problem_config.html';
@@ -3923,7 +3967,6 @@ export class ProblemFileDownloadHandler extends ProblemDetailHandler {
     @param('noDisposition', Types.Boolean)
     @query('tid', Types.ObjectId, true)
     async get({}, type = 'additional_file', filename: string, noDisposition = false, tid: ObjectId) {
-        if (!tid) this.checkPerm(PERM.PERM_VIEW_PROBLEM);
         if (this.pdoc.reference) {
             if (type === 'testdata') throw new ProblemIsReferencedError(localizedErrorText`download testdata`);
             const reference = this.pdoc.reference;
@@ -3948,6 +3991,17 @@ export class ProblemFileDownloadHandler extends ProblemDetailHandler {
     }
 }
 
+function requireProblemSolutionView(handler: { user: any; checkPerm(perm: bigint): void }, accepted: boolean) {
+    if (
+        handler.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM) ||
+        handler.user.hasPerm(PERM.PERM_EDIT_PROBLEM) ||
+        (accepted && handler.user.hasPerm(PERM.PERM_VIEW_PROBLEM_SOLUTION_ACCEPT))
+    ) {
+        return;
+    }
+    handler.checkPerm(PERM.PERM_VIEW_PROBLEM_SOLUTION);
+}
+
 export class ProblemSolutionHandler extends ProblemDetailHandler {
     @param('page', Types.PositiveInt, true)
     @param('tid', Types.ObjectId, true)
@@ -3957,9 +4011,7 @@ export class ProblemSolutionHandler extends ProblemDetailHandler {
         if (tid) throw new PermissionError(PERM.PERM_VIEW_PROBLEM_SOLUTION);
         this.response.template = 'problem_solution.html';
         const accepted = this.psdoc?.status === STATUS.STATUS_ACCEPTED;
-        if (!accepted || !this.user.hasPerm(PERM.PERM_VIEW_PROBLEM_SOLUTION_ACCEPT)) {
-            this.checkPerm(PERM.PERM_VIEW_PROBLEM_SOLUTION);
-        }
+        requireProblemSolutionView(this, accepted);
 
         let [psdocs, pcount, pscount] = await this.paginate(solution.getMulti(domainId, this.pdoc.docId), page, 'solution');
         if (sid) {
@@ -4094,9 +4146,7 @@ export class ProblemSolutionRawHandler extends ProblemDetailHandler {
         const domainId = this.pdoc.domainId;
         if (tid) throw new PermissionError(PERM.PERM_VIEW_PROBLEM_SOLUTION);
         const accepted = this.psdoc?.status === STATUS.STATUS_ACCEPTED;
-        if (!accepted || !this.user.hasPerm(PERM.PERM_VIEW_PROBLEM_SOLUTION_ACCEPT)) {
-            this.checkPerm(PERM.PERM_VIEW_PROBLEM_SOLUTION);
-        }
+        requireProblemSolutionView(this, accepted);
         if (psrid) {
             const [psdoc, psrdoc] = await solution.getReply(domainId, psid, psrid);
             if (!psdoc || psdoc.parentId !== this.pdoc.docId) throw new SolutionNotFoundError(psid, psrid);
@@ -4468,10 +4518,10 @@ declare module '@hydrooj/framework' {
 }
 
 export async function apply(ctx: Context) {
-    ctx.Route('problem_main', '/p', ProblemMainHandler, PERM.PERM_VIEW_PROBLEM);
-    ctx.Route('problem_review', '/p/review', ProblemReviewHandler, PERM.PERM_VIEW_PROBLEM);
-    ctx.Route('problem_pid_namespace', '/p/namespaces', ProblemPidNamespaceHandler, PERM.PERM_VIEW_PROBLEM);
-    ctx.Route('problem_random', '/problem/random', ProblemRandomHandler, PERM.PERM_VIEW_PROBLEM);
+    ctx.Route('problem_main', '/p', ProblemMainHandler);
+    ctx.Route('problem_review', '/p/review', ProblemReviewHandler);
+    ctx.Route('problem_pid_namespace', '/p/namespaces', ProblemPidNamespaceHandler);
+    ctx.Route('problem_random', '/problem/random', ProblemRandomHandler);
     ctx.Route('problem_detail', '/p/:pid', ProblemDetailHandler);
     ctx.Route('problem_submit', '/p/:pid/submit', ProblemSubmitHandler);
     ctx.Route('problem_hack', '/p/:pid/hack/:rid', ProblemHackHandler, PERM.PERM_SUBMIT_PROBLEM);
@@ -4479,13 +4529,13 @@ export async function apply(ctx: Context) {
     ctx.Route('problem_programming_tags_preview', '/p/:pid/tags/preview', ProblemProgrammingTagPreviewHandler);
     ctx.Route('problem_programming_tags_apply', '/p/:pid/tags/apply', ProblemProgrammingTagApplyHandler);
     ctx.Route('problem_config', '/p/:pid/config', ProblemConfigHandler);
-    ctx.Route('problem_files', '/p/:pid/files', ProblemFilesHandler, PERM.PERM_VIEW_PROBLEM);
+    ctx.Route('problem_files', '/p/:pid/files', ProblemFilesHandler);
     ctx.Route('problem_file_download', '/p/:pid/file/:filename', ProblemFileDownloadHandler);
-    ctx.Route('problem_solution', '/p/:pid/solution', ProblemSolutionHandler, PERM.PERM_VIEW_PROBLEM);
-    ctx.Route('problem_solution_detail', '/p/:pid/solution/:sid', ProblemSolutionHandler, PERM.PERM_VIEW_PROBLEM);
-    ctx.Route('problem_solution_raw', '/p/:pid/solution/:psid/raw', ProblemSolutionRawHandler, PERM.PERM_VIEW_PROBLEM);
-    ctx.Route('problem_solution_reply_raw', '/p/:pid/solution/:psid/:psrid/raw', ProblemSolutionRawHandler, PERM.PERM_VIEW_PROBLEM);
-    ctx.Route('problem_statistics', '/p/:pid/stat', ProblemStatisticsHandler, PERM.PERM_VIEW_PROBLEM);
+    ctx.Route('problem_solution', '/p/:pid/solution', ProblemSolutionHandler);
+    ctx.Route('problem_solution_detail', '/p/:pid/solution/:sid', ProblemSolutionHandler);
+    ctx.Route('problem_solution_raw', '/p/:pid/solution/:psid/raw', ProblemSolutionRawHandler);
+    ctx.Route('problem_solution_reply_raw', '/p/:pid/solution/:psid/:psrid/raw', ProblemSolutionRawHandler);
+    ctx.Route('problem_statistics', '/p/:pid/stat', ProblemStatisticsHandler);
     ctx.Route('problem_mine', '/problem/mine', ProblemMineHandler, PRIV.PRIV_USER_PROFILE);
     ctx.Route('problem_create', '/problem/create', ProblemCreateHubHandler, PRIV.PRIV_USER_PROFILE);
     ctx.Route(

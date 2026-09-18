@@ -120,6 +120,7 @@ interface ContestDoc {
   score?: Record<string, number>;
   balloon?: Record<string, ContestBalloonConfig | string>;
   autoHide?: boolean;
+  hidden?: boolean;
   allowViewCode?: boolean;
   allowPrint?: boolean;
   keepScoreboardHidden?: boolean;

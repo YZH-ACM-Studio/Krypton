@@ -71,6 +71,7 @@ interface ContestDoc {
   entryMode?: string;
   content?: string | Record<string, string>;
   allowViewCode?: boolean;
+  hidden?: boolean;
   allowPrint?: boolean;
   unlocked?: boolean;
   pids?: (string | number)[];
@@ -564,6 +565,15 @@ function StatCell({
   );
 }
 
+function HiddenContestBadge({ hidden }: { hidden?: boolean }) {
+  if (hidden !== true) return null;
+  return (
+    <Badge variant="outline" className="text-[10px]">
+      已隐藏
+    </Badge>
+  );
+}
+
 function RunningContestCard({ c, bs, tsdict }: { c: ContestDoc; bs: ReturnType<typeof useBootstrap>; tsdict: Record<string, ContestStatusDoc> }) {
   const endAt = toDate(c.endAt)?.getTime() || 0;
   const cd = useCountdown(endAt);
@@ -575,9 +585,10 @@ function RunningContestCard({ c, bs, tsdict }: { c: ContestDoc; bs: ReturnType<t
         <a href={detailUrl} className="block space-y-2">
           <div className="flex items-start justify-between gap-2">
             <h3 className="font-medium line-clamp-2 leading-tight">{c.title || '未命名'}</h3>
-            <Badge variant={ruleBadgeVariant(c.rule)} className="shrink-0">
-              {ruleLabel(c.rule)}
-            </Badge>
+            <div className="flex shrink-0 items-center gap-1">
+              <HiddenContestBadge hidden={c.hidden} />
+              <Badge variant={ruleBadgeVariant(c.rule)}>{ruleLabel(c.rule)}</Badge>
+            </div>
           </div>
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <Clock className="size-3" />
@@ -619,9 +630,10 @@ function ContestCard({ c, bs, tsdict }: { c: ContestDoc; bs: ReturnType<typeof u
         <a href={detailUrl} className="block space-y-2">
           <div className="flex items-start justify-between gap-2">
             <h3 className="font-medium line-clamp-2 leading-tight">{c.title || '未命名'}</h3>
-            <Badge variant={ruleBadgeVariant(c.rule)} className="shrink-0">
-              {ruleLabel(c.rule)}
-            </Badge>
+            <div className="flex shrink-0 items-center gap-1">
+              <HiddenContestBadge hidden={c.hidden} />
+              <Badge variant={ruleBadgeVariant(c.rule)}>{ruleLabel(c.rule)}</Badge>
+            </div>
           </div>
           <div className="text-xs text-muted-foreground">{formatDateTime(c.beginAt, bs.locale)}</div>
           <div className="flex items-center justify-between">
@@ -690,6 +702,11 @@ function ContestTable({
                     {c.rated ? (
                       <Badge variant="secondary" className="ml-2 text-[10px]">
                         Rated
+                      </Badge>
+                    ) : null}
+                    {c.hidden === true ? (
+                      <Badge variant="outline" className="ml-2 text-[10px]">
+                        已隐藏
                       </Badge>
                     ) : null}
                     {isTeamContest(c) ? (
@@ -794,6 +811,7 @@ export function ContestDetailPage() {
               <Badge variant={st.variant}>{st.label}</Badge>
               <Badge variant={ruleBadgeVariant(tdoc.rule)}>{ruleLabel(tdoc.rule)}</Badge>
               {tdoc.rated ? <Badge variant="secondary">Rated</Badge> : null}
+              <HiddenContestBadge hidden={tdoc.hidden} />
               {isClientRequired ? (
                 <Badge variant="outline" className="gap-1">
                   <ShieldCheck className="size-3" />

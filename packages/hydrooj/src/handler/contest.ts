@@ -346,11 +346,7 @@ export class ContestListHandler extends Handler {
         const escaped = escapeRegExp(q.toLowerCase());
         const $regex = new RegExp(q.length >= 2 ? escaped : `\\A${escaped}`, 'gim');
         const filter = {
-            ...(canBrowseAssignRestricted && !group
-                ? {}
-                : {
-                      $or: [{ maintainer: this.user._id }, { owner: this.user._id }, { assign: { $in: groups } }, { assign: { $size: 0 } }],
-                  }),
+            ...contest.listAccessQuery(this.user._id, groups, canBrowseAssignRestricted && !group),
             ...(rule ? { rule } : { rule: { $in: rules } }),
             ...(group ? { assign: { $in: [group] } } : {}),
             ...(q ? { title: { $regex } } : {}),
@@ -1093,6 +1089,7 @@ export class ContestEditHandler extends Handler {
     @param('code', Types.String, true)
     @param('autoHide', Types.Boolean)
     @param('assign', Types.CommaSeperatedArray, true)
+    @param('hidden', Types.Boolean)
     @param('lock', Types.UnsignedInt, true)
     @param('contestDuration', Types.Float, true)
     @param('maintainer', Types.NumericArray, true)
@@ -1146,6 +1143,7 @@ export class ContestEditHandler extends Handler {
         _code = '',
         autoHide = false,
         assign: string[] = [],
+        hidden = false,
         lock: number = null,
         contestDuration: number = null,
         maintainer: number[] = [],
@@ -1481,6 +1479,7 @@ export class ContestEditHandler extends Handler {
 
         await contest.edit(authoritativeDomainId, tid, {
             assign,
+            hidden,
             _code,
             autoHide,
             autoHidePendingPids: [],

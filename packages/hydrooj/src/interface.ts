@@ -436,6 +436,13 @@ export interface Tdoc extends Document {
     rated?: boolean;
     _code?: string;
     assign?: string[];
+    /**
+     * Missing or false = listed. true hides the contest from student list/home
+     * and problem-bank contest filters. Owner, maintainer, and
+     * PERM_EDIT_CONTEST / PERM_VIEW_HIDDEN_CONTEST still see it.
+     * Detail URLs, course-exam entry, attend, invite, and scope gates stay.
+     */
+    hidden?: boolean;
     files?: FileInfo[];
     privateFiles?: FileInfo[];
     allowViewCode?: boolean;

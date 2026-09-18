@@ -39,6 +39,7 @@ interface HomeContentDocument {
   content?: string;
   desc?: string;
   owner?: string | number;
+  hidden?: boolean;
   nReply?: number;
   updateAt?: unknown;
 }
@@ -326,7 +327,14 @@ export function KryptonHomePage() {
                       href={replaceRouteTokens(bs.urls.contestDetail, { TID: String(c.docId) })}
                     >
                       <div className="flex-1 min-w-0">
-                        <p className="truncate text-sm font-medium">{c.title || '未命名比赛'}</p>
+                        <p className="truncate text-sm font-medium">
+                          {c.title || '未命名比赛'}
+                          {c.hidden === true ? (
+                            <Badge variant="outline" className="ml-2 align-middle text-[10px]">
+                              已隐藏
+                            </Badge>
+                          ) : null}
+                        </p>
                         <p className="mt-0.5 text-xs text-muted-foreground">
                           {formatDateTime(c.beginAt, locale)}
                           {c.rule ? ` · ${c.rule}` : ''}

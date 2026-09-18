@@ -100,6 +100,8 @@ describe('contest edit exam render', () => {
     expect(hiddenInput('allowViewCode')?.value).to.equal('false');
     expect(hiddenInput('vigilEnabled')?.value).to.equal('false');
     expect(hiddenInput('participationMode')?.value).to.equal('individual');
+    expect(hiddenInput('hidden')?.value).to.equal('false');
+    expect(screen.getByText('不在列表中显示')).to.exist;
     const wallClock = screen.getByLabelText('整场关门（小时）') as HTMLInputElement;
     expect(wallClock.name).to.equal('duration');
     expect(wallClock.value).to.equal('2');
@@ -140,6 +142,7 @@ describe('contest edit exam render', () => {
         files: [],
         rated: true,
         examPaperQuotas: { single: 1 },
+        hidden: true,
       },
       `/contest/${CONTEST_ID}/edit`,
     );
@@ -148,6 +151,8 @@ describe('contest edit exam render', () => {
     expect(screen.getByText('按题型抽题')).to.exist;
     expect(namedInput('examPaperQuotas')?.value).to.equal(JSON.stringify({ single: 1 }));
     expect(hiddenInput('rated')?.value).to.equal('true');
+    expect(hiddenInput('hidden')?.value).to.equal('true');
+    expect(screen.getByText('不在列表中显示')).to.exist;
     expect(screen.getByText('客户端与反作弊')).to.exist;
     expect(screen.getByText('启用 Vigil 反作弊')).to.exist;
     expect(screen.getByText('复制为新考试')).to.exist;

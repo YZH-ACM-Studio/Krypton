@@ -263,6 +263,7 @@ export function ContestEditExam({ rule, onRuleChange, children }: ContestEditExa
   const [duration, setDuration] = useState(String(wallClock ?? EXAM_CREATE_WALL_CLOCK_HOURS));
   const [pids, setPids] = useState(() => initialPidIds(readString(data.pids), tdoc.pids));
   const [permission, setPermission] = useState<AccessPermission>(() => (tdoc._code || tdoc.code ? 'invite' : 'public'));
+  const [listHidden, setListHidden] = useState(tdoc.hidden === true);
   const [scopeMode, setScopeMode] = useState<ParticipantScopeMode>(readScopeMode(tdoc.participantScopeMode));
   const [vigilEnabled, setVigilEnabled] = useState(flags.vigilEnabled);
   const [entryMode, setEntryMode] = useState<ContestEntryMode>(flags.entryMode);
@@ -480,7 +481,7 @@ export function ContestEditExam({ rule, onRuleChange, children }: ContestEditExa
           <ContestExamPaperQuotas pids={quotaPids} pdict={readPdict(data.pdict)} quotas={readQuotaMap(tdoc.examPaperQuotas)} />
         </ExamCard>
 
-        <ExamCard title="谁能考" description="公开或邀请码，再加可选的学校 / 用户组范围。不写入比赛 assign。">
+        <ExamCard title="谁能考" description="公开或邀请码，再加可选的学校 / 用户组范围。不写入比赛 assign。列表隐藏只影响发现，不影响链接和课程入口。">
           <div className="grid gap-4 lg:grid-cols-2">
             <div className="space-y-2">
               <p className="text-sm font-medium">访问</p>
@@ -559,6 +560,13 @@ export function ContestEditExam({ rule, onRuleChange, children }: ContestEditExa
           ) : (
             <input type="hidden" name="participantGroupIds" value="" />
           )}
+          <SettingsRow
+            label="不在列表中显示"
+            description="学生在比赛列表和首页看不到这场考试。知道链接、从课程进入或已报名的人仍可考。"
+          >
+            <Switch checked={listHidden} onCheckedChange={(value) => setListHidden(!!value)} />
+          </SettingsRow>
+          <HiddenFlag name="hidden" value={listHidden} />
         </ExamCard>
 
         <ExamCard title="考生说明" description="开考页展示的 Markdown，可后补。">

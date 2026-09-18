@@ -107,11 +107,7 @@ export class HomeHandler extends Handler {
         );
         const q = {
             rule: { $in: rules },
-            ...(canBrowseAssignRestricted
-                ? {}
-                : {
-                      $or: [{ maintainer: this.user._id }, { owner: this.user._id }, { assign: { $in: groups } }, { assign: { $size: 0 } }],
-                  }),
+            ...contest.listAccessQuery(this.user._id, groups, canBrowseAssignRestricted),
         };
         const tdocs = await contest.getMulti(domainId, q).sort({ endAt: -1, beginAt: -1, _id: -1 }).limit(limit).toArray();
         const tsdict = await contest.getListStatus(

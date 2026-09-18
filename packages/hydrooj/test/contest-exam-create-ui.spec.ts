@@ -48,6 +48,11 @@ describe('contest exam create UI handler lock', () => {
         expect(postUpdate).to.match(/contest\.edit\([\s\S]*duration:\s*contestDuration/);
     });
 
+    it('persists hidden on the second contest.edit', () => {
+        expect(editor).to.include("@param('hidden', Types.Boolean)");
+        expect(postUpdate).to.match(/contest\.edit\([\s\S]*hidden,/);
+    });
+
     it('does not read query.rule on GET', () => {
         expect(get).to.match(/async get\(_domainId: string, tid: ObjectId\)/);
         expect(get).not.to.include('query.rule');

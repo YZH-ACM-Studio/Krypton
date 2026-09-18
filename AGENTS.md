@@ -214,6 +214,12 @@
 - `duration>0`：若 `now + duration小时 > endAt` 不得开考；开考后个人截止为 `startAt + duration小时`。不改 `contest.isOngoing`（ACM truncate 保持原样）。
 - 学生 payload 不得含未抽题库。`courseExam` schema 不变。
 
+## 比赛列表隐藏协议
+
+- `Tdoc.hidden` 是比赛/考试是否出现在学生列表、首页比赛条和题库按比赛筛选中的开关。缺字段或 `false` = 列出。`true` 时普通学生看不到；所有者、维护者、`PERM_EDIT_CONTEST` / `PERM_VIEW_HIDDEN_CONTEST` 仍可见。
+- 详情 URL、课程结业入口、已 attend、邀请码和 `participantScope` 门禁不因 hidden 变成 404。hidden 不是 assign，也不写入 assign。缺字段禁止请求路径回填。
+- 考试创建/编辑可开关「不在列表中显示」。ACM 创建默认仍列出。
+
 ## 课程隐藏与删除协议
 
 - `TrainingDoc.courseHidden` 是课程对学生是否可见的唯一开关。缺省或 `false` 仍按 `courseGroupIds` 发现和进入；`true` 时学生列表、详情、视频、课件、报名和真实性 Context 一律 fail closed。兑换权益不能绕过隐藏。

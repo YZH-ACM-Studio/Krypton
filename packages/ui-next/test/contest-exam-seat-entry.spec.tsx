@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BootstrapProvider, type KryptonBootstrap } from '../src/lib/bootstrap.tsx';
@@ -38,18 +38,21 @@ function event(eventId: string, title: string) {
   };
 }
 
-function editBootstrap(): KryptonBootstrap {
+function pageBootstrap(
+  pageName: 'contest_create' | 'contest_edit',
+  rule: 'acm' | 'exam',
+): KryptonBootstrap {
+  const isEdit = pageName === 'contest_edit';
   const tdoc = {
     ...fixedContest(),
-    _id: CONTEST_ID,
-    docId: CONTEST_ID,
-    rule: 'acm',
+    ...(isEdit ? { _id: CONTEST_ID, docId: CONTEST_ID } : {}),
+    rule,
     owner: 2,
     pids: [],
     files: [],
     participationMode: 'individual',
-    vigilEnabled: true,
-    entryMode: 'client_required',
+    vigilEnabled: isEdit,
+    entryMode: isEdit ? 'client_required' : 'open',
   };
   return {
     appName: 'Krypton',
@@ -68,9 +71,9 @@ function editBootstrap(): KryptonBootstrap {
     page: {
       templateName: 'contest_edit.html',
       data: {
-        page_name: 'contest_edit',
+        page_name: pageName,
         tdoc,
-        rules: { acm: 'ACM' },
+        rules: { acm: 'ACM', exam: '考试' },
         duration: 3,
         pids: '',
         beginAt: tdoc.beginAt,
@@ -82,16 +85,64 @@ function editBootstrap(): KryptonBootstrap {
   };
 }
 
+function editBootstrap(): KryptonBootstrap {
+  return pageBootstrap('contest_edit', 'exam');
+}
+
+function createBootstrap(rule: 'acm' | 'exam' = 'exam'): KryptonBootstrap {
+  return pageBootstrap('contest_create', rule);
+}
+
+function seatEntryCard() {
+  const title = screen.getByText('机房座位与赛前预启动');
+  const card = title.closest('[data-slot="card"]');
+  if (!(card instanceof HTMLElement)) throw new Error('ContestExamSeatEntry card is missing');
+  return card;
+}
+
+function withinSeatEntry() {
+  return within(seatEntryCard());
+}
+
+function expectNoSeatWorkflow() {
+  expect(screen.queryByText('机房座位与赛前预启动')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '进入座位工作台' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '创建考试活动并安排座位' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '进入所选活动' })).not.toBeInTheDocument();
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
 describe('contest exam seat entry', () => {
-  it('reuses the same seat entry on the post-create edit page', async () => {
+  it('does not offer the seat workflow on the create page', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => json({ events: [], schools: [SCHOOL_ONE], pdocs: [] })),
+    );
+
+    const { unmount } = render(
+      <BootstrapProvider bootstrap={createBootstrap('exam')}>
+        <ContestEditPage />
+      </BootstrapProvider>,
+    );
+    await waitFor(() => expectNoSeatWorkflow());
+    unmount();
+
+    render(
+      <BootstrapProvider bootstrap={createBootstrap('acm')}>
+        <ContestEditPage />
+      </BootstrapProvider>,
+    );
+    await waitFor(() => expectNoSeatWorkflow());
+  });
+
+  it('shows ContestExamSeatEntry on the exam edit page as a chrome sibling', async () => {
     const linked = event('66bf00000000000000000109', '创建后的机房场次');
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => json({ events: [linked], schools: [SCHOOL_ONE] })),
+      vi.fn(async () => json({ events: [linked], schools: [SCHOOL_ONE], pdocs: [] })),
     );
 
     render(
@@ -100,7 +151,12 @@ describe('contest exam seat entry', () => {
       </BootstrapProvider>,
     );
 
-    expect(await screen.findByRole('button', { name: '进入座位工作台' })).toBeInTheDocument();
+    expect(await screen.findByText('机房座位与赛前预启动')).toBeInTheDocument();
+    const seat = withinSeatEntry();
+    expect(await seat.findByRole('button', { name: '进入座位工作台' })).toBeInTheDocument();
+    expect(seat.getByText('创建后的机房场次')).toBeInTheDocument();
+    expect(screen.getByText('返回比赛详情')).toBeInTheDocument();
+    expect([...document.querySelectorAll('form')].some((form) => form.contains(seatEntryCard()))).toBe(false);
   });
 
   it('prefills and explicitly creates the only missing exam event from a fixed contest audience', async () => {
@@ -122,9 +178,10 @@ describe('contest exam seat entry', () => {
     );
     render(<ContestExamSeatEntry tdoc={fixedContest()} contestId={CONTEST_ID} onNavigate={navigate} />);
 
-    expect(await screen.findByText('2026 校赛')).toBeInTheDocument();
-    expect(screen.getByRole('combobox', { name: '考试活动学校' })).toHaveTextContent(SCHOOL_ONE.name);
-    await user.click(screen.getByRole('button', { name: '创建考试活动并安排座位' }));
+    const seat = withinSeatEntry();
+    expect(await seat.findByText('2026 校赛')).toBeInTheDocument();
+    expect(seat.getByRole('combobox', { name: '考试活动学校' })).toHaveTextContent(SCHOOL_ONE.name);
+    await user.click(seat.getByRole('button', { name: '创建考试活动并安排座位' }));
 
     await waitFor(() => expect(posts).toHaveLength(1));
     expect(posts[0]).toEqual({
@@ -150,9 +207,10 @@ describe('contest exam seat entry', () => {
     );
     render(<ContestExamSeatEntry tdoc={fixedContest()} contestId={CONTEST_ID} onNavigate={navigate} />);
 
-    expect(await screen.findByText('机房场次 A')).toBeInTheDocument();
-    expect(screen.getByText(SCHOOL_ONE.name)).toBeInTheDocument();
-    await user.click(await screen.findByRole('button', { name: '进入座位工作台' }));
+    const seat = withinSeatEntry();
+    expect(await seat.findByText('机房场次 A')).toBeInTheDocument();
+    expect(seat.getByText(SCHOOL_ONE.name)).toBeInTheDocument();
+    await user.click(await seat.findByRole('button', { name: '进入座位工作台' }));
     expect(navigate).toHaveBeenCalledWith(`/admin/exam-infrastructure/events/${linked.eventId}/seats`);
   });
 

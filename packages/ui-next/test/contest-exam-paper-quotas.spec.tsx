@@ -24,6 +24,7 @@ function editBootstrap(rule: string): KryptonBootstrap {
     owner: 2,
     pids: [11],
     files: [],
+    duration: 1.5,
     examPaperQuotas: { single: 1 },
   };
   return {
@@ -207,7 +208,8 @@ describe('contest exam paper quotas', () => {
     expect(allowed.defaultPrevented).to.equal(false);
   });
 
-  it('shows the exam duration hint and quotas only when rule is exam', () => {
+  it('shows the exam duration hint and quotas only when rule is exam', async () => {
+    const user = userEvent.setup();
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => new Response(JSON.stringify({ events: [], schools: [], pdocs: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })),
@@ -217,8 +219,13 @@ describe('contest exam paper quotas', () => {
         <ContestEditPage />
       </BootstrapProvider>,
     );
-    expect(screen.getByLabelText('弹性时长 (小时)')).to.exist;
-    expect(screen.getByText('开考后个人时长；剩余全局时间不够一场则不能开考')).to.exist;
+    const wallClock = screen.getByLabelText('整场关门（小时）') as HTMLInputElement;
+    expect(wallClock.name).to.equal('duration');
+    expect(wallClock.value).to.equal('3');
+    const personalClock = screen.getByLabelText('开考后个人时长（小时）') as HTMLInputElement;
+    expect(personalClock.name).to.equal('contestDuration');
+    expect(personalClock.value).to.equal('1.5');
+    expect(screen.getByText('开考后个人时长；剩余整场时间不够一场则不能开考。与整场关门不是同一字段。')).to.exist;
     expect(screen.getByText('按题型抽题')).to.exist;
     expect((document.querySelector('input[name="examPaperQuotas"]') as HTMLInputElement | null)?.value).to.equal(
       JSON.stringify({ single: 1 }),
@@ -229,8 +236,12 @@ describe('contest exam paper quotas', () => {
         <ContestEditPage />
       </BootstrapProvider>,
     );
-    expect(screen.getByLabelText('弹性时长 (小时)')).to.exist;
+    await user.click(screen.getByRole('button', { name: '比赛设置' }));
+    const acmPersonal = screen.getByLabelText('弹性时长 (小时)') as HTMLInputElement;
+    expect(acmPersonal.name).to.equal('contestDuration');
+    expect(acmPersonal.value).to.equal('1.5');
     expect(screen.queryByText('开考后个人时长；剩余全局时间不够一场则不能开考')).to.equal(null);
+    expect(screen.queryByText('开考后个人时长；剩余整场时间不够一场则不能开考。与整场关门不是同一字段。')).to.equal(null);
     expect(screen.queryByText('按题型抽题')).to.equal(null);
     expect(document.querySelector('input[name="examPaperQuotas"]')).to.equal(null);
   });

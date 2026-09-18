@@ -65,7 +65,8 @@ import { companionContestEligibility, contestProblemLetter } from '@/lib/competi
 import { fetchHydroResponse, presentHydroResponseError, readHydroResponseError, type PresentedResponseError } from '@/lib/error-presenter';
 import { formatDateTime, formatRelativeTime, makeInitials, replaceRouteTokens } from '@/lib/format';
 import { isSystemAdmin } from '@/lib/perms';
-import { ContestExamPaperQuotas } from './contest-exam-paper-quotas';
+import { ContestEditExam } from './contest-edit-exam';
+import { initialContestEditRule } from './contest-edit-exam-defaults';
 
 /**
  * Loose server-payload record — kept only for payloads whose shape is not
@@ -590,7 +591,7 @@ function managementItems(tdoc: ContestDoc, contestUrl: string, canGradeSubjectiv
       icon: ClipboardCheck,
       show: canGradeSubjective,
     },
-    { key: 'balloon', label: '气球分发', href: `${contestUrl}/balloon`, icon: Trophy },
+    { key: 'balloon', label: '气球分发', href: `${contestUrl}/balloon`, icon: Trophy, show: String(tdoc.rule) !== 'exam' },
     { key: 'print', label: '打印服务', href: `${contestUrl}/print`, icon: Printer, show: !!tdoc.allowPrint },
     { key: 'scoreboard', label: '排行榜', href: `${contestUrl}/scoreboard`, icon: Trophy },
     { key: 'records', label: '全部提交', href: `/record?tid=${encodeURIComponent(contestId(tdoc))}`, icon: Send },
@@ -720,6 +721,29 @@ export function ContestEditPage() {
   const bs = useBootstrap();
   const data = bs.page.data as ContestEditPageData;
   const tdoc: ContestDoc = data.tdoc || {};
+  const isEdit = data.page_name === 'contest_edit';
+  const [rule, setRule] = useState(initialContestEditRule(tdoc.rule));
+  const tid = tdoc.docId || tdoc._id;
+
+  if (rule === 'exam') {
+    return (
+      <ContestManagementChrome tdoc={tdoc} active="edit">
+        <ContestEditExam rule={rule} onRuleChange={setRule}>
+          {isEdit && typeof tid === 'string' ? (
+            <ContestExamSeatEntry tdoc={tdoc} contestId={tid} scopeGroups={data.scopeGroups || []} />
+          ) : null}
+        </ContestEditExam>
+      </ContestManagementChrome>
+    );
+  }
+
+  return <ContestEditAcmForm rule={rule} onRuleChange={setRule} />;
+}
+
+function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange: (rule: string) => void }) {
+  const bs = useBootstrap();
+  const data = bs.page.data as ContestEditPageData;
+  const tdoc: ContestDoc = data.tdoc || {};
   const rules: Record<string, string> = data.rules || {};
   const isEdit = data.page_name === 'contest_edit';
   const editableContestId = tdoc.docId || tdoc._id;
@@ -732,7 +756,6 @@ export function ContestEditPage() {
   const [beginDate, setBeginDate] = useState(formatDateInput(initialBeginAt));
   const [beginTime, setBeginTime] = useState(formatTimeInput(initialBeginAt));
   const [duration, setDuration] = useState(String(data.duration || 2));
-  const [rule, setRule] = useState(String(tdoc.rule || 'acm'));
   const initialParticipationMode: 'individual' | 'team' = tdoc.participationMode === 'team' ? 'team' : 'individual';
   const [participationMode, setParticipationMode] = useState<'individual' | 'team'>(initialParticipationMode);
   const finalizedTeamBatchId = String(tdoc.teamBatchId || '');
@@ -850,7 +873,7 @@ export function ContestEditPage() {
   }, [networkLockdownMode, networkFailurePolicy]);
   useEffect(() => {
     if (participationMode !== 'team') return;
-    if (rule !== 'acm') setRule('acm');
+    if (rule !== 'acm') onRuleChange('acm');
     if (!vigilEnabled) setVigilEnabled(true);
     if (entryMode !== 'client_required') setEntryMode('client_required');
     if (rated) setRated(false);
@@ -956,7 +979,7 @@ export function ContestEditPage() {
                       name={participationMode === 'team' ? undefined : 'rule'}
                       value={rule}
                       disabled={participationMode === 'team'}
-                      onValueChange={setRule}
+                      onValueChange={onRuleChange}
                       options={Object.entries(rules).map(([k, v]) => ({
                         value: k,
                         label: v as string,
@@ -1569,10 +1592,6 @@ export function ContestEditPage() {
                     ) : null}
                   </div>
                 </div>
-
-                {rule === 'exam' ? (
-                  <ContestExamPaperQuotas pids={tdoc.pids} pdict={data.pdict} quotas={tdoc.examPaperQuotas} />
-                ) : null}
 
                 <Separator />
 

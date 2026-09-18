@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
@@ -33,6 +33,23 @@ describe('p1.11 contest team-mode editor contract', () => {
     expect(editor).to.include('setRated(false)');
     expect(editor).to.include('<input type="hidden" name="rule" value="acm" />');
     expect(editor).to.include('<input type="hidden" name="rated" value="false" />');
+  });
+
+  it('keeps ACM team hidden rule=acm on contest-manage and exam create off the team field', () => {
+    const editor = readFileSync(resolve(root, 'src/pages/contest-manage.tsx'), 'utf8');
+    expect(editor).to.include('{participationMode === \'team\' ? <input type="hidden" name="rule" value="acm" /> : null}');
+
+    const examPath = resolve(root, 'src/pages/contest-edit-exam.tsx');
+    if (!existsSync(examPath)) return;
+    const exam = readFileSync(examPath, 'utf8');
+    expect(exam).not.to.include('ContestParticipationField');
+    const participationInputs = [...exam.matchAll(/<input\b[\s\S]*?>/g)]
+      .map((match) => match[0])
+      .filter((tag) => tag.includes('name="participationMode"'));
+    expect(participationInputs).to.have.length(1);
+    expect(participationInputs[0]).to.include('type="hidden"');
+    expect(participationInputs[0]).to.match(/value="individual"|value=\{['"]individual['"]\}|value=\{[^\n}]*participationMode\}/);
+    expect(participationInputs[0]).not.to.include('team');
   });
 
   it('routes all mode and cleanup writes through the contest model', () => {

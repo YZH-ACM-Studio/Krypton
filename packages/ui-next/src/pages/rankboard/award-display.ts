@@ -279,3 +279,11 @@ export function isRankboardStatsMode(input: {
 export function rankboardTableRows<T extends { rank: number }>(filtered: T[], statsMode: boolean): T[] {
   return statsMode ? filtered : filtered.filter((row) => row.rank > 3);
 }
+
+/** 荣誉榜学院：人员覆盖优先，否则回落花名册学校名。 */
+export function rankboardCollege(person: { college?: string | null }, student: { schoolName?: string | null }): string {
+  const override = typeof person.college === 'string' ? person.college.trim() : '';
+  if (override) return override;
+  const school = typeof student.schoolName === 'string' ? student.schoolName.trim() : '';
+  return school && school !== '—' ? school : '';
+}

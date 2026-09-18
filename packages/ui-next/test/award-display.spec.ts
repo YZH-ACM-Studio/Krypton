@@ -7,6 +7,7 @@ import {
   isIcpcRegularType,
   isRankboardStatsMode,
   mergeAwardTally,
+  rankboardCollege,
   rankboardTableRows,
   rowMatchesAwardFilter,
   shouldShowLadderDetails,
@@ -103,5 +104,12 @@ describe('rankboard award display', () => {
     const moreGold = tallyAwards([{ type: 'icpc_gold' }], typeMap);
     expect(mergeAwardTally(gold, moreGold).icpc.gold).to.deep.equal({ regular: 2, extra: 1 });
     expect(mergeAwardTally(emptyAwardTally(), gold).icpc.gold).to.deep.equal({ regular: 1, extra: 1 });
+  });
+
+  it('prefers an explicit college and falls back to the roster school name', () => {
+    expect(rankboardCollege({ college: ' 软件学院 ' }, { schoolName: '计算机学院' })).to.equal('软件学院');
+    expect(rankboardCollege({ college: '' }, { schoolName: '计算机学院' })).to.equal('计算机学院');
+    expect(rankboardCollege({}, { schoolName: '—' })).to.equal('');
+    expect(rankboardCollege({ college: '   ' }, { schoolName: '' })).to.equal('');
   });
 });

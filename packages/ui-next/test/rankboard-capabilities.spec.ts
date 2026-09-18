@@ -102,10 +102,12 @@ describe('rankboard public branding', () => {
     expect(gallerySource).not.to.include('schoolName');
   });
 
-  it('keeps school data for the existing filter', () => {
-    expect(source).to.include("const [schoolFilter, setSchoolFilter] = useState<string>('all')");
-    expect(source).to.include('r.student.schoolName !== schoolFilter');
-    expect(source).to.include("label: '全部学校'");
+  it('shows an editable college field and filters by displayed college', () => {
+    expect(source).to.include('rankboardCollege');
+    expect(source).to.include("const [collegeFilter, setCollegeFilter] = useState<string>('all')");
+    expect(source).to.include('rankboardCollege(r.person, r.student) !== collegeFilter');
+    expect(source).to.include("label: '全部学院'");
+    expect(adminSource).to.include('name="college"');
   });
 
   it('uses a custom award filter and splits ICPC-EC from regular medals', () => {

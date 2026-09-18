@@ -97,6 +97,9 @@ const studentsColl = {
 };
 
 const schoolsColl = {
+    async findOne() {
+        return { _id: new ObjectId(), name: '计算机学院' };
+    },
     find() {
         return {
             async toArray() {
@@ -594,6 +597,7 @@ describe('rankboard handler operation contract', () => {
                 operation: 'save',
                 awards: JSON.stringify([{ type: 'icpc_gold', importBatchId: String(batchId) }]),
                 employmentStatus: '测试去向',
+                college: ' 计算机学院 ',
             },
             makeUser('import'),
             { id: String(personId) },
@@ -603,6 +607,7 @@ describe('rankboard handler operation contract', () => {
         expect(calls.updatePerson).to.have.lengthOf(1);
         expect(String(calls.updatePerson[0].id)).to.equal(String(personId));
         expect(calls.updatePerson[0].patch.employmentStatus).to.equal('测试去向');
+        expect(calls.updatePerson[0].patch.college).to.equal('计算机学院');
         expect(calls.updatePerson[0].patch.awards[0].importBatchId).to.be.instanceOf(ObjectId);
         expect(response.redirect).to.equal(`/admin/rankboard/people/${personId}`);
     });
@@ -779,6 +784,7 @@ describe('rankboard management GET capability and section contract', () => {
         expect(response.body.canImport).to.equal(true);
         expect(response.body.canManage).to.equal(false);
         expect(response.body.person._id).to.equal(String(personId));
+        expect(response.body.student.schoolName).to.equal('计算机学院');
     });
 });
 

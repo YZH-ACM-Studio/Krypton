@@ -333,6 +333,7 @@ class AdminPersonDetailHandler extends AdminBase {
         // same numeric score as the public board; existing edits stay.
         await applyGpltStoreScores([person]);
         const student = await studentsColl.findOne({ _id: person.studentDocId });
+        const school = student?.schoolId ? await schoolsColl.findOne({ _id: student.schoolId }) : null;
         const types = await listAwardTypes({ includeHidden: true });
         this.response.template = 'admin_rankboard_person.html';
         this.response.body = {
@@ -346,6 +347,7 @@ class AdminPersonDetailHandler extends AdminBase {
                       ...student,
                       _id: String(student._id),
                       schoolId: String(student.schoolId),
+                      schoolName: typeof school?.name === 'string' ? school.name : '',
                   }
                 : null,
             types,
@@ -357,7 +359,8 @@ class AdminPersonDetailHandler extends AdminBase {
     @param('id', Types.ObjectId)
     @param('awards', Types.Content, true)
     @param('employmentStatus', Types.String, true)
-    async postSave(_ctx: any, id: ObjectId, awardsJson?: string, employmentStatus?: string) {
+    @param('college', Types.String, true)
+    async postSave(_ctx: any, id: ObjectId, awardsJson?: string, employmentStatus?: string, college?: string) {
         this.checkDataOp();
         // JSON 往返会把 importBatchId 的 ObjectId 变成 string——存回前还原，
         // 否则批次回滚的 $pull 匹配不到这些奖项。
@@ -365,7 +368,11 @@ class AdminPersonDetailHandler extends AdminBase {
             ...a,
             ...(a.importBatchId ? { importBatchId: new ObjectId(a.importBatchId) } : {}),
         }));
-        await updatePerson(id, { awards, employmentStatus });
+        await updatePerson(id, {
+            awards,
+            employmentStatus,
+            college: college?.trim() ?? '',
+        });
         this.response.redirect = this.url('admin_rankboard_person', { id: String(id) });
     }
 }

@@ -124,6 +124,7 @@ export async function createPerson(input: {
     studentDocId: ObjectId | string;
     createdBy: number;
     employmentStatus?: string;
+    college?: string;
     awards?: Award[];
 }): Promise<PersonRecord> {
     const sid = typeof input.studentDocId === 'string' ? new ObjectId(input.studentDocId) : input.studentDocId;
@@ -140,6 +141,7 @@ export async function createPerson(input: {
         studentDocId: sid,
         awards: input.awards || [],
         employmentStatus: input.employmentStatus,
+        college: input.college,
         createdAt: new Date(),
         updatedAt: new Date(),
         createdBy: input.createdBy,
@@ -148,7 +150,10 @@ export async function createPerson(input: {
     return doc;
 }
 
-export async function updatePerson(id: ObjectId | string, patch: Partial<Pick<PersonRecord, 'awards' | 'employmentStatus'>>): Promise<void> {
+export async function updatePerson(
+    id: ObjectId | string,
+    patch: Partial<Pick<PersonRecord, 'awards' | 'employmentStatus' | 'college'>>,
+): Promise<void> {
     const person = await requireScopedPerson(id);
     await peopleColl.updateOne({ _id: person._id, studentDocId: person.studentDocId }, { $set: { ...patch, updatedAt: new Date() } });
 }

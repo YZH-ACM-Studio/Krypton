@@ -107,6 +107,8 @@ export interface PersonRecord {
     studentDocId: ObjectId;
     awards: Award[];
     employmentStatus?: string;
+    /** 学院展示名；缺省时荣誉榜回落花名册学校名。 */
+    college?: string;
     createdAt: Date;
     updatedAt: Date;
     createdBy: number;

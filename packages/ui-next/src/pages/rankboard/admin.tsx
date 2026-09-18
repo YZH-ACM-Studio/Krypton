@@ -23,7 +23,7 @@ import { fetchHydroResponse } from '@/lib/error-presenter';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 import { uploadUserFile } from '@/lib/upload';
-import { awardHasEditableExamScore, isLadderIndividualKey } from './award-display';
+import { awardHasEditableExamScore, isLadderIndividualKey, rankboardCollege } from './award-display';
 
 const RANKBOARD_WORKSPACE_NAV = [
   {
@@ -252,6 +252,7 @@ interface PersonRecord {
   studentDocId: string;
   awards: Award[];
   employmentStatus?: string;
+  college?: string;
 }
 
 interface AdminRow {
@@ -383,7 +384,7 @@ export function AdminRankBoardListPage() {
                   <TableRow>
                     <TableHead className="w-14 pl-5">排名</TableHead>
                     <TableHead>姓名</TableHead>
-                    <TableHead>学校 / 班级</TableHead>
+                    <TableHead>学院 / 班级</TableHead>
                     <TableHead className="w-20 text-right">总分</TableHead>
                     <TableHead className="w-20 text-right">奖项数</TableHead>
                     <TableHead className="w-32 pr-5 text-right">操作</TableHead>
@@ -405,7 +406,7 @@ export function AdminRankBoardListPage() {
                           <p className="font-mono text-[11px] text-muted-foreground">{r.student.studentId}</p>
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground">
-                          {r.student.schoolName}
+                          {rankboardCollege(r.person, r.student) || r.student.schoolName}
                           {r.student.groupNames[0] && ` · ${r.student.groupNames[0]}`}
                         </TableCell>
                         <TableCell className="text-right font-mono text-sm">{r.totalScore.toFixed(1)}</TableCell>
@@ -899,7 +900,7 @@ export function AdminRankBoardPersonPage() {
   const bs = useBootstrap();
   const data = bs.page.data as {
     person: PersonRecord;
-    student: { _id: string; studentId: string; realName: string } | null;
+    student: { _id: string; studentId: string; realName: string; schoolName?: string } | null;
     types: AwardType[];
     canImport: boolean;
     canManage: boolean;
@@ -907,6 +908,7 @@ export function AdminRankBoardPersonPage() {
 
   const [awards, setAwards] = useState<Award[]>(data.person.awards || []);
   const [employmentStatus, setEmploymentStatus] = useState(data.person.employmentStatus || '');
+  const [college, setCollege] = useState(data.person.college || '');
   if (!data.canImport) throw new Error('Rankboard management capability is missing');
 
   const updateAward = (idx: number, patch: Partial<Award>) => {
@@ -946,7 +948,17 @@ export function AdminRankBoardPersonPage() {
           <CardHeader className="pb-2">
             <CardTitle className="text-sm">基本</CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="grid gap-3 sm:grid-cols-2">
+            <FormField label="学院" htmlFor="college">
+              <Input
+                id="college"
+                name="college"
+                value={college}
+                onChange={(e) => setCollege(e.target.value)}
+                placeholder={data.student?.schoolName || '如 计算机学院'}
+              />
+              <p className="mt-1 text-[11px] text-muted-foreground">留空则展示花名册学校名。</p>
+            </FormField>
             <FormField label="就业去向（可选）" htmlFor="emp">
               <Input
                 id="emp"

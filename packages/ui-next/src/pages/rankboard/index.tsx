@@ -6,7 +6,7 @@
  *
  * Layout:
  *   - Top 3 podium cards (gold / silver / bronze)
- *   - Filter bar: search + school + award-type multi-select
+ *   - Filter bar: search + college + award-type multi-select
  *   - Dense table (rank + person + total + per-category counts + OJ AC count)
  *   - Row click opens a right drawer with the full awards list, images,
  *     and per-award scores.
@@ -33,6 +33,7 @@ import {
   isRankboardStatsMode,
   ladderColumnCount,
   mergeAwardTally,
+  rankboardCollege,
   rankboardTableRows,
   rowMatchesAwardFilter,
   shouldShowLadderDetails,
@@ -69,7 +70,7 @@ interface Award {
 }
 
 interface LeaderboardRow {
-  person: { _id: string; studentDocId: string; awards: Award[]; employmentStatus?: string };
+  person: { _id: string; studentDocId: string; awards: Award[]; employmentStatus?: string; college?: string };
   student: {
     _id: string;
     studentId: string;
@@ -246,6 +247,7 @@ const PODIUM_STYLES: Array<{
 function PodiumCard({ row, rank }: { row: LeaderboardRow; rank: number }) {
   const style = PODIUM_STYLES[rank - 1];
   const Icon = style.icon;
+  const college = rankboardCollege(row.person, row.student);
   return (
     <a
       href={`/rankboard/${row.student._id}`}
@@ -270,6 +272,7 @@ function PodiumCard({ row, rank }: { row: LeaderboardRow; rank: number }) {
         <div className="min-w-0">
           <p className="truncate text-lg font-semibold">{row.student.realName}</p>
           <p className="truncate font-mono text-xs text-muted-foreground">{row.student.studentId}</p>
+          {college ? <p className="truncate text-xs text-muted-foreground">{college}</p> : null}
         </div>
       </div>
       <div className="mt-1 flex items-baseline gap-2">
@@ -284,6 +287,7 @@ function PodiumCard({ row, rank }: { row: LeaderboardRow; rank: number }) {
 
 function AwardsDrawer({ row, typeMap, onClose }: { row: LeaderboardRow; typeMap: Map<string, AwardType>; onClose: () => void }) {
   const [lightbox, setLightbox] = useState<string | null>(null);
+  const college = rankboardCollege(row.person, row.student);
   return (
     <>
       <div className="fixed inset-0 z-40 bg-black/30" onClick={onClose} />
@@ -295,6 +299,7 @@ function AwardsDrawer({ row, typeMap, onClose }: { row: LeaderboardRow; typeMap:
             </p>
             <h2 className="text-xl font-semibold">{row.student.realName}</h2>
             <p className="font-mono text-xs text-muted-foreground">{row.student.studentId}</p>
+            {college ? <p className="text-xs text-muted-foreground">{college}</p> : null}
           </div>
           <Button variant="ghost" size="icon" onClick={onClose}>
             <X className="size-4" />
@@ -397,7 +402,7 @@ export function RankBoardMainPage() {
   const typeMap = useMemo(() => new Map(data.awardTypes.map((t) => [t.key, t])), [data.awardTypes]);
 
   const [search, setSearch] = useState('');
-  const [schoolFilter, setSchoolFilter] = useState<string>('all');
+  const [collegeFilter, setCollegeFilter] = useState<string>('all');
   const [yearFilter, setYearFilter] = useState<string>('all');
   const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set());
   const [ladderGroupSelected, setLadderGroupSelected] = useState(false);
@@ -406,15 +411,13 @@ export function RankBoardMainPage() {
   const filterGroups = useMemo(() => buildAwardFilterGroups(data.awardTypes), [data.awardTypes]);
   const showLadderDetails = shouldShowLadderDetails(typeFilter, showAllLadderDetails, data.awardTypes);
 
-  // Build school list once.
-  const schools = useMemo(() => {
-    const set = new Map<string, string>();
+  const colleges = useMemo(() => {
+    const set = new Set<string>();
     for (const r of data.rows) {
-      if (r.student.schoolName && r.student.schoolName !== '—') {
-        set.set(r.student.schoolName, r.student.schoolName);
-      }
+      const college = rankboardCollege(r.person, r.student);
+      if (college) set.add(college);
     }
-    return Array.from(set.keys()).sort();
+    return [...set].sort();
   }, [data.rows]);
 
   // 年级（入学年）列表——来自 userbind 派生的 enrollmentYear（PLAN §5）。
@@ -430,25 +433,25 @@ export function RankBoardMainPage() {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return data.rows.filter((r) => {
-      if (schoolFilter !== 'all' && r.student.schoolName !== schoolFilter) return false;
+      if (collegeFilter !== 'all' && rankboardCollege(r.person, r.student) !== collegeFilter) return false;
       if (yearFilter !== 'all') {
         const y = r.student.enrollmentYear;
         if (String(y ?? '') !== yearFilter) return false;
       }
       if (!rowMatchesAwardFilter(r.person.awards, typeFilter, ladderGroupSelected, typeMap)) return false;
       if (q) {
-        const hay = `${r.student.studentId} ${r.student.realName} ${r.user?.uname || ''}`.toLowerCase();
+        const hay = `${r.student.studentId} ${r.student.realName} ${rankboardCollege(r.person, r.student)} ${r.user?.uname || ''}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
     });
-  }, [data.rows, schoolFilter, yearFilter, typeFilter, ladderGroupSelected, search, typeMap]);
+  }, [data.rows, collegeFilter, yearFilter, typeFilter, ladderGroupSelected, search, typeMap]);
 
   const top3 = data.rows.slice(0, 3);
   const statsMode = isRankboardStatsMode({
     typeFilterSize: typeFilter.size,
     ladderGroupSelected,
-    schoolFilter,
+    schoolFilter: collegeFilter,
     yearFilter,
     search,
   });
@@ -542,10 +545,10 @@ export function RankBoardMainPage() {
             <Input className="pl-8" placeholder="搜索学号 / 姓名" value={search} onChange={(e) => setSearch(e.target.value)} />
           </div>
           <SimpleSelect
-            value={schoolFilter}
-            onValueChange={setSchoolFilter}
+            value={collegeFilter}
+            onValueChange={setCollegeFilter}
             className="w-auto min-w-[10rem]"
-            options={[{ value: 'all', label: '全部学校' }, ...schools.map((s) => ({ value: s, label: s }))]}
+            options={[{ value: 'all', label: '全部学院' }, ...colleges.map((s) => ({ value: s, label: s }))]}
           />
           <SimpleSelect
             value={yearFilter}
@@ -621,6 +624,7 @@ export function RankBoardMainPage() {
                 <TableRow>
                   <TableHead className="w-14 pl-5">排名</TableHead>
                   <TableHead>姓名</TableHead>
+                  <TableHead className="w-32">学院</TableHead>
                   <TableHead className="w-32">就业去向</TableHead>
                   <TableHead className="w-16 text-center">ICPC 金</TableHead>
                   <TableHead className="w-16 text-center">ICPC 银</TableHead>
@@ -646,7 +650,7 @@ export function RankBoardMainPage() {
               <TableBody>
                 {tableRows.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={showLadderDetails ? 20 : 14} className="py-10 text-center text-sm text-muted-foreground">
+                    <TableCell colSpan={showLadderDetails ? 21 : 15} className="py-10 text-center text-sm text-muted-foreground">
                       {data.rows.length === 0 ? '荣誉榜暂无成员，等待管理员添加。' : '当前筛选下没有匹配的成员。'}
                     </TableCell>
                   </TableRow>
@@ -661,6 +665,9 @@ export function RankBoardMainPage() {
                             <p className="text-sm font-medium">{r.student.realName}</p>
                             <p className="font-mono text-[11px] text-muted-foreground">{r.student.studentId}</p>
                           </div>
+                        </TableCell>
+                        <TableCell className="truncate text-xs text-muted-foreground">
+                          {rankboardCollege(r.person, r.student) || <span className="opacity-40">—</span>}
                         </TableCell>
                         <TableCell className="truncate text-xs text-muted-foreground">
                           {r.person.employmentStatus || <span className="opacity-40">—</span>}
@@ -678,6 +685,7 @@ export function RankBoardMainPage() {
                   <TableRow className="hover:bg-transparent">
                     <TableCell className="pl-5 font-semibold">合计</TableCell>
                     <TableCell className="text-xs text-muted-foreground">{tableRows.length} 人</TableCell>
+                    <TableCell />
                     <TableCell />
                     <LeaderboardCountCells
                       awards={[]}
@@ -709,6 +717,7 @@ export function RankBoardDetailPage() {
     awardTypes: AwardType[];
   };
   const typeMap = new Map(data.awardTypes.map((t) => [t.key, t]));
+  const college = rankboardCollege(data.row.person, data.row.student);
   return (
     <div className="space-y-5">
       <Button variant="ghost" size="sm" asChild>
@@ -724,6 +733,7 @@ export function RankBoardDetailPage() {
           </p>
           <h1 className="text-3xl font-bold">{data.row.student.realName}</h1>
           <p className="font-mono text-sm text-muted-foreground">{data.row.student.studentId}</p>
+          {college ? <p className="text-xs text-muted-foreground">学院：{college}</p> : null}
           {data.row.user && data.row.student.boundUserId ? (
             <p className="text-xs text-muted-foreground">
               OJ：

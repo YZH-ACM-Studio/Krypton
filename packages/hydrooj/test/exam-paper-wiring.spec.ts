@@ -120,6 +120,9 @@ describe('exam paper wiring', () => {
         expect(catalog).to.include('还没有开始答题');
         expect(catalog).to.include('已经交卷');
         expect(catalog).to.include('预览考试不能开始答题');
+        expect(catalog).to.include('只有选择题考试能设置题目分数');
+        expect(catalog).to.include('考试分数无效');
+        expect(catalog).to.include('只能给这场考试里的题目改分数');
     });
 
     it('contest student surfaces project draw-on pids and do not write exam startAt', () => {
@@ -163,6 +166,10 @@ describe('exam paper wiring', () => {
         expect(paper).to.include('isExamPaperWindowClosed');
         expect(paper).to.include('canFinalize: !this.examPaperAdminPreview && paperStarted && !paperFinalized && !isExamPaperWindowClosed(this.tdoc, this.tsdoc, new Date())');
         expect(paper).to.include('examShowVerdict: this.examPaperAdminPreview || examShowsVerdict(this.tdoc)');
+        expect(paper).to.include('scaleByContestProblemScore(this.tdoc, pid');
+        expect(readHydrooj('src/handler/contest.ts')).to.include('async postSetScores');
+        expect(readHydrooj('src/handler/contest.ts')).to.include('assignContestProblemScores');
+        expect(readHydrooj('src/handler/contest.ts')).to.include("'tag', 'problemKind'");
         expect(paper).to.include('recordStatus: showVerdict ? recordStatus : {}');
         expect(paper).to.include('judgeResults: showVerdict ? aggregateResults : {}');
         expect(paper).to.include("localizedErrorText`已经交卷`");

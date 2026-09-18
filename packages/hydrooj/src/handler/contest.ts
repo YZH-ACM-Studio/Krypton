@@ -34,8 +34,12 @@ import { assertCourseExamWatchGate } from '../lib/course-exam-gate';
 import { assertIndividualContestUnrankAllowed } from '../lib/contest-unrank';
 import {
     assertExamPaperPoolSatisfiesQuotas,
+    assignContestProblemScores,
+    contestProblemScoreWeight,
     examPaperQuotasEqual,
+    examScoresForPool,
     normalizeExamPaperPids,
+    parseContestProblemScores,
     parseExamPaperQuotas,
     projectStudentContestTdoc,
     readExamPaperQuotas,
@@ -1129,6 +1133,7 @@ export class ContestEditHandler extends Handler {
     @param('plannedTeamBatchId', Types.ObjectId, true)
     @param('examPaperQuotas', Types.Content, true)
     @param('examShowVerdict', Types.Boolean, true)
+    @param('examScores', Types.Content, true)
     @serializedContestEdit
     async postUpdate(
         _domainId: string,
@@ -1181,6 +1186,7 @@ export class ContestEditHandler extends Handler {
         plannedTeamBatchId: ObjectId = null,
         examPaperQuotas = '',
         examShowVerdict: boolean = undefined,
+        examScores = '',
     ) {
         content = content ?? '';
         const creatingContest = !tid;
@@ -1193,6 +1199,17 @@ export class ContestEditHandler extends Handler {
         }
         if (rule !== 'exam' && examShowVerdict !== undefined) {
             throw new ValidationError('examShowVerdict', null, localizedErrorText`只有选择题考试能设置是否显示对错`);
+        }
+        if (rule !== 'exam' && examScores) {
+            throw new ValidationError('examScores', null, localizedErrorText`只有选择题考试能设置题目分数`);
+        }
+        let nextExamScores: Record<number, number> | undefined;
+        if (rule === 'exam' && examScores) {
+            try {
+                nextExamScores = examScoresForPool(parseContestProblemScores(JSON.parse(examScores)), pids);
+            } catch {
+                throw new ValidationError('examScores', null, localizedErrorText`考试分数无效`);
+            }
         }
         let nextExamPaperQuotas: ExamPaperQuotas | null = null;
         if (examPaperQuotas) {
@@ -1258,6 +1275,12 @@ export class ContestEditHandler extends Handler {
             lockBoundaryChanged = timestamp(this.tdoc.lockAt) !== timestamp(lockAt);
             if (lockBoundaryChanged) statusRecalcReasons.push('lockAt');
             if (this.tdoc.statusRecalcToken) statusRecalcReasons.push('pending');
+            if (
+                nextExamScores &&
+                pids.some((pid) => contestProblemScoreWeight(this.tdoc, pid) !== (nextExamScores[pid] ?? 100))
+            ) {
+                statusRecalcReasons.push('score');
+            }
         }
         const statusRecalcToken = statusRecalcReasons.length ? randomstring(24) : null;
         await assertProblemBankSelection(authoritativeDomainId, pids, this.user, this.tdoc?.pids);
@@ -1355,6 +1378,7 @@ export class ContestEditHandler extends Handler {
                     autoHideProblemPids: prewriteAutoHideProblemPids,
                     ...(statusRecalcToken ? { statusRecalcToken } : {}),
                     ...(nextExamPaperQuotas ? { examPaperQuotas: nextExamPaperQuotas } : {}),
+                    ...(nextExamScores ? { score: nextExamScores } : {}),
                 },
                 {
                     actor: this.user,
@@ -1374,6 +1398,7 @@ export class ContestEditHandler extends Handler {
                 autoHideProblemPids: prewriteAutoHideProblemPids,
                 ...(allowVirtual != null ? { allowVirtual } : {}),
                 ...(nextExamPaperQuotas ? { examPaperQuotas: nextExamPaperQuotas } : {}),
+                ...(nextExamScores ? { score: nextExamScores } : {}),
             });
             if (requestedPlannedTeamBatchId) {
                 try {
@@ -1854,7 +1879,7 @@ export class ContestManagementHandler extends ContestManagementBaseHandler {
             tdoc: this.tdoc,
             tsdoc: this.tsdoc,
             owner_udoc: await user.getById(authoritativeDomainId, this.tdoc.owner),
-            pdict: await problem.getList(authoritativeDomainId, this.tdoc.pids, true, true, [...problem.PROJECTION_CONTEST_LIST, 'tag']),
+            pdict: await problem.getList(authoritativeDomainId, this.tdoc.pids, true, true, [...problem.PROJECTION_CONTEST_LIST, 'tag', 'problemKind']),
             files: sortFiles(this.tdoc.files || []),
             privateFiles: sortFiles(this.tdoc.privateFiles || []),
             scopeGroups,
@@ -1931,11 +1956,31 @@ export class ContestManagementHandler extends ContestManagementBaseHandler {
     @param('pid', Types.PositiveInt)
     @param('score', Types.PositiveInt)
     async postSetScore(_domainId: string, pid: number, score: number) {
+        await this.writeContestProblemScores([pid], score);
+    }
+
+    @param('pids', Types.NumericArray)
+    @param('score', Types.PositiveInt)
+    async postSetScores(_domainId: string, pids: number[], score: number) {
+        await this.writeContestProblemScores(pids, score);
+    }
+
+    private async writeContestProblemScores(pids: number[], score: number) {
         const authoritativeDomainId = this.authoritativeDomainId();
-        if (!this.tdoc.pids.includes(pid)) throw new ValidationError('pid');
-        this.tdoc.score ||= {};
-        this.tdoc.score[pid] = score;
-        await contest.edit(authoritativeDomainId, this.tdoc.docId, { score: this.tdoc.score });
+        let next: Record<number, number>;
+        try {
+            next = assignContestProblemScores(this.tdoc.score, this.tdoc.pids, pids, score);
+        } catch (error) {
+            if (error instanceof TypeError && error.message === 'contest_score_pids') {
+                throw new ValidationError('pids', null, localizedErrorText`只能给这场考试里的题目改分数`);
+            }
+            if (error instanceof TypeError && error.message === 'contest_score_value') {
+                throw new ValidationError('score', null, localizedErrorText`考试分数无效`);
+            }
+            throw error;
+        }
+        this.tdoc.score = next;
+        await contest.edit(authoritativeDomainId, this.tdoc.docId, { score: next });
         await contest.recalcStatus(authoritativeDomainId, this.tdoc.docId);
         this.back();
     }

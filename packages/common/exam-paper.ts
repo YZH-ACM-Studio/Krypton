@@ -131,6 +131,76 @@ export function examShowsVerdict(tdoc: { rule?: unknown; examShowVerdict?: unkno
     return tdoc.examShowVerdict !== false;
 }
 
+/** Contest-scoped weight. Missing or invalid = 100. Does not read the problem bank. */
+export function contestProblemScoreWeight(tdoc: { score?: unknown }, pid: number): number {
+    if (!Number.isInteger(pid) || pid <= 0) return 100;
+    if (!isPlainObject(tdoc.score)) return 100;
+    const raw = tdoc.score[String(pid)];
+    const weight = typeof raw === 'number' ? raw : Number(raw);
+    if (!Number.isFinite(weight) || weight <= 0) return 100;
+    return weight;
+}
+
+export function scaleByContestProblemScore(tdoc: { score?: unknown }, pid: number, baseScore: number): number {
+    if (typeof baseScore !== 'number' || !Number.isFinite(baseScore)) return 0;
+    return (contestProblemScoreWeight(tdoc, pid) * baseScore) / 100;
+}
+
+export function parseContestProblemScores(raw: unknown): Record<number, number> {
+    if (!isPlainObject(raw)) throw new TypeError('contest_score_map');
+    const out: Record<number, number> = {};
+    for (const [key, value] of Object.entries(raw)) {
+        const pid = Number(key);
+        if (!Number.isInteger(pid) || pid <= 0 || String(pid) !== key) throw new TypeError('contest_score_map');
+        if (typeof value !== 'number' || !Number.isInteger(value) || !Number.isSafeInteger(value) || value < 1) {
+            throw new TypeError('contest_score_value');
+        }
+        out[pid] = value;
+    }
+    return out;
+}
+
+export function examScoresForPool(map: Record<number, number>, poolPids: readonly number[]): Record<number, number> {
+    const allowed = new Set(normalizeExamPaperPids(poolPids));
+    for (const pid of Object.keys(map).map(Number)) {
+        if (!allowed.has(pid)) throw new TypeError('contest_score_pids');
+    }
+    const next: Record<number, number> = {};
+    for (const pid of normalizeExamPaperPids(poolPids)) {
+        next[pid] = map[pid] ?? 100;
+    }
+    return next;
+}
+
+export function assignContestProblemScores(
+    existing: unknown,
+    contestPids: readonly number[],
+    selected: readonly number[],
+    score: number,
+): Record<number, number> {
+    if (!Number.isInteger(score) || !Number.isSafeInteger(score) || score < 1) {
+        throw new TypeError('contest_score_value');
+    }
+    const allowed = new Set(normalizeExamPaperPids(contestPids));
+    if (!Array.isArray(selected) || !selected.length) throw new TypeError('contest_score_pids');
+    const unique: number[] = [];
+    const seen = new Set<number>();
+    for (const pid of selected) {
+        if (typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 0 || !allowed.has(pid)) {
+            throw new TypeError('contest_score_pids');
+        }
+        if (seen.has(pid)) continue;
+        seen.add(pid);
+        unique.push(pid);
+    }
+    const next: Record<number, number> = {};
+    for (const pid of normalizeExamPaperPids(contestPids)) {
+        next[pid] = contestProblemScoreWeight({ score: existing }, pid);
+    }
+    for (const pid of unique) next[pid] = score;
+    return next;
+}
+
 export function isExamPaperInWindow(tdoc: ExamPaperContestClock, tsdoc: ExamPaperStatusClock | null | undefined, now: Date): boolean {
     if (isExamPaperStarted(tsdoc)) {
         const beginAt = asExamPaperDate(tdoc.beginAt);

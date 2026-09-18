@@ -41,6 +41,31 @@ export function examPaperBankCanAddAll(query: string, kind: string): boolean {
   return Boolean(query.trim() || kind);
 }
 
+export function examPaperScoreWeight(scores: Record<string, number>, key: string): number {
+  const raw = scores[key];
+  return Number.isInteger(raw) && raw >= 1 ? raw : 100;
+}
+
+export function examScoresPayload(pids: string[], scores: Record<string, number>): string {
+  const out: Record<string, number> = {};
+  for (const id of pids) {
+    if (!/^[1-9][0-9]*$/.test(id)) continue;
+    out[id] = examPaperScoreWeight(scores, id);
+  }
+  return JSON.stringify(out);
+}
+
+export function examScoresFromTdoc(pids: string[], score: unknown): Record<string, number> {
+  const record = score && typeof score === 'object' && !Array.isArray(score) ? (score as Record<string, unknown>) : {};
+  const out: Record<string, number> = {};
+  for (const id of pids) {
+    const raw = record[id];
+    const n = typeof raw === 'number' ? raw : Number(raw);
+    out[id] = Number.isInteger(n) && n >= 1 ? n : 100;
+  }
+  return out;
+}
+
 export type ExamPaperPdictRow = {
   problemKind?: unknown;
   title?: unknown;
@@ -150,12 +175,14 @@ export function ContestExamPaperPool({
   onChange,
   pdict,
   quotas,
+  scores: initialScores,
 }: {
   name?: string;
   value: string[];
   onChange: (next: string[]) => void;
   pdict?: Record<string, ExamPaperPdictRow>;
   quotas?: Partial<Record<string, number>>;
+  scores?: unknown;
 }) {
   const bs = useBootstrap();
   const [history, setHistory] = useState(() => examPaperHistoryInit(value));
@@ -178,6 +205,8 @@ export function ContestExamPaperPool({
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteText, setPasteText] = useState('');
   const [status, setStatus] = useState('');
+  const [scores, setScores] = useState(() => examScoresFromTdoc(value, initialScores));
+  const [batchScore, setBatchScore] = useState('2');
 
   const pids = uniqueExamPaperPids(value);
   const rows = useMemo(() => pids.map((id) => catalog[id] || rowFromId(id, pdict)), [catalog, pdict, pids]);
@@ -240,6 +269,13 @@ export function ContestExamPaperPool({
     setHistory((current) => examPaperHistoryPush(current, unique));
     onChange(unique);
     setSelected((current) => current.filter((id) => unique.includes(id)));
+    setScores((current) => {
+      const next = { ...current };
+      for (const id of unique) {
+        if (!Number.isInteger(next[id]) || next[id] < 1) next[id] = 100;
+      }
+      return next;
+    });
     setStatus(message);
   };
 
@@ -432,6 +468,7 @@ export function ContestExamPaperPool({
   return (
     <div className="space-y-5">
       <input type="hidden" name={name} value={pids.join(',')} />
+      <input type="hidden" name="examScores" value={examScoresPayload(pids, scores)} />
 
       <section className="space-y-3 rounded-xl border bg-muted/20 p-4">
         <div className="flex flex-wrap items-end justify-between gap-2">
@@ -656,6 +693,35 @@ export function ContestExamPaperPool({
             <Trash2 />
             移除所选
           </Button>
+          <Input
+            type="number"
+            min={1}
+            value={batchScore}
+            onChange={(event) => setBatchScore(event.target.value)}
+            className="w-20 text-right"
+            aria-label="批量分数"
+          />
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={!selected.length}
+            onClick={() => {
+              const n = Number(batchScore);
+              if (!Number.isInteger(n) || n < 1) {
+                setStatus('分数必须是正整数');
+                return;
+              }
+              setScores((current) => {
+                const next = { ...current };
+                for (const id of selected) next[id] = n;
+                return next;
+              });
+              setStatus(`已将 ${selected.length} 道题设为 ${n} 分，保存考试后生效`);
+            }}
+          >
+            所选设为该分
+          </Button>
         </div>
         {pids.length ? (
           <PoolTable
@@ -669,6 +735,8 @@ export function ContestExamPaperPool({
             showIndex
             allSelected={allVisibleSelected}
             indeterminate={someVisibleSelected}
+            scores={scores}
+            onScoreChange={(key, score) => setScores((current) => ({ ...current, [key]: score }))}
           />
         ) : (
           <p className="rounded-lg border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">题池还是空的。先搜索或粘贴题号。</p>
@@ -738,6 +806,8 @@ function PoolTable({
   showIndex = false,
   allSelected,
   indeterminate,
+  scores,
+  onScoreChange,
 }: {
   rows: ExamPaperPoolRow[];
   selected: string[];
@@ -748,6 +818,8 @@ function PoolTable({
   showIndex?: boolean;
   allSelected?: boolean;
   indeterminate?: boolean;
+  scores?: Record<string, number>;
+  onScoreChange?: (key: string, score: number) => void;
 }) {
   const selectedSet = new Set(selected);
   const headerChecked = allSelected ?? (rows.length > 0 && rows.every((row) => selectedSet.has(row.key)));
@@ -770,6 +842,7 @@ function PoolTable({
             <TableHead className="w-28">题号</TableHead>
             <TableHead>标题</TableHead>
             <TableHead className="w-24">题型</TableHead>
+            {onScoreChange ? <TableHead className="w-24 text-right">本场分数</TableHead> : null}
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -800,6 +873,21 @@ function PoolTable({
               <TableCell>
                 <Badge variant="secondary">{KIND_LABEL[row.kind]}</Badge>
               </TableCell>
+              {onScoreChange ? (
+                <TableCell className="text-right">
+                  <Input
+                    type="number"
+                    min={1}
+                    value={examPaperScoreWeight(scores || {}, row.key)}
+                    onChange={(event) => {
+                      const n = Number(event.target.value);
+                      if (Number.isInteger(n) && n >= 1) onScoreChange(row.key, n);
+                    }}
+                    className="ml-auto w-20 text-right"
+                    aria-label={`${row.pid || row.key} 本场分数`}
+                  />
+                </TableCell>
+              ) : null}
             </TableRow>
           ))}
         </TableBody>

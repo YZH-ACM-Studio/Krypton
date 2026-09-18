@@ -18,6 +18,7 @@ const LOCKED_POST_NAMES = [
   'cameraEnabled',
   'hidden',
   'examShowVerdict',
+  'examScores',
 ] as const;
 
 const FORBIDDEN_POST_NAMES = ['courseExam', 'examEvent'] as const;
@@ -82,6 +83,10 @@ describe('contest edit exam field contract', () => {
     expect(exam, 'inactive exam tabs stay mounted for POST').to.match(/hidden=\{tab !== '/);
     expect(exam, 'exam tree uses ContestExamPaperPool').to.include('ContestExamPaperPool');
     expect(exam, 'exam tree must POST pids via the paper pool').to.include('name="pids"');
+    expect(exam, 'exam tree passes contest scores into the paper pool').to.include('scores={tdoc.score}');
+    const pool = source('packages/ui-next/src/pages/contest-exam-paper-pool.tsx');
+    expect(pool, 'paper pool must POST examScores').to.match(/name=["']examScores["']/);
+    expect(pool, 'paper pool can batch-set contest scores').to.include('所选设为该分');
     expect(exam, 'exam description stays postable and can be filled later').to.include('name="content"');
     expect(exam, 'exam description can be filled later').to.include('可后补');
     const postDecorators = contestEditPostUpdateDecorators(handler);

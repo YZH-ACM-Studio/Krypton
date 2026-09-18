@@ -67,6 +67,7 @@ import { formatDateTime, formatRelativeTime, makeInitials, replaceRouteTokens } 
 import { isSystemAdmin } from '@/lib/perms';
 import { ContestEditExam } from './contest-edit-exam';
 import { initialContestEditRule } from './contest-edit-exam-defaults';
+import { ContestExamScoreBatch } from './contest-exam-score-batch';
 
 /**
  * Loose server-payload record — kept only for payloads whose shape is not
@@ -78,6 +79,7 @@ type R = Record<string, unknown>;
 /** Minimal projection of a problem doc as used on these management pages. */
 interface ProblemBrief {
   title?: string;
+  pid?: string | number;
   problemKind?: unknown;
 }
 
@@ -2290,6 +2292,9 @@ export function ContestManagePage() {
           />
 
           {activeManageTab === 'score' ? (
+            String(tdoc.rule) === 'exam' ? (
+              <ContestExamScoreBatch pids={pids} pdict={pdict} scores={tdoc.score} />
+            ) : (
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">题目分值</CardTitle>
@@ -2331,6 +2336,7 @@ export function ContestManagePage() {
                 )}
               </CardContent>
             </Card>
+            )
           ) : null}
 
           {activeManageTab === 'stats' && submissionStats ? (

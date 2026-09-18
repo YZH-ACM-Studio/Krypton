@@ -50,6 +50,7 @@ import {
     examPaperPersonalEnd,
     examShowsVerdict,
     isExamPaperDrawEnabled,
+    scaleByContestProblemScore,
     isExamPaperFinalized,
     isExamPaperInWindow,
     isExamPaperStarted,
@@ -702,13 +703,13 @@ class PaperLayoutHandler extends PaperBaseHandler {
             if (type === 'objective') {
                 const kinds = questionKindMap(config?.answers);
                 for (const [key, kind] of Object.entries(kinds)) {
-                    const score = Array.isArray(config.answers?.[key]) ? config.answers[key][1] : 0;
+                    const baseScore = Array.isArray(config.answers?.[key]) ? config.answers[key][1] : 0;
                     const meta = Array.isArray(config.answers?.[key]) && config.answers[key].length >= 3 ? config.answers[key][2] : undefined;
                     cells.push({
                         pid,
                         questionKey: key,
                         kind,
-                        score,
+                        score: scaleByContestProblemScore(this.tdoc, pid, typeof baseScore === 'number' ? baseScore : 0),
                         prompt: meta?.prompt,
                     });
                 }
@@ -718,10 +719,15 @@ class PaperLayoutHandler extends PaperBaseHandler {
                     pid,
                     questionKey: null,
                     kind: kind === 'program_fill' ? (config.mode === 'compile' ? 'program_fill_compile' : 'program_fill_text') : 'function',
-                    score: pdoc.score || 100,
+                    score: scaleByContestProblemScore(this.tdoc, pid, pdoc.score || 100),
                 });
             } else {
-                cells.push({ pid, questionKey: null, kind: type === 'submit_answer' ? 'submit_answer' : 'default', score: pdoc.score || 100 });
+                cells.push({
+                    pid,
+                    questionKey: null,
+                    kind: type === 'submit_answer' ? 'submit_answer' : 'default',
+                    score: scaleByContestProblemScore(this.tdoc, pid, pdoc.score || 100),
+                });
             }
         }
 

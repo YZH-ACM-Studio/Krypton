@@ -501,8 +501,15 @@ export function ContestEditExam({ rule, onRuleChange, children }: ContestEditExa
         </div>
 
         <div hidden={tab !== 'paper'}>
-        <ExamCard title="试卷" description="题池可批量筛选、多选、排序和撤销。填写配额后按题型抽个人卷，第一次开考冻结。">
-          <ContestExamPaperPool name="pids" value={pids} onChange={setPids} pdict={readPdict(data.pdict)} quotas={readQuotaMap(tdoc.examPaperQuotas)} />
+        <ExamCard title="试卷" description="题池可按题型筛选、多选、排序，并批量改这场考试的分数。填写配额后按题型抽个人卷，第一次开考冻结。">
+          <ContestExamPaperPool
+            name="pids"
+            value={pids}
+            onChange={setPids}
+            pdict={readPdict(data.pdict)}
+            quotas={readQuotaMap(tdoc.examPaperQuotas)}
+            scores={tdoc.score}
+          />
         </ExamCard>
         </div>
 

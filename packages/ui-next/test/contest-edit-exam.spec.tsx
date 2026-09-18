@@ -102,6 +102,7 @@ describe('contest edit exam render', () => {
     expect(hiddenInput('participationMode')?.value).to.equal('individual');
     expect(hiddenInput('hidden')?.value).to.equal('false');
     expect(hiddenInput('examShowVerdict')?.value).to.equal('true');
+    expect(hiddenInput('examScores')?.value).to.equal('{}');
     expect(screen.getByText('不在列表中显示')).to.exist;
     expect(screen.getByText('交卷后显示对错')).to.exist;
     expect(screen.getByRole('tab', { name: '这场考试' })).to.exist;
@@ -155,6 +156,7 @@ describe('contest edit exam render', () => {
         files: [],
         rated: true,
         examPaperQuotas: { single: 1 },
+        score: { 11: 2 },
         hidden: true,
       },
       `/contest/${CONTEST_ID}/edit`,
@@ -165,6 +167,7 @@ describe('contest edit exam render', () => {
     expect(screen.getByText('撤销')).to.exist;
     expect(screen.getByText('按题型抽题')).to.exist;
     expect(namedInput('examPaperQuotas')?.value).to.equal(JSON.stringify({ single: 1 }));
+    expect(hiddenInput('examScores')?.value).to.equal('{"11":2}');
     expect(hiddenInput('rated')?.value).to.equal('true');
     expect(hiddenInput('hidden')?.value).to.equal('true');
     expect(screen.getByText('不在列表中显示')).to.exist;

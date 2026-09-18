@@ -9,6 +9,11 @@ import {
     examPaperPersonalEnd,
     examPaperQuotasEqual,
     examShowsVerdict,
+    assignContestProblemScores,
+    contestProblemScoreWeight,
+    examScoresForPool,
+    parseContestProblemScores,
+    scaleByContestProblemScore,
     isExamPaperFinalized,
     isExamPaperInWindow,
     isExamPaperUnstartedClosed,
@@ -158,5 +163,18 @@ describe('exam paper draw and resolve', () => {
         expect(projectStudentContestTdoc(tdoc, frozen).autoHideProblemPids).to.deep.equal([2]);
         expect(projectStudentContestTdoc(tdoc, frozen, true)).to.equal(tdoc);
         expect(projectStudentContestTdoc({ rule: 'acm', pids: [1, 2] }, null).pids).to.deep.equal([1, 2]);
+    });
+
+    it('reads contest-scoped scores and rejects scores for problems outside the pool', () => {
+        expect(contestProblemScoreWeight({}, 12)).to.equal(100);
+        expect(contestProblemScoreWeight({ score: { 12: 2 } }, 12)).to.equal(2);
+        expect(scaleByContestProblemScore({ score: { 12: 2 } }, 12, 100)).to.equal(2);
+        expect(parseContestProblemScores({ 12: 2, 13: 3 })).to.deep.equal({ 12: 2, 13: 3 });
+        expect(examScoresForPool({ 12: 2 }, [12, 13])).to.deep.equal({ 12: 2, 13: 100 });
+        expect(() => examScoresForPool({ 99: 2 }, [12])).to.throw(TypeError, 'contest_score_pids');
+        expect(assignContestProblemScores({ 12: 5 }, [12, 13], [13, 13], 2)).to.deep.equal({ 12: 5, 13: 2 });
+        expect(() => assignContestProblemScores({}, [12], [99], 2)).to.throw(TypeError, 'contest_score_pids');
+        expect(() => assignContestProblemScores({}, [12], [], 2)).to.throw(TypeError, 'contest_score_pids');
+        expect(() => assignContestProblemScores({}, [12], [12], 0)).to.throw(TypeError, 'contest_score_value');
     });
 });

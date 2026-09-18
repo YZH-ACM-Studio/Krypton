@@ -59,6 +59,13 @@ describe('contest exam create UI handler lock', () => {
         expect(postUpdate).to.include('examShowVerdict: examShowVerdict !== false');
     });
 
+    it('writes examScores only for exam', () => {
+        expect(editor).to.include("@param('examScores', Types.Content, true)");
+        expect(postUpdate).to.include("rule !== 'exam' && examScores");
+        expect(postUpdate).to.include('score: nextExamScores');
+        expect(postUpdate).to.include("statusRecalcReasons.push('score')");
+    });
+
     it('accepts empty exam description and empty paper pool on create', () => {
         expect(editor).to.include("@param('content', Types.Content, true)");
         expect(editor).to.include("@param('pids', Types.Content, true)");

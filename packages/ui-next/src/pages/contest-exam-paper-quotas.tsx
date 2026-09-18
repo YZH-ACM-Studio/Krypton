@@ -126,7 +126,7 @@ export function ContestExamPaperQuotas({
         <p className="text-xs text-muted-foreground">0 或留空表示不抽该题型</p>
         {shortfalls.length ? <p className="text-xs text-destructive">{POOL_SHORT_MESSAGE}</p> : null}
       </div>
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {PROBLEM_KINDS.map((kind) => (
           <div key={kind} className="space-y-1.5">
             <label htmlFor={`examPaperQuota-${kind}`} className="text-sm font-medium">

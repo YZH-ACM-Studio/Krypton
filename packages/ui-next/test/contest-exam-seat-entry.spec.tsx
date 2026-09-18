@@ -155,7 +155,7 @@ describe('contest exam seat entry', () => {
     const seat = withinSeatEntry();
     expect(await seat.findByRole('button', { name: '进入座位工作台' })).toBeInTheDocument();
     expect(seat.getByText('创建后的机房场次')).toBeInTheDocument();
-    expect(screen.getByText('返回比赛详情')).toBeInTheDocument();
+    expect(screen.getByText('返回考试详情')).toBeInTheDocument();
     expect([...document.querySelectorAll('form')].some((form) => form.contains(seatEntryCard()))).toBe(false);
   });
 

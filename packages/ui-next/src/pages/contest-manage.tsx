@@ -581,7 +581,7 @@ interface ManagementItem {
 function managementItems(tdoc: ContestDoc, contestUrl: string, canGradeSubjective: boolean): ManagementItem[] {
   const items: ManagementItem[] = [
     { key: 'overview', label: '概览与文件', href: `${contestUrl}/management`, icon: LayoutDashboard },
-    { key: 'edit', label: '编辑比赛', href: `${contestUrl}/edit`, icon: Settings },
+    { key: 'edit', label: String(tdoc.rule) === 'exam' ? '编辑考试' : '编辑比赛', href: `${contestUrl}/edit`, icon: Settings },
     { key: 'users', label: '参赛选手', href: `${contestUrl}/user`, icon: Users },
     { key: 'clarification', label: '答疑管理', href: `${contestUrl}/clarification`, icon: MessageSquare },
     {
@@ -613,8 +613,10 @@ function ContestManagementChrome({ tdoc, active, children }: { tdoc: ContestDoc;
       <aside className="space-y-3">
         <div className="rounded-xl border bg-card p-3">
           <a href={contestUrl} className="group block rounded-lg px-2 py-2 hover:bg-accent/40">
-            <p className="line-clamp-2 text-sm font-medium group-hover:text-primary">{tdoc.title || '比赛'}</p>
-            <p className="mt-1 text-xs text-muted-foreground">返回比赛详情</p>
+            <p className="line-clamp-2 text-sm font-medium group-hover:text-primary">
+              {tdoc.title || (String(tdoc.rule) === 'exam' ? '考试' : '比赛')}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">{String(tdoc.rule) === 'exam' ? '返回考试详情' : '返回比赛详情'}</p>
           </a>
           <div className="my-2 h-px bg-border" />
           <nav className="space-y-1">

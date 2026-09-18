@@ -36,7 +36,7 @@ import { StructuredRegionInputs } from '@/components/structured-region-inputs';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { SimpleSelect } from '@/components/ui/select';
-import { type KryptonUser, useBootstrap } from '@/lib/bootstrap';
+import { useBootstrap } from '@/lib/bootstrap';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 
 interface PdocLike {
@@ -89,8 +89,10 @@ const EMPTY_DRAFT: DraftState = {
   dirty: false,
 };
 
-/** Exam bootstrap augments the signed-in user with student identity fields (via userbind). */
-type ExamUser = KryptonUser & { studentId?: string; realName?: string };
+interface ExamModeStudentView {
+  studentId?: string;
+  realName?: string;
+}
 
 /** JSON-serialized `PaperDraft` row from GET /paper/:tid/draft — dates arrive as ISO strings. */
 interface SavedDraftRow {
@@ -146,8 +148,10 @@ export function ExamPaperPage() {
     scoreboard: Array<{ rank: number; uid: number; uname: string; realName?: string; studentId?: string; score: number }>;
     showScoreboard: boolean;
     allowSubmitByKind: boolean;
+    examMode?: { student?: ExamModeStudentView | null };
   };
   const { tdoc, pdict, cells, inWindow, broadcasts, scoreboard, showScoreboard, allowSubmitByKind } = data;
+  const examStudent = data.examMode?.student;
   const tid = tdoc.docId;
   const [section, setSection] = useExamSection('overview');
 
@@ -168,8 +172,8 @@ export function ExamPaperPage() {
             now: data.now,
             signedInUser: {
               name: bs.user.name,
-              studentId: (bs.user as ExamUser).studentId,
-              realName: (bs.user as ExamUser).realName,
+              studentId: examStudent?.studentId,
+              realName: examStudent?.realName,
             },
           }}
           onEnterProblems={() => setSection('problems')}

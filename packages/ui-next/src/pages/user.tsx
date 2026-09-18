@@ -74,6 +74,7 @@ interface UserStudentBinding {
   bound?: boolean;
   realName?: string;
   studentId?: string;
+  schoolName?: string | null;
 }
 
 interface UserSetting {
@@ -363,9 +364,7 @@ export function UserDetailPage() {
   const submitCount = Number(udoc.nSubmit ?? 0);
   const lastActive = sdoc?.updateAt || udoc.loginat;
 
-  // 真实身份（krypton-userbind 注入）：绑定状态所有人可见；姓名/学号仅登录
-  // 用户可见（服务端过滤，未登录时字段不下发）。有绑定档案时它是唯一真源，
-  // 用户自填的 studentId/school 不再展示（防止两个学号打架）。
+  // 学号/姓名/学校只认 userbind。绑定状态所有人可见；身份字段仅登录用户可见。
   const binding = data.studentBinding || null;
   const isBound = !!binding?.bound;
 
@@ -374,11 +373,11 @@ export function UserDetailPage() {
     { label: 'QQ', value: udoc.qq, icon: MessageSquare },
     { label: '微信', value: udoc.wechat, icon: MessageSquare },
     ...(isBound
-      ? [{ label: '学号', value: binding.studentId, icon: Hash }]
-      : [
-          { label: '学号', value: udoc.studentId, icon: Hash },
-          { label: '学校', value: udoc.school, icon: UserIcon },
-        ]),
+      ? [
+          { label: '学号', value: binding.studentId, icon: Hash },
+          { label: '学校', value: binding.schoolName, icon: UserIcon },
+        ]
+      : []),
   ].filter((it) => it.value);
 
   const avatarUrl = udoc.avatarUrl || (udoc.avatar && /^https?:|^\//.test(udoc.avatar) ? udoc.avatar : null);
@@ -419,9 +418,9 @@ export function UserDetailPage() {
                       </Badge>
                     )
                   ) : null}
-                  {!isBound && udoc.school ? (
+                  {isBound && binding.schoolName ? (
                     <Badge variant="secondary" className="text-[10px]">
-                      {udoc.school}
+                      {binding.schoolName}
                     </Badge>
                   ) : null}
                   <Badge variant="outline" className="text-[10px] font-mono">

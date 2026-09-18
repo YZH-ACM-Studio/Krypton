@@ -1082,9 +1082,9 @@ export class ContestEditHandler extends Handler {
     @param('beginAtTime', Types.Time)
     @param('duration', Types.Float)
     @param('title', Types.Title)
-    @param('content', Types.Content)
+    @param('content', Types.Content, true)
     @param('rule', Types.String)
-    @param('pids', Types.Content)
+    @param('pids', Types.Content, true)
     @param('rated', Types.Boolean)
     @param('code', Types.String, true)
     @param('autoHide', Types.Boolean)
@@ -1138,7 +1138,7 @@ export class ContestEditHandler extends Handler {
         title: string,
         content: string,
         rule: string,
-        _pids: string,
+        _pids = '',
         rated = false,
         _code = '',
         autoHide = false,
@@ -1180,6 +1180,7 @@ export class ContestEditHandler extends Handler {
         plannedTeamBatchId: ObjectId = null,
         examPaperQuotas = '',
     ) {
+        content = content ?? '';
         const creatingContest = !tid;
         const authoritativeDomainId = String(this.domain?._id);
         problem.assertProblemAclDomain(this.user, authoritativeDomainId);

@@ -130,6 +130,12 @@ describe('contest edit exam render', () => {
     expect(document.querySelector('[name="examEvent"]')).to.equal(null);
     expect(namedInput('liveEnabled')).to.equal(null);
     expect(namedInput('cameraEnabled')).to.equal(null);
+    const contentField = document.querySelector<HTMLTextAreaElement | HTMLInputElement>('[name="content"]');
+    expect(contentField, 'content stays in the form while the 考生说明 tab is inactive').to.exist;
+    expect(contentField?.value).to.equal('');
+    const pidsField = document.querySelector<HTMLInputElement>('[name="pids"]');
+    expect(pidsField, 'pids stays in the form while the 试卷 tab is inactive').to.exist;
+    expect(pidsField?.value).to.equal('');
   });
 
   it('renders contest_edit exam as 编辑考试 and persists hidden rated', () => {

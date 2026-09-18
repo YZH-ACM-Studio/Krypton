@@ -53,6 +53,13 @@ describe('contest exam create UI handler lock', () => {
         expect(postUpdate).to.match(/contest\.edit\([\s\S]*hidden,/);
     });
 
+    it('accepts empty exam description and empty paper pool on create', () => {
+        expect(editor).to.include("@param('content', Types.Content, true)");
+        expect(editor).to.include("@param('pids', Types.Content, true)");
+        expect(postUpdate).to.include("content = content ?? ''");
+        expect(postUpdate).to.match(/_pids\s*=\s*''/);
+    });
+
     it('does not read query.rule on GET', () => {
         expect(get).to.match(/async get\(_domainId: string, tid: ObjectId\)/);
         expect(get).not.to.include('query.rule');

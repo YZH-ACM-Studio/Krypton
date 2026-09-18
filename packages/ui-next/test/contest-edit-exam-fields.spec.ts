@@ -25,12 +25,16 @@ function source(rel: string) {
   return readFileSync(resolve(workspaceRoot, rel), 'utf8');
 }
 
-function contestEditPostUpdateParamNames(handler: string): string[] {
+function contestEditPostUpdateDecorators(handler: string): string {
   const cls = handler.indexOf('export class ContestEditHandler');
   expect(cls, 'ContestEditHandler missing').to.be.at.least(0);
   const post = handler.indexOf('async postUpdate(', cls);
   expect(post, 'ContestEditHandler.postUpdate missing').to.be.greaterThan(cls);
-  return [...handler.slice(cls, post).matchAll(/@param\('([A-Za-z]+)'/g)].map((match) => match[1]);
+  return handler.slice(cls, post);
+}
+
+function contestEditPostUpdateParamNames(handler: string): string[] {
+  return [...contestEditPostUpdateDecorators(handler).matchAll(/@param\('([A-Za-z]+)'/g)].map((match) => match[1]);
 }
 
 function readExamTree(): string {
@@ -75,6 +79,11 @@ describe('contest edit exam field contract', () => {
     expect(exam, 'inactive exam tabs stay mounted for POST').to.match(/hidden=\{tab !== '/);
     expect(exam, 'exam tree uses ContestExamPaperPool').to.include('ContestExamPaperPool');
     expect(exam, 'exam tree must POST pids via the paper pool').to.include('name="pids"');
+    expect(exam, 'exam description stays postable and can be filled later').to.include('name="content"');
+    expect(exam, 'exam description can be filled later').to.include('可后补');
+    const postDecorators = contestEditPostUpdateDecorators(handler);
+    expect(postDecorators, 'empty content must not fail Types.Content').to.include("@param('content', Types.Content, true)");
+    expect(postDecorators, 'empty paper pool must not fail Types.Content').to.include("@param('pids', Types.Content, true)");
     expect(exam, 'exam tree must not use ProblemPicker').not.to.include('ProblemPicker');
     expect(exam, 'examPaperQuotas via ContestExamPaperPool').to.include('ContestExamPaperPool');
     expect(exam).to.match(/from\s+['"][^'"]*contest-exam-paper-pool['"]/);

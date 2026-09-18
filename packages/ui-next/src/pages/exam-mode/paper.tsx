@@ -147,6 +147,7 @@ export function ExamPaperPage() {
     inWindow: boolean;
     canFinalize: boolean;
     paperStarted?: boolean;
+    paperFinalized?: boolean;
     canStartPaper?: boolean;
     canViewPaper?: boolean;
     contestBeginAt?: string;
@@ -163,6 +164,7 @@ export function ExamPaperPage() {
   };
   const { tdoc, pdict, cells, inWindow, canFinalize, paperPreview, broadcasts, scoreboard, showScoreboard, allowSubmitByKind } = data;
   const paperStarted = data.paperStarted === true;
+  const paperFinalized = data.paperFinalized === true;
   const canViewPaper = paperPreview === true || data.paperStarted !== false;
   const examStudent = data.examMode?.student;
   const tid = tdoc.docId;
@@ -222,6 +224,7 @@ export function ExamPaperPage() {
               realName: examStudent?.realName,
             },
             paperStarted,
+            paperFinalized,
             paperPreview: paperPreview === true,
             canStartPaper: data.canStartPaper === true,
             contestBeginAt: data.contestBeginAt,
@@ -235,7 +238,7 @@ export function ExamPaperPage() {
         />
       )}
       {visibleSection === 'problems' && canViewPaper && (
-        <ProblemsSection tdoc={tdoc} tid={tid} pdict={pdict} cells={cells} inWindow={inWindow} canFinalize={canFinalize} paperPreview={paperPreview === true} allowSubmitByKind={allowSubmitByKind} />
+        <ProblemsSection tdoc={tdoc} tid={tid} pdict={pdict} cells={cells} inWindow={inWindow && !paperFinalized} canFinalize={canFinalize && !paperFinalized} paperPreview={paperPreview === true} paperFinalized={paperFinalized} allowSubmitByKind={allowSubmitByKind && !paperFinalized} />
       )}
       {visibleSection === 'announcements' && <AnnouncementsSection broadcasts={broadcasts || []} />}
       {visibleSection === 'ranking' && <RankingSection scoreboard={scoreboard || []} showScoreboard={showScoreboard} signedInUid={bs.user.id} />}
@@ -252,6 +255,7 @@ function ProblemsSection({
   inWindow,
   canFinalize,
   paperPreview,
+  paperFinalized,
   allowSubmitByKind,
 }: {
   tdoc: TdocLike;
@@ -261,6 +265,7 @@ function ProblemsSection({
   inWindow: boolean;
   canFinalize: boolean;
   paperPreview: boolean;
+  paperFinalized: boolean;
   allowSubmitByKind: boolean;
 }) {
   const groups = useMemo(() => groupCellsByKind(cells), [cells]);
@@ -556,7 +561,7 @@ function ProblemsSection({
     }
     const { count }: { count: number } = await res.json();
     await alertDialog(`交卷成功，已生成 ${count} 份评测记录。`);
-    window.location.href = `/c/${tid}/scoreboard`;
+    window.location.href = `/paper/${tid}#ranking`;
   };
 
   const switchKind = async (next: QuestionKind) => {
@@ -607,10 +612,14 @@ function ProblemsSection({
           <Save className="size-4" />
           保存
         </Button>
-        <Button size="sm" className="h-8 gap-1.5" onClick={finalize} disabled={!canFinalize || !draftReady}>
-          <Send className="size-4" />
-          交卷
-        </Button>
+        {paperFinalized ? (
+          <span className="text-xs text-muted-foreground">已交卷</span>
+        ) : (
+          <Button size="sm" className="h-8 gap-1.5" onClick={finalize} disabled={!canFinalize || !draftReady}>
+            <Send className="size-4" />
+            交卷
+          </Button>
+        )}
         {paperPreview ? <span className="text-xs text-muted-foreground">预览不能交卷</span> : null}
       </div>
 

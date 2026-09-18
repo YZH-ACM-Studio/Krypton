@@ -37,6 +37,7 @@ interface OverviewData {
   signedInUser: { name: string; studentId?: string; realName?: string };
   attended?: boolean;
   paperStarted?: boolean;
+  paperFinalized?: boolean;
   paperPreview?: boolean;
   canStartPaper?: boolean;
   contestBeginAt?: string | Date;
@@ -59,7 +60,7 @@ export function OverviewSection({
   onEnterProblems: () => void;
   onStartPaper?: () => void;
 }) {
-  const { tdoc, cells, owner, now, signedInUser, paperStarted, paperPreview, canStartPaper, durationHours, paperOutline, starting } = data;
+  const { tdoc, cells, owner, now, signedInUser, paperStarted, paperFinalized, paperPreview, canStartPaper, durationHours, paperOutline, starting } = data;
   const wallBegin = new Date(data.contestBeginAt || tdoc.beginAt).getTime();
   const wallEnd = new Date(data.contestEndAt || tdoc.endAt).getTime();
   const isUpcoming = now < wallBegin;
@@ -72,9 +73,9 @@ export function OverviewSection({
     for (const item of paperOutline?.kinds || []) byKind.set(item.kind, item.count);
   }
   const questionCount = cells.length || paperOutline?.questionCount || 0;
-  const ctaLabel = paperPreview ? '预览题目' : paperStarted ? '进入答题' : '开始答题';
-  const ctaEnabled = paperPreview || paperStarted || canStartPaper === true;
-  const onCta = paperPreview || paperStarted ? onEnterProblems : onStartPaper;
+  const ctaLabel = paperPreview ? '预览题目' : paperFinalized ? '查看答卷' : paperStarted ? '进入答题' : '开始答题';
+  const ctaEnabled = paperPreview || paperFinalized || paperStarted || canStartPaper === true;
+  const onCta = paperPreview || paperFinalized || paperStarted ? onEnterProblems : onStartPaper;
 
   return (
     <div className="flex min-h-full justify-center p-6 sm:p-10">
@@ -82,8 +83,9 @@ export function OverviewSection({
         <div className="space-y-3 text-center">
           <div className="flex flex-wrap justify-center gap-2">
             {paperPreview && <Badge variant="outline">预览</Badge>}
-            {paperStarted && !paperPreview && <Badge>答题中</Badge>}
-            {!paperStarted && !paperPreview && data.inWindow && <Badge>可开考</Badge>}
+            {paperFinalized && !paperPreview && <Badge variant="secondary">已交卷</Badge>}
+            {paperStarted && !paperFinalized && !paperPreview && <Badge>答题中</Badge>}
+            {!paperStarted && !paperFinalized && !paperPreview && data.inWindow && <Badge>可开考</Badge>}
             {isUpcoming && <Badge variant="outline">即将开始</Badge>}
             {isEnded && <Badge variant="secondary">已结束</Badge>}
             {tdoc.lockdownMode && (
@@ -95,19 +97,27 @@ export function OverviewSection({
           </div>
           <h1 className="text-3xl font-semibold tracking-tight">{tdoc.title}</h1>
           <p className="text-sm text-muted-foreground">
-            {paperPreview ? '管理员预览不会计时，也不能交卷。' : paperStarted ? '个人计时已开始。进入答题后继续作答。' : '开始答题后才会抽卷并开始个人倒计时。'}
+            {paperPreview
+              ? '管理员预览不会计时，也不能交卷。'
+              : paperFinalized
+                ? '已经交卷。可以查看对错，不能再改、不能再交。'
+                : paperStarted
+                  ? '个人计时已开始。进入答题后继续作答。'
+                  : '开始答题后才会抽卷并开始个人倒计时。'}
           </p>
         </div>
 
         <Card>
           <CardHeader className="items-center space-y-1 pb-4 text-center">
-            <CardTitle className="text-lg">{paperPreview ? '预览试卷' : paperStarted ? '继续考试' : '准备开考'}</CardTitle>
+            <CardTitle className="text-lg">{paperPreview ? '预览试卷' : paperFinalized ? '答卷已提交' : paperStarted ? '继续考试' : '准备开考'}</CardTitle>
             <CardDescription>
               {paperPreview
                 ? '预览可以看到题库，但不会写入开考时间。'
-                : paperStarted
-                  ? '试卷已冻结，倒计时按个人时长计算。'
-                  : '点击下方按钮后需再次确认。确认前看不见题目。'}
+                : paperFinalized
+                  ? '再次打开只是查阅，不会生成新的评测记录。'
+                  : paperStarted
+                    ? '试卷已冻结，倒计时按个人时长计算。'
+                    : '点击下方按钮后需再次确认。确认前看不见题目。'}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">

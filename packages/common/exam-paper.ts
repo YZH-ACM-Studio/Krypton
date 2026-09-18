@@ -17,6 +17,7 @@ export interface ExamPaperContestClock {
 export interface ExamPaperStatusClock {
     startAt?: unknown;
     examPaperPids?: unknown;
+    paperFinalizedAt?: unknown;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -118,6 +119,10 @@ export function examPaperPersonalEnd(tdoc: ExamPaperContestClock, tsdoc?: ExamPa
 
 export function isExamPaperStarted(tsdoc?: ExamPaperStatusClock | null): boolean {
     return asExamPaperDate(tsdoc?.startAt) !== null;
+}
+
+export function isExamPaperFinalized(tsdoc?: ExamPaperStatusClock | null): boolean {
+    return asExamPaperDate(tsdoc?.paperFinalizedAt) !== null;
 }
 
 export function isExamPaperInWindow(tdoc: ExamPaperContestClock, tsdoc: ExamPaperStatusClock | null | undefined, now: Date): boolean {

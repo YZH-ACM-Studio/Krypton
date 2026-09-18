@@ -54,4 +54,18 @@ describe('course exam card manager preview', () => {
     expect(screen.getByRole('link', { name: '预览考试' })).to.exist;
     expect(screen.queryByRole('link', { name: '进入考试' })).to.equal(null);
   });
+
+  it('replaces enter with a read-only review link after the student finalized', () => {
+    render(
+      <CourseExamCard
+        exam={exam}
+        contest={{ ...contest, attend: true, complete: true, paperFinalizedAt: '2026-09-18T06:00:00.000Z' }}
+        chapters={chapters}
+        canManage={false}
+      />,
+    );
+    expect(screen.getByText('已交卷，不能再答。')).to.exist;
+    expect(screen.getByRole('link', { name: '查看答卷' })).to.exist;
+    expect(screen.queryByRole('link', { name: '进入考试' })).to.equal(null);
+  });
 });

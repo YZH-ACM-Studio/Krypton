@@ -200,6 +200,8 @@ describe('course exam bind source contract', () => {
         expect(course).to.include('hydrateCourseExamContest(domainId, tdoc, this.user._id)');
         expect(course).to.include('contest.getStatus');
         expect(course).to.include('endAt.toISOString()');
+        expect(course).to.include('isCourseExamCompleteFromStatus');
+        expect(course).to.include('paperFinalizedAt');
         expect(course).to.include('missing: true');
     });
 

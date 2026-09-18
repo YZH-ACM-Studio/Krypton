@@ -45,6 +45,7 @@ import user from '../model/user';
 import { Handler, param, post, Types } from '../service/server';
 import { studentDirectory } from '../service/student-directory';
 import { assertCourseAccessible, canManageCourse, courseAssignsUserGroups, courseUserGroupIds, isCourseHidden } from '../lib/course-access';
+import { isCourseExamCompleteFromStatus } from '../lib/course-exam-complete';
 import { isCourseExamDuplicateKey, parseCourseExamForm, resolveCourseExamForSave } from '../lib/course-exam';
 import { courseNodePids, parseCourseSections } from '../lib/course-chapter';
 import { copiedCourseTitle } from '../lib/course-copy';
@@ -121,12 +122,18 @@ async function hydrateCourseExamContest(
             : undefined;
         let attend = false;
         let startAt: string | undefined;
+        let paperFinalizedAt: string | undefined;
+        let complete = false;
         if (typeof uid === 'number' && uid > 0) {
             const tsdoc = await contest.getStatus(domainId, oid, uid);
             attend = Boolean(tsdoc?.attend);
             if (tsdoc?.startAt instanceof Date && !Number.isNaN(tsdoc.startAt.getTime())) {
                 startAt = tsdoc.startAt.toISOString();
             }
+            if (tsdoc?.paperFinalizedAt instanceof Date && !Number.isNaN(tsdoc.paperFinalizedAt.getTime())) {
+                paperFinalizedAt = tsdoc.paperFinalizedAt.toISOString();
+            }
+            complete = isCourseExamCompleteFromStatus(cdoc, tsdoc);
         }
         return {
             docId,
@@ -134,6 +141,8 @@ async function hydrateCourseExamContest(
             ...(endAt ? { endAt } : {}),
             ...(beginAt ? { beginAt } : {}),
             ...(startAt ? { startAt } : {}),
+            ...(paperFinalizedAt ? { paperFinalizedAt } : {}),
+            ...(complete ? { complete: true } : {}),
             ...(duration ? { duration } : {}),
             ...(attend ? { attend: true } : {}),
         };

@@ -118,6 +118,7 @@ describe('exam paper wiring', () => {
         expect(catalog).to.include("'个人试卷缺失或损坏，不能进入'");
         expect(catalog).to.include("'剩余时间不足，不能开始考试'");
         expect(catalog).to.include('还没有开始答题');
+        expect(catalog).to.include('已经交卷');
         expect(catalog).to.include('预览考试不能开始答题');
     });
 
@@ -160,7 +161,8 @@ describe('exam paper wiring', () => {
         expect(paper).to.include('examPaperAllowPool');
         expect(paper).to.include('allowUnfrozenPool');
         expect(paper).to.include('isExamPaperWindowClosed');
-        expect(paper).to.include('canFinalize: !this.examPaperAdminPreview && paperStarted && !isExamPaperWindowClosed(this.tdoc, this.tsdoc, new Date())');
+        expect(paper).to.include('canFinalize: !this.examPaperAdminPreview && paperStarted && !paperFinalized && !isExamPaperWindowClosed(this.tdoc, this.tsdoc, new Date())');
+        expect(paper).to.include("localizedErrorText`已经交卷`");
         expect(paper).to.include("localizedErrorText`预览考试不能交卷`");
         expect(paper).to.include('if (this.examPaperAdminPreview)');
     });

@@ -109,10 +109,14 @@ describe('exam paper start and overview', () => {
     const shell = readFileSync(resolve(import.meta.dirname, '../src/components/paper/paper-shell.tsx'), 'utf8');
     const workspace = readFileSync(resolve(import.meta.dirname, '../src/pages/exam-mode/workspace.tsx'), 'utf8');
     expect(paper).to.include('/paper/${tid}/start');
+    expect(paper).to.include('/paper/${tid}#ranking');
+    expect(paper).not.to.include('/c/${tid}/scoreboard');
     expect(paper).to.include('开始后将按个人时长计时，试卷不能重抽。确定开始答题？');
     expect(paper).to.include('firstPaperKind(groups)');
     expect(paper).to.include('kindLabel={KIND_LABELS[cell.kind]}');
     expect(paper).to.include("data.paperStarted === false");
+    expect(paper).to.include('paperFinalized');
+    expect(paper).to.include('已交卷');
     expect(sections).to.include('开始答题');
     expect(sections).to.include('h-14 w-full');
     expect(shell).to.include("true_false: '判断'");

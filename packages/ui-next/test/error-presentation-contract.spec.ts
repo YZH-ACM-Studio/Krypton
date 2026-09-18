@@ -19,15 +19,17 @@ describe('p2.45 first-party error presentation contracts', () => {
     const exam = source('packages/ui-next/src/pages/exam-mode/paper.tsx');
 
     expect(exam).to.include("from '@/lib/error-presenter'");
-    expect(exam.match(/readHydroResponseError\(/g)).to.have.length(5);
+    expect(exam.match(/readHydroResponseError\(/g)).to.have.length(6);
     expect(exam).not.to.include('statusText');
     expect(exam).to.match(/fetchHydroResponse\(`\/paper\/\$\{tid\}\/draft`/);
     expect(exam).to.match(/fetchHydroResponse\(\s*`\/paper\/\$\{tid\}\/draft\/\$\{pid\}`/);
     expect(exam).to.match(/fetchHydroResponse\(\s*`\/paper\/\$\{tid\}\/lock-kind`/);
     expect(exam).to.match(/fetchHydroResponse\(\s*`\/paper\/\$\{tid\}\/submit-code\/\$\{pid\}`/);
     expect(exam).to.match(/fetchHydroResponse\(\s*`\/paper\/\$\{tid\}\/finalize`/);
+    expect(exam).to.match(/fetchHydroResponse\(\s*`\/paper\/\$\{tid\}\/start`/);
     expect(exam).to.include('草稿加载失败：{draftLoadError} 已阻止作答、保存和交卷，请刷新重试。');
-    expect(exam).to.match(/window\.location\.href = `\/c\/\$\{tid\}\/scoreboard`/);
+    expect(exam).to.match(/window\.location\.href = `\/paper\/\$\{tid\}#ranking`/);
+    expect(exam).not.to.match(/\/c\/\$\{tid\}\/scoreboard/);
   });
 
   it('removes the ui-default message-plus-params display paths', () => {

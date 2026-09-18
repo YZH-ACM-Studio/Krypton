@@ -103,6 +103,8 @@ describe('course exam UI source contracts', () => {
     expect(card).to.include('考试不存在');
     expect(card).to.include('!canEnter && windowClosed');
     expect(card).to.match(/canEnter \? \([\s\S]*进入考试/);
+    expect(card).to.include('已交卷，不能再答。');
+    expect(card).to.include('查看答卷');
   });
 
   it('settings hint names binding rejects without new fields or courseGroupIds', () => {
@@ -214,6 +216,19 @@ describe('computeCourseExamWatchState', () => {
     })).to.equal(false);
     expect(canEnterCourseExam({ watchLocked: true, attend: false })).to.equal(false);
     expect(canEnterCourseExam({ watchLocked: false, attend: false })).to.equal(true);
+    expect(canEnterCourseExam({
+      watchLocked: false,
+      attend: true,
+      startAt: endAt,
+      paperFinalizedAt: endAt,
+      now: endMs - 60_000,
+    })).to.equal(false);
+    expect(canEnterCourseExam({
+      watchLocked: false,
+      attend: true,
+      complete: true,
+      now: endMs - 60_000,
+    })).to.equal(false);
   });
 
   it('refuses a duration start that cannot get a full window', () => {

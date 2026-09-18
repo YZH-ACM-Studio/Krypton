@@ -210,7 +210,7 @@
 - 视频进度写入走 `courseAccessibleTo`（兑换权益可记进度）；仍须已绑定学生。
 - `rule:'exam'` 可在 contest 上设可选 exact-key `examPaperQuotas`：非空 object，键只能是 `ProblemKind`，值为整数 ≥1；未知键 / 空 object / 非正整数 fail closed。缺字段 = 共用 `tdoc.pids`。非 exam 不得存此字段。
 - 抽卷按 `problemKind` 从 `tdoc.pids` 抽取；学生二次确认后 POST `/paper/:tid/start` 才写入 `startAt` 并冻结 `ContestStatus.examPaperPids`，不得重抽。概览、公告、排名和未开始的 exam-shell GET 不写 `startAt`，也不下发试卷。ACM/IOI 工作台不走这条路径。
-- 「考完」只认该场 `ContestStatus.paperFinalizedAt`（或旧 finalize 的 journal 覆盖：抽卷开启时个人 `examPaperPids`，否则 `tdoc.pids`）。写入只走 `finalizePaperForUser`。个人停笔 +60s 之后（`duration>0` 且已 `startAt` 则为 `startAt+duration`，否则 `endAt`），若该场 `rule === 'exam'`、`ContestStatus.attend` 且已有有效 `startAt`、试卷非空、且尚未考完，考完读路径（`hasCompletedCourseExam` / collect gate）必须调用同一 `finalizePaperForUser`（空白答卷允许）。禁止第二套完成集合、后台任务、或对未绑定考试做请求路径回填。从未 attend / 没有 `startAt` / 空试卷不得自动 finalize。文件收集可另开可选门槛 `requireCourseExamComplete`，见文件收集协议；不是每门课默认要求。
+- 「考完」只认该场 `ContestStatus.paperFinalizedAt`（或旧 finalize 的 journal 覆盖：抽卷开启时个人 `examPaperPids`，否则 `tdoc.pids`）。写入只走 `finalizePaperForUser`。已交卷后学生草稿/提交/交卷 POST fail closed；课程卡不再显示「进入考试」。个人停笔 +60s 之后（`duration>0` 且已 `startAt` 则为 `startAt+duration`，否则 `endAt`），若该场 `rule === 'exam'`、`ContestStatus.attend` 且已有有效 `startAt`、试卷非空、且尚未考完，考完读路径（`hasCompletedCourseExam` / collect gate）必须调用同一 `finalizePaperForUser`（空白答卷允许）。禁止第二套完成集合、后台任务、或对未绑定考试做请求路径回填。从未 attend / 没有 `startAt` / 空试卷不得自动 finalize。文件收集可另开可选门槛 `requireCourseExamComplete`，见文件收集协议；不是每门课默认要求。
 - `duration>0`：若 `now + duration小时 > endAt` 不得开考；开考后个人截止为 `startAt + duration小时`。不改 `contest.isOngoing`（ACM truncate 保持原样）。
 - 学生 payload 不得含未抽题库。`courseExam` schema 不变。
 

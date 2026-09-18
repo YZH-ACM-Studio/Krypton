@@ -8,6 +8,7 @@ import {
     examPaperPidsForCompletion,
     examPaperPersonalEnd,
     examPaperQuotasEqual,
+    isExamPaperFinalized,
     isExamPaperInWindow,
     isExamPaperUnstartedClosed,
     isExamPaperWindowClosed,
@@ -85,6 +86,14 @@ describe('exam paper clock', () => {
         expect(isExamPaperUnstartedClosed(tdoc, { startAt: date('2026-09-18T01:00:00.000Z') }, date('2026-09-18T01:30:00.001Z'))).to.equal(false);
         expect(isExamPaperUnstartedClosed(window, null, date('2026-09-18T03:00:00.000Z'))).to.equal(false);
         expect(isExamPaperUnstartedClosed(window, null, date('2026-09-18T03:00:00.001Z'))).to.equal(true);
+    });
+
+    it('treats a valid paperFinalizedAt as finalized', () => {
+        expect(isExamPaperFinalized(null)).to.equal(false);
+        expect(isExamPaperFinalized({})).to.equal(false);
+        expect(isExamPaperFinalized({ paperFinalizedAt: date('invalid') })).to.equal(false);
+        expect(isExamPaperFinalized({ paperFinalizedAt: date('2026-09-18T01:00:00.000Z') })).to.equal(true);
+        expect(isExamPaperFinalized({ paperFinalizedAt: '2026-09-18T01:00:00.000Z' })).to.equal(true);
     });
 });
 

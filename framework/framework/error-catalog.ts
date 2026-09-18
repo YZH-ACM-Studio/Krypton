@@ -1583,6 +1583,7 @@ const CHINESE_ERROR_MESSAGE_ENGLISH_TRANSLATIONS: Readonly<Record<string, string
     该课程已隐藏: 'This course is hidden.',
     指定用户组的课程不需要报名: 'Grouped courses do not use enrollment.',
     还没有开始答题: 'You have not started the exam paper yet.',
+    已经交卷: 'You have already submitted the exam paper.',
     预览考试不能开始答题: 'Preview cannot start the exam paper.',
     该考试不是选择题考试: 'This contest is not a multiple-choice exam.',
     这场考试已绑定其它课程: 'This exam is already bound to another course.',

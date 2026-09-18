@@ -78,11 +78,14 @@ export function canEnterCourseExam(params: {
   endAt?: string;
   beginAt?: string;
   startAt?: string;
+  paperFinalizedAt?: string;
+  complete?: boolean;
   durationHours?: number;
   missing?: boolean;
   now?: number;
 }): boolean {
   if (params.missing === true) return false;
+  if (params.complete === true || asExamPaperDate(params.paperFinalizedAt)) return false;
   const now = params.now ?? Date.now();
   const durationHours = params.durationHours;
   if (typeof durationHours === 'number' && durationHours > 0) {

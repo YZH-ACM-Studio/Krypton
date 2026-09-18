@@ -49,6 +49,7 @@ import {
     drawExamPaperPids,
     examPaperPersonalEnd,
     isExamPaperDrawEnabled,
+    isExamPaperFinalized,
     isExamPaperInWindow,
     isExamPaperStarted,
     isExamPaperWindowClosed,
@@ -335,6 +336,9 @@ function assertExamPaperStartedForWrite(handler: PaperBaseHandler) {
     if (handler.examPaperAdminPreview) return;
     if (!isExamPaperStarted(handler.tsdoc)) {
         throw new ValidationError('contest', null, localizedErrorText`还没有开始答题`);
+    }
+    if (isExamPaperFinalized(handler.tsdoc)) {
+        throw new ValidationError('contest', null, localizedErrorText`已经交卷`);
     }
 }
 
@@ -671,6 +675,7 @@ class PaperLayoutHandler extends PaperBaseHandler {
     async get({ domainId }: { domainId: string }) {
         assertPaperProblemsReadable(this);
         const paperStarted = isExamPaperStarted(this.tsdoc);
+        const paperFinalized = isExamPaperFinalized(this.tsdoc);
         const canViewPaper = paperStarted || this.examPaperAdminPreview;
         const pdict = canViewPaper ? await this.getProblemDict() : {};
         // Build the cell map: each entry describes one answerable slot.
@@ -778,13 +783,14 @@ class PaperLayoutHandler extends PaperBaseHandler {
             now: Date.now(),
             inWindow: this.isInWindow(),
             paperStarted,
-            canStartPaper: !this.examPaperAdminPreview && !paperStarted && canStartExamPaper(this.tdoc, new Date()),
+            paperFinalized,
+            canStartPaper: !this.examPaperAdminPreview && !paperStarted && !paperFinalized && canStartExamPaper(this.tdoc, new Date()),
             canViewPaper,
             contestBeginAt: this.tdoc.beginAt,
             contestEndAt: this.tdoc.endAt,
             durationHours: typeof this.tdoc.duration === 'number' && this.tdoc.duration > 0 ? this.tdoc.duration : null,
             paperOutline: examPaperOutline(this.tdoc),
-            canFinalize: !this.examPaperAdminPreview && paperStarted && !isExamPaperWindowClosed(this.tdoc, this.tsdoc, new Date()),
+            canFinalize: !this.examPaperAdminPreview && paperStarted && !paperFinalized && !isExamPaperWindowClosed(this.tdoc, this.tsdoc, new Date()),
             paperPreview: this.examPaperAdminPreview,
             owner: ownerInfo,
             broadcasts,

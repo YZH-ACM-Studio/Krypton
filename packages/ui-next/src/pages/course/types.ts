@@ -15,8 +15,10 @@ export interface CourseExamContestPreview {
   endAt?: string;
   beginAt?: string;
   startAt?: string;
+  paperFinalizedAt?: string;
   duration?: number;
   attend?: boolean;
+  complete?: boolean;
   missing?: boolean;
 }
 
@@ -90,11 +92,15 @@ export function readCourseExamContest(value: unknown): CourseExamContestPreview 
   const endAt = typeof value.endAt === 'string' && value.endAt.trim() ? value.endAt.trim() : undefined;
   const beginAt = typeof value.beginAt === 'string' && value.beginAt.trim() ? value.beginAt.trim() : undefined;
   const startAt = typeof value.startAt === 'string' && value.startAt.trim() ? value.startAt.trim() : undefined;
+  const paperFinalizedAt = typeof value.paperFinalizedAt === 'string' && value.paperFinalizedAt.trim()
+    ? value.paperFinalizedAt.trim()
+    : undefined;
   if (value.duration !== undefined && typeof value.duration !== 'number') {
     throw new TypeError('courseExamContest.duration is invalid');
   }
   const duration = typeof value.duration === 'number' && value.duration > 0 ? value.duration : undefined;
   const attend = value.attend === true;
+  const complete = value.complete === true;
   const missing = value.missing === true;
   return {
     docId,
@@ -102,8 +108,10 @@ export function readCourseExamContest(value: unknown): CourseExamContestPreview 
     ...(endAt ? { endAt } : {}),
     ...(beginAt ? { beginAt } : {}),
     ...(startAt ? { startAt } : {}),
+    ...(paperFinalizedAt ? { paperFinalizedAt } : {}),
     ...(duration ? { duration } : {}),
     ...(attend ? { attend: true } : {}),
+    ...(complete ? { complete: true } : {}),
     ...(missing ? { missing: true } : {}),
   };
 }

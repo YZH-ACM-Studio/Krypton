@@ -47,8 +47,11 @@ export function CourseExamCard({
     endAt: contest?.endAt,
     beginAt: contest?.beginAt,
     startAt: contest?.startAt,
+    paperFinalizedAt: contest?.paperFinalizedAt,
+    complete: contest?.complete,
     durationHours: contest?.duration,
   };
+  const paperFinalized = contest?.complete === true || Boolean(contest?.paperFinalizedAt);
   const canEnter = canEnterCourseExam({
     watchLocked: state.locked,
     missing: contest?.missing,
@@ -77,6 +80,8 @@ export function CourseExamCard({
                 {windowClosed ? '考试已结束。' : ''}
                 学生需看完规定视频后才能参加。预览不能交卷。
               </p>
+            ) : paperFinalized ? (
+              <p className="mt-2 text-sm text-muted-foreground">已交卷，不能再答。</p>
             ) : !canEnter && windowClosed ? (
               <p className="mt-2 text-sm text-muted-foreground">考试已结束</p>
             ) : showWatchLock ? (
@@ -107,6 +112,10 @@ export function CourseExamCard({
           {canManage ? (
             <Button asChild variant="outline" size="sm" className="h-9">
               <a href={href}>预览考试</a>
+            </Button>
+          ) : paperFinalized ? (
+            <Button asChild variant="outline" size="sm" className="h-9">
+              <a href={href}>查看答卷</a>
             </Button>
           ) : canEnter ? (
             <Button asChild size="sm" className="h-9">

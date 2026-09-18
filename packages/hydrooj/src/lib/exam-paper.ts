@@ -18,6 +18,7 @@ export {
     examPaperQuotaTotal,
     examPaperQuotasEqual,
     isExamPaperDrawEnabled,
+    isExamPaperFinalized,
     isExamPaperInWindow,
     isExamPaperStarted,
     isExamPaperUnstartedClosed,

@@ -404,9 +404,14 @@ export function ContestsPage() {
           <h1 className="text-xl font-semibold">比赛</h1>
           <p className="text-sm text-muted-foreground">{tdocs.length} 场比赛</p>
         </div>
-        <Button asChild>
-          <a href={`${bs.urls.contests}/create`}>创建比赛</a>
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button asChild>
+            <a href={`${bs.urls.contests}/create`}>创建比赛</a>
+          </Button>
+          <Button asChild variant="outline">
+            <a href={`${bs.urls.contests}/create?rule=exam`}>创建考试</a>
+          </Button>
+        </div>
       </div>
 
       {/* Stats strip */}
@@ -1034,7 +1039,7 @@ export function ContestDetailPage() {
                   全部提交
                 </SidebarLink>
               ) : null}
-              {canManageContest ? (
+              {canManageContest && !isExam ? (
                 <SidebarLink href={`${detailUrl}/balloon`} icon={<Flag className="size-3.5" />}>
                   气球
                 </SidebarLink>

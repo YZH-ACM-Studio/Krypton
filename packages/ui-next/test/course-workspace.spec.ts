@@ -65,6 +65,8 @@ describe('p3.8 course workspace', () => {
     expect(editor).to.include('onAddSection');
     expect(editor).to.include('<MultiSelect');
     expect(editor).to.include('name="courseGroupIds"');
+    expect(editor).to.include('name="content"');
+    expect(editor).to.include('选填');
     const outline = readFileSync(resolve(root, 'src/pages/course/chapter-outline.tsx'), 'utf8');
     expect(outline).to.include('添加小节');
     expect(outline).to.include('onAddSection');

@@ -66,7 +66,18 @@ describe('course edit operation dispatch', () => {
         const postBody = course.slice(postStart, course.indexOf('async postDelete'));
         expect(postBody).to.match(/if \(this\.args\?\.operation \|\| this\.request\.body\?\.operation\) return;/);
         expect(postBody).to.include("throw new ValidationError('title')");
-        expect(postBody).to.include("throw new ValidationError('content')");
+        expect(postBody).to.include("content = content ?? ''");
+        expect(postBody).not.to.include("throw new ValidationError('content')");
         expect(postBody).to.include("throw new ValidationError('chapters')");
+    });
+
+    it('accepts an empty optional course intro on save', () => {
+        const course = readSrc('src/handler/course.ts');
+        const postStart = course.indexOf('\n    async post(');
+        const decoratorBlock = course.slice(course.lastIndexOf("@param('tid', Types.ObjectId, true)", postStart), postStart);
+        expect(decoratorBlock).to.include("@param('content', Types.Content, true)");
+        const postBody = course.slice(postStart, course.indexOf('async postDelete'));
+        expect(postBody).to.include("content = content ?? ''");
+        expect(postBody).not.to.include("throw new ValidationError('content')");
     });
 });

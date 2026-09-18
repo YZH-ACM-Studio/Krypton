@@ -1042,7 +1042,7 @@ class CourseEditHandler extends Handler {
         // Framework runs `post` before `postAssign`/`postDelete`; those POSTs omit the save payload.
         if (this.args?.operation || this.request.body?.operation) return;
         if (title === undefined) throw new ValidationError('title');
-        if (content === undefined) throw new ValidationError('content');
+        content = content ?? '';
         if (chaptersJson === undefined) throw new ValidationError('chapters');
         const authoritativeDomainId = String(this.domain?._id);
         problem.assertProblemAclDomain(this.user, authoritativeDomainId);

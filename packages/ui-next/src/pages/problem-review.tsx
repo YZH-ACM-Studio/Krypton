@@ -4,12 +4,12 @@ import { ManagedPublishProtocolFields } from '@/components/managed-programming-a
 import { ProblemBankNav } from '@/components/problem-bank-nav';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { MultiSelect } from '@/components/ui/multi-select';
 import { Pagination } from '@/components/ui/pagination';
 import { SimpleSelect } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { useBootstrap } from '@/lib/bootstrap';
 import { replaceRouteTokens } from '@/lib/format';
@@ -644,7 +644,7 @@ export function ProblemReviewPage() {
                     </label>
                     {metadataDraft ? (
                       <label className="flex min-h-11 items-center gap-2 rounded-xl border border-border/75 px-3 text-sm sm:col-span-2">
-                        <Checkbox name="finalHidden" value="true" />
+                        <Switch name="finalHidden" value="true" />
                         <span>
                           <span className="block font-medium">审核后保持隐藏</span>
                           <span className="block text-xs text-muted-foreground">确认元数据与训练归属，但暂不向普通用户公开。</span>

@@ -50,6 +50,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Switch } from '@/components/ui/switch';
 import { MiniTabs } from '@/components/ui/mini-tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { KryptonIDE } from '@/components/krypton-ide';
@@ -1551,7 +1552,7 @@ function CaseRow({
             />
           </label>
           <label className="col-span-2 flex items-center gap-1.5">
-            <Checkbox checked={!!c.hintPublic} onChange={() => onUpdate({ hintPublic: !c.hintPublic })} />
+            <Switch checked={!!c.hintPublic} onChange={() => onUpdate({ hintPublic: !c.hintPublic })} />
             <span className="text-[10px] text-muted-foreground">提示对外公开（题库/训练显示；比赛进行中自动隐藏，赛后恢复）</span>
           </label>
           <label className="col-span-2 space-y-0.5">
@@ -1565,7 +1566,7 @@ function CaseRow({
             />
           </label>
           <label className="col-span-2 flex items-center gap-1.5">
-            <Checkbox checked={c.videoPublic ?? !!c.hintPublic} onChange={() => onUpdate({ videoPublic: !(c.videoPublic ?? !!c.hintPublic) })} />
+            <Switch checked={c.videoPublic ?? !!c.hintPublic} onChange={() => onUpdate({ videoPublic: !(c.videoPublic ?? !!c.hintPublic) })} />
             <span className="text-[10px] text-muted-foreground">视频对外公开（未单独设置时跟随提示的公开状态）</span>
           </label>
         </div>

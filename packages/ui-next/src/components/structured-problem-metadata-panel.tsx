@@ -2,8 +2,8 @@ import { ArrowRight, ChevronDown, Loader2, Tag } from 'lucide-react';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Switch } from '@/components/ui/switch';
 import { Input } from '@/components/ui/input';
 import { MultiSelect } from '@/components/ui/multi-select';
 import { SimpleSelect } from '@/components/ui/select';
@@ -425,14 +425,14 @@ export function StructuredProblemMetadataPanel({
         <div className="space-y-1 border-y border-border/70 py-2">
           <input type="hidden" name="hidden" value="true" />
           <label className="flex min-h-9 items-center gap-2 text-sm text-muted-foreground">
-            <Checkbox checked disabled />
+            <Switch checked disabled />
             <span>隐藏题目</span>
           </label>
           <p className="text-xs text-muted-foreground">{visibilityLockedReason}</p>
         </div>
       ) : (
         <label className="flex min-h-11 cursor-pointer items-center gap-2 border-y border-border/70 py-2 text-sm">
-          <Checkbox name="hidden" defaultChecked={!!pdoc.hidden} />
+          <Switch name="hidden" defaultChecked={!!pdoc.hidden} />
           <span>隐藏题目</span>
         </label>
       )}

@@ -27,6 +27,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Switch } from '@/components/ui/switch';
 import { Input } from '@/components/ui/input';
 import { MultiSelect } from '@/components/ui/multi-select';
 import { SimpleSelect } from '@/components/ui/select';
@@ -2265,14 +2266,14 @@ export function ProblemEditPage() {
                     {canToggleVisibility ? <input type="hidden" name="hidden" value={hiddenValue ? 'true' : 'false'} /> : null}
                     {!isCreate && canPublish ? <input type="hidden" name="lockHidden" value={lockHiddenValue ? 'true' : 'false'} /> : null}
                     <label className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-xl bg-muted/45 px-3">
-                      <Checkbox checked={hiddenValue} disabled={!canToggleVisibility} onCheckedChange={setHiddenValue} aria-label="隐藏题目" />
+                      <Switch checked={hiddenValue} disabled={!canToggleVisibility} onCheckedChange={setHiddenValue} aria-label="隐藏题目" />
                       <span className="flex items-center gap-1.5 text-sm">
                         {hiddenValue ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
                         隐藏题目
                       </span>
                     </label>
                     <label className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-xl bg-muted/45 px-3">
-                      <Checkbox
+                      <Switch
                         checked={lockHiddenValue}
                         disabled={managed && !canPublish}
                         onCheckedChange={setLockHiddenValue}

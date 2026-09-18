@@ -5,6 +5,7 @@ import { ProblemBankNav } from '@/components/problem-bank-nav';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Switch } from '@/components/ui/switch';
 import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { MultiSelect } from '@/components/ui/multi-select';
@@ -491,7 +492,7 @@ export function ProblemPidNamespacesPage() {
                   </div>
                 ) : null}
                 <label className="flex min-h-11 items-center gap-3 rounded-xl bg-muted/50 px-3">
-                  <Checkbox name="enabled" value="true" defaultChecked={dialog.namespace.enabled} />
+                  <Switch name="enabled" value="true" defaultChecked={dialog.namespace.enabled} />
                   <span>
                     <span className="block text-sm font-medium">启用命名空间</span>
                     <span className="block text-xs text-muted-foreground">停用后不能创建新题，既有题目和权限不受影响。</span>

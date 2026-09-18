@@ -19,7 +19,7 @@ import { BlankRenderer, FillProgramRenderer, MultiChoiceRenderer, SingleChoiceRe
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/cn';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
@@ -328,17 +328,15 @@ export function ObjectiveAnswerPanel({
         >
           <DialogHeader>
             <DialogTitle>{confirm?.kind === 'clear' ? '清空已选答案' : '确认提交答案'}</DialogTitle>
-          </DialogHeader>
-          <DialogBody className="space-y-3 px-6 py-5">
-            <p className="text-sm leading-6 text-muted-foreground">
+            <DialogDescription className="leading-6">
               {confirm?.kind === 'clear'
                 ? '将清除本题在本机保存的全部作答草稿，无法撤销。'
                 : confirm && confirm.kind === 'submit' && confirm.missing > 0
                   ? `还有 ${confirm.missing} 道题未作答。提交后以评测记录为准，本机草稿会被清除。`
                   : '提交后以评测记录为准，本机草稿会被清除。'}
-            </p>
-          </DialogBody>
-          <div className="flex shrink-0 justify-end gap-2 border-t px-6 py-4">
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
             <Button type="button" variant="outline" disabled={submitting} onClick={() => setConfirm(null)}>
               取消
             </Button>
@@ -365,7 +363,7 @@ export function ObjectiveAnswerPanel({
                 {submitting ? '提交中…' : '确认提交'}
               </Button>
             )}
-          </div>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </Card>

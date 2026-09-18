@@ -29,11 +29,10 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { FormField, FormRow, FormSection } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { MiniTabs } from '@/components/ui/mini-tabs';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { SimpleSelect } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
@@ -540,8 +539,7 @@ function SensitiveActionDialog({ action, onClose }: { action: PendingAction | nu
             {action?.title}
           </DialogTitle>
         </DialogHeader>
-        <ScrollArea className="min-h-0 flex-1">
-          <div className="space-y-4 px-5 py-4">
+        <DialogBody className="space-y-4 px-5 py-4">
             <p className="text-sm text-muted-foreground">{action?.description}</p>
             <div className={action?.destructive ? 'rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm' : 'rounded-lg border bg-muted/20 p-3 text-sm'}>
               <strong>影响：</strong>{action?.impact}
@@ -565,9 +563,8 @@ function SensitiveActionDialog({ action, onClose }: { action: PendingAction | nu
               </FormField>
             ) : null}
             {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
-          </div>
-        </ScrollArea>
-        <div className="flex shrink-0 justify-end gap-2 border-t bg-muted/20 px-5 py-3">
+        </DialogBody>
+        <DialogFooter className="flex shrink-0 justify-end gap-2 border-t bg-muted/20 px-5 py-3 flex-row">
           <Button type="button" variant="ghost" onClick={close} disabled={busy}>取消</Button>
           <Button
             type="button"
@@ -578,7 +575,7 @@ function SensitiveActionDialog({ action, onClose }: { action: PendingAction | nu
             {busy ? <RefreshCw className="animate-spin" /> : <ShieldCheck />}
             {busy ? '处理中…' : action?.confirmLabel || '确认执行'}
           </Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -722,7 +719,7 @@ function OneTimePasswordDialog({ result, onClose }: {
     <Dialog open={!!result} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="w-full sm:w-[520px]" onClose={onClose}>
         <DialogHeader><DialogTitle className="flex items-center gap-2"><Check className="size-4 text-emerald-600" />账号创建成功</DialogTitle></DialogHeader>
-        <div className="space-y-4 px-5 py-4">
+        <DialogBody className="space-y-4 px-5 py-4">
           <p className="text-sm text-muted-foreground">UID {result?.uid} · {result?.username}。关闭后无法再次查看此密码。</p>
           <div className="rounded-lg border bg-muted/30 p-3">
             <p className="mb-1 text-xs text-muted-foreground">一次性显示的新账号密码</p>
@@ -732,8 +729,8 @@ function OneTimePasswordDialog({ result, onClose }: {
             </div>
           </div>
           {copyError ? <p role="alert" className="text-sm text-destructive">{copyError}</p> : null}
-        </div>
-        <div className="flex justify-end border-t bg-muted/20 px-5 py-3"><Button type="button" onClick={onClose}>我已保存，关闭</Button></div>
+        </DialogBody>
+        <DialogFooter className="flex justify-end border-t bg-muted/20 px-5 py-3 flex-row"><Button type="button" onClick={onClose}>我已保存，关闭</Button></DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -788,8 +785,7 @@ function ImportAccountsDialog({ open, onClose }: { open: boolean; onClose: () =>
     <Dialog open={open} onOpenChange={(next) => !next && close()}>
       <DialogContent className="w-full sm:w-[860px]" onClose={close}>
         <DialogHeader><DialogTitle className="flex items-center gap-2"><FileUp className="size-4" />批量导入账号</DialogTitle></DialogHeader>
-        <ScrollArea className="min-h-0 flex-1">
-          <div className="space-y-4 px-5 py-4">
+        <DialogBody className="space-y-4 px-5 py-4">
             <FormField
               label="账号数据"
               required
@@ -836,9 +832,8 @@ function ImportAccountsDialog({ open, onClose }: { open: boolean; onClose: () =>
               </>
             ) : null}
             {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
-          </div>
-        </ScrollArea>
-        <div className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3">
+        </DialogBody>
+        <DialogFooter className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3 flex-row">
           <Button type="button" variant="ghost" disabled={busy} onClick={close}>取消</Button>
           <Button
             type="button"
@@ -847,7 +842,7 @@ function ImportAccountsDialog({ open, onClose }: { open: boolean; onClose: () =>
           >
             {busy && preview ? <RefreshCw className="animate-spin" /> : <FileUp />}{busy && preview ? '导入中…' : '确认导入'}
           </Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -954,7 +949,7 @@ function BulkActionDialog({ open, selected, metadata, onClose }: {
     <Dialog open={open} onOpenChange={(next) => !next && !busy && onClose()}>
       <DialogContent className="w-full sm:w-[620px]" onClose={() => !busy && onClose()}>
         <DialogHeader><DialogTitle className="flex items-center gap-2"><Users className="size-4" />批量操作</DialogTitle></DialogHeader>
-        <div className="space-y-4 px-5 py-4">
+        <DialogBody className="space-y-4 px-5 py-4">
           <div className="rounded-lg border bg-muted/20 p-3 text-sm">已选择 <strong>{selected.length}</strong> 个账号（单次上限 {metadata.bulkLimit}）。全部目标会先通过服务端预检。</div>
           <FormField label="操作"><SimpleSelect value={action} onValueChange={setAction} options={Object.entries(label).map(([value, text]) => ({ value, label: text }))} /></FormField>
           {needsGroup || needsRole ? (
@@ -975,13 +970,13 @@ function BulkActionDialog({ open, selected, metadata, onClose }: {
           </div>
           <FormField label="当前管理员密码" required><Input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} /></FormField>
           {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
-        </div>
-        <div className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3">
+        </DialogBody>
+        <DialogFooter className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3 flex-row">
           <Button type="button" variant="ghost" disabled={busy} onClick={onClose}>取消</Button>
           <Button type="button" variant={action === 'disable' ? 'destructive' : 'default'} disabled={!valid || busy} onClick={() => void submit()}>
             {busy ? <RefreshCw className="animate-spin" /> : <ShieldCheck />}{busy ? '处理中…' : label[action]}
           </Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

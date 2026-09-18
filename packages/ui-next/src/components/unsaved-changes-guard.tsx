@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 type PendingNavigation =
   | { type: 'href'; url: string }
@@ -223,19 +223,19 @@ export function useUnsavedChangesGuard(dirty: boolean) {
 
   const guardDialog = (
     <Dialog open={pending !== null} onOpenChange={(open) => !open && cancelNavigation()}>
-      <DialogContent className="sm:max-w-md" onClose={cancelNavigation}>
+      <DialogContent size="sm" onClose={cancelNavigation}>
         <DialogHeader>
           <DialogTitle>放弃未保存的更改？</DialogTitle>
+          <DialogDescription>当前题目还有未保存的修改。离开后这些修改不会自动恢复。</DialogDescription>
         </DialogHeader>
-        <p className="px-5 text-sm text-muted-foreground">当前题目还有未保存的修改。离开后这些修改不会自动恢复。</p>
-        <div className="flex justify-end gap-2 border-t px-5 py-4">
+        <DialogFooter>
           <Button type="button" variant="outline" onClick={cancelNavigation}>
             继续编辑
           </Button>
           <Button type="button" variant="destructive" onClick={discardAndLeave}>
             放弃更改并离开
           </Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

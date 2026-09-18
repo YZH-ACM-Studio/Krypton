@@ -49,6 +49,9 @@ describe('p2.25 contribution assignment and task UI', () => {
 
     expect(batchDialog).to.include('role="alert"');
     expect(batchDialog).to.include('{batchError}');
+    expect(batchDialog).to.include('<DialogBody');
+    expect(batchDialog).to.include('<DialogFooter');
+    expect(batchDialog.indexOf('<DialogFooter')).to.be.greaterThan(batchDialog.indexOf('逐题结果'));
     expect(assignDialog).to.include('role="alert"');
     expect(assignDialog).to.include('{error}');
     expect(revokeDialog).to.include('role="alert"');

@@ -12,7 +12,7 @@ import { ArrowUpDown, Calendar, Eye, EyeOff, GripVertical, Megaphone, Pencil, Pi
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { FormField, FormRow } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { MiniTabs } from '@/components/ui/mini-tabs';
@@ -697,8 +697,8 @@ function CategoryEditorDialog({ category, onClose }: { category: Category | null
           <DialogTitle>{isNew ? '新增分类' : '编辑分类'}</DialogTitle>
         </DialogHeader>
         <form method="post" action="/admin/announce/categories" className="flex flex-col">
-          <input type="hidden" name="operation" value="upsert" />
-          <div className="space-y-4 p-5">
+          <DialogBody className="space-y-4 p-5">
+            <input type="hidden" name="operation" value="upsert" />
             <FormRow columns={2}>
               <FormField label="Key" required htmlFor="cat-key">
                 <Input id="cat-key" name="key" value={key} onChange={(e) => setKey(e.target.value)} disabled={!isNew} required className="min-h-10" />
@@ -741,15 +741,15 @@ function CategoryEditorDialog({ category, onClose }: { category: Category | null
               <p className="mb-2 text-xs text-muted-foreground">预览：</p>
               <CategoryChip category={{ name: name || '示例', color }} size="md" />
             </div>
-          </div>
-          <div className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3">
+          </DialogBody>
+          <DialogFooter className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3 flex-row">
             <Button type="button" variant="ghost" onClick={onClose} className="min-h-10">
               取消
             </Button>
             <Button type="submit" className="min-h-10">
               保存
             </Button>
-          </div>
+          </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>

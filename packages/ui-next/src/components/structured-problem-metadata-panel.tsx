@@ -2,7 +2,7 @@ import { ArrowRight, ChevronDown, Loader2, Tag } from 'lucide-react';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
 import { Input } from '@/components/ui/input';
 import { MultiSelect } from '@/components/ui/multi-select';
@@ -455,7 +455,7 @@ export function StructuredProblemMetadataPanel({
             <DialogTitle>确认更换所属导图</DialogTitle>
           </DialogHeader>
           {switchPreview ? (
-            <div className="space-y-5">
+            <DialogBody className="space-y-5">
               <p className="text-sm leading-6 text-muted-foreground">
                 确认后，服务端会用当前题目与实时导图重新校验，并一次写入新导图、节点引用和派生标签。
               </p>
@@ -492,24 +492,26 @@ export function StructuredProblemMetadataPanel({
                   </div>
                 ))}
               </div>
-              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={switchState === 'applying'}
-                  onClick={() => {
-                    setSwitchPreviewOpen(false);
-                    setSwitchPreview(null);
-                  }}
-                >
-                  取消
-                </Button>
-                <Button type="button" disabled={switchState === 'applying'} onClick={confirmMapSwitch}>
-                  {switchState === 'applying' ? <Loader2 className="size-4 animate-spin motion-reduce:animate-none" /> : null}
-                  确认并更换导图
-                </Button>
-              </div>
-            </div>
+            </DialogBody>
+          ) : null}
+          {switchPreview ? (
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={switchState === 'applying'}
+                onClick={() => {
+                  setSwitchPreviewOpen(false);
+                  setSwitchPreview(null);
+                }}
+              >
+                取消
+              </Button>
+              <Button type="button" disabled={switchState === 'applying'} onClick={confirmMapSwitch}>
+                {switchState === 'applying' ? <Loader2 className="size-4 animate-spin motion-reduce:animate-none" /> : null}
+                确认并更换导图
+              </Button>
+            </DialogFooter>
           ) : null}
         </DialogContent>
       </Dialog>

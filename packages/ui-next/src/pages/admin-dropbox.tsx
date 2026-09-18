@@ -14,7 +14,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { DateTime } from '@/components/ui/datetime';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { FormField } from '@/components/ui/form';
 import { SimpleSelect } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -248,13 +248,15 @@ function DeleteDialog({ target, onClose }: { target: DropboxFileView | null; onC
         <DialogHeader>
           <DialogTitle>删除确认</DialogTitle>
         </DialogHeader>
+        <DialogBody>
         <p className="text-sm text-muted-foreground">确定删除「{target?.originalName}」？删除后不可恢复。</p>
         {error ? (
           <p role="alert" className="text-sm text-destructive">
             {error}
           </p>
         ) : null}
-        <div className="mt-4 flex justify-end gap-2">
+        </DialogBody>
+        <DialogFooter className="mt-4 flex justify-end gap-2 flex-row border-0 p-0">
           <Button type="button" variant="outline" onClick={close} disabled={busy}>
             取消
           </Button>
@@ -262,7 +264,7 @@ function DeleteDialog({ target, onClose }: { target: DropboxFileView | null; onC
             <Trash2 />
             {busy ? '删除中…' : '删除'}
           </Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

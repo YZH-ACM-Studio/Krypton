@@ -1,7 +1,7 @@
 import { AlertTriangle } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 
 export interface ActiveContainer {
@@ -194,28 +194,28 @@ export function useProblemDataWriteGuard(
 
   const dialog = action ? (
     <Dialog open onOpenChange={(open) => !open && settle(false)}>
-      <DialogContent className="max-w-lg" onClose={() => settle(false)}>
+      <DialogContent size="sm" onClose={() => settle(false)}>
         <DialogHeader>
           <DialogTitle>确认修改赛中{scopeLabel}</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-4 p-5 text-sm">
-          <p>
+          <DialogDescription>
             你即将执行“{action.label}”。此题正被 {action.active.length} 个进行中的比赛或考试引用，修改可能影响正在答题的学生。
-          </p>
+          </DialogDescription>
+        </DialogHeader>
+        <DialogBody className="px-6 py-4">
           <ul className="list-inside list-disc text-xs text-muted-foreground">
             {action.active.map((item) => (
               <li key={item.id}>{item.title || item.id}</li>
             ))}
           </ul>
-          <div className="flex justify-end gap-2">
-            <Button type="button" variant="outline" onClick={() => settle(false)}>
-              取消
-            </Button>
-            <Button type="button" variant="destructive" onClick={() => settle(true)}>
-              我已确认，继续
-            </Button>
-          </div>
-        </div>
+        </DialogBody>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => settle(false)}>
+            取消
+          </Button>
+          <Button type="button" variant="destructive" onClick={() => settle(true)}>
+            我已确认，继续
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   ) : null;

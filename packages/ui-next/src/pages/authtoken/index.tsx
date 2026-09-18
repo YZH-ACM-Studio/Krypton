@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input';
 import { FormField } from '@/components/ui/form';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { DateTime } from '@/components/ui/datetime';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 
@@ -267,7 +267,7 @@ function RevealDialog({ token, onClose }: { token: string | null; onClose: () =>
         <DialogHeader>
           <DialogTitle>令牌已签发</DialogTitle>
         </DialogHeader>
-        <div className="space-y-3 px-5 py-4">
+        <DialogBody className="space-y-3 px-5 py-4">
           <p className="text-sm font-medium text-destructive">此令牌只显示这一次,关闭后无法再次查看,请立即复制保存。</p>
           <div className="flex items-center gap-2">
             <code className="flex-1 select-all break-all rounded-md border bg-muted px-3 py-2 font-mono text-sm">{token}</code>
@@ -278,10 +278,10 @@ function RevealDialog({ token, onClose }: { token: string | null; onClose: () =>
           <p className="text-xs text-muted-foreground">
             在客户端 / 调用方的 <span className="font-mono">X-Service-Token</span> 请求头中粘贴此令牌。
           </p>
-        </div>
-        <div className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3">
+        </DialogBody>
+        <DialogFooter className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3 flex-row">
           <Button onClick={onClose}>我已复制,关闭</Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -323,7 +323,7 @@ function RenewDialog({ target, onClose }: { target: AuthTokenRow | null; onClose
         <DialogHeader>
           <DialogTitle>续期 / 改有效期</DialogTitle>
         </DialogHeader>
-        <div className="space-y-3 px-5 py-4">
+        <DialogBody className="space-y-3 px-5 py-4">
           <p className="font-mono text-sm text-muted-foreground">{target?.display}</p>
           <div className="space-y-1.5">
             <label className="text-sm font-medium" htmlFor="kat-renew">
@@ -339,15 +339,15 @@ function RenewDialog({ target, onClose }: { target: AuthTokenRow | null; onClose
           </div>
           <p className="text-xs text-muted-foreground">已撤销的令牌无法续期(请重新签发)。</p>
           {error && <p className="text-sm text-destructive">{error}</p>}
-        </div>
-        <div className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3">
+        </DialogBody>
+        <DialogFooter className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3 flex-row">
           <Button variant="ghost" onClick={close}>
             取消
           </Button>
           <Button onClick={submit} disabled={busy}>
             {busy ? '提交中…' : '确认'}
           </Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -385,22 +385,22 @@ function RevokeDialog({ target, onClose }: { target: AuthTokenRow | null; onClos
         <DialogHeader>
           <DialogTitle>撤销令牌</DialogTitle>
         </DialogHeader>
-        <div className="space-y-2 px-5 py-4">
+        <DialogBody className="space-y-2 px-5 py-4">
           <p className="text-sm">
             确认撤销 <span className="font-mono">{target?.display}</span>
             {target?.label ? `(${target.label})` : ''}?
           </p>
           <p className="text-sm text-destructive">撤销立即生效且不可恢复,如需重新授权请重新签发。</p>
           {error && <p className="text-sm text-destructive">{error}</p>}
-        </div>
-        <div className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3">
+        </DialogBody>
+        <DialogFooter className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3 flex-row">
           <Button variant="ghost" onClick={close}>
             取消
           </Button>
           <Button variant="destructive" onClick={submit} disabled={busy}>
             <Trash2 /> {busy ? '撤销中…' : '撤销'}
           </Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -470,7 +470,7 @@ function EditDialog({ target, onClose }: { target: AuthTokenRow | null; onClose:
         <DialogHeader>
           <DialogTitle>编辑令牌权限范围</DialogTitle>
         </DialogHeader>
-        <div className="space-y-4 px-5 py-4">
+        <DialogBody className="space-y-4 px-5 py-4">
           <p className="font-mono text-sm text-muted-foreground">{target?.display}</p>
           <div className="space-y-2">
             <div className="text-sm font-medium">
@@ -499,15 +499,15 @@ function EditDialog({ target, onClose }: { target: AuthTokenRow | null; onClose:
 
           <p className="text-xs text-muted-foreground">绑定用户与密钥明文不变;仅调整频道与数据范围,保存后立即生效。</p>
           {error && <p className="text-sm text-destructive">{error}</p>}
-        </div>
-        <div className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3">
+        </DialogBody>
+        <DialogFooter className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3 flex-row">
           <Button variant="ghost" onClick={close}>
             取消
           </Button>
           <Button onClick={submit} disabled={!canSubmit}>
             <Pencil /> {busy ? '保存中…' : '保存'}
           </Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

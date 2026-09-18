@@ -1,7 +1,7 @@
 import { type FormEvent, useState } from 'react';
 import { KeyRound } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogBody, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { cn } from '@/lib/cn';
@@ -82,7 +82,6 @@ export function RedeemForm({ onRedeemed }: { onRedeemed?: (result: RedeemResultV
 
   return (
     <form className="space-y-3" autoComplete="off" onSubmit={submit}>
-      <p className="text-sm text-muted-foreground">成功后会写入对应题集或课程的访问权益并开始学习记录。猜码会被限速。</p>
       {result ? (
         <div
           role="status"
@@ -123,6 +122,7 @@ export function RedeemDialog({ open, onOpenChange }: { open: boolean; onOpenChan
       <DialogContent className="max-w-md" onClose={() => onOpenChange(false)}>
         <DialogHeader>
           <DialogTitle>兑换码</DialogTitle>
+          <DialogDescription>成功后会写入对应题集或课程的访问权益并开始学习记录。猜码会被限速。</DialogDescription>
         </DialogHeader>
         <DialogBody className="px-6 py-4">
           <RedeemForm />

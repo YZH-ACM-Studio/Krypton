@@ -5,7 +5,7 @@ import { type ProblemDataWriteConfirmationResult, type ProblemDataWriteOperation
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 
 interface ProblemFile {
@@ -173,7 +173,7 @@ export function ProblemTestdataFileDialog({
           </DialogTitle>
         </DialogHeader>
 
-        <div className="flex min-h-0 flex-1 flex-col gap-4 p-5">
+        <DialogBody className="flex min-h-0 flex-1 flex-col gap-4 p-5">
           {loadError ? (
             <div className="rounded border border-amber-300 bg-amber-50/40 p-3 text-sm text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-300">
               {loadError}
@@ -201,8 +201,8 @@ export function ProblemTestdataFileDialog({
               />
             </div>
           )}
-
-          <div className="flex shrink-0 items-center justify-between gap-2">
+        </DialogBody>
+        <DialogFooter className="flex shrink-0 items-center justify-between gap-2 flex-row border-0 px-5 pb-5 pt-0 sm:justify-between">
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               {!tooBig && content != null ? (
                 <label className="flex cursor-pointer items-center gap-1">
@@ -221,8 +221,7 @@ export function ProblemTestdataFileDialog({
                 {saving ? '保存中…' : '保存'}
               </Button>
             </div>
-          </div>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

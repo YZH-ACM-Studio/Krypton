@@ -1,7 +1,7 @@
 import { AlertTriangle, Loader2, RotateCcw } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast, ToastProvider } from '@/components/ui/toast';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 
@@ -78,9 +78,9 @@ export function ProblemRejudgeDialog({ open, endpoint, pid, title, onOpenChange,
               </span>
               <div className="min-w-0">
                 <DialogTitle>整题重测</DialogTitle>
-                <p className="mt-1 truncate text-sm text-muted-foreground">
+                <DialogDescription className="truncate">
                   {pid} · <span className="text-foreground">{title}</span>
-                </p>
+                </DialogDescription>
               </div>
             </div>
           </DialogHeader>
@@ -102,7 +102,7 @@ export function ProblemRejudgeDialog({ open, endpoint, pid, title, onOpenChange,
               </div>
             ) : null}
           </DialogBody>
-          <div className="flex shrink-0 justify-end gap-2 border-t px-6 py-4">
+          <DialogFooter>
             <Button type="button" variant="outline" disabled={busy} onClick={close}>
               取消
             </Button>
@@ -114,7 +114,7 @@ export function ProblemRejudgeDialog({ open, endpoint, pid, title, onOpenChange,
               )}
               确认重测
             </Button>
-          </div>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </>

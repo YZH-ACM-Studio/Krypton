@@ -42,7 +42,7 @@ import { ForbiddenPanel } from '@/components/admin/forbidden';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { SimpleSelect } from '@/components/ui/select';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
@@ -773,7 +773,7 @@ function ConfirmActionDialogContent({
     <DialogContent className="w-[min(560px,calc(100vw-1.5rem))]" onClose={busy ? undefined : close}>
       <DialogHeader>
         <DialogTitle>{plan.title}</DialogTitle>
-        <p className="mt-1 pr-8 text-sm leading-6 text-muted-foreground">{plan.description}</p>
+        <DialogDescription className="pr-8 leading-6">{plan.description}</DialogDescription>
       </DialogHeader>
       <DialogBody className="space-y-3 px-6 py-5">
         <Notice error={error} />
@@ -796,7 +796,7 @@ function ConfirmActionDialogContent({
           </label>
         ) : null}
       </DialogBody>
-      <div className="flex justify-end gap-2 border-t px-6 py-4">
+      <DialogFooter>
         <Button type="button" variant="outline" disabled={busy} autoFocus onClick={close}>
           取消
         </Button>
@@ -809,7 +809,7 @@ function ConfirmActionDialogContent({
           {busy ? <CircleDashed className="size-4 animate-spin" aria-hidden="true" /> : null}
           {plan.confirmLabel}
         </Button>
-      </div>
+      </DialogFooter>
     </DialogContent>
   );
 }

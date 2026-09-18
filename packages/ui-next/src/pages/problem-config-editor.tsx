@@ -52,7 +52,7 @@ import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Switch } from '@/components/ui/switch';
 import { MiniTabs } from '@/components/ui/mini-tabs';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { KryptonIDE } from '@/components/krypton-ide';
 import { FileUploader } from '@/components/uploader';
 import { MultiSelect } from '@/components/ui/multi-select';
@@ -1234,7 +1234,7 @@ function FilesColumn({
               上传测试数据
             </DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 p-5">
+          <DialogBody className="space-y-4 p-5">
             <FileUploader
               endpoint={`${problemUrl}/files`}
               fieldName="file"
@@ -1251,12 +1251,12 @@ function FilesColumn({
                 setTimeout(() => window.location.reload(), 600);
               }}
             />
-            <div className="flex justify-end">
-              <Button variant="outline" onClick={closeUpload}>
-                关闭
-              </Button>
-            </div>
-          </div>
+          </DialogBody>
+          <DialogFooter>
+            <Button variant="outline" onClick={closeUpload}>
+              关闭
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </Card>

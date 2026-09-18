@@ -8,7 +8,7 @@ import { ProblemCreationActions } from '@/components/problem-creation-actions';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { confirmFormSubmit, Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { MultiSelect } from '@/components/ui/multi-select';
 import { Pagination } from '@/components/ui/pagination';
@@ -805,9 +805,11 @@ export function ProblemsPage() {
                             <form
                               method="post"
                               onSubmit={(event) => {
-                                if (!window.confirm(`归档题目「${pdoc.title || displayPid}」？归档后将强制隐藏。`)) {
-                                  event.preventDefault();
-                                }
+                                void confirmFormSubmit(
+                                  event,
+                                  `归档题目「${pdoc.title || displayPid}」？归档后将强制隐藏。`,
+                                  { destructive: true },
+                                );
                               }}
                             >
                               <input type="hidden" name="operation" value="archive" />
@@ -837,7 +839,8 @@ export function ProblemsPage() {
           <DialogHeader>
             <DialogTitle>批量分配题目协作</DialogTitle>
           </DialogHeader>
-          <form className="space-y-4 p-5" onSubmit={submitContributionBatch}>
+          <form onSubmit={submitContributionBatch}>
+            <DialogBody className="space-y-4 p-5">
             <p className="text-sm text-muted-foreground">只处理本页已明确勾选的 {selectedContributionPids.size} 道题。</p>
             {batchError ? (
               <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
@@ -957,7 +960,8 @@ export function ProblemsPage() {
                 })}
               </div>
             ) : null}
-            <div className="flex justify-end gap-2 pt-2">
+            </DialogBody>
+            <DialogFooter className="flex justify-end gap-2 flex-row">
               <Button type="button" variant="ghost" disabled={batchBusy} onClick={() => setBatchOpen(false)}>
                 取消
               </Button>
@@ -967,7 +971,7 @@ export function ProblemsPage() {
               >
                 {batchBusy ? '分配中…' : batchVerifierRole && batchVerifierResults?.retryPids.length ? '重试失败项' : '确认分配'}
               </Button>
-            </div>
+            </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>

@@ -11,7 +11,7 @@ import { ModuleWorkspace, type ModuleWorkspaceNavItem } from '@/components/manag
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { alertDialog, Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { FormField, FormRow } from '@/components/ui/form';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { SimpleSelect } from '@/components/ui/select';
@@ -587,7 +587,7 @@ function AddPersonDialog({ onClose }: { onClose: () => void }) {
         <DialogHeader>
           <DialogTitle>添加人员到荣誉榜</DialogTitle>
         </DialogHeader>
-        <div className="space-y-4 p-5">
+        <DialogBody className="space-y-4 p-5">
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -622,7 +622,7 @@ function AddPersonDialog({ onClose }: { onClose: () => void }) {
             </ScrollArea>
           )}
           {!loading && q && results.length === 0 && <p className="text-center text-sm text-muted-foreground">没有匹配的学生</p>}
-        </div>
+        </DialogBody>
       </DialogContent>
     </Dialog>
   );
@@ -637,8 +637,8 @@ function BatchImportDialog({ onClose, schools }: { onClose: () => void; schools:
           <DialogTitle>批量导入奖项（TSV）</DialogTitle>
         </DialogHeader>
         <form method="post" action="/admin/rankboard" className="flex flex-col">
-          <input type="hidden" name="operation" value="batch" />
-          <div className="space-y-3 p-5">
+          <DialogBody className="space-y-3 p-5">
+            <input type="hidden" name="operation" value="batch" />
             <div className="rounded-md border bg-muted/30 p-3 text-xs leading-relaxed text-muted-foreground">
               <p className="mb-1 font-medium text-foreground">每行一条记录，TAB 分隔，字段顺序：</p>
               <code className="font-mono">学号 ⇥ 奖项key ⇥ 比赛名 ⇥ 日期 ⇥ liveRank ⇥ schoolRank ⇥ 队名 ⇥ 队友(逗号) ⇥ 姓名(可选)</code>
@@ -673,8 +673,8 @@ function BatchImportDialog({ onClose, schools }: { onClose: () => void; schools:
                 </>
               ) : null}
             </div>
-          </div>
-          <div className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3">
+          </DialogBody>
+          <DialogFooter className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3 flex-row">
             <Button type="button" variant="ghost" onClick={onClose}>
               取消
             </Button>
@@ -682,7 +682,7 @@ function BatchImportDialog({ onClose, schools }: { onClose: () => void; schools:
               <Upload className="size-3.5" />
               导入
             </Button>
-          </div>
+          </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>
@@ -839,9 +839,9 @@ function AwardTypeDialog({ type, onClose }: { type: AwardType | null; onClose: (
           <DialogTitle>{isNew ? '新增奖项类型' : '编辑奖项类型'}</DialogTitle>
         </DialogHeader>
         <form method="post" action="/admin/rankboard/awards" className="flex flex-col">
-          <input type="hidden" name="operation" value="upsert" />
-          {!isNew && <input type="hidden" name="key" value={key} />}
-          <div className="space-y-4 p-5">
+          <DialogBody className="space-y-4 p-5">
+            <input type="hidden" name="operation" value="upsert" />
+            {!isNew && <input type="hidden" name="key" value={key} />}
             <FormRow columns={2}>
               <FormField label="Key" required htmlFor="aw-key">
                 <Input
@@ -882,13 +882,13 @@ function AwardTypeDialog({ type, onClose }: { type: AwardType | null; onClose: (
               <Switch name="hidden" value="true" checked={hidden} onChange={(e) => setHidden(e.target.checked)} />
               隐藏（已存在的奖项仍计分，但新建时不显示）
             </label>
-          </div>
-          <div className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3">
+          </DialogBody>
+          <DialogFooter className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3 flex-row">
             <Button type="button" variant="ghost" onClick={onClose}>
               取消
             </Button>
             <Button type="submit">保存</Button>
-          </div>
+          </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>
@@ -926,7 +926,7 @@ export function AdminRankBoardPersonPage() {
     try {
       url = await uploadUserFile(file, bs.user.id);
     } catch (e) {
-      alert(e instanceof Error && e.message ? e.message : '上传失败');
+      await alertDialog(e instanceof Error && e.message ? e.message : '上传失败');
       return;
     }
     setAwards((prev) => prev.map((a, i) => (i === idx ? { ...a, imageUrls: [...(a.imageUrls || []), url] } : a)));

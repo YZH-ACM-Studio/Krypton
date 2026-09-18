@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import {
   executeRecordingDelete,
@@ -76,31 +76,37 @@ export function RecordingDeleteDialog({ open, onOpenChange, scope, onDeleted }: 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
-        <DialogHeader><DialogTitle>删除录像证据</DialogTitle></DialogHeader>
-        {loading && !preview ? <p className="py-8 text-center text-sm text-muted-foreground">正在预检…</p> : null}
-        {preview ? (
-          <div className="space-y-4">
-            <div className="flex gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm">
-              <AlertTriangle className="mt-0.5 size-5 shrink-0 text-destructive" />
-              <p>将永久删除 {preview.count} 个文件（{formatBytes(preview.totalBytes)}）。此操作不可恢复。</p>
-            </div>
-            {contestLevel ? (
-              <div className="space-y-2">
-                <label className="text-xs text-muted-foreground" htmlFor="recording-delete-title">
-                  输入比赛名“{preview.contestTitle}”确认
-                </label>
-                <Input id="recording-delete-title" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} />
+        <DialogHeader>
+          <DialogTitle>删除录像证据</DialogTitle>
+        </DialogHeader>
+        <DialogBody className="space-y-4 px-6 py-5">
+          {loading && !preview ? <p className="py-8 text-center text-sm text-muted-foreground">正在预检…</p> : null}
+          {preview ? (
+            <div className="space-y-4">
+              <div className="flex gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm">
+                <AlertTriangle className="mt-0.5 size-5 shrink-0 text-destructive" />
+                <DialogDescription className="mt-0 text-foreground">
+                  将永久删除 {preview.count} 个文件（{formatBytes(preview.totalBytes)}）。此操作不可恢复。
+                </DialogDescription>
               </div>
-            ) : null}
-          </div>
-        ) : null}
-        {error ? <p className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{error}</p> : null}
-        <div className="flex justify-end gap-2">
+              {contestLevel ? (
+                <div className="space-y-2">
+                  <label className="text-xs text-muted-foreground" htmlFor="recording-delete-title">
+                    输入比赛名“{preview.contestTitle}”确认
+                  </label>
+                  <Input id="recording-delete-title" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} />
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          {error ? <p className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{error}</p> : null}
+        </DialogBody>
+        <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>取消</Button>
           <Button variant="destructive" disabled={!preview || !confirmed || loading || preview.count === 0} onClick={() => void submit()}>
             确认永久删除
           </Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

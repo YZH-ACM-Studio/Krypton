@@ -26,7 +26,7 @@ import { useFormDirtyState, useUnsavedChangesGuard } from '@/components/unsaved-
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { confirmFormSubmit, Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
 import { Input } from '@/components/ui/input';
 import { MultiSelect } from '@/components/ui/multi-select';
@@ -412,7 +412,8 @@ function PermitsPanel({ pid, pdocId }: { pid: string; pdocId?: number }) {
           <DialogHeader>
             <DialogTitle>添加题目协作者</DialogTitle>
           </DialogHeader>
-          <form method="post" action={`/p/${apiPid}/permits`} className="space-y-4 p-5" onSubmit={submitInvite}>
+          <form method="post" action={`/p/${apiPid}/permits`} onSubmit={submitInvite}>
+            <DialogBody className="space-y-4 p-5">
             <div className="space-y-1.5">
               <label className="text-xs text-muted-foreground">用户 UID</label>
               <MultiSelect<DomainUserOption>
@@ -460,14 +461,15 @@ function PermitsPanel({ pid, pdocId }: { pid: string; pdocId?: number }) {
                 {inviteError}
               </p>
             ) : null}
-            <div className="flex justify-end gap-2 pt-2">
+            </DialogBody>
+            <DialogFooter className="flex justify-end gap-2 pt-2 border-0 px-5 pb-5 flex-row">
               <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={inviteBusy}>
                 取消
               </Button>
               <Button type="submit" disabled={inviteBusy || selectedUsers.length === 0}>
                 {inviteBusy ? '发送中…' : '发送邀请'}
               </Button>
-            </div>
+            </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
@@ -481,7 +483,7 @@ function PermitsPanel({ pid, pdocId }: { pid: string; pdocId?: number }) {
           <DialogHeader>
             <DialogTitle>确认撤销协作权限</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 p-5">
+          <DialogBody className="space-y-4 p-5">
             <p className="text-sm leading-6 text-muted-foreground">
               确定撤销
               <span className="mx-1 font-medium text-foreground">
@@ -494,7 +496,8 @@ function PermitsPanel({ pid, pdocId }: { pid: string; pdocId?: number }) {
                 {loadError}
               </p>
             ) : null}
-            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          </DialogBody>
+          <DialogFooter className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end border-0 px-5 pb-5 pt-0">
               <Button type="button" variant="outline" disabled={revokeBusy} onClick={() => setRevokeTarget(null)}>
                 取消
               </Button>
@@ -502,8 +505,7 @@ function PermitsPanel({ pid, pdocId }: { pid: string; pdocId?: number }) {
                 {revokeBusy ? <Loader2 className="mr-1 size-4 animate-spin motion-reduce:animate-none" /> : null}
                 确认撤销
               </Button>
-            </div>
-          </div>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </section>
@@ -691,7 +693,8 @@ function ContributionsPanel({ pid, pdocId, structureRevision }: { pid: string; p
           <DialogHeader>
             <DialogTitle>分配数据 / 标签贡献任务</DialogTitle>
           </DialogHeader>
-          <form className="space-y-4 p-5" onSubmit={assign}>
+          <form onSubmit={assign}>
+            <DialogBody className="space-y-4 p-5">
             {error ? (
               <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
                 {error}
@@ -728,7 +731,8 @@ function ContributionsPanel({ pid, pdocId, structureRevision }: { pid: string; p
               </label>
               <Input id="contribution-note" name="note" placeholder="例：补齐边界数据并跑一遍验证程序" />
             </div>
-            <div className="flex justify-end gap-2 pt-2">
+            </DialogBody>
+            <DialogFooter className="flex justify-end gap-2 pt-2 border-0 px-5 pb-5 flex-row">
               <Button type="button" variant="ghost" disabled={busy} onClick={() => setAssignOpen(false)}>
                 取消
               </Button>
@@ -736,7 +740,7 @@ function ContributionsPanel({ pid, pdocId, structureRevision }: { pid: string; p
                 {busy ? <Loader2 className="mr-1 size-4 animate-spin motion-reduce:animate-none" /> : null}
                 确认分配
               </Button>
-            </div>
+            </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
@@ -746,14 +750,15 @@ function ContributionsPanel({ pid, pdocId, structureRevision }: { pid: string; p
           <DialogHeader>
             <DialogTitle>确认撤销贡献范围</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 p-5">
+          <DialogBody className="space-y-4 p-5">
             <p className="text-sm leading-6 text-muted-foreground">撤销后将立即停止后续写权限；已经记录的首次完成署名仍会保留。</p>
             {error ? (
               <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
                 {error}
               </p>
             ) : null}
-            <div className="flex justify-end gap-2">
+          </DialogBody>
+          <DialogFooter className="flex justify-end gap-2 border-0 px-5 pb-5 pt-0 flex-row">
               <Button type="button" variant="outline" disabled={busy} onClick={() => setRevokeTarget(null)}>
                 取消
               </Button>
@@ -766,8 +771,7 @@ function ContributionsPanel({ pid, pdocId, structureRevision }: { pid: string; p
                 {busy ? <Loader2 className="mr-1 size-4 animate-spin motion-reduce:animate-none" /> : null}
                 确认撤销
               </Button>
-            </div>
-          </div>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </section>
@@ -883,14 +887,14 @@ function ManagedNamespaceCorrection({
                 ) : null}
               </div>
             </DialogBody>
-            <div className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3">
+            <DialogFooter className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3 flex-row">
               <Button type="button" variant="outline" className="min-h-11" onClick={() => setOpen(false)}>
                 取消
               </Button>
               <Button type="submit" className="min-h-11" disabled={!namespaceId || !template}>
                 分配新题号并纠正
               </Button>
-            </div>
+            </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
@@ -2346,7 +2350,11 @@ export function ProblemEditPage() {
                 action={String(bs.urls.problems || '/p')}
                 className="rounded-2xl border border-amber-500/25 bg-amber-500/[0.04] p-5"
                 onSubmit={(event) => {
-                  if (!window.confirm(`归档题目「${pdoc.title || pid}」？归档后将强制隐藏。`)) event.preventDefault();
+                  void confirmFormSubmit(
+                    event,
+                    `归档题目「${pdoc.title || pid}」？归档后将强制隐藏。`,
+                    { destructive: true },
+                  );
                 }}
               >
                 <input type="hidden" name="operation" value="archive" />
@@ -2385,7 +2393,7 @@ export function ProblemEditPage() {
             </DialogTitle>
           </DialogHeader>
           {tagPreview ? (
-            <div className="space-y-5">
+            <DialogBody className="space-y-5">
               <p className="text-sm leading-6 text-muted-foreground">
                 以下结果由服务器根据当前题目与实时导图计算。确认后会一次写入节点引用与完整派生标签；取消不会修改数据库。
               </p>
@@ -2429,7 +2437,10 @@ export function ProblemEditPage() {
                   确认后，上述“删除”标签不会保留为自由文本；如选择有误，请取消并重新选择完整路径节点。
                 </p>
               ) : null}
-              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            </DialogBody>
+          ) : null}
+          {tagPreview ? (
+            <DialogFooter className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end border-0 p-0">
                 <Button
                   type="button"
                   variant="outline"
@@ -2445,8 +2456,7 @@ export function ProblemEditPage() {
                   {tagOperationState === 'applying' ? <Loader2 className="mr-1 size-4 animate-spin motion-reduce:animate-none" /> : null}
                   确认并保存标签
                 </Button>
-              </div>
-            </div>
+            </DialogFooter>
           ) : null}
         </DialogContent>
       </Dialog>

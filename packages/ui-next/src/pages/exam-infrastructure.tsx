@@ -25,7 +25,7 @@ import { DomainUserSearchOption, domainUserSearchLabel, loadDomainUsers, type Do
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { FormField, FormRow } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { MultiSelect } from '@/components/ui/multi-select';
@@ -890,7 +890,7 @@ function ConfirmActionDialog({ plan, busy, error, onClose }: { plan: ConfirmPlan
         <DialogContent className="w-[min(560px,calc(100vw-1.5rem))]" onClose={busy ? undefined : onClose}>
           <DialogHeader>
             <DialogTitle>{plan.title}</DialogTitle>
-            <p className="mt-1 pr-8 text-sm leading-6 text-muted-foreground">{plan.description}</p>
+            <DialogDescription className="pr-8 leading-6">{plan.description}</DialogDescription>
           </DialogHeader>
           <DialogBody className="space-y-3 px-6 py-5">
             <MutationNotice error={error} />
@@ -914,7 +914,7 @@ function ConfirmActionDialog({ plan, busy, error, onClose }: { plan: ConfirmPlan
               </details>
             ) : null}
           </DialogBody>
-          <div className="flex justify-end gap-2 border-t px-6 py-4">
+          <DialogFooter>
             <Button type="button" variant="outline" disabled={busy} autoFocus onClick={onClose}>
               取消
             </Button>
@@ -922,7 +922,7 @@ function ConfirmActionDialog({ plan, busy, error, onClose }: { plan: ConfirmPlan
               {busy ? <CircleDashed className="size-4 animate-spin" /> : null}
               {plan.confirmLabel}
             </Button>
-          </div>
+          </DialogFooter>
         </DialogContent>
       ) : null}
     </Dialog>

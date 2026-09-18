@@ -27,7 +27,7 @@
 import { useRef, useState, type ComponentType, type ReactNode } from 'react';
 import { type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/cn';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 
 export type TableActionVariant = 'default' | 'destructive' | 'primary';
@@ -179,12 +179,12 @@ function TableActionForm({
       </form>
       {confirm ? (
         <Dialog open={open} onOpenChange={setOpen}>
-          <DialogContent className="w-full sm:w-[440px]">
+          <DialogContent size="sm">
             <DialogHeader>
               <DialogTitle>{label ? `${label}确认` : '确认操作'}</DialogTitle>
+              <DialogDescription>{confirm}</DialogDescription>
             </DialogHeader>
-            <p className="text-sm text-muted-foreground">{confirm}</p>
-            <div className="mt-4 flex justify-end gap-2">
+            <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setOpen(false)}>
                 取消
               </Button>
@@ -203,7 +203,7 @@ function TableActionForm({
               >
                 {label || '确认'}
               </Button>
-            </div>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
       ) : null}

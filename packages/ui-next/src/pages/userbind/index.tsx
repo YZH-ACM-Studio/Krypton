@@ -32,7 +32,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { DateTime } from '@/components/ui/datetime';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { alertDialog, promptDialog, Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { FormField, FormRow, FormSection } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { MiniTabs } from '@/components/ui/mini-tabs';
@@ -390,7 +390,7 @@ function CreateSchoolDialog({ open, onClose }: { open: boolean; onClose: () => v
           <DialogTitle>新建学校</DialogTitle>
         </DialogHeader>
         <form method="post" className="flex flex-col">
-          <ScrollArea className="h-[55vh]" viewportClassName="space-y-4 p-5">
+          <DialogBody className="space-y-4 p-5">
             <input type="hidden" name="operation" value="create" />
             <FormField label="学校名称" required htmlFor="school-name">
               <Input
@@ -422,15 +422,15 @@ function CreateSchoolDialog({ open, onClose }: { open: boolean; onClose: () => v
                 )}
               </div>
             </FormField>
-          </ScrollArea>
-          <div className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3">
+          </DialogBody>
+          <DialogFooter className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3 flex-row">
             <Button type="button" variant="ghost" onClick={onClose}>
               取消
             </Button>
             <Button type="submit" disabled={!newName.trim()}>
               创建学校
             </Button>
-          </div>
+          </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>
@@ -923,7 +923,7 @@ function CreateGroupDialog({ open, onClose, schools }: { open: boolean; onClose:
           <DialogTitle>新建用户组</DialogTitle>
         </DialogHeader>
         <form method="post" className="flex flex-col">
-          <ScrollArea className="h-[55vh]" viewportClassName="space-y-4 p-5">
+          <DialogBody className="space-y-4 p-5">
             <input type="hidden" name="operation" value="create" />
             <FormRow columns={2}>
               <FormField label="所属学校" required htmlFor="group-school">
@@ -959,13 +959,13 @@ function CreateGroupDialog({ open, onClose, schools }: { open: boolean; onClose:
                 )}
               </div>
             </FormField>
-          </ScrollArea>
-          <div className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3">
+          </DialogBody>
+          <DialogFooter className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3 flex-row">
             <Button type="button" variant="ghost" onClick={onClose}>
               取消
             </Button>
             <Button type="submit">创建用户组</Button>
-          </div>
+          </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>
@@ -1743,15 +1743,16 @@ export function AdminUserbindRequestsPage() {
                         <form
                           method="post"
                           className="inline-block"
-                          onSubmit={(e) => {
-                            const reason = window.prompt('驳回理由（必填）：') ?? '';
-                            if (!reason.trim()) {
-                              e.preventDefault();
-                              alert('请填写驳回理由');
-                              return;
-                            }
-                            const reasonInput = e.currentTarget.querySelector('input[name=reason]') as HTMLInputElement | null;
-                            if (reasonInput) reasonInput.value = reason;
+                          onSubmit={async (e) => {
+                            e.preventDefault();
+                            const form = e.currentTarget;
+                            const reason = await promptDialog('驳回理由（必填）：');
+                            if (reason === null) return;
+                            if (!reason.trim()) { await alertDialog('请填写驳回理由'); return; }
+                            const reasonInput = form.querySelector('input[name=reason]');
+                            if (!(reasonInput instanceof HTMLInputElement)) return;
+                            reasonInput.value = reason;
+                            form.submit();
                           }}
                         >
                           <input type="hidden" name="operation" value="reject" />

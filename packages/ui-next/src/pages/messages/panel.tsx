@@ -3,7 +3,7 @@
  */
 
 import { useEffect, useRef, useState, type JSX } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { useBootstrap } from '@/lib/bootstrap';
@@ -535,16 +535,16 @@ export function MessagesPanel(): JSX.Element {
         <DialogContent className="w-full sm:w-[400px]" onClose={() => setPendingDelete(null)}>
           <DialogHeader>
             <DialogTitle>删除消息</DialogTitle>
+            <DialogDescription>此操作无法撤销。该消息将从你和对方的会话中移除。</DialogDescription>
           </DialogHeader>
-          <p className="px-6 pt-4 text-sm text-muted-foreground">此操作无法撤销。该消息将从你和对方的会话中移除。</p>
-          <div className="mt-4 flex justify-end gap-2 px-6 pb-6">
+          <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setPendingDelete(null)}>
               取消
             </Button>
             <Button type="button" variant="destructive" onClick={() => pendingDelete && void confirmDelete(pendingDelete)}>
               删除
             </Button>
-          </div>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

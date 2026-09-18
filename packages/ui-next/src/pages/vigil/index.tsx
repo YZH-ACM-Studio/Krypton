@@ -45,7 +45,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { DateTime } from '@/components/ui/datetime';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -1611,12 +1611,12 @@ function SessionsTable({ sessions, proctorOjUserId, onChanged }: { sessions: Vig
           </DialogHeader>
           {invalidateTarget && (
             <form
-              className="space-y-4 p-5"
               onSubmit={(event) => {
                 event.preventDefault();
                 submitInvalidate();
               }}
             >
+              <DialogBody className="space-y-4 p-5">
               <div className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
                 <div>
                   会话：<code>{invalidateTarget.id}</code>
@@ -1635,14 +1635,15 @@ function SessionsTable({ sessions, proctorOjUserId, onChanged }: { sessions: Vig
                 />
               </label>
               <p className="text-xs text-muted-foreground">作废只关闭本次客户端会话并使启动链接失效，不会替学生提交答卷。</p>
-              <div className="flex justify-end gap-2">
+              </DialogBody>
+              <DialogFooter className="flex justify-end gap-2 border-0 px-5 pb-5 pt-0 flex-row">
                 <Button type="button" variant="outline" onClick={() => setInvalidateTarget(null)} disabled={busy}>
                   取消
                 </Button>
                 <Button type="submit" variant="destructive" disabled={busy}>
                   确认作废
                 </Button>
-              </div>
+              </DialogFooter>
             </form>
           )}
         </DialogContent>
@@ -1663,12 +1664,12 @@ function SessionsTable({ sessions, proctorOjUserId, onChanged }: { sessions: Vig
           </DialogHeader>
           {resetTarget && (
             <form
-              className="space-y-4 p-5"
               onSubmit={(event) => {
                 event.preventDefault();
                 submitResetFinish();
               }}
             >
+              <DialogBody className="space-y-4 p-5">
               <div className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
                 <div>
                   会话：<code>{resetTarget.id}</code>
@@ -1679,14 +1680,15 @@ function SessionsTable({ sessions, proctorOjUserId, onChanged }: { sessions: Vig
                 <div>OJ 用户：UID {resetTarget.oj_user_id}</div>
               </div>
               <p className="text-sm text-muted-foreground">重置后该考生可以重新通过客户端申请进入本场比赛/考试；不会恢复旧客户端会话。</p>
-              <div className="flex justify-end gap-2">
+              </DialogBody>
+              <DialogFooter className="flex justify-end gap-2 border-0 px-5 pb-5 pt-0 flex-row">
                 <Button type="button" variant="outline" onClick={() => setResetTarget(null)} disabled={busy}>
                   取消
                 </Button>
                 <Button type="submit" disabled={busy}>
                   确认允许重进
                 </Button>
-              </div>
+              </DialogFooter>
             </form>
           )}
         </DialogContent>
@@ -1705,14 +1707,14 @@ function SessionsTable({ sessions, proctorOjUserId, onChanged }: { sessions: Vig
               操作失败
             </DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 p-5">
+          <DialogBody className="space-y-4 p-5">
             <p className="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">{actionError || '操作失败'}</p>
-            <div className="flex justify-end">
+          </DialogBody>
+          <DialogFooter className="flex justify-end border-0 px-5 pb-5 pt-0 flex-row">
               <Button type="button" onClick={() => setActionError('')}>
                 知道了
               </Button>
-            </div>
-          </div>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </>
@@ -1850,8 +1852,8 @@ function ApprovalsTable({ approvals, onChanged }: { approvals: VigilApproval[]; 
               未知考生审批
             </DialogTitle>
           </DialogHeader>
-          {approveTarget && (
-            <div className="space-y-4 p-5">
+          {approveTarget ? (
+              <DialogBody className="space-y-4 p-5">
               <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3">
                 <p className="text-sm font-medium text-foreground">未在学号库中匹配到该考生</p>
                 <div className="mt-2 grid gap-1 text-xs text-muted-foreground">
@@ -1865,7 +1867,10 @@ function ApprovalsTable({ approvals, onChanged }: { approvals: VigilApproval[]; 
                 </div>
               </div>
               <p className="text-sm text-muted-foreground">可以直接批准本次登录，也可以批准并创建临时账号，便于后续追踪这名考生的会话。</p>
-              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              </DialogBody>
+          ) : null}
+          {approveTarget ? (
+              <DialogFooter className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end border-0 px-5 pb-5 pt-0">
                 <Button type="button" variant="ghost" onClick={() => setApproveTarget(null)} disabled={busy}>
                   取消
                 </Button>
@@ -1875,9 +1880,8 @@ function ApprovalsTable({ approvals, onChanged }: { approvals: VigilApproval[]; 
                 <Button type="button" onClick={() => approve(approveTarget, true)} disabled={busy}>
                   创建临时账号并批准
                 </Button>
-              </div>
-            </div>
-          )}
+              </DialogFooter>
+          ) : null}
         </DialogContent>
       </Dialog>
 
@@ -1896,12 +1900,12 @@ function ApprovalsTable({ approvals, onChanged }: { approvals: VigilApproval[]; 
           </DialogHeader>
           {rejectTarget && (
             <form
-              className="space-y-4 p-5"
               onSubmit={(event) => {
                 event.preventDefault();
                 submitReject();
               }}
             >
+              <DialogBody className="space-y-4 p-5">
               <div className="grid gap-1 text-xs text-muted-foreground">
                 <span>
                   学号：<code className="font-mono">{rejectTarget.student_id_input}</code>
@@ -1927,14 +1931,15 @@ function ApprovalsTable({ approvals, onChanged }: { approvals: VigilApproval[]; 
               {rejectReasonError && (
                 <p className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">{rejectReasonError}</p>
               )}
-              <div className="flex justify-end gap-2">
+              </DialogBody>
+              <DialogFooter className="flex justify-end gap-2 border-0 px-5 pb-5 pt-0 flex-row">
                 <Button type="button" variant="outline" onClick={() => setRejectTarget(null)} disabled={busy}>
                   取消
                 </Button>
                 <Button type="submit" variant="destructive" disabled={busy}>
                   确认拒绝
                 </Button>
-              </div>
+              </DialogFooter>
             </form>
           )}
         </DialogContent>
@@ -1953,14 +1958,14 @@ function ApprovalsTable({ approvals, onChanged }: { approvals: VigilApproval[]; 
               操作失败
             </DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 p-5">
+          <DialogBody className="space-y-4 p-5">
             <p className="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">{actionError || '操作失败'}</p>
-            <div className="flex justify-end">
+          </DialogBody>
+          <DialogFooter className="flex justify-end border-0 px-5 pb-5 pt-0 flex-row">
               <Button type="button" onClick={() => setActionError('')}>
                 知道了
               </Button>
-            </div>
-          </div>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </>

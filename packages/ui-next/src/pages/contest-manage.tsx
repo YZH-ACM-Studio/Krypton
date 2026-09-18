@@ -47,6 +47,7 @@ import { ContestParticipationField } from '@/components/contest-participation-fi
 import { MarkdownEditor, MarkdownView } from '@/components/markdown-renderer';
 import { TEAM_DIALOG_BUTTON_CLASS, TeamDialogBody, TeamDialogContent, TeamDialogFooter } from '@/components/team-dialog';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Switch } from '@/components/ui/switch';
 import { MultiSelect } from '@/components/ui/multi-select';
 import { MiniTabs } from '@/components/ui/mini-tabs';
 import { SimpleSelect } from '@/components/ui/select';
@@ -1343,7 +1344,7 @@ export function ContestEditPage() {
               {/* ─── Tab 4: 客户端与反作弊 (Krypton) ─── */}
               <div className="space-y-4" hidden={activeTab !== 'vigil'}>
                 <label className="flex items-center gap-2 text-sm">
-                  <Checkbox checked={vigilEnabled} disabled={participationMode === 'team'} onCheckedChange={(v) => setVigilEnabled(!!v)} />
+                  <Switch checked={vigilEnabled} disabled={participationMode === 'team'} onCheckedChange={(v) => setVigilEnabled(!!v)} />
                   启用 Vigil 反作弊
                   <span className="ml-auto text-[11px] text-muted-foreground">开启后比赛的会话会被推送到 Vigil Server</span>
                 </label>
@@ -1384,16 +1385,16 @@ export function ContestEditPage() {
 
                     <div className="flex flex-wrap gap-4">
                       <label className="flex items-center gap-2 text-sm">
-                        <Checkbox checked={lockdownMode} onCheckedChange={(v) => setLockdownMode(!!v)} />
+                        <Switch checked={lockdownMode} onCheckedChange={(v) => setLockdownMode(!!v)} />
                         启用客户端锁屏 / 热键拦截
                       </label>
                       <input type="hidden" name="lockdownMode" value={lockdownMode ? 'true' : 'false'} />
                       <label className="flex items-center gap-2 text-sm">
-                        <Checkbox name="pauseOnDisconnect" value="true" defaultChecked={!!tdoc.pauseOnDisconnect} />
+                        <Switch name="pauseOnDisconnect" value="true" defaultChecked={!!tdoc.pauseOnDisconnect} />
                         断线时暂停
                       </label>
                       <label className="flex items-center gap-2 text-sm">
-                        <Checkbox name="exclusive" value="true" defaultChecked={!!tdoc.exclusive} />
+                        <Switch name="exclusive" value="true" defaultChecked={!!tdoc.exclusive} />
                         锁定当前比赛工作台（不显示比赛切换器）
                       </label>
                     </div>
@@ -1406,15 +1407,15 @@ export function ContestEditPage() {
                       </p>
                       <div className="flex flex-wrap gap-4">
                         <label className="flex items-center gap-2 text-sm">
-                          <Checkbox name="liveEnabled" value="true" defaultChecked={tdoc.liveEnabled !== false} />
+                          <Switch name="liveEnabled" value="true" defaultChecked={tdoc.liveEnabled !== false} />
                           实时屏幕直播
                         </label>
                         <label className="flex items-center gap-2 text-sm">
-                          <Checkbox name="cameraEnabled" value="true" defaultChecked={tdoc.cameraEnabled !== false} />
+                          <Switch name="cameraEnabled" value="true" defaultChecked={tdoc.cameraEnabled !== false} />
                           摄像头直播（防替考）
                         </label>
                         <label className="flex items-center gap-2 text-sm">
-                          <Checkbox name="recordEnabled" value="true" defaultChecked={!!tdoc.recordEnabled} />
+                          <Switch name="recordEnabled" value="true" defaultChecked={!!tdoc.recordEnabled} />
                           服务器录屏 mp4（存储压力大，默认关闭）
                         </label>
                       </div>
@@ -1469,7 +1470,7 @@ export function ContestEditPage() {
                           </p>
                         </div>
                         <label className="flex shrink-0 items-center gap-2 text-sm">
-                          <Checkbox
+                          <Switch
                             checked={networkLockdownMode}
                             onCheckedChange={(v) => {
                               setNetworkTouched(true);
@@ -1566,30 +1567,30 @@ export function ContestEditPage() {
 
                 <div className="flex flex-wrap gap-4">
                   <label className="flex items-center gap-2 text-sm">
-                    <Checkbox name="rated" value="true" checked={rated} disabled={participationMode === 'team'} onCheckedChange={setRated} />
+                    <Switch name="rated" value="true" checked={rated} disabled={participationMode === 'team'} onCheckedChange={setRated} />
                     计入 Rating
                   </label>
                   {participationMode === 'team' ? <input type="hidden" name="rated" value="false" /> : null}
                   <label className="flex items-center gap-2 text-sm">
-                    <Checkbox name="autoHide" value="true" defaultChecked={defaultAutoHide} disabled={!canAutoHideProblems} />
+                    <Switch name="autoHide" value="true" defaultChecked={defaultAutoHide} disabled={!canAutoHideProblems} />
                     比赛中自动隐藏题目（赛后自动公开）
                   </label>
                   {!canAutoHideProblems && defaultAutoHide ? <input type="hidden" name="autoHide" value="true" /> : null}
                   <label className="flex items-center gap-2 text-sm">
-                    <Checkbox name="allowViewCode" value="true" defaultChecked={defaultAllowViewCode} />
+                    <Switch name="allowViewCode" value="true" defaultChecked={defaultAllowViewCode} />
                     允许查看代码
                   </label>
                   <label className="flex items-center gap-2 text-sm">
-                    <Checkbox name="allowPrint" value="true" defaultChecked={tdoc.allowPrint} />
+                    <Switch name="allowPrint" value="true" defaultChecked={tdoc.allowPrint} />
                     允许打印
                   </label>
                   <label className="flex items-center gap-2 text-sm">
-                    <Checkbox name="keepScoreboardHidden" value="true" defaultChecked={tdoc.keepScoreboardHidden} />
+                    <Switch name="keepScoreboardHidden" value="true" defaultChecked={tdoc.keepScoreboardHidden} />
                     赛后保持榜单隐藏
                   </label>
                   <label className="flex items-center gap-2 text-sm">
                     <input type="hidden" name="allowVirtual" value="false" />
-                    <Checkbox name="allowVirtual" value="true" defaultChecked={tdoc.allowVirtual !== false} />
+                    <Switch name="allowVirtual" value="true" defaultChecked={tdoc.allowVirtual !== false} />
                     允许赛后虚拟参赛
                   </label>
                 </div>

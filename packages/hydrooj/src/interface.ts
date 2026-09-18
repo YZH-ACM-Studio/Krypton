@@ -476,6 +476,11 @@ export interface Tdoc extends Document {
      * 在比赛有效时间内选择特定的 X 小时参加比赛（从首次打开比赛算起）
      */
     duration: number;
+    /**
+     * Exam-rule only. Missing means the shared `pids` paper.
+     * Exact-key: non-empty `ProblemKind → integer ≥ 1`. Non-exam must not store this.
+     */
+    examPaperQuotas?: import('@hydrooj/common').ExamPaperQuotas;
 
     // For homework
     penaltySince?: Date;
@@ -785,6 +790,10 @@ export interface OplogDoc extends Record<string, any> {
 export interface ContestStat extends Record<string, any> {
     detail: Record<number, Record<string, any>>;
     unrank?: boolean;
+    /** Exam-rule personal paper. Frozen with `startAt`; missing means not drawn. */
+    examPaperPids?: number[];
+    /** Exam-rule paper completion. Written only by `finalizePaperForUser`. */
+    paperFinalizedAt?: Date;
 }
 
 export interface ScoreboardConfig {

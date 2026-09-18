@@ -7,7 +7,7 @@
  * current templateName from bootstrap.
  */
 
-import { useState } from 'react';
+import { type ReactNode, useState } from 'react';
 import { motion } from 'motion/react';
 import {
   FolderOpen,
@@ -24,22 +24,31 @@ import {
   Trophy,
   Upload,
   User as UserIcon,
+  type LucideIcon,
 } from 'lucide-react';
 import { RedeemDialogButton } from '@/components/redeem-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { FormField, FormRow } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
+import { MiniTabs } from '@/components/ui/mini-tabs';
 import { SimpleSelect } from '@/components/ui/select';
-import { Separator } from '@/components/ui/separator';
 import { AvatarUpload } from '@/components/uploader';
 import { MarkdownEditor } from '@/components/markdown-renderer';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useBootstrap } from '@/lib/bootstrap';
 import { formatDateTime, toDate } from '@/lib/format';
-import { cn } from '@/lib/cn';
 import { MessagesPanel } from './messages';
+import {
+  settingFamilyDescription,
+  settingFamilyLabel,
+  settingHint,
+  settingLabel,
+  settingOptionLabel,
+  shouldRenderAccountSetting,
+} from './user-account-settings';
 
 export { MessagesPanel } from './messages';
 
@@ -118,6 +127,14 @@ interface ExternalRatingAccountPayload {
   nowcoder?: ExternalRatingSiteOwnerView | null;
 }
 
+interface StudentBindingView {
+  bound?: boolean;
+  realName?: string | null;
+  studentId?: string | null;
+  enrollmentYear?: number | null;
+  schoolName?: string | null;
+}
+
 interface UserAccountPageData {
   authenticators?: AuthenticatorDoc[];
   category?: string;
@@ -131,6 +148,7 @@ interface UserAccountPageData {
   relations?: OauthRelation[];
   sessions?: SessionDoc[];
   settings?: SettingDescriptor[];
+  studentBinding?: StudentBindingView | null;
 }
 
 const EXTERNAL_RATING_SAVE_ACTION = '/user/external-rating';
@@ -239,7 +257,7 @@ function binaryIdToBase64(value: string | BinaryIdLike | null | undefined) {
 interface AccountTab {
   id: string;
   label: string;
-  icon: React.ElementType;
+  icon: LucideIcon;
   href: string;
   templates: string[];
 }
@@ -287,34 +305,29 @@ export function UserAccountPage() {
 
   return (
     <motion.div
-      className={isMessages ? 'flex min-h-0 flex-col gap-2' : 'space-y-4'}
+      className={isMessages ? 'flex min-h-0 flex-col gap-4' : 'space-y-6'}
       initial={isMessages ? false : { opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.25 }}
     >
-      <h1 className="text-lg font-semibold">{isMessages ? '消息' : '账号设置'}</h1>
-
-      {/* Tab bar */}
-      <div className="flex gap-1 overflow-x-auto rounded-lg border bg-muted/40 p-1">
-        {tabs.map((tab) => (
-          <a
-            key={tab.id}
-            href={tab.href}
-            className={cn(
-              'flex items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
-              activeId === tab.id ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-background/50',
-            )}
-          >
-            <tab.icon className="size-3.5" />
-            {tab.label}
-            {tab.id === 'messages' && bs.user.unreadMessages > 0 && (
-              <Badge className="ml-1 h-4 min-w-4 px-1 text-[10px]">{bs.user.unreadMessages}</Badge>
-            )}
-          </a>
-        ))}
+      <div className="space-y-1">
+        <h1 className="text-2xl font-semibold tracking-tight">{isMessages ? '消息' : '账号设置'}</h1>
+        {isMessages ? null : <p className="text-sm text-muted-foreground">偏好、公开资料和登录安全都在这里。学号、姓名和学校只来自学生绑定。</p>}
       </div>
 
-      {/* Panel */}
+      <MiniTabs
+        size="md"
+        value={activeId}
+        aria-label="账号设置分类"
+        items={tabs.map((tab) => ({
+          value: tab.id,
+          label: tab.label,
+          icon: tab.icon,
+          href: tab.href,
+          count: tab.id === 'messages' && bs.user.unreadMessages > 0 ? bs.user.unreadMessages : undefined,
+        }))}
+      />
+
       {content}
     </motion.div>
   );
@@ -331,67 +344,95 @@ function SettingsPanel() {
   const current: Record<string, unknown> = data.current || {};
   const showExternalRating = data.category === 'account' && data.externalRatingBound === true;
   const externalRating = readExternalRatingPayload(data);
+  const isAccount = data.category === 'account';
 
-  // Group settings by family
   const families = new Map<string, SettingDescriptor[]>();
-  for (const s of settings) {
-    if (s.flag & 1) continue; // FLAG_HIDDEN
-    if (isExternalRatingSetting(s)) continue;
-    const fam = s.family || 'general';
+  for (const setting of settings) {
+    if (!shouldRenderAccountSetting(setting) || isExternalRatingSetting(setting)) continue;
+    const fam = setting.family || 'general';
     if (!families.has(fam)) families.set(fam, []);
-    families.get(fam)!.push(s);
+    families.get(fam)!.push(setting);
   }
-
-  const familyLabels: Record<string, string> = {
-    setting_display: '显示',
-    setting_usage: '使用偏好',
-    setting_info: '个人信息',
-    setting_customize: '自定义',
-    setting_storage: '存储',
-    setting_basic: '基本',
-    setting_external_rating: '外站 Rating',
-    general: '通用',
-  };
 
   return (
     <div className="space-y-4">
+      {isAccount ? <StudentIdentityCard binding={data.studentBinding} /> : null}
       {bs.user.signedIn ? (
         <Card>
           <CardHeader>
             <CardTitle className="text-base">兑换码</CardTitle>
+            <CardDescription>用兑换码获取题集或课程访问权益。结果在弹窗里显示。</CardDescription>
           </CardHeader>
-          <CardContent className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-sm text-muted-foreground">用兑换码获取题集或课程访问权益。结果在弹窗里显示。</p>
-            <RedeemDialogButton variant="outline" size="default" />
-          </CardContent>
+          <CardFooter className="justify-end">
+            <RedeemDialogButton variant="outline" />
+          </CardFooter>
         </Card>
       ) : null}
-      <Card>
-        <CardContent className="space-y-6 p-5">
-          {showExternalRating ? (
-            <form id={EXTERNAL_RATING_REFRESH_FORM_ID} method="post" action={EXTERNAL_RATING_REFRESH_ACTION} hidden />
-          ) : null}
-          <form method="post" className="space-y-6">
-            {Array.from(families.entries()).map(([fam, items]) => (
-              <fieldset key={fam} className="space-y-4">
-                <legend className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{familyLabels[fam] || fam}</legend>
-                {items.map((setting) => (
-                  <SettingField key={setting.key} setting={setting} value={current[setting.key]} />
-                ))}
-              </fieldset>
-            ))}
-            <Separator />
-            <div className="flex justify-end">
-              <Button type="submit">保存设置</Button>
-            </div>
+      {showExternalRating ? <form id={EXTERNAL_RATING_REFRESH_FORM_ID} method="post" action={EXTERNAL_RATING_REFRESH_ACTION} hidden /> : null}
+      <form method="post" className="space-y-4">
+        {Array.from(families.entries()).map(([fam, items]) => (
+          <Card key={fam}>
+            <CardHeader>
+              <CardTitle className="text-base">{settingFamilyLabel(fam)}</CardTitle>
+              {settingFamilyDescription(fam) ? <CardDescription>{settingFamilyDescription(fam)}</CardDescription> : null}
+            </CardHeader>
+            <CardContent className="space-y-5">
+              {items.map((setting) => (
+                <SettingField key={setting.key} setting={setting} value={current[setting.key]} />
+              ))}
+            </CardContent>
+          </Card>
+        ))}
+        <div className="flex justify-end">
+          <Button type="submit">保存设置</Button>
+        </div>
+      </form>
+      {showExternalRating ? (
+        <Card>
+          <form method="post" action={EXTERNAL_RATING_SAVE_ACTION}>
+            <ExternalRatingSettingsFields settings={settings} current={current} payload={externalRating} locale={bs.locale} />
           </form>
-          {showExternalRating ? (
-            <form method="post" action={EXTERNAL_RATING_SAVE_ACTION} className="space-y-6">
-              <ExternalRatingSettingsFields settings={settings} current={current} payload={externalRating} locale={bs.locale} />
-            </form>
-          ) : null}
-        </CardContent>
-      </Card>
+        </Card>
+      ) : null}
+    </div>
+  );
+}
+
+function StudentIdentityCard({ binding }: { binding?: StudentBindingView | null }) {
+  const bound = binding?.bound === true;
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">学生身份</CardTitle>
+        <CardDescription>学号、姓名和学校只来自花名册绑定，不能在账号设置里填写。</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {bound ? (
+          <dl className="grid gap-3 sm:grid-cols-2">
+            <IdentityFact label="姓名" value={binding?.realName} />
+            <IdentityFact label="学号" value={binding?.studentId} mono />
+            <IdentityFact label="学校" value={binding?.schoolName} />
+            <IdentityFact label="入学年" value={binding?.enrollmentYear == null ? null : String(binding.enrollmentYear)} />
+          </dl>
+        ) : (
+          <p className="text-sm text-muted-foreground">还未绑定学生档案。绑定后，公开资料和考试页会显示花名册上的学号和姓名。</p>
+        )}
+      </CardContent>
+      <CardFooter className="justify-between gap-3">
+        <p className="text-xs text-muted-foreground">{bound ? '绑定后无法在此修改。如需变更，请联系管理员。' : '去绑定页填写学校、学号和姓名，与花名册核对。'}</p>
+        <Button asChild variant={bound ? 'outline' : 'default'} size="sm">
+          <a href="/userbind">{bound ? '查看绑定' : '去绑定'}</a>
+        </Button>
+      </CardFooter>
+    </Card>
+  );
+}
+
+function IdentityFact({ label, value, mono }: { label: string; value?: string | null; mono?: boolean }) {
+  return (
+    <div className="space-y-1">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className={mono ? 'font-mono text-sm' : 'text-sm font-medium'}>{value?.trim() || '—'}</dd>
     </div>
   );
 }
@@ -410,30 +451,31 @@ function ExternalRatingSettingsFields({
   const codeforces = readSiteOwnerView(payload?.codeforces);
   const nowcoder = readSiteOwnerView(payload?.nowcoder);
   return (
-    <fieldset className="space-y-4">
-      <legend className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-        <Trophy className="size-3.5" />
-        外站 Rating
-      </legend>
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <p className="max-w-xl text-xs text-muted-foreground">
-          填写 Codeforces handle 与牛客用户名后点保存即可抓取。公开开关默认关闭，只影响公开资料和排行榜。Rating 由系统抓取，不可编辑。
-        </p>
-        <div className="flex flex-wrap gap-2">
-          <Button type="submit" size="sm">
-            保存
-          </Button>
-          <Button type="submit" form={EXTERNAL_RATING_REFRESH_FORM_ID} variant="outline" size="sm" className="gap-1.5">
-            <RefreshCw className="size-3.5" />
-            刷新 rating
-          </Button>
-        </div>
+    <>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-1.5 text-base">
+          <Trophy className="size-4" />
+          外站分数
+        </CardTitle>
+        <CardDescription>
+          填写 Codeforces 用户名与牛客用户名后点保存即可抓取。公开开关默认关闭，只影响公开资料和排行榜。分数由系统抓取，不可编辑。
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+      <div className="flex flex-wrap justify-end gap-2">
+        <Button type="submit" size="sm">
+          保存
+        </Button>
+        <Button type="submit" form={EXTERNAL_RATING_REFRESH_FORM_ID} variant="outline" size="sm" className="gap-1.5">
+          <RefreshCw className="size-3.5" />
+          刷新分数
+        </Button>
       </div>
       <ExternalRatingSiteFields
         siteLabel="Codeforces"
         handleSetting={settingByKey(settings, EXTERNAL_RATING_SETTING_KEYS.codeforcesHandle)}
         handleKey={EXTERNAL_RATING_SETTING_KEYS.codeforcesHandle}
-        handleLabel="Codeforces handle"
+        handleLabel="Codeforces 用户名"
         handlePlaceholder="tourist"
         handleMaxLength={24}
         publicSetting={settingByKey(settings, EXTERNAL_RATING_SETTING_KEYS.codeforcesRatingPublic)}
@@ -457,7 +499,8 @@ function ExternalRatingSettingsFields({
         snapshot={nowcoder}
         locale={locale}
       />
-    </fieldset>
+      </CardContent>
+    </>
   );
 }
 
@@ -497,13 +540,9 @@ function ExternalRatingSiteFields({
   const fetchedAt = toDate(unwrapDateValue(snapshot.fetchedAt));
   const lastError = formatExternalRatingError(snapshot.lastError);
   return (
-    <div className="space-y-4 rounded-md border bg-muted/10 p-4">
+    <div className="space-y-4 rounded-lg border bg-muted/20 p-4">
       <p className="text-sm font-medium">{siteLabel}</p>
-      <div className="grid gap-1.5 sm:grid-cols-[200px_1fr] sm:items-start">
-        <div>
-          <label className="text-sm font-medium">{handleLabel}</label>
-          <p className="text-[11px] leading-tight text-muted-foreground">留空则清空该站账号</p>
-        </div>
+      <FormField label={handleLabel} hint="留空则清空该站账号">
         <Input
           name={handleName}
           defaultValue={handleValue}
@@ -512,30 +551,21 @@ function ExternalRatingSiteFields({
           maxLength={handleMaxLength}
           autoComplete="off"
           spellCheck={false}
-          className="max-w-sm"
         />
-      </div>
-      <div className="grid gap-1.5 sm:grid-cols-[200px_1fr] sm:items-start">
-        <div>
-          <label className="text-sm font-medium">{publicLabel}</label>
-          <p className="text-[11px] leading-tight text-muted-foreground">默认关闭。打开后公开资料和排行榜可以展示该站 rating。</p>
-        </div>
+      </FormField>
+      <FormField label={publicLabel} hint="默认关闭。打开后公开资料和排行榜可以展示该站分数。">
         <label className="inline-flex cursor-pointer items-center gap-2">
           <Checkbox name={publicName} value="on" defaultChecked={publicChecked} disabled={publicDisabled} />
           <span className="text-sm text-muted-foreground">展示</span>
         </label>
-      </div>
-      <div className="grid gap-1.5 sm:grid-cols-[200px_1fr] sm:items-start">
-        <div>
-          <p className="text-sm font-medium">{siteLabel} rating</p>
-          <p className="text-[11px] leading-tight text-muted-foreground">由系统抓取，不可编辑</p>
-        </div>
+      </FormField>
+      <FormField label={`${siteLabel} 分数`} hint="由系统抓取，不可编辑">
         <div className="space-y-1">
           <p className="text-sm font-medium tabular-nums">{formatExternalRatingValue(snapshot.rating)}</p>
-          <p className="text-[11px] text-muted-foreground">{fetchedAt ? `最近抓取 ${formatDateTime(fetchedAt, locale)}` : '尚未抓取'}</p>
-          {lastError ? <p className="text-[11px] text-destructive">失败：{lastError}</p> : null}
+          <p className="text-xs text-muted-foreground">{fetchedAt ? `最近抓取 ${formatDateTime(fetchedAt, locale)}` : '尚未抓取'}</p>
+          {lastError ? <p className="text-xs text-destructive">失败：{lastError}</p> : null}
         </div>
-      </div>
+      </FormField>
     </div>
   );
 }
@@ -544,84 +574,80 @@ function SettingField({ setting, value }: { setting: SettingDescriptor; value: u
   const isDisabled = !!(setting.flag & 2); // FLAG_DISABLED
   const isSecret = !!(setting.flag & 4); // FLAG_SECRET
   const bs = useBootstrap();
+  const label = settingLabel(setting.key, setting.name);
+  const hint = settingHint(setting.key, setting.desc || undefined);
   const isAvatar = setting.key === 'avatar';
 
   if (isAvatar) {
-    // Replace the plain text field with the full avatar uploader.
-    // The text input is still emitted as a hidden input so the form
-    // round-trips a non-empty value if the user picks a provider via
-    // the popover (the popover hits /home/avatar directly and reloads).
     const data = bs.page.data as { current?: { avatarUrl?: string | null } };
     const current: { avatarUrl?: string | null } = data.current || {};
-    const uname = bs.user.name;
     const avatarUrl = current.avatarUrl || null;
     return (
-      <div className="grid gap-1.5 sm:grid-cols-[200px_1fr] sm:items-start">
-        <div>
-          <label className="text-sm font-medium">{setting.name || setting.key}</label>
-          {setting.desc ? <p className="text-[11px] leading-tight text-muted-foreground">{setting.desc}</p> : null}
-        </div>
-        <div>
-          <AvatarUpload uname={uname} currentUrl={avatarUrl || (typeof value === 'string' && /^https?:|^\//.test(value) ? value : null)} size={96} />
-          {/* Preserve the existing text value when posting the rest of the form. */}
-          <input type="hidden" name={setting.key} value={(value ?? '') as string} readOnly />
-        </div>
-      </div>
+      <FormField label={label} hint={hint}>
+        <AvatarUpload
+          uname={bs.user.name}
+          currentUrl={avatarUrl || (typeof value === 'string' && /^https?:|^\//.test(value) ? value : null)}
+          size={96}
+        />
+        <input type="hidden" name={setting.key} value={(value ?? '') as string} readOnly />
+      </FormField>
+    );
+  }
+
+  let control: ReactNode;
+  if (setting.type === 'boolean' || setting.type === 'checkbox') {
+    control = (
+      <label className="inline-flex cursor-pointer items-center gap-2">
+        <Checkbox name={setting.key} value="on" defaultChecked={!!value} disabled={isDisabled} />
+        <span className="text-sm text-muted-foreground">{setting.ui || '启用'}</span>
+        {!isDisabled ? <input type="hidden" name={`booleanKeys.${setting.key}`} value="on" /> : null}
+      </label>
+    );
+  } else if (setting.type === 'select') {
+    control = (
+      <SimpleSelect name={setting.key} defaultValue={String(value ?? setting.value ?? '')} disabled={isDisabled} options={rangeOptions(setting.range)} />
+    );
+  } else if (setting.type === 'markdown' && !isDisabled) {
+    control = <MarkdownEditor name={setting.key} value={(value ?? setting.value ?? '') as string} minHeight={260} />;
+  } else if (setting.type === 'textarea' || setting.type === 'markdown') {
+    control = (
+      <textarea
+        name={setting.key}
+        defaultValue={(value ?? setting.value ?? '') as string}
+        disabled={isDisabled}
+        rows={setting.type === 'markdown' ? 6 : 3}
+        className="w-full rounded-md border bg-background px-3 py-2 text-sm font-mono disabled:opacity-50"
+      />
+    );
+  } else if (setting.type === 'number' || setting.type === 'float') {
+    control = (
+      <Input
+        type="number"
+        name={setting.key}
+        defaultValue={(value ?? setting.value ?? '') as string | number}
+        disabled={isDisabled}
+        step={setting.type === 'float' ? 'any' : '1'}
+        className="max-w-xs"
+      />
+    );
+  } else if (setting.type === 'password') {
+    control = <Input type="password" name={setting.key} defaultValue="" disabled={isDisabled} autoComplete="new-password" className="max-w-xs" />;
+  } else {
+    control = (
+      <Input
+        name={setting.key}
+        defaultValue={isSecret ? '' : ((value ?? setting.value ?? '') as string)}
+        disabled={isDisabled}
+        type={isSecret ? 'password' : 'text'}
+        className="max-w-sm"
+      />
     );
   }
 
   return (
-    <div className="grid gap-1.5 sm:grid-cols-[200px_1fr] sm:items-start">
-      <div>
-        <label className="text-sm font-medium">{setting.name || setting.key}</label>
-        {setting.desc ? <p className="text-[11px] leading-tight text-muted-foreground">{setting.desc}</p> : null}
-      </div>
-      <div>
-        {setting.type === 'boolean' || setting.type === 'checkbox' ? (
-          <label className="inline-flex cursor-pointer items-center gap-2">
-            <Checkbox name={setting.key} value="on" defaultChecked={!!value} disabled={isDisabled} />
-            <span className="text-sm text-muted-foreground">{setting.ui || '启用'}</span>
-            {!isDisabled ? <input type="hidden" name={`booleanKeys.${setting.key}`} value="on" /> : null}
-          </label>
-        ) : setting.type === 'select' ? (
-          <SimpleSelect
-            name={setting.key}
-            defaultValue={String(value ?? setting.value ?? '')}
-            disabled={isDisabled}
-            options={rangeOptions(setting.range)}
-          />
-        ) : setting.type === 'markdown' && !isDisabled ? (
-          <MarkdownEditor name={setting.key} value={(value ?? setting.value ?? '') as string} minHeight={260} />
-        ) : setting.type === 'textarea' || setting.type === 'markdown' ? (
-          <textarea
-            name={setting.key}
-            defaultValue={(value ?? setting.value ?? '') as string}
-            disabled={isDisabled}
-            rows={setting.type === 'markdown' ? 6 : 3}
-            className="w-full rounded-md border bg-background px-3 py-2 text-sm font-mono disabled:opacity-50"
-          />
-        ) : setting.type === 'number' || setting.type === 'float' ? (
-          <Input
-            type="number"
-            name={setting.key}
-            defaultValue={(value ?? setting.value ?? '') as string | number}
-            disabled={isDisabled}
-            step={setting.type === 'float' ? 'any' : '1'}
-            className="max-w-xs"
-          />
-        ) : setting.type === 'password' ? (
-          <Input type="password" name={setting.key} defaultValue="" disabled={isDisabled} autoComplete="new-password" className="max-w-xs" />
-        ) : (
-          <Input
-            name={setting.key}
-            defaultValue={isSecret ? '' : ((value ?? setting.value ?? '') as string)}
-            disabled={isDisabled}
-            type={isSecret ? 'password' : 'text'}
-            className="max-w-sm"
-          />
-        )}
-      </div>
-    </div>
+    <FormField label={label} hint={hint} htmlFor={setting.key}>
+      {control}
+    </FormField>
   );
 }
 
@@ -629,15 +655,14 @@ function rangeOptions(range: SettingDescriptor['range']): { value: string; label
   if (!range) return [];
   if (Array.isArray(range)) {
     return range.map((opt) => {
-      const val = Array.isArray(opt) ? opt[0] : opt;
-      const label = Array.isArray(opt) ? opt[1] || opt[0] : opt;
-      return { value: String(val), label: String(label) };
+      const val = Array.isArray(opt) ? String(opt[0]) : String(opt);
+      const rawLabel = Array.isArray(opt) ? String(opt[1] || opt[0]) : String(opt);
+      return { value: val, label: settingOptionLabel(val, rawLabel) };
     });
   }
-  // Record<string, string>
   return Object.entries(range).map(([val, label]) => ({
     value: val,
-    label: String(label),
+    label: settingOptionLabel(val, String(label)),
   }));
 }
 
@@ -666,19 +691,17 @@ function SecurityPanel() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <form method="post" className="space-y-3">
+          <form method="post" className="space-y-4">
             <input type="hidden" name="operation" value="change_username" />
             <input type="hidden" name="expectedUsername" value={bs.user.name} />
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">新用户名</label>
+            <FormRow columns={2}>
+              <FormField label="新用户名">
                 <Input name="username" defaultValue={bs.user.name} autoComplete="username" />
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">当前密码</label>
+              </FormField>
+              <FormField label="当前密码">
                 <Input name="current" type="password" autoComplete="current-password" />
-              </div>
-            </div>
+              </FormField>
+            </FormRow>
             <p className="text-xs text-muted-foreground">保存后使用新用户名登录；现有登录会话保持不变。</p>
             <Button type="submit" size="sm">
               更新用户名
@@ -696,22 +719,19 @@ function SecurityPanel() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <form method="post" className="space-y-3">
+          <form method="post" className="space-y-4">
             <input type="hidden" name="operation" value="change_password" />
-            <div className="grid gap-3 sm:grid-cols-3">
-              <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">当前密码</label>
+            <FormRow columns={3}>
+              <FormField label="当前密码">
                 <Input name="current" type="password" autoComplete="current-password" />
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">新密码</label>
+              </FormField>
+              <FormField label="新密码">
                 <Input name="password" type="password" autoComplete="new-password" />
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">确认新密码</label>
+              </FormField>
+              <FormField label="确认新密码">
                 <Input name="verifyPassword" type="password" autoComplete="new-password" />
-              </div>
-            </div>
+              </FormField>
+            </FormRow>
             <Button type="submit" size="sm">
               更新密码
             </Button>
@@ -728,18 +748,16 @@ function SecurityPanel() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <form method="post" className="space-y-3">
+          <form method="post" className="space-y-4">
             <input type="hidden" name="operation" value="change_mail" />
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">当前密码</label>
+            <FormRow columns={2}>
+              <FormField label="当前密码">
                 <Input name="password" type="password" />
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">新邮箱</label>
+              </FormField>
+              <FormField label="新邮箱">
                 <Input name="mail" type="email" />
-              </div>
-            </div>
+              </FormField>
+            </FormRow>
             <Button type="submit" size="sm">
               更换邮箱
             </Button>
@@ -822,7 +840,7 @@ function SecurityPanel() {
             return (
               <div key={id || authenticator.name} className="flex items-center justify-between gap-3 rounded-md border bg-muted/20 px-3 py-2 text-sm">
                 <div className="min-w-0">
-                  <p className="font-medium">{authenticator.name || 'Authenticator'}</p>
+                  <p className="font-medium">{authenticator.name || '未命名认证器'}</p>
                   <p className="truncate text-xs text-muted-foreground">
                     {[authenticator.credentialDeviceType, authenticator.fmt].filter(Boolean).join(' · ') || 'WebAuthn'}
                     {authenticator.regat ? ` · ${formatDateTime(authenticator.regat, bs.locale)}` : ''}
@@ -961,11 +979,8 @@ function FilesPanel() {
           <CardTitle className="text-sm">上传文件</CardTitle>
         </CardHeader>
         <CardContent>
-          <form method="post" encType="multipart/form-data" className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
-            <div className="space-y-1.5">
-              <label htmlFor="user-file" className="text-xs text-muted-foreground">
-                选择文件
-              </label>
+          <form method="post" encType="multipart/form-data" className="grid gap-4 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+            <FormField label="选择文件" htmlFor="user-file">
               <input
                 id="user-file"
                 type="file"
@@ -976,11 +991,8 @@ function FilesPanel() {
                   if (file) setUploadName(file.name);
                 }}
               />
-            </div>
-            <div className="space-y-1.5">
-              <label htmlFor="user-filename" className="text-xs text-muted-foreground">
-                保存为
-              </label>
+            </FormField>
+            <FormField label="保存为" htmlFor="user-filename">
               <Input
                 id="user-filename"
                 name="filename"
@@ -989,7 +1001,7 @@ function FilesPanel() {
                 placeholder="文件名"
                 required
               />
-            </div>
+            </FormField>
             <Button type="submit" size="sm" className="gap-1">
               <Upload className="size-3.5" />
               上传

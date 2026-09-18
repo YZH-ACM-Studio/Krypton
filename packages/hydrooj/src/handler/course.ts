@@ -44,7 +44,7 @@ import * as training from '../model/training';
 import user from '../model/user';
 import { Handler, param, post, Types } from '../service/server';
 import { studentDirectory } from '../service/student-directory';
-import { assertCourseAccessible, canManageCourse, courseUserGroupIds, isCourseHidden } from '../lib/course-access';
+import { assertCourseAccessible, canManageCourse, courseAssignsUserGroups, courseUserGroupIds, isCourseHidden } from '../lib/course-access';
 import { isCourseExamDuplicateKey, parseCourseExamForm, resolveCourseExamForSave } from '../lib/course-exam';
 import { courseNodePids, parseCourseSections } from '../lib/course-chapter';
 import { copiedCourseTitle } from '../lib/course-copy';
@@ -833,6 +833,7 @@ class CourseDetailHandler extends Handler {
                           docId: tdoc.docId,
                           title: tdoc.title,
                           term: tdoc.term || '',
+                          courseGroupIds: tdoc.courseGroupIds || [],
                       }
                     : tdoc,
             chapters,
@@ -851,7 +852,7 @@ class CourseDetailHandler extends Handler {
                     this.user.hasPerm(PERM.PERM_CREATE_COLLECT) ||
                     this.user.hasPerm(PERM.PERM_MANAGE_COLLECT)),
             collectRequests: collectResult.requests,
-            canEnroll: canDownloadFiles && !tsdoc?.enroll,
+            canEnroll: canDownloadFiles && !courseAssignsUserGroups(tdoc) && !tsdoc?.enroll,
             canDownloadFiles,
             files: activeView === 'overview' && canDownloadFiles ? sortFiles(tdoc.files || []) : [],
             view: activeView,
@@ -925,10 +926,10 @@ class CourseDetailHandler extends Handler {
         const tdoc = await training.get(domainId, tid);
         if (!isCourseKind(tdoc.kind)) throw new TrainingNotFoundError(domainId, tid);
         const canManage = canManageCourse(this.user, tdoc, PERM.PERM_EDIT_COURSE);
-        if (!canManage && isCourseHidden(tdoc)) throw new ValidationError('tid', null, localizedErrorText`该课程已隐藏`);
-        if (!canManage && (tdoc.courseGroupIds || []).length) {
-            await assertCourseAccessible(domainId, this.user._id, tdoc);
+        if (courseAssignsUserGroups(tdoc)) {
+            throw new ValidationError('tid', null, localizedErrorText`指定用户组的课程不需要报名`);
         }
+        if (!canManage && isCourseHidden(tdoc)) throw new ValidationError('tid', null, localizedErrorText`该课程已隐藏`);
         await training.enroll(domainId, tdoc.docId, this.user._id);
         this.back();
     }

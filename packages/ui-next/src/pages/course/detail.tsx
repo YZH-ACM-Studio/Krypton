@@ -32,6 +32,7 @@ import { useChapterQuery } from './chapter-query';
 import { CourseExamCard } from './course-exam-card';
 import { CourseMindmapView } from './mindmap';
 import {
+  courseAssignsUserGroups,
   readCourseExam,
   readCourseExamContest,
   type CourseChapter,
@@ -393,14 +394,14 @@ export function CourseDetailPage() {
               </Button>
             </form>
           ) : null}
-          {data.canEnroll ? (
+          {!courseAssignsUserGroups(course) && data.canEnroll ? (
             <form method="post" action={`/course/${tid}`}>
               <input type="hidden" name="operation" value="enroll" />
               <Button type="submit" size="sm" className="h-9">
                 报名
               </Button>
             </form>
-          ) : data.tsdoc?.enroll ? (
+          ) : !courseAssignsUserGroups(course) && data.tsdoc?.enroll ? (
             <Badge variant="secondary" className="h-9 gap-1 px-3 font-normal">
               <CheckCircle2 className="size-3.5" strokeWidth={2} />
               已报名

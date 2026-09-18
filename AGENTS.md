@@ -223,6 +223,7 @@
 ## 课程隐藏与删除协议
 
 - `TrainingDoc.courseHidden` 是课程对学生是否可见的唯一开关。缺省或 `false` 仍按 `courseGroupIds` 发现和进入；`true` 时学生列表、详情、视频、课件、报名和真实性 Context 一律 fail closed。兑换权益不能绕过隐藏。
+- 指定 `courseGroupIds` 后不展示、不写入 `enroll`；进课、视频、结业考试和花名册只认用户组（及课管 / 兑换）。无用户组的全站课仍可用报名作为个人学习记录和花名册回退。
 - 所有者、维护者和 `PERM_EDIT_COURSE` / 系统管理员仍可在列表看到「已隐藏」、进入并编辑。隐藏不是草稿态，也不改章节、视频或观看记录。
 - 删除走现有 `postDelete`：删 Training 文档与 status、`course/{domain}/{tid}/` 下课件和视频 blob、观看进度。课程仍被文件收集引用时拒绝删除。不级联删作业、题集、导图或真实性历史。删除不可恢复，UI 必须二次确认。
 

@@ -9,7 +9,7 @@ import { Pagination } from '@/components/ui/pagination';
 import { useBootstrap } from '@/lib/bootstrap';
 import { formatPlainTextSummary } from '@/lib/format';
 import { CourseAssignDialog } from './assign';
-import type { CourseRecord } from './types';
+import { courseAssignsUserGroups, type CourseRecord } from './types';
 import { CourseMark } from './ui';
 
 function courseId(course: CourseRecord): string {
@@ -104,7 +104,7 @@ function ManagedCourseRow({
         <span className="min-w-0 flex-1">
           <span className="flex min-w-0 items-center gap-2">
             <span className="truncate text-sm font-medium">{course.title}</span>
-            {enrolled ? (
+            {enrolled && !courseAssignsUserGroups(course) ? (
               <Badge variant="secondary" className="shrink-0 font-normal">
                 已报名
               </Badge>
@@ -156,8 +156,14 @@ export function CoursePage() {
   const [assigning, setAssigning] = useState<CourseRecord | null>(null);
 
   const managed = courses.filter((course) => managedIds.has(courseId(course)));
-  const enrolled = courses.filter((course) => !managedIds.has(courseId(course)) && statuses[courseId(course)]?.enroll);
-  const available = courses.filter((course) => !managedIds.has(courseId(course)) && !statuses[courseId(course)]?.enroll);
+  const enrolled = courses.filter(
+    (course) =>
+      !managedIds.has(courseId(course)) && !courseAssignsUserGroups(course) && statuses[courseId(course)]?.enroll,
+  );
+  const available = courses.filter(
+    (course) =>
+      !managedIds.has(courseId(course)) && (courseAssignsUserGroups(course) || !statuses[courseId(course)]?.enroll),
+  );
 
   return (
     <main className="w-full min-w-0 pb-10">

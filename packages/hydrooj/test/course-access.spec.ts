@@ -37,9 +37,12 @@ describe('course hide and delete gates', () => {
         expect(download).to.include('await assertCourseAccessible(domainId, this.user._id, tdoc)');
         expect(download).not.to.include('PERM.PERM_VIEW_TRAINING');
         const enroll = handler.slice(handler.indexOf('async postEnroll'), handler.indexOf('class CourseEditHandler'));
-        expect(enroll).to.include('await assertCourseAccessible(domainId, this.user._id, tdoc)');
+        expect(enroll).to.include('if (courseAssignsUserGroups(tdoc))');
+        expect(enroll).to.include('指定用户组的课程不需要报名');
         expect(enroll).to.include('该课程已隐藏');
         expect(enroll).not.to.include('PERM.PERM_VIEW_TRAINING');
+        expect(access).to.include('export function courseAssignsUserGroups');
+        expect(handler).to.include('canEnroll: canDownloadFiles && !courseAssignsUserGroups(tdoc) && !tsdoc?.enroll');
         const editor = handler.slice(handler.indexOf('class CourseEditHandler'), handler.indexOf('class CourseFilesHandler'));
         const editorGet = editor.slice(editor.indexOf('async get('), editor.indexOf('async postUpdate('));
         expect(editorGet).to.include('listCourseMindmapOptions()');

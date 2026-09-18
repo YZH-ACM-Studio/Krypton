@@ -5,6 +5,7 @@ import { claimChapterProblemIds } from '../src/pages/course/chapter-draft.ts';
 import { resolveChapterId, resolveSectionId, withChapterQuery } from '../src/pages/course/chapter-query.ts';
 import { problemsForCourseMindmapNode } from '../src/pages/course/mindmap-state.ts';
 import { courseMindmapProblemHref } from '../src/pages/course/mindmap.tsx';
+import { courseAssignsUserGroups } from '../src/pages/course/types.ts';
 
 const root = resolve(import.meta.dirname, '..');
 
@@ -111,8 +112,14 @@ describe('p3.8 course workspace', () => {
     expect(editor).to.include('name="operation" value="delete"');
     expect(editor).to.include('删除课程');
     expect(list).to.include('已隐藏');
+    expect(list).to.include('courseAssignsUserGroups(course)');
     expect(detail).to.include('已对学生隐藏');
+    expect(detail).to.include('!courseAssignsUserGroups(course) && data.canEnroll');
+    expect(detail).to.include('!courseAssignsUserGroups(course) && data.tsdoc?.enroll');
     expect(detail).to.not.include('chapters.map((ch');
+    expect(courseAssignsUserGroups({})).to.equal(false);
+    expect(courseAssignsUserGroups({ courseGroupIds: [] })).to.equal(false);
+    expect(courseAssignsUserGroups({ courseGroupIds: ['g1'] })).to.equal(true);
   });
 
   it('copies a saved course into a new document from the editor and detail', () => {

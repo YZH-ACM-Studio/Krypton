@@ -22,6 +22,10 @@ export function isCourseHidden(tdoc: Pick<TrainingDoc, 'courseHidden'>): boolean
     return tdoc.courseHidden === true;
 }
 
+export function courseAssignsUserGroups(tdoc: Pick<TrainingDoc, 'courseGroupIds'>): boolean {
+    return (tdoc.courseGroupIds || []).length > 0;
+}
+
 export function courseVisibleTo(tdoc: TrainingDoc, myGroups: Set<string>, canManage: boolean): boolean {
     if (canManage) return true;
     if (isCourseHidden(tdoc)) return false;

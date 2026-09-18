@@ -41,6 +41,10 @@ export interface CourseRecord {
   mindmapId?: string | number;
 }
 
+export function courseAssignsUserGroups(course: Pick<CourseRecord, 'courseGroupIds'>): boolean {
+  return (course.courseGroupIds || []).length > 0;
+}
+
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

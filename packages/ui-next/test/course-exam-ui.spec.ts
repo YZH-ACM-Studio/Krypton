@@ -87,6 +87,9 @@ describe('course exam UI source contracts', () => {
     expect(card).to.include('还需看完');
     expect(card).to.include('/exam-mode/');
     expect(card).to.include('预览考试');
+    expect(card).to.include('预览不能交卷');
+    expect(card).to.include('学生需看完规定视频后才能参加');
+    expect(card).to.match(/canManage \? \([\s\S]*预览考试/);
     expect(card).to.include('看完后才能参加考试');
     expect(card).to.include('老师还没开放视频，还不能参加考试');
     expect(card).to.include('state.locked && state.remaining === 0 && state.remainingVideos.length === 0');

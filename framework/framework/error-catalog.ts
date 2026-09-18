@@ -797,6 +797,10 @@ const CORE_ERROR_MESSAGE_TRANSLATIONS: Readonly<Record<string, ErrorMessageTrans
         en: 'Choose only one recording deletion scope',
         'zh-CN': '只能选择一种录像删除范围。',
     },
+    '预览考试不能交卷': {
+        en: 'Preview cannot submit the paper',
+        'zh-CN': '预览考试不能交卷',
+    },
     'Contest finalize window has closed': {
         en: 'Contest finalize window has closed',
         'zh-CN': '比赛定版窗口已关闭。',
@@ -1577,6 +1581,7 @@ const CHINESE_ERROR_MESSAGE_ENGLISH_TRANSLATIONS: Readonly<Record<string, string
     'Vigil 返回的比赛 ID 无效，请联系考务重新发起登录。': 'Vigil returned an invalid contest ID. Contact the exam staff to restart sign-in.',
     你不在该课程的可见范围内: 'You are outside the visibility scope of this course.',
     该课程已隐藏: 'This course is hidden.',
+    指定用户组的课程不需要报名: 'Grouped courses do not use enrollment.',
     该考试不是选择题考试: 'This contest is not a multiple-choice exam.',
     这场考试已绑定其它课程: 'This exam is already bound to another course.',
     结业考试门槛无效: 'The course-completion exam gate is invalid.',

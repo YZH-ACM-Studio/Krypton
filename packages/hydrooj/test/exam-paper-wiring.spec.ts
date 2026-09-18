@@ -154,7 +154,9 @@ describe('exam paper wiring', () => {
         expect(paper).to.include('examPaperAllowPool');
         expect(paper).to.include('allowUnfrozenPool');
         expect(paper).to.include('isExamPaperWindowClosed');
-        expect(paper).to.include('canFinalize: !isExamPaperWindowClosed(this.tdoc, this.tsdoc, new Date())');
+        expect(paper).to.include('canFinalize: !this.examPaperAdminPreview && !isExamPaperWindowClosed(this.tdoc, this.tsdoc, new Date())');
+        expect(paper).to.include("localizedErrorText`预览考试不能交卷`");
+        expect(paper).to.include('if (this.examPaperAdminPreview)');
     });
 
     it('first exam-paper start CASes one frozen paper and re-reads on conflict', () => {

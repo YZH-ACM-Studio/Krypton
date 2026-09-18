@@ -72,6 +72,11 @@ export function CourseExamCard({
             <h3 className="truncate text-sm font-medium">{title}</h3>
             {contest?.missing === true ? (
               <p className="mt-2 text-sm text-muted-foreground">考试不存在</p>
+            ) : canManage ? (
+              <p className="mt-2 text-sm text-muted-foreground">
+                {windowClosed ? '考试已结束。' : ''}
+                学生需看完规定视频后才能参加。预览不能交卷。
+              </p>
             ) : !canEnter && windowClosed ? (
               <p className="mt-2 text-sm text-muted-foreground">考试已结束</p>
             ) : showWatchLock ? (
@@ -99,14 +104,13 @@ export function CourseExamCard({
           </div>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
-          {canEnter ? (
-            <Button asChild size="sm" className="h-9">
-              <a href={href}>进入考试</a>
-            </Button>
-          ) : null}
           {canManage ? (
             <Button asChild variant="outline" size="sm" className="h-9">
               <a href={href}>预览考试</a>
+            </Button>
+          ) : canEnter ? (
+            <Button asChild size="sm" className="h-9">
+              <a href={href}>进入考试</a>
             </Button>
           ) : null}
         </div>

@@ -300,6 +300,10 @@ async function hideAssignUnlessPostContest(domainId: string, tdoc: any, user: an
     return tsdoc;
 }
 
+function isExamPaperAdminPreview(user: { own(doc: any): boolean; hasPerm(...perm: bigint[]): boolean; hasPriv(...priv: number[]): boolean }, tdoc: any) {
+    return user.own(tdoc) || user.hasPerm(PERM.PERM_EDIT_CONTEST) || user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
+}
+
 function assertPaperProblemsReadable(handler: PaperBaseHandler) {
     const canManageContest = handler.user.own(handler.tdoc) || handler.user.hasPerm(PERM.PERM_EDIT_CONTEST);
     if (canManageContest) return;
@@ -312,6 +316,7 @@ class PaperBaseHandler extends Handler {
     tid: ObjectId;
     tsdoc: any;
     examPaperAllowPool = false;
+    examPaperAdminPreview = false;
 
     @param('tid', Types.ObjectId)
     async _prepare(_domainId: string, tid: ObjectId) {
@@ -329,8 +334,9 @@ class PaperBaseHandler extends Handler {
         // ── Krypton: client-required gate ────────────────────────────
         // Paper mode's _prepare is its own (it doesn't extend
         // ContestDetailBaseHandler), so we apply the same gate here.
-        const isAdminBypass = this.user.own(this.tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST) || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
+        const isAdminBypass = isExamPaperAdminPreview(this.user, this.tdoc);
         this.examPaperAllowPool = isAdminBypass;
+        this.examPaperAdminPreview = isAdminBypass;
         const hasAttendPerm = this.user.hasPerm(PERM.PERM_ATTEND_CONTEST);
         const vg = (global as any).Hydro?.model?.vigilguard;
         const sid = vg?.clientSessionKeyFromSession
@@ -748,12 +754,13 @@ class PaperLayoutHandler extends PaperBaseHandler {
             cells,
             now: Date.now(),
             inWindow: this.isInWindow(),
-            canFinalize: !isExamPaperWindowClosed(this.tdoc, this.tsdoc, new Date()),
+            canFinalize: !this.examPaperAdminPreview && !isExamPaperWindowClosed(this.tdoc, this.tsdoc, new Date()),
+            paperPreview: this.examPaperAdminPreview,
             owner: ownerInfo,
             broadcasts,
             scoreboard,
             showScoreboard,
-            allowSubmitByKind: !!this.tdoc.allowSubmitByKind,
+            allowSubmitByKind: !!this.tdoc.allowSubmitByKind && !this.examPaperAdminPreview,
             examMode: {
                 student: await resolveExamModeStudent(this, domainId),
             },
@@ -1037,6 +1044,9 @@ export async function finalizePaperForUser(
 
 class PaperFinalizeHandler extends PaperBaseHandler {
     async post({ domainId }: { domainId: string }) {
+        if (this.examPaperAdminPreview) {
+            throw new ValidationError('contest', null, localizedErrorText`预览考试不能交卷`);
+        }
         if (isExamPaperWindowClosed(this.tdoc, this.tsdoc, new Date())) {
             throw new ValidationError('contest', null, localizedErrorText`Contest finalize window has closed`);
         }

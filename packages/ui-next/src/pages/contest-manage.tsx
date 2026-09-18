@@ -67,7 +67,7 @@ import { formatDateTime, formatRelativeTime, makeInitials, replaceRouteTokens } 
 import { isSystemAdmin } from '@/lib/perms';
 import { ContestEditExam } from './contest-edit-exam';
 import { initialContestEditRule } from './contest-edit-exam-defaults';
-import { ExamContestManagePage, ExamManagementChrome } from './contest-exam-manage';
+import { ExamContestManagePage, ExamManagementChrome, isExamRule } from './contest-exam-manage';
 
 /**
  * Loose server-payload record — kept only for payloads whose shape is not
@@ -584,7 +584,7 @@ interface ManagementItem {
 function managementItems(tdoc: ContestDoc, contestUrl: string, canGradeSubjective: boolean): ManagementItem[] {
   const items: ManagementItem[] = [
     { key: 'overview', label: '概览与文件', href: `${contestUrl}/management`, icon: LayoutDashboard },
-    { key: 'edit', label: String(tdoc.rule) === 'exam' ? '编辑考试' : '编辑比赛', href: `${contestUrl}/edit`, icon: Settings },
+    { key: 'edit', label: isExamRule(tdoc.rule) ? '编辑考试' : '编辑比赛', href: `${contestUrl}/edit`, icon: Settings },
     { key: 'users', label: '参赛选手', href: `${contestUrl}/user`, icon: Users },
     { key: 'clarification', label: '答疑管理', href: `${contestUrl}/clarification`, icon: MessageSquare },
     {
@@ -594,7 +594,7 @@ function managementItems(tdoc: ContestDoc, contestUrl: string, canGradeSubjectiv
       icon: ClipboardCheck,
       show: canGradeSubjective,
     },
-    { key: 'balloon', label: '气球分发', href: `${contestUrl}/balloon`, icon: Trophy, show: String(tdoc.rule) !== 'exam' },
+    { key: 'balloon', label: '气球分发', href: `${contestUrl}/balloon`, icon: Trophy, show: !isExamRule(tdoc.rule) },
     { key: 'print', label: '打印服务', href: `${contestUrl}/print`, icon: Printer, show: !!tdoc.allowPrint },
     { key: 'scoreboard', label: '排行榜', href: `${contestUrl}/scoreboard`, icon: Trophy },
     { key: 'records', label: '全部提交', href: `/record?tid=${encodeURIComponent(contestId(tdoc))}`, icon: Send },
@@ -605,7 +605,7 @@ function managementItems(tdoc: ContestDoc, contestUrl: string, canGradeSubjectiv
 
 function ContestManagementChrome({ tdoc, active, children }: { tdoc: ContestDoc; active: ManagementSection; children: React.ReactNode }) {
   const bs = useBootstrap();
-  if (String(tdoc.rule) === 'exam') {
+  if (isExamRule(tdoc.rule)) {
     return (
       <ExamManagementChrome tdoc={tdoc} active={active}>
         {children}
@@ -616,7 +616,8 @@ function ContestManagementChrome({ tdoc, active, children }: { tdoc: ContestDoc;
   if (!tid) return <>{children}</>;
   const contestUrl = contestDetailUrl(bs, tdoc);
   const canGradeSubjective =
-    ['exam', 'homework', 'oi'].includes(String(tdoc.rule)) && (Number(tdoc.owner) === bs.user.id || isSystemAdmin(bs.user.priv));
+    (tdoc.rule === 'exam' || tdoc.rule === 'homework' || tdoc.rule === 'oi') &&
+    (tdoc.owner === bs.user.id || isSystemAdmin(bs.user.priv));
   const items = managementItems(tdoc, contestUrl, canGradeSubjective);
   return (
     <div className="grid gap-5 lg:grid-cols-[220px_minmax(0,1fr)]">
@@ -624,9 +625,9 @@ function ContestManagementChrome({ tdoc, active, children }: { tdoc: ContestDoc;
         <div className="rounded-xl border bg-card p-3">
           <a href={contestUrl} className="group block rounded-lg px-2 py-2 hover:bg-accent/40">
             <p className="line-clamp-2 text-sm font-medium group-hover:text-primary">
-              {tdoc.title || (String(tdoc.rule) === 'exam' ? '考试' : '比赛')}
+              {tdoc.title || (isExamRule(tdoc.rule) ? '考试' : '比赛')}
             </p>
-            <p className="mt-1 text-xs text-muted-foreground">{String(tdoc.rule) === 'exam' ? '返回考试详情' : '返回比赛详情'}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{isExamRule(tdoc.rule) ? '返回考试详情' : '返回比赛详情'}</p>
           </a>
           <div className="my-2 h-px bg-border" />
           <nav className="space-y-1">
@@ -2148,7 +2149,7 @@ export function ContestManagePage() {
   const data = bs.page.data as ContestManagePageData;
   const tdoc: ContestDoc = data.tdoc || {};
   const tid = tdoc.docId || tdoc._id;
-  if (String(tdoc.rule) === 'exam') {
+  if (isExamRule(tdoc.rule)) {
     return (
       <ExamContestManagePage
         seat={typeof tid === 'string' ? <ContestExamSeatEntry tdoc={tdoc} contestId={tid} scopeGroups={data.scopeGroups || []} /> : null}
@@ -2856,7 +2857,7 @@ export function ContestUserPage() {
           </a>
         </Button>
         <div>
-          <h1 className="text-xl font-semibold">{String(tdoc.rule) === 'exam' ? '考生名单' : '参赛选手'}</h1>
+          <h1 className="text-xl font-semibold">{isExamRule(tdoc.rule) ? '考生名单' : '参赛选手'}</h1>
           <p className="text-sm text-muted-foreground">
             {tdoc.title} — 共 {tsdocs.length} 人
           </p>
@@ -2865,7 +2866,7 @@ export function ContestUserPage() {
 
       <ContestManagementChrome tdoc={tdoc} active="users">
         <div className="space-y-4">
-          {isTeamMode && String(tdoc.rule) !== 'exam' ? (
+          {isTeamMode && !isExamRule(tdoc.rule) ? (
             <p className="text-sm text-muted-foreground">
               团队赛请到
               <a href={`/contest/${tid}/teams`} className="text-primary underline-offset-4 hover:underline">
@@ -2878,11 +2879,11 @@ export function ContestUserPage() {
             value={userTab}
             onValueChange={setUserTab}
             items={[
-              { value: 'list', label: String(tdoc.rule) === 'exam' ? '考生列表' : '选手列表', count: tsdocs.length, icon: Users },
-              { value: 'add', label: String(tdoc.rule) === 'exam' ? '添加考生' : '添加选手', icon: UserPlus },
+              { value: 'list', label: isExamRule(tdoc.rule) ? '考生列表' : '选手列表', count: tsdocs.length, icon: Users },
+              { value: 'add', label: isExamRule(tdoc.rule) ? '添加考生' : '添加选手', icon: UserPlus },
             ]}
             size="md"
-            aria-label={String(tdoc.rule) === 'exam' ? '考生管理' : '选手管理'}
+            aria-label={isExamRule(tdoc.rule) ? '考生管理' : '选手管理'}
           />
 
           {userTab === 'add' ? (
@@ -2928,7 +2929,7 @@ export function ContestUserPage() {
                     ) : null}
                     <Button type="submit" disabled={selectedUsers.length === 0}>
                       <UserPlus className="mr-1 size-4" />
-                      {String(tdoc.rule) === 'exam' ? '添加考生' : '添加选手'}
+                      {isExamRule(tdoc.rule) ? '添加考生' : '添加选手'}
                     </Button>
                   </div>
                 </form>
@@ -2965,11 +2966,11 @@ export function ContestUserPage() {
                           <TableCell className="text-center">
                             {ts.attend ? (
                               <Badge variant={ts.unrank ? 'outline' : 'default'} className="text-xs">
-                                {ts.unrank ? '打星' : String(tdoc.rule) === 'exam' ? '已报名' : '参赛中'}
+                                {ts.unrank ? '打星' : isExamRule(tdoc.rule) ? '已报名' : '参赛中'}
                               </Badge>
                             ) : (
                               <Badge variant="secondary" className="text-xs">
-                                {String(tdoc.rule) === 'exam' ? '未报名' : '未参赛'}
+                                {isExamRule(tdoc.rule) ? '未报名' : '未参赛'}
                               </Badge>
                             )}
                           </TableCell>
@@ -2996,7 +2997,7 @@ export function ContestUserPage() {
                     {tsdocs.length === 0 && (
                       <TableRow>
                         <TableCell colSpan={5} className="py-6 text-center text-sm text-muted-foreground">
-                          {String(tdoc.rule) === 'exam' ? '暂无考生' : '暂无选手'}
+                          {isExamRule(tdoc.rule) ? '暂无考生' : '暂无选手'}
                         </TableCell>
                       </TableRow>
                     )}

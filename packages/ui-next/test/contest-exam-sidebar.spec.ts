@@ -22,7 +22,7 @@ describe('contest exam sidebar', () => {
     const page = source('src/pages/contest-manage.tsx');
     const items = sliceBetween(page, 'function managementItems(', 'return items.filter');
     const balloon = sliceBetween(items, "key: 'balloon'", "key: 'print'");
-    expect(balloon).to.include("show: String(tdoc.rule) !== 'exam'");
+    expect(balloon).to.include('show: !isExamRule(tdoc.rule)');
   });
 
   it('hides balloon from the contest detail sidebar when exam', () => {
@@ -55,10 +55,10 @@ describe('contest exam sidebar', () => {
     const manage = source('src/pages/contest-manage.tsx');
     const exam = source('src/pages/contest-exam-manage.tsx');
     const switcher = sliceBetween(manage, 'export function ContestManagePage()', 'function ContestAcmManagePage(');
-    expect(switcher).to.include("String(tdoc.rule) === 'exam'");
+    expect(switcher).to.include('isExamRule(tdoc.rule)');
     expect(switcher).to.include('ExamContestManagePage');
     const chrome = sliceBetween(manage, 'function ContestManagementChrome(', 'const items = managementItems(');
-    expect(chrome).to.include("String(tdoc.rule) === 'exam'");
+    expect(chrome).to.include('isExamRule(tdoc.rule)');
     expect(chrome).to.include('ExamManagementChrome');
     expect(exam).not.to.include('/balloon');
     expect(exam).to.include('考试管理');

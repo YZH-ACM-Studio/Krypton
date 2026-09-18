@@ -62,8 +62,22 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
-function examContestId(tdoc: ExamManageTdoc) {
-  return String(tdoc.docId || tdoc._id || '');
+export function isExamRule(rule: unknown): boolean {
+  return rule === 'exam';
+}
+
+function readContestId(value: unknown): string | undefined {
+  if (typeof value === 'string' && value) return value;
+  if (typeof value === 'number' && Number.isInteger(value)) return String(value);
+  return undefined;
+}
+
+function readOwner(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isInteger(value) ? value : undefined;
+}
+
+export function examContestId(tdoc: ExamManageTdoc) {
+  return readContestId(tdoc.docId) || readContestId(tdoc._id) || '';
 }
 
 function examContestUrl(detailTemplate: string, tdoc: ExamManageTdoc) {
@@ -72,6 +86,7 @@ function examContestUrl(detailTemplate: string, tdoc: ExamManageTdoc) {
 }
 
 function formatSize(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes < 0) return '0 B';
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
@@ -110,17 +125,17 @@ function readScoreMap(value: unknown): Record<string, number> | undefined {
   return Object.keys(out).length ? out : undefined;
 }
 
-function readExamManageData(raw: unknown): ExamManageData {
+export function readExamManageData(raw: unknown): ExamManageData {
   const page = isRecord(raw) ? raw : {};
   const tdocRaw = isRecord(page.tdoc) ? page.tdoc : {};
   const pids = readPids(tdocRaw.pids);
   return {
     tdoc: {
-      docId: tdocRaw.docId == null ? undefined : String(tdocRaw.docId),
-      _id: tdocRaw._id == null ? undefined : String(tdocRaw._id),
+      docId: readContestId(tdocRaw.docId),
+      _id: readContestId(tdocRaw._id),
       title: typeof tdocRaw.title === 'string' && tdocRaw.title ? tdocRaw.title : '考试',
       rule: typeof tdocRaw.rule === 'string' ? tdocRaw.rule : 'exam',
-      owner: typeof tdocRaw.owner === 'number' ? tdocRaw.owner : undefined,
+      owner: readOwner(tdocRaw.owner),
       allowPrint: tdocRaw.allowPrint === true,
       pids,
       score: readScoreMap(tdocRaw.score),
@@ -176,7 +191,7 @@ export function ExamManagementChrome({
   const tid = examContestId(tdoc);
   if (!tid) return <>{children}</>;
   const contestUrl = examContestUrl(bs.urls.contestDetail, tdoc);
-  const canGradeSubjective = Number(tdoc.owner) === bs.user.id || isSystemAdmin(bs.user.priv);
+  const canGradeSubjective = tdoc.owner === bs.user.id || isSystemAdmin(bs.user.priv);
   const items = examManagementItems(tdoc, contestUrl, canGradeSubjective);
   return (
     <div className="grid gap-5 lg:grid-cols-[220px_minmax(0,1fr)]">

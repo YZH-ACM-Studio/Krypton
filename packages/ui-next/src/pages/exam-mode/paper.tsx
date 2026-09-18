@@ -20,9 +20,9 @@ import {
   CellCard,
   CellNavigator,
   type CellStatus,
-  Countdown,
   examPaperSurfaceTitle,
   FillProgramRenderer,
+  firstPaperKind,
   groupCellsByKind,
   KIND_LABELS,
   MiniTabBar,
@@ -146,6 +146,13 @@ export function ExamPaperPage() {
     now: number;
     inWindow: boolean;
     canFinalize: boolean;
+    paperStarted?: boolean;
+    canStartPaper?: boolean;
+    canViewPaper?: boolean;
+    contestBeginAt?: string;
+    contestEndAt?: string;
+    durationHours?: number | null;
+    paperOutline?: { questionCount: number; kinds: Array<{ kind: string; count: number }> };
     paperPreview?: boolean;
     owner: { uid: number; uname: string } | null;
     broadcasts: Array<{ _id: string; content: string; createdAt: string }>;
@@ -155,18 +162,53 @@ export function ExamPaperPage() {
     examMode?: { student?: ExamModeStudentView | null };
   };
   const { tdoc, pdict, cells, inWindow, canFinalize, paperPreview, broadcasts, scoreboard, showScoreboard, allowSubmitByKind } = data;
+  const paperStarted = data.paperStarted === true;
+  const canViewPaper = paperPreview === true || data.paperStarted !== false;
   const examStudent = data.examMode?.student;
   const tid = tdoc.docId;
   const [section, setSection] = useExamSection('overview');
+  const [starting, setStarting] = useState(false);
+  const paperLocked = data.paperStarted === false && paperPreview !== true;
+  const visibleSection = paperLocked && section === 'problems' ? 'overview' : section;
+
+  useEffect(() => {
+    if (paperLocked && section === 'problems') {
+      setSection('overview');
+    }
+  }, [paperLocked, section, setSection]);
+
+  const startPaper = async () => {
+    if (!(await confirmDialog('开始后将按个人时长计时，试卷不能重抽。确定开始答题？', { title: '开始答题' }))) return;
+    setStarting(true);
+    try {
+      const res = await fetchHydroResponse(
+        `/paper/${tid}/start`,
+        { method: 'POST', headers: { Accept: 'application/json' } },
+        '开始答题失败',
+      );
+      if (!res.ok) throw new Error(await readHydroResponseError(res, '开始答题失败'));
+      window.location.hash = '#problems';
+      window.location.reload();
+    } catch (error) {
+      setStarting(false);
+      await alertDialog(error instanceof Error ? error.message : '开始答题失败');
+    }
+  };
 
   return (
     <ExamDetailShell
       title={tdoc.title}
-      subtitle={<Countdown endAt={new Date(tdoc.endAt).getTime()} />}
-      section={section as ExamSection}
-      onSectionChange={(s) => setSection(s)}
+      subtitle={paperPreview ? '管理员预览' : undefined}
+      section={visibleSection as ExamSection}
+      onSectionChange={(next) => {
+        if (paperLocked && next === 'problems') {
+          setSection('overview');
+          return;
+        }
+        setSection(next);
+      }}
     >
-      {section === 'overview' && (
+      {visibleSection === 'overview' && (
         <OverviewSection
           data={{
             tdoc,
@@ -179,15 +221,24 @@ export function ExamPaperPage() {
               studentId: examStudent?.studentId,
               realName: examStudent?.realName,
             },
+            paperStarted,
+            paperPreview: paperPreview === true,
+            canStartPaper: data.canStartPaper === true,
+            contestBeginAt: data.contestBeginAt,
+            contestEndAt: data.contestEndAt,
+            durationHours: data.durationHours,
+            paperOutline: data.paperOutline,
+            starting,
           }}
           onEnterProblems={() => setSection('problems')}
+          onStartPaper={startPaper}
         />
       )}
-      {section === 'problems' && (
+      {visibleSection === 'problems' && canViewPaper && (
         <ProblemsSection tdoc={tdoc} tid={tid} pdict={pdict} cells={cells} inWindow={inWindow} canFinalize={canFinalize} paperPreview={paperPreview === true} allowSubmitByKind={allowSubmitByKind} />
       )}
-      {section === 'announcements' && <AnnouncementsSection broadcasts={broadcasts || []} />}
-      {section === 'ranking' && <RankingSection scoreboard={scoreboard || []} showScoreboard={showScoreboard} signedInUid={bs.user.id} />}
+      {visibleSection === 'announcements' && <AnnouncementsSection broadcasts={broadcasts || []} />}
+      {visibleSection === 'ranking' && <RankingSection scoreboard={scoreboard || []} showScoreboard={showScoreboard} signedInUid={bs.user.id} />}
     </ExamDetailShell>
   );
 }
@@ -213,8 +264,7 @@ function ProblemsSection({
   allowSubmitByKind: boolean;
 }) {
   const groups = useMemo(() => groupCellsByKind(cells), [cells]);
-  const kinds = useMemo(() => Array.from(groups.keys()), [groups]);
-  const [activeKind, setActiveKind] = useState<QuestionKind | null>(kinds[0] ?? null);
+  const [activeKind, setActiveKind] = useState<QuestionKind | null>(() => firstPaperKind(groups));
   const tabCells = activeKind ? groups.get(activeKind) || [] : [];
 
   const [drafts, setDrafts] = useState<Record<number, DraftState>>({});
@@ -674,13 +724,21 @@ function CellEditor({
   const options = pdoc.config.options?.[cell.questionKey || ''] || ['选项 A', '选项 B', '选项 C', '选项 D'];
 
   return (
-    <CellCard id={`cell-${cellIndex}`} title={title} score={cell.score} prompt={cell.prompt} locked={isLocked} status={status}>
+    <CellCard
+      id={`cell-${cellIndex}`}
+      title={title}
+      score={cell.score}
+      kindLabel={KIND_LABELS[cell.kind]}
+      prompt={cell.prompt}
+      locked={isLocked}
+      status={status}
+    >
       {pdoc.content && (
         <div className="prose prose-sm dark:prose-invert max-w-none">
           <MarkdownView content={pdoc.content} />
         </div>
       )}
-      {cell.kind === 'single' && (
+      {(cell.kind === 'single' || cell.kind === 'true_false') && (
         <SingleChoiceRenderer
           name={`paper-${cell.pid}-${cell.questionKey}`}
           value={(draft.answers[cell.questionKey!] as string) || null}

@@ -100,6 +100,7 @@ describe('exam paper surface title', () => {
     );
     expect(screen.getByRole('heading', { name: '第 1 题' })).to.exist;
     expect(screen.getByRole('heading', { name: '第 2 题' })).to.exist;
+    expect(screen.getAllByText('单选')).to.have.length.greaterThan(0);
     expect(screen.queryByText('第 main 题')).to.equal(null);
     expect(screen.queryByText('内部标题 11')).to.equal(null);
   });

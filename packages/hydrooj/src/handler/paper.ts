@@ -11,7 +11,7 @@
  */
 import yaml from 'js-yaml';
 import { ObjectId } from 'mongodb';
-import { effectiveProblemKind, gradeObjectiveAnswer, type ProblemKind } from '@hydrooj/common';
+import { effectiveProblemKind, examPaperQuotaTotal, gradeObjectiveAnswer, PROBLEM_KINDS, type ProblemKind } from '@hydrooj/common';
 import { Logger } from '@hydrooj/utils';
 import {
     localizeErrorParameter,
@@ -173,11 +173,21 @@ function assertExamPaperCanStart(tdoc: any, tsdoc: any) {
 }
 
 function projectStudentExamPaperTdoc(tdoc: any, tsdoc: any, allowUnfrozenPool = false) {
+    const started = isExamPaperStarted(tsdoc);
     return {
         ...tdoc,
-        pids: examPaperPidsOrThrow(tdoc, tsdoc, allowUnfrozenPool),
+        pids: started || allowUnfrozenPool ? examPaperPidsOrThrow(tdoc, tsdoc, allowUnfrozenPool) : [],
         endAt: examPaperPersonalEnd(tdoc, tsdoc),
     };
+}
+
+function examPaperOutline(tdoc: any): { questionCount: number; kinds: Array<{ kind: string; count: number }> } {
+    const quotas = readExamPaperQuotas(tdoc.examPaperQuotas);
+    if (quotas) {
+        const kinds = PROBLEM_KINDS.filter((kind) => (quotas[kind] || 0) > 0).map((kind) => ({ kind, count: quotas[kind] as number }));
+        return { questionCount: examPaperQuotaTotal(quotas), kinds };
+    }
+    return { questionCount: normalizeExamPaperPids(tdoc.pids).length, kinds: [] };
 }
 
 function assertPidInExamPaper(tdoc: any, tsdoc: any, pid: number) {
@@ -209,9 +219,19 @@ async function loadExamPaperPoolKinds(domainId: string, tid: ObjectId, poolPids:
 async function writeExamPaperStart(domainId: string, tid: ObjectId, uid: number, tdoc: any): Promise<any> {
     if (!isExamPaperDrawEnabled(tdoc)) {
         const startAt = new Date();
-        await contest.setStatus(domainId, tid, uid, { startAt });
-        const tsdoc = await contest.getStatus(domainId, tid, uid);
-        return tsdoc || { startAt };
+        const updated = await document.setStatusIfCondition(
+            domainId,
+            document.TYPE_CONTEST,
+            tid,
+            uid,
+            { startAt: { $exists: false } },
+            { startAt },
+        );
+        const tsdoc = updated || (await contest.getStatus(domainId, tid, uid));
+        if (!isExamPaperStarted(tsdoc)) {
+            throw new ValidationError('startAt', null, localizedErrorText`个人试卷缺失或损坏，不能进入`);
+        }
+        return tsdoc;
     }
     const quotas = readExamPaperQuotas(tdoc.examPaperQuotas);
     if (!quotas) {
@@ -311,6 +331,13 @@ function assertPaperProblemsReadable(handler: PaperBaseHandler) {
     if (!handler.tsdoc?.attend && !contest.isDone(handler.tdoc)) throw new ContestNotAttendedError(handler.tid);
 }
 
+function assertExamPaperStartedForWrite(handler: PaperBaseHandler) {
+    if (handler.examPaperAdminPreview) return;
+    if (!isExamPaperStarted(handler.tsdoc)) {
+        throw new ValidationError('contest', null, localizedErrorText`还没有开始答题`);
+    }
+}
+
 class PaperBaseHandler extends Handler {
     tdoc: any;
     tid: ObjectId;
@@ -375,7 +402,6 @@ class PaperBaseHandler extends Handler {
         }
         await assertCourseExamWatchGate({ domainId: authoritativeDomainId, user: this.user, contest: this.tdoc });
         if (this.tdoc.rule === 'exam' && !isAdminBypass) {
-            assertExamPaperCanStart(this.tdoc, tsdoc);
             if (!tsdoc?.attend) {
                 try {
                     await contest.attend(authoritativeDomainId, tid, this.user._id, { subscribe: 1 });
@@ -385,9 +411,7 @@ class PaperBaseHandler extends Handler {
                 }
                 tsdoc = await contest.getStatus(authoritativeDomainId, tid, this.user._id);
             }
-            if (tsdoc?.attend && !isExamPaperStarted(tsdoc)) {
-                tsdoc = await writeExamPaperStart(authoritativeDomainId, tid, this.user._id, this.tdoc);
-            } else if (isExamPaperDrawEnabled(this.tdoc) && isExamPaperStarted(tsdoc)) {
+            if (isExamPaperDrawEnabled(this.tdoc) && isExamPaperStarted(tsdoc)) {
                 assertFrozenExamPaperPids(this.tdoc, tsdoc);
             }
         }
@@ -572,7 +596,6 @@ async function ensureExamModeAccess(handler: Handler | ConnectionHandler, domain
     }
     await assertCourseExamWatchGate({ domainId, user: handler.user, contest: tdoc });
     if (!isAdminBypass && tdoc.rule === 'exam') {
-        assertExamPaperCanStart(tdoc, tsdoc);
         if (!tsdoc?.attend) {
             try {
                 await contest.attend(domainId, tid, handler.user._id, { subscribe: 1 });
@@ -582,9 +605,7 @@ async function ensureExamModeAccess(handler: Handler | ConnectionHandler, domain
             }
             tsdoc = await contest.getStatus(domainId, tid, handler.user._id);
         }
-        if (tsdoc?.attend && !isExamPaperStarted(tsdoc)) {
-            tsdoc = await writeExamPaperStart(domainId, tid, handler.user._id, tdoc);
-        } else if (isExamPaperDrawEnabled(tdoc) && isExamPaperStarted(tsdoc)) {
+        if (isExamPaperDrawEnabled(tdoc) && isExamPaperStarted(tsdoc)) {
             assertFrozenExamPaperPids(tdoc, tsdoc);
         }
     } else if (!isAdminBypass && contest.isOngoing(tdoc, tsdoc)) {
@@ -649,7 +670,9 @@ async function gradeObjectiveDraft(
 class PaperLayoutHandler extends PaperBaseHandler {
     async get({ domainId }: { domainId: string }) {
         assertPaperProblemsReadable(this);
-        const pdict = await this.getProblemDict();
+        const paperStarted = isExamPaperStarted(this.tsdoc);
+        const canViewPaper = paperStarted || this.examPaperAdminPreview;
+        const pdict = canViewPaper ? await this.getProblemDict() : {};
         // Build the cell map: each entry describes one answerable slot.
         const cells: Array<{
             pid: number;
@@ -658,7 +681,7 @@ class PaperLayoutHandler extends PaperBaseHandler {
             score: number;
             prompt?: string;
         }> = [];
-        const paperPids = examPaperPidsOrThrow(this.tdoc, this.tsdoc, this.examPaperAllowPool);
+        const paperPids = canViewPaper ? examPaperPidsOrThrow(this.tdoc, this.tsdoc, this.examPaperAllowPool) : [];
         const failOnMissingPaper = isExamPaperDrawEnabled(this.tdoc) && isExamPaperStarted(this.tsdoc);
         for (const pid of paperPids) {
             const pdoc = pdict[pid];
@@ -754,7 +777,14 @@ class PaperLayoutHandler extends PaperBaseHandler {
             cells,
             now: Date.now(),
             inWindow: this.isInWindow(),
-            canFinalize: !this.examPaperAdminPreview && !isExamPaperWindowClosed(this.tdoc, this.tsdoc, new Date()),
+            paperStarted,
+            canStartPaper: !this.examPaperAdminPreview && !paperStarted && canStartExamPaper(this.tdoc, new Date()),
+            canViewPaper,
+            contestBeginAt: this.tdoc.beginAt,
+            contestEndAt: this.tdoc.endAt,
+            durationHours: typeof this.tdoc.duration === 'number' && this.tdoc.duration > 0 ? this.tdoc.duration : null,
+            paperOutline: examPaperOutline(this.tdoc),
+            canFinalize: !this.examPaperAdminPreview && paperStarted && !isExamPaperWindowClosed(this.tdoc, this.tsdoc, new Date()),
             paperPreview: this.examPaperAdminPreview,
             owner: ownerInfo,
             broadcasts,
@@ -773,6 +803,7 @@ class PaperLayoutHandler extends PaperBaseHandler {
 class PaperDraftListHandler extends PaperBaseHandler {
     async get({ domainId }: { domainId: string }) {
         assertPaperProblemsReadable(this);
+        assertExamPaperStartedForWrite(this);
         const drafts = await PaperDraftModel.getDraftsForUser(domainId, this.tid, this.user._id);
         const pdict = await this.getProblemDict();
         const staleness: Record<string, boolean> = {};
@@ -813,6 +844,7 @@ class PaperDraftUpsertHandler extends PaperBaseHandler {
     @param('code', Types.Content, true)
     @param('lang', Types.Name, true)
     async post({ domainId }: { domainId: string }, pid: number, answersJson?: string, code?: string, lang?: string) {
+        assertExamPaperStartedForWrite(this);
         if (!this.isInWindow()) throw new ValidationError('contest', null, localizedErrorText`Contest not in active window`);
         assertPidInExamPaper(this.tdoc, this.tsdoc, pid);
         // rawConfig=true + 自行解析：与 getProblemDict/finalize 的指纹口径
@@ -865,6 +897,7 @@ class PaperDraftUpsertHandler extends PaperBaseHandler {
 class PaperLockKindHandler extends PaperBaseHandler {
     @param('kind', Types.Name)
     async post({ domainId }: { domainId: string }, kind: string) {
+        assertExamPaperStartedForWrite(this);
         if (!['single', 'multi', 'blank', 'fill_program', 'subjective'].includes(kind)) {
             throw new ValidationError('kind');
         }
@@ -906,6 +939,7 @@ class PaperLockKindHandler extends PaperBaseHandler {
 class PaperSubmitCodeHandler extends PaperBaseHandler {
     @param('pid', Types.UnsignedInt)
     async post({ domainId }: { domainId: string }, pid: number) {
+        assertExamPaperStartedForWrite(this);
         if (!this.isInWindow()) throw new ValidationError('contest', null, localizedErrorText`Contest not in active window`);
         assertPidInExamPaper(this.tdoc, this.tsdoc, pid);
         const pdoc = await ProblemModel.get(this.tdoc.domainId, pid, undefined, true);
@@ -934,6 +968,31 @@ class PaperSubmitCodeHandler extends PaperBaseHandler {
         const rid = await record.add(domainId, pid, this.user._id, lang, finalCode, true, { contest: this.tid, type: 'judge' });
         this.response.body = { rid };
         await OplogModel.log(this, 'paper.submit_code', { tid: this.tid, pid, rid });
+    }
+}
+
+// ─── POST /paper/:tid/start ───────────────────────────────────────────────
+
+class PaperStartHandler extends PaperBaseHandler {
+    async post({ domainId }: { domainId: string }) {
+        if (this.examPaperAdminPreview) {
+            throw new ValidationError('contest', null, localizedErrorText`预览考试不能开始答题`);
+        }
+        assertExamPaperCanStart(this.tdoc, this.tsdoc);
+        if (!this.tsdoc?.attend) {
+            throw new ContestNotAttendedError(this.tid);
+        }
+        let tsdoc = this.tsdoc;
+        if (!isExamPaperStarted(tsdoc)) {
+            tsdoc = await writeExamPaperStart(domainId, this.tid, this.user._id, this.tdoc);
+        }
+        this.tsdoc = tsdoc;
+        await OplogModel.log(this, 'paper.start', { tid: this.tid, startAt: tsdoc.startAt });
+        this.response.body = {
+            started: true,
+            startAt: tsdoc.startAt,
+            endAt: examPaperPersonalEnd(this.tdoc, tsdoc),
+        };
     }
 }
 
@@ -1047,6 +1106,7 @@ class PaperFinalizeHandler extends PaperBaseHandler {
         if (this.examPaperAdminPreview) {
             throw new ValidationError('contest', null, localizedErrorText`预览考试不能交卷`);
         }
+        assertExamPaperStartedForWrite(this);
         if (isExamPaperWindowClosed(this.tdoc, this.tsdoc, new Date())) {
             throw new ValidationError('contest', null, localizedErrorText`Contest finalize window has closed`);
         }
@@ -1613,6 +1673,7 @@ export async function apply(ctx: Context) {
     ctx.Route('exam_mode_discussion_create', '/exam-mode/:tid/discussion/create', ExamModeDiscussionCreateHandler, PRIV.PRIV_USER_PROFILE);
     ctx.Route('exam_mode_discussion_detail', '/exam-mode/:tid/discussion/:did', ExamModeDiscussionDetailHandler, PRIV.PRIV_USER_PROFILE);
     ctx.Route('paper_layout', '/paper/:tid', PaperLayoutHandler, PRIV.PRIV_USER_PROFILE);
+    ctx.Route('paper_start', '/paper/:tid/start', PaperStartHandler, PRIV.PRIV_USER_PROFILE);
     ctx.Route('paper_draft_list', '/paper/:tid/draft', PaperDraftListHandler, PRIV.PRIV_USER_PROFILE);
     ctx.Route('paper_draft_upsert', '/paper/:tid/draft/:pid', PaperDraftUpsertHandler, PRIV.PRIV_USER_PROFILE);
     ctx.Route('paper_lock_kind', '/paper/:tid/lock-kind', PaperLockKindHandler, PRIV.PRIV_USER_PROFILE);

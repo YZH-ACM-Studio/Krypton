@@ -49,6 +49,9 @@ interface ExamShellModeData {
 interface ExamShellPageData {
   examMode?: ExamShellModeData;
   tdoc?: { title?: string; beginAt?: string | Date; endAt?: string | Date };
+  paperStarted?: boolean;
+  contestBeginAt?: string | Date;
+  contestEndAt?: string | Date;
 }
 
 function examShellClockIso(value: unknown): string | undefined {
@@ -119,8 +122,13 @@ function ExamCountdown() {
   const bs = useBootstrap();
   const data = (bs.page.data || {}) as ExamShellPageData;
   const examMode = data.examMode || {};
-  const beginIso = examShellClockIso(data.tdoc?.beginAt) ?? examMode.beginAt;
-  const endIso = examShellClockIso(data.tdoc?.endAt) ?? examMode.endAt;
+  const wallClock = data.paperStarted === false;
+  const beginIso = wallClock
+    ? examShellClockIso(data.contestBeginAt) ?? examShellClockIso(data.tdoc?.beginAt) ?? examMode.beginAt
+    : examShellClockIso(data.tdoc?.beginAt) ?? examMode.beginAt;
+  const endIso = wallClock
+    ? examShellClockIso(data.contestEndAt) ?? examShellClockIso(data.tdoc?.endAt) ?? examMode.endAt
+    : examShellClockIso(data.tdoc?.endAt) ?? examMode.endAt;
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!endIso) return undefined;
@@ -142,6 +150,8 @@ function ExamCountdown() {
 
   if (!state) return null;
   const danger = state.kind === 'during' && state.ms < 5 * 60 * 1000;
+  const duringLabel = wallClock ? '整场剩余' : '剩余';
+  const duringTitle = wallClock ? '整场剩余' : '剩余时间';
   return (
     <div
       className={cn(
@@ -157,11 +167,11 @@ function ExamCountdown() {
           ? `比赛开始倒计时 · ${formatRemaining(state.ms)}`
           : state.kind === 'ended'
             ? '比赛已结束'
-            : `剩余时间 · ${formatRemaining(state.ms)}`
+            : `${duringTitle} · ${formatRemaining(state.ms)}`
       }
     >
       <span className="text-[10px] font-normal text-muted-foreground">
-        {state.kind === 'before' ? '开赛倒计时' : state.kind === 'ended' ? '已结束' : '剩余'}
+        {state.kind === 'before' ? '开赛倒计时' : state.kind === 'ended' ? '已结束' : duringLabel}
       </span>
       <span>{formatRemaining(state.ms)}</span>
     </div>

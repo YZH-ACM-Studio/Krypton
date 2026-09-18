@@ -13,6 +13,7 @@ import { MiniTabs } from '@/components/ui/mini-tabs';
 import { cn } from '@/lib/cn';
 
 export type QuestionKind =
+  | 'true_false'
   | 'single'
   | 'multi'
   | 'blank'
@@ -42,6 +43,7 @@ export function examPaperSurfaceTitle(order: number): string {
 }
 
 export const KIND_LABELS: Record<QuestionKind, string> = {
+  true_false: '判断',
   single: '单选',
   multi: '多选',
   blank: '填空',
@@ -55,6 +57,7 @@ export const KIND_LABELS: Record<QuestionKind, string> = {
 };
 
 const KIND_SHORT: Record<QuestionKind, string> = {
+  true_false: '判',
   single: '单',
   multi: '多',
   blank: '填',
@@ -77,7 +80,8 @@ export function groupCellsByKind(cells: PaperCell[]): Map<QuestionKind, PaperCel
   return map;
 }
 
-const KIND_ORDER: QuestionKind[] = [
+export const KIND_ORDER: QuestionKind[] = [
+  'true_false',
   'single',
   'multi',
   'blank',
@@ -89,6 +93,10 @@ const KIND_ORDER: QuestionKind[] = [
   'default',
   'submit_answer',
 ];
+
+export function firstPaperKind(groups: Map<QuestionKind, PaperCell[]>): QuestionKind | null {
+  return KIND_ORDER.find((kind) => groups.has(kind)) ?? null;
+}
 
 // ─── Mini Tab Bar (horizontal, lives at top of sub-sidebar) ──────────────
 //
@@ -372,6 +380,7 @@ export function PaperStatusPill({ dirtyCount, saving }: { dirtyCount: number; sa
 export function CellCard({
   title,
   score,
+  kindLabel,
   prompt,
   children,
   locked,
@@ -380,6 +389,7 @@ export function CellCard({
 }: {
   title: string;
   score: number;
+  kindLabel?: string;
   prompt?: string;
   locked: boolean;
   status?: CellStatus;
@@ -404,6 +414,11 @@ export function CellCard({
           <Badge variant="secondary" className="text-[10px]">
             {score} 分
           </Badge>
+          {kindLabel && (
+            <Badge variant="outline" className="text-[10px]">
+              {kindLabel}
+            </Badge>
+          )}
           {locked && (
             <Badge variant="outline" className="gap-1 text-[10px]">
               <Lock className="size-3" />

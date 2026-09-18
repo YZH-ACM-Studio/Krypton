@@ -57,10 +57,14 @@ describe('exam paper wiring', () => {
         const watchAt = prepare.indexOf('assertCourseExamWatchGate');
         expect(watchAt, 'exam start stays after the watch gate').to.be.at.least(0);
         const afterWatch = prepare.slice(watchAt);
-        expect(afterWatch, 'exam startAt must use canStartExamPaper').to.match(/assertExamPaperCanStart|canStartExamPaper/);
-        expect(afterWatch, 'exam-rule start stays on its own predicate').to.match(
-            /rule\s*===\s*['"]exam['"][\s\S]*(?:assertExamPaperCanStart|canStartExamPaper)|(?:assertExamPaperCanStart|canStartExamPaper)[\s\S]*rule\s*===\s*['"]exam['"]/,
-        );
+        expect(afterWatch, 'GET must not write exam startAt').to.not.include('writeExamPaperStart');
+        expect(afterWatch, 'GET must not start the personal clock').to.not.match(/assertExamPaperCanStart|canStartExamPaper/);
+        const startAt = paper.indexOf('class PaperStartHandler');
+        const startEnd = paper.indexOf('export async function finalizePaperForUser');
+        expect(startAt).to.be.at.least(0);
+        expect(startEnd).to.be.greaterThan(startAt);
+        const startHandler = paper.slice(startAt, startEnd);
+        expect(startHandler, 'explicit start POST uses canStartExamPaper').to.match(/assertExamPaperCanStart|canStartExamPaper/);
     });
 
     it('keeps contest isOngoing and isDone duration truncate bodies', () => {
@@ -113,6 +117,8 @@ describe('exam paper wiring', () => {
         expect(catalog).to.include("'考试已有人开考，不能改抽题'");
         expect(catalog).to.include("'个人试卷缺失或损坏，不能进入'");
         expect(catalog).to.include("'剩余时间不足，不能开始考试'");
+        expect(catalog).to.include('还没有开始答题');
+        expect(catalog).to.include('预览考试不能开始答题');
     });
 
     it('contest student surfaces project draw-on pids and do not write exam startAt', () => {
@@ -154,7 +160,7 @@ describe('exam paper wiring', () => {
         expect(paper).to.include('examPaperAllowPool');
         expect(paper).to.include('allowUnfrozenPool');
         expect(paper).to.include('isExamPaperWindowClosed');
-        expect(paper).to.include('canFinalize: !this.examPaperAdminPreview && !isExamPaperWindowClosed(this.tdoc, this.tsdoc, new Date())');
+        expect(paper).to.include('canFinalize: !this.examPaperAdminPreview && paperStarted && !isExamPaperWindowClosed(this.tdoc, this.tsdoc, new Date())');
         expect(paper).to.include("localizedErrorText`预览考试不能交卷`");
         expect(paper).to.include('if (this.examPaperAdminPreview)');
     });
@@ -174,7 +180,10 @@ describe('exam paper wiring', () => {
         expect(write).to.not.include('{ examPaperPids: { $exists: false } }');
         expect(write).to.not.include('existingStart');
         expect(paper).to.not.include('examPaperStartNeedsWrite');
-        expect(paper).to.include('tsdoc?.attend && !isExamPaperStarted(tsdoc)');
+        expect(paper).to.not.include('tsdoc?.attend && !isExamPaperStarted(tsdoc)');
+        expect(paper).to.include('class PaperStartHandler');
+        expect(paper).to.include("ctx.Route('paper_start'");
+        expect(paper).to.include('assertExamPaperStartedForWrite');
     });
 
     it('home, problem, and record student JSON project draw-on tdoc.pids', () => {
@@ -199,10 +208,10 @@ describe('exam paper wiring', () => {
     it('exam-shell countdown consumes projected tdoc.endAt and paper UI does not reread the pool', () => {
         const shell = readRepo('packages/ui-next/src/components/layout/exam-shell.tsx');
         expect(shell).to.include('examShellClockIso(data.tdoc?.endAt)');
-        expect(readRepo('packages/ui-next/src/pages/exam-mode/paper.tsx')).to.include('new Date(tdoc.endAt).getTime()');
+        expect(readRepo('packages/ui-next/src/pages/exam-mode/paper.tsx')).to.include('/paper/${tid}/start');
         expect(readRepo('packages/ui-next/src/pages/exam-mode/paper.tsx')).not.to.include('examPaperQuotas');
         expect(readRepo('packages/ui-next/src/pages/exam-mode/workspace.tsx')).not.to.include('examPaper');
-        expect(readRepo('packages/ui-next/src/components/paper/sections.tsx')).to.include('new Date(tdoc.endAt).getTime()');
+        expect(readRepo('packages/ui-next/src/components/paper/sections.tsx')).to.include('contestEndAt || tdoc.endAt');
         expect(readRepo('packages/ui-next/src/components/paper/sections.tsx')).not.to.include('examPaperQuotas');
     });
 

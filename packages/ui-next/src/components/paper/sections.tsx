@@ -3,16 +3,22 @@
  * Used by pages/exam-mode/paper.tsx when section is non-`problems`.
  */
 import type { ReactNode } from 'react';
-import { Calendar, Clock, Lock, MegaphoneIcon, Trophy, User, type LucideIcon } from 'lucide-react';
+import { Calendar, Clock, FileText, Lock, MegaphoneIcon, Trophy, User, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { DateTime } from '@/components/ui/datetime';
 import { MarkdownView } from '@/components/markdown-renderer';
-import { Countdown, KIND_LABELS, type PaperCell, type QuestionKind } from '@/components/paper/paper-shell';
+import { KIND_LABELS, type PaperCell, type QuestionKind } from '@/components/paper/paper-shell';
 
 // ─── Overview ─────────────────────────────────────────────────────────────
+
+interface PaperOutline {
+  questionCount: number;
+  kinds: Array<{ kind: string; count: number }>;
+}
 
 interface OverviewData {
   tdoc: {
@@ -30,144 +36,150 @@ interface OverviewData {
   now: number;
   signedInUser: { name: string; studentId?: string; realName?: string };
   attended?: boolean;
+  paperStarted?: boolean;
+  paperPreview?: boolean;
+  canStartPaper?: boolean;
+  contestBeginAt?: string | Date;
+  contestEndAt?: string | Date;
+  durationHours?: number | null;
+  paperOutline?: PaperOutline;
+  starting?: boolean;
 }
 
-export function OverviewSection({ data, onEnterProblems }: { data: OverviewData; onEnterProblems: () => void }) {
-  const { tdoc, cells, owner, inWindow, now, signedInUser } = data;
-  const beginAt = new Date(tdoc.beginAt).getTime();
-  const endAt = new Date(tdoc.endAt).getTime();
-  const durationMin = Math.round((endAt - beginAt) / 60000);
-  const isUpcoming = now < beginAt;
-  const isEnded = now > endAt;
+function kindLabel(kind: string): string {
+  return KIND_LABELS[kind as QuestionKind] || kind;
+}
 
-  // Count cells by kind.
-  const byKind = new Map<QuestionKind, number>();
-  for (const c of cells) byKind.set(c.kind, (byKind.get(c.kind) || 0) + 1);
-  const totalScore = cells.reduce((sum, c) => sum + (c.score || 0), 0);
-
-  const ruleLabel: Record<string, string> = {
-    exam: '考试 Exam',
-    acm: 'ACM',
-    oi: 'OI',
-    ioi: 'IOI',
-  };
+export function OverviewSection({
+  data,
+  onEnterProblems,
+  onStartPaper,
+}: {
+  data: OverviewData;
+  onEnterProblems: () => void;
+  onStartPaper?: () => void;
+}) {
+  const { tdoc, cells, owner, now, signedInUser, paperStarted, paperPreview, canStartPaper, durationHours, paperOutline, starting } = data;
+  const wallBegin = new Date(data.contestBeginAt || tdoc.beginAt).getTime();
+  const wallEnd = new Date(data.contestEndAt || tdoc.endAt).getTime();
+  const isUpcoming = now < wallBegin;
+  const isEnded = now > wallEnd;
+  const wallMinutes = Math.round((wallEnd - wallBegin) / 60000);
+  const byKind = new Map<string, number>();
+  if (cells.length) {
+    for (const cell of cells) byKind.set(cell.kind, (byKind.get(cell.kind) || 0) + 1);
+  } else {
+    for (const item of paperOutline?.kinds || []) byKind.set(item.kind, item.count);
+  }
+  const questionCount = cells.length || paperOutline?.questionCount || 0;
+  const ctaLabel = paperPreview ? '预览题目' : paperStarted ? '进入答题' : '开始答题';
+  const ctaEnabled = paperPreview || paperStarted || canStartPaper === true;
+  const onCta = paperPreview || paperStarted ? onEnterProblems : onStartPaper;
 
   return (
-    <div className="space-y-5 p-6">
-      {/* Hero */}
-      <Card>
-        <CardContent className="p-6">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div className="space-y-2">
-              <h1 className="text-2xl font-bold tracking-tight">{tdoc.title}</h1>
-              <div className="flex flex-wrap gap-2">
-                {inWindow && <Badge>进行中</Badge>}
-                {isUpcoming && <Badge variant="outline">即将开始</Badge>}
-                {isEnded && <Badge variant="secondary">已结束</Badge>}
-                <Badge variant="outline">{ruleLabel[tdoc.rule] || tdoc.rule}</Badge>
-                {tdoc.lockdownMode && (
-                  <Badge variant="outline" className="gap-1">
-                    <Lock className="size-3" />
-                    屏幕锁定
-                  </Badge>
-                )}
-                {tdoc.approvalMode === 'strict' && <Badge variant="outline">人工审核入场</Badge>}
-              </div>
-            </div>
-            <div className="space-y-2 text-right">
-              {inWindow ? (
-                <>
-                  <p className="text-xs text-muted-foreground">剩余时间</p>
-                  <Countdown endAt={endAt} />
-                </>
-              ) : isUpcoming ? (
-                <>
-                  <p className="text-xs text-muted-foreground">距开始还有</p>
-                  <Countdown endAt={beginAt} />
-                </>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  已结束 <DateTime value={endAt} />
-                </p>
-              )}
-              {inWindow && (
-                <button
-                  type="button"
-                  onClick={onEnterProblems}
-                  className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
-                >
-                  开始答题
-                </button>
-              )}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Info grid */}
-      <div className="grid gap-4 md:grid-cols-2">
-        <Card>
-          <CardHeader className="px-5 pb-3 pt-5">
-            <CardTitle className="text-sm">考试时间</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 px-5 pb-5 text-sm">
-            <InfoRow icon={Calendar} label="开始" value={<DateTime value={beginAt} />} />
-            <InfoRow icon={Calendar} label="结束" value={<DateTime value={endAt} />} />
-            <InfoRow icon={Clock} label="时长" value={`${durationMin} 分钟`} />
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="px-5 pb-3 pt-5">
-            <CardTitle className="text-sm">管理员</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 px-5 pb-5 text-sm">
-            {owner ? <InfoRow icon={User} label="主管" value={owner.uname || `UID ${owner.uid}`} /> : <p className="text-muted-foreground">未知</p>}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Problem set */}
-      <Card>
-        <CardHeader className="px-5 pb-3 pt-5">
-          <CardTitle className="text-sm">
-            题目集（共 {cells.length} 道 · {totalScore} 分）
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3 px-5 pb-5">
-          <div className="flex flex-wrap gap-2">
-            {Array.from(byKind.entries()).map(([kind, count]) => (
-              <Badge key={kind} variant="outline" className="text-xs">
-                {KIND_LABELS[kind]} · {count}
+    <div className="flex min-h-full justify-center p-6 sm:p-10">
+      <div className="flex w-full max-w-xl flex-col gap-6">
+        <div className="space-y-3 text-center">
+          <div className="flex flex-wrap justify-center gap-2">
+            {paperPreview && <Badge variant="outline">预览</Badge>}
+            {paperStarted && !paperPreview && <Badge>答题中</Badge>}
+            {!paperStarted && !paperPreview && data.inWindow && <Badge>可开考</Badge>}
+            {isUpcoming && <Badge variant="outline">即将开始</Badge>}
+            {isEnded && <Badge variant="secondary">已结束</Badge>}
+            {tdoc.lockdownMode && (
+              <Badge variant="outline" className="gap-1">
+                <Lock className="size-3" />
+                屏幕锁定
               </Badge>
-            ))}
+            )}
           </div>
-        </CardContent>
-      </Card>
+          <h1 className="text-3xl font-semibold tracking-tight">{tdoc.title}</h1>
+          <p className="text-sm text-muted-foreground">
+            {paperPreview ? '管理员预览不会计时，也不能交卷。' : paperStarted ? '个人计时已开始。进入答题后继续作答。' : '开始答题后才会抽卷并开始个人倒计时。'}
+          </p>
+        </div>
 
-      {/* You */}
-      <Card>
-        <CardHeader className="px-5 pb-3 pt-5">
-          <CardTitle className="text-sm">你的状态</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-1 px-5 pb-5 text-sm">
-          <InfoRow icon={User} label="账号" value={signedInUser.name} />
-          {signedInUser.studentId && <InfoRow icon={User} label="学号" value={`${signedInUser.studentId} ${signedInUser.realName || ''}`} />}
-        </CardContent>
-      </Card>
-
-      {/* Description / markdown */}
-      {tdoc.content && (
         <Card>
-          <CardHeader className="px-5 pb-3 pt-5">
-            <CardTitle className="text-sm">说明</CardTitle>
+          <CardHeader className="items-center space-y-1 pb-4 text-center">
+            <CardTitle className="text-lg">{paperPreview ? '预览试卷' : paperStarted ? '继续考试' : '准备开考'}</CardTitle>
+            <CardDescription>
+              {paperPreview
+                ? '预览可以看到题库，但不会写入开考时间。'
+                : paperStarted
+                  ? '试卷已冻结，倒计时按个人时长计算。'
+                  : '点击下方按钮后需再次确认。确认前看不见题目。'}
+            </CardDescription>
           </CardHeader>
-          <CardContent className="px-5 pb-5">
-            <div className="prose prose-sm dark:prose-invert max-w-none">
-              <MarkdownView content={tdoc.content} />
+          <CardContent className="space-y-6">
+            <Button
+              type="button"
+              size="lg"
+              className="h-14 w-full text-base font-semibold"
+              disabled={!ctaEnabled || starting}
+              onClick={onCta}
+            >
+              {starting ? '正在开始…' : ctaLabel}
+            </Button>
+            {!ctaEnabled && !paperPreview && (
+              <p className="text-center text-sm text-muted-foreground">{isUpcoming ? '整场开始后才能开考。' : '现在不能开始答题。'}</p>
+            )}
+            <div className="grid gap-3 sm:grid-cols-3">
+              <Fact icon={Calendar} label="整场开始" value={<DateTime value={wallBegin} />} />
+              <Fact icon={Calendar} label="整场结束" value={<DateTime value={wallEnd} />} />
+              <Fact
+                icon={Clock}
+                label="个人时长"
+                value={typeof durationHours === 'number' && durationHours > 0 ? `${durationHours} 小时` : `${wallMinutes} 分钟（整场）`}
+              />
+            </div>
+            <div className="space-y-2 rounded-lg border bg-muted/30 p-4">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <FileText className="size-4 text-muted-foreground" />
+                题量 {questionCount} 道
+              </div>
+              {byKind.size > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {Array.from(byKind.entries()).map(([kind, count]) => (
+                    <Badge key={kind} variant="outline" className="text-xs">
+                      {kindLabel(kind)} · {count}
+                    </Badge>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="space-y-1 text-sm">
+              <InfoRow icon={User} label="账号" value={signedInUser.name} />
+              {signedInUser.studentId && <InfoRow icon={User} label="学号" value={`${signedInUser.studentId} ${signedInUser.realName || ''}`} />}
+              {owner && <InfoRow icon={User} label="主管" value={owner.uname || `UID ${owner.uid}`} />}
             </div>
           </CardContent>
         </Card>
-      )}
+
+        {tdoc.content && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm">考生说明</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="prose prose-sm dark:prose-invert max-w-none">
+                <MarkdownView content={tdoc.content} />
+              </div>
+            </CardContent>
+          </Card>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Fact({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: ReactNode }) {
+  return (
+    <div className="rounded-lg border bg-card p-3 text-center">
+      <div className="mb-1 flex items-center justify-center gap-1 text-[11px] text-muted-foreground">
+        <Icon className="size-3.5" />
+        {label}
+      </div>
+      <div className="text-sm font-medium">{value}</div>
     </div>
   );
 }

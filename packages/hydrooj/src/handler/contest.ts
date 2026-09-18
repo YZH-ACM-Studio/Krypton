@@ -1024,7 +1024,7 @@ export class ContestEditHandler extends Handler {
             tid ? record.coll.countDocuments({ domainId: authoritativeDomainId, contest: tid }) : Promise.resolve(0),
             canManageTeamBatches ? contestTeamBatch.listBatches(authoritativeDomainId) : Promise.resolve([]),
             tid && this.tdoc.pids?.length
-                ? problem.getList(authoritativeDomainId, this.tdoc.pids, true, true, ['docId', 'problemKind'], true)
+                ? problem.getList(authoritativeDomainId, this.tdoc.pids, true, true, ['docId', 'pid', 'title', 'problemKind'], true)
                 : Promise.resolve({}),
         ]);
         const participationRevision = this.tdoc?.participationRevision ?? 0;

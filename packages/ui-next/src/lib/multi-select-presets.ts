@@ -49,17 +49,23 @@ export interface ProblemOption {
   difficulty?: number;
   nSubmit?: number;
   nAccept?: number;
+  problemKind?: unknown;
 }
 
 /**
  * Search problems via the existing Hydro /p endpoint with JSON Accept.
  * `quick=true` keeps the projection small. Limit is server-clamped.
  */
-export async function searchProblems(query: string | number, limit = 20): Promise<ProblemOption[]> {
+export async function searchProblems(
+  query: string | number,
+  limit = 20,
+  options?: { kind?: string; quick?: boolean },
+): Promise<ProblemOption[]> {
   const url = new URL('/p', window.location.origin);
   if (query) url.searchParams.set('q', String(query));
-  url.searchParams.set('quick', 'true');
+  if (options?.quick !== false) url.searchParams.set('quick', 'true');
   url.searchParams.set('limit', String(limit));
+  if (options?.kind) url.searchParams.set('kind', options.kind);
   try {
     const res = await fetchHydroResponse(url.toString(), { headers: { Accept: 'application/json' } });
     if (!res.ok) return [];
@@ -74,6 +80,7 @@ export async function searchProblems(query: string | number, limit = 20): Promis
       difficulty: p.difficulty,
       nSubmit: p.nSubmit,
       nAccept: p.nAccept,
+      problemKind: p.problemKind,
     }));
   } catch {
     return [];

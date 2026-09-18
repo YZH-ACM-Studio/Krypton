@@ -88,7 +88,7 @@ describe('exam paper wiring', () => {
         expect(getStart).to.be.at.least(0);
         expect(getEnd).to.be.greaterThan(getStart);
         const get = src.slice(getStart, getEnd);
-        expect(get).to.include("problem.getList(authoritativeDomainId, this.tdoc.pids, true, true, ['docId', 'problemKind'], true)");
+        expect(get).to.include("problem.getList(authoritativeDomainId, this.tdoc.pids, true, true, ['docId', 'pid', 'title', 'problemKind'], true)");
         const saveStart = src.indexOf('let previousExamPaperQuotas');
         const saveEnd = src.indexOf('if (autoHideTargets.length)');
         expect(saveStart).to.be.at.least(0);

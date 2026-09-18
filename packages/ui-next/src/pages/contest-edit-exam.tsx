@@ -4,7 +4,6 @@
  */
 import { useEffect, useState, type ReactNode } from 'react';
 import { ArrowLeft, Copy, Save, Trash2, WifiOff } from 'lucide-react';
-import { ProblemPicker } from '@/components/problem-picker';
 import { MarkdownEditor } from '@/components/markdown-renderer';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -19,7 +18,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/cn';
 import { useBootstrap } from '@/lib/bootstrap';
 import { replaceRouteTokens } from '@/lib/format';
-import { ContestExamPaperQuotas } from './contest-exam-paper-quotas';
+import { ContestExamPaperPool } from './contest-exam-paper-pool';
 import { EXAM_CREATE_WALL_CLOCK_HOURS, examHiddenFlags } from './contest-edit-exam-defaults';
 
 export interface ContestEditExamProps {
@@ -85,12 +84,12 @@ function readQuotaMap(value: unknown): Partial<Record<string, number>> | undefin
   return Object.keys(out).length ? out : undefined;
 }
 
-function readPdict(value: unknown): Record<string, { problemKind?: unknown }> {
+function readPdict(value: unknown): Record<string, { problemKind?: unknown; title?: unknown; pid?: unknown; docId?: unknown }> {
   const record = readRecord(value);
-  const out: Record<string, { problemKind?: unknown }> = {};
+  const out: Record<string, { problemKind?: unknown; title?: unknown; pid?: unknown; docId?: unknown }> = {};
   for (const [key, row] of Object.entries(record)) {
     const item = readRecord(row);
-    out[key] = { problemKind: item.problemKind };
+    out[key] = { problemKind: item.problemKind, title: item.title, pid: item.pid, docId: item.docId };
   }
   return out;
 }
@@ -296,7 +295,6 @@ export function ContestEditExam({ rule, onRuleChange, children }: ContestEditExa
   const endAtDate = toDate(tdoc.endAt);
   const lockAtDate = toDate(tdoc.lockAt);
   const lockMinutes = endAtDate && lockAtDate ? String(Math.max(0, Math.round((endAtDate.getTime() - lockAtDate.getTime()) / 60000))) : '';
-  const quotaPids = pids.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0);
   const postedVigilEnabled = isEdit ? vigilEnabled : flags.vigilEnabled;
   const postedEntryMode = isEdit ? entryMode : flags.entryMode;
   const computedEnd = formatDateTimeInput(beginDate, beginTime, duration);
@@ -473,12 +471,8 @@ export function ContestEditExam({ rule, onRuleChange, children }: ContestEditExa
           </div>
         </ExamCard>
 
-        <ExamCard title="试卷" description="题目列表是题池。填写配额后按题型抽个人卷，第一次开考冻结。">
-          <div className="space-y-1.5">
-            <label className="text-sm font-medium">题目列表</label>
-            <ProblemPicker name="pids" value={pids} onChange={setPids} placeholder="搜索题目 (pid / 标题)…" />
-          </div>
-          <ContestExamPaperQuotas pids={quotaPids} pdict={readPdict(data.pdict)} quotas={readQuotaMap(tdoc.examPaperQuotas)} />
+        <ExamCard title="试卷" description="题池可批量筛选、多选、排序和撤销。填写配额后按题型抽个人卷，第一次开考冻结。">
+          <ContestExamPaperPool name="pids" value={pids} onChange={setPids} pdict={readPdict(data.pdict)} quotas={readQuotaMap(tdoc.examPaperQuotas)} />
         </ExamCard>
 
         <ExamCard title="谁能考" description="公开或邀请码，再加可选的学校 / 用户组范围。不写入比赛 assign。列表隐藏只影响发现，不影响链接和课程入口。">

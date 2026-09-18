@@ -71,8 +71,11 @@ describe('contest edit exam field contract', () => {
       '<input type="hidden" name="participationMode" value={flags.participationMode} />',
     );
 
-    expect(exam, 'examPaperQuotas via ContestExamPaperQuotas').to.include('ContestExamPaperQuotas');
-    expect(exam).to.match(/from\s+['"][^'"]*contest-exam-paper-quotas['"]/);
+    expect(exam, 'exam tree uses ContestExamPaperPool').to.include('ContestExamPaperPool');
+    expect(exam, 'exam tree must POST pids via the paper pool').to.include('name="pids"');
+    expect(exam, 'exam tree must not use ProblemPicker').not.to.include('ProblemPicker');
+    expect(exam, 'examPaperQuotas via ContestExamPaperPool').to.include('ContestExamPaperPool');
+    expect(exam).to.match(/from\s+['"][^'"]*contest-exam-paper-pool['"]/);
     const quotas = source('packages/ui-next/src/pages/contest-exam-paper-quotas.tsx');
     expect(quotas, 'ContestExamPaperQuotas posts examPaperQuotas').to.match(/name=["']examPaperQuotas["']/);
     const manage = source('packages/ui-next/src/pages/contest-manage.tsx');

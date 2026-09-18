@@ -148,6 +148,8 @@ describe('contest edit exam render', () => {
     );
     expect(screen.getByRole('heading', { name: '编辑考试' })).to.exist;
     expect(screen.queryByRole('heading', { name: '编辑比赛' })).to.equal(null);
+    expect(screen.getByText('题池')).to.exist;
+    expect(screen.getByText('撤销')).to.exist;
     expect(screen.getByText('按题型抽题')).to.exist;
     expect(namedInput('examPaperQuotas')?.value).to.equal(JSON.stringify({ single: 1 }));
     expect(hiddenInput('rated')?.value).to.equal('true');

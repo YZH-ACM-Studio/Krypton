@@ -67,7 +67,7 @@ describe('practice integrity teacher policy panel', () => {
     expect(screen.getByRole('button', { name: '仅保存草稿' })).toBeEnabled();
     expect(screen.getByText('还没有发布过策略，学生不受限制。')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('checkbox', { name: /禁止粘贴或拖入外部代码/ }));
+    await user.click(screen.getByRole('switch', { name: /禁止粘贴或拖入外部代码/ }));
     await user.click(screen.getByRole('button', { name: '发布到学生' }));
 
     await waitFor(() => expect(screen.getByText('已发布第 1 版，学生现在会按该版生效。')).toBeInTheDocument());
@@ -124,7 +124,7 @@ describe('practice integrity teacher policy panel', () => {
     render(<PracticeIntegrityPolicyPanel containerKind="course" containerId={containerId} />);
     expect(await screen.findByText('学生当前生效：第 1 版。 有未发布草稿（版本 3）。')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('checkbox', { name: /只许用题面内的 Krypton IDE 提交/ }));
+    await user.click(screen.getByRole('switch', { name: /只许用题面内的 Krypton IDE 提交/ }));
     await user.click(screen.getByRole('button', { name: '发布到学生' }));
     await waitFor(() => expect(screen.getByText('已发布第 2 版，学生现在会按该版生效。')).toBeInTheDocument());
     expect(postedCalls(fetchMock).map((fields) => fields.operation)).to.deep.equal(['saveAndPublish']);
@@ -209,7 +209,7 @@ describe('practice integrity teacher policy panel', () => {
 
     render(<PracticeIntegrityPolicyPanel containerKind="course" containerId={containerId} />);
     expect(await screen.findByText('学生当前生效：第 1 版。')).toBeInTheDocument();
-    await user.click(screen.getByRole('checkbox', { name: /禁止粘贴或拖入外部代码/ }));
+    await user.click(screen.getByRole('switch', { name: /禁止粘贴或拖入外部代码/ }));
     await user.click(screen.getByRole('button', { name: '发布到学生' }));
     await waitFor(() => expect(screen.getByText('已发布第 2 版，学生现在会按该版生效。')).toBeInTheDocument());
     expect(postedCalls(fetchMock)[0]).to.include({
@@ -238,7 +238,7 @@ describe('practice integrity teacher policy panel', () => {
 
     render(<PracticeIntegrityPolicyPanel containerKind="course" containerId={containerId} />);
     await screen.findByRole('button', { name: '仅保存草稿' });
-    await user.click(screen.getByRole('checkbox', { name: /禁止粘贴或拖入外部代码/ }));
+    await user.click(screen.getByRole('switch', { name: /禁止粘贴或拖入外部代码/ }));
     await user.click(screen.getByRole('button', { name: '仅保存草稿' }));
     await waitFor(() => expect(screen.getByText('草稿已保存。学生在你点「发布到学生」之前不会受影响。')).toBeInTheDocument());
     expect(postedCalls(fetchMock)).to.have.length(1);

@@ -16,6 +16,7 @@ import { SimpleSelect } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { MarkdownEditor } from '@/components/markdown-renderer';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Switch } from '@/components/ui/switch';
 import { ProblemPicker } from '@/components/problem-picker';
 import { PracticeIntegrityPolicyPanel } from '@/components/practice-integrity-policy-panel';
 import { useBootstrap } from '@/lib/bootstrap';
@@ -148,6 +149,7 @@ export function TrainingEditPage() {
   const groups = (data.groups || []).filter((group) => !group.archivedAt);
   const [audiencePublic, setAudiencePublic] = useState(data.audience?.public !== false);
   const [audienceGroupIds, setAudienceGroupIds] = useState<Set<string>>(() => new Set((data.audience?.groupIds || []).map(String)));
+  const [pin, setPin] = useState(Number(tdoc.pin || 0) === 1);
   const [planNodes, setPlanNodes] = useState<TrainingPlanNode[]>(() => {
     try {
       return parsePlan(data.dag || tdoc.dag);
@@ -267,7 +269,7 @@ export function TrainingEditPage() {
               <label className="text-sm font-medium">可见范围</label>
               <p className="text-xs text-muted-foreground">公开和用户组动态生效；关闭公开且不选用户组后，仅兑换或课程引用可见。</p>
               <label className="flex items-center gap-2 text-sm">
-                <Checkbox checked={audiencePublic} onCheckedChange={(checked) => setAudiencePublic(checked === true)} />
+                <Switch checked={audiencePublic} onCheckedChange={setAudiencePublic} />
                 公开可见
               </label>
               {groups.length ? (
@@ -308,18 +310,9 @@ export function TrainingEditPage() {
             ) : null}
 
             <div className="space-y-1.5">
-              <label htmlFor="pin" className="text-sm font-medium">
-                置顶
-              </label>
-              <SimpleSelect
-                id="pin"
-                name="pin"
-                defaultValue={String(tdoc.pin || 0)}
-                options={[
-                  { value: '0', label: '不置顶' },
-                  { value: '1', label: '置顶' },
-                ]}
-              />
+              <label className="text-sm font-medium">置顶</label>
+              <input type="hidden" name="pin" value={pin ? '1' : '0'} />
+              <Switch checked={pin} onCheckedChange={setPin} aria-label="置顶" />
             </div>
 
             <Separator />

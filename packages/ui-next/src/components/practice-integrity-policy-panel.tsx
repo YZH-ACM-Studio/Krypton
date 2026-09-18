@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
+import { Switch } from '@/components/ui/switch';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import type { PracticeIntegrityPolicyView } from '@/lib/practice-integrity';
 
@@ -180,7 +180,7 @@ export function PracticeIntegrityPolicyPanel({ containerKind, containerId }: { c
         {draft ? ` 有未发布草稿（版本 ${draft.draftVersion}）。` : ''}
       </p>
       <label className="flex items-start gap-2.5 text-sm">
-        <Checkbox
+        <Switch
           checked={policy.prohibitExternalCodeInjection}
           disabled={writesDisabled}
           onCheckedChange={() => toggle('prohibitExternalCodeInjection')}
@@ -191,7 +191,7 @@ export function PracticeIntegrityPolicyPanel({ containerKind, containerId }: { c
         </span>
       </label>
       <label className="flex items-start gap-2.5 text-sm">
-        <Checkbox
+        <Switch
           checked={policy.removeIndependentSubmitForm}
           disabled={writesDisabled}
           onCheckedChange={() => toggle('removeIndependentSubmitForm')}
@@ -202,7 +202,7 @@ export function PracticeIntegrityPolicyPanel({ containerKind, containerId }: { c
         </span>
       </label>
       <label className="flex items-start gap-2.5 text-sm">
-        <Checkbox checked={policy.antiAiCopyInjection} disabled={writesDisabled} onCheckedChange={() => toggle('antiAiCopyInjection')} />
+        <Switch checked={policy.antiAiCopyInjection} disabled={writesDisabled} onCheckedChange={() => toggle('antiAiCopyInjection')} />
         <span>
           防 AI 复制注入
           <span className="mt-0.5 block text-xs text-muted-foreground">只在从本课或本题集入口进入题目时生效；题库直达和作业不会注入。</span>

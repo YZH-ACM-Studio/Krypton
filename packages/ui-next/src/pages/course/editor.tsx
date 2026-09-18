@@ -23,10 +23,10 @@ import { MarkdownEditor } from '@/components/markdown-renderer';
 import { ProblemPicker } from '@/components/problem-picker';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { MultiSelect } from '@/components/ui/multi-select';
 import { SimpleSelect } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import { Sheet, SheetBody, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs-compound';
 import { FileUploader } from '@/components/uploader';
@@ -834,7 +834,7 @@ export function CourseEditPage() {
             </p>
             <input type="hidden" name="courseHidden" value={courseHidden ? 'true' : 'false'} />
             <label className="flex min-h-10 cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2.5">
-              <Checkbox
+              <Switch
                 checked={courseHidden}
                 onCheckedChange={(checked) => {
                   setCourseHidden(checked);

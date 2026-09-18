@@ -4,7 +4,7 @@ import { FileUploader } from '@/components/uploader';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { Checkbox } from '@/components/ui/checkbox';
+import { Switch } from '@/components/ui/switch';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { cn } from '@/lib/cn';
 import type { CourseAuthorVideo } from './types';
@@ -226,7 +226,7 @@ function ReplaceVideoButton({
   return (
     <div className="min-w-52 space-y-2 rounded-lg border bg-background p-2">
       <label className="flex items-center gap-2 text-xs">
-        <Checkbox checked={requireRewatch} onChange={() => setRequireRewatch((current) => !current)} />
+        <Switch checked={requireRewatch} onChange={() => setRequireRewatch((current) => !current)} />
         替换后要求重看
       </label>
       <FileUploader

@@ -21,6 +21,7 @@ import {
   CellNavigator,
   type CellStatus,
   Countdown,
+  examPaperSurfaceTitle,
   FillProgramRenderer,
   groupCellsByKind,
   KIND_LABELS,
@@ -145,6 +146,7 @@ export function ExamPaperPage() {
     now: number;
     inWindow: boolean;
     canFinalize: boolean;
+    paperPreview?: boolean;
     owner: { uid: number; uname: string } | null;
     broadcasts: Array<{ _id: string; content: string; createdAt: string }>;
     scoreboard: Array<{ rank: number; uid: number; uname: string; realName?: string; studentId?: string; score: number }>;
@@ -152,7 +154,7 @@ export function ExamPaperPage() {
     allowSubmitByKind: boolean;
     examMode?: { student?: ExamModeStudentView | null };
   };
-  const { tdoc, pdict, cells, inWindow, canFinalize, broadcasts, scoreboard, showScoreboard, allowSubmitByKind } = data;
+  const { tdoc, pdict, cells, inWindow, canFinalize, paperPreview, broadcasts, scoreboard, showScoreboard, allowSubmitByKind } = data;
   const examStudent = data.examMode?.student;
   const tid = tdoc.docId;
   const [section, setSection] = useExamSection('overview');
@@ -182,7 +184,7 @@ export function ExamPaperPage() {
         />
       )}
       {section === 'problems' && (
-        <ProblemsSection tdoc={tdoc} tid={tid} pdict={pdict} cells={cells} inWindow={inWindow} canFinalize={canFinalize} allowSubmitByKind={allowSubmitByKind} />
+        <ProblemsSection tdoc={tdoc} tid={tid} pdict={pdict} cells={cells} inWindow={inWindow} canFinalize={canFinalize} paperPreview={paperPreview === true} allowSubmitByKind={allowSubmitByKind} />
       )}
       {section === 'announcements' && <AnnouncementsSection broadcasts={broadcasts || []} />}
       {section === 'ranking' && <RankingSection scoreboard={scoreboard || []} showScoreboard={showScoreboard} signedInUid={bs.user.id} />}
@@ -198,6 +200,7 @@ function ProblemsSection({
   cells,
   inWindow,
   canFinalize,
+  paperPreview,
   allowSubmitByKind,
 }: {
   tdoc: TdocLike;
@@ -206,6 +209,7 @@ function ProblemsSection({
   cells: PaperCell[];
   inWindow: boolean;
   canFinalize: boolean;
+  paperPreview: boolean;
   allowSubmitByKind: boolean;
 }) {
   const groups = useMemo(() => groupCellsByKind(cells), [cells]);
@@ -467,6 +471,10 @@ function ProblemsSection({
   };
 
   const finalize = async () => {
+    if (paperPreview || !canFinalize) {
+      await alertDialog('预览不能交卷');
+      return;
+    }
     if (!(await confirmDialog('确认交卷？交卷后将不能再编辑答案。', { destructive: true }))) return;
     try {
       await Promise.all(
@@ -553,6 +561,7 @@ function ProblemsSection({
           <Send className="size-4" />
           交卷
         </Button>
+        {paperPreview ? <span className="text-xs text-muted-foreground">预览不能交卷</span> : null}
       </div>
 
       {draftLoadState === 'loading' ? (
@@ -660,7 +669,7 @@ function CellEditor({
     return <div className="rounded-md border border-dashed p-6 text-sm text-muted-foreground">题目数据缺失</div>;
   }
 
-  const title = cell.questionKey ? `第 ${cell.questionKey} 题` : pdoc.title;
+  const title = examPaperSurfaceTitle(cellIndex + 1);
   const isLocked = locked || disabled;
   const options = pdoc.config.options?.[cell.questionKey || ''] || ['选项 A', '选项 B', '选项 C', '选项 D'];
 

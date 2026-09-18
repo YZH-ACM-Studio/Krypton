@@ -35,6 +35,12 @@ export interface PaperCell {
 
 export type CellStatus = 'unanswered' | 'answered' | 'correct' | 'wrong' | 'partial';
 
+/** 1-based order on the current paper surface (tab-local, matches CellNavigator). */
+export function examPaperSurfaceTitle(order: number): string {
+  if (!Number.isInteger(order) || order < 1) throw new TypeError('exam_paper_surface_order');
+  return `第 ${order} 题`;
+}
+
 export const KIND_LABELS: Record<QuestionKind, string> = {
   single: '单选',
   multi: '多选',

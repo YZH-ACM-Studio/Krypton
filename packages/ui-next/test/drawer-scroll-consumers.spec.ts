@@ -90,10 +90,12 @@ describe('unified drawer and scroll consumers', () => {
     const team = source('src/components/team-dialog.tsx');
     expect(dialog).to.include('export function DialogBody');
     expect(dialog).to.include('min-h-0 flex-1 overflow-y-auto overscroll-contain');
+    expect(dialog).to.include('role="dialog"');
+    expect(dialog).to.include('aria-modal="true"');
     expect(team).to.include('export function TeamDialogBody');
     expect(team).to.include('overflow-y-auto overscroll-contain');
-    expect(team).to.include('role="dialog"');
-    expect(team).to.include('aria-modal="true"');
+    expect(team).to.include('markDialogSlot(TeamDialogBody, \'body\')');
+    expect(team).to.include('markDialogSlot(TeamDialogFooter, \'footer\')');
   });
 
   it('keeps both-axis scroll on wide native tables and lets Table own horizontal overflow', () => {

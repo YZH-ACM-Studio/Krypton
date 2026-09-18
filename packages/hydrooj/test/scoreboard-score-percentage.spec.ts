@@ -124,4 +124,24 @@ describe('scoreboard score percentages', () => {
 
         expect(rows[1][1].scorePercentage).to.equal(100);
     });
+
+    it('does not score the pool when the header has no per-pid columns', () => {
+        const rows: Parameters<typeof annotateScoreboardPercentages>[1] = [
+            [
+                { type: 'rank', value: '#' },
+                { type: 'total_score', value: '总分' },
+            ],
+            [
+                { type: 'rank', value: '1' },
+                { type: 'total_score', value: 80 },
+            ],
+        ];
+
+        annotateScoreboardPercentages({ pids: [601, 602] }, rows, {
+            601: { config: 'Cannot parse: missing' },
+        });
+
+        expect(rows[1][1].scorePercentage).to.equal(undefined);
+        expect(rows[1][1].value).to.equal(80);
+    });
 });

@@ -27,6 +27,7 @@ import {
 import avatar from '../lib/avatar';
 import { contestScoreboardRankValue } from '../lib/contest-unrank';
 import { effectiveLockoutWindow } from '../lib/contest-lockout';
+import { readExamPaperQuotas } from '../lib/exam-paper';
 import { annotateScoreboardPercentages } from '../lib/scoreboard-score-percentage';
 import bus, { parallelAllSettled } from '../service/bus';
 import db from '../service/db';
@@ -211,6 +212,7 @@ export interface ContestEditOptions {
     expectedParticipationRevision?: number;
     teamModeClearConfirmation?: string;
     now?: Date;
+    unset?: { examPaperQuotas?: true | '' | 1 };
 }
 
 export {
@@ -1050,6 +1052,40 @@ const exam = buildContestRule(
         TEXT: 'Exam',
         features: ['scoreboard'],
         check: () => {},
+        async scoreboardHeader(config, _, tdoc, pdict) {
+            if (readExamPaperQuotas(tdoc.examPaperQuotas) === null) {
+                return oi.scoreboardHeader(config, _, tdoc, pdict);
+            }
+            const columns: ScoreboardNode[] = [
+                { type: 'rank', value: '#' },
+                { type: 'user', value: _('User') },
+            ];
+            if (config.isExport && config.showDisplayName) {
+                columns.push({ type: 'email', value: _('Email') });
+                columns.push({ type: 'string', value: _('School') });
+                columns.push({ type: 'string', value: _('Name') });
+                columns.push({ type: 'string', value: _('Student ID') });
+            }
+            columns.push({ type: 'total_score', value: _('Total Score') });
+            return columns;
+        },
+        async scoreboardRow(config, _, tdoc, pdict, udoc, rank, tsdoc, meta) {
+            if (readExamPaperQuotas(tdoc.examPaperQuotas) === null) {
+                return oi.scoreboardRow(config, _, tdoc, pdict, udoc, rank, tsdoc, meta);
+            }
+            const row: ScoreboardNode[] = [
+                { type: 'rank', value: contestScoreboardRankValue(rank) },
+                { type: 'user', value: udoc.uname, raw: tsdoc.uid },
+            ];
+            if (config.isExport && config.showDisplayName) {
+                row.push({ type: 'email', value: udoc.mail });
+                row.push({ type: 'string', value: udoc.school || '' });
+                row.push({ type: 'string', value: udoc.displayName || '' });
+                row.push({ type: 'string', value: udoc.studentId || '' });
+            }
+            row.push({ type: 'total_score', value: tsdoc.score || 0 });
+            return row;
+        },
     },
     oi,
 );
@@ -1231,9 +1267,10 @@ export async function edit(domainId: string, tid: ObjectId, $set: Partial<Tdoc>,
 
     await bus.parallel('contest/before-edit', current, $set);
     RULES[next.rule].check(next);
+    const $unset = options.unset && Object.keys(options.unset).length ? options.unset : undefined;
     let res: Tdoc;
     if (modeChanged) {
-        await bus.parallel('document/set', domainId, document.TYPE_CONTEST, tid, $set, undefined);
+        await bus.parallel('document/set', domainId, document.TYPE_CONTEST, tid, $set, $unset);
         await withContestTeamBoundary(domainId, tid, async () => {
             const revisionFilter: any =
                 expectedRevision === 0
@@ -1262,7 +1299,7 @@ export async function edit(domainId: string, tid: ObjectId, $set: Partial<Tdoc>,
                         ...storedModeFilter,
                         ...revisionFilter,
                     },
-                    { $set },
+                    { $set, ...($unset ? { $unset } : {}) },
                     { returnDocument: 'after' },
                 );
                 if (!res) throw new ContestTeamConflictError('participation_revision_mismatch');
@@ -1322,7 +1359,7 @@ export async function edit(domainId: string, tid: ObjectId, $set: Partial<Tdoc>,
         });
         await auditParticipationModeChange(domainId, tid, options.actor._id, previousMode, nextMode, expectedRevision, 'success');
     } else {
-        res = await document.set(domainId, document.TYPE_CONTEST, tid, $set);
+        res = await document.set(domainId, document.TYPE_CONTEST, tid, $set, $unset);
     }
     // `contest/edit` payload enriched (Krypton): now includes domainId,
     // tid, the *post*-mutation tdoc, and the pre-mutation snapshot so listeners
@@ -1660,7 +1697,9 @@ export async function getScoreboard(
                   getMultiStatus(domainId, { docId: tid }).sort(RULES[tdoc.rule].statusSort),
               );
     await bus.parallel('contest/scoreboard', tdoc, rows, udict, pdict);
-    annotateScoreboardPercentages(tdoc, rows, pdict);
+    if (readExamPaperQuotas(tdoc.examPaperQuotas) === null) {
+        annotateScoreboardPercentages(tdoc, rows, pdict);
+    }
     return [tdoc, rows, udict, pdict];
 }
 

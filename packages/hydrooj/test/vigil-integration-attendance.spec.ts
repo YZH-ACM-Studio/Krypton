@@ -12,6 +12,7 @@ let attended = false;
 let persistAttendance = true;
 let contestExists = true;
 let userExists = true;
+let contestRule: string | undefined;
 
 class TestValidationError extends Error {}
 class TestNotFoundError extends Error {}
@@ -20,7 +21,7 @@ const contestStub = {
     get: async (domainId: string, tid: ObjectId) => {
         calls.push({ action: 'get', domainId });
         expect(tid.equals(contestId)).to.equal(true);
-        return contestExists ? { docId: tid } : null;
+        return contestExists ? { docId: tid, ...(contestRule ? { rule: contestRule } : {}) } : null;
     },
     getStatus: async (domainId: string, tid: ObjectId, uid: number) => {
         calls.push({ action: attended ? 'status-attended' : 'status-missing', domainId, uid });
@@ -101,6 +102,7 @@ beforeEach(() => {
     persistAttendance = true;
     contestExists = true;
     userExists = true;
+    contestRule = undefined;
     (global as any).Hydro = {
         model: {
             vigilguard: {
@@ -131,6 +133,22 @@ describe('P1.28 Vigil Client attendance transition', () => {
             { action: 'invalidate', domainId: 'system', uid: 64 },
             { action: 'vigilguard.auto_attend', uid: 64 },
             { action: 'set-status', domainId: 'system', uid: 64 },
+        ]);
+    });
+
+    it('does not write startAt for exam-rule contests', async () => {
+        contestRule = 'exam';
+        await attendance.ensureVigilContestParticipation({} as any, 'system', contestId.toHexString(), 64);
+
+        expect(calls).to.deep.equal([
+            { action: 'get', domainId: 'system' },
+            { action: 'get-user', uid: 64 },
+            { action: 'watch-gate', uid: 64 },
+            { action: 'status-missing', domainId: 'system', uid: 64 },
+            { action: 'attend', domainId: 'system', uid: 64, subscribe: 1 },
+            { action: 'status-attended', domainId: 'system', uid: 64 },
+            { action: 'invalidate', domainId: 'system', uid: 64 },
+            { action: 'vigilguard.auto_attend', uid: 64 },
         ]);
     });
 
@@ -191,6 +209,14 @@ describe('P1.28 Vigil Client attendance transition', () => {
 
         expect(error).to.be.instanceOf(TestNotFoundError);
         expect(calls).to.deep.equal([{ action: 'get', domainId: 'system' }]);
+    });
+
+    it('does not write exam startAt during Vigil attend so the first exam-shell GET can freeze the paper', async () => {
+        contestRule = 'exam';
+        await attendance.ensureVigilContestParticipation({} as any, 'system', contestId.toHexString(), 70);
+
+        expect(calls.some(({ action }) => action === 'set-status')).to.equal(false);
+        expect(calls.some(({ action }) => action === 'attend')).to.equal(true);
     });
 
     it('fails closed if the attended student cannot be loaded', async () => {

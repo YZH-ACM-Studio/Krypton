@@ -91,6 +91,7 @@ export function annotateScoreboardPercentages(
 ): void {
     const header = rows[0];
     if (!header) return;
+    if (!header.some((cell) => cell.type === 'problem')) return;
 
     const scaleByPid = new Map(tdoc.pids.map((pid) => [pid, scoreScale(tdoc, pdict, pid)]));
     const problemScaleByColumn = header.map((cell, column) => {

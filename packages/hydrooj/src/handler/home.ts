@@ -29,6 +29,7 @@ import { runAuditedUsernameRename } from '../lib/user-rename';
 import { verifyTFA } from '../lib/verifyTFA';
 import { practiceContainerKindOf, withProblemSetKind } from '../lib/training-kind';
 import BlackListModel from '../model/blacklist';
+import { projectStudentContestTdoc } from '../lib/exam-paper';
 import { PERM, PRIV } from '../model/builtin';
 import * as contest from '../model/contest';
 import { contextualCompletionService } from '../model/contextual-completion';
@@ -118,7 +119,13 @@ export class HomeHandler extends Handler {
             this.user._id,
             tdocs.map((tdoc) => tdoc.docId),
         );
-        return [tdocs, tsdict];
+        const canEditContest = this.user.hasPerm(PERM.PERM_EDIT_CONTEST);
+        return [
+            tdocs.map((tdoc) =>
+                projectStudentContestTdoc(tdoc, tsdict[tdoc.docId.toHexString()], canEditContest || this.user.own(tdoc)),
+            ),
+            tsdict,
+        ];
     }
 
     async getTraining(domainId: string, limit = 10) {

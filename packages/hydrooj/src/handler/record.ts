@@ -18,6 +18,7 @@ import {
 } from '../error';
 import { RecordDoc, Tdoc } from '../interface';
 import { canAccessPostContestPracticeRecord, canUsePostContestPractice } from '../lib/contest-correction';
+import { projectStudentContestTdoc, studentContestProblemPids } from '../lib/exam-paper';
 import { canViewVirtualContestRecord, isVirtualAttemptOpen } from '../lib/virtual-contest';
 import { buildPersonalPracticeRecordQuery } from '../lib/contest-problem-status';
 import { buildExamModeRecordCodePayload, shouldUseLiveClientRecordCodeOnly } from '../lib/exam-mode-record';
@@ -273,7 +274,12 @@ export class RecordListHandler extends ContestDetailBaseHandler {
         }
         if (pid) {
             if (typeof pid === 'string' && tdoc && /^[A-Z]$/.test(pid)) {
-                pid = tdoc.pids[Number.parseInt(pid, 36) - 10];
+                const visiblePids = studentContestProblemPids(
+                    tdoc,
+                    this.tsdoc,
+                    this.user.own(tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST),
+                );
+                pid = visiblePids[Number.parseInt(pid, 36) - 10];
             }
             const pdoc = tdoc
                 ? await problem.get(domainId, pid)
@@ -362,7 +368,13 @@ export class RecordListHandler extends ContestDetailBaseHandler {
         this.response.body = {
             page,
             rdocs,
-            tdoc,
+            tdoc: tdoc
+                ? projectStudentContestTdoc(
+                      tdoc,
+                      this.tsdoc,
+                      this.user.own(tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST),
+                  )
+                : tdoc,
             pdict,
             udict,
             studentDict,
@@ -444,8 +456,11 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
             if (
                 this.rdoc.uid !== this.user._id ||
                 this.tsdoc?.attend !== 1 ||
-                !Array.isArray(this.tdoc.pids) ||
-                !this.tdoc.pids.includes(this.rdoc.pid)
+                !studentContestProblemPids(
+                    this.tdoc,
+                    this.tsdoc,
+                    this.user.own(this.tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST),
+                ).includes(this.rdoc.pid)
             ) {
                 throw new PermissionError(PERM.PERM_VIEW_RECORD);
             }
@@ -655,7 +670,13 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
             recordStudent,
             rdoc: canViewDetail ? responseRdoc : pick(responseRdoc, ['_id', 'lang', 'code']),
             pdoc,
-            tdoc: this.tdoc,
+            tdoc: this.tdoc
+                ? projectStudentContestTdoc(
+                      this.tdoc,
+                      this.tsdoc,
+                      this.user.own(this.tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST),
+                  )
+                : this.tdoc,
             postContestPracticeRecordAccess: this.postContestPracticeRecordAccess,
             practiceTid: this.postContestPracticeRecordAccess || virtualRecords ? this.tdoc?.docId : undefined,
             ...(virtualRecords
@@ -977,6 +998,13 @@ export class RecordMainConnectionHandler extends ConnectionHandler {
             rdoc.contest || this.practice ? problem.get(rdoc.domainId, rdoc.pid) : problem.getViewableAuthorized(rdoc.domainId, rdoc.pid, this.user),
         ]);
         const tdoc = this.tid || this.practice ? this.tdoc : null;
+        const studentTdoc = tdoc
+            ? projectStudentContestTdoc(
+                  tdoc,
+                  this.practiceTsdoc,
+                  this.user.own(tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST),
+              )
+            : tdoc;
         if (this.applyProjection && rdoc.contest?.toString() !== '0'.repeat(24)) rdoc = contest.applyProjection(tdoc, rdoc, this.user);
         rdoc = omit(rdoc, ['scoreCancellation']) as RecordDoc;
         if (this.pretest) {
@@ -989,7 +1017,7 @@ export class RecordMainConnectionHandler extends ConnectionHandler {
                     rdoc,
                     udoc,
                     pdoc,
-                    tdoc,
+                    tdoc: studentTdoc,
                     recordDetailTid: this.practice ? this.practiceTid : undefined,
                     allDomain: this.allDomain,
                     recordScoreActions: recordScoreAction ? { [rdoc._id.toHexString()]: recordScoreAction } : {},
@@ -1082,8 +1110,11 @@ export class RecordDetailConnectionHandler extends ConnectionHandler {
                 !this.tdoc ||
                 rdoc.uid !== this.user._id ||
                 tsdoc?.attend !== 1 ||
-                !Array.isArray(this.tdoc.pids) ||
-                !this.tdoc.pids.includes(rdoc.pid)
+                !studentContestProblemPids(
+                    this.tdoc,
+                    tsdoc,
+                    this.user.own(this.tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST),
+                ).includes(rdoc.pid)
             ) {
                 throw new PermissionError(PERM.PERM_VIEW_RECORD);
             }

@@ -73,6 +73,7 @@ import { resolveProblemKnowledgeNodeIds } from '../lib/problem-tag-canonical';
 import { PERM, PRIV, STATUS } from '../model/builtin';
 import { virtualContestService } from '../model/virtual-contest';
 import { normalizeCodeEvaluationDraftCreationConfig } from '../model/code-evaluation-lifecycle';
+import { isExamPaperDrawEnabled, projectStudentContestTdoc, resolveExamPaperPids } from '../lib/exam-paper';
 import * as contest from '../model/contest';
 import * as discussion from '../model/discussion';
 import domain from '../model/domain';
@@ -1635,6 +1636,16 @@ export class ProblemRandomHandler extends Handler {
     }
 }
 
+function canAccessExamAwareContestProblem(tdoc: any, tsdoc: any, pid: number, canManageContest: boolean): boolean {
+    if (!Array.isArray(tdoc?.pids) || !tdoc.pids.includes(pid)) return false;
+    if (canManageContest || tdoc.rule !== 'exam' || !isExamPaperDrawEnabled(tdoc)) return true;
+    try {
+        return resolveExamPaperPids(tdoc, tsdoc).includes(pid);
+    } catch {
+        return false;
+    }
+}
+
 export class ProblemDetailHandler extends ContestDetailBaseHandler {
     pdoc: ProblemDoc;
     udoc: User;
@@ -1852,7 +1863,9 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
                 if (!attempt) throw new ValidationError('virtual', null, localizedErrorText`虚拟参赛尚未开始`);
                 this.virtualAttempt = await virtualContestService.assertActiveForUser(domainId, attempt._id, this.user._id, this.pdoc.docId);
             } else {
-                if (!this.tdoc?.pids?.includes(this.pdoc.docId)) throw new ContestNotFoundError(domainId, tid);
+                if (!canAccessExamAwareContestProblem(this.tdoc, this.tsdoc, this.pdoc.docId, canManageContest)) {
+                    throw new ContestNotFoundError(domainId, tid);
+                }
                 if (contest.isNotStarted(this.tdoc) && !canManageContest) throw new ContestNotLiveError(tid);
                 // Krypton: a privileged viewer (contest owner / editor / system admin)
                 // who opened a problem from an external scoreboard hasn't "attended"
@@ -2101,7 +2114,13 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
             title: this.pdoc.title,
             solutionCount: scnt,
             discussionCount: dcnt,
-            tdoc: this.tdoc,
+            tdoc: this.tdoc
+                ? projectStudentContestTdoc(
+                      this.tdoc,
+                      this.tsdoc,
+                      this.user.own(this.tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST) || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM),
+                  )
+                : this.tdoc,
             owner_udoc: tid && this.tdoc.owner !== this.pdoc.owner ? await user.getById(this.pdoc.domainId, this.tdoc.owner) : null,
             mode,
             postContestPracticeActive,
@@ -2205,7 +2224,7 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
                 : 'contest_detail_problem'
             : 'problem_detail';
         if (args[2]) {
-            const data = { pdoc: this.response.body.pdoc, tdoc: this.tdoc };
+            const data = { pdoc: this.response.body.pdoc, tdoc: this.response.body.tdoc };
             this.response.body = {
                 title: this.renderTitle(this.response.body.page_name),
                 fragments: [{ html: await this.renderHTML('partials/problem_description.html', data) }],
@@ -2216,19 +2235,28 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
             if (this.psdoc?.rid) {
                 this.response.body.rdoc = await record.get(this.pdoc.domainId, this.psdoc.rid);
             }
-            [this.response.body.ctdocs, this.response.body.htdocs] = (
-                await Promise.all([
-                    contest.getRelated(this.pdoc.domainId, this.pdoc.docId),
-                    contest.getRelated(this.pdoc.domainId, this.pdoc.docId, 'homework'),
-                ])
-            ).map((tdocs) =>
-                tdocs.filter(
+            const canEditContest = this.user.hasPerm(PERM.PERM_EDIT_CONTEST);
+            const projectRelatedContests = async (tdocs: Awaited<ReturnType<typeof contest.getRelated>>) => {
+                const visible = tdocs.filter(
                     (tdoc) =>
                         canBrowseAssignRestrictedContests(this.user) ||
                         !tdoc.assign?.length ||
                         new Set(tdoc.assign).intersection(new Set(this.user.group)).size,
-                ),
-            );
+                );
+                if (!visible.length) return visible;
+                const tsdict = await contest.getListStatus(
+                    this.pdoc.domainId,
+                    this.user._id,
+                    visible.map((tdoc) => tdoc.docId),
+                );
+                return visible.map((tdoc) =>
+                    projectStudentContestTdoc(tdoc, tsdict[tdoc.docId.toHexString()], canEditContest || this.user.own(tdoc)),
+                );
+            };
+            [this.response.body.ctdocs, this.response.body.htdocs] = await Promise.all([
+                contest.getRelated(this.pdoc.domainId, this.pdoc.docId).then(projectRelatedContests),
+                contest.getRelated(this.pdoc.domainId, this.pdoc.docId, 'homework').then(projectRelatedContests),
+            ]);
         }
     }
 
@@ -2348,7 +2376,13 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
         if (
             !this.tdoc ||
             String(this.tdoc.docId) !== String(tid) ||
-            (!this.virtualAttempt && (!Array.isArray(this.tdoc.pids) || !this.tdoc.pids.includes(this.pdoc.docId)))
+            (!this.virtualAttempt &&
+                !canAccessExamAwareContestProblem(
+                    this.tdoc,
+                    this.tsdoc,
+                    this.pdoc.docId,
+                    this.user.own(this.tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST) || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM),
+                ))
         ) {
             throw new ContestNotFoundError(this.pdoc.domainId, tid);
         }

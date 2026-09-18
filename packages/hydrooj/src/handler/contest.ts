@@ -5,6 +5,7 @@ import { readFile } from 'fs-extra';
 import { escapeRegExp, pick } from 'lodash';
 import moment from 'moment-timezone';
 import { ObjectId } from 'mongodb';
+import { effectiveProblemKind, type ProblemKind } from '@hydrooj/common';
 import { Counter, getAlphabeticId, Logger, randomstring, sortFiles, Time, yaml } from '@hydrooj/utils/lib/utils';
 import { Context, Service } from '../context';
 import {
@@ -31,6 +32,16 @@ import { FileInfo, ScoreboardConfig, Tdoc } from '../interface';
 import { canUsePostContestPractice, getPostContestPracticeState } from '../lib/contest-correction';
 import { assertCourseExamWatchGate } from '../lib/course-exam-gate';
 import { assertIndividualContestUnrankAllowed } from '../lib/contest-unrank';
+import {
+    assertExamPaperPoolSatisfiesQuotas,
+    examPaperQuotasEqual,
+    normalizeExamPaperPids,
+    parseExamPaperQuotas,
+    projectStudentContestTdoc,
+    readExamPaperQuotas,
+    studentContestProblemPids,
+    type ExamPaperQuotas,
+} from '../lib/exam-paper';
 import { isContestGloballyEnded } from '../lib/virtual-contest';
 import { virtualContestService } from '../model/virtual-contest';
 import { withContestEditBoundary } from '../lib/contest-edit-boundary';
@@ -354,6 +365,7 @@ export class ContestListHandler extends Handler {
         for (const tdoc of tdocs) tids.push(tdoc.docId);
         const tsdict = await contest.getListStatus(authoritativeDomainId, this.user._id, tids);
         const groupsFilter = groups.filter((i) => !Number.isSafeInteger(+i));
+        const canEditContest = this.user.hasPerm(PERM.PERM_EDIT_CONTEST);
         this.response.template = 'contest_main.html';
         this.response.body = {
             page,
@@ -361,7 +373,9 @@ export class ContestListHandler extends Handler {
             qs,
             rule,
             rules: Object.fromEntries(rules.map((i) => [i, contest.RULES[i].TEXT])),
-            tdocs,
+            tdocs: tdocs.map((tdoc) =>
+                projectStudentContestTdoc(tdoc, tsdict[tdoc.docId.toHexString()], canEditContest || this.user.own(tdoc)),
+            ),
             tsdict,
             groups: groupsFilter,
             group,
@@ -459,6 +473,18 @@ export class ContestDetailBaseHandler extends Handler {
         return pick(this.tsdoc, ['attend', 'subscribe', 'startAt', ...(this.tdoc.duration ? ['endAt'] : [])]);
     }
 
+    protected canManageLoadedContest() {
+        return !!(this.tdoc && (this.user.own(this.tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST)));
+    }
+
+    protected studentVisibleProblemPids() {
+        return studentContestProblemPids(this.tdoc, this.tsdoc, this.canManageLoadedContest());
+    }
+
+    protected projectLoadedContestForStudent() {
+        return projectStudentContestTdoc(this.tdoc, this.tsdoc, this.canManageLoadedContest());
+    }
+
     @param('tid', Types.ObjectId, true)
     async after(_domainId: string, tid: ObjectId) {
         if (!tid || !this.tdoc || this.tdoc.rule === 'homework') return;
@@ -502,6 +528,15 @@ export class ContestDetailBaseHandler extends Handler {
     }
 }
 
+function pdictForStudentPids<T>(pdict: Record<string, T>, pids: number[]): Record<string, T> {
+    const out: Record<string, T> = {};
+    for (const pid of pids) {
+        if (pdict[pid] !== undefined) out[pid] = pdict[pid];
+        else if (pdict[String(pid)] !== undefined) out[String(pid)] = pdict[String(pid)];
+    }
+    return out;
+}
+
 function contestProblemTableUsesContainerFace(
     tdoc: Tdoc,
     tsdoc: { attend?: number } | null | undefined,
@@ -540,7 +575,7 @@ export class ContestDetailHandler extends ContestDetailBaseHandler {
         const authoritativeDomainId = this.authoritativeDomainId();
         this.response.template = 'contest_detail.html';
         // Detail manage is own or PERM_EDIT_CONTEST; system admin is not implied.
-        const canManageContest = this.user.own(this.tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST);
+        const canManageContest = this.canManageLoadedContest();
         const postContestPractice = getPostContestPracticeState(this.tdoc, this.tsdoc);
         // Load contest problem dict so the new UI can render the problem table
         // inline. Older Hydro split this across /contest/:tid (description) and
@@ -551,13 +586,15 @@ export class ContestDetailHandler extends ContestDetailBaseHandler {
         // against below at line ~185, and that `ContestProblemListHandler`
         // already guards at line ~305).
         const canPeekProblems = (this.tsdoc?.attend && !contest.isNotStarted(this.tdoc)) || contest.isDone(this.tdoc) || canManageContest;
+        const visiblePids = this.studentVisibleProblemPids();
+        const studentTdoc = this.projectLoadedContestForStudent();
         const [udict, pdict, teamContext, teamCount] = await Promise.all([
             user.getList(authoritativeDomainId, [this.tdoc.owner]),
             canPeekProblems
                 ? readContestProblemTable(
                       authoritativeDomainId,
                       this.user,
-                      this.tdoc.pids,
+                      visiblePids,
                       // PROJECTION_CONTEST_LIST omits nSubmit/nAccept/difficulty/tag —
                       // include them so the detail page can show real pass/submit
                       // counts in its problem table.
@@ -578,11 +615,11 @@ export class ContestDetailHandler extends ContestDetailBaseHandler {
         const canViewRecord =
             contest.canShowSelfRecord.call(this, this.tdoc) && (contest.getParticipationMode(this.tdoc) !== 'team' || !!teamContext.team);
         this.response.body = {
-            tdoc: this.tdoc,
+            tdoc: studentTdoc,
             tsdoc: this.tsdocAsPublic(),
             udict,
             pdict,
-            pids: this.tdoc.pids.filter((pid) => pdict[pid]),
+            pids: visiblePids.filter((pid) => pdict[pid]),
             psdict,
             team: teamContext.team,
             teamStatus: publicTeamStatus(teamContext.status),
@@ -654,8 +691,8 @@ export class ContestPrintHandler extends ContestDetailBaseHandler {
 
     async get() {
         this.response.body = {
-            tdoc: this.tdoc,
-            isAdmin: this.user.own(this.tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST),
+            tdoc: this.projectLoadedContestForStudent(),
+            isAdmin: this.canManageLoadedContest(),
             canSubmitPrint: !!this.tsdoc?.attend && contest.isOngoing(this.tdoc, this.tsdoc),
         };
         this.response.template = 'contest_print.html';
@@ -816,16 +853,18 @@ export class ContestProblemListHandler extends ContestDetailBaseHandler {
     @param('tid', Types.ObjectId)
     async get(_domainId: string, tid: ObjectId) {
         const authoritativeDomainId = this.authoritativeDomainId();
-        const canManageContest = this.user.own(this.tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST);
+        const canManageContest = this.canManageLoadedContest();
         if (contest.isNotStarted(this.tdoc) && !canManageContest) throw new ContestNotLiveError(authoritativeDomainId, tid);
         if (!this.tsdoc?.attend && !contest.isDone(this.tdoc) && !canManageContest) throw new ContestNotAttendedError(authoritativeDomainId, tid);
         const postContestPractice = getPostContestPracticeState(this.tdoc, this.tsdoc);
+        const visiblePids = this.studentVisibleProblemPids();
+        const studentTdoc = this.projectLoadedContestForStudent();
         const contestMembership = { kind: 'contest-membership' as const, tdoc: this.tdoc, tsdoc: this.tsdoc };
         const [pdict, udict, tcdocs, teamContext] = await Promise.all([
             readContestProblemTable(
                 authoritativeDomainId,
                 this.user,
-                this.tdoc.pids,
+                visiblePids,
                 problem.PROJECTION_CONTEST_LIST,
                 problemViewReadFace(this.user, contestMembership) === 'container',
             ),
@@ -835,11 +874,11 @@ export class ContestProblemListHandler extends ContestDetailBaseHandler {
         ]);
         this.response.body = {
             pdict,
-            visiblePids: this.tdoc.pids.filter((pid) => pdict[pid]),
+            visiblePids: visiblePids.filter((pid) => pdict[pid]),
             psdict: {},
             udict,
             rdict: {},
-            tdoc: this.tdoc,
+            tdoc: studentTdoc,
             tcdocs,
             team: teamContext.team,
             teamStatus: publicTeamStatus(teamContext.status),
@@ -856,7 +895,7 @@ export class ContestProblemListHandler extends ContestDetailBaseHandler {
         this.response.template = 'contest_problemlist.html';
         this.response.body.showScore = Object.values(this.tdoc.score || {}).some((i) => i && i !== 100);
         if (!this.tsdoc) return;
-        if (this.tsdoc.attend && !this.tsdoc.startAt && contest.isOngoing(this.tdoc)) {
+        if (this.tdoc.rule !== 'exam' && this.tsdoc.attend && !this.tsdoc.startAt && contest.isOngoing(this.tdoc)) {
             await contest.setStatus(authoritativeDomainId, tid, this.user._id, { startAt: new Date() });
             this.tsdoc.startAt = new Date();
         }
@@ -865,7 +904,7 @@ export class ContestProblemListHandler extends ContestDetailBaseHandler {
         this.response.body.psdict = teamMode ? teamContext.status?.detail || {} : this.tsdoc.detail || {};
         if (this.latestProblemStatusesEnabled) {
             const statusJournal = teamMode ? teamContext.status?.journal || [] : this.tsdoc.journal || [];
-            this.response.body.problemStatusByPid = buildLatestContestProblemStatusByPid(statusJournal, this.tdoc.pids);
+            this.response.body.problemStatusByPid = buildLatestContestProblemStatusByPid(statusJournal, visiblePids);
         }
         const psdocs: any[] = Object.values(this.response.body.psdict);
         const canViewContestRecord = contest.canShowSelfRecord.call(this, this.tdoc) && (!teamMode || !!teamContext.team);
@@ -876,10 +915,10 @@ export class ContestProblemListHandler extends ContestDetailBaseHandler {
         const rids = canViewContestRecord ? [...contestRids] : [];
         if (postContestPractice.eligible) {
             const personalRecords = await record
-                .getMulti(authoritativeDomainId, buildPersonalPracticeRecordQuery(this.user._id, this.tdoc.pids))
+                .getMulti(authoritativeDomainId, buildPersonalPracticeRecordQuery(this.user._id, visiblePids))
                 .project<PersonalPracticeRecord>({ _id: 1, pid: 1, status: 1, contest: 1, contestTeamId: 1, hackTarget: 1, input: 1 })
                 .toArray();
-            const personalPracticeStatusByPid = buildPersonalPracticeStatusByPid(personalRecords, this.tdoc.pids, this.tdoc.beginAt, this.tdoc.endAt);
+            const personalPracticeStatusByPid = buildPersonalPracticeStatusByPid(personalRecords, visiblePids, this.tdoc.beginAt, this.tdoc.endAt);
             rids.push(...Object.values(personalPracticeStatusByPid).map((i) => i.rid));
             this.response.body.personalPracticeStatusByPid = personalPracticeStatusByPid;
             // ui-default still renders this field as its correction column.
@@ -888,7 +927,7 @@ export class ContestProblemListHandler extends ContestDetailBaseHandler {
             // Preserve Hydro's existing post-contest correction display for
             // unsupported rules such as exam/homework. P1.24 must not reinterpret
             // or remove that legacy behavior.
-            const correction = await problem.getListStatus(authoritativeDomainId, this.user._id, this.tdoc.pids);
+            const correction = await problem.getListStatus(authoritativeDomainId, this.user._id, visiblePids);
             for (const pid in correction) {
                 if (this.tsdoc.detail?.[pid]?.rid === correction[pid].rid) delete correction[pid];
             }
@@ -984,10 +1023,13 @@ export class ContestEditHandler extends Handler {
         ts = ts - (ts % (15 * Time.minute)) + 15 * Time.minute;
         const beginAt = moment(this.tdoc?.beginAt || new Date(ts)).tz(this.user.timeZone);
         const canManageTeamBatches = contestTeamBatch.canManageTeamBatches(this.user);
-        const [activeTeamCount, recordCount, teamBatches] = await Promise.all([
+        const [activeTeamCount, recordCount, teamBatches, pdict] = await Promise.all([
             tid ? contestTeam.countActiveTeams(authoritativeDomainId, tid) : Promise.resolve(0),
             tid ? record.coll.countDocuments({ domainId: authoritativeDomainId, contest: tid }) : Promise.resolve(0),
             canManageTeamBatches ? contestTeamBatch.listBatches(authoritativeDomainId) : Promise.resolve([]),
+            tid && this.tdoc.pids?.length
+                ? problem.getList(authoritativeDomainId, this.tdoc.pids, true, true, ['docId', 'problemKind'], true)
+                : Promise.resolve({}),
         ]);
         const participationRevision = this.tdoc?.participationRevision ?? 0;
         const canUpdatePlannedTeamBatch =
@@ -1012,6 +1054,7 @@ export class ContestEditHandler extends Handler {
         this.response.body = {
             rules,
             tdoc: this.tdoc,
+            pdict,
             duration: tid ? -beginAt.diff(this.tdoc.endAt, 'hour', true) : 2,
             pids: tid ? this.tdoc.pids.join(',') : '',
             beginAt,
@@ -1087,6 +1130,7 @@ export class ContestEditHandler extends Handler {
     @param('participationRevision', Types.UnsignedInt, true)
     @param('teamModeClearConfirmation', Types.String, true)
     @param('plannedTeamBatchId', Types.ObjectId, true)
+    @param('examPaperQuotas', Types.Content, true)
     @serializedContestEdit
     async postUpdate(
         _domainId: string,
@@ -1136,12 +1180,24 @@ export class ContestEditHandler extends Handler {
         participationRevision: number = null,
         teamModeClearConfirmation = '',
         plannedTeamBatchId: ObjectId = null,
+        examPaperQuotas = '',
     ) {
         const creatingContest = !tid;
         const authoritativeDomainId = String(this.domain?._id);
         problem.assertProblemAclDomain(this.user, authoritativeDomainId);
         if (!Object.keys(contest.RULES).includes(rule) || contest.RULES[rule].hidden) throw new ValidationError('rule');
         const pids = parseProblemDocIds(_pids);
+        if (rule !== 'exam' && examPaperQuotas) {
+            throw new ValidationError('examPaperQuotas', null, localizedErrorText`只有选择题考试能设置抽题`);
+        }
+        let nextExamPaperQuotas: ExamPaperQuotas | null = null;
+        if (examPaperQuotas) {
+            try {
+                nextExamPaperQuotas = parseExamPaperQuotas(JSON.parse(examPaperQuotas));
+            } catch {
+                throw new ValidationError('examPaperQuotas', null, localizedErrorText`抽题配额无效`);
+            }
+        }
         const previousPids = new Set(this.tdoc?.pids || []);
         const pendingAutoHidePids = new Set(this.tdoc?.autoHidePendingPids || []);
         const trackedAutoHidePids = new Set(
@@ -1201,6 +1257,46 @@ export class ContestEditHandler extends Handler {
         }
         const statusRecalcToken = statusRecalcReasons.length ? randomstring(24) : null;
         await assertProblemBankSelection(authoritativeDomainId, pids, this.user, this.tdoc?.pids);
+        if (nextExamPaperQuotas) {
+            const poolPids = normalizeExamPaperPids(pids);
+            const pdict = await problem.getList(authoritativeDomainId, poolPids, true, true, ['docId', 'problemKind'], true);
+            const kinds = new Map<number, ProblemKind>();
+            for (const pid of poolPids) {
+                const pdoc = pdict[pid];
+                if (!pdoc) throw new ValidationError('pids');
+                kinds.set(pid, effectiveProblemKind(pdoc));
+            }
+            try {
+                assertExamPaperPoolSatisfiesQuotas(poolPids, kinds, nextExamPaperQuotas);
+            } catch (error) {
+                if (error instanceof TypeError && error.message === 'exam_paper_pool_short') {
+                    throw new ValidationError('examPaperQuotas', null, localizedErrorText`题型数量不足，不能保存抽题`);
+                }
+                throw error;
+            }
+        }
+        if (tid) {
+            let previousExamPaperQuotas: ExamPaperQuotas | null = null;
+            try {
+                previousExamPaperQuotas = readExamPaperQuotas(this.tdoc.examPaperQuotas);
+            } catch {
+                if (nextExamPaperQuotas !== null) {
+                    throw new ValidationError('examPaperQuotas', null, localizedErrorText`抽题配额无效`);
+                }
+            }
+            const examPaperDrawTouched = previousExamPaperQuotas !== null || nextExamPaperQuotas !== null;
+            const examPaperQuotasChanged = !examPaperQuotasEqual(previousExamPaperQuotas, nextExamPaperQuotas);
+            const examPaperPoolChanged = examPaperDrawTouched && pidsChanged;
+            if (examPaperQuotasChanged || examPaperPoolChanged) {
+                const started = await contest.countStatus(authoritativeDomainId, {
+                    docId: tid,
+                    $or: [{ startAt: { $exists: true } }, { examPaperPids: { $exists: true } }],
+                });
+                if (started) {
+                    throw new ValidationError('examPaperQuotas', null, localizedErrorText`考试已有人开考，不能改抽题`);
+                }
+            }
+        }
         if (autoHideTargets.length) await assertCanPublishAutoHiddenProblems(authoritativeDomainId, autoHideTargets, this.user);
         const actorUnhideTargets = Array.from(
             new Set([...autoUnhideTargets, ...removedAutoHideTargets, ...(autoHideScheduleChanged ? Array.from(trackedAutoHidePids) : [])]),
@@ -1233,6 +1329,7 @@ export class ContestEditHandler extends Handler {
         } else if (entryMode === 'client_required') vigilEnabled = true;
         else if (!vigilEnabled) entryMode = 'open';
 
+        const unsetExamPaperQuotas = !creatingContest && nextExamPaperQuotas === null && this.tdoc.examPaperQuotas != null;
         if (tid) {
             await contest.edit(
                 authoritativeDomainId,
@@ -1253,11 +1350,13 @@ export class ContestEditHandler extends Handler {
                     autoHidePendingPids: pendingAutoHideTargets,
                     autoHideProblemPids: prewriteAutoHideProblemPids,
                     ...(statusRecalcToken ? { statusRecalcToken } : {}),
+                    ...(nextExamPaperQuotas ? { examPaperQuotas: nextExamPaperQuotas } : {}),
                 },
                 {
                     actor: this.user,
                     expectedParticipationRevision: participationRevision ?? (this.tdoc.participationRevision || 0),
                     teamModeClearConfirmation,
+                    ...(unsetExamPaperQuotas ? { unset: { examPaperQuotas: 1 as const } } : {}),
                 },
             );
         } else {
@@ -1270,6 +1369,7 @@ export class ContestEditHandler extends Handler {
                 autoHidePendingPids: pendingAutoHideTargets,
                 autoHideProblemPids: prewriteAutoHideProblemPids,
                 ...(allowVirtual != null ? { allowVirtual } : {}),
+                ...(nextExamPaperQuotas ? { examPaperQuotas: nextExamPaperQuotas } : {}),
             });
             if (requestedPlannedTeamBatchId) {
                 try {
@@ -1915,7 +2015,9 @@ export class ContestFileDownloadHandler extends ContestDetailBaseHandler {
         if (type === 'private' && !this.user.own(this.tdoc) && !this.user.hasPerm(PERM.PERM_EDIT_CONTEST)) {
             if (!this.tsdoc?.attend) throw new ContestNotAttendedError(authoritativeDomainId, tid);
             if (!contest.isOngoing(this.tdoc) && !contest.isDone(this.tdoc)) throw new ContestNotLiveError(authoritativeDomainId, tid);
-            if (!this.tsdoc.startAt) await contest.setStatus(authoritativeDomainId, tid, this.user._id, { startAt: new Date() });
+            if (this.tdoc.rule !== 'exam' && !this.tsdoc.startAt) {
+                await contest.setStatus(authoritativeDomainId, tid, this.user._id, { startAt: new Date() });
+            }
         }
         this.response.addHeader('Cache-Control', 'public');
         const target = `contest/${authoritativeDomainId}/${tid}/${type}/${filename}`;
@@ -2208,6 +2310,9 @@ export async function apply(ctx: Context) {
                         config.lockAt = this.tdoc.lockAt;
                     }
                     const [, rows, udict, pdict] = await contest.getScoreboard.call(this, tdoc.domainId, tdoc._id, config);
+                    const canManageContest = this.canManageLoadedContest();
+                    const studentTdoc = this.projectLoadedContestForStudent();
+                    const visiblePids = this.studentVisibleProblemPids();
 
                     const page_name = tdoc.rule === 'homework' ? 'homework_scoreboard' : 'contest_scoreboard';
                     const availableViews = scoreboard.getAvailableViews(tdoc.rule);
@@ -2234,11 +2339,11 @@ export async function apply(ctx: Context) {
                         teamMode: contest.getParticipationMode(tdoc) === 'team',
                     });
                     this.response.body = {
-                        tdoc: this.tdoc,
+                        tdoc: studentTdoc,
                         tsdoc: this.tsdocAsPublic(),
                         rows,
                         udict,
-                        pdict,
+                        pdict: canManageContest ? pdict : pdictForStudentPids(pdict, visiblePids),
                         page_name,
                         groups,
                         availableViews,
@@ -2261,6 +2366,9 @@ export async function apply(ctx: Context) {
                 async display({ tdoc }) {
                     if (contest.isLocked(tdoc) && !this.user.own(tdoc)) {
                         this.checkPerm(PERM.PERM_VIEW_CONTEST_HIDDEN_SCOREBOARD);
+                    }
+                    if (tdoc.rule === 'exam' && readExamPaperQuotas(tdoc.examPaperQuotas) !== null) {
+                        throw localizeError(new NotFoundError('View ghost not found'), 'View {0} not found', 'ghost');
                     }
                     if (contest.getParticipationMode(tdoc) === 'team') {
                         const [pdict, entries] = await Promise.all([

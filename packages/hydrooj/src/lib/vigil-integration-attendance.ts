@@ -43,7 +43,7 @@ export async function ensureVigilContestParticipation(handler: Handler, domainId
             });
         }
     }
-    if (tsdoc?.attend && !tsdoc.startAt && contestModel.isOngoing(tdoc, tsdoc)) {
+    if (tsdoc?.attend && !tsdoc.startAt && tdoc.rule !== 'exam' && contestModel.isOngoing(tdoc, tsdoc)) {
         await contestModel.setStatus(domainId, tid, uid, { startAt: new Date() });
     }
 }

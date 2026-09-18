@@ -64,6 +64,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { SimpleSelect } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import {
   CheckCircle2,
   ChevronDown,
@@ -340,26 +341,6 @@ interface ErrorLike {
 /*  Small UI primitives (used only inside this file)                   */
 /* ================================================================== */
 
-function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked ? 'true' : 'false'}
-      onClick={() => onChange(!checked)}
-      title={checked ? '关闭' : '开启'}
-      className={cn(
-        'relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors',
-        checked ? 'bg-primary' : 'bg-muted-foreground/30',
-      )}
-    >
-      <span
-        className={cn('inline-block size-3.5 rounded-full bg-white shadow transition-transform', checked ? 'translate-x-4.5' : 'translate-x-0.75')}
-      />
-    </button>
-  );
-}
-
 function SettingRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -454,7 +435,7 @@ function SettingsDialog({
                 </SettingRow>
 
                 <SettingRow label="自动换行">
-                  <Toggle checked={config.wordWrap} onChange={(v) => onChange({ ...config, wordWrap: v })} />
+                  <Switch checked={config.wordWrap} onCheckedChange={(v) => onChange({ ...config, wordWrap: v })} aria-label="自动换行" />
                 </SettingRow>
               </>
             )}

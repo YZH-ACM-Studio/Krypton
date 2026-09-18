@@ -12,7 +12,9 @@ import {
 } from './course-exam-complete';
 import { isCourseVideoComplete, listCourseVideos, studentVisibleVideos } from './course-video';
 import {
+    canOpenExamPaperAfterFail,
     examPaperPidsForCompletion,
+    isExamPaperFinalized,
     isExamPaperStarted,
     isExamPaperUnstartedClosed,
     isExamPaperWindowClosed,
@@ -172,6 +174,7 @@ export async function resolveCourseExamCompletion(params: {
         windowClosed,
         examRule: tdoc.rule === 'exam',
         hasPids,
+        finalized: isExamPaperFinalized(tsdoc),
     })) {
         const latest = await contest.getStatus(params.domainId, params.contestId, params.uid);
         const alreadyFinalized = latest?.paperFinalizedAt instanceof Date && !Number.isNaN(latest.paperFinalizedAt.getTime());
@@ -199,6 +202,7 @@ export async function resolveCourseExamCompletion(params: {
         attended,
         windowClosed,
         ended,
+        canRetake: canOpenExamPaperAfterFail(tdoc, tsdoc, now),
         contestId: params.contestId,
     });
 }

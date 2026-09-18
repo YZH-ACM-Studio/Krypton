@@ -68,4 +68,27 @@ describe('course exam card manager preview', () => {
     expect(screen.getByRole('link', { name: '查看答卷' })).to.exist;
     expect(screen.queryByRole('link', { name: '进入考试' })).to.equal(null);
   });
+
+  it('offers a retake when the bound exam says the student can try again', () => {
+    render(
+      <CourseExamCard
+        exam={exam}
+        contest={{
+          ...contest,
+          attend: true,
+          paperFinalizedAt: '2026-09-18T06:00:00.000Z',
+          examPassScore: 60,
+          examScore: 40,
+          examAttemptLimit: 3,
+          examAttemptsUsed: 1,
+          canRetake: true,
+        }}
+        chapters={chapters}
+        canManage={false}
+      />,
+    );
+    expect(screen.getByText(/未及格/)).to.exist;
+    expect(screen.getByRole('link', { name: '查看答卷' })).to.exist;
+    expect(screen.getByRole('link', { name: '再考一次' })).to.exist;
+  });
 });

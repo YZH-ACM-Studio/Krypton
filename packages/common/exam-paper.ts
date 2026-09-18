@@ -1,4 +1,5 @@
 import { PROBLEM_KINDS, parseProblemKind, type ProblemKind } from './problem-kind';
+import { STATUS } from './status';
 
 export const EXAM_PAPER_HOUR_MS = 3600_000;
 export const EXAM_PAPER_FINALIZE_GRACE_MS = 60_000;
@@ -10,15 +11,28 @@ export interface ExamPaperContestClock {
     endAt?: unknown;
     duration?: unknown;
     examPaperQuotas?: unknown;
+    examPassScore?: unknown;
+    examAttemptLimit?: unknown;
     pids?: unknown;
     rule?: unknown;
+    score?: unknown;
 }
 
 export interface ExamPaperStatusClock {
     startAt?: unknown;
     examPaperPids?: unknown;
     paperFinalizedAt?: unknown;
+    examAttemptsUsed?: unknown;
+    journal?: unknown;
+    score?: unknown;
 }
+
+export const EXAM_ATTEMPT_PENDING_STATUSES = [
+    STATUS.STATUS_WAITING,
+    STATUS.STATUS_JUDGING,
+    STATUS.STATUS_COMPILING,
+    STATUS.STATUS_FETCHED,
+] as const;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -199,6 +213,186 @@ export function assignContestProblemScores(
     }
     for (const pid of unique) next[pid] = score;
     return next;
+}
+
+function optionalPostedNumber(raw: unknown): unknown {
+    if (raw === undefined || raw === null) return raw;
+    if (typeof raw === 'string' && !raw.trim()) return undefined;
+    return raw;
+}
+
+function postedInteger(raw: unknown): number {
+    if (typeof raw === 'number') return raw;
+    if (typeof raw === 'string' && raw.trim()) {
+        const parsed = Number(raw);
+        if (String(parsed) === raw.trim()) return parsed;
+    }
+    throw new TypeError('exam_pass_score_invalid');
+}
+
+/** Missing, empty, or 0 = no pass line. Integer ≥1 is the contest-weighted pass score. */
+export function parseExamPassScore(raw: unknown): number | null {
+    const value = optionalPostedNumber(raw);
+    if (value === undefined || value === null) return null;
+    const score = postedInteger(value);
+    if (score === 0) return null;
+    if (!Number.isInteger(score) || !Number.isSafeInteger(score) || score < 1) {
+        throw new TypeError('exam_pass_score_invalid');
+    }
+    return score;
+}
+
+export function readExamPassScore(tdoc: { examPassScore?: unknown }): number | null {
+    return parseExamPassScore(tdoc.examPassScore);
+}
+
+/** Missing or empty = 1. Integer ≥1 is the max finalize count. */
+export function parseExamAttemptLimit(raw: unknown): number {
+    const value = optionalPostedNumber(raw);
+    if (value === undefined || value === null) return 1;
+    const limit = postedInteger(value);
+    if (!Number.isInteger(limit) || !Number.isSafeInteger(limit) || limit < 1) {
+        throw new TypeError('exam_attempt_limit_invalid');
+    }
+    return limit;
+}
+
+export function readExamAttemptLimit(tdoc: { examAttemptLimit?: unknown }): number {
+    return parseExamAttemptLimit(tdoc.examAttemptLimit);
+}
+
+export function examAttemptsUsed(tsdoc?: ExamPaperStatusClock | null): number {
+    const raw = tsdoc?.examAttemptsUsed;
+    if (typeof raw === 'number' && Number.isInteger(raw) && Number.isSafeInteger(raw) && raw >= 0) return raw;
+    return isExamPaperFinalized(tsdoc) ? 1 : 0;
+}
+
+export function examAttemptScore(tsdoc?: ExamPaperStatusClock | null): number {
+    const raw = tsdoc?.score;
+    return typeof raw === 'number' && Number.isFinite(raw) ? raw : 0;
+}
+
+function journalRows(tsdoc?: ExamPaperStatusClock | null): Record<string, unknown>[] {
+    if (!Array.isArray(tsdoc?.journal)) return [];
+    return tsdoc.journal.filter((row): row is Record<string, unknown> => isPlainObject(row));
+}
+
+export function isExamAttemptJudgePending(tsdoc?: ExamPaperStatusClock | null): boolean {
+    for (const row of journalRows(tsdoc)) {
+        if (row.manual === true) continue;
+        const raw = row.status;
+        const status = raw === undefined ? STATUS.STATUS_WAITING : typeof raw === 'number' ? raw : Number(raw);
+        if (!Number.isInteger(status)) continue;
+        if ((EXAM_ATTEMPT_PENDING_STATUSES as readonly number[]).includes(status)) return true;
+    }
+    return false;
+}
+
+export function isExamAttemptPassed(tdoc: ExamPaperContestClock, tsdoc?: ExamPaperStatusClock | null): boolean {
+    const pass = readExamPassScore(tdoc);
+    if (pass === null || !isExamPaperFinalized(tsdoc) || isExamAttemptJudgePending(tsdoc)) return false;
+    return examAttemptScore(tsdoc) >= pass;
+}
+
+export function canRetakeExamPaper(tdoc: ExamPaperContestClock, tsdoc: ExamPaperStatusClock | null | undefined, now: Date): boolean {
+    if (isExamAttemptJudgePending(tsdoc)) return false;
+    return canOpenExamPaperAfterFail(tdoc, tsdoc, now);
+}
+
+/** Failed (or still judging) with attempts and a full window left. Used for 去考试 / 评测中, not for starting the next paper. */
+export function canOpenExamPaperAfterFail(tdoc: ExamPaperContestClock, tsdoc: ExamPaperStatusClock | null | undefined, now: Date): boolean {
+    if (readExamPassScore(tdoc) === null || !isExamPaperFinalized(tsdoc)) return false;
+    if (isExamAttemptPassed(tdoc, tsdoc)) return false;
+    if (examAttemptsUsed(tsdoc) >= readExamAttemptLimit(tdoc)) return false;
+    return canStartExamPaper(tdoc, now);
+}
+
+export function minContributionsToReach(target: number, contributions: readonly number[]): number | null {
+    if (typeof target !== 'number' || !Number.isFinite(target)) throw new TypeError('exam_pass_score_invalid');
+    if (target <= 0) return 0;
+    const sorted = contributions
+        .filter((value) => typeof value === 'number' && Number.isFinite(value) && value > 0)
+        .slice()
+        .sort((left, right) => right - left);
+    let acc = 0;
+    for (let i = 0; i < sorted.length; i += 1) {
+        acc += sorted[i] as number;
+        if (acc >= target) return i + 1;
+    }
+    return null;
+}
+
+export function minProblemsToPass(passScore: number, contributions: readonly number[]): number | null {
+    if (!Number.isInteger(passScore) || !Number.isSafeInteger(passScore) || passScore < 1) {
+        throw new TypeError('exam_pass_score_invalid');
+    }
+    return minContributionsToReach(passScore, contributions);
+}
+
+export function examPaperContributions(tdoc: { score?: unknown }, pids: readonly number[]): number[] {
+    return normalizeExamPaperPids(pids).map((pid) => contestProblemScoreWeight(tdoc, pid));
+}
+
+export function examDrawUnitContributions(
+    tdoc: { score?: unknown; examPaperQuotas?: unknown },
+    poolPids: readonly number[],
+    kinds: ReadonlyMap<number, ProblemKind>,
+): number[] | null {
+    const quotas = readExamPaperQuotas(tdoc.examPaperQuotas);
+    if (quotas === null) return examPaperContributions(tdoc, poolPids);
+    const byKind = Object.fromEntries(PROBLEM_KINDS.map((kind) => [kind, [] as number[]])) as Record<ProblemKind, number[]>;
+    for (const pid of normalizeExamPaperPids(poolPids)) {
+        const kind = kinds.get(pid);
+        if (!kind) throw new TypeError('exam_paper_pool_kind_missing');
+        byKind[kind].push(contestProblemScoreWeight(tdoc, pid));
+    }
+    const units: number[] = [];
+    for (const kind of PROBLEM_KINDS) {
+        const need = quotas[kind] || 0;
+        if (!need) continue;
+        const weights = byKind[kind];
+        if (!weights.length) throw new TypeError('exam_paper_pool_short');
+        const first = weights[0];
+        if (typeof first !== 'number' || weights.some((weight) => weight !== first)) return null;
+        for (let i = 0; i < need; i += 1) units.push(first);
+    }
+    return units;
+}
+
+export function examDefinitePaperMax(
+    tdoc: { score?: unknown; examPaperQuotas?: unknown },
+    poolPids: readonly number[],
+    kinds?: ReadonlyMap<number, ProblemKind>,
+): number | null {
+    if (readExamPaperQuotas(tdoc.examPaperQuotas) === null) {
+        return examPaperContributions(tdoc, poolPids).reduce((sum, value) => sum + value, 0);
+    }
+    if (!kinds) return null;
+    const units = examDrawUnitContributions(tdoc, poolPids, kinds);
+    if (units === null) return null;
+    return units.reduce((sum, value) => sum + value, 0);
+}
+
+export function assertExamPassScoreFitsPaper(passScore: number, paperMax: number | null): void {
+    if (paperMax !== null && passScore > paperMax) throw new TypeError('exam_pass_score_above_max');
+}
+
+export function minRemainingProblemsToPass(
+    passScore: number,
+    items: readonly { max: number; earned?: number | null }[],
+): number | null {
+    if (!Number.isInteger(passScore) || !Number.isSafeInteger(passScore) || passScore < 1) {
+        throw new TypeError('exam_pass_score_invalid');
+    }
+    let earned = 0;
+    const remain: number[] = [];
+    for (const item of items) {
+        if (typeof item.max !== 'number' || !Number.isFinite(item.max) || item.max <= 0) continue;
+        const got = typeof item.earned === 'number' && Number.isFinite(item.earned) ? item.earned : 0;
+        earned += got;
+        if (got < item.max) remain.push(item.max - got);
+    }
+    return minContributionsToReach(passScore - earned, remain);
 }
 
 export function isExamPaperInWindow(tdoc: ExamPaperContestClock, tsdoc: ExamPaperStatusClock | null | undefined, now: Date): boolean {

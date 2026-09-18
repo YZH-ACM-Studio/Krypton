@@ -46,6 +46,15 @@ import { Handler, param, post, Types } from '../service/server';
 import { studentDirectory } from '../service/student-directory';
 import { assertCourseAccessible, canManageCourse, courseAssignsUserGroups, courseUserGroupIds, isCourseHidden } from '../lib/course-access';
 import { isCourseExamCompleteFromStatus } from '../lib/course-exam-complete';
+import {
+    canRetakeExamPaper,
+    examAttemptScore,
+    examAttemptsUsed,
+    isExamAttemptJudgePending,
+    isExamAttemptPassed,
+    readExamAttemptLimit,
+    readExamPassScore,
+} from '../lib/exam-paper';
 import { isCourseExamDuplicateKey, parseCourseExamForm, resolveCourseExamForSave } from '../lib/course-exam';
 import { courseNodePids, parseCourseSections } from '../lib/course-chapter';
 import { copiedCourseTitle } from '../lib/course-copy';
@@ -96,9 +105,18 @@ async function hydrateCourseExamContest(
     endAt?: string;
     beginAt?: string;
     startAt?: string;
+    paperFinalizedAt?: string;
     duration?: number;
     attend?: boolean;
+    complete?: boolean;
     missing?: boolean;
+    examPassScore?: number;
+    examAttemptLimit?: number;
+    examAttemptsUsed?: number;
+    examScore?: number;
+    examJudging?: boolean;
+    examPassed?: boolean;
+    canRetake?: boolean;
 } | undefined> {
     const contestId = tdoc?.courseExam?.contestId;
     if (!contestId) return undefined;
@@ -124,8 +142,9 @@ async function hydrateCourseExamContest(
         let startAt: string | undefined;
         let paperFinalizedAt: string | undefined;
         let complete = false;
+        let tsdoc: Awaited<ReturnType<typeof contest.getStatus>> | null = null;
         if (typeof uid === 'number' && uid > 0) {
-            const tsdoc = await contest.getStatus(domainId, oid, uid);
+            tsdoc = await contest.getStatus(domainId, oid, uid);
             attend = Boolean(tsdoc?.attend);
             if (tsdoc?.startAt instanceof Date && !Number.isNaN(tsdoc.startAt.getTime())) {
                 startAt = tsdoc.startAt.toISOString();
@@ -135,6 +154,12 @@ async function hydrateCourseExamContest(
             }
             complete = isCourseExamCompleteFromStatus(cdoc, tsdoc);
         }
+        const passScore = readExamPassScore(cdoc);
+        const attemptLimit = readExamAttemptLimit(cdoc);
+        const attemptsUsed = tsdoc ? examAttemptsUsed(tsdoc) : 0;
+        const judging = Boolean(paperFinalizedAt) && isExamAttemptJudgePending(tsdoc);
+        const passed = isExamAttemptPassed(cdoc, tsdoc);
+        const canRetake = typeof uid === 'number' && uid > 0 && canRetakeExamPaper(cdoc, tsdoc, new Date());
         return {
             docId,
             title: typeof cdoc.title === 'string' ? cdoc.title : '',
@@ -145,6 +170,13 @@ async function hydrateCourseExamContest(
             ...(complete ? { complete: true } : {}),
             ...(duration ? { duration } : {}),
             ...(attend ? { attend: true } : {}),
+            ...(passScore !== null ? { examPassScore: passScore } : {}),
+            ...(attemptLimit > 1 ? { examAttemptLimit: attemptLimit } : {}),
+            ...(attemptsUsed > 0 ? { examAttemptsUsed: attemptsUsed } : {}),
+            ...(paperFinalizedAt ? { examScore: examAttemptScore(tsdoc) } : {}),
+            ...(judging ? { examJudging: true } : {}),
+            ...(passed ? { examPassed: true } : {}),
+            ...(canRetake ? { canRetake: true } : {}),
         };
     } catch (error) {
         if (error instanceof ContestNotFoundError || (error instanceof Error && error.name === 'ContestNotFoundError')) {

@@ -20,6 +20,13 @@ export interface CourseExamContestPreview {
   attend?: boolean;
   complete?: boolean;
   missing?: boolean;
+  examPassScore?: number;
+  examAttemptLimit?: number;
+  examAttemptsUsed?: number;
+  examScore?: number;
+  examJudging?: boolean;
+  examPassed?: boolean;
+  canRetake?: boolean;
 }
 
 export interface CourseRecord {
@@ -102,6 +109,13 @@ export function readCourseExamContest(value: unknown): CourseExamContestPreview 
   const attend = value.attend === true;
   const complete = value.complete === true;
   const missing = value.missing === true;
+  const examPassScore = readOptionalExamInt(value.examPassScore, 'examPassScore', 1);
+  const examAttemptLimit = readOptionalExamInt(value.examAttemptLimit, 'examAttemptLimit', 1);
+  const examAttemptsUsed = readOptionalExamInt(value.examAttemptsUsed, 'examAttemptsUsed', 0);
+  const examScore = readOptionalExamScore(value.examScore);
+  const examJudging = value.examJudging === true;
+  const examPassed = value.examPassed === true;
+  const canRetake = value.canRetake === true;
   return {
     docId,
     title,
@@ -113,7 +127,30 @@ export function readCourseExamContest(value: unknown): CourseExamContestPreview 
     ...(attend ? { attend: true } : {}),
     ...(complete ? { complete: true } : {}),
     ...(missing ? { missing: true } : {}),
+    ...(examPassScore !== undefined ? { examPassScore } : {}),
+    ...(examAttemptLimit !== undefined ? { examAttemptLimit } : {}),
+    ...(examAttemptsUsed !== undefined ? { examAttemptsUsed } : {}),
+    ...(examScore !== undefined ? { examScore } : {}),
+    ...(examJudging ? { examJudging: true } : {}),
+    ...(examPassed ? { examPassed: true } : {}),
+    ...(canRetake ? { canRetake: true } : {}),
   };
+}
+
+function readOptionalExamInt(value: unknown, field: string, min: number): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'number' || !Number.isInteger(value) || !Number.isSafeInteger(value) || value < min) {
+    throw new TypeError(`courseExamContest.${field} is invalid`);
+  }
+  return value;
+}
+
+function readOptionalExamScore(value: unknown): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new TypeError('courseExamContest.examScore is invalid');
+  }
+  return value;
 }
 
 export interface CourseFile {

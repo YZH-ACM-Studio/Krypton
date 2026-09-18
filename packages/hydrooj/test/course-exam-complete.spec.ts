@@ -30,6 +30,17 @@ describe('course exam completion', () => {
         )).to.equal(true);
     });
 
+    it('requires a settled passing score when examPassScore is set', () => {
+        const tdoc = { rule: 'exam', pids: [1, 2], examPassScore: 60 };
+        const finalized = { paperFinalizedAt: new Date('2026-09-16T00:00:00.000Z'), journal: [], score: 60 };
+        expect(isCourseExamCompleteFromStatus(tdoc, finalized)).to.equal(true);
+        expect(isCourseExamCompleteFromStatus(tdoc, { ...finalized, score: 59 })).to.equal(false);
+        expect(isCourseExamCompleteFromStatus(tdoc, { ...finalized, journal: [{ pid: 1, status: 20 }] })).to.equal(false);
+        expect(isCourseExamCompleteFromStatus(tdoc, { ...finalized, journal: [{ pid: 1, status: 20, manual: true }] })).to.equal(true);
+        expect(isCourseExamCompleteFromStatus(tdoc, { journal: [{ pid: 1 }, { pid: 2 }], score: 80 })).to.equal(false);
+        expect(isCourseExamCompleteFromStatus({ rule: 'exam', pids: [1, 2] }, { ...finalized, score: 0 })).to.equal(true);
+    });
+
     it('falls back to journal covering every exam pid when paperFinalizedAt is missing', () => {
         expect(isCourseExamCompleteFromStatus(
             { rule: 'exam', pids: [11, 12] },
@@ -134,6 +145,7 @@ describe('course exam completion', () => {
         expect(shouldSettleCourseExam({ ...ready, windowClosed: false })).to.equal(false);
         expect(shouldSettleCourseExam({ ...ready, examRule: false })).to.equal(false);
         expect(shouldSettleCourseExam({ ...ready, hasPids: false })).to.equal(false);
+        expect(shouldSettleCourseExam({ ...ready, finalized: true })).to.equal(false);
     });
 
     it('builds lockKind and examHref from completion facts without IO', () => {
@@ -242,10 +254,11 @@ describe('course exam completion', () => {
         expect(end).to.be.greaterThan(start);
         const finalize = source.slice(start, end);
         const updateAt = finalize.indexOf('contest.updateStatus');
-        const writeAt = finalize.lastIndexOf('contest.setStatus');
+        const writeAt = finalize.lastIndexOf('findOneAndUpdate');
         const returnAt = finalize.lastIndexOf('return rids');
         expect(finalize, 'already-finalized papers must not mint records').to.match(/paperFinalizedAt instanceof Date[\s\S]*return \[\]/);
-        expect(finalize).to.include('contest.setStatus');
+        expect(finalize).to.include('examAttemptsUsed');
+        expect(finalize).to.include("paperFinalizedAt: { $exists: false }");
         expect(updateAt).to.be.at.least(0);
         expect(writeAt, 'finalize must persist paperFinalizedAt').to.be.greaterThan(updateAt);
         expect(returnAt).to.be.greaterThan(writeAt);

@@ -52,6 +52,9 @@ export function CourseExamCard({
     durationHours: contest?.duration,
   };
   const paperFinalized = contest?.complete === true || Boolean(contest?.paperFinalizedAt);
+  const canRetake = contest?.canRetake === true;
+  const judging = contest?.examJudging === true;
+  const passed = contest?.examPassed === true || contest?.complete === true;
   const canEnter = canEnterCourseExam({
     watchLocked: state.locked,
     missing: contest?.missing,
@@ -60,8 +63,12 @@ export function CourseExamCard({
   const windowClosed = isCourseExamEnterClosed({
     missing: contest?.missing,
     ...examClock,
-  });
-  const showWatchLock = !canEnter && !windowClosed && contest?.missing !== true && state.locked;
+  }) && !canRetake;
+  const showWatchLock = !canEnter && !windowClosed && !paperFinalized && contest?.missing !== true && state.locked;
+  const remainingAttempts = Math.max(
+    0,
+    (contest?.examAttemptLimit || 1) - (contest?.examAttemptsUsed || (paperFinalized ? 1 : 0)),
+  );
 
   return (
     <Card className={className}>
@@ -80,8 +87,20 @@ export function CourseExamCard({
                 {windowClosed ? '考试已结束。' : ''}
                 学生需看完规定视频后才能参加。预览不能交卷。
               </p>
+            ) : judging ? (
+              <p className="mt-2 text-sm text-muted-foreground">已交卷，正在评测。</p>
+            ) : passed && paperFinalized ? (
+              <p className="mt-2 text-sm text-muted-foreground">
+                {contest?.examPassScore ? '已及格。' : '已交卷，不能再答。'}
+              </p>
+            ) : paperFinalized && canRetake ? (
+              <p className="mt-2 text-sm text-muted-foreground">
+                未及格{typeof contest?.examScore === 'number' ? `（${contest.examScore} 分）` : ''}，还可再考 {remainingAttempts} 次。
+              </p>
             ) : paperFinalized ? (
-              <p className="mt-2 text-sm text-muted-foreground">已交卷，不能再答。</p>
+              <p className="mt-2 text-sm text-muted-foreground">
+                {contest?.examPassScore ? '未及格，不能再考。' : '已交卷，不能再答。'}
+              </p>
             ) : !canEnter && windowClosed ? (
               <p className="mt-2 text-sm text-muted-foreground">考试已结束</p>
             ) : showWatchLock ? (
@@ -114,9 +133,16 @@ export function CourseExamCard({
               <a href={href}>预览考试</a>
             </Button>
           ) : paperFinalized ? (
-            <Button asChild variant="outline" size="sm" className="h-9">
-              <a href={href}>查看答卷</a>
-            </Button>
+            <>
+              <Button asChild variant="outline" size="sm" className="h-9">
+                <a href={href}>查看答卷</a>
+              </Button>
+              {canRetake ? (
+                <Button asChild size="sm" className="h-9">
+                  <a href={href}>再考一次</a>
+                </Button>
+              ) : null}
+            </>
           ) : canEnter ? (
             <Button asChild size="sm" className="h-9">
               <a href={href}>进入考试</a>

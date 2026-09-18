@@ -28,7 +28,7 @@ import avatar from '../lib/avatar';
 import { contestScoreboardRankValue } from '../lib/contest-unrank';
 import { effectiveLockoutWindow } from '../lib/contest-lockout';
 import { isListVisibleToUser, listAccessQuery } from '../lib/contest-list-access';
-import { readExamPaperQuotas } from '../lib/exam-paper';
+import { examJournalFloorFilter, examStatusAcceptsJournalRid, readExamPaperQuotas } from '../lib/exam-paper';
 import { annotateScoreboardPercentages } from '../lib/scoreboard-score-percentage';
 import bus, { parallelAllSettled } from '../service/bus';
 import db from '../service/db';
@@ -213,7 +213,7 @@ export interface ContestEditOptions {
     expectedParticipationRevision?: number;
     teamModeClearConfirmation?: string;
     now?: Date;
-    unset?: { examPaperQuotas?: true | '' | 1 };
+    unset?: { examPaperQuotas?: true | '' | 1; examPassScore?: true | '' | 1; examAttemptLimit?: true | '' | 1; examShowVerdict?: true | '' | 1 };
 }
 
 export {
@@ -1467,9 +1467,9 @@ export async function getStatus(domainId: string, tid: ObjectId, uid: number) {
     return await document.getStatus(domainId, document.TYPE_CONTEST, tid, uid);
 }
 
-export async function updateStatus(domainId: string, tid: ObjectId, uid: number, rid: ObjectId, pid: number, result: Partial<RecordDoc> = {}) {
+export async function updateStatus(domainId: string, tid: ObjectId, uid: number, rid: ObjectId, pid: number, result: Partial<RecordDoc> & { manual?: boolean } = {}) {
     return await withContestTeamBoundary(domainId, tid, async () => {
-        const { status = STATUS.STATUS_WAITING, score = 0, subtasks, lang } = result;
+        const { status = STATUS.STATUS_WAITING, score = 0, subtasks, lang, manual } = result;
         const tdoc = await get(domainId, tid);
         if (getParticipationMode(tdoc) === 'team') {
             const synced = await contestTeamStatus.synchronizeFromRecord(
@@ -1485,20 +1485,49 @@ export async function updateStatus(domainId: string, tid: ObjectId, uid: number,
             return synced.status;
         }
         if (tdoc.balloon && status === STATUS.STATUS_ACCEPTED && !isLocked(tdoc)) await addBalloon(domainId, tid, uid, rid, pid);
+        const journalEntry = {
+            rid,
+            pid,
+            status,
+            score,
+            subtasks,
+            lang,
+            ...(manual === true ? { manual: true } : {}),
+        };
+        if (tdoc.rule === 'exam') {
+            const current = await getStatus(domainId, tid, uid);
+            if (!examStatusAcceptsJournalRid(current, rid)) return current;
+            const examFilter = {
+                domainId: tdoc.domainId,
+                docType: document.TYPE_CONTEST,
+                docId: tdoc.docId,
+                uid,
+                ...examJournalFloorFilter(current),
+            };
+            let examTsdoc = await document.collStatus.findOneAndUpdate(
+                { ...examFilter, 'journal.rid': rid },
+                { $set: { 'journal.$': journalEntry }, $inc: { rev: 1 } },
+                { returnDocument: 'after' },
+            );
+            examTsdoc ||= await document.collStatus.findOneAndUpdate(
+                examFilter,
+                { $push: { journal: journalEntry }, $inc: { rev: 1 } },
+                { returnDocument: 'after' },
+            );
+            if (!examTsdoc) return (await getStatus(domainId, tid, uid)) || current;
+            const examJournal = _getStatusJournal(examTsdoc);
+            const examStats = RULES[tdoc.rule].stat(tdoc, examJournal);
+            return await document.revSetStatus(tdoc.domainId, document.TYPE_CONTEST, tdoc.docId, uid, examTsdoc.rev, { journal: examJournal, ...examStats })
+                || (await getStatus(domainId, tid, uid))
+                || examTsdoc;
+        }
         const tsdoc = await document.revPushStatus(
             tdoc.domainId,
             document.TYPE_CONTEST,
             tdoc.docId,
             uid,
             'journal',
-            {
-                rid,
-                pid,
-                status,
-                score,
-                subtasks,
-                lang,
-            },
+            journalEntry,
             'rid',
         );
         const journal = _getStatusJournal(tsdoc);

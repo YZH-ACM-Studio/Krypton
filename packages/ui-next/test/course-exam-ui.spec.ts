@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { EXAM_PAPER_FINALIZE_GRACE_MS } from '@hydrooj/common';
 import { canEnterCourseExam, collectCourseExamVideos, computeCourseExamWatchState, COURSE_EXAM_ENTER_GRACE_MS, isCourseExamEnterClosed } from '../src/pages/course/course-exam-watch';
-import type { CourseChapter, CourseExamBinding, CourseStudentVideo } from '../src/pages/course/types';
+import { readCourseExamContest, type CourseChapter, type CourseExamBinding, type CourseStudentVideo } from '../src/pages/course/types';
 
 const uiRoot = resolve(import.meta.dirname, '..');
 const hydroojRoot = resolve(uiRoot, '../hydrooj');
@@ -105,6 +105,8 @@ describe('course exam UI source contracts', () => {
     expect(card).to.match(/canEnter \? \([\s\S]*进入考试/);
     expect(card).to.include('已交卷，不能再答。');
     expect(card).to.include('查看答卷');
+    expect(card).to.include('再考一次');
+    expect(card).to.include('contest?.canRetake');
   });
 
   it('settings hint names binding rejects without new fields or courseGroupIds', () => {
@@ -325,5 +327,27 @@ describe('computeCourseExamWatchState', () => {
     const emptyPercent = computeCourseExamWatchState([], percentGate);
     expect(emptyAll).to.deep.equal({ locked: true, remaining: 0, remainingVideos: [] });
     expect(emptyPercent).to.deep.equal({ locked: true, remaining: 0, remainingVideos: [] });
+  });
+
+  it('forwards exam pass and retake fields from the course bootstrap', () => {
+    expect(readCourseExamContest({
+      docId: '64a000000000000000000801',
+      title: '结业考试',
+      examPassScore: 60,
+      examAttemptLimit: 3,
+      examAttemptsUsed: 1,
+      examScore: 40,
+      examJudging: true,
+      examPassed: false,
+      canRetake: true,
+    })).to.deep.include({
+      examPassScore: 60,
+      examAttemptLimit: 3,
+      examAttemptsUsed: 1,
+      examScore: 40,
+      examJudging: true,
+      canRetake: true,
+    });
+    expect(() => readCourseExamContest({ docId: '64a000000000000000000801', title: 'x', examPassScore: '60' })).to.throw(TypeError);
   });
 });

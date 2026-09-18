@@ -37,10 +37,14 @@ import {
     assignContestProblemScores,
     contestProblemScoreWeight,
     examPaperQuotasEqual,
+    examDefinitePaperMax,
     examScoresForPool,
     normalizeExamPaperPids,
     parseContestProblemScores,
+    parseExamAttemptLimit,
     parseExamPaperQuotas,
+    parseExamPassScore,
+    assertExamPassScoreFitsPaper,
     projectStudentContestTdoc,
     readExamPaperQuotas,
     studentContestProblemPids,
@@ -1133,6 +1137,8 @@ export class ContestEditHandler extends Handler {
     @param('plannedTeamBatchId', Types.ObjectId, true)
     @param('examPaperQuotas', Types.Content, true)
     @param('examShowVerdict', Types.Boolean, true)
+    @param('examPassScore', Types.Content, true)
+    @param('examAttemptLimit', Types.Content, true)
     @param('examScores', Types.Content, true)
     @serializedContestEdit
     async postUpdate(
@@ -1186,6 +1192,8 @@ export class ContestEditHandler extends Handler {
         plannedTeamBatchId: ObjectId = null,
         examPaperQuotas = '',
         examShowVerdict: boolean = undefined,
+        examPassScore = '',
+        examAttemptLimit = '',
         examScores = '',
     ) {
         content = content ?? '';
@@ -1203,12 +1211,32 @@ export class ContestEditHandler extends Handler {
         if (rule !== 'exam' && examScores) {
             throw new ValidationError('examScores', null, localizedErrorText`只有选择题考试能设置题目分数`);
         }
+        if (rule !== 'exam' && examPassScore) {
+            throw new ValidationError('examPassScore', null, localizedErrorText`只有选择题考试能设置及格分`);
+        }
+        if (rule !== 'exam' && examAttemptLimit) {
+            throw new ValidationError('examAttemptLimit', null, localizedErrorText`只有选择题考试能设置补考次数`);
+        }
         let nextExamScores: Record<number, number> | undefined;
         if (rule === 'exam' && examScores) {
             try {
                 nextExamScores = examScoresForPool(parseContestProblemScores(JSON.parse(examScores)), pids);
             } catch {
                 throw new ValidationError('examScores', null, localizedErrorText`考试分数无效`);
+            }
+        }
+        let nextExamPassScore: number | null = null;
+        let nextExamAttemptLimit = 1;
+        if (rule === 'exam') {
+            try {
+                nextExamPassScore = parseExamPassScore(examPassScore);
+            } catch {
+                throw new ValidationError('examPassScore', null, localizedErrorText`考试及格分无效`);
+            }
+            try {
+                nextExamAttemptLimit = parseExamAttemptLimit(examAttemptLimit);
+            } catch {
+                throw new ValidationError('examAttemptLimit', null, localizedErrorText`考试补考次数无效`);
             }
         }
         let nextExamPaperQuotas: ExamPaperQuotas | null = null;
@@ -1284,20 +1312,38 @@ export class ContestEditHandler extends Handler {
         }
         const statusRecalcToken = statusRecalcReasons.length ? randomstring(24) : null;
         await assertProblemBankSelection(authoritativeDomainId, pids, this.user, this.tdoc?.pids);
+        const poolPids = normalizeExamPaperPids(pids);
+        let examPaperKinds: Map<number, ProblemKind> | undefined;
         if (nextExamPaperQuotas) {
-            const poolPids = normalizeExamPaperPids(pids);
             const pdict = await problem.getList(authoritativeDomainId, poolPids, true, true, ['docId', 'problemKind'], true);
-            const kinds = new Map<number, ProblemKind>();
+            examPaperKinds = new Map<number, ProblemKind>();
             for (const pid of poolPids) {
                 const pdoc = pdict[pid];
                 if (!pdoc) throw new ValidationError('pids');
-                kinds.set(pid, effectiveProblemKind(pdoc));
+                examPaperKinds.set(pid, effectiveProblemKind(pdoc));
             }
             try {
-                assertExamPaperPoolSatisfiesQuotas(poolPids, kinds, nextExamPaperQuotas);
+                assertExamPaperPoolSatisfiesQuotas(poolPids, examPaperKinds, nextExamPaperQuotas);
             } catch (error) {
                 if (error instanceof TypeError && error.message === 'exam_paper_pool_short') {
                     throw new ValidationError('examPaperQuotas', null, localizedErrorText`题型数量不足，不能保存抽题`);
+                }
+                throw error;
+            }
+        }
+        if (nextExamPassScore !== null) {
+            try {
+                assertExamPassScoreFitsPaper(
+                    nextExamPassScore,
+                    examDefinitePaperMax(
+                        { score: nextExamScores || this.tdoc?.score, examPaperQuotas: nextExamPaperQuotas },
+                        poolPids,
+                        examPaperKinds,
+                    ),
+                );
+            } catch (error) {
+                if (error instanceof TypeError && error.message === 'exam_pass_score_above_max') {
+                    throw new ValidationError('examPassScore', null, localizedErrorText`及格分高于卷面满分`);
                 }
                 throw error;
             }
@@ -1508,6 +1554,11 @@ export class ContestEditHandler extends Handler {
         const sids = participantScopeMode === 'schools' ? participantSchoolIds.map((s) => new ObjectId(s.trim())).filter(Boolean) : [];
         const gids = participantScopeMode === 'groups' ? participantGroupIds.map((s) => new ObjectId(s.trim())).filter(Boolean) : [];
 
+        const unsetExamPassScore = rule === 'exam' && nextExamPassScore === null && this.tdoc?.examPassScore != null;
+        const unsetExamAttemptLimit = rule === 'exam' && nextExamAttemptLimit <= 1 && this.tdoc?.examAttemptLimit != null;
+        const unsetExamPassOnRuleChange = rule !== 'exam' && this.tdoc?.examPassScore != null;
+        const unsetExamLimitOnRuleChange = rule !== 'exam' && this.tdoc?.examAttemptLimit != null;
+        const unsetExamShowVerdictOnRuleChange = rule !== 'exam' && this.tdoc && 'examShowVerdict' in this.tdoc;
         await contest.edit(authoritativeDomainId, tid, {
             assign,
             hidden,
@@ -1523,6 +1574,8 @@ export class ContestEditHandler extends Handler {
             allowPrint,
             keepScoreboardHidden,
             ...(rule === 'exam' ? { examShowVerdict: examShowVerdict !== false } : {}),
+            ...(rule === 'exam' && nextExamPassScore !== null ? { examPassScore: nextExamPassScore } : {}),
+            ...(rule === 'exam' && nextExamAttemptLimit > 1 ? { examAttemptLimit: nextExamAttemptLimit } : {}),
             ...(allowVirtual != null ? { allowVirtual } : {}),
             langs,
             vigilEnabled,
@@ -1547,6 +1600,16 @@ export class ContestEditHandler extends Handler {
             participantScopeMode,
             participantSchoolIds: sids,
             participantGroupIds: gids,
+        }, {
+            ...(unsetExamPassScore || unsetExamAttemptLimit || unsetExamPassOnRuleChange || unsetExamLimitOnRuleChange || unsetExamShowVerdictOnRuleChange
+                ? {
+                    unset: {
+                        ...(unsetExamPassScore || unsetExamPassOnRuleChange ? { examPassScore: 1 as const } : {}),
+                        ...(unsetExamAttemptLimit || unsetExamLimitOnRuleChange ? { examAttemptLimit: 1 as const } : {}),
+                        ...(unsetExamShowVerdictOnRuleChange ? { examShowVerdict: 1 as const } : {}),
+                    },
+                }
+                : {}),
         });
         if (this.tdoc && plannedTeamBatchChanged) {
             await contestTeamBatch.setContestPlannedBatch(authoritativeDomainId, tid, requestedPlannedTeamBatchId, existingPlannedTeamBatchId, {

@@ -493,6 +493,16 @@ export interface Tdoc extends Document {
      * false = scores only. Non-exam must not store this.
      */
     examShowVerdict?: boolean;
+    /**
+     * Exam-rule only. Integer ≥1 is the contest-weighted pass score.
+     * Missing or 0 = no pass line and no retake. Non-exam must not store this.
+     */
+    examPassScore?: number;
+    /**
+     * Exam-rule only. Integer ≥2 is the max finalize count.
+     * Missing or 1 = one attempt. Non-exam must not store this.
+     */
+    examAttemptLimit?: number;
 
     // For homework
     penaltySince?: Date;
@@ -806,6 +816,10 @@ export interface ContestStat extends Record<string, any> {
     examPaperPids?: number[];
     /** Exam-rule paper completion. Written only by `finalizePaperForUser`. */
     paperFinalizedAt?: Date;
+    /** Exam-rule finalize count. Survives a retake clear. Missing + finalized = 1. */
+    examAttemptsUsed?: number;
+    /** Exam-rule journal floor. Minted at start/retake; older Record ids must not re-enter journal. */
+    examJournalAfter?: ObjectId;
 }
 
 export interface ScoreboardConfig {

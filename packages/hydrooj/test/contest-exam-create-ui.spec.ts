@@ -59,6 +59,19 @@ describe('contest exam create UI handler lock', () => {
         expect(postUpdate).to.include('examShowVerdict: examShowVerdict !== false');
     });
 
+    it('writes examPassScore and examAttemptLimit only for exam', () => {
+        expect(editor).to.include("@param('examPassScore', Types.Content, true)");
+        expect(editor).to.include("@param('examAttemptLimit', Types.Content, true)");
+        expect(postUpdate).to.include("rule !== 'exam' && examPassScore");
+        expect(postUpdate).to.include("rule !== 'exam' && examAttemptLimit");
+        expect(postUpdate).to.include('examPassScore: nextExamPassScore');
+        expect(postUpdate).to.include('examAttemptLimit: nextExamAttemptLimit');
+        expect(postUpdate).to.include('assertExamPassScoreFitsPaper');
+        expect(postUpdate).to.include('unsetExamPassOnRuleChange');
+        expect(postUpdate).to.include('unsetExamLimitOnRuleChange');
+        expect(postUpdate).to.include('unsetExamShowVerdictOnRuleChange');
+    });
+
     it('writes examScores only for exam', () => {
         expect(editor).to.include("@param('examScores', Types.Content, true)");
         expect(postUpdate).to.include("rule !== 'exam' && examScores");

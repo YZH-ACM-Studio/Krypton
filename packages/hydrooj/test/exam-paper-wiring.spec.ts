@@ -121,6 +121,11 @@ describe('exam paper wiring', () => {
         expect(catalog).to.include('已经交卷');
         expect(catalog).to.include('预览考试不能开始答题');
         expect(catalog).to.include('只有选择题考试能设置题目分数');
+        expect(catalog).to.include('只有选择题考试能设置及格分');
+        expect(catalog).to.include('考试及格分无效');
+        expect(catalog).to.include('补考次数已用完');
+        expect(catalog).to.include("'评测尚未结束，不能再考'");
+        expect(catalog).to.include("'已经及格，不能再考'");
         expect(catalog).to.include('考试分数无效');
         expect(catalog).to.include('只能给这场考试里的题目改分数');
     });
@@ -166,6 +171,18 @@ describe('exam paper wiring', () => {
         expect(paper).to.include('isExamPaperWindowClosed');
         expect(paper).to.include('canFinalize: !this.examPaperAdminPreview && paperStarted && !paperFinalized && !isExamPaperWindowClosed(this.tdoc, this.tsdoc, new Date())');
         expect(paper).to.include('examShowVerdict: this.examPaperAdminPreview || examShowsVerdict(this.tdoc)');
+        expect(paper).to.include('canRetakeExamPaper');
+        expect(paper).to.include('writeExamPaperRetakeStart');
+        expect(paper).to.include('examJournalAfter');
+        expect(paper).to.include('display: 1');
+        expect(paper).to.include('examAttemptsUsed');
+        expect(paper).to.include('assertExamPaperDraftReadable');
+        expect(paper).to.include("localizedErrorText`补考次数已用完`");
+        expect(paper).to.include('readExamPassScore(tdoc) === null');
+        expect(paper).to.include('examAttemptsUsed: used');
+        const retake = extractFunction(paper, 'writeExamPaperRetakeStart');
+        expect(retake.indexOf('contest.get(')).to.be.lessThan(retake.indexOf('drawExamPaperPids'));
+        expect(retake).to.include('if (updated && isExamPaperStarted(updated)');
         expect(paper).to.include('scaleByContestProblemScore(this.tdoc, pid');
         expect(readHydrooj('src/handler/contest.ts')).to.include('async postSetScores');
         expect(readHydrooj('src/handler/contest.ts')).to.include('assignContestProblemScores');
@@ -185,10 +202,11 @@ describe('exam paper wiring', () => {
         expect(write).to.include('examPaperPids');
         expect(write).to.include('assertFrozenExamPaperPids');
         const drawOff = write.slice(write.indexOf('if (!isExamPaperDrawEnabled'), write.indexOf('const quotas'));
-        expect(drawOff).to.include('{ startAt }');
+        expect(drawOff).to.include('{ startAt, examJournalAfter }');
         expect(drawOff).not.to.include('examPaperPids');
         expect(write).to.include('{ startAt: { $exists: false } }');
-        expect(write).to.include('{ startAt, examPaperPids }');
+        expect(write).to.include('{ startAt, examPaperPids, examJournalAfter }');
+        expect(write).to.include('examJournalAfter');
         expect(write).to.not.include('{ examPaperPids: { $exists: false } }');
         expect(write).to.not.include('existingStart');
         expect(paper).to.not.include('examPaperStartNeedsWrite');
@@ -225,6 +243,19 @@ describe('exam paper wiring', () => {
         expect(readRepo('packages/ui-next/src/pages/exam-mode/workspace.tsx')).not.to.include('examPaper');
         expect(readRepo('packages/ui-next/src/components/paper/sections.tsx')).to.include('contestEndAt || tdoc.endAt');
         expect(readRepo('packages/ui-next/src/components/paper/sections.tsx')).not.to.include('examPaperQuotas');
+    });
+
+    it('drops stale exam journal rids after a retake floor', () => {
+        const contestModel = readHydrooj('src/model/contest.ts');
+        expect(contestModel).to.include("tdoc.rule === 'exam'");
+        expect(contestModel).to.include('examStatusAcceptsJournalRid');
+        expect(contestModel).to.include('examJournalFloorFilter');
+        expect(contestModel).to.include("'journal.rid': rid");
+        expect(contestModel).to.include('manual === true');
+        expect(readHydrooj('src/handler/paper.ts')).to.include('$inc: { rev: 1 }');
+        expect(readHydrooj('src/model/manual-grade.ts')).to.include('manual: true');
+        expect(readHydrooj('src/handler/course.ts')).to.include('canRetake: true');
+        expect(readRepo('packages/ui-next/src/pages/course/types.ts')).to.include('canRetake: true');
     });
 
     it('fails closed on a missing frozen pid and maps remaining-time / short-pool start errors', () => {

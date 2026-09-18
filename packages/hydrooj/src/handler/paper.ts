@@ -45,19 +45,29 @@ import { canUsePostContestPractice, getPostContestPracticeState, isPostContestPr
 import { assertCourseExamWatchGate } from '../lib/course-exam-gate';
 import { buildExamModeRecordCodePayload } from '../lib/exam-mode-record';
 import {
+    canRetakeExamPaper,
     canStartExamPaper,
     drawExamPaperPids,
+    EXAM_ATTEMPT_PENDING_STATUSES,
+    examAttemptScore,
+    examAttemptsUsed,
     examPaperPersonalEnd,
     examShowsVerdict,
+    isExamAttemptJudgePending,
+    isExamAttemptPassed,
     isExamPaperDrawEnabled,
     scaleByContestProblemScore,
     isExamPaperFinalized,
     isExamPaperInWindow,
     isExamPaperStarted,
     isExamPaperWindowClosed,
+    minProblemsToPass,
+    examPaperContributions,
     normalizeExamPaperPids,
     parseFrozenExamPaperPids,
+    readExamAttemptLimit,
     readExamPaperQuotas,
+    readExamPassScore,
     resolveExamPaperPids,
 } from '../lib/exam-paper';
 import * as contest from '../model/contest';
@@ -222,13 +232,14 @@ async function loadExamPaperPoolKinds(domainId: string, tid: ObjectId, poolPids:
 async function writeExamPaperStart(domainId: string, tid: ObjectId, uid: number, tdoc: any): Promise<any> {
     if (!isExamPaperDrawEnabled(tdoc)) {
         const startAt = new Date();
+        const examJournalAfter = new ObjectId();
         const updated = await document.setStatusIfCondition(
             domainId,
             document.TYPE_CONTEST,
             tid,
             uid,
             { startAt: { $exists: false } },
-            { startAt },
+            { startAt, examJournalAfter },
         );
         const tsdoc = updated || (await contest.getStatus(domainId, tid, uid));
         if (!isExamPaperStarted(tsdoc)) {
@@ -252,13 +263,14 @@ async function writeExamPaperStart(domainId: string, tid: ObjectId, uid: number,
         throw error;
     }
     const startAt = new Date();
+    const examJournalAfter = new ObjectId();
     const updated = await document.setStatusIfCondition(
         domainId,
         document.TYPE_CONTEST,
         tid,
         uid,
         { startAt: { $exists: false } },
-        { startAt, examPaperPids },
+        { startAt, examPaperPids, examJournalAfter },
     );
     const tsdoc = updated || (await contest.getStatus(domainId, tid, uid));
     if (isExamPaperStarted(tsdoc)) {
@@ -275,6 +287,120 @@ async function writeExamPaperStart(domainId: string, tid: ObjectId, uid: number,
         updated ? 'applied' : 're-read',
     );
     return tsdoc;
+}
+
+function assertExamPaperCanRetake(tdoc: any, tsdoc: any) {
+    const now = new Date();
+    if (canRetakeExamPaper(tdoc, tsdoc, now)) return;
+    if (!isExamPaperFinalized(tsdoc)) {
+        throw new ValidationError('contest', null, localizedErrorText`还不能再考`);
+    }
+    if (isExamAttemptJudgePending(tsdoc)) {
+        throw new ValidationError('contest', null, localizedErrorText`评测尚未结束，不能再考`);
+    }
+    if (isExamAttemptPassed(tdoc, tsdoc)) {
+        throw new ValidationError('contest', null, localizedErrorText`已经及格，不能再考`);
+    }
+    if (readExamPassScore(tdoc) === null) {
+        throw new ValidationError('contest', null, localizedErrorText`还不能再考`);
+    }
+    if (examAttemptsUsed(tsdoc) >= readExamAttemptLimit(tdoc)) {
+        throw new ValidationError('contest', null, localizedErrorText`补考次数已用完`);
+    }
+    assertExamPaperCanStart({ ...tdoc }, { startAt: undefined, examPaperPids: undefined, paperFinalizedAt: undefined });
+    throw new ValidationError('contest', null, localizedErrorText`还不能再考`);
+}
+
+async function writeExamPaperRetakeStart(domainId: string, tid: ObjectId, uid: number, tdoc: any, tsdoc: any): Promise<any> {
+    assertExamPaperCanRetake(tdoc, tsdoc);
+    const live = await contest.get(domainId, tid);
+    const latest = await contest.getStatus(domainId, tid, uid);
+    assertExamPaperCanRetake(live, latest);
+    let examPaperPids: number[] | undefined;
+    if (isExamPaperDrawEnabled(live)) {
+        const quotas = readExamPaperQuotas(live.examPaperQuotas);
+        if (!quotas) {
+            throw new ValidationError('examPaperPids', null, localizedErrorText`个人试卷缺失或损坏，不能进入`);
+        }
+        const poolPids = Array.isArray(live.pids) ? (live.pids as number[]) : [];
+        const kinds = await loadExamPaperPoolKinds(domainId, tid, poolPids);
+        try {
+            examPaperPids = drawExamPaperPids(normalizeExamPaperPids(poolPids), kinds, quotas);
+        } catch (error) {
+            if (error instanceof TypeError && error.message === 'exam_paper_pool_short') {
+                throw new ValidationError('examPaperQuotas', null, localizedErrorText`题型数量不足，不能开始考试`);
+            }
+            throw error;
+        }
+    }
+    const used = examAttemptsUsed(latest);
+    const pass = readExamPassScore(live);
+    const startAt = new Date();
+    const examJournalAfter = new ObjectId();
+    const $set: Record<string, unknown> = { startAt, examJournalAfter, examAttemptsUsed: used };
+    const $unset: Record<string, 1> = {
+        paperFinalizedAt: 1,
+        journal: 1,
+        score: 1,
+        detail: 1,
+        display: 1,
+    };
+    if (examPaperPids) $set.examPaperPids = examPaperPids;
+    else $unset.examPaperPids = 1;
+    const filter: Record<string, unknown> = {
+        domainId,
+        docType: document.TYPE_CONTEST,
+        docId: tid,
+        uid,
+        paperFinalizedAt: { $exists: true },
+        startAt: { $exists: true },
+        journal: {
+            $not: {
+                $elemMatch: {
+                    status: { $in: [...EXAM_ATTEMPT_PENDING_STATUSES] },
+                    manual: { $ne: true },
+                },
+            },
+        },
+        ...(used === 1
+            ? { $or: [{ examAttemptsUsed: 1 }, { examAttemptsUsed: { $exists: false } }] }
+            : { examAttemptsUsed: used }),
+        ...(pass !== null ? { score: { $not: { $gte: pass } } } : {}),
+    };
+    const updated = await document.collStatus.findOneAndUpdate(
+        filter,
+        { $set, $unset, $inc: { rev: 1 } },
+        { returnDocument: 'after' },
+    );
+    if (updated && isExamPaperStarted(updated) && !isExamPaperFinalized(updated)) {
+        if (isExamPaperDrawEnabled(live)) assertFrozenExamPaperPids(live, updated);
+        await PaperDraftModel.clearDrafts(domainId, tid, uid);
+        logger.info(
+            'Exam paper retake start domain=%s tid=%s uid=%d used=%d pidCount=%d cas=%s',
+            domainId,
+            String(tid),
+            uid,
+            used,
+            Array.isArray(updated.examPaperPids) ? updated.examPaperPids.length : normalizeExamPaperPids(live.pids).length,
+            'applied',
+        );
+        return updated;
+    }
+    const next = await contest.getStatus(domainId, tid, uid);
+    if (isExamPaperStarted(next) && !isExamPaperFinalized(next)) {
+        if (isExamPaperDrawEnabled(live)) assertFrozenExamPaperPids(live, next);
+        logger.info(
+            'Exam paper retake start domain=%s tid=%s uid=%d used=%d pidCount=%d cas=%s',
+            domainId,
+            String(tid),
+            uid,
+            examAttemptsUsed(next),
+            Array.isArray(next?.examPaperPids) ? next.examPaperPids.length : normalizeExamPaperPids(live.pids).length,
+            're-read',
+        );
+        return next;
+    }
+    throw new ValidationError('contest', null, localizedErrorText`还不能再考`);
 }
 
 function localizedConfigValidation(field: string, detail: LocalizedErrorText) {
@@ -334,11 +460,16 @@ function assertPaperProblemsReadable(handler: PaperBaseHandler) {
     if (!handler.tsdoc?.attend && !contest.isDone(handler.tdoc)) throw new ContestNotAttendedError(handler.tid);
 }
 
-function assertExamPaperStartedForWrite(handler: PaperBaseHandler) {
+function assertExamPaperDraftReadable(handler: PaperBaseHandler) {
     if (handler.examPaperAdminPreview) return;
     if (!isExamPaperStarted(handler.tsdoc)) {
         throw new ValidationError('contest', null, localizedErrorText`还没有开始答题`);
     }
+}
+
+function assertExamPaperStartedForWrite(handler: PaperBaseHandler) {
+    assertExamPaperDraftReadable(handler);
+    if (handler.examPaperAdminPreview) return;
     if (isExamPaperFinalized(handler.tsdoc)) {
         throw new ValidationError('contest', null, localizedErrorText`已经交卷`);
     }
@@ -791,7 +922,10 @@ class PaperLayoutHandler extends PaperBaseHandler {
             inWindow: this.isInWindow(),
             paperStarted,
             paperFinalized,
-            canStartPaper: !this.examPaperAdminPreview && !paperStarted && !paperFinalized && canStartExamPaper(this.tdoc, new Date()),
+            canStartPaper: !this.examPaperAdminPreview && (
+                (!paperStarted && !paperFinalized && canStartExamPaper(this.tdoc, new Date()))
+                || canRetakeExamPaper(this.tdoc, this.tsdoc, new Date())
+            ),
             canViewPaper,
             contestBeginAt: this.tdoc.beginAt,
             contestEndAt: this.tdoc.endAt,
@@ -799,6 +933,23 @@ class PaperLayoutHandler extends PaperBaseHandler {
             paperOutline: examPaperOutline(this.tdoc),
             canFinalize: !this.examPaperAdminPreview && paperStarted && !paperFinalized && !isExamPaperWindowClosed(this.tdoc, this.tsdoc, new Date()),
             examShowVerdict: this.examPaperAdminPreview || examShowsVerdict(this.tdoc),
+            examPassScore: readExamPassScore(this.tdoc),
+            examAttemptLimit: readExamAttemptLimit(this.tdoc),
+            examAttemptsUsed: examAttemptsUsed(this.tsdoc),
+            examScore: examAttemptScore(this.tsdoc),
+            examJudging: paperFinalized && isExamAttemptJudgePending(this.tsdoc),
+            examPassed: isExamAttemptPassed(this.tdoc, this.tsdoc),
+            canRetake: !this.examPaperAdminPreview && canRetakeExamPaper(this.tdoc, this.tsdoc, new Date()),
+            examMinProblemsToPass: (() => {
+                const pass = readExamPassScore(this.tdoc);
+                if (pass === null || !canViewPaper) return null;
+                if (!this.examPaperAdminPreview && !examShowsVerdict(this.tdoc)) return null;
+                try {
+                    return minProblemsToPass(pass, examPaperContributions(this.tdoc, paperPids));
+                } catch {
+                    return null;
+                }
+            })(),
             paperPreview: this.examPaperAdminPreview,
             owner: ownerInfo,
             broadcasts,
@@ -817,7 +968,7 @@ class PaperLayoutHandler extends PaperBaseHandler {
 class PaperDraftListHandler extends PaperBaseHandler {
     async get({ domainId }: { domainId: string }) {
         assertPaperProblemsReadable(this);
-        assertExamPaperStartedForWrite(this);
+        assertExamPaperDraftReadable(this);
         const drafts = await PaperDraftModel.getDraftsForUser(domainId, this.tid, this.user._id);
         const pdict = await this.getProblemDict();
         const staleness: Record<string, boolean> = {};
@@ -839,7 +990,11 @@ class PaperDraftListHandler extends PaperBaseHandler {
                 .sort({ _id: -1 })
                 .limit(200)
                 .toArray();
+            const journalFloor = this.tsdoc?.examJournalAfter;
+            const journalFloorHex = journalFloor instanceof ObjectId ? journalFloor.toHexString() : '';
             for (const r of rdocs || []) {
+                const rid = r?._id;
+                if (journalFloorHex && rid instanceof ObjectId && rid.toHexString() <= journalFloorHex) continue;
                 if (!recordStatus[String(r.pid)]) {
                     recordStatus[String(r.pid)] = String(r.status || '');
                 }
@@ -1002,12 +1157,14 @@ class PaperStartHandler extends PaperBaseHandler {
         if (this.examPaperAdminPreview) {
             throw new ValidationError('contest', null, localizedErrorText`预览考试不能开始答题`);
         }
-        assertExamPaperCanStart(this.tdoc, this.tsdoc);
         if (!this.tsdoc?.attend) {
             throw new ContestNotAttendedError(this.tid);
         }
         let tsdoc = this.tsdoc;
-        if (!isExamPaperStarted(tsdoc)) {
+        if (isExamPaperFinalized(tsdoc)) {
+            tsdoc = await writeExamPaperRetakeStart(domainId, this.tid, this.user._id, this.tdoc, tsdoc);
+        } else if (!isExamPaperStarted(tsdoc)) {
+            assertExamPaperCanStart(this.tdoc, tsdoc);
             tsdoc = await writeExamPaperStart(domainId, this.tid, this.user._id, this.tdoc);
         }
         this.tsdoc = tsdoc;
@@ -1112,13 +1269,29 @@ export async function finalizePaperForUser(
     const tsdoc = await contest.getStatus(domainId, tid, uid);
     if (!(tsdoc?.paperFinalizedAt instanceof Date) || Number.isNaN(tsdoc.paperFinalizedAt.getTime())) {
         const paperFinalizedAt = new Date();
-        await contest.setStatus(domainId, tid, uid, { paperFinalizedAt });
+        const examAttemptsUsedNext = examAttemptsUsed(existing) + 1;
+        const written = await document.collStatus.findOneAndUpdate(
+            {
+                domainId,
+                docType: document.TYPE_CONTEST,
+                docId: tid,
+                uid,
+                paperFinalizedAt: { $exists: false },
+            },
+            { $set: { paperFinalizedAt, examAttemptsUsed: examAttemptsUsedNext } },
+            { returnDocument: 'after' },
+        );
+        const settled = written || (await contest.getStatus(domainId, tid, uid));
+        if (!(settled?.paperFinalizedAt instanceof Date) || Number.isNaN(settled.paperFinalizedAt.getTime())) {
+            throw new ValidationError('contest', null, localizedErrorText`已经交卷`);
+        }
         logger.info(
-            'Paper finalized domain=%s tid=%s uid=%d rids=%d paperFinalizedAt=%s result=success',
+            'Paper finalized domain=%s tid=%s uid=%d rids=%d used=%d paperFinalizedAt=%s result=success',
             domainId,
             String(tid),
             uid,
             rids.length,
+            examAttemptsUsed(settled),
             paperFinalizedAt.toISOString(),
         );
     }

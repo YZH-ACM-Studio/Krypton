@@ -112,6 +112,7 @@ describe('exam paper start and overview', () => {
     expect(paper).to.include('/paper/${tid}#ranking');
     expect(paper).not.to.include('/c/${tid}/scoreboard');
     expect(paper).to.include('开始后将按个人时长计时，试卷不能重抽。确定开始答题？');
+    expect(paper).to.include('将清空上一轮本场答卷并重新计时');
     expect(paper).to.include('firstPaperKind(groups)');
     expect(paper).to.include('kindLabel={KIND_LABELS[cell.kind]}');
     expect(paper).to.include("data.paperStarted === false");

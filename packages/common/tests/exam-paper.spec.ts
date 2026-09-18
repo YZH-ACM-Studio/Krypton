@@ -13,6 +13,15 @@ import {
     contestProblemScoreWeight,
     examScoresForPool,
     parseContestProblemScores,
+    parseExamAttemptLimit,
+    parseExamPassScore,
+    canOpenExamPaperAfterFail,
+    canRetakeExamPaper,
+    examAttemptsUsed,
+    examDefinitePaperMax,
+    isExamAttemptJudgePending,
+    isExamAttemptPassed,
+    minProblemsToPass,
     scaleByContestProblemScore,
     isExamPaperFinalized,
     isExamPaperInWindow,
@@ -176,5 +185,82 @@ describe('exam paper draw and resolve', () => {
         expect(() => assignContestProblemScores({}, [12], [99], 2)).to.throw(TypeError, 'contest_score_pids');
         expect(() => assignContestProblemScores({}, [12], [], 2)).to.throw(TypeError, 'contest_score_pids');
         expect(() => assignContestProblemScores({}, [12], [12], 0)).to.throw(TypeError, 'contest_score_value');
+    });
+});
+
+describe('exam pass and retake', () => {
+    const window = {
+        beginAt: date('2026-09-18T00:00:00.000Z'),
+        endAt: date('2026-09-18T06:00:00.000Z'),
+        duration: 1,
+        examPassScore: 60,
+        examAttemptLimit: 3,
+        pids: [11, 12],
+        score: { 11: 40, 12: 30 },
+        rule: 'exam',
+    };
+
+    it('treats missing pass score as off and missing limit as one attempt', () => {
+        expect(parseExamPassScore(undefined)).to.equal(null);
+        expect(parseExamPassScore('')).to.equal(null);
+        expect(parseExamPassScore(0)).to.equal(null);
+        expect(parseExamPassScore(60)).to.equal(60);
+        expect(parseExamAttemptLimit(undefined)).to.equal(1);
+        expect(parseExamAttemptLimit('')).to.equal(1);
+        expect(parseExamAttemptLimit(2)).to.equal(2);
+        expect(() => parseExamPassScore(-1)).to.throw(TypeError, 'exam_pass_score_invalid');
+        expect(() => parseExamAttemptLimit(0)).to.throw(TypeError, 'exam_attempt_limit_invalid');
+    });
+
+    it('counts a legacy finalized paper as one used attempt', () => {
+        expect(examAttemptsUsed({})).to.equal(0);
+        expect(examAttemptsUsed({ paperFinalizedAt: date('2026-09-18T01:00:00.000Z') })).to.equal(1);
+        expect(examAttemptsUsed({ paperFinalizedAt: date('2026-09-18T01:00:00.000Z'), examAttemptsUsed: 2 })).to.equal(2);
+    });
+
+    it('passes only after finalize, settled judging, and the weighted score', () => {
+        const tsdoc = { startAt: date('2026-09-18T01:00:00.000Z'), paperFinalizedAt: date('2026-09-18T01:30:00.000Z'), score: 60 };
+        expect(isExamAttemptPassed(window, tsdoc)).to.equal(true);
+        expect(isExamAttemptPassed(window, { ...tsdoc, score: 59 })).to.equal(false);
+        expect(isExamAttemptJudgePending({ journal: [{ pid: 11, status: 20 }] })).to.equal(true);
+        expect(isExamAttemptJudgePending({ journal: [{ pid: 11, status: 20, manual: true }] })).to.equal(false);
+        expect(isExamAttemptPassed(window, { ...tsdoc, journal: [{ pid: 11, status: 20 }] })).to.equal(false);
+        expect(isExamAttemptPassed(window, { ...tsdoc, journal: [{ pid: 11, status: 20, manual: true }] })).to.equal(true);
+        expect(isExamAttemptPassed({ ...window, examPassScore: undefined }, tsdoc)).to.equal(false);
+    });
+
+    it('allows an immediate retake when failed, attempts remain, and a full duration still fits', () => {
+        const failed = {
+            startAt: date('2026-09-18T01:00:00.000Z'),
+            paperFinalizedAt: date('2026-09-18T01:20:00.000Z'),
+            score: 40,
+            examAttemptsUsed: 1,
+        };
+        expect(canRetakeExamPaper(window, failed, date('2026-09-18T01:21:00.000Z'))).to.equal(true);
+        expect(canRetakeExamPaper(window, { ...failed, score: 60 }, date('2026-09-18T01:21:00.000Z'))).to.equal(false);
+        expect(canRetakeExamPaper(window, { ...failed, examAttemptsUsed: 3 }, date('2026-09-18T01:21:00.000Z'))).to.equal(false);
+        expect(canRetakeExamPaper(window, failed, date('2026-09-18T05:00:00.001Z'))).to.equal(false);
+        expect(canRetakeExamPaper({ ...window, examPassScore: undefined, examAttemptLimit: 3 }, failed, date('2026-09-18T01:21:00.000Z'))).to.equal(false);
+        expect(canOpenExamPaperAfterFail({ ...window, examPassScore: undefined, examAttemptLimit: 3 }, failed, date('2026-09-18T01:21:00.000Z'))).to.equal(false);
+        const judging = { ...failed, journal: [{ pid: 11, status: 20 }] };
+        expect(canRetakeExamPaper(window, judging, date('2026-09-18T01:21:00.000Z'))).to.equal(false);
+        expect(canOpenExamPaperAfterFail(window, judging, date('2026-09-18T01:21:00.000Z'))).to.equal(true);
+    });
+
+    it('computes the greedy minimum full-score count and a definite paper max', () => {
+        expect(minProblemsToPass(60, [40, 30, 20])).to.equal(2);
+        expect(minProblemsToPass(90, [40, 30, 20])).to.equal(3);
+        expect(minProblemsToPass(100, [40, 30, 20])).to.equal(null);
+        expect(examDefinitePaperMax(window, [11, 12])).to.equal(70);
+        expect(examDefinitePaperMax(
+            { score: { 11: 2, 12: 2, 13: 4 }, examPaperQuotas: { single: 2 } },
+            [11, 12, 13],
+            new Map([[11, 'single'], [12, 'single'], [13, 'multi']]),
+        )).to.equal(4);
+        expect(examDefinitePaperMax(
+            { score: { 11: 2, 12: 3 }, examPaperQuotas: { single: 1 } },
+            [11, 12],
+            new Map([[11, 'single'], [12, 'single']]),
+        )).to.equal(null);
     });
 });

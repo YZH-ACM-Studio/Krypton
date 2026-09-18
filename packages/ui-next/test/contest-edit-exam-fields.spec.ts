@@ -18,6 +18,8 @@ const LOCKED_POST_NAMES = [
   'cameraEnabled',
   'hidden',
   'examShowVerdict',
+  'examPassScore',
+  'examAttemptLimit',
   'examScores',
 ] as const;
 
@@ -87,6 +89,10 @@ describe('contest edit exam field contract', () => {
     const pool = source('packages/ui-next/src/pages/contest-exam-paper-pool.tsx');
     expect(pool, 'paper pool must POST examScores').to.match(/name=["']examScores["']/);
     expect(pool, 'paper pool can batch-set contest scores').to.include('所选设为该分');
+    expect(pool, 'paper pool mounts pass settings').to.include('ContestExamPassSettings');
+    const pass = source('packages/ui-next/src/pages/contest-exam-pass-settings.tsx');
+    expect(pass, 'pass settings POST examPassScore').to.match(/name=["']examPassScore["']/);
+    expect(pass, 'pass settings POST examAttemptLimit').to.match(/name=["']examAttemptLimit["']/);
     expect(exam, 'exam description stays postable and can be filled later').to.include('name="content"');
     expect(exam, 'exam description can be filled later').to.include('可后补');
     const postDecorators = contestEditPostUpdateDecorators(handler);

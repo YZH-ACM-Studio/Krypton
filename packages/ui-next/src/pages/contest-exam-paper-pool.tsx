@@ -23,6 +23,7 @@ import {
   type ProblemOption,
 } from '@/lib/multi-select-presets';
 import { ContestExamPaperQuotas } from './contest-exam-paper-quotas';
+import { ContestExamPassSettings } from './contest-exam-pass-settings';
 
 const KIND_LABEL: Record<ProblemKind, string> = {
   programming: '编程',
@@ -176,6 +177,8 @@ export function ContestExamPaperPool({
   pdict,
   quotas,
   scores: initialScores,
+  passScore,
+  attemptLimit,
 }: {
   name?: string;
   value: string[];
@@ -183,6 +186,8 @@ export function ContestExamPaperPool({
   pdict?: Record<string, ExamPaperPdictRow>;
   quotas?: Partial<Record<string, number>>;
   scores?: unknown;
+  passScore?: unknown;
+  attemptLimit?: unknown;
 }) {
   const bs = useBootstrap();
   const [history, setHistory] = useState(() => examPaperHistoryInit(value));
@@ -469,6 +474,14 @@ export function ContestExamPaperPool({
     <div className="space-y-5">
       <input type="hidden" name={name} value={pids.join(',')} />
       <input type="hidden" name="examScores" value={examScoresPayload(pids, scores)} />
+      <ContestExamPassSettings
+        pids={pids}
+        scores={scores}
+        quotas={quotas}
+        kinds={new Map(rows.map((row) => [row.key, row.kind]))}
+        passScore={passScore}
+        attemptLimit={attemptLimit}
+      />
 
       <section className="space-y-3 rounded-xl border bg-muted/20 p-4">
         <div className="flex flex-wrap items-end justify-between gap-2">

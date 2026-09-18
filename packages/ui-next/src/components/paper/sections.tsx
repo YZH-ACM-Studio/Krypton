@@ -45,6 +45,15 @@ interface OverviewData {
   durationHours?: number | null;
   paperOutline?: PaperOutline;
   starting?: boolean;
+  examShowVerdict?: boolean;
+  examPassScore?: number | null;
+  examAttemptLimit?: number;
+  examAttemptsUsed?: number;
+  examScore?: number;
+  examJudging?: boolean;
+  examPassed?: boolean;
+  canRetake?: boolean;
+  examMinProblemsToPass?: number | null;
 }
 
 function kindLabel(kind: string): string {
@@ -73,9 +82,21 @@ export function OverviewSection({
     for (const item of paperOutline?.kinds || []) byKind.set(item.kind, item.count);
   }
   const questionCount = cells.length || paperOutline?.questionCount || 0;
-  const ctaLabel = paperPreview ? '预览题目' : paperFinalized ? '查看答卷' : paperStarted ? '进入答题' : '开始答题';
+  const canRetake = data.canRetake === true;
+  const startNext = !paperPreview && ((canStartPaper === true && !paperStarted) || canRetake);
+  const ctaLabel = paperPreview
+    ? '预览题目'
+    : canRetake
+      ? '再考一次'
+      : paperFinalized
+        ? '查看答卷'
+        : paperStarted
+          ? '进入答题'
+          : '开始答题';
   const ctaEnabled = paperPreview || paperFinalized || paperStarted || canStartPaper === true;
-  const onCta = paperPreview || paperFinalized || paperStarted ? onEnterProblems : onStartPaper;
+  const onCta = startNext ? onStartPaper : paperPreview || paperFinalized || paperStarted ? onEnterProblems : onStartPaper;
+  const passScore = typeof data.examPassScore === 'number' && data.examPassScore > 0 ? data.examPassScore : null;
+  const showVerdict = data.examShowVerdict !== false;
 
   return (
     <div className="flex min-h-full justify-center p-6 sm:p-10">
@@ -83,7 +104,10 @@ export function OverviewSection({
         <div className="space-y-3 text-center">
           <div className="flex flex-wrap justify-center gap-2">
             {paperPreview && <Badge variant="outline">预览</Badge>}
-            {paperFinalized && !paperPreview && <Badge variant="secondary">已交卷</Badge>}
+            {paperFinalized && !paperPreview && data.examJudging && <Badge variant="outline">评测中</Badge>}
+            {paperFinalized && !paperPreview && data.examPassed && <Badge>已及格</Badge>}
+            {paperFinalized && !paperPreview && !data.examJudging && !data.examPassed && passScore && <Badge variant="secondary">未及格</Badge>}
+            {paperFinalized && !paperPreview && !passScore && <Badge variant="secondary">已交卷</Badge>}
             {paperStarted && !paperFinalized && !paperPreview && <Badge>答题中</Badge>}
             {!paperStarted && !paperFinalized && !paperPreview && data.inWindow && <Badge>可开考</Badge>}
             {isUpcoming && <Badge variant="outline">即将开始</Badge>}
@@ -99,8 +123,14 @@ export function OverviewSection({
           <p className="text-sm text-muted-foreground">
             {paperPreview
               ? '管理员预览不会计时，也不能交卷。'
-              : paperFinalized
-                ? '已经交卷。可以查看对错，不能再改、不能再交。'
+              : paperFinalized && canRetake
+                ? '上一轮未及格。再考会清空本场答卷并重新计时。'
+                : paperFinalized
+                ? data.examJudging
+                  ? '已交卷，正在评测，出分前不能再考。'
+                  : data.examPassed
+                    ? '已经及格。可以查看答卷，不能再考。'
+                    : '已经交卷。可以查看答卷，不能再改、不能再交。'
                 : paperStarted
                   ? '个人计时已开始。进入答题后继续作答。'
                   : '开始答题后才会抽卷并开始个人倒计时。'}
@@ -109,11 +139,15 @@ export function OverviewSection({
 
         <Card>
           <CardHeader className="items-center space-y-1 pb-4 text-center">
-            <CardTitle className="text-lg">{paperPreview ? '预览试卷' : paperFinalized ? '答卷已提交' : paperStarted ? '继续考试' : '准备开考'}</CardTitle>
+            <CardTitle className="text-lg">
+              {paperPreview ? '预览试卷' : canRetake ? '可以再考' : paperFinalized ? '答卷已提交' : paperStarted ? '继续考试' : '准备开考'}
+            </CardTitle>
             <CardDescription>
               {paperPreview
                 ? '预览可以看到题库，但不会写入开考时间。'
-                : paperFinalized
+                : canRetake
+                  ? '先查看上一轮，或确认后再开一轮完整时长。'
+                  : paperFinalized
                   ? '再次打开只是查阅，不会生成新的评测记录。'
                   : paperStarted
                     ? '试卷已冻结，倒计时按个人时长计算。'
@@ -121,15 +155,22 @@ export function OverviewSection({
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
-            <Button
-              type="button"
-              size="lg"
-              className="h-14 w-full text-base font-semibold"
-              disabled={!ctaEnabled || starting}
-              onClick={onCta}
-            >
-              {starting ? '正在开始…' : ctaLabel}
-            </Button>
+            <div className="space-y-2">
+              <Button
+                type="button"
+                size="lg"
+                className="h-14 w-full text-base font-semibold"
+                disabled={!ctaEnabled || starting}
+                onClick={onCta}
+              >
+                {starting ? '正在开始…' : ctaLabel}
+              </Button>
+              {canRetake ? (
+                <Button type="button" variant="outline" className="w-full" onClick={onEnterProblems}>
+                  查看上一轮答卷
+                </Button>
+              ) : null}
+            </div>
             {!ctaEnabled && !paperPreview && (
               <p className="text-center text-sm text-muted-foreground">{isUpcoming ? '整场开始后才能开考。' : '现在不能开始答题。'}</p>
             )}
@@ -142,6 +183,24 @@ export function OverviewSection({
                 value={typeof durationHours === 'number' && durationHours > 0 ? `${durationHours} 小时` : `${wallMinutes} 分钟（整场）`}
               />
             </div>
+            {passScore !== null && (
+              <div className="space-y-1 rounded-lg border bg-muted/30 p-4 text-sm">
+                <p>
+                  及格分 <span className="font-medium tabular-nums">{passScore}</span>
+                  {typeof data.examScore === 'number' && paperFinalized ? (
+                    <>
+                      ，本轮 <span className="font-medium tabular-nums">{data.examScore}</span>
+                    </>
+                  ) : null}
+                </p>
+                {showVerdict && paperStarted && typeof data.examMinProblemsToPass === 'number' ? (
+                  <p className="text-xs text-muted-foreground">按当前卷面，至少全对 {data.examMinProblemsToPass} 题才够及格。</p>
+                ) : null}
+                <p className="text-xs text-muted-foreground">
+                  已考 {data.examAttemptsUsed || (paperFinalized ? 1 : 0)} / {data.examAttemptLimit || 1} 次
+                </p>
+              </div>
+            )}
             <div className="space-y-2 rounded-lg border bg-muted/30 p-4">
               <div className="flex items-center gap-2 text-sm font-medium">
                 <FileText className="size-4 text-muted-foreground" />

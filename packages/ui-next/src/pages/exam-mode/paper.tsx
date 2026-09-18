@@ -161,6 +161,14 @@ export function ExamPaperPage() {
     showScoreboard: boolean;
     allowSubmitByKind: boolean;
     examShowVerdict?: boolean;
+    examPassScore?: number | null;
+    examAttemptLimit?: number;
+    examAttemptsUsed?: number;
+    examScore?: number;
+    examJudging?: boolean;
+    examPassed?: boolean;
+    canRetake?: boolean;
+    examMinProblemsToPass?: number | null;
     examMode?: { student?: ExamModeStudentView | null };
   };
   const { tdoc, pdict, cells, inWindow, canFinalize, paperPreview, broadcasts, scoreboard, showScoreboard, allowSubmitByKind } = data;
@@ -181,7 +189,13 @@ export function ExamPaperPage() {
   }, [paperLocked, section, setSection]);
 
   const startPaper = async () => {
-    if (!(await confirmDialog('开始后将按个人时长计时，试卷不能重抽。确定开始答题？', { title: '开始答题' }))) return;
+    const retake = data.canRetake === true;
+    if (!(await confirmDialog(
+      retake
+        ? '将清空上一轮本场答卷并重新计时。开了抽卷会再抽一卷。确定再考一次？'
+        : '开始后将按个人时长计时，试卷不能重抽。确定开始答题？',
+      { title: retake ? '再考一次' : '开始答题' },
+    ))) return;
     setStarting(true);
     try {
       const res = await fetchHydroResponse(
@@ -233,6 +247,15 @@ export function ExamPaperPage() {
             durationHours: data.durationHours,
             paperOutline: data.paperOutline,
             starting,
+            examShowVerdict: paperPreview === true || data.examShowVerdict !== false,
+            examPassScore: data.examPassScore,
+            examAttemptLimit: data.examAttemptLimit,
+            examAttemptsUsed: data.examAttemptsUsed,
+            examScore: data.examScore,
+            examJudging: data.examJudging === true,
+            examPassed: data.examPassed === true,
+            canRetake: data.canRetake === true,
+            examMinProblemsToPass: data.examMinProblemsToPass,
           }}
           onEnterProblems={() => setSection('problems')}
           onStartPaper={startPaper}

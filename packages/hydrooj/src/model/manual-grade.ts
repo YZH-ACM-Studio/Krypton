@@ -42,7 +42,11 @@ export async function markManualPending(input: { domainId: string; tid: ObjectId
     try {
         const [problemStatus, contestStatus] = await Promise.all([
             problem.updateManualStatusLatest(input.domainId, input.pid, input.uid, input.rid, STATUS.STATUS_WAITING, 0),
-            contest.updateStatus(input.domainId, input.tid, input.uid, input.rid, input.pid, { status: STATUS.STATUS_WAITING, score: 0 }),
+            contest.updateStatus(input.domainId, input.tid, input.uid, input.rid, input.pid, {
+                status: STATUS.STATUS_WAITING,
+                score: 0,
+                manual: true,
+            }),
         ]);
         if (!problemStatus) throw new ManualGradeConflictError();
         if (!contestStatus) throw new Error('Manual pending contest status projection was not applied');

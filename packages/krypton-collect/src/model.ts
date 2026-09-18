@@ -99,7 +99,7 @@ export interface CreateCollectRequestInput {
     maxFiles?: number;
     fileNameTemplate?: string;
     packLayout?: 'nested' | 'flat';
-    courseRef?: { courseId: ObjectId | string; chapterId: number } | null;
+    courseRef?: { courseId: ObjectId | string; chapterId?: number } | null;
     requireCourseExamComplete?: unknown;
 }
 
@@ -115,7 +115,7 @@ export interface UpdateCollectRequestPatch {
     maxFiles?: number;
     fileNameTemplate?: string;
     packLayout?: 'nested' | 'flat';
-    courseRef?: { courseId: ObjectId | string; chapterId: number } | null;
+    courseRef?: { courseId: ObjectId | string; chapterId?: number } | null;
     requireCourseExamComplete?: unknown;
 }
 
@@ -382,8 +382,12 @@ function parseCourseRef(value: unknown): CollectCourseRef | null {
     if (value == null) return null;
     if (typeof value !== 'object') rejectFile('课程引用不合法');
     const rec = value as { courseId?: unknown; chapterId?: unknown };
-    if (!Number.isSafeInteger(rec.chapterId) || (rec.chapterId as number) < 0) rejectFile('课程章节不合法');
-    return { courseId: asObjectId(rec.courseId, 'courseId'), chapterId: rec.chapterId as number };
+    const courseId = asObjectId(rec.courseId, 'courseId');
+    if (rec.chapterId === undefined || rec.chapterId === null || rec.chapterId === '') {
+        return { courseId };
+    }
+    if (!Number.isSafeInteger(rec.chapterId) || (rec.chapterId as number) < 1) rejectFile('课程章节不合法');
+    return { courseId, chapterId: rec.chapterId as number };
 }
 
 export function parseRequireCourseExamComplete(value: unknown): boolean {

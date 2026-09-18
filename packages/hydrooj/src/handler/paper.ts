@@ -48,6 +48,7 @@ import {
     canStartExamPaper,
     drawExamPaperPids,
     examPaperPersonalEnd,
+    examShowsVerdict,
     isExamPaperDrawEnabled,
     isExamPaperFinalized,
     isExamPaperInWindow,
@@ -791,6 +792,7 @@ class PaperLayoutHandler extends PaperBaseHandler {
             durationHours: typeof this.tdoc.duration === 'number' && this.tdoc.duration > 0 ? this.tdoc.duration : null,
             paperOutline: examPaperOutline(this.tdoc),
             canFinalize: !this.examPaperAdminPreview && paperStarted && !paperFinalized && !isExamPaperWindowClosed(this.tdoc, this.tsdoc, new Date()),
+            examShowVerdict: this.examPaperAdminPreview || examShowsVerdict(this.tdoc),
             paperPreview: this.examPaperAdminPreview,
             owner: ownerInfo,
             broadcasts,
@@ -838,7 +840,16 @@ class PaperDraftListHandler extends PaperBaseHandler {
             }
         } catch {}
 
-        this.response.body = { drafts, staleness, recordStatus };
+        const showVerdict = this.examPaperAdminPreview || examShowsVerdict(this.tdoc);
+        this.response.body = {
+            drafts: showVerdict ? drafts : drafts.map((draft) => {
+                if (draft.judgeResult == null) return draft;
+                const { judgeResult: _judgeResult, ...rest } = draft;
+                return rest;
+            }),
+            staleness,
+            recordStatus: showVerdict ? recordStatus : {},
+        };
     }
 }
 
@@ -936,7 +947,8 @@ class PaperLockKindHandler extends PaperBaseHandler {
             if (Object.keys(results).length > 0) aggregateResults[pid] = results;
         }
         await OplogModel.log(this, 'paper.lock_kind', { tid: this.tid, kind });
-        this.response.body = { kind, locked: true, judgeResults: aggregateResults };
+        const showVerdict = this.examPaperAdminPreview || examShowsVerdict(this.tdoc);
+        this.response.body = { kind, locked: true, judgeResults: showVerdict ? aggregateResults : {} };
     }
 }
 

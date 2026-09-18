@@ -17,6 +17,7 @@ const LOCKED_POST_NAMES = [
   'liveEnabled',
   'cameraEnabled',
   'hidden',
+  'examShowVerdict',
 ] as const;
 
 const FORBIDDEN_POST_NAMES = ['courseExam', 'examEvent'] as const;
@@ -69,7 +70,9 @@ describe('contest edit exam field contract', () => {
     expect(exam, 'edit must POST liveEnabled explicitly').to.include('<HiddenFlag name="liveEnabled" value={liveEnabled} />');
     expect(exam, 'edit must POST cameraEnabled explicitly').to.include('<HiddenFlag name="cameraEnabled" value={cameraEnabled} />');
     expect(exam, 'exam tree must POST hidden explicitly').to.include('<HiddenFlag name="hidden" value={listHidden} />');
+    expect(exam, 'exam tree must POST examShowVerdict explicitly').to.include('<HiddenFlag name="examShowVerdict" value={showVerdict} />');
     expect(exam, 'list-hide control').to.include('不在列表中显示');
+    expect(exam, 'verdict control').to.include('交卷后显示对错');
     expect(exam, 'exam tree must not use ContestParticipationField').not.to.include('ContestParticipationField');
     expect(exam, 'participationMode must POST flags.participationMode').to.include(
       '<input type="hidden" name="participationMode" value={flags.participationMode} />',

@@ -53,6 +53,12 @@ describe('contest exam create UI handler lock', () => {
         expect(postUpdate).to.match(/contest\.edit\([\s\S]*hidden,/);
     });
 
+    it('writes examShowVerdict only for exam', () => {
+        expect(editor).to.include("@param('examShowVerdict', Types.Boolean, true)");
+        expect(postUpdate).to.include("rule !== 'exam' && examShowVerdict !== undefined");
+        expect(postUpdate).to.include('examShowVerdict: examShowVerdict !== false');
+    });
+
     it('accepts empty exam description and empty paper pool on create', () => {
         expect(editor).to.include("@param('content', Types.Content, true)");
         expect(editor).to.include("@param('pids', Types.Content, true)");

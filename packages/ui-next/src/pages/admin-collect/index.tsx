@@ -18,6 +18,7 @@ import { DateTime } from '@/components/ui/datetime';
 import { confirmFormSubmit } from '@/components/ui/dialog';
 import { FormField, FormRow, FormSection } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
+import { MiniTabs } from '@/components/ui/mini-tabs';
 import { MultiSelect } from '@/components/ui/multi-select';
 import { SimpleSelect } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
@@ -111,7 +112,7 @@ interface CollectRequestView {
   maxFiles: number;
   fileNameTemplate: string;
   packLayout: CollectPackLayout;
-  courseRef: { courseId: string; chapterId: string } | null;
+  courseRef: { courseId: string; chapterId?: string } | null;
   requireCourseExamComplete: boolean;
   ownerUid: number;
   canEdit: boolean;
@@ -398,7 +399,11 @@ function parseSlot(value: unknown): SlotDraft {
 function parseCourseRef(value: unknown): CollectRequestView['courseRef'] {
   if (value === undefined || value === null) return null;
   const rec = asRecord(value, '课程引用');
-  return { courseId: asId(rec.courseId, '课程'), chapterId: asId(rec.chapterId, '章节') };
+  const courseId = asId(rec.courseId, '课程');
+  if (rec.chapterId === undefined || rec.chapterId === null || rec.chapterId === '') {
+    return { courseId };
+  }
+  return { courseId, chapterId: asId(rec.chapterId, '章节') };
 }
 
 function parseFileNameTemplate(value: unknown): string {
@@ -894,6 +899,7 @@ export function AdminCollectEditPage() {
   const [courseId, setCourseId] = useState(initial?.courseRef?.courseId || data.fromCourse || '');
   const [chapterId, setChapterId] = useState(initial?.courseRef?.chapterId || data.chapter || '');
   const [requireCourseExamComplete, setRequireCourseExamComplete] = useState(initial?.requireCourseExamComplete === true);
+  const [tab, setTab] = useState<'basic' | 'audience' | 'files' | 'course'>('basic');
   const [maxFileMib, setMaxFileMib] = useState(bytesToMib(initial?.maxFileBytes || HARD_MAX_FILE_BYTES));
   const [maxTotalMib, setMaxTotalMib] = useState(bytesToMib(initial?.maxTotalBytes || HARD_MAX_TOTAL_BYTES));
   const [maxFiles, setMaxFiles] = useState(initial?.maxFiles || HARD_MAX_FILES);
@@ -994,6 +1000,7 @@ export function AdminCollectEditPage() {
   return (
     <ModuleWorkspace
       {...COLLECT_WORKSPACE_PROPS}
+      hideNav
       title={isEdit ? '编辑文件收集' : '新建文件收集'}
       description={isEdit ? '修改说明和截止时间；已有人提交后不能改槽位或上限。' : '先保存草稿，圈好同校班级后再发布。'}
       actions={
@@ -1018,6 +1025,19 @@ export function AdminCollectEditPage() {
         <input type="hidden" name="courseId" value={courseId} />
         <input type="hidden" name="chapterId" value={chapterId} />
         <input type="hidden" name="requireCourseExamComplete" value={requireCourseExamComplete ? '1' : '0'} />
+        <MiniTabs<'basic' | 'audience' | 'files' | 'course'>
+          value={tab}
+          onValueChange={setTab}
+          size="md"
+          aria-label="收集编辑分区"
+          items={[
+            { value: 'basic', label: '基本' },
+            { value: 'audience', label: '受众' },
+            { value: 'files', label: '文件' },
+            { value: 'course', label: '课程' },
+          ]}
+        />
+        <div hidden={tab !== 'basic'}>
         <Card>
           <CardHeader>
             <CardTitle className="text-sm">基本信息</CardTitle>
@@ -1061,7 +1081,9 @@ export function AdminCollectEditPage() {
             </FormSection>
           </CardContent>
         </Card>
+        </div>
 
+        <div hidden={tab !== 'audience'}>
         <Card>
           <CardHeader>
             <CardTitle className="text-sm">受众</CardTitle>
@@ -1118,7 +1140,9 @@ export function AdminCollectEditPage() {
             </FormSection>
           </CardContent>
         </Card>
+        </div>
 
+        <div hidden={tab !== 'files'}>
         <Card>
           <CardHeader>
             <CardTitle className="text-sm">槽位</CardTitle>
@@ -1307,7 +1331,9 @@ export function AdminCollectEditPage() {
             </FormSection>
           </CardContent>
         </Card>
+        </div>
 
+        <div hidden={tab !== 'audience'}>
         <Card>
           <CardHeader>
             <CardTitle className="text-sm">协作者</CardTitle>
@@ -1318,7 +1344,9 @@ export function AdminCollectEditPage() {
             </FormField>
           </CardContent>
         </Card>
+        </div>
 
+        <div hidden={tab !== 'course'}>
         <Card>
           <CardHeader>
             <CardTitle className="text-sm">课程引用</CardTitle>
@@ -1326,7 +1354,7 @@ export function AdminCollectEditPage() {
           <CardContent>
             <FormSection>
               <FormRow columns={2}>
-                <FormField label="课程" hint="可选，不改课程章节结构">
+                <FormField label="课程" hint="可以只挂整门课，不必选章节">
                   <SimpleSelect
                     value={courseId}
                     onValueChange={(next) => {
@@ -1343,14 +1371,14 @@ export function AdminCollectEditPage() {
                     ]}
                   />
                 </FormField>
-                <FormField label="章节">
+                <FormField label="章节" hint="留空表示挂在整门课程下">
                   <SimpleSelect
                     value={chapterId}
                     onValueChange={setChapterId}
                     disabled={!canEdit || !courseId}
                     className="min-h-10"
                     options={[
-                      { value: '', label: '选择章节' },
+                      { value: '', label: courseId ? '整门课程（不挂章节）' : '先选课程' },
                       ...(selectedCourse?.chapters || []).map((chapter) => ({ value: chapter._id, label: chapter.title })),
                     ]}
                   />
@@ -1379,6 +1407,7 @@ export function AdminCollectEditPage() {
             </FormSection>
           </CardContent>
         </Card>
+        </div>
 
         {canEdit ? (
           <div className="flex flex-wrap justify-end gap-2 border-t pt-4">

@@ -24,7 +24,7 @@ interface RequestRow {
     title: string;
     dueAt: Date;
     status: 'draft' | 'published' | 'closed' | 'archived';
-    courseRef: { courseId: ObjectId; chapterId: number };
+    courseRef: { courseId: ObjectId; chapterId?: number };
     ownerUid: number;
     collaboratorUids: number[];
     schoolId: ObjectId;
@@ -137,15 +137,21 @@ type ListByCourseChapter = (
     courseId: ObjectId | string,
     chapterId: number,
     options?: { includeDraft?: boolean; viewer?: { _id: number; hasPerm(p: bigint): boolean; hasPriv(p: number): boolean } },
-) => Promise<Array<{ _id: string; title: string; status: string; chapterId: number }>>;
+) => Promise<Array<{ _id: string; title: string; status: string; chapterId: number | null }>>;
+type ListByCourse = (
+    domainId: string,
+    courseId: ObjectId | string,
+    options?: { includeDraft?: boolean; viewer?: { _id: number; hasPerm(p: bigint): boolean; hasPriv(p: number): boolean } },
+) => Promise<Array<{ _id: string; title: string; status: string; chapterId: number | null }>>;
 type ExistsRequiringCourseExam = (domainId: string, courseId: ObjectId | string) => Promise<boolean>;
 
 let listByCourseChapter: ListByCourseChapter;
+let listByCourse: ListByCourse;
 let existsRequiringCourseExam: ExistsRequiringCourseExam;
 try {
     delete require.cache[queryPath];
     delete require.cache[authPath];
-    ({ listByCourseChapter, existsRequiringCourseExam } = require(queryPath));
+    ({ listByCourseChapter, listByCourse, existsRequiringCourseExam } = require(queryPath));
 } finally {
     Module._load = originalLoad;
 }
@@ -225,6 +231,23 @@ describe('listByCourseChapter audience', () => {
             inAudienceId.toHexString(),
             outAudienceId.toHexString(),
         ]);
+    });
+});
+
+describe('listByCourse', () => {
+    it('includes course-level collections that have no chapterId', async () => {
+        const courseLevelId = new ObjectId('66ba00000000000000000006');
+        rows.push(row({
+            _id: courseLevelId,
+            title: '整门课收集',
+            status: 'published',
+            courseRef: { courseId },
+            dueAt: new Date('2026-09-21T00:00:00.000Z'),
+        }));
+        const listed = await listByCourse(domainId, courseId);
+        expect(listed.some((item) => item._id === courseLevelId.toHexString() && item.chapterId === null)).to.equal(true);
+        const chapterOnly = await listByCourseChapter(domainId, courseId, 1);
+        expect(chapterOnly.map((item) => item._id)).to.not.include(courseLevelId.toHexString());
     });
 });
 

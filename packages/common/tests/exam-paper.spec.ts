@@ -8,6 +8,7 @@ import {
     examPaperPidsForCompletion,
     examPaperPersonalEnd,
     examPaperQuotasEqual,
+    examShowsVerdict,
     isExamPaperFinalized,
     isExamPaperInWindow,
     isExamPaperUnstartedClosed,
@@ -94,6 +95,15 @@ describe('exam paper clock', () => {
         expect(isExamPaperFinalized({ paperFinalizedAt: date('invalid') })).to.equal(false);
         expect(isExamPaperFinalized({ paperFinalizedAt: date('2026-09-18T01:00:00.000Z') })).to.equal(true);
         expect(isExamPaperFinalized({ paperFinalizedAt: '2026-09-18T01:00:00.000Z' })).to.equal(true);
+    });
+
+    it('hides exam verdicts only when examShowVerdict is false', () => {
+        expect(examShowsVerdict({})).to.equal(true);
+        expect(examShowsVerdict({ rule: 'acm' })).to.equal(true);
+        expect(examShowsVerdict({ rule: 'acm', examShowVerdict: false })).to.equal(true);
+        expect(examShowsVerdict({ rule: 'exam' })).to.equal(true);
+        expect(examShowsVerdict({ rule: 'exam', examShowVerdict: true })).to.equal(true);
+        expect(examShowsVerdict({ rule: 'exam', examShowVerdict: false })).to.equal(false);
     });
 });
 

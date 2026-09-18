@@ -25,6 +25,8 @@ export interface ModuleWorkspaceProps {
   bypassPrivGate?: boolean;
   contentClassName?: string;
   navAriaLabel?: string;
+  /** Hide the module pill nav (create/edit pages that already have a back link). */
+  hideNav?: boolean;
   children: ReactNode;
 }
 
@@ -55,11 +57,12 @@ export function ModuleWorkspace({
   bypassPrivGate = false,
   contentClassName,
   navAriaLabel = `${moduleTitle}导航`,
+  hideNav = false,
   children,
 }: ModuleWorkspaceProps) {
   const titleId = useId();
   const templateName = useBootstrap().page.templateName;
-  const resolvedActiveKey = resolveModuleWorkspaceActiveKey(navItems, templateName, activeKey);
+  const resolvedActiveKey = hideNav ? '' : resolveModuleWorkspaceActiveKey(navItems, templateName, activeKey);
 
   return (
     <AdminPage requiredPriv={requiredPriv} bypassPrivGate={bypassPrivGate} hideSidebar contentClassName="min-w-0">
@@ -75,6 +78,7 @@ export function ModuleWorkspace({
           {actions ? <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div> : null}
         </header>
 
+        {hideNav ? null : (
         <nav aria-label={navAriaLabel} className="-mx-1 overflow-x-auto px-1 pb-1">
           <div className="inline-flex min-w-max items-center gap-1 rounded-xl bg-muted/70 p-1">
             {navItems.map((item) => {
@@ -99,6 +103,7 @@ export function ModuleWorkspace({
             })}
           </div>
         </nav>
+        )}
 
         {toolbar ? (
           <section aria-label={toolbarLabel} className="flex min-h-11 min-w-0 flex-wrap items-center gap-2 border-y border-border/70 py-2">

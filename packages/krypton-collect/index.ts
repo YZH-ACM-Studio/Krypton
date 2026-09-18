@@ -9,7 +9,7 @@ import { applyHandlers } from './src/handler';
 import { migrationScripts } from './src/migration';
 
 export { canCreateCollect, canEditCollect, canViewCollect } from './src/auth';
-export { existsByCourse, existsRequiringCourseExam, listByCourseChapter } from './src/course-query';
+export { existsByCourse, existsRequiringCourseExam, listByCourse, listByCourseChapter } from './src/course-query';
 export {
     COLLECT_DEFAULT_FILE_NAME_TEMPLATE,
     COLLECT_DEFAULT_PACK_LAYOUT,

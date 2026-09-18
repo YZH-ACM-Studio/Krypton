@@ -51,7 +51,7 @@ interface CourseCollectRequest {
   title: string;
   dueAt: string;
   status: CourseCollectStatus;
-  chapterId: number;
+  chapterId: number | null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -74,10 +74,16 @@ function readCourseCollectRequests(value: unknown): CourseCollectRequest[] {
     if (!title) throw new TypeError(`collectRequests[${index}].title must be a string`);
     if (!dueAt || Number.isNaN(Date.parse(dueAt))) throw new TypeError(`collectRequests[${index}].dueAt must be an ISO date`);
     if (!isCourseCollectStatus(item.status)) throw new TypeError(`collectRequests[${index}].status is invalid`);
-    if (typeof item.chapterId !== 'number' || !Number.isSafeInteger(item.chapterId)) {
-      throw new TypeError(`collectRequests[${index}].chapterId must be an integer`);
+    if (item.chapterId !== undefined && item.chapterId !== null && (typeof item.chapterId !== 'number' || !Number.isSafeInteger(item.chapterId))) {
+      throw new TypeError(`collectRequests[${index}].chapterId must be an integer or null`);
     }
-    return { _id: id, title, dueAt, status: item.status, chapterId: item.chapterId };
+    return {
+      _id: id,
+      title,
+      dueAt,
+      status: item.status,
+      chapterId: typeof item.chapterId === 'number' ? item.chapterId : null,
+    };
   });
 }
 
@@ -174,15 +180,19 @@ function ProblemList({
 function CollectRequestList({
   requests,
   canManage,
+  title = '文件收集',
+  className,
 }: {
   requests: CourseCollectRequest[];
   canManage: boolean;
+  title?: string;
+  className?: string;
 }) {
   if (!requests.length) return <div data-course-slot="collect" />;
   return (
-    <section data-course-slot="collect" aria-labelledby="course-collect-title" className="space-y-3">
+    <section data-course-slot="collect" aria-labelledby="course-collect-title" className={cn('space-y-3', className)}>
       <h3 id="course-collect-title" className="text-sm font-medium">
-        文件收集
+        {title}
       </h3>
       <ul className="grid gap-2 sm:grid-cols-2">
         {requests.map((request) => {
@@ -385,6 +395,14 @@ export function CourseDetailPage() {
               <a href={`/course/${tid}/videos`}>观看统计</a>
             </Button>
           ) : null}
+          {data.canCreateCollect ? (
+            <Button asChild variant="outline" size="sm" className="h-9 gap-1.5">
+              <a href={`/admin/collect/create?fromCourse=${encodeURIComponent(tid)}`}>
+                <FolderInput className="size-3.5" strokeWidth={1.75} />
+                布置收集
+              </a>
+            </Button>
+          ) : null}
           {data.canManage && data.canCreate ? (
             <form method="post" action={`/course/${tid}/edit`}>
               <input type="hidden" name="operation" value="copy" />
@@ -462,13 +480,21 @@ export function CourseDetailPage() {
       ) : null}
 
       {activeView === 'overview' ? (
-        <CourseExamCard
-          exam={courseExam}
-          contest={courseExamContest}
-          chapters={chapters}
-          canManage={data.canManage}
-          className="mb-6"
-        />
+        <>
+          <CourseExamCard
+            exam={courseExam}
+            contest={courseExamContest}
+            chapters={chapters}
+            canManage={data.canManage}
+            className="mb-6"
+          />
+          <CollectRequestList
+            requests={collectRequests.filter((request) => request.chapterId == null)}
+            canManage={data.canManage}
+            title="本课收集"
+            className="mb-6"
+          />
+        </>
       ) : null}
 
       {activeView === 'mindmap' ? (
@@ -694,6 +720,7 @@ export function CourseDetailPage() {
             <CollectRequestList
               requests={collectRequests.filter((request) => request.chapterId === activeChapter._id)}
               canManage={data.canManage}
+              title="本章收集"
             />
             {data.canDownloadFiles && data.files?.length ? (
               <section data-course-slot="files" aria-labelledby="course-files-title" className="space-y-3">

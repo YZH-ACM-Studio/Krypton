@@ -596,10 +596,18 @@ interface CourseCollectRequestView {
     title: string;
     dueAt: string;
     status: CourseCollectRequestStatus;
-    chapterId: number;
+    chapterId: number | null;
 }
 
 interface CollectCourseQueryModule {
+    listByCourse?: (
+        domainId: string,
+        courseId: ObjectId,
+        options?: {
+            includeDraft?: boolean;
+            viewer?: { _id: number; hasPerm(p: bigint): boolean; hasPriv(p: number): boolean };
+        },
+    ) => Promise<unknown>;
     listByCourseChapter?: (
         domainId: string,
         courseId: ObjectId,
@@ -648,10 +656,10 @@ function asCourseCollectRequestView(value: unknown, index: number): CourseCollec
     if (status !== 'draft' && status !== 'published' && status !== 'closed' && status !== 'archived') {
         throw new TypeError(`collectRequests[${index}].status is invalid`);
     }
-    if (typeof chapterId !== 'number' || !Number.isSafeInteger(chapterId)) {
-        throw new TypeError(`collectRequests[${index}].chapterId must be an integer`);
+    if (chapterId !== undefined && chapterId !== null && (typeof chapterId !== 'number' || !Number.isSafeInteger(chapterId))) {
+        throw new TypeError(`collectRequests[${index}].chapterId must be an integer or null`);
     }
-    return { _id: id, title, dueAt, status, chapterId };
+    return { _id: id, title, dueAt, status, chapterId: typeof chapterId === 'number' ? chapterId : null };
 }
 
 async function loadCourseCollectRequests(
@@ -662,6 +670,12 @@ async function loadCourseCollectRequests(
     viewer: { _id: number; hasPerm(p: bigint): boolean; hasPriv(p: number): boolean },
 ): Promise<{ available: boolean; requests: CourseCollectRequestView[] }> {
     const mod = loadCollectCourseQuery();
+    const listByCourse = mod?.listByCourse;
+    if (typeof listByCourse === 'function') {
+        const list = await listByCourse(domainId, courseId, { includeDraft, viewer });
+        if (!Array.isArray(list)) throw new TypeError('listByCourse must return an array');
+        return { available: true, requests: list.map((item, index) => asCourseCollectRequestView(item, index)) };
+    }
     const listByCourseChapter = mod?.listByCourseChapter;
     if (typeof listByCourseChapter !== 'function') return { available: false, requests: [] };
     if (!chapterIds.length) return { available: true, requests: [] };

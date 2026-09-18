@@ -100,6 +100,9 @@ describe('p3.8 course workspace', () => {
     expect(detail).to.include('本章小节');
     expect(detail).to.include('view=roster');
     expect(detail).to.include('布置收集');
+    expect(detail).to.include('本课收集');
+    expect(detail).to.include('/admin/collect/create?fromCourse=${encodeURIComponent(tid)}');
+    expect(handler).to.include('listByCourse');
     expect(detail).to.include('创建小测');
     expect(detail).not.to.include('创建本章小测');
     expect(handler).to.include("view === 'roster'");
@@ -274,6 +277,9 @@ describe('p3.8 course workspace', () => {
     const videoStats = readFileSync(resolve(root, 'src/pages/course/video-stats.tsx'), 'utf8');
     expect(videoStats).to.include("data.rosterUnavailable === 'invalid_groups'");
     expect(videoStats).to.include('课程绑定的班级引用已失效，无法出观看名单');
+    expect(videoStats).to.include('MiniTabs');
+    expect(videoStats).to.include('搜索学号或姓名');
+    expect(videoStats).not.to.include('min-w-[48rem]');
   });
 
   it('attributes live-ref mindmap problems to the referencing course chapter', () => {

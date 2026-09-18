@@ -160,6 +160,7 @@ export function ExamPaperPage() {
     scoreboard: Array<{ rank: number; uid: number; uname: string; realName?: string; studentId?: string; score: number }>;
     showScoreboard: boolean;
     allowSubmitByKind: boolean;
+    examShowVerdict?: boolean;
     examMode?: { student?: ExamModeStudentView | null };
   };
   const { tdoc, pdict, cells, inWindow, canFinalize, paperPreview, broadcasts, scoreboard, showScoreboard, allowSubmitByKind } = data;
@@ -238,7 +239,7 @@ export function ExamPaperPage() {
         />
       )}
       {visibleSection === 'problems' && canViewPaper && (
-        <ProblemsSection tdoc={tdoc} tid={tid} pdict={pdict} cells={cells} inWindow={inWindow && !paperFinalized} canFinalize={canFinalize && !paperFinalized} paperPreview={paperPreview === true} paperFinalized={paperFinalized} allowSubmitByKind={allowSubmitByKind && !paperFinalized} />
+        <ProblemsSection tdoc={tdoc} tid={tid} pdict={pdict} cells={cells} inWindow={inWindow && !paperFinalized} canFinalize={canFinalize && !paperFinalized} paperPreview={paperPreview === true} paperFinalized={paperFinalized} allowSubmitByKind={allowSubmitByKind && !paperFinalized} examShowVerdict={paperPreview === true || data.examShowVerdict !== false} />
       )}
       {visibleSection === 'announcements' && <AnnouncementsSection broadcasts={broadcasts || []} />}
       {visibleSection === 'ranking' && <RankingSection scoreboard={scoreboard || []} showScoreboard={showScoreboard} signedInUid={bs.user.id} />}
@@ -257,6 +258,7 @@ function ProblemsSection({
   paperPreview,
   paperFinalized,
   allowSubmitByKind,
+  examShowVerdict,
 }: {
   tdoc: TdocLike;
   tid: string;
@@ -267,6 +269,7 @@ function ProblemsSection({
   paperPreview: boolean;
   paperFinalized: boolean;
   allowSubmitByKind: boolean;
+  examShowVerdict: boolean;
 }) {
   const groups = useMemo(() => groupCellsByKind(cells), [cells]);
   const [activeKind, setActiveKind] = useState<QuestionKind | null>(() => firstPaperKind(groups));
@@ -364,11 +367,11 @@ function ProblemsSection({
   const statuses: CellStatus[] = useMemo(() => {
     return tabCells.map((c) => {
       const draft = drafts[c.pid];
-      if (c.questionKey && draft?.judgeResult?.[c.questionKey]) {
+      if (examShowVerdict && c.questionKey && draft?.judgeResult?.[c.questionKey]) {
         const r = draft.judgeResult[c.questionKey];
         return r;
       }
-      if (!c.questionKey && draft?.recordStatus) {
+      if (examShowVerdict && !c.questionKey && draft?.recordStatus) {
         // Programming cell: status code 1 means AC for hydrojudge.
         const s = String(draft.recordStatus);
         if (s === '1') return 'correct';
@@ -385,7 +388,7 @@ function ProblemsSection({
       }
       return draft.code ? 'answered' : 'unanswered';
     });
-  }, [tabCells, drafts]);
+  }, [tabCells, drafts, examShowVerdict]);
 
   // Save all dirty drafts in active tab.
   const dirtyCountInTab = useMemo(() => {
@@ -480,15 +483,16 @@ function ProblemsSection({
     }
     const body: { judgeResults?: Record<string, NonNullable<DraftState['judgeResult']>> } = await res.json();
     setLockedKinds((prev) => new Set([...prev, activeKind]));
-    // Merge per-pid judgeResults back.
     setDrafts((prev) => {
       const next = { ...prev };
-      const judgeMap = body.judgeResults || {};
-      for (const [pidStr, results] of Object.entries(judgeMap)) {
-        const pid = Number(pidStr);
-        next[pid] &&= {
+      const judgeMap = examShowVerdict ? body.judgeResults || {} : {};
+      const pids = new Set(tabCells.map((c) => c.pid));
+      for (const pid of pids) {
+        if (!next[pid]) continue;
+        const results = judgeMap[String(pid)];
+        next[pid] = {
           ...next[pid],
-          judgeResult: { ...(next[pid].judgeResult || {}), ...results },
+          ...(results ? { judgeResult: { ...(next[pid].judgeResult || {}), ...results } } : {}),
           lockedKinds: [...(next[pid].lockedKinds || []), activeKind],
         };
       }

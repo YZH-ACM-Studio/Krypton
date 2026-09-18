@@ -281,7 +281,10 @@ function serializeRequest(doc: CollectRequestDoc, extras: {
         fileNameTemplate: requestFileNameTemplate(doc.fileNameTemplate),
         packLayout: requestPackLayout(doc.packLayout),
         courseRef: doc.courseRef
-            ? { courseId: String(doc.courseRef.courseId), chapterId: doc.courseRef.chapterId }
+            ? {
+                courseId: String(doc.courseRef.courseId),
+                ...(doc.courseRef.chapterId !== undefined ? { chapterId: doc.courseRef.chapterId } : {}),
+            }
             : null,
         requireCourseExamComplete: doc.requireCourseExamComplete === true,
         hasSubmissions: extras.hasSubmissions === true,
@@ -727,14 +730,22 @@ class AdminCollectEditHandler extends CollectBaseHandler {
         const maxFiles = Number(body.maxFiles);
         const courseId = String(body.courseId || '').trim();
         const chapterToken = body.chapterId;
-        const chapterId = chapterToken === '' || chapterToken == null ? Number.NaN : Number(chapterToken);
-        const courseRef = courseId && Number.isInteger(chapterId) && chapterId >= 0
-            ? { courseId, chapterId }
-            : null;
+        let courseRef: { courseId: string; chapterId?: number } | null = null;
+        if (courseId) {
+            if (chapterToken === '' || chapterToken == null) {
+                courseRef = { courseId };
+            } else {
+                const chapterId = Number(chapterToken);
+                if (!Number.isInteger(chapterId) || chapterId < 1) throw new CollectForbiddenError('课程章节不合法');
+                courseRef = { courseId, chapterId };
+            }
+        }
         const requireCourseExamComplete = parseRequireCourseExamComplete(body.requireCourseExamComplete);
         await assertCanEnableRequireCourseExamComplete(
             domainId,
-            courseRef ? { courseId: new ObjectId(courseId), chapterId } : null,
+            courseRef
+                ? { courseId: new ObjectId(courseId), ...(courseRef.chapterId !== undefined ? { chapterId: courseRef.chapterId } : {}) }
+                : null,
             requireCourseExamComplete,
         );
         const patch: CreateCollectRequestInput & UpdateCollectRequestPatch = {

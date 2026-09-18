@@ -125,6 +125,12 @@ export function isExamPaperFinalized(tsdoc?: ExamPaperStatusClock | null): boole
     return asExamPaperDate(tsdoc?.paperFinalizedAt) !== null;
 }
 
+/** Exam-rule only. Missing or true = students see 对错. false = scores only. Other rules always show. */
+export function examShowsVerdict(tdoc: { rule?: unknown; examShowVerdict?: unknown }): boolean {
+    if (tdoc.rule !== 'exam') return true;
+    return tdoc.examShowVerdict !== false;
+}
+
 export function isExamPaperInWindow(tdoc: ExamPaperContestClock, tsdoc: ExamPaperStatusClock | null | undefined, now: Date): boolean {
     if (isExamPaperStarted(tsdoc)) {
         const beginAt = asExamPaperDate(tdoc.beginAt);

@@ -14,6 +14,7 @@ export {
     countExamPaperPoolByKind,
     examPaperDurationMs,
     examPaperPidsForCompletion,
+    examShowsVerdict,
     examPaperPersonalEnd,
     examPaperQuotaTotal,
     examPaperQuotasEqual,

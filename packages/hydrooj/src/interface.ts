@@ -488,6 +488,11 @@ export interface Tdoc extends Document {
      * Exact-key: non-empty `ProblemKind → integer ≥ 1`. Non-exam must not store this.
      */
     examPaperQuotas?: import('@hydrooj/common').ExamPaperQuotas;
+    /**
+     * Exam-rule only. Missing or true = students may see per-question 对错.
+     * false = scores only. Non-exam must not store this.
+     */
+    examShowVerdict?: boolean;
 
     // For homework
     penaltySince?: Date;

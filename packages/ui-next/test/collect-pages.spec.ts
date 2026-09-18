@@ -245,6 +245,10 @@ describe('collect teacher payload contracts', () => {
     expect(admin).to.include("!data.hasFiles && data.request.status !== 'archived'");
     expect(admin).to.include("data.hasFiles && data.request.status !== 'archived'");
     expect(admin).to.include("chapter: asOptionalId(rec.chapter, '来源章节')");
+    expect(admin).to.include('hideNav');
+    expect(admin).to.include('MiniTabs');
+    expect(admin).to.include('整门课程（不挂章节）');
+    expect(admin).to.include('hidden={tab !== \'');
   });
 
   it('uses locked product copy on the homepage pending block', () => {

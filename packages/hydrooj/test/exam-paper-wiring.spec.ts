@@ -162,6 +162,9 @@ describe('exam paper wiring', () => {
         expect(paper).to.include('allowUnfrozenPool');
         expect(paper).to.include('isExamPaperWindowClosed');
         expect(paper).to.include('canFinalize: !this.examPaperAdminPreview && paperStarted && !paperFinalized && !isExamPaperWindowClosed(this.tdoc, this.tsdoc, new Date())');
+        expect(paper).to.include('examShowVerdict: this.examPaperAdminPreview || examShowsVerdict(this.tdoc)');
+        expect(paper).to.include('recordStatus: showVerdict ? recordStatus : {}');
+        expect(paper).to.include('judgeResults: showVerdict ? aggregateResults : {}');
         expect(paper).to.include("localizedErrorText`已经交卷`");
         expect(paper).to.include("localizedErrorText`预览考试不能交卷`");
         expect(paper).to.include('if (this.examPaperAdminPreview)');

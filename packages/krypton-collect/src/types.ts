@@ -26,7 +26,7 @@ export interface CollectSlot {
 
 export interface CollectCourseRef {
     courseId: ObjectId;
-    chapterId: number;
+    chapterId?: number;
 }
 
 export interface CollectRequestDoc {

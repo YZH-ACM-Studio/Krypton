@@ -117,6 +117,8 @@ describe('exam paper start and overview', () => {
     expect(paper).to.include("data.paperStarted === false");
     expect(paper).to.include('paperFinalized');
     expect(paper).to.include('已交卷');
+    expect(paper).to.include('examShowVerdict');
+    expect(paper).to.include('examShowVerdict && c.questionKey && draft?.judgeResult');
     expect(sections).to.include('开始答题');
     expect(sections).to.include('h-14 w-full');
     expect(shell).to.include("true_false: '判断'");

@@ -1128,6 +1128,7 @@ export class ContestEditHandler extends Handler {
     @param('teamModeClearConfirmation', Types.String, true)
     @param('plannedTeamBatchId', Types.ObjectId, true)
     @param('examPaperQuotas', Types.Content, true)
+    @param('examShowVerdict', Types.Boolean, true)
     @serializedContestEdit
     async postUpdate(
         _domainId: string,
@@ -1179,6 +1180,7 @@ export class ContestEditHandler extends Handler {
         teamModeClearConfirmation = '',
         plannedTeamBatchId: ObjectId = null,
         examPaperQuotas = '',
+        examShowVerdict: boolean = undefined,
     ) {
         content = content ?? '';
         const creatingContest = !tid;
@@ -1188,6 +1190,9 @@ export class ContestEditHandler extends Handler {
         const pids = parseProblemDocIds(_pids);
         if (rule !== 'exam' && examPaperQuotas) {
             throw new ValidationError('examPaperQuotas', null, localizedErrorText`只有选择题考试能设置抽题`);
+        }
+        if (rule !== 'exam' && examShowVerdict !== undefined) {
+            throw new ValidationError('examShowVerdict', null, localizedErrorText`只有选择题考试能设置是否显示对错`);
         }
         let nextExamPaperQuotas: ExamPaperQuotas | null = null;
         if (examPaperQuotas) {
@@ -1492,6 +1497,7 @@ export class ContestEditHandler extends Handler {
             allowViewCode,
             allowPrint,
             keepScoreboardHidden,
+            ...(rule === 'exam' ? { examShowVerdict: examShowVerdict !== false } : {}),
             ...(allowVirtual != null ? { allowVirtual } : {}),
             langs,
             vigilEnabled,

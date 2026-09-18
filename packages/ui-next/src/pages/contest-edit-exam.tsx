@@ -265,6 +265,7 @@ export function ContestEditExam({ rule, onRuleChange, children }: ContestEditExa
   const [pids, setPids] = useState(() => initialPidIds(readString(data.pids), tdoc.pids));
   const [permission, setPermission] = useState<AccessPermission>(() => (tdoc._code || tdoc.code ? 'invite' : 'public'));
   const [listHidden, setListHidden] = useState(tdoc.hidden === true);
+  const [showVerdict, setShowVerdict] = useState(isEdit ? tdoc.examShowVerdict !== false : true);
   const [scopeMode, setScopeMode] = useState<ParticipantScopeMode>(readScopeMode(tdoc.participantScopeMode));
   const [vigilEnabled, setVigilEnabled] = useState(flags.vigilEnabled);
   const [entryMode, setEntryMode] = useState<ContestEntryMode>(flags.entryMode);
@@ -488,6 +489,14 @@ export function ContestEditExam({ rule, onRuleChange, children }: ContestEditExa
             <SimpleSelect id="rule" name="rule" value={rule} onValueChange={onRuleChange} options={ruleOptions} />
             <p className="text-xs text-muted-foreground">改成 ACM / OI 会切回比赛编辑器。</p>
           </div>
+
+          <SettingsRow
+            label="交卷后显示对错"
+            description="关闭后学生只能看到分数，看不到每题正确或错误。管理员预览仍显示对错。"
+          >
+            <Switch checked={showVerdict} onCheckedChange={(value) => setShowVerdict(!!value)} />
+          </SettingsRow>
+          <HiddenFlag name="examShowVerdict" value={showVerdict} />
         </ExamCard>
         </div>
 

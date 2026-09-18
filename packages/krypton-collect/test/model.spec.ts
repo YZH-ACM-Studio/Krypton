@@ -566,6 +566,18 @@ describe('krypton-collect requests', () => {
         expect(cleared.courseRef).to.equal(null);
         expect(() => model.parseRequireCourseExamComplete('yes')).to.throw();
     });
+
+    it('accepts a courseRef without chapterId as a whole-course attach', async () => {
+        const courseId = new ObjectId();
+        const created = await createDraft({ courseRef: { courseId } });
+        expect(String(created.courseRef?.courseId)).to.equal(String(courseId));
+        expect(created.courseRef?.chapterId).to.equal(undefined);
+        const gated = await createDraft({
+            requireCourseExamComplete: true,
+            courseRef: { courseId },
+        });
+        expect(gated.requireCourseExamComplete).to.equal(true);
+    });
 });
 
 describe('krypton-collect lists', () => {

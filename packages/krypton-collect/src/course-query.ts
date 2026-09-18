@@ -1,7 +1,8 @@
 /**
- * Course-chapter pointer for file collections.
+ * Course pointer for file collections.
  *
- * Collect requests optionally store `courseRef: { courseId, chapterId }`.
+ * Collect requests optionally store `courseRef: { courseId }` (whole course)
+ * or `courseRef: { courseId, chapterId }` (one chapter).
  * This is a live query against `collect.requests`, not a TrainingNode field.
  */
 import { ObjectId } from 'hydrooj';
@@ -16,7 +17,7 @@ export interface CourseCollectRequestView {
     title: string;
     dueAt: string;
     status: CollectRequestStatus;
-    chapterId: number;
+    chapterId: number | null;
 }
 
 export interface ListByCourseChapterOptions {
@@ -36,10 +37,10 @@ function visibleStatuses(includeDraft: boolean): CollectRequestStatus[] {
     return includeDraft ? ['draft', 'published', 'closed'] : ['published', 'closed'];
 }
 
-function serializeCourseCollectRequest(doc: CollectRequestDoc, expectedChapterId: number): CourseCollectRequestView {
+function serializeCourseCollectRequest(doc: CollectRequestDoc, expectedChapterId?: number): CourseCollectRequestView {
     const courseRef = doc.courseRef;
     if (!courseRef) throw new TypeError(`collect request ${String(doc._id)} is missing courseRef`);
-    if (courseRef.chapterId !== expectedChapterId) {
+    if (expectedChapterId !== undefined && courseRef.chapterId !== expectedChapterId) {
         throw new TypeError(`collect request ${String(doc._id)} chapterId mismatch expected=${expectedChapterId} actual=${courseRef.chapterId}`);
     }
     if (!(doc.dueAt instanceof Date) || Number.isNaN(doc.dueAt.getTime())) {
@@ -57,7 +58,7 @@ function serializeCourseCollectRequest(doc: CollectRequestDoc, expectedChapterId
         title: doc.title,
         dueAt: doc.dueAt.toISOString(),
         status,
-        chapterId: courseRef.chapterId,
+        chapterId: typeof courseRef.chapterId === 'number' ? courseRef.chapterId : null,
     };
 }
 
@@ -108,6 +109,49 @@ export async function listByCourseChapter(
         if (await isAudienceMember(domainId, viewer._id, doc)) allowed.push(doc);
     }
     return allowed.map((doc) => serializeCourseCollectRequest(doc, chapterId));
+}
+
+export async function listByCourse(
+    domainId: string,
+    courseId: ObjectId | string,
+    options: ListByCourseChapterOptions = {},
+): Promise<CourseCollectRequestView[]> {
+    if (typeof domainId !== 'string' || !domainId) throw new TypeError('domainId is required');
+    const courseObjectId = canonicalObjectId(courseId, 'courseId');
+    const viewer = options.viewer;
+    const includeDraft = options.includeDraft === true && !!viewer;
+    const filter: Filter<CollectRequestDoc> = {
+        domainId,
+        'courseRef.courseId': courseObjectId,
+        status: { $in: visibleStatuses(includeDraft) },
+    };
+    const docs = await requestsColl
+        .find(filter)
+        .sort({ dueAt: 1, _id: 1 })
+        .project<CollectRequestDoc>({
+            _id: 1,
+            title: 1,
+            dueAt: 1,
+            status: 1,
+            courseRef: 1,
+            ownerUid: 1,
+            collaboratorUids: 1,
+            schoolId: 1,
+            groupIds: 1,
+        })
+        .toArray();
+    const visible = docs.filter((doc) => doc.status !== 'draft' || (viewer && canViewCollect(viewer, {
+        ownerUid: doc.ownerUid,
+        collaboratorUids: doc.collaboratorUids || [],
+    })));
+    if (includeDraft || !viewer) {
+        return visible.map((doc) => serializeCourseCollectRequest(doc));
+    }
+    const allowed: CollectRequestDoc[] = [];
+    for (const doc of visible) {
+        if (await isAudienceMember(domainId, viewer._id, doc)) allowed.push(doc);
+    }
+    return allowed.map((doc) => serializeCourseCollectRequest(doc));
 }
 
 export async function existsByCourse(domainId: string, courseId: ObjectId | string): Promise<boolean> {

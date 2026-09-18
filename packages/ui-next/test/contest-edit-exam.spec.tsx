@@ -101,7 +101,9 @@ describe('contest edit exam render', () => {
     expect(hiddenInput('vigilEnabled')?.value).to.equal('false');
     expect(hiddenInput('participationMode')?.value).to.equal('individual');
     expect(hiddenInput('hidden')?.value).to.equal('false');
+    expect(hiddenInput('examShowVerdict')?.value).to.equal('true');
     expect(screen.getByText('不在列表中显示')).to.exist;
+    expect(screen.getByText('交卷后显示对错')).to.exist;
     expect(screen.getByRole('tab', { name: '这场考试' })).to.exist;
     expect(screen.getByRole('tab', { name: /试卷/ })).to.exist;
     expect(screen.getByRole('tab', { name: '谁能考' })).to.exist;

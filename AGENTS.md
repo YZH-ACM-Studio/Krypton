@@ -208,7 +208,11 @@
 - 该课任一收集仍开启 `requireCourseExamComplete` 时拒绝解绑 `courseExam`。
 - 学生课程页收集卡片按 live audience 过滤。
 - 视频进度写入走 `courseAccessibleTo`（兑换权益可记进度）；仍须已绑定学生。
-- 「考完」只认该场 `ContestStatus.paperFinalizedAt`（或旧 finalize 的 journal 覆盖该场全部 `pids`）。写入只走 `finalizePaperForUser`。`endAt+60s` grace 之后，若该场 `rule === 'exam'`、`ContestStatus.attend` 且已有有效 `startAt`、试卷 `pids` 非空、且尚未考完，考完读路径（`hasCompletedCourseExam` / collect gate）必须调用同一 `finalizePaperForUser`（空白答卷允许）。禁止第二套完成集合、后台任务、或对未绑定考试做请求路径回填。从未 attend / 没有 `startAt` / 空试卷不得自动 finalize。文件收集可另开可选门槛 `requireCourseExamComplete`，见文件收集协议；不是每门课默认要求。
+- `rule:'exam'` 可在 contest 上设可选 exact-key `examPaperQuotas`：非空 object，键只能是 `ProblemKind`，值为整数 ≥1；未知键 / 空 object / 非正整数 fail closed。缺字段 = 共用 `tdoc.pids`。非 exam 不得存此字段。
+- 抽卷按 `problemKind` 从 `tdoc.pids` 抽取；首次允许的 exam-shell 进入与 `startAt` 一并冻结 `ContestStatus.examPaperPids`，不得重抽。
+- 「考完」只认该场 `ContestStatus.paperFinalizedAt`（或旧 finalize 的 journal 覆盖：抽卷开启时个人 `examPaperPids`，否则 `tdoc.pids`）。写入只走 `finalizePaperForUser`。个人停笔 +60s 之后（`duration>0` 且已 `startAt` 则为 `startAt+duration`，否则 `endAt`），若该场 `rule === 'exam'`、`ContestStatus.attend` 且已有有效 `startAt`、试卷非空、且尚未考完，考完读路径（`hasCompletedCourseExam` / collect gate）必须调用同一 `finalizePaperForUser`（空白答卷允许）。禁止第二套完成集合、后台任务、或对未绑定考试做请求路径回填。从未 attend / 没有 `startAt` / 空试卷不得自动 finalize。文件收集可另开可选门槛 `requireCourseExamComplete`，见文件收集协议；不是每门课默认要求。
+- `duration>0`：若 `now + duration小时 > endAt` 不得开考；开考后个人截止为 `startAt + duration小时`。不改 `contest.isOngoing`（ACM truncate 保持原样）。
+- 学生 payload 不得含未抽题库。`courseExam` schema 不变。
 
 ## 课程隐藏与删除协议
 
@@ -259,7 +263,7 @@
 - 打包 CSV：未交按每个必填槽给出预期文件名；已交含 assigned、original 与 sha256。当前文件 sha256 重复只作为教师进度提示。
 - 只挂普通浏览器 `/collect`、`/admin/collect`、`/api/collect/*`。禁止考试壳、`/paper`、Vigil Client 或封锁白名单。`docs/PLAN-2026-10-08-file-collect.md` 的 P2.1–P2.15 不是 Vigil 协议单元，完成本地实现不授权部署或连接真实考试机。
 - `requireCourseExamComplete` 是可选硬门槛，缺字段或 `false` 不拦截。仅当收集绑定了 `courseRef` 且该课存在 `courseExam` 时允许开启；未绑定课程或课程无结业考试时开启必须 fail closed。学生上传/替换/删除/确认都要现场重查，禁止客户端自证。
-- 「考完」与结业考试协议同一 settle-on-read：只认绑定 exam 的 `ContestStatus.paperFinalizedAt`（缺该字段时，仅当 journal 覆盖该场全部 `pids` 才算完成）。写入只走 `finalizePaperForUser`；`endAt+60s` 后该场 `rule === 'exam'`、已 attend 且已有 `startAt`、试卷非空、尚未完成则读路径调用同一 finalize（空白答卷允许）。窗口已到 `endAt` 且从未 attend → 门槛锁定，不展示「去考试」；不得把时间到点当成考完。缺赛、错规则、空试卷、课程解绑均不得放行。不为此新增完成集合、后台任务或回填。已交文件不因后来开启门槛而删除。
+- 「考完」与结业考试协议同一 settle-on-read：只认绑定 exam 的 `ContestStatus.paperFinalizedAt`（缺该字段时，抽卷开启则 journal 须覆盖个人 `examPaperPids`，否则覆盖 `tdoc.pids`）。写入只走 `finalizePaperForUser`；个人停笔 +60s 后（`duration>0` 且已 `startAt` 则为 `startAt+duration`，否则 `endAt`）该场 `rule === 'exam'`、已 attend 且已有 `startAt`、试卷非空、尚未完成则读路径调用同一 finalize（空白答卷允许）。窗口已到 `endAt` 或剩余时间不够开考且从未 attend → 门槛锁定，不展示「去考试」；不得把时间到点当成考完。缺赛、错规则、空试卷、课程解绑均不得放行。不为此新增完成集合、后台任务或回填。已交文件不因后来开启门槛而删除。
 
 ## 真实性训练可信完成协议
 

@@ -3,8 +3,12 @@ import {
   COMMON_LANG_OPTIONS,
   fetchProblemsByIds,
   LANG_LABEL_MAP,
+  mergeProblemBankPages,
   problemKey,
+  readProblemBankPage,
   resolveLangs,
+  searchProblemBankAll,
+  searchProblemBankPage,
   searchProblems,
 } from '../src/lib/multi-select-presets.ts';
 
@@ -97,6 +101,7 @@ describe('searchProblems', () => {
       difficulty: 3,
       nSubmit: 100,
       nAccept: 60,
+      problemKind: undefined,
     }]);
   });
 
@@ -126,6 +131,47 @@ describe('searchProblems', () => {
   });
 });
 
+describe('searchProblemBankPage', () => {
+  it('reads pcount, pages, and namespaces and paginates all matching rows', async () => {
+    const parsed = readProblemBankPage(
+      {
+        pdocs: [{ docId: 21, pid: 'P21', title: 'A', problemKind: 'single' }],
+        pcount: 2,
+        ppcount: 2,
+        pidNamespaces: [{ namespaceId: 'hdu', name: 'HDU', enabled: true }],
+      },
+      1,
+    );
+    expect(parsed).to.include({ page: 1, pcount: 2, ppcount: 2 });
+    expect(parsed.problems[0]).to.include({ docId: 21, pid: 'P21', title: 'A', problemKind: 'single' });
+    expect(parsed.pidNamespaces).to.deep.equal([{ namespaceId: 'hdu', name: 'HDU', enabled: true, allocated: false, prefix: undefined }]);
+    expect(
+      mergeProblemBankPages([
+        [{ docId: 21, pid: 'P21', title: 'A' }],
+        [{ docId: 21, pid: 'P21', title: 'A' }, { docId: 22, pid: 'P22', title: 'B' }],
+      ]).map((row) => row.docId),
+    ).to.deep.equal([21, 22]);
+
+    const mock = stubFetch(async (...args: unknown[]) => {
+      const url = new URL(String(args[0]));
+      const page = url.searchParams.get('page') === '2' ? 2 : 1;
+      return jsonResponse({
+        pdocs: [{ docId: page === 1 ? 21 : 22, pid: `P${page}`, title: `T${page}` }],
+        pcount: 2,
+        ppcount: 2,
+      });
+    });
+    expect((await searchProblemBankPage({ query: '期末', quick: false })).pcount).to.equal(2);
+    expect(requestedUrl(mock).searchParams.get('quick')).to.equal(null);
+    expect((await searchProblemBankAll({ query: '期末', quick: false })).map((row) => row.docId)).to.deep.equal([21, 22]);
+  });
+
+  it('fails closed when the server claims more rows than one unpaged result', async () => {
+    stubFetch(async () => jsonResponse({ pdocs: [{ docId: 21, title: 'A' }], pcount: 80, ppcount: 1 }));
+    await expect(searchProblemBankAll({ query: '期末', quick: false })).rejects.toThrow(/只返回了一页/);
+  });
+});
+
 describe('fetchProblemsByIds', () => {
   const pdocs = [
     { docId: 1001, pid: 'P1001', title: 'A + B', tag: [], difficulty: 1, nSubmit: 10, nAccept: 9 },
@@ -142,8 +188,8 @@ describe('fetchProblemsByIds', () => {
     const mock = stubFetch(async () => jsonResponse({ pdocs }));
 
     expect(await fetchProblemsByIds(['P1002', '1001'])).to.deep.equal([
-      { docId: 1002, pid: 'P1002', title: 'A - B', tag: [], difficulty: 2, nSubmit: 20, nAccept: 8 },
-      { docId: 1001, pid: 'P1001', title: 'A + B', tag: [], difficulty: 1, nSubmit: 10, nAccept: 9 },
+      { docId: 1002, pid: 'P1002', title: 'A - B', tag: [], difficulty: 2, nSubmit: 20, nAccept: 8, problemKind: undefined },
+      { docId: 1001, pid: 'P1001', title: 'A + B', tag: [], difficulty: 1, nSubmit: 10, nAccept: 9, problemKind: undefined },
     ]);
     expect(mock.mock.calls.length).to.equal(2);
     expect(requestedUrl(mock, 0).searchParams.get('q')).to.equal('P1002');

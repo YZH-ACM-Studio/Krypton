@@ -12,7 +12,16 @@ import { Textarea } from '@/components/ui/textarea';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 import { replaceRouteTokens } from '@/lib/format';
-import { fetchProblemsByIds, problemKey, searchProblems, type ProblemOption } from '@/lib/multi-select-presets';
+import {
+  fetchProblemsByIds,
+  listPidNamespaceOptions,
+  problemKey,
+  searchProblemBankAll,
+  searchProblemBankPage,
+  searchProblems,
+  type PidNamespaceOption,
+  type ProblemOption,
+} from '@/lib/multi-select-presets';
 import { ContestExamPaperQuotas } from './contest-exam-paper-quotas';
 
 const KIND_LABEL: Record<ProblemKind, string> = {
@@ -27,7 +36,10 @@ const KIND_LABEL: Record<ProblemKind, string> = {
 };
 
 const HISTORY_LIMIT = 50;
-const BANK_LIMIT = 30;
+
+export function examPaperBankCanAddAll(query: string, kind: string): boolean {
+  return Boolean(query.trim() || kind);
+}
 
 export type ExamPaperPdictRow = {
   problemKind?: unknown;
@@ -157,7 +169,12 @@ export function ContestExamPaperPool({
   const [bankKind, setBankKind] = useState('');
   const [bankHits, setBankHits] = useState<ExamPaperPoolRow[]>([]);
   const [bankSelected, setBankSelected] = useState<string[]>([]);
+  const [bankPage, setBankPage] = useState(1);
+  const [bankPageCount, setBankPageCount] = useState(0);
+  const [bankTotal, setBankTotal] = useState(0);
   const [bankBusy, setBankBusy] = useState(false);
+  const [namespaces, setNamespaces] = useState<PidNamespaceOption[]>([]);
+  const [namespaceId, setNamespaceId] = useState('');
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteText, setPasteText] = useState('');
   const [status, setStatus] = useState('');
@@ -178,6 +195,20 @@ export function ContestExamPaperPool({
   const quotaPids = pids.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0);
   const canUndo = history.index > 0;
   const canRedo = history.index < history.entries.length - 1;
+
+  useEffect(() => {
+    let cancelled = false;
+    listPidNamespaceOptions()
+      .then((rows) => {
+        if (!cancelled) setNamespaces(rows);
+      })
+      .catch((error) => {
+        if (!cancelled) setStatus(error instanceof Error ? error.message : '无法读取题号命名空间');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!pids.length) return undefined;
@@ -241,23 +272,45 @@ export function ContestExamPaperPool({
     return () => window.removeEventListener('keydown', onKey);
   });
 
-  const searchBank = async () => {
+  const rememberMany = (rows: ExamPaperPoolRow[]) => {
+    setCatalog((current) => {
+      const next = { ...current };
+      for (const row of rows) next[row.key] = row;
+      return next;
+    });
+  };
+
+  const loadBankPage = async (page: number) => {
     setBankBusy(true);
     setStatus('');
     try {
-      const found = await searchProblems(bankQuery.trim(), BANK_LIMIT, {
+      const result = await searchProblemBankPage({
+        query: bankQuery.trim() || undefined,
         kind: bankKind || undefined,
+        page,
         quick: false,
       });
-      const hits = found.map((option) => examPaperPoolRowFromOption(option));
-      for (const row of hits) remember(row);
+      const hits = result.problems.map((option) => examPaperPoolRowFromOption(option));
+      rememberMany(hits);
       setBankHits(hits);
       setBankSelected([]);
-      setStatus(hits.length ? `找到 ${hits.length} 道题` : '没有匹配的题目');
+      setBankPage(result.page);
+      setBankPageCount(result.ppcount);
+      setBankTotal(result.pcount);
+      if (result.pidNamespaces.length && !namespaces.length) setNamespaces(result.pidNamespaces);
+      setStatus(result.pcount ? `找到 ${result.pcount} 道题，本页 ${hits.length} 道` : '没有匹配的题目');
+    } catch (error) {
+      setBankHits([]);
+      setBankSelected([]);
+      setBankPageCount(0);
+      setBankTotal(0);
+      setStatus(error instanceof Error ? error.message : '题库搜索失败');
     } finally {
       setBankBusy(false);
     }
   };
+
+  const searchBank = () => loadBankPage(1);
 
   const addKeys = (keys: string[]) => {
     const incoming = uniqueExamPaperPids(keys);
@@ -274,6 +327,62 @@ export function ContestExamPaperPool({
     const keys = bankSelected.length ? bankSelected : bankHits.map((row) => row.key);
     addKeys(keys);
     setBankSelected([]);
+  };
+
+  const addAllMatching = async () => {
+    if (!examPaperBankCanAddAll(bankQuery, bankKind)) {
+      setStatus('请先输入搜索或选择题型，再加入全部匹配。整库一次加入请用题号命名空间。');
+      return;
+    }
+    setBankBusy(true);
+    setStatus('');
+    try {
+      const found = await searchProblemBankAll(
+        {
+          query: bankQuery.trim() || undefined,
+          kind: bankKind || undefined,
+          quick: false,
+        },
+        (page, pageCount) => setStatus(`正在读取第 ${page}/${pageCount} 页…`),
+      );
+      const rows = found.map((option) => examPaperPoolRowFromOption(option));
+      rememberMany(rows);
+      addKeys(rows.map((row) => row.key));
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : '加入全部匹配失败');
+    } finally {
+      setBankBusy(false);
+    }
+  };
+
+  const addNamespace = async () => {
+    if (!namespaceId) {
+      setStatus('请先选择题号命名空间');
+      return;
+    }
+    setBankBusy(true);
+    setStatus('');
+    try {
+      const found = await searchProblemBankAll(
+        {
+          pidNamespaceId: namespaceId,
+          kind: bankKind || undefined,
+          quick: false,
+        },
+        (page, pageCount) => setStatus(`正在读取命名空间第 ${page}/${pageCount} 页…`),
+      );
+      if (!found.length) {
+        setStatus('该命名空间没有可见题目');
+        return;
+      }
+      const rows = found.map((option) => examPaperPoolRowFromOption(option));
+      rememberMany(rows);
+      addKeys(rows.map((row) => row.key));
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : '加入命名空间失败');
+    } finally {
+      setBankBusy(false);
+    }
   };
 
   const addFromPaste = async () => {
@@ -328,7 +437,7 @@ export function ContestExamPaperPool({
         <div className="flex flex-wrap items-end justify-between gap-2">
           <div>
             <h3 className="text-sm font-medium">从题库加入</h3>
-            <p className="text-xs text-muted-foreground">按题号、标题或题型搜索，勾选后批量加入题池。</p>
+            <p className="text-xs text-muted-foreground">搜索按页预览，可以加入本页或全部匹配；也可以一次加入整个题号命名空间。</p>
           </div>
           <Button type="button" variant="outline" size="sm" onClick={() => setPasteOpen(true)}>
             <ClipboardPaste />
@@ -367,32 +476,85 @@ export function ContestExamPaperPool({
             {bankBusy ? '搜索中…' : '搜索'}
           </Button>
         </div>
-        {bankHits.length ? (
+        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
+          <label className="space-y-1.5">
+            <span className="text-xs text-muted-foreground">题号命名空间</span>
+            <SimpleSelect
+              value={namespaceId}
+              onValueChange={setNamespaceId}
+              ariaLabel="题号命名空间"
+              options={[
+                { value: '', label: namespaces.length ? '选择题号命名空间' : '正在读取命名空间…' },
+                ...namespaces.map((namespace) => ({
+                  value: namespace.namespaceId,
+                  label: namespace.enabled ? namespace.name : `${namespace.name}（已停用）`,
+                })),
+              ]}
+            />
+          </label>
+          <Button type="button" variant="outline" className="md:mt-6" disabled={bankBusy || !namespaceId} onClick={() => void addNamespace()}>
+            加入该命名空间全部题目
+          </Button>
+        </div>
+        {bankHits.length || bankTotal ? (
           <div className="space-y-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-xs text-muted-foreground">搜索结果 {bankHits.length} 道</p>
+              <p className="text-xs text-muted-foreground">
+                {bankTotal
+                  ? `共 ${bankTotal} 道 · 第 ${bankPage}/${Math.max(bankPageCount, 1)} 页 · 本页 ${bankHits.length} 道`
+                  : `本页 ${bankHits.length} 道`}
+              </p>
               <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={bankBusy || bankPage <= 1}
+                  onClick={() => void loadBankPage(bankPage - 1)}
+                >
+                  上一页
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={bankBusy || bankPageCount <= 0 || bankPage >= bankPageCount}
+                  onClick={() => void loadBankPage(bankPage + 1)}
+                >
+                  下一页
+                </Button>
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
                   onClick={() => setBankSelected(bankHits.map((row) => row.key))}
                 >
-                  全选结果
+                  全选本页
                 </Button>
-                <Button type="button" size="sm" onClick={addFromBank}>
-                  加入所选{bankSelected.length ? `（${bankSelected.length}）` : '结果'}
+                <Button type="button" size="sm" disabled={!bankHits.length} onClick={addFromBank}>
+                  加入所选{bankSelected.length ? `（${bankSelected.length}）` : '本页'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={bankBusy || !examPaperBankCanAddAll(bankQuery, bankKind)}
+                  onClick={() => void addAllMatching()}
+                >
+                  加入全部匹配{bankTotal ? `（${bankTotal}）` : ''}
                 </Button>
               </div>
             </div>
-            <PoolTable
-              rows={bankHits}
-              selected={bankSelected}
-              onToggle={toggleBankSelected}
-              onToggleAll={(checked) => setBankSelected(checked ? bankHits.map((row) => row.key) : [])}
-              hrefFor={problemHref}
-              alreadyIn={new Set(pids)}
-            />
+            {bankHits.length ? (
+              <PoolTable
+                rows={bankHits}
+                selected={bankSelected}
+                onToggle={toggleBankSelected}
+                onToggleAll={(checked) => setBankSelected(checked ? bankHits.map((row) => row.key) : [])}
+                hrefFor={problemHref}
+                alreadyIn={new Set(pids)}
+              />
+            ) : null}
           </div>
         ) : null}
       </section>

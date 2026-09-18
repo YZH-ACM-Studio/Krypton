@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { confirmFormSubmit } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { MiniTabs } from '@/components/ui/mini-tabs';
 import { MultiSelect } from '@/components/ui/multi-select';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { SimpleSelect } from '@/components/ui/select';
@@ -32,6 +33,7 @@ type ContestEntryMode = 'open' | 'client_required';
 type ContestApprovalMode = 'strict' | 'auto';
 type NetworkFailurePolicy = 'strict' | 'report_only' | 'off';
 type AccessPermission = 'public' | 'invite';
+type ExamEditTab = 'basic' | 'paper' | 'access' | 'content' | 'vigil';
 
 interface ScopeOption {
   _id: string;
@@ -277,6 +279,7 @@ export function ContestEditExam({ rule, onRuleChange, children }: ContestEditExa
   );
   const [liveEnabled, setLiveEnabled] = useState(tdoc.liveEnabled !== false);
   const [cameraEnabled, setCameraEnabled] = useState(tdoc.cameraEnabled !== false);
+  const [tab, setTab] = useState<ExamEditTab>('basic');
 
   const schoolCatalog: ScopeOption[] = (Array.isArray(data.scopeSchools) ? data.scopeSchools : [])
     .map((row) => readRecord(row))
@@ -355,6 +358,21 @@ export function ContestEditExam({ rule, onRuleChange, children }: ContestEditExa
             {isEdit ? '保存修改' : '创建考试'}
           </Button>
         </div>
+        <div className="w-full overflow-x-auto">
+          <MiniTabs<ExamEditTab>
+            value={tab}
+            onValueChange={setTab}
+            size="md"
+            aria-label="考试编辑分区"
+            items={[
+              { value: 'basic', label: '这场考试' },
+              { value: 'paper', label: '试卷', count: pids.length },
+              { value: 'access', label: '谁能考' },
+              { value: 'content', label: '考生说明' },
+              ...(isEdit ? [{ value: 'vigil' as const, label: '反作弊' }] : []),
+            ]}
+          />
+        </div>
       </header>
 
       <form id="exam-edit-form" method="post" className="space-y-6">
@@ -377,6 +395,7 @@ export function ContestEditExam({ rule, onRuleChange, children }: ContestEditExa
           </>
         ) : null}
 
+        <div hidden={tab !== 'basic'}>
         <ExamCard title="这场考试" description="标题和开门时间是这场考试的身份。整场关门后不能再开考。">
           <div className="space-y-1.5">
             <label htmlFor="title" className="text-sm font-medium">
@@ -470,11 +489,15 @@ export function ContestEditExam({ rule, onRuleChange, children }: ContestEditExa
             <p className="text-xs text-muted-foreground">改成 ACM / OI 会切回比赛编辑器。</p>
           </div>
         </ExamCard>
+        </div>
 
+        <div hidden={tab !== 'paper'}>
         <ExamCard title="试卷" description="题池可批量筛选、多选、排序和撤销。填写配额后按题型抽个人卷，第一次开考冻结。">
           <ContestExamPaperPool name="pids" value={pids} onChange={setPids} pdict={readPdict(data.pdict)} quotas={readQuotaMap(tdoc.examPaperQuotas)} />
         </ExamCard>
+        </div>
 
+        <div hidden={tab !== 'access'}>
         <ExamCard title="谁能考" description="公开或邀请码，再加可选的学校 / 用户组范围。不写入比赛 assign。列表隐藏只影响发现，不影响链接和课程入口。">
           <div className="grid gap-4 lg:grid-cols-2">
             <div className="space-y-2">
@@ -562,7 +585,9 @@ export function ContestEditExam({ rule, onRuleChange, children }: ContestEditExa
           </SettingsRow>
           <HiddenFlag name="hidden" value={listHidden} />
         </ExamCard>
+        </div>
 
+        <div hidden={tab !== 'content'}>
         <ExamCard title="考生说明" description="开考页展示的 Markdown，可后补。">
           <div className="space-y-1.5">
             <label htmlFor="content" className="text-sm font-medium">
@@ -571,8 +596,10 @@ export function ContestEditExam({ rule, onRuleChange, children }: ContestEditExa
             <MarkdownEditor name="content" value={readString(tdoc.content)} minHeight={240} />
           </div>
         </ExamCard>
+        </div>
 
         {isEdit ? (
+          <div hidden={tab !== 'vigil'}>
           <ExamCard title="客户端与反作弊" description="创建时默认关闭。这里打开后才会要求 Client、锁屏或网络锁。">
             <label className="flex cursor-pointer items-start justify-between gap-4 rounded-lg border p-4">
               <span className="min-w-0 space-y-1">
@@ -744,6 +771,7 @@ export function ContestEditExam({ rule, onRuleChange, children }: ContestEditExa
               </div>
             ) : null}
           </ExamCard>
+          </div>
         ) : null}
 
         <div className="flex items-center justify-end gap-3">

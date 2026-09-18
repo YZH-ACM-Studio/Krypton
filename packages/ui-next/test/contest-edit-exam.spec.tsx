@@ -102,6 +102,11 @@ describe('contest edit exam render', () => {
     expect(hiddenInput('participationMode')?.value).to.equal('individual');
     expect(hiddenInput('hidden')?.value).to.equal('false');
     expect(screen.getByText('不在列表中显示')).to.exist;
+    expect(screen.getByRole('tab', { name: '这场考试' })).to.exist;
+    expect(screen.getByRole('tab', { name: /试卷/ })).to.exist;
+    expect(screen.getByRole('tab', { name: '谁能考' })).to.exist;
+    expect(screen.getByRole('tab', { name: '考生说明' })).to.exist;
+    expect(screen.queryByRole('tab', { name: '反作弊' })).to.equal(null);
     const wallClock = screen.getByLabelText('整场关门（小时）') as HTMLInputElement;
     expect(wallClock.name).to.equal('duration');
     expect(wallClock.value).to.equal('2');
@@ -155,6 +160,7 @@ describe('contest edit exam render', () => {
     expect(hiddenInput('rated')?.value).to.equal('true');
     expect(hiddenInput('hidden')?.value).to.equal('true');
     expect(screen.getByText('不在列表中显示')).to.exist;
+    expect(screen.getByRole('tab', { name: '反作弊' })).to.exist;
     expect(screen.getByText('客户端与反作弊')).to.exist;
     expect(screen.getByText('启用 Vigil 反作弊')).to.exist;
     expect(screen.getByText('复制为新考试')).to.exist;

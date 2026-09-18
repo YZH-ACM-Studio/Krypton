@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -13,6 +14,7 @@ import {
   moveExamPaperPoolBlock,
   parseExamPaperPidTokens,
   uniqueExamPaperPids,
+  examPaperBankCanAddAll,
 } from '../src/pages/contest-exam-paper-pool';
 
 function bootstrap(): KryptonBootstrap {
@@ -42,6 +44,9 @@ describe('exam paper pool helpers', () => {
   it('parses and deduplicates pasted tokens', () => {
     expect(parseExamPaperPidTokens('12, 12\nP1001；13')).to.deep.equal(['12', 'P1001', '13']);
     expect(uniqueExamPaperPids(['12', '12', ' 13 '])).to.deep.equal(['12', '13']);
+    expect(examPaperBankCanAddAll('', '')).to.equal(false);
+    expect(examPaperBankCanAddAll('单选', '')).to.equal(true);
+    expect(examPaperBankCanAddAll('', 'single')).to.equal(true);
   });
 
   it('moves a selected block and filters the pool', () => {
@@ -73,6 +78,10 @@ describe('exam paper pool UI', () => {
   it('filters, multi-selects, removes, and undoes', async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ pdocs: [], pcount: 0, ppcount: 0, pidNamespaces: [] }), { status: 200 })),
+    );
     render(
       <BootstrapProvider bootstrap={bootstrap()}>
         <ContestExamPaperPool
@@ -109,13 +118,20 @@ describe('exam paper pool UI', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
-        const url = String(input);
-        expect(url).to.include('kind=single');
-        expect(url).not.to.include('quick=true');
+        const url = new URL(String(input), 'http://local.test');
+        expect(url.searchParams.get('quick')).to.equal(null);
+        if (url.searchParams.get('kind') === 'single') {
+          return new Response(
+            JSON.stringify({
+              pdocs: [{ docId: 21, pid: 'P21', title: '新单选', problemKind: 'single' }],
+              pcount: 1,
+              ppcount: 1,
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
         return new Response(
-          JSON.stringify({
-            pdocs: [{ docId: 21, pid: 'P21', title: '新单选', problemKind: 'single' }],
-          }),
+          JSON.stringify({ pdocs: [], pcount: 0, ppcount: 0, pidNamespaces: [] }),
           { status: 200, headers: { 'Content-Type': 'application/json' } },
         );
       }),
@@ -132,7 +148,82 @@ describe('exam paper pool UI', () => {
     await user.click(screen.getByRole('option', { name: '单选' }));
     await user.click(screen.getByRole('button', { name: '搜索' }));
     expect(await screen.findByText('新单选')).to.exist;
-    await user.click(screen.getByRole('button', { name: '加入所选结果' }));
+    await user.click(screen.getByRole('button', { name: '加入所选本页' }));
     expect(onChange).toHaveBeenCalledWith(['11', '21']);
+  });
+
+  it('adds every matching page and a whole pid namespace', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = new URL(String(input), 'http://local.test');
+        if (url.searchParams.get('pidNamespaceId') === 'hdu') {
+          return new Response(
+            JSON.stringify({
+              pdocs: [
+                { docId: 31, pid: 'HDU1001', title: 'HDU 1', problemKind: 'programming' },
+                { docId: 32, pid: 'HDU1002', title: 'HDU 2', problemKind: 'programming' },
+              ],
+              pcount: 2,
+              ppcount: 1,
+              pidNamespaces: [{ namespaceId: 'hdu', name: 'HDU', enabled: true }],
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+        if (url.searchParams.get('q') === '期末') {
+          const page = url.searchParams.get('page') === '2' ? 2 : 1;
+          return new Response(
+            JSON.stringify({
+              pdocs: [{ docId: page === 1 ? 21 : 22, pid: page === 1 ? 'P21' : 'P22', title: page === 1 ? '卷一' : '卷二', problemKind: 'single' }],
+              pcount: 2,
+              ppcount: 2,
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+        return new Response(
+          JSON.stringify({
+            pdocs: [],
+            pcount: 0,
+            ppcount: 0,
+            pidNamespaces: [{ namespaceId: 'hdu', name: 'HDU', enabled: true }],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }),
+    );
+
+    function StatefulPool() {
+      const [value, setValue] = useState<string[]>([]);
+      return (
+        <ContestExamPaperPool
+          value={value}
+          onChange={(next) => {
+            onChange(next);
+            setValue(next);
+          }}
+        />
+      );
+    }
+
+    render(
+      <BootstrapProvider bootstrap={bootstrap()}>
+        <StatefulPool />
+      </BootstrapProvider>,
+    );
+
+    await user.type(screen.getByPlaceholderText('题号、标题或标签'), '期末');
+    await user.click(screen.getByRole('button', { name: '搜索' }));
+    expect(await screen.findByText('卷一')).to.exist;
+    await user.click(screen.getByRole('button', { name: '加入全部匹配（2）' }));
+    expect(onChange).toHaveBeenCalledWith(['21', '22']);
+
+    await user.click(screen.getByLabelText('题号命名空间'));
+    await user.click(await screen.findByRole('option', { name: 'HDU' }));
+    await user.click(screen.getByRole('button', { name: '加入该命名空间全部题目' }));
+    expect(onChange).toHaveBeenCalledWith(['21', '22', '31', '32']);
   });
 });

@@ -71,6 +71,8 @@ describe('contest edit exam field contract', () => {
       '<input type="hidden" name="participationMode" value={flags.participationMode} />',
     );
 
+    expect(exam, 'exam tree splits with MiniTabs').to.include('MiniTabs');
+    expect(exam, 'inactive exam tabs stay mounted for POST').to.match(/hidden=\{tab !== '/);
     expect(exam, 'exam tree uses ContestExamPaperPool').to.include('ContestExamPaperPool');
     expect(exam, 'exam tree must POST pids via the paper pool').to.include('name="pids"');
     expect(exam, 'exam tree must not use ProblemPicker').not.to.include('ProblemPicker');

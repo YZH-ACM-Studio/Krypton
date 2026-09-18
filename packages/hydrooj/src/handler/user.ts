@@ -786,8 +786,12 @@ const UserApi = {
             }
             return udocs.map((candidate) => {
                 const student = students[String(candidate._id)];
+                const serialized = candidate.serialize(c) as Record<string, unknown>;
+                delete serialized.studentId;
+                delete serialized.realName;
+                delete serialized.school;
                 return {
-                    ...candidate.serialize(c),
+                    ...serialized,
                     avatarUrl: candidate.avatarUrl,
                     ...(student?.studentId ? { studentId: student.studentId } : {}),
                     ...(student?.realName ? { realName: student.realName } : {}),

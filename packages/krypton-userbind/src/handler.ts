@@ -8,6 +8,7 @@ import { localizedErrorText, Context, Handler, NotFoundError, ObjectId, OplogMod
 import { bindingRequestsColl, bindTokensColl, schoolsColl, studentsColl, userGroupsColl } from './db';
 import { BindingRequiredError } from './errors';
 import { decideForceBind, isForceBindEnabled, shouldForceBindSubject, wantsForceBindHtml, type ForceBindSubject } from './force-bind';
+import { buildBoundStudentView, stripLegacyProfileIdentity } from './identity-view';
 import { userBindModel } from './model';
 import type { ParsedStudentFilterQuery } from './student-filter';
 import { parseStudentFilterQuery } from './student-filter';
@@ -1193,8 +1194,7 @@ class UserBindClaimHandler extends Handler {
             schools,
             schoolLocked: !!userSchoolId,
             candidates: null,
-            currentStudentId: (this.user as any).studentId || null,
-            currentRealName: (this.user as any).realName || null,
+            ...(await currentCanonicalBinding(domainId, this.user._id)),
         };
     }
 
@@ -1226,8 +1226,7 @@ class UserBindClaimHandler extends Handler {
                 candidates,
                 studentIdInput: sid,
                 realNameInput: name,
-                currentStudentId: (this.user as any).studentId || null,
-                currentRealName: (this.user as any).realName || null,
+                ...(await currentCanonicalBinding(domainId, this.user._id)),
             };
             return;
         }
@@ -1284,27 +1283,33 @@ export function applyHandlers(ctx: Context) {
         });
     });
 
-    // 个人主页真实身份注入（PLAN 2026-07-02 §3）。绑定状态对所有访客可见；
-    // 真实姓名/学号仅登录用户可见（校园网内未登录也能访问，防止被爬成
-    // 全校学号姓名名录）。有绑定时前端以此为准、隐藏用户自填的 studentId。
+    // 学号/姓名/学校只认 userbind。绑定状态对所有访客可见；
+    // 身份字段仅登录用户可见，避免未登录爬成花名册。
     ctx.on('handler/after/UserDetail#get', async (h) => {
         const uid = h.response?.body?.udoc?._id;
         if (typeof uid !== 'number') return;
-        const domainId = (h.args as any)?.domainId || 'system';
+        const domainId = (h.args as any)?.domainId || (h as Handler).domain?._id || 'system';
+        const signedIn = !!(h as Handler).user?.hasPriv?.(PRIV.PRIV_USER_PROFILE);
+        if (h.response.body.udoc && typeof h.response.body.udoc === 'object') {
+            const udoc = h.response.body.udoc as { serialize: (handler: unknown) => Record<string, unknown> };
+            h.response.body.udoc = stripLegacyProfileIdentity(udoc.serialize(h));
+        }
         const student = await userBindModel.findStudentByUserId(domainId, uid);
-        const signedIn = (h as Handler).user?.hasPriv?.(PRIV.PRIV_USER_PROFILE);
-        h.response.body.studentBinding = student
-            ? {
-                  bound: true,
-                  ...(signedIn
-                      ? {
-                            realName: student.realName,
-                            studentId: student.studentId,
-                            enrollmentYear: student.enrollmentYear ?? null,
-                        }
-                      : {}),
-              }
-            : { bound: false };
+        const school = signedIn && student ? await userBindModel.getSchool(domainId, student.schoolId) : null;
+        h.response.body.studentBinding = buildBoundStudentView(student, school, signedIn);
+    });
+
+    ctx.on('handler/after/HomeSettings#get', async (h) => {
+        const uid = (h as Handler).user?._id;
+        if (typeof uid !== 'number' || uid <= 0) return;
+        const domainId = (h.args as any)?.domainId || (h as Handler).domain?._id || 'system';
+        if (h.response.body?.current && typeof h.response.body.current === 'object') {
+            const current = h.response.body.current as { serialize: (handler: unknown) => Record<string, unknown> };
+            h.response.body.current = stripLegacyProfileIdentity(current.serialize(h));
+        }
+        const student = await userBindModel.findStudentByUserId(domainId, uid);
+        const school = student ? await userBindModel.getSchool(domainId, student.schoolId) : null;
+        h.response.body.studentBinding = buildBoundStudentView(student, school, true);
     });
 
     ctx.on('handler/before-prepare', async (h) => {

@@ -552,14 +552,16 @@ class PaperLayoutHandler extends PaperBaseHandler {
                 const tsdocs = await (contest as any).getMultiStatus(domainId, { docId: this.tid }).sort({ score: -1 }).limit(100).toArray();
                 const uids = tsdocs.map((t: any) => t.uid);
                 const udict = uids.length > 0 ? await UserModel.getListForRender(domainId, uids, false).catch(() => ({})) : {};
+                const students = uids.length > 0 ? await studentDirectory().findStudentsByUserIds(domainId, uids) : {};
                 scoreboard = tsdocs.map((t: any, i: number) => {
                     const u = (udict as any)[t.uid] || {};
+                    const student = students[String(t.uid)];
                     return {
                         rank: i + 1,
                         uid: t.uid,
                         uname: u.uname || `UID ${t.uid}`,
-                        realName: u.realName,
-                        studentId: u.studentId,
+                        realName: student?.realName,
+                        studentId: student?.studentId,
                         score: t.score || 0,
                     };
                 });
@@ -580,6 +582,9 @@ class PaperLayoutHandler extends PaperBaseHandler {
             scoreboard,
             showScoreboard,
             allowSubmitByKind: !!this.tdoc.allowSubmitByKind,
+            examMode: {
+                student: await resolveExamModeStudent(this, domainId),
+            },
         };
     }
 }
@@ -933,6 +938,7 @@ class ExamModeHomeHandler extends Handler {
         }
 
         this.response.template = 'exam_mode_home.html';
+        const student = await resolveExamModeStudent(this, authoritativeDomainId);
         this.response.body = {
             // legacy field for the existing ui-next `/exam-mode` page; tracks
             // the renamed "contests" view (all rules) — old name retained
@@ -942,8 +948,7 @@ class ExamModeHomeHandler extends Handler {
             isAdmin,
             user: {
                 name: this.user.uname,
-                studentId: (this.user as any).studentId,
-                realName: (this.user as any).realName,
+                ...(student || {}),
             },
         };
     }

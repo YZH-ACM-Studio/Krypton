@@ -15,6 +15,7 @@ import { Separator } from '@/components/ui/separator';
 import { MarkdownEditor } from '@/components/markdown-renderer';
 import { AdminPage } from '@/components/admin/admin-page';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Switch } from '@/components/ui/switch';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { SimpleSelect } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -320,7 +321,7 @@ function SchemaField({
   if (node.type === 'boolean') {
     return (
       <label className="inline-flex cursor-pointer items-center gap-2 text-sm">
-        <Checkbox checked={value === true} onChange={(e) => onChange(e.target.checked)} />
+        <Switch checked={value === true} onChange={(e) => onChange(e.target.checked)} />
         <span className="text-muted-foreground">{description || '启用'}</span>
       </label>
     );
@@ -1006,7 +1007,7 @@ function SettingField({ setting, value }: { setting: SystemSetting; value: unkno
       <div>
         {setting.type === 'boolean' || setting.type === 'checkbox' ? (
           <label className="inline-flex cursor-pointer items-center gap-2">
-            <Checkbox name={setting.key} defaultChecked={!!value} disabled={isDisabled} />
+            <Switch name={setting.key} defaultChecked={!!value} disabled={isDisabled} />
             <span className="text-sm text-muted-foreground">{setting.ui || '启用'}</span>
           </label>
         ) : setting.type === 'select' ? (

@@ -37,6 +37,7 @@ import { SimpleSelect } from '@/components/ui/select';
 import { AvatarUpload } from '@/components/uploader';
 import { MarkdownEditor } from '@/components/markdown-renderer';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useBootstrap } from '@/lib/bootstrap';
 import { formatDateTime, toDate } from '@/lib/format';
@@ -555,7 +556,7 @@ function ExternalRatingSiteFields({
       </FormField>
       <FormField label={publicLabel} hint="默认关闭。打开后公开资料和排行榜可以展示该站分数。">
         <label className="inline-flex cursor-pointer items-center gap-2">
-          <Checkbox name={publicName} value="on" defaultChecked={publicChecked} disabled={publicDisabled} />
+          <Switch name={publicName} value="on" defaultChecked={publicChecked} disabled={publicDisabled} />
           <span className="text-sm text-muted-foreground">展示</span>
         </label>
       </FormField>
@@ -598,7 +599,7 @@ function SettingField({ setting, value }: { setting: SettingDescriptor; value: u
   if (setting.type === 'boolean' || setting.type === 'checkbox') {
     control = (
       <label className="inline-flex cursor-pointer items-center gap-2">
-        <Checkbox name={setting.key} value="on" defaultChecked={!!value} disabled={isDisabled} />
+        <Switch name={setting.key} value="on" defaultChecked={!!value} disabled={isDisabled} />
         <span className="text-sm text-muted-foreground">{setting.ui || '启用'}</span>
         {!isDisabled ? <input type="hidden" name={`booleanKeys.${setting.key}`} value="on" /> : null}
       </label>

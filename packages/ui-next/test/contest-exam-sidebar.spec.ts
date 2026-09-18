@@ -31,6 +31,18 @@ describe('contest exam sidebar', () => {
     expect(balloon).to.include('${detailUrl}/balloon');
   });
 
+  it('routes exam contest_detail onto the exam landing and omits balloon there', () => {
+    const contests = source('src/pages/contests.tsx');
+    const exam = source('src/pages/contest-exam-detail.tsx');
+    expect(contests).to.match(/tdoc\?\.rule === 'exam'[\s\S]{0,80}ExamContestDetailPage/);
+    expect(exam).not.to.include('/balloon');
+    expect(exam).to.include('报名考试');
+    expect(exam).to.include('postContestProblemEntryUrl');
+    expect(exam).to.include("rule: 'exam'");
+    expect(exam).not.to.include('参加比赛');
+    expect(exam).not.to.include('打星参赛');
+  });
+
   it('uses 创建考试 and 编辑考试 copy when contest-edit-exam.tsx exists', () => {
     const examPath = resolve(uiRoot, 'src/pages/contest-edit-exam.tsx');
     if (!existsSync(examPath)) return;

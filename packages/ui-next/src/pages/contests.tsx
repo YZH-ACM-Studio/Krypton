@@ -57,6 +57,7 @@ import {
   type ScoreboardImageRow,
   type ScoreboardSnapshotMode,
 } from '@/lib/scoreboard-image-export';
+import { ExamContestDetailPage } from '@/pages/contest-exam-detail';
 
 interface ContestDoc {
   docId?: string | number;
@@ -754,6 +755,7 @@ function ContestTable({
 export function ContestDetailPage() {
   const bs = useBootstrap();
   const data = bs.page.data as ContestsPageData;
+  if (data.tdoc?.rule === 'exam') return <ExamContestDetailPage />;
   const tdoc: ContestDoc = data.tdoc || {};
   const pids: (string | number)[] = data.pids || tdoc.pids || [];
   const tsdoc: ContestStatusDoc = data.tsdoc || {};

@@ -7,11 +7,16 @@ import {
     buildCourseExamCompletionResolution,
     isCourseExamCompleteFromStatus,
     isCourseExamEnded,
-    isCourseExamWindowClosed,
     shouldSettleCourseExam,
     type CourseExamCompletionResolution,
 } from './course-exam-complete';
 import { isCourseVideoComplete, listCourseVideos, studentVisibleVideos } from './course-video';
+import {
+    examPaperPidsForCompletion,
+    isExamPaperStarted,
+    isExamPaperUnstartedClosed,
+    isExamPaperWindowClosed,
+} from './exam-paper';
 
 const logger = new Logger('course-exam-gate');
 
@@ -154,11 +159,11 @@ export async function resolveCourseExamCompletion(params: {
     }
     let tsdoc = await contest.getStatus(params.domainId, params.contestId, params.uid);
     const attended = Boolean(tsdoc?.attend);
-    const started = tsdoc?.startAt instanceof Date && !Number.isNaN(tsdoc.startAt.getTime());
-    const windowClosed = isCourseExamWindowClosed(tdoc.endAt, now);
-    const ended = isCourseExamEnded(tdoc.endAt, now);
+    const started = isExamPaperStarted(tsdoc);
+    const windowClosed = isExamPaperWindowClosed(tdoc, tsdoc, now);
+    const ended = isCourseExamEnded(tdoc.endAt, now) || isExamPaperUnstartedClosed(tdoc, tsdoc, now);
     let complete = isCourseExamCompleteFromStatus(tdoc, tsdoc);
-    const hasPids = Array.isArray(tdoc.pids) && tdoc.pids.some((pid: unknown) => typeof pid === 'number' && Number.isSafeInteger(pid));
+    const hasPids = examPaperPidsForCompletion(tdoc, tsdoc).length > 0;
 
     if (shouldSettleCourseExam({
         complete,

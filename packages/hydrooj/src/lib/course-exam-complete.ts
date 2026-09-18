@@ -2,10 +2,14 @@
  * Course-exam completion facts used by file-collect's optional 考完 gate.
  *
  * Canonical: ContestStatus.paperFinalizedAt written ONLY by finalizePaperForUser.
- * After endAt + COURSE_EXAM_FINALIZE_GRACE_MS, the read path may settle an
- * already-attended incomplete paper by calling that same function.
- * Fallback: exam-rule journal covers every pid on the contest (pre-field students).
+ * After the exam-paper window + COURSE_EXAM_FINALIZE_GRACE_MS, the read path may
+ * settle an already-attended incomplete paper by calling that same function.
+ * Fallback: exam-rule journal covers examPaperPidsForCompletion (shared tdoc.pids
+ * when draw is off; frozen personal pids when draw is on). Draw-on without a
+ * frozen paper is an empty paper and is not complete.
  */
+
+import { examPaperPidsForCompletion } from './exam-paper';
 
 export const COURSE_EXAM_FINALIZE_GRACE_MS = 60_000;
 
@@ -22,7 +26,10 @@ export interface CourseExamCompletionResolution {
 export interface CourseExamCompleteContest {
     rule?: unknown;
     pids?: unknown;
+    beginAt?: unknown;
     endAt?: unknown;
+    duration?: unknown;
+    examPaperQuotas?: unknown;
 }
 
 export interface CourseExamCompleteStatus {
@@ -30,23 +37,11 @@ export interface CourseExamCompleteStatus {
     journal?: unknown;
     attend?: unknown;
     startAt?: unknown;
+    examPaperPids?: unknown;
 }
 
 function isValidDate(value: unknown): value is Date {
     return value instanceof Date && !Number.isNaN(value.getTime());
-}
-
-function contestPids(tdoc: CourseExamCompleteContest): number[] {
-    if (!Array.isArray(tdoc.pids)) return [];
-    const out: number[] = [];
-    const seen = new Set<number>();
-    for (const pid of tdoc.pids) {
-        if (typeof pid !== 'number' || !Number.isInteger(pid) || !Number.isSafeInteger(pid)) continue;
-        if (seen.has(pid)) continue;
-        seen.add(pid);
-        out.push(pid);
-    }
-    return out;
 }
 
 function journalPids(tsdoc: CourseExamCompleteStatus): Set<number> {
@@ -66,7 +61,7 @@ export function isCourseExamCompleteFromStatus(
 ): boolean {
     if (!tdoc || tdoc.rule !== 'exam') return false;
     if (!tsdoc) return false;
-    const pids = contestPids(tdoc);
+    const pids = examPaperPidsForCompletion(tdoc, tsdoc);
     if (pids.length === 0) return false;
     if (isValidDate(tsdoc.paperFinalizedAt)) return true;
     const seen = journalPids(tsdoc);

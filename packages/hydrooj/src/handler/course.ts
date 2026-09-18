@@ -89,7 +89,16 @@ async function hydrateCourseExamContest(
     domainId: string,
     tdoc?: Pick<TrainingDoc, 'courseExam'>,
     uid?: number,
-): Promise<{ docId: string; title: string; endAt?: string; attend?: boolean; missing?: boolean } | undefined> {
+): Promise<{
+    docId: string;
+    title: string;
+    endAt?: string;
+    beginAt?: string;
+    startAt?: string;
+    duration?: number;
+    attend?: boolean;
+    missing?: boolean;
+} | undefined> {
     const contestId = tdoc?.courseExam?.contestId;
     if (!contestId) return undefined;
     const docId = contestId instanceof ObjectId ? contestId.toHexString() : String(contestId);
@@ -104,15 +113,28 @@ async function hydrateCourseExamContest(
         const endAt = cdoc.endAt instanceof Date && !Number.isNaN(cdoc.endAt.getTime())
             ? cdoc.endAt.toISOString()
             : undefined;
+        const beginAt = cdoc.beginAt instanceof Date && !Number.isNaN(cdoc.beginAt.getTime())
+            ? cdoc.beginAt.toISOString()
+            : undefined;
+        const duration = typeof cdoc.duration === 'number' && cdoc.duration > 0
+            ? cdoc.duration
+            : undefined;
         let attend = false;
+        let startAt: string | undefined;
         if (typeof uid === 'number' && uid > 0) {
             const tsdoc = await contest.getStatus(domainId, oid, uid);
             attend = Boolean(tsdoc?.attend);
+            if (tsdoc?.startAt instanceof Date && !Number.isNaN(tsdoc.startAt.getTime())) {
+                startAt = tsdoc.startAt.toISOString();
+            }
         }
         return {
             docId,
             title: typeof cdoc.title === 'string' ? cdoc.title : '',
             ...(endAt ? { endAt } : {}),
+            ...(beginAt ? { beginAt } : {}),
+            ...(startAt ? { startAt } : {}),
+            ...(duration ? { duration } : {}),
             ...(attend ? { attend: true } : {}),
         };
     } catch (error) {

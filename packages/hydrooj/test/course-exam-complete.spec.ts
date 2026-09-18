@@ -3,6 +3,11 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, it } from 'node:test';
 import {
+    canStartExamPaper,
+    isExamPaperUnstartedClosed,
+    isExamPaperWindowClosed,
+} from '../src/lib/exam-paper';
+import {
     COURSE_EXAM_FINALIZE_GRACE_MS,
     buildCourseExamCompletionResolution,
     isCourseExamCompleteFromStatus,
@@ -54,6 +59,70 @@ describe('course exam completion', () => {
         expect(isCourseExamWindowClosed(new Date('invalid'), new Date('2026-09-17T01:00:00.000Z'))).to.equal(false);
         expect(isCourseExamEnded(endAt, endAt)).to.equal(true);
         expect(isCourseExamEnded(endAt, new Date(endAt.getTime() - 1))).to.equal(false);
+    });
+
+    it('does not treat a journal covering the pool as complete when draw is on and personal pids differ', () => {
+        expect(isCourseExamCompleteFromStatus(
+            { rule: 'exam', pids: [11, 12], examPaperQuotas: { single: 1 } },
+            { examPaperPids: [12], journal: [{ pid: 11 }] },
+        )).to.equal(false);
+        expect(isCourseExamCompleteFromStatus(
+            { rule: 'exam', pids: [11, 12], examPaperQuotas: { single: 1 } },
+            { journal: [{ pid: 11 }, { pid: 12 }] },
+        )).to.equal(false);
+        expect(isCourseExamCompleteFromStatus(
+            { rule: 'exam', pids: [11, 12], examPaperQuotas: { single: 1 } },
+            { examPaperPids: [12], journal: [{ pid: 12 }] },
+        )).to.equal(true);
+        expect(isCourseExamCompleteFromStatus(
+            { rule: 'exam', pids: [11, 12], examPaperQuotas: { single: 1 } },
+            { examPaperPids: [12], paperFinalizedAt: new Date('2026-09-16T00:00:00.000Z'), journal: [] },
+        )).to.equal(true);
+    });
+
+    it('treats duration too-late unattended as ended while the global window is still open', () => {
+        const tdoc = {
+            beginAt: new Date('2026-09-18T00:00:00.000Z'),
+            endAt: new Date('2026-09-18T03:00:00.000Z'),
+            duration: 1.5,
+        };
+        const now = new Date('2026-09-18T01:30:00.001Z');
+        const ended = isCourseExamEnded(tdoc.endAt, now) || isExamPaperUnstartedClosed(tdoc, null, now);
+        expect(canStartExamPaper(tdoc, now)).to.equal(false);
+        expect(isCourseExamEnded(tdoc.endAt, now)).to.equal(false);
+        expect(ended).to.equal(true);
+        expect(buildCourseExamCompletionResolution({
+            complete: false,
+            attended: false,
+            windowClosed: isExamPaperWindowClosed(tdoc, null, now),
+            ended,
+            contestId: '64a000000000000000000801',
+        })).to.deep.equal({
+            complete: false,
+            attended: false,
+            windowClosed: false,
+            lockKind: 'never_attended_closed',
+        });
+        expect(isExamPaperUnstartedClosed(tdoc, null, new Date('2026-09-17T23:59:59.000Z'))).to.equal(false);
+        expect(isCourseExamEnded(tdoc.endAt, tdoc.endAt) || isExamPaperUnstartedClosed(tdoc, null, tdoc.endAt)).to.equal(true);
+        expect(readHydrooj('src/lib/course-exam-gate.ts')).to.include('isCourseExamEnded(tdoc.endAt, now)');
+        expect(readHydrooj('src/lib/course-exam-gate.ts')).to.include('isExamPaperUnstartedClosed(tdoc, tsdoc, now)');
+        expect(readHydrooj('src/lib/course-exam-gate.ts')).to.include('isExamPaperStarted(tsdoc)');
+    });
+
+    it('closes the settle window from personal end when started with duration', () => {
+        const tdoc = {
+            beginAt: new Date('2026-09-18T00:00:00.000Z'),
+            endAt: new Date('2026-09-18T03:00:00.000Z'),
+            duration: 1.5,
+        };
+        const tsdoc = { startAt: new Date('2026-09-18T01:00:00.000Z') };
+        const personalClosed = new Date('2026-09-18T02:31:00.001Z');
+        expect(isCourseExamWindowClosed(tdoc.endAt, personalClosed)).to.equal(false);
+        expect(isExamPaperWindowClosed(tdoc, tsdoc, new Date('2026-09-18T02:31:00.000Z'))).to.equal(false);
+        expect(isExamPaperWindowClosed(tdoc, tsdoc, personalClosed)).to.equal(true);
+        expect(readHydrooj('src/lib/course-exam-gate.ts')).to.include('isExamPaperWindowClosed(tdoc, tsdoc, now)');
+        expect(readHydrooj('src/lib/course-exam-gate.ts')).to.include('examPaperPidsForCompletion');
     });
 
     it('allows settle only when incomplete, already attended, started, exam-rule, has pids, and the window is closed', () => {
@@ -147,6 +216,18 @@ describe('course exam completion', () => {
         })).to.deep.equal({
             complete: false,
             attended: true,
+            windowClosed: false,
+            examHref: `/exam-mode/${contestId}`,
+            lockKind: 'open',
+        });
+        expect(buildCourseExamCompletionResolution({
+            complete: false,
+            attended: false,
+            windowClosed: false,
+            contestId,
+        })).to.deep.equal({
+            complete: false,
+            attended: false,
             windowClosed: false,
             examHref: `/exam-mode/${contestId}`,
             lockKind: 'open',

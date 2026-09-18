@@ -49,6 +49,8 @@ describe('course exam settle-on-read', () => {
         expect(hasCompleted).not.to.include('isCourseExamCompleteFromStatus');
         expect(resolve).to.include('shouldSettleCourseExam');
         expect(resolve).to.include('isCourseExamEnded');
+        expect(resolve).to.include('isExamPaperUnstartedClosed');
+        expect(resolve).not.to.include('enterAllowed');
         expect(resolve).to.include('started');
         expect(resolve).to.include('hasPids');
         expect(resolve).to.include('finalizePaperForUser');
@@ -82,12 +84,11 @@ describe('course exam settle-on-read', () => {
         const complete = readHydrooj('src/lib/course-exam-complete.ts');
         expect(complete).to.include('export const COURSE_EXAM_FINALIZE_GRACE_MS = 60_000');
         expect(COURSE_EXAM_FINALIZE_GRACE_MS).to.equal(60_000);
-        expect(paper).to.include("import { COURSE_EXAM_FINALIZE_GRACE_MS } from '../lib/course-exam-complete'");
-        expect(paper).to.include('this.tdoc.endAt.getTime() + COURSE_EXAM_FINALIZE_GRACE_MS');
+        expect(paper).to.include('isExamPaperWindowClosed');
         expect(paper).not.to.include('const grace = 60 * 1000');
         const handlerStart = paper.indexOf('class PaperFinalizeHandler');
         const handler = paper.slice(handlerStart, paper.indexOf('private async closeVigilClientSession', handlerStart));
-        expect(handler).to.include('COURSE_EXAM_FINALIZE_GRACE_MS');
+        expect(handler).to.include('isExamPaperWindowClosed(this.tdoc, this.tsdoc');
         expect(handler).not.to.include('finalizePaperForUser =');
     });
 });

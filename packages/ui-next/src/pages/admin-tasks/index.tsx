@@ -50,6 +50,7 @@ import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/
 import { MiniTabs } from '@/components/ui/mini-tabs';
 import { TableAction, TableActions } from '@/components/ui/table-actions';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Switch } from '@/components/ui/switch';
 import { Sheet, SheetBody, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { SimpleSelect, type SimpleSelectOption } from '@/components/ui/select';
@@ -609,7 +610,7 @@ export function AdminTasksEditPage() {
                 </FormField>
                 <FormField label="启用状态">
                   <label className="flex h-9 items-center gap-2 text-sm">
-                    <Checkbox checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />
+                    <Switch checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />
                     用户可见可认领
                   </label>
                 </FormField>

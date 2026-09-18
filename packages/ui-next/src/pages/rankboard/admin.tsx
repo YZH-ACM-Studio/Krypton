@@ -19,6 +19,7 @@ import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { TableAction, TableActions } from '@/components/ui/table-actions';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Switch } from '@/components/ui/switch';
 import { fetchHydroResponse } from '@/lib/error-presenter';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
@@ -874,11 +875,11 @@ function AwardTypeDialog({ type, onClose }: { type: AwardType | null; onClose: (
               </FormField>
             </FormRow>
             <label className="flex items-center gap-2 text-sm">
-              <Checkbox name="useRankDecay" value="true" checked={useRankDecay} onChange={(e) => setUseRankDecay(e.target.checked)} />
+              <Switch name="useRankDecay" value="true" checked={useRankDecay} onChange={(e) => setUseRankDecay(e.target.checked)} />
               启用排名衰减（weight × decayFactor^(liveRank-1)）
             </label>
             <label className="flex items-center gap-2 text-sm">
-              <Checkbox name="hidden" value="true" checked={hidden} onChange={(e) => setHidden(e.target.checked)} />
+              <Switch name="hidden" value="true" checked={hidden} onChange={(e) => setHidden(e.target.checked)} />
               隐藏（已存在的奖项仍计分，但新建时不显示）
             </label>
           </div>

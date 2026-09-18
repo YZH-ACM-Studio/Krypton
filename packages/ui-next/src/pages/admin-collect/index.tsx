@@ -19,6 +19,7 @@ import { FormField, FormRow, FormSection } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { MultiSelect } from '@/components/ui/multi-select';
 import { SimpleSelect } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { TableAction, TableActions } from '@/components/ui/table-actions';
 import { Textarea } from '@/components/ui/textarea';
@@ -1355,7 +1356,7 @@ export function AdminCollectEditPage() {
                 </FormField>
               </FormRow>
               <label className="flex min-h-10 cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2.5">
-                <Checkbox
+                <Switch
                   checked={requireCourseExamComplete}
                   disabled={!canEdit || (!selectedCourse?.hasExam && !requireCourseExamComplete)}
                   onCheckedChange={(checked) => {

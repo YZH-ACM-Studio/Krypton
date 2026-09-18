@@ -3,11 +3,11 @@ import { AlertCircle, Check, ChevronLeft, Circle, Eye, EyeOff, Loader2, Network,
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { MiniTabs } from '@/components/ui/mini-tabs';
 import { SimpleSelect } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
@@ -871,23 +871,22 @@ function MapSettingsDialog({
             </div>
             <div>
               <label className="text-xs font-medium">可见性</label>
-              <SimpleSelect
-                value={visibility}
-                onValueChange={(value) => {
-                  const next = value as 'hidden' | 'public';
-                  setVisibility(next);
-                  if (next !== 'public') setIsDefault(false);
-                }}
-                options={[
-                  { value: 'hidden', label: '隐藏，仅管理员可见' },
-                  { value: 'public', label: '公开，学生可见' },
-                ]}
-                className="mt-1.5 min-h-10"
-              />
+              <label className="mt-1.5 flex min-h-10 cursor-pointer items-center gap-2.5">
+                <Switch
+                  checked={visibility === 'public'}
+                  onCheckedChange={(checked) => {
+                    setVisibility(checked ? 'public' : 'hidden');
+                    if (!checked) setIsDefault(false);
+                  }}
+                />
+                <span className="text-xs text-muted-foreground">
+                  {visibility === 'public' ? '公开，学生可见' : '隐藏，仅管理员可见'}
+                </span>
+              </label>
             </div>
           </div>
           <label className="flex min-h-10 cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2.5">
-            <Checkbox
+            <Switch
               checked={isDefault}
               disabled={visibility !== 'public'}
               onCheckedChange={(checked) => {

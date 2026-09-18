@@ -23,7 +23,7 @@ import { TableAction, TableActions } from '@/components/ui/table-actions';
 import { DateTime } from '@/components/ui/datetime';
 import { MarkdownEditor, MarkdownView } from '@/components/markdown-renderer';
 import { ModuleWorkspace, type ModuleWorkspaceNavItem } from '@/components/management/module-workspace';
-import { Checkbox } from '@/components/ui/checkbox';
+import { Switch } from '@/components/ui/switch';
 import { useBootstrap } from '@/lib/bootstrap';
 import { PRIV } from '@/lib/perms';
 import { cn } from '@/lib/cn';
@@ -564,11 +564,11 @@ export function AdminAnnounceEditorPage() {
               </CardHeader>
               <CardContent className="space-y-2">
                 <label className="flex min-h-10 cursor-pointer items-center gap-2 text-sm">
-                  <Checkbox checked={pin} onChange={(e) => setPin(e.target.checked)} />
+                  <Switch checked={pin} onChange={(e) => setPin(e.target.checked)} />
                   置顶
                 </label>
                 <label className="flex min-h-10 cursor-pointer items-center gap-2 text-sm">
-                  <Checkbox checked={hidden} onChange={(e) => setHidden(e.target.checked)} />
+                  <Switch checked={hidden} onChange={(e) => setHidden(e.target.checked)} />
                   隐藏（暂不公开）
                 </label>
               </CardContent>
@@ -734,7 +734,7 @@ function CategoryEditorDialog({ category, onClose }: { category: Category | null
               </FormField>
             </FormRow>
             <label className="flex min-h-10 cursor-pointer items-center gap-2 text-sm">
-              <Checkbox name="hidden" value="true" checked={hidden} onChange={(e) => setHidden(e.target.checked)} />
+              <Switch name="hidden" value="true" checked={hidden} onChange={(e) => setHidden(e.target.checked)} />
               隐藏（仍可用于已有公告，但不出现在新建下拉里）
             </label>
             <div className="rounded-md border bg-muted/30 p-3">

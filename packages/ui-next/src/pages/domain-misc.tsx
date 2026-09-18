@@ -7,6 +7,7 @@ import { ArrowLeft, Globe, Key, Monitor, Save, Shield, Trash2, UserPlus } from '
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { confirmFormSubmit } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { SimpleSelect } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -309,7 +310,7 @@ export function ContestModePage() {
         <form
           method="post"
           onSubmit={(e) => {
-            if (!confirm('确定要解绑所有用户吗？')) e.preventDefault();
+            void confirmFormSubmit(e, '确定要解绑所有用户吗？', { destructive: true });
           }}
         >
           <input type="hidden" name="operation" value="reset" />

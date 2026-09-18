@@ -23,6 +23,7 @@ import { MarkdownEditor } from '@/components/markdown-renderer';
 import { ProblemPicker } from '@/components/problem-picker';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { confirmFormSubmit } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { MultiSelect } from '@/components/ui/multi-select';
 import { SimpleSelect } from '@/components/ui/select';
@@ -545,7 +546,11 @@ export function CourseEditPage() {
             action={`/course/${tid}/edit`}
             onSubmit={(event) => {
               const title = course.title || '该课程';
-              if (!confirm(`确定删除课程「${title}」？课件、视频和观看记录会一并删除，不能恢复。`)) event.preventDefault();
+              void confirmFormSubmit(
+                event,
+                `确定删除课程「${title}」？课件、视频和观看记录会一并删除，不能恢复。`,
+                { destructive: true },
+              );
             }}
           >
             <input type="hidden" name="operation" value="delete" />

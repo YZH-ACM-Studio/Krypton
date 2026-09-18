@@ -1,4 +1,5 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BootstrapProvider, type KryptonBootstrap } from '../src/lib/bootstrap.tsx';
 import { DomainDashboardPage, ManageDashboardPage, StatusPage } from '../src/pages/admin.tsx';
@@ -46,6 +47,7 @@ describe('admin dashboard pages', () => {
         dcount: 7,
         domain: { _id: 'system', name: '主域', owner: 2 },
         owner: { _id: 2, uname: 'root' },
+        canDeleteDomain: true,
       },
       2,
     );
@@ -74,8 +76,8 @@ describe('admin dashboard pages', () => {
     expect(screen.getByRole('button', { name: '初始化讨论节点' })).not.to.equal(null);
   });
 
-  it('exposes management destinations and protects restart with confirmation', () => {
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+  it('exposes management destinations and protects restart with confirmation', async () => {
+    const user = userEvent.setup();
     renderPage(<ManageDashboardPage />, 'manage_dashboard.html', {});
 
     expect(screen.getByRole('link', { name: /系统设置/ }).getAttribute('href')).to.equal('/manage/setting');
@@ -85,8 +87,14 @@ describe('admin dashboard pages', () => {
     const restartButton = screen.getByRole('button', { name: '重启服务' });
     const form = restartButton.closest('form');
     expect(form).not.to.equal(null);
-    expect(fireEvent.submit(form!)).to.equal(false);
-    expect(confirm).toHaveBeenCalledWith('确定要重启服务吗？');
+    const submitted = vi.fn();
+    form!.submit = submitted;
+
+    await user.click(restartButton);
+    expect(await screen.findByRole('dialog')).not.to.equal(null);
+    expect(screen.getByText('确定要重启服务吗？')).not.to.equal(null);
+    await user.click(screen.getByRole('button', { name: '取消' }));
+    expect(submitted).not.toHaveBeenCalled();
   });
 
   it('summarizes judge health, compiler versions and language commands', () => {

@@ -3,6 +3,7 @@ import { ExternalLink, FolderOpen, Globe, HelpCircle, LogOut, Settings, Star, Us
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { confirmFormSubmit } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useBootstrap } from '@/lib/bootstrap';
 import { formatPlainTextSummary } from '@/lib/format';
@@ -131,7 +132,7 @@ export function DomainsPage() {
                       <form
                         method="post"
                         onSubmit={(event) => {
-                          if (!window.confirm(`确定离开域 ${id}？`)) event.preventDefault();
+                          void confirmFormSubmit(event, `确定离开域 ${id}？`, { destructive: true });
                         }}
                       >
                         <input type="hidden" name="operation" value="leave" />

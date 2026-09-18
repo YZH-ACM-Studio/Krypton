@@ -39,6 +39,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { CheckCircle2, Circle, Flag, Play, UserCheck } from 'lucide-react';
+import { confirmDialog } from '@/components/ui/dialog';
 import { cn } from '@/lib/cn';
 import { useColorMode } from '@/lib/use-color-mode';
 
@@ -525,9 +526,9 @@ function TaskGraphInner({ graph, presets, progress, onChange, selectedNodeId, on
   // "select edge + press Delete/Backspace". The keyboard path stays wired
   // via `deleteKeyCode` below for power-users.
   const onEdgeDoubleClick = useCallback(
-    (_: ReactMouseEvent, edge: Edge) => {
+    async (_: ReactMouseEvent, edge: Edge) => {
       if (!editable) return;
-      if (!window.confirm('删除这条连线？')) return;
+      if (!(await confirmDialog('删除这条连线？', { destructive: true }))) return;
       onChange!({ ...graph, edges: graph.edges.filter((e) => e.id !== edge.id) });
     },
     [editable, graph, onChange],

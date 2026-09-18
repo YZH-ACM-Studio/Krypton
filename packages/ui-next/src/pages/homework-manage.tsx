@@ -7,6 +7,7 @@ import { motion } from 'motion/react';
 import { ArrowLeft, FolderOpen, Plus, Save, Trash2, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { confirmFormSubmit } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -124,10 +125,6 @@ export function HomeworkEditPage() {
   const updatePenaltyRule = (id: string, patch: Partial<PenaltyRuleRow>) => {
     setPenaltyRules((rows) => rows.map((row) => (row.id === id ? { ...row, ...patch } : row)));
   };
-  const confirmDelete = (event: { preventDefault: () => void }) => {
-    if (!confirm('确定要删除此作业吗？')) event.preventDefault();
-  };
-
   /* MultiSelect state — pids resolved async on mount, langs sync. */
   const initialPidCsv: string = (typeof data.pids === 'string' ? data.pids : '') || '';
   const initialPidIds = initialPidCsv
@@ -435,7 +432,13 @@ export function HomeworkEditPage() {
             </div>
           </form>
           {isEdit ? (
-            <form method="post" className="flex items-center" onSubmit={confirmDelete}>
+            <form
+              method="post"
+              className="flex items-center"
+              onSubmit={(event) => {
+                void confirmFormSubmit(event, '确定要删除此作业吗？', { destructive: true });
+              }}
+            >
               <input type="hidden" name="operation" value="delete" />
               <Button type="submit" variant="destructive" size="sm">
                 <Trash2 className="mr-1 size-3" />

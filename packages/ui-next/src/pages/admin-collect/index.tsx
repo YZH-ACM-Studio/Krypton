@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { DateTime } from '@/components/ui/datetime';
+import { confirmFormSubmit } from '@/components/ui/dialog';
 import { FormField, FormRow, FormSection } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { MultiSelect } from '@/components/ui/multi-select';
@@ -1418,36 +1419,36 @@ export function AdminCollectEditPage() {
         </form>
       ) : null}
       {canEdit && isEdit && !data.hasFiles && status !== 'archived' ? (
-        <form method="post" action={formAction} className="flex justify-end">
+        <form
+          method="post"
+          action={formAction}
+          className="flex justify-end"
+          onSubmit={(event) => {
+            void confirmFormSubmit(event, `确定删除文件收集「${title || initial?.title || ''}」？`, { destructive: true });
+          }}
+        >
           <input type="hidden" name="id" value={initial._id} />
           <input type="hidden" name="revision" value={String(initial.revision)} />
           <input type="hidden" name="operation" value="delete" />
-          <Button
-            type="submit"
-            variant="destructive"
-            className="min-h-10"
-            onClick={(event) => {
-              if (!window.confirm(`确定删除文件收集「${title || initial?.title || ''}」？`)) event.preventDefault();
-            }}
-          >
+          <Button type="submit" variant="destructive" className="min-h-10">
             <Trash2 className="mr-1 size-3.5" />
             删除
           </Button>
         </form>
       ) : null}
       {canEdit && isEdit && data.hasFiles && status !== 'archived' ? (
-        <form method="post" action={formAction} className="flex justify-end">
+        <form
+          method="post"
+          action={formAction}
+          className="flex justify-end"
+          onSubmit={(event) => {
+            void confirmFormSubmit(event, `归档「${title || initial?.title || ''}」后不能再收文件，已交文件保留。`, { destructive: true });
+          }}
+        >
           <input type="hidden" name="id" value={initial._id} />
           <input type="hidden" name="revision" value={String(initial.revision)} />
           <input type="hidden" name="operation" value="archive" />
-          <Button
-            type="submit"
-            variant="outline"
-            className="min-h-10"
-            onClick={(event) => {
-              if (!window.confirm(`归档「${title || initial?.title || ''}」后不能再收文件，已交文件保留。`)) event.preventDefault();
-            }}
-          >
+          <Button type="submit" variant="outline" className="min-h-10">
             <Archive className="mr-1 size-3.5" />
             归档
           </Button>
@@ -1521,32 +1522,30 @@ export function AdminCollectStatsPage() {
             </Button>
           ) : null}
           {data.request.canEdit && !data.hasFiles && data.request.status !== 'archived' ? (
-            <form method="post" action={`/admin/collect/${data.request._id}`}>
+            <form
+              method="post"
+              action={`/admin/collect/${data.request._id}`}
+              onSubmit={(event) => {
+                void confirmFormSubmit(event, `确定删除文件收集「${data.request.title}」？`, { destructive: true });
+              }}
+            >
               <input type="hidden" name="operation" value="delete" />
-              <Button
-                type="submit"
-                variant="destructive"
-                className="min-h-10"
-                onClick={(event) => {
-                  if (!window.confirm(`确定删除文件收集「${data.request.title}」？`)) event.preventDefault();
-                }}
-              >
+              <Button type="submit" variant="destructive" className="min-h-10">
                 <Trash2 className="mr-1 size-4" />
                 删除
               </Button>
             </form>
           ) : null}
           {data.request.canEdit && data.hasFiles && data.request.status !== 'archived' ? (
-            <form method="post" action={`/admin/collect/${data.request._id}`}>
+            <form
+              method="post"
+              action={`/admin/collect/${data.request._id}`}
+              onSubmit={(event) => {
+                void confirmFormSubmit(event, `归档「${data.request.title}」后不能再收文件，已交文件保留。`, { destructive: true });
+              }}
+            >
               <input type="hidden" name="operation" value="archive" />
-              <Button
-                type="submit"
-                variant="outline"
-                className="min-h-10"
-                onClick={(event) => {
-                  if (!window.confirm(`归档「${data.request.title}」后不能再收文件，已交文件保留。`)) event.preventDefault();
-                }}
-              >
+              <Button type="submit" variant="outline" className="min-h-10">
                 <Archive className="mr-1 size-4" />
                 归档
               </Button>

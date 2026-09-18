@@ -11,6 +11,7 @@ import { useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { confirmDialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -157,7 +158,7 @@ export function RealPassManagePage() {
   };
 
   const remove = async (docId: number, title: string) => {
-    if (!window.confirm(`确认删除「${title}」(#${docId}) 的赛时数据？`)) return;
+    if (!(await confirmDialog(`确认删除「${title}」(#${docId}) 的赛时数据？`, { destructive: true }))) return;
     setBusy(true);
     try {
       await postOp({ operation: 'remove', docId: String(docId) });
@@ -172,7 +173,7 @@ export function RealPassManagePage() {
     if (commit) {
       if (!preview) return;
 
-      if (!window.confirm(`确认写入 ${preview.summary?.ok ?? 0} 条赛时数据？（写入内容=刚才预览的那份，重复执行会覆盖同题旧值）`)) return;
+      if (!(await confirmDialog(`确认写入 ${preview.summary?.ok ?? 0} 条赛时数据？（写入内容=刚才预览的那份，重复执行会覆盖同题旧值）`))) return;
     } else if (!payload.trim()) {
       setMsg({ kind: 'err', text: '批量内容为空' });
       return;

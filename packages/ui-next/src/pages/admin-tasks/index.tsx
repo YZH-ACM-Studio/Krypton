@@ -46,7 +46,7 @@ import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { FormField, FormRow, FormSection } from '@/components/ui/form';
 import { DateTime } from '@/components/ui/datetime';
-import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { confirmFormSubmit, Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { MiniTabs } from '@/components/ui/mini-tabs';
 import { TableAction, TableActions } from '@/components/ui/table-actions';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -1250,7 +1250,7 @@ export function AdminTasksStatsPage() {
             method="post"
             action={`/admin/tasks/${data.task._id}/stats`}
             onSubmit={(e) => {
-              if (!confirm('对该任务所有「未完成」的分配强制重算进度？已完成的不受影响。')) e.preventDefault();
+              void confirmFormSubmit(e, '对该任务所有「未完成」的分配强制重算进度？已完成的不受影响。', { destructive: true });
             }}
           >
             <input type="hidden" name="operation" value="recheck_all" />
@@ -1870,7 +1870,7 @@ function BulkActionForm({
       method="post"
       action={`/admin/tasks/${taskId}/candidates`}
       onSubmit={(e) => {
-        if (confirm && !window.confirm(confirm)) e.preventDefault();
+        if (confirm) void confirmFormSubmit(e, confirm, { destructive: true });
       }}
     >
       <input type="hidden" name="operation" value={operation} />
@@ -2465,7 +2465,7 @@ function StayCountTab({ events, schools, udict }: { events: StayEvent[]; schools
                           action="/admin/tasks/scores?tab=stay"
                           className="inline"
                           onSubmit={(ev) => {
-                            if (!confirm('确定删除该事件？此操作不会撤销已完成的任务')) ev.preventDefault();
+                            void confirmFormSubmit(ev, '确定删除该事件？此操作不会撤销已完成的任务', { destructive: true });
                           }}
                         >
                           <input type="hidden" name="operation" value="stayDelete" />

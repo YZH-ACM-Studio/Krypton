@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
+import { confirmFormSubmit } from '@/components/ui/dialog';
 import { MarkdownEditor } from '@/components/markdown-renderer';
 import { Switch } from '@/components/ui/switch';
 import { useBootstrap } from '@/lib/bootstrap';
@@ -183,7 +184,7 @@ export function DiscussionEditPage() {
               method="post"
               className="flex items-center"
               onSubmit={(e) => {
-                if (!confirm('确定要删除此讨论吗？')) e.preventDefault();
+                void confirmFormSubmit(e, '确定要删除此讨论吗？', { destructive: true });
               }}
             >
               <input type="hidden" name="operation" value="delete" />

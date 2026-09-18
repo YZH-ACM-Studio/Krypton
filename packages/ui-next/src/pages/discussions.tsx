@@ -35,6 +35,7 @@ import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Pagination } from '@/components/ui/pagination';
 import { MiniTabs } from '@/components/ui/mini-tabs';
+import { confirmDialog, confirmFormSubmit } from '@/components/ui/dialog';
 import { MarkdownEditor, MarkdownView } from '@/components/markdown-renderer';
 import { useBootstrap, type GenericUserDoc } from '@/lib/bootstrap';
 import { formatRelativeTime, makeInitials, replaceRouteTokens } from '@/lib/format';
@@ -823,7 +824,7 @@ export function DiscussionDetailPage() {
                         <form
                           method="post"
                           onSubmit={(event) => {
-                            if (!window.confirm('确定删除这条回复？')) event.preventDefault();
+                            void confirmFormSubmit(event, '确定删除这条回复？', { destructive: true });
                           }}
                         >
                           <input type="hidden" name="operation" value="delete_reply" />
@@ -878,7 +879,7 @@ export function DiscussionDetailPage() {
                                   <form
                                     method="post"
                                     onSubmit={(event) => {
-                                      if (!window.confirm('确定删除这条楼中楼回复？')) event.preventDefault();
+                                      void confirmFormSubmit(event, '确定删除这条楼中楼回复？', { destructive: true });
                                     }}
                                   >
                                     <input type="hidden" name="operation" value="delete_tail_reply" />
@@ -957,8 +958,8 @@ export function DiscussionDetailPage() {
                 <Button
                   type="button"
                   variant="ghost"
-                  onClick={() => {
-                    if (window.confirm('清除已保存的草稿？')) {
+                  onClick={async () => {
+                    if (await confirmDialog('清除已保存的草稿？')) {
                       try {
                         localStorage.removeItem(draftKey);
                       } catch {

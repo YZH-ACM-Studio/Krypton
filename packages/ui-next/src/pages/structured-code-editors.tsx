@@ -14,6 +14,7 @@ import {
 import { useFormDirtyState, useUnsavedChangesGuard } from '@/components/unsaved-changes-guard';
 import { FileUploader } from '@/components/uploader';
 import { Button } from '@/components/ui/button';
+import { confirmFormSubmit } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { SimpleSelect } from '@/components/ui/select';
 import { useBootstrap } from '@/lib/bootstrap';
@@ -1119,7 +1120,11 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
           action={String(bs.urls.problems || '/p')}
           className="mt-6 rounded-xl border border-amber-500/25 bg-amber-500/[0.04] p-4"
           onSubmit={(event) => {
-            if (!window.confirm(`归档题目「${pdoc.title || pid}」？归档后将强制隐藏。`)) event.preventDefault();
+            void confirmFormSubmit(
+              event,
+              `归档题目「${pdoc.title || pid}」？归档后将强制隐藏。`,
+              { destructive: true },
+            );
           }}
         >
           <input type="hidden" name="operation" value="archive" />

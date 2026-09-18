@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Pagination } from '@/components/ui/pagination';
+import { confirmFormSubmit } from '@/components/ui/dialog';
 import { MarkdownEditor, MarkdownView } from '@/components/markdown-renderer';
 import { useBootstrap } from '@/lib/bootstrap';
 import { formatDateTime, makeInitials } from '@/lib/format';
@@ -184,7 +185,7 @@ export function BlogEditPage() {
           method="post"
           className="flex justify-end"
           onSubmit={(event) => {
-            if (!window.confirm('确认删除这篇博客？')) event.preventDefault();
+            void confirmFormSubmit(event, '确认删除这篇博客？', { destructive: true });
           }}
         >
           <input type="hidden" name="operation" value="delete" />

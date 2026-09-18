@@ -11,6 +11,7 @@ import {
 } from '@/components/structured-problem-metadata-panel';
 import { useFormDirtyState, useUnsavedChangesGuard } from '@/components/unsaved-changes-guard';
 import { Button } from '@/components/ui/button';
+import { confirmFormSubmit } from '@/components/ui/dialog';
 import { useBootstrap } from '@/lib/bootstrap';
 import { readAntiAiMarkerDrafts, serializeAntiAiMarkerInput, type AntiAiMarkerDraft } from '@/lib/anti-ai-marker';
 import { cn } from '@/lib/cn';
@@ -200,7 +201,11 @@ export function SubjectiveProblemEditorPage() {
           action={String(bs.urls.problems || '/p')}
           className="mt-6 rounded-xl border border-amber-500/25 bg-amber-500/[0.04] p-4"
           onSubmit={(event) => {
-            if (!window.confirm(`归档题目「${pdoc.title || pid}」？归档后将强制隐藏。`)) event.preventDefault();
+            void confirmFormSubmit(
+              event,
+              `归档题目「${pdoc.title || pid}」？归档后将强制隐藏。`,
+              { destructive: true },
+            );
           }}
         >
           <input type="hidden" name="operation" value="archive" />

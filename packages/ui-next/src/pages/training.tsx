@@ -6,6 +6,7 @@ import { MarkdownView } from '@/components/markdown-renderer';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { confirmFormSubmit } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Pagination } from '@/components/ui/pagination';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -726,7 +727,7 @@ export function TrainingDetailPage() {
               <form
                 method="post"
                 onSubmit={(event) => {
-                  if (!window.confirm(`确定删除题集「${tdoc.title || ''}」？`)) event.preventDefault();
+                  void confirmFormSubmit(event, `确定删除题集「${tdoc.title || ''}」？`, { destructive: true });
                 }}
               >
                 <input type="hidden" name="operation" value="delete" />

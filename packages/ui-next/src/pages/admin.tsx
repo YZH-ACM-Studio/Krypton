@@ -3,6 +3,7 @@ import { Activity, Code2, Cpu, HardDrive, LayoutDashboard, MemoryStick, MessageS
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { confirmFormSubmit } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { AdminPage } from '@/components/admin/admin-page';
 import { useBootstrap } from '@/lib/bootstrap';
@@ -155,7 +156,7 @@ export function DomainDashboardPage() {
             <form
               method="post"
               onSubmit={(event) => {
-                if (!window.confirm('确定要删除此域吗？此操作不可恢复。')) event.preventDefault();
+                void confirmFormSubmit(event, '确定要删除此域吗？此操作不可恢复。', { destructive: true });
               }}
             >
               <input type="hidden" name="operation" value="delete" />
@@ -220,7 +221,7 @@ export function ManageDashboardPage() {
           <form
             method="post"
             onSubmit={(event) => {
-              if (!window.confirm('确定要重启服务吗？')) event.preventDefault();
+              void confirmFormSubmit(event, '确定要重启服务吗？', { destructive: true });
             }}
           >
             <input type="hidden" name="operation" value="restart" />

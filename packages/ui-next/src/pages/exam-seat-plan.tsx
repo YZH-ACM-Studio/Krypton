@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
+import { confirmDialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { SimpleSelect } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -2992,9 +2993,10 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
       return;
     }
     if (
-      !window.confirm(
+      !(await confirmDialog(
         '停止网络策略？停止命令仍需逐机执行且终端必须在线。离线终端不会被记成已释放；已整盘还原的机器先在本机运行 --network-lock-recover。',
-      )
+        { destructive: true },
+      ))
     ) {
       return;
     }
@@ -3288,8 +3290,8 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
       type="button"
       variant={!workspaceFresh || dirty ? 'default' : 'ghost'}
       disabled={workspaceWriteBusy}
-      onClick={() => {
-        if (dirty && !window.confirm('这会放弃当前未保存的人工调整，并从服务端重新读取最终状态。是否继续？')) return;
+      onClick={async () => {
+        if (dirty && !(await confirmDialog('这会放弃当前未保存的人工调整，并从服务端重新读取最终状态。是否继续？'))) return;
         void refreshWorkspace();
       }}
     >

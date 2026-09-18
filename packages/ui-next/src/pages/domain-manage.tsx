@@ -7,7 +7,7 @@ import { ChevronLeft, ChevronRight, FileDown, FileUp, Plus, Save, Search, Trash2
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { alertDialog, confirmDialog, Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import { MarkdownEditor } from '@/components/markdown-renderer';
@@ -888,7 +888,7 @@ export function DomainGroupPage() {
               size="sm"
               variant="destructive"
               onClick={async () => {
-                if (!window.confirm('确认删除选中的用户组吗？')) return;
+                if (!(await confirmDialog('确认删除选中的用户组吗？', { destructive: true }))) return;
                 for (const name of selectedGroupList) {
                   await postGroup('del', name);
                 }
@@ -953,7 +953,7 @@ export function DomainGroupPage() {
               </TableBody>
             </Table>
             <div className="flex justify-end border-t p-4">
-              <Button type="button" size="sm" className="gap-1" onClick={() => saveAllGroups().catch((error) => alert(error.message))}>
+              <Button type="button" size="sm" className="gap-1" onClick={() => saveAllGroups().catch((error) => { void alertDialog(error instanceof Error ? error.message : String(error)); })}>
                 <Save className="size-3.5" />
                 保存全部
               </Button>

@@ -983,10 +983,6 @@ describe('p2.5 exam seat assignment workspace', () => {
   it('offers an explicit discard-and-reload recovery after an adjustment response is lost', async () => {
     const fixture = singleClassroomV2Fixture();
     vi.stubGlobal(
-      'confirm',
-      vi.fn(() => true),
-    );
-    vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
@@ -1008,6 +1004,9 @@ describe('p2.5 exam seat assignment workspace', () => {
     expect(screen.getByRole('button', { name: '放弃草稿并重读' })).toBeEnabled();
 
     await user.click(screen.getByRole('button', { name: '放弃草稿并重读' }));
+    const discardDialog = await screen.findByRole('dialog');
+    expect(discardDialog).toHaveTextContent('这会放弃当前未保存的人工调整，并从服务端重新读取最终状态。是否继续？');
+    await user.click(within(discardDialog).getByRole('button', { name: '确认' }));
     await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
     expect(screen.queryByText('人工调整未保存')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '选择张三换位' })).toBeEnabled();
@@ -2439,7 +2438,6 @@ describe('p2.5 exam seat assignment workspace', () => {
     const stopped = preloginWorkflow(2, 'config');
     let prepareCalls = 0;
     const posts: Array<{ body: Record<string, unknown>; url: string }> = [];
-    const confirm = vi.spyOn(window, 'confirm');
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -2475,17 +2473,18 @@ describe('p2.5 exam seat assignment workspace', () => {
     expect(screen.getByRole('button', { name: '停止' })).toBeEnabled();
     expect(screen.queryByRole('button', { name: '启动网络策略' })).not.toBeInTheDocument();
 
-    confirm.mockReturnValueOnce(false);
     await user.click(screen.getByRole('button', { name: '停止' }));
-    expect(posts.some((entry) => entry.url.endsWith('/network-execution'))).toBe(false);
-
-    confirm.mockReturnValueOnce(true);
-    await user.click(screen.getByRole('button', { name: '停止' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: '启动网络策略' })).toBeEnabled());
-
-    expect(confirm).toHaveBeenCalledWith(
+    expect(await screen.findByRole('dialog')).toHaveTextContent(
       '停止网络策略？停止命令仍需逐机执行且终端必须在线。离线终端不会被记成已释放；已整盘还原的机器先在本机运行 --network-lock-recover。',
     );
+    await user.click(screen.getByRole('button', { name: '取消' }));
+    expect(posts.some((entry) => entry.url.endsWith('/network-execution'))).toBe(false);
+
+    await user.click(screen.getByRole('button', { name: '停止' }));
+    await screen.findByRole('dialog');
+    await user.click(screen.getByRole('button', { name: '确认' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '启动网络策略' })).toBeEnabled());
+
     expect(posts.find((entry) => entry.url.endsWith('/network-execution'))?.body).toMatchObject({
       action: 'stop',
       expectedRevision: 7,

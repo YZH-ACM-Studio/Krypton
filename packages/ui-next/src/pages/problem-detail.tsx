@@ -42,6 +42,7 @@ import { Badge } from '@/components/ui/badge';
 import { CompetitiveCompanionBridge } from '@/components/competitive-companion-bridge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { confirmFormSubmit } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useRecordSocket } from '@/hooks/use-record-socket';
 import { useBootstrap } from '@/lib/bootstrap';
@@ -1847,7 +1848,11 @@ export function ProblemDetailPage() {
               method="post"
               action={bs.urls.problems}
               onSubmit={(event) => {
-                if (!window.confirm(`归档题目「${pdoc.title || pid}」？归档后将强制隐藏。`)) event.preventDefault();
+                void confirmFormSubmit(
+                  event,
+                  `归档题目「${pdoc.title || pid}」？归档后将强制隐藏。`,
+                  { destructive: true },
+                );
               }}
             >
               <input type="hidden" name="operation" value="archive" />

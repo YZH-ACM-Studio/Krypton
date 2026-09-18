@@ -30,6 +30,7 @@ import { RedeemDialogButton } from '@/components/redeem-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { confirmFormSubmit } from '@/components/ui/dialog';
 import { FormField, FormRow } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { MiniTabs } from '@/components/ui/mini-tabs';
@@ -923,7 +924,7 @@ function SecurityPanel() {
             <form
               method="post"
               onSubmit={(event) => {
-                if (!window.confirm('确定要注销所有会话吗？当前会话也会退出。')) event.preventDefault();
+                void confirmFormSubmit(event, '确定要注销所有会话吗？当前会话也会退出。', { destructive: true });
               }}
             >
               <input type="hidden" name="operation" value="delete_all_tokens" />
@@ -1018,7 +1019,7 @@ function FilesPanel() {
             <form
               method="post"
               onSubmit={(event) => {
-                if (!window.confirm('确认删除选中的文件吗？')) event.preventDefault();
+                void confirmFormSubmit(event, '确认删除选中的文件吗？', { destructive: true });
               }}
             >
               <input type="hidden" name="operation" value="delete_files" />
@@ -1068,18 +1069,16 @@ function FilesPanel() {
                           <Button asChild variant="ghost" size="sm" className="h-7 text-xs">
                             <a href={`/file/${bs.user.id}/${f.name || f.filename}`}>下载</a>
                           </Button>
-                          <form method="post" className="inline">
+                          <form
+                            method="post"
+                            className="inline"
+                            onSubmit={(event) => {
+                              void confirmFormSubmit(event, `确认删除 ${f.name || f.filename}？`, { destructive: true });
+                            }}
+                          >
                             <input type="hidden" name="operation" value="delete_files" />
                             <input type="hidden" name="files" value={f.name || f.filename} />
-                            <Button
-                              type="submit"
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 px-2 text-destructive"
-                              onClick={(event) => {
-                                if (!window.confirm(`确认删除 ${f.name || f.filename}？`)) event.preventDefault();
-                              }}
-                            >
+                            <Button type="submit" variant="ghost" size="sm" className="h-7 px-2 text-destructive">
                               <Trash2 className="size-3.5" />
                             </Button>
                           </form>

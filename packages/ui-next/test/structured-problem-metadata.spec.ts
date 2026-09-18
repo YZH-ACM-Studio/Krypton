@@ -48,19 +48,28 @@ describe('p3.16 structured metadata and unsaved-navigation contracts', () => {
   });
 
   it('uses the shared custom guard in every editor workspace without mutating browser history', () => {
-    const pages = [
+    const archivePagePaths = [
       'packages/ui-next/src/pages/basic-objective-editors.tsx',
       'packages/ui-next/src/pages/subjective-editor.tsx',
       'packages/ui-next/src/pages/structured-code-editors.tsx',
       'packages/ui-next/src/pages/problem-edit.tsx',
+    ];
+    const pages = [
+      ...archivePagePaths,
       'packages/ui-next/src/pages/problem-config-editor.tsx',
     ].map(read);
+    const archivePages = archivePagePaths.map(read);
     const guard = read('packages/ui-next/src/components/unsaved-changes-guard.tsx');
 
     for (const page of pages) {
       expect(page).to.include('useUnsavedChangesGuard');
       expect(page).not.to.include("addEventListener('beforeunload'");
-      expect(page.replace(/window\.confirm\(`归档题目[^`]+`\)/g, '')).not.to.include('window.confirm');
+      expect(page).not.to.include('window.confirm');
+    }
+    for (const page of archivePages) {
+      expect(page).to.include('void confirmFormSubmit(');
+      expect(page).to.include('归档题目「${pdoc.title || pid}」？归档后将强制隐藏。');
+      expect(page).to.include('{ destructive: true }');
     }
     expect(guard).to.include("addEventListener('beforeunload'");
     expect(guard).to.include("addEventListener('click', interceptLink, true)");

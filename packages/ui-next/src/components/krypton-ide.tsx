@@ -61,7 +61,7 @@ import {
 } from '@/lib/pretest-results';
 import { READ_ONLY_CODE_EXTENSIONS, resolveReadOnlyCodeLanguage } from '@/lib/readonly-code-policy';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { confirmDialog, Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { SimpleSelect } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
@@ -1598,9 +1598,9 @@ export function KryptonIDE({
   );
 
   /* ── Reset code handler ── */
-  const handleReset = useCallback(() => {
+  const handleReset = useCallback(async () => {
     if (isReadOnly) return;
-    if (!confirm('确定要重置代码吗？这将清除所有未保存的更改。')) return;
+    if (!(await confirmDialog('确定要重置代码吗？这将清除所有未保存的更改。', { destructive: true }))) return;
     if (viewRef.current) {
       viewRef.current.dispatch({
         changes: { from: 0, to: viewRef.current.state.doc.length, insert: defaultCode },

@@ -37,7 +37,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { alertDialog, confirmFormSubmit, Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -1614,7 +1614,7 @@ export function ContestEditPage() {
                 method="post"
                 className="flex items-center"
                 onSubmit={(e) => {
-                  if (!confirm('确定要删除此比赛吗？')) e.preventDefault();
+                  void confirmFormSubmit(e, '确定要删除此比赛吗？', { destructive: true });
                 }}
               >
                 <input type="hidden" name="operation" value="delete" />
@@ -1736,7 +1736,7 @@ function ContestVerifierPanel({ tid, verifiers }: { tid: string; verifiers: numb
                 method="post"
                 action={`/contest/${tid}/verifiers/remove`}
                 onSubmit={(e) => {
-                  if (!confirm(`确定移除 UID ${uid}？该用户对所有比赛题目的查看权将被撤销。`)) e.preventDefault();
+                  void confirmFormSubmit(e, `确定移除 UID ${uid}？该用户对所有比赛题目的查看权将被撤销。`, { destructive: true });
                 }}
               >
                 <input type="hidden" name="uid" value={uid} />
@@ -2159,7 +2159,7 @@ export function ContestManagePage() {
             <form
               method="post"
               onSubmit={(event) => {
-                if (!window.confirm(`确认删除选中的 ${selected.size} 个文件吗？`)) event.preventDefault();
+                void confirmFormSubmit(event, `确认删除选中的 ${selected.size} 个文件吗？`, { destructive: true });
               }}
             >
               <input type="hidden" name="operation" value="delete_files" />
@@ -3539,7 +3539,7 @@ export function ContestPrintPage() {
                   <FileText className="size-4" />
                   打印队列
                 </CardTitle>
-                <Button type="button" size="sm" variant="outline" onClick={() => refreshTasks().catch((error) => alert(error.message))}>
+                <Button type="button" size="sm" variant="outline" onClick={() => refreshTasks().catch((error) => void alertDialog(error instanceof Error ? error.message : String(error)))}>
                   <RefreshCw className="mr-1 size-3.5" />
                   {loadingTasks ? '刷新中' : '刷新'}
                 </Button>
@@ -3585,7 +3585,7 @@ export function ContestPrintPage() {
                                   onClick={() =>
                                     postPrintOperation({ operation: 'update_print_task', taskId: String(task._id), status: 'pending' })
                                       .then(refreshTasks)
-                                      .catch((error) => alert(error.message))
+                                      .catch((error) => void alertDialog(error instanceof Error ? error.message : String(error)))
                                   }
                                 >
                                   重新打印

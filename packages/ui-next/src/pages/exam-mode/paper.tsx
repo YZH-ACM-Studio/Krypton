@@ -34,6 +34,7 @@ import {
 import { AnnouncementsSection, OverviewSection, RankingSection } from '@/components/paper/sections';
 import { StructuredRegionInputs } from '@/components/structured-region-inputs';
 import { Button } from '@/components/ui/button';
+import { alertDialog, confirmDialog } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { SimpleSelect } from '@/components/ui/select';
 import { useBootstrap } from '@/lib/bootstrap';
@@ -343,7 +344,7 @@ function ProblemsSection({
       );
       return true;
     } catch (error) {
-      alert(error instanceof Error ? error.message : '保存失败');
+      await alertDialog(error instanceof Error ? error.message : '保存失败');
       return false;
     } finally {
       setSaving(false);
@@ -392,7 +393,7 @@ function ProblemsSection({
     if (!activeKind) return;
     if (!allowSubmitByKind) return;
     if (!['single', 'multi', 'blank', 'fill_program'].includes(activeKind)) return;
-    if (!window.confirm(`确认提交「${KIND_LABELS[activeKind]}」类的全部答案？提交后将立即批改并锁定该类，无法再修改。`)) return;
+    if (!(await confirmDialog(`确认提交「${KIND_LABELS[activeKind]}」类的全部答案？提交后将立即批改并锁定该类，无法再修改。`, { destructive: true }))) return;
     // Save first to ensure latest state is on server.
     if (!(await saveCurrentTab())) return;
     const form = new URLSearchParams({ kind: activeKind });
@@ -408,11 +409,11 @@ function ProblemsSection({
         '提交本类失败',
       );
     } catch (error) {
-      alert(error instanceof Error ? error.message : '提交本类失败');
+      await alertDialog(error instanceof Error ? error.message : '提交本类失败');
       return;
     }
     if (!res.ok) {
-      alert(await readHydroResponseError(res, '提交本类失败'));
+      await alertDialog(await readHydroResponseError(res, '提交本类失败'));
       return;
     }
     const body: { judgeResults?: Record<string, NonNullable<DraftState['judgeResult']>> } = await res.json();
@@ -437,7 +438,7 @@ function ProblemsSection({
     try {
       await saveDraftForPid(pid);
     } catch (error) {
-      alert(error instanceof Error ? error.message : '保存失败');
+      await alertDialog(error instanceof Error ? error.message : '保存失败');
       return;
     }
     let res: Response;
@@ -451,19 +452,19 @@ function ProblemsSection({
         '提交失败',
       );
     } catch (error) {
-      alert(error instanceof Error ? error.message : '提交失败');
+      await alertDialog(error instanceof Error ? error.message : '提交失败');
       return;
     }
     if (!res.ok) {
-      alert(await readHydroResponseError(res, '提交失败'));
+      await alertDialog(await readHydroResponseError(res, '提交失败'));
       return;
     }
     const { rid }: { rid: string } = await res.json();
-    alert(`已提交评测，评测记录 ID: ${rid}`);
+    await alertDialog(`已提交评测，评测记录 ID: ${rid}`);
   };
 
   const finalize = async () => {
-    if (!window.confirm('确认交卷？交卷后将不能再编辑答案。')) return;
+    if (!(await confirmDialog('确认交卷？交卷后将不能再编辑答案。', { destructive: true }))) return;
     try {
       await Promise.all(
         Object.entries(drafts)
@@ -471,7 +472,7 @@ function ProblemsSection({
           .map(([pid]) => saveDraftForPid(Number(pid))),
       );
     } catch (error) {
-      alert(error instanceof Error ? error.message : '保存失败，未交卷');
+      await alertDialog(error instanceof Error ? error.message : '保存失败，未交卷');
       return;
     }
     let res: Response;
@@ -485,20 +486,20 @@ function ProblemsSection({
         '交卷失败',
       );
     } catch (error) {
-      alert(error instanceof Error ? error.message : '交卷失败');
+      await alertDialog(error instanceof Error ? error.message : '交卷失败');
       return;
     }
     if (!res.ok) {
-      alert(await readHydroResponseError(res, '交卷失败'));
+      await alertDialog(await readHydroResponseError(res, '交卷失败'));
       return;
     }
     const { count }: { count: number } = await res.json();
-    alert(`交卷成功，已生成 ${count} 份评测记录。`);
+    await alertDialog(`交卷成功，已生成 ${count} 份评测记录。`);
     window.location.href = `/c/${tid}/scoreboard`;
   };
 
-  const switchKind = (next: QuestionKind) => {
-    if (dirtyCountInTab > 0 && !window.confirm('当前题目还有未保存的修改，切换 tab 将不会自动保存。确定要切换吗？')) return;
+  const switchKind = async (next: QuestionKind) => {
+    if (dirtyCountInTab > 0 && !(await confirmDialog('当前题目还有未保存的修改，切换 tab 将不会自动保存。确定要切换吗？'))) return;
     setActiveKind(next);
     setActiveCellIndex(0);
   };

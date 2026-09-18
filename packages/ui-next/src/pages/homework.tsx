@@ -3,6 +3,7 @@ import { Users, ChevronRight, Clock } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { confirmFormSubmit } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Pagination } from '@/components/ui/pagination';
 import { MarkdownView } from '@/components/markdown-renderer';
@@ -172,7 +173,7 @@ export function HomeworkDetailPage() {
               method="post"
               action={`/homework/${String(tdoc.docId)}/edit`}
               onSubmit={(event) => {
-                if (!window.confirm('确定要删除此作业吗？')) event.preventDefault();
+                void confirmFormSubmit(event, '确定要删除此作业吗？', { destructive: true });
               }}
             >
               <input type="hidden" name="operation" value="delete" />

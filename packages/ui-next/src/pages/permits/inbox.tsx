@@ -15,6 +15,7 @@ import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { confirmDialog } from '@/components/ui/dialog';
 import { useBootstrap } from '@/lib/bootstrap';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { createRequestId } from '@/lib/request-id';
@@ -82,7 +83,7 @@ export function MyVerifyInboxPage() {
   }
 
   async function revoke(pid: number, permitId: string) {
-    if (!confirm('退出该题目的协作角色？')) return;
+    if (!(await confirmDialog('退出该题目的协作角色？', { destructive: true }))) return;
     setActionError('');
     const fd = new FormData();
     fd.set('permitId', permitId);
@@ -100,7 +101,7 @@ export function MyVerifyInboxPage() {
   }
 
   async function revokeViaContest(tid: string) {
-    if (!confirm('退出该比赛的验题角色？')) return;
+    if (!(await confirmDialog('退出该比赛的验题角色？', { destructive: true }))) return;
     setActionError('');
     const fd = new FormData();
     fd.set('uid', String(bs.user.id));

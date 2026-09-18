@@ -144,6 +144,7 @@ export function ExamPaperPage() {
     cells: PaperCell[];
     now: number;
     inWindow: boolean;
+    canFinalize: boolean;
     owner: { uid: number; uname: string } | null;
     broadcasts: Array<{ _id: string; content: string; createdAt: string }>;
     scoreboard: Array<{ rank: number; uid: number; uname: string; realName?: string; studentId?: string; score: number }>;
@@ -151,7 +152,7 @@ export function ExamPaperPage() {
     allowSubmitByKind: boolean;
     examMode?: { student?: ExamModeStudentView | null };
   };
-  const { tdoc, pdict, cells, inWindow, broadcasts, scoreboard, showScoreboard, allowSubmitByKind } = data;
+  const { tdoc, pdict, cells, inWindow, canFinalize, broadcasts, scoreboard, showScoreboard, allowSubmitByKind } = data;
   const examStudent = data.examMode?.student;
   const tid = tdoc.docId;
   const [section, setSection] = useExamSection('overview');
@@ -181,7 +182,7 @@ export function ExamPaperPage() {
         />
       )}
       {section === 'problems' && (
-        <ProblemsSection tdoc={tdoc} tid={tid} pdict={pdict} cells={cells} inWindow={inWindow} allowSubmitByKind={allowSubmitByKind} />
+        <ProblemsSection tdoc={tdoc} tid={tid} pdict={pdict} cells={cells} inWindow={inWindow} canFinalize={canFinalize} allowSubmitByKind={allowSubmitByKind} />
       )}
       {section === 'announcements' && <AnnouncementsSection broadcasts={broadcasts || []} />}
       {section === 'ranking' && <RankingSection scoreboard={scoreboard || []} showScoreboard={showScoreboard} signedInUid={bs.user.id} />}
@@ -196,6 +197,7 @@ function ProblemsSection({
   pdict,
   cells,
   inWindow,
+  canFinalize,
   allowSubmitByKind,
 }: {
   tdoc: TdocLike;
@@ -203,6 +205,7 @@ function ProblemsSection({
   pdict: Record<number, PdocLike>;
   cells: PaperCell[];
   inWindow: boolean;
+  canFinalize: boolean;
   allowSubmitByKind: boolean;
 }) {
   const groups = useMemo(() => groupCellsByKind(cells), [cells]);
@@ -546,7 +549,7 @@ function ProblemsSection({
           <Save className="size-4" />
           保存
         </Button>
-        <Button size="sm" className="h-8 gap-1.5" onClick={finalize} disabled={!inWindow || !draftReady}>
+        <Button size="sm" className="h-8 gap-1.5" onClick={finalize} disabled={!canFinalize || !draftReady}>
           <Send className="size-4" />
           交卷
         </Button>

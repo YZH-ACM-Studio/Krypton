@@ -1,3 +1,11 @@
+import {
+  EXAM_PAPER_FINALIZE_GRACE_MS,
+  asExamPaperDate,
+  canStartExamPaper,
+  isExamPaperStarted,
+  isExamPaperUnstartedClosed,
+  isExamPaperWindowClosed,
+} from '@hydrooj/common';
 import type { CourseChapter, CourseExamBinding, CourseStudentVideo } from './types';
 
 export interface CourseExamWatchState {
@@ -6,7 +14,7 @@ export interface CourseExamWatchState {
   remainingVideos: CourseStudentVideo[];
 }
 
-export const COURSE_EXAM_ENTER_GRACE_MS = 60_000;
+export const COURSE_EXAM_ENTER_GRACE_MS = EXAM_PAPER_FINALIZE_GRACE_MS;
 
 function chapterVideos(chapter: CourseChapter): CourseStudentVideo[] {
   const videos = [...(chapter.videos || [])];
@@ -52,19 +60,69 @@ export function computeCourseExamWatchState(videos: CourseStudentVideo[], exam: 
   return { locked: true, remaining: incomplete.length, remainingVideos: incomplete };
 }
 
+function examPaperClock(params: {
+  beginAt?: string;
+  endAt?: string;
+  startAt?: string;
+  durationHours?: number;
+}) {
+  return {
+    tdoc: { beginAt: params.beginAt, endAt: params.endAt, duration: params.durationHours },
+    tsdoc: { startAt: params.startAt },
+  };
+}
+
 export function canEnterCourseExam(params: {
   watchLocked: boolean;
   attend?: boolean;
   endAt?: string;
+  beginAt?: string;
+  startAt?: string;
+  durationHours?: number;
   missing?: boolean;
   now?: number;
 }): boolean {
   if (params.missing === true) return false;
-  const endMs = params.endAt ? Date.parse(params.endAt) : Number.NaN;
   const now = params.now ?? Date.now();
+  const durationHours = params.durationHours;
+  if (typeof durationHours === 'number' && durationHours > 0) {
+    const nowDate = new Date(now);
+    const { tdoc, tsdoc } = examPaperClock(params);
+    if (params.attend === true && isExamPaperStarted(tsdoc)) {
+      if (!asExamPaperDate(params.endAt)) return true;
+      return !isExamPaperWindowClosed(tdoc, tsdoc, nowDate);
+    }
+    if (!canStartExamPaper(tdoc, nowDate)) return false;
+    return params.attend === true || !params.watchLocked;
+  }
+  const endMs = params.endAt ? Date.parse(params.endAt) : Number.NaN;
   const ended = Number.isFinite(endMs) && now >= endMs;
   const afterGrace = Number.isFinite(endMs) && now > endMs + COURSE_EXAM_ENTER_GRACE_MS;
   if (params.attend === true) return !afterGrace;
   if (ended) return false;
   return !params.watchLocked;
+}
+
+export function isCourseExamEnterClosed(params: {
+  attend?: boolean;
+  endAt?: string;
+  beginAt?: string;
+  startAt?: string;
+  durationHours?: number;
+  missing?: boolean;
+  now?: number;
+}): boolean {
+  if (params.missing === true) return false;
+  const now = params.now ?? Date.now();
+  const durationHours = params.durationHours;
+  if (typeof durationHours === 'number' && durationHours > 0) {
+    const nowDate = new Date(now);
+    const { tdoc, tsdoc } = examPaperClock(params);
+    if (params.attend === true && isExamPaperStarted(tsdoc)) {
+      return asExamPaperDate(params.endAt) ? isExamPaperWindowClosed(tdoc, tsdoc, nowDate) : false;
+    }
+    return isExamPaperUnstartedClosed(tdoc, tsdoc, nowDate);
+  }
+  const endMs = params.endAt ? Date.parse(params.endAt) : Number.NaN;
+  return Number.isFinite(endMs) && now >= endMs;
 }

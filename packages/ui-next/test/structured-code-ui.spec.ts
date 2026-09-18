@@ -44,6 +44,7 @@ describe('p3.11 structured code UI contract', () => {
     expect(exam).to.include('if (!Array.isArray(body?.drafts)) throw new Error');
     expect(exam).to.include("useState<'loading' | 'ready' | 'error'>('loading')");
     expect(exam).to.include('disabled={!inWindow || !draftReady}');
+    expect(exam).to.include('disabled={!canFinalize || !draftReady}');
     expect(exam).to.include('服务端草稿尚未成功加载，禁止保存');
     expect(exam).to.include('已阻止作答、保存和交卷');
     expect(detail).to.include('!isObjective && !isStructuredAnswer');

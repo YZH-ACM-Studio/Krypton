@@ -65,6 +65,7 @@ import { companionContestEligibility, contestProblemLetter } from '@/lib/competi
 import { fetchHydroResponse, presentHydroResponseError, readHydroResponseError, type PresentedResponseError } from '@/lib/error-presenter';
 import { formatDateTime, formatRelativeTime, makeInitials, replaceRouteTokens } from '@/lib/format';
 import { isSystemAdmin } from '@/lib/perms';
+import { ContestExamPaperQuotas } from './contest-exam-paper-quotas';
 
 /**
  * Loose server-payload record — kept only for payloads whose shape is not
@@ -76,6 +77,7 @@ type R = Record<string, unknown>;
 /** Minimal projection of a problem doc as used on these management pages. */
 interface ProblemBrief {
   title?: string;
+  problemKind?: unknown;
 }
 
 /** Per-problem balloon config stored on the contest doc (legacy value: bare color string). */
@@ -108,6 +110,7 @@ interface ContestDoc {
   lockAt?: string;
   /** Flexible per-user duration (hours); absent = fixed window. */
   duration?: number;
+  examPaperQuotas?: Partial<Record<string, number>>;
   rated?: boolean;
   assign?: string[];
   _code?: string;
@@ -401,6 +404,7 @@ interface ContestEditPageData {
   duration?: number;
   page_name?: string;
   participationRevision?: number;
+  pdict?: Record<string, ProblemBrief>;
   pids?: string;
   rules?: Record<string, string>;
   scopeGroups?: ScopeGroupPayload[];
@@ -1560,8 +1564,15 @@ export function ContestEditPage() {
                       defaultValue={tdoc.duration || ''}
                       placeholder="留空表示不限制"
                     />
+                    {rule === 'exam' ? (
+                      <p className="text-xs text-muted-foreground">开考后个人时长；剩余全局时间不够一场则不能开考</p>
+                    ) : null}
                   </div>
                 </div>
+
+                {rule === 'exam' ? (
+                  <ContestExamPaperQuotas pids={tdoc.pids} pdict={data.pdict} quotas={tdoc.examPaperQuotas} />
+                ) : null}
 
                 <Separator />
 

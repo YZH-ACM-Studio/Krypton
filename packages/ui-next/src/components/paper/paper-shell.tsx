@@ -303,7 +303,7 @@ export function Countdown({ endAt, onExpire }: { endAt: number; onExpire?: () =>
     return () => clearInterval(i);
   }, []);
   const remainingMs = Math.max(0, endAt - now);
-  const expired = remainingMs <= 0;
+  const expired = now > endAt;
   useEffect(() => {
     if (expired && onExpire) onExpire();
   }, [expired, onExpire]);

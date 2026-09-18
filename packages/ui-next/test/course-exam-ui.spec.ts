@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { canEnterCourseExam, collectCourseExamVideos, computeCourseExamWatchState, COURSE_EXAM_ENTER_GRACE_MS } from '../src/pages/course/course-exam-watch';
+import { EXAM_PAPER_FINALIZE_GRACE_MS } from '@hydrooj/common';
+import { canEnterCourseExam, collectCourseExamVideos, computeCourseExamWatchState, COURSE_EXAM_ENTER_GRACE_MS, isCourseExamEnterClosed } from '../src/pages/course/course-exam-watch';
 import type { CourseChapter, CourseExamBinding, CourseStudentVideo } from '../src/pages/course/types';
 
 const uiRoot = resolve(import.meta.dirname, '..');
@@ -91,6 +92,10 @@ describe('course exam UI source contracts', () => {
     expect(card).to.include('state.locked && state.remaining === 0 && state.remainingVideos.length === 0');
     expect(card).not.to.include('还需看完 0');
     expect(card).to.include('canEnterCourseExam');
+    expect(card).to.include('isCourseExamEnterClosed');
+    expect(card).to.include('durationHours');
+    expect(card).to.include('contest?.beginAt');
+    expect(card).to.include('contest?.startAt');
     expect(card).to.include('考试已结束');
     expect(card).to.include('考试不存在');
     expect(card).to.include('!canEnter && windowClosed');
@@ -174,8 +179,23 @@ describe('computeCourseExamWatchState', () => {
     const endAt = '2026-09-17T00:00:00.000Z';
     const endMs = Date.parse(endAt);
     expect(COURSE_EXAM_ENTER_GRACE_MS).to.equal(60_000);
+    expect(COURSE_EXAM_ENTER_GRACE_MS).to.equal(EXAM_PAPER_FINALIZE_GRACE_MS);
     expect(canEnterCourseExam({ watchLocked: true, attend: true, endAt, now: endMs })).to.equal(true);
     expect(canEnterCourseExam({ watchLocked: false, attend: false, endAt, now: endMs })).to.equal(false);
+    expect(canEnterCourseExam({
+      watchLocked: false,
+      attend: false,
+      beginAt: '2026-09-16T00:00:00.000Z',
+      endAt,
+      now: endMs,
+    })).to.equal(false);
+    expect(canEnterCourseExam({
+      watchLocked: true,
+      attend: true,
+      beginAt: '2026-09-16T00:00:00.000Z',
+      endAt,
+      now: endMs + 1,
+    })).to.equal(true);
     expect(canEnterCourseExam({ watchLocked: false, attend: false, missing: true })).to.equal(false);
     expect(canEnterCourseExam({
       watchLocked: false,
@@ -191,6 +211,93 @@ describe('computeCourseExamWatchState', () => {
     })).to.equal(false);
     expect(canEnterCourseExam({ watchLocked: true, attend: false })).to.equal(false);
     expect(canEnterCourseExam({ watchLocked: false, attend: false })).to.equal(true);
+  });
+
+  it('refuses a duration start that cannot get a full window', () => {
+    const beginAt = '2026-09-18T00:00:00.000Z';
+    const endAt = '2026-09-18T03:00:00.000Z';
+    const durationHours = 1.5;
+    const lastStart = Date.parse('2026-09-18T01:30:00.000Z');
+    const startAt = '2026-09-18T01:00:00.000Z';
+    const personalEnd = Date.parse('2026-09-18T02:30:00.000Z');
+    expect(canEnterCourseExam({
+      watchLocked: false,
+      attend: false,
+      beginAt,
+      endAt,
+      durationHours,
+      now: lastStart,
+    })).to.equal(true);
+    expect(canEnterCourseExam({
+      watchLocked: false,
+      attend: false,
+      beginAt,
+      endAt,
+      durationHours,
+      now: lastStart + 1,
+    })).to.equal(false);
+    expect(canEnterCourseExam({
+      watchLocked: true,
+      attend: true,
+      beginAt,
+      endAt,
+      durationHours,
+      now: lastStart + 1,
+    })).to.equal(false);
+    expect(canEnterCourseExam({
+      watchLocked: true,
+      attend: true,
+      beginAt,
+      endAt,
+      startAt,
+      durationHours,
+      now: personalEnd,
+    })).to.equal(true);
+    expect(canEnterCourseExam({
+      watchLocked: true,
+      attend: true,
+      beginAt,
+      endAt,
+      startAt,
+      durationHours,
+      now: personalEnd + COURSE_EXAM_ENTER_GRACE_MS + 1,
+    })).to.equal(false);
+    expect(canEnterCourseExam({
+      watchLocked: false,
+      attend: false,
+      beginAt,
+      endAt,
+      durationHours,
+      now: Date.parse('2026-09-17T23:59:59.000Z'),
+    })).to.equal(false);
+    expect(isCourseExamEnterClosed({
+      beginAt,
+      endAt,
+      durationHours,
+      now: Date.parse('2026-09-17T23:59:59.000Z'),
+    })).to.equal(false);
+    expect(isCourseExamEnterClosed({
+      beginAt,
+      endAt,
+      durationHours,
+      now: lastStart + 1,
+    })).to.equal(true);
+    expect(isCourseExamEnterClosed({
+      attend: true,
+      beginAt,
+      endAt,
+      startAt,
+      durationHours,
+      now: personalEnd,
+    })).to.equal(false);
+    expect(isCourseExamEnterClosed({
+      attend: true,
+      beginAt,
+      endAt,
+      startAt,
+      durationHours,
+      now: personalEnd + COURSE_EXAM_ENTER_GRACE_MS + 1,
+    })).to.equal(true);
   });
 
   it('fail-closes when the confirmed/student-visible list is empty', () => {

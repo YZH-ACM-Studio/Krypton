@@ -13,6 +13,9 @@ export interface CourseExamContestPreview {
   docId: string;
   title: string;
   endAt?: string;
+  beginAt?: string;
+  startAt?: string;
+  duration?: number;
   attend?: boolean;
   missing?: boolean;
 }
@@ -81,12 +84,21 @@ export function readCourseExamContest(value: unknown): CourseExamContestPreview 
   const docId = readCourseExamDocumentId(value.docId ?? value._id);
   const title = typeof value.title === 'string' && value.title.trim() ? value.title.trim() : '结业考试';
   const endAt = typeof value.endAt === 'string' && value.endAt.trim() ? value.endAt.trim() : undefined;
+  const beginAt = typeof value.beginAt === 'string' && value.beginAt.trim() ? value.beginAt.trim() : undefined;
+  const startAt = typeof value.startAt === 'string' && value.startAt.trim() ? value.startAt.trim() : undefined;
+  if (value.duration !== undefined && typeof value.duration !== 'number') {
+    throw new TypeError('courseExamContest.duration is invalid');
+  }
+  const duration = typeof value.duration === 'number' && value.duration > 0 ? value.duration : undefined;
   const attend = value.attend === true;
   const missing = value.missing === true;
   return {
     docId,
     title,
     ...(endAt ? { endAt } : {}),
+    ...(beginAt ? { beginAt } : {}),
+    ...(startAt ? { startAt } : {}),
+    ...(duration ? { duration } : {}),
     ...(attend ? { attend: true } : {}),
     ...(missing ? { missing: true } : {}),
   };

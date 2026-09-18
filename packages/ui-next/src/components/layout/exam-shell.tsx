@@ -48,7 +48,13 @@ interface ExamShellModeData {
 
 interface ExamShellPageData {
   examMode?: ExamShellModeData;
-  tdoc?: { title?: string };
+  tdoc?: { title?: string; beginAt?: string | Date; endAt?: string | Date };
+}
+
+function examShellClockIso(value: unknown): string | undefined {
+  if (typeof value === 'string' && value.trim()) return value;
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString();
+  return undefined;
 }
 
 const EXAM_SIDEBAR: ExamSidebarItem[] = [
@@ -104,15 +110,17 @@ function formatRemaining(ms: number): string {
 }
 
 /**
- * Live-updating "剩余时间" pill for the exam top bar. Reads beginAt / endAt
- * from `bs.page.data.examMode` (server-injected by `paper.ts`). Falls back
- * to nothing if the page isn't an exam-mode page.
+ * Live-updating "剩余时间" pill for the exam top bar.
+ * Exam paper bootstrap projects the personal stop onto `tdoc.endAt`;
+ * programming workspace keeps the shared contest `tdoc.endAt`.
+ * `examMode` is only a fallback for pages that do not ship `tdoc`.
  */
 function ExamCountdown() {
   const bs = useBootstrap();
-  const examMode = ((bs.page.data || {}) as ExamShellPageData).examMode || {};
-  const beginIso = examMode.beginAt as string | undefined;
-  const endIso = examMode.endAt as string | undefined;
+  const data = (bs.page.data || {}) as ExamShellPageData;
+  const examMode = data.examMode || {};
+  const beginIso = examShellClockIso(data.tdoc?.beginAt) ?? examMode.beginAt;
+  const endIso = examShellClockIso(data.tdoc?.endAt) ?? examMode.endAt;
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!endIso) return undefined;

@@ -7,6 +7,7 @@ import {
   canEnterCourseExam,
   collectCourseExamVideos,
   computeCourseExamWatchState,
+  isCourseExamEnterClosed,
 } from './course-exam-watch';
 
 export {
@@ -14,6 +15,7 @@ export {
   canEnterCourseExam,
   collectCourseExamVideos,
   computeCourseExamWatchState,
+  isCourseExamEnterClosed,
 } from './course-exam-watch';
 export type { CourseExamWatchState } from './course-exam-watch';
 
@@ -40,15 +42,23 @@ export function CourseExamCard({
   const state = computeCourseExamWatchState(collectCourseExamVideos(chapters, exam), exam);
   const listed = state.remainingVideos.slice(0, TITLE_LIMIT);
   const noOpenVideos = state.locked && state.remaining === 0 && state.remainingVideos.length === 0;
-  const endMs = contest?.endAt ? Date.parse(contest.endAt) : Number.NaN;
-  const windowClosed = Number.isFinite(endMs) && Date.now() >= endMs;
-  const canEnter = canEnterCourseExam({
-    watchLocked: state.locked,
+  const examClock = {
     attend: contest?.attend,
     endAt: contest?.endAt,
+    beginAt: contest?.beginAt,
+    startAt: contest?.startAt,
+    durationHours: contest?.duration,
+  };
+  const canEnter = canEnterCourseExam({
+    watchLocked: state.locked,
     missing: contest?.missing,
+    ...examClock,
   });
-  const showWatchLock = !canEnter && !windowClosed && contest?.missing !== true;
+  const windowClosed = isCourseExamEnterClosed({
+    missing: contest?.missing,
+    ...examClock,
+  });
+  const showWatchLock = !canEnter && !windowClosed && contest?.missing !== true && state.locked;
 
   return (
     <Card className={className}>

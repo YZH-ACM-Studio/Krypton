@@ -50,6 +50,7 @@ function bootstrap(): KryptonBootstrap {
         cells: [{ pid: 1, questionKey: 'main', kind: 'single', score: 100, prompt: '请选择。' }],
         now,
         inWindow: true,
+        canFinalize: true,
         owner: null,
         broadcasts: [],
         scoreboard: [],
@@ -109,5 +110,14 @@ describe('exam mode error presentation', () => {
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent('草稿加载失败：答题草稿加载失败 已阻止作答、保存和交卷，请刷新重试。');
     expect(alert).not.toHaveTextContent('Failed to fetch');
+  });
+
+  it('exam-shell countdown uses projected tdoc.endAt when examMode omits the clock', () => {
+    render(
+      <BootstrapProvider bootstrap={bootstrap()}>
+        <ExamPaperPage />
+      </BootstrapProvider>,
+    );
+    expect(screen.getByTitle(/剩余时间/)).toHaveTextContent(/00:0[01]:\d{2}/);
   });
 });

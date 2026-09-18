@@ -50,4 +50,21 @@ describe('contest exam sidebar', () => {
     expect(exam).to.include('创建考试');
     expect(exam).to.include('编辑考试');
   });
+
+  it('routes exam contest_manage onto exam chrome and omits balloon there', () => {
+    const manage = source('src/pages/contest-manage.tsx');
+    const exam = source('src/pages/contest-exam-manage.tsx');
+    const switcher = sliceBetween(manage, 'export function ContestManagePage()', 'function ContestAcmManagePage(');
+    expect(switcher).to.include("String(tdoc.rule) === 'exam'");
+    expect(switcher).to.include('ExamContestManagePage');
+    const chrome = sliceBetween(manage, 'function ContestManagementChrome(', 'const items = managementItems(');
+    expect(chrome).to.include("String(tdoc.rule) === 'exam'");
+    expect(chrome).to.include('ExamManagementChrome');
+    expect(exam).not.to.include('/balloon');
+    expect(exam).to.include('考试管理');
+    expect(exam).to.include('考生名单');
+    expect(exam).not.to.include('参赛选手');
+    expect(exam).not.to.include('提交统计');
+    expect(exam).not.to.include('比赛管理');
+  });
 });

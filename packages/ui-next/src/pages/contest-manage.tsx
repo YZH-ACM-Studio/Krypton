@@ -67,7 +67,7 @@ import { formatDateTime, formatRelativeTime, makeInitials, replaceRouteTokens } 
 import { isSystemAdmin } from '@/lib/perms';
 import { ContestEditExam } from './contest-edit-exam';
 import { initialContestEditRule } from './contest-edit-exam-defaults';
-import { ContestExamScoreBatch } from './contest-exam-score-batch';
+import { ExamContestManagePage, ExamManagementChrome } from './contest-exam-manage';
 
 /**
  * Loose server-payload record — kept only for payloads whose shape is not
@@ -605,6 +605,13 @@ function managementItems(tdoc: ContestDoc, contestUrl: string, canGradeSubjectiv
 
 function ContestManagementChrome({ tdoc, active, children }: { tdoc: ContestDoc; active: ManagementSection; children: React.ReactNode }) {
   const bs = useBootstrap();
+  if (String(tdoc.rule) === 'exam') {
+    return (
+      <ExamManagementChrome tdoc={tdoc} active={active}>
+        {children}
+      </ExamManagementChrome>
+    );
+  }
   const tid = contestId(tdoc);
   if (!tid) return <>{children}</>;
   const contestUrl = contestDetailUrl(bs, tdoc);
@@ -2025,7 +2032,7 @@ export function ContestExamSeatEntry({
       </CardHeader>
       <CardContent className="space-y-3">
         <p className="text-sm text-muted-foreground">
-          从当前比赛创建或进入考试活动，再按名单、候选教室、自动分配、人工调整、发布、终端预检和显式预启动的顺序完成赛前准备。
+          从这场考试创建或进入机房活动，再按名单、候选教室、自动分配、人工调整、发布、终端预检和显式预启动的顺序完成开考准备。
         </p>
         {groupScopeUnsupported ? (
           <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-800 dark:text-amber-200">
@@ -2094,7 +2101,7 @@ export function ContestExamSeatEntry({
             <div className="grid gap-2 text-sm sm:grid-cols-3">
               <div>
                 <p className="text-xs text-muted-foreground">活动名称</p>
-                <p className="font-medium">{tdoc.title || '未命名比赛'}</p>
+                <p className="font-medium">{tdoc.title || '未命名考试'}</p>
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">开始</p>
@@ -2137,6 +2144,21 @@ export function ContestExamSeatEntry({
 }
 
 export function ContestManagePage() {
+  const bs = useBootstrap();
+  const data = bs.page.data as ContestManagePageData;
+  const tdoc: ContestDoc = data.tdoc || {};
+  const tid = tdoc.docId || tdoc._id;
+  if (String(tdoc.rule) === 'exam') {
+    return (
+      <ExamContestManagePage
+        seat={typeof tid === 'string' ? <ContestExamSeatEntry tdoc={tdoc} contestId={tid} scopeGroups={data.scopeGroups || []} /> : null}
+      />
+    );
+  }
+  return <ContestAcmManagePage />;
+}
+
+function ContestAcmManagePage() {
   const bs = useBootstrap();
   const data = bs.page.data as ContestManagePageData;
   const tdoc: ContestDoc = data.tdoc || {};
@@ -2292,9 +2314,6 @@ export function ContestManagePage() {
           />
 
           {activeManageTab === 'score' ? (
-            String(tdoc.rule) === 'exam' ? (
-              <ContestExamScoreBatch pids={pids} pdict={pdict} scores={tdoc.score} />
-            ) : (
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">题目分值</CardTitle>
@@ -2336,7 +2355,6 @@ export function ContestManagePage() {
                 )}
               </CardContent>
             </Card>
-            )
           ) : null}
 
           {activeManageTab === 'stats' && submissionStats ? (
@@ -2838,7 +2856,7 @@ export function ContestUserPage() {
           </a>
         </Button>
         <div>
-          <h1 className="text-xl font-semibold">参赛选手</h1>
+          <h1 className="text-xl font-semibold">{String(tdoc.rule) === 'exam' ? '考生名单' : '参赛选手'}</h1>
           <p className="text-sm text-muted-foreground">
             {tdoc.title} — 共 {tsdocs.length} 人
           </p>
@@ -2847,7 +2865,7 @@ export function ContestUserPage() {
 
       <ContestManagementChrome tdoc={tdoc} active="users">
         <div className="space-y-4">
-          {isTeamMode ? (
+          {isTeamMode && String(tdoc.rule) !== 'exam' ? (
             <p className="text-sm text-muted-foreground">
               团队赛请到
               <a href={`/contest/${tid}/teams`} className="text-primary underline-offset-4 hover:underline">
@@ -2860,11 +2878,11 @@ export function ContestUserPage() {
             value={userTab}
             onValueChange={setUserTab}
             items={[
-              { value: 'list', label: '选手列表', count: tsdocs.length, icon: Users },
-              { value: 'add', label: '添加选手', icon: UserPlus },
+              { value: 'list', label: String(tdoc.rule) === 'exam' ? '考生列表' : '选手列表', count: tsdocs.length, icon: Users },
+              { value: 'add', label: String(tdoc.rule) === 'exam' ? '添加考生' : '添加选手', icon: UserPlus },
             ]}
             size="md"
-            aria-label="选手管理"
+            aria-label={String(tdoc.rule) === 'exam' ? '考生管理' : '选手管理'}
           />
 
           {userTab === 'add' ? (
@@ -2910,7 +2928,7 @@ export function ContestUserPage() {
                     ) : null}
                     <Button type="submit" disabled={selectedUsers.length === 0}>
                       <UserPlus className="mr-1 size-4" />
-                      添加选手
+                      {String(tdoc.rule) === 'exam' ? '添加考生' : '添加选手'}
                     </Button>
                   </div>
                 </form>
@@ -2947,11 +2965,11 @@ export function ContestUserPage() {
                           <TableCell className="text-center">
                             {ts.attend ? (
                               <Badge variant={ts.unrank ? 'outline' : 'default'} className="text-xs">
-                                {ts.unrank ? '打星' : '参赛中'}
+                                {ts.unrank ? '打星' : String(tdoc.rule) === 'exam' ? '已报名' : '参赛中'}
                               </Badge>
                             ) : (
                               <Badge variant="secondary" className="text-xs">
-                                未参赛
+                                {String(tdoc.rule) === 'exam' ? '未报名' : '未参赛'}
                               </Badge>
                             )}
                           </TableCell>
@@ -2978,7 +2996,7 @@ export function ContestUserPage() {
                     {tsdocs.length === 0 && (
                       <TableRow>
                         <TableCell colSpan={5} className="py-6 text-center text-sm text-muted-foreground">
-                          暂无选手
+                          {String(tdoc.rule) === 'exam' ? '暂无考生' : '暂无选手'}
                         </TableCell>
                       </TableRow>
                     )}

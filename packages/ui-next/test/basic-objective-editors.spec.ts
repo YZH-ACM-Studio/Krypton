@@ -56,7 +56,8 @@ describe('p3.9 dedicated basic objective editors', () => {
     expect(panel).to.include('<Dialog');
     expect(panel).to.include('确认提交答案');
     expect(panel).not.to.include('window.confirm');
-    expect(paper).to.include('clientProblemConfig(pdoc.config)');
+    expect(paper).to.include('projectStudentPdict');
+    expect(paper).to.include('sanitizePdictForClient');
     expect(paper).to.include('questionKey: key');
   });
 });

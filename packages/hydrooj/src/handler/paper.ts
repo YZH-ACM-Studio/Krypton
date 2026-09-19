@@ -16,7 +16,6 @@ import { Logger } from '@hydrooj/utils';
 import {
     localizeErrorParameter,
     localizedErrorText,
-    clientProblemConfig,
     Context,
     Handler,
     getProblemConfigErrorText,
@@ -43,6 +42,7 @@ import {
 import { ContestClientFinishedError, ContestNotAttendedError, ContestNotFoundError, ContestNotLiveError, ContestTeamConflictError } from '../error';
 import { canUsePostContestPractice, getPostContestPracticeState, isPostContestPracticeRule } from '../lib/contest-correction';
 import { assertCourseExamWatchGate } from '../lib/course-exam-gate';
+import { projectStudentPdict } from '../lib/student-pdict';
 import { buildExamModeRecordCodePayload } from '../lib/exam-mode-record';
 import {
     canRetakeExamPaper,
@@ -137,6 +137,23 @@ function absolutizeProgrammingStatementFileUrls(handler: Handler, view: any, pdo
     for (const item of view.examples?.items || []) {
         if (typeof item.note === 'string') item.note = absolutizeProblemFileUrls(handler, item.note, pdoc, tid);
     }
+}
+
+function projectAndAbsolutizeStudentPdict(
+    handler: Handler,
+    pdict: Record<string | number, Record<string, unknown>>,
+    tid: ObjectId | string,
+): Record<string, Record<string, unknown>> {
+    const projected = projectStudentPdict(pdict);
+    for (const pdoc of Object.values(projected)) {
+        if (typeof pdoc.content === 'string') {
+            pdoc.content = absolutizeProblemFileUrls(handler, pdoc.content, pdoc, tid);
+        }
+        if (pdoc.programmingStatementView) {
+            absolutizeProgrammingStatementFileUrls(handler, pdoc.programmingStatementView, pdoc, tid);
+        }
+    }
+    return projected;
 }
 
 /**
@@ -570,15 +587,11 @@ class PaperBaseHandler extends Handler {
                     }
                     return;
                 }
-                // Raw pdoc → file:// image attachments are never rewritten; make them
-                // absolute so they load under the deep /exam-mode/:tid/... routes.
-                if (typeof pdoc.content === 'string') {
-                    pdoc.content = absolutizeProblemFileUrls(this, pdoc.content, pdoc, this.tdoc.docId);
-                }
                 // 考试上下文不得下发原赛通过率（难度提示）——public 投影会带上它。
                 delete pdoc.origStat;
                 delete pdoc.reactions;
                 // 统一解析为完整 config 对象（服务端内部用；含标准答案）。
+                // 客户端投影必须先对照原始 content 做 compile 校验，再 absolutize。
                 pdoc.config = parsedProblemConfig(pdoc);
                 pdict[pid] = pdoc;
             }),
@@ -587,16 +600,11 @@ class PaperBaseHandler extends Handler {
     }
 
     /**
-     * pdict 的客户端安全版：config 换成净化子集。原始 config 含
-     * answers（标准答案），一旦考试里挂客观题会把答案直接发给考生
-     * —— 任何 response.body 里的 pdict 必须走这里。
+     * pdict 的客户端安全版：结构化题面换成 client view，config 换成净化子集。
+     * 原始 config 含 answers，任何 response.body 里的 pdict 必须走这里。
      */
     sanitizePdictForClient(pdict: Record<number, any>): Record<number, any> {
-        const out: Record<number, any> = {};
-        for (const [pid, pdoc] of Object.entries(pdict)) {
-            out[pid] = { ...pdoc, config: clientProblemConfig(pdoc.config) };
-        }
-        return out;
+        return projectAndAbsolutizeStudentPdict(this, pdict, this.tdoc.docId);
     }
 
     isInWindow(): boolean {
@@ -1442,15 +1450,7 @@ class ExamModeEntryHandler extends Handler {
                 ((tdoc.pids as number[]) || []).map(async (pid) => {
                     const pdoc = await ProblemModel.get(authoritativeDomainId, pid, undefined, true);
                     if (!pdoc) return;
-                    // Absolutize file:// image attachments for the deep exam-mode route.
-                    if (typeof pdoc.content === 'string') {
-                        pdoc.content = absolutizeProblemFileUrls(this, pdoc.content, pdoc, tdoc.docId);
-                    }
-                    // 考试上下文不得下发原赛通过率（难度提示）。
-                    delete pdoc.origStat;
-                    delete pdoc.reactions;
-                    // 净化 config：原始 YAML 串含标准答案，不下发。
-                    pdoc.config = clientProblemConfig(parsedProblemConfig(pdoc));
+                    pdoc.config = parsedProblemConfig(pdoc);
                     pdict[pid] = pdoc;
                 }),
             );
@@ -1458,7 +1458,7 @@ class ExamModeEntryHandler extends Handler {
 
         this.response.body = {
             tdoc: workspaceTdoc,
-            pdict,
+            pdict: projectAndAbsolutizeStudentPdict(this, pdict, tdoc.docId),
             previewMode,
             currentUserId: this.user._id,
             page_name: 'contest_workspace',

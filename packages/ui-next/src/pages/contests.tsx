@@ -37,7 +37,9 @@ import { MarkdownView } from '@/components/markdown-renderer';
 import { useBootstrap, type GenericUserDoc } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 import {
+  examContestId,
   filterOfficialScoreboardRows,
+  isExamRule,
   officialOnlyFromLocation,
   postContestProblemEntryUrl,
   prioritizeCurrentScoreboardRows,
@@ -755,7 +757,7 @@ function ContestTable({
 export function ContestDetailPage() {
   const bs = useBootstrap();
   const data = bs.page.data as ContestsPageData;
-  if (data.tdoc?.rule === 'exam') return <ExamContestDetailPage />;
+  if (isExamRule(data.tdoc?.rule)) return <ExamContestDetailPage />;
   const tdoc: ContestDoc = data.tdoc || {};
   const pids: (string | number)[] = data.pids || tdoc.pids || [];
   const tsdoc: ContestStatusDoc = data.tsdoc || {};
@@ -764,7 +766,7 @@ export function ContestDetailPage() {
   const locale = bs.locale;
   const isHomework = tdoc.rule === 'homework';
   const isACM = tdoc.rule === 'acm';
-  const isExam = tdoc.rule === 'exam';
+  const isExam = isExamRule(tdoc.rule);
   const isTeam = isTeamContest(tdoc);
   const scoreDoc: ContestStatusDoc = isTeam ? data.teamStatus || {} : tsdoc;
   const canManageContest = !!data.canManageContest;
@@ -774,7 +776,8 @@ export function ContestDetailPage() {
   const postContestPracticeOpen = data.postContestPractice?.open === true;
   const postContestPracticeWaiting = !canManageContest && postContestPracticeSupported && st.phase === 'ended' && !postContestPracticeOpen;
 
-  const detailUrl = replaceRouteTokens(bs.urls.contestDetail, { TID: String(tdoc.docId) });
+  const tid = examContestId(tdoc);
+  const detailUrl = replaceRouteTokens(bs.urls.contestDetail, { TID: tid });
   const beginAt = toDate(tdoc.beginAt)?.getTime() || 0;
   const endAt = toDate(tdoc.endAt)?.getTime() || 0;
   const countdownTarget = st.phase === 'upcoming' ? beginAt : st.phase === 'running' ? endAt : null;
@@ -787,13 +790,13 @@ export function ContestDetailPage() {
     practiceOpen: postContestPracticeOpen,
     ended: st.phase === 'ended',
     detailUrl,
-    contestId: String(tdoc.docId),
+    contestId: tid,
   });
   const canOpenProblems = !postContestPracticeWaiting && (canManageContest || st.phase === 'ended' || (attended && st.phase !== 'upcoming'));
   const canSelfStar = !isTeam && !isHomework && !isExam && ['acm', 'oi', 'ioi', 'strictioi'].includes(String(tdoc.rule || '').toLowerCase());
-  const discussionUrl = replaceRouteTokens(bs.urls.discussionNode, { TYPE: 'contest', NAME: String(tdoc.docId) });
-  const myRecordUrl = `${bs.urls.records}?tid=${encodeURIComponent(String(tdoc.docId))}&uidOrName=${encodeURIComponent(String(bs.user.id))}`;
-  const allRecordUrl = `${bs.urls.records}?tid=${encodeURIComponent(String(tdoc.docId))}`;
+  const discussionUrl = replaceRouteTokens(bs.urls.discussionNode, { TYPE: 'contest', NAME: tid });
+  const myRecordUrl = `${bs.urls.records}?tid=${encodeURIComponent(tid)}&uidOrName=${encodeURIComponent(String(bs.user.id))}`;
+  const allRecordUrl = `${bs.urls.records}?tid=${encodeURIComponent(tid)}`;
 
   return (
     <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>

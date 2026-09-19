@@ -30,7 +30,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { DateTime } from '@/components/ui/datetime';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
-import { postContestProblemEntryUrl } from '@/lib/contest-exam-display';
+import { examContestId, postContestProblemEntryUrl } from '@/lib/contest-exam-display';
 import { replaceRouteTokens, toDate } from '@/lib/format';
 
 interface ExamDetailTdoc {
@@ -101,7 +101,7 @@ function readExamDetailData(raw: unknown): ExamDetailData {
   const attendFlag = page.attended === true || page.attended === 1 || tsdocRaw.attend === 1 || tsdocRaw.attend === true;
   return {
     tdoc: {
-      docId: tdocRaw.docId == null ? '' : String(tdocRaw.docId),
+      docId: examContestId(tdocRaw),
       title: typeof tdocRaw.title === 'string' && tdocRaw.title ? tdocRaw.title : '考试',
       content: typeof tdocRaw.content === 'string' || isRecord(tdocRaw.content) ? tdocRaw.content : undefined,
       beginAt: tdocRaw.beginAt,

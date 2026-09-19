@@ -73,8 +73,22 @@ export function getPersonalPracticeStatus(snapshot: PersonalPracticeStatusSnapsh
   };
 }
 
+export function isExamRule(rule: unknown): boolean {
+  return rule === 'exam';
+}
+
+export function readContestId(value: unknown): string | undefined {
+  if (typeof value === 'string' && value) return value;
+  if (typeof value === 'number' && Number.isInteger(value)) return String(value);
+  return undefined;
+}
+
+export function examContestId(tdoc: { docId?: unknown; _id?: unknown }): string {
+  return readContestId(tdoc.docId) || readContestId(tdoc._id) || '';
+}
+
 export function postContestProblemEntryUrl(input: {
-  rule: string;
+  rule: unknown;
   clientRequired: boolean;
   practiceSupported: boolean;
   practiceOpen: boolean;
@@ -82,7 +96,7 @@ export function postContestProblemEntryUrl(input: {
   detailUrl: string;
   contestId: string;
 }): string {
-  if (input.rule === 'exam') return `/exam-mode/${encodeURIComponent(input.contestId)}`;
+  if (isExamRule(input.rule)) return `/exam-mode/${encodeURIComponent(input.contestId)}`;
   if (input.clientRequired && (!input.practiceSupported || !input.ended || !input.practiceOpen)) {
     return `/exam-mode/${encodeURIComponent(input.contestId)}`;
   }

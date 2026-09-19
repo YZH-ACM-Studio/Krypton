@@ -34,7 +34,7 @@ describe('contest exam sidebar', () => {
   it('routes exam contest_detail onto the exam landing and omits balloon there', () => {
     const contests = source('src/pages/contests.tsx');
     const exam = source('src/pages/contest-exam-detail.tsx');
-    expect(contests).to.match(/tdoc\?\.rule === 'exam'[\s\S]{0,80}ExamContestDetailPage/);
+    expect(contests).to.match(/isExamRule\(data\.tdoc\?\.rule\)[\s\S]{0,80}ExamContestDetailPage/);
     expect(exam).not.to.include('/balloon');
     expect(exam).to.include('报名考试');
     expect(exam).to.include('postContestProblemEntryUrl');

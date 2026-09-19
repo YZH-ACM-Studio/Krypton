@@ -28,9 +28,12 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { confirmFormSubmit } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useBootstrap } from '@/lib/bootstrap';
+import { examContestId, isExamRule, readContestId } from '@/lib/contest-exam-display';
 import { replaceRouteTokens } from '@/lib/format';
 import { isSystemAdmin } from '@/lib/perms';
 import { ContestExamScoreBatch, type ExamScorePdictRow } from './contest-exam-score-batch';
+
+export { examContestId, isExamRule };
 
 export type ExamManageSection = 'overview' | 'edit' | 'users' | 'clarification' | 'balloon' | 'print';
 
@@ -62,22 +65,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
-export function isExamRule(rule: unknown): boolean {
-  return rule === 'exam';
-}
-
-function readContestId(value: unknown): string | undefined {
-  if (typeof value === 'string' && value) return value;
-  if (typeof value === 'number' && Number.isInteger(value)) return String(value);
-  return undefined;
-}
-
 function readOwner(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isInteger(value) ? value : undefined;
-}
-
-export function examContestId(tdoc: ExamManageTdoc) {
-  return readContestId(tdoc.docId) || readContestId(tdoc._id) || '';
 }
 
 function examContestUrl(detailTemplate: string, tdoc: ExamManageTdoc) {

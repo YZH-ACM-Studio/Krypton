@@ -2,9 +2,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   canSubmitProblemMode,
+  examContestId,
   filterOfficialScoreboardRows,
   getContestProblemStatus,
   getPersonalPracticeStatus,
+  isExamRule,
   isUnofficialScoreboardRank,
   officialOnlyFromLocation,
   postContestProblemEntryUrl,
@@ -96,6 +98,21 @@ describe('getPersonalPracticeStatus', () => {
   it('does not mutate the shared status table', () => {
     getPersonalPracticeStatus({ status: 1, phase: 'before' });
     expect(getContestProblemStatus(1)).to.deep.equal({ label: 'AC', title: 'Accepted', code: 'pass' });
+  });
+});
+
+describe('isExamRule and examContestId', () => {
+  it('accepts only the exact exam rule string', () => {
+    expect(isExamRule('exam')).to.equal(true);
+    expect(isExamRule('Exam')).to.equal(false);
+    expect(isExamRule('exam ')).to.equal(false);
+    expect(isExamRule(['exam'])).to.equal(false);
+  });
+
+  it('reads docId or integer _id without String() fallback', () => {
+    expect(examContestId({ docId: '6aacef7ef6e8b68176be808b' })).to.equal('6aacef7ef6e8b68176be808b');
+    expect(examContestId({ _id: 42 })).to.equal('42');
+    expect(examContestId({ docId: { toString: () => 'forged' } })).to.equal('');
   });
 });
 

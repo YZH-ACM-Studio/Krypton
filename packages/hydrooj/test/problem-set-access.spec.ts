@@ -219,6 +219,56 @@ describe('P3.3 problem set access sources', () => {
         expect(await access.hasActiveEntitlement(domainId, uid, 'course', otherSetId)).to.equal(false);
     });
 
+    it('does not let a hidden course grant problem-set discovery even with course redemption', async () => {
+        const course = {
+            domainId,
+            docId: courseId,
+            owner: 9,
+            kind: 'course',
+            courseHidden: true,
+            courseGroupIds: [],
+            dag: [{ _id: 1, title: 'Ch', requireNids: [], pids: [], problemSetId: otherSetId }],
+        };
+        const access = service({
+            groups: [],
+            courses: [course],
+            entitlements: [
+                {
+                    _id: new ObjectId(),
+                    domainId,
+                    uid,
+                    targetKind: 'course',
+                    targetId: courseId,
+                    stageId: ACCESS_ENTITLEMENT_WHOLE_SET_STAGE,
+                    source: 'redemption',
+                    sourceId,
+                    createdAt: new Date(),
+                    revokedAt: null,
+                },
+            ],
+        });
+        const decision = await access.evaluate(domainId, user(), hiddenSet as any);
+        expect(decision.discoverable).to.equal(false);
+        expect(decision.accessible).to.equal(false);
+        expect(decision.sources).to.deep.equal([]);
+        expect(await access.hasActiveEntitlement(domainId, uid, 'course', courseId)).to.equal(true);
+    });
+
+    it('still lets a course manager discover a set referenced by a hidden course', async () => {
+        const course = {
+            domainId,
+            docId: courseId,
+            owner: uid,
+            kind: 'course',
+            courseHidden: true,
+            courseGroupIds: [],
+            dag: [{ _id: 1, title: 'Ch', requireNids: [], pids: [], problemSetId: otherSetId }],
+        };
+        const decision = await service({ courses: [course] }).evaluate(domainId, user(), hiddenSet as any);
+        expect(decision.accessible).to.equal(true);
+        expect(decision.sources[0]).to.include({ kind: 'course', courseId: String(courseId) });
+    });
+
     it('keeps a redemption entitlement after leaving the group and after revoking a different source', async () => {
         const grouped = {
             ...hiddenSet,

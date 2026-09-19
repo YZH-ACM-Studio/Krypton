@@ -10,8 +10,10 @@ function readSrc(relative: string) {
 describe('course hide and delete gates', () => {
     it('hides unpublished courses from students and keeps managers inside', () => {
         const access = readSrc('src/lib/course-access.ts');
-        expect(access).to.include('export function isCourseHidden');
-        expect(access).to.include('return tdoc.courseHidden === true');
+        const visibility = readSrc('src/lib/course-visibility.ts');
+        expect(access).to.include('export { courseAssignsUserGroups, courseVisibleTo, isCourseHidden }');
+        expect(visibility).to.include('export function isCourseHidden');
+        expect(visibility).to.include('return tdoc.courseHidden === true');
         expect(access).to.include('if (isCourseHidden(tdoc)) return false');
         expect(access).to.include('export async function assertCourseAccessible');
         expect(access).to.include('throw new TrainingNotFoundError(domainId, tdoc.docId)');
@@ -41,7 +43,7 @@ describe('course hide and delete gates', () => {
         expect(enroll).to.include('指定用户组的课程不需要报名');
         expect(enroll).to.include('该课程已隐藏');
         expect(enroll).not.to.include('PERM.PERM_VIEW_TRAINING');
-        expect(access).to.include('export function courseAssignsUserGroups');
+        expect(visibility).to.include('export function courseAssignsUserGroups');
         expect(handler).to.include('canEnroll: canDownloadFiles && !courseAssignsUserGroups(tdoc) && !tsdoc?.enroll');
         const editor = handler.slice(handler.indexOf('class CourseEditHandler'), handler.indexOf('class CourseFilesHandler'));
         const editorGet = editor.slice(editor.indexOf('async get('), editor.indexOf('async postUpdate('));

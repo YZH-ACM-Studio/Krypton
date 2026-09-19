@@ -5,6 +5,9 @@ import type { TrainingDoc } from '../interface';
 import { PRIV } from '../model/builtin';
 import { problemSetAccessService } from '../model/problem-set-access';
 import { studentDirectory } from '../service/student-directory';
+import { courseAssignsUserGroups, courseVisibleTo, isCourseHidden } from './course-visibility';
+
+export { courseAssignsUserGroups, courseVisibleTo, isCourseHidden };
 
 const logger = new Logger('course-access');
 
@@ -16,22 +19,6 @@ export async function courseUserGroupIds(domainId: string, uid: number): Promise
         logger.error('Course user-group lookup failed domain=%s uid=%d error=%o', domainId, uid, error);
         throw error;
     }
-}
-
-export function isCourseHidden(tdoc: Pick<TrainingDoc, 'courseHidden'>): boolean {
-    return tdoc.courseHidden === true;
-}
-
-export function courseAssignsUserGroups(tdoc: Pick<TrainingDoc, 'courseGroupIds'>): boolean {
-    return (tdoc.courseGroupIds || []).length > 0;
-}
-
-export function courseVisibleTo(tdoc: TrainingDoc, myGroups: Set<string>, canManage: boolean): boolean {
-    if (canManage) return true;
-    if (isCourseHidden(tdoc)) return false;
-    const groups = tdoc.courseGroupIds || [];
-    if (!groups.length) return true;
-    return groups.some((g) => myGroups.has(String(g)));
 }
 
 export async function courseAccessibleTo(domainId: string, uid: number, tdoc: TrainingDoc, myGroups: Set<string>, canManage: boolean): Promise<boolean> {

@@ -18,6 +18,7 @@ import {
     type ProblemSetIntroProgressInput,
     type ProblemSetIntroProjection,
 } from '../lib/problem-set-stage';
+import { courseVisibleTo, isCourseHidden } from '../lib/course-visibility';
 import { PERM, PRIV } from './builtin';
 import * as document from './document';
 import { settleDomainCleanupOperations } from './domain-lifecycle-boundary';
@@ -91,11 +92,8 @@ export function canManageProblemSet(user: ProblemSetAccessUser, tdoc: Pick<Train
     return user.own(tdoc) && user.hasPerm(PERM.PERM_EDIT_TRAINING_SELF);
 }
 
-function courseVisibleTo(course: Pick<TrainingDoc, 'owner' | 'courseGroupIds'>, user: ProblemSetAccessUser, groupIds: Set<string>): boolean {
-    if (user.hasPriv(PRIV.PRIV_EDIT_SYSTEM) || user.hasPerm(PERM.PERM_EDIT_COURSE) || user.own(course)) return true;
-    const bound = course.courseGroupIds || [];
-    if (!bound.length) return true;
-    return bound.some((groupId) => groupIds.has(String(groupId)));
+function canManageReferencedCourse(user: ProblemSetAccessUser, course: Pick<TrainingDoc, 'owner'>): boolean {
+    return user.hasPriv(PRIV.PRIV_EDIT_SYSTEM) || user.hasPerm(PERM.PERM_EDIT_COURSE) || user.own(course);
 }
 
 async function defaultFindStudentGroupIds(domainId: string, uid: number): Promise<Set<string>> {
@@ -217,7 +215,9 @@ export class ProblemSetAccessService {
         const coursesBySet = new Map<string, TrainingDoc[]>();
         const courseStageIdsBySet = new Map<string, { wholeSet: boolean; stageIds: Set<number> }>();
         for (const course of courses) {
-            if (!courseVisibleTo(course, user, groupIds) && !entitledCourseIds.has(String(course.docId))) continue;
+            const canManage = canManageReferencedCourse(user, course);
+            if (!canManage && isCourseHidden(course)) continue;
+            if (!courseVisibleTo(course, groupIds, canManage) && !entitledCourseIds.has(String(course.docId))) continue;
             for (const node of course.dag || []) {
                 if (!node.problemSetId) continue;
                 const key = String(node.problemSetId);

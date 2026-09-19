@@ -38,6 +38,7 @@ import {
     UserModel,
     ValidationError,
 } from 'hydrooj';
+import { hideAssignRestrictedContest as hideAssignRestrictedContestCore } from 'hydrooj/src/handler/contest';
 import MessageModel from 'hydrooj/src/model/message';
 import { permitsColl, permitSourcesColl } from './db';
 import { canonicalActiveFilter } from './legacy-canonical';
@@ -143,11 +144,11 @@ function canManageContestVerifiers(user: any, tdoc: any): boolean {
 }
 
 async function hideAssignRestrictedContest(domainId: string, tdoc: any, actor: any) {
-    if (actor.own(tdoc) || actor.hasPerm(PERM.PERM_EDIT_CONTEST) || actor.hasPerm(PERM.PERM_VIEW_HIDDEN_CONTEST)) return;
-    if (!tdoc.assign?.length) return;
-    const groups = await UserModel.listGroup(domainId, actor._id);
-    if (!new Set(tdoc.assign).intersection(new Set(groups.map((item: { name: string }) => item.name))).size) {
-        throw contestNotFound();
+    try {
+        await hideAssignRestrictedContestCore(domainId, tdoc, actor);
+    } catch (error) {
+        if (error instanceof ContestNotFoundError) throw contestNotFound();
+        throw error;
     }
 }
 

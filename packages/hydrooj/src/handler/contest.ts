@@ -409,17 +409,8 @@ export class ContestDetailBaseHandler extends Handler {
         if (this.tdoc.rule === 'homework') {
             await assertHomeworkAccessOrHide(authoritativeDomainId, this.tdoc, this.user);
         } else {
-            if (
-                this.tdoc.assign?.length &&
-                !postContestPracticeEligible &&
-                !this.user.own(this.tdoc) &&
-                !this.user.hasPerm(PERM.PERM_EDIT_CONTEST) &&
-                !this.user.hasPerm(PERM.PERM_VIEW_HIDDEN_CONTEST)
-            ) {
-                const groups = await user.listGroup(authoritativeDomainId, this.user._id);
-                if (!new Set(this.tdoc.assign).intersection(new Set(groups.map((i) => i.name))).size) {
-                    throw new ContestNotFoundError(authoritativeDomainId, tid);
-                }
+            if (!postContestPracticeEligible) {
+                await hideAssignRestrictedContest(authoritativeDomainId, this.tdoc, this.user);
             }
             // ── Krypton: client-required contest gate ────────────────────────
             //

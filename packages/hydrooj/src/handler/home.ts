@@ -31,6 +31,7 @@ import { practiceContainerKindOf, withProblemSetKind } from '../lib/training-kin
 import BlackListModel from '../model/blacklist';
 import { projectStudentContestTdoc } from '../lib/exam-paper';
 import { PERM, PRIV } from '../model/builtin';
+import { canBrowseAssignRestrictedContests } from './contest';
 import * as contest from '../model/contest';
 import { contextualCompletionService } from '../model/contextual-completion';
 import * as discussion from '../model/discussion';
@@ -100,8 +101,7 @@ export class HomeHandler extends Handler {
             return [[], {}];
         }
         const rules = Object.keys(contest.RULES).filter((i) => !contest.RULES[i].hidden);
-        const canBrowseAssignRestricted =
-            this.user.hasPerm(PERM.PERM_EDIT_CONTEST) || this.user.hasPerm(PERM.PERM_VIEW_HIDDEN_CONTEST);
+        const canBrowseAssignRestricted = canBrowseAssignRestrictedContests(this.user);
         const groups = (await user.listGroup(domainId, canBrowseAssignRestricted ? undefined : this.user._id)).map(
             (i) => i.name,
         );

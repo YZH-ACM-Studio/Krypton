@@ -313,9 +313,7 @@ describe('small interface fixes', () => {
     expect(record).to.include('async function hideLoadedContest');
     expect(record).to.include('if (actor.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) return;');
     expect(source('packages/hydrooj/src/handler/contest.ts')).to.include('export function canBrowseAssignRestrictedContests');
-    expect(source('packages/hydrooj/src/handler/home.ts')).to.include(
-        'this.user.hasPerm(PERM.PERM_EDIT_CONTEST) || this.user.hasPerm(PERM.PERM_VIEW_HIDDEN_CONTEST)',
-    );
+    expect(source('packages/hydrooj/src/handler/home.ts')).to.include('canBrowseAssignRestrictedContests(this.user)');
     expect(source('packages/hydrooj/src/handler/problem.ts')).to.include('canBrowseAssignRestrictedContests(this.user)');
     expect(source('packages/hydrooj/src/handler/record.ts')).to.include('function canRejudgeVirtualOnList');
     const team = source('packages/hydrooj/src/handler/contest-team.ts');

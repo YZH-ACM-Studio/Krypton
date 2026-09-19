@@ -658,9 +658,8 @@ describe('P3.7 course homework scope', () => {
             contest.indexOf('export class ContestDetailBaseHandler'),
             contest.indexOf('const isAdminBypass = this.user.own(this.tdoc)'),
         );
-        expect(detailPrepare).to.include('!this.user.hasPerm(PERM.PERM_EDIT_CONTEST)');
-        expect(detailPrepare).to.include('!this.user.hasPerm(PERM.PERM_VIEW_HIDDEN_CONTEST)');
-        expect(detailPrepare).to.include('throw new ContestNotFoundError(authoritativeDomainId, tid)');
+        expect(detailPrepare).to.include('if (!postContestPracticeEligible) {');
+        expect(detailPrepare).to.include('await hideAssignRestrictedContest(authoritativeDomainId, this.tdoc, this.user)');
         expect(detailPrepare).not.to.include('NotAssignedError');
         expect(detailPrepare).not.to.include('PRIV.PRIV_EDIT_SYSTEM');
         const scopeMiss = contest.slice(contest.indexOf("result.reason === 'scope_miss'"), contest.indexOf("result.reason === 'client_only'"));

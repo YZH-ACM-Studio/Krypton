@@ -5,8 +5,6 @@
  * the list/detail pages consume after structural narrowing.
  */
 
-import { parseFileNameTemplate, type CollectPackLayout } from './name-format';
-
 export const COLLECT_MAX_FILE_BYTES = 32 * 1024 * 1024;
 
 export type CollectRequestStatus = 'draft' | 'published' | 'closed' | 'archived';
@@ -38,6 +36,7 @@ export interface CollectSlotView {
   required: boolean;
   allowedExt: string[];
   maxFiles: number;
+  nextAssignedName: string;
 }
 
 export interface CollectCurrentFileView {
@@ -49,12 +48,6 @@ export interface CollectCurrentFileView {
   ext?: string;
   url?: string;
   assignedName?: string;
-}
-
-export interface CollectStudentIdentity {
-  studentId: string;
-  realName: string;
-  uid?: number;
 }
 
 export interface CollectHistoryFileView {
@@ -82,9 +75,6 @@ export interface CollectDetailPayload {
   slots: CollectSlotView[];
   currentFiles: CollectCurrentFileView[];
   history?: CollectHistoryFileView[];
-  fileNameTemplate: string;
-  packLayout: CollectPackLayout;
-  identity: CollectStudentIdentity;
 }
 
 export type CollectParseResult<T> = { ok: true; value: T } | { ok: false; error: string };
@@ -224,6 +214,9 @@ function parseSlot(value: unknown, index: number): CollectParseResult<CollectSlo
   if (typeof value.maxFiles !== 'number' || !Number.isSafeInteger(value.maxFiles) || value.maxFiles < 1) {
     return { ok: false, error: `slots[${index}] 的 maxFiles 无效` };
   }
+  if (typeof value.nextAssignedName !== 'string' || !value.nextAssignedName.trim()) {
+    return { ok: false, error: `slots[${index}] 缺少 nextAssignedName` };
+  }
   return {
     ok: true,
     value: {
@@ -232,6 +225,7 @@ function parseSlot(value: unknown, index: number): CollectParseResult<CollectSlo
       required: value.required,
       allowedExt,
       maxFiles: value.maxFiles,
+      nextAssignedName: value.nextAssignedName.trim(),
     },
   };
 }
@@ -321,42 +315,8 @@ function unwrapDetailSource(data: unknown): unknown {
     filled: data.filled,
     currentFiles: data.currentFiles !== undefined ? data.currentFiles : submission?.currentFiles,
     history: data.history,
-    fileNameTemplate: data.fileNameTemplate !== undefined ? data.fileNameTemplate : request.fileNameTemplate,
-    packLayout: data.packLayout !== undefined ? data.packLayout : request.packLayout,
-    identity: data.identity !== undefined ? data.identity : request.identity,
     examGate: data.examGate !== undefined ? data.examGate : request.examGate,
   };
-}
-
-function parseStudentIdentity(value: unknown): CollectParseResult<CollectStudentIdentity> {
-  if (!isRecord(value)) return { ok: false, error: '缺少 identity' };
-  if (typeof value.studentId !== 'string') return { ok: false, error: 'identity.studentId 无效' };
-  if (typeof value.realName !== 'string') return { ok: false, error: 'identity.realName 无效' };
-  const identity: CollectStudentIdentity = {
-    studentId: value.studentId,
-    realName: value.realName,
-  };
-  if (value.uid !== undefined) {
-    if (typeof value.uid !== 'number' || !Number.isSafeInteger(value.uid)) {
-      return { ok: false, error: 'identity.uid 无效' };
-    }
-    identity.uid = value.uid;
-  }
-  return { ok: true, value: identity };
-}
-
-function parseDetailFileNameTemplate(value: unknown): CollectParseResult<string> {
-  if (typeof value !== 'string') return { ok: false, error: '缺少 fileNameTemplate' };
-  try {
-    return { ok: true, value: parseFileNameTemplate(value) };
-  } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : '文件名格式不合法' };
-  }
-}
-
-function parseDetailPackLayout(value: unknown): CollectParseResult<CollectPackLayout> {
-  if (value === 'nested' || value === 'flat') return { ok: true, value };
-  return { ok: false, error: 'packLayout 无效' };
 }
 
 export function parseCollectDetailPayload(data: unknown): CollectParseResult<CollectDetailPayload> {
@@ -399,12 +359,6 @@ export function parseCollectDetailPayload(data: unknown): CollectParseResult<Col
   } else {
     return { ok: false, error: 'filled 无效' };
   }
-  const fileNameTemplate = parseDetailFileNameTemplate(source.fileNameTemplate);
-  if (!fileNameTemplate.ok) return fileNameTemplate;
-  const packLayout = parseDetailPackLayout(source.packLayout);
-  if (!packLayout.ok) return packLayout;
-  const identity = parseStudentIdentity(source.identity);
-  if (!identity.ok) return identity;
   const examGate = parseExamGate(source.examGate);
   if (!examGate.ok) return examGate;
   const payload: CollectDetailPayload = {
@@ -419,9 +373,6 @@ export function parseCollectDetailPayload(data: unknown): CollectParseResult<Col
     examGate: examGate.value,
     slots,
     currentFiles,
-    fileNameTemplate: fileNameTemplate.value,
-    packLayout: packLayout.value,
-    identity: identity.value,
   };
   if (source.history !== undefined) {
     if (!Array.isArray(source.history)) return { ok: false, error: 'history 不是数组' };

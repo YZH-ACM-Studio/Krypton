@@ -329,7 +329,8 @@ describe('collect naming rev.2 source contracts', () => {
   it('shows assignedName or 将保存为 on the student collect page', () => {
     expect(student).to.include('file.assignedName || file.originalName');
     expect(student).to.include('将保存为');
-    expect(student).to.include('nextUploadPreviewName');
+    expect(student).to.include('slot.nextAssignedName');
+    expect(student).not.to.include('nextUploadPreviewName');
     expect(student).not.to.include('assignedFileTitle');
   });
 
@@ -352,5 +353,6 @@ describe('collect naming rev.2 source contracts', () => {
     expect(handler).to.include('fileNameTemplate');
     expect(handler).to.include('packLayout');
     expect(handler).to.include('assignedName');
+    expect(handler).to.include('nextAssignedNameForSlot');
   });
 });

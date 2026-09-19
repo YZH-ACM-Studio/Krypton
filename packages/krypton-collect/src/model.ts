@@ -1368,6 +1368,27 @@ export function assignedNameForFile(
     });
 }
 
+export function nextAssignedNameForSlot(
+    request: { fileNameTemplate?: string | null },
+    identity: CollectNameIdentity,
+    slot: Pick<CollectSlot, 'id' | 'title' | 'allowedExt'>,
+    nextIndex: number,
+): string {
+    const ext = slotPreviewExt(slot);
+    return assignedNameForFile(
+        request,
+        identity,
+        slot,
+        {
+            fileId: slot.id,
+            originalName: missingOriginalName(ext),
+            ext,
+            slotId: slot.id,
+        },
+        nextIndex,
+    );
+}
+
 export function annotateProgressDuplicates(
     rows: ReadonlyArray<Omit<CollectProgressRow, 'currentFiles'> & { currentFiles: readonly CollectCurrentFileRef[] }>,
 ): CollectProgressRow[] {

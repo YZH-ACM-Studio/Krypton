@@ -29,6 +29,7 @@ import { CollectForbiddenError, CollectNotFoundError } from './errors';
 import {
     archiveRequest,
     assignedNameForFile,
+    nextAssignedNameForSlot,
     closeRequest,
     confirmSubmit,
     createRequest,
@@ -344,11 +345,12 @@ class CollectDetailHandler extends CollectBaseHandler {
             .toArray();
         const identity = await lookupStudentIdentity(domainId, this.user._id);
         const files = submission?.currentFiles || [];
+        const studentIdentity = { uid: this.user._id, ...identity };
         const currentFiles = files.map((file) => ({
             ...file,
             assignedName: assignedNameForFile(
                 request,
-                { uid: this.user._id, ...identity },
+                studentIdentity,
                 { title: slotTitleOf(request, file.slotId) },
                 file,
                 fileIndexInSlot(files, file.slotId, file.fileId),
@@ -367,10 +369,15 @@ class CollectDetailHandler extends CollectBaseHandler {
             submitted: submission?.status === 'submitted',
             filled: requiredSlotsFilled(request.slots, files),
             examGate,
-            slots: request.slots,
-            fileNameTemplate: requestFileNameTemplate(request.fileNameTemplate),
-            packLayout: requestPackLayout(request.packLayout),
-            identity: { uid: this.user._id, ...identity },
+            slots: request.slots.map((slot) => ({
+                ...slot,
+                nextAssignedName: nextAssignedNameForSlot(
+                    request,
+                    studentIdentity,
+                    slot,
+                    files.filter((file) => file.slotId === slot.id).length + 1,
+                ),
+            })),
             currentFiles,
             history: history.map((file) => ({
                 slotId: file.slotId,

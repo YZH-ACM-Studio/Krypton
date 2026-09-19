@@ -29,7 +29,6 @@ import { MiniTabs } from '@/components/ui/mini-tabs';
 import { cn } from '@/lib/cn';
 import { useBootstrap } from '@/lib/bootstrap';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
-import { missingOriginalName, renderAssignedFileName, slotPreviewExt } from './name-format';
 import {
   acceptFromSlot,
   COLLECT_MAX_FILE_BYTES,
@@ -42,7 +41,6 @@ import {
   type CollectHistoryFileView,
   type CollectListItem,
   type CollectSlotView,
-  type CollectStudentIdentity,
 } from './types';
 
 type CollectListTab = 'pending' | 'submitted' | 'closed';
@@ -168,23 +166,6 @@ function filesForSlot(files: CollectCurrentFileView[], slotId: string): CollectC
   return files.filter((file) => file.slotId === slotId);
 }
 
-function nextUploadPreviewName(
-  slot: CollectSlotView,
-  nextIndex: number,
-  template: string,
-  identity: CollectStudentIdentity,
-): string {
-  const ext = slotPreviewExt(slot);
-  return renderAssignedFileName(template, {
-    uid: identity.uid,
-    studentId: identity.studentId,
-    realName: identity.realName,
-    slotTitle: slot.title,
-    index: nextIndex,
-    ext,
-    originalName: missingOriginalName(ext),
-  });
-}
 
 async function postCollectOperation(requestId: string, fields: Record<string, string>, fallback: string): Promise<void> {
   const body = new URLSearchParams(fields);
@@ -626,7 +607,7 @@ export function CollectDetailPage() {
               {writable && files.length < slot.maxFiles ? (
                 <div className="space-y-2">
                   <p className="text-xs text-muted-foreground">
-                    将保存为 {nextUploadPreviewName(slot, files.length + 1, data.fileNameTemplate, data.identity)}
+                    将保存为 {slot.nextAssignedName}
                   </p>
                   <FileUploader
                     endpoint={`/collect/${encodeURIComponent(data._id)}`}

@@ -67,11 +67,15 @@ describe('collect Hydro operation methods', () => {
         expect(handlerSource).not.to.match(/function currentFileIndex\(/);
         expect(handlerSource).not.to.match(/function assignedNameFor\(/);
         expect(handlerSource).to.include('assignedNameForFile');
+        expect(handlerSource).to.include('nextAssignedNameForSlot');
         expect(handlerSource).to.include('fileIndexInSlot');
         const detail = sliceClass('CollectDetailHandler');
         const stats = sliceClass('AdminCollectStatsHandler');
         expect(detail).to.include('assignedNameForFile');
+        expect(detail).to.include('nextAssignedNameForSlot');
         expect(detail).to.include('fileIndexInSlot');
+        expect(detail).not.to.include('fileNameTemplate: requestFileNameTemplate(request.fileNameTemplate)');
+        expect(detail).not.to.include('identity: { uid: this.user._id');
         expect(stats).to.include('assignedNameForFile');
         expect(stats).to.include('fileIndexInSlot');
     });

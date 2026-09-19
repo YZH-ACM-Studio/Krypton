@@ -429,6 +429,12 @@ describe('krypton-collect model helpers', () => {
             { fileId: 'f1', originalName: 'lab.pdf', ext: 'pdf', slotId: 'report' },
             1,
         )).to.equal('unbound-UID42.pdf');
+        expect(model.nextAssignedNameForSlot(
+            { fileNameTemplate: '{originalStem}_{index}' },
+            { uid: 9, studentId: '24000001', realName: '张三' },
+            { id: 'report', title: '实验报告', allowedExt: ['pdf'] },
+            2,
+        )).to.equal('未交_2.pdf');
     });
 });
 

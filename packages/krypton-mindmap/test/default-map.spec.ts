@@ -27,4 +27,11 @@ describe('pickDefaultKnowledgeMap', () => {
             { title: 'B', isDefault: true },
         ])).to.throw(/multiple default knowledge maps/);
     });
+
+    it('returns undefined when no default flag and no unique algorithm map exist', () => {
+        expect(pickDefaultKnowledgeMap([
+            { title: '学校安全' },
+            { title: '操作系统' },
+        ])).to.equal(undefined);
+    });
 });

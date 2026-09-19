@@ -20,5 +20,5 @@ export function pickDefaultKnowledgeMap<T extends DefaultKnowledgeMapCandidate>(
     if (flagged[0]) return flagged[0];
     const algorithm = maps.filter((map) => map.title === ALGORITHM_KNOWLEDGE_MAP_TITLE);
     if (algorithm.length === 1) return algorithm[0];
-    return maps[0];
+    return undefined;
 }

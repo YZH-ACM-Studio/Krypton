@@ -45,15 +45,25 @@ function knowledgeNodeIdStrings(problem: { knowledgeNodeIds?: unknown; docId?: u
     return ids;
 }
 
+function knowledgeMapIdString(value: unknown): string | undefined {
+    if (value === undefined || value === null || value === '') return undefined;
+    const id = typeof value === 'string' ? value.trim() : String(value);
+    return id || undefined;
+}
+
 export function knowledgeNodeCompletionCounts(input: {
-    problems: ReadonlyArray<{ knowledgeNodeIds?: unknown; docId?: unknown }>;
-    publicNodes: ReadonlyArray<{ id: string; title: string; href?: string; subtitle?: string }>;
+    problems: ReadonlyArray<{ knowledgeNodeIds?: unknown; knowledgeMapId?: unknown; docId?: unknown }>;
+    publicNodes: ReadonlyArray<{ id: string; title: string; href?: string; subtitle?: string; knowledgeMapId?: string }>;
 }): ProfileCompletionItem[] {
     const nodes = new Map(input.publicNodes.map((node) => [node.id, node]));
     const counts = new Map<string, number>();
     for (const problem of input.problems) {
+        const problemMapId = knowledgeMapIdString(problem.knowledgeMapId);
         for (const id of knowledgeNodeIdStrings(problem)) {
-            if (!nodes.has(id)) continue;
+            const node = nodes.get(id);
+            if (!node) continue;
+            const nodeMapId = knowledgeMapIdString(node.knowledgeMapId);
+            if (problemMapId && nodeMapId && problemMapId !== nodeMapId) continue;
             counts.set(id, (counts.get(id) || 0) + 1);
         }
     }

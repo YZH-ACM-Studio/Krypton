@@ -436,7 +436,7 @@ class UserDetailHandler extends Handler {
                     domainId,
                     psdocs.map((i) => i.docId),
                     this.user,
-                    [...problem.PROJECTION_LIST, 'knowledgeNodeIds'],
+                    [...problem.PROJECTION_LIST, 'knowledgeNodeIds', 'knowledgeMapId'],
                     false,
                     true,
                 ),
@@ -497,7 +497,7 @@ class UserDetailHandler extends Handler {
         const mindmap = (global as any).Hydro?.model?.mindmap;
         if (this.user.hasPerm(PERM.PERM_VIEW_PROBLEM) && mindmap?.listPublicMaps && mindmap.getPublicSnapshot) {
             const maps = await mindmap.listPublicMaps();
-            const publicNodes: Array<{ id: string; title: string; href?: string; subtitle?: string }> = [];
+            const publicNodes: Array<{ id: string; title: string; href?: string; subtitle?: string; knowledgeMapId?: string }> = [];
             for (const map of maps) {
                 const snapshot = await mindmap.getPublicSnapshot(map._id);
                 if (!snapshot) continue;
@@ -514,7 +514,8 @@ class UserDetailHandler extends Handler {
                     publicNodes.push({
                         id,
                         title: topic,
-                        href: `/mindmap?mapId=${mapId}`,
+                        href: `/mindmap?map=${mapId}`,
+                        knowledgeMapId: mapId,
                         subtitle: maps.length > 1 && mapTitle && mapTitle !== topic ? mapTitle : undefined,
                     });
                 }

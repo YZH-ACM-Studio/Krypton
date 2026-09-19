@@ -65,14 +65,14 @@ describe('user profile completion histograms', () => {
                     { docId: 3 },
                 ],
                 publicNodes: [
-                    { id: 'n-graph', title: '图论', href: '/mindmap?mapId=m1', subtitle: '算法知识图谱' },
+                    { id: 'n-graph', title: '图论', href: '/mindmap?map=m1', subtitle: '算法知识图谱' },
                     { id: 'n-hidden', title: '隐藏' },
-                    { id: 'n-dp', title: '动态规划', href: '/mindmap?mapId=m1' },
+                    { id: 'n-dp', title: '动态规划', href: '/mindmap?map=m1' },
                 ],
             }),
         ).to.deep.equal([
-            { id: 'n-graph', title: '图论', count: 2, href: '/mindmap?mapId=m1', subtitle: '算法知识图谱' },
-            { id: 'n-dp', title: '动态规划', count: 1, href: '/mindmap?mapId=m1' },
+            { id: 'n-graph', title: '图论', count: 2, href: '/mindmap?map=m1', subtitle: '算法知识图谱' },
+            { id: 'n-dp', title: '动态规划', count: 1, href: '/mindmap?map=m1' },
         ]);
         expect(() => knowledgeNodeCompletionCounts({ problems: [{ docId: 8, knowledgeNodeIds: 'n-graph' }], publicNodes: [] })).to.throw(
             /invalid knowledgeNodeIds/,
@@ -89,5 +89,17 @@ describe('user profile completion histograms', () => {
         expect(source).to.include("'knowledgeNodeIds'");
         expect(source).to.match(/subtitle:\s*maps\.length > 1/);
         expect(source).not.to.match(/title:\s*maps\.length > 1 && mapTitle \?/);
+        expect(source).to.include('href: `/mindmap?map=${mapId}`');
+        expect(source).to.include("'knowledgeMapId'");
+        expect(source).to.include('knowledgeMapId: mapId');
+    });
+
+    it('ignores a node id that belongs to a different knowledge map when both sides declare one', () => {
+        expect(
+            knowledgeNodeCompletionCounts({
+                problems: [{ docId: 1, knowledgeNodeIds: ['n-graph'], knowledgeMapId: 'map-a' }],
+                publicNodes: [{ id: 'n-graph', title: '图论', knowledgeMapId: 'map-b', href: '/mindmap?map=map-b' }],
+            }),
+        ).to.deep.equal([]);
     });
 });

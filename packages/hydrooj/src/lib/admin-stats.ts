@@ -13,10 +13,27 @@ export function shanghaiDayWindow(days: number, now = new Date()) {
     };
 }
 
+function passRate(accepted: number, total: number): number | null {
+    return total > 0 ? accepted / total : null;
+}
+
+function average(values: number[]): number {
+    if (!values.length) return 0;
+    return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function median(values: number[]): number {
+    if (!values.length) return 0;
+    const sorted = values.slice().sort((a, b) => a - b);
+    const middle = Math.floor(sorted.length / 2);
+    return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
 export interface UserStats {
     total: number;
     accepted: number;
     activeDays: number;
+    passRate: number | null;
     byDay: Array<{ day: string; total: number; accepted: number }>;
 }
 
@@ -24,6 +41,7 @@ export interface DashboardStats {
     total: number;
     accepted: number;
     participants: number;
+    passRate: number | null;
     byDay: Array<{ day: string; total: number; accepted: number; activeUsers: number }>;
 }
 
@@ -40,9 +58,11 @@ export interface ContestStats {
     total: number;
     accepted: number;
     participants: number;
+    passRate: number | null;
+    submitsPerParticipant: number;
     byProblem: Array<{ pid: number; total: number; accepted: number }>;
-    byHour: Array<{ hour: string; count: number }>;
-    byLanguage: Array<{ language: string; count: number }>;
+    byHour: Array<{ hour: string; count: number; accepted: number }>;
+    byLanguage: Array<{ language: string; count: number; percent: number }>;
 }
 
 export function contestStatsPipeline(domainId: string, contestId: unknown, acceptedStatus: number, timezone = 'Asia/Shanghai') {
@@ -82,6 +102,7 @@ export function contestStatsPipeline(domainId: string, contestId: unknown, accep
                                 },
                             },
                             count: { $sum: 1 },
+                            accepted: { $sum: { $cond: [{ $eq: ['$status', acceptedStatus] }, 1, 0] } },
                         },
                     },
                     { $sort: { _id: 1 } },
@@ -98,17 +119,33 @@ export function contestStatsPipeline(domainId: string, contestId: unknown, accep
 export function normalizeContestStats(rows: any[]): ContestStats {
     const facet = rows[0] || {};
     const overall = facet.overall?.[0] || {};
+    const total = Number(overall.total || 0);
+    const accepted = Number(overall.accepted || 0);
+    const participants = Number(overall.participants || 0);
     return {
-        total: Number(overall.total || 0),
-        accepted: Number(overall.accepted || 0),
-        participants: Number(overall.participants || 0),
+        total,
+        accepted,
+        participants,
+        passRate: passRate(accepted, total),
+        submitsPerParticipant: participants > 0 ? total / participants : 0,
         byProblem: (facet.byProblem || []).map((row) => ({
             pid: Number(row._id),
             total: Number(row.total || 0),
             accepted: Number(row.accepted || 0),
         })),
-        byHour: (facet.byHour || []).map((row) => ({ hour: String(row._id), count: Number(row.count || 0) })),
-        byLanguage: (facet.byLanguage || []).map((row) => ({ language: String(row._id), count: Number(row.count || 0) })),
+        byHour: (facet.byHour || []).map((row) => ({
+            hour: String(row._id),
+            count: Number(row.count || 0),
+            accepted: Number(row.accepted || 0),
+        })),
+        byLanguage: (facet.byLanguage || []).map((row) => {
+            const count = Number(row.count || 0);
+            return {
+                language: String(row._id),
+                count,
+                percent: total > 0 ? (count / total) * 100 : 0,
+            };
+        }),
     };
 }
 
@@ -156,11 +193,14 @@ export function userStatsPipeline(
 export function normalizeUserStats(rows: any[], expectedDays: string[] = []): UserStats {
     const facet = rows[0] || {};
     const overall = facet.overall?.[0] || {};
+    const total = Number(overall.total || 0);
+    const accepted = Number(overall.accepted || 0);
     const byDay = new Map<string, any>((facet.byDay || []).map((row) => [String(row._id), row]));
     return {
-        total: Number(overall.total || 0),
-        accepted: Number(overall.accepted || 0),
+        total,
+        accepted,
         activeDays: Number(overall.activeDays || 0),
+        passRate: passRate(accepted, total),
         byDay: (expectedDays.length ? expectedDays : Array.from(byDay.keys()).sort()).map((day) => ({
             day,
             total: Number(byDay.get(day)?.total || 0),
@@ -238,11 +278,14 @@ export function dashboardStatsPipeline(
 export function normalizeDashboardStats(rows: any[], expectedDays: string[] = []): DashboardStats {
     const facet = rows[0] || {};
     const overall = facet.overall?.[0] || {};
+    const total = Number(overall.total || 0);
+    const accepted = Number(overall.accepted || 0);
     const byDay = new Map<string, any>((facet.byDay || []).map((row) => [String(row._id), row]));
     return {
-        total: Number(overall.total || 0),
-        accepted: Number(overall.accepted || 0),
+        total,
+        accepted,
         participants: Number(overall.participants || 0),
+        passRate: passRate(accepted, total),
         byDay: (expectedDays.length ? expectedDays : Array.from(byDay.keys()).sort()).map((day) => ({
             day,
             total: Number(byDay.get(day)?.total || 0),
@@ -319,6 +362,8 @@ export interface TrainingMemberIdentity {
 export interface TrainingStats {
     enrollmentCount: number;
     problemCount: number;
+    averageProgress: number;
+    medianProgress: number;
     byProblem: Array<{ pid: number; completed: number }>;
     progressDistribution: Array<{ label: string; count: number }>;
     members: Array<TrainingMemberIdentity & { done: number; total: number; progress: number }>;
@@ -356,10 +401,13 @@ export function buildTrainingStats(
     const labels = ['0%', '1–25%', '26–50%', '51–75%', '76–99%', '100%'];
     const distribution = new Map(labels.map((label) => [label, 0]));
     for (const member of members) distribution.set(progressBucket(member.progress), (distribution.get(progressBucket(member.progress)) || 0) + 1);
+    const progressValues = members.map((member) => member.progress);
 
     return {
         enrollmentCount: identities.length,
         problemCount: uniquePids.length,
+        averageProgress: average(progressValues),
+        medianProgress: median(progressValues),
         byProblem: uniquePids.map((pid) => ({
             pid,
             completed: identities.reduce((count, member) => count + (acceptedByUid.get(member.uid)?.has(pid) ? 1 : 0), 0),

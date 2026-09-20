@@ -24,6 +24,8 @@ describe('admin statistics aggregation contracts', () => {
         const pipeline = contestStatsPipeline('system', 'contest-id', 12);
         expect(pipeline).to.have.lengthOf(2);
         expect(pipeline[0]).to.deep.equal({ $match: { domainId: 'system', contest: 'contest-id' } });
+        const facet = (pipeline[1] as { $facet: Record<string, unknown> }).$facet;
+        expect(Object.keys(facet)).to.deep.equal(['overall', 'byProblem', 'byHour', 'byLanguage']);
         const source = JSON.stringify(pipeline[1]);
         expect(source).to.include('overall');
         expect(source).to.include('byProblem');
@@ -31,6 +33,7 @@ describe('admin statistics aggregation contracts', () => {
         expect(source).to.include('byLanguage');
         expect(source).to.include('Asia/Shanghai');
         expect(source).to.include('12');
+        expect(JSON.stringify(facet.byHour)).to.include('accepted');
     });
 
     it('normalizes an empty or populated contest facet without NaN values', () => {
@@ -38,6 +41,8 @@ describe('admin statistics aggregation contracts', () => {
             total: 0,
             accepted: 0,
             participants: 0,
+            passRate: null,
+            submitsPerParticipant: 0,
             byProblem: [],
             byHour: [],
             byLanguage: [],
@@ -45,15 +50,17 @@ describe('admin statistics aggregation contracts', () => {
         expect(normalizeContestStats([{
             overall: [{ total: 10, accepted: 4, participants: 3 }],
             byProblem: [{ _id: 7, total: 6, accepted: 2 }],
-            byHour: [{ _id: '2026-07-13T01', count: 5 }],
+            byHour: [{ _id: '2026-07-13T01', count: 5, accepted: 2 }],
             byLanguage: [{ _id: 'cpp', count: 8 }],
         }])).to.deep.equal({
             total: 10,
             accepted: 4,
             participants: 3,
+            passRate: 0.4,
+            submitsPerParticipant: 10 / 3,
             byProblem: [{ pid: 7, total: 6, accepted: 2 }],
-            byHour: [{ hour: '2026-07-13T01', count: 5 }],
-            byLanguage: [{ language: 'cpp', count: 8 }],
+            byHour: [{ hour: '2026-07-13T01', count: 5, accepted: 2 }],
+            byLanguage: [{ language: 'cpp', count: 8, percent: 80 }],
         });
     });
 
@@ -86,6 +93,8 @@ describe('admin statistics aggregation contracts', () => {
             [3, 1, 33],
             [4, 0, 0],
         ]);
+        expect(stats.averageProgress).to.equal((100 + 33 + 0) / 3);
+        expect(stats.medianProgress).to.equal(33);
         expect(stats.progressDistribution).to.deep.include.members([
             { label: '0%', count: 1 },
             { label: '26–50%', count: 1 },
@@ -122,6 +131,7 @@ describe('admin statistics aggregation contracts', () => {
             total: 8,
             accepted: 3,
             activeDays: 4,
+            passRate: 3 / 8,
             byDay: [{ day: '2026-07-12', total: 2, accepted: 1 }],
         });
 
@@ -135,6 +145,7 @@ describe('admin statistics aggregation contracts', () => {
             total: 10,
             accepted: 5,
             participants: 3,
+            passRate: 0.5,
             byDay: [{ day: '2026-07-12', total: 4, accepted: 2, activeUsers: 2 }],
         });
     });

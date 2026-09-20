@@ -1,12 +1,11 @@
 /**
- * User detail page — redesigned (Q2):
- *   - Hero with large avatar + identity + KPI strip
- *   - Bio card directly under hero, rendered as full Markdown
- *   - Optional 外站 Rating card (CF / 牛客 snapshots; not Hydro RP)
- *   - 65 : 35 split — left = problem-set / knowledge-node completions + attended contests,
- *     right = identity meta + contacts (with copy) + solution previews.
+ * User detail page — Cloudflare / shadcn profile:
+ *   - Full-width header: avatar | identity + badges | actions
+ *   - Bio, KPI, 外站 Rating, then a full-width GitHub-style heatmap
+ *   - xl split: completions + contests | meta + contacts + solutions
+ *   - CF / 牛客 charts consume server `externalRatingHistory` only (no browser fetch)
  */
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { motion } from 'motion/react';
 import {
   Activity,
@@ -25,7 +24,8 @@ import {
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { EChart, type KryptonEChartsOption } from '@/components/ui/echart';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { SimpleSelect } from '@/components/ui/select';
@@ -33,6 +33,7 @@ import { Separator } from '@/components/ui/separator';
 import { MarkdownEditor, MarkdownView } from '@/components/markdown-renderer';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useBootstrap } from '@/lib/bootstrap';
+import { cn } from '@/lib/cn';
 import { formatDateTime, makeInitials, replaceRouteTokens, toDate } from '@/lib/format';
 
 interface UserProfileDocument {
@@ -46,8 +47,6 @@ interface UserProfileDocument {
   mail?: string;
   qq?: string;
   wechat?: string;
-  studentId?: string;
-  school?: string;
   avatar?: string;
   avatarUrl?: string;
   displayName?: string;
@@ -142,6 +141,15 @@ interface ExternalRatingPayload {
   sites?: ExternalRatingSiteEntry[];
 }
 
+/** Server-projected contest history. Visibility is already applied; do not fetch. */
+interface ExternalRatingHistoryPoint {
+  ratedAt: string;
+  rating: number;
+  contestName?: string;
+}
+
+type ExternalRatingHistoryBySite = Record<ExternalRatingSiteId, ExternalRatingHistoryPoint[]>;
+
 interface UserPageData {
   udoc?: UserProfileDocument;
   sdoc?: { updateAt?: unknown };
@@ -171,6 +179,8 @@ interface UserPageData {
   nowcoder?: ExternalRatingSiteView | null;
   externalRating?: ExternalRatingPayload | null;
   externalRatings?: ExternalRatingPayload | null;
+  /** Viewer-filtered CF / 牛客 history. Hidden sites are omitted by the server. */
+  externalRatingHistory?: unknown;
 }
 
 const EXTERNAL_RATING_SITE_IDS: ExternalRatingSiteId[] = ['codeforces', 'nowcoder'];
@@ -303,20 +313,29 @@ function readExternalRatingView(data: UserPageData): {
   };
 }
 
-function hasExternalRatingSiteContent(view: ExternalRatingSiteView, includeError: boolean): boolean {
+function hasExternalRatingSiteContent(
+  view: ExternalRatingSiteView,
+  includeError: boolean,
+  history: ExternalRatingHistoryPoint[],
+): boolean {
   if (view.handle) return true;
   if (typeof view.rating === 'number') return true;
   if (toDate(unwrapDateValue(view.fetchedAt))) return true;
-  return includeError && !!view.lastError;
+  if (includeError && !!view.lastError) return true;
+  // Unset handle clears the snapshot but not injected history.
+  return history.length >= 1;
 }
 
-function isExternalRatingSiteVisible(view: ExternalRatingSiteView, canViewPrivate: boolean): boolean {
-  if (canViewPrivate) return hasExternalRatingSiteContent(view, true);
-  // Strangers never see lastError. Privileged snapshots require publicShow === true;
-  // the public projection already dropped hidden sites and omits the flag.
+function isExternalRatingSiteVisible(
+  view: ExternalRatingSiteView,
+  canViewPrivate: boolean,
+  history: ExternalRatingHistoryPoint[],
+): boolean {
+  if (canViewPrivate) return hasExternalRatingSiteContent(view, true, history);
+  // Strangers never see lastError. Hidden sites stay hidden even if history sneaks in.
+  // The public projection already dropped hidden sites and omits the flag.
   if (view.publicShow === false) return false;
-  if (view.publicShow === true) return hasExternalRatingSiteContent(view, false);
-  return hasExternalRatingSiteContent(view, false);
+  return hasExternalRatingSiteContent(view, false, history);
 }
 
 function formatExternalRatingValue(rating: number | null | undefined): string {
@@ -326,6 +345,98 @@ function formatExternalRatingValue(rating: number | null | undefined): string {
 
 function formatExternalRatingLastError(lastError: string): string {
   return EXTERNAL_RATING_ERROR_TEXT[lastError] || lastError;
+}
+
+function emptyExternalRatingHistory(): ExternalRatingHistoryBySite {
+  return { codeforces: [], nowcoder: [] };
+}
+
+function readRatedAt(value: unknown): string | undefined {
+  const text = readOptionalString(value);
+  if (text) return text;
+  const date = toDate(unwrapDateValue(value));
+  return date ? date.toISOString() : undefined;
+}
+
+function readExternalRatingHistoryPoints(value: unknown): ExternalRatingHistoryPoint[] {
+  if (!Array.isArray(value)) return [];
+  const points: ExternalRatingHistoryPoint[] = [];
+  for (const item of value) {
+    if (!isRecord(item)) continue;
+    const ratedAt = readRatedAt(item.ratedAt);
+    const rating = readOptionalRating(item.rating);
+    if (ratedAt === undefined || typeof rating !== 'number') continue;
+    const contestName = readOptionalString(item.contestName);
+    const point: ExternalRatingHistoryPoint = { ratedAt, rating };
+    if (contestName) point.contestName = contestName;
+    points.push(point);
+  }
+  return points;
+}
+
+function readExternalRatingHistoryBySite(raw: unknown): ExternalRatingHistoryBySite {
+  if (!isRecord(raw)) return emptyExternalRatingHistory();
+  return {
+    codeforces: readExternalRatingHistoryPoints(raw.codeforces),
+    nowcoder: readExternalRatingHistoryPoints(raw.nowcoder),
+  };
+}
+
+function readTooltipRating(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (Array.isArray(value) && typeof value[1] === 'number' && Number.isFinite(value[1])) return value[1];
+  return undefined;
+}
+
+function formatExternalRatingTooltip(raw: unknown, points: ExternalRatingHistoryPoint[]): string {
+  const item = Array.isArray(raw) ? raw[0] : raw;
+  if (!isRecord(item)) return '';
+  const index = typeof item.dataIndex === 'number' ? item.dataIndex : -1;
+  const point = index >= 0 && index < points.length ? points[index] : undefined;
+  const ratedAt = point?.ratedAt ?? (typeof item.axisValue === 'string' ? item.axisValue : '');
+  const rating = point?.rating ?? readTooltipRating(item.value);
+  const lines: string[] = [];
+  if (point?.contestName) lines.push(point.contestName);
+  if (ratedAt) lines.push(ratedAt);
+  lines.push(`Rating ${typeof rating === 'number' ? String(Math.round(rating)) : '—'}`);
+  return lines.join('\n');
+}
+
+function buildExternalRatingChartOption(points: ExternalRatingHistoryPoint[]): KryptonEChartsOption {
+  const option: KryptonEChartsOption = {
+    grid: { left: 8, right: 12, top: 16, bottom: points.length > 20 ? 48 : 8, containLabel: true },
+    tooltip: {
+      trigger: 'axis',
+      formatter: (raw) => formatExternalRatingTooltip(raw, points),
+    },
+    xAxis: {
+      type: 'time',
+    },
+    yAxis: {
+      type: 'value',
+      scale: true,
+    },
+    series: [
+      {
+        type: 'line',
+        name: 'Rating',
+        smooth: true,
+        showSymbol: points.length <= 20,
+        symbolSize: 6,
+        data: points.map((point) => ({
+          name: point.contestName || point.ratedAt,
+          value: [point.ratedAt, point.rating],
+        })),
+      },
+    ],
+  };
+  if (points.length > 20) {
+    option.dataZoom = [
+      { type: 'inside', filterMode: 'none' },
+      { type: 'slider', height: 16, bottom: 4 },
+    ];
+  }
+  return option;
 }
 
 function codeforcesProfileUrl(handle: string): string {
@@ -353,9 +464,13 @@ export function UserDetailPage() {
     || externalRatingView.viewerIsTeacher
     || data.viewerIsTeacher === true
     || data.isTeacherOrAdmin === true;
-  const visibleExternalRatingSites = externalRatingView.sites.filter((site) =>
-    isExternalRatingSiteVisible(site.view, canViewPrivateExternalRating),
-  );
+  const historyBySite = readExternalRatingHistoryBySite(data.externalRatingHistory);
+  const sitesById = new Map(externalRatingView.sites.map((site) => [site.id, site.view]));
+  const visibleExternalRatingSites = EXTERNAL_RATING_SITE_IDS.flatMap((id) => {
+    const view = sitesById.get(id) ?? {};
+    if (!isExternalRatingSiteVisible(view, canViewPrivateExternalRating, historyBySite[id])) return [];
+    return [{ id, view }];
+  });
 
   const name = udoc.uname || 'User';
   const rp = Math.round(Number(udoc.rp || 0));
@@ -383,79 +498,75 @@ export function UserDetailPage() {
   const avatarUrl = udoc.avatarUrl || (udoc.avatar && /^https?:|^\//.test(udoc.avatar) ? udoc.avatar : null);
 
   return (
-    <motion.div className="space-y-5" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-      {/* Hero card */}
-      <Card>
-        <CardContent className="flex flex-col items-center gap-5 p-6 sm:flex-row sm:items-start">
-          <Avatar className="size-24 shrink-0">
+    <motion.div className="w-full min-w-0 space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
+      <header className="flex w-full min-w-0 flex-col gap-4 border-b border-border/70 pb-6 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex min-w-0 items-start gap-4">
+          <Avatar className="size-16 shrink-0 ring-1 ring-border sm:size-20">
             {avatarUrl ? <AvatarImage src={avatarUrl} alt={name} /> : null}
-            <AvatarFallback className="text-3xl">{makeInitials(name)}</AvatarFallback>
+            <AvatarFallback className="text-xl sm:text-2xl">{makeInitials(name)}</AvatarFallback>
           </Avatar>
-          <div className="flex-1 text-center sm:text-left min-w-0">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-              <div className="min-w-0">
-                <h1 className="text-2xl font-bold truncate">{name}</h1>
-                {isBound && binding.realName ? (
-                  <p className="text-sm text-muted-foreground">
-                    {binding.realName}
-                    {binding.studentId ? <span className="ml-1.5 font-mono">{binding.studentId}</span> : null}
-                  </p>
-                ) : udoc.displayName ? (
-                  <p className="text-sm text-muted-foreground">{udoc.displayName}</p>
-                ) : null}
-                <div className="mt-2 flex flex-wrap justify-center gap-1.5 sm:justify-start">
-                  {udoc.role ? (
-                    <Badge variant="outline" className="text-[10px]">
-                      {udoc.role}
-                    </Badge>
-                  ) : null}
-                  {binding ? (
-                    isBound ? (
-                      <Badge className="border-transparent bg-green-600/15 text-[10px] text-green-700 dark:text-green-400">已绑定</Badge>
-                    ) : (
-                      <Badge variant="outline" className="text-[10px] text-muted-foreground">
-                        未绑定
-                      </Badge>
-                    )
-                  ) : null}
-                  {isBound && binding.schoolName ? (
-                    <Badge variant="secondary" className="text-[10px]">
-                      {binding.schoolName}
-                    </Badge>
-                  ) : null}
-                  <Badge variant="outline" className="text-[10px] font-mono">
-                    UID {udoc._id ?? '?'}
+          <div className="min-w-0 space-y-2">
+            <div className="space-y-1">
+              <h1 className="truncate text-2xl font-semibold tracking-tight sm:text-3xl">{name}</h1>
+              {isBound && binding.realName ? (
+                <p className="text-sm text-muted-foreground">
+                  {binding.realName}
+                  {binding.studentId ? <span className="ml-1.5 font-mono tabular-nums">{binding.studentId}</span> : null}
+                </p>
+              ) : udoc.displayName ? (
+                <p className="text-sm text-muted-foreground">{udoc.displayName}</p>
+              ) : null}
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {udoc.role ? (
+                <Badge variant="outline" className="text-[10px]">
+                  {udoc.role}
+                </Badge>
+              ) : null}
+              {binding ? (
+                isBound ? (
+                  <Badge className="border-transparent bg-green-600/15 text-[10px] text-green-700 dark:text-green-400">已绑定</Badge>
+                ) : (
+                  <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                    未绑定
                   </Badge>
-                </div>
-              </div>
-              <div className="flex flex-wrap justify-center gap-2 sm:justify-end shrink-0">
-                {isSelfProfile ? (
-                  <Button asChild variant="outline" size="sm">
-                    <a href="/home/settings/account">
-                      <SettingsIcon className="size-4" />
-                      编辑资料
-                    </a>
-                  </Button>
-                ) : null}
-                {bs.user.signedIn && udoc._id ? (
-                  <Button asChild variant="outline" size="sm">
-                    <a href={`/home/messages?target=${udoc._id}`} target="_blank" rel="noreferrer">
-                      <MessageSquare className="size-4" />
-                      发消息
-                    </a>
-                  </Button>
-                ) : null}
-              </div>
+                )
+              ) : null}
+              {isBound && binding.schoolName ? (
+                <Badge variant="secondary" className="text-[10px]">
+                  {binding.schoolName}
+                </Badge>
+              ) : null}
+              <Badge variant="outline" className="font-mono text-[10px] tabular-nums">
+                UID {udoc._id ?? '?'}
+              </Badge>
             </div>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          {isSelfProfile ? (
+            <Button asChild variant="outline" size="sm">
+              <a href="/home/settings/account">
+                <SettingsIcon className="size-4" />
+                编辑资料
+              </a>
+            </Button>
+          ) : null}
+          {bs.user.signedIn && udoc._id ? (
+            <Button asChild variant="outline" size="sm">
+              <a href={`/home/messages?target=${udoc._id}`} target="_blank" rel="noreferrer">
+                <MessageSquare className="size-4" />
+                发消息
+              </a>
+            </Button>
+          ) : null}
+        </div>
+      </header>
 
-      {/* Bio card — only when non-empty; rendered with full Markdown */}
       {bio ? (
-        <Card>
+        <Card className="w-full min-w-0">
           <CardHeader className="pb-2">
-            <CardTitle className="text-base flex items-center gap-1.5">
+            <CardTitle className="flex items-center gap-1.5 text-base">
               <UserIcon className="size-4" />
               个人简介
             </CardTitle>
@@ -466,8 +577,7 @@ export function UserDetailPage() {
         </Card>
       ) : null}
 
-      {/* KPI strip */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid w-full grid-cols-2 gap-3 xl:grid-cols-4">
         <KpiCard label="RP" value={rp} icon={<Trophy className="size-4 text-amber-500" />} />
         <KpiCard label="通过" value={acCount} icon={<ListChecks className="size-4 text-green-600" />} />
         <KpiCard label="提交" value={submitCount} icon={<Hash className="size-4 text-muted-foreground" />} />
@@ -475,20 +585,23 @@ export function UserDetailPage() {
       </div>
 
       {visibleExternalRatingSites.length ? (
-        <Card>
+        <Card className="w-full min-w-0">
           <CardHeader className="pb-2">
-            <CardTitle className="text-base flex items-center gap-1.5">
+            <CardTitle className="flex items-center gap-1.5 text-base">
               <Globe className="size-4" />
               外站 Rating
             </CardTitle>
-            <p className="text-xs font-normal text-muted-foreground">Codeforces / 牛客快照，不是本站 RP</p>
+            <CardDescription className="text-xs">Codeforces / 牛客快照，不是本站 RP</CardDescription>
           </CardHeader>
-          <CardContent className={`grid gap-3 ${visibleExternalRatingSites.length > 1 ? 'sm:grid-cols-2' : 'max-w-xl'}`}>
+          <CardContent
+            className={cn('grid w-full min-w-0 gap-6', visibleExternalRatingSites.length > 1 && 'sm:grid-cols-2')}
+          >
             {visibleExternalRatingSites.map((site) => (
               <ExternalRatingSiteBlock
                 key={site.id}
                 siteId={site.id}
                 view={site.view}
+                history={historyBySite[site.id]}
                 canViewPrivate={canViewPrivateExternalRating}
                 locale={bs.locale}
               />
@@ -497,26 +610,22 @@ export function UserDetailPage() {
         </Card>
       ) : null}
 
-      {/* 65 : 35 main grid */}
-      <div className="grid gap-5 lg:grid-cols-[64fr_36fr]">
-        {/* Left */}
-        <div className="space-y-4 min-w-0">
+      <ActivityHeatmap daily={data.daily || {}} />
+
+      <div className="grid w-full min-w-0 gap-6 xl:grid-cols-2">
+        <div className="min-w-0 space-y-6">
           <CompletionList title="题集完成" icon={<BookOpen className="size-4" />} items={problemSetCompletions} unit="题" />
           <CompletionList title="知识点完成" icon={<Network className="size-4" />} items={knowledgeNodeCompletions} unit="题" />
 
-          {/* Submission heatmap (GitHub-style) */}
-          <ActivityHeatmap daily={data.daily || {}} />
-
-          {/* Attended contests */}
           {tdocs.length ? (
-            <Card>
+            <Card className="w-full min-w-0">
               <CardHeader className="pb-2">
-                <CardTitle className="text-base flex flex-wrap items-center justify-between gap-2">
+                <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-base">
                   <span className="flex items-center gap-1.5">
                     <Trophy className="size-4" />
                     参加过的比赛
                   </span>
-                  <span className="text-xs font-normal text-muted-foreground">{tdocs.length}</span>
+                  <span className="text-xs font-normal tabular-nums text-muted-foreground">{tdocs.length}</span>
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-0">
@@ -528,7 +637,7 @@ export function UserDetailPage() {
                       className="flex items-center gap-2 px-4 py-2 text-sm transition-colors hover:bg-accent"
                     >
                       <span className="truncate">{t.title || '未命名'}</span>
-                      <Badge variant="outline" className="ml-auto text-[10px] shrink-0">
+                      <Badge variant="outline" className="ml-auto shrink-0 text-[10px]">
                         {t.rule || '—'}
                       </Badge>
                     </a>
@@ -539,12 +648,10 @@ export function UserDetailPage() {
           ) : null}
         </div>
 
-        {/* Right */}
-        <div className="space-y-3 min-w-0">
-          {/* Meta */}
-          <Card>
+        <div className="min-w-0 space-y-6">
+          <Card className="w-full min-w-0">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm flex items-center gap-1.5">
+              <CardTitle className="flex items-center gap-1.5 text-base">
                 <Calendar className="size-3.5" />
                 账号信息
               </CardTitle>
@@ -557,11 +664,10 @@ export function UserDetailPage() {
             </CardContent>
           </Card>
 
-          {/* Contacts */}
           {contactItems.length ? (
-            <Card>
+            <Card className="w-full min-w-0">
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm">联系方式</CardTitle>
+                <CardTitle className="text-base">联系方式</CardTitle>
               </CardHeader>
               <CardContent className="space-y-1.5">
                 {contactItems.map(({ label, value, icon: Icon }) => (
@@ -571,11 +677,10 @@ export function UserDetailPage() {
             </Card>
           ) : null}
 
-          {/* Solutions */}
           {psdocs.length ? (
-            <Card>
+            <Card className="w-full min-w-0">
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm">最近题解</CardTitle>
+                <CardTitle className="text-base">最近题解</CardTitle>
               </CardHeader>
               <CardContent className="p-0">
                 <div className="divide-y">
@@ -614,7 +719,7 @@ function CompletionList({
   unit,
 }: {
   title: string;
-  icon: React.ReactNode;
+  icon: ReactNode;
   items: ProfileCompletionItem[];
   unit: string;
 }) {
@@ -670,15 +775,15 @@ function CompletionList({
   );
 }
 
-function KpiCard({ label, value, icon }: { label: string; value: React.ReactNode; icon: React.ReactNode }) {
+function KpiCard({ label, value, icon }: { label: string; value: ReactNode; icon: ReactNode }) {
   return (
-    <Card>
-      <CardContent className="p-3 flex items-center gap-3">
-        <div className="rounded-md bg-muted/40 p-2">{icon}</div>
+    <Card className="w-full min-w-0">
+      <CardContent className="flex items-center justify-between gap-3 p-5">
         <div className="min-w-0">
-          <p className="text-[11px] text-muted-foreground truncate">{label}</p>
-          <p className="text-xl font-semibold tabular-nums leading-tight">{value}</p>
+          <p className="truncate text-xs text-muted-foreground">{label}</p>
+          <p className="mt-1 text-2xl font-semibold tabular-nums leading-none tracking-tight">{value}</p>
         </div>
+        <div className="rounded-md bg-muted/40 p-2">{icon}</div>
       </CardContent>
     </Card>
   );
@@ -687,11 +792,13 @@ function KpiCard({ label, value, icon }: { label: string; value: React.ReactNode
 function ExternalRatingSiteBlock({
   siteId,
   view,
+  history,
   canViewPrivate,
   locale,
 }: {
   siteId: ExternalRatingSiteId;
   view: ExternalRatingSiteView;
+  history: ExternalRatingHistoryPoint[];
   canViewPrivate: boolean;
   locale: string;
 }) {
@@ -699,7 +806,7 @@ function ExternalRatingSiteBlock({
   const fetchedAt = toDate(unwrapDateValue(view.fetchedAt));
   const profileHref = siteId === 'codeforces' && handle ? codeforcesProfileUrl(handle) : null;
   return (
-    <div className="min-w-0 rounded-md border bg-muted/20 p-3">
+    <div className="flex w-full min-w-0 flex-col gap-3">
       <div className="flex items-center justify-between gap-2">
         <p className="text-sm font-medium">{EXTERNAL_RATING_SITE_LABEL[siteId]}</p>
         {canViewPrivate && view.publicShow !== true ? (
@@ -708,31 +815,36 @@ function ExternalRatingSiteBlock({
           </Badge>
         ) : null}
       </div>
-      <div className="mt-2 flex items-baseline justify-between gap-2">
-        {profileHref ? (
-          <a
-            href={profileHref}
-            target="_blank"
-            rel="noreferrer"
-            className="truncate font-mono text-sm hover:underline"
-            title={handle}
-          >
-            {handle}
-          </a>
-        ) : (
-          <span className="truncate font-mono text-sm">{handle || '—'}</span>
-        )}
-        <span className="shrink-0 text-xl font-semibold tabular-nums leading-none">{formatExternalRatingValue(view.rating)}</span>
+      <div className="flex items-end justify-between gap-3">
+        <div className="min-w-0">
+          {profileHref ? (
+            <a
+              href={profileHref}
+              target="_blank"
+              rel="noreferrer"
+              className="truncate font-mono text-sm hover:underline"
+              title={handle}
+            >
+              {handle}
+            </a>
+          ) : (
+            <span className="truncate font-mono text-sm">{handle || '—'}</span>
+          )}
+          {canViewPrivate || fetchedAt ? (
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              抓取 {fetchedAt ? formatDateTime(fetchedAt, locale) : '—'}
+            </p>
+          ) : null}
+        </div>
+        <span className="shrink-0 text-3xl font-semibold tabular-nums leading-none">{formatExternalRatingValue(view.rating)}</span>
       </div>
-      {canViewPrivate || fetchedAt ? (
-        <p className="mt-2 text-[11px] text-muted-foreground">
-          抓取 {fetchedAt ? formatDateTime(fetchedAt, locale) : '—'}
-        </p>
-      ) : null}
       {canViewPrivate && view.lastError ? (
-        <p className="mt-1 break-words text-[11px] text-destructive">失败 {formatExternalRatingLastError(view.lastError)}</p>
+        <p className="break-words text-[11px] text-destructive">失败 {formatExternalRatingLastError(view.lastError)}</p>
       ) : null}
-      {!canViewPrivate && view.stale ? <p className="mt-1 text-[11px] text-muted-foreground">快照可能过期</p> : null}
+      {!canViewPrivate && view.stale ? <p className="text-[11px] text-muted-foreground">快照可能过期</p> : null}
+      {history.length >= 1 ? (
+        <EChart option={buildExternalRatingChartOption(history)} className="h-[240px] w-full min-w-0" />
+      ) : null}
     </div>
   );
 }
@@ -825,14 +937,14 @@ function ActivityHeatmap({ daily }: { daily: Record<string, number> }) {
   };
 
   return (
-    <Card>
+    <Card className="w-full min-w-0">
       <CardHeader className="pb-2">
-        <CardTitle className="text-base flex flex-wrap items-center justify-between gap-2">
+        <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-base">
           <span className="flex items-center gap-1.5">
             <Activity className="size-4" />
             最近一年的提交活跃度
           </span>
-          <span className="text-xs font-normal text-muted-foreground">
+          <span className="text-xs font-normal tabular-nums text-muted-foreground">
             共 {totalSubmissions} 次 · 活跃 {activeDays} 天
           </span>
         </CardTitle>
@@ -898,7 +1010,7 @@ function Row({ label, value, mono }: { label: string; value: string; mono?: bool
   );
 }
 
-function ContactRow({ label, value, icon }: { label: string; value: string; icon: React.ReactNode }) {
+function ContactRow({ label, value, icon }: { label: string; value: string; icon: ReactNode }) {
   const [copied, setCopied] = useState(false);
   const handleCopy = async () => {
     if (!navigator.clipboard) return;

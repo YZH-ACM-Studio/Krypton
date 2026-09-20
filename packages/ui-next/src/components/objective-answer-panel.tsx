@@ -231,8 +231,8 @@ export function ObjectiveAnswerPanel({
 
         {questions.map((q, idx) => (
           <div key={q.key} className="rounded-lg border">
-            <div className="flex items-center gap-2 border-b bg-muted/40 px-4 py-2">
-              <span className="text-sm font-medium">第 {q.key} 题</span>
+            <div className="flex flex-wrap items-center gap-2 border-b bg-muted/40 px-4 py-2">
+              <span className="min-w-0 break-words text-sm font-medium">第 {q.key} 题</span>
               <Badge variant="secondary" className="text-[10px]">
                 {q.presentation === 'truefalse' ? '判断' : KIND_LABEL[q.kind] || q.kind}
               </Badge>
@@ -292,25 +292,25 @@ export function ObjectiveAnswerPanel({
         {error ? (
           <div
             className={cn(
-              'flex items-center gap-2 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700',
+              'flex flex-wrap items-start gap-2 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700',
               'dark:border-red-900 dark:bg-red-950/30 dark:text-red-300',
             )}
           >
             <AlertTriangle className="size-4 shrink-0" />
-            {error}
+            <span className="min-w-0 flex-1 break-words">{error}</span>
           </div>
         ) : null}
 
-        <div className="flex items-center justify-end gap-3 border-t pt-4">
+        <div className="flex flex-col-reverse flex-wrap items-stretch gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-end">
           {previewOnly ? (
-            <span className="text-xs text-muted-foreground">只读预览；主观题不能从独立题目页提交。</span>
+            <span className="min-w-0 break-words text-xs text-muted-foreground">只读预览；主观题不能从独立题目页提交。</span>
           ) : (
             <>
-              <span className="text-xs text-muted-foreground">草稿已自动保存在本机，提交后以评测记录为准。</span>
+              <span className="min-w-0 break-words text-xs text-muted-foreground">草稿已自动保存在本机，提交后以评测记录为准。</span>
               <Button
                 onClick={() => setConfirm({ kind: 'submit', missing: questions.length - answeredCount })}
                 disabled={submitting || !signedIn}
-                className="gap-1.5"
+                className="w-full gap-1.5 sm:w-auto"
               >
                 {submitting ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
                 {signedIn ? '提交答案' : '登录后可提交'}

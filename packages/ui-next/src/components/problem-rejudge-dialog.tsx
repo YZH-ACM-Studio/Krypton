@@ -72,13 +72,13 @@ export function ProblemRejudgeDialog({ open, endpoint, pid, title, onOpenChange,
       <Dialog open={open} onOpenChange={(next) => (next ? onOpenChange(true) : close())}>
         <DialogContent className="w-[min(34rem,calc(100vw-1.5rem))]" onClose={close}>
           <DialogHeader>
-            <div className="flex items-center gap-3 pr-8">
+            <div className="flex items-start gap-3 pr-8">
               <span className="grid size-9 shrink-0 place-items-center rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400">
                 <RotateCcw className="size-4.5" aria-hidden="true" />
               </span>
               <div className="min-w-0">
                 <DialogTitle>整题重测</DialogTitle>
-                <DialogDescription className="truncate">
+                <DialogDescription className="whitespace-normal break-words">
                   {pid} · <span className="text-foreground">{title}</span>
                 </DialogDescription>
               </div>

@@ -99,7 +99,7 @@ export function OverviewSection({
   const showVerdict = data.examShowVerdict !== false;
 
   return (
-    <div className="flex min-h-full justify-center p-6 sm:p-10">
+    <div className="flex min-h-0 min-w-0 flex-1 justify-center overflow-y-auto p-6 sm:p-10">
       <div className="flex w-full max-w-xl flex-col gap-6">
         <div className="space-y-3 text-center">
           <div className="flex flex-wrap justify-center gap-2">
@@ -267,7 +267,7 @@ function InfoRow({ icon: Icon, label, value }: { icon: LucideIcon; label: string
 
 export function AnnouncementsSection({ broadcasts }: { broadcasts: Array<{ _id: string; content: string; createdAt: string | Date }> }) {
   return (
-    <div className="space-y-4 p-6">
+    <div className="min-h-0 min-w-0 flex-1 space-y-4 overflow-y-auto p-6">
       <header className="space-y-1">
         <h2 className="flex items-center gap-2 text-lg font-semibold">
           <MegaphoneIcon className="size-5 text-primary" />
@@ -319,7 +319,7 @@ export function RankingSection({
   signedInUid: number;
 }) {
   return (
-    <div className="space-y-4 p-6">
+    <div className="min-h-0 min-w-0 flex-1 space-y-4 overflow-y-auto p-6">
       <header className="space-y-1">
         <h2 className="flex items-center gap-2 text-lg font-semibold">
           <Trophy className="size-5 text-primary" />
@@ -343,7 +343,7 @@ export function RankingSection({
         </Card>
       ) : (
         <Card>
-          <CardContent className="p-0">
+          <CardContent className="overflow-x-auto p-0">
             <Table>
               <TableHeader>
                 <TableRow>

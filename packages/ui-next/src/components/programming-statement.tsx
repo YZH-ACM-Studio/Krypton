@@ -66,10 +66,10 @@ export function structuredStatementSamples(view: ProgrammingStatementViewData | 
 
 function Section({ title, children, icon = <FileText className="size-4" /> }: { title: string; children: ReactNode; icon?: ReactNode }) {
   return (
-    <section className="space-y-3">
-      <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight">
-        <span className="text-muted-foreground">{icon}</span>
-        {title}
+    <section className="min-w-0 space-y-3">
+      <h2 className="flex min-w-0 items-center gap-2 text-lg font-semibold tracking-tight">
+        <span className="shrink-0 text-muted-foreground">{icon}</span>
+        <span className="min-w-0">{title}</span>
       </h2>
       {children}
     </section>
@@ -88,7 +88,7 @@ export function ProgrammingStatementView({
   antiAiMarkers?: readonly AntiAiMarkerClientMarker[];
 }) {
   return (
-    <div className="space-y-8" data-programming-statement="structured-v1">
+    <div className="min-w-0 space-y-8" data-programming-statement="structured-v1">
       {statement.background ? (
         <Section title="题目背景">
           <MarkdownView
@@ -143,19 +143,19 @@ export function ProgrammingStatementView({
         <Section title="样例">
           <div className="space-y-4">
             {statement.examples.items.map((item, index) => (
-              <article key={`${index}-${item.input}-${item.output}`} className="overflow-hidden rounded-xl border bg-muted/15">
-                <header className="border-b px-4 py-2 text-sm font-medium">样例 {index + 1}</header>
-                <div className="grid gap-px bg-border md:grid-cols-2">
-                  <div className="bg-card p-4">
-                    <div className="mb-2 flex items-center justify-between gap-2">
-                      <p className="text-xs font-medium text-muted-foreground">输入</p>
+              <article key={`${index}-${item.input}-${item.output}`} className="min-w-0 overflow-hidden rounded-xl border bg-muted/15">
+                <header className="min-w-0 border-b px-4 py-2 text-sm font-medium">样例 {index + 1}</header>
+                <div className="grid min-w-0 gap-px bg-border md:grid-cols-2">
+                  <div className="min-w-0 bg-card p-4">
+                    <div className="mb-2 flex min-w-0 items-center justify-between gap-2">
+                      <p className="min-w-0 text-xs font-medium text-muted-foreground">输入</p>
                       <SampleCopyButton label={`样例 ${index + 1} 输入`} content={item.inputEmpty ? '' : item.input} />
                     </div>
                     <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-sm">{item.inputEmpty ? '（空）' : item.input}</pre>
                   </div>
-                  <div className="bg-card p-4">
-                    <div className="mb-2 flex items-center justify-between gap-2">
-                      <p className="text-xs font-medium text-muted-foreground">输出</p>
+                  <div className="min-w-0 bg-card p-4">
+                    <div className="mb-2 flex min-w-0 items-center justify-between gap-2">
+                      <p className="min-w-0 text-xs font-medium text-muted-foreground">输出</p>
                       <SampleCopyButton label={`样例 ${index + 1} 输出`} content={item.outputEmpty ? '' : item.output} />
                     </div>
                     <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-sm">{item.outputEmpty ? '（空）' : item.output}</pre>
@@ -239,11 +239,11 @@ function EditorCard({
   children: ReactNode;
 }) {
   return (
-    <section className="scroll-mt-6 overflow-hidden rounded-2xl border border-border/70 bg-card/35" id={`statement-${sectionKey}`}>
-      <header className="flex flex-col gap-3 border-b border-border/60 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-2">
-          {state === 'undecided' ? <CircleDashed className="size-4 text-amber-500" /> : <CheckCircle2 className="size-4 text-emerald-500" />}
-          <h3 className="font-semibold">{title}</h3>
+    <section className="scroll-mt-6 min-w-0 overflow-hidden rounded-2xl border border-border/70 bg-card/35" id={`statement-${sectionKey}`}>
+      <header className="flex min-w-0 flex-col gap-3 border-b border-border/60 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-center gap-2">
+          {state === 'undecided' ? <CircleDashed className="size-4 shrink-0 text-amber-500" /> : <CheckCircle2 className="size-4 shrink-0 text-emerald-500" />}
+          <h3 className="min-w-0 font-semibold">{title}</h3>
         </div>
         <SimpleSelect value={state} options={stateOptions(allowAbsent)} onValueChange={(value) => onState(value as StatementState)} />
       </header>
@@ -367,10 +367,10 @@ export function ProgrammingStatementEditor({
 
   return (
     <div className="space-y-5">
-      <div className="rounded-2xl border border-border/70 bg-muted/20 p-5">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="font-semibold">
+      <div className="min-w-0 rounded-2xl border border-border/70 bg-muted/20 p-5">
+        <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <p className="min-w-0 font-semibold">
               已决定 {summary.completed}/{summary.total} 个区块
             </p>
             <p className="mt-1 text-sm text-muted-foreground">
@@ -460,9 +460,9 @@ export function ProgrammingStatementEditor({
       <EditorCard sectionKey="examples" title="样例" state={value.examples.state} allowAbsent onState={setExamplesState}>
         <div className="space-y-4">
           {value.examples.items.map((item, index) => (
-            <article key={index} className="overflow-hidden rounded-xl border">
-              <header className="flex items-center gap-2 border-b bg-muted/25 px-4 py-3">
-                <span className="font-medium">样例 {index + 1}</span>
+            <article key={index} className="min-w-0 overflow-hidden rounded-xl border">
+              <header className="flex min-w-0 items-center gap-2 border-b bg-muted/25 px-4 py-3">
+                <span className="min-w-0 font-medium">样例 {index + 1}</span>
                 <div className="ml-auto flex gap-1">
                   <Button
                     type="button"
@@ -501,7 +501,7 @@ export function ProgrammingStatementEditor({
                   </Button>
                 </div>
               </header>
-              <div className="grid gap-4 p-4 md:grid-cols-2">
+              <div className="grid min-w-0 gap-4 p-4 md:grid-cols-2">
                 {(['input', 'output'] as const).map((side) => {
                   const emptyKey = `${side}Empty` as const;
                   return (
@@ -600,11 +600,11 @@ export function ProgrammingStatementEditor({
       </Dialog>
 
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
-        <DialogContent className="max-h-[88vh] w-full sm:w-[900px]" onClose={() => setPreviewOpen(false)}>
+        <DialogContent className="min-h-0 min-w-0 w-full max-h-[min(88dvh,calc(100dvh-2rem))] sm:w-[900px]" onClose={() => setPreviewOpen(false)}>
           <DialogHeader>
-            <DialogTitle>完整题面预览</DialogTitle>
+            <DialogTitle className="min-w-0">完整题面预览</DialogTitle>
           </DialogHeader>
-          <DialogBody className="p-6">
+          <DialogBody className="min-h-0 overflow-y-auto p-6">
             <ProgrammingStatementView statement={preview} limits={limitsPreview || <p className="text-sm text-amber-600">评测限制尚未完成。</p>} />
           </DialogBody>
         </DialogContent>

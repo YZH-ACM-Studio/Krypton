@@ -754,16 +754,15 @@ export function MarkdownEditor({
         </section>
       ) : null}
 
-      {/* Side-by-side panels. Both panes share the same height + scroll
-          behavior so the editor doesn't look stunted next to a tall preview.
-          Height is driven by the `--md-shell-h` variable, which the CSS file
-          flips to `auto` on mobile so the panes stack with a sensible floor. */}
+      {/* Side-by-side from `lg`, or a single column on short viewports.
+          `--md-shell-h` still drives tall-desktop height; stacked panes cap
+          at ~40svh so two bands cannot each eat most of the screen. */}
       <div
-        className="krypton-md-shell grid grid-cols-1 gap-0 overflow-hidden rounded-lg border md:grid-cols-2"
+        className="krypton-md-shell grid grid-cols-1 gap-0 overflow-hidden rounded-lg border max-lg:!h-auto lg:grid-cols-2 [@media(max-height:500px)]:!h-auto [@media(max-height:500px)]:grid-cols-1"
         style={{ '--md-shell-h': `${minHeight}px` } as CSSProperties}
       >
         {/* Editor pane */}
-        <div className="relative h-full min-h-0 border-b md:border-b-0 md:border-r">
+        <div className="relative h-full min-h-0 border-b max-lg:!max-h-[40svh] lg:border-b-0 lg:border-r [@media(max-height:500px)]:border-b [@media(max-height:500px)]:border-r-0 [@media(max-height:500px)]:!max-h-[40svh]">
           <div className="pointer-events-none absolute left-0 top-0 select-none px-2 py-2.5 text-right font-mono text-xs leading-[1.625rem] text-muted-foreground/40">
             {source.split('\n').map((_, i) => (
               <div key={i}>{i + 1}</div>
@@ -784,7 +783,12 @@ export function MarkdownEditor({
         </div>
 
         {/* Preview pane */}
-        <ScrollArea viewportRef={previewRef} orientation="both" className="h-full min-h-0 bg-card" viewportClassName="p-4">
+        <ScrollArea
+          viewportRef={previewRef}
+          orientation="both"
+          className="h-full min-h-0 bg-card max-lg:!max-h-[40svh] [@media(max-height:500px)]:!max-h-[40svh]"
+          viewportClassName="p-4"
+        >
           {preview ? (
             <PreviewWithSamples source={preview} resolveFileUrl={previewFileUrl} />
           ) : (

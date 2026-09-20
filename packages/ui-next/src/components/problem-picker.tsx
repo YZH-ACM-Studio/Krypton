@@ -88,15 +88,15 @@ export function ProblemPicker({
       getKey={problemKey}
       getLabel={(p) => `${p.pid || p.docId} ${p.title || ''}`.trim()}
       renderChip={(p) => (
-        <span className="flex items-center gap-1">
-          <span className="font-mono text-[10px] text-muted-foreground">{p.pid || p.docId}</span>
-          {p.title ? <span className="truncate max-w-[140px]">{p.title}</span> : null}
+        <span className="flex min-w-0 items-center gap-1">
+          <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{p.pid || p.docId}</span>
+          {p.title ? <span className="min-w-0 max-w-[140px] truncate">{p.title}</span> : null}
         </span>
       )}
       renderOption={(p) => (
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="font-mono text-[11px] text-muted-foreground shrink-0">{p.pid || p.docId}</span>
-          <span className="truncate flex-1">{p.title || '—'}</span>
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{p.pid || p.docId}</span>
+          <span className="min-w-0 flex-1 truncate">{p.title || '—'}</span>
           {p.difficulty ? (
             <Badge variant="outline" className="text-[10px] shrink-0">
               Lv.{p.difficulty}

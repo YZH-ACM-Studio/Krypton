@@ -139,7 +139,7 @@ export function SampleCopyButton({ label, content }: { label: string; content: s
     <button
       type="button"
       onClick={handleCopy}
-      className="inline-flex h-6 items-center gap-1 rounded px-1.5 text-[10px] text-muted-foreground transition-colors hover:bg-background/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      className="inline-flex h-8 min-h-8 min-w-8 items-center gap-1 rounded px-2 text-[10px] text-muted-foreground transition-colors hover:bg-background/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
       aria-label={`复制${label}`}
     >
       <Icon className="size-3" />

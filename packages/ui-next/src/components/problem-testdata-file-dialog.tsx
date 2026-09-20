@@ -154,26 +154,31 @@ export function ProblemTestdataFileDialog({
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="h-[88vh] max-h-[92vh] w-[92vw] max-w-none" onClose={onClose}>
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <FileCode className="size-4" />
-            <span className="font-mono">{filename}</span>
-            <Badge variant="outline" className="text-[10px]">
+      <DialogContent
+        className="flex h-[min(92dvh,calc(100dvh-2rem))] max-h-[min(92dvh,calc(100dvh-2rem))] min-h-0 w-[min(92vw,72rem)] max-w-none sm:max-h-[min(92dvh,calc(100dvh-2rem))]"
+        onClose={onClose}
+      >
+        <DialogHeader className="min-w-0">
+          <DialogTitle className="flex min-w-0 items-center gap-2 overflow-hidden">
+            <FileCode className="size-4 shrink-0" />
+            <span className="min-w-0 truncate font-mono" title={filename}>
+              {filename}
+            </span>
+            <Badge variant="outline" className="shrink-0 text-[10px]">
               {bytesLabel(size)}
             </Badge>
-            <Badge variant="secondary" className="text-[10px]">
+            <Badge variant="secondary" className="shrink-0 text-[10px]">
               {language.toUpperCase()}
             </Badge>
             {dirty ? (
-              <Badge variant="default" className="text-[10px]">
+              <Badge variant="default" className="shrink-0 text-[10px]">
                 未保存
               </Badge>
             ) : null}
           </DialogTitle>
         </DialogHeader>
 
-        <DialogBody className="flex min-h-0 flex-1 flex-col gap-4 p-5">
+        <DialogBody className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden p-5">
           {loadError ? (
             <div className="rounded border border-amber-300 bg-amber-50/40 p-3 text-sm text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-300">
               {loadError}
@@ -187,7 +192,7 @@ export function ProblemTestdataFileDialog({
               </div>
             </div>
           ) : content == null ? (
-            <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">加载中…</div>
+            <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground">加载中…</div>
           ) : (
             <div className="min-h-0 flex-1 overflow-hidden rounded-md border">
               <KryptonIDE
@@ -196,13 +201,13 @@ export function ProblemTestdataFileDialog({
                 defaultLang={language}
                 value={content}
                 onValueChange={setContent}
-                minHeight={420}
-                className="h-full"
+                minHeight={0}
+                className="h-full min-h-0"
               />
             </div>
           )}
         </DialogBody>
-        <DialogFooter className="flex shrink-0 items-center justify-between gap-2 flex-row border-0 px-5 pb-5 pt-0 sm:justify-between">
+        <DialogFooter className="flex min-w-0 shrink-0 flex-row flex-wrap items-center justify-between gap-2 border-0 px-5 pb-5 pt-0 sm:justify-between">
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               {!tooBig && content != null ? (
                 <label className="flex cursor-pointer items-center gap-1">

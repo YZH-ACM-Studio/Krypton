@@ -4,7 +4,7 @@
  *
  * The paper UI is fully controlled by parent state.
  */
-import { AlertCircle, Check, Clock, Lock, Minus, X as XIcon } from 'lucide-react';
+import { AlertCircle, Check, Clock, Lock } from 'lucide-react';
 import { type ReactNode, useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -118,7 +118,7 @@ export function MiniTabBar({
   const ordered = KIND_ORDER.filter((k) => groups.has(k));
   if (!ordered.length || !current) return null;
   return (
-    <div className="flex justify-center border-b bg-card/50 p-2">
+    <div className="flex justify-start overflow-x-auto border-b bg-card/50 p-2 md:justify-center">
       <MiniTabs
         size="sm"
         value={current}
@@ -143,25 +143,52 @@ export function CellNavigator({
   activeIndex,
   statuses,
   onJump,
+  orientation = 'grid',
 }: {
   cells: PaperCell[];
   activeIndex: number;
   statuses: CellStatus[];
   onJump: (index: number) => void;
+  orientation?: 'grid' | 'row';
 }) {
-  return (
-    <div className="grid grid-cols-5 gap-2 p-2.5">
-      {cells.map((_cell, i) => {
-        const status = statuses[i] || 'unanswered';
-        const active = i === activeIndex;
-        return <StatusButton key={i} index={i + 1} status={status} active={active} onClick={() => onJump(i)} />;
-      })}
-    </div>
-  );
+  const buttons = cells.map((_cell, i) => {
+    const status = statuses[i] || 'unanswered';
+    const active = i === activeIndex;
+    return (
+      <StatusButton
+        key={i}
+        index={i + 1}
+        status={status}
+        active={active}
+        compact={orientation === 'row'}
+        onClick={() => onJump(i)}
+      />
+    );
+  });
+  if (orientation === 'row') {
+    return (
+      <div className="overflow-x-auto">
+        <div className="flex w-max gap-2 p-2.5">{buttons}</div>
+      </div>
+    );
+  }
+  return <div className="grid grid-cols-5 gap-2 p-2.5">{buttons}</div>;
 }
 
-export function StatusButton({ index, status, active, onClick }: { index: number; status: CellStatus; active: boolean; onClick: () => void }) {
-  const base = 'relative flex aspect-square w-full items-center justify-center rounded-md text-xs font-semibold transition-colors';
+export function StatusButton({
+  index,
+  status,
+  active,
+  onClick,
+  compact,
+}: {
+  index: number;
+  status: CellStatus;
+  active: boolean;
+  onClick: () => void;
+  compact?: boolean;
+}) {
+  const base = 'relative flex aspect-square items-center justify-center rounded-md text-xs font-semibold tabular-nums transition-colors';
   const palette: Record<CellStatus, string> = {
     unanswered: 'bg-muted/40 text-muted-foreground hover:bg-muted/60',
     answered: 'bg-sky-500/15 text-sky-700 hover:bg-sky-500/25 dark:text-sky-300',
@@ -173,19 +200,16 @@ export function StatusButton({ index, status, active, onClick }: { index: number
     <button
       type="button"
       onClick={onClick}
-      className={cn(base, palette[status], active && 'ring-2 ring-sky-500 ring-offset-2 ring-offset-background')}
+      className={cn(
+        base,
+        compact ? 'size-11 shrink-0' : 'w-full',
+        palette[status],
+        active && 'ring-2 ring-sky-500 ring-offset-2 ring-offset-background',
+      )}
     >
-      <CellStatusIcon status={status} fallback={String(index)} />
+      {index}
     </button>
   );
-}
-
-function CellStatusIcon({ status, fallback }: { status: CellStatus; fallback: string }) {
-  if (status === 'correct') return <Check className="size-4" strokeWidth={3} />;
-  if (status === 'wrong') return <XIcon className="size-4" strokeWidth={3} />;
-  if (status === 'partial') return <Minus className="size-4" strokeWidth={3} />;
-  if (status === 'answered') return <Minus className="size-4 opacity-60" strokeWidth={3} />;
-  return <span>{fallback}</span>;
 }
 
 // ─── Single / Multi / Blank renderers ────────────────────────────────────
@@ -213,7 +237,7 @@ export function SingleChoiceRenderer({
           <label
             key={letter}
             className={cn(
-              'flex cursor-pointer items-start gap-3 rounded-md border p-3 text-sm transition-colors',
+              'flex min-w-0 cursor-pointer items-start gap-3 rounded-md border p-3 text-sm transition-colors',
               checked && 'border-primary bg-primary/5',
               !checked && 'hover:bg-accent/50',
               disabled && 'cursor-not-allowed opacity-60',
@@ -225,10 +249,10 @@ export function SingleChoiceRenderer({
               checked={checked}
               disabled={disabled}
               onChange={() => onChange(letter)}
-              className="mt-0.5 accent-primary"
+              className="mt-0.5 shrink-0 accent-primary"
             />
-            <span className="font-mono text-xs text-muted-foreground">{letter}.</span>
-            <span className="flex-1">{opt}</span>
+            <span className="shrink-0 font-mono text-xs text-muted-foreground">{letter}.</span>
+            <span className="min-w-0 flex-1 break-words">{opt}</span>
           </label>
         );
       })}
@@ -257,13 +281,14 @@ export function MultiChoiceRenderer({
           <label
             key={letter}
             className={cn(
-              'flex cursor-pointer items-start gap-3 rounded-md border p-3 text-sm transition-colors',
+              'flex min-w-0 cursor-pointer items-start gap-3 rounded-md border p-3 text-sm transition-colors',
               checked && 'border-primary bg-primary/5',
               !checked && 'hover:bg-accent/50',
               disabled && 'cursor-not-allowed opacity-60',
             )}
           >
             <Checkbox
+              className="shrink-0"
               checked={checked}
               disabled={disabled}
               onChange={(e) => {
@@ -273,8 +298,8 @@ export function MultiChoiceRenderer({
                 onChange(Array.from(next).sort());
               }}
             />
-            <span className="font-mono text-xs text-muted-foreground">{letter}.</span>
-            <span className="flex-1">{opt}</span>
+            <span className="shrink-0 font-mono text-xs text-muted-foreground">{letter}.</span>
+            <span className="min-w-0 flex-1 break-words">{opt}</span>
           </label>
         );
       })}
@@ -293,7 +318,15 @@ export function BlankRenderer({
   disabled?: boolean;
   placeholder?: string;
 }) {
-  return <Input value={value} onChange={(e) => onChange(e.target.value)} disabled={disabled} placeholder={placeholder || '在此输入你的答案'} />;
+  return (
+    <Input
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      disabled={disabled}
+      placeholder={placeholder || '在此输入你的答案'}
+      className="min-h-11 min-w-0"
+    />
+  );
 }
 
 export function FillProgramRenderer({ value, onChange, disabled }: { value: string; onChange: (next: string) => void; disabled?: boolean }) {
@@ -302,7 +335,7 @@ export function FillProgramRenderer({ value, onChange, disabled }: { value: stri
       value={value}
       onChange={(e) => onChange(e.target.value.replace(/[\r\n]/g, ''))}
       disabled={disabled}
-      className="font-mono"
+      className="min-h-11 min-w-0 font-mono"
       placeholder="在此填入一行代码"
     />
   );
@@ -386,6 +419,7 @@ export function CellCard({
   locked,
   status,
   id,
+  belowTitle,
 }: {
   title: string;
   score: number;
@@ -394,6 +428,7 @@ export function CellCard({
   locked: boolean;
   status?: CellStatus;
   id?: string;
+  belowTitle?: ReactNode;
   children: ReactNode;
 }) {
   const accent = {
@@ -408,40 +443,43 @@ export function CellCard({
       id={id}
       className={cn('overflow-hidden rounded-lg border bg-card shadow-sm scroll-mt-20', accent, locked && 'border-amber-500/30 bg-amber-500/5')}
     >
-      <header className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/30 px-5 py-3">
-        <div className="flex items-center gap-2">
-          <h3 className="text-base font-semibold">{title}</h3>
-          <Badge variant="secondary" className="text-[10px]">
-            {score} 分
-          </Badge>
-          {kindLabel && (
-            <Badge variant="outline" className="text-[10px]">
-              {kindLabel}
+      <header className="space-y-2 border-b bg-muted/30 px-5 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <h3 className="text-base font-semibold">{title}</h3>
+            <Badge variant="secondary" className="text-[10px]">
+              {score} 分
             </Badge>
-          )}
-          {locked && (
-            <Badge variant="outline" className="gap-1 text-[10px]">
-              <Lock className="size-3" />
-              已锁定
-            </Badge>
+            {kindLabel && (
+              <Badge variant="outline" className="text-[10px]">
+                {kindLabel}
+              </Badge>
+            )}
+            {locked && (
+              <Badge variant="outline" className="gap-1 text-[10px]">
+                <Lock className="size-3" />
+                已锁定
+              </Badge>
+            )}
+          </div>
+          {status && status !== 'unanswered' && (
+            <span
+              className={cn(
+                'rounded-full px-2 py-0.5 text-[10px] font-semibold',
+                status === 'answered' && 'bg-sky-500/15 text-sky-700 dark:text-sky-300',
+                status === 'correct' && 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300',
+                status === 'wrong' && 'bg-rose-500/15 text-rose-700 dark:text-rose-300',
+                status === 'partial' && 'bg-amber-500/15 text-amber-700 dark:text-amber-300',
+              )}
+            >
+              {status === 'answered' && '已作答'}
+              {status === 'correct' && '正确'}
+              {status === 'wrong' && '错误'}
+              {status === 'partial' && '部分'}
+            </span>
           )}
         </div>
-        {status && status !== 'unanswered' && (
-          <span
-            className={cn(
-              'rounded-full px-2 py-0.5 text-[10px] font-semibold',
-              status === 'answered' && 'bg-sky-500/15 text-sky-700 dark:text-sky-300',
-              status === 'correct' && 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300',
-              status === 'wrong' && 'bg-rose-500/15 text-rose-700 dark:text-rose-300',
-              status === 'partial' && 'bg-amber-500/15 text-amber-700 dark:text-amber-300',
-            )}
-          >
-            {status === 'answered' && '已作答'}
-            {status === 'correct' && '正确'}
-            {status === 'wrong' && '错误'}
-            {status === 'partial' && '部分'}
-          </span>
-        )}
+        {belowTitle}
       </header>
       {prompt && <p className="border-b bg-card px-5 py-3 text-sm text-muted-foreground">{prompt}</p>}
       <div className="space-y-4 p-5">{children}</div>

@@ -670,7 +670,7 @@ export interface KryptonIDEProps {
   onSubmit?: (lang: string, code: string) => void;
   /** Custom CSS class */
   className?: string;
-  /** Minimum editor height in px */
+  /** Minimum editor height in px. Defaults to 0 when `className` includes `h-full`. */
   minHeight?: number;
   /** localStorage key suffix for code caching (e.g. "uid/domain/pid") */
   cacheKey?: string;
@@ -733,7 +733,7 @@ export function KryptonIDE({
   canPretest = false,
   onSubmit,
   className,
-  minHeight = 400,
+  minHeight: minHeightProp,
   cacheKey,
   samples = [],
   onRecordsChange,
@@ -755,6 +755,8 @@ export function KryptonIDE({
 }: KryptonIDEProps) {
   const isSimple = mode === 'simple' || mode === 'readonly';
   const isReadOnly = mode === 'readonly';
+  const fillsParentHeight = /\bh-full\b/.test(className ?? '');
+  const minHeight = minHeightProp ?? (fillsParentHeight ? 0 : 400);
   /* ── refs ── */
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -1457,10 +1459,12 @@ export function KryptonIDE({
         setPretestHeight(Math.max(120, Math.min(rect.height * 0.6, newH)));
       }
 
-      // Horizontal drag (left/right split)
+      // Horizontal drag (left/right split); stacked accordion uses vertical motion.
       if (pretestHDragging.current && pretestPanelRef.current) {
         const rect = pretestPanelRef.current.getBoundingClientRect();
-        const pct = ((e.clientX - rect.left) / rect.width) * 100;
+        const stacked =
+          typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 767px), (max-height: 500px)').matches;
+        const pct = stacked ? ((e.clientY - rect.top) / rect.height) * 100 : ((e.clientX - rect.left) / rect.width) * 100;
         setPretestLeftPct(Math.max(20, Math.min(80, pct)));
       }
 
@@ -1642,16 +1646,19 @@ export function KryptonIDE({
     <div
       className={cn(
         'relative flex flex-col overflow-hidden rounded-lg border bg-background',
-        fullscreen && 'fixed inset-0 z-50 rounded-none',
+        fillsParentHeight && 'min-h-0',
+        fullscreen && 'fixed inset-0 z-50 h-dvh rounded-none pb-safe pb-[env(safe-area-inset-bottom)]',
         className,
       )}
     >
       {/* ── Toolbar (hidden in simple/readonly mode) ── */}
       {!isSimple ? (
+        <div className="flex min-w-0 shrink-0 items-center border-b bg-muted/50">
         <ScrollArea
           orientation="horizontal"
-          className="shrink-0 border-b bg-muted/50"
-          viewportClassName="px-2 py-1 [&>div]:!flex [&>div]:items-center [&>div]:gap-1"
+          viewportLayout="flex"
+          className="min-w-0 flex-1"
+          viewportClassName="px-2 py-1 [&>div]:items-center [&>div]:gap-1"
         >
           {/* Language selector — button stays in toolbar, dropdown portals to body */}
           <button
@@ -1732,21 +1739,6 @@ export function KryptonIDE({
             </>
           )}
 
-          {/* Submit */}
-          {(submitUrl || onSubmit) && (
-            <Button size="sm" className="h-7 gap-1 text-xs" disabled={submitting || submitCooldown > 0} onClick={handleSubmit}>
-              {submitting ? (
-                <Loader2 className="size-3 animate-spin" />
-              ) : submitCooldown > 0 ? (
-                <Clock className="size-3" />
-              ) : (
-                <Send className="size-3" />
-              )}
-              {submitCooldown > 0 ? `${submitCooldown}s` : '提交'}
-              <kbd className="ml-0.5 rounded bg-primary-foreground/20 px-1 text-[10px] font-normal">F10</kbd>
-            </Button>
-          )}
-
           {onSendToTeammates ? (
             <Button
               type="button"
@@ -1765,7 +1757,7 @@ export function KryptonIDE({
             </Button>
           ) : null}
 
-          {/* Records toggle — right next to submit */}
+          {/* Records toggle */}
           {showRecordsButton && (
             <Button
               type="button"
@@ -1828,6 +1820,22 @@ export function KryptonIDE({
             {fullscreen ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
           </button>
         </ScrollArea>
+          {(submitUrl || onSubmit) && (
+            <div className="flex shrink-0 items-center self-stretch border-l px-2">
+              <Button size="sm" className="min-h-11 shrink-0 gap-1 text-xs" disabled={submitting || submitCooldown > 0} onClick={handleSubmit}>
+                {submitting ? (
+                  <Loader2 className="size-3 animate-spin" />
+                ) : submitCooldown > 0 ? (
+                  <Clock className="size-3" />
+                ) : (
+                  <Send className="size-3" />
+                )}
+                {submitCooldown > 0 ? `${submitCooldown}s` : '提交'}
+                <kbd className="ml-0.5 hidden rounded bg-primary-foreground/20 px-1 text-[10px] font-normal sm:inline">F10</kbd>
+              </Button>
+            </div>
+          )}
+        </div>
       ) : isReadOnly && teamReadOnlyView ? (
         <div data-readonly-code-toolbar className="flex shrink-0 items-center gap-2 border-b bg-muted/50 px-3 py-1 text-xs">
           <span className="font-medium">{langLabel}</span>
@@ -1979,7 +1987,7 @@ export function KryptonIDE({
             >
               {pretestRunning.has(activeTab.id) ? <Loader2 className="size-3 animate-spin" /> : <Play className="size-3" />}
               运行此自测
-              <kbd className="ml-0.5 rounded border bg-muted px-1 text-[10px] font-normal">F9</kbd>
+              <kbd className="ml-0.5 hidden rounded border bg-muted px-1 text-[10px] font-normal sm:inline">F9</kbd>
             </button>
             <button
               type="button"
@@ -1990,11 +1998,14 @@ export function KryptonIDE({
             </button>
           </div>
 
-          {/* Tab content: resizable 2-column layout (input left, result right) */}
-          <div ref={pretestPanelRef} className="krypton-split flex flex-1 min-h-0 overflow-hidden relative">
+          {/* Tab content: own split class so page `.krypton-split` 46% stacking never applies. */}
+          <div
+            ref={pretestPanelRef}
+            className="krypton-pretest-split relative flex min-h-0 flex-1 overflow-hidden max-md:flex-col [@media(max-height:500px)]:flex-col"
+          >
             {/* Crosshair at intersection of horizontal and vertical drag handles */}
             <div
-              className="absolute z-10 cursor-move bg-border transition-colors hover:bg-primary/60 active:bg-primary/80"
+              className="absolute z-10 cursor-move bg-border transition-colors hover:bg-primary/60 active:bg-primary/80 max-md:hidden [@media(max-height:500px)]:hidden"
               style={{
                 left: `calc(${pretestLeftPct}% - 3px)`,
                 top: `calc(${pretestInputPct}% - 3px)`,
@@ -2010,7 +2021,10 @@ export function KryptonIDE({
               }}
             />
             {/* Left: input + expected output (vertically resizable) */}
-            <div className="krypton-split-pane flex flex-col min-w-0 min-h-0 overflow-hidden" style={{ width: `${pretestLeftPct}%` }}>
+            <div
+              className="krypton-pretest-split-pane flex min-h-0 min-w-0 flex-col overflow-hidden max-md:!h-auto max-md:!w-full max-md:flex-1 [@media(max-height:500px)]:!h-auto [@media(max-height:500px)]:!w-full [@media(max-height:500px)]:flex-1"
+              style={{ width: `${pretestLeftPct}%` }}
+            >
               {/* Input section */}
               <div className="flex flex-col min-h-0 overflow-hidden" style={{ height: `${pretestInputPct}%` }}>
                 <div className="flex items-center gap-2 bg-muted/20 px-3 py-1 border-b shrink-0">
@@ -2026,7 +2040,7 @@ export function KryptonIDE({
                     value={activeTab.input}
                     onChange={(e) => updateTabField(activeTestTab, 'input', e.target.value)}
                     placeholder="在此输入测试数据…"
-                    className="flex-1 w-full resize-none border-0 bg-background p-2 font-mono text-xs focus:outline-none min-h-0"
+                    className="flex-1 w-full resize-none border-0 bg-background p-2 font-mono text-base md:text-xs/sm focus:outline-none min-h-0"
                   />
                 )}
               </div>
@@ -2055,7 +2069,7 @@ export function KryptonIDE({
                     value={activeTab.expectedOutput}
                     onChange={(e) => updateTabField(activeTestTab, 'expectedOutput', e.target.value)}
                     placeholder="输入期望输出以便自动比对…"
-                    className="flex-1 w-full resize-none border-0 bg-background p-2 font-mono text-xs focus:outline-none min-h-0"
+                    className="flex-1 w-full resize-none border-0 bg-background p-2 font-mono text-base md:text-xs/sm focus:outline-none min-h-0"
                   />
                 )}
               </div>
@@ -2063,10 +2077,12 @@ export function KryptonIDE({
 
             {/* Horizontal drag handle (between left and right) — has special cursor at intersection with vertical handle */}
             <div
-              className="krypton-split-handle w-1 shrink-0 cursor-col-resize bg-border transition-colors hover:bg-primary/40 active:bg-primary/60"
+              className="krypton-pretest-split-handle w-1 shrink-0 cursor-col-resize bg-border transition-colors hover:bg-primary/40 active:bg-primary/60 max-md:h-1.5 max-md:!w-full max-md:cursor-row-resize [@media(max-height:500px)]:h-1.5 [@media(max-height:500px)]:!w-full [@media(max-height:500px)]:cursor-row-resize"
               onMouseDown={() => {
                 pretestHDragging.current = true;
-                document.body.style.cursor = 'col-resize';
+                const stacked =
+                  typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 767px), (max-height: 500px)').matches;
+                document.body.style.cursor = stacked ? 'row-resize' : 'col-resize';
                 document.body.style.userSelect = 'none';
               }}
             />
@@ -2075,7 +2091,10 @@ export function KryptonIDE({
                 tab keeps its own latest result in `pretestResults`, so
                 switching tabs while a "运行全部自测" pass is mid-judge shows
                 the per-tab progress without races. */}
-            <div className="krypton-split-pane flex flex-col min-w-0 min-h-0 overflow-hidden" style={{ width: `${100 - pretestLeftPct}%` }}>
+            <div
+              className="krypton-pretest-split-pane flex min-h-0 min-w-0 flex-col overflow-hidden max-md:!h-auto max-md:!w-full max-md:flex-1 [@media(max-height:500px)]:!h-auto [@media(max-height:500px)]:!w-full [@media(max-height:500px)]:flex-1"
+              style={{ width: `${100 - pretestLeftPct}%` }}
+            >
               {(() => {
                 const result = pretestResults.get(activeTab.id) || null;
                 const thisTabRunning = pretestRunning.has(activeTab.id);

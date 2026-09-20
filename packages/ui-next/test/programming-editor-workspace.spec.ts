@@ -71,7 +71,8 @@ describe('p3.15 programming editor workspace correction', () => {
     expect(shell).not.to.include('sticky top-12');
     expect(shell).not.to.include('backdrop-blur');
     expect(shell).not.to.include('supports-[backdrop-filter]');
-    expect(shell).to.include('sticky top-20');
+    expect(shell).not.to.include('overflow-x-clip');
+    expect(shell).to.include('sticky top-2');
     expect(edit).to.include('创建并进入工作区');
   });
 

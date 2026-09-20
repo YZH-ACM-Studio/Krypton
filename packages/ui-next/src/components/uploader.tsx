@@ -230,7 +230,7 @@ export function AvatarUpload({
       {/* Crop dialog */}
       {pickedFile && previewUrl ? (
         <Dialog open onOpenChange={(o) => !o && closeCrop()}>
-          <DialogContent className="w-full max-w-xl" onClose={closeCrop}>
+          <DialogContent className="w-full max-w-[min(100%,540px)]" onClose={closeCrop}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-1.5">
                 <Crop className="size-4" />
@@ -262,8 +262,10 @@ function CropPanel({
 }) {
   const imgRef = useRef<HTMLImageElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const frameRef = useRef<HTMLDivElement | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [imgSize, setImgSize] = useState({ w: 0, h: 0 });
+  const [frameW, setFrameW] = useState(540);
   const [crop, setCrop] = useState({ x: 0, y: 0, size: 0 });
   const dragRef = useRef<{
     mode: 'move' | 'resize' | null;
@@ -283,9 +285,26 @@ function CropPanel({
     setCrop({ x: (w - sz) / 2, y: (h - sz) / 2, size: sz });
   }, [loaded]);
 
-  // The image is shown at a fixed display width; convert between display
-  // px and natural px when interacting with the crop box.
-  const displayW = Math.min(540, imgSize.w || 540);
+  useEffect(() => {
+    const el = frameRef.current;
+    if (!el) return;
+    const measure = () => {
+      const width = el.clientWidth;
+      if (width > 0) setFrameW(width);
+    };
+    measure();
+    if (typeof ResizeObserver === 'function') {
+      const observer = new ResizeObserver(measure);
+      observer.observe(el);
+      return () => observer.disconnect();
+    }
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [srcUrl]);
+
+  // Display width is min(container, 540, natural width); convert between
+  // display px and natural px when interacting with the crop box.
+  const displayW = Math.min(frameW, 540, imgSize.w || frameW);
   const scale = imgSize.w ? displayW / imgSize.w : 1;
   const displayH = imgSize.h * scale;
   const dCrop = {
@@ -343,12 +362,13 @@ function CropPanel({
 
   return (
     <div className="space-y-3">
-      <div className="flex justify-center">
-        <div
-          ref={containerRef}
-          className="relative inline-block bg-muted/20 rounded-md overflow-hidden touch-none"
-          style={{ width: displayW, height: displayH || 200 }}
-        >
+      <div className="flex w-full justify-center">
+        <div ref={frameRef} className="flex w-full max-w-[540px] justify-center">
+          <div
+            ref={containerRef}
+            className="relative inline-block overflow-hidden rounded-md bg-muted/20 touch-none"
+            style={{ width: displayW, height: displayH || 200, maxWidth: '100%' }}
+          >
           <img
             ref={imgRef}
             src={srcUrl}
@@ -398,6 +418,7 @@ function CropPanel({
               </div>
             </>
           ) : null}
+          </div>
         </div>
       </div>
 
@@ -723,8 +744,8 @@ export function FileUploader({
       {items.length ? (
         <ul aria-label="上传进度" className="space-y-1">
           {items.map((it) => (
-            <li key={it.id} className="flex items-center gap-2 rounded border bg-card px-2 py-1.5 text-xs">
-              <span className="truncate flex-1 font-mono">{it.name}</span>
+            <li key={it.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded border bg-card px-2 py-1.5 text-xs">
+              <span className="min-w-0 flex-1 basis-40 truncate font-mono">{it.name}</span>
               <Badge variant="outline" className="text-[9px]">
                 {Math.round(it.size / 1024)} KB
               </Badge>

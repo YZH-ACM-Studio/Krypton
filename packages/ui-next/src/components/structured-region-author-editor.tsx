@@ -138,7 +138,6 @@ export function StructuredRegionAuthorEditor({
         EditorView.theme({
           '&': {
             height: '100%',
-            minHeight: '32rem',
             fontSize: '13px',
             color: 'var(--foreground)',
             backgroundColor: 'color-mix(in srgb, var(--muted) 32%, var(--background))',
@@ -190,7 +189,7 @@ export function StructuredRegionAuthorEditor({
   return (
     <div
       ref={hostRef}
-      className="h-[clamp(32rem,62vh,48rem)] min-h-[32rem] overflow-hidden rounded-xl border bg-muted/20"
+      className="h-[min(32rem,calc(100dvh-12rem))] overflow-hidden rounded-xl border bg-muted/20"
       aria-label="私有完整模板编辑器；行号前公、答、私分别表示公开、作答和私有"
     />
   );

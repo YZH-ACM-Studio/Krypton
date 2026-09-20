@@ -245,7 +245,7 @@ export function StructuredProblemMetadataPanel({
   };
 
   return (
-    <aside className={cn('space-y-5', layout === 'sidebar' && 'lg:border-l lg:border-border/70 lg:pl-5')} aria-label="题目元数据">
+    <aside className={cn('min-w-0 space-y-5', layout === 'sidebar' && 'lg:border-l lg:border-border/70 lg:pl-5')} aria-label="题目元数据">
       <label className="block space-y-1.5">
         <span className="text-xs font-medium">标题</span>
         <Input

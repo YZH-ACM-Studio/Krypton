@@ -22,7 +22,7 @@ export function ProblemBankNav({
     ...(canManageNamespaces && namespaceUrl ? [{ key: 'namespaces' as const, label: '题号命名空间', href: namespaceUrl }] : []),
   ];
   return (
-    <nav aria-label="题库工作区" className="-mx-1 overflow-x-auto px-1 pb-1">
+    <nav aria-label="题库工作区" className="-mx-1 min-w-0 overflow-x-auto px-1 pb-1">
       <div className="inline-flex min-w-max items-center gap-1 rounded-xl bg-muted/70 p-1">
         {items.map((item) => {
           const selected = item.key === active;

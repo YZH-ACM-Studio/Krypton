@@ -5,7 +5,7 @@ import { readHydroResponseError } from '../lib/error-presenter';
 import type { ManagedTrainingOptionView } from './problem-authoring-state';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
+import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 import { Input } from './ui/input';
 import { SimpleSelect } from './ui/select';
 import { fetchHydroResponse } from '@/lib/error-presenter';
@@ -248,7 +248,7 @@ export function ManagedReviewPanel({
             <form
               method="post"
               action={problemsUrl}
-              className="grid gap-4 border-t border-primary/15 pt-5 sm:grid-cols-[minmax(0,1fr)_12rem_auto] sm:items-end"
+              className="grid grid-cols-1 gap-4 border-t border-primary/15 pt-5 md:grid-cols-[minmax(0,1fr)_9rem_auto] md:items-end"
               onSubmit={requestReview}
             >
               <ManagedPublishProtocolFields docId={pdoc.docId ?? ''} expectedStructureRevision={Number(pdoc.structureRevision)} />
@@ -280,7 +280,7 @@ export function ManagedReviewPanel({
                 {metadataDraft ? '确认并发布' : '重新公开'}
               </Button>
               {reviewError ? (
-                <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive sm:col-span-3">
+                <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive md:col-span-3">
                   {reviewError}
                 </p>
               ) : null}
@@ -298,7 +298,7 @@ export function ManagedReviewPanel({
           <DialogHeader>
             <DialogTitle>确认发布题目</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 p-5">
+          <DialogBody className="space-y-4 p-5">
             <p className="text-sm leading-6 text-muted-foreground">下列协作任务仍未完成：</p>
             <ul className="space-y-1 rounded-xl border border-amber-500/35 bg-amber-500/[0.06] px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
               {pendingContributions.map((item, index) => (
@@ -308,15 +308,15 @@ export function ManagedReviewPanel({
               ))}
             </ul>
             <p className="text-xs text-muted-foreground">继续发布不会完成、撤销或公开这些任务。</p>
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="outline" disabled={reviewing} onClick={() => setPendingConfirmOpen(false)}>
-                取消
-              </Button>
-              <Button type="button" disabled={reviewing} onClick={confirmPendingReview}>
-                确认发布
-              </Button>
-            </div>
-          </div>
+          </DialogBody>
+          <DialogFooter className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3 flex-row">
+            <Button type="button" variant="outline" disabled={reviewing} onClick={() => setPendingConfirmOpen(false)}>
+              取消
+            </Button>
+            <Button type="button" disabled={reviewing} onClick={confirmPendingReview}>
+              确认发布
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </>

@@ -138,7 +138,7 @@ export function ProblemEditorWorkspace({
   };
 
   return (
-    <section className="w-full min-w-0 space-y-5 overflow-x-clip pb-10">
+    <section className="w-full min-w-0 space-y-5 pb-10">
       <header className="border-b border-border/70 pb-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div className="min-w-0 space-y-1">
@@ -188,7 +188,7 @@ export function ProblemEditorWorkspace({
 
       <div className="grid min-w-0 gap-6 lg:grid-cols-[15rem_minmax(0,1fr)]">
         <aside className="hidden lg:block">
-          <nav aria-label="编程题编辑步骤" className="sticky top-20 space-y-1 rounded-2xl bg-muted/55 p-2">
+          <nav aria-label="编程题编辑步骤" className="sticky top-2 space-y-1 rounded-2xl bg-muted/55 p-2">
             {items.map((item) => renderItem(item, false))}
           </nav>
         </aside>

@@ -48,8 +48,8 @@ describe('p3.11 structured code UI contract', () => {
     expect(exam).to.include('服务端草稿尚未成功加载，禁止保存');
     expect(exam).to.include('已阻止作答、保存和交卷');
     expect(detail).to.include('!isObjective && !isStructuredAnswer');
-    expect(detail).to.include('!practicePolicy?.removeIndependentSubmitForm || isStructuredAnswer');
-    expect(detail).to.include("practiceControlled && practicePolicy?.removeIndependentSubmitForm && isStructuredAnswer ? '作答' : '提交'");
+    expect(detail).to.include('isStructuredAnswer || (!examMode?.enabled && !ideOnlySubmit)');
+    expect(detail).to.include("ideOnlySubmit && isStructuredAnswer ? '作答' : '提交'");
     const fallback = read('packages/ui-default/templates/problem_submit.html');
     expect(fallback).to.include('{% if controlledStructured %}');
     expect(fallback).to.include('the fallback form is disabled');
@@ -110,8 +110,11 @@ describe('p3.17 code evaluation draft workspace', () => {
     expect(editor).to.include('data-testid="structured-author-stage-nav"');
     expect(editor).to.include('data-testid="structured-author-stage-panel"');
     expect(editor).to.include('data-testid="structured-author-stage-actions"');
-    expect(editor).to.include('min-h-[32rem]');
+    expect(editor).to.include('min-h-[min(32rem,calc(100dvh-12rem))]');
+    expect(editor).not.to.include('min-h-[32rem]');
     expect(editor).to.include('sticky bottom-0');
+    expect(editor).to.include('pb-safe');
+    expect(editor).to.include('pb-[max(0.5rem,env(safe-area-inset-bottom))]');
     expect(editor).to.include('上一步');
     expect(editor).to.include('下一步');
     expect(editor).to.include('event.preventDefault();');
@@ -146,6 +149,9 @@ describe('p3.21 shared structured-code workspace', () => {
     expect(editor).to.include('startLine: start.number - 1');
     expect(editor).to.include('endLine: end.number');
     expect(editor).to.include("height: '100%'");
+    expect(editor).to.include('h-[min(32rem,calc(100dvh-12rem))]');
+    expect(editor).not.to.include('min-h-[32rem]');
+    expect(editor).not.to.include("minHeight: '32rem'");
     expect(editor).to.include("backgroundColor: 'color-mix(in srgb, var(--muted) 32%, var(--background))'");
     expect(editor).to.include("backgroundColor: 'color-mix(in srgb, var(--muted) 68%, var(--background))'");
     expect(editor).to.include("'.cm-gutter': { minHeight: '100%' }");
@@ -291,8 +297,9 @@ describe('p3.23 program-fill authoring and student contract', () => {
     expect(inputs).to.include('event.preventDefault()');
     expect(inputs).to.include('target.focus()');
     expect(inputs).to.include("event.target.value.replace(/[\\r\\n]/g, '')");
-    expect(inputs).to.include('className="h-9 min-h-9 min-w-[18rem] font-mono"');
-    expect(inputs).to.include('overflow-x-auto');
+    expect(inputs).to.include('className="h-9 min-h-9 min-w-0 w-full font-mono"');
+    expect(inputs).to.include('overflow-x-auto whitespace-pre');
+    expect(inputs).not.to.include('min-w-[18rem]');
   });
 
   it('reuses the same student surface for direct, contest/OI/homework, exam, training, and course entry points', () => {

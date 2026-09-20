@@ -109,7 +109,7 @@ function StructuredRegionCodeEditor({
     syncingRef.current = false;
   }, [value]);
 
-  return <div ref={hostRef} className="overflow-hidden rounded-lg border bg-background" />;
+  return <div ref={hostRef} className="min-w-0 w-full overflow-hidden rounded-lg border bg-background" />;
 }
 
 export function StructuredRegionInputs({
@@ -159,24 +159,24 @@ export function StructuredRegionInputs({
   };
 
   return (
-    <div className="overflow-hidden rounded-xl border bg-muted/10" aria-label="连续代码作答区">
-      <div className="overflow-x-auto font-mono text-sm">
+    <div className="min-w-0 overflow-hidden rounded-xl border bg-muted/10" aria-label="连续代码作答区">
+      <div className="min-w-0 font-mono text-sm">
         {surface.length ? (
           surface.map((segment, index) => {
             if (segment.type === 'code') {
               return (
-                <pre key={`code-${index}`} className="m-0 min-w-max whitespace-pre px-4 py-2 leading-6 text-foreground">
-                  <code>{segment.code || ' '}</code>
+                <pre key={`code-${index}`} className="m-0 overflow-x-auto whitespace-pre px-4 py-2 leading-6 text-foreground">
+                  <code className="inline-block min-w-max">{segment.code || ' '}</code>
                 </pre>
               );
             }
             const regionIndex = regionIds.indexOf(segment.id);
             const label = segment.title || segment.prompt || `作答区 ${regionIndex + 1}`;
             return (
-              <label key={segment.id} className="block border-y border-primary/25 bg-primary/[0.055] px-3 py-2">
-                <span className="mb-1.5 flex flex-wrap items-baseline gap-x-2 font-sans text-xs font-medium text-foreground">
-                  <span>{label}</span>
-                  {segment.description ? <span className="font-normal text-muted-foreground">{segment.description}</span> : null}
+              <label key={segment.id} className="block min-w-0 border-y border-primary/25 bg-primary/[0.055] px-3 py-2">
+                <span className="mb-1.5 flex min-w-0 flex-wrap items-baseline gap-x-2 font-sans text-xs font-medium text-foreground">
+                  <span className="min-w-0">{label}</span>
+                  {segment.description ? <span className="min-w-0 font-normal text-muted-foreground">{segment.description}</span> : null}
                 </span>
                 {singleLine ? (
                   <Input
@@ -200,7 +200,7 @@ export function StructuredRegionInputs({
                     onKeyDown={(event) => moveFocus(event, segment.id)}
                     disabled={readOnly}
                     placeholder={segment.prompt || `填写第 ${regionIndex + 1} 空代码`}
-                    className="h-9 min-h-9 min-w-[18rem] font-mono"
+                    className="h-9 min-h-9 min-w-0 w-full font-mono"
                     autoComplete="off"
                     spellCheck={false}
                   />

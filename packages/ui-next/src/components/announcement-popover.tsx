@@ -3,7 +3,7 @@
  *
  * Polls /api/announce/unread on mount to fetch the count + latest 20
  * unread announcements for the current user. Clicking the icon toggles
- * a fixed-position popover anchored to the icon.
+ * a viewport-right popover that cannot exceed 100dvh / 100vw.
  */
 import { useEffect, useRef, useState } from 'react';
 import { Megaphone, Pin } from 'lucide-react';
@@ -89,8 +89,11 @@ export function AnnouncementPopover({ signedIn }: { signedIn: boolean }) {
         )}
       </Button>
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-1.5 w-[360px] rounded-lg border bg-popover shadow-lg" onClick={(e) => e.stopPropagation()}>
-          <div className="flex items-center justify-between border-b px-4 py-2.5">
+        <div
+          className="fixed right-3 top-12 z-50 mt-1.5 flex w-[min(360px,calc(100vw-1.5rem))] max-h-[min(28rem,calc(100dvh-4.5rem))] flex-col overflow-hidden rounded-lg border bg-popover shadow-lg"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex shrink-0 items-center justify-between border-b px-4 py-2.5">
             <span className="text-sm font-medium">公告</span>
             {count > 0 && (
               <Badge variant="secondary" className="text-[10px]">
@@ -98,7 +101,7 @@ export function AnnouncementPopover({ signedIn }: { signedIn: boolean }) {
               </Badge>
             )}
           </div>
-          <ScrollArea className="max-h-[400px]">
+          <ScrollArea className="min-h-0 flex-1">
             {!loaded ? (
               <p className="px-4 py-8 text-center text-xs text-muted-foreground">加载中…</p>
             ) : docs.length === 0 ? (
@@ -129,7 +132,7 @@ export function AnnouncementPopover({ signedIn }: { signedIn: boolean }) {
               </ul>
             )}
           </ScrollArea>
-          <div className="border-t px-4 py-2">
+          <div className="shrink-0 border-t px-4 py-2">
             <a href="/announce" className="text-xs text-primary hover:underline">
               查看全部公告 →
             </a>

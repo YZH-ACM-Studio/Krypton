@@ -108,6 +108,7 @@ export function RedeemForm({ onRedeemed }: { onRedeemed?: (result: RedeemResultV
         placeholder="兑换码"
         aria-label="兑换码"
         autoComplete="off"
+        className="text-base md:text-sm"
       />
       <Button type="submit" disabled={busy} className="min-h-11 w-full">
         {busy ? '兑换中' : '兑换'}

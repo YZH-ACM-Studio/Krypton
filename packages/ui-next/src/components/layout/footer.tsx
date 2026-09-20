@@ -36,26 +36,26 @@ export function KryptonFooter() {
 
         {/* Middle: links */}
         <nav className="flex flex-wrap items-start gap-3">
-          <a href="/wiki/about" className="hover:text-foreground">
+          <a href="/wiki/about" className="inline-flex min-h-11 items-center hover:text-foreground sm:min-h-0">
             关于
           </a>
-          <a href="/wiki/help" className="hover:text-foreground">
+          <a href="/wiki/help" className="inline-flex min-h-11 items-center hover:text-foreground sm:min-h-0">
             帮助
           </a>
-          <a href="/wiki/tos" className="hover:text-foreground">
+          <a href="/wiki/tos" className="inline-flex min-h-11 items-center hover:text-foreground sm:min-h-0">
             服务条款
           </a>
-          <a href="/wiki/privacy" className="hover:text-foreground">
+          <a href="/wiki/privacy" className="inline-flex min-h-11 items-center hover:text-foreground sm:min-h-0">
             隐私
           </a>
-          <a href="https://github.com/hydro-dev/Hydro" className="flex items-center gap-1 hover:text-foreground" target="_blank" rel="noreferrer">
+          <a href="https://github.com/hydro-dev/Hydro" className="inline-flex min-h-11 items-center gap-1 hover:text-foreground sm:min-h-0" target="_blank" rel="noreferrer">
             <Github className="size-3" />
             GitHub
           </a>
         </nav>
 
         {/* Right: ICP / domain / system extras */}
-        <div className="space-y-1 sm:text-right">
+        <div className="min-w-0 space-y-1 break-words sm:text-right">
           {domLines.map((html, i) => (
             <p key={`d${i}`} dangerouslySetInnerHTML={{ __html: html }} />
           ))}

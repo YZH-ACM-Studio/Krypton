@@ -121,20 +121,23 @@
     @apply border-border;
   }
 
+  html,
+  body,
+  #root {
+    height: 100%;
+    overflow: hidden;
+  }
+
   html {
-    min-height: 100%;
     scroll-behavior: smooth;
-    overflow-x: hidden;
   }
 
   body {
-    min-height: 100vh;
     background: var(--background);
     color: var(--foreground);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    overflow-x: hidden;
   }
 }
 
@@ -187,41 +190,44 @@
   }
 }
 
-/* MarkdownEditor responsive height. Desktop: fixed height set by JS via the
-   CSS variable `--md-shell-h`. Mobile: drop the fixed height and let each
-   pane breathe with a sensible floor. */
+/* MarkdownEditor height. `--md-shell-h` is set by JS on tall desktops.
+   Narrow or short/landscape viewports stay one column; pane max-height is
+   shared so two stacked panes cannot each take 60vh. */
 .krypton-md-shell {
   height: var(--md-shell-h, 400px);
 }
-@media (max-width: 767px) {
+@media (max-width: 767px), (max-height: 500px) {
   .krypton-md-shell {
     height: auto;
+    grid-template-columns: minmax(0, 1fr);
   }
   .krypton-md-shell > * {
-    min-height: 220px;
-    max-height: 60vh;
+    min-height: 7rem;
+    max-height: min(32dvh, calc((100dvh - 8rem) / 2));
   }
 }
 
-@media (max-width: 767px) {
-  .krypton-split {
+/* Problem-detail shell only. Nested pretest `.krypton-split` keeps row layout
+   and must not inherit the 46% first-pane height. */
+@media (max-width: 767px), (max-height: 500px) {
+  .krypton-split:not(.krypton-split *) {
     flex-direction: column;
   }
 
-  .krypton-split-pane {
+  .krypton-split:not(.krypton-split *) > .krypton-split-pane {
     width: 100% !important;
   }
 
-  .krypton-split-pane:first-child {
+  .krypton-split:not(.krypton-split *) > .krypton-split-pane:first-child {
     height: 46%;
   }
 
-  .krypton-split-pane:last-child {
+  .krypton-split:not(.krypton-split *) > .krypton-split-pane:last-child {
     flex: 1 1 auto;
     min-height: 0;
   }
 
-  .krypton-split-handle {
+  .krypton-split:not(.krypton-split *) > .krypton-split-handle {
     width: 100% !important;
     height: 0.375rem;
     cursor: row-resize;

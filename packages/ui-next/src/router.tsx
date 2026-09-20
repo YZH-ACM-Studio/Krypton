@@ -87,16 +87,16 @@ function DefaultAppShell() {
   }, [userMenuOpen]);
 
   return (
-    <div className="flex h-dvh min-w-0 overflow-hidden bg-background">
+    <div className="flex h-full min-h-0 min-w-0 overflow-hidden bg-background">
       {/* Sidebar */}
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} collapsed={collapsed} />
 
       {/* Main area */}
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {/* Top bar — frosted glass */}
-        <header className="sticky top-0 z-40 flex h-12 shrink-0 items-center gap-2 border-b bg-background/80 px-3 backdrop-blur-xl saturate-150 sm:px-4">
+        <header className="sticky top-0 z-40 flex h-12 min-w-0 shrink-0 items-center gap-2 border-b bg-background/80 px-3 backdrop-blur-xl saturate-150 sm:px-4">
           {/* Mobile menu toggle */}
-          <Button variant="ghost" size="icon" className="size-8 md:hidden" onClick={() => setSidebarOpen(true)}>
+          <Button variant="ghost" size="icon" className="size-8 md:hidden" aria-label="打开菜单" onClick={() => setSidebarOpen(true)}>
             <Menu className="size-4" />
           </Button>
 
@@ -115,7 +115,7 @@ function DefaultAppShell() {
           <a href={bs.urls.home} className="flex items-center gap-1.5 md:hidden">
             <Swords className="size-4 text-primary" />
           </a>
-          <span className="hidden text-sm text-muted-foreground md:inline-block">{bs.domain.name}</span>
+          <span className="hidden min-w-0 truncate text-sm text-muted-foreground md:inline-block">{bs.domain.name}</span>
 
           <div className="flex-1" />
 
@@ -125,7 +125,7 @@ function DefaultAppShell() {
           </Button>
 
           {/* Right: user section */}
-          <div className="flex items-center gap-1.5">
+          <div className="flex min-w-0 items-center gap-1.5">
             {bs.user.signedIn ? (
               <>
                 {/* Announcement popover */}
@@ -133,7 +133,7 @@ function DefaultAppShell() {
                 <CollectPendingBadge />
 
                 {/* Messages icon */}
-                <Button asChild variant="ghost" size="icon" className="relative size-8">
+                <Button asChild variant="ghost" size="icon" className="relative hidden size-8 sm:inline-flex">
                   <a href={bs.urls.messages}>
                     <Mail className="size-4" />
                     {bs.user.unreadMessages > 0 && (
@@ -147,7 +147,7 @@ function DefaultAppShell() {
                 <RedeemDialogButton variant="ghost" size="icon" iconOnly className="size-8" />
 
                 {/* Settings shortcut */}
-                <Button asChild variant="ghost" size="icon" className="size-8">
+                <Button asChild variant="ghost" size="icon" className="hidden size-8 sm:inline-flex">
                   <a href={`${bs.urls.settings}/preference`}>
                     <Settings className="size-4" />
                   </a>
@@ -182,16 +182,16 @@ function DefaultAppShell() {
                       <div className="my-1 h-px bg-border" />
                       <a
                         href={replaceRouteTokens(bs.urls.userDetail, { UID: String(bs.user.id) })}
-                        className="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm hover:bg-accent"
+                        className="flex items-center gap-2 rounded-md px-3 py-2.5 text-sm hover:bg-accent sm:py-1.5"
                       >
                         <User className="size-3.5" />
                         个人主页
                       </a>
-                      <a href={`${bs.urls.settings}/preference`} className="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm hover:bg-accent">
+                      <a href={`${bs.urls.settings}/preference`} className="flex items-center gap-2 rounded-md px-3 py-2.5 text-sm hover:bg-accent sm:py-1.5">
                         <Settings className="size-3.5" />
                         账号设置
                       </a>
-                      <a href={bs.urls.messages} className="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm hover:bg-accent">
+                      <a href={bs.urls.messages} className="flex items-center gap-2 rounded-md px-3 py-2.5 text-sm hover:bg-accent sm:py-1.5">
                         <Mail className="size-3.5" />
                         消息
                         {bs.user.unreadMessages > 0 && <Badge className="ml-auto h-4 px-1 text-[10px]">{bs.user.unreadMessages}</Badge>}
@@ -199,7 +199,7 @@ function DefaultAppShell() {
                       <div className="my-1 h-px bg-border" />
                       <a
                         href={bs.urls.logout}
-                        className="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm text-destructive hover:bg-destructive/10"
+                        className="flex items-center gap-2 rounded-md px-3 py-2.5 text-sm text-destructive hover:bg-destructive/10 sm:py-1.5"
                       >
                         <LogOut className="size-3.5" />
                         退出登录
@@ -259,7 +259,7 @@ function DefaultAppShell() {
             so on short pages it stretches to the viewport height (sticking
             the footer to the bottom), and on tall pages it grows naturally
             (footer ends up below scrolled content). */}
-        <ScrollArea data-scroll-owner="page" className="min-w-0 flex-1" viewportClassName="[&>div]:!flex [&>div]:!flex-col [&>div]:!min-h-full">
+        <ScrollArea data-scroll-owner="page" className="min-h-0 min-w-0 flex-1" viewportClassName="[&>div]:!flex [&>div]:!flex-col [&>div]:!min-h-full pb-[env(safe-area-inset-bottom)]">
           <main className="flex min-w-0 flex-1 flex-col">
             <div className="min-w-0 flex-1 p-3 sm:p-6 xl:p-8 2xl:px-10">
               <Outlet />

@@ -60,7 +60,9 @@ describe('collapsed sidebar interaction contracts', () => {
     expect(sidebar).to.include('delayDuration={160}');
     expect(sidebar).to.include('const COLLAPSED_TOOLTIP_OFFSET = 18');
     expect(sidebar).to.include('sideOffset={COLLAPSED_TOOLTIP_OFFSET}');
-    expect(sidebar).to.include('{renderSidebarContent(false)}');
+    expect(sidebar).to.include("{renderSidebarContent(false, 'auto')}");
+    expect(sidebar).to.include('type={scrollType}');
+    expect(sidebar).to.include('size-8 min-h-11 min-w-11 md:hidden');
     expect(sidebar).not.to.include('transition-all');
   });
 });

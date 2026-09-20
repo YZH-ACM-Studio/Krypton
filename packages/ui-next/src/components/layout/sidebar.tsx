@@ -341,7 +341,7 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
     })(),
   ];
 
-  const renderSidebarContent = (isCollapsed: boolean) => (
+  const renderSidebarContent = (isCollapsed: boolean, scrollType: 'hover' | 'auto' = 'hover') => (
     <div className="flex h-full flex-col">
       {/* Logo */}
       <div className={cn('flex shrink-0 items-center border-b', isCollapsed ? 'h-12 justify-center px-2' : 'h-12 gap-2 px-4')}>
@@ -358,7 +358,7 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
         </a>
         {!isCollapsed && <div className="flex-1" />}
         {!isCollapsed && (
-          <Button variant="ghost" size="icon" className="size-7 md:hidden" onClick={onClose}>
+          <Button variant="ghost" size="icon" className="size-8 min-h-11 min-w-11 md:hidden" onClick={onClose}>
             <X className="size-4" />
           </Button>
         )}
@@ -366,7 +366,7 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
 
       {/* Nav */}
       <TooltipProvider delayDuration={160}>
-        <ScrollArea type="hover" className="min-h-0 flex-1" viewportClassName={cn(isCollapsed ? 'px-2 py-2.5' : 'p-3')}>
+        <ScrollArea type={scrollType} className="min-h-0 flex-1" viewportClassName={cn(isCollapsed ? 'px-2 py-2.5' : 'p-3')}>
           <nav aria-label="主导航">
             {groups.map((group, gi) => {
               if (group.show === false) return null;
@@ -411,7 +411,7 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
         <div className="fixed inset-0 z-50 md:hidden">
           <div className="absolute inset-0 bg-black/55 backdrop-blur-[2px]" onClick={onClose} />
           <aside className="relative h-full w-[min(18rem,82vw)] border-r border-sidebar-border bg-sidebar-background text-sidebar-foreground shadow-2xl">
-            {renderSidebarContent(false)}
+            {renderSidebarContent(false, 'auto')}
           </aside>
         </div>
       ) : null}

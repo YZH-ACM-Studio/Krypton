@@ -1,7 +1,10 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BootstrapProvider, type KryptonBootstrap } from '../src/lib/bootstrap';
-import { MessagesPanel } from '../src/pages/user-account';
+import { MessagesPanel, NARROW_QUERY } from '../src/pages/user-account';
+import { DUAL_PANE_TW } from '../src/pages/messages/viewport';
 
 function bootstrap(): KryptonBootstrap {
   return {
@@ -72,6 +75,21 @@ function resetClientState() {
 
 function emptyCopy() {
   return screen.queryByText('暂无消息') ?? screen.queryByText('选择一个会话');
+}
+
+function stubMatchMedia(narrow: boolean) {
+  const matchMedia = vi.fn((query: string) => ({
+    matches: query === NARROW_QUERY ? narrow : false,
+    media: query,
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(() => false),
+  }));
+  vi.stubGlobal('matchMedia', matchMedia);
+  return matchMedia;
 }
 
 function postFormData(fetchMock: ReturnType<typeof vi.fn>): FormData[] {
@@ -197,5 +215,76 @@ describe('user account messages', () => {
 
     expect(() => renderPanel([])).not.toThrow();
     expect(emptyCopy()).toBeInTheDocument();
+  });
+
+  it('keeps JS matchMedia on the same OR query as the CSS dual-pane complement', () => {
+    expect(NARROW_QUERY).toBe('(max-width: 767px), (max-height: 540px)');
+    expect(DUAL_PANE_TW).toBe('[@media(min-width:768px)_and_(min-height:541px)]');
+    const panel = readFileSync(resolve(import.meta.dirname, '../src/pages/messages/panel.tsx'), 'utf8');
+    const viewport = readFileSync(resolve(import.meta.dirname, '../src/pages/messages/viewport.ts'), 'utf8');
+    expect(viewport).toContain(NARROW_QUERY);
+    expect(viewport).toContain('(min-width:768px)_and_(min-height:541px)');
+    expect(viewport).toContain('max-md');
+    expect(viewport).toContain('[@media(max-height:540px)]');
+    expect(panel).toContain('matchMedia(NARROW_QUERY)');
+    expect(panel).toContain('dualPaneTw');
+    expect(panel).not.toContain('min-h-[480px]');
+    expect(panel).toMatch(/flex-1/);
+    expect(panel).toMatch(/min-h-0/);
+  });
+
+  it('subscribes to the shared narrow query', () => {
+    const matchMedia = stubMatchMedia(false);
+    renderPanel(twoConversations());
+    expect(matchMedia).toHaveBeenCalledWith(NARROW_QUERY);
+  });
+
+  it('keeps dual pane without a back control when the viewport is wide and tall', () => {
+    stubMatchMedia(false);
+    renderPanel(twoConversations());
+
+    expect(screen.getByRole('button', { name: /Alice/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Bob/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '返回' })).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/输入消息/)).toHaveAttribute('rows', '3');
+  });
+
+  it('starts on the conversation list when the viewport is narrow and no target is set', () => {
+    stubMatchMedia(true);
+    renderPanel(twoConversations());
+
+    expect(screen.getByRole('button', { name: /Alice/ })).not.toHaveAttribute('aria-current');
+    expect(screen.getByRole('button', { name: /Bob/ })).not.toHaveAttribute('aria-current');
+    expect(screen.queryByPlaceholderText(/输入消息/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '返回' })).not.toBeInTheDocument();
+  });
+
+  it('opens a conversation as a second level with back on a narrow viewport', () => {
+    stubMatchMedia(true);
+    renderPanel(twoConversations());
+
+    fireEvent.click(screen.getByRole('button', { name: /Alice/ }));
+
+    expect(screen.getByRole('button', { name: /Alice/ })).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByRole('button', { name: '返回' })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/输入消息/)).toHaveAttribute('rows', '1');
+    expect(screen.getByRole('link', { name: /资料/ })).toHaveAttribute('href', '/user/3');
+
+    fireEvent.click(screen.getByRole('button', { name: '返回' }));
+
+    expect(screen.queryByPlaceholderText(/输入消息/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '返回' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Alice/ })).not.toHaveAttribute('aria-current');
+  });
+
+  it('returns to the list on Escape when the viewport is narrow', () => {
+    stubMatchMedia(true);
+    window.history.replaceState({}, '', '/home/messages?target=3');
+    renderPanel(twoConversations());
+
+    expect(screen.getByRole('button', { name: '返回' })).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('button', { name: '返回' })).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/输入消息/)).not.toBeInTheDocument();
   });
 });

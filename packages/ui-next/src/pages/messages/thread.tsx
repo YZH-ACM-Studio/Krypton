@@ -9,6 +9,7 @@ import { MessageBody } from './content';
 import { objectIdDate } from './parse';
 import { isUnseenIncoming } from './seen';
 import type { Conv, MessageDoc } from './types';
+import { dualPaneTw } from './viewport';
 
 const MINUTE_MS = 60_000;
 const STICK_THRESHOLD_PX = 64;
@@ -88,7 +89,7 @@ export function MessageThread(props: {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center justify-between gap-2 border-b px-4 py-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-2.5">
         <div className="flex min-w-0 items-center gap-2">
           {onBack ? (
             <Button type="button" variant="ghost" size="sm" name="返回" onClick={onBack} className="h-8 shrink-0 px-2">
@@ -136,21 +137,24 @@ export function MessageThread(props: {
                 {showTime && time ? (
                   <p className="my-1 text-center text-[10px] text-muted-foreground/70">{formatClock(time, locale)}</p>
                 ) : null}
-                <div className={cn('group flex items-center gap-1.5', fromMe ? 'justify-end' : 'justify-start')}>
-                  {fromMe ? (
-                    <MessageActions message={message} fromMe onQuote={onQuote} onCopy={onCopy} onAskDelete={onAskDelete} />
-                  ) : null}
+                <div
+                  className={cn(
+                    'group flex min-w-0 flex-col gap-1.5',
+                    fromMe ? 'items-end' : 'items-start',
+                    fromMe ? dualPaneTw('flex-row-reverse') : dualPaneTw('flex-row'),
+                    dualPaneTw('items-center'),
+                  )}
+                >
                   <div
                     className={cn(
-                      'max-w-[75%] break-words rounded-2xl px-3 py-2 text-sm leading-6',
+                      'max-w-full min-w-0 break-words rounded-2xl px-3 py-2 text-sm leading-6',
                       fromMe ? 'rounded-br-md bg-primary text-primary-foreground' : 'rounded-bl-md bg-muted',
+                      dualPaneTw('max-w-[75%]'),
                     )}
                   >
                     <MessageBody message={message} fromMe={fromMe} />
                   </div>
-                  {!fromMe ? (
-                    <MessageActions message={message} fromMe={false} onQuote={onQuote} onCopy={onCopy} onAskDelete={onAskDelete} />
-                  ) : null}
+                  <MessageActions message={message} fromMe={fromMe} onQuote={onQuote} onCopy={onCopy} onAskDelete={onAskDelete} />
                 </div>
               </div>
             );
@@ -177,7 +181,16 @@ function MessageActions(props: {
 }): JSX.Element {
   const { message, fromMe, onQuote, onCopy, onAskDelete } = props;
   return (
-    <div className="flex flex-col gap-0.5 opacity-100 transition-opacity duration-150 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100 [@media(hover:none)]:opacity-100 motion-reduce:transition-none">
+    <div
+      className={cn(
+        'flex shrink-0 flex-row gap-0.5 opacity-100 transition-opacity duration-150 motion-reduce:transition-none',
+        dualPaneTw('flex-col'),
+        dualPaneTw('opacity-0'),
+        dualPaneTw('group-hover:opacity-100'),
+        dualPaneTw('group-focus-within:opacity-100'),
+        '[@media(hover:none)]:opacity-100',
+      )}
+    >
       <ThreadIconButton title="引用" onClick={() => onQuote(message)}>
         <Quote className="size-3" aria-hidden="true" />
       </ThreadIconButton>

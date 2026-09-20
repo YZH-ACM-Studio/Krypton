@@ -30,12 +30,12 @@ export function ClientRequiredNoticePage() {
   const blockEnd = data?.blockEnd;
 
   return (
-    <div className="mx-auto flex min-h-[60vh] max-w-2xl items-center justify-center p-6">
-      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }} className="w-full">
+    <div className="mx-auto flex min-h-0 max-w-2xl justify-center py-4 md:min-h-[60vh] md:items-center">
+      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }} className="w-full min-w-0">
         <Card className="border-rose-500/30">
-          <CardHeader className="flex flex-row items-center gap-3 space-y-0">
-            <ShieldAlert className="size-6 text-rose-500" />
-            <CardTitle className="text-lg">该时间段禁止普通网页登录</CardTitle>
+          <CardHeader className="flex min-w-0 flex-row items-center gap-3 space-y-0">
+            <ShieldAlert className="size-6 shrink-0 text-rose-500" />
+            <CardTitle className="min-w-0 text-lg leading-snug">该时间段禁止普通网页登录</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4 text-sm">
             <p className="text-muted-foreground">
@@ -45,7 +45,7 @@ export function ClientRequiredNoticePage() {
             {title && (
               <div className="rounded-lg border bg-muted/40 p-3">
                 <div className="text-xs text-muted-foreground">触发的比赛</div>
-                <div className="mt-1 font-medium">{title}</div>
+                <div className="mt-1 break-words font-medium">{title}</div>
                 {blockEnd && (
                   <div className="mt-1 text-xs text-muted-foreground">
                     预计解除时间：
@@ -57,7 +57,7 @@ export function ClientRequiredNoticePage() {
 
             <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-amber-700 dark:text-amber-200">
               <AlertOctagon className="size-4 shrink-0" />
-              <div className="space-y-1">
+              <div className="min-w-0 space-y-1">
                 <p className="font-medium">如何进入</p>
                 <ol className="ml-4 list-decimal text-xs leading-relaxed">
                   <li>打开监考用的 Qt 客户端</li>
@@ -67,14 +67,14 @@ export function ClientRequiredNoticePage() {
               </div>
             </div>
 
-            <div className="flex gap-2">
-              <Button asChild variant="outline" size="sm">
+            <div className="flex flex-col flex-wrap gap-2 sm:flex-row">
+              <Button asChild variant="outline" className="min-h-11 w-full sm:w-auto">
                 <a href="/logout">
                   <LogOut className="mr-1.5 size-4" />
                   退出登录
                 </a>
               </Button>
-              <Button asChild variant="ghost" size="sm">
+              <Button asChild variant="ghost" className="min-h-11 w-full sm:w-auto">
                 <a href="/userbind">
                   <ExternalLink className="mr-1.5 size-4" />
                   绑定 / 认领账号

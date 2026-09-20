@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { render } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { ScrollArea } from '../src/components/ui/scroll-area';
+import { Table } from '../src/components/ui/table';
 
 const pkg = resolve(import.meta.dirname, '..');
 
@@ -28,10 +29,16 @@ function WideRecordTable() {
   );
 }
 
-function viewportOverflowX(container: HTMLElement): string {
+function viewportOverflow(container: HTMLElement, axis: 'X' | 'Y'): string {
   const viewport = container.querySelector<HTMLElement>('[data-radix-scroll-area-viewport]');
   expect(viewport, 'ScrollArea viewport').not.to.equal(null);
-  return viewport!.style.overflowX || getComputedStyle(viewport!).overflowX;
+  const inline = axis === 'X' ? viewport!.style.overflowX : viewport!.style.overflowY;
+  const computed = axis === 'X' ? getComputedStyle(viewport!).overflowX : getComputedStyle(viewport!).overflowY;
+  return inline || computed;
+}
+
+function viewportOverflowX(container: HTMLElement): string {
+  return viewportOverflow(container, 'X');
 }
 
 describe('both-axis table scroll', () => {
@@ -63,15 +70,50 @@ describe('both-axis table scroll', () => {
     const recordsWrap = problemDetail.slice(Math.max(0, tableAt - 1600), tableAt);
     expect(recordsWrap).to.match(/<ScrollArea\b[^>]+orientation="both"/);
 
-    const training = source('src/pages/training.tsx');
-    const rosterAt = training.indexOf('placeholder="搜索用户名/姓名/学号/班级"');
-    expect(rosterAt, 'training roster search').to.be.greaterThan(-1);
-    const roster = training.slice(rosterAt, rosterAt + 900);
+    const roster = source('src/components/practice-roster.tsx');
+    expect(roster).to.include('placeholder="搜索用户名/姓名/学号/班级"');
     expect(roster).to.include('用户名');
     expect(roster).to.include('真实姓名');
     expect(roster).to.include('学号');
     expect(roster).to.include('班级组');
     expect(roster).to.include('进度');
-    expect(roster).to.match(/<ScrollArea\b[^>]+orientation="both"/);
+    expect(roster.match(/<ScrollArea\b[^>]+orientation="both"/g)?.length, 'both roster tables').to.equal(2);
+    const membersAt = roster.indexOf('min-w-[640px]');
+    expect(membersAt, 'members table min-w').to.be.greaterThan(-1);
+    expect(roster.slice(Math.max(0, membersAt - 400), membersAt)).to.match(/<ScrollArea\b[^>]+orientation="both"/);
+    expect(roster).to.include('whitespace-nowrap');
+    expect(roster).to.include('sticky left-0');
+    expect(roster).to.include('176 + matrixColumns.length * 96');
+  });
+
+  it('keeps Table horizontal by default and only enables both when asked', () => {
+    const horizontal = render(
+      <div style={{ width: 280, height: 160 }}>
+        <Table>
+          <thead>
+            <tr>
+              <th>状态</th>
+            </tr>
+          </thead>
+        </Table>
+      </div>,
+    );
+    expect(viewportOverflowX(horizontal.container)).to.match(/^(scroll|auto)$/);
+    expect(viewportOverflow(horizontal.container, 'Y')).to.equal('hidden');
+    horizontal.unmount();
+
+    const both = render(
+      <div style={{ width: 280, height: 160 }}>
+        <Table orientation="both">
+          <thead>
+            <tr>
+              <th>状态</th>
+            </tr>
+          </thead>
+        </Table>
+      </div>,
+    );
+    expect(viewportOverflowX(both.container)).to.match(/^(scroll|auto)$/);
+    expect(viewportOverflow(both.container, 'Y')).to.match(/^(scroll|auto)$/);
   });
 });

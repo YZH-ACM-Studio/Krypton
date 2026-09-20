@@ -2,9 +2,9 @@
  * Paper answer-sheet page — the heart of Phase 2 / V2 rewrite.
  *
  * Layout:
- *   ExamDetailShell { topbar, thin-icon-sidebar (overview/problems/announcements/ranking) }
+ *   ExamDetailShell { topbar, section nav (md+ icon rail / <md bottom tabs) }
  *     section=overview      → OverviewSection
- *     section=problems      → ProblemsSection (collapsible sub-sidebar + scroll-snap cards)
+ *     section=problems      → ProblemsSection (md+ collapsible sub-sidebar; <md kind+cell strips)
  *     section=announcements → AnnouncementsSection
  *     section=ranking       → RankingSection
  *
@@ -12,7 +12,7 @@
  */
 import type { ClientStructuredCodeSegment } from '@hydrooj/common';
 import { Lock, PanelLeftClose, PanelLeftOpen, Save, Send } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ExamDetailShell, type ExamSection, useExamSection } from '@/components/layout/exam-shell';
 import { MarkdownView } from '@/components/markdown-renderer';
 import {
@@ -115,6 +115,17 @@ interface DraftListResponse {
 
 const SUBSIDEBAR_KEY = 'krypton:exam-subsidebar-collapsed';
 const STRUCTURED_REGION_KINDS: QuestionKind[] = ['program_fill_text', 'program_fill_compile', 'function'];
+
+function readSubsidebarCollapsed(): boolean {
+  try {
+    const stored = localStorage.getItem(SUBSIDEBAR_KEY);
+    if (stored === '1') return true;
+    if (stored === '0') return false;
+  } catch {
+    // private mode / quota
+  }
+  return typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 767px)').matches;
+}
 
 function parseSavedRegionContents(pdoc: PdocLike | undefined, rawCode: unknown): Record<string, string> | undefined {
   if (!pdoc || !['program_fill', 'function'].includes(pdoc.config.type || '')) return undefined;
@@ -304,13 +315,7 @@ function ProblemsSection({
   const [lockedKinds, setLockedKinds] = useState<Set<QuestionKind>>(new Set());
   const [saving, setSaving] = useState(false);
   const [activeCellIndex, setActiveCellIndex] = useState(0);
-  const [collapsed, setCollapsed] = useState(() => {
-    try {
-      return localStorage.getItem(SUBSIDEBAR_KEY) === '1';
-    } catch {
-      return false;
-    }
-  });
+  const [collapsed, setCollapsed] = useState(readSubsidebarCollapsed);
   const toggleCollapsed = useCallback(() => {
     setCollapsed((p) => {
       const n = !p;
@@ -606,70 +611,84 @@ function ProblemsSection({
   };
 
   if (!activeKind || tabCells.length === 0) {
-    return <div className="flex h-full items-center justify-center p-10 text-sm text-muted-foreground">本场考试没有题目。</div>;
+    return <div className="flex min-h-0 flex-1 items-center justify-center p-10 text-sm text-muted-foreground">本场考试没有题目。</div>;
   }
 
   const isObjectiveTab = ['single', 'multi', 'blank', 'fill_program'].includes(activeKind);
   const showLockButton = allowSubmitByKind && isObjectiveTab && !lockedKinds.has(activeKind);
 
   return (
-    <div className="flex h-full flex-col bg-background">
-      {/* Sticky top bar within problems section */}
-      <div className="sticky top-0 z-30 flex items-center gap-2 border-b bg-background/85 px-4 py-2 backdrop-blur-xl">
+    <div className="flex min-h-0 flex-1 flex-col bg-background">
+      <div className="sticky top-0 z-30 flex w-full min-w-0 shrink-0 flex-wrap items-center gap-2 border-b bg-background/85 px-4 py-2 backdrop-blur-xl">
         <button
           type="button"
           onClick={toggleCollapsed}
           title={collapsed ? '展开侧边栏 (⌘+B)' : '收起侧边栏 (⌘+B)'}
-          className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="hidden size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground md:inline-flex"
         >
           {collapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
         </button>
         <PaperStatusPill dirtyCount={dirtyCountInTab} saving={saving} />
-        <div className="ml-2 hidden text-xs text-muted-foreground sm:block">
+        <div className="hidden text-xs text-muted-foreground sm:block">
           {KIND_LABELS[activeKind]} · 共 {tabCells.length} 题
         </div>
-        <div className="flex-1" />
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-8 gap-1.5"
-          onClick={saveCurrentTab}
-          disabled={!inWindow || !draftReady || saving || dirtyCountInTab === 0}
-        >
-          <Save className="size-4" />
-          保存
-        </Button>
+        <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2">
+          {showLockButton ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 shrink-0 gap-1.5 md:hidden"
+              onClick={lockCurrentKind}
+              disabled={!inWindow || !draftReady}
+            >
+              <Lock className="size-4" />
+              提交「{KIND_LABELS[activeKind]}」
+            </Button>
+          ) : null}
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 shrink-0 gap-1.5"
+            onClick={saveCurrentTab}
+            disabled={!inWindow || !draftReady || saving || dirtyCountInTab === 0}
+          >
+            <Save className="size-4" />
+            保存
+          </Button>
+          {paperPreview ? <span className="text-xs text-muted-foreground">预览不能交卷</span> : null}
+        </div>
         {paperFinalized ? (
-          <span className="text-xs text-muted-foreground">已交卷</span>
+          <span className="shrink-0 text-xs text-muted-foreground">已交卷</span>
         ) : (
-          <Button size="sm" className="h-8 gap-1.5" onClick={finalize} disabled={!canFinalize || !draftReady}>
+          <Button size="sm" className="h-8 shrink-0 gap-1.5" onClick={finalize} disabled={!canFinalize || !draftReady}>
             <Send className="size-4" />
             交卷
           </Button>
         )}
-        {paperPreview ? <span className="text-xs text-muted-foreground">预览不能交卷</span> : null}
       </div>
 
       {draftLoadState === 'loading' ? (
-        <p role="status" className="border-b px-4 py-3 text-sm text-muted-foreground">
+        <p role="status" className="shrink-0 border-b px-4 py-3 text-sm text-muted-foreground">
           正在加载服务端草稿，加载完成前暂不可作答。
         </p>
       ) : null}
       {draftLoadState === 'error' ? (
-        <p role="alert" className="border-b border-destructive/40 px-4 py-3 text-sm text-destructive">
+        <p role="alert" className="shrink-0 border-b border-destructive/40 px-4 py-3 text-sm text-destructive">
           草稿加载失败：{draftLoadError} 已阻止作答、保存和交卷，请刷新重试。
         </p>
       ) : null}
 
+      <div className="flex min-h-0 min-w-0 shrink-0 flex-col border-b md:hidden">
+        <MiniTabBar groups={groups} current={activeKind} onChange={switchKind} lockedKinds={lockedKinds} />
+      </div>
+
       <div className="flex min-h-0 flex-1">
-        {/* Sub-sidebar */}
         {!collapsed && (
-          <aside className="flex w-56 shrink-0 flex-col border-r bg-card/30">
+          <aside className="hidden min-h-0 w-56 shrink-0 flex-col overflow-y-auto border-r bg-card/30 md:flex">
             <MiniTabBar groups={groups} current={activeKind} onChange={switchKind} lockedKinds={lockedKinds} />
             <ScrollArea className="min-h-0 flex-1">
               <CellNavigator cells={tabCells} activeIndex={activeCellIndex} statuses={statuses} onJump={jumpToCell} />
             </ScrollArea>
-            {/* Bottom: 提交本类 (only when contest config opens it) */}
             <div className="border-t bg-card/40 p-2.5">
               {showLockButton ? (
                 <Button variant="outline" size="sm" className="w-full gap-1.5" onClick={lockCurrentKind} disabled={!inWindow || !draftReady}>
@@ -685,9 +704,8 @@ function ProblemsSection({
           </aside>
         )}
 
-        {/* Main scroll area */}
-        <ScrollArea viewportRef={mainRef} className="min-w-0 flex-1">
-          <div className="space-y-5 p-6">
+        <ScrollArea viewportRef={mainRef} className="min-h-0 min-w-0 flex-1">
+          <div className="space-y-5 p-4 sm:p-6">
             {tabCells.map((cell, i) => (
               <div key={`${cell.pid}-${cell.questionKey ?? 'P'}-${i}`}>
                 <CellEditor
@@ -698,6 +716,19 @@ function ProblemsSection({
                   status={statuses[i]}
                   locked={lockedKinds.has(cell.kind)}
                   disabled={!inWindow || !draftReady}
+                  cellNavigator={
+                    i === activeCellIndex ? (
+                      <div className="md:hidden">
+                        <CellNavigator
+                          cells={tabCells}
+                          activeIndex={activeCellIndex}
+                          statuses={statuses}
+                          onJump={jumpToCell}
+                          orientation="row"
+                        />
+                      </div>
+                    ) : undefined
+                  }
                   onAnswerChange={(answer) => {
                     if (!cell.questionKey) return;
                     updateDraft(cell.pid, {
@@ -734,6 +765,7 @@ function CellEditor({
   status,
   locked,
   disabled,
+  cellNavigator,
   onAnswerChange,
   onCodeChange,
   onRegionChange,
@@ -746,6 +778,7 @@ function CellEditor({
   status: CellStatus;
   locked: boolean;
   disabled: boolean;
+  cellNavigator?: ReactNode;
   onAnswerChange: (answer: string | string[]) => void;
   onCodeChange: (code: string, lang?: string) => void;
   onRegionChange: (regionId: string, content: string) => void;
@@ -768,6 +801,7 @@ function CellEditor({
       prompt={cell.prompt}
       locked={isLocked}
       status={status}
+      belowTitle={cellNavigator}
     >
       {pdoc.content && (
         <div className="prose prose-sm dark:prose-invert max-w-none">
@@ -804,7 +838,7 @@ function CellEditor({
             onChange={(e) => onAnswerChange(e.target.value)}
             disabled={isLocked}
             rows={6}
-            className="w-full rounded-md border bg-background p-3 text-sm disabled:opacity-60"
+            className="w-full rounded-md border bg-background p-3 text-base disabled:opacity-60 md:text-sm"
             placeholder="在此作答（主观题）"
           />
           <p className="text-[11px] text-muted-foreground">本题为主观题，交卷后由老师人工评分。</p>
@@ -831,7 +865,7 @@ function CellEditor({
             disabled={isLocked}
             rows={16}
             spellCheck={false}
-            className="w-full rounded-md border bg-card p-3 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-60"
+            className="w-full rounded-md border bg-card p-3 font-mono text-base focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-60 md:text-sm"
             placeholder="// 在此输入你的代码"
           />
           <div className="flex items-center gap-2">

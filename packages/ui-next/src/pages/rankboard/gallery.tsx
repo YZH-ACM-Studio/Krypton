@@ -5,7 +5,7 @@
  * 再 POST operation=addImage 挂到该卡片的代表奖项上。
  */
 import { useState } from 'react';
-import { AlertCircle, ArrowLeft, Award as AwardIcon, Camera, CircleCheck, ImageOff, LoaderCircle, Trophy, Users } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Award as AwardIcon, Camera, CircleCheck, ImageOff, LoaderCircle, Trophy, Users, ZoomIn } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -100,16 +100,55 @@ function TeamCard({ card, canUpload, uid, onLightbox }: { card: GalleryCard; can
   return (
     <Card className="overflow-hidden">
       {/* 封面区 */}
-      {cover ? (
-        <button type="button" onClick={() => onLightbox(cover)} className="block h-44 w-full overflow-hidden bg-muted">
-          <img src={cover} alt={card.title} className="size-full object-cover transition-transform hover:scale-105" />
-        </button>
-      ) : (
-        <div className="flex h-44 w-full flex-col items-center justify-center gap-1.5 bg-muted/40 text-muted-foreground">
-          <ImageOff className="size-6" />
-          <span className="text-xs">暂无照片</span>
-        </div>
-      )}
+      <div className="relative h-44 w-full overflow-hidden bg-muted">
+        {cover ? (
+          <button type="button" onClick={() => onLightbox(cover)} className="block size-full">
+            <img src={cover} alt={card.title} className="size-full object-cover" />
+          </button>
+        ) : (
+          <div className="flex size-full flex-col items-center justify-center gap-1.5 bg-muted/40 text-muted-foreground">
+            <ImageOff className="size-6" />
+            <span className="text-xs">暂无照片</span>
+          </div>
+        )}
+        {cover || canUpload ? (
+          <div className="absolute right-2 top-2 flex items-center gap-1">
+            {cover ? (
+              <button
+                type="button"
+                title="查看大图"
+                onClick={() => onLightbox(cover)}
+                className="rounded-full bg-black/50 p-1.5 text-white"
+              >
+                <ZoomIn className="size-3.5" />
+              </button>
+            ) : null}
+            {canUpload ? (
+              <label
+                title={imageUrls.length ? '替换照片' : '上传照片'}
+                className={cn(
+                  'flex size-8 cursor-pointer items-center justify-center rounded-full bg-black/50 text-white',
+                  uploading && 'pointer-events-none opacity-50',
+                )}
+              >
+                <Camera className="size-3.5" />
+                <input
+                  type="file"
+                  accept="image/*"
+                  aria-label={imageUrls.length ? '替换照片' : '上传照片'}
+                  className="hidden"
+                  disabled={uploading}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) upload(f);
+                    e.target.value = '';
+                  }}
+                />
+              </label>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
       <CardContent className="space-y-2.5 p-4">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
@@ -239,14 +278,14 @@ export function RankBoardGalleryPage() {
   const [lightbox, setLightbox] = useState<string | null>(null);
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <Button asChild variant="ghost" size="icon">
+    <div className="min-w-0 space-y-6">
+      <div className="flex flex-wrap items-start gap-3">
+        <Button asChild variant="ghost" size="icon" className="shrink-0">
           <a href="/rankboard">
             <ArrowLeft className="size-4" />
           </a>
         </Button>
-        <div>
+        <div className="min-w-0 flex-1">
           <h1 className="text-xl font-semibold">荣誉照片墙</h1>
           <p className="text-sm text-muted-foreground">
             按年展示天梯赛团队与 ICPC / CCPC 队伍的获奖照片和成绩
@@ -272,7 +311,7 @@ export function RankBoardGalleryPage() {
                   <Trophy className="size-3.5 text-amber-500" />
                   天梯赛（团队）
                 </h3>
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <div className="grid grid-cols-[repeat(auto-fill,minmax(16rem,1fr))] gap-4">
                   {bucket.ladder.map((card, i) => (
                     <TeamCard
                       key={`${card.typeKey}-${card.team || i}`}
@@ -291,7 +330,7 @@ export function RankBoardGalleryPage() {
                   <AwardIcon className="size-3.5 text-primary" />
                   ICPC / CCPC（队伍）
                 </h3>
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <div className="grid grid-cols-[repeat(auto-fill,minmax(16rem,1fr))] gap-4">
                   {bucket.icpc.map((card, i) => (
                     <TeamCard
                       key={`${card.contest || ''}-${card.typeKey}-${card.team || i}`}

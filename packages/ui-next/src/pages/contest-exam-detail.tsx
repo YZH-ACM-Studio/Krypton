@@ -253,17 +253,17 @@ export function ExamContestDetailPage() {
 
   return (
     <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <a href={bs.urls.contests} className="hover:text-primary">
+      <div className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
+        <a href={bs.urls.contests} className="shrink-0 hover:text-primary">
           比赛
         </a>
-        <ChevronRight className="size-3" />
-        <span className="text-foreground">{tdoc.title}</span>
+        <ChevronRight className="size-3 shrink-0" />
+        <span className="min-w-0 truncate text-foreground">{tdoc.title}</span>
       </div>
 
-      <Card>
-        <CardContent className="space-y-6 p-5 sm:p-6">
-          <div className="space-y-3">
+      <Card className="min-w-0">
+        <CardContent className="min-w-0 space-y-6 p-5 sm:p-6">
+          <div className="min-w-0 space-y-3">
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant={status.variant}>{status.badge}</Badge>
               <Badge variant="outline">考试</Badge>
@@ -276,11 +276,11 @@ export function ExamContestDetailPage() {
               ) : null}
               {tdoc.allowViewCode ? <Badge variant="outline">代码可见</Badge> : null}
             </div>
-            <h1 className="text-3xl font-semibold tracking-tight">{tdoc.title}</h1>
+            <h1 className="min-w-0 break-words text-3xl font-semibold tracking-tight">{tdoc.title}</h1>
             <p className="max-w-2xl text-sm leading-6 text-muted-foreground">{heroHint}</p>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <Fact label="已报名" value={`${tdoc.attend} 人`} />
             <Fact label="整场时长" value={formatSpan(beginAt, endAt)} />
             <Fact
@@ -294,7 +294,7 @@ export function ExamContestDetailPage() {
             )}
           </div>
 
-          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+          <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap">
             {!data.attended && phase !== 'ended' ? (
               <form method="post">
                 <input type="hidden" name="operation" value="attend" />
@@ -352,7 +352,7 @@ export function ExamContestDetailPage() {
               <p className="text-sm font-medium">
                 {phase === 'upcoming' ? '距离开考' : phase === 'running' ? '距离整场结束' : '整场已结束'}
               </p>
-              <p className="mt-1 font-mono text-2xl font-semibold tabular-nums tracking-tight">
+              <p className="mt-1 font-mono text-xl font-semibold tabular-nums tracking-tight sm:text-2xl">
                 {phase === 'ended' ? '00:00:00' : formatCountdown(cd)}
               </p>
             </div>
@@ -373,12 +373,12 @@ export function ExamContestDetailPage() {
       ) : null}
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
-        <div className="space-y-4">
+        <div className="min-w-0 space-y-4">
           {tdoc.content ? (
-            <Card>
+            <Card className="max-w-4xl">
               <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <BookOpen className="size-4" />
+                <CardTitle className="flex min-w-0 items-center gap-2 text-base">
+                  <BookOpen className="size-4 shrink-0" />
                   考生说明
                 </CardTitle>
               </CardHeader>
@@ -390,7 +390,7 @@ export function ExamContestDetailPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">考试入口</CardTitle>
+              <CardTitle className="min-w-0 text-base">考试入口</CardTitle>
               <CardDescription>进入答题工作台，或查看排行与讨论。题目不会出现在这个页面。</CardDescription>
             </CardHeader>
             <CardContent className="space-y-2 pt-0">
@@ -438,10 +438,10 @@ export function ExamContestDetailPage() {
           </Card>
         </div>
 
-        <div className="space-y-4">
+        <div className="min-w-0 space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle className="text-sm">考试安排</CardTitle>
+              <CardTitle className="min-w-0 text-sm">考试安排</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2.5 pt-0 text-sm">
               <MetaRow icon={<Calendar className="size-3.5" />} label="整场开始">
@@ -476,7 +476,7 @@ export function ExamContestDetailPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-sm">报名状态</CardTitle>
+              <CardTitle className="min-w-0 text-sm">报名状态</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2.5 pt-0 text-sm">
               {data.attended ? (
@@ -506,7 +506,7 @@ export function ExamContestDetailPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-sm">操作</CardTitle>
+              <CardTitle className="min-w-0 text-sm">操作</CardTitle>
             </CardHeader>
             <CardContent className="space-y-1 pt-0">
               {data.canManageContest ? (
@@ -561,7 +561,7 @@ export function ExamContestDetailPage() {
           {data.files.length > 0 ? (
             <Card>
               <CardHeader>
-                <CardTitle className="text-sm">附件</CardTitle>
+                <CardTitle className="min-w-0 text-sm">附件</CardTitle>
               </CardHeader>
               <CardContent className="space-y-1.5 pt-0">
                 {data.files.map((file) => (
@@ -585,9 +585,9 @@ export function ExamContestDetailPage() {
 
 function Fact({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg bg-muted/40 px-3 py-2.5">
+    <div className="min-w-0 rounded-lg bg-muted/40 px-3 py-2.5">
       <p className="text-[11px] text-muted-foreground">{label}</p>
-      <p className="mt-1 text-sm font-medium tabular-nums">{value}</p>
+      <p className="mt-1 break-words text-sm font-medium tabular-nums">{value}</p>
     </div>
   );
 }
@@ -637,12 +637,12 @@ function MetaRow({
   children: ReactNode;
 }) {
   return (
-    <div className="flex items-center justify-between gap-3">
-      <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+    <div className="flex min-w-0 items-center justify-between gap-3">
+      <span className="inline-flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
         {icon}
         {label}
       </span>
-      <span className="text-xs font-medium tabular-nums">{children}</span>
+      <span className="min-w-0 break-words text-right text-xs font-medium tabular-nums">{children}</span>
     </div>
   );
 }

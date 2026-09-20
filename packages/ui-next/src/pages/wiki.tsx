@@ -138,16 +138,16 @@ function WikiShell({
 }) {
   return (
     <motion.div
-      className="grid gap-6 lg:grid-cols-[220px_1fr]"
+      className="grid min-w-0 gap-6 lg:grid-cols-[220px_minmax(0,1fr)]"
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
     >
-      <aside className="lg:sticky lg:top-16 lg:self-start">
+      <aside className="lg:sticky lg:top-0 lg:self-start">
         <div className="rounded-md border bg-card p-3">
           <div className="flex items-center gap-2 px-2 py-1.5">
-            <Icon className="size-4 text-primary" />
-            <span className="text-sm font-medium">{title}</span>
+            <Icon className="size-4 shrink-0 text-primary" />
+            <span className="min-w-0 text-sm font-medium">{title}</span>
           </div>
           <div className="mt-2 space-y-1 text-sm">
             {nav.map((item) => (
@@ -162,16 +162,16 @@ function WikiShell({
           </div>
         </div>
       </aside>
-      <main className="min-w-0 space-y-4">
+      <div className="min-w-0 max-w-3xl space-y-4">
         <div>
-          <h1 className="flex items-center gap-2 text-xl font-semibold">
-            <BookOpen className="size-5 text-primary" />
+          <h1 className="flex min-w-0 items-center gap-2 text-xl font-semibold">
+            <BookOpen className="size-5 shrink-0 text-primary" />
             {title}
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">常用规则、平台说明与格式约定。</p>
         </div>
         {children}
-      </main>
+      </div>
     </motion.div>
   );
 }

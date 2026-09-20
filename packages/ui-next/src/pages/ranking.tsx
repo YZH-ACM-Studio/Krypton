@@ -238,7 +238,7 @@ function RankingRow({
         </TableCell>
       ) : null}
       <TableCell className="text-right tabular-nums">{user.nAccept ?? 0}</TableCell>
-      <TableCell className="max-w-64 text-sm">
+      <TableCell className="hidden min-w-40 max-w-64 text-sm lg:table-cell">
         {bioPreview ? (
           <button
             type="button"
@@ -280,77 +280,75 @@ export function RankingPage() {
   const [bioUser, setBioUser] = useState<RankingUser | null>(null);
 
   return (
-    <motion.div className="space-y-4" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
+    <motion.div className="min-w-0 space-y-4" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       <div>
         <h1 className="text-xl font-semibold">排名</h1>
         <p className="text-sm text-muted-foreground">用户 RP 排行榜，分项列会跟随当前评分脚本配置。</p>
       </div>
 
-      <Card>
+      <Card className="min-w-0">
         <CardContent className="p-0">
-          <div>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-16 text-center">#</TableHead>
-                  <TableHead>用户</TableHead>
-                  {hasStudentColumn ? <TableHead className="w-32">学号 / 姓名</TableHead> : null}
-                  <TableHead className="w-20 text-right">RP</TableHead>
-                  {rpKeys.map((key) => (
-                    <TableHead key={key} className="hidden w-24 text-right md:table-cell">
-                      {RP_LABELS[key] || key}
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-16 text-center">#</TableHead>
+                <TableHead>用户</TableHead>
+                {hasStudentColumn ? <TableHead className="w-32">学号 / 姓名</TableHead> : null}
+                <TableHead className="w-20 text-right">RP</TableHead>
+                {rpKeys.map((key) => (
+                  <TableHead key={key} className="hidden w-24 text-right md:table-cell">
+                    {RP_LABELS[key] || key}
+                  </TableHead>
+                ))}
+                {EXTERNAL_RATING_SITE_IDS.map((site) => {
+                  const show = site === 'codeforces' ? hasCfRatingColumn : hasNowcoderRatingColumn;
+                  if (!show) return null;
+                  return (
+                    <TableHead key={site} className="hidden w-20 text-right md:table-cell">
+                      {EXTERNAL_RATING_SITE_LABEL[site]}
                     </TableHead>
-                  ))}
-                  {EXTERNAL_RATING_SITE_IDS.map((site) => {
-                    const show = site === 'codeforces' ? hasCfRatingColumn : hasNowcoderRatingColumn;
-                    if (!show) return null;
-                    return (
-                      <TableHead key={site} className="hidden w-20 text-right md:table-cell">
-                        {EXTERNAL_RATING_SITE_LABEL[site]}
-                      </TableHead>
-                    );
-                  })}
-                  <TableHead className="w-20 text-right">AC</TableHead>
-                  <TableHead className="min-w-40">简介</TableHead>
+                  );
+                })}
+                <TableHead className="w-20 text-right">AC</TableHead>
+                <TableHead className="hidden min-w-40 lg:table-cell">简介</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {self ? (
+                <RankingRow
+                  user={self}
+                  rank={self.rank || '—'}
+                  rpKeys={rpKeys}
+                  current
+                  onShowBio={setBioUser}
+                  studentInfo={hasStudentColumn ? (studentDict[String(self._id)] ?? null) : undefined}
+                  {...publicRatingRowProps(self, publicRatingDicts, hasCfRatingColumn, hasNowcoderRatingColumn)}
+                />
+              ) : null}
+              {rows.length === 0 ? (
+                <TableRow>
+                  <TableCell
+                    colSpan={5 + rpKeys.length + extraRatingColumns + (hasStudentColumn ? 1 : 0)}
+                    className="py-8 text-center text-sm text-muted-foreground"
+                  >
+                    暂无排名数据
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {self ? (
+              ) : (
+                rows.map((user, index) => (
                   <RankingRow
-                    user={self}
-                    rank={self.rank || '—'}
+                    key={user._id}
+                    user={user}
+                    rank={user.rank || userRankFallback(page, index)}
                     rpKeys={rpKeys}
-                    current
                     onShowBio={setBioUser}
-                    studentInfo={hasStudentColumn ? (studentDict[String(self._id)] ?? null) : undefined}
-                    {...publicRatingRowProps(self, publicRatingDicts, hasCfRatingColumn, hasNowcoderRatingColumn)}
+                    studentInfo={hasStudentColumn ? (studentDict[String(user._id)] ?? null) : undefined}
+                    {...publicRatingRowProps(user, publicRatingDicts, hasCfRatingColumn, hasNowcoderRatingColumn)}
                   />
-                ) : null}
-                {rows.length === 0 ? (
-                  <TableRow>
-                    <TableCell
-                      colSpan={5 + rpKeys.length + extraRatingColumns + (hasStudentColumn ? 1 : 0)}
-                      className="py-8 text-center text-sm text-muted-foreground"
-                    >
-                      暂无排名数据
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  rows.map((user, index) => (
-                    <RankingRow
-                      key={user._id}
-                      user={user}
-                      rank={user.rank || userRankFallback(page, index)}
-                      rpKeys={rpKeys}
-                      onShowBio={setBioUser}
-                      studentInfo={hasStudentColumn ? (studentDict[String(user._id)] ?? null) : undefined}
-                      {...publicRatingRowProps(user, publicRatingDicts, hasCfRatingColumn, hasNowcoderRatingColumn)}
-                    />
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </div>
+                ))
+              )}
+            </TableBody>
+          </Table>
         </CardContent>
       </Card>
 
@@ -358,7 +356,7 @@ export function RankingPage() {
 
       {/* Bio detail dialog */}
       <Dialog open={!!bioUser} onOpenChange={(o) => !o && setBioUser(null)}>
-        <DialogContent className="flex h-[80vh] w-[80vw] max-w-4xl flex-col" onClose={() => setBioUser(null)}>
+        <DialogContent size="xl" className="flex min-h-0 w-full flex-col" onClose={() => setBioUser(null)}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Avatar className="size-7">
@@ -369,7 +367,7 @@ export function RankingPage() {
               <span className="text-xs font-normal text-muted-foreground">· 个人简介</span>
             </DialogTitle>
           </DialogHeader>
-          <ScrollArea className="flex-1" viewportClassName="px-6 py-5">
+          <ScrollArea className="min-h-0 flex-1" viewportClassName="px-6 py-5">
             {bioUser?.bio ? (
               <MarkdownView content={bioUser.bio} preferredLang={bs.locale} />
             ) : (

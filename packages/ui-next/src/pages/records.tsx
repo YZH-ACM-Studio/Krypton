@@ -24,12 +24,13 @@ import { readTeamExamModeContext } from '@/components/team-exam-mode';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { SimpleSelect } from '@/components/ui/select';
-import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { MiniTabs } from '@/components/ui/mini-tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useBootstrap, type GenericUserDoc } from '@/lib/bootstrap';
+import { cn } from '@/lib/cn';
 import { formatRelativeTime, replaceRouteTokens, toDate } from '@/lib/format';
 import {
   defaultRecordDetailTab,
@@ -183,6 +184,9 @@ interface RecordScoreResponse {
 function getUser(udict: Record<string, GenericUserDoc>, uid: string | number | undefined) {
   return uid != null ? (udict[String(uid)] ?? null) : null;
 }
+
+const RECORD_NATIVE_TABLE_CLASS =
+  'krypton-table w-full caption-bottom text-sm [&_tr>*:first-child]:pl-5 [&_tr>*:last-child]:pr-5';
 
 const STATUS_MAP: Record<number, { label: string; color: string }> = {
   0: { label: '等待评测', color: 'text-muted-foreground' },
@@ -458,7 +462,7 @@ function RecordCodeContent({
         </div>
       </div>
       {code ? (
-        <div className="overflow-hidden" style={{ height: 'min(68vh, 720px)', minHeight: 360 }}>
+        <div className="h-[min(68vh,720px)] min-h-0 overflow-hidden">
           <KryptonIDE
             mode="readonly"
             langs={[]}
@@ -467,8 +471,8 @@ function RecordCodeContent({
             onValueChange={() => {
               /* read-only */
             }}
-            minHeight={360}
-            className="h-full rounded-none border-0"
+            minHeight={0}
+            className="h-full min-h-0 rounded-none border-0"
           />
         </div>
       ) : (
@@ -589,14 +593,14 @@ function RecordScoreActionDialog({
           ) : null}
           {error ? <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">{error}</div> : null}
         </DialogBody>
-        <div className="flex shrink-0 justify-end gap-2 border-t px-6 py-4">
+        <DialogFooter>
           <Button type="button" variant="outline" disabled={busy} onClick={() => onOpenChange(false)}>
             取消
           </Button>
           <Button type="button" variant={cancel ? 'destructive' : 'default'} disabled={busy} onClick={() => void submit()}>
             {busy ? '处理中…' : cancel ? '确认取消成绩' : '重新评测'}
           </Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -684,6 +688,7 @@ export function RecordsPage() {
   const canRejudgeVirtual = data.canRejudgeVirtual === true;
   const showRecordManage = Object.keys(recordScoreActions).length > 0 || canRejudgeVirtual;
   const [scoreActionRid, setScoreActionRid] = useState('');
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
   const page = Number(data.page) || 1;
   const locale = bs.locale;
   const pdict = data.pdict || {};
@@ -720,6 +725,16 @@ export function RecordsPage() {
     : Object.entries(STATUS_MAP).map(([key, value]) => [key, value.label]);
   const selectedScoreRecord = rdocs.find((rdoc) => String(rdoc._id) === scoreActionRid) || null;
   const selectedScoreAction = scoreActionRid ? recordScoreActions[scoreActionRid] || null : null;
+  const filtersActive = Boolean(
+    filterParams.uidOrName ||
+      filterParams.pid ||
+      filterParams.tid ||
+      filterParams.lang ||
+      filterParams.status ||
+      filterParams.all ||
+      filterParams.allDomain ||
+      filterParams.stat,
+  );
 
   // Live updates: subscribe to /record-conn with the same filters as the
   // current page so newly arriving rdocs (or status flips) update the
@@ -789,7 +804,28 @@ export function RecordsPage() {
 
       <Card>
         <CardContent className="p-4">
-          <form method="get" action={bs.urls.records} className="grid gap-3 lg:grid-cols-[repeat(5,minmax(0,1fr))_auto] lg:items-end">
+          <div className="mb-3 flex items-center justify-between lg:hidden">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              aria-expanded={filtersExpanded}
+              aria-controls="record-list-filters"
+              onClick={() => setFiltersExpanded((open) => !open)}
+            >
+              <Filter className="size-4" />
+              {filtersExpanded ? '收起筛选' : `筛选${filtersActive ? ' · 已启用' : ''}`}
+            </Button>
+          </div>
+          <form
+            id="record-list-filters"
+            method="get"
+            action={bs.urls.records}
+            className={cn(
+              'grid gap-3 lg:grid-cols-[repeat(5,minmax(0,1fr))_auto] lg:items-end',
+              filtersExpanded ? 'grid' : 'hidden lg:grid',
+            )}
+          >
             {postContestPracticeActive ? <input type="hidden" name="practice" value="1" /> : null}
             {virtualRecords ? <input type="hidden" name="virtual" value="1" /> : null}
             <div className="space-y-1">
@@ -864,24 +900,25 @@ export function RecordsPage() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="min-w-0">
         <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-28">状态</TableHead>
-                <TableHead>题目</TableHead>
-                <TableHead className="w-28">用户</TableHead>
-                {hasStudentColumn ? <TableHead className="w-32">学号 / 姓名</TableHead> : null}
-                <TableHead className="w-20 text-center">语言</TableHead>
-                <TableHead className="w-24 text-right">得分</TableHead>
-                <TableHead className="w-24 text-right">时间</TableHead>
-                <TableHead className="w-24 text-right">内存</TableHead>
-                <TableHead className="w-28 text-right">提交时间</TableHead>
-                {showRecordManage ? <TableHead className="w-28 text-right">管理</TableHead> : null}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
+          <ScrollArea className="max-h-[min(65vh,680px)] w-full" orientation="both">
+            <table className={cn(RECORD_NATIVE_TABLE_CLASS, 'min-w-[56rem]')}>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-28">状态</TableHead>
+                  <TableHead className="min-w-0">题目</TableHead>
+                  <TableHead className="w-28">用户</TableHead>
+                  {hasStudentColumn ? <TableHead className="w-32">学号 / 姓名</TableHead> : null}
+                  <TableHead className="w-20 text-center">语言</TableHead>
+                  <TableHead className="w-24 text-right">得分</TableHead>
+                  <TableHead className="w-24 text-right">时间</TableHead>
+                  <TableHead className="w-24 text-right">内存</TableHead>
+                  <TableHead className="w-28 text-right">提交时间</TableHead>
+                  {showRecordManage ? <TableHead className="text-right">管理</TableHead> : null}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
               {rdocs.length === 0 ? (
                 <TableRow>
                   <TableCell
@@ -906,6 +943,7 @@ export function RecordsPage() {
                   });
                   const scoreAction = recordScoreActions[String(r._id)];
                   const vpHref = virtualRejudgeHref(r);
+                  const problemLabel = pdoc.title ? `${r.pid}. ${pdoc.title}` : String(r.pid ?? '');
                   return (
                     <TableRow key={String(r._id)}>
                       <TableCell>
@@ -913,9 +951,13 @@ export function RecordsPage() {
                           {statusDisplay(r.status)}
                         </a>
                       </TableCell>
-                      <TableCell>
-                        <a href={problemUrl} className="font-medium hover:text-primary hover:underline">
-                          {pdoc.title ? `${r.pid}. ${pdoc.title}` : r.pid}
+                      <TableCell className="min-w-0 max-w-[18rem]">
+                        <a
+                          href={problemUrl}
+                          title={problemLabel}
+                          className="block min-w-0 truncate font-medium hover:text-primary hover:underline"
+                        >
+                          {problemLabel}
                         </a>
                       </TableCell>
                       <TableCell className="text-sm">{user?.uname || `#${r.uid}`}</TableCell>
@@ -947,9 +989,9 @@ export function RecordsPage() {
                       <TableCell className="text-right tabular-nums text-xs text-muted-foreground">{formatMemory(r.memory)}</TableCell>
                       <TableCell className="text-right text-xs text-muted-foreground">{formatRecordTime(r._id || r.judgeAt, locale)}</TableCell>
                       {showRecordManage ? (
-                        <TableCell className="text-right">
+                        <TableCell className="whitespace-nowrap text-right">
                           {scoreAction ? (
-                            <div className="flex justify-end gap-1">
+                            <div className="inline-flex justify-end gap-1">
                               {scoreAction.kind === 'rejudge' && vpHref ? (
                                 <Button asChild size="sm" variant="ghost">
                                   <a href={vpHref}>确认重测</a>
@@ -976,8 +1018,9 @@ export function RecordsPage() {
                   );
                 })
               )}
-            </TableBody>
-          </Table>
+              </TableBody>
+            </table>
+          </ScrollArea>
         </CardContent>
       </Card>
 
@@ -1124,6 +1167,9 @@ export function RecordDetailPage() {
   const currentTab = tabs.includes(activeTab) ? activeTab : defaultRecordDetailTab({ hasCode: !!code, caseCount: cases.length });
   const caseSummary = summarizeRecordCases(cases);
   const casePageData = paginateRecordCases(cases, casePage);
+  const canSplitWorkspace = tabs.includes('code') && tabs.includes('cases');
+  const showCasesPanel = currentTab === 'cases' || (canSplitWorkspace && currentTab === 'code');
+  const showCodePanel = currentTab === 'code' || (canSplitWorkspace && currentTab === 'cases');
   const allRevs = Object.entries(data.allRevs || {});
   const examUrls = data.examMode?.urls || {};
   const teamExamMode = readTeamExamModeContext(data.examMode);
@@ -1304,23 +1350,26 @@ export function RecordDetailPage() {
       ) : (
         <Card className="overflow-hidden">
           <CardContent className="p-0">
-            <div className="flex flex-col gap-3 border-b bg-muted/10 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
+            <div className="flex min-w-0 flex-col gap-3 border-b bg-muted/10 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
                 <p className="text-sm font-semibold">评测详情</p>
                 <p className="mt-0.5 text-xs text-muted-foreground">在摘要、测试点和源码之间直接切换</p>
               </div>
-              <MiniTabs
-                value={currentTab}
-                onValueChange={setActiveTab}
-                size="md"
-                aria-label="提交详情视图"
-                items={tabs.map((tab) => ({
-                  value: tab,
-                  label: tab === 'overview' ? '概览' : tab === 'cases' ? '测试点' : '代码',
-                  count: tab === 'cases' ? cases.length : undefined,
-                  icon: tab === 'overview' ? LayoutDashboard : tab === 'cases' ? ListChecks : Code2,
-                }))}
-              />
+              <div className="min-w-0 overflow-x-auto">
+                <MiniTabs
+                  value={currentTab}
+                  onValueChange={setActiveTab}
+                  size="md"
+                  className="max-w-full overflow-x-auto"
+                  aria-label="提交详情视图"
+                  items={tabs.map((tab) => ({
+                    value: tab,
+                    label: tab === 'overview' ? '概览' : tab === 'cases' ? '测试点' : '代码',
+                    count: tab === 'cases' ? cases.length : undefined,
+                    icon: tab === 'overview' ? LayoutDashboard : tab === 'cases' ? ListChecks : Code2,
+                  }))}
+                />
+              </div>
             </div>
 
             {currentTab === 'overview' ? (
@@ -1379,128 +1428,135 @@ export function RecordDetailPage() {
               </div>
             ) : null}
 
-            {currentTab === 'cases' ? (
-              <div role="tabpanel">
-                <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-b px-4 py-3 text-xs text-muted-foreground">
-                  <span>
-                    共 <strong className="font-semibold tabular-nums text-foreground">{caseSummary.total}</strong> 个
-                  </span>
-                  <span>
-                    通过 <strong className="font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">{caseSummary.accepted}</strong>
-                  </span>
-                  <span>
-                    未通过 <strong className="font-semibold tabular-nums text-destructive">{caseSummary.failed}</strong>
-                  </span>
-                  <span>
-                    评测中 <strong className="font-semibold tabular-nums text-blue-600 dark:text-blue-400">{caseSummary.active}</strong>
-                  </span>
-                  <span>
-                    其他 <strong className="font-semibold tabular-nums text-muted-foreground">{caseSummary.other}</strong>
-                  </span>
-                </div>
-                <ScrollArea className="max-h-[min(65vh,680px)]" viewportLayout="block">
-                  <Table density="compact">
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-16">#</TableHead>
-                        <TableHead>状态</TableHead>
-                        <TableHead className="w-20 text-right">得分</TableHead>
-                        <TableHead className="w-24 text-right">时间</TableHead>
-                        <TableHead className="w-24 text-right">内存</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {casePageData.items.map((c, pageIndex) => {
-                        const absoluteIndex = (casePageData.page - 1) * casePageData.pageSize + pageIndex;
-                        const message = formatJudgeText(c.message);
-                        const subtaskId = c.subtaskId ?? c.subtask;
-                        const caseId = c.id ?? absoluteIndex + 1;
-                        // Key by the case identity emitted by the judge. Flat
-                        // problems are judged as subtask 1.
-                        const hint = testHints[subtaskId != null ? `${subtaskId}-${caseId}` : `1-${caseId}`];
-                        const hasDetails = !!(message || hint?.hint || hint?.videoUrl);
-                        return (
-                          <TableRow key={`${subtaskId ?? 'case'}-${caseId}-${absoluteIndex}`}>
-                            <TableCell className="font-mono text-xs tabular-nums text-muted-foreground">
-                              {subtaskId != null ? `${subtaskId}-${caseId}` : caseId}
-                            </TableCell>
-                            <TableCell>
-                              <div>{statusDisplay(c.status)}</div>
-                              {hasDetails ? (
-                                <details className="group mt-1 max-w-2xl">
-                                  <summary className="flex min-h-10 cursor-pointer list-none items-center text-xs font-medium text-primary hover:underline">
-                                    查看输出与提示
-                                  </summary>
-                                  <div className="mb-2 space-y-2 rounded-lg border bg-muted/20 p-3">
-                                    {message ? (
-                                      <pre className="whitespace-pre-wrap break-words font-mono text-xs text-muted-foreground">{message}</pre>
-                                    ) : null}
-                                    {hint?.hint ? (
-                                      <p className="whitespace-pre-wrap break-words text-xs text-amber-700 dark:text-amber-300">💡 {hint.hint}</p>
-                                    ) : null}
-                                    {hint?.videoUrl && /^https?:\/\//i.test(hint.videoUrl) ? (
-                                      <a
-                                        href={hint.videoUrl}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        className="inline-flex min-h-10 items-center text-xs text-primary hover:underline"
-                                      >
-                                        ▶ 讲解视频
-                                      </a>
-                                    ) : null}
-                                  </div>
-                                </details>
-                              ) : null}
-                            </TableCell>
-                            <TableCell className="text-right tabular-nums">{c.score ?? '—'}</TableCell>
-                            <TableCell className="text-right tabular-nums text-sm text-muted-foreground">{formatTime(c.time, c.status)}</TableCell>
-                            <TableCell className="text-right tabular-nums text-sm text-muted-foreground">{formatMemory(c.memory)}</TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </ScrollArea>
-                <div className="flex flex-col gap-2 border-t bg-muted/10 px-4 py-3 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-                  <span className="tabular-nums">
-                    显示 {casePageData.start}–{casePageData.end} / {casePageData.total}
-                  </span>
-                  {casePageData.totalPages > 1 ? (
-                    <div className="flex items-center gap-2">
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        className="h-10 active:scale-[0.96]"
-                        disabled={casePageData.page === 1}
-                        onClick={() => setCasePage(casePageData.page - 1)}
-                      >
-                        <ChevronLeft />
-                        上一页
-                      </Button>
-                      <span className="min-w-16 text-center tabular-nums">
-                        {casePageData.page} / {casePageData.totalPages}
+            {currentTab !== 'overview' ? (
+              <div className={cn(canSplitWorkspace && 'xl:grid xl:grid-cols-2 xl:items-stretch')}>
+                {showCasesPanel ? (
+                  <div role="tabpanel" className={cn('min-w-0', currentTab !== 'cases' && 'hidden xl:block')}>
+                    <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-b px-4 py-3 text-xs text-muted-foreground">
+                      <span>
+                        共 <strong className="font-semibold tabular-nums text-foreground">{caseSummary.total}</strong> 个
                       </span>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        className="h-10 active:scale-[0.96]"
-                        disabled={casePageData.page === casePageData.totalPages}
-                        onClick={() => setCasePage(casePageData.page + 1)}
-                      >
-                        下一页
-                        <ChevronRight />
-                      </Button>
+                      <span>
+                        通过 <strong className="font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">{caseSummary.accepted}</strong>
+                      </span>
+                      <span>
+                        未通过 <strong className="font-semibold tabular-nums text-destructive">{caseSummary.failed}</strong>
+                      </span>
+                      <span>
+                        评测中 <strong className="font-semibold tabular-nums text-blue-600 dark:text-blue-400">{caseSummary.active}</strong>
+                      </span>
+                      <span>
+                        其他 <strong className="font-semibold tabular-nums text-muted-foreground">{caseSummary.other}</strong>
+                      </span>
                     </div>
-                  ) : null}
-                </div>
-              </div>
-            ) : null}
+                    <div className="max-h-[min(65vh,680px)] overflow-x-auto">
+                      <table className={RECORD_NATIVE_TABLE_CLASS}>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="w-16">#</TableHead>
+                            <TableHead>状态</TableHead>
+                            <TableHead className="w-20 text-right">得分</TableHead>
+                            <TableHead className="w-24 text-right">时间</TableHead>
+                            <TableHead className="w-24 text-right">内存</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {casePageData.items.map((c, pageIndex) => {
+                            const absoluteIndex = (casePageData.page - 1) * casePageData.pageSize + pageIndex;
+                            const message = formatJudgeText(c.message);
+                            const subtaskId = c.subtaskId ?? c.subtask;
+                            const caseId = c.id ?? absoluteIndex + 1;
+                            // Key by the case identity emitted by the judge. Flat
+                            // problems are judged as subtask 1.
+                            const hint = testHints[subtaskId != null ? `${subtaskId}-${caseId}` : `1-${caseId}`];
+                            const hasDetails = !!(message || hint?.hint || hint?.videoUrl);
+                            return (
+                              <TableRow key={`${subtaskId ?? 'case'}-${caseId}-${absoluteIndex}`}>
+                                <TableCell className="font-mono text-xs tabular-nums text-muted-foreground">
+                                  {subtaskId != null ? `${subtaskId}-${caseId}` : caseId}
+                                </TableCell>
+                                <TableCell>
+                                  <div>{statusDisplay(c.status)}</div>
+                                  {hasDetails ? (
+                                    <details className="group mt-1 max-w-2xl">
+                                      <summary className="flex min-h-10 cursor-pointer list-none items-center text-xs font-medium text-primary hover:underline">
+                                        查看输出与提示
+                                      </summary>
+                                      <div className="mb-2 space-y-2 rounded-lg border bg-muted/20 p-3">
+                                        {message ? (
+                                          <pre className="whitespace-pre-wrap break-words font-mono text-xs text-muted-foreground">{message}</pre>
+                                        ) : null}
+                                        {hint?.hint ? (
+                                          <p className="whitespace-pre-wrap break-words text-xs text-amber-700 dark:text-amber-300">💡 {hint.hint}</p>
+                                        ) : null}
+                                        {hint?.videoUrl && /^https?:\/\//i.test(hint.videoUrl) ? (
+                                          <a
+                                            href={hint.videoUrl}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="inline-flex min-h-10 items-center text-xs text-primary hover:underline"
+                                          >
+                                            ▶ 讲解视频
+                                          </a>
+                                        ) : null}
+                                      </div>
+                                    </details>
+                                  ) : null}
+                                </TableCell>
+                                <TableCell className="text-right tabular-nums">{c.score ?? '—'}</TableCell>
+                                <TableCell className="text-right tabular-nums text-sm text-muted-foreground">{formatTime(c.time, c.status)}</TableCell>
+                                <TableCell className="text-right tabular-nums text-sm text-muted-foreground">{formatMemory(c.memory)}</TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </table>
+                    </div>
+                    <div className="flex flex-col gap-2 border-t bg-muted/10 px-4 py-3 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+                      <span className="tabular-nums">
+                        显示 {casePageData.start}–{casePageData.end} / {casePageData.total}
+                      </span>
+                      {casePageData.totalPages > 1 ? (
+                        <div className="flex items-center gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-10 active:scale-[0.96]"
+                            disabled={casePageData.page === 1}
+                            onClick={() => setCasePage(casePageData.page - 1)}
+                          >
+                            <ChevronLeft />
+                            上一页
+                          </Button>
+                          <span className="min-w-16 text-center tabular-nums">
+                            {casePageData.page} / {casePageData.totalPages}
+                          </span>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-10 active:scale-[0.96]"
+                            disabled={casePageData.page === casePageData.totalPages}
+                            onClick={() => setCasePage(casePageData.page + 1)}
+                          >
+                            下一页
+                            <ChevronRight />
+                          </Button>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
 
-            {currentTab === 'code' && code ? (
-              <div role="tabpanel">
-                <RecordCodeContent data={data} rdoc={rdoc} code={code} copyState={copyState} onCopy={() => void handleCopyCode()} />
+                {showCodePanel && code ? (
+                  <div
+                    role="tabpanel"
+                    className={cn('min-w-0', currentTab !== 'code' && 'hidden xl:block', canSplitWorkspace && 'xl:border-l')}
+                  >
+                    <RecordCodeContent data={data} rdoc={rdoc} code={code} copyState={copyState} onCopy={() => void handleCopyCode()} />
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </CardContent>

@@ -219,14 +219,14 @@ export function TrainingPage() {
   );
 
   return (
-    <motion.div className="space-y-4" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
+    <motion.div className="min-w-0 space-y-4" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">题集</h1>
-          <p className="text-sm text-muted-foreground">系统化题集，按阶段 DAG 推进</p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0">
+          <h1 className="truncate text-xl font-semibold">题集</h1>
+          <p className="truncate text-sm text-muted-foreground">系统化题集，按阶段 DAG 推进</p>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           {bs.user.signedIn ? <RedeemDialogButton variant="outline" /> : null}
           <Button asChild>
             <a href={`${bs.urls.training}/create`}>创建题集</a>
@@ -644,20 +644,25 @@ export function TrainingDetailPage() {
   };
 
   return (
-    <motion.div className="space-y-5" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
+    <motion.div
+      className="w-full min-w-0 space-y-5"
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3 }}
+    >
       {/* Breadcrumb */}
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <a href={bs.urls.training} className="hover:text-primary">
+      <div className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
+        <a href={bs.urls.training} className="shrink-0 hover:text-primary">
           题集
         </a>
-        <ChevronRight className="size-3" />
-        <span className="text-foreground">{tdoc.title || '题集'}</span>
+        <ChevronRight className="size-3 shrink-0" />
+        <span className="min-w-0 truncate text-foreground">{tdoc.title || '题集'}</span>
       </div>
 
       {/* Hero (compact, single line) */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="text-2xl font-bold truncate">{tdoc.title || '题集'}</h1>
+          <h1 className="truncate text-2xl font-bold">{tdoc.title || '题集'}</h1>
           <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <span className="flex items-center gap-1">
               <Users className="size-3" />
@@ -700,7 +705,7 @@ export function TrainingDetailPage() {
             ) : null}
           </div>
         </div>
-        <div className="flex gap-2 shrink-0">
+        <div className="flex min-w-0 flex-wrap gap-2">
           {bs.user.signedIn ? <RedeemDialogButton variant="outline" /> : null}
           {!enrolled && bs.user.signedIn ? (
             <form method="post">
@@ -885,8 +890,8 @@ export function TrainingDetailPage() {
           {selected ? (
             <Card>
               <CardHeader className="pb-2">
-                <div className="flex items-center justify-between gap-2">
-                  <CardTitle className="text-base truncate">{selected.title || `阶段 ${selected._id}`}</CardTitle>
+                <div className="flex min-w-0 items-center justify-between gap-2">
+                  <CardTitle className="min-w-0 truncate text-base">{selected.title || `阶段 ${selected._id}`}</CardTitle>
                   <SectionStatusBadge ns={selectedStatus} />
                 </div>
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -1008,13 +1013,13 @@ export function TrainingDetailPage() {
         <div className="space-y-4 min-w-0">
           <Card>
             <CardHeader className="pb-2">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-sm">阶段</CardTitle>
-                <span className="text-[10px] text-muted-foreground">{dag.length} 段</span>
+              <div className="flex min-w-0 items-center justify-between gap-2">
+                <CardTitle className="min-w-0 truncate text-sm">阶段</CardTitle>
+                <span className="shrink-0 text-[10px] text-muted-foreground">{dag.length} 段</span>
               </div>
             </CardHeader>
             <CardContent className="p-3">
-              <ScrollArea className="h-[60vh]">
+              <ScrollArea className="max-h-[min(60vh,calc(100dvh-12rem))] lg:h-[60vh]">
                 <div className="space-y-2 pr-2">
                   {dag.map((s, i) => {
                     const ns = nsdict[s._id] || {};

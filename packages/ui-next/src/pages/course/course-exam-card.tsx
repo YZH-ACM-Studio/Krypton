@@ -72,7 +72,7 @@ export function CourseExamCard({
 
   return (
     <Card className={className}>
-      <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+      <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex min-w-0 items-start gap-3">
           <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
             {canEnter ? <Trophy className="size-4" strokeWidth={1.75} /> : <Lock className="size-4" strokeWidth={1.75} />}

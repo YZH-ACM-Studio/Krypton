@@ -49,6 +49,10 @@ describe('account settings page source', () => {
 
   it('redesigns settings with MiniTabs and Chinese identity copy', () => {
     expect(page).to.include('MiniTabs');
+    expect(page).to.include('overflow-x-auto');
+    expect(page).to.include('max-w-3xl');
+    expect(page).to.include('lg:grid-cols-3');
+    expect(page).to.include('flex-wrap');
     expect(page).to.include('StudentIdentityCard');
     expect(page).to.include('学号、姓名和学校只来自花名册绑定');
     expect(page).to.include('settingLabel');

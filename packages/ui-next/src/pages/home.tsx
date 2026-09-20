@@ -122,13 +122,13 @@ export function trainingProgress(t: HomeContentDocument, st: HomeTrainingStatus)
 
 function StatCard({ icon: Icon, label, value, href, index }: { icon: LucideIcon; label: string; value: number; href: string; index: number }) {
   return (
-    <motion.a href={href} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: 0.05 * index }}>
-      <Card className="transition-colors hover:bg-accent/50">
-        <CardContent className="flex items-center gap-4 p-4">
-          <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
+    <motion.a href={href} className="min-w-0" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: 0.05 * index }}>
+      <Card className="min-w-0 transition-colors hover:bg-accent/50">
+        <CardContent className="flex min-w-0 items-center gap-4 p-4">
+          <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
             <Icon className="size-5" />
           </div>
-          <div>
+          <div className="min-w-0">
             <p className="text-2xl font-semibold tabular-nums">{value}</p>
             <p className="text-xs text-muted-foreground">{label}</p>
           </div>
@@ -199,15 +199,15 @@ export function KryptonHomePage() {
   ];
 
   return (
-    <div className="space-y-6">
+    <div className="mx-auto w-full max-w-[90rem] space-y-6">
       {/* ── Announcement block ──────────────────── */}
       <AnnouncementHomeBlock />
 
       {/* ── Hero ────────────────────────────────── */}
       <motion.section initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
         <Card className="overflow-hidden border-primary/20 bg-linear-to-br from-primary/5 via-background to-background">
-          <CardContent className="grid gap-6 p-6 lg:grid-cols-[1fr_340px]">
-            <div className="flex flex-col justify-center gap-4">
+          <CardContent className="grid min-w-0 gap-6 p-6 lg:grid-cols-[1fr_340px]">
+            <div className="flex min-w-0 flex-col justify-center gap-4">
               <div>
                 <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">{bs.domain.name}</h1>
               </div>
@@ -233,37 +233,37 @@ export function KryptonHomePage() {
 
             {/* Search panel */}
             {bs.user.canBrowseProblemBank === true ? (
-            <div className="flex flex-col gap-3 rounded-lg border bg-card p-4">
+            <div className="flex min-w-0 flex-col gap-3 rounded-lg border bg-card p-4">
               <p className="text-sm font-medium">快速搜索</p>
               <form
-                className="flex gap-2"
+                className="flex min-w-0 flex-wrap gap-2"
                 onSubmit={(e) => {
                   e.preventDefault();
                   submitSearch(search);
                 }}
               >
-                <div className="relative flex-1">
+                <div className="relative min-w-0 flex-1">
                   <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                   <Input
                     value={search}
                     onChange={(e) => startTransition(() => setSearch(e.target.value))}
                     placeholder="题号或标题…"
-                    className="pl-8"
+                    className="min-w-0 pl-8 text-base sm:text-sm"
                   />
                 </div>
-                <Button type="submit" size="sm">
+                <Button type="submit" size="sm" className="shrink-0">
                   搜索
                 </Button>
               </form>
               {matched.length > 0 ? (
-                <div className="flex flex-col gap-0.5 rounded-md border p-1">
+                <div className="flex min-w-0 flex-col gap-0.5 rounded-md border p-1">
                   {matched.map((p) => (
                     <a
                       key={String(p.docId)}
-                      className="flex items-center justify-between rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent"
+                      className="flex min-w-0 items-center justify-between rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent"
                       href={replaceRouteTokens(bs.urls.problemDetail, { PID: String(p.docId) })}
                     >
-                      <span className="truncate">
+                      <span className="min-w-0 flex-1 truncate">
                         {p.docId}. {p.title || '未命名'}
                       </span>
                       <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
@@ -278,7 +278,7 @@ export function KryptonHomePage() {
       </motion.section>
 
       {/* ── Stats ──────────────────────────────── */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid min-w-0 grid-cols-2 gap-3 lg:grid-cols-4">
         {stats.map((s, i) => (
           <StatCard key={s.label} {...s} index={i} />
         ))}
@@ -299,9 +299,9 @@ export function KryptonHomePage() {
       ) : null}
 
       {/* ── Main grid ──────────────────────────── */}
-      <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
+      <div className="grid min-w-0 gap-6 lg:grid-cols-[1fr_320px]">
         {/* Left column */}
-        <div className="space-y-6">
+        <div className="min-w-0 space-y-6">
           {/* Contests */}
           <SectionShell
             title="比赛"
@@ -327,14 +327,14 @@ export function KryptonHomePage() {
                       href={replaceRouteTokens(bs.urls.contestDetail, { TID: String(c.docId) })}
                     >
                       <div className="flex-1 min-w-0">
-                        <p className="truncate text-sm font-medium">
-                          {c.title || '未命名比赛'}
+                        <div className="flex min-w-0 items-center gap-2">
+                          <p className="min-w-0 flex-1 truncate text-sm font-medium">{c.title || '未命名比赛'}</p>
                           {c.hidden === true ? (
-                            <Badge variant="outline" className="ml-2 align-middle text-[10px]">
+                            <Badge variant="outline" className="shrink-0 text-[10px]">
                               已隐藏
                             </Badge>
                           ) : null}
-                        </p>
+                        </div>
                         <p className="mt-0.5 text-xs text-muted-foreground">
                           {formatDateTime(c.beginAt, locale)}
                           {c.rule ? ` · ${c.rule}` : ''}
@@ -407,16 +407,16 @@ export function KryptonHomePage() {
             {training.length === 0 ? (
               <Empty text="暂无题集" />
             ) : (
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid min-w-0 gap-3 sm:grid-cols-2">
                 {training.slice(0, 4).map((t) => {
                   const pct = trainingProgress(t, trStatus[String(t.docId)] || {});
                   return (
                     <a
                       key={String(t.docId)}
-                      className="group rounded-lg border p-3 transition-colors hover:bg-accent/50"
+                      className="group min-w-0 rounded-lg border p-3 transition-colors hover:bg-accent/50"
                       href={replaceRouteTokens(bs.urls.trainingDetail, { TID: String(t.docId) })}
                     >
-                      <p className="truncate text-sm font-medium">{t.title || '未命名题集'}</p>
+                      <p className="min-w-0 truncate text-sm font-medium">{t.title || '未命名题集'}</p>
                       <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
                         {formatPlainTextSummary(t.content || t.desc) || '一组精选题目'}
                       </p>
@@ -477,7 +477,7 @@ export function KryptonHomePage() {
         </div>
 
         {/* Right sidebar */}
-        <div className="space-y-6">
+        <div className="min-w-0 space-y-6">
           {/* User card */}
           <SectionShell title={bs.user.signedIn ? '个人' : '账号'} delay={0.1}>
             <div className="flex items-center gap-3">
@@ -557,10 +557,10 @@ export function KryptonHomePage() {
                 {starred.slice(0, 5).map((p) => (
                   <a
                     key={String(p.docId)}
-                    className="flex items-center justify-between rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent"
+                    className="flex min-w-0 items-center justify-between rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent"
                     href={replaceRouteTokens(bs.urls.problemDetail, { PID: String(p.docId) })}
                   >
-                    <span className="truncate">
+                    <span className="min-w-0 flex-1 truncate">
                       {p.docId}. {p.title || '未命名'}
                     </span>
                     <Star className="size-3.5 shrink-0 text-yellow-500" />
@@ -577,10 +577,10 @@ export function KryptonHomePage() {
                 {recent.slice(0, 5).map((p) => (
                   <a
                     key={String(p.docId)}
-                    className="flex items-center justify-between rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent"
+                    className="flex min-w-0 items-center justify-between rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent"
                     href={replaceRouteTokens(bs.urls.problemDetail, { PID: String(p.docId) })}
                   >
-                    <span className="truncate">
+                    <span className="min-w-0 flex-1 truncate">
                       {p.docId}. {p.title || '未命名'}
                     </span>
                     <span className="shrink-0 text-xs text-muted-foreground">{formatShortDate(p._id, locale)}</span>

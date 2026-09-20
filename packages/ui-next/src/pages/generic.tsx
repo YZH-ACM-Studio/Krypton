@@ -81,13 +81,13 @@ export function GenericPage() {
 
   return (
     <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <Button variant="ghost" size="icon" onClick={() => window.history.back()}>
           <ArrowLeft className="size-4" />
         </Button>
-        <div>
-          <h1 className="text-xl font-semibold capitalize">{label}</h1>
-          {title ? <p className="text-sm text-muted-foreground">{title}</p> : null}
+        <div className="min-w-0 flex-1">
+          <h1 className="min-w-0 truncate text-xl font-semibold capitalize">{label}</h1>
+          {title ? <p className="min-w-0 truncate text-sm text-muted-foreground">{title}</p> : null}
         </div>
         <Badge variant="outline" className="ml-auto">
           {tpl}
@@ -120,7 +120,7 @@ export function GenericPage() {
   );
 }
 
-const HIDDEN_KEYS = new Set(['_', 'handler', 'model', 'global', 'ctx', 'context', 'domain', 'udict', 'UserContext', 'UiContext']);
+const HIDDEN_KEYS = new Set(['_', 'handler', 'model', 'global', 'ctx', 'context', 'domain', 'udict', 'UserContext', 'UiContext', 'params']);
 
 const LABELS: Record<string, string> = {
   pdoc: '题目',

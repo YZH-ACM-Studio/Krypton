@@ -29,9 +29,10 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Pagination } from '@/components/ui/pagination';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { SimpleSelect } from '@/components/ui/select';
 import { MarkdownView } from '@/components/markdown-renderer';
 import { useBootstrap, type GenericUserDoc } from '@/lib/bootstrap';
@@ -255,13 +256,13 @@ function countdownProgress(phase: ReturnType<typeof contestState>['phase'], begi
 
 function CountdownUnit({ value, label, wide = false }: { value: string | number; label: string; wide?: boolean }) {
   return (
-    <span className="inline-flex items-end gap-1">
+    <span className="inline-flex items-end gap-0.5 sm:gap-1">
       <span
-        className={`inline-flex h-11 items-center justify-center rounded-md border bg-background/80 px-2 font-mono text-2xl font-semibold tabular-nums ${wide ? 'min-w-16' : 'min-w-12'}`}
+        className={`inline-flex h-8 items-center justify-center rounded-md border bg-background/80 px-1.5 font-mono text-lg font-semibold tabular-nums sm:h-11 sm:px-2 sm:text-2xl ${wide ? 'min-w-10 sm:min-w-16' : 'min-w-8 sm:min-w-12'}`}
       >
         {value}
       </span>
-      <span className="pb-1 text-[11px] text-muted-foreground">{label}</span>
+      <span className="pb-0.5 text-[10px] text-muted-foreground sm:pb-1 sm:text-[11px]">{label}</span>
     </span>
   );
 }
@@ -291,8 +292,8 @@ function CountdownStrip({
 
   return (
     <section className={`rounded-xl border ${tone}`}>
-      <div className="grid gap-4 p-4 lg:grid-cols-[1fr_auto_220px] lg:items-center">
-        <div className="flex items-center gap-3">
+      <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_auto_220px] lg:items-center">
+        <div className="flex min-w-0 items-center gap-3">
           <span className="flex size-10 items-center justify-center rounded-lg border bg-background/70">
             {isRunning ? (
               <Radio className="size-4 text-emerald-600" />
@@ -302,19 +303,19 @@ function CountdownStrip({
               <CheckCircle2 className="size-4 text-muted-foreground" />
             )}
           </span>
-          <div>
+          <div className="min-w-0">
             <p className="text-sm font-medium">{label}</p>
             <p className="text-xs text-muted-foreground">{isRunning ? '比赛正在进行' : isUpcoming ? '准备阶段' : '可查看赛后信息'}</p>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5 sm:gap-2">
           <CountdownUnit value={cd?.expired ? '0' : cd?.days || 0} label="天" wide />
-          <span className="text-xl font-semibold text-muted-foreground">:</span>
+          <span className="text-base font-semibold text-muted-foreground sm:text-xl">:</span>
           <CountdownUnit value={cd?.expired ? '00' : pad(cd?.hours || 0)} label="时" />
-          <span className="text-xl font-semibold text-muted-foreground">:</span>
+          <span className="text-base font-semibold text-muted-foreground sm:text-xl">:</span>
           <CountdownUnit value={cd?.expired ? '00' : pad(cd?.minutes || 0)} label="分" />
-          <span className="text-xl font-semibold text-muted-foreground">:</span>
+          <span className="text-base font-semibold text-muted-foreground sm:text-xl">:</span>
           <CountdownUnit value={cd?.expired ? '00' : pad(cd?.seconds || 0)} label="秒" />
         </div>
 
@@ -403,12 +404,12 @@ export function ContestsPage() {
   return (
     <motion.div className="space-y-4" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       {/* Header + create */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">比赛</h1>
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0">
+          <h1 className="min-w-0 text-xl font-semibold">比赛</h1>
           <p className="text-sm text-muted-foreground">{tdocs.length} 场比赛</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           <Button asChild>
             <a href={`${bs.urls.contests}/create`}>创建比赛</a>
           </Button>
@@ -445,10 +446,10 @@ export function ContestsPage() {
       </div>
 
       {/* Search + group + rule filter form */}
-      <Card>
+      <Card className="min-w-0">
         <CardContent className="p-4">
-          <form method="get" className="grid gap-3 sm:grid-cols-[1fr_180px_180px_auto] sm:items-end">
-            <div className="space-y-1.5">
+          <form method="get" className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_180px_180px_auto] lg:items-end">
+            <div className="min-w-0 space-y-1.5">
               <label className="text-xs text-muted-foreground">搜索</label>
               <div className="relative">
                 <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -460,7 +461,7 @@ export function ContestsPage() {
                 />
               </div>
             </div>
-            <div className="space-y-1.5">
+            <div className="min-w-0 space-y-1.5">
               <label className="text-xs text-muted-foreground">用户组</label>
               <SimpleSelect
                 name="group"
@@ -468,7 +469,7 @@ export function ContestsPage() {
                 options={[{ value: '', label: '全部' }, ...groups.map((group) => ({ value: group, label: group }))]}
               />
             </div>
-            <div className="space-y-1.5">
+            <div className="min-w-0 space-y-1.5">
               <label className="text-xs text-muted-foreground">赛制</label>
               <SimpleSelect
                 name="rule"
@@ -586,8 +587,8 @@ function RunningContestCard({ c, bs, tsdict }: { c: ContestDoc; bs: ReturnType<t
     <Card className="group h-full transition-all hover:border-primary/40 hover:shadow-md">
       <CardContent className="space-y-2 p-4">
         <a href={detailUrl} className="block space-y-2">
-          <div className="flex items-start justify-between gap-2">
-            <h3 className="font-medium line-clamp-2 leading-tight">{c.title || '未命名'}</h3>
+          <div className="flex min-w-0 items-start justify-between gap-2">
+            <h3 className="min-w-0 font-medium line-clamp-2 leading-tight">{c.title || '未命名'}</h3>
             <div className="flex shrink-0 items-center gap-1">
               <HiddenContestBadge hidden={c.hidden} />
               <Badge variant={ruleBadgeVariant(c.rule)}>{ruleLabel(c.rule)}</Badge>
@@ -631,8 +632,8 @@ function ContestCard({ c, bs, tsdict }: { c: ContestDoc; bs: ReturnType<typeof u
     <Card className="group h-full transition-all hover:border-primary/40 hover:shadow-md">
       <CardContent className="space-y-2 p-4">
         <a href={detailUrl} className="block space-y-2">
-          <div className="flex items-start justify-between gap-2">
-            <h3 className="font-medium line-clamp-2 leading-tight">{c.title || '未命名'}</h3>
+          <div className="flex min-w-0 items-start justify-between gap-2">
+            <h3 className="min-w-0 font-medium line-clamp-2 leading-tight">{c.title || '未命名'}</h3>
             <div className="flex shrink-0 items-center gap-1">
               <HiddenContestBadge hidden={c.hidden} />
               <Badge variant={ruleBadgeVariant(c.rule)}>{ruleLabel(c.rule)}</Badge>
@@ -676,9 +677,9 @@ function ContestTable({
   locale: string;
 }) {
   return (
-    <Card>
+    <Card className="min-w-0">
       <CardContent className="p-0">
-        <Table>
+        <Table className="min-w-max">
           <TableHeader>
             <TableRow>
               <TableHead>比赛名称</TableHead>
@@ -801,16 +802,16 @@ export function ContestDetailPage() {
   return (
     <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       {/* Breadcrumb */}
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <a href={isHomework ? bs.urls.homework : bs.urls.contests} className="hover:text-primary">
+      <div className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
+        <a href={isHomework ? bs.urls.homework : bs.urls.contests} className="shrink-0 hover:text-primary">
           {isHomework ? '作业' : '比赛'}
         </a>
-        <ChevronRight className="size-3" />
-        <span className="text-foreground">{tdoc.title || '比赛'}</span>
+        <ChevronRight className="size-3 shrink-0" />
+        <span className="min-w-0 truncate text-foreground">{tdoc.title || '比赛'}</span>
       </div>
 
-      <section className="rounded-xl border bg-card p-5 shadow-sm">
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+      <section className="min-w-0 rounded-xl border bg-card p-5 shadow-sm">
+        <div className="flex min-w-0 flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant={st.variant}>{st.label}</Badge>
@@ -825,7 +826,7 @@ export function ContestDetailPage() {
               ) : null}
               {tdoc.allowViewCode ? <Badge variant="outline">代码可见</Badge> : null}
             </div>
-            <h1 className="mt-3 text-3xl font-semibold leading-tight">{tdoc.title || '比赛'}</h1>
+            <h1 className="mt-3 min-w-0 break-words text-3xl font-semibold leading-tight">{tdoc.title || '比赛'}</h1>
             <div className="mt-4 grid gap-3 text-sm text-muted-foreground sm:grid-cols-3">
               <span className="inline-flex items-center gap-2">
                 <Users className="size-4" />
@@ -842,14 +843,14 @@ export function ContestDetailPage() {
             </div>
           </div>
 
-          <div className="flex flex-wrap gap-2 lg:justify-end">
+          <div className="flex min-w-0 flex-wrap gap-2 lg:justify-end">
             {!attended && st.phase !== 'ended' ? (
-              <form method="post" className="flex min-w-[16rem] flex-col gap-2">
+              <form method="post" className="flex w-full min-w-0 flex-col gap-2 sm:min-w-[16rem]">
                 <input type="hidden" name="operation" value="attend" />
                 {canSelfStar ? (
                   <label className="flex cursor-pointer items-start gap-2 rounded-lg border bg-background/70 px-3 py-2 text-sm">
                     <Checkbox name="unrank" value="true" className="mt-0.5" />
-                    <span>
+                    <span className="min-w-0">
                       <span className="block font-medium">打星参赛（不计正式名次）</span>
                       <span className="mt-0.5 block text-xs text-muted-foreground">仍会出现在榜上，名次显示为 *，不影响一血和气球。</span>
                     </span>
@@ -912,13 +913,13 @@ export function ContestDetailPage() {
 
       {cdForStrip ? <CountdownStrip phase={st.phase} beginAt={beginAt} endAt={endAt} cd={cdForStrip} /> : null}
 
-      <div className="grid gap-6 lg:grid-cols-[1fr_280px]">
-        <div className="space-y-4">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_280px]">
+        <div className="min-w-0 space-y-4">
           {tdoc.content ? (
-            <Card>
+            <Card className="max-w-4xl">
               <CardHeader className="pb-2">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <BookOpen className="size-4" />
+                <CardTitle className="flex min-w-0 items-center gap-2 text-base">
+                  <BookOpen className="size-4 shrink-0" />
                   比赛说明
                 </CardTitle>
               </CardHeader>
@@ -930,7 +931,7 @@ export function ContestDetailPage() {
 
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-base">比赛入口</CardTitle>
+              <CardTitle className="min-w-0 text-base">比赛入口</CardTitle>
             </CardHeader>
             <CardContent className="grid gap-3 sm:grid-cols-2">
               <DetailAction
@@ -982,10 +983,10 @@ export function ContestDetailPage() {
           </Card>
         </div>
 
-        <div className="space-y-3">
+        <div className="min-w-0 space-y-3">
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm">{isTeam ? '本队成绩' : '我的成绩'}</CardTitle>
+              <CardTitle className="min-w-0 text-sm">{isTeam ? '本队成绩' : '我的成绩'}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2 text-sm">
               {attended ? (
@@ -1005,7 +1006,7 @@ export function ContestDetailPage() {
 
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm">比赛时间</CardTitle>
+              <CardTitle className="min-w-0 text-sm">比赛时间</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2 text-sm">
               <Row label="开始" value={formatDateTime(tdoc.beginAt, locale)} />
@@ -1017,7 +1018,7 @@ export function ContestDetailPage() {
 
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm">操作</CardTitle>
+              <CardTitle className="min-w-0 text-sm">操作</CardTitle>
             </CardHeader>
             <CardContent className="space-y-1.5">
               {canManageContest ? (
@@ -1083,7 +1084,7 @@ export function ContestDetailPage() {
           {Array.isArray(data.files) && data.files.length > 0 ? (
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm">附件</CardTitle>
+                <CardTitle className="min-w-0 text-sm">附件</CardTitle>
               </CardHeader>
               <CardContent className="space-y-1.5">
                 {data.files.map((f: { name?: string }) => (
@@ -1567,22 +1568,22 @@ export function ContestScoreboardPage() {
   }
 
   return (
-    <motion.div className="space-y-4" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <a href={examUrls.overview || (isHomework ? bs.urls.homework : bs.urls.contests)} className="hover:text-primary">
+    <motion.div className="min-w-0 space-y-4" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
+      <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+        <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
+            <a href={examUrls.overview || (isHomework ? bs.urls.homework : bs.urls.contests)} className="shrink-0 hover:text-primary">
               {isHomework ? '作业' : '比赛'}
             </a>
-            <ChevronRight className="size-3" />
-            <a href={detailUrl} className="hover:text-primary">
+            <ChevronRight className="size-3 shrink-0" />
+            <a href={detailUrl} className="min-w-0 truncate hover:text-primary">
               {tdoc.title || (isHomework ? '作业' : '比赛')}
             </a>
-            <ChevronRight className="size-3" />
+            <ChevronRight className="size-3 shrink-0" />
           </div>
-          <h1 className="mt-1 text-xl font-semibold">排行榜</h1>
+          <h1 className="mt-1 min-w-0 text-xl font-semibold">排行榜</h1>
         </div>
-        <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+        <div className="flex min-w-0 flex-wrap items-center gap-2 lg:justify-end">
           <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border bg-background px-3 py-2 text-sm">
             <Checkbox checked={officialOnly} onCheckedChange={(checked) => setOfficialOnlyFilter(checked === true)} />
             只看正式排名
@@ -1640,69 +1641,71 @@ export function ContestScoreboardPage() {
         </Card>
       ) : null}
 
-      <Card>
+      <Card className="min-w-0">
         <CardContent className="p-0">
           {header.length > 0 ? (
-            <Table className="min-w-max">
-              <TableHeader>
-                <TableRow>
-                  {displayHeader.map((cell, index) => (
-                    <TableHead
-                      key={`${cell.type || 'col'}-${index}`}
-                      className={cn(
-                        cell.type === 'problem' || cell.type === 'record' || cell.type === 'records' ? 'min-w-20 text-center' : 'min-w-24',
-                        teamMode && index === participantColumn && 'w-80 min-w-80 normal-case tracking-normal',
-                        teamMode && cell.type === 'time' && 'text-right',
-                      )}
-                    >
-                      {teamMode && index === participantColumn ? '队伍' : renderHeaderCell(cell, index)}
-                    </TableHead>
-                  ))}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {visibleDisplayBody.map((row, rowIndex) => {
-                  const isCurrent = inExamMode && scoreboardRowMatches(row, participantColumn, currentParticipantId);
-                  const participantKey = row[participantColumn]?.raw;
-                  return (
-                    <TableRow
-                      key={`${String(participantKey ?? 'row')}-${rowIndex}`}
-                      aria-current={isCurrent ? 'true' : undefined}
-                      className={
-                        isCurrent ? 'bg-primary/[0.08] hover:bg-primary/[0.12] dark:bg-primary/[0.13] dark:hover:bg-primary/[0.17]' : undefined
-                      }
-                    >
-                      {displayHeader.map((head, columnIndex) => {
-                        const cell = row[columnIndex] || {};
-                        const isTeamParticipant = teamMode && columnIndex === participantColumn;
-                        const content = isTeamParticipant ? renderTeamParticipant(cell, isCurrent) : renderBodyCell(cell);
-                        return (
-                          <TableCell
-                            key={`${rowIndex}-${columnIndex}`}
-                            className={cn(
-                              head.type === 'problem' || cell.type === 'record' || cell.type === 'records' ? 'text-center' : '',
-                              teamMode && cell.type === 'time' && 'text-right',
-                              firstBloodClass(cell),
-                            )}
-                          >
-                            {isCurrent && columnIndex === participantColumn && !isTeamParticipant ? (
-                              <span className="inline-flex items-center gap-2">
-                                {content}
-                                <Badge variant="outline" className="border-primary/25 bg-primary/10 text-[10px] text-primary">
-                                  {teamMode ? '本队' : '我'}
-                                </Badge>
-                              </span>
-                            ) : (
-                              content
-                            )}
-                          </TableCell>
-                        );
-                      })}
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+            <ScrollArea className="max-h-[min(70vh,48rem)] w-full" orientation="both">
+              <table className="krypton-table min-w-max w-full caption-bottom text-sm [&_tr>*:first-child]:pl-5 [&_tr>*:last-child]:pr-5">
+                <TableHeader>
+                  <TableRow>
+                    {displayHeader.map((cell, index) => (
+                      <TableHead
+                        key={`${cell.type || 'col'}-${index}`}
+                        className={cn(
+                          cell.type === 'problem' || cell.type === 'record' || cell.type === 'records' ? 'min-w-20 text-center' : 'min-w-24',
+                          teamMode && index === participantColumn && 'w-80 min-w-80 normal-case tracking-normal',
+                          teamMode && cell.type === 'time' && 'text-right',
+                        )}
+                      >
+                        {teamMode && index === participantColumn ? '队伍' : renderHeaderCell(cell, index)}
+                      </TableHead>
+                    ))}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {visibleDisplayBody.map((row, rowIndex) => {
+                    const isCurrent = inExamMode && scoreboardRowMatches(row, participantColumn, currentParticipantId);
+                    const participantKey = row[participantColumn]?.raw;
+                    return (
+                      <TableRow
+                        key={`${String(participantKey ?? 'row')}-${rowIndex}`}
+                        aria-current={isCurrent ? 'true' : undefined}
+                        className={
+                          isCurrent ? 'bg-primary/[0.08] hover:bg-primary/[0.12] dark:bg-primary/[0.13] dark:hover:bg-primary/[0.17]' : undefined
+                        }
+                      >
+                        {displayHeader.map((head, columnIndex) => {
+                          const cell = row[columnIndex] || {};
+                          const isTeamParticipant = teamMode && columnIndex === participantColumn;
+                          const content = isTeamParticipant ? renderTeamParticipant(cell, isCurrent) : renderBodyCell(cell);
+                          return (
+                            <TableCell
+                              key={`${rowIndex}-${columnIndex}`}
+                              className={cn(
+                                head.type === 'problem' || cell.type === 'record' || cell.type === 'records' ? 'text-center' : '',
+                                teamMode && cell.type === 'time' && 'text-right',
+                                firstBloodClass(cell),
+                              )}
+                            >
+                              {isCurrent && columnIndex === participantColumn && !isTeamParticipant ? (
+                                <span className="inline-flex items-center gap-2">
+                                  {content}
+                                  <Badge variant="outline" className="border-primary/25 bg-primary/10 text-[10px] text-primary">
+                                    {teamMode ? '本队' : '我'}
+                                  </Badge>
+                                </span>
+                              ) : (
+                                content
+                              )}
+                            </TableCell>
+                          );
+                        })}
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </table>
+            </ScrollArea>
           ) : (
             <p className="py-8 text-center text-sm text-muted-foreground">暂无排行数据</p>
           )}
@@ -1719,14 +1722,14 @@ export function ContestScoreboardPage() {
       >
         <DialogContent className="w-full sm:w-[520px]" onClose={() => !imageExportBusy && setImageExportOpen(false)}>
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <ImageDown className="size-4 text-primary" />
+            <DialogTitle className="flex min-w-0 items-center gap-2">
+              <ImageDown className="size-4 shrink-0 text-primary" />
               导出完整排行榜
             </DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 px-6 py-5">
+          <DialogBody className="space-y-4 px-6 py-5">
             <div className="rounded-xl border bg-muted/35 p-4">
-              <p className="font-medium">{tdoc.title || (isHomework ? '作业排行榜' : '比赛排行榜')}</p>
+              <p className="min-w-0 font-medium">{tdoc.title || (isHomework ? '作业排行榜' : '比赛排行榜')}</p>
               <p className="mt-1 text-sm text-muted-foreground">
                 将全部 {orderedDisplayBody.length} 行、{displayHeader.length} 列生成一张完整 PNG，含打星（*），不受屏幕过滤影响。
               </p>
@@ -1742,7 +1745,7 @@ export function ContestScoreboardPage() {
                   onCheckedChange={setIncludePrivateIdentity}
                   disabled={imageExportBusy}
                 />
-                <span>
+                <span className="min-w-0">
                   <span className="block text-sm font-medium">包含学号和姓名</span>
                   <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
                     仅全站系统管理员可选。图片可能包含个人信息，请按管理用途妥善保存。
@@ -1755,8 +1758,8 @@ export function ContestScoreboardPage() {
                 {imageExportError}
               </div>
             ) : null}
-          </div>
-          <div className="flex justify-end gap-2 border-t px-6 py-4">
+          </DialogBody>
+          <DialogFooter>
             <Button type="button" variant="outline" disabled={imageExportBusy} onClick={() => setImageExportOpen(false)}>
               取消
             </Button>
@@ -1764,7 +1767,7 @@ export function ContestScoreboardPage() {
               <ImageDown className="size-4" />
               {imageExportBusy ? '正在生成…' : '生成并下载'}
             </Button>
-          </div>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </motion.div>

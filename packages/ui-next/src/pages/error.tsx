@@ -30,9 +30,9 @@ export function ErrorPage() {
           <div className="rounded-full bg-yellow-500/10 p-4">
             <AlertTriangle className="size-8 text-yellow-500" />
           </div>
-          {code ? <p className="text-4xl font-bold text-muted-foreground">{code}</p> : null}
-          <p className="text-lg font-medium">{message}</p>
-          <div className="flex gap-3 pt-4">
+          {code ? <p className="w-full max-w-full min-w-0 break-words text-4xl font-bold text-muted-foreground">{code}</p> : null}
+          <p className="w-full max-w-full min-w-0 break-words text-lg font-medium">{message}</p>
+          <div className="flex w-full max-w-full min-w-0 flex-wrap items-center justify-center gap-3 break-words pt-4">
             <Button variant="outline" onClick={() => window.history.back()}>
               <ArrowLeft className="mr-2 size-4" />
               返回
@@ -67,9 +67,9 @@ export function BsodPage() {
           <div className="rounded-full bg-destructive/10 p-4">
             <Bug className="size-8 text-destructive" />
           </div>
-          <p className="text-lg font-semibold">服务器内部错误</p>
-          <p className="text-sm text-muted-foreground">{message}</p>
-          <div className="flex gap-3 pt-4">
+          <p className="w-full max-w-full min-w-0 break-words text-lg font-semibold">服务器内部错误</p>
+          <p className="w-full max-w-full min-w-0 break-words text-sm text-muted-foreground">{message}</p>
+          <div className="flex w-full max-w-full min-w-0 flex-wrap items-center justify-center gap-3 break-words pt-4">
             <Button variant="outline" onClick={() => window.history.back()}>
               <ArrowLeft className="mr-2 size-4" />
               返回

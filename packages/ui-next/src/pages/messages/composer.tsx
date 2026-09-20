@@ -3,6 +3,8 @@ import type { JSX } from 'react';
 import { Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { cn } from '@/lib/cn';
+import { narrowTw } from './viewport';
 
 export function MessageComposer(props: {
   draftRef: React.Ref<HTMLTextAreaElement>;
@@ -11,8 +13,9 @@ export function MessageComposer(props: {
   onSend: () => void;
   sending: boolean;
   disabled?: boolean;
+  compact?: boolean;
 }): JSX.Element {
-  const { draftRef, value, onChange, onSend, sending, disabled } = props;
+  const { draftRef, value, onChange, onSend, sending, disabled, compact } = props;
   const sendDisabled = !value.trim() || sending || Boolean(disabled);
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -31,16 +34,16 @@ export function MessageComposer(props: {
   };
 
   return (
-    <div className="space-y-2 border-t p-3">
+    <div className={cn('space-y-2 border-t p-3', compact && 'space-y-1 p-2', narrowTw('space-y-1'), narrowTw('p-2'))}>
       <Textarea
         ref={draftRef}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={handleKeyDown}
-        rows={3}
+        rows={compact ? 1 : 3}
         disabled={disabled}
         placeholder="输入消息… Markdown · Enter 发送 · Shift+Enter 换行"
-        className="min-h-[80px] resize-none"
+        className={cn('min-h-[80px] resize-none', compact && 'min-h-9 py-1.5', narrowTw('min-h-9'), narrowTw('py-1.5'))}
       />
       <div className="flex items-center justify-between gap-2">
         <span className="text-[10px] text-muted-foreground">{value.length} 字符</span>

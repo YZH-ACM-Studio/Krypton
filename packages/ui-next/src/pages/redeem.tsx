@@ -12,10 +12,10 @@ export function RedeemPage() {
   const bs = useBootstrap();
   const data = bs.page.data as RedeemPageData;
   return (
-    <div className="mx-auto max-w-lg space-y-4">
-      <div className="flex items-center gap-2">
-        <KeyRound className="size-5 text-primary" />
-        <h1 className="text-xl font-semibold">兑换码</h1>
+    <div className="mx-auto min-w-0 max-w-lg space-y-4">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <KeyRound className="size-5 shrink-0 text-primary" />
+        <h1 className="text-xl font-semibold break-words">兑换码</h1>
       </div>
       <Card>
         <CardHeader>

@@ -335,9 +335,9 @@ export function ProblemSubmitPage() {
   }, [code, lang, tid, practiceContextId, submitUrl, submitting, bs.urls.recordDetail]);
 
   return (
-    <motion.div className="space-y-4" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
+    <motion.div className="w-full min-w-0 space-y-4" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
       {/* Breadcrumb */}
-      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
         {tdoc && contestLetter ? (
           <>
             <a href={tdoc.rule === 'homework' ? bs.urls.homework : bs.urls.contests} className="hover:text-primary">
@@ -346,7 +346,7 @@ export function ProblemSubmitPage() {
             <ChevronRight className="size-3" />
             <a
               href={replaceRouteTokens(tdoc.rule === 'homework' ? bs.urls.homeworkDetail : bs.urls.contestDetail, { TID: tid! })}
-              className="hover:text-primary truncate max-w-[200px]"
+              className="min-w-0 truncate hover:text-primary"
             >
               {tdoc.title || '比赛'}
             </a>
@@ -357,7 +357,7 @@ export function ProblemSubmitPage() {
           </a>
         )}
         <ChevronRight className="size-3" />
-        <a href={problemDetailUrl} className="hover:text-primary truncate max-w-[260px]">
+        <a href={problemDetailUrl} className="min-w-0 truncate hover:text-primary">
           {title}
         </a>
         <ChevronRight className="size-3" />
@@ -365,10 +365,10 @@ export function ProblemSubmitPage() {
       </div>
 
       {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
           <h1 className="text-xl font-semibold">{isStructuredAnswer ? '提交作答' : '提交代码'}</h1>
-          <p className="text-sm text-muted-foreground">{title}</p>
+          <p className="min-w-0 break-words text-sm text-muted-foreground">{title}</p>
         </div>
         <div className="flex items-center gap-2">
           <Button asChild variant="outline" size="sm">
@@ -422,7 +422,13 @@ export function ProblemSubmitPage() {
             />
           </div>
         ) : (
-          <div className="rounded-md border overflow-hidden" style={{ height: 'calc(100vh - 220px)', minHeight: 480 }}>
+          <div
+            className="min-w-0 overflow-hidden rounded-md border"
+            style={{
+              height: 'calc(100dvh - 12.5rem)',
+              minHeight: 'min(480px, calc(100dvh - 12.5rem))',
+            }}
+          >
             <KryptonIDE
               mode="simple"
               langs={availableLangs}
@@ -430,8 +436,8 @@ export function ProblemSubmitPage() {
               value={code}
               onValueChange={setCode}
               prohibitExternalCodeInjection={blockExternalCode}
-              minHeight={480}
-              className="h-full"
+              minHeight={0}
+              className="h-full min-h-0"
             />
           </div>
         )}
@@ -490,12 +496,12 @@ export function ProblemSubmitPage() {
           <p className="rounded-lg border border-border/70 px-3 py-2 text-sm text-muted-foreground">文本比对模式不执行程序，请填写后直接提交。</p>
         ) : null}
 
-        {/* Submit row */}
-        <div className="flex items-center justify-between gap-2">
-          <div className="text-xs text-muted-foreground">
+        {/* Submit row — sticky so the same handleSubmit stays reachable on short viewports */}
+        <div className="sticky bottom-0 z-10 -mx-1 flex min-w-0 items-center justify-between gap-2 border-t bg-background/95 px-1 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur">
+          <div className="min-w-0 text-xs text-muted-foreground">
             {submitError ? <span className="text-destructive">{submitError}</span> : <span>{code.length} 字符</span>}
           </div>
-          <Button onClick={handleSubmit} disabled={submitting} size="lg" className="gap-1.5">
+          <Button onClick={handleSubmit} disabled={submitting} size="lg" className="shrink-0 gap-1.5">
             {submitting ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
             {submitting ? '提交中…' : '提交'}
           </Button>

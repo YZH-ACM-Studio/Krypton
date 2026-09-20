@@ -189,6 +189,163 @@ function buildUrlWithQuery(baseUrl: string, params: Record<string, unknown>) {
   return query ? `${baseUrl}?${query}` : baseUrl;
 }
 
+function FilterFields({
+  query,
+  sort,
+  filters,
+  problemKinds,
+  contestOptions,
+  pidNamespaces,
+  canFilterOwner,
+  canReviewManaged,
+  compact = false,
+}: {
+  query: string;
+  sort: string;
+  filters: BankFilters;
+  problemKinds: Array<{ kind: ProblemKind; slug: string }>;
+  contestOptions: Array<{ id: string; title: string; beginAt?: string | Date }>;
+  pidNamespaces: Array<{ namespaceId: string; name: string; pidPattern: string }>;
+  canFilterOwner: boolean;
+  canReviewManaged: boolean;
+  compact?: boolean;
+}) {
+  return (
+    <>
+      <label className={compact ? 'block min-w-0 space-y-1.5' : 'min-w-0 space-y-1.5 lg:col-span-2'}>
+        <span className="text-xs font-medium text-muted-foreground">关键词或题号</span>
+        <span className="relative block min-w-0">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input name="q" defaultValue={query} placeholder="标题、PID、题号或标签" className="min-h-11 min-w-0 pl-9" />
+        </span>
+      </label>
+      <label className="min-w-0 space-y-1.5">
+        <span className="text-xs font-medium text-muted-foreground">题型</span>
+        <SimpleSelect
+          name="kind"
+          defaultValue={filters.kind || ''}
+          className="min-h-11"
+          options={[{ value: '', label: '全部题型' }, ...problemKinds.map((item) => ({ value: item.slug, label: KIND_LABEL[item.kind] }))]}
+        />
+      </label>
+      {contestOptions.length ? (
+        <label className="min-w-0 space-y-1.5">
+          <span className="text-xs font-medium text-muted-foreground">所属比赛</span>
+          <SimpleSelect
+            name="contest"
+            defaultValue={filters.contest || ''}
+            className="min-h-11"
+            options={[
+              { value: '', label: '全部比赛' },
+              ...contestOptions.map((item) => {
+                const year = item.beginAt ? new Date(item.beginAt).getFullYear() : null;
+                return { value: item.id, label: `${item.title}${year && Number.isFinite(year) ? ` · ${year}` : ''}` };
+              }),
+            ]}
+          />
+        </label>
+      ) : null}
+      <label className="min-w-0 space-y-1.5">
+        <span className="text-xs font-medium text-muted-foreground">题号命名空间</span>
+        <SimpleSelect
+          name="pidNamespaceId"
+          defaultValue={filters.pidNamespaceId || ''}
+          className="min-h-11"
+          options={[
+            { value: '', label: '全部命名空间' },
+            ...pidNamespaces.map((namespace) => ({
+              value: namespace.namespaceId,
+              label: `${namespace.name} · ${namespace.pidPattern}`,
+            })),
+          ]}
+        />
+      </label>
+      <label className="min-w-0 space-y-1.5">
+        <span className="text-xs font-medium text-muted-foreground">标签</span>
+        <Input name="tag" defaultValue={filters.tag || ''} placeholder="精确标签" className="min-h-11 min-w-0" />
+      </label>
+      {canFilterOwner ? (
+        <label className="min-w-0 space-y-1.5">
+          <span className="text-xs font-medium text-muted-foreground">出题人 UID</span>
+          <Input name="owner" type="number" min={1} defaultValue={filters.owner || ''} placeholder="全部" className="min-h-11 min-w-0" />
+        </label>
+      ) : null}
+      {canReviewManaged ? (
+        <label className="min-w-0 space-y-1.5">
+          <span className="text-xs font-medium text-muted-foreground">托管审核</span>
+          <SimpleSelect
+            name="managedReview"
+            defaultValue={filters.managedReview || 'all'}
+            className="min-h-11"
+            options={[
+              { value: 'all', label: '全部' },
+              { value: 'pending', label: '元数据待确认' },
+            ]}
+          />
+        </label>
+      ) : null}
+      <label className="min-w-0 space-y-1.5">
+        <span className="text-xs font-medium text-muted-foreground">可见性</span>
+        <SimpleSelect
+          name="visibility"
+          defaultValue={filters.visibility || 'all'}
+          className="min-h-11"
+          options={[
+            { value: 'all', label: '全部' },
+            { value: 'hidden', label: '隐藏' },
+            { value: 'published', label: '已发布' },
+          ]}
+        />
+      </label>
+      <label className="min-w-0 space-y-1.5">
+        <span className="text-xs font-medium text-muted-foreground">生命周期</span>
+        <SimpleSelect
+          name="lifecycle"
+          defaultValue={filters.lifecycle || 'active'}
+          className="min-h-11"
+          options={[
+            { value: 'active', label: '使用中' },
+            { value: 'archived', label: '已归档' },
+            { value: 'all', label: '全部' },
+          ]}
+        />
+      </label>
+      <label className="min-w-0 space-y-1.5">
+        <span className="text-xs font-medium text-muted-foreground">排序</span>
+        <SimpleSelect
+          name="sort"
+          defaultValue={sort}
+          className="min-h-11"
+          options={[
+            { value: 'default', label: '题号顺序' },
+            { value: 'recent', label: '最近创建' },
+            { value: 'title', label: '标题 A–Z' },
+          ]}
+        />
+      </label>
+    </>
+  );
+}
+
+function FilterActions({ action, compact = false }: { action: string; compact?: boolean }) {
+  return (
+    <div
+      className={
+        compact
+          ? 'flex shrink-0 gap-2 border-t px-5 py-3'
+          : 'flex min-w-0 flex-wrap items-end gap-2'
+      }
+    >
+      <Button type="submit" className="min-h-11 min-w-0 flex-1">
+        应用
+      </Button>
+      <Button asChild type="button" variant="ghost" className="min-h-11 shrink-0">
+        <a href={action}>清空</a>
+      </Button>
+    </div>
+  );
+}
+
 function FilterForm({
   action,
   query,
@@ -212,127 +369,33 @@ function FilterForm({
   canReviewManaged: boolean;
   compact?: boolean;
 }) {
+  const fields = (
+    <FilterFields
+      query={query}
+      sort={sort}
+      filters={filters}
+      problemKinds={problemKinds}
+      contestOptions={contestOptions}
+      pidNamespaces={pidNamespaces}
+      canFilterOwner={canFilterOwner}
+      canReviewManaged={canReviewManaged}
+      compact={compact}
+    />
+  );
+  if (compact) {
+    return (
+      <form method="get" action={action} className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <SheetBody className="p-5">
+          <div className="space-y-4">{fields}</div>
+        </SheetBody>
+        <FilterActions action={action} compact />
+      </form>
+    );
+  }
   return (
-    <form method="get" action={action} className={compact ? 'space-y-4' : 'grid gap-3 lg:grid-cols-4 xl:grid-cols-8'}>
-      <label className={compact ? 'block space-y-1.5' : 'space-y-1.5 lg:col-span-2'}>
-        <span className="text-xs font-medium text-muted-foreground">关键词或题号</span>
-        <span className="relative block">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input name="q" defaultValue={query} placeholder="标题、PID、题号或标签" className="min-h-11 pl-9" />
-        </span>
-      </label>
-      <label className="space-y-1.5">
-        <span className="text-xs font-medium text-muted-foreground">题型</span>
-        <SimpleSelect
-          name="kind"
-          defaultValue={filters.kind || ''}
-          className="min-h-11"
-          options={[{ value: '', label: '全部题型' }, ...problemKinds.map((item) => ({ value: item.slug, label: KIND_LABEL[item.kind] }))]}
-        />
-      </label>
-      {contestOptions.length ? (
-        <label className="space-y-1.5">
-          <span className="text-xs font-medium text-muted-foreground">所属比赛</span>
-          <SimpleSelect
-            name="contest"
-            defaultValue={filters.contest || ''}
-            className="min-h-11"
-            options={[
-              { value: '', label: '全部比赛' },
-              ...contestOptions.map((item) => {
-                const year = item.beginAt ? new Date(item.beginAt).getFullYear() : null;
-                return { value: item.id, label: `${item.title}${year && Number.isFinite(year) ? ` · ${year}` : ''}` };
-              }),
-            ]}
-          />
-        </label>
-      ) : null}
-      <label className="space-y-1.5">
-        <span className="text-xs font-medium text-muted-foreground">题号命名空间</span>
-        <SimpleSelect
-          name="pidNamespaceId"
-          defaultValue={filters.pidNamespaceId || ''}
-          className="min-h-11"
-          options={[
-            { value: '', label: '全部命名空间' },
-            ...pidNamespaces.map((namespace) => ({
-              value: namespace.namespaceId,
-              label: `${namespace.name} · ${namespace.pidPattern}`,
-            })),
-          ]}
-        />
-      </label>
-      <label className="space-y-1.5">
-        <span className="text-xs font-medium text-muted-foreground">标签</span>
-        <Input name="tag" defaultValue={filters.tag || ''} placeholder="精确标签" className="min-h-11" />
-      </label>
-      {canFilterOwner ? (
-        <label className="space-y-1.5">
-          <span className="text-xs font-medium text-muted-foreground">出题人 UID</span>
-          <Input name="owner" type="number" min={1} defaultValue={filters.owner || ''} placeholder="全部" className="min-h-11" />
-        </label>
-      ) : null}
-      {canReviewManaged ? (
-        <label className="space-y-1.5">
-          <span className="text-xs font-medium text-muted-foreground">托管审核</span>
-          <SimpleSelect
-            name="managedReview"
-            defaultValue={filters.managedReview || 'all'}
-            className="min-h-11"
-            options={[
-              { value: 'all', label: '全部' },
-              { value: 'pending', label: '元数据待确认' },
-            ]}
-          />
-        </label>
-      ) : null}
-      <label className="space-y-1.5">
-        <span className="text-xs font-medium text-muted-foreground">可见性</span>
-        <SimpleSelect
-          name="visibility"
-          defaultValue={filters.visibility || 'all'}
-          className="min-h-11"
-          options={[
-            { value: 'all', label: '全部' },
-            { value: 'hidden', label: '隐藏' },
-            { value: 'published', label: '已发布' },
-          ]}
-        />
-      </label>
-      <label className="space-y-1.5">
-        <span className="text-xs font-medium text-muted-foreground">生命周期</span>
-        <SimpleSelect
-          name="lifecycle"
-          defaultValue={filters.lifecycle || 'active'}
-          className="min-h-11"
-          options={[
-            { value: 'active', label: '使用中' },
-            { value: 'archived', label: '已归档' },
-            { value: 'all', label: '全部' },
-          ]}
-        />
-      </label>
-      <label className="space-y-1.5">
-        <span className="text-xs font-medium text-muted-foreground">排序</span>
-        <SimpleSelect
-          name="sort"
-          defaultValue={sort}
-          className="min-h-11"
-          options={[
-            { value: 'default', label: '题号顺序' },
-            { value: 'recent', label: '最近创建' },
-            { value: 'title', label: '标题 A–Z' },
-          ]}
-        />
-      </label>
-      <div className={compact ? 'flex gap-2 pt-1' : 'flex items-end gap-2'}>
-        <Button type="submit" className="min-h-11 flex-1">
-          应用
-        </Button>
-        <Button asChild type="button" variant="ghost" className="min-h-11">
-          <a href={action}>清空</a>
-        </Button>
-      </div>
+    <form method="get" action={action} className="grid min-w-0 gap-3 lg:grid-cols-4 xl:grid-cols-8">
+      {fields}
+      <FilterActions action={action} />
     </form>
   );
 }
@@ -515,8 +578,8 @@ export function ProblemsPage() {
 
   return (
     <main className="w-full min-w-0 space-y-6 overflow-x-clip pb-12">
-      <header className="flex flex-col gap-4 border-b border-border/70 pb-5 sm:flex-row sm:items-end sm:justify-between">
-        <div className="space-y-1">
+      <header className="flex min-w-0 flex-col gap-4 border-b border-border/70 pb-5 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0 space-y-1">
           <p className="text-xs font-medium tracking-wide text-muted-foreground">统一题库</p>
           <h1 className="text-3xl font-semibold tracking-tight">题目</h1>
           <p className="text-sm text-muted-foreground">当前条件下共 {pcount} 道题</p>
@@ -583,28 +646,26 @@ export function ProblemsPage() {
       </section>
 
       <Sheet open={mobileFiltersOpen} onOpenChange={setMobileFiltersOpen}>
-        <SheetContent side="bottom" className="max-h-[88vh]">
+        <SheetContent side="bottom" className="max-h-[88vh] min-h-0 pb-[env(safe-area-inset-bottom)]">
           <SheetHeader>
             <SheetTitle>筛选题库</SheetTitle>
           </SheetHeader>
-          <SheetBody className="p-5">
-            <FilterForm
-              action={bs.urls.problems}
-              query={query}
-              sort={sort}
-              filters={filters}
-              problemKinds={problemKinds}
-              contestOptions={contestOptions}
-              pidNamespaces={pidNamespaces}
-              canFilterOwner={!!data.canFilterOwner}
-              canReviewManaged={!!data.canReviewManaged}
-              compact
-            />
-          </SheetBody>
+          <FilterForm
+            action={bs.urls.problems}
+            query={query}
+            sort={sort}
+            filters={filters}
+            problemKinds={problemKinds}
+            contestOptions={contestOptions}
+            pidNamespaces={pidNamespaces}
+            canFilterOwner={!!data.canFilterOwner}
+            canReviewManaged={!!data.canReviewManaged}
+            compact
+          />
         </SheetContent>
       </Sheet>
 
-      <section aria-label="题目列表" className="overflow-hidden rounded-2xl border border-border/80 bg-background">
+      <section aria-label="题目列表" className="min-w-0 overflow-hidden rounded-2xl border border-border/80 bg-background">
         {pdocs.length === 0 ? (
           <div className="grid min-h-56 place-items-center px-6 py-12 text-center">
             <div className="space-y-2">
@@ -637,7 +698,7 @@ export function ProblemsPage() {
               const pendingChapter = pendingTraining?.chapters?.find((chapter) => chapter.id === pendingPlacement?.chapterId);
               const pendingContributions = pendingContributionsByDocId[docId] || [];
               return (
-                <li key={docId} className="px-4 py-4 sm:px-5">
+                <li key={docId} className="min-w-0 px-4 py-4 sm:px-5">
                   <div className="grid min-w-0 gap-3 sm:grid-cols-[1.2rem_1.2rem_minmax(0,1fr)_auto] sm:items-center">
                     <SubmissionStatus status={status} />
                     {canManageContributions ? (
@@ -779,7 +840,7 @@ export function ProblemsPage() {
                         </section>
                       ) : null}
                     </div>
-                    <div className="flex flex-wrap items-center gap-1 sm:justify-end">
+                    <div className="flex min-w-0 flex-wrap items-center gap-1 sm:justify-end">
                       <Button asChild variant="ghost" size="sm">
                         <a href={detailUrl}>查看</a>
                       </Button>

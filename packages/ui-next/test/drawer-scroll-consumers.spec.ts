@@ -79,6 +79,10 @@ describe('unified drawer and scroll consumers', () => {
 
     expect(snapshots).to.include('队伍代码快照');
     expect(snapshots).to.include('<ScrollArea');
+    expect(snapshots).to.include('grid-rows-[minmax(0,40%)_minmax(0,1fr)]');
+    expect(snapshots).to.include('md:grid-rows-[minmax(0,1fr)]');
+    expect(snapshots).to.include('md:grid-cols-[19rem_minmax(0,1fr)]');
+    expect(snapshots).not.to.include('min-h-[18rem]');
 
     expect(adminTasks).to.include('<SheetBody');
     expect(adminTasks).to.include('录取此人');
@@ -100,16 +104,17 @@ describe('unified drawer and scroll consumers', () => {
 
   it('keeps both-axis scroll on wide native tables and lets Table own horizontal overflow', () => {
     const problemDetail = source('src/pages/problem-detail.tsx');
-    const training = source('src/pages/training.tsx');
+    const roster = source('src/components/practice-roster.tsx');
     const records = source('src/pages/records.tsx');
     const realpass = source('src/pages/realpass-manage.tsx');
 
     expect(problemDetail).to.include('min-w-[620px]');
     expect(problemDetail).to.match(/<ScrollArea className="min-h-0 flex-1" orientation="both">/);
-    expect(training).to.include('参加名单');
-    expect(training).to.match(/<ScrollArea className="max-h-\[28rem\]" orientation="both">/);
-    expect(records).to.match(/<ScrollArea className="max-h-\[min\(65vh,680px\)\]" viewportLayout="block">/);
-    expect(records).to.include('<Table density="compact">');
+    expect(roster).to.include('参加名单');
+    expect(roster).to.match(/<ScrollArea className="max-h-\[28rem\]" orientation="both">/);
+    expect(roster).to.include('min-w-[640px]');
+    expect(records).to.match(/<ScrollArea className="max-h-\[min\(65vh,680px\)\] w-full" orientation="both">/);
+    expect(records).to.include("<table className={cn(RECORD_NATIVE_TABLE_CLASS, 'min-w-[56rem]')}>");
     expect(realpass).to.match(/<ScrollArea className="max-h-80" viewportLayout="block">/);
     expect(realpass).to.include('<Table>');
   });

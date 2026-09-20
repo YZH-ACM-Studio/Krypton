@@ -32,7 +32,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Pagination } from '@/components/ui/pagination';
 import { MiniTabs } from '@/components/ui/mini-tabs';
 import { confirmDialog, confirmFormSubmit } from '@/components/ui/dialog';
@@ -255,59 +254,67 @@ export function DiscussionsPage() {
 
   return (
     <motion.div className="space-y-4" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">{vnode.title ? `讨论 · ${vnode.title}` : '讨论'}</h1>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <h1 className="truncate text-xl font-semibold">{vnode.title ? `讨论 · ${vnode.title}` : '讨论'}</h1>
           <p className="text-sm text-muted-foreground">{data.dcount || ddocs.length} 条讨论</p>
         </div>
         {createUrl ? (
-          <Button asChild>
+          <Button asChild className="shrink-0">
             <a href={createUrl}>发起讨论</a>
           </Button>
         ) : null}
       </div>
 
-      {/* Layout: 220px node sidebar | main */}
+      {/* Layout: 220px node sidebar | main. Below md the sidebar becomes a chip row. */}
       <div className={inExamMode ? 'grid gap-4' : 'grid gap-4 md:grid-cols-[220px_minmax(0,1fr)]'}>
-        {/* Node sidebar */}
         {!inExamMode ? (
-          <aside className="space-y-3">
-            <Card>
+          <aside className="min-w-0 space-y-3">
+            <div className="md:hidden">
+              <NodeList layout="chips" vnodes={vnodes} currentId={vnode?.id} discussionsUrl={bs.urls.discussions} />
+            </div>
+            <Card className="hidden md:block">
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm flex items-center gap-1.5">
+                <CardTitle className="flex items-center gap-1.5 text-sm">
                   <Filter className="size-3.5" />
                   分类
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-0">
-                <ScrollArea className="max-h-[60vh]">
-                  <NodeList vnodes={vnodes} currentId={vnode?.id} discussionsUrl={bs.urls.discussions} />
-                </ScrollArea>
+                <NodeList layout="list" vnodes={vnodes} currentId={vnode?.id} discussionsUrl={bs.urls.discussions} />
               </CardContent>
             </Card>
           </aside>
         ) : null}
 
         {/* Main */}
-        <div className="space-y-3 min-w-0">
+        <div className="min-w-0 space-y-3">
           {/* Search + sort */}
           <Card>
-            <CardContent className="p-3 flex flex-wrap items-center gap-2">
-              <div className="relative flex-1 min-w-[180px]">
+            <CardContent className="flex flex-wrap items-center gap-2 p-3">
+              <div className="relative min-w-[180px] flex-1">
                 <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                <Input value={search} onChange={(e) => setSearch(e.target.value)} className="pl-8 h-8 text-sm" placeholder="搜索标题…" />
+                <Input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="h-8 pl-8 text-base sm:text-sm"
+                  placeholder="搜索标题…"
+                />
               </div>
-              <MiniTabs
-                size="sm"
-                value={sortKey}
-                onValueChange={(v) => setSortKey(v as SortKey)}
-                items={[
-                  { value: 'updateAt', label: '最新回复' },
-                  { value: 'docId', label: '最新发布' },
-                  { value: 'nReply', label: '回复数' },
-                  { value: 'views', label: '浏览数' },
-                ]}
-              />
+              <div className="w-full min-w-0 overflow-x-auto sm:w-auto">
+                <MiniTabs
+                  size="sm"
+                  className="min-w-max"
+                  value={sortKey}
+                  onValueChange={(v) => setSortKey(v as SortKey)}
+                  items={[
+                    { value: 'updateAt', label: '最新回复' },
+                    { value: 'docId', label: '最新发布' },
+                    { value: 'nReply', label: '回复数' },
+                    { value: 'views', label: '浏览数' },
+                  ]}
+                />
+              </div>
               {canViewHidden ? (
                 <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
                   <Checkbox
@@ -380,29 +387,64 @@ function vnodeTypeSlug(type: number | string | undefined): string {
   }
 }
 
-function NodeList({
-  vnodes,
-  currentId,
-  discussionsUrl,
-}: {
-  vnodes: VNodeCollection | null | undefined;
-  currentId?: string | number;
-  discussionsUrl: string;
-}) {
-  // Normalize to an array — be tolerant if hydrooj ever changes the shape.
-  let items: VNodeDoc[] = [];
-  if (Array.isArray(vnodes)) {
-    items = vnodes;
-  } else if (vnodes && typeof vnodes === 'object') {
+function nodeListItems(vnodes: VNodeCollection | null | undefined): VNodeDoc[] {
+  if (Array.isArray(vnodes)) return vnodes;
+  const items: VNodeDoc[] = [];
+  if (vnodes && typeof vnodes === 'object') {
     // Legacy/alternate shapes: { docType: [vnode, ...] } or { docType: { id: vnode } }
     for (const v of Object.values(vnodes)) {
       if (Array.isArray(v)) items.push(...v);
       else if (v && typeof v === 'object') items.push(...Object.values(v));
     }
   }
+  return items;
+}
+
+function NodeList({
+  vnodes,
+  currentId,
+  discussionsUrl,
+  layout = 'list',
+}: {
+  vnodes: VNodeCollection | null | undefined;
+  currentId?: string | number;
+  discussionsUrl: string;
+  layout?: 'list' | 'chips';
+}) {
+  const items = nodeListItems(vnodes);
+
+  if (layout === 'chips') {
+    const chipClass = (active: boolean) =>
+      `inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-3 py-1.5 text-xs transition-colors ${
+        active ? 'border-transparent bg-accent font-medium' : 'hover:bg-accent'
+      }`;
+    return (
+      <div className="flex gap-1.5 overflow-x-auto overscroll-x-contain" aria-label="讨论分类">
+        <a href={discussionsUrl} className={chipClass(!currentId)}>
+          全部讨论
+        </a>
+        {items.slice(0, 60).map((n) => {
+          const slugName = n.docId ?? n._id;
+          const label = n.docId ?? n.content ?? String(n._id ?? '');
+          const active = String(currentId) === String(slugName);
+          return (
+            <a
+              key={String(n._id ?? slugName)}
+              href={`${discussionsUrl}/node/${encodeURIComponent(String(slugName))}`}
+              className={chipClass(active)}
+              title={label}
+            >
+              <span>{label}</span>
+              {n.count ? <span className="text-[10px] tabular-nums text-muted-foreground">{n.count}</span> : null}
+            </a>
+          );
+        })}
+      </div>
+    );
+  }
 
   const allDiscussionsLink = (
-    <a href={discussionsUrl} className={`block px-3 py-2 text-xs font-medium border-b ${!currentId ? 'bg-accent/50' : 'hover:bg-accent'}`}>
+    <a href={discussionsUrl} className={`block border-b px-3 py-2 text-xs font-medium ${!currentId ? 'bg-accent/50' : 'hover:bg-accent'}`}>
       全部讨论
     </a>
   );
@@ -430,7 +472,7 @@ function NodeList({
               title={label}
             >
               <span className="truncate">{label}</span>
-              {n.count ? <span className="text-[10px] text-muted-foreground tabular-nums shrink-0">{n.count}</span> : null}
+              {n.count ? <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">{n.count}</span> : null}
             </a>
           );
         })}
@@ -614,29 +656,29 @@ export function DiscussionDetailPage() {
   }, [canEditDiscussion, discussionUrl, inExamMode]);
 
   return (
-    <motion.div className="space-y-5" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
+    <motion.div className="mx-auto w-full min-w-0 space-y-5 md:max-w-3xl" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       <div>
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
           <a href={discussionsBase} className="hover:text-primary">
             讨论
           </a>
           {!inExamMode && data.vnode?.title ? (
             <>
-              <ChevronRight className="size-3" />
+              <ChevronRight className="size-3 shrink-0" />
               <a
                 href={`${bs.urls.discussions}/${vnodeTypeSlug(data.vnode.type)}/${encodeURIComponent(String(data.vnode.id))}`}
-                className="hover:text-primary"
+                className="min-w-0 truncate hover:text-primary"
               >
                 {data.vnode.title}
               </a>
             </>
           ) : null}
-          <ChevronRight className="size-3" />
+          <ChevronRight className="size-3 shrink-0" />
         </div>
-        <h1 className="mt-1 text-2xl font-bold flex items-center gap-2 flex-wrap">
-          {ddoc.pin ? <Pin className="size-5 text-amber-500" /> : null}
-          {ddoc.highlight ? <Star className="size-5 text-amber-500" /> : null}
-          {ddoc.title || '讨论'}
+        <h1 className="mt-1 flex flex-wrap items-center gap-2 text-2xl font-bold">
+          {ddoc.pin ? <Pin className="size-5 shrink-0 text-amber-500" /> : null}
+          {ddoc.highlight ? <Star className="size-5 shrink-0 text-amber-500" /> : null}
+          <span className="min-w-0 break-words">{ddoc.title || '讨论'}</span>
         </h1>
         <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
           <Avatar className="size-5">
@@ -667,15 +709,15 @@ export function DiscussionDetailPage() {
       {/* Floor jump bar — visible when many replies */}
       {drcount > 5 ? (
         <Card>
-          <CardContent className="flex items-center gap-2 p-2.5 text-xs">
-            <Hash className="size-3.5 text-muted-foreground" />
+          <CardContent className="flex flex-wrap items-center gap-2 p-2.5 text-xs">
+            <Hash className="size-3.5 shrink-0 text-muted-foreground" />
             <span className="text-muted-foreground">跳楼：</span>
             <input
               type="number"
               min={1}
               max={drcount + 1}
               placeholder="1"
-              className="w-20 rounded border bg-background px-2 py-1 text-xs"
+              className="w-20 rounded border bg-background px-2 py-1 text-base sm:text-xs"
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   const v = Number.parseInt((e.target as HTMLInputElement).value || '0', 10);
@@ -691,7 +733,7 @@ export function DiscussionDetailPage() {
               }}
             />
             <span className="text-muted-foreground">/ {drcount + 1}</span>
-            <a href={`${discussionUrl}?page=${pcount}#bottom`} className="ml-auto text-primary hover:underline flex items-center gap-1">
+            <a href={`${discussionUrl}?page=${pcount}#bottom`} className="ml-auto flex items-center gap-1 text-primary hover:underline">
               <ArrowDown className="size-3" />
               跳到最新
             </a>
@@ -701,8 +743,8 @@ export function DiscussionDetailPage() {
 
       {/* OP card */}
       <Card id="floor-1">
-        <CardContent className="p-6 space-y-3">
-          <div className="flex items-center justify-between text-xs text-muted-foreground">
+        <CardContent className="space-y-3 p-4 sm:p-6">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
             <span className="font-mono">#1 (楼主)</span>
             {!inExamMode ? (
               <a href={`${discussionUrl}/raw?history=1`} className="flex items-center gap-1 hover:text-primary" title="编辑历史">
@@ -772,70 +814,68 @@ export function DiscussionDetailPage() {
             return (
               <Card key={rid} id={`floor-${floor}`}>
                 <CardContent className="space-y-4 p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2 text-sm">
-                      <Avatar className="size-6">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+                    <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm sm:mr-auto">
+                      <Avatar className="size-6 shrink-0">
                         {rOwner?.avatarUrl ? <AvatarImage src={String(rOwner.avatarUrl)} alt={String(rOwner.uname || '')} /> : null}
                         <AvatarFallback className="text-[8px]">{makeInitials(rOwner?.uname || '?')}</AvatarFallback>
                       </Avatar>
-                      <span className="font-medium">{rOwner?.uname || '匿名'}</span>
+                      <span className="truncate font-medium">{rOwner?.uname || '匿名'}</span>
                       <span className="font-mono text-xs text-muted-foreground">#{floor}</span>
                       <span className="text-xs text-muted-foreground">{formatRelativeTime(reply.updateAt || reply._id, locale)}</span>
                     </div>
-                    <div className="flex flex-wrap justify-end gap-1">
-                      {canReply ? (
-                        <Button type="button" variant="ghost" size="sm" className="h-7 text-xs" onClick={() => quoteReply(reply)}>
-                          <Quote className="size-3" />
-                          引用
+                    {canReply ? (
+                      <Button type="button" variant="ghost" size="sm" className="h-7 text-xs" onClick={() => quoteReply(reply)}>
+                        <Quote className="size-3" />
+                        引用
+                      </Button>
+                    ) : null}
+                    {!inExamMode ? (
+                      <a
+                        href={`${discussionUrl}/raw?drid=${rid}&history=1`}
+                        className="inline-flex h-7 items-center gap-1 rounded px-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+                      >
+                        <History className="size-3" />
+                        历史
+                      </a>
+                    ) : null}
+                    {perms.canDelete ? (
+                      <form
+                        method="post"
+                        onSubmit={(event) => {
+                          void confirmFormSubmit(event, '确定删除这条回复？', { destructive: true });
+                        }}
+                      >
+                        <input type="hidden" name="operation" value="delete_reply" />
+                        <input type="hidden" name="drid" value={rid} />
+                        <Button type="submit" variant="ghost" size="sm" className="text-destructive">
+                          <Trash2 className="size-3.5" />
+                          删除
                         </Button>
-                      ) : null}
-                      {!inExamMode ? (
-                        <a
-                          href={`${discussionUrl}/raw?drid=${rid}&history=1`}
-                          className="inline-flex items-center gap-1 rounded h-7 px-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
-                        >
-                          <History className="size-3" />
-                          历史
-                        </a>
-                      ) : null}
-                      {perms.canEdit ? (
-                        <details className="relative">
-                          <summary className="list-none">
-                            <Button type="button" variant="outline" size="sm">
-                              <Edit className="size-3.5" />
-                              编辑
-                            </Button>
-                          </summary>
-                          <div className="mt-2 min-w-[min(560px,80vw)] rounded-md border bg-card p-3 shadow-sm">
-                            <form method="post" className="space-y-3">
-                              <input type="hidden" name="operation" value="edit_reply" />
-                              <input type="hidden" name="drid" value={rid} />
-                              <MarkdownEditor name="content" value={reply.content || ''} minHeight={160} />
-                              <div className="flex justify-end">
-                                <Button type="submit" size="sm">
-                                  保存
-                                </Button>
-                              </div>
-                            </form>
-                          </div>
-                        </details>
-                      ) : null}
-                      {perms.canDelete ? (
-                        <form
-                          method="post"
-                          onSubmit={(event) => {
-                            void confirmFormSubmit(event, '确定删除这条回复？', { destructive: true });
-                          }}
-                        >
-                          <input type="hidden" name="operation" value="delete_reply" />
-                          <input type="hidden" name="drid" value={rid} />
-                          <Button type="submit" variant="ghost" size="sm" className="text-destructive">
-                            <Trash2 className="size-3.5" />
-                            删除
+                      </form>
+                    ) : null}
+                    {perms.canEdit ? (
+                      <details className="contents">
+                        <summary className="list-none">
+                          <Button type="button" variant="outline" size="sm">
+                            <Edit className="size-3.5" />
+                            编辑
                           </Button>
-                        </form>
-                      ) : null}
-                    </div>
+                        </summary>
+                        <div className="mt-2 w-full basis-auto rounded-md border bg-card p-3 shadow-sm sm:basis-full">
+                          <form method="post" className="space-y-3">
+                            <input type="hidden" name="operation" value="edit_reply" />
+                            <input type="hidden" name="drid" value={rid} />
+                            <MarkdownEditor name="content" value={reply.content || ''} minHeight={160} />
+                            <div className="flex justify-end">
+                              <Button type="submit" size="sm">
+                                保存
+                              </Button>
+                            </div>
+                          </form>
+                        </div>
+                      </details>
+                    ) : null}
                   </div>
                   {reply.content ? <MentionedMarkdown content={reply.content} /> : null}
                   <ReactionBar react={reply.react} status={reactions[rid]} nodeType="drid" id={rid} canReact={canReact} />
@@ -847,50 +887,48 @@ export function DiscussionDetailPage() {
                         const tailPerms: TailReplyPermissions = perms.tail?.[tid] || {};
                         return (
                           <div key={tid} className="space-y-2 border-b pb-3 last:border-b-0 last:pb-0">
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                                <span className="font-medium text-foreground">{tailOwner?.uname || `UID ${tail.owner}`}</span>
+                            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+                              <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground sm:mr-auto">
+                                <span className="truncate font-medium text-foreground">{tailOwner?.uname || `UID ${tail.owner}`}</span>
                                 <span>{formatRelativeTime(tail.updateAt || tail._id, locale)}</span>
                               </div>
-                              <div className="flex gap-1">
-                                {tailPerms.canEdit ? (
-                                  <details>
-                                    <summary className="list-none">
-                                      <Button type="button" variant="outline" size="sm" className="h-7 text-xs">
-                                        编辑
-                                      </Button>
-                                    </summary>
-                                    <div className="mt-2 min-w-[min(520px,78vw)] rounded-md border bg-card p-3 shadow-sm">
-                                      <form method="post" className="space-y-3">
-                                        <input type="hidden" name="operation" value="edit_tail_reply" />
-                                        <input type="hidden" name="drid" value={rid} />
-                                        <input type="hidden" name="drrid" value={tid} />
-                                        <MarkdownEditor name="content" value={tail.content || ''} minHeight={140} />
-                                        <div className="flex justify-end">
-                                          <Button type="submit" size="sm">
-                                            保存
-                                          </Button>
-                                        </div>
-                                      </form>
-                                    </div>
-                                  </details>
-                                ) : null}
-                                {tailPerms.canDelete ? (
-                                  <form
-                                    method="post"
-                                    onSubmit={(event) => {
-                                      void confirmFormSubmit(event, '确定删除这条楼中楼回复？', { destructive: true });
-                                    }}
-                                  >
-                                    <input type="hidden" name="operation" value="delete_tail_reply" />
-                                    <input type="hidden" name="drid" value={rid} />
-                                    <input type="hidden" name="drrid" value={tid} />
-                                    <Button type="submit" variant="ghost" size="sm" className="h-7 text-xs text-destructive">
-                                      删除
+                              {tailPerms.canDelete ? (
+                                <form
+                                  method="post"
+                                  onSubmit={(event) => {
+                                    void confirmFormSubmit(event, '确定删除这条楼中楼回复？', { destructive: true });
+                                  }}
+                                >
+                                  <input type="hidden" name="operation" value="delete_tail_reply" />
+                                  <input type="hidden" name="drid" value={rid} />
+                                  <input type="hidden" name="drrid" value={tid} />
+                                  <Button type="submit" variant="ghost" size="sm" className="h-7 text-xs text-destructive">
+                                    删除
+                                  </Button>
+                                </form>
+                              ) : null}
+                              {tailPerms.canEdit ? (
+                                <details className="contents">
+                                  <summary className="list-none">
+                                    <Button type="button" variant="outline" size="sm" className="h-7 text-xs">
+                                      编辑
                                     </Button>
-                                  </form>
-                                ) : null}
-                              </div>
+                                  </summary>
+                                  <div className="mt-2 w-full basis-auto rounded-md border bg-card p-3 shadow-sm sm:basis-full">
+                                    <form method="post" className="space-y-3">
+                                      <input type="hidden" name="operation" value="edit_tail_reply" />
+                                      <input type="hidden" name="drid" value={rid} />
+                                      <input type="hidden" name="drrid" value={tid} />
+                                      <MarkdownEditor name="content" value={tail.content || ''} minHeight={140} />
+                                      <div className="flex justify-end">
+                                        <Button type="submit" size="sm">
+                                          保存
+                                        </Button>
+                                      </div>
+                                    </form>
+                                  </div>
+                                </details>
+                              ) : null}
                             </div>
                             <MentionedMarkdown content={tail.content || ''} />
                           </div>
@@ -930,9 +968,9 @@ export function DiscussionDetailPage() {
       {canReply ? (
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-base flex items-center justify-between">
+            <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-base">
               <span>发表回复</span>
-              <span className="text-xs font-normal text-muted-foreground flex items-center gap-2">
+              <span className="flex flex-wrap items-center gap-2 text-xs font-normal text-muted-foreground">
                 <span className="hidden sm:inline">
                   快捷键 <kbd className="rounded border bg-muted px-1 text-[10px]">R</kbd> 回复
                 </span>
@@ -953,8 +991,8 @@ export function DiscussionDetailPage() {
               }}
             >
               <input type="hidden" name="operation" value="reply" />
-              <MarkdownEditor name="content" value="" minHeight={220} />
-              <div className="mt-3 flex justify-end gap-2">
+              <MarkdownEditor name="content" value="" minHeight={180} />
+              <div className="mt-3 flex flex-wrap justify-end gap-2">
                 <Button
                   type="button"
                   variant="ghost"

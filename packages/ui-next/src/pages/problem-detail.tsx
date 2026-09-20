@@ -628,6 +628,13 @@ function ContestBanner({
 /*  Resizable split pane                                               */
 /* ------------------------------------------------------------------ */
 
+const IDE_STACK_QUERY = '(max-width: 767px), (max-height: 500px)';
+
+function readStackedIdeSplit(): boolean {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false;
+  return window.matchMedia(IDE_STACK_QUERY).matches;
+}
+
 function ResizableSplit({
   left,
   right,
@@ -642,15 +649,33 @@ function ResizableSplit({
   maxPercent?: number;
 }) {
   const [leftPct, setLeftPct] = useState(defaultLeftPercent);
+  const [stacked, setStacked] = useState(readStackedIdeSplit);
   const containerRef = useRef<HTMLDivElement>(null);
   const draggingRef = useRef(false);
+  const stackedRef = useRef(stacked);
+  stackedRef.current = stacked;
+
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+    const mq = window.matchMedia(IDE_STACK_QUERY);
+    const sync = () => setStacked(mq.matches);
+    sync();
+    if (typeof mq.addEventListener === 'function') {
+      mq.addEventListener('change', sync);
+      return () => mq.removeEventListener('change', sync);
+    }
+    mq.addListener(sync);
+    return () => mq.removeListener(sync);
+  }, []);
 
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
       if (!draggingRef.current || !containerRef.current) return;
       e.preventDefault();
       const rect = containerRef.current.getBoundingClientRect();
-      const pct = ((e.clientX - rect.left) / rect.width) * 100;
+      const pct = stackedRef.current
+        ? ((e.clientY - rect.top) / rect.height) * 100
+        : ((e.clientX - rect.left) / rect.width) * 100;
       setLeftPct(Math.max(minPercent, Math.min(maxPercent, pct)));
     };
     const onUp = () => {
@@ -668,19 +693,25 @@ function ResizableSplit({
   }, [minPercent, maxPercent]);
 
   return (
-    <div ref={containerRef} className="krypton-split flex flex-1 overflow-hidden">
-      <div style={{ width: `${leftPct}%` }} className="krypton-split-pane shrink-0 overflow-hidden">
+    <div ref={containerRef} className={cn('krypton-split flex min-h-0 min-w-0 flex-1 overflow-hidden', stacked && 'flex-col')}>
+      <div
+        style={stacked ? { height: `${leftPct}%`, width: '100%' } : { width: `${leftPct}%` }}
+        className="krypton-split-pane min-h-0 min-w-0 shrink-0 overflow-hidden"
+      >
         {left}
       </div>
       <div
-        className="krypton-split-handle w-1.5 shrink-0 cursor-col-resize bg-border transition-colors hover:bg-primary/40 active:bg-primary/60"
+        className={cn(
+          'krypton-split-handle shrink-0 bg-border transition-colors hover:bg-primary/40 active:bg-primary/60',
+          stacked ? 'h-1.5 w-full cursor-row-resize' : 'w-1.5 cursor-col-resize',
+        )}
         onMouseDown={() => {
           draggingRef.current = true;
-          document.body.style.cursor = 'col-resize';
+          document.body.style.cursor = stackedRef.current ? 'row-resize' : 'col-resize';
           document.body.style.userSelect = 'none';
         }}
       />
-      <div className="krypton-split-pane flex-1 overflow-hidden">{right}</div>
+      <div className="krypton-split-pane min-h-0 min-w-0 flex-1 overflow-hidden">{right}</div>
     </div>
   );
 }
@@ -870,34 +901,36 @@ function LimitsSection({ config }: { config: ProblemConfig }) {
       {perLangKeys.length > 0 ? (
         <div className="pt-1 space-y-1">
           <p className="text-[11px] text-muted-foreground">分语言限制</p>
-          <div className="overflow-hidden rounded-md border">
-            <table className="w-full text-[11px]">
-              <thead className="bg-muted/40 text-muted-foreground">
-                <tr>
-                  <th className="px-2 py-1 text-left font-normal">语言</th>
-                  <th className="px-2 py-1 text-right font-normal">时间</th>
-                  <th className="px-2 py-1 text-right font-normal">内存</th>
-                </tr>
-              </thead>
-              <tbody>
-                {perLangKeys.map((id) => {
-                  const tr = Number(timeRates[id]);
-                  const mr = Number(memRates[id]);
-                  const absMs = languageBaseTimeMs != null && Number.isFinite(tr) && tr > 0 ? languageBaseTimeMs * tr : null;
-                  const absMb = languageBaseMemMb != null && Number.isFinite(mr) && mr > 0 ? languageBaseMemMb * mr : null;
-                  return (
-                    <tr key={id} className="border-t">
-                      <td className="px-2 py-1">
-                        <span className="font-medium">{langLabel(id)}</span>
-                        {langLabel(id) !== id ? <span className="ml-1 font-mono text-[9px] text-muted-foreground">{id}</span> : null}
-                      </td>
-                      <td className="px-2 py-1 text-right font-mono tabular-nums">{absMs != null ? formatHumanTime(absMs) : '默认'}</td>
-                      <td className="px-2 py-1 text-right font-mono tabular-nums">{absMb != null ? formatHumanMemory(absMb) : '默认'}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          <div className="rounded-md border">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[18rem] text-[11px]">
+                <thead className="bg-muted/40 text-muted-foreground">
+                  <tr>
+                    <th className="px-2 py-1 text-left font-normal">语言</th>
+                    <th className="px-2 py-1 text-right font-normal">时间</th>
+                    <th className="px-2 py-1 text-right font-normal">内存</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {perLangKeys.map((id) => {
+                    const tr = Number(timeRates[id]);
+                    const mr = Number(memRates[id]);
+                    const absMs = languageBaseTimeMs != null && Number.isFinite(tr) && tr > 0 ? languageBaseTimeMs * tr : null;
+                    const absMb = languageBaseMemMb != null && Number.isFinite(mr) && mr > 0 ? languageBaseMemMb * mr : null;
+                    return (
+                      <tr key={id} className="border-t">
+                        <td className="px-2 py-1">
+                          <span className="font-medium">{langLabel(id)}</span>
+                          {langLabel(id) !== id ? <span className="ml-1 font-mono text-[9px] text-muted-foreground">{id}</span> : null}
+                        </td>
+                        <td className="px-2 py-1 text-right font-mono tabular-nums">{absMs != null ? formatHumanTime(absMs) : '默认'}</td>
+                        <td className="px-2 py-1 text-right font-mono tabular-nums">{absMb != null ? formatHumanMemory(absMb) : '默认'}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       ) : null}
@@ -923,7 +956,7 @@ function AllowedLangs({ ids }: { ids: string[] }) {
       {groups.map((g) => {
         const onlyBaseVariant = g.variants.length === 1 && g.variants[0].suffix === '';
         return (
-          <div key={g.family} className="flex items-baseline gap-2 text-[11px]">
+          <div key={g.family} className="flex min-w-0 flex-wrap items-baseline gap-2 text-[11px]">
             <span className="min-w-[60px] shrink-0 font-medium">{g.familyLabel}</span>
             {onlyBaseVariant ? (
               // Single-variant families collapse to a green check; no chip soup.
@@ -1408,23 +1441,30 @@ export function ProblemDetailPage() {
   /* Fullscreen IDE mode */
   if (ideMode) {
     return (
-      <div className="fixed inset-0 z-50 flex flex-col bg-background">
+      <div
+        className={cn(
+          'flex min-h-0 min-w-0 flex-col bg-background',
+          // Leave the exam shell countdown (h-14) visible; keep 退出 IDE on-screen.
+          examMode?.enabled ? 'fixed inset-x-0 bottom-0 top-14 z-30' : 'fixed inset-0 z-50',
+        )}
+      >
         {/* IDE top bar */}
-        <div className="flex h-10 shrink-0 items-center gap-2 border-b bg-muted/50 px-3">
-          <Code2 className="size-4 text-primary" />
-          <span className="text-sm font-medium">{title}</span>
-          <span className="text-xs text-muted-foreground">— {pid}</span>
-          {teamCodeReadOnly ? (
-            <Badge variant="outline" className="border-amber-500/40 text-amber-600 dark:text-amber-300">
-              {teamExamMode?.teamRole === 'invalid'
-                ? '团队身份异常 · 已锁定'
-                : teamExamMode?.teamRole === 'admin_preview'
-                  ? '管理员只读预览'
-                  : '队员只读'}
-            </Badge>
-          ) : null}
-          <div className="flex-1" />
-          <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs" onClick={() => setIdeMode(false)}>
+        <div className="flex h-10 min-w-0 shrink-0 items-center gap-2 border-b bg-muted/50 px-3">
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <Code2 className="size-4 shrink-0 text-primary" />
+            <span className="min-w-0 truncate text-sm font-medium">{title}</span>
+            <span className="hidden min-w-0 truncate text-xs text-muted-foreground sm:inline">— {pid}</span>
+            {teamCodeReadOnly ? (
+              <Badge variant="outline" className="shrink-0 border-amber-500/40 text-amber-600 dark:text-amber-300">
+                {teamExamMode?.teamRole === 'invalid'
+                  ? '团队身份异常 · 已锁定'
+                  : teamExamMode?.teamRole === 'admin_preview'
+                    ? '管理员只读预览'
+                    : '队员只读'}
+              </Badge>
+            ) : null}
+          </div>
+          <Button variant="ghost" size="sm" className="h-7 shrink-0 gap-1 text-xs" onClick={() => setIdeMode(false)}>
             <X className="size-3.5" />
             退出 IDE
           </Button>
@@ -1432,13 +1472,13 @@ export function ProblemDetailPage() {
         {/* Resizable split view */}
         <ResizableSplit
           left={
-            <div ref={recordsPanelRef} className="flex h-full flex-col">
+            <div ref={recordsPanelRef} className="flex h-full min-h-0 min-w-0 flex-col">
               {/* Problem content area */}
               <ScrollArea viewportClassName="p-4 sm:p-6 space-y-4" style={{ height: showIdeRecords ? `${ideRecordsPct}%` : '100%' }}>
                 {/* Problem header */}
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h1 className="text-lg font-bold leading-tight">{title}</h1>
+                <div className="min-w-0">
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    <h1 className="min-w-0 text-lg font-bold leading-tight break-words">{title}</h1>
                     {statusBadge(psdoc.status)}
                     {difficultyBadge(difficulty)}
                   </div>
@@ -1607,10 +1647,10 @@ export function ProblemDetailPage() {
           }
           right={
             teamCodeReadOnly ? (
-              <div className="flex h-full min-h-0 flex-col">
-                <div className="flex h-10 shrink-0 items-center gap-2 border-b bg-muted/30 px-3 text-xs">
-                  <span className="font-medium">只读源码</span>
-                  {readonlySource ? <span className="font-mono text-muted-foreground">#{readonlySource.rid.slice(-8)}</span> : null}
+              <div className="flex h-full min-h-0 min-w-0 flex-col">
+                <div className="flex h-10 min-w-0 shrink-0 items-center gap-2 border-b bg-muted/30 px-3 text-xs">
+                  <span className="shrink-0 font-medium">只读源码</span>
+                  {readonlySource ? <span className="min-w-0 truncate font-mono text-muted-foreground">#{readonlySource.rid.slice(-8)}</span> : null}
                   <div className="flex-1" />
                   {readonlySourceLoading ? <Loader2 className="size-3.5 animate-spin text-muted-foreground" /> : null}
                   {readonlySourceError ? <span className="text-destructive">{readonlySourceError}</span> : null}
@@ -1670,7 +1710,7 @@ export function ProblemDetailPage() {
                 }
                 reloadOnConflict={!!teamExamMode}
                 onSendToTeammates={teamCanVirtualPrint && teamCodeEndpoint ? setTeamCodeBuffer : undefined}
-                className="h-full rounded-none border-0"
+                className="h-full min-h-0 min-w-0 rounded-none border-0"
               />
             )
           }
@@ -1692,7 +1732,7 @@ export function ProblemDetailPage() {
   }
 
   return (
-    <motion.div className="space-y-4" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
+    <motion.div className="w-full min-w-0 space-y-4" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
       <ProblemRejudgeDialog open={rejudgeOpen} onOpenChange={setRejudgeOpen} endpoint={problemUrl} pid={String(pid)} title={baseTitle} />
       {/* Contest mode banner — visible whenever we entered via a contest tid */}
       {inContest && contestUrl ? (
@@ -1716,14 +1756,14 @@ export function ProblemDetailPage() {
       {/* Breadcrumb + title row */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
             {inContest && contestUrl ? (
               <>
                 <a href={examUrls.overview || (isHomework ? bs.urls.homework : bs.urls.contests)} className="hover:text-primary">
                   {isHomework ? '作业' : '比赛'}
                 </a>
                 <ChevronRight className="size-3" />
-                <a href={contestUrl} className="hover:text-primary truncate max-w-[200px]">
+                <a href={contestUrl} className="min-w-0 truncate hover:text-primary">
                   {tdoc?.title || '比赛'}
                 </a>
                 <ChevronRight className="size-3" />
@@ -1739,8 +1779,8 @@ export function ProblemDetailPage() {
               </>
             )}
           </div>
-          <div className="mt-1 flex items-center gap-2">
-            <h1 className="text-lg font-bold leading-tight sm:text-xl">{title}</h1>
+          <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2">
+            <h1 className="min-w-0 text-lg font-bold leading-tight break-words sm:text-xl">{title}</h1>
             {statusBadge(psdoc.status)}
             {/* Hide difficulty during contest (gives away problem hardness) */}
             {!inContest ? difficultyBadge(difficulty) : null}
@@ -1821,7 +1861,7 @@ export function ProblemDetailPage() {
               </a>
             </Button>
           ) : null}
-          {canSubmit && !examMode?.enabled && (!ideOnlySubmit || isStructuredAnswer) ? (
+          {canSubmit && (isStructuredAnswer || (!examMode?.enabled && !ideOnlySubmit)) ? (
             <Button asChild size="sm" variant="outline">
               <a href={independentSubmitUrl}>
                 <Send className="mr-1 size-3.5" />

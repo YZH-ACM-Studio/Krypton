@@ -15,7 +15,7 @@ import { buildSudoReplayFields, resolveSudoReplayTarget } from '@/lib/sudo-repla
 export function SudoPage() {
   return (
     <motion.div
-      className="flex min-h-[60vh] items-center justify-center"
+      className="flex min-h-0 justify-center py-4 md:min-h-[60vh] md:items-center"
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.25 }}
@@ -25,7 +25,7 @@ export function SudoPage() {
           <div className="mx-auto mb-2 flex size-12 items-center justify-center rounded-full bg-primary/10">
             <Lock className="size-5 text-primary" />
           </div>
-          <CardTitle className="text-lg">身份验证</CardTitle>
+          <CardTitle className="text-lg leading-snug">身份验证</CardTitle>
           <p className="text-sm text-muted-foreground">此操作需要重新验证您的身份，请输入密码以继续。</p>
         </CardHeader>
         <CardContent>
@@ -34,9 +34,17 @@ export function SudoPage() {
               <label className="text-sm font-medium" htmlFor="sudo-password">
                 密码
               </label>
-              <Input id="sudo-password" name="password" type="password" autoComplete="current-password" autoFocus placeholder="请输入您的密码" />
+              <Input
+                id="sudo-password"
+                name="password"
+                type="password"
+                autoComplete="current-password"
+                autoFocus
+                placeholder="请输入您的密码"
+                className="h-11 text-base md:h-9 md:text-sm"
+              />
             </div>
-            <Button type="submit" className="w-full">
+            <Button type="submit" className="min-h-11 w-full">
               验证
             </Button>
           </form>
@@ -68,7 +76,7 @@ export function SudoRedirectPage() {
   }, []);
 
   return (
-    <motion.div className="flex min-h-[60vh] items-center justify-center" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+    <motion.div className="flex min-h-0 justify-center py-4 md:min-h-[60vh] md:items-center" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
       <form ref={formRef} method="post" action={target} className="space-y-3 text-center">
         {fields.map((field, index) => (
           <input key={`${field.name}-${index}`} type="hidden" name={field.name} value={field.value} />

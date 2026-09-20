@@ -135,7 +135,7 @@ export function SpikeWebViewProbePage() {
               <p className="text-muted-foreground">(no messages yet — click a control above)</p>
             ) : (
               messages.map((m, i) => (
-                <p key={i} className={m.direction === 'from' ? 'text-emerald-500' : 'text-blue-500'}>
+                <p key={i} className={m.direction === 'from' ? 'break-all text-emerald-500' : 'break-all text-blue-500'}>
                   [{m.timestamp}] {m.direction === 'from' ? '←' : '→'} {m.text}
                 </p>
               ))

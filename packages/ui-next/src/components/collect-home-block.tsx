@@ -83,14 +83,17 @@ export function CollectHomeBlock() {
         <ul className="divide-y">
           {docs.slice(0, 3).map((doc) => (
             <li key={doc._id}>
-              <div className="flex items-center gap-3 px-4 py-2.5">
+              <div className="flex min-w-0 items-center gap-3 px-4 py-2.5">
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium">{doc.title}</p>
                   <p className="mt-0.5 text-xs text-muted-foreground">
                     截止 <DateTime value={doc.dueAt} mode="datetime" />
                   </p>
                 </div>
-                <a href={`/collect/${doc._id}`} className="shrink-0 text-xs text-primary hover:underline">
+                <a
+                  href={`/collect/${doc._id}`}
+                  className="inline-flex min-h-11 shrink-0 items-center px-2 text-xs text-primary hover:underline"
+                >
                   去交文件
                 </a>
               </div>

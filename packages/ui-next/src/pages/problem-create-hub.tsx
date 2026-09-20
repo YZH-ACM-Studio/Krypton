@@ -101,12 +101,12 @@ export function ProblemCreateHubView({ problemKinds }: { problemKinds: Array<{ k
               <h2 id={`problem-kind-${group}`} className="px-1 text-sm font-semibold">
                 {group}
               </h2>
-              <ul className="divide-y divide-border/70 overflow-hidden rounded-2xl border border-border/80 bg-background">
+              <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 2xl:grid-cols-3">
                 {kinds.map((kind) => {
                   const meta = KIND_META[kind];
                   const Icon = meta.icon;
                   return (
-                    <li key={kind}>
+                    <li key={kind} className="overflow-hidden rounded-2xl border border-border/80 bg-background">
                       <a
                         href={`/problem/create/${PROBLEM_KIND_TO_SLUG[kind]}`}
                         className="group flex min-h-20 items-center gap-4 px-4 py-3 transition-colors hover:bg-muted/55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring motion-reduce:transition-none sm:px-5"

@@ -17,6 +17,7 @@ import { formatRelativeTime, makeInitials } from '@/lib/format';
 import { getMessagePreview, lastMessage, objectIdDate } from './parse';
 import { isUnseenIncoming } from './seen';
 import type { Conv } from './types';
+import { dualPaneTw } from './viewport';
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -137,7 +138,12 @@ function ConversationRow({
           'm-1 flex size-7 shrink-0 items-center justify-center self-center rounded-md transition-opacity duration-150 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring motion-reduce:transition-none',
           pinned
             ? 'text-amber-500 opacity-100 hover:bg-accent hover:text-amber-600'
-            : 'text-muted-foreground opacity-100 hover:bg-accent hover:text-foreground md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100 [@media(hover:none)]:opacity-100',
+            : cn(
+                'text-muted-foreground opacity-100 hover:bg-accent hover:text-foreground [@media(hover:none)]:opacity-100',
+                dualPaneTw('opacity-0'),
+                dualPaneTw('group-hover:opacity-100'),
+                dualPaneTw('group-focus-within:opacity-100'),
+              ),
         )}
       >
         <Pin className={cn('size-3.5', pinned && 'fill-current')} />
@@ -185,8 +191,8 @@ export function ConversationList(props: {
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-r bg-background">
-      <div className="flex items-center gap-2 border-b p-2.5">
-        <div className="relative min-w-0 flex-1">
+      <div className="flex flex-wrap items-center gap-2 border-b p-2.5">
+        <div className="relative min-w-0 flex-1 basis-40">
           <span className="pointer-events-none absolute inset-y-0 left-2.5 flex items-center">
             <Search className="size-3.5 text-muted-foreground" aria-hidden="true" />
           </span>
@@ -200,17 +206,19 @@ export function ConversationList(props: {
             className="h-8 pl-8 text-sm"
           />
         </div>
-        <Button
-          type="button"
-          size="sm"
-          variant={unreadOnly ? 'default' : 'outline'}
-          aria-pressed={unreadOnly}
-          onClick={() => onUnreadOnlyChange(!unreadOnly)}
-          className="shrink-0"
-        >
-          未读
-        </Button>
-        {headerAction}
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant={unreadOnly ? 'default' : 'outline'}
+            aria-pressed={unreadOnly}
+            onClick={() => onUnreadOnlyChange(!unreadOnly)}
+            className="shrink-0"
+          >
+            未读
+          </Button>
+          {headerAction}
+        </div>
       </div>
       {filtered.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center px-3 py-6 text-center">

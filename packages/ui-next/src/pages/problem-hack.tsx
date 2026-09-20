@@ -30,25 +30,25 @@ export function ProblemHackPage() {
 
   return (
     <motion.div
-      className="grid gap-5 lg:grid-cols-[1fr_260px]"
+      className="grid w-full min-w-0 gap-5 lg:grid-cols-[1fr_260px]"
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
     >
       <main className="min-w-0 space-y-4">
-        <div className="flex items-center gap-3">
-          <Button asChild variant="ghost" size="icon">
+        <div className="flex min-w-0 flex-wrap items-center gap-3">
+          <Button asChild variant="ghost" size="icon" className="shrink-0">
             <a href={problemUrl}>
               <ArrowLeft className="size-4" />
             </a>
           </Button>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <h1 className="truncate text-xl font-semibold">Hack 提交</h1>
-            <p className="mt-1 truncate text-sm text-muted-foreground">
+            <p className="mt-1 min-w-0 break-words text-sm text-muted-foreground">
               #{String(rid).slice(-8)} · {pdoc.title || data.title || '题目'}
             </p>
           </div>
-          <Badge variant="outline" className="ml-auto">
+          <Badge variant="outline" className="ml-auto shrink-0">
             {pdoc.pid || pdoc.docId || 'Problem'}
           </Badge>
         </div>
@@ -72,15 +72,15 @@ export function ProblemHackPage() {
                   rows={18}
                   autoFocus
                   spellCheck={false}
-                  className="w-full resize-y rounded-md border bg-background p-4 font-mono text-sm leading-6 focus:outline-none focus:ring-2 focus:ring-ring"
+                  className="min-w-0 w-full resize-y rounded-md border bg-background p-4 font-mono text-sm leading-6 focus:outline-none focus:ring-2 focus:ring-ring"
                   placeholder="在这里粘贴或编写能卡掉目标提交的输入数据"
                 />
               </div>
 
-              <div className="grid gap-4 rounded-md border bg-muted/30 p-4 sm:grid-cols-[1fr_auto] sm:items-center">
-                <div>
-                  <label htmlFor="hack-file" className="flex items-center gap-2 text-sm font-medium">
-                    <FileUp className="size-4 text-primary" />
+              <div className="grid min-w-0 gap-4 rounded-md border bg-muted/30 p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+                <div className="min-w-0">
+                  <label htmlFor="hack-file" className="flex min-w-0 items-center gap-2 text-sm font-medium">
+                    <FileUp className="size-4 shrink-0 text-primary" />
                     上传输入文件
                   </label>
                   <p className="mt-1 text-xs text-muted-foreground">适合较大的测试数据；如果同时填写文本输入，服务端会优先使用上传文件。</p>
@@ -89,7 +89,7 @@ export function ProblemHackPage() {
                   id="hack-file"
                   type="file"
                   name="file"
-                  className="text-sm file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-primary-foreground"
+                  className="min-w-0 max-w-full text-sm file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-primary-foreground"
                 />
               </div>
 
@@ -140,9 +140,9 @@ export function ProblemHackPage() {
 
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-start justify-between gap-3">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="text-right font-medium">{value}</span>
+    <div className="flex min-w-0 items-start justify-between gap-3">
+      <span className="shrink-0 text-muted-foreground">{label}</span>
+      <span className="min-w-0 break-words text-right font-medium">{value}</span>
     </div>
   );
 }

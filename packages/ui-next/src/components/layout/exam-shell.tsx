@@ -7,8 +7,9 @@
  *
  * Two layouts:
  *  - Home: top bar only + content (used by ExamModeHomePage).
- *  - Exam detail: top bar + thin square icon sidebar (概览/题目/公告/排名).
- *    The sidebar items deep-link via hash (#overview / #problems / ...).
+ *  - Exam detail: top bar + section nav (概览/题目/公告/排名).
+ *    md+: thin square icon rail. <md: bottom horizontally scrollable tabs.
+ *    The items deep-link via hash (#overview / #problems / ...).
  */
 import { useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { Bell, ClipboardList, Code2, ListOrdered, MessageSquare, Moon, Printer, Sun, Swords, Trophy, type LucideIcon } from 'lucide-react';
@@ -152,10 +153,19 @@ function ExamCountdown() {
   const danger = state.kind === 'during' && state.ms < 5 * 60 * 1000;
   const duringLabel = wallClock ? '整场剩余' : '剩余';
   const duringTitle = wallClock ? '整场剩余' : '剩余时间';
+  const duringLabelNode =
+    wallClock ? (
+      <>
+        <span className="sm:hidden">剩余</span>
+        <span className="hidden sm:inline">整场剩余</span>
+      </>
+    ) : (
+      duringLabel
+    );
   return (
     <div
       className={cn(
-        'hidden items-center gap-1.5 rounded-md border px-2.5 py-1 font-mono text-xs tabular-nums sm:flex',
+        'flex shrink-0 items-center gap-1 rounded-md border px-1.5 py-1 font-mono text-[11px] tabular-nums sm:gap-1.5 sm:px-2.5 sm:text-xs',
         state.kind === 'ended'
           ? 'border-destructive/40 bg-destructive/10 text-destructive'
           : danger
@@ -170,8 +180,13 @@ function ExamCountdown() {
             : `${duringTitle} · ${formatRemaining(state.ms)}`
       }
     >
-      <span className="text-[10px] font-normal text-muted-foreground">
-        {state.kind === 'before' ? '开赛倒计时' : state.kind === 'ended' ? '已结束' : duringLabel}
+      <span
+        className={cn(
+          'text-[10px] font-normal text-muted-foreground',
+          state.kind === 'before' && 'hidden sm:inline',
+        )}
+      >
+        {state.kind === 'before' ? '开赛倒计时' : state.kind === 'ended' ? '已结束' : duringLabelNode}
       </span>
       <span>{formatRemaining(state.ms)}</span>
     </div>
@@ -194,16 +209,21 @@ function StudentBadge() {
   const line2 = studentId || null;
 
   return (
-    <div className="flex items-center gap-2 rounded-md border bg-card pl-1.5 pr-2 py-1">
+    <div className="flex shrink-0 items-center gap-2 rounded-md border bg-card py-1 pl-1.5 pr-2">
       {/* "考" mark, anchors the badge — visually labels what role this
           chrome belongs to (考生 / 考试模式) regardless of UI scale. */}
       <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-primary/10 font-sans text-sm font-bold text-primary ring-1 ring-primary/30">
         考
       </div>
       {avatarUrl ? (
-        <img src={avatarUrl} alt={line1} className="size-7 shrink-0 rounded-full object-cover ring-1 ring-border" referrerPolicy="no-referrer" />
+        <img
+          src={avatarUrl}
+          alt={line1}
+          className="hidden size-7 shrink-0 rounded-full object-cover ring-1 ring-border sm:block"
+          referrerPolicy="no-referrer"
+        />
       ) : (
-        <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/15 font-mono text-[10px] font-semibold text-primary">
+        <div className="hidden size-7 shrink-0 items-center justify-center rounded-full bg-primary/15 font-mono text-[10px] font-semibold text-primary sm:flex">
           {initials}
         </div>
       )}
@@ -218,28 +238,108 @@ function StudentBadge() {
 function ExamTopBar({ title, subtitle, right }: { title?: string; subtitle?: ReactNode; right?: ReactNode }) {
   const { dark, toggle } = useDark();
   return (
-    <header className="sticky top-0 z-40 flex h-14 shrink-0 items-center gap-3 border-b bg-background/85 px-4 backdrop-blur-xl sm:px-6">
-      <a href="/exam-mode" className="flex items-center gap-2 font-semibold">
+    <header className="sticky top-0 z-40 flex min-h-14 min-w-0 shrink-0 items-center gap-2 border-b bg-background/85 px-3 backdrop-blur-xl sm:gap-3 sm:px-6">
+      <a href="/exam-mode" className="flex shrink-0 items-center gap-2 font-semibold">
         <Swords className="size-5 text-primary" />
         <span className="hidden sm:inline">Krypton 考试</span>
       </a>
       <div className="mx-2 hidden h-5 w-px bg-border sm:block" />
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 truncate">
         {title && <p className="truncate text-sm font-semibold">{title}</p>}
         {subtitle && <div className="truncate text-xs text-muted-foreground">{subtitle}</div>}
       </div>
-      {right}
-      <ExamCountdown />
-      <button
-        type="button"
-        onClick={toggle}
-        title={dark ? '切换亮色模式' : '切换暗色模式'}
-        className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-      >
-        {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
-      </button>
-      <StudentBadge />
+      <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+        {right}
+        <ExamCountdown />
+        <button
+          type="button"
+          onClick={toggle}
+          title={dark ? '切换亮色模式' : '切换暗色模式'}
+          className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
+        </button>
+        <StudentBadge />
+      </div>
     </header>
+  );
+}
+
+function examNavItemClass(active: boolean, disabled: boolean, layout: 'rail' | 'bar') {
+  return cn(
+    'flex flex-col items-center justify-center gap-0.5 rounded-lg text-[11px] font-medium transition-colors',
+    layout === 'rail' ? 'aspect-square gap-1' : 'min-h-11 min-w-[3.75rem] shrink-0 px-2.5',
+    disabled
+      ? 'cursor-not-allowed text-muted-foreground/45'
+      : active
+        ? 'bg-primary/10 text-primary shadow-sm ring-1 ring-primary/30'
+        : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+  );
+}
+
+function ExamSectionNav({
+  items,
+  section,
+  layout,
+  hrefFor,
+  onSelect,
+  isDisabled,
+}: {
+  items: ExamSidebarItem[];
+  section: ExamSection;
+  layout: 'rail' | 'bar';
+  hrefFor?: (key: ExamSection) => string;
+  onSelect?: (key: ExamSection) => void;
+  isDisabled?: (key: ExamSection) => boolean;
+}) {
+  const nodes = items.map((item) => {
+    const active = section === item.key;
+    const disabled = isDisabled?.(item.key) === true;
+    const className = examNavItemClass(active, disabled, layout);
+    const inner = (
+      <>
+        <item.icon className={layout === 'bar' ? 'size-4' : 'size-5'} />
+        <span>{item.label}</span>
+      </>
+    );
+    if (hrefFor) {
+      return (
+        <a
+          key={item.key}
+          href={disabled ? '#' : hrefFor(item.key)}
+          aria-disabled={disabled}
+          title={disabled ? '考试开始后开放' : item.label}
+          onClick={disabled ? (event) => event.preventDefault() : undefined}
+          className={className}
+        >
+          {inner}
+        </a>
+      );
+    }
+    return (
+      <button key={item.key} type="button" onClick={() => onSelect?.(item.key)} className={className}>
+        {inner}
+      </button>
+    );
+  });
+
+  if (layout === 'rail') {
+    return (
+      <aside className="hidden min-h-0 w-20 shrink-0 flex-col overflow-y-auto border-r bg-card/40 md:flex">
+        <nav aria-label="考试导航" className="flex flex-col gap-1.5 p-2.5">
+          {nodes}
+        </nav>
+      </aside>
+    );
+  }
+
+  return (
+    <nav
+      aria-label="考试导航"
+      className="flex shrink-0 overflow-x-auto border-t bg-card/95 pb-[max(0.375rem,env(safe-area-inset-bottom))] md:hidden"
+    >
+      <div className="flex min-w-max gap-1 px-2 py-1.5">{nodes}</div>
+    </nav>
   );
 }
 
@@ -258,7 +358,7 @@ export function ExamHomeShell({ children }: { children: ReactNode }) {
 }
 
 /**
- * Detail shell: top bar + thin icon sidebar + main outlet.
+ * Detail shell: top bar + section nav (md+ icon rail, <md bottom tabs) + main outlet.
  * The active section is controlled via the URL hash to keep the inner page
  * a plain component without router knowledge.
  */
@@ -281,33 +381,10 @@ export function ExamDetailShell({
     <div className="flex h-dvh min-w-0 flex-col bg-background">
       <ExamTopBar title={title} subtitle={subtitle} right={topBarRight} />
       <div className="flex min-h-0 flex-1">
-        {/* Thin square icon sidebar */}
-        <aside className="flex w-20 shrink-0 flex-col border-r bg-card/40">
-          <nav className="flex flex-col gap-1.5 p-2.5">
-            {EXAM_SIDEBAR.map((item) => {
-              const active = section === item.key;
-              return (
-                <button
-                  key={item.key}
-                  type="button"
-                  onClick={() => onSectionChange(item.key)}
-                  className={cn(
-                    'flex aspect-square flex-col items-center justify-center gap-1 rounded-lg text-[11px] font-medium transition-colors',
-                    active
-                      ? 'bg-primary/10 text-primary shadow-sm ring-1 ring-primary/30'
-                      : 'text-muted-foreground hover:bg-accent hover:text-foreground',
-                  )}
-                >
-                  <item.icon className="size-5" />
-                  <span>{item.label}</span>
-                </button>
-              );
-            })}
-          </nav>
-        </aside>
-        {/* Main outlet */}
-        <main className="min-w-0 flex-1 overflow-hidden">{children}</main>
+        <ExamSectionNav items={EXAM_SIDEBAR} section={section} layout="rail" onSelect={onSectionChange} />
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">{children}</main>
       </div>
+      <ExamSectionNav items={EXAM_SIDEBAR} section={section} layout="bar" onSelect={onSectionChange} />
     </div>
   );
 }
@@ -396,41 +473,26 @@ export function ExamContestShell({ children }: { children: ReactNode }) {
         }
       />
       <div className="flex min-h-0 flex-1">
-        <aside className="flex w-20 shrink-0 flex-col border-r bg-card/40">
-          <nav className="flex flex-col gap-1.5 p-2.5">
-            {items.map((item) => {
-              const active = section === item.key;
-              const disabled = beforeStart && lockedBeforeStart.has(item.key);
-              const href = disabled ? '#' : hrefFor(item.key);
-              return (
-                <a
-                  key={item.key}
-                  href={href}
-                  aria-disabled={disabled}
-                  title={disabled ? '考试开始后开放' : item.label}
-                  onClick={disabled ? (event) => event.preventDefault() : undefined}
-                  className={cn(
-                    'flex aspect-square flex-col items-center justify-center gap-1 rounded-lg text-[11px] font-medium transition-colors',
-                    disabled
-                      ? 'cursor-not-allowed text-muted-foreground/45'
-                      : active
-                        ? 'bg-primary/10 text-primary shadow-sm ring-1 ring-primary/30'
-                        : 'text-muted-foreground hover:bg-accent hover:text-foreground',
-                  )}
-                >
-                  <item.icon className="size-5" />
-                  <span>{item.label}</span>
-                </a>
-              );
-            })}
-          </nav>
-        </aside>
+        <ExamSectionNav
+          items={items}
+          section={section}
+          layout="rail"
+          hrefFor={hrefFor}
+          isDisabled={(key) => beforeStart && lockedBeforeStart.has(key)}
+        />
         <main className="min-w-0 flex-1 overflow-hidden" onClickCapture={stopUserProfileLinks}>
           <ScrollArea className="h-full" viewportClassName="p-4 sm:p-6 xl:p-8 2xl:px-10">
             {children}
           </ScrollArea>
         </main>
       </div>
+      <ExamSectionNav
+        items={items}
+        section={section}
+        layout="bar"
+        hrefFor={hrefFor}
+        isDisabled={(key) => beforeStart && lockedBeforeStart.has(key)}
+      />
       {teamContext?.teamId && teamCodeEndpoint ? (
         <TeamCodeSnapshotDrawer
           open={teamCodeDrawerOpen}

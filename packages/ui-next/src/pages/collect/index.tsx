@@ -166,7 +166,6 @@ function filesForSlot(files: CollectCurrentFileView[], slotId: string): CollectC
   return files.filter((file) => file.slotId === slotId);
 }
 
-
 async function postCollectOperation(requestId: string, fields: Record<string, string>, fallback: string): Promise<void> {
   const body = new URLSearchParams(fields);
   const response = await fetchHydroResponse(`/collect/${encodeURIComponent(requestId)}`, {
@@ -225,17 +224,17 @@ export function CollectListPage() {
         initial={{ opacity: 0, y: -6 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.25 }}
-        className="flex items-center justify-between rounded-xl border bg-card p-6 shadow-sm"
+        className="flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-xl border bg-card p-6 shadow-sm"
       >
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <FolderUp className="size-5 text-primary" />
-            <h1 className="text-xl font-semibold">文件收集</h1>
+        <div className="min-w-0 space-y-1">
+          <div className="flex min-w-0 items-center gap-2">
+            <FolderUp className="size-5 shrink-0 text-primary" />
+            <h1 className="min-w-0 break-words text-xl font-semibold">文件收集</h1>
           </div>
-          <p className="text-sm text-muted-foreground">按槽位上传文件，截止前可替换，确认后才算已交。</p>
+          <p className="min-w-0 break-words text-sm text-muted-foreground">按槽位上传文件，截止前可替换，确认后才算已交。</p>
         </div>
         {bs.user.canManageCollect ? (
-          <Button asChild variant="default" size="sm">
+          <Button asChild variant="default" size="sm" className="shrink-0">
             <a href="/admin/collect">
               <FolderUp className="mr-1 size-4" />
               管理收集
@@ -248,6 +247,7 @@ export function CollectListPage() {
         value={tab}
         onValueChange={setTab}
         aria-label="文件收集分类"
+        className="max-w-full overflow-x-auto"
         items={[
           { value: 'pending', label: '未交文件', count: counts.pending },
           { value: 'submitted', label: '已交文件', count: counts.submitted },
@@ -270,8 +270,8 @@ export function CollectListPage() {
             return (
               <Card key={item._id} className="h-full transition-[box-shadow,opacity] duration-200 ease-out hover:shadow-md motion-reduce:transition-none">
                 <CardContent className="flex h-full flex-col gap-3">
-                  <div className="flex min-h-10 items-start justify-between gap-2">
-                    <h3 className="line-clamp-2 font-semibold">{item.title}</h3>
+                  <div className="flex min-h-10 min-w-0 items-start justify-between gap-2">
+                    <h3 className="min-w-0 flex-1 break-words font-semibold line-clamp-2">{item.title}</h3>
                     <div className="flex shrink-0 flex-col items-end gap-1">
                       <SubmitStatusBadge submitted={item.submitted} />
                       {item.examLocked && !item.submitted ? (
@@ -338,39 +338,41 @@ function SlotFiles({
         const assignedName = file.assignedName || file.originalName;
         return (
           <li key={file.fileId} className="rounded-md border bg-card px-2.5 py-2 text-xs">
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-start gap-2">
               <div className="min-w-0 flex-1">
-                <span className="block truncate font-medium">{assignedName}</span>
+                <span className="block break-all font-medium">{assignedName}</span>
                 {file.originalName !== assignedName ? (
-                  <span className="block truncate text-muted-foreground">{file.originalName}</span>
+                  <span className="block break-all text-muted-foreground">{file.originalName}</span>
+                ) : null}
+                <span className="mt-0.5 block text-muted-foreground">{formatSize(file.size)}</span>
+              </div>
+              <div className="flex shrink-0 flex-wrap items-center gap-1">
+                <a
+                  href={collectFileHref(requestId, file)}
+                  className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                  aria-label={`下载${assignedName}`}
+                >
+                  <Download className="size-3.5" />
+                </a>
+                {open ? (
+                  <>
+                    <Button type="button" variant="ghost" size="sm" className="h-8 px-2" onClick={() => onReplace(file.fileId)}>
+                      替换
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="size-8 text-destructive hover:bg-destructive/10"
+                      disabled={busyFileId === file.fileId}
+                      onClick={() => onDelete(file)}
+                      aria-label={`删除${file.originalName}`}
+                    >
+                      {busyFileId === file.fileId ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
+                    </Button>
+                  </>
                 ) : null}
               </div>
-              <span className="shrink-0 text-muted-foreground">{formatSize(file.size)}</span>
-              <a
-                href={collectFileHref(requestId, file)}
-                className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-                aria-label={`下载${assignedName}`}
-              >
-                <Download className="size-3.5" />
-              </a>
-              {open ? (
-                <>
-                  <Button type="button" variant="ghost" size="sm" className="h-8 px-2" onClick={() => onReplace(file.fileId)}>
-                    替换
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="size-8 text-destructive hover:bg-destructive/10"
-                    disabled={busyFileId === file.fileId}
-                    onClick={() => onDelete(file)}
-                    aria-label={`删除${file.originalName}`}
-                  >
-                    {busyFileId === file.fileId ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
-                  </Button>
-                </>
-              ) : null}
             </div>
             {open && replacingFileId === file.fileId ? (
               <div className="mt-2">
@@ -491,14 +493,14 @@ export function CollectDetailPage() {
 
   return (
     <div className="space-y-6">
-      <motion.header initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} className="rounded-xl border bg-card p-6 shadow-sm">
-        <div className="flex items-start justify-between gap-3">
-          <div className="space-y-1">
+      <motion.header initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} className="min-w-0 rounded-xl border bg-card p-6 shadow-sm">
+        <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 flex-1 space-y-1">
             <Button variant="ghost" size="sm" asChild className="-ml-2 mb-1">
               <a href="/collect">返回文件收集</a>
             </Button>
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-xl font-semibold">{data.title}</h1>
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <h1 className="min-w-0 break-words text-xl font-semibold">{data.title}</h1>
               <SubmitStatusBadge submitted={data.submitted} />
               {closed ? (
                 <Badge variant="outline" className="gap-1 text-muted-foreground">
@@ -514,14 +516,14 @@ export function CollectDetailPage() {
             </div>
             {dueAtMs !== null ? <CollectCountdownNotice dueAtMs={dueAtMs} now={now} closed={closed} alwaysShowRemaining /> : null}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
             {bs.user.canManageCollect ? (
               <Button asChild variant="outline" size="sm">
                 <a href={`/admin/collect/${encodeURIComponent(data._id)}`}>进度</a>
               </Button>
             ) : null}
             {writable && !data.submitted ? (
-              <Button type="button" size="sm" disabled={!data.filled || confirming} onClick={() => void confirm()}>
+              <Button type="button" size="sm" className="min-h-11" disabled={!data.filled || confirming} onClick={() => void confirm()}>
                 {confirming ? <Loader2 className="mr-1 size-4 animate-spin" /> : null}
                 确认提交
               </Button>
@@ -573,9 +575,9 @@ export function CollectDetailPage() {
         const files = filesForSlot(data.currentFiles, slot.id);
         return (
           <Card key={slot.id}>
-            <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
-              <div className="space-y-1.5">
-                <CardTitle className="text-base">{slot.title}</CardTitle>
+            <CardHeader className="flex min-w-0 flex-row items-start justify-between gap-3 space-y-0">
+              <div className="min-w-0 space-y-1.5">
+                <CardTitle className="min-w-0 break-words text-base">{slot.title}</CardTitle>
                 <div className="flex flex-wrap gap-1.5">
                   {slot.required ? (
                     <Badge>必填</Badge>
@@ -606,7 +608,7 @@ export function CollectDetailPage() {
               />
               {writable && files.length < slot.maxFiles ? (
                 <div className="space-y-2">
-                  <p className="text-xs text-muted-foreground">
+                  <p className="break-all text-xs text-muted-foreground">
                     将保存为 {slot.nextAssignedName}
                   </p>
                   <FileUploader
@@ -628,7 +630,7 @@ export function CollectDetailPage() {
 
       {writable && !data.submitted ? (
         <div className="flex justify-end">
-          <Button type="button" disabled={!data.filled || confirming} onClick={() => void confirm()}>
+          <Button type="button" className="min-h-11" disabled={!data.filled || confirming} onClick={() => void confirm()}>
             {confirming ? <Loader2 className="mr-1 size-4 animate-spin" /> : null}
             确认提交
           </Button>

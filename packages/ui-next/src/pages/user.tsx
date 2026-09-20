@@ -511,7 +511,7 @@ export function UserDetailPage() {
           {tdocs.length ? (
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-base flex items-center justify-between">
+                <CardTitle className="text-base flex flex-wrap items-center justify-between gap-2">
                   <span className="flex items-center gap-1.5">
                     <Trophy className="size-4" />
                     参加过的比赛
@@ -624,7 +624,7 @@ function CompletionList({
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-base flex items-center justify-between gap-2">
+        <CardTitle className="text-base flex flex-wrap items-center justify-between gap-2">
           <span className="flex min-w-0 items-center gap-1.5">
             {icon}
             {title}
@@ -827,7 +827,7 @@ function ActivityHeatmap({ daily }: { daily: Record<string, number> }) {
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-base flex items-center justify-between">
+        <CardTitle className="text-base flex flex-wrap items-center justify-between gap-2">
           <span className="flex items-center gap-1.5">
             <Activity className="size-4" />
             最近一年的提交活跃度

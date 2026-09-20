@@ -1,1 +1,1 @@
-export { MessagesPanel } from './panel';
+export { MessagesPanel, NARROW_QUERY } from './panel';

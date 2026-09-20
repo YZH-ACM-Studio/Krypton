@@ -76,23 +76,23 @@ export function ObjectiveRecordResult({
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
         <a href={listHref} className="hover:text-primary">
           记录
         </a>
-        <ChevronRight className="size-3" />
-        <span>客观题</span>
+        <ChevronRight className="size-3 shrink-0" />
+        <span className="break-words">客观题</span>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
-        <Card>
-          <CardContent className="flex flex-col gap-5 p-5 sm:flex-row sm:items-center sm:justify-between">
-            <div>
+        <Card className="min-w-0">
+          <CardContent className="flex min-w-0 flex-col flex-wrap gap-5 p-5 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">结果</p>
-              <p className={cn('mt-1 text-2xl font-semibold tracking-tight', verdict.tone)}>{verdict.label}</p>
-              <p className="mt-1 text-sm text-muted-foreground">{submittedAt}</p>
+              <p className={cn('mt-1 break-words text-2xl font-semibold tracking-tight', verdict.tone)}>{verdict.label}</p>
+              <p className="mt-1 break-words text-sm text-muted-foreground">{submittedAt}</p>
             </div>
-            <div className="flex gap-6">
+            <div className="flex flex-wrap gap-6">
               <div>
                 <p className="text-xs text-muted-foreground">得分</p>
                 <p className="mt-1 text-2xl font-semibold tabular-nums">{rdoc.score ?? '—'}</p>
@@ -107,25 +107,25 @@ export function ObjectiveRecordResult({
             </div>
           </CardContent>
         </Card>
-        <Card>
-          <CardContent className="p-5">
+        <Card className="min-w-0">
+          <CardContent className="min-w-0 p-5">
             <p className="text-xs text-muted-foreground">题目 / 用户</p>
-            <a href={problemUrl} className="mt-1 block text-sm font-semibold leading-5 hover:text-primary">
+            <a href={problemUrl} className="mt-1 block break-words text-sm font-semibold leading-5 hover:text-primary">
               {typeof pdoc.title === 'string' ? pdoc.title : '客观题'}
             </a>
             <div className="mt-3 flex flex-wrap gap-2 border-t pt-3 text-xs">
-              <span className="rounded-md bg-muted px-2.5 py-1 font-medium">{username}</span>
-              {student?.studentId ? <span className="rounded-md bg-muted px-2.5 py-1 font-mono tabular-nums">{student.studentId}</span> : null}
-              {student?.realName ? <span className="rounded-md bg-muted px-2.5 py-1">{student.realName}</span> : null}
+              <span className="break-words rounded-md bg-muted px-2.5 py-1 font-medium">{username}</span>
+              {student?.studentId ? <span className="break-words rounded-md bg-muted px-2.5 py-1 font-mono tabular-nums">{student.studentId}</span> : null}
+              {student?.realName ? <span className="break-words rounded-md bg-muted px-2.5 py-1">{student.realName}</span> : null}
             </div>
           </CardContent>
         </Card>
       </div>
 
       <section className="space-y-3">
-        <div className="flex items-baseline justify-between gap-3">
-          <h2 className="text-sm font-semibold">作答明细</h2>
-          <p className="text-xs text-muted-foreground">不展示标准答案，只对照你提交的选项。</p>
+        <div className="flex flex-wrap items-baseline justify-between gap-3">
+          <h2 className="break-words text-sm font-semibold">作答明细</h2>
+          <p className="break-words text-xs text-muted-foreground">不展示标准答案，只对照你提交的选项。</p>
         </div>
         {rows.length ? (
           <ul className="space-y-3">

@@ -18,9 +18,11 @@ import { clearDraft, loadDraft, saveDraft } from './drafts';
 import { loadPins, togglePin } from './pins';
 import { isUnseenIncoming, loadSeen, markConvSeen } from './seen';
 import type { Conv, MessageDoc } from './types';
+import { NARROW_QUERY, dualPaneTw } from './viewport';
+
+export { NARROW_QUERY };
 
 const POLL_MS = 15_000;
-const NARROW_QUERY = '(max-width: 767px)';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -472,14 +474,14 @@ export function MessagesPanel(): JSX.Element {
   const showThread = selectedUid != null;
 
   return (
-    <div className="flex h-[calc(100dvh-11rem)] min-h-[480px] flex-col overflow-hidden rounded-xl border bg-background">
+    <div className="flex h-[calc(100dvh-11rem)] min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-background">
       {errorText ? (
         <p role="alert" className="shrink-0 border-b bg-destructive/10 px-4 py-2 text-xs text-destructive">
           {errorText}
         </p>
       ) : null}
-      <div className="grid min-h-0 min-w-0 flex-1 md:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
-        <section className={cn('h-full min-h-0 min-w-0 overflow-hidden flex-col', showThread ? 'hidden md:flex' : 'flex')}>
+      <div className={cn('grid min-h-0 min-w-0 flex-1', dualPaneTw('grid-cols-[minmax(0,20rem)_minmax(0,1fr)]'))}>
+        <section className={cn('h-full min-h-0 min-w-0 overflow-hidden flex-col', showThread ? cn('hidden', dualPaneTw('flex')) : 'flex')}>
           <ConversationList
             conversations={orderedConversations}
             filtered={filteredConversations}
@@ -498,7 +500,7 @@ export function MessagesPanel(): JSX.Element {
             headerAction={<NewConversation domainId={bs.domain.id} selfUid={selfUid} onPick={handlePickUser} />}
           />
         </section>
-        <section className={cn('h-full min-h-0 min-w-0 overflow-hidden flex-col', showList ? 'hidden md:flex' : 'flex')}>
+        <section className={cn('h-full min-h-0 min-w-0 overflow-hidden flex-col', showList ? cn('hidden', dualPaneTw('flex')) : 'flex')}>
           <MessageThread
             conv={activeConv}
             selfUid={selfUid}
@@ -526,6 +528,7 @@ export function MessagesPanel(): JSX.Element {
                 void sendMessage();
               }}
               sending={sending}
+              compact={isNarrow}
             />
           ) : null}
         </section>

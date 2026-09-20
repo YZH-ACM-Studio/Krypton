@@ -171,19 +171,21 @@ export function PracticeRosterCard({
     ]);
   };
 
+  const matrixMinWidthPx = 176 + matrixColumns.length * 96;
+
   return (
-    <Card className={cn('mt-4', className)}>
+    <Card className={cn('mt-4 min-w-0', className)}>
       <CardHeader className="pb-2">
         <div className="flex flex-wrap items-center gap-2">
-          <CardTitle className="text-sm">参加名单</CardTitle>
-          <span className="text-[10px] text-muted-foreground">
+          <CardTitle className="min-w-0 text-sm">参加名单</CardTitle>
+          <span className="min-w-0 text-[10px] text-muted-foreground">
             共 {members.length} 人（仅教师可见）{truncated ? ' · 名单已截断' : ''}
           </span>
-          <div className="flex-1" />
+          <div className="min-w-0 flex-1" />
           <SimpleSelect
             value={groupFilter}
             onValueChange={setGroupFilter}
-            className="h-8 w-44"
+            className="h-8 w-44 min-w-0"
             ariaLabel="按用户组筛选"
             options={[{ value: '', label: '全部组' }, ...columns.map((column) => ({ value: column.id, label: column.name }))]}
           />
@@ -191,7 +193,7 @@ export function PracticeRosterCard({
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="搜索用户名/姓名/学号/班级"
-            className="h-8 w-56 text-xs"
+            className="h-8 w-56 min-w-0 max-w-full text-xs"
           />
           <Button variant="outline" size="sm" onClick={exportMembers} disabled={!filtered.length}>
             导出名单{keyword || groupFilter ? `（${filtered.length} 条）` : ''}
@@ -214,7 +216,7 @@ export function PracticeRosterCard({
       </CardHeader>
       <CardContent className="p-0">
         <ScrollArea className="max-h-[28rem]" orientation="both">
-          <table className="w-full text-sm">
+          <table className="w-full min-w-[640px] whitespace-nowrap text-sm">
             <thead className="sticky top-0 bg-card">
               <tr className="border-b text-left text-xs text-muted-foreground">
                 <th className="px-4 py-2 font-medium">用户名</th>
@@ -252,12 +254,12 @@ export function PracticeRosterCard({
           <div className="border-t">
             <p className="px-4 py-2 text-xs font-medium">每题完成人数</p>
             <ScrollArea className="max-h-[22rem]" orientation="both">
-              <table className="w-full text-sm">
+              <table className="w-full whitespace-nowrap text-sm" style={{ minWidth: matrixMinWidthPx }}>
                 <thead className="sticky top-0 bg-card">
                   <tr className="border-b text-left text-xs text-muted-foreground">
-                    <th className="px-4 py-2 font-medium">题目</th>
+                    <th className="sticky left-0 z-20 min-w-44 max-w-44 bg-card px-4 py-2 font-medium">题目</th>
                     {matrixColumns.map((column) => (
-                      <th key={column.id} className="px-4 py-2 text-right font-medium">
+                      <th key={column.id} className="min-w-24 px-4 py-2 text-right font-medium">
                         {column.name}
                       </th>
                     ))}
@@ -265,8 +267,8 @@ export function PracticeRosterCard({
                 </thead>
                 <tbody>
                   {problems.map((problem) => (
-                    <tr key={problem.pid} className="border-b last:border-0">
-                      <td className="px-4 py-2">
+                    <tr key={problem.pid} className="group border-b last:border-0 hover:bg-muted/20">
+                      <td className="sticky left-0 z-10 min-w-44 max-w-44 bg-card px-4 py-2 group-hover:bg-muted/20">
                         <span className="block truncate text-sm">{problem.title}</span>
                         <span className="font-mono text-[11px] text-muted-foreground">{problem.pidLabel}</span>
                       </td>

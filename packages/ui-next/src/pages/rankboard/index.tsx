@@ -321,10 +321,10 @@ function AwardsDrawer({ row, typeMap, onClose }: { row: LeaderboardRow; typeMap:
                     <button
                       type="button"
                       onClick={() => setLightbox(cover)}
-                      className="group relative block aspect-video w-full overflow-hidden bg-muted"
+                      className="relative block aspect-video w-full overflow-hidden bg-muted"
                     >
-                      <img src={cover} alt={award.contest} className="size-full object-cover transition-transform group-hover:scale-105" />
-                      <span className="absolute right-2 top-2 rounded-full bg-black/40 p-1 text-white opacity-0 transition-opacity group-hover:opacity-100">
+                      <img src={cover} alt={award.contest} className="size-full object-cover" />
+                      <span className="absolute right-2 top-2 rounded-full bg-black/40 p-1 text-white">
                         <ZoomIn className="size-3.5" />
                       </span>
                     </button>
@@ -511,13 +511,15 @@ export function RankBoardMainPage() {
   const filterActive = typeFilter.size > 0 || ladderGroupSelected;
 
   return (
-    <div className="space-y-5">
-      <header className="flex items-center gap-2">
-        <AwardIcon className="size-5 text-primary" />
-        <h1 className="text-xl font-semibold">中国民航大学荣誉榜</h1>
-        <span className="ml-3 text-xs text-muted-foreground">
-          共 {data.rows.length} 人 · 基础分 {data.config.baseScore} · 衰减 {data.config.decayFactor}
-        </span>
+    <div className="min-w-0 space-y-5">
+      <header className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <AwardIcon className="size-5 shrink-0 text-primary" />
+          <h1 className="text-xl font-semibold">中国民航大学荣誉榜</h1>
+          <span className="text-xs text-muted-foreground">
+            共 {data.rows.length} 人 · 基础分 {data.config.baseScore} · 衰减 {data.config.decayFactor}
+          </span>
+        </div>
         <Button asChild variant="outline" size="sm" className="ml-auto">
           <a href="/rankboard/gallery">荣誉照片墙</a>
         </Button>
@@ -525,7 +527,7 @@ export function RankBoardMainPage() {
 
       {/* Top 3 podium */}
       {top3.length > 0 && (
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(16rem,1fr))] gap-4">
           {top3.map((r, i) => (
             <PodiumCard key={r.person._id} row={r} rank={i + 1} />
           ))}
@@ -539,8 +541,8 @@ export function RankBoardMainPage() {
 
       {/* Filters */}
       <Card>
-        <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-end">
-          <div className="relative max-w-xs flex-1">
+        <CardContent className="flex flex-wrap items-end gap-3 p-4">
+          <div className="relative min-w-[12rem] max-w-xs flex-1">
             <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input className="pl-8" placeholder="搜索学号 / 姓名" value={search} onChange={(e) => setSearch(e.target.value)} />
           </div>
@@ -616,91 +618,89 @@ export function RankBoardMainPage() {
       </Card>
 
       {/* Table */}
-      <Card>
+      <Card className="min-w-0">
         <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-14 pl-5">排名</TableHead>
-                  <TableHead>姓名</TableHead>
-                  <TableHead className="w-32">学院</TableHead>
-                  <TableHead className="w-32">就业去向</TableHead>
-                  <TableHead className="w-16 text-center">ICPC 金</TableHead>
-                  <TableHead className="w-16 text-center">ICPC 银</TableHead>
-                  <TableHead className="w-16 text-center">ICPC 铜</TableHead>
-                  <TableHead className="w-12 text-center">CCPC 金</TableHead>
-                  <TableHead className="w-12 text-center">CCPC 银</TableHead>
-                  <TableHead className="w-12 text-center">CCPC 铜</TableHead>
-                  <TableHead className="w-12 text-center">PAT</TableHead>
-                  {showLadderDetails ? (
-                    LADDER_DETAIL_COLUMNS.map((column) => (
-                      <TableHead key={column.key} className="w-12 text-center">
-                        {column.label}
-                      </TableHead>
-                    ))
-                  ) : (
-                    <TableHead className="w-14 text-center">天梯赛</TableHead>
-                  )}
-                  <TableHead className="w-12 text-center">其它</TableHead>
-                  <TableHead className="w-16 text-right">OJ AC</TableHead>
-                  <TableHead className="w-20 pr-5 text-right">总分</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {tableRows.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={showLadderDetails ? 21 : 15} className="py-10 text-center text-sm text-muted-foreground">
-                      {data.rows.length === 0 ? '荣誉榜暂无成员，等待管理员添加。' : '当前筛选下没有匹配的成员。'}
-                    </TableCell>
-                  </TableRow>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-14 pl-5">排名</TableHead>
+                <TableHead>姓名</TableHead>
+                <TableHead className="w-32">学院</TableHead>
+                <TableHead className="w-32">就业去向</TableHead>
+                <TableHead className="w-16 text-center">ICPC 金</TableHead>
+                <TableHead className="w-16 text-center">ICPC 银</TableHead>
+                <TableHead className="w-16 text-center">ICPC 铜</TableHead>
+                <TableHead className="w-12 text-center">CCPC 金</TableHead>
+                <TableHead className="w-12 text-center">CCPC 银</TableHead>
+                <TableHead className="w-12 text-center">CCPC 铜</TableHead>
+                <TableHead className="w-12 text-center">PAT</TableHead>
+                {showLadderDetails ? (
+                  LADDER_DETAIL_COLUMNS.map((column) => (
+                    <TableHead key={column.key} className="w-12 text-center">
+                      {column.label}
+                    </TableHead>
+                  ))
                 ) : (
-                  tableRows.map((r) => {
-                    const counts = tallyAwards(r.person.awards, typeMap);
-                    return (
-                      <TableRow key={r.person._id} className="cursor-pointer" onClick={() => setOpenRow(r)}>
-                        <TableCell className="pl-5 font-mono text-sm font-semibold">#{r.rank}</TableCell>
-                        <TableCell>
-                          <div>
-                            <p className="text-sm font-medium">{r.student.realName}</p>
-                            <p className="font-mono text-[11px] text-muted-foreground">{r.student.studentId}</p>
-                          </div>
-                        </TableCell>
-                        <TableCell className="truncate text-xs text-muted-foreground">
-                          {rankboardCollege(r.person, r.student) || <span className="opacity-40">—</span>}
-                        </TableCell>
-                        <TableCell className="truncate text-xs text-muted-foreground">
-                          {r.person.employmentStatus || <span className="opacity-40">—</span>}
-                        </TableCell>
-                        <LeaderboardCountCells awards={r.person.awards} typeMap={typeMap} showLadderDetails={showLadderDetails} counts={counts} />
-                        <TableCell className="text-right font-mono text-sm">{r.user ? r.user.nAccept : '—'}</TableCell>
-                        <TableCell className="pr-5 text-right font-mono text-sm font-semibold">{r.totalScore.toFixed(1)}</TableCell>
-                      </TableRow>
-                    );
-                  })
+                  <TableHead className="w-14 text-center">天梯赛</TableHead>
                 )}
-              </TableBody>
-              {tableTotals ? (
-                <TableFooter>
-                  <TableRow className="hover:bg-transparent">
-                    <TableCell className="pl-5 font-semibold">合计</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{tableRows.length} 人</TableCell>
-                    <TableCell />
-                    <TableCell />
-                    <LeaderboardCountCells
-                      awards={[]}
-                      typeMap={typeMap}
-                      showLadderDetails={showLadderDetails}
-                      counts={tableTotals.tally}
-                      ladderCounts={tableTotals.ladderColumns}
-                    />
-                    <TableCell className="text-right font-mono text-sm">{tableTotals.nAccept}</TableCell>
-                    <TableCell className="pr-5 text-right font-mono text-sm font-semibold">{tableTotals.totalScore.toFixed(1)}</TableCell>
-                  </TableRow>
-                </TableFooter>
-              ) : null}
-            </Table>
-          </div>
+                <TableHead className="w-12 text-center">其它</TableHead>
+                <TableHead className="w-16 text-right">OJ AC</TableHead>
+                <TableHead className="w-20 pr-5 text-right">总分</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {tableRows.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={showLadderDetails ? 21 : 15} className="py-10 text-center text-sm text-muted-foreground">
+                    {data.rows.length === 0 ? '荣誉榜暂无成员，等待管理员添加。' : '当前筛选下没有匹配的成员。'}
+                  </TableCell>
+                </TableRow>
+              ) : (
+                tableRows.map((r) => {
+                  const counts = tallyAwards(r.person.awards, typeMap);
+                  return (
+                    <TableRow key={r.person._id} className="cursor-pointer" onClick={() => setOpenRow(r)}>
+                      <TableCell className="pl-5 font-mono text-sm font-semibold">#{r.rank}</TableCell>
+                      <TableCell>
+                        <div>
+                          <p className="text-sm font-medium">{r.student.realName}</p>
+                          <p className="font-mono text-[11px] text-muted-foreground">{r.student.studentId}</p>
+                        </div>
+                      </TableCell>
+                      <TableCell className="truncate text-xs text-muted-foreground">
+                        {rankboardCollege(r.person, r.student) || <span className="opacity-40">—</span>}
+                      </TableCell>
+                      <TableCell className="truncate text-xs text-muted-foreground">
+                        {r.person.employmentStatus || <span className="opacity-40">—</span>}
+                      </TableCell>
+                      <LeaderboardCountCells awards={r.person.awards} typeMap={typeMap} showLadderDetails={showLadderDetails} counts={counts} />
+                      <TableCell className="text-right font-mono text-sm">{r.user ? r.user.nAccept : '—'}</TableCell>
+                      <TableCell className="pr-5 text-right font-mono text-sm font-semibold">{r.totalScore.toFixed(1)}</TableCell>
+                    </TableRow>
+                  );
+                })
+              )}
+            </TableBody>
+            {tableTotals ? (
+              <TableFooter>
+                <TableRow className="hover:bg-transparent">
+                  <TableCell className="pl-5 font-semibold">合计</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{tableRows.length} 人</TableCell>
+                  <TableCell />
+                  <TableCell />
+                  <LeaderboardCountCells
+                    awards={[]}
+                    typeMap={typeMap}
+                    showLadderDetails={showLadderDetails}
+                    counts={tableTotals.tally}
+                    ladderCounts={tableTotals.ladderColumns}
+                  />
+                  <TableCell className="text-right font-mono text-sm">{tableTotals.nAccept}</TableCell>
+                  <TableCell className="pr-5 text-right font-mono text-sm font-semibold">{tableTotals.totalScore.toFixed(1)}</TableCell>
+                </TableRow>
+              </TableFooter>
+            ) : null}
+          </Table>
         </CardContent>
       </Card>
 
@@ -719,7 +719,7 @@ export function RankBoardDetailPage() {
   const typeMap = new Map(data.awardTypes.map((t) => [t.key, t]));
   const college = rankboardCollege(data.row.person, data.row.student);
   return (
-    <div className="space-y-5">
+    <div className="min-w-0 space-y-5">
       <Button variant="ghost" size="sm" asChild>
         <a href="/rankboard" className="gap-1.5">
           <ChevronRight className="size-3.5 rotate-180" />
@@ -747,7 +747,7 @@ export function RankBoardDetailPage() {
         </CardContent>
       </Card>
       <h2 className="text-base font-semibold">奖项（{data.row.awardCount}）</h2>
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(16rem,1fr))] gap-4">
         {data.row.person.awards.map((award, idx) => {
           const type = typeMap.get(award.type);
           const score = data.row.awardScores[idx] || 0;

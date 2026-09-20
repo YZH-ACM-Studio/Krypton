@@ -152,19 +152,19 @@ export function TelegramLoginPage() {
 
   return (
     <motion.div
-      className="mx-auto flex min-h-[60vh] max-w-md items-center"
+      className="mx-auto flex min-h-0 max-w-md py-4 md:min-h-[60vh] md:items-center"
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
     >
-      <Card className="w-full">
-        <CardContent className="flex flex-col items-center p-8 text-center">
+      <Card className="w-full min-w-0">
+        <CardContent className="flex flex-col items-center p-6 text-center sm:p-8">
           <div className="flex size-12 items-center justify-center rounded-md bg-primary/10 text-primary">
             <LogIn className="size-6" />
           </div>
-          <h1 className="mt-4 text-xl font-semibold">使用 Telegram 登录</h1>
+          <h1 className="mt-4 text-xl font-semibold leading-snug">使用 Telegram 登录</h1>
           <p className="mt-2 text-sm text-muted-foreground">请在弹出的 Telegram 授权组件中确认身份。</p>
-          <div id="telegram-login-widget" className="mt-6 min-h-10" />
+          <div id="telegram-login-widget" className="mt-6 min-h-10 w-full max-w-full overflow-x-auto" />
           {!botLogin ? <p className="mt-4 text-sm text-destructive">Telegram Bot 尚未配置。</p> : null}
         </CardContent>
       </Card>
@@ -210,20 +210,20 @@ export function XcpcioBoardPage() {
   }, [bs.locale, cssHref, data.dataSource, data.refreshInterval, scriptSrc]);
 
   return (
-    <motion.div className="space-y-4" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-      <div className="flex flex-wrap items-center gap-3">
-        <div>
-          <h1 className="flex items-center gap-2 text-xl font-semibold">
-            <Trophy className="size-5 text-primary" />
+    <motion.div className="min-w-0 space-y-4" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
+      <div className="flex min-w-0 flex-wrap items-center gap-3">
+        <div className="min-w-0">
+          <h1 className="flex items-center gap-2 text-xl font-semibold leading-snug">
+            <Trophy className="size-5 shrink-0 text-primary" />
             XCPCIO 榜单
           </h1>
-          <p className="mt-1 text-sm text-muted-foreground">{data.tdoc?.title || '比赛榜单'} · 外榜视图</p>
+          <p className="mt-1 break-words text-sm text-muted-foreground">{data.tdoc?.title || '比赛榜单'} · 外榜视图</p>
         </div>
         {data.realtime ? <Badge variant="secondary">实时</Badge> : <Badge variant="outline">封榜/静态</Badge>}
       </div>
       {scriptSrc && cssHref ? (
-        <div className="overflow-hidden rounded-md border bg-card">
-          <div id="app" className="min-h-[70vh]" />
+        <div className="min-w-0 overflow-x-auto rounded-md border bg-card">
+          <div id="app" className="min-h-[min(70vh,calc(100dvh-10rem))]" />
         </div>
       ) : (
         <Card>

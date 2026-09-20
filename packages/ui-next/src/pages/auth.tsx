@@ -11,6 +11,8 @@ interface AuthPageData {
   uname?: string;
 }
 
+const AUTH_INPUT_CLASS = 'h-11 text-base md:h-9 md:text-sm';
+
 export function LoginPage() {
   const bs = useBootstrap();
 
@@ -34,15 +36,15 @@ export function LoginPage() {
               <label htmlFor="uname" className="text-sm font-medium">
                 用户名或邮箱
               </label>
-              <Input id="uname" name="uname" autoComplete="username" autoFocus required />
+              <Input id="uname" name="uname" autoComplete="username" autoFocus required className={AUTH_INPUT_CLASS} />
             </div>
             <div className="space-y-2">
               <label htmlFor="password" className="text-sm font-medium">
                 密码
               </label>
-              <Input id="password" name="password" type="password" autoComplete="current-password" required />
+              <Input id="password" name="password" type="password" autoComplete="current-password" required className={AUTH_INPUT_CLASS} />
             </div>
-            <Button type="submit" className="w-full">
+            <Button type="submit" className="min-h-11 w-full">
               登录
             </Button>
           </form>
@@ -64,7 +66,7 @@ export function LoginPage() {
           </CardHeader>
           <CardContent className="flex flex-wrap justify-center gap-2">
             {(bs.page.data as AuthPageData).oauth!.map((o) => (
-              <Button key={o.type} asChild variant="outline" size="sm">
+              <Button key={o.type} asChild variant="outline" className="min-h-11">
                 <a href={`/oauth/${o.type}/login`}>{o.name || o.type}</a>
               </Button>
             ))}
@@ -92,7 +94,7 @@ export function RegisterPage() {
         <div className="text-center">
           <Swords className="mx-auto size-8 text-primary" />
           <h1 className="mt-3 text-2xl font-bold">完成注册</h1>
-          {mail ? <p className="mt-1 text-sm text-muted-foreground">{mail}</p> : null}
+          {mail ? <p className="mt-1 break-all text-sm text-muted-foreground">{mail}</p> : null}
         </div>
 
         <Card>
@@ -102,21 +104,21 @@ export function RegisterPage() {
                 <label htmlFor="uname" className="text-sm font-medium">
                   用户名
                 </label>
-                <Input id="uname" name="uname" autoComplete="username" autoFocus required placeholder="设置你的用户名" />
+                <Input id="uname" name="uname" autoComplete="username" autoFocus required placeholder="设置你的用户名" className={AUTH_INPUT_CLASS} />
               </div>
               <div className="space-y-2">
                 <label htmlFor="password" className="text-sm font-medium">
                   密码
                 </label>
-                <Input id="password" name="password" type="password" autoComplete="new-password" required />
+                <Input id="password" name="password" type="password" autoComplete="new-password" required className={AUTH_INPUT_CLASS} />
               </div>
               <div className="space-y-2">
                 <label htmlFor="verifyPassword" className="text-sm font-medium">
                   确认密码
                 </label>
-                <Input id="verifyPassword" name="verifyPassword" type="password" autoComplete="new-password" required />
+                <Input id="verifyPassword" name="verifyPassword" type="password" autoComplete="new-password" required className={AUTH_INPUT_CLASS} />
               </div>
-              <Button type="submit" className="w-full">
+              <Button type="submit" className="min-h-11 w-full">
                 注册
               </Button>
             </form>
@@ -147,9 +149,9 @@ export function RegisterPage() {
               <label htmlFor="mail" className="text-sm font-medium">
                 邮箱
               </label>
-              <Input id="mail" name="mail" type="email" autoComplete="email" autoFocus required />
+              <Input id="mail" name="mail" type="email" autoComplete="email" autoFocus required className={AUTH_INPUT_CLASS} />
             </div>
-            <Button type="submit" className="w-full">
+            <Button type="submit" className="min-h-11 w-full">
               发送验证邮件
             </Button>
           </form>
@@ -181,11 +183,11 @@ export function LogoutPage() {
           <h1 className="mt-3 text-xl font-semibold">确认退出</h1>
           <p className="mt-1 text-sm text-muted-foreground">你确定要退出登录吗？</p>
           <div className="mt-6 flex gap-3">
-            <Button asChild variant="outline" className="flex-1">
+            <Button asChild variant="outline" className="min-h-11 flex-1">
               <a href={bs.urls.home}>取消</a>
             </Button>
             <form method="post" className="flex-1">
-              <Button type="submit" variant="destructive" className="w-full">
+              <Button type="submit" variant="destructive" className="min-h-11 w-full">
                 退出
               </Button>
             </form>
@@ -218,9 +220,9 @@ export function LostPasswordPage() {
               <label htmlFor="mail" className="text-sm font-medium">
                 邮箱
               </label>
-              <Input id="mail" name="mail" type="email" autoFocus required />
+              <Input id="mail" name="mail" type="email" autoFocus required className={AUTH_INPUT_CLASS} />
             </div>
-            <Button type="submit" className="w-full">
+            <Button type="submit" className="min-h-11 w-full">
               发送重置邮件
             </Button>
           </form>
@@ -249,13 +251,13 @@ export function RegisterMailSentPage() {
       transition={{ duration: 0.35 }}
     >
       <Card>
-        <CardContent className="p-8 text-center">
+        <CardContent className="p-6 text-center sm:p-8">
           <MailIcon className="mx-auto size-10 text-primary" />
-          <h1 className="mt-4 text-xl font-semibold">验证邮件已发送</h1>
+          <h1 className="mt-4 text-xl font-semibold leading-snug">验证邮件已发送</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            我们已向 <strong>{mail}</strong> 发送了一封验证邮件，请查看你的收件箱并点击链接完成注册。
+            我们已向 <strong className="break-all">{mail}</strong> 发送了一封验证邮件，请查看你的收件箱并点击链接完成注册。
           </p>
-          <Button asChild variant="outline" className="mt-6">
+          <Button asChild variant="outline" className="mt-6 min-h-11">
             <a href={bs.urls.login}>返回登录</a>
           </Button>
         </CardContent>
@@ -276,19 +278,19 @@ export function LostPasswordMailSentPage() {
       transition={{ duration: 0.35 }}
     >
       <Card>
-        <CardContent className="p-8 text-center">
+        <CardContent className="p-6 text-center sm:p-8">
           <MailIcon className="mx-auto size-10 text-primary" />
-          <h1 className="mt-4 text-xl font-semibold">重置邮件已发送</h1>
+          <h1 className="mt-4 text-xl font-semibold leading-snug">重置邮件已发送</h1>
           <p className="mt-2 text-sm text-muted-foreground">
             {mail ? (
               <>
-                我们已向 <strong>{mail}</strong> 发送了一封密码重置邮件，请查看收件箱并按邮件中的链接继续。
+                我们已向 <strong className="break-all">{mail}</strong> 发送了一封密码重置邮件，请查看收件箱并按邮件中的链接继续。
               </>
             ) : (
               '如果邮箱匹配已有账号，我们会发送密码重置链接，请稍后查看收件箱。'
             )}
           </p>
-          <Button asChild variant="outline" className="mt-6">
+          <Button asChild variant="outline" className="mt-6 min-h-11">
             <a href={bs.urls.login}>返回登录</a>
           </Button>
         </CardContent>
@@ -322,15 +324,15 @@ export function LostPasswordWithCodePage() {
               <label htmlFor="password" className="text-sm font-medium">
                 新密码
               </label>
-              <Input id="password" name="password" type="password" autoComplete="new-password" autoFocus required />
+              <Input id="password" name="password" type="password" autoComplete="new-password" autoFocus required className={AUTH_INPUT_CLASS} />
             </div>
             <div className="space-y-2">
               <label htmlFor="verifyPassword" className="text-sm font-medium">
                 确认密码
               </label>
-              <Input id="verifyPassword" name="verifyPassword" type="password" autoComplete="new-password" required />
+              <Input id="verifyPassword" name="verifyPassword" type="password" autoComplete="new-password" required className={AUTH_INPUT_CLASS} />
             </div>
-            <Button type="submit" className="w-full">
+            <Button type="submit" className="min-h-11 w-full">
               重置密码
             </Button>
           </form>
@@ -372,7 +374,7 @@ export function ChangeMailSentPage() {
       transition={{ duration: 0.35 }}
     >
       <Card>
-        <CardContent className="p-8 text-center">
+        <CardContent className="p-6 text-center sm:p-8">
           <MailIcon className="mx-auto size-10 text-green-500" />
           <h1 className="mt-4 text-xl font-semibold">验证邮件已发送</h1>
           <p className="mt-2 text-sm text-muted-foreground">请查看新邮箱的收件箱，点击链接完成邮箱更换。</p>

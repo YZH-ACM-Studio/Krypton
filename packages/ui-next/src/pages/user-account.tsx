@@ -52,7 +52,7 @@ import {
   shouldRenderAccountSetting,
 } from './user-account-settings';
 
-export { MessagesPanel } from './messages';
+export { MessagesPanel, NARROW_QUERY } from './messages';
 
 /* ------------------------------------------------------------------ */
 /*  Server-doc shapes flowing through the loosely-typed page data      */
@@ -307,7 +307,7 @@ export function UserAccountPage() {
 
   return (
     <motion.div
-      className={isMessages ? 'flex min-h-0 flex-col gap-4' : 'space-y-6'}
+      className={isMessages ? 'flex min-h-0 flex-1 flex-col gap-4' : 'space-y-6'}
       initial={isMessages ? false : { opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.25 }}
@@ -317,18 +317,20 @@ export function UserAccountPage() {
         {isMessages ? null : <p className="text-sm text-muted-foreground">偏好、公开资料和登录安全都在这里。学号、姓名和学校只来自学生绑定。</p>}
       </div>
 
-      <MiniTabs
-        size="md"
-        value={activeId}
-        aria-label="账号设置分类"
-        items={tabs.map((tab) => ({
-          value: tab.id,
-          label: tab.label,
-          icon: tab.icon,
-          href: tab.href,
-          count: tab.id === 'messages' && bs.user.unreadMessages > 0 ? bs.user.unreadMessages : undefined,
-        }))}
-      />
+      <div className="min-w-0 max-w-full overflow-x-auto">
+        <MiniTabs
+          size="md"
+          value={activeId}
+          aria-label="账号设置分类"
+          items={tabs.map((tab) => ({
+            value: tab.id,
+            label: tab.label,
+            icon: tab.icon,
+            href: tab.href,
+            count: tab.id === 'messages' && bs.user.unreadMessages > 0 ? bs.user.unreadMessages : undefined,
+          }))}
+        />
+      </div>
 
       {content}
     </motion.div>
@@ -420,9 +422,9 @@ function StudentIdentityCard({ binding }: { binding?: StudentBindingView | null 
           <p className="text-sm text-muted-foreground">还未绑定学生档案。绑定后，公开资料和考试页会显示花名册上的学号和姓名。</p>
         )}
       </CardContent>
-      <CardFooter className="justify-between gap-3">
-        <p className="text-xs text-muted-foreground">{bound ? '绑定后无法在此修改。如需变更，请联系管理员。' : '去绑定页填写学校、学号和姓名，与花名册核对。'}</p>
-        <Button asChild variant={bound ? 'outline' : 'default'} size="sm">
+      <CardFooter className="flex-wrap justify-between gap-3">
+        <p className="min-w-0 flex-1 basis-48 text-xs text-muted-foreground">{bound ? '绑定后无法在此修改。如需变更，请联系管理员。' : '去绑定页填写学校、学号和姓名，与花名册核对。'}</p>
+        <Button asChild variant={bound ? 'outline' : 'default'} size="sm" className="shrink-0">
           <a href="/userbind">{bound ? '查看绑定' : '去绑定'}</a>
         </Button>
       </CardFooter>
@@ -683,7 +685,7 @@ function SecurityPanel() {
   const methodsToLink = loginMethods.filter((method) => !linkedPlatforms.has(method.id || method.type));
 
   return (
-    <div className="space-y-4">
+    <div className="mx-auto w-full max-w-3xl space-y-4">
       {/* Change username */}
       <Card>
         <CardHeader className="pb-3">
@@ -723,7 +725,7 @@ function SecurityPanel() {
         <CardContent>
           <form method="post" className="space-y-4">
             <input type="hidden" name="operation" value="change_password" />
-            <FormRow columns={3}>
+            <FormRow columns={1} className="lg:grid-cols-3">
               <FormField label="当前密码">
                 <Input name="current" type="password" autoComplete="current-password" />
               </FormField>
@@ -942,9 +944,9 @@ function SecurityPanel() {
         <CardHeader className="pb-3">
           <CardTitle className="text-sm text-destructive">危险区域</CardTitle>
         </CardHeader>
-        <CardContent className="flex items-center justify-between">
-          <p className="text-xs text-muted-foreground">删除账号后所有数据将无法恢复</p>
-          <Button asChild variant="destructive" size="sm">
+        <CardContent className="flex flex-wrap items-center justify-between gap-3">
+          <p className="min-w-0 flex-1 basis-48 text-xs text-muted-foreground">删除账号后所有数据将无法恢复</p>
+          <Button asChild variant="destructive" size="sm" className="shrink-0">
             <a href="/user/delete">删除账号</a>
           </Button>
         </CardContent>

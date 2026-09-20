@@ -80,11 +80,11 @@ export function BlogMainPage() {
             <a
               key={String(post._id || post.docId)}
               href={blogDetailUrl(ownerId, post._id || post.docId)}
-              className="block rounded-md border bg-card p-4 transition-colors hover:border-primary/40 hover:bg-accent/40"
+              className="block rounded-md border bg-card p-3 transition-colors hover:border-primary/40 hover:bg-accent/40 sm:p-4"
             >
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0">
-                  <h2 className="truncate text-base font-semibold">{post.title || '未命名文章'}</h2>
+                  <h2 className="min-w-0 break-words text-base font-semibold">{post.title || '未命名文章'}</h2>
                   <p className="mt-1 text-sm text-muted-foreground">{formatDateTime(post.updateAt || post._id, bs.locale)}</p>
                 </div>
                 <div className="flex shrink-0 gap-2">
@@ -100,7 +100,9 @@ export function BlogMainPage() {
               </div>
             </a>
           ))}
-          <Pagination current={page} total={total} baseUrl={blogMainUrl(ownerId)} />
+          <div className="overflow-x-auto">
+            <Pagination current={page} total={total} baseUrl={blogMainUrl(ownerId)} />
+          </div>
         </div>
       ) : (
         <EmptyBlog />
@@ -121,15 +123,15 @@ export function BlogDetailPage() {
   return (
     <BlogShell title={post.title || '博客文章'} udoc={udoc}>
       <article className="space-y-4">
-        <div className="flex flex-col gap-3 border-b pb-4 sm:flex-row sm:items-start sm:justify-between">
-          <div>
+        <div className="flex min-w-0 flex-col gap-3 border-b pb-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
             <a href={blogMainUrl(ownerId)} className="text-sm text-primary hover:underline">
               {udoc.uname || '用户'} 的博客
             </a>
-            <h1 className="mt-2 text-2xl font-semibold">{post.title || '未命名文章'}</h1>
+            <h1 className="mt-2 min-w-0 break-words text-2xl font-semibold">{post.title || '未命名文章'}</h1>
             <p className="mt-2 text-sm text-muted-foreground">{formatDateTime(post.updateAt || post._id, bs.locale)}</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex shrink-0 gap-2">
             <Badge variant="outline" className="gap-1">
               <Eye className="size-3" />
               {post.views || 0}
@@ -144,7 +146,9 @@ export function BlogDetailPage() {
             ) : null}
           </div>
         </div>
-        <MarkdownView content={post.content || ''} />
+        <div className="max-w-3xl overflow-x-auto">
+          <MarkdownView content={post.content || ''} />
+        </div>
       </article>
     </BlogShell>
   );
@@ -168,7 +172,13 @@ export function BlogEditPage() {
         </div>
         <div className="space-y-2">
           <label className="text-sm font-medium">内容</label>
-          <MarkdownEditor name="content" value={post.content || ''} minHeight={500} preferredLang={bs.locale} />
+          <MarkdownEditor
+            name="content"
+            value={post.content || ''}
+            minHeight={500}
+            preferredLang={bs.locale}
+            className="[&_.krypton-md-shell]:md:h-[min(500px,calc(100dvh-16rem))]"
+          />
         </div>
         <div className="flex flex-wrap justify-end gap-2">
           <Button type="button" variant="outline" onClick={() => window.history.back()}>
@@ -202,25 +212,25 @@ export function BlogEditPage() {
 function BlogShell({ title, udoc, aside, children }: { title: string; udoc: BlogUser; aside?: React.ReactNode; children: React.ReactNode }) {
   return (
     <motion.div
-      className="grid gap-5 lg:grid-cols-[1fr_260px]"
+      className="mx-auto grid w-full max-w-6xl gap-5 lg:grid-cols-[1fr_260px]"
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
     >
       <main className="min-w-0">
         <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-xl">
-              <BookOpen className="size-5 text-primary" />
-              {title}
+          <CardHeader className="p-4 pb-3 sm:p-5 sm:pb-3">
+            <CardTitle className="flex min-w-0 items-center gap-2 text-xl">
+              <BookOpen className="size-5 shrink-0 text-primary" />
+              <span className="min-w-0 break-words">{title}</span>
             </CardTitle>
           </CardHeader>
-          <CardContent>{children}</CardContent>
+          <CardContent className="p-4 sm:p-5">{children}</CardContent>
         </Card>
       </main>
       <aside className="space-y-4">
         <Card>
-          <CardContent className="p-4">
+          <CardContent className="p-3 sm:p-4">
             <div className="flex items-center gap-3">
               <Avatar className="size-12">
                 <AvatarFallback>{makeInitials(udoc.uname || 'K')}</AvatarFallback>
@@ -235,11 +245,11 @@ function BlogShell({ title, udoc, aside, children }: { title: string; udoc: Blog
         </Card>
         {aside ? (
           <Card>
-            <CardContent className="p-4">{aside}</CardContent>
+            <CardContent className="p-3 sm:p-4">{aside}</CardContent>
           </Card>
         ) : null}
         <Card>
-          <CardContent className="space-y-2 p-4 text-sm">
+          <CardContent className="space-y-2 p-3 text-sm sm:p-4">
             <a href={blogMainUrl(udoc._id || '')} className="flex items-center gap-2 text-muted-foreground hover:text-foreground">
               <BookOpen className="size-4" />
               查看博客

@@ -23,6 +23,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { DateTime } from '@/components/ui/datetime';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { Sheet, SheetBody, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
@@ -269,7 +270,7 @@ function ChapterPager({
   return (
     <nav aria-label="章节导航" className="grid gap-2 pt-2 sm:grid-cols-2">
       {previous ? (
-        <Button type="button" variant="outline" className="h-auto justify-start px-4 py-3" onClick={() => onSelect(previous._id)}>
+        <Button type="button" variant="outline" className="h-auto w-full min-w-0 justify-start whitespace-normal px-4 py-3" onClick={() => onSelect(previous._id)}>
           <span className="flex min-w-0 flex-col items-start gap-0.5">
             <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
               <ArrowLeft className="size-3.5" strokeWidth={1.75} />
@@ -282,7 +283,7 @@ function ChapterPager({
         <span aria-hidden="true" className="hidden sm:block" />
       )}
       {next ? (
-        <Button type="button" variant="outline" className="h-auto justify-end px-4 py-3" onClick={() => onSelect(next._id)}>
+        <Button type="button" variant="outline" className="h-auto w-full min-w-0 justify-end whitespace-normal px-4 py-3" onClick={() => onSelect(next._id)}>
           <span className="flex min-w-0 flex-col items-end gap-0.5">
             <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
               下一章
@@ -530,9 +531,9 @@ export function CourseDetailPage() {
         </Card>
       ) : (
         <div className="grid min-w-0 w-full gap-6 lg:grid-cols-[19rem_minmax(0,1fr)] xl:gap-8">
-          <aside className="hidden self-start lg:sticky lg:top-20 lg:block">
-            <Card className="overflow-hidden py-0">
-              <div className="flex items-center gap-3 border-b px-4 py-3">
+          <aside className="hidden self-start lg:sticky lg:top-14 lg:block lg:max-h-[calc(100dvh-4.5rem)]">
+            <Card className="flex max-h-[calc(100dvh-4.5rem)] flex-col overflow-hidden py-0">
+              <div className="flex shrink-0 items-center gap-3 border-b px-4 py-3">
                 {totalProblems ? (
                   <CourseProgressRing value={overallProgress} size={40} thickness={4} label={`课程完成进度 ${overallProgress}%`} />
                 ) : null}
@@ -543,14 +544,16 @@ export function CourseDetailPage() {
                   </p>
                 </div>
               </div>
-              <div className="p-1.5">
-                <ChapterOutline
-                  chapters={chapters}
-                  activeId={activeChapter._id}
-                  activeSectionId={activeSectionId}
-                  onSelect={(chapterId, sectionId) => (sectionId == null ? selectChapter(chapterId) : selectSection(chapterId, sectionId))}
-                />
-              </div>
+              <ScrollArea className="min-h-0 max-h-[calc(100dvh-8.5rem)] flex-1">
+                <div className="p-1.5">
+                  <ChapterOutline
+                    chapters={chapters}
+                    activeId={activeChapter._id}
+                    activeSectionId={activeSectionId}
+                    onSelect={(chapterId, sectionId) => (sectionId == null ? selectChapter(chapterId) : selectSection(chapterId, sectionId))}
+                  />
+                </div>
+              </ScrollArea>
             </Card>
           </aside>
 

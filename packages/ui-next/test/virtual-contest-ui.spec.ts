@@ -23,6 +23,30 @@ describe('p4.3 virtual contest UI', () => {
     expect(page).to.include('不能当作防作弊');
   });
 
+  it('wraps entry actions, remaining label, problem titles, and scoreboard columns without a live timer protocol', () => {
+    const page = readFileSync(resolve(root, 'src/pages/virtual-contest.tsx'), 'utf8');
+    expect(page).to.include('className="mt-1 max-w-prose text-sm text-muted-foreground"');
+    expect(page).to.include('className="flex flex-wrap items-center gap-2"');
+    expect(page).to.include('className="h-auto whitespace-normal"');
+    expect(page).to.include('className="flex flex-wrap items-center gap-2 text-base"');
+    expect(page).to.include('remainingLabel(attempt.remainingMs || 0)');
+    expect(page).to.include('className="min-w-0 truncate"');
+    expect(page).to.include('className="shrink-0"');
+    expect(page).to.include('<div className="min-w-0 space-y-4">');
+    expect(page).to.include('<Card className="min-w-0">');
+    expect(page).to.include('<ScrollArea className="w-full" orientation="both">');
+    expect(page).to.include('krypton-table min-w-max');
+    expect(page).not.to.include('[&_.krypton-table-shell]');
+    expect(page).to.include('min-w-20 whitespace-nowrap');
+    expect(page).to.include('min-w-20 whitespace-pre-line');
+    expect(page).to.include('min-w-24 whitespace-nowrap');
+    expect(page).to.include('scoreboardExportPlainText');
+    expect(page).not.to.include('dangerouslySetInnerHTML');
+    expect(page).not.to.include('replace(/<[^>]*>/g');
+    expect(page).not.to.match(/setInterval|requestAnimationFrame/);
+    expect(page).not.to.match(/\blive countdown\b|\b倒计时协议\b/);
+  });
+
   it('keeps VP submit, records, and remaining time on the isolated problem page', () => {
     const detail = readFileSync(resolve(root, 'src/pages/problem-detail.tsx'), 'utf8');
     // eslint-disable-next-line no-template-curly-in-string

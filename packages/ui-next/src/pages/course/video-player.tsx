@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/cn';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import {
   clampPlaybackRate,
@@ -111,9 +110,9 @@ export function CourseVideoPlayer({
 
   return (
     <section className="krypton-course-panel space-y-3 p-4">
-      <div className="flex flex-wrap items-end justify-between gap-2">
-        <div>
-          <h3 className="text-sm font-semibold">{video.title}</h3>
+      <div className="flex min-w-0 flex-wrap items-end justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <h3 className="min-w-0 truncate text-sm font-semibold">{video.title}</h3>
           <p className="krypton-course-meta mt-0.5">
             {completed ? '已看完' : `已覆盖 ${coverage}%`}
             <span className="ml-2">按播放规则看完，不是监考证明。</span>
@@ -141,7 +140,7 @@ export function CourseVideoPlayer({
       </div>
       <video
         ref={ref}
-        className={cn('w-full rounded-lg bg-black')}
+        className="block aspect-video max-h-[min(70dvh,36rem)] min-w-0 w-full rounded-lg bg-black object-contain"
         src={video.playUrl}
         controls
         controlsList="nodownload noplaybackrate"

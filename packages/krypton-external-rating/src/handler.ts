@@ -6,7 +6,8 @@
  * POST /user/:uid/external-rating             — teacher/admin override (can clear), then fetch
  * POST /home/settings/account with rating fields — same persist+fetch, then strip leftover keys
  *
- * GET profile / ranking / account settings never fetch. Serializer flags come from
+ * GET profile / ranking / account settings never fetch. Profile GET may attach
+ * stored history; ranking and account settings do not. Serializer flags come from
  * the server, never from a client publicShow claim.
  */
 import {
@@ -28,6 +29,7 @@ import {
     MANUAL_REFRESH_MIN_INTERVAL_MS,
     refreshBoth,
 } from './fetch';
+import { listHistory, type ExternalRatingHistoryBySite } from './history';
 import {
     ExternalRatingUnboundError,
     canEditOthersExternalRating,
@@ -40,6 +42,7 @@ import {
 } from './model';
 import {
     serializeForViewer,
+    serializeHistoryForViewer,
     serializeOwnerOrTeacher,
     serializePublic,
     serializeRanking,
@@ -314,6 +317,28 @@ function redactLeakedRatingFields(payload: unknown): void {
     }
 }
 
+function mapHistoryPoint(doc: { ratedAt: Date; rating: number; contestName?: string | null }): {
+    ratedAt: Date;
+    rating: number;
+    contestName: string | null;
+} {
+    return {
+        ratedAt: doc.ratedAt,
+        rating: doc.rating,
+        contestName: doc.contestName ?? null,
+    };
+}
+
+function mapHistoryDocs(stored: ExternalRatingHistoryBySite): {
+    codeforces: ReturnType<typeof mapHistoryPoint>[];
+    nowcoder: ReturnType<typeof mapHistoryPoint>[];
+} {
+    return {
+        codeforces: stored.codeforces.map(mapHistoryPoint),
+        nowcoder: stored.nowcoder.map(mapHistoryPoint),
+    };
+}
+
 function projectRankingExternalRating(
     row: unknown,
     byUid: Record<string, ReturnType<typeof serializeRanking>>,
@@ -374,7 +399,7 @@ async function fetchSavedSites(
         if (!isExternalRatingSiteId(site)) {
             throw new ValidationError('site', null, localizedErrorText`未知外站`);
         }
-        next = await applyFetch(next, site, next[site].handle, now);
+        next = await applyFetch(next, site, next[site].handle, now, { uid });
         logStage('fetch', `uid=${uid} site=${site}`);
     }
     return saveSnapshot(uid, next);
@@ -468,7 +493,7 @@ async function refreshSelf(handler: Handler): Promise<UserExternalRatingState> {
     await markRefreshAttempt(uid, now);
     let fetched: UserExternalRatingState;
     try {
-        fetched = await refreshBoth(state, now, lastAttemptAt);
+        fetched = await refreshBoth(state, now, lastAttemptAt, { uid });
     } catch (error) {
         wrapClientError(error);
     }
@@ -516,6 +541,8 @@ export async function injectUserProfileExternalRating(handler: Handler): Promise
     body.viewerIsSelf = viewer.isSelf === true;
     body.viewerIsTeacher = viewer.isTeacherOrAdmin === true;
     body.isTeacherOrAdmin = viewer.isTeacherOrAdmin === true;
+    const storedHistory = await listHistory(uid);
+    body.externalRatingHistory = serializeHistoryForViewer(mapHistoryDocs(storedHistory), state, viewer);
 }
 
 export async function injectRankingExternalRating(handler: Handler): Promise<void> {

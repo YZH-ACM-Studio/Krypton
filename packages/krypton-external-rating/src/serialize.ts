@@ -3,6 +3,8 @@
  * Viewer flags are supplied by the caller; they are never read from a client payload.
  */
 import {
+    EXTERNAL_RATING_MAX,
+    EXTERNAL_RATING_MIN,
     EXTERNAL_RATING_SITES,
     parseUserExternalRatingState,
     type ExternalRatingSitePrivilegedView,
@@ -31,6 +33,27 @@ export type ExternalRatingRankingView = {
 };
 
 export type ExternalRatingProfileView = ExternalRatingOwnerView | ExternalRatingPublicView;
+
+export interface ExternalRatingHistoryPointView {
+    ratedAt: string;
+    rating: number;
+    contestName?: string;
+}
+
+export type ExternalRatingHistoryView = {
+    [K in ExternalRatingSiteId]?: ExternalRatingHistoryPointView[];
+};
+
+type ExternalRatingHistoryPointSource = {
+    ratedAt: Date;
+    rating: number;
+    contestName?: string | null;
+};
+
+type ExternalRatingHistorySource = {
+    codeforces: ExternalRatingHistoryPointSource[];
+    nowcoder: ExternalRatingHistoryPointSource[];
+};
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
     return value != null && typeof value === 'object' && !Array.isArray(value);
@@ -123,4 +146,74 @@ export function serializeForViewer(
         return serializeOwnerOrTeacher(state);
     }
     return serializePublic(state);
+}
+
+function isValidHistoryRating(value: unknown): value is number {
+    return typeof value === 'number'
+        && Number.isSafeInteger(value)
+        && value >= EXTERNAL_RATING_MIN
+        && value <= EXTERNAL_RATING_MAX;
+}
+
+function requireHistory(history: ExternalRatingHistorySource): ExternalRatingHistorySource {
+    if (!isPlainObject(history)) {
+        throw new TypeError('external rating history must be an object');
+    }
+    if (!Array.isArray(history.codeforces) || !Array.isArray(history.nowcoder)) {
+        throw new TypeError('external rating history must include codeforces and nowcoder arrays');
+    }
+    return history;
+}
+
+function serializeHistoryPoint(point: unknown): { time: number; view: ExternalRatingHistoryPointView } | null {
+    if (!isPlainObject(point)) {
+        throw new TypeError('external rating history point must be an object');
+    }
+    if (!isValidHistoryRating(point.rating)) return null;
+    const ratedAt = point.ratedAt;
+    if (!(ratedAt instanceof Date) || Number.isNaN(ratedAt.getTime())) {
+        throw new TypeError('external rating history ratedAt must be a Date');
+    }
+    const view: ExternalRatingHistoryPointView = {
+        ratedAt: ratedAt.toISOString(),
+        rating: point.rating,
+    };
+    if (typeof point.contestName === 'string' && point.contestName !== '') {
+        view.contestName = point.contestName;
+    }
+    return { time: ratedAt.getTime(), view };
+}
+
+function serializeHistorySite(points: readonly unknown[]): ExternalRatingHistoryPointView[] {
+    const items: { time: number; view: ExternalRatingHistoryPointView }[] = [];
+    for (const point of points) {
+        const item = serializeHistoryPoint(point);
+        if (item) items.push(item);
+    }
+    items.sort((left, right) => left.time - right.time);
+    return items.map((item) => item.view);
+}
+
+/**
+ * Client-safe rating history. Owner/teacher always get both site arrays
+ * (empty allowed). Strangers only get sites with publicShow === true;
+ * hidden site keys are omitted rather than sent as [].
+ */
+export function serializeHistoryForViewer(
+    history: ExternalRatingHistorySource,
+    state: UserExternalRatingState,
+    viewer: ExternalRatingViewer,
+): ExternalRatingHistoryView {
+    if (!isPlainObject(viewer)) {
+        throw new TypeError('external rating viewer must be { isSelf, isTeacherOrAdmin } from the caller');
+    }
+    const snapshot = requireState(state);
+    const points = requireHistory(history);
+    const privileged = viewer.isSelf === true || viewer.isTeacherOrAdmin === true;
+    const view: ExternalRatingHistoryView = {};
+    for (const site of EXTERNAL_RATING_SITES) {
+        if (!privileged && !isPublicShow(snapshot[site])) continue;
+        view[site] = serializeHistorySite(points[site]);
+    }
+    return view;
 }

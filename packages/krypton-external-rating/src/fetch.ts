@@ -5,9 +5,14 @@
  * Same-handle fetch failures keep the last successful rating+fetchedAt and
  * record lastError. A handle change clears that site's rating first so a
  * failed new account cannot show the previous account's score.
+ *
+ * After a successful current-rating fetch, optional `uid` also pulls contest
+ * history and upserts points. History failures do not change the snapshot or
+ * lastError, and never delete existing history (including on handle change).
  */
-import { CodeforcesFetchError, fetchCodeforcesRating } from './cf';
-import { fetchNowcoderRating, NowcoderFetchError } from './nowcoder';
+import { CodeforcesFetchError, fetchCodeforcesRating, fetchCodeforcesRatingHistory } from './cf';
+import { upsertPoints } from './history';
+import { fetchNowcoderRating, fetchNowcoderRatingHistory, NowcoderFetchError } from './nowcoder';
 import {
     emptyExternalRatingSiteSnapshot,
     EXTERNAL_RATING_MANUAL_REFRESH_COOLDOWN_MS,
@@ -25,6 +30,15 @@ import {
     type UserExternalRatingState,
 } from './types';
 import { normalizeCfHandle, normalizeNowcoderName } from './validate';
+
+export interface ExternalRatingFetchOptions {
+    uid?: number;
+}
+
+interface SiteRatingFetch {
+    rating: number | null;
+    nowcoderUid?: string;
+}
 
 export const MANUAL_REFRESH_MIN_INTERVAL_MS = EXTERNAL_RATING_MANUAL_REFRESH_COOLDOWN_MS;
 
@@ -46,8 +60,113 @@ function logStage(stage: string, site: string, handle: string, detail?: string):
     const line = detail
         ? `krypton-external-rating.fetch stage=${stage} site=${site} handle=${handle} ${detail}`
         : `krypton-external-rating.fetch stage=${stage} site=${site} handle=${handle}`;
-    if (stage === 'fetch_fail' || stage === 'rate_limited') console.error(line);
+    if (stage === 'fetch_fail' || stage === 'rate_limited' || stage === 'history_fail') console.error(line);
     else console.info(line);
+}
+
+function errorMessage(error: unknown): string {
+    if (error instanceof Error && error.message) return error.message;
+    return 'unknown history error';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function optionalPersistUid(options?: ExternalRatingFetchOptions): number | undefined {
+    if (options == null || options.uid == null) return undefined;
+    const uid = options.uid;
+    if (typeof uid !== 'number' || !Number.isSafeInteger(uid) || uid <= 0) {
+        throw new TypeError('uid must be a positive integer');
+    }
+    return uid;
+}
+
+function readNowcoderUid(result: { rating: number; uid?: string }): string | undefined {
+    if (typeof result.uid !== 'string') return undefined;
+    const uid = result.uid.trim();
+    return uid || undefined;
+}
+
+function mapHistoryPoints(handle: string, rows: unknown): Array<{
+    handle: string;
+    contestId: string;
+    contestName: string | null;
+    ratedAt: Date;
+    rating: number;
+    oldRating: number | null;
+    rank: number | null;
+}> {
+    if (!Array.isArray(rows)) throw new TypeError('contest history must be an array');
+    return rows.map((row, index) => {
+        if (!isRecord(row)) throw new TypeError(`contest history row ${index} is malformed`);
+        const contestKey = row.contestKey;
+        if (typeof contestKey !== 'string' || !contestKey.trim()) {
+            throw new TypeError(`contest history row ${index} contestKey is missing`);
+        }
+        if (!(row.ratedAt instanceof Date) || Number.isNaN(row.ratedAt.getTime())) {
+            throw new TypeError(`contest history row ${index} ratedAt is malformed`);
+        }
+        if (typeof row.rating !== 'number' || !Number.isSafeInteger(row.rating)) {
+            throw new TypeError(`contest history row ${index} rating is malformed`);
+        }
+        const contestName = row.contestName == null ? null : row.contestName;
+        if (contestName !== null && typeof contestName !== 'string') {
+            throw new TypeError(`contest history row ${index} contestName is malformed`);
+        }
+        const oldRating = row.oldRating == null ? null : row.oldRating;
+        if (oldRating !== null && (typeof oldRating !== 'number' || !Number.isSafeInteger(oldRating))) {
+            throw new TypeError(`contest history row ${index} oldRating is malformed`);
+        }
+        const rank = row.rank == null ? null : row.rank;
+        if (rank !== null && (typeof rank !== 'number' || !Number.isSafeInteger(rank))) {
+            throw new TypeError(`contest history row ${index} rank is malformed`);
+        }
+        return {
+            handle,
+            contestId: contestKey.trim(),
+            contestName: contestName === '' ? null : contestName,
+            ratedAt: row.ratedAt,
+            rating: row.rating,
+            oldRating,
+            rank,
+        };
+    });
+}
+
+async function fetchHistoryRows(
+    site: ExternalRatingSiteId,
+    handle: string,
+    nowcoderUid: string | undefined,
+): Promise<unknown> {
+    if (site === 'codeforces') return fetchCodeforcesRatingHistory(handle);
+    if (site === 'nowcoder') {
+        if (!nowcoderUid) {
+            throw new Error('Nowcoder uid missing after successful rating fetch');
+        }
+        return fetchNowcoderRatingHistory(nowcoderUid);
+    }
+    throw new ExternalRatingUnknownSiteError(site);
+}
+
+async function persistHistoryAfterFetch(
+    uid: number,
+    site: ExternalRatingSiteId,
+    handle: string,
+    nowcoderUid: string | undefined,
+): Promise<void> {
+    try {
+        const rows = await fetchHistoryRows(site, handle, nowcoderUid);
+        const points = mapHistoryPoints(handle, rows);
+        if (points.length === 0) {
+            logStage('history_skip', site, handle, 'points=0');
+            return;
+        }
+        await upsertPoints(uid, site, points);
+        logStage('history_ok', site, handle, `count=${points.length}`);
+    } catch (error: unknown) {
+        logStage('history_fail', site, handle, errorMessage(error));
+    }
 }
 
 function siteSnapshot(state: UserExternalRatingState, site: ExternalRatingSiteId): ExternalRatingSiteSnapshot {
@@ -116,14 +235,15 @@ function classifyFetchError(error: unknown): ExternalRatingErrorCode {
     return 'network_error';
 }
 
-async function fetchSiteRating(site: ExternalRatingSiteId, handle: string): Promise<number | null> {
+async function fetchSiteRating(site: ExternalRatingSiteId, handle: string): Promise<SiteRatingFetch> {
     if (site === 'codeforces') {
         const result = await fetchCodeforcesRating(handle);
-        return result.rating;
+        return { rating: result.rating };
     }
     if (site === 'nowcoder') {
         const result = await fetchNowcoderRating(handle);
-        return result.rating;
+        const nowcoderUid = readNowcoderUid(result);
+        return nowcoderUid ? { rating: result.rating, nowcoderUid } : { rating: result.rating };
     }
     throw new ExternalRatingUnknownSiteError(site);
 }
@@ -158,10 +278,12 @@ export async function applyFetch(
     site: ExternalRatingSiteId,
     newHandle: string,
     now: Date | number,
+    options?: ExternalRatingFetchOptions,
 ): Promise<UserExternalRatingState> {
     if (!isExternalRatingSiteId(site)) {
         throw new ExternalRatingUnknownSiteError(String(site));
     }
+    const persistUid = optionalPersistUid(options);
     const fetchedAt = toDate(now);
     const previous = siteSnapshot(state, site);
     const normalizedNew = normalizeHandleForSite(site, newHandle);
@@ -169,6 +291,7 @@ export async function applyFetch(
     if (isHandleUnset(normalizedNew)) {
         logStage('clear', site, '');
         // Unset handle cannot stay public (types invariant); G8 allows publicShow false.
+        // Unset does not fetch or delete contest history.
         return withSiteSnapshot(cloneState(state), site, emptyExternalRatingSiteSnapshot());
     }
 
@@ -179,14 +302,25 @@ export async function applyFetch(
     }
 
     logStage(handleChanged ? 'fetch_new' : 'fetch_same', site, normalizedNew);
+    let fetched: SiteRatingFetch | undefined;
+    let ratingOk = false;
     try {
-        const rating = await fetchSiteRating(site, normalizedNew);
-        working = snapshotAfterFetchSuccess(working, rating, fetchedAt);
-        logStage('fetch_ok', site, normalizedNew, rating === null ? 'rating=null' : `rating=${rating}`);
+        const ratingFetch = await fetchSiteRating(site, normalizedNew);
+        working = snapshotAfterFetchSuccess(working, ratingFetch.rating, fetchedAt);
+        logStage('fetch_ok', site, normalizedNew, ratingFetch.rating === null ? 'rating=null' : `rating=${ratingFetch.rating}`);
+        fetched = ratingFetch;
+        ratingOk = true;
     } catch (error: unknown) {
         const lastError = classifyFetchError(error);
         logStage('fetch_fail', site, normalizedNew, lastError);
         working = snapshotAfterFetchFailure(working, lastError);
+    }
+    if (persistUid !== undefined && ratingOk && fetched) {
+        try {
+            await persistHistoryAfterFetch(persistUid, site, normalizedNew, fetched.nowcoderUid);
+        } catch (error: unknown) {
+            logStage('history_fail', site, normalizedNew, errorMessage(error));
+        }
     }
     return withSiteSnapshot(cloneState(state), site, working);
 }
@@ -202,17 +336,18 @@ export async function fetchBoth(
     state: UserExternalRatingState,
     now: Date | number,
     newHandles?: Partial<Record<ExternalRatingSiteId, string>>,
+    options?: ExternalRatingFetchOptions,
 ): Promise<UserExternalRatingState> {
     const updates = await Promise.all(EXTERNAL_RATING_SITES.map(async (site) => {
         if (newHandles && Object.hasOwn(newHandles, site)) {
-            const next = await applyFetch(state, site, newHandles[site] ?? '', now);
+            const next = await applyFetch(state, site, newHandles[site] ?? '', now, options);
             return { site, snapshot: next[site] };
         }
         const current = state[site]?.handle ?? '';
         if (isHandleUnset(current) || newHandles) {
             return { site, snapshot: siteSnapshot(state, site) };
         }
-        const next = await applyFetch(state, site, current, now);
+        const next = await applyFetch(state, site, current, now, options);
         return { site, snapshot: next[site] };
     }));
     let result = cloneState(state);
@@ -227,17 +362,19 @@ export async function refreshSite(
     site: ExternalRatingSiteId,
     now: Date | number,
     lastAttemptAt: Date | number | null | undefined,
+    options?: ExternalRatingFetchOptions,
 ): Promise<UserExternalRatingState> {
     assertManualRefreshAllowed(lastAttemptAt, now);
     const handle = state[site]?.handle ?? '';
-    return applyFetch(state, site, handle, now);
+    return applyFetch(state, site, handle, now, options);
 }
 
 export async function refreshBoth(
     state: UserExternalRatingState,
     now: Date | number,
     lastAttemptAt: Date | number | null | undefined,
+    options?: ExternalRatingFetchOptions,
 ): Promise<UserExternalRatingState> {
     assertManualRefreshAllowed(lastAttemptAt, now);
-    return fetchBoth(state, now);
+    return fetchBoth(state, now, undefined, options);
 }

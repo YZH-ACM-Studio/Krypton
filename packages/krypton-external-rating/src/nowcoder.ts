@@ -1,8 +1,8 @@
 /**
- * Nowcoder ACM rating client (HTML; there is no stable JSON user.info).
+ * Nowcoder ACM rating client.
  *
- * Canonical GET (username-keyed; this is what the student typed):
- *   https://ac.nowcoder.com/acm/contest/rating-index?searchUserName={urlencoded exact nickname}
+ * Username → current rating + uid (HTML; there is no stable JSON user.info):
+ *   GET https://ac.nowcoder.com/acm/contest/rating-index?searchUserName={urlencoded exact nickname}
  *
  * Why this URL, not the personal homepage:
  *   ACM homepages are `/acm/contest/profile/{numericUid}` and 404/redirect when
@@ -31,14 +31,35 @@
  *      case-insensitive; substring hits such as `jianglyly` for `jiangly`
  *      are dropped. Zero exact rows → not-found. Two or more exact rows
  *      (nicknames are not unique) → malformed; never pick the higher rating.
+ *   6. The match returns `{ rating, uid }` where uid is the digit string from
+ *      `data-uid` (never Number()).
+ *
+ * uid → rating history (JSON):
+ *   GET https://ac.nowcoder.com/acm/contest/rating-history?uid={digits}
+ *   Query param is `uid`, not `userId`. Final URL host `ac.nowcoder.com`,
+ *   path `/acm/contest/rating-history`. Envelope `{ code: 0, data: Point[], msg? }`;
+ *   extra `msg` is ignored. `data: []` is success (unknown uid and unrated both
+ *   return empty). HTTP 404 → not_found. Other non-200 → network. HTML body,
+ *   code !== 0, or data not an array → malformed. Non-digit uid is rejected
+ *   before network.
  *
  * Timeout ~8s. No retries. No cookie/token logging.
  */
 
 export const NOWCODER_RATING_INDEX_URL = 'https://ac.nowcoder.com/acm/contest/rating-index';
+export const NOWCODER_RATING_HISTORY_URL = 'https://ac.nowcoder.com/acm/contest/rating-history';
 export const NOWCODER_RATING_INDEX_TIMEOUT_MS = 8000;
 export const NOWCODER_MAX_HTML_CHARS = 1_000_000;
 export const NOWCODER_MAX_NAME_CHARS = 128;
+
+export interface NowcoderRatingHistoryEntry {
+    ratedAt: Date;
+    rating: number;
+    contestKey: string;
+    oldRating: number;
+    rank: number;
+    contestName: string;
+}
 
 export type NowcoderFetchFailureKind = 'not_found' | 'network' | 'malformed';
 
@@ -84,6 +105,14 @@ function logStage(level: 'info' | 'error', stage: string, handle: string, detail
         : `krypton-external-rating.nowcoder stage=${stage} name=${handle}`;
     if (level === 'error') console.error(line);
     else console.info(line);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isIntegerValued(value: unknown): value is number {
+    return typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value);
 }
 
 function errorMessage(error: unknown): string {
@@ -223,7 +252,7 @@ function parseRatingRow(uid: string, rowInner: string, requestedName: string): {
     return { uid, rating };
 }
 
-export function parseNowcoderRatingIndexHtml(html: string, name: string): { rating: number } {
+export function parseNowcoderRatingIndexHtml(html: string, name: string): { rating: number; uid: string } {
     if (typeof html !== 'string') {
         throwMalformed(name, 'Nowcoder response is not text');
     }
@@ -262,29 +291,45 @@ export function parseNowcoderRatingIndexHtml(html: string, name: string): { rati
     if (exactMatches.length !== 1) {
         throwMalformed(name, `Nowcoder returned ${exactMatches.length} exact username matches; refusing to pick one`);
     }
-    return { rating: exactMatches[0].rating };
+    return { rating: exactMatches[0].rating, uid: exactMatches[0].uid };
 }
 
-function assertRatingIndexUrl(finalUrl: string, handle: string): void {
+function assertAcNowcoderPath(finalUrl: string, handle: string, pathname: string, label: string): void {
     let parsed: URL;
     try {
         parsed = new URL(finalUrl);
     } catch (error: unknown) {
         throwMalformed(handle, 'Nowcoder response URL is malformed', error);
     }
-    if (parsed.hostname !== 'ac.nowcoder.com' || parsed.pathname !== '/acm/contest/rating-index') {
-        throwMalformed(handle, `Nowcoder redirected away from rating-index to ${parsed.hostname}${parsed.pathname}`);
+    if (parsed.hostname !== 'ac.nowcoder.com' || parsed.pathname !== pathname) {
+        throwMalformed(handle, `Nowcoder redirected away from ${label} to ${parsed.hostname}${parsed.pathname}`);
     }
 }
 
-async function fetchRatingIndex(url: string, handle: string): Promise<Response> {
+function assertRatingIndexUrl(finalUrl: string, handle: string): void {
+    assertAcNowcoderPath(finalUrl, handle, '/acm/contest/rating-index', 'rating-index');
+}
+
+function assertRatingHistoryUrl(finalUrl: string, handle: string): void {
+    assertAcNowcoderPath(finalUrl, handle, '/acm/contest/rating-history', 'rating-history');
+}
+
+function normalizeUid(uid: string): string {
+    if (typeof uid !== 'string' || !/^\d+$/.test(uid)) {
+        const handle = typeof uid === 'string' ? uid : '';
+        throwMalformed(handle, 'Nowcoder uid must be a digit string');
+    }
+    return uid;
+}
+
+async function fetchNowcoder(url: string, handle: string, accept: string): Promise<Response> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), NOWCODER_RATING_INDEX_TIMEOUT_MS);
     try {
         return await fetch(url, {
             method: 'GET',
             headers: {
-                Accept: 'text/html',
+                Accept: accept,
                 'User-Agent': 'KryptonOJ/external-rating',
             },
             signal: controller.signal,
@@ -305,12 +350,103 @@ async function fetchRatingIndex(url: string, handle: string): Promise<Response> 
     }
 }
 
-export async function fetchNowcoderRating(name: string): Promise<{ rating: number }> {
+function requireHistoryInteger(value: unknown, uid: string, label: string): number {
+    if (!isIntegerValued(value)) {
+        throwMalformed(uid, `Nowcoder rating-history ${label} is malformed`);
+    }
+    return value;
+}
+
+function parseHistoryPoint(point: unknown, uid: string, index: number): NowcoderRatingHistoryEntry & { contestId: number; time: number } {
+    if (!isRecord(point)) {
+        throwMalformed(uid, `Nowcoder rating-history point ${index} is not an object`);
+    }
+    const contestId = requireHistoryInteger(point.contestId, uid, `point ${index} contestId`);
+    const rating = requireHistoryInteger(point.rating, uid, `point ${index} rating`);
+    const rank = requireHistoryInteger(point.rank, uid, `point ${index} rank`);
+    if (rank < 1) {
+        throwMalformed(uid, `Nowcoder rating-history point ${index} rank is malformed`);
+    }
+    const changeValue = requireHistoryInteger(point.changeValue, uid, `point ${index} changeValue`);
+    const time = requireHistoryInteger(point.time, uid, `point ${index} time`);
+    if (!(time > 1e12)) {
+        throwMalformed(uid, `Nowcoder rating-history point ${index} time is not unix milliseconds`);
+    }
+    if (typeof point.contestName !== 'string' || !point.contestName) {
+        throwMalformed(uid, `Nowcoder rating-history point ${index} contestName is malformed`);
+    }
+    const contestName = decodeHtmlText(point.contestName);
+    if (!contestName) {
+        throwMalformed(uid, `Nowcoder rating-history point ${index} contestName is empty`);
+    }
+    if (contestName.includes('<')) {
+        throwMalformed(uid, `Nowcoder rating-history point ${index} contestName contains markup`);
+    }
+    const oldRating = rating - changeValue;
+    if (!Number.isInteger(oldRating)) {
+        throwMalformed(uid, `Nowcoder rating-history point ${index} oldRating is malformed`);
+    }
+    return {
+        ratedAt: new Date(time),
+        rating,
+        contestKey: String(contestId),
+        oldRating,
+        rank,
+        contestName,
+        contestId,
+        time,
+    };
+}
+
+export function parseNowcoderRatingHistoryJson(payload: unknown, uid: string): NowcoderRatingHistoryEntry[] {
+    let json: unknown = payload;
+    if (typeof payload === 'string') {
+        try {
+            json = JSON.parse(payload);
+        } catch (error: unknown) {
+            throwMalformed(uid, 'Nowcoder rating-history response is not valid JSON', error);
+        }
+    }
+    if (!isRecord(json)) {
+        throwMalformed(uid, 'Nowcoder rating-history response is not an object');
+    }
+    if (json.code !== 0) {
+        throwMalformed(uid, `Nowcoder rating-history code is not 0: ${String(json.code)}`);
+    }
+    if (!Array.isArray(json.data)) {
+        throwMalformed(uid, 'Nowcoder rating-history data is missing or not an array');
+    }
+    const contestIds = new Set<number>();
+    let previousTime: number | undefined;
+    const entries: NowcoderRatingHistoryEntry[] = [];
+    for (let index = 0; index < json.data.length; index++) {
+        const parsed = parseHistoryPoint(json.data[index], uid, index);
+        if (contestIds.has(parsed.contestId)) {
+            throwMalformed(uid, `Nowcoder rating-history has duplicate contestId ${parsed.contestId}`);
+        }
+        contestIds.add(parsed.contestId);
+        if (previousTime !== undefined && parsed.time <= previousTime) {
+            throwMalformed(uid, 'Nowcoder rating-history time must be strictly increasing');
+        }
+        previousTime = parsed.time;
+        entries.push({
+            ratedAt: parsed.ratedAt,
+            rating: parsed.rating,
+            contestKey: parsed.contestKey,
+            oldRating: parsed.oldRating,
+            rank: parsed.rank,
+            contestName: parsed.contestName,
+        });
+    }
+    return entries;
+}
+
+export async function fetchNowcoderRating(name: string): Promise<{ rating: number; uid: string }> {
     const normalized = normalizeName(name);
     logStage('info', 'start', normalized);
     const url = `${NOWCODER_RATING_INDEX_URL}?searchUserName=${encodeURIComponent(normalized)}`;
     logStage('info', 'request', normalized);
-    const response = await fetchRatingIndex(url, normalized);
+    const response = await fetchNowcoder(url, normalized, 'text/html');
     logStage('info', 'http', normalized, `status=${response.status}`);
     if (response.status === 404) {
         throwNotFound(normalized);
@@ -327,6 +463,32 @@ export async function fetchNowcoderRating(name: string): Promise<{ rating: numbe
     }
     logStage('info', 'parse', normalized);
     const result = parseNowcoderRatingIndexHtml(html, normalized);
-    logStage('info', 'success', normalized, `rating=${result.rating}`);
+    logStage('info', 'success', normalized, `rating=${result.rating} uid=${result.uid}`);
+    return result;
+}
+
+export async function fetchNowcoderRatingHistory(uid: string): Promise<NowcoderRatingHistoryEntry[]> {
+    const normalized = normalizeUid(uid);
+    logStage('info', 'start', normalized);
+    const url = `${NOWCODER_RATING_HISTORY_URL}?uid=${encodeURIComponent(normalized)}`;
+    logStage('info', 'request', normalized);
+    const response = await fetchNowcoder(url, normalized, 'application/json');
+    logStage('info', 'http', normalized, `status=${response.status}`);
+    if (response.status === 404) {
+        throwNotFound(normalized);
+    }
+    if (response.status !== 200) {
+        throwNetwork(normalized, `Nowcoder HTTP ${response.status}`);
+    }
+    assertRatingHistoryUrl(response.url, normalized);
+    let payload: unknown;
+    try {
+        payload = await response.json();
+    } catch (error: unknown) {
+        throwMalformed(normalized, 'Nowcoder rating-history response is not valid JSON', error);
+    }
+    logStage('info', 'parse', normalized);
+    const result = parseNowcoderRatingHistoryJson(payload, normalized);
+    logStage('info', 'success', normalized, `points=${result.length}`);
     return result;
 }

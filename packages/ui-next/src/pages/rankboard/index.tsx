@@ -252,7 +252,7 @@ function PodiumCard({ row, rank }: { row: LeaderboardRow; rank: number }) {
     <a
       href={`/rankboard/${row.student._id}`}
       className={cn(
-        'group relative flex flex-col gap-2 rounded-xl border bg-linear-to-br p-5 transition-transform hover:-translate-y-1',
+        'group relative flex w-full min-w-0 flex-col gap-2 rounded-xl border bg-linear-to-br p-5 transition-transform hover:-translate-y-1',
         style.border,
         style.gradient,
       )}
@@ -527,12 +527,12 @@ export function RankBoardMainPage() {
 
       {/* Top 3 podium */}
       {top3.length > 0 && (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(16rem,1fr))] gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {top3.map((r, i) => (
             <PodiumCard key={r.person._id} row={r} rank={i + 1} />
           ))}
           {Array.from({ length: 3 - top3.length }).map((_, i) => (
-            <div key={`empty-${i}`} className="rounded-xl border border-dashed bg-muted/20 p-5 text-center text-xs text-muted-foreground">
+            <div key={`empty-${i}`} className="w-full min-w-0 rounded-xl border border-dashed bg-muted/20 p-5 text-center text-xs text-muted-foreground">
               暂无第 {top3.length + i + 1} 名
             </div>
           ))}
@@ -542,7 +542,7 @@ export function RankBoardMainPage() {
       {/* Filters */}
       <Card>
         <CardContent className="flex flex-wrap items-end gap-3 p-4">
-          <div className="relative min-w-[12rem] max-w-xs flex-1">
+          <div className="relative min-w-0 flex-1">
             <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input className="pl-8" placeholder="搜索学号 / 姓名" value={search} onChange={(e) => setSearch(e.target.value)} />
           </div>
@@ -747,14 +747,14 @@ export function RankBoardDetailPage() {
         </CardContent>
       </Card>
       <h2 className="text-base font-semibold">奖项（{data.row.awardCount}）</h2>
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(16rem,1fr))] gap-4">
+      <div className="grid w-full min-w-0 grid-cols-[repeat(auto-fit,minmax(16rem,1fr))] gap-4">
         {data.row.person.awards.map((award, idx) => {
           const type = typeMap.get(award.type);
           const score = data.row.awardScores[idx] || 0;
           const cover = award.imageUrls?.[award.coverIndex ?? 0];
           const fields = awardFields(award.type);
           return (
-            <Card key={idx}>
+            <Card key={idx} className="w-full min-w-0">
               {cover && (
                 <div className="aspect-video w-full overflow-hidden bg-muted">
                   <img src={cover} alt={award.contest} className="size-full object-cover" />

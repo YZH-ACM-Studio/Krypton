@@ -135,7 +135,7 @@ export function AnnounceListPage() {
   };
 
   return (
-    <div className="mx-auto w-full min-w-0 max-w-4xl space-y-5">
+    <div className="w-full min-w-0 space-y-5">
       <header className="flex min-w-0 flex-wrap items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
           <Megaphone className="size-5 shrink-0 text-primary" />

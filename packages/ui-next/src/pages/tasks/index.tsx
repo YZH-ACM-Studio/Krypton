@@ -660,7 +660,7 @@ export function TaskCenterPage() {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid w-full min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
           {filtered.map((task) => {
             const a = data.assignmentMap[task._id];
             const status = ((a?.status as AssignmentStatus | undefined) || 'not-claimed') as AssignmentStatus | 'not-claimed';
@@ -669,7 +669,7 @@ export function TaskCenterPage() {
               <Card
                 key={task._id}
                 className={cn(
-                  'h-full transition-[box-shadow,opacity] duration-200 ease-out hover:shadow-md motion-reduce:transition-none',
+                  'h-full w-full min-w-0 transition-[box-shadow,opacity] duration-200 ease-out hover:shadow-md motion-reduce:transition-none',
                   !task.isActive && 'opacity-60',
                 )}
               >

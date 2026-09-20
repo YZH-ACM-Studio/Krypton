@@ -319,7 +319,7 @@ export function TrainingPage() {
           </CardContent>
         </Card>
       ) : view === 'cards' ? (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <div className="grid w-full min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
           {filtered.map((e) => (
             <TrainingCard key={String(e.t.docId)} e={e} bs={bs} />
           ))}
@@ -368,8 +368,8 @@ function TrainingCard({ e, bs }: { e: TrainingListEntry; bs: ReturnType<typeof u
   const url = replaceRouteTokens(bs.urls.trainingDetail, { TID: String(t.docId) });
   const sources = problemSetAccessSources(access);
   return (
-    <a href={url} className="group block">
-      <Card className="h-full transition-all group-hover:border-primary/40 group-hover:shadow-md">
+    <a href={url} className="group block w-full min-w-0">
+      <Card className="h-full w-full min-w-0 transition-all group-hover:border-primary/40 group-hover:shadow-md">
         <CardHeader className="pb-2">
           <div className="flex items-start justify-between gap-2">
             <CardTitle className="line-clamp-2 text-base leading-tight">{t.title || '未命名题集'}</CardTitle>

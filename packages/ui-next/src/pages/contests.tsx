@@ -292,7 +292,7 @@ function CountdownStrip({
 
   return (
     <section className={`rounded-xl border ${tone}`}>
-      <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_auto_220px] lg:items-center">
+      <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_auto_minmax(16rem,1fr)] lg:items-center">
         <div className="flex min-w-0 items-center gap-3">
           <span className="flex size-10 items-center justify-center rounded-lg border bg-background/70">
             {isRunning ? (
@@ -319,7 +319,7 @@ function CountdownStrip({
           <CountdownUnit value={cd?.expired ? '00' : pad(cd?.seconds || 0)} label="秒" />
         </div>
 
-        <div className="space-y-2">
+        <div className="w-full min-w-0 space-y-2">
           <div className="flex items-center justify-between text-xs text-muted-foreground">
             <span>{isRunning ? '比赛进度' : isUpcoming ? '等待开始' : '已完成'}</span>
             <span className="font-mono tabular-nums">{Math.round(progress)}%</span>
@@ -511,7 +511,7 @@ export function ContestsPage() {
             <Flag className="size-3.5 text-green-600" />
             进行中
           </div>
-          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(18rem,1fr))] gap-3">
             {buckets.running.map((c) => (
               <RunningContestCard key={String(c.docId)} c={c} bs={bs} tsdict={tsdict} />
             ))}
@@ -527,7 +527,7 @@ export function ContestsPage() {
       ) : view === 'list' ? (
         <ContestTable docs={filteredDocs} bs={bs} tsdict={tsdict} locale={locale} />
       ) : (
-        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(18rem,1fr))] gap-3">
           {filteredDocs.map((c) => (
             <ContestCard key={String(c.docId)} c={c} bs={bs} tsdict={tsdict} />
           ))}
@@ -916,7 +916,7 @@ export function ContestDetailPage() {
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_280px]">
         <div className="min-w-0 space-y-4">
           {tdoc.content ? (
-            <Card className="max-w-4xl">
+            <Card className="w-full min-w-0">
               <CardHeader className="pb-2">
                 <CardTitle className="flex min-w-0 items-center gap-2 text-base">
                   <BookOpen className="size-4 shrink-0" />
@@ -924,7 +924,11 @@ export function ContestDetailPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <MarkdownView content={tdoc.content} preferredLang={locale?.startsWith('zh') ? 'zh' : 'en'} />
+                <MarkdownView
+                  content={tdoc.content}
+                  className="max-w-[80ch]"
+                  preferredLang={locale?.startsWith('zh') ? 'zh' : 'en'}
+                />
               </CardContent>
             </Card>
           ) : null}

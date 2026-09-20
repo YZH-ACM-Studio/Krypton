@@ -86,7 +86,7 @@ export function ProblemCreateHubView({ problemKinds }: { problemKinds: Array<{ k
         <div className="space-y-1.5">
           <p className="text-xs font-medium tracking-wide text-muted-foreground">统一题库 · 创建</p>
           <h1 className="text-3xl font-semibold tracking-tight text-balance">选择题目类型</h1>
-          <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+          <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
             每种题型有独立字段和编辑界面。题型创建后固定；需要更换类型时请创建新题。
           </p>
         </div>
@@ -101,12 +101,12 @@ export function ProblemCreateHubView({ problemKinds }: { problemKinds: Array<{ k
               <h2 id={`problem-kind-${group}`} className="px-1 text-sm font-semibold">
                 {group}
               </h2>
-              <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 2xl:grid-cols-3">
+              <ul className="grid w-full min-w-0 grid-cols-[repeat(auto-fit,minmax(20rem,1fr))] gap-3">
                 {kinds.map((kind) => {
                   const meta = KIND_META[kind];
                   const Icon = meta.icon;
                   return (
-                    <li key={kind} className="overflow-hidden rounded-2xl border border-border/80 bg-background">
+                    <li key={kind} className="w-full min-w-0 overflow-hidden rounded-2xl border border-border/80 bg-background">
                       <a
                         href={`/problem/create/${PROBLEM_KIND_TO_SLUG[kind]}`}
                         className="group flex min-h-20 items-center gap-4 px-4 py-3 transition-colors hover:bg-muted/55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring motion-reduce:transition-none sm:px-5"

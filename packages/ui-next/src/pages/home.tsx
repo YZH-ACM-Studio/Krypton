@@ -206,7 +206,13 @@ export function KryptonHomePage() {
       {/* ── Hero ────────────────────────────────── */}
       <motion.section initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
         <Card className="overflow-hidden border-primary/20 bg-linear-to-br from-primary/5 via-background to-background">
-          <CardContent className="grid min-w-0 gap-6 p-6 lg:grid-cols-[1fr_340px]">
+          <CardContent
+            className={
+              bs.user.canBrowseProblemBank === true
+                ? 'grid min-w-0 gap-6 p-6 lg:grid-cols-[1fr_340px]'
+                : 'grid min-w-0 gap-6 p-6'
+            }
+          >
             <div className="flex min-w-0 flex-col justify-center gap-4">
               <div>
                 <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">{bs.domain.name}</h1>
@@ -407,7 +413,7 @@ export function KryptonHomePage() {
             {training.length === 0 ? (
               <Empty text="暂无题集" />
             ) : (
-              <div className="grid min-w-0 gap-3 sm:grid-cols-2">
+              <div className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
                 {training.slice(0, 4).map((t) => {
                   const pct = trainingProgress(t, trStatus[String(t.docId)] || {});
                   return (

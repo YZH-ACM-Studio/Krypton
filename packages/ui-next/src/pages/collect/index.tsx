@@ -263,12 +263,12 @@ export function CollectListPage() {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid w-full min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
           {filtered.map((item) => {
             const dueAtMs = collectDueMs(item.dueAt);
             const closed = dueAtMs === null || isCollectWindowClosed(item.status, dueAtMs, now);
             return (
-              <Card key={item._id} className="h-full transition-[box-shadow,opacity] duration-200 ease-out hover:shadow-md motion-reduce:transition-none">
+              <Card key={item._id} className="h-full w-full min-w-0 transition-[box-shadow,opacity] duration-200 ease-out hover:shadow-md motion-reduce:transition-none">
                 <CardContent className="flex h-full flex-col gap-3">
                   <div className="flex min-h-10 min-w-0 items-start justify-between gap-2">
                     <h3 className="min-w-0 flex-1 break-words font-semibold line-clamp-2">{item.title}</h3>

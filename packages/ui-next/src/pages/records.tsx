@@ -1399,9 +1399,9 @@ export function RecordDetailPage() {
                 {subtasks.length > 0 ? (
                   <section className="overflow-hidden rounded-lg border">
                     <div className="border-b px-4 py-3 text-sm font-medium">子任务</div>
-                    <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
+                    <div className="grid w-full min-w-0 grid-cols-[repeat(auto-fit,minmax(14rem,1fr))] gap-3 p-4">
                       {subtasks.map((subtask) => (
-                        <div key={subtask.id} className="rounded-lg border bg-muted/10 p-3">
+                        <div key={subtask.id} className="w-full min-w-0 rounded-lg border bg-muted/10 p-3">
                           <div className="flex items-center justify-between gap-3">
                             <span className="text-sm font-medium">#{subtask.id}</span>
                             {statusDisplay(subtask.status)}

@@ -98,7 +98,7 @@ function TeamCard({ card, canUpload, uid, onLightbox }: { card: GalleryCard; can
   };
 
   return (
-    <Card className="overflow-hidden">
+    <Card className="w-full min-w-0 overflow-hidden">
       {/* 封面区 */}
       <div className="relative h-44 w-full overflow-hidden bg-muted">
         {cover ? (
@@ -311,7 +311,7 @@ export function RankBoardGalleryPage() {
                   <Trophy className="size-3.5 text-amber-500" />
                   天梯赛（团队）
                 </h3>
-                <div className="grid grid-cols-[repeat(auto-fill,minmax(16rem,1fr))] gap-4">
+                <div className="grid w-full min-w-0 grid-cols-[repeat(auto-fit,minmax(16rem,1fr))] gap-4">
                   {bucket.ladder.map((card, i) => (
                     <TeamCard
                       key={`${card.typeKey}-${card.team || i}`}
@@ -330,7 +330,7 @@ export function RankBoardGalleryPage() {
                   <AwardIcon className="size-3.5 text-primary" />
                   ICPC / CCPC（队伍）
                 </h3>
-                <div className="grid grid-cols-[repeat(auto-fill,minmax(16rem,1fr))] gap-4">
+                <div className="grid w-full min-w-0 grid-cols-[repeat(auto-fit,minmax(16rem,1fr))] gap-4">
                   {bucket.icpc.map((card, i) => (
                     <TeamCard
                       key={`${card.contest || ''}-${card.typeKey}-${card.team || i}`}

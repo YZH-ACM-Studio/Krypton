@@ -187,7 +187,7 @@ export function ManageDashboardPage() {
       }
       bypassPrivGate
     >
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid w-full min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
         {[
           { label: '系统设置', desc: '全局配置与参数', href: '/manage/setting', icon: Wrench },
           { label: '系统配置', desc: '配置文件编辑', href: '/manage/config', icon: HardDrive },
@@ -198,8 +198,8 @@ export function ManageDashboardPage() {
           { label: '兑换码', desc: '创建批次、一次性导出明文并停用或撤销', href: '/manage/redemption-codes', icon: Activity },
           { label: '系统状态', desc: '查看系统运行状态', href: bs.urls.status, icon: Server },
         ].map((item) => (
-          <a key={item.href} href={item.href}>
-            <Card className="h-full transition-colors hover:border-primary/30">
+          <a key={item.href} href={item.href} className="w-full min-w-0">
+            <Card className="h-full w-full min-w-0 transition-colors hover:border-primary/30">
               <CardContent className="flex items-start gap-3 p-4">
                 <div className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
                   <item.icon className="size-4" />

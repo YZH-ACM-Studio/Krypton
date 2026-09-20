@@ -58,8 +58,8 @@ function CourseCard({ course }: { course: CourseRecord }) {
   const tid = courseId(course);
   const summary = summaryOf(course);
   return (
-    <a href={`/course/${tid}`} className="block h-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-      <Card className="h-full transition-colors hover:bg-muted/40">
+    <a href={`/course/${tid}`} className="block h-full w-full min-w-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+      <Card className="h-full w-full min-w-0 transition-colors hover:bg-muted/40">
         <CardContent className="flex h-full flex-col gap-3 p-4">
           <div className="flex items-start gap-3">
             <CourseMark seed={tid} title={course.title || ''} className="size-10 text-base" />
@@ -222,7 +222,7 @@ export function CoursePage() {
           {enrolled.length ? (
             <section className="space-y-3">
               <h2 className="text-sm font-medium text-muted-foreground">已报名</h2>
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+              <div className="grid w-full min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
                 {enrolled.map((course) => (
                   <CourseCard key={courseId(course)} course={course} />
                 ))}
@@ -252,7 +252,7 @@ export function CoursePage() {
           {available.length ? (
             <section className="space-y-3">
               <h2 className="text-sm font-medium text-muted-foreground">{enrolled.length || managed.length ? '其它课程' : '可学习'}</h2>
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+              <div className="grid w-full min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
                 {available.map((course) => (
                   <CourseCard key={courseId(course)} course={course} />
                 ))}

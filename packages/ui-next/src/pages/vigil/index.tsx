@@ -786,7 +786,7 @@ type SecondaryView = 'sessions' | 'approvals' | 'events' | 'recordings';
 type StatusFilter = '' | VigilStudentStatus;
 const ALL_STATUSES: VigilStudentStatus[] = ['online', 'anomaly', 'offline', 'disconnected', 'locked', 'ended'];
 const PAGE_SIZE = 30;
-const CARD_WALL_GRID_CLASS = 'grid grid-cols-[repeat(auto-fill,minmax(12rem,1fr))] gap-3';
+const CARD_WALL_GRID_CLASS = 'grid w-full min-w-0 grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5';
 
 export function AdminVigilExamDetailPage() {
   const bs = useBootstrap();
@@ -1206,7 +1206,9 @@ export function AdminVigilExamDetailPage() {
       ) : (
         <div className={CARD_WALL_GRID_CLASS}>
           {students.map((s) => (
-            <StudentCard key={s.machineId} student={s} onClick={() => openStudent(s)} onDoubleClick={() => liveLaunch(s)} />
+            <div key={s.machineId} className="w-full min-w-0 [&>button]:w-full [&>button]:min-w-0">
+              <StudentCard student={s} onClick={() => openStudent(s)} onDoubleClick={() => liveLaunch(s)} />
+            </div>
           ))}
         </div>
       )}
@@ -1436,7 +1438,7 @@ function CardWallSkeleton() {
   return (
     <div className={CARD_WALL_GRID_CLASS}>
       {Array.from({ length: 12 }).map((_, i) => (
-        <div key={i} className="overflow-hidden rounded-lg border bg-card">
+        <div key={i} className="w-full min-w-0 overflow-hidden rounded-lg border bg-card">
           <div className="aspect-video w-full animate-pulse bg-muted/40" />
           <div className="space-y-2 px-3 py-2.5">
             <div className="h-3 w-2/3 animate-pulse rounded bg-muted/40" />

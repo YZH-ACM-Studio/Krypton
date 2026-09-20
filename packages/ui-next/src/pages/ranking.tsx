@@ -239,18 +239,18 @@ function RankingRow({
         </TableCell>
       ) : null}
       <TableCell className="text-right tabular-nums">{user.nAccept ?? 0}</TableCell>
-      <TableCell className="hidden min-w-40 max-w-64 text-sm lg:table-cell">
+      <TableCell className="hidden min-w-0 text-sm lg:table-cell">
         {bioPreview ? (
           <button
             type="button"
             onClick={() => onShowBio?.(user)}
-            className="block w-full max-w-full truncate text-left text-muted-foreground hover:text-foreground hover:underline"
+            className="block w-full min-w-0 truncate text-left text-muted-foreground hover:text-foreground hover:underline"
             title="点击查看完整简介"
           >
             {bioPreview}
           </button>
         ) : (
-          <span className="text-muted-foreground/40">—</span>
+          <span className="block min-w-0 truncate text-muted-foreground/40">—</span>
         )}
       </TableCell>
     </TableRow>
@@ -279,7 +279,7 @@ export function RankingPage() {
   const [bioUser, setBioUser] = useState<RankingUser | null>(null);
 
   return (
-    <motion.div className="min-w-0 space-y-4" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
+    <motion.div className="w-full min-w-0 space-y-4" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       <div>
         <h1 className="text-xl font-semibold">排名</h1>
         <p className="text-sm text-muted-foreground">用户 RP 排行榜，分项列会跟随当前评分脚本配置。</p>

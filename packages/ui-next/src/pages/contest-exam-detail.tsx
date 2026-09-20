@@ -356,7 +356,7 @@ export function ExamContestDetailPage() {
                 {phase === 'ended' ? '00:00:00' : formatCountdown(cd)}
               </p>
             </div>
-            <div className="w-full space-y-1.5 sm:max-w-xs">
+            <div className="w-full min-w-0 space-y-1.5 sm:max-w-xs lg:max-w-none lg:flex-1">
               <div className="flex items-center justify-between text-xs text-muted-foreground">
                 <span>{phase === 'upcoming' ? '尚未开始' : phase === 'running' ? '整场进度' : '已结束'}</span>
                 <span className="font-mono tabular-nums">{Math.round(progress)}%</span>
@@ -375,7 +375,7 @@ export function ExamContestDetailPage() {
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="min-w-0 space-y-4">
           {tdoc.content ? (
-            <Card className="max-w-4xl">
+            <Card className="w-full min-w-0">
               <CardHeader>
                 <CardTitle className="flex min-w-0 items-center gap-2 text-base">
                   <BookOpen className="size-4 shrink-0" />
@@ -383,7 +383,11 @@ export function ExamContestDetailPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="pt-0">
-                <MarkdownView content={tdoc.content} preferredLang={locale?.startsWith('zh') ? 'zh' : 'en'} />
+                <MarkdownView
+                  content={tdoc.content}
+                  className="max-w-[80ch]"
+                  preferredLang={locale?.startsWith('zh') ? 'zh' : 'en'}
+                />
               </CardContent>
             </Card>
           ) : null}

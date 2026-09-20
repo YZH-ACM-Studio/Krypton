@@ -78,7 +78,7 @@ export function ExamModeHomePage() {
             <h2 className="text-base font-semibold text-primary">
               进行中 <span className="text-xs font-normal text-muted-foreground">({live.length})</span>
             </h2>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid w-full min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
               {live.map((e) => (
                 <ExamCard key={e._id} exam={e} />
               ))}
@@ -121,7 +121,7 @@ function EmptyWaitingState({ next }: { next: ExamCardData | undefined }) {
 
 function ExamCard({ exam, disabled }: { exam: ExamCardData; disabled?: boolean }) {
   return (
-    <Card className={disabled ? 'opacity-70' : 'transition-shadow hover:shadow-md'}>
+    <Card className={disabled ? 'w-full min-w-0 opacity-70' : 'w-full min-w-0 transition-shadow hover:shadow-md'}>
       <CardContent className="space-y-3 p-5">
         <div className="space-y-1">
           <h3 className="line-clamp-2 font-semibold">{exam.title}</h3>

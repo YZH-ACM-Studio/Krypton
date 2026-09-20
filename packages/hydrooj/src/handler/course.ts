@@ -47,6 +47,7 @@ import { Handler, param, post, Types } from '../service/server';
 import { studentDirectory } from '../service/student-directory';
 import { assertCourseAccessible, canManageCourse, courseAssignsUserGroups, courseUserGroupIds, isCourseHidden } from '../lib/course-access';
 import { isCourseExamCompleteFromStatus } from '../lib/course-exam-complete';
+import { courseExamRosterFactsByUid, courseExamRosterMeta } from '../lib/course-exam-roster';
 import {
     canRetakeExamPaper,
     examAttemptScore,
@@ -185,6 +186,48 @@ async function hydrateCourseExamContest(
         }
         throw error;
     }
+}
+
+async function loadCourseExamRoster(
+    domainId: string,
+    contestId: ObjectId,
+    memberUids: readonly number[],
+): Promise<{
+    meta?: ReturnType<typeof courseExamRosterMeta>;
+    facts?: ReturnType<typeof courseExamRosterFactsByUid>;
+    warning?: string;
+}> {
+    let examDoc: Awaited<ReturnType<typeof contest.get>>;
+    try {
+        examDoc = await contest.get(domainId, contestId);
+    } catch (error) {
+        if (error instanceof ContestNotFoundError || (error instanceof Error && error.name === 'ContestNotFoundError')) {
+            logger.error(
+                'Course roster found missing courseExam contest domain=%s contest=%s error=%s',
+                domainId,
+                contestId,
+                error instanceof Error ? error.message : error,
+            );
+            return { warning: '结业考试已不存在，名单不显示考试分数。' };
+        }
+        throw error;
+    }
+    if (examDoc.rule !== 'exam') {
+        logger.error(
+            'Course roster found non-exam courseExam binding domain=%s contest=%s rule=%s',
+            domainId,
+            contestId,
+            examDoc.rule,
+        );
+        return { warning: '结业考试绑定已损坏，名单不显示考试分数。' };
+    }
+    const examStatuses = memberUids.length
+        ? await contest.getMultiStatus(domainId, { docId: examDoc.docId, uid: { $in: [...memberUids] } }).toArray()
+        : [];
+    return {
+        meta: courseExamRosterMeta(examDoc),
+        facts: courseExamRosterFactsByUid(examDoc, memberUids, examStatuses),
+    };
 }
 
 function isStaleReferencedProblemSetError(error: unknown): boolean {
@@ -948,7 +991,8 @@ class CourseDetailHandler extends Handler {
             for (const node of tdoc.dag || []) {
                 scopePids.set(node._id, new Set([...courseNodePids(node), ...(referencedPidsByChapter.get(node._id) || [])]));
             }
-            const [memberUdict, students, ubGroups, completedPidsByUid] = await Promise.all([
+            const examContestId = tdoc.courseExam?.contestId;
+            const [memberUdict, students, ubGroups, completedPidsByUid, examRoster] = await Promise.all([
                 user.getListForRender(domainId, memberUids, false),
                 memberUids.length ? ub.findStudentsByUserIds(domainId, memberUids) : {},
                 ub.listUserGroups(domainId),
@@ -961,6 +1005,9 @@ class CourseDetailHandler extends Handler {
                     containerId: tdoc.docId,
                     scopePids,
                 }),
+                examContestId
+                    ? loadCourseExamRoster(domainId, examContestId, memberUids)
+                    : Promise.resolve(null),
             ]);
             this.response.body.membersTruncated = membersTruncated;
             this.response.body.members = assemblePracticeRosterMembers({
@@ -970,9 +1017,12 @@ class CourseDetailHandler extends Handler {
                 groupNameById: new Map((ubGroups as Array<{ _id: ObjectId; name: string }>).map((group) => [String(group._id), group.name])),
                 completedPidsByUid,
                 total: rosterPids.length,
+                ...(examRoster?.facts ? { examFactsByUid: examRoster.facts } : {}),
             });
             this.response.body.rosterProblems = serializePracticeRosterProblems(rosterPids, pdict);
             if (courseGroups.length) this.response.body.rosterGroupIds = courseGroups.map((groupId) => String(groupId));
+            if (examRoster?.meta) this.response.body.rosterExam = examRoster.meta;
+            if (examRoster?.warning) this.response.body.rosterExamWarning = examRoster.warning;
         }
     }
 

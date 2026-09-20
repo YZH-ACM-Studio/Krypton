@@ -18,7 +18,13 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 import { MarkdownView } from '@/components/markdown-renderer';
-import { PracticeRosterCard, type PracticeRosterMember, type PracticeRosterProblem } from '@/components/practice-roster';
+import {
+  PracticeRosterCard,
+  readPracticeRosterExamFact,
+  readPracticeRosterExamMeta,
+  type PracticeRosterMember,
+  type PracticeRosterProblem,
+} from '@/components/practice-roster';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -323,6 +329,8 @@ export function CourseDetailPage() {
     membersTruncated?: boolean;
     rosterProblems?: PracticeRosterProblem[];
     rosterGroupIds?: string[];
+    rosterExam?: unknown;
+    rosterExamWarning?: unknown;
     courseExamContest?: unknown;
   };
   const course = data.tdoc || {};
@@ -508,11 +516,17 @@ export function CourseDetailPage() {
       ) : activeView === 'roster' ? (
         <PracticeRosterCard
           className="mt-0"
-          members={Array.isArray(data.members) ? data.members : []}
+          members={(Array.isArray(data.members) ? data.members : []).map((member, index) => {
+            const raw = member as PracticeRosterMember & { exam?: unknown };
+            if (raw.exam === undefined) return member;
+            return { ...member, exam: readPracticeRosterExamFact(raw.exam, `members[${index}].exam`) };
+          })}
           problems={Array.isArray(data.rosterProblems) ? data.rosterProblems : []}
           title={course.title || '课程'}
           truncated={!!data.membersTruncated}
           visibleGroupIds={Array.isArray(data.rosterGroupIds) ? data.rosterGroupIds : undefined}
+          exam={readPracticeRosterExamMeta(data.rosterExam)}
+          examWarning={typeof data.rosterExamWarning === 'string' ? data.rosterExamWarning : undefined}
         />
       ) : !chapters.length ? (
         <Card>

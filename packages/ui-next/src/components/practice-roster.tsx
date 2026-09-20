@@ -6,6 +6,22 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { SimpleSelect } from '@/components/ui/select';
 import { cn } from '@/lib/cn';
 
+export const PRACTICE_ROSTER_EXAM_STATES = ['not_started', 'in_progress', 'judging', 'finalized'] as const;
+export type PracticeRosterExamState = (typeof PRACTICE_ROSTER_EXAM_STATES)[number];
+
+export interface PracticeRosterExamFact {
+  state: PracticeRosterExamState;
+  attemptsUsed: number;
+  score?: number;
+  passed?: boolean;
+}
+
+export interface PracticeRosterExamMeta {
+  title: string;
+  passScore: number | null;
+  attemptLimit: number;
+}
+
 export interface PracticeRosterMember {
   uid: number;
   uname: string;
@@ -16,6 +32,7 @@ export interface PracticeRosterMember {
   done: number;
   total: number;
   completedPids: number[];
+  exam?: PracticeRosterExamFact;
 }
 
 export interface PracticeRosterProblem {
@@ -25,6 +42,54 @@ export interface PracticeRosterProblem {
 }
 
 const UNGROUPED = '__ungrouped__';
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+export function readPracticeRosterExamMeta(value: unknown): PracticeRosterExamMeta | null {
+  if (value === undefined || value === null) return null;
+  if (!isRecord(value)) throw new TypeError('rosterExam must be an object');
+  const title = typeof value.title === 'string' && value.title.trim() ? value.title.trim() : '结业考试';
+  if (value.passScore !== null && (typeof value.passScore !== 'number' || !Number.isInteger(value.passScore) || value.passScore < 1)) {
+    throw new TypeError('rosterExam.passScore is invalid');
+  }
+  if (typeof value.attemptLimit !== 'number' || !Number.isInteger(value.attemptLimit) || value.attemptLimit < 1) {
+    throw new TypeError('rosterExam.attemptLimit is invalid');
+  }
+  return {
+    title,
+    passScore: value.passScore === null ? null : value.passScore,
+    attemptLimit: value.attemptLimit,
+  };
+}
+
+export function readPracticeRosterExamFact(value: unknown, label = 'exam'): PracticeRosterExamFact {
+  if (!isRecord(value)) throw new TypeError(`${label} must be an object`);
+  if (!PRACTICE_ROSTER_EXAM_STATES.includes(value.state as PracticeRosterExamState)) {
+    throw new TypeError(`${label}.state is invalid`);
+  }
+  if (typeof value.attemptsUsed !== 'number' || !Number.isInteger(value.attemptsUsed) || value.attemptsUsed < 0) {
+    throw new TypeError(`${label}.attemptsUsed is invalid`);
+  }
+  const fact: PracticeRosterExamFact = {
+    state: value.state as PracticeRosterExamState,
+    attemptsUsed: value.attemptsUsed,
+  };
+  if (value.score !== undefined) {
+    if (typeof value.score !== 'number' || !Number.isFinite(value.score)) throw new TypeError(`${label}.score is invalid`);
+    if (fact.state !== 'finalized' && fact.state !== 'judging') {
+      throw new TypeError(`${label}.score cannot appear before the paper is submitted`);
+    }
+    fact.score = value.score;
+  }
+  if (value.passed !== undefined) {
+    if (typeof value.passed !== 'boolean') throw new TypeError(`${label}.passed is invalid`);
+    if (fact.state !== 'finalized') throw new TypeError(`${label}.passed cannot appear before judging settles`);
+    fact.passed = value.passed;
+  }
+  return fact;
+}
 
 function neutralizeCsvCell(value: unknown): string {
   let text = String(value ?? '');
@@ -102,12 +167,47 @@ export function practiceRosterMatrixCell(
   };
 }
 
+export function practiceRosterExamLabel(exam: PracticeRosterExamFact | undefined): string {
+  if (!exam) return '—';
+  if (exam.state === 'not_started') return '未开考';
+  if (exam.state === 'in_progress') return '答题中';
+  if (exam.state === 'judging') return '评测中';
+  if (exam.passed === true) return '已及格';
+  if (exam.passed === false) return '未及格';
+  return '已交卷';
+}
+
+export function practiceRosterExamScoreText(exam: PracticeRosterExamFact | undefined): string {
+  if (!exam || (exam.state !== 'finalized' && exam.state !== 'judging') || typeof exam.score !== 'number') return '—';
+  return String(exam.score);
+}
+
+export function rosterExamGroupColumns(
+  members: readonly PracticeRosterMember[],
+  visibleGroupIds?: readonly string[],
+): Array<PracticeRosterGroupColumn & { finalizedCount: number; passedCount: number; averageScore: number | null }> {
+  const columns = rosterGroupColumns(members, visibleGroupIds);
+  return columns.map((column) => {
+    const inGroup = members.filter((member) => (column.id === UNGROUPED ? member.groupIds.length === 0 : member.groupIds.includes(column.id)));
+    const settled = inGroup.filter((member) => member.exam?.state === 'finalized');
+    const scores = settled.flatMap((member) => (typeof member.exam?.score === 'number' ? [member.exam.score] : []));
+    return {
+      ...column,
+      finalizedCount: settled.length,
+      passedCount: settled.filter((member) => member.exam?.passed === true).length,
+      averageScore: scores.length ? scores.reduce((sum, score) => sum + score, 0) / scores.length : null,
+    };
+  });
+}
+
 export function PracticeRosterCard({
   members,
   problems,
   title,
   truncated,
   visibleGroupIds,
+  exam,
+  examWarning,
   className,
 }: {
   members: PracticeRosterMember[];
@@ -115,11 +215,16 @@ export function PracticeRosterCard({
   title: string;
   truncated?: boolean;
   visibleGroupIds?: string[];
+  exam?: PracticeRosterExamMeta | null;
+  examWarning?: string;
   className?: string;
 }) {
   const [query, setQuery] = useState('');
   const [groupFilter, setGroupFilter] = useState('');
+  const showProblems = Boolean(problems?.length) || members.some((member) => member.total > 0);
+  const showExam = Boolean(exam) || members.some((member) => member.exam);
   const columns = useMemo(() => rosterGroupColumns(members, visibleGroupIds), [members, visibleGroupIds]);
+  const examColumns = useMemo(() => (showExam ? rosterExamGroupColumns(members, visibleGroupIds) : []), [members, showExam, visibleGroupIds]);
   const keyword = query.trim().toLowerCase();
   const filtered = members.filter((member) => {
     if (groupFilter === UNGROUPED && member.groupIds.length) return false;
@@ -132,19 +237,34 @@ export function PracticeRosterCard({
     );
   });
   const matrixColumns = groupFilter ? columns.filter((column) => column.id === groupFilter) : columns;
+  const columnCount = 4 + (showProblems ? 1 : 0) + (showExam ? 2 : 0);
 
   const exportMembers = () => {
     downloadCsv(`${title || '花名册'}-参加名单.csv`, [
-      ['用户名', '真实姓名', '学号', '班级组', '已完成题数', '总题数', '完成率'].map(neutralizeCsvCell).join(','),
+      [
+        '用户名',
+        '真实姓名',
+        '学号',
+        '班级组',
+        ...(showProblems ? ['已完成题数', '总题数', '完成率'] : []),
+        ...(showExam ? ['结业考试', '分数', '是否及格'] : []),
+      ].map(neutralizeCsvCell).join(','),
       ...filtered.map((member) =>
         [
           member.uname,
           member.realName,
           member.studentId,
           (member.groups || []).join(' / '),
-          member.done,
-          member.total,
-          member.total > 0 ? `${Math.round((member.done / member.total) * 100)}%` : '-',
+          ...(showProblems
+            ? [member.done, member.total, member.total > 0 ? `${Math.round((member.done / member.total) * 100)}%` : '-']
+            : []),
+          ...(showExam
+            ? [
+                practiceRosterExamLabel(member.exam),
+                practiceRosterExamScoreText(member.exam),
+                member.exam?.passed === true ? '是' : member.exam?.passed === false ? '否' : '-',
+              ]
+            : []),
         ]
           .map(neutralizeCsvCell)
           .join(','),
@@ -198,19 +318,36 @@ export function PracticeRosterCard({
           <Button variant="outline" size="sm" onClick={exportMembers} disabled={!filtered.length}>
             导出名单{keyword || groupFilter ? `（${filtered.length} 条）` : ''}
           </Button>
-          {problems?.length ? (
+          {showProblems && problems?.length ? (
             <Button variant="outline" size="sm" onClick={exportMatrix} disabled={!matrixColumns.length}>
               导出每题完成人数
             </Button>
           ) : null}
         </div>
+        {examWarning ? (
+          <p role="alert" className="mt-2 text-[11px] text-amber-800 dark:text-amber-300">
+            {examWarning}
+          </p>
+        ) : null}
         {columns.length ? (
           <ul className="mt-2 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
-            {columns.map((column) => (
-              <li key={column.id} className="rounded-md border px-2 py-1">
-                {column.name}：{column.memberCount} 人 / 已全部完成 {column.allDoneCount} 人 / 人均 {column.averageDone.toFixed(1)} 题
-              </li>
-            ))}
+            {columns.map((column) => {
+              const examColumn = examColumns.find((item) => item.id === column.id);
+              const examSummary = showExam
+                ? ` / 已交卷 ${examColumn?.finalizedCount || 0} 人${
+                    exam && exam.passScore !== null ? ` / 及格 ${examColumn?.passedCount || 0} 人` : ''
+                  } / 人均 ${examColumn?.averageScore == null ? '—' : examColumn.averageScore.toFixed(1)} 分`
+                : '';
+              const problemSummary = showProblems
+                ? ` / 已全部完成 ${column.allDoneCount} 人 / 人均 ${column.averageDone.toFixed(1)} 题`
+                : '';
+              return (
+                <li key={column.id} className="rounded-md border px-2 py-1">
+                  {column.name}：{column.memberCount} 人{problemSummary}
+                  {examSummary}
+                </li>
+              );
+            })}
           </ul>
         ) : null}
       </CardHeader>
@@ -223,13 +360,15 @@ export function PracticeRosterCard({
                 <th className="px-4 py-2 font-medium">真实姓名</th>
                 <th className="px-4 py-2 font-medium">学号</th>
                 <th className="px-4 py-2 font-medium">班级组</th>
-                <th className="px-4 py-2 text-right font-medium">进度</th>
+                {showProblems ? <th className="px-4 py-2 text-right font-medium">进度</th> : null}
+                {showExam ? <th className="px-4 py-2 font-medium">{exam?.title || '结业考试'}</th> : null}
+                {showExam ? <th className="px-4 py-2 text-right font-medium">分数</th> : null}
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-xs text-muted-foreground">
+                  <td colSpan={columnCount} className="px-4 py-8 text-center text-xs text-muted-foreground">
                     {keyword || groupFilter ? '没有匹配的成员' : '还没有人在这份名单里'}
                   </td>
                 </tr>
@@ -240,10 +379,18 @@ export function PracticeRosterCard({
                     <td className="px-4 py-2">{member.realName || <span className="text-xs text-muted-foreground">未绑定</span>}</td>
                     <td className="px-4 py-2 font-mono text-xs">{member.studentId || '—'}</td>
                     <td className="px-4 py-2 text-xs">{(member.groups || []).join(' / ') || '—'}</td>
-                    <td className="px-4 py-2 text-right font-mono text-xs tabular-nums">
-                      {member.done}/{member.total}
-                      <span className="ml-1 text-muted-foreground">({member.total > 0 ? Math.round((member.done / member.total) * 100) : 0}%)</span>
-                    </td>
+                    {showProblems ? (
+                      <td className="px-4 py-2 text-right font-mono text-xs tabular-nums">
+                        {member.done}/{member.total}
+                        <span className="ml-1 text-muted-foreground">
+                          ({member.total > 0 ? Math.round((member.done / member.total) * 100) : 0}%)
+                        </span>
+                      </td>
+                    ) : null}
+                    {showExam ? <td className="px-4 py-2 text-xs">{practiceRosterExamLabel(member.exam)}</td> : null}
+                    {showExam ? (
+                      <td className="px-4 py-2 text-right font-mono text-xs tabular-nums">{practiceRosterExamScoreText(member.exam)}</td>
+                    ) : null}
                   </tr>
                 ))
               )}

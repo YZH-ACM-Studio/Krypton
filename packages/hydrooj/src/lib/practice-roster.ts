@@ -1,4 +1,5 @@
 import { ObjectId } from 'mongodb';
+import type { CourseExamRosterFact } from './course-exam-roster';
 
 export const PRACTICE_ROSTER_ENROLL_LIMIT = 1000;
 
@@ -12,6 +13,7 @@ export interface PracticeRosterMemberPayload {
     done: number;
     total: number;
     completedPids: number[];
+    exam?: CourseExamRosterFact;
 }
 
 export interface PracticeRosterProblemPayload {
@@ -49,6 +51,7 @@ export function assemblePracticeRosterMembers(input: {
     groupNameById: ReadonlyMap<string, string>;
     completedPidsByUid: ReadonlyMap<number, ReadonlySet<number>>;
     total: number;
+    examFactsByUid?: ReadonlyMap<number, CourseExamRosterFact>;
 }): PracticeRosterMemberPayload[] {
     return input.memberUids.map((uid) => {
         const student = input.students[String(uid)];
@@ -56,6 +59,10 @@ export function assemblePracticeRosterMembers(input: {
         const completedPids = [...(input.completedPidsByUid.get(uid) || [])]
             .filter((pid) => Number.isSafeInteger(pid) && pid > 0)
             .sort((a, b) => a - b);
+        const exam = input.examFactsByUid?.get(uid);
+        if (input.examFactsByUid && !exam) {
+            throw new TypeError(`missing course exam roster fact for uid=${uid}`);
+        }
         return {
             uid,
             uname: input.udict[uid]?.uname || `UID ${uid}`,
@@ -66,6 +73,7 @@ export function assemblePracticeRosterMembers(input: {
             done: completedPids.length,
             total: input.total,
             completedPids,
+            ...(exam ? { exam } : {}),
         };
     });
 }

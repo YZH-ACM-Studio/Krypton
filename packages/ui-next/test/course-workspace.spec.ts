@@ -107,6 +107,10 @@ describe('p3.8 course workspace', () => {
     expect(detail).not.to.include('创建本章小测');
     expect(handler).to.include("view === 'roster'");
     expect(handler).to.include('canViewRoster');
+    expect(handler).to.include('loadCourseExamRoster');
+    expect(handler).to.include('rosterExam');
+    expect(detail).to.include('readPracticeRosterExamMeta');
+    expect(detail).to.include('rosterExamWarning');
     expect(handler).to.include('courseHidden');
     expect(handler).to.include('existsByCourse');
     expect(handler).to.include('该课程已隐藏');

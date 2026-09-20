@@ -7,7 +7,7 @@
  *   admin_announce_list.html       → AdminAnnounceListPage
  *   admin_announce_categories.html → AdminAnnounceCategoriesPage
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ArrowUpDown, Calendar, Eye, EyeOff, GripVertical, Megaphone, Pencil, Pin, PinOff, Plus, Save, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -94,12 +94,12 @@ function CategoryChip({ category, size = 'sm' }: { category: { name: string; col
   return (
     <span
       className={cn(
-        'inline-flex items-center rounded-md border font-medium',
+        'inline-flex max-w-full min-w-0 items-center rounded-md border font-medium',
         size === 'sm' ? 'px-1.5 py-0.5 text-[10px]' : 'px-2 py-0.5 text-xs',
         colorClass,
       )}
     >
-      {category.name}
+      <span className="min-w-0 truncate">{category.name}</span>
     </span>
   );
 }
@@ -135,11 +135,11 @@ export function AnnounceListPage() {
   };
 
   return (
-    <div className="w-full space-y-5">
-      <header className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Megaphone className="size-5 text-primary" />
-          <h1 className="text-xl font-semibold">公告</h1>
+    <div className="mx-auto w-full min-w-0 max-w-4xl space-y-5">
+      <header className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <Megaphone className="size-5 shrink-0 text-primary" />
+          <h1 className="min-w-0 truncate text-xl font-semibold">公告</h1>
         </div>
         <Button asChild variant="outline" size="sm">
           <a href={toggleSortUrl()} className="gap-1.5">
@@ -149,19 +149,22 @@ export function AnnounceListPage() {
         </Button>
       </header>
 
-      <MiniTabs
-        size="sm"
-        value={data.category || 'all'}
-        onValueChange={(v) => {
-          const q: string[] = [];
-          if (v !== 'all') q.push(`category=${encodeURIComponent(v)}`);
-          if (currentSort === 'asc') q.push('sort=asc');
-          window.location.href = q.length ? `/announce?${q.join('&')}` : '/announce';
-        }}
-        items={[{ value: 'all', label: '全部' }, ...data.categories.map((c) => ({ value: c.key, label: c.name }))]}
-      />
+      <div className="min-w-0 max-w-full overflow-x-auto">
+        <MiniTabs
+          size="sm"
+          className="max-w-full overflow-x-auto"
+          value={data.category || 'all'}
+          onValueChange={(v) => {
+            const q: string[] = [];
+            if (v !== 'all') q.push(`category=${encodeURIComponent(v)}`);
+            if (currentSort === 'asc') q.push('sort=asc');
+            window.location.href = q.length ? `/announce?${q.join('&')}` : '/announce';
+          }}
+          items={[{ value: 'all', label: '全部' }, ...data.categories.map((c) => ({ value: c.key, label: c.name }))]}
+        />
+      </div>
 
-      <Card>
+      <Card className="min-w-0">
         <CardContent className="p-0">
           {data.docs.length === 0 ? (
             <p className="py-12 text-center text-sm text-muted-foreground">暂无公告</p>
@@ -170,11 +173,11 @@ export function AnnounceListPage() {
               {data.docs.map((doc) => {
                 const cat = catMap.get(doc.category);
                 return (
-                  <li key={doc._id}>
-                    <a href={`/announce/${doc._id}`} className="flex items-center gap-3 px-5 py-3.5 transition-colors hover:bg-accent/40">
+                  <li key={doc._id} className="min-w-0">
+                    <a href={`/announce/${doc._id}`} className="flex min-w-0 items-center gap-3 px-5 py-3.5 transition-colors hover:bg-accent/40">
                       {doc.pin ? <Pin className="size-3.5 shrink-0 text-amber-600" /> : <span className="size-3.5 shrink-0" />}
                       <CategoryChip category={cat} />
-                      <span className="flex-1 truncate text-sm font-medium">{doc.title}</span>
+                      <span className="min-w-0 flex-1 truncate text-sm font-medium">{doc.title}</span>
                       <span className="shrink-0 text-xs text-muted-foreground">
                         <DateTime value={doc.publishAt} mode="date" />
                       </span>
@@ -205,19 +208,19 @@ export function AnnounceDetailPage() {
     category: Category | null;
   };
   return (
-    <div className="w-full space-y-5">
+    <div className="mx-auto w-full min-w-0 max-w-3xl space-y-5">
       <Button variant="ghost" size="sm" asChild>
         <a href="/announce" className="gap-1.5">
           <ArrowUpDown className="size-3.5 rotate-90" />
           返回公告列表
         </a>
       </Button>
-      <Card>
+      <Card className="min-w-0 overflow-x-auto">
         <CardHeader className="space-y-2 border-b">
-          <div className="flex items-center gap-2">
-            {data.doc.pin && <Pin className="size-4 text-amber-600" />}
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            {data.doc.pin && <Pin className="size-4 shrink-0 text-amber-600" />}
             <CategoryChip category={data.category || undefined} size="md" />
-            <span className="text-xs text-muted-foreground">
+            <span className="min-w-0 break-words text-xs text-muted-foreground">
               <DateTime value={data.doc.publishAt} />
             </span>
             <span className="ml-auto text-xs text-muted-foreground">
@@ -225,7 +228,7 @@ export function AnnounceDetailPage() {
               {data.doc.views}
             </span>
           </div>
-          <CardTitle className="text-2xl">{data.doc.title}</CardTitle>
+          <CardTitle className="min-w-0 break-words text-2xl">{data.doc.title}</CardTitle>
         </CardHeader>
         <CardContent className="p-6">
           <MarkdownView content={data.doc.content} />
@@ -444,10 +447,28 @@ interface EditorBody {
   canEditGlobal: boolean;
 }
 
+const ANNOUNCE_EDITOR_MIN_HEIGHT = 480;
+const ANNOUNCE_EDITOR_MIN_HEIGHT_SHORT = 240;
+const SHORT_MARKDOWN_QUERY = '(max-height: 56rem)';
+
+function useShortScreenMarkdownMinHeight(): number {
+  const [minHeight, setMinHeight] = useState(ANNOUNCE_EDITOR_MIN_HEIGHT);
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+    const media = window.matchMedia(SHORT_MARKDOWN_QUERY);
+    const apply = () => setMinHeight(media.matches ? ANNOUNCE_EDITOR_MIN_HEIGHT_SHORT : ANNOUNCE_EDITOR_MIN_HEIGHT);
+    apply();
+    media.addEventListener('change', apply);
+    return () => media.removeEventListener('change', apply);
+  }, []);
+  return minHeight;
+}
+
 export function AdminAnnounceEditorPage() {
   const bs = useBootstrap();
   const data = bs.page.data as EditorBody;
   const uid = bs.user.id;
+  const markdownMinHeight = useShortScreenMarkdownMinHeight();
   const isNew = !data.doc;
   const [title, setTitle] = useState(data.doc?.title || '');
   const [content, setContent] = useState(data.doc?.content || '');
@@ -496,7 +517,7 @@ export function AdminAnnounceEditorPage() {
                 <MarkdownEditor
                   value={content}
                   onChange={setContent}
-                  minHeight={480}
+                  minHeight={markdownMinHeight}
                   pasteUpload={{
                     endpoint: '/file',
                     makeUrl: (filename) => `/file/${uid}/${filename}?noDisposition=1`,
@@ -506,8 +527,8 @@ export function AdminAnnounceEditorPage() {
             </CardContent>
           </Card>
 
-          <div className="space-y-5">
-            <Card>
+          <div className="min-w-0 space-y-5">
+            <Card className="min-w-0">
               <CardHeader>
                 <CardTitle className="text-base">发布设置</CardTitle>
               </CardHeader>
@@ -542,7 +563,7 @@ export function AdminAnnounceEditorPage() {
                     type="datetime-local"
                     value={publishAt}
                     onChange={(e) => setPublishAt(e.target.value)}
-                    className="min-h-10"
+                    className="min-h-10 min-w-0 w-full"
                   />
                 </FormField>
                 <FormField label="下线时间（可选）" htmlFor="ann-unpub">
@@ -552,7 +573,7 @@ export function AdminAnnounceEditorPage() {
                     type="datetime-local"
                     value={unpublishAt}
                     onChange={(e) => setUnpublishAt(e.target.value)}
-                    className="min-h-10"
+                    className="min-h-10 min-w-0 w-full"
                   />
                 </FormField>
               </CardContent>
@@ -576,7 +597,7 @@ export function AdminAnnounceEditorPage() {
           </div>
         </div>
 
-        <div className="flex justify-end gap-2 border-t pt-4">
+        <div className="sticky bottom-0 z-10 -mx-1 flex min-w-0 flex-wrap justify-end gap-2 border-t bg-background/95 px-1 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))] backdrop-blur">
           <Button type="button" variant="ghost" asChild className="min-h-10">
             <a href="/admin/announce">取消</a>
           </Button>
@@ -733,9 +754,9 @@ function CategoryEditorDialog({ category, onClose }: { category: Category | null
                 />
               </FormField>
             </FormRow>
-            <label className="flex min-h-10 cursor-pointer items-center gap-2 text-sm">
-              <Switch name="hidden" value="true" checked={hidden} onChange={(e) => setHidden(e.target.checked)} />
-              隐藏（仍可用于已有公告，但不出现在新建下拉里）
+            <label className="flex min-h-10 min-w-0 cursor-pointer items-start gap-2 text-sm">
+              <Switch name="hidden" value="true" checked={hidden} onChange={(e) => setHidden(e.target.checked)} className="mt-0.5 shrink-0" />
+              <span className="min-w-0 break-words leading-5">隐藏（仍可用于已有公告，但不出现在新建下拉里）</span>
             </label>
             <div className="rounded-md border bg-muted/30 p-3">
               <p className="mb-2 text-xs text-muted-foreground">预览：</p>

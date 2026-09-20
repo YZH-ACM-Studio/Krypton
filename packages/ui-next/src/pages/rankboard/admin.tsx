@@ -378,7 +378,7 @@ export function AdminRankBoardListPage() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="min-w-0">
             <CardContent className="p-0">
               <Table>
                 <TableHeader>
@@ -500,7 +500,7 @@ function ImportReport({ report }: { report: BatchImportReport }) {
  */
 function ImportBatchesSection({ batches }: { batches: ImportBatch[] }) {
   return (
-    <Card>
+    <Card className="min-w-0">
       <CardHeader className="pb-2">
         <CardTitle className="text-sm">批次历史</CardTitle>
       </CardHeader>
@@ -743,7 +743,7 @@ export function AdminAwardTypesPage() {
         </Button>
       }
     >
-      <Card>
+      <Card className="min-w-0">
         <CardContent className="p-0">
           <Table>
             <TableHeader>
@@ -1084,30 +1084,32 @@ export function AdminRankBoardPersonPage() {
                         {award.imageUrls.map((u, j) => {
                           const isCover = j === (award.coverIndex ?? 0);
                           return (
-                            <div key={j} className="group relative size-20 overflow-hidden rounded border bg-muted">
-                              <img src={u} alt="" className="size-full object-cover" />
-                              <div className="absolute inset-0 flex flex-col justify-end gap-1 bg-black/40 p-1 opacity-0 transition-opacity group-hover:opacity-100">
-                                <button
-                                  type="button"
-                                  onClick={() => updateAward(idx, { coverIndex: j })}
-                                  className="rounded bg-white/90 px-1 text-[10px] text-black hover:bg-white"
-                                >
-                                  {isCover ? '✓封面' : '设封面'}
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    updateAward(idx, {
-                                      imageUrls: (award.imageUrls || []).filter((_, k) => k !== j),
-                                      coverIndex: 0,
-                                    })
-                                  }
-                                  className="rounded bg-red-600/90 px-1 text-[10px] text-white hover:bg-red-600"
-                                >
-                                  删除
-                                </button>
+                            <div key={j} className="w-20 space-y-1">
+                              <div className="relative size-20 overflow-hidden rounded border bg-muted">
+                                <img src={u} alt="" className="size-full object-cover" />
+                                {isCover ? (
+                                  <span className="absolute left-1 top-1 rounded bg-amber-400/90 px-1 text-[9px] text-amber-950">封面</span>
+                                ) : null}
                               </div>
-                              {isCover && <span className="absolute left-1 top-1 rounded bg-amber-400/90 px-1 text-[9px] text-amber-950">封面</span>}
+                              <button
+                                type="button"
+                                onClick={() => updateAward(idx, { coverIndex: j })}
+                                className="w-full rounded border bg-background px-1 py-0.5 text-[10px] hover:bg-muted"
+                              >
+                                {isCover ? '当前封面' : '设封面'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  updateAward(idx, {
+                                    imageUrls: (award.imageUrls || []).filter((_, k) => k !== j),
+                                    coverIndex: 0,
+                                  })
+                                }
+                                className="w-full rounded border border-destructive/40 bg-background px-1 py-0.5 text-[10px] text-destructive hover:bg-destructive/10"
+                              >
+                                删除
+                              </button>
                             </div>
                           );
                         })}

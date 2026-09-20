@@ -223,7 +223,7 @@ function StudentFilterBar({
             结束日期
             <Input name="to" type="date" defaultValue={values.to} />
           </label>
-          <div className="flex items-end gap-2">
+          <div className="flex flex-wrap items-end gap-2">
             <Button type="submit" className="gap-1">
               <Search className="size-3.5" />
               筛选
@@ -460,7 +460,7 @@ function SchoolGroupsList({
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center justify-between text-base">
+        <CardTitle className="flex flex-wrap items-center justify-between gap-3 text-base">
           <span>用户组 ({total})</span>
           <Button asChild size="sm" variant="outline" className="gap-1">
             <a href={`/admin/userbind/groups?schoolId=${schoolId}`}>
@@ -509,7 +509,7 @@ function SchoolGroupsList({
               )}
             </ScrollArea>
             {pageCount > 1 && (
-              <div className="flex justify-center">
+              <div className="overflow-x-auto">
                 <Pagination
                   current={page}
                   total={pageCount}
@@ -575,33 +575,35 @@ export function AdminUserbindSchoolDetailPage() {
         </Button>
       }
     >
-      <MiniTabs
-        items={[
-          {
-            value: 'students',
-            label: '学生',
-            count: data.studentTotal || 0,
-            icon: GraduationCap,
-            href: `/admin/userbind/schools/${data.school._id}?tab=students`,
-          },
-          { value: 'import', label: '导入', icon: UserPlus, href: `/admin/userbind/schools/${data.school._id}?tab=import` },
-          {
-            value: 'groups',
-            label: '用户组',
-            count: data.groupTotal || 0,
-            icon: Users,
-            href: `/admin/userbind/schools/${data.school._id}?tab=groups`,
-          },
-          {
-            value: 'links',
-            label: '邀请链接',
-            count: (data.schoolTokens || []).length,
-            icon: LinkIcon,
-            href: `/admin/userbind/schools/${data.school._id}?tab=links`,
-          },
-        ]}
-        value={activeTab}
-      />
+      <div className="min-w-0 max-w-full overflow-x-auto">
+        <MiniTabs
+          items={[
+            {
+              value: 'students',
+              label: '学生',
+              count: data.studentTotal || 0,
+              icon: GraduationCap,
+              href: `/admin/userbind/schools/${data.school._id}?tab=students`,
+            },
+            { value: 'import', label: '导入', icon: UserPlus, href: `/admin/userbind/schools/${data.school._id}?tab=import` },
+            {
+              value: 'groups',
+              label: '用户组',
+              count: data.groupTotal || 0,
+              icon: Users,
+              href: `/admin/userbind/schools/${data.school._id}?tab=groups`,
+            },
+            {
+              value: 'links',
+              label: '邀请链接',
+              count: (data.schoolTokens || []).length,
+              icon: LinkIcon,
+              href: `/admin/userbind/schools/${data.school._id}?tab=links`,
+            },
+          ]}
+          value={activeTab}
+        />
+      </div>
 
       {activeTab === 'students' && (
         <div className="space-y-4">
@@ -667,7 +669,7 @@ export function AdminUserbindSchoolDetailPage() {
               </Table>
             </CardContent>
             {studentPageCount > 1 && (
-              <div className="flex justify-center border-t px-5 py-3">
+              <div className="overflow-x-auto border-t px-5 py-3">
                 <Pagination current={studentPage} total={studentPageCount} baseUrl={studentPaginationBaseUrl} />
               </div>
             )}
@@ -710,12 +712,12 @@ export function AdminUserbindSchoolDetailPage() {
       {activeTab === 'links' && (
         <Card>
           <CardHeader className="px-5 pb-3 pt-5">
-            <CardTitle className="flex items-center justify-between text-base">
+            <CardTitle className="flex flex-wrap items-center justify-between gap-3 text-base">
               <span className="flex items-center gap-2">
                 <LinkIcon className="size-4" />
                 学校邀请链接
               </span>
-              <form method="post" className="flex items-end gap-2">
+              <form method="post" className="flex flex-wrap items-end gap-2">
                 <input type="hidden" name="operation" value="generateLink" />
                 <Input name="ttlDays" type="number" placeholder="有效天数（留空=永久）" className="max-w-[160px]" />
                 <Button type="submit" size="sm">
@@ -732,8 +734,8 @@ export function AdminUserbindSchoolDetailPage() {
                 {data.schoolTokens.map((t) => {
                   const url = `${origin}/bind/${t._id}`;
                   return (
-                    <div key={t._id} className="flex items-center gap-2 rounded-md border bg-muted/30 p-3 text-xs">
-                      <code className="flex-1 break-all font-mono">{url}</code>
+                    <div key={t._id} className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 p-3 text-xs">
+                      <code className="min-w-0 flex-1 break-all font-mono">{url}</code>
                       <Button
                         type="button"
                         variant="ghost"
@@ -806,7 +808,7 @@ export function AdminUserbindGroupsPage() {
       title="班级 / 队伍（用户组）"
       description="学校下的学生分组 — 课程班级 / 校队 / 训练队等。"
       actions={
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           {archivedCount > 0 ? (
             <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <Checkbox checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
@@ -1026,17 +1028,19 @@ export function AdminUserbindGroupDetailPage() {
       }
     >
       <div className="flex flex-col gap-4">
-        <MiniTabs
-          value={activeTab}
-          size="md"
-          aria-label="用户组详情分页"
-          items={[
-            { value: 'overview', label: '总览', icon: LinkIcon, href: `${groupHref}?tab=overview` },
-            { value: 'members', label: '人员', count: memberTotal, icon: Users, href: `${groupHref}?tab=members` },
-            // 归档组不可扩员（PLAN §9）——移除成员仍可用
-            ...(isArchived ? [] : [{ value: 'add', label: '添加人员', icon: UserPlus, href: `${groupHref}?tab=add` }]),
-          ]}
-        />
+        <div className="min-w-0 max-w-full overflow-x-auto">
+          <MiniTabs
+            value={activeTab}
+            size="md"
+            aria-label="用户组详情分页"
+            items={[
+              { value: 'overview', label: '总览', icon: LinkIcon, href: `${groupHref}?tab=overview` },
+              { value: 'members', label: '人员', count: memberTotal, icon: Users, href: `${groupHref}?tab=members` },
+              // 归档组不可扩员（PLAN §9）——移除成员仍可用
+              ...(isArchived ? [] : [{ value: 'add', label: '添加人员', icon: UserPlus, href: `${groupHref}?tab=add` }]),
+            ]}
+          />
+        </div>
 
         {activeTab === 'overview' && (
           <>
@@ -1161,7 +1165,7 @@ export function AdminUserbindGroupDetailPage() {
                       <TableHead className="pl-5">学号</TableHead>
                       <TableHead>姓名</TableHead>
                       <TableHead>绑定用户</TableHead>
-                      <TableHead className="w-28">操作</TableHead>
+                      <TableHead className="w-72">操作</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -1198,13 +1202,13 @@ export function AdminUserbindGroupDetailPage() {
                             )}
                           </TableCell>
                           <TableCell>
-                            <div className="flex flex-wrap items-center justify-end gap-1">
+                            <div className="flex flex-wrap items-center gap-1">
                               <StudentRosterActions
                                 student={m}
                                 returnTo={currentUserbindReturnTo(`${groupHref}?tab=members`)}
                                 showInviteToken={false}
                               />
-                              <TableActions>
+                              <TableActions className="flex-wrap">
                                 <TableAction
                                   formAction=""
                                   variant="destructive"
@@ -1231,7 +1235,7 @@ export function AdminUserbindGroupDetailPage() {
                 </Table>
               </CardContent>
               {memberPageCount > 1 && (
-                <div className="flex justify-center border-t px-5 py-3">
+                <div className="overflow-x-auto border-t px-5 py-3">
                   <Pagination current={memberPage} total={memberPageCount} baseUrl={`${groupHref}?tab=members`} />
                 </div>
               )}
@@ -1375,7 +1379,7 @@ export function AdminUserbindStudentsPage() {
           </Table>
         </CardContent>
         {pageCount > 1 && (
-          <div className="flex justify-center border-t px-5 py-3">
+          <div className="overflow-x-auto border-t px-5 py-3">
             <Pagination current={page} total={pageCount} baseUrl={paginationBaseUrl} />
           </div>
         )}
@@ -1430,7 +1434,7 @@ export function AdminUserbindStudentsImportPage() {
           <CardTitle className="text-base">选择导入目标</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button
               type="button"
               variant={target === 'school' ? 'default' : 'outline'}
@@ -1523,17 +1527,19 @@ export function AdminUserbindTokensPage() {
     <ModuleWorkspace {...USERBIND_WORKSPACE_PROPS} title="邀请令牌">
       <Card>
         <CardContent className="p-5">
-          <div className="flex items-center gap-3">
-            <span className="text-sm text-muted-foreground">类型:</span>
-            <MiniTabs
-              value={data.kind || 'all'}
-              items={[
-                { value: 'all', label: '全部', href: '/admin/userbind/tokens' },
-                { value: 'school', label: '学校共享', href: '/admin/userbind/tokens?kind=school' },
-                { value: 'user_group', label: '用户组共享', href: '/admin/userbind/tokens?kind=user_group' },
-                { value: 'student', label: '单人', href: '/admin/userbind/tokens?kind=student' },
-              ]}
-            />
+          <div className="flex min-w-0 flex-wrap items-center gap-3">
+            <span className="shrink-0 text-sm text-muted-foreground">类型:</span>
+            <div className="min-w-0 max-w-full overflow-x-auto">
+              <MiniTabs
+                value={data.kind || 'all'}
+                items={[
+                  { value: 'all', label: '全部', href: '/admin/userbind/tokens' },
+                  { value: 'school', label: '学校共享', href: '/admin/userbind/tokens?kind=school' },
+                  { value: 'user_group', label: '用户组共享', href: '/admin/userbind/tokens?kind=user_group' },
+                  { value: 'student', label: '单人', href: '/admin/userbind/tokens?kind=student' },
+                ]}
+              />
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -1645,16 +1651,18 @@ export function AdminUserbindRequestsPage() {
     <ModuleWorkspace {...USERBIND_WORKSPACE_PROPS} title="绑定申请" description={`共 ${data.total} 条`}>
       <Card>
         <CardContent className="p-5">
-          <MiniTabs
-            size="md"
-            value={data.status || 'all'}
-            items={[
-              { value: 'all', label: '全部', href: '/admin/userbind/requests' },
-              { value: 'pending', label: '待审核', href: '/admin/userbind/requests?status=pending' },
-              { value: 'approved', label: '已通过', href: '/admin/userbind/requests?status=approved' },
-              { value: 'rejected', label: '已拒绝', href: '/admin/userbind/requests?status=rejected' },
-            ]}
-          />
+          <div className="min-w-0 max-w-full overflow-x-auto">
+            <MiniTabs
+              size="md"
+              value={data.status || 'all'}
+              items={[
+                { value: 'all', label: '全部', href: '/admin/userbind/requests' },
+                { value: 'pending', label: '待审核', href: '/admin/userbind/requests?status=pending' },
+                { value: 'approved', label: '已通过', href: '/admin/userbind/requests?status=approved' },
+                { value: 'rejected', label: '已拒绝', href: '/admin/userbind/requests?status=rejected' },
+              ]}
+            />
+          </div>
         </CardContent>
       </Card>
       <Card>
@@ -1803,7 +1811,7 @@ export function UserBindPage() {
 
   if (data.alreadyBound) {
     return (
-      <div className="space-y-5">
+      <div className="mx-auto w-full max-w-xl space-y-5">
         <Card>
           <CardHeader className="px-6 pb-3 pt-6">
             <CardTitle className="flex items-center gap-2 text-base">
@@ -1826,10 +1834,12 @@ export function UserBindPage() {
   }
 
   return (
-    <div className="space-y-5">
-      <div className="space-y-1">
-        <h1 className="text-xl font-semibold">绑定学生身份</h1>
-        <p className="text-sm text-muted-foreground">填写学校、学号和姓名。与花名册一致则立即绑定；对不上再提交管理员审核。</p>
+    <div className="mx-auto w-full max-w-xl space-y-5">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0 space-y-1">
+          <h1 className="text-xl font-semibold">绑定学生身份</h1>
+          <p className="text-sm text-muted-foreground">填写学校、学号和姓名。与花名册一致则立即绑定；对不上再提交管理员审核。</p>
+        </div>
       </div>
       {data.hasPending && (
         <Card className="border-amber-500/40 bg-amber-500/5">
@@ -1869,7 +1879,7 @@ export function UserBindPage() {
                 <Input id="bind-realName" name="realName" required />
               </FormField>
             </FormRow>
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <a href="/userbind/applications" className="text-xs text-muted-foreground hover:underline">
                 查看我的申请记录 →
               </a>
@@ -1907,9 +1917,9 @@ export function UserBindApplicationsPage() {
     currentRealName: string | null;
   };
   return (
-    <div className="space-y-5">
-      <header className="flex items-start justify-between gap-2">
-        <div className="space-y-1">
+    <div className="mx-auto w-full max-w-xl space-y-5">
+      <header className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0 space-y-1">
           <h1 className="flex items-center gap-2 text-xl font-semibold">
             <ListChecks className="size-5 text-primary" />
             我的申请
@@ -1957,9 +1967,9 @@ export function UserBindApplicationsPage() {
             return (
               <Card key={r._id} className={r.status === 'rejected' ? 'border-rose-500/40' : undefined}>
                 <CardContent className="space-y-3 p-5">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0 space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
                         <span className="font-mono text-sm">{r.studentIdInput}</span>
                         <span className="text-sm">{r.realNameInput}</span>
                       </div>
@@ -2024,7 +2034,7 @@ export function UserBindLandingPage() {
   // Error cases
   if (data.error) {
     return (
-      <div className="space-y-4">
+      <div className="mx-auto w-full max-w-xl space-y-4">
         <Card className="border-rose-500/40 bg-rose-500/5">
           <CardHeader className="px-6 pb-3 pt-6">
             <CardTitle className="flex items-center gap-2 text-base text-rose-700 dark:text-rose-300">
@@ -2047,7 +2057,7 @@ export function UserBindLandingPage() {
   // Student kind: one-click bind
   if (data.kind === 'student' && data.student) {
     return (
-      <div className="space-y-5">
+      <div className="mx-auto w-full max-w-xl space-y-5">
         <Card>
           <CardHeader className="px-6 pb-3 pt-6">
             <CardTitle className="flex items-center gap-2 text-base">
@@ -2106,7 +2116,7 @@ export function UserBindLandingPage() {
   const kindLabel = data.kind === 'school' ? '加入学校' : '加入用户组';
   const targetName = data.kind === 'school' ? data.school?.name : data.group?.name;
   return (
-    <div className="space-y-5">
+    <div className="mx-auto w-full max-w-xl space-y-5">
       <Card>
         <CardHeader className="px-6 pb-3 pt-6">
           <CardTitle className="flex items-center gap-2 text-base">
@@ -2173,7 +2183,7 @@ export function UserBindSuccessPage() {
     wasAlreadyBound?: boolean;
   };
   return (
-    <div className="space-y-4">
+    <div className="mx-auto w-full max-w-xl space-y-4">
       <Card className="border-emerald-500/40 bg-emerald-500/5">
         <CardHeader className="px-6 pb-3 pt-6">
           <CardTitle className="flex items-center gap-2 text-base text-emerald-700 dark:text-emerald-300">
@@ -2219,15 +2229,17 @@ export function UserBindClaimPage() {
   };
 
   return (
-    <div className="space-y-5">
-      <header className="space-y-1">
-        <h1 className="flex items-center gap-2 text-xl font-semibold">
-          <Mail className="size-5 text-primary" />
-          认领临时账号
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          如果你之前用临时账号参加过考试，可以在这里把那些考试记录归到你当前账号下。两步完成 — 不需要手动记 UID。
-        </p>
+    <div className="mx-auto w-full max-w-xl space-y-5">
+      <header className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0 space-y-1">
+          <h1 className="flex items-center gap-2 text-xl font-semibold">
+            <Mail className="size-5 text-primary" />
+            认领临时账号
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            如果你之前用临时账号参加过考试，可以在这里把那些考试记录归到你当前账号下。两步完成 — 不需要手动记 UID。
+          </p>
+        </div>
       </header>
 
       {data.step === 1 && (
@@ -2307,7 +2319,7 @@ export function UserBindClaimPage() {
                     ]}
                   />
                 </FormField>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   <Button type="submit">提交认领申请</Button>
                   <form method="post" className="inline-block">
                     <input type="hidden" name="action" value="lookup" />

@@ -82,10 +82,11 @@ function ManageShell({ title, icon: Icon, children }: { title: string; icon: Rea
   return (
     <AdminPage
       bypassPrivGate
+      contentClassName="min-w-0"
       title={
-        <div className="flex items-center gap-2">
-          <Icon className="size-5 text-primary" />
-          <h1 className="text-xl font-semibold">{title}</h1>
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <Icon className="size-5 shrink-0 text-primary" />
+          <h1 className="text-xl font-semibold break-words">{title}</h1>
         </div>
       }
     >
@@ -417,7 +418,7 @@ function SchemaSection({
             const isLeaf = childResolved.type !== 'object';
 
             return (
-              <div key={key} className={isLeaf ? 'grid gap-1.5 sm:grid-cols-[200px_1fr] sm:items-start' : ''}>
+              <div key={key} className={isLeaf ? 'grid min-w-0 gap-1.5 lg:grid-cols-[200px_minmax(0,1fr)] lg:items-start' : ''}>
                 {isLeaf ? (
                   <label className="text-sm font-medium">
                     <code className="font-mono text-xs text-muted-foreground">{key}</code>
@@ -482,7 +483,7 @@ export function ManageConfigPage() {
   return (
     <ManageShell title="系统配置" icon={FileCode}>
       <Card>
-        <CardHeader className="flex flex-col gap-2 pb-2 sm:flex-row sm:items-start sm:justify-between">
+        <CardHeader className="flex flex-col gap-2 pb-2 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <CardTitle className="text-sm">高级配置</CardTitle>
             <p className="text-xs text-muted-foreground">修改后点击保存生效。标记为 [hidden] 的值为敏感信息，不会显示。</p>
@@ -490,6 +491,7 @@ export function ManageConfigPage() {
           {hasSchema ? (
             <MiniTabs
               size="sm"
+              className="max-w-full overflow-x-auto"
               value={mode}
               onValueChange={(v) => setMode(v as 'visual' | 'yaml')}
               items={[
@@ -999,12 +1001,12 @@ function SettingField({ setting, value }: { setting: SystemSetting; value: unkno
   const scalarValue = typeof rawValue === 'string' || typeof rawValue === 'number' || Array.isArray(rawValue) ? rawValue : String(rawValue);
 
   return (
-    <div className="grid gap-1.5 sm:grid-cols-[200px_1fr] sm:items-start">
-      <div>
+    <div className="grid min-w-0 gap-1.5 lg:grid-cols-[200px_minmax(0,1fr)] lg:items-start">
+      <div className="min-w-0">
         <label className="text-sm font-medium">{setting.name || setting.key}</label>
         {setting.desc ? <p className="text-[11px] leading-tight text-muted-foreground">{setting.desc}</p> : null}
       </div>
-      <div>
+      <div className="min-w-0">
         {setting.type === 'boolean' || setting.type === 'checkbox' ? (
           <label className="inline-flex cursor-pointer items-center gap-2">
             <Switch name={setting.key} defaultChecked={!!value} disabled={isDisabled} />

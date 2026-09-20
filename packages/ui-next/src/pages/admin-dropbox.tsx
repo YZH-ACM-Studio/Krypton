@@ -303,6 +303,7 @@ export function AdminDropboxPage() {
         title="临时文件柜"
         description="系统管理员临时搬运文件。不进入题目评测数据，也不进入学生文件收集。"
         requiredPriv={PRIV.PRIV_EDIT_SYSTEM}
+        contentClassName="min-w-0"
       >
         <PayloadError message={parsed.error} />
       </AdminPage>
@@ -320,8 +321,9 @@ export function AdminDropboxPage() {
       title="临时文件柜"
       description="系统管理员临时搬运文件。不进入题目评测数据，也不进入学生文件收集。到期后删除文件和元数据。"
       requiredPriv={PRIV.PRIV_EDIT_SYSTEM}
+      contentClassName="min-w-0"
     >
-      <div className="space-y-5">
+      <div className="min-w-0 space-y-5">
         {canManage ? (
           <Card>
             <CardHeader className="space-y-4">

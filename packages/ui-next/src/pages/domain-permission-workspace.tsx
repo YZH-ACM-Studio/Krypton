@@ -336,8 +336,8 @@ export function DomainPermissionWorkspace({ domainName, endpoint, initialRoles, 
           <p>权限包含标记只说明实际能力，不会替你勾选或写入其它权限位。root 始终拥有全部域权限，且不可修改或删除。</p>
         </div>
 
-        <div className="overflow-hidden rounded-2xl border bg-card/20 shadow-sm lg:grid lg:grid-cols-[17rem_minmax(0,1fr)]">
-          <aside className="hidden border-r bg-muted/20 lg:block" aria-label="角色列表">
+        <div className="rounded-2xl border bg-card/20 shadow-sm lg:grid lg:grid-cols-[17rem_minmax(0,1fr)]">
+          <aside className="hidden overflow-hidden border-r bg-muted/20 lg:block lg:rounded-l-2xl" aria-label="角色列表">
             <div className="border-b px-4 py-3">
               <p className="text-sm font-semibold">角色</p>
               <p className="mt-0.5 text-xs text-muted-foreground">{roles.length} 个角色</p>
@@ -393,7 +393,7 @@ export function DomainPermissionWorkspace({ domainName, endpoint, initialRoles, 
                 className="min-h-11"
                 options={roles.map((role) => ({
                   value: role.id,
-                  label: `${role.id}${dirtyRoles.has(role.id) ? ' · 未保存' : ''}`,
+                  label: `${role.id} · ${role.memberCount} 人${dirtyRoles.has(role.id) ? ' · 未保存' : ''}`,
                 }))}
               />
             </div>
@@ -483,14 +483,14 @@ export function DomainPermissionWorkspace({ domainName, endpoint, initialRoles, 
               )}
 
               {selectedDirty && selectedRole.editable ? (
-                <div className="sticky bottom-2 z-10 flex flex-col gap-3 rounded-xl border bg-background p-3 shadow-lg sm:flex-row sm:items-center sm:justify-between">
+                <div className="sticky bottom-2 z-10 flex flex-col gap-3 rounded-xl border bg-background p-3 shadow-lg sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
                   <div>
                     <p className="text-sm font-medium">{selectedRole.id} 有未保存修改</p>
                     <p className="text-xs text-muted-foreground">
                       新增 {selectedDiff.added.length} 项，移除 {selectedDiff.removed.length} 项
                     </p>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
                     <Button type="button" variant="ghost" className="min-h-10 gap-1.5" onClick={() => updateDraft(new Set(originalKeys))}>
                       <RotateCcw className="size-3.5" />
                       撤销草稿

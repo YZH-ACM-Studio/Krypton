@@ -519,7 +519,7 @@ export function DomainUserPage() {
           </Button>
         </section>
 
-        <Card className="overflow-hidden">
+        <Card>
           <CardHeader className="border-b bg-muted/10 pb-4">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
               <div>
@@ -587,11 +587,19 @@ export function DomainUserPage() {
             </div>
           ) : null}
 
-          <CardContent className="overflow-x-auto p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-12 pl-5">
+          <CardContent className="p-0">
+            {roster.items.length === 0 ? (
+              <div className="flex h-40 flex-col items-center justify-center px-5 text-center">
+                <Users className="mb-2 size-5 text-muted-foreground" />
+                <p className="text-sm font-medium">{rows.length === 0 ? '当前域还没有成员' : '没有匹配的成员'}</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {rows.length === 0 ? '添加用户后会显示在这里。' : '请尝试调整搜索词或角色筛选。'}
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="lg:hidden">
+                  <div className="flex items-center gap-3 border-b px-5 py-2">
                     <label className="grid size-10 place-items-center" title="选择当前页全部用户">
                       <Checkbox
                         size="sm"
@@ -602,96 +610,167 @@ export function DomainUserPage() {
                         onCheckedChange={toggleVisible}
                       />
                     </label>
-                  </TableHead>
-                  <TableHead>用户</TableHead>
-                  <TableHead className="w-28">UID</TableHead>
-                  <TableHead className="w-40">域角色</TableHead>
-                  <TableHead className="w-28">加入状态</TableHead>
-                  <TableHead className="w-20 pr-5 text-right">操作</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {roster.items.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={6} className="h-40 text-center">
-                      <Users className="mx-auto mb-2 size-5 text-muted-foreground" />
-                      <p className="text-sm font-medium">{rows.length === 0 ? '当前域还没有成员' : '没有匹配的成员'}</p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {rows.length === 0 ? '添加用户后会显示在这里。' : '请尝试调整搜索词或角色筛选。'}
-                      </p>
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  roster.items.map((user) => (
-                    <TableRow key={user.uid}>
-                      <TableCell className="pl-5">
-                        <label className="grid size-10 place-items-center">
-                          <Checkbox
-                            size="sm"
-                            aria-label={`选择 ${user.displayName || user.uname || `UID ${user.uid}`}`}
-                            checked={selectedUsers.has(user.uid)}
-                            disabled={user.uid === ownerUid}
-                            onCheckedChange={() => toggleUser(user.uid)}
-                          />
-                        </label>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex min-w-52 items-center gap-3">
-                          <span className="grid size-8 shrink-0 place-items-center rounded-full bg-muted text-xs font-semibold text-muted-foreground">
-                            {(user.displayName || user.uname || user.uid).slice(0, 1).toLocaleUpperCase()}
-                          </span>
-                          <div className="min-w-0">
-                            <div className="flex min-w-0 items-center gap-2">
-                              <p className="truncate text-sm font-medium" title={user.displayName || user.uname || `UID ${user.uid}`}>
-                                {user.displayName || user.uname || `UID ${user.uid}`}
-                              </p>
-                              {user.uid === ownerUid ? (
-                                <Badge variant="outline" className="shrink-0">
-                                  域所有者
-                                </Badge>
-                              ) : null}
+                    <p className="text-xs text-muted-foreground">选择当前页</p>
+                  </div>
+                  <ul className="divide-y">
+                    {roster.items.map((user) => (
+                      <li key={user.uid} className="px-5 py-4">
+                        <div className="flex items-start gap-3">
+                          <label className="grid size-10 shrink-0 place-items-center">
+                            <Checkbox
+                              size="sm"
+                              aria-label={`选择 ${user.displayName || user.uname || `UID ${user.uid}`}`}
+                              checked={selectedUsers.has(user.uid)}
+                              disabled={user.uid === ownerUid}
+                              onCheckedChange={() => toggleUser(user.uid)}
+                            />
+                          </label>
+                          <div className="min-w-0 flex-1 space-y-3">
+                            <div className="flex min-w-0 items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                                  <p className="truncate text-sm font-medium" title={user.displayName || user.uname || `UID ${user.uid}`}>
+                                    {user.displayName || user.uname || `UID ${user.uid}`}
+                                  </p>
+                                  {user.uid === ownerUid ? (
+                                    <Badge variant="outline" className="shrink-0">
+                                      域所有者
+                                    </Badge>
+                                  ) : null}
+                                </div>
+                                <p className="truncate text-xs text-muted-foreground" title={user.uname || undefined}>
+                                  {user.uname ? `@${user.uname}` : '未设置用户名'} · UID {user.uid}
+                                </p>
+                              </div>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="size-10 shrink-0 p-0 text-destructive hover:text-destructive"
+                                aria-label={`移除 ${user.displayName || user.uname || `UID ${user.uid}`}`}
+                                disabled={user.uid === ownerUid}
+                                onClick={(event) => openRemoveDialog([user], event.currentTarget)}
+                              >
+                                <UserMinus className="size-3.5" />
+                                <span className="sr-only">移除</span>
+                              </Button>
                             </div>
-                            <p className="truncate text-xs text-muted-foreground" title={user.uname || undefined}>
-                              {user.uname ? `@${user.uname}` : '未设置用户名'}
-                            </p>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <form method="post" className="min-w-32 flex-1">
+                                <input type="hidden" name="operation" value="set_users" />
+                                <input type="hidden" name="uids" value={user.uid} />
+                                <RoleQuickSelect
+                                  defaultValue={user.role}
+                                  roleOptions={roleOptions}
+                                  ariaLabel={`修改 ${user.displayName || user.uname || `UID ${user.uid}`} 的域角色`}
+                                  disabled={user.uid === ownerUid}
+                                />
+                              </form>
+                              <Badge variant={user.joined ? 'secondary' : 'outline'}>{user.joined ? '已加入' : '未加入'}</Badge>
+                            </div>
                           </div>
                         </div>
-                      </TableCell>
-                      <TableCell className="font-mono text-xs tabular-nums">{user.uid}</TableCell>
-                      <TableCell>
-                        <form method="post">
-                          <input type="hidden" name="operation" value="set_users" />
-                          <input type="hidden" name="uids" value={user.uid} />
-                          <RoleQuickSelect
-                            defaultValue={user.role}
-                            roleOptions={roleOptions}
-                            ariaLabel={`修改 ${user.displayName || user.uname || `UID ${user.uid}`} 的域角色`}
-                            disabled={user.uid === ownerUid}
-                          />
-                        </form>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={user.joined ? 'secondary' : 'outline'}>{user.joined ? '已加入' : '未加入'}</Badge>
-                      </TableCell>
-                      <TableCell className="pr-5 text-right">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="size-10 p-0 text-destructive hover:text-destructive"
-                          aria-label={`移除 ${user.displayName || user.uname || `UID ${user.uid}`}`}
-                          disabled={user.uid === ownerUid}
-                          onClick={(event) => openRemoveDialog([user], event.currentTarget)}
-                        >
-                          <UserMinus className="size-3.5" />
-                          <span className="sr-only">移除</span>
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                <div className="hidden lg:block">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-12 pl-5">
+                          <label className="grid size-10 place-items-center" title="选择当前页全部用户">
+                            <Checkbox
+                              size="sm"
+                              aria-label="选择当前页全部用户"
+                              checked={allVisibleSelected}
+                              indeterminate={partlyVisibleSelected}
+                              disabled={visibleIds.length === 0}
+                              onCheckedChange={toggleVisible}
+                            />
+                          </label>
+                        </TableHead>
+                        <TableHead>用户</TableHead>
+                        <TableHead className="w-28">UID</TableHead>
+                        <TableHead className="w-40">域角色</TableHead>
+                        <TableHead className="w-28">加入状态</TableHead>
+                        <TableHead className="w-20 pr-5 text-right">操作</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {roster.items.map((user) => (
+                        <TableRow key={user.uid}>
+                          <TableCell className="pl-5">
+                            <label className="grid size-10 place-items-center">
+                              <Checkbox
+                                size="sm"
+                                aria-label={`选择 ${user.displayName || user.uname || `UID ${user.uid}`}`}
+                                checked={selectedUsers.has(user.uid)}
+                                disabled={user.uid === ownerUid}
+                                onCheckedChange={() => toggleUser(user.uid)}
+                              />
+                            </label>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex min-w-0 items-center gap-3">
+                              <span className="grid size-8 shrink-0 place-items-center rounded-full bg-muted text-xs font-semibold text-muted-foreground">
+                                {(user.displayName || user.uname || user.uid).slice(0, 1).toLocaleUpperCase()}
+                              </span>
+                              <div className="min-w-0">
+                                <div className="flex min-w-0 items-center gap-2">
+                                  <p className="truncate text-sm font-medium" title={user.displayName || user.uname || `UID ${user.uid}`}>
+                                    {user.displayName || user.uname || `UID ${user.uid}`}
+                                  </p>
+                                  {user.uid === ownerUid ? (
+                                    <Badge variant="outline" className="shrink-0">
+                                      域所有者
+                                    </Badge>
+                                  ) : null}
+                                </div>
+                                <p className="truncate text-xs text-muted-foreground" title={user.uname || undefined}>
+                                  {user.uname ? `@${user.uname}` : '未设置用户名'}
+                                </p>
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="font-mono text-xs tabular-nums">{user.uid}</TableCell>
+                          <TableCell>
+                            <form method="post">
+                              <input type="hidden" name="operation" value="set_users" />
+                              <input type="hidden" name="uids" value={user.uid} />
+                              <RoleQuickSelect
+                                defaultValue={user.role}
+                                roleOptions={roleOptions}
+                                ariaLabel={`修改 ${user.displayName || user.uname || `UID ${user.uid}`} 的域角色`}
+                                disabled={user.uid === ownerUid}
+                              />
+                            </form>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={user.joined ? 'secondary' : 'outline'}>{user.joined ? '已加入' : '未加入'}</Badge>
+                          </TableCell>
+                          <TableCell className="pr-5 text-right">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="size-10 p-0 text-destructive hover:text-destructive"
+                              aria-label={`移除 ${user.displayName || user.uname || `UID ${user.uid}`}`}
+                              disabled={user.uid === ownerUid}
+                              onClick={(event) => openRemoveDialog([user], event.currentTarget)}
+                            >
+                              <UserMinus className="size-3.5" />
+                              <span className="sr-only">移除</span>
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </>
+            )}
           </CardContent>
 
           <div className="flex flex-col gap-3 border-t bg-muted/10 px-5 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
@@ -812,21 +891,21 @@ export function DomainGroupPage() {
           <CardTitle className="text-sm">创建用户组</CardTitle>
         </CardHeader>
         <CardContent>
-          <form method="post" className="flex items-end gap-2">
+          <form method="post" className="flex flex-col gap-2 sm:flex-row sm:items-end">
             <input type="hidden" name="operation" value="update" />
-            <div className="space-y-1 flex-1 max-w-xs">
+            <div className="w-full space-y-1 sm:max-w-xs sm:flex-1">
               <label className="text-xs text-muted-foreground" htmlFor="group-name">
                 组名
               </label>
               <Input id="group-name" name="name" placeholder="输入组名" />
             </div>
-            <div className="space-y-1 flex-1 max-w-xs">
+            <div className="w-full space-y-1 sm:max-w-xs sm:flex-1">
               <label className="text-xs text-muted-foreground" htmlFor="group-uids">
                 用户 UID（逗号分隔）
               </label>
               <Input id="group-uids" name="uids" placeholder="如: 1,2,3" />
             </div>
-            <Button type="submit" size="sm" className="gap-1">
+            <Button type="submit" size="sm" className="w-full gap-1 sm:w-auto">
               <Plus className="size-3.5" />
               创建
             </Button>

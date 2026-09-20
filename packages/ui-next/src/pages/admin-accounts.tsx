@@ -3,6 +3,7 @@ import {
   ArchiveRestore,
   Ban,
   Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Copy,
@@ -853,38 +854,45 @@ function AccountFiltersPanel({ data }: { data: AdminAccountsData }) {
   const domainOptions = metadata.domains.map((item) => ({ value: item.id, label: `${item.name} (${item.id})` }));
   const permissionsView = isAdminAccountPermissionsView(window.location.href);
   return (
-    <Card>
-      <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
-        <CardTitle className="flex items-center gap-2 text-sm"><Search className="size-4" />搜索与筛选</CardTitle>
-        <Button asChild variant="ghost" size="sm"><a href={buildAdminAccountFiltersClearHref(window.location.href)}>清空</a></Button>
-      </CardHeader>
-      <CardContent className="pt-0">
-        <form method="get" action={ENDPOINT} className="space-y-3">
-          {permissionsView ? <input type="hidden" name="view" value="permissions" /> : null}
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <FormField label="关键词" className="xl:col-span-2">
-              <Input name="q" defaultValue={filters.q} placeholder="UID、用户名、邮箱、展示名、学号或学校" />
-            </FormField>
-            <FormField label="账号状态"><SimpleSelect name="status" defaultValue={filters.status} options={[{ value: 'all', label: '全部状态' }, { value: 'enabled', label: '正常' }, { value: 'disabled', label: '已禁用' }]} /></FormField>
-            <FormField label="系统管理员"><SimpleSelect name="admin" defaultValue={filters.admin} options={[{ value: 'all', label: '全部' }, { value: 'yes', label: '仅管理员' }, { value: 'no', label: '非管理员' }]} /></FormField>
-            <FormField label="安全能力"><SimpleSelect name="security" defaultValue={filters.security} options={[{ value: 'all', label: '全部' }, { value: 'tfa', label: '已启用 TOTP' }, { value: 'webauthn', label: '有 Passkey' }, { value: 'oauth', label: '有 OAuth 关联' }, { value: 'none', label: '均未配置' }]} /></FormField>
-            <FormField label="绑定状态" hint={!data.bindingAvailable ? '用户绑定模块不可用，筛选已禁用。' : undefined}>
-              <SimpleSelect name="binding" defaultValue={data.bindingAvailable ? filters.binding : 'all'} disabled={!data.bindingAvailable} options={[{ value: 'all', label: '全部' }, { value: 'bound', label: '已绑定' }, { value: 'unbound', label: '未绑定' }]} />
-            </FormField>
-            <FormField label="用户组所在域" hint="切换域后先应用筛选，再选择该域用户组。"><SimpleSelect name="groupDomain" defaultValue={filters.groupDomain} options={domainOptions} /></FormField>
-            <FormField label="用户组"><SimpleSelect name="group" defaultValue={filters.group} options={[{ value: '', label: '全部用户组' }, ...metadata.groups.map((group) => ({ value: group.name, label: `${group.name} (${group.count})` }))]} /></FormField>
-            <FormField label="角色所在域" hint="切换域后先应用筛选，再选择该域角色。"><SimpleSelect name="roleDomain" defaultValue={filters.roleDomain} options={domainOptions} /></FormField>
-            <FormField label="域角色"><SimpleSelect name="role" defaultValue={filters.role} options={[{ value: '', label: '全部角色' }, ...metadata.roles.map((role) => ({ value: role, label: role }))]} /></FormField>
-            <FormField label="注册日期从"><Input type="date" name="registeredFrom" defaultValue={filters.registeredFrom} /></FormField>
-            <FormField label="注册日期至"><Input type="date" name="registeredTo" defaultValue={filters.registeredTo} /></FormField>
-            <FormField label="登录日期从"><Input type="date" name="loginFrom" defaultValue={filters.loginFrom} /></FormField>
-            <FormField label="登录日期至"><Input type="date" name="loginTo" defaultValue={filters.loginTo} /></FormField>
-            <FormField label="排序字段"><SimpleSelect name="sort" defaultValue={filters.sort} options={[{ value: 'uid', label: 'UID' }, { value: 'username', label: '用户名' }, { value: 'registeredAt', label: '注册时间' }, { value: 'lastLoginAt', label: '最近登录' }]} /></FormField>
-            <FormField label="排序方向"><SimpleSelect name="order" defaultValue={filters.order} options={[{ value: 'asc', label: '升序' }, { value: 'desc', label: '降序' }]} /></FormField>
-          </div>
-          <div className="flex justify-end"><Button type="submit"><Search />应用筛选</Button></div>
-        </form>
-      </CardContent>
+    <Card className="min-w-0">
+      <details className="group min-w-0" defaultOpen>
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-5 py-3 [&::-webkit-details-marker]:hidden">
+          <CardTitle className="flex min-w-0 items-center gap-2 text-sm">
+            <Search className="size-4 shrink-0" />搜索与筛选
+          </CardTitle>
+          <ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
+        </summary>
+        <CardContent className="min-w-0 pt-0">
+          <form method="get" action={ENDPOINT} className="min-w-0 space-y-3">
+            {permissionsView ? <input type="hidden" name="view" value="permissions" /> : null}
+            <div className="grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <FormField label="关键词" className="min-w-0 xl:col-span-2">
+                <Input name="q" defaultValue={filters.q} placeholder="UID、用户名、邮箱、展示名、学号或学校" />
+              </FormField>
+              <FormField label="账号状态"><SimpleSelect name="status" defaultValue={filters.status} options={[{ value: 'all', label: '全部状态' }, { value: 'enabled', label: '正常' }, { value: 'disabled', label: '已禁用' }]} /></FormField>
+              <FormField label="系统管理员"><SimpleSelect name="admin" defaultValue={filters.admin} options={[{ value: 'all', label: '全部' }, { value: 'yes', label: '仅管理员' }, { value: 'no', label: '非管理员' }]} /></FormField>
+              <FormField label="安全能力"><SimpleSelect name="security" defaultValue={filters.security} options={[{ value: 'all', label: '全部' }, { value: 'tfa', label: '已启用 TOTP' }, { value: 'webauthn', label: '有 Passkey' }, { value: 'oauth', label: '有 OAuth 关联' }, { value: 'none', label: '均未配置' }]} /></FormField>
+              <FormField label="绑定状态" hint={!data.bindingAvailable ? '用户绑定模块不可用，筛选已禁用。' : undefined}>
+                <SimpleSelect name="binding" defaultValue={data.bindingAvailable ? filters.binding : 'all'} disabled={!data.bindingAvailable} options={[{ value: 'all', label: '全部' }, { value: 'bound', label: '已绑定' }, { value: 'unbound', label: '未绑定' }]} />
+              </FormField>
+              <FormField label="用户组所在域" hint="切换域后先应用筛选，再选择该域用户组。"><SimpleSelect name="groupDomain" defaultValue={filters.groupDomain} options={domainOptions} /></FormField>
+              <FormField label="用户组"><SimpleSelect name="group" defaultValue={filters.group} options={[{ value: '', label: '全部用户组' }, ...metadata.groups.map((group) => ({ value: group.name, label: `${group.name} (${group.count})` }))]} /></FormField>
+              <FormField label="角色所在域" hint="切换域后先应用筛选，再选择该域角色。"><SimpleSelect name="roleDomain" defaultValue={filters.roleDomain} options={domainOptions} /></FormField>
+              <FormField label="域角色"><SimpleSelect name="role" defaultValue={filters.role} options={[{ value: '', label: '全部角色' }, ...metadata.roles.map((role) => ({ value: role, label: role }))]} /></FormField>
+              <FormField label="注册日期从"><Input type="date" name="registeredFrom" defaultValue={filters.registeredFrom} /></FormField>
+              <FormField label="注册日期至"><Input type="date" name="registeredTo" defaultValue={filters.registeredTo} /></FormField>
+              <FormField label="登录日期从"><Input type="date" name="loginFrom" defaultValue={filters.loginFrom} /></FormField>
+              <FormField label="登录日期至"><Input type="date" name="loginTo" defaultValue={filters.loginTo} /></FormField>
+              <FormField label="排序字段"><SimpleSelect name="sort" defaultValue={filters.sort} options={[{ value: 'uid', label: 'UID' }, { value: 'username', label: '用户名' }, { value: 'registeredAt', label: '注册时间' }, { value: 'lastLoginAt', label: '最近登录' }]} /></FormField>
+              <FormField label="排序方向"><SimpleSelect name="order" defaultValue={filters.order} options={[{ value: 'asc', label: '升序' }, { value: 'desc', label: '降序' }]} /></FormField>
+            </div>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button asChild variant="ghost" size="sm"><a href={buildAdminAccountFiltersClearHref(window.location.href)}>清空</a></Button>
+              <Button type="submit"><Search />应用筛选</Button>
+            </div>
+          </form>
+        </CardContent>
+      </details>
     </Card>
   );
 }
@@ -1256,7 +1264,7 @@ function AccountDetailPanel({ detail, metadata }: { detail: AccountDetail; metad
             )}
           </div>
         )}
-        <MiniTabs value={tab} onValueChange={selectTab} items={tabs} className="max-w-full overflow-x-auto" aria-label="账号档案分区" />
+        <MiniTabs value={tab} onValueChange={selectTab} items={tabs} className="max-w-full min-w-0 overflow-x-auto" aria-label="账号档案分区" />
       </CardHeader>
       <CardContent className="border-t pt-5">
         {tab === 'profile' ? (
@@ -1397,7 +1405,7 @@ export function AdminAccountsPage() {
       description={`管理可登录真实账号。UID ${data.metadata.superadminUid} 为只读超级管理员；不提供永久删除或任意字段编辑。`}
       requiredPriv={PRIV.PRIV_EDIT_SYSTEM}
       hideSidebar
-      contentClassName="pb-6"
+      contentClassName="min-w-0 pb-6"
       actions={(
         <>
           <Button type="button" variant="outline" onClick={openImport}><FileUp />批量导入</Button>
@@ -1432,7 +1440,7 @@ export function AdminAccountDetailPage() {
       description={`${account.displayName || account.username}（UID ${account.uid}）的资料、安全、权限、关联数据与操作审计。`}
       requiredPriv={PRIV.PRIV_EDIT_SYSTEM}
       hideSidebar
-      contentClassName="pb-6"
+      contentClassName="min-w-0 pb-6"
       actions={(
         <Button asChild variant="outline">
           <a href={data.returnTo}><ChevronLeft />返回账号列表</a>

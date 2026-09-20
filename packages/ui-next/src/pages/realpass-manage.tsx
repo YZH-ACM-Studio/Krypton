@@ -101,6 +101,23 @@ function pct(a: number, s: number) {
   return s > 0 ? Math.round((a / s) * 100) : 0;
 }
 
+function scrollNearestContainerToTop(from: HTMLElement | null) {
+  if (!from) return;
+  const viewport = from.closest('[data-radix-scroll-area-viewport]');
+  if (viewport instanceof HTMLElement) {
+    viewport.scrollTo({ top: 0, behavior: 'smooth' });
+    return;
+  }
+  const owner = from.closest('[data-scroll-owner]');
+  if (!(owner instanceof HTMLElement)) return;
+  const inner = owner.querySelector('[data-radix-scroll-area-viewport]');
+  if (inner instanceof HTMLElement) {
+    inner.scrollTo({ top: 0, behavior: 'smooth' });
+    return;
+  }
+  owner.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
 const BATCH_STATUS: Record<string, { label: string; variant: 'default' | 'secondary' | 'outline' | 'destructive' }> = {
   ok: { label: '命中', variant: 'secondary' },
   unmatched: { label: '未找到', variant: 'destructive' },
@@ -131,6 +148,7 @@ export function RealPassManagePage() {
   // 且在途响应回来时若内容已被改动则整个丢弃（防"确认写入未预览内容"竞态）。
   const [preview, setPreview] = useState<(BatchPreviewResponse & { payload: string }) | null>(null);
   const payloadRef = useRef('');
+  const editorRef = useRef<HTMLDivElement>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
 
@@ -209,17 +227,19 @@ export function RealPassManagePage() {
     setTarget(String(p.pid || p.docId));
     setAccepted(String(p.origStat?.accepted ?? ''));
     setSubmitted(String(p.origStat?.submitted ?? ''));
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    scrollNearestContainerToTop(editorRef.current);
   };
 
   return (
-    <div className="space-y-5">
-      <header className="flex items-center gap-2">
-        <BarChart3 className="size-5 text-primary" />
-        <h1 className="text-xl font-semibold">赛时通过率管理</h1>
-        <span className="ml-2 text-xs text-muted-foreground">
-          已录 {data.pcount ?? pdocs.length} 题 · 数据为题目在原赛（牛客/杭电等）当年的通过/提交数
-        </span>
+    <div className="min-w-0 space-y-5">
+      <header className="flex min-w-0 flex-wrap items-start gap-2">
+        <BarChart3 className="mt-0.5 size-5 shrink-0 text-primary" />
+        <div className="min-w-0 flex-1 space-y-1">
+          <h1 className="text-xl font-semibold break-words">赛时通过率管理</h1>
+          <p className="text-xs text-muted-foreground">
+            已录 {data.pcount ?? pdocs.length} 题 · 数据为题目在原赛（牛客/杭电等）当年的通过/提交数
+          </p>
+        </div>
       </header>
 
       {msg ? (
@@ -235,29 +255,31 @@ export function RealPassManagePage() {
       ) : null}
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardContent className="space-y-3 p-4">
-            <h2 className="text-sm font-semibold">单题录入 / 修改</h2>
-            <div className="flex flex-wrap items-end gap-2">
-              <div className="min-w-40 flex-1">
-                <label className="mb-1 block text-xs text-muted-foreground">题目 ID（docId 或 pid）</label>
-                <Input value={target} onChange={(e) => setTarget(e.target.value)} placeholder="如 2467 或 CCCCCAUC20250001" />
+        <div ref={editorRef} className="min-w-0">
+          <Card>
+            <CardContent className="space-y-3 p-4">
+              <h2 className="text-sm font-semibold">单题录入 / 修改</h2>
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="min-w-40 flex-1">
+                  <label className="mb-1 block text-xs text-muted-foreground">题目 ID（docId 或 pid）</label>
+                  <Input value={target} onChange={(e) => setTarget(e.target.value)} placeholder="如 2467 或 CCCCCAUC20250001" />
+                </div>
+                <div className="w-28">
+                  <label className="mb-1 block text-xs text-muted-foreground">通过数</label>
+                  <Input type="number" min={0} value={accepted} onChange={(e) => setAccepted(e.target.value)} />
+                </div>
+                <div className="w-28">
+                  <label className="mb-1 block text-xs text-muted-foreground">提交数</label>
+                  <Input type="number" min={0} value={submitted} onChange={(e) => setSubmitted(e.target.value)} />
+                </div>
+                <Button onClick={saveSingle} disabled={busy}>
+                  保存
+                </Button>
               </div>
-              <div className="w-28">
-                <label className="mb-1 block text-xs text-muted-foreground">通过数</label>
-                <Input type="number" min={0} value={accepted} onChange={(e) => setAccepted(e.target.value)} />
-              </div>
-              <div className="w-28">
-                <label className="mb-1 block text-xs text-muted-foreground">提交数</label>
-                <Input type="number" min={0} value={submitted} onChange={(e) => setSubmitted(e.target.value)} />
-              </div>
-              <Button onClick={saveSingle} disabled={busy}>
-                保存
-              </Button>
-            </div>
-            <p className="text-xs text-muted-foreground">纯数字 ID 会同时按题号(docId)与 pid 匹配；两者命中不同题时会拒绝并提示，请改用完整 pid。</p>
-          </CardContent>
-        </Card>
+              <p className="text-xs text-muted-foreground">纯数字 ID 会同时按题号(docId)与 pid 匹配；两者命中不同题时会拒绝并提示，请改用完整 pid。</p>
+            </CardContent>
+          </Card>
+        </div>
 
         <Card>
           <CardContent className="space-y-3 p-4">
@@ -361,8 +383,8 @@ export function RealPassManagePage() {
 
       <Card>
         <CardContent className="p-0">
-          <div className="flex items-center gap-2 border-b p-3">
-            <form method="get" className="flex flex-1 items-center gap-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-2 border-b p-3">
+            <form method="get" className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
               <Search className="size-4 text-muted-foreground" />
               <Input name="q" defaultValue={data.q || ''} placeholder="按 pid / 标题搜索已录题目" className="h-8 max-w-72" />
               <Button type="submit" variant="outline" size="sm">

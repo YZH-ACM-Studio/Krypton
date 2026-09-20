@@ -59,10 +59,11 @@ export function DomainDashboardPage() {
 
   return (
     <AdminPage
+      contentClassName="min-w-0"
       title={
-        <div className="flex items-center gap-2">
-          <LayoutDashboard className="size-5 text-primary" />
-          <h1 className="text-xl font-semibold">域管理</h1>
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <LayoutDashboard className="size-5 shrink-0 text-primary" />
+          <h1 className="text-xl font-semibold break-words">域管理</h1>
         </div>
       }
       bypassPrivGate
@@ -177,10 +178,11 @@ export function ManageDashboardPage() {
 
   return (
     <AdminPage
+      contentClassName="min-w-0"
       title={
-        <div className="flex items-center gap-2">
-          <Wrench className="size-5 text-primary" />
-          <h1 className="text-xl font-semibold">系统管理</h1>
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <Wrench className="size-5 shrink-0 text-primary" />
+          <h1 className="text-xl font-semibold break-words">系统管理</h1>
         </div>
       }
       bypassPrivGate
@@ -248,10 +250,11 @@ export function StatusPage() {
 
   return (
     <AdminPage
+      contentClassName="min-w-0"
       title={
-        <div className="flex items-center gap-2">
-          <Server className="size-5 text-primary" />
-          <h1 className="text-xl font-semibold">系统状态</h1>
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <Server className="size-5 shrink-0 text-primary" />
+          <h1 className="text-xl font-semibold break-words">系统状态</h1>
         </div>
       }
       bypassPrivGate

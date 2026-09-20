@@ -42,7 +42,7 @@ interface DomainMiscPageData {
 
 export function DomainCreatePage() {
   return (
-    <motion.div className="space-y-6 pt-4" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
+    <motion.div className="mx-auto w-full max-w-xl space-y-6 pt-4" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       <div className="flex items-center gap-3">
         <Button variant="ghost" size="icon" onClick={() => window.history.back()}>
           <ArrowLeft className="size-4" />
@@ -194,15 +194,15 @@ export function DomainJoinApplicationsPage() {
               {joinSettings.role && <Badge variant="outline">角色: {joinSettings.role}</Badge>}
             </div>
             {joinSettings.method === 2 && joinSettings.code && (
-              <div className="mt-2 flex items-center gap-2 text-sm">
-                <Key className="size-3.5" />
-                <span className="text-muted-foreground">邀请码:</span>
-                <code className="font-mono">{joinSettings.code}</code>
+              <div className="mt-2 flex min-w-0 items-start gap-2 text-sm">
+                <Key className="mt-0.5 size-3.5 shrink-0" />
+                <span className="shrink-0 text-muted-foreground">邀请码:</span>
+                <code className="min-w-0 break-all font-mono">{joinSettings.code}</code>
               </div>
             )}
             {urlPrefix && (
-              <p className="mt-2 text-xs text-muted-foreground">
-                加入链接: <code>{urlPrefix}domain/join</code>
+              <p className="mt-2 min-w-0 text-xs text-muted-foreground">
+                加入链接: <code className="break-all">{urlPrefix}domain/join</code>
               </p>
             )}
           </CardContent>

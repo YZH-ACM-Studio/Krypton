@@ -530,6 +530,7 @@ export function AdminAuthTokenPage() {
       title="访问令牌"
       description="签发、撤销、续期 Krypton 访问令牌(KAT)。令牌绑定到 Hydro 用户、复用其权限,并按频道与数据范围收敛。明文仅在签发时显示一次。"
       requiredPriv={PRIV.PRIV_EDIT_SYSTEM}
+      contentClassName="min-w-0"
       actions={
         <Button onClick={() => setIssueOpen(true)}>
           <Plus /> 签发令牌

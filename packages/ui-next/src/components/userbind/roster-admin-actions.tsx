@@ -1,7 +1,7 @@
 import { KeyRound, Pencil, Trash2, Unlink } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { FormField } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { TableAction, TableActions } from '@/components/ui/table-actions';
@@ -34,7 +34,7 @@ export function StudentRosterActions({
 
   return (
     <>
-      <TableActions>
+      <TableActions className="flex-wrap">
         <TableAction onClick={() => setEditOpen(true)} icon={Pencil}>
           编辑
         </TableAction>
@@ -101,7 +101,7 @@ function EditStudentDialog({
         <form
           method="post"
           action="/admin/userbind/students"
-          className="space-y-4 p-5"
+          className="flex flex-col"
           onSubmit={(event) => {
             const form = event.currentTarget;
             const yearInput = form.elements.namedItem('enrollmentYear');
@@ -118,30 +118,32 @@ function EditStudentDialog({
             }
           }}
         >
-          <input type="hidden" name="operation" value="updateStudent" />
-          <input type="hidden" name="studentRecordId" value={student._id} />
-          <input type="hidden" name="returnTo" value={returnTo} />
-          <p className="text-sm text-muted-foreground">
-            学号 <span className="font-mono text-foreground">{student.studentId}</span> 不可在此修改。
-          </p>
-          <FormField label="姓名" required htmlFor={`edit-realName-${student._id}`}>
-            <Input id={`edit-realName-${student._id}`} name="realName" defaultValue={student.realName} required maxLength={32} />
-          </FormField>
-          <FormField label="入学年" htmlFor={`edit-year-${student._id}`} hint="留空表示清除入学年">
-            <Input
-              id={`edit-year-${student._id}`}
-              name="enrollmentYear"
-              defaultValue={student.enrollmentYear == null ? '' : String(student.enrollmentYear)}
-              inputMode="numeric"
-              placeholder="如 2024"
-            />
-          </FormField>
-          <div className="flex justify-end gap-2">
+          <DialogBody className="space-y-4 p-5">
+            <input type="hidden" name="operation" value="updateStudent" />
+            <input type="hidden" name="studentRecordId" value={student._id} />
+            <input type="hidden" name="returnTo" value={returnTo} />
+            <p className="text-sm text-muted-foreground">
+              学号 <span className="font-mono text-foreground">{student.studentId}</span> 不可在此修改。
+            </p>
+            <FormField label="姓名" required htmlFor={`edit-realName-${student._id}`}>
+              <Input id={`edit-realName-${student._id}`} name="realName" defaultValue={student.realName} required maxLength={32} />
+            </FormField>
+            <FormField label="入学年" htmlFor={`edit-year-${student._id}`} hint="留空表示清除入学年">
+              <Input
+                id={`edit-year-${student._id}`}
+                name="enrollmentYear"
+                defaultValue={student.enrollmentYear == null ? '' : String(student.enrollmentYear)}
+                inputMode="numeric"
+                placeholder="如 2024"
+              />
+            </FormField>
+          </DialogBody>
+          <DialogFooter className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3 flex-row">
             <Button type="button" variant="ghost" onClick={onClose}>
               取消
             </Button>
             <Button type="submit">保存</Button>
-          </div>
+          </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>
@@ -178,22 +180,24 @@ export function RenameEntityDialog({
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
-        <form method="post" action={action} className="space-y-4 p-5">
-          <input type="hidden" name="operation" value="rename" />
-          {Object.entries(hidden).map(([key, value]) => (
-            <input key={key} type="hidden" name={key} value={value} />
-          ))}
-          <FormField label={fieldLabel} required htmlFor="rename-entity-name">
-            <Input id="rename-entity-name" name="name" value={name} onChange={(e) => setName(e.target.value)} required autoFocus />
-          </FormField>
-          <div className="flex justify-end gap-2">
+        <form method="post" action={action} className="flex flex-col">
+          <DialogBody className="space-y-4 p-5">
+            <input type="hidden" name="operation" value="rename" />
+            {Object.entries(hidden).map(([key, value]) => (
+              <input key={key} type="hidden" name={key} value={value} />
+            ))}
+            <FormField label={fieldLabel} required htmlFor="rename-entity-name">
+              <Input id="rename-entity-name" name="name" value={name} onChange={(e) => setName(e.target.value)} required autoFocus />
+            </FormField>
+          </DialogBody>
+          <DialogFooter className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3 flex-row">
             <Button type="button" variant="ghost" onClick={onClose}>
               取消
             </Button>
             <Button type="submit" disabled={!name.trim()}>
               保存
             </Button>
-          </div>
+          </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>

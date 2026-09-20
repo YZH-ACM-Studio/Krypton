@@ -529,9 +529,11 @@ function DashboardView({ data }: { data: AdminStatsData }) {
   const stats = data.stats as DashboardStats;
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
         <MiniTabs
           value={String(data.range)}
+          className="max-w-full overflow-x-auto"
+          aria-label="统计时间范围"
           items={[
             { value: '30', label: '近 30 天', href: '/admin/stats?view=dashboard&range=30' },
             { value: '90', label: '近 90 天', href: '/admin/stats?view=dashboard&range=90' },
@@ -595,7 +597,7 @@ function ProblemView({ data }: { data: AdminStatsData }) {
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
         <Card>
           <CardHeader><CardTitle className="text-sm">难度排行（通过率升序）</CardTitle></CardHeader>
-          <CardContent className="max-h-[640px] overflow-auto p-0">
+          <CardContent className="p-0">
             <Table>
               <TableHeader><TableRow><TableHead className="pl-5">题目</TableHead><TableHead className="text-right">提交</TableHead><TableHead className="text-right">AC</TableHead><TableHead className="pr-5 text-right">通过率</TableHead></TableRow></TableHeader>
               <TableBody>
@@ -636,22 +638,23 @@ export function AdminStatsPage() {
     <AdminPage
       requiredPriv={PRIV.PRIV_EDIT_SYSTEM}
       hideSidebar
+      contentClassName="min-w-0"
       title="统计中心"
       description={`实时聚合，单次查询最长 ${data.maxTimeMs / 1000} 秒。`}
-      actions={(
-        <MiniTabs
-          value={data.view}
-          items={[
-            { value: 'contest', label: '按比赛', href: '/admin/stats?view=contest' },
-            { value: 'training', label: '按题集', href: '/admin/stats?view=training' },
-            { value: 'user', label: '按人', href: '/admin/stats?view=user' },
-            { value: 'group', label: '班级组', href: '/admin/stats?view=group' },
-            { value: 'dashboard', label: '大盘', href: '/admin/stats?view=dashboard' },
-            { value: 'problem', label: '按题目', href: '/admin/stats?view=problem' },
-          ]}
-        />
-      )}
     >
+      <MiniTabs
+        value={data.view}
+        className="max-w-full overflow-x-auto"
+        aria-label="统计维度"
+        items={[
+          { value: 'contest', label: '按比赛', href: '/admin/stats?view=contest' },
+          { value: 'training', label: '按题集', href: '/admin/stats?view=training' },
+          { value: 'user', label: '按人', href: '/admin/stats?view=user' },
+          { value: 'group', label: '班级组', href: '/admin/stats?view=group' },
+          { value: 'dashboard', label: '大盘', href: '/admin/stats?view=dashboard' },
+          { value: 'problem', label: '按题目', href: '/admin/stats?view=problem' },
+        ]}
+      />
       <StatsViewContent data={data} />
     </AdminPage>
   );

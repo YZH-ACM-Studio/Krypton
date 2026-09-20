@@ -699,7 +699,6 @@ function serializeSlots(slots: SlotDraft[]) {
   });
 }
 
-
 /**
  * 用户组下拉选项：常规选择器过滤已归档组；
  * 当前已选中的历史值保留并标注「已归档」，保证旧收集的引用仍可解析。
@@ -783,7 +782,7 @@ export function AdminCollectListPage() {
     >
       <Card>
         <CardContent className="p-0">
-          <Table className="min-w-[56rem]">
+          <Table className="min-w-0">
             <TableHeader>
               <TableRow>
                 <TableHead>标题</TableHead>
@@ -791,7 +790,7 @@ export function AdminCollectListPage() {
                 <TableHead>截止</TableHead>
                 <TableHead>状态</TableHead>
                 <TableHead>已交 / 应交</TableHead>
-                <TableHead className="w-80">操作</TableHead>
+                <TableHead className="min-w-0">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -804,8 +803,8 @@ export function AdminCollectListPage() {
               ) : (
                 data.requests.map((item) => (
                   <TableRow key={item._id}>
-                    <TableCell>
-                      <a href={`/admin/collect/${item._id}/edit`} className="font-medium hover:underline">
+                    <TableCell className="min-w-0">
+                      <a href={`/admin/collect/${item._id}/edit`} className="break-words font-medium hover:underline">
                         {item.title}
                       </a>
                     </TableCell>
@@ -819,8 +818,8 @@ export function AdminCollectListPage() {
                     <TableCell className="text-sm">
                       {item.submitted}/{item.total}
                     </TableCell>
-                    <TableCell>
-                      <TableActions>
+                    <TableCell className="min-w-0">
+                      <TableActions className="flex-wrap">
                         <TableAction href={`/admin/collect/${item._id}/edit`}>编辑</TableAction>
                         <TableAction href={`/admin/collect/${item._id}`}>进度</TableAction>
                         {item.canEdit && item.status === 'draft' ? (
@@ -1030,6 +1029,7 @@ export function AdminCollectEditPage() {
           onValueChange={setTab}
           size="md"
           aria-label="收集编辑分区"
+          className="max-w-full overflow-x-auto"
           items={[
             { value: 'basic', label: '基本' },
             { value: 'audience', label: '受众' },
@@ -1317,7 +1317,7 @@ export function AdminCollectEditPage() {
                   </Button>
                 ))}
               </div>
-              <p className="rounded-md bg-muted px-3 py-2 font-mono text-xs leading-6">
+              <p className="break-all rounded-md bg-muted px-3 py-2 font-mono text-xs leading-6">
                 <span className="text-muted-foreground">预览文件名 </span>
                 {namePreview.assigned}
                 <br />
@@ -1534,66 +1534,69 @@ export function AdminCollectStatsPage() {
         </span>
       }
       actions={
-        <div className="flex max-w-full flex-wrap gap-2">
-          {data.canNudge ? (
-            <form method="post" action={`/admin/collect/${data.request._id}`}>
-              <input type="hidden" name="operation" value="nudge" />
-              <Button type="submit" variant="outline" className="min-h-10" disabled={data.missingCount === 0}>
-                <Bell className="mr-1 size-4" />
-                催未交
-              </Button>
-            </form>
-          ) : null}
-          {data.canPack ? (
-            <Button type="button" variant="outline" className="min-h-10" disabled={packing} onClick={() => void packDownload()}>
-              <FileDown className="mr-1 size-4" />
-              {packing ? '打包中…' : '打包下载'}
-            </Button>
-          ) : null}
-          {data.request.canEdit && !data.hasFiles && data.request.status !== 'archived' ? (
-            <form
-              method="post"
-              action={`/admin/collect/${data.request._id}`}
-              onSubmit={(event) => {
-                void confirmFormSubmit(event, `确定删除文件收集「${data.request.title}」？`, { destructive: true });
-              }}
-            >
-              <input type="hidden" name="operation" value="delete" />
-              <Button type="submit" variant="destructive" className="min-h-10">
-                <Trash2 className="mr-1 size-4" />
-                删除
-              </Button>
-            </form>
-          ) : null}
-          {data.request.canEdit && data.hasFiles && data.request.status !== 'archived' ? (
-            <form
-              method="post"
-              action={`/admin/collect/${data.request._id}`}
-              onSubmit={(event) => {
-                void confirmFormSubmit(event, `归档「${data.request.title}」后不能再收文件，已交文件保留。`, { destructive: true });
-              }}
-            >
-              <input type="hidden" name="operation" value="archive" />
-              <Button type="submit" variant="outline" className="min-h-10">
-                <Archive className="mr-1 size-4" />
-                归档
-              </Button>
-            </form>
-          ) : null}
-          {data.request.canEdit ? (
-            <Button asChild variant="outline" className="min-h-10">
-              <a href={`/admin/collect/${data.request._id}/edit`}>编辑</a>
-            </Button>
-          ) : null}
-          <Button asChild variant="outline" className="min-h-10">
-            <a href="/admin/collect">
-              <ArrowLeft className="mr-1 size-4" />
-              返回列表
-            </a>
-          </Button>
-        </div>
+        <Button asChild variant="outline" className="min-h-10">
+          <a href="/admin/collect">
+            <ArrowLeft className="mr-1 size-4" />
+            返回列表
+          </a>
+        </Button>
       }
     >
+      <div
+        aria-label="打包"
+        className="sticky top-0 z-10 flex max-w-full flex-wrap items-center gap-2 rounded-xl border bg-background/95 p-2 shadow-sm backdrop-blur"
+      >
+        {data.canNudge ? (
+          <form method="post" action={`/admin/collect/${data.request._id}`}>
+            <input type="hidden" name="operation" value="nudge" />
+            <Button type="submit" variant="outline" className="min-h-10" disabled={data.missingCount === 0}>
+              <Bell className="mr-1 size-4" />
+              催未交
+            </Button>
+          </form>
+        ) : null}
+        {data.canPack ? (
+          <Button type="button" variant="outline" className="min-h-10" disabled={packing} onClick={() => void packDownload()}>
+            <FileDown className="mr-1 size-4" />
+            {packing ? '打包中…' : '打包下载'}
+          </Button>
+        ) : null}
+        {data.request.canEdit && !data.hasFiles && data.request.status !== 'archived' ? (
+          <form
+            method="post"
+            action={`/admin/collect/${data.request._id}`}
+            onSubmit={(event) => {
+              void confirmFormSubmit(event, `确定删除文件收集「${data.request.title}」？`, { destructive: true });
+            }}
+          >
+            <input type="hidden" name="operation" value="delete" />
+            <Button type="submit" variant="destructive" className="min-h-10">
+              <Trash2 className="mr-1 size-4" />
+              删除
+            </Button>
+          </form>
+        ) : null}
+        {data.request.canEdit && data.hasFiles && data.request.status !== 'archived' ? (
+          <form
+            method="post"
+            action={`/admin/collect/${data.request._id}`}
+            onSubmit={(event) => {
+              void confirmFormSubmit(event, `归档「${data.request.title}」后不能再收文件，已交文件保留。`, { destructive: true });
+            }}
+          >
+            <input type="hidden" name="operation" value="archive" />
+            <Button type="submit" variant="outline" className="min-h-10">
+              <Archive className="mr-1 size-4" />
+              归档
+            </Button>
+          </form>
+        ) : null}
+        {data.request.canEdit ? (
+          <Button asChild variant="outline" className="min-h-10">
+            <a href={`/admin/collect/${data.request._id}/edit`}>编辑</a>
+          </Button>
+        ) : null}
+      </div>
       {packError ? (
         <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
           {packError}
@@ -1623,13 +1626,13 @@ export function AdminCollectStatsPage() {
 
       <Card>
         <CardContent className="p-0">
-          <Table className="min-w-[56rem]">
+          <Table className="min-w-0">
             <TableHeader>
               <TableRow>
                 <TableHead>学号</TableHead>
                 <TableHead>姓名</TableHead>
                 <TableHead>状态</TableHead>
-                <TableHead>文件</TableHead>
+                <TableHead className="max-w-[16rem] min-w-0">文件</TableHead>
                 <TableHead>时间</TableHead>
               </TableRow>
             </TableHeader>
@@ -1683,11 +1686,11 @@ function ProgressFileLink({
   const showOriginal = Boolean(file.assignedName && file.assignedName !== file.originalName);
   const others = showDuplicates ? duplicateOtherCount(file) : null;
   return (
-    <div className="space-y-0.5">
+    <div className="max-w-[16rem] min-w-0 space-y-0.5">
       <div className="flex flex-wrap items-center gap-1.5">
         <a
           href={file.url}
-          className={muted ? 'text-xs text-muted-foreground hover:underline' : 'text-xs text-primary hover:underline'}
+          className={muted ? 'break-all text-xs text-muted-foreground hover:underline' : 'break-all text-xs text-primary hover:underline'}
           rel="noopener"
         >
           {prefix}
@@ -1700,7 +1703,7 @@ function ProgressFileLink({
           </Badge>
         ) : null}
       </div>
-      {showOriginal ? <p className="text-[11px] text-muted-foreground">原名 {file.originalName}</p> : null}
+      {showOriginal ? <p className="break-all text-[11px] text-muted-foreground">原名 {file.originalName}</p> : null}
     </div>
   );
 }
@@ -1717,7 +1720,7 @@ function ProgressTableRow({ row }: { row: ProgressRow }) {
           <Badge variant="outline">未交文件</Badge>
         )}
       </TableCell>
-      <TableCell>
+      <TableCell className="max-w-[16rem] min-w-0 break-all">
         {row.files.length === 0 && row.history.length === 0 ? (
           <span className="text-xs text-muted-foreground">—</span>
         ) : (

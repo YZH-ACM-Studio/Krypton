@@ -356,3 +356,60 @@ describe('collect naming rev.2 source contracts', () => {
     expect(handler).to.include('nextAssignedNameForSlot');
   });
 });
+
+describe('collect narrow layout contracts', () => {
+  const admin = source('packages/ui-next/src/pages/admin-collect/index.tsx');
+  const student = source('packages/ui-next/src/pages/collect/index.tsx');
+
+  it('wraps student top bar and card titles with min-w-0', () => {
+    expect(student).to.include(
+      'className="flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-xl border bg-card p-6 shadow-sm"',
+    );
+    expect(student).to.include('min-w-0 break-words text-xl font-semibold');
+    expect(student).to.include('flex min-h-10 min-w-0 items-start justify-between gap-2');
+    expect(student).to.include('min-w-0 flex-1 break-words font-semibold line-clamp-2');
+    expect(student).to.include('flex min-w-0 flex-wrap items-start justify-between gap-3');
+    expect(student).to.include('min-w-0 break-words text-base');
+  });
+
+  it('splits slot file rows into a wrapping name block and action block', () => {
+    const slotFiles = sliceBetween(student, 'function SlotFiles(', 'function CollectHistory(');
+    expect(slotFiles).to.include('flex flex-wrap items-start gap-2');
+    expect(slotFiles).to.include('min-w-0 flex-1');
+    expect(slotFiles).to.include('block break-all font-medium');
+    expect(slotFiles).to.include('flex shrink-0 flex-wrap items-center gap-1');
+    expect(slotFiles).not.to.include('truncate');
+  });
+
+  it('keeps assignedName break-all and confirm submit at min-h-11', () => {
+    expect(student).to.include('block break-all font-medium">{assignedName}');
+    expect(student).to.include('break-all text-xs text-muted-foreground');
+    expect(student).to.include('将保存为 {slot.nextAssignedName}');
+    expect(student.match(/className="min-h-11"/g) || []).to.have.lengthOf(2);
+    expect(student).to.match(/className="min-h-11"[\s\S]{0,200}确认提交/);
+  });
+
+  it('scrolls MiniTabs horizontally instead of clipping labels', () => {
+    expect(student).to.include('className="max-w-full overflow-x-auto"');
+    expect(admin).to.include('className="max-w-full overflow-x-auto"');
+  });
+
+  it('keeps admin file names breakable and operations reachable at 320', () => {
+    expect(admin).not.to.include('min-w-[56rem]');
+    expect(admin).not.to.include('className="w-80"');
+    expect(admin).to.include('Table className="min-w-0"');
+    expect(admin).to.include('max-w-[16rem] min-w-0');
+    expect(admin).to.include('max-w-[16rem] min-w-0 break-all');
+    expect(admin).to.include('break-all text-xs');
+    expect(admin).to.include('TableActions className="flex-wrap"');
+  });
+
+  it('puts a wrapping sticky pack bar inside stats content', () => {
+    const stats = admin.slice(admin.indexOf('export function AdminCollectStatsPage'));
+    expect(stats).to.include('aria-label="打包"');
+    expect(stats).to.include('sticky top-0');
+    expect(stats).to.include('flex max-w-full flex-wrap items-center gap-2');
+    expect(stats).to.include('打包下载');
+    expect(stats).to.include('催未交');
+  });
+});

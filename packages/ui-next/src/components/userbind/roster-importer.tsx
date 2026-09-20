@@ -161,7 +161,7 @@ export function RosterImporter({
       )}
       <CardContent className="space-y-4">
         {enableSearch && (
-          <div className="flex gap-1 rounded-md border bg-muted/30 p-1">
+          <div className="flex max-w-full flex-wrap gap-1 overflow-x-auto rounded-md border bg-muted/30 p-1">
             <TabBtn active={mode === 'text'} onClick={() => setMode('text')} icon={FileText}>
               名单导入
             </TabBtn>
@@ -191,7 +191,7 @@ export function RosterImporter({
 
             {parsedRows.length > 0 && <PreviewTable rows={parsedRows} />}
 
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-xs text-muted-foreground">
                 {validCount > 0 && <span className="text-emerald-700 dark:text-emerald-400">{validCount} 行有效</span>}
                 {validCount > 0 && invalidCount > 0 && '；'}
@@ -199,7 +199,7 @@ export function RosterImporter({
                 {parsedRows.length === 0 && '暂无输入'}
                 {checked && parsedRows.length > 0 && ' · 已检查'}
               </p>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <Button type="button" variant="outline" disabled={parsedRows.length === 0} onClick={() => setChecked(true)}>
                   检查名单
                 </Button>
@@ -214,7 +214,7 @@ export function RosterImporter({
         {mode === 'search' && enableSearch && (
           <div className="space-y-3">
             {/* Search uses GET to the same page with q= to populate searchResults. */}
-            <form method="get" action={searchUrl || action} className="flex gap-2">
+            <form method="get" action={searchUrl || action} className="flex flex-wrap gap-2">
               {Object.entries(searchHiddenFields).map(([k, v]) => (
                 <input key={k} type="hidden" name={k} value={v} />
               ))}
@@ -278,7 +278,7 @@ export function RosterImporter({
               {selectedIds.size > 0 &&
                 Array.from(selectedIds).map((id) => <input key={id} type="hidden" name={searchSelectFieldName} value={String(id)} />)}
 
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-xs text-muted-foreground">{selectedIds.size > 0 ? `已选 ${selectedIds.size} 人` : '从结果中勾选要添加的学生'}</p>
                 <Button type="submit" disabled={selectedIds.size === 0}>
                   {submitLabel}
@@ -311,8 +311,8 @@ function TabBtn({ active, onClick, icon: Icon, children }: { active: boolean; on
 function PreviewTable({ rows }: { rows: ParsedRow[] }) {
   if (rows.length === 0) return null;
   return (
-    <ScrollArea className="max-h-56 rounded-md border bg-card">
-      <table className="w-full text-xs">
+    <ScrollArea className="max-h-56 rounded-md border bg-card" orientation="both">
+      <table className="w-full min-w-[32rem] text-xs">
         <thead className="sticky top-0 bg-muted/60 text-muted-foreground">
           <tr>
             <th className="px-2 py-1.5 text-left">行</th>

@@ -489,11 +489,10 @@ export function AdminTasksEditPage() {
   const selectedNode = useMemo(() => graph.nodes.find((n) => n.id === selectedNodeId), [graph, selectedNodeId]);
 
   // Fullscreen canvas — same pattern as Krypton IDE (krypton-ide.tsx). When
-  // active, the editor card becomes `fixed inset-0` so it covers the whole
-  // viewport. The side panel stays as an inline `<aside>` next to the canvas,
-  // so it naturally anchors to the canvas's right edge in both modes — which
-  // equals the screen's right edge when fullscreen, the card's right edge
-  // when not.
+  // active, the editor card becomes `fixed inset-0 flex flex-col` so it
+  // covers the viewport and the canvas row can `flex-1 min-h-0`. Below `lg`
+  // the toolbox/canvas/node panel stack vertically; from `lg` up the node
+  // panel stays an inline `<aside>` on the canvas's right edge.
   const [fullscreen, setFullscreen] = useState(false);
   useEffect(() => {
     if (!fullscreen) return;
@@ -634,20 +633,22 @@ export function AdminTasksEditPage() {
               <CardTitle className="text-sm">可见范围</CardTitle>
             </CardHeader>
             <CardContent>
-              <MiniTabs
-                size="md"
-                value={accessType}
-                onValueChange={(t) => {
-                  setAccessType(t as TaskAccess['type']);
-                  if (t === 'public') setAccessTargetId('');
-                }}
-                items={[
-                  { value: 'public', label: '所有人' },
-                  { value: 'user_group', label: '用户组' },
-                  { value: 'school', label: '学校' },
-                  { value: 'grade', label: '年级' },
-                ]}
-              />
+              <div className="max-w-full overflow-x-auto">
+                <MiniTabs
+                  size="md"
+                  value={accessType}
+                  onValueChange={(t) => {
+                    setAccessType(t as TaskAccess['type']);
+                    if (t === 'public') setAccessTargetId('');
+                  }}
+                  items={[
+                    { value: 'public', label: '所有人' },
+                    { value: 'user_group', label: '用户组' },
+                    { value: 'school', label: '学校' },
+                    { value: 'grade', label: '年级' },
+                  ]}
+                />
+              </div>
               {accessType === 'grade' && (
                 <FormField label="允许的入学年" className="mt-3">
                   <TaskYearSetInput value={accessYears} onChange={setAccessYears} inputLabel="允许的入学年" scopeKey="task-access-grade" />
@@ -681,15 +682,17 @@ export function AdminTasksEditPage() {
               <CardTitle className="text-sm">完成模式</CardTitle>
             </CardHeader>
             <CardContent>
-              <MiniTabs
-                size="md"
-                value={admissionMode}
-                onValueChange={(v) => setAdmissionMode(v as AdmissionMode)}
-                items={[
-                  { value: 'auto', label: '自动（满足图条件即完成）' },
-                  { value: 'quota', label: '配额（候选池 + 管理员审核）' },
-                ]}
-              />
+              <div className="max-w-full overflow-x-auto">
+                <MiniTabs
+                  size="md"
+                  value={admissionMode}
+                  onValueChange={(v) => setAdmissionMode(v as AdmissionMode)}
+                  items={[
+                    { value: 'auto', label: '自动' },
+                    { value: 'quota', label: '配额' },
+                  ]}
+                />
+              </div>
               {admissionMode === 'quota' && (
                 <FormField label="名额数（quota）" className="mt-3" hint="软上限——超额录取会警告但不阻止">
                   <Input type="number" name="quota" min={1} value={quota} onChange={(e) => setQuota(e.target.value)} placeholder="例如 30" />
@@ -707,17 +710,17 @@ export function AdminTasksEditPage() {
           </Card>
         </div>
 
-        {/* The big canvas — flex row [toolbox | canvas | side-panel-when-selected].
-            When fullscreen, the whole Card escapes its page slot via
-            `fixed inset-0 z-50` (same trick as krypton-ide). The inner flex
-            layout is unchanged, so the side panel keeps tracking the canvas's
-            right edge — which is the screen's right edge in fullscreen. */}
-        <Card className={cn('overflow-hidden', fullscreen && 'fixed inset-0 z-50 rounded-none border-0')}>
-          <CardHeader>
-            <div className="flex items-center justify-between gap-2">
-              <div>
-                <CardTitle className="text-sm">任务流程图</CardTitle>
-                <p className="mt-1 text-xs text-muted-foreground">从左侧拖拽节点到画布；连线拖动节点边上的圆点；删除连线双击它或选中后按 Delete。</p>
+        {/* Canvas stack: below `lg` [toolbox | canvas | node panel as a max-height
+            bottom bar]; from `lg` up [toolbox | canvas | side panel]. Fullscreen
+            uses `fixed inset-0 flex flex-col` so CardContent can flex-1. */}
+        <Card className={cn('overflow-hidden', fullscreen && 'fixed inset-0 z-50 flex flex-col flex-1 min-h-0 rounded-none border-0')}>
+          <CardHeader className="shrink-0">
+            <div className="flex min-w-0 items-start justify-between gap-2">
+              <div className="min-w-0">
+                <CardTitle className="min-w-0 break-words text-sm">任务流程图</CardTitle>
+                <p className="mt-1 min-w-0 break-words text-xs text-muted-foreground">
+                  从工具箱拖拽节点到画布；连线拖动节点边上的圆点；删除连线双击它或选中后按 Delete。
+                </p>
               </div>
               {/* Header keeps just the fullscreen toggle. Save lives in the
                   bottom action card so the form follows natural top-down flow
@@ -726,6 +729,7 @@ export function AdminTasksEditPage() {
                 type="button"
                 size="sm"
                 variant="outline"
+                className="shrink-0"
                 onClick={() => setFullscreen((p) => !p)}
                 title={fullscreen ? '退出全屏 (Esc)' : '全屏编辑'}
               >
@@ -733,16 +737,10 @@ export function AdminTasksEditPage() {
               </Button>
             </div>
           </CardHeader>
-          <CardContent
-            className={cn('p-0', fullscreen ? 'flex-1 min-h-0' : '')}
-            // In fullscreen, the Card is `fixed inset-0` and uses default
-            // CardContent height. Force flex-col on the Card so the canvas
-            // row can flex-1 fill remaining viewport height.
-            style={fullscreen ? { height: 'calc(100% - 4rem)' } : undefined}
-          >
-            <div className={cn('flex', fullscreen ? 'h-full' : 'h-[68vh]')}>
+          <CardContent className={cn('p-0', fullscreen && 'flex min-h-0 flex-1 flex-col')}>
+            <div className={cn('flex min-h-0 min-w-0 flex-col lg:flex-row', fullscreen ? 'h-full flex-1' : 'h-[min(68vh,calc(100dvh-12rem))]')}>
               <Toolbox presetsByCategory={presetsByCategory} />
-              <div className="flex min-w-0 flex-1">
+              <div className="flex min-h-0 min-w-0 flex-1">
                 <TaskGraphRenderer
                   graph={graph}
                   presets={data.presets}
@@ -753,9 +751,9 @@ export function AdminTasksEditPage() {
                 />
               </div>
               {selectedNode && (
-                <aside className="flex w-[400px] shrink-0 flex-col border-l bg-background">
-                  <div className="flex shrink-0 items-center justify-between border-b px-5 py-3">
-                    <h3 className="text-sm font-semibold">
+                <aside className="flex max-h-[min(42vh,22rem)] w-full min-h-0 flex-col border-t bg-background lg:max-h-none lg:w-[400px] lg:shrink-0 lg:border-l lg:border-t-0">
+                  <div className="flex shrink-0 items-center justify-between gap-2 border-b px-5 py-3">
+                    <h3 className="min-w-0 break-words text-sm font-semibold">
                       {selectedNode.type === 'start' ? '开始节点' : selectedNode.type === 'end' ? '完成节点' : '编辑任务点'}
                     </h3>
                     <button
@@ -828,29 +826,27 @@ function Toolbox({ presetsByCategory }: { presetsByCategory: Record<string, Pres
     { key: 'behavior', label: '行为型', icon: Target, tone: 'sky' },
     { key: 'condition', label: '条件型', icon: UserCheck, tone: 'amber' },
   ] as const;
-  // Toolbox is the leftmost column inside a fixed-height flex row, so we let
-  // the parent dictate height: `w-[220px]` width, `h-full` to fill the flex
-  // row, then ScrollArea inside is `min-h-0 flex-1`. Hardcoded `h-[68vh]`
-  // (old behavior) clipped wrong when the page entered fullscreen.
+  // Below `lg` this is a horizontal scroller above the canvas. From `lg` up
+  // it is the left column (`w-[220px]`, fill parent height, overflow-y-auto).
   return (
-    <div className="flex h-full w-[220px] shrink-0 flex-col border-r bg-muted/30">
+    <div className="flex w-full shrink-0 flex-col border-b bg-muted/30 lg:h-full lg:w-[220px] lg:border-b-0 lg:border-r">
       <h3 className="shrink-0 px-3 pb-2 pt-3 text-xs font-medium text-muted-foreground">从这里拖到画布</h3>
-      <ScrollArea className="min-h-0 flex-1">
-        <div className="space-y-3 px-3 pb-4">
+      <div className="overflow-x-auto lg:min-h-0 lg:flex-1 lg:overflow-x-hidden lg:overflow-y-auto">
+        <div className="flex gap-3 px-3 pb-3 lg:flex-col">
           {groups.map((g) => (
-            <div key={g.key}>
+            <div key={g.key} className="min-w-0 shrink-0 lg:shrink">
               <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                 <g.icon className={cn('size-3', g.key === 'behavior' ? 'text-sky-500' : 'text-amber-500')} />
                 {g.label}
               </div>
-              <div className="space-y-1">
+              <div className="flex gap-1 lg:flex-col lg:space-y-1">
                 {(presetsByCategory[g.key] || []).map((p) => (
                   <div
                     key={p.id}
                     draggable
                     onDragStart={(e) => onDragStart(e, p.id)}
                     className={cn(
-                      'cursor-grab rounded border bg-card px-2 py-1.5 text-xs transition-colors hover:bg-accent active:cursor-grabbing',
+                      'w-40 shrink-0 cursor-grab rounded border bg-card px-2 py-1.5 text-xs transition-colors hover:bg-accent active:cursor-grabbing lg:w-auto',
                       g.key === 'behavior' && 'hover:border-sky-400',
                       g.key === 'condition' && 'hover:border-amber-400',
                     )}
@@ -864,7 +860,7 @@ function Toolbox({ presetsByCategory }: { presetsByCategory: Record<string, Pres
             </div>
           ))}
         </div>
-      </ScrollArea>
+      </div>
     </div>
   );
 }
@@ -1114,16 +1110,18 @@ export function AdminTasksAssignPage() {
           <form method="post" className="space-y-3">
             <input type="hidden" name="operation" value="batch" />
             <input type="hidden" name="scope" value={scope} />
-            <MiniTabs
-              size="md"
-              value={scope}
-              onValueChange={setScope}
-              items={[
-                { value: 'uid', label: '单个用户' },
-                { value: 'user_group', label: '整个用户组' },
-                { value: 'school', label: '整个学校' },
-              ]}
-            />
+            <div className="max-w-full overflow-x-auto">
+              <MiniTabs
+                size="md"
+                value={scope}
+                onValueChange={setScope}
+                items={[
+                  { value: 'uid', label: '单个用户' },
+                  { value: 'user_group', label: '整个用户组' },
+                  { value: 'school', label: '整个学校' },
+                ]}
+              />
+            </div>
             {scope === 'uid' && (
               <FormField label="用户 UID" required>
                 <Input name="uid" type="number" min={1} value={uid} onChange={(e) => setUid(e.target.value)} required />
@@ -1313,14 +1311,16 @@ export function AdminTasksStatsPage() {
       <Card>
         <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <CardTitle className="text-sm">统计明细</CardTitle>
-          <MiniTabs
-            value={statsTab}
-            onValueChange={setStatsTab}
-            items={[
-              { value: 'progress', label: '用户进度', count: data.assignments.length, icon: ListChecks },
-              { value: 'audit', label: '审计日志', count: data.audit.length, icon: ClipboardList },
-            ]}
-          />
+          <div className="max-w-full overflow-x-auto">
+            <MiniTabs
+              value={statsTab}
+              onValueChange={setStatsTab}
+              items={[
+                { value: 'progress', label: '用户进度', count: data.assignments.length, icon: ListChecks },
+                { value: 'audit', label: '审计日志', count: data.audit.length, icon: ClipboardList },
+              ]}
+            />
+          </div>
         </CardHeader>
         <CardContent className={cn(statsTab === 'progress' && 'p-0')}>
           {statsTab === 'progress' ? (
@@ -1405,7 +1405,7 @@ export function AdminTasksStatsPage() {
           if (!o) setDrillIn(null);
         }}
       >
-        <SheetContent side="right" className="w-[640px] sm:max-w-[640px] p-0">
+        <SheetContent side="right" className="w-full max-w-full p-0 sm:w-[640px] sm:max-w-[640px]">
           <SheetHeader>
             <SheetTitle>{drillIn ? drillUser?.uname || `uid:${drillIn.userId}` : '—'}</SheetTitle>
             {drillStudent ? (
@@ -1579,16 +1579,18 @@ export function AdminTasksCandidatesPage() {
             options={[{ value: '', label: '所有学校' }, ...data.schools.map((s) => ({ value: s._id, label: s.name }))]}
             className="w-40"
           />
-          <MiniTabs
-            value={statusFilter}
-            onValueChange={setStatusFilter}
-            items={[
-              { value: 'all', label: `全部 (${data.assignments.length})` },
-              { value: 'qualified', label: `候选 (${data.counts.qualified})` },
-              { value: 'admitted', label: `已录取 (${data.counts.admitted})` },
-              { value: 'completed', label: `已完成 (${data.counts.completed})` },
-            ]}
-          />
+          <div className="max-w-full overflow-x-auto">
+            <MiniTabs
+              value={statusFilter}
+              onValueChange={setStatusFilter}
+              items={[
+                { value: 'all', label: `全部 (${data.assignments.length})` },
+                { value: 'qualified', label: `候选 (${data.counts.qualified})` },
+                { value: 'admitted', label: `已录取 (${data.counts.admitted})` },
+                { value: 'completed', label: `已完成 (${data.counts.completed})` },
+              ]}
+            />
+          </div>
           <div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
             选中 <span className="font-semibold text-foreground">{selected.size}</span> 人
           </div>
@@ -1637,7 +1639,7 @@ export function AdminTasksCandidatesPage() {
               {data.assignments.length === 0 ? '候选池还为空——等用户图条件全满足后会自动进入此池' : '没有匹配的候选'}
             </p>
           ) : (
-            <Table>
+            <Table className="min-w-[56rem]">
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-8">
@@ -1699,7 +1701,7 @@ export function AdminTasksCandidatesPage() {
           if (!o) setDrillIn(null);
         }}
       >
-        <SheetContent side="right" className="w-[680px] sm:max-w-[680px] p-0">
+        <SheetContent side="right" className="w-full max-w-full p-0 sm:w-[640px] sm:max-w-[640px]">
           <SheetHeader>
             <SheetTitle>{drillIn ? data.udict[drillIn.userId]?.uname || `uid:${drillIn.userId}` : '—'}</SheetTitle>
           </SheetHeader>
@@ -1979,7 +1981,9 @@ export function AdminTasksScoresPage() {
       title="比赛分数"
       description="录入 PAT / GPLT / CSP 等外部比赛成绩；这些分数会被任务点用作完成判定的输入。"
     >
-      <MiniTabs size="md" value={data.tab} items={tabs.map((t) => ({ value: t.key, label: t.label, href: `/admin/tasks/scores?tab=${t.key}` }))} />
+      <div className="max-w-full overflow-x-auto">
+        <MiniTabs size="md" value={data.tab} items={tabs.map((t) => ({ value: t.key, label: t.label, href: `/admin/tasks/scores?tab=${t.key}` }))} />
+      </div>
 
       {data.tab === 'pat' && <PatScoreTab scores={data.scores} udict={data.udict} studentDict={data.studentDict} settings={data.settings} />}
       {data.tab === 'gplt' && <GpltScoreTab scores={data.scores} udict={data.udict} studentDict={data.studentDict} settings={data.settings} />}
@@ -2143,7 +2147,7 @@ function PatScoreTab({
           {scores.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">还没有 PAT 成绩</p>
           ) : (
-            <Table>
+            <Table className="min-w-[48rem]">
               <TableHeader>
                 <TableRow>
                   <TableHead>学号 / 姓名</TableHead>
@@ -2239,7 +2243,7 @@ function GpltScoreTab({
           {scores.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">还没有天梯赛成绩</p>
           ) : (
-            <Table>
+            <Table className="min-w-[48rem]">
               <TableHeader>
                 <TableRow>
                   <TableHead>学号 / 姓名</TableHead>
@@ -2321,7 +2325,7 @@ function CspScoreTab({
           {scores.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">还没有 CSP 成绩</p>
           ) : (
-            <Table>
+            <Table className="min-w-[36rem]">
               <TableHeader>
                 <TableRow>
                   <TableHead>学号 / 姓名</TableHead>
@@ -2434,7 +2438,7 @@ function StayCountTab({ events, schools, udict }: { events: StayEvent[]; schools
           {events.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">还没有留校事件</p>
           ) : (
-            <Table>
+            <Table className="min-w-[40rem]">
               <TableHeader>
                 <TableRow>
                   <TableHead>用户</TableHead>

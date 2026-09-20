@@ -1,8 +1,12 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BootstrapProvider, type KryptonBootstrap } from '../src/lib/bootstrap.tsx';
 import { ExamSeatPlanPage, assignmentCsv, assignmentCsvV2 } from '../src/pages/exam-seat-plan.tsx';
+
+const EXAM_SEAT_PLAN_SOURCE = readFileSync(resolve(import.meta.dirname, '../src/pages/exam-seat-plan.tsx'), 'utf8');
 
 const EVENT_ID = '66b800000000000000000801';
 const objectIdFromIndex = (index: number) => index.toString(16).padStart(24, '0');
@@ -3466,5 +3470,13 @@ describe('p2.5 exam seat assignment workspace', () => {
         1,
       ),
     ).toContain("'=HYPERLINK");
+  });
+
+  it('scrolls 500-person assignment and prelogin tables inside a both-axis owner', () => {
+    expect(EXAM_SEAT_PLAN_SOURCE).to.include('max-h-[min(65vh,680px)] w-full min-w-0');
+    expect(EXAM_SEAT_PLAN_SOURCE).to.include('orientation="both"');
+    expect(EXAM_SEAT_PLAN_SOURCE).to.include("min-w-[56rem]");
+    expect(EXAM_SEAT_PLAN_SOURCE.match(/<SeatPlanScrollTable>/g)?.length).to.equal(3);
+    expect(EXAM_SEAT_PLAN_SOURCE).not.to.include('<Table>');
   });
 });

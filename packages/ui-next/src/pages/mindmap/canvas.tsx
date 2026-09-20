@@ -147,7 +147,7 @@ export function MindmapCanvas({
 
   const nodeTypes = useMemo(() => NODE_TYPES, []);
   return (
-    <div className="relative h-full w-full">
+    <div className="relative h-full min-h-0 w-full">
       <ReactFlow
         nodes={flowNodes}
         edges={flowEdges}

@@ -548,7 +548,7 @@ function AllContestsPage() {
         </CardContent>
       </Card>
       {data && data.total > data.pageSize ? (
-        <div className="flex items-center justify-center gap-3">
+        <div className="flex flex-wrap items-center justify-center gap-3">
           <Button size="sm" variant="outline" disabled={page <= 1 || loading} onClick={() => setPage((current) => Math.max(1, current - 1))}>
             <ChevronLeft className="mr-1 size-3.5" />上一页
           </Button>
@@ -786,6 +786,7 @@ type SecondaryView = 'sessions' | 'approvals' | 'events' | 'recordings';
 type StatusFilter = '' | VigilStudentStatus;
 const ALL_STATUSES: VigilStudentStatus[] = ['online', 'anomaly', 'offline', 'disconnected', 'locked', 'ended'];
 const PAGE_SIZE = 30;
+const CARD_WALL_GRID_CLASS = 'grid grid-cols-[repeat(auto-fill,minmax(12rem,1fr))] gap-3';
 
 export function AdminVigilExamDetailPage() {
   const bs = useBootstrap();
@@ -1101,7 +1102,7 @@ export function AdminVigilExamDetailPage() {
       {offline && <OfflineBanner err={offline} onRetry={retryStudents} />}
 
       {/* Stat banner (compressed) */}
-      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
+      <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
         <CompactStat label="已连接" value={(counters?.online ?? 0) + (counters?.locked ?? 0)} color="emerald" />
         <CompactStat label="异常" value={counters?.anomaly ?? 0} color="amber" highlight={(counters?.anomaly ?? 0) > 0} />
         <CompactStat label="离线" value={counters?.offline ?? 0} color="red" highlight={(counters?.offline ?? 0) > 0} />
@@ -1203,7 +1204,7 @@ export function AdminVigilExamDetailPage() {
           {queryDebounced || statusFilter.size ? '没有匹配当前筛选条件的学生。' : '此比赛暂无学生客户端会话接入。'}
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
+        <div className={CARD_WALL_GRID_CLASS}>
           {students.map((s) => (
             <StudentCard key={s.machineId} student={s} onClick={() => openStudent(s)} onDoubleClick={() => liveLaunch(s)} />
           ))}
@@ -1212,7 +1213,7 @@ export function AdminVigilExamDetailPage() {
 
       {/* Pagination */}
       {studentResp && totalPages > 1 && (
-        <div className="flex items-center justify-center gap-2 pt-2">
+        <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
           <Button
             size="sm"
             variant="outline"
@@ -1433,7 +1434,7 @@ function CompactStat({ label, value, color, highlight }: { label: string; value:
 
 function CardWallSkeleton() {
   return (
-    <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
+    <div className={CARD_WALL_GRID_CLASS}>
       {Array.from({ length: 12 }).map((_, i) => (
         <div key={i} className="overflow-hidden rounded-lg border bg-card">
           <div className="aspect-video w-full animate-pulse bg-muted/40" />

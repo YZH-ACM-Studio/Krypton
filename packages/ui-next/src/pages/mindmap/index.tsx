@@ -1,6 +1,6 @@
 /** Public, read-only algorithm mindmap. Editing lives only at /admin/mindmap. */
 import { ReactFlowProvider } from '@xyflow/react';
-import { Network, Search, Sparkles, X } from 'lucide-react';
+import { Network, Search, Sparkles } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
@@ -8,11 +8,27 @@ import { Input } from '@/components/ui/input';
 import { MiniTabs } from '@/components/ui/mini-tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { SimpleSelect } from '@/components/ui/select';
+import { Sheet, SheetBody, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 import { loadNodeProblems, mindmapProblemHref, MindmapApiError } from './api';
 import { MindmapCanvas } from './canvas';
 import type { KnowledgeMap, MindmapNode, PanelProblem } from './types';
+
+const PUBLIC_COMPACT_QUERY = '(max-width: 1023px)';
+
+function useMatchMedia(query: string): boolean {
+  const [matches, setMatches] = useState(() => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia(query).matches);
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+    const media = window.matchMedia(query);
+    const sync = () => setMatches(media.matches);
+    sync();
+    media.addEventListener('change', sync);
+    return () => media.removeEventListener('change', sync);
+  }, [query]);
+  return matches;
+}
 
 function difficultyStyle(value: number): string {
   if (value <= 1) return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200';
@@ -21,6 +37,97 @@ function difficultyStyle(value: number): string {
   if (value <= 4) return 'bg-amber-100 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200';
   if (value <= 5) return 'bg-rose-100 text-rose-800 dark:bg-rose-950/40 dark:text-rose-200';
   return 'bg-red-100 text-red-800 dark:bg-red-950/40 dark:text-red-200';
+}
+
+function NodeSummary({ selected, compact }: { selected: MindmapNode; compact?: boolean }) {
+  return (
+    <>
+      {compact ? null : <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">知识节点</p>}
+      {compact ? null : <h2 className="mt-1 truncate text-lg font-semibold tracking-tight">{selected.topic}</h2>}
+      {selected.description ? <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{selected.description}</p> : null}
+      {selected.tags.length ? (
+        <div className={cn('flex flex-wrap gap-1.5', selected.description || !compact ? 'mt-3' : 'mt-1')}>
+          {selected.tags.map((tag) => (
+            <Badge key={tag} variant="outline" className="font-normal">
+              {tag}
+            </Badge>
+          ))}
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function ProblemFilters({
+  query,
+  sort,
+  onQueryChange,
+  onSortChange,
+}: {
+  query: string;
+  sort: 'pid' | 'difficulty' | 'accept';
+  onQueryChange: (value: string) => void;
+  onSortChange: (value: 'pid' | 'difficulty' | 'accept') => void;
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="relative">
+        <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+        <Input value={query} onChange={(event) => onQueryChange(event.target.value)} placeholder="搜索题号或标题" className="h-9 pl-8" />
+      </div>
+      <MiniTabs
+        size="sm"
+        value={sort}
+        onValueChange={(value) => onSortChange(value as typeof sort)}
+        items={[
+          { value: 'pid', label: '题号' },
+          { value: 'difficulty', label: '难度' },
+          { value: 'accept', label: '通过数' },
+        ]}
+      />
+    </div>
+  );
+}
+
+function ProblemResults({
+  problems,
+  visibleProblems,
+  loading,
+  problemError,
+}: {
+  problems: PanelProblem[];
+  visibleProblems: PanelProblem[];
+  loading: boolean;
+  problemError: string | null;
+}) {
+  return (
+    <>
+      {loading ? <p className="py-10 text-center text-sm text-muted-foreground">正在加载…</p> : null}
+      {!loading && problemError ? <p className="px-5 py-10 text-center text-sm text-destructive">{problemError}</p> : null}
+      {!loading && !problemError && !visibleProblems.length ? (
+        <p className="py-10 text-center text-sm text-muted-foreground">{problems.length ? '没有匹配题目' : '此节点暂无关联题目'}</p>
+      ) : null}
+      {!loading && !problemError ? (
+        <ul className="divide-y">
+          {visibleProblems.map((problem) => (
+            <li key={`${problem.domainId}:${problem.docId}`}>
+              <a href={mindmapProblemHref(problem)} className="flex items-center gap-2.5 px-4 py-3 hover:bg-accent/50">
+                <span className={cn('rounded-md px-2 py-1 text-[10px] font-semibold', difficultyStyle(problem.difficulty))}>
+                  {problem.difficulty}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium">{problem.title}</span>
+                  <span className="block font-mono text-[11px] text-muted-foreground">
+                    {problem.pid} · {problem.nAccept}/{problem.nSubmit}
+                  </span>
+                </span>
+              </a>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </>
+  );
 }
 
 function ProblemPanel({
@@ -33,7 +140,6 @@ function ProblemPanel({
   sort,
   onQueryChange,
   onSortChange,
-  onClose,
 }: {
   selected: MindmapNode | null;
   problems: PanelProblem[];
@@ -44,36 +150,12 @@ function ProblemPanel({
   sort: 'pid' | 'difficulty' | 'accept';
   onQueryChange: (value: string) => void;
   onSortChange: (value: 'pid' | 'difficulty' | 'accept') => void;
-  onClose?: () => void;
 }) {
   return (
-    <Card className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl shadow-lg lg:shadow-sm">
-      <header className="relative border-b px-4 py-4">
-        {onClose ? (
-          <button
-            type="button"
-            onClick={onClose}
-            className="absolute right-3 top-3 grid size-8 place-items-center rounded-lg text-muted-foreground hover:bg-accent"
-            aria-label="关闭相关题目"
-          >
-            <X className="size-4" />
-          </button>
-        ) : null}
+    <Card className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl shadow-sm">
+      <header className="border-b px-4 py-4">
         {selected ? (
-          <>
-            <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">知识节点</p>
-            <h2 className="mt-1 truncate pr-8 text-lg font-semibold tracking-tight">{selected.topic}</h2>
-            {selected.description ? <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{selected.description}</p> : null}
-            {selected.tags.length ? (
-              <div className="mt-3 flex flex-wrap gap-1.5">
-                {selected.tags.map((tag) => (
-                  <Badge key={tag} variant="outline" className="font-normal">
-                    {tag}
-                  </Badge>
-                ))}
-              </div>
-            ) : null}
-          </>
+          <NodeSummary selected={selected} />
         ) : (
           <div className="py-8 text-center text-sm text-muted-foreground">
             <Sparkles className="mx-auto mb-2 size-5" />
@@ -83,47 +165,11 @@ function ProblemPanel({
       </header>
       {selected ? (
         <>
-          <div className="space-y-2 border-b p-3">
-            <div className="relative">
-              <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-              <Input value={query} onChange={(event) => onQueryChange(event.target.value)} placeholder="搜索题号或标题" className="h-9 pl-8" />
-            </div>
-            <MiniTabs
-              size="sm"
-              value={sort}
-              onValueChange={(value) => onSortChange(value as typeof sort)}
-              items={[
-                { value: 'pid', label: '题号' },
-                { value: 'difficulty', label: '难度' },
-                { value: 'accept', label: '通过数' },
-              ]}
-            />
+          <div className="shrink-0 space-y-2 border-b p-3">
+            <ProblemFilters query={query} sort={sort} onQueryChange={onQueryChange} onSortChange={onSortChange} />
           </div>
           <ScrollArea className="min-h-0 flex-1">
-            {loading ? <p className="py-10 text-center text-sm text-muted-foreground">正在加载…</p> : null}
-            {!loading && problemError ? <p className="px-5 py-10 text-center text-sm text-destructive">{problemError}</p> : null}
-            {!loading && !problemError && !visibleProblems.length ? (
-              <p className="py-10 text-center text-sm text-muted-foreground">{problems.length ? '没有匹配题目' : '此节点暂无关联题目'}</p>
-            ) : null}
-            {!loading && !problemError ? (
-              <ul className="divide-y">
-                {visibleProblems.map((problem) => (
-                  <li key={`${problem.domainId}:${problem.docId}`}>
-                    <a href={mindmapProblemHref(problem)} className="flex items-center gap-2.5 px-4 py-3 hover:bg-accent/50">
-                      <span className={cn('rounded-md px-2 py-1 text-[10px] font-semibold', difficultyStyle(problem.difficulty))}>
-                        {problem.difficulty}
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-medium">{problem.title}</span>
-                        <span className="block font-mono text-[11px] text-muted-foreground">
-                          {problem.pid} · {problem.nAccept}/{problem.nSubmit}
-                        </span>
-                      </span>
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
+            <ProblemResults problems={problems} visibleProblems={visibleProblems} loading={loading} problemError={problemError} />
           </ScrollArea>
         </>
       ) : null}
@@ -182,6 +228,7 @@ export function MindmapPage() {
     else result = [...result].sort((left, right) => left.pid.localeCompare(right.pid, 'zh-CN', { numeric: true }));
     return result;
   }, [problems, query, sort]);
+  const compact = useMatchMedia(PUBLIC_COMPACT_QUERY);
 
   if (!data.config) {
     return (
@@ -201,16 +248,16 @@ export function MindmapPage() {
 
   return (
     <ReactFlowProvider>
-      <div className="flex h-[calc(100dvh-6rem)] min-h-[34rem] gap-3">
-        <section className="relative min-w-0 flex-1 overflow-hidden rounded-2xl border bg-background shadow-sm">
-          <header className="absolute inset-x-0 top-0 z-10 flex h-16 items-center justify-between gap-3 border-b bg-background/90 px-4 backdrop-blur-sm">
+      <div className="flex h-[calc(100dvh-4.5rem)] min-h-[min(34rem,calc(100dvh-4.5rem))] w-full min-w-0 gap-3 overflow-hidden sm:h-[calc(100dvh-6rem)] sm:min-h-[min(34rem,calc(100dvh-6rem))] xl:h-[calc(100dvh-7rem)] xl:min-h-[min(34rem,calc(100dvh-7rem))]">
+        <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border bg-background shadow-sm">
+          <header className="flex h-12 shrink-0 items-center justify-between gap-2 border-b bg-background/90 px-3 backdrop-blur-sm sm:h-14 sm:gap-3 sm:px-4 xl:h-16">
             <div className="flex min-w-0 items-center gap-2">
-              <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
-                <Network className="size-4" />
+              <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary sm:size-8">
+                <Network className="size-3.5 sm:size-4" />
               </span>
               <div className="min-w-0">
                 <h1 className="truncate text-sm font-semibold">{config.title}</h1>
-                <p className="text-xs text-muted-foreground">{data.nodes.length} 个知识节点</p>
+                <p className="hidden text-xs text-muted-foreground sm:block">{data.nodes.length} 个知识节点</p>
               </div>
             </div>
             <SimpleSelect
@@ -221,29 +268,13 @@ export function MindmapPage() {
                 label: map.isDefault ? `${map.title}（默认）` : map.title,
               }))}
               ariaLabel="切换知识导图"
-              className="min-h-10 w-40 max-w-[48%] sm:w-56"
+              className="min-h-9 w-32 max-w-[48%] sm:min-h-10 sm:w-48 xl:w-56"
               contentClassName="[&_[role=option]]:min-h-10"
             />
           </header>
-          <div className="h-full pt-16">
+          <div className="min-h-0 flex-1">
             <MindmapCanvas nodes={data.nodes} config={config} selectedId={selectedId} onSelect={setSelectedId} />
           </div>
-          {selected ? (
-            <div className="absolute inset-x-3 bottom-3 top-[42%] z-20 flex lg:hidden">
-              <ProblemPanel
-                selected={selected}
-                problems={problems}
-                visibleProblems={visibleProblems}
-                loading={loading}
-                problemError={problemError}
-                query={query}
-                sort={sort}
-                onQueryChange={setQuery}
-                onSortChange={setSort}
-                onClose={() => setSelectedId(null)}
-              />
-            </div>
-          ) : null}
         </section>
 
         <aside className="hidden w-[22rem] shrink-0 lg:flex">
@@ -260,6 +291,26 @@ export function MindmapPage() {
           />
         </aside>
       </div>
+
+      <Sheet
+        open={!!selected && compact}
+        onOpenChange={(open) => {
+          if (!open) setSelectedId(null);
+        }}
+      >
+        <SheetContent side="bottom" className="h-[min(70dvh,34rem)] max-h-[88vh]">
+          <SheetHeader>
+            <SheetTitle>{selected?.topic || '相关题目'}</SheetTitle>
+            {selected ? <NodeSummary selected={selected} compact /> : null}
+          </SheetHeader>
+          <div className="shrink-0 border-b p-3">
+            <ProblemFilters query={query} sort={sort} onQueryChange={setQuery} onSortChange={setSort} />
+          </div>
+          <SheetBody>
+            <ProblemResults problems={problems} visibleProblems={visibleProblems} loading={loading} problemError={problemError} />
+          </SheetBody>
+        </SheetContent>
+      </Sheet>
     </ReactFlowProvider>
   );
 }

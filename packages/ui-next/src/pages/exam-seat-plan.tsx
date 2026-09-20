@@ -9,8 +9,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { confirmDialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { SimpleSelect } from '@/components/ui/select';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 import { fetchHydroResponse, presentHydroResponseError } from '@/lib/error-presenter';
@@ -1369,7 +1370,7 @@ function TeacherSurfaceError({ className, message }: { className?: string; messa
       {presented.raw ? (
         <details className="mt-2 text-xs text-muted-foreground">
           <summary className="cursor-pointer text-sm text-foreground">技术细节</summary>
-          <p className="mt-1 font-mono">{presented.raw}</p>
+          <p className="mt-1 break-all font-mono">{presented.raw}</p>
         </details>
       ) : null}
     </div>
@@ -1503,12 +1504,28 @@ const networkSetupStageLabel: Record<NetworkSetupStage, string> = {
   assign: '分配到活动',
 };
 
-function StepFooter({ left, right }: { left?: ReactNode; right?: ReactNode }) {
+function StepFooter({ left, right, sticky }: { left?: ReactNode; right?: ReactNode; sticky?: boolean }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
+    <div
+      className={cn(
+        'flex flex-wrap items-center justify-between gap-3 border-t pt-4',
+        sticky && 'sticky bottom-0 z-10 -mx-5 -mb-5 bg-card/95 px-5 pb-5 backdrop-blur',
+      )}
+    >
       <div className="flex flex-wrap items-center gap-2">{left}</div>
       <div className="flex flex-wrap items-center justify-end gap-2">{right}</div>
     </div>
+  );
+}
+
+const SEAT_PLAN_NATIVE_TABLE_CLASS =
+  'krypton-table w-full min-w-[56rem] caption-bottom text-sm [&_tr>*:first-child]:pl-5 [&_tr>*:last-child]:pr-5';
+
+function SeatPlanScrollTable({ children }: { children: ReactNode }) {
+  return (
+    <ScrollArea className="max-h-[min(65vh,680px)] w-full min-w-0" orientation="both">
+      <table className={SEAT_PLAN_NATIVE_TABLE_CLASS}>{children}</table>
+    </ScrollArea>
   );
 }
 
@@ -1580,7 +1597,11 @@ function ClassroomSeatMap({
         <h4 className="font-medium">{classroomName}</h4>
         <span className="text-xs text-muted-foreground">{roomSeats.length} 个候选座位</span>
       </div>
-      <div className="max-w-full overflow-auto rounded-lg border bg-muted/20" tabIndex={0} aria-label={`${classroomName}座位图，可滚动平移`}>
+      <div
+        className="max-h-[min(30rem,calc(100dvh-14rem))] max-w-full min-w-0 overflow-auto rounded-lg border bg-muted/20"
+        tabIndex={0}
+        aria-label={`${classroomName}座位图，可滚动平移`}
+      >
         <div
           data-seat-map-canvas=""
           className="relative"
@@ -3324,6 +3345,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
     <AdminPage
       bypassPrivGate
       hideSidebar
+      contentClassName="min-w-0 overflow-x-clip"
       title={
         <div>
           <a href={`/admin/exam-infrastructure/events/${eventId}`} className="mb-2 inline-flex items-center gap-1 text-sm text-muted-foreground">
@@ -3334,7 +3356,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
       }
       description="名单、布局、终端绑定与分配 revision 均由服务端重新校验；页面不会自动生成或发布真实分配。"
     >
-      <div className="space-y-4 pb-10">
+      <div className="min-w-0 space-y-4 pb-10">
         {error ? (
           <TeacherSurfaceError
             className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive"
@@ -3402,7 +3424,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
         </div>
         <details className="rounded-md border p-3 text-xs text-muted-foreground">
           <summary className="cursor-pointer text-sm text-foreground">技术身份与 fingerprint</summary>
-          <div className="mt-2 space-y-1 font-mono">
+          <div className="mt-2 space-y-1 break-all font-mono">
             {publishedPreparationAssignment ? <p>发布 assignment {publishedPreparationAssignment.assignmentId}</p> : null}
             {latest ? <p>当前 assignment {latest.assignmentId}</p> : null}
             {newestRoster ? <p>名单 fingerprint {newestRoster.fingerprint}</p> : null}
@@ -3412,7 +3434,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
         </details>
         <nav
           aria-label="考试座位步骤"
-          className="grid auto-cols-[minmax(9rem,1fr)] grid-flow-col overflow-x-auto border-y border-border/70"
+          className="grid w-full min-w-0 auto-cols-[minmax(9rem,1fr)] grid-flow-col overflow-x-auto border-y border-border/70"
         >
           {steps.map((step, index) => (
             <Button
@@ -3920,7 +3942,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                   />
                 </div>
               ) : null}
-              <Table>
+              <SeatPlanScrollTable>
                 <TableHeader>
                   <TableRow>
                     <TableHead>学生</TableHead>
@@ -4014,7 +4036,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                     );
                   })}
                 </TableBody>
-              </Table>
+              </SeatPlanScrollTable>
               {!workspace ? <p className="text-sm text-muted-foreground">正在加载座位分配……</p> : null}
               {workspace && !rows.length ? <p className="text-sm text-muted-foreground">当前名单为空；系统不会凭空创建学生或分配记录。</p> : null}
               {diagnostics.length ? (
@@ -4026,6 +4048,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                 </div>
               ) : null}
               <StepFooter
+                sticky
                 left={rereadButton}
                 right={
                   <>
@@ -4171,7 +4194,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                   </p>
                   <details className="mt-2 text-xs">
                     <summary className="cursor-pointer">查看完整 Endpoint 范围</summary>
-                    <ul className="mt-2 space-y-1 font-mono">
+                    <ul className="mt-2 space-y-1 break-all font-mono">
                       {preloginTargetPreview.endpointIds.map((endpointId) => (
                         <li key={endpointId}>{endpointId}</li>
                       ))}
@@ -4346,8 +4369,8 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                       <Badge variant="outline">告警 {preloginWorkflow.warningCount}</Badge>
                     </div>
                   </div>
-                  <div className="max-h-96 overflow-auto rounded-md border">
-                    <Table>
+                  <div className="rounded-md border">
+                    <SeatPlanScrollTable>
                       <TableHeader>
                         <TableRow>
                           <TableHead>学生</TableHead>
@@ -4375,7 +4398,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                                     ? `${classroomDisplayById.get(publishedSeat.classroomId) || publishedSeat.classroomId} / ${publishedSeat.sourceSeatId}`
                                     : item.sourceSeatId}
                                 </div>
-                                <div className="font-mono text-xs text-muted-foreground">{item.endpointId || '未绑定'}</div>
+                                <div className="break-all font-mono text-xs text-muted-foreground">{item.endpointId || '未绑定'}</div>
                               </TableCell>
                               <TableCell>
                                 <div>{item.endpoint.serviceVersion || monitoring?.serviceVersion || '未知版本'}</div>
@@ -4409,11 +4432,12 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                           );
                         })}
                       </TableBody>
-                    </Table>
+                    </SeatPlanScrollTable>
                   </div>
                 </div>
               ) : null}
               <StepFooter
+                sticky
                 left={rereadButton}
                 right={
                   <>
@@ -4569,7 +4593,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                   </div>
                   <details className="text-xs text-muted-foreground">
                     <summary className="cursor-pointer text-sm text-foreground">技术细节</summary>
-                    <div className="mt-2 space-y-1 font-mono">
+                    <div className="mt-2 space-y-1 break-all font-mono">
                       <p>batch {preloginBatch.batchId}</p>
                       <p>request {preloginBatch.requestId}</p>
                     </div>
@@ -4592,8 +4616,8 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                     <RefreshCw className="size-4" />
                     {pendingRetryIdentity ? '继续上次失败重试' : `只重试 ${preloginBatch.retryableTicketIds.length} 个失败项`}
                   </Button>
-                  <div className="max-h-96 overflow-auto rounded-md border">
-                    <Table>
+                  <div className="rounded-md border">
+                    <SeatPlanScrollTable>
                       <TableHeader>
                         <TableRow>
                           <TableHead>学生</TableHead>
@@ -4619,7 +4643,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                                       ? subject.sourceSeatId
                                       : `${subject.sourceSeatId}（历史教室不可定位）`}
                                 </div>
-                                <div className="font-mono text-xs text-muted-foreground">{subject.endpointId}</div>
+                                <div className="break-all font-mono text-xs text-muted-foreground">{subject.endpointId}</div>
                               </TableCell>
                               <TableCell>{result ? PRELOGIN_STAGE_LABELS[result.stage] : PRELOGIN_STAGE_LABELS.dispatch}</TableCell>
                               <TableCell>
@@ -4634,7 +4658,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                           );
                         })}
                       </TableBody>
-                    </Table>
+                    </SeatPlanScrollTable>
                   </div>
                 </div>
               ) : null}
@@ -4675,7 +4699,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                       </button>
                       <details className="border-t px-3 py-2 text-xs text-muted-foreground">
                         <summary className="cursor-pointer text-sm text-foreground">技术细节</summary>
-                        <div className="mt-2 space-y-1 font-mono">
+                        <div className="mt-2 space-y-1 break-all font-mono">
                           <p>batchId {batch.batchId}</p>
                           <p>{batch.requestId}</p>
                         </div>
@@ -4691,6 +4715,7 @@ function SeatAssignmentWorkspace({ eventId }: { eventId: string }) {
                 </p>
               ) : null}
               <StepFooter
+                sticky
                 left={rereadButton}
                 right={
                   currentPublicationAlreadyConfirmed || preloginBatch ? null : (

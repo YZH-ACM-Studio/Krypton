@@ -46,6 +46,25 @@ describe('p2.16 and P2.28 mindmap workspace contracts', () => {
     expect(publicPage).not.to.include('编辑模式');
     expect(publicPage).to.include('ariaLabel="切换知识导图"');
     expect(publicPage).to.include('/mindmap?map=');
+    expect(publicPage).to.include('side="bottom"');
+    expect(publicPage).to.include('<Sheet');
+    expect(publicPage).not.to.include('min-h-[34rem]');
+    expect(publicPage).not.to.include('top-[42%]');
+    const publicWorkspaceMatch = publicPage.match(/<ReactFlowProvider>\s*<div className="([^"]+)"/);
+    expect(publicWorkspaceMatch, 'mindmap public workspace root').not.to.equal(null);
+    const publicWorkspaceClasses = publicWorkspaceMatch![1].split(/\s+/);
+    expect(publicWorkspaceClasses).to.include.members([
+      'flex',
+      'w-full',
+      'min-w-0',
+      'overflow-hidden',
+      'h-[calc(100dvh-4.5rem)]',
+      'min-h-[min(34rem,calc(100dvh-4.5rem))]',
+      'sm:h-[calc(100dvh-6rem)]',
+      'sm:min-h-[min(34rem,calc(100dvh-6rem))]',
+      'xl:h-[calc(100dvh-7rem)]',
+      'xl:min-h-[min(34rem,calc(100dvh-7rem))]',
+    ]);
     expect(canvas).to.include('nodesDraggable={false}');
     expect(adminPage).to.include('staleMapId');
     expect(adminPage).to.include('当前链接里的导图已不可用');
@@ -57,6 +76,7 @@ describe('p2.16 and P2.28 mindmap workspace contracts', () => {
     expect(adminPage).to.include('<UnsavedMapActionDialog');
     expect(adminPage).to.include('放弃未保存的节点修改');
     expect(adminPage).to.include("type MobilePane = 'outline' | 'preview' | 'inspector'");
+    expect(adminPage).to.include("setMobilePane('inspector')");
     const workspaceMatch = adminPage.match(/<ReactFlowProvider>\s*<div className="([^"]+)"/);
     expect(workspaceMatch, 'mindmap admin workspace root').not.to.equal(null);
     const workspaceClasses = workspaceMatch![1].split(/\s+/);
@@ -64,17 +84,31 @@ describe('p2.16 and P2.28 mindmap workspace contracts', () => {
     expect(workspaceClasses.some((value) => utilityName(value).startsWith('rounded'))).to.equal(false);
     expect(workspaceClasses.some((value) => utilityName(value).startsWith('border'))).to.equal(false);
     expect(workspaceClasses.some((value) => utilityName(value).startsWith('shadow'))).to.equal(false);
-    expect(workspaceClasses).to.include.members(['flex', 'w-full', 'min-w-0', 'flex-col', 'overflow-hidden']);
-    expect(workspaceClasses).to.include('h-[calc(100dvh-4.5rem)]');
-    expect(workspaceClasses).to.include('sm:h-[calc(100dvh-6rem)]');
-    expect(workspaceClasses).to.include('xl:h-[calc(100dvh-7rem)]');
+    expect(workspaceClasses).to.include.members([
+      'flex',
+      'w-full',
+      'min-w-0',
+      'flex-col',
+      'h-[calc(100dvh-4.5rem)]',
+      'min-h-[min(42rem,calc(100dvh-4.5rem))]',
+      'sm:h-[calc(100dvh-6rem)]',
+      'sm:min-h-[min(42rem,calc(100dvh-6rem))]',
+      'xl:h-[calc(100dvh-7rem)]',
+      'xl:min-h-[min(42rem,calc(100dvh-7rem))]',
+      'xl:overflow-hidden',
+    ]);
+    expect(workspaceClasses).not.to.include('overflow-hidden');
+    expect(workspaceClasses).not.to.include('min-h-[42rem]');
+    expect(adminPage).not.to.include('min-h-[42rem]');
+    expect(adminPage).not.to.include('md:grid-cols-3');
     for (const panel of ['outline', 'preview', 'inspector']) {
       expect(adminPage).to.include(`data-mindmap-panel="${panel}"`);
       expect(adminPage).to.match(new RegExp(`data-mindmap-panel="${panel}"[\\s\\S]*?rounded-[^\\s'"]+[\\s\\S]*?bg-card[\\s\\S]*?shadow-sm`));
     }
     expect(adminPage).to.include('data-mindmap-canvas');
     expect(adminPage).to.include('aria-label="导图管理工作区"');
-    expect(adminPage).to.include('className="xl:hidden"');
+    expect(adminPage).to.include('sticky top-0');
+    expect(adminPage).to.include('xl:hidden');
     expect(adminPage).to.include("'hidden xl:flex xl:flex-col'");
     expect(adminPage).to.include('xl:grid-cols-');
     expect(adminPage).not.to.match(/\blg:(?:grid|flex|hidden)/);
@@ -82,7 +116,10 @@ describe('p2.16 and P2.28 mindmap workspace contracts', () => {
     const inspector = read('packages/ui-next/src/pages/mindmap/inspector.tsx');
     expect(outline).to.include('flex h-full min-h-0 flex-col');
     expect(inspector.match(/h-full min-h-0/g) || []).to.have.lengthOf.at.least(2);
-    expect(adminPage).to.match(/<MiniTabs[\s\S]*?className="h-11"/);
+    expect(inspector).to.include('createPortal');
+    expect(inspector).to.include('data-mindmap-problem-search="results"');
+    expect(inspector).not.to.include('absolute inset-x-0 top-[calc(100%+4px)]');
+    expect(adminPage).to.match(/sticky top-0[\s\S]*?<MiniTabs[\s\S]*?className="h-11"/);
     expect(canvas).to.match(/className="[^"]*size-10[^"]*"[\s\S]*?aria-label=\{data\.collapsed/);
 
     const createDialog = adminPage.slice(adminPage.indexOf('function CreateNodeDialog'), adminPage.indexOf('function DeleteNodeDialog'));

@@ -17,8 +17,7 @@
  * Clicking the thumbnail opens a fullscreen lightbox layered on top.
  */
 import { useState } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 // VigilDateTime adds the missing UTC marker before delegating to <DateTime/>.
 // Required because vigil-server emits naive ISO strings.
@@ -64,70 +63,68 @@ export function EventDetailDialog({ open, onOpenChange, event }: EventDetailDial
             </DialogTitle>
           </DialogHeader>
 
-          <ScrollArea className="flex-1 min-h-0">
-            <div className="space-y-4 p-5">
-              {/* Metadata grid */}
-              <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs sm:grid-cols-4">
-                <Metric label="时间">
-                  <DateTime value={event.ts} mode="both" />
-                </Metric>
-                <Metric label="类型">
-                  <span>{eventTypeLabel(event.type)}</span>
-                  <span className="ml-1.5 font-mono text-[10px] text-muted-foreground/70">{event.type}</span>
-                </Metric>
-                <Metric label="严重程度">
-                  <Badge className={cn('h-5 text-[10px]', sevClass)}>{translateSeverity(event.severity)}</Badge>
-                </Metric>
-                <Metric label="次数">{event.count > 1 ? `${event.count}（聚合）` : '1'}</Metric>
+          <DialogBody className="space-y-4 p-5">
+            {/* Metadata grid */}
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs sm:grid-cols-4">
+              <Metric label="时间">
+                <DateTime value={event.ts} mode="both" />
+              </Metric>
+              <Metric label="类型">
+                <span>{eventTypeLabel(event.type)}</span>
+                <span className="ml-1.5 font-mono text-[10px] text-muted-foreground/70">{event.type}</span>
+              </Metric>
+              <Metric label="严重程度">
+                <Badge className={cn('h-5 text-[10px]', sevClass)}>{translateSeverity(event.severity)}</Badge>
+              </Metric>
+              <Metric label="次数">{event.count > 1 ? `${event.count}（聚合）` : '1'}</Metric>
+            </div>
+
+            {event.count > 1 && (
+              <div className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
+                聚合时间窗：
+                <DateTime value={event.firstTs} mode="both" /> — <DateTime value={event.lastTs} mode="both" />
+              </div>
+            )}
+
+            <p className="text-sm">{event.summary}</p>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              {/* Payload JSON */}
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Payload</p>
+                <pre className="max-h-72 overflow-auto rounded-md border bg-muted/30 p-3 font-mono text-[11px] leading-relaxed">
+                  {JSON.stringify(event.payload || {}, null, 2)}
+                </pre>
               </div>
 
-              {event.count > 1 && (
-                <div className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
-                  聚合时间窗：
-                  <DateTime value={event.firstTs} mode="both" /> — <DateTime value={event.lastTs} mode="both" />
+              {/* Associated screenshot */}
+              {event.screenshotId ? (
+                <div className="space-y-1.5">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">事件触发截屏</p>
+                  <button
+                    type="button"
+                    onClick={() => setLightboxOpen(true)}
+                    className="block w-full overflow-hidden rounded-md border bg-muted/20 transition-shadow hover:shadow-md"
+                  >
+                    <img
+                      src={vigilThumbUrl(event.screenshotId)}
+                      alt={`截屏 ${event.screenshotId}`}
+                      className="aspect-video w-full object-contain"
+                      loading="lazy"
+                    />
+                  </button>
+                  <p className="text-[10px] text-muted-foreground">点击查看大图</p>
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">事件触发截屏</p>
+                  <div className="flex aspect-video w-full items-center justify-center rounded-md border bg-muted/20 text-xs text-muted-foreground">
+                    此事件未关联截屏
+                  </div>
                 </div>
               )}
-
-              <p className="text-sm">{event.summary}</p>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                {/* Payload JSON */}
-                <div className="space-y-1.5">
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Payload</p>
-                  <pre className="max-h-72 overflow-auto rounded-md border bg-muted/30 p-3 font-mono text-[11px] leading-relaxed">
-                    {JSON.stringify(event.payload || {}, null, 2)}
-                  </pre>
-                </div>
-
-                {/* Associated screenshot */}
-                {event.screenshotId ? (
-                  <div className="space-y-1.5">
-                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">事件触发截屏</p>
-                    <button
-                      type="button"
-                      onClick={() => setLightboxOpen(true)}
-                      className="block w-full overflow-hidden rounded-md border bg-muted/20 transition-shadow hover:shadow-md"
-                    >
-                      <img
-                        src={vigilThumbUrl(event.screenshotId)}
-                        alt={`截屏 ${event.screenshotId}`}
-                        className="aspect-video w-full object-contain"
-                        loading="lazy"
-                      />
-                    </button>
-                    <p className="text-[10px] text-muted-foreground">点击查看大图</p>
-                  </div>
-                ) : (
-                  <div className="space-y-1.5">
-                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">事件触发截屏</p>
-                    <div className="flex aspect-video w-full items-center justify-center rounded-md border bg-muted/20 text-xs text-muted-foreground">
-                      此事件未关联截屏
-                    </div>
-                  </div>
-                )}
-              </div>
             </div>
-          </ScrollArea>
+          </DialogBody>
         </DialogContent>
       </Dialog>
 

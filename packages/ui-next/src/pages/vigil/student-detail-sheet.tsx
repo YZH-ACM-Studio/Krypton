@@ -168,7 +168,7 @@ export function StudentDetailSheet({ open, onOpenChange, contestId, student, rec
   if (!student) {
     return (
       <Sheet open={open} onOpenChange={onOpenChange}>
-        <SheetContent side="right" className="w-[620px] max-w-[100vw]" />
+        <SheetContent side="right" className="w-[min(620px,calc(100vw-2rem))]" />
       </Sheet>
     );
   }
@@ -176,7 +176,7 @@ export function StudentDetailSheet({ open, onOpenChange, contestId, student, rec
   return (
     <>
       <Sheet open={open} onOpenChange={onOpenChange}>
-        <SheetContent side="right" className="flex w-[620px] max-w-[100vw] flex-col p-0">
+        <SheetContent side="right" className="flex w-[min(620px,calc(100vw-2rem))] flex-col p-0">
           <SheetHeader className="px-6 py-4">
             <div className="flex items-baseline gap-2 pr-8">
               <SheetTitle className="truncate pr-0 text-lg">{student.name}</SheetTitle>

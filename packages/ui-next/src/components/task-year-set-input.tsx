@@ -50,7 +50,7 @@ export function TaskYearSetInput({ value, onChange, inputLabel, scopeKey }: Task
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-2">
+      <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
         <Input
           type="number"
           min={1900}
@@ -63,8 +63,16 @@ export function TaskYearSetInput({ value, onChange, inputLabel, scopeKey }: Task
           onChange={(event) => setDraftState({ scopeKey, value: event.target.value })}
           onKeyDown={handleKeyDown}
           placeholder="例如 2023"
+          className="min-w-0"
         />
-        <Button type="button" size="sm" disabled={year === null} onClick={addYear} aria-label="添加入学年份">
+        <Button
+          type="button"
+          size="sm"
+          className="shrink-0 self-start sm:self-auto"
+          disabled={year === null}
+          onClick={addYear}
+          aria-label="添加入学年份"
+        >
           添加年份
         </Button>
       </div>

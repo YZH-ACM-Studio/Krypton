@@ -974,7 +974,7 @@ function SeatCanvas({
       role="group"
       aria-label={operationalSelection === null ? '教室实体座位布局，可用方向键移动焦点' : '教室实体座位布局，拖动空白区域可框选座位'}
       className={cn(
-        'relative min-h-[30rem] max-h-[66dvh] overflow-auto rounded-2xl border bg-slate-50/70 shadow-inner [overscroll-behavior:contain] dark:bg-slate-950/45',
+        'relative h-[min(30rem,calc(100dvh-14rem))] min-h-0 overflow-auto rounded-2xl border bg-slate-50/70 shadow-inner [overscroll-behavior:contain] dark:bg-slate-950/45',
         operationalSelection === null ? 'cursor-grab active:cursor-grabbing' : 'cursor-crosshair',
       )}
       onPointerDown={beginPan}
@@ -1890,7 +1890,7 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
 
   if (loading && !state) {
     return (
-      <AdminPage bypassPrivGate hideSidebar title="教室终端工作台">
+      <AdminPage bypassPrivGate hideSidebar contentClassName="min-w-0 overflow-x-clip" title="教室终端工作台">
         <div className="flex min-h-72 items-center justify-center">
           <CircleDashed className="size-7 animate-spin text-muted-foreground" aria-label="正在加载" />
         </div>
@@ -1900,7 +1900,7 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
 
   if (!state) {
     return (
-      <AdminPage bypassPrivGate hideSidebar title="教室终端工作台">
+      <AdminPage bypassPrivGate hideSidebar contentClassName="min-w-0 overflow-x-clip" title="教室终端工作台">
         <Notice error={error || '教室终端状态不可用'} />
         <Button className="mt-4" variant="outline" onClick={() => void load()}>
           <RefreshCw className="size-4" aria-hidden="true" />
@@ -1927,7 +1927,7 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
     <AdminPage
       bypassPrivGate
       hideSidebar
-      contentClassName="max-w-none"
+      contentClassName="max-w-none min-w-0 overflow-x-clip"
       title={
         <div>
           <a
@@ -2032,7 +2032,7 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
         </section>
       ) : null}
 
-      <div className="grid min-h-0 gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
+      <div className="grid min-h-0 min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
         <div className="min-w-0 space-y-3">
           <div className="flex flex-col gap-3 rounded-2xl border bg-card p-3 sm:flex-row sm:items-center sm:justify-between">
             <label className="relative block min-w-0 flex-1 sm:max-w-md">
@@ -2182,7 +2182,7 @@ function ExamClassroomWorkspace({ classroomId }: { classroomId: string }) {
             Tab 进入布局，方向键按坐标移动，Home/End 跳至首尾；拖动空白区域或滚动可平移。
           </div>
         </div>
-        <aside className="space-y-4 xl:sticky xl:top-0 xl:self-start">
+        <aside className="min-w-0 space-y-4 xl:sticky xl:top-0 xl:max-h-[calc(100dvh-14rem)] xl:self-start xl:overflow-y-auto xl:overscroll-contain">
           <SeatDetail
             view={selected}
             code={selectedCode}
@@ -2313,6 +2313,11 @@ export function ClassroomLauncher({ schools }: { schools: ClassroomLauncherSchoo
               </div>
             )}
           </DialogBody>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+              关闭
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </>

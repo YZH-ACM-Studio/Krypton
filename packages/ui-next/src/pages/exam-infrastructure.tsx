@@ -861,7 +861,7 @@ function MutationNotice({ error, success }: { error: string | null; success?: st
           {presented.raw ? (
             <details className="mt-2 text-xs text-muted-foreground">
               <summary className="cursor-pointer text-sm text-foreground">技术细节</summary>
-              <p className="mt-1 font-mono">{presented.raw}</p>
+              <p className="mt-1 break-all font-mono">{presented.raw}</p>
             </details>
           ) : null}
         </>
@@ -933,7 +933,7 @@ function EventStepNav({ panel, onChange }: { panel: EventPanel; onChange: (panel
   return (
     <nav
       aria-label="考试活动步骤"
-      className="mb-6 grid auto-cols-[minmax(11rem,1fr)] grid-flow-col overflow-x-auto border-y border-border/70"
+      className="mb-6 grid w-full min-w-0 auto-cols-[minmax(11rem,1fr)] grid-flow-col overflow-x-auto border-y border-border/70"
     >
       {EVENT_PANELS.map((stage, index) => (
         <Button
@@ -1188,14 +1188,14 @@ function EventCreateDialog({ open, schools, onClose }: { open: boolean; schools:
               <CollaboratorSelect domainId={bs.domain.id} value={collaborators} onChange={setCollaborators} />
             </FormField>
           </DialogBody>
-          <div className="flex justify-end gap-2 border-t px-6 py-4">
+          <DialogFooter>
             <Button type="button" variant="outline" disabled={busy} onClick={close}>
               取消
             </Button>
             <Button type="submit" disabled={busy}>
               {busy ? <CircleDashed className="size-4 animate-spin" /> : <Plus className="size-4" />}创建活动
             </Button>
-          </div>
+          </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>
@@ -1232,6 +1232,7 @@ function EventListPage() {
     <AdminPage
       bypassPrivGate
       hideSidebar
+      contentClassName="min-w-0 overflow-x-clip"
       title="考试基础设施"
       description="统一管理 Krypton 比赛与外部考试的网络策略、目标终端和真实执行结果。"
       actions={
@@ -1553,14 +1554,14 @@ function BasicEventSection({
                 <CollaboratorSelect domainId={bs.domain.id} value={collaborators} onChange={setCollaborators} />
               </FormField>
             </DialogBody>
-            <div className="flex justify-end gap-2 border-t px-6 py-4">
+            <DialogFooter>
               <Button type="button" variant="outline" disabled={busy} onClick={() => setEditing(false)}>
                 取消
               </Button>
               <Button type="submit" disabled={busy}>
                 {busy ? <CircleDashed className="size-4 animate-spin" /> : <Save className="size-4" />}保存
               </Button>
-            </div>
+            </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
@@ -2673,9 +2674,9 @@ function ExecutionSection({
                 </div>
                 <div className="grid gap-2 md:grid-cols-2">
                   {visiblePreflight.map((item) => (
-                    <div key={item.endpointId} className="rounded-lg bg-muted/30 px-3 py-2 text-sm">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-mono text-xs">{item.endpointId}</span>
+                    <div key={item.endpointId} className="min-w-0 rounded-lg bg-muted/30 px-3 py-2 text-sm">
+                      <div className="flex min-w-0 items-center justify-between gap-2">
+                        <span className="min-w-0 break-all font-mono text-xs">{item.endpointId}</span>
                         <Badge variant={item.ready ? 'outline' : 'destructive'}>{item.ready ? '就绪' : teacherReasonLabel(item.reason)}</Badge>
                       </div>
                       <p className="mt-1 text-xs text-muted-foreground">
@@ -2732,7 +2733,7 @@ function ExecutionFacts({ execution }: { execution: NetworkExecution }) {
               ))}
             </div>
           </div>
-          <div className="overflow-x-auto rounded-xl border">
+          <div className="rounded-xl border">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -2746,7 +2747,7 @@ function ExecutionFacts({ execution }: { execution: NetworkExecution }) {
               <TableBody>
                 {projection.items.map((item) => (
                   <TableRow key={item.endpointId}>
-                    <TableCell className="font-mono text-xs">{item.endpointId}</TableCell>
+                    <TableCell className="break-all font-mono text-xs">{item.endpointId}</TableCell>
                     <TableCell>{item.online ? '在线' : '离线'}</TableCell>
                     <TableCell>
                       <Badge
@@ -2871,7 +2872,7 @@ function EventDetailPage({ eventId }: { eventId: string }) {
   };
   if (loading) {
     return (
-      <AdminPage bypassPrivGate hideSidebar>
+      <AdminPage bypassPrivGate hideSidebar contentClassName="min-w-0 overflow-x-clip">
         <div className="flex min-h-64 items-center justify-center">
           <CircleDashed className="size-6 animate-spin text-muted-foreground" />
         </div>
@@ -2880,7 +2881,7 @@ function EventDetailPage({ eventId }: { eventId: string }) {
   }
   if (!event || error) {
     return (
-      <AdminPage bypassPrivGate hideSidebar title="考试基础设施">
+      <AdminPage bypassPrivGate hideSidebar contentClassName="min-w-0 overflow-x-clip" title="考试基础设施">
         <MutationNotice error={error || '考试活动不存在或无权访问'} />
       </AdminPage>
     );
@@ -2889,6 +2890,7 @@ function EventDetailPage({ eventId }: { eventId: string }) {
     <AdminPage
       bypassPrivGate
       hideSidebar
+      contentClassName="min-w-0 overflow-x-clip"
       title={
         <div>
           <a
@@ -2907,7 +2909,7 @@ function EventDetailPage({ eventId }: { eventId: string }) {
       }
       description={`活动版本 ${event.revision} · 配置版本 ${config?.revision || 0} · 所有写入仍由服务端 CAS 与权限边界确认。`}
     >
-      <div className="space-y-4 pb-10">
+      <div className="min-w-0 space-y-4 pb-10">
         {preparation?.warning === 'assignment_publication_reference_drift' ? (
           <MutationNotice error="已发布座位分配的引用已变化，座位发布摘要暂不可用，但活动基本信息仍可编辑。" />
         ) : preparation?.warning ? (

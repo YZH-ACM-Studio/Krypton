@@ -13,7 +13,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, Download, Film, Pause, Play, Trash2, X } from 'lucide-react';
-import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import {
   buildRecordingUrl,
@@ -114,10 +114,10 @@ export function RecordingPlaybackDialog({ open, onOpenChange, contestId, student
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="flex h-[80vh] w-[80vw] max-w-[1200px] flex-col overflow-hidden p-0">
-          <div className="flex items-center justify-between border-b px-4 py-2.5">
+        <DialogContent className="flex h-[min(85dvh)] w-[80vw] max-w-[1200px] flex-col overflow-hidden p-0" showCloseButton={false}>
+          <DialogHeader className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5">
             <div className="min-w-0">
-              <DialogTitle className="truncate text-sm font-semibold">
+              <DialogTitle className="truncate pr-0 text-sm font-semibold">
                 录屏回放 · {student.name}
                 {student.studentId && <span className="ml-2 font-mono text-xs text-muted-foreground">{student.studentId}</span>}
               </DialogTitle>
@@ -125,60 +125,62 @@ export function RecordingPlaybackDialog({ open, onOpenChange, contestId, student
             <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => onOpenChange(false)} title="关闭">
               <X className="size-4" />
             </Button>
-          </div>
+          </DialogHeader>
 
-          <div className="flex flex-wrap items-center gap-3 border-b bg-muted/20 px-4 py-2">
-            <div className="inline-flex rounded-md border bg-background p-0.5">
-              <button
-                type="button"
-                className={`rounded-sm px-3 py-1 text-xs transition-colors ${
-                  streamType === 'screen' ? 'bg-primary text-primary-foreground' : 'hover:bg-accent'
-                }`}
-                onClick={() => setStreamType('screen')}
-              >
-                屏幕
-              </button>
-              <button
-                type="button"
-                className={`rounded-sm px-3 py-1 text-xs transition-colors ${
-                  streamType === 'camera' ? 'bg-primary text-primary-foreground' : 'hover:bg-accent'
-                }`}
-                onClick={() => setStreamType('camera')}
-              >
-                摄像头
-              </button>
+          <DialogBody className="flex min-h-0 flex-1 flex-col overflow-hidden p-0">
+            <div className="flex flex-wrap items-center gap-3 border-b bg-muted/20 px-4 py-2">
+              <div className="inline-flex rounded-md border bg-background p-0.5">
+                <button
+                  type="button"
+                  className={`rounded-sm px-3 py-1 text-xs transition-colors ${
+                    streamType === 'screen' ? 'bg-primary text-primary-foreground' : 'hover:bg-accent'
+                  }`}
+                  onClick={() => setStreamType('screen')}
+                >
+                  屏幕
+                </button>
+                <button
+                  type="button"
+                  className={`rounded-sm px-3 py-1 text-xs transition-colors ${
+                    streamType === 'camera' ? 'bg-primary text-primary-foreground' : 'hover:bg-accent'
+                  }`}
+                  onClick={() => setStreamType('camera')}
+                >
+                  摄像头
+                </button>
+              </div>
+
+              {candidates.length > 0 && (
+                <p className="ml-auto text-[11px] text-muted-foreground">
+                  {candidates.length} 段 · 连续时间轴 · {formatBytes(totalBytes)}
+                </p>
+              )}
+              {downloadError ? <p className="w-full text-xs text-destructive">{downloadError}</p> : null}
             </div>
 
-            {candidates.length > 0 && (
-              <p className="ml-auto text-[11px] text-muted-foreground">
-                {candidates.length} 段 · 连续时间轴 · {formatBytes(totalBytes)}
-              </p>
-            )}
-            {downloadError ? <p className="w-full text-xs text-destructive">{downloadError}</p> : null}
-          </div>
-
-          <div className="relative flex-1 bg-black">
-            {loading ? (
-              <div className="flex h-full items-center justify-center text-xs text-white/60">加载录屏列表…</div>
-            ) : err ? (
-              <div className="flex h-full flex-col items-center justify-center gap-2 text-xs text-white/70">
-                <AlertCircle className="size-6 text-amber-400" />
-                <p>{err}</p>
-              </div>
-            ) : !candidates.length ? (
-              <div className="flex h-full flex-col items-center justify-center gap-2 text-xs text-white/70">
-                <Film className="size-8" />
-                <p>此学生在当前比赛暂无 {streamType === 'screen' ? '屏幕' : '摄像头'} 录屏。</p>
-              </div>
-            ) : (
-              <UnifiedTimelinePlayer
-                chunks={candidates}
-                downloadingId={downloadingId}
-                onDelete={setDeleteRecording}
-                onDownload={(recording) => void downloadRecording(recording)}
-              />
-            )}
-          </div>
+            <div className="relative min-h-0 flex-1 bg-black">
+              {loading ? (
+                <div className="flex h-full items-center justify-center text-xs text-white/60">加载录屏列表…</div>
+              ) : err ? (
+                <div className="flex h-full flex-col items-center justify-center gap-2 text-xs text-white/70">
+                  <AlertCircle className="size-6 text-amber-400" />
+                  <p>{err}</p>
+                </div>
+              ) : !candidates.length ? (
+                <div className="flex h-full flex-col items-center justify-center gap-2 text-xs text-white/70">
+                  <Film className="size-8" />
+                  <p>此学生在当前比赛暂无 {streamType === 'screen' ? '屏幕' : '摄像头'} 录屏。</p>
+                </div>
+              ) : (
+                <UnifiedTimelinePlayer
+                  chunks={candidates}
+                  downloadingId={downloadingId}
+                  onDelete={setDeleteRecording}
+                  onDownload={(recording) => void downloadRecording(recording)}
+                />
+              )}
+            </div>
+          </DialogBody>
         </DialogContent>
       </Dialog>
       {deleteRecording ? (
@@ -352,7 +354,7 @@ function UnifiedTimelinePlayer({
           onClick={togglePlay}
         />
       </div>
-      <div className="flex items-center gap-3 border-t border-white/10 bg-black/60 px-4 py-2">
+      <div className="flex flex-wrap items-center gap-3 border-t border-white/10 bg-black/60 px-4 py-2">
         <button type="button" onClick={togglePlay} className="text-white/90 hover:text-white" title={playing ? '暂停' : '播放'}>
           {playing ? <Pause className="size-5" /> : <Play className="size-5" />}
         </button>
@@ -383,7 +385,7 @@ function UnifiedTimelinePlayer({
           <Trash2 className="size-4" />
         </button>
       </div>
-      <div className="flex items-center gap-2 overflow-x-auto border-t border-white/10 bg-black/70 px-4 py-2">
+      <div className="flex flex-wrap items-center gap-2 border-t border-white/10 bg-black/70 px-4 py-2">
         <span className="shrink-0 text-[11px] text-white/50">分段下载</span>
         {chunks.map((chunk, index) => (
           <button

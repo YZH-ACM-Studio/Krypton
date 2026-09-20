@@ -145,11 +145,11 @@ export function MyVerifyInboxPage() {
 
   return (
     <motion.div className="space-y-5" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="flex items-center gap-2 text-2xl font-bold">
-            <Mail className="size-6 text-primary" />
-            我的出题协作
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="flex min-w-0 items-center gap-2 text-2xl font-bold">
+            <Mail className="size-6 shrink-0 text-primary" />
+            <span className="min-w-0 break-words">我的出题协作</span>
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">出题角色与数据、标签贡献任务都集中在这里；完成仅记录工作进度。</p>
         </div>
@@ -234,12 +234,14 @@ export function MyVerifyInboxPage() {
         return (
           <Card key={tid}>
             <CardHeader className="pb-2">
-              <CardTitle className="flex items-center gap-2 text-sm">
-                <Trophy className="size-4 text-amber-500" />
-                来自比赛：
-                <a href={`/contest/${tid}`} className="text-primary hover:underline">
-                  {t?.title || tid}
-                </a>
+              <CardTitle className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
+                <Trophy className="size-4 shrink-0 text-amber-500" />
+                <span className="min-w-0 break-words">
+                  来自比赛：
+                  <a href={`/contest/${tid}`} className="text-primary hover:underline">
+                    {t?.title || tid}
+                  </a>
+                </span>
                 <span className="text-xs font-normal text-muted-foreground">({rows.length} 题)</span>
               </CardTitle>
             </CardHeader>
@@ -328,36 +330,40 @@ function PermitRowItem({
   const p = pdict[permit.pid] || ({} as ProblemMini);
   const granter = udict[permit.grantedBy];
   return (
-    <li className="flex items-center justify-between px-5 py-3">
-      <div className="flex min-w-0 flex-1 items-center gap-2">
-        <ChevronRight className="size-3 shrink-0 text-muted-foreground" />
-        <a href={`/p/${p.pid || p.docId}`} className="truncate text-sm font-medium hover:text-primary hover:underline">
-          <span className="font-mono text-[11px] text-muted-foreground">{p.pid || p.docId}</span>
-          <span className="ml-1.5">{p.title || '题目'}</span>
-        </a>
-        {p.hidden ? (
-          <Badge
-            variant="outline"
-            className="gap-0.5 border-amber-500/40 bg-amber-50 px-1 py-0 text-[10px] text-amber-700 dark:bg-amber-950/40 dark:text-amber-300"
-          >
-            <EyeOff className="size-2.5" />
-            隐藏
+    <li className="flex flex-col gap-3 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="min-w-0">
+        <div className="flex min-w-0 items-center gap-2">
+          <ChevronRight className="size-3 shrink-0 text-muted-foreground" />
+          <a href={`/p/${p.pid || p.docId}`} className="truncate text-sm font-medium hover:text-primary hover:underline">
+            <span className="font-mono text-[11px] text-muted-foreground">{p.pid || p.docId}</span>
+            <span className="ml-1.5">{p.title || '题目'}</span>
+          </a>
+        </div>
+        <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2">
+          {p.hidden ? (
+            <Badge
+              variant="outline"
+              className="gap-0.5 border-amber-500/40 bg-amber-50 px-1 py-0 text-[10px] text-amber-700 dark:bg-amber-950/40 dark:text-amber-300"
+            >
+              <EyeOff className="size-2.5" />
+              隐藏
+            </Badge>
+          ) : null}
+          {p.lockHidden ? (
+            <Badge
+              variant="outline"
+              className="gap-0.5 border-rose-500/40 bg-rose-50 px-1 py-0 text-[10px] text-rose-700 dark:bg-rose-950/40 dark:text-rose-300"
+            >
+              <Lock className="size-2.5" />
+              锁定
+            </Badge>
+          ) : null}
+          <Badge variant={permit.role === 'maintainer' ? 'default' : 'secondary'} className="text-[10px]">
+            {permit.role === 'maintainer' ? '维护者' : permit.role === 'author' ? '出题人' : '验题人'}
           </Badge>
-        ) : null}
-        {p.lockHidden ? (
-          <Badge
-            variant="outline"
-            className="gap-0.5 border-rose-500/40 bg-rose-50 px-1 py-0 text-[10px] text-rose-700 dark:bg-rose-950/40 dark:text-rose-300"
-          >
-            <Lock className="size-2.5" />
-            锁定
-          </Badge>
-        ) : null}
-        <Badge variant={permit.role === 'maintainer' ? 'default' : 'secondary'} className="text-[10px]">
-          {permit.role === 'maintainer' ? '维护者' : permit.role === 'author' ? '出题人' : '验题人'}
-        </Badge>
+        </div>
       </div>
-      <div className="flex items-center gap-3 shrink-0">
+      <div className="flex flex-wrap items-center gap-2 shrink-0">
         <span className="text-xs text-muted-foreground">{granter ? `${granter.uname} 邀请` : `uid:${permit.grantedBy}`}</span>
         {permit.role === 'maintainer' && p.authoringMode === 'managed' ? (
           <span className="text-xs text-muted-foreground">需管理员撤销</span>

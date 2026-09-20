@@ -132,7 +132,7 @@ function TaskGraphNodeComponent({ data, selected }: { data: NodeDataShape; selec
           hasProgress && !data.done && !isStart && !isEnd && 'opacity-60',
         )}
       >
-        <div className="flex items-center gap-1.5">
+        <div className="flex min-w-0 items-center gap-1.5">
           {isStart ? (
             <Play className="size-3.5" />
           ) : isEnd ? (
@@ -148,7 +148,7 @@ function TaskGraphNodeComponent({ data, selected }: { data: NodeDataShape; selec
           ) : (
             <Circle className="size-3.5 shrink-0" />
           )}
-          <span className="truncate font-medium">{isStart ? '开始' : isEnd ? '完成' : data.name || data.presetId || '未命名'}</span>
+          <span className="min-w-0 truncate font-medium">{isStart ? '开始' : isEnd ? '完成' : data.name || data.presetId || '未命名'}</span>
         </div>
         {hasProgress && !isStart && !isEnd && (
           <div className="text-[10px] leading-tight opacity-80">
@@ -394,9 +394,7 @@ function TaskGraphInner({ graph, presets, progress, onChange, selectedNodeId, on
       // Two persistable changes:
       //   - 'position' (drag): update node coordinates
       //   - 'remove'   (Delete key): drop node + every edge touching it
-      const positional = changes.filter(
-        (c): c is NodePositionChange & { position: XYPosition } => c.type === 'position' && !!c.position,
-      );
+      const positional = changes.filter((c): c is NodePositionChange & { position: XYPosition } => c.type === 'position' && !!c.position);
       const removed = changes
         .filter((c): c is NodeRemoveChange => c.type === 'remove')
         .map((c) => c.id)
@@ -537,7 +535,7 @@ function TaskGraphInner({ graph, presets, progress, onChange, selectedNodeId, on
   return (
     <div
       ref={wrapperRef}
-      className="relative w-full overflow-hidden rounded-md border bg-card"
+      className="relative h-full min-h-0 min-w-0 w-full overflow-hidden rounded-md border bg-card"
       style={{ height: height ?? '70vh' }}
       onDrop={onDrop}
       onDragOver={onDragOver}

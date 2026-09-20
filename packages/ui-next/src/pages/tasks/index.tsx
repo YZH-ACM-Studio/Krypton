@@ -587,16 +587,16 @@ export function TaskCenterPage() {
         initial={{ opacity: 0, y: -6 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.25 }}
-        className="flex items-center justify-between rounded-xl border bg-card p-6 shadow-sm"
+        className="flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-xl border bg-card p-6 shadow-sm"
       >
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <ClipboardList className="size-5 text-primary" />
-            <h1 className="text-xl font-semibold">任务中心</h1>
+        <div className="min-w-0 space-y-1">
+          <div className="flex min-w-0 items-center gap-2">
+            <ClipboardList className="size-5 shrink-0 text-primary" />
+            <h1 className="min-w-0 break-words text-xl font-semibold">任务中心</h1>
           </div>
-          <p className="text-sm text-muted-foreground">完成任务获得比赛资格 — 任务点会根据你的 OJ 记录自动判定。</p>
+          <p className="min-w-0 break-words text-sm text-muted-foreground">完成任务获得比赛资格 — 任务点会根据你的 OJ 记录自动判定。</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
           <Button asChild variant="outline" size="sm">
             <a href="/tasks/my">
               <ListChecks className="mr-1 size-4" />
@@ -674,9 +674,11 @@ export function TaskCenterPage() {
                 )}
               >
                 <CardContent className="flex h-full flex-col gap-3">
-                  <div className="flex min-h-10 items-start justify-between gap-2">
-                    <h3 className="line-clamp-2 font-semibold">{task.title}</h3>
-                    <StatusPill status={status} />
+                  <div className="flex min-h-10 min-w-0 items-start justify-between gap-2">
+                    <h3 className="min-w-0 flex-1 break-words font-semibold line-clamp-2">{task.title}</h3>
+                    <div className="shrink-0">
+                      <StatusPill status={status} />
+                    </div>
                   </div>
                   {task.description ? <p className="line-clamp-2 text-xs text-muted-foreground">{task.description}</p> : null}
                   <div className="flex flex-wrap gap-1.5">
@@ -743,16 +745,18 @@ export function TaskMyPage() {
       <motion.header
         initial={{ opacity: 0, y: -6 }}
         animate={{ opacity: 1, y: 0 }}
-        className="flex items-center justify-between rounded-xl border bg-card p-6 shadow-sm"
+        className="flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-xl border bg-card p-6 shadow-sm"
       >
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <ListChecks className="size-5 text-primary" />
-            <h1 className="text-xl font-semibold">我的任务</h1>
+        <div className="min-w-0 space-y-1">
+          <div className="flex min-w-0 items-center gap-2">
+            <ListChecks className="size-5 shrink-0 text-primary" />
+            <h1 className="min-w-0 break-words text-xl font-semibold">我的任务</h1>
           </div>
-          <p className="text-sm text-muted-foreground">已认领或分配给你的任务。进度会在你提交代码 / 完成 exam / 加入用户组时自动更新。</p>
+          <p className="min-w-0 break-words text-sm text-muted-foreground">
+            已认领或分配给你的任务。进度会在你提交代码 / 完成 exam / 加入用户组时自动更新。
+          </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
           <Button asChild variant="outline" size="sm">
             <a href="/tasks">
               <ClipboardList className="mr-1 size-4" />
@@ -770,16 +774,18 @@ export function TaskMyPage() {
         </div>
       </motion.header>
 
-      <MiniTabs
-        value={filter}
-        onValueChange={setFilter}
-        items={[
-          { value: 'all', label: '全部', count: counts.all },
-          { value: 'pending', label: '进行中', count: counts.pending },
-          { value: 'completed', label: '已完成', count: counts.completed },
-          { value: 'cancelled', label: '已取消', count: counts.cancelled },
-        ]}
-      />
+      <div className="max-w-full overflow-x-auto">
+        <MiniTabs
+          value={filter}
+          onValueChange={setFilter}
+          items={[
+            { value: 'all', label: '全部', count: counts.all },
+            { value: 'pending', label: '进行中', count: counts.pending },
+            { value: 'completed', label: '已完成', count: counts.completed },
+            { value: 'cancelled', label: '已取消', count: counts.cancelled },
+          ]}
+        />
+      </div>
 
       {filtered.length === 0 ? (
         <Card>
@@ -803,11 +809,11 @@ export function TaskMyPage() {
             return (
               <Card key={a._id} className="transition-shadow hover:shadow-md">
                 <CardContent className="space-y-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <a href={`/tasks/${task._id}`} className="font-semibold hover:underline">
+                  <div className="flex min-w-0 items-start justify-between gap-2">
+                    <a href={`/tasks/${task._id}`} className="min-w-0 flex-1 break-words font-semibold hover:underline">
                       {task.title}
                     </a>
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex shrink-0 flex-wrap items-center gap-1.5">
                       <StatusPill status={a.status} />
                       {!a.canCancel && (
                         <Badge variant="outline" className="gap-1 text-[10px]">
@@ -900,11 +906,11 @@ export function TaskDetailPage() {
 
   return (
     <div className="space-y-6">
-      <motion.header initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} className="rounded-xl border bg-card p-6 shadow-sm">
-        <div className="flex items-start justify-between gap-3">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <h1 className="text-xl font-semibold">{task.title}</h1>
+      <motion.header initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} className="min-w-0 rounded-xl border bg-card p-6 shadow-sm">
+        <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 flex-1 space-y-1">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <h1 className="min-w-0 break-words text-xl font-semibold">{task.title}</h1>
               {!task.isActive && <Badge variant="outline">已停用</Badge>}
               {task.admissionMode === 'quota' && (
                 <Badge variant="outline" className="gap-1">
@@ -932,7 +938,7 @@ export function TaskDetailPage() {
               {task.admissionMode === 'quota' && task.quota != null && <span>· 录取名额 {task.quota}</span>}
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
             {data.canManage && (
               <>
                 <Button asChild variant="outline" size="sm">
@@ -1010,9 +1016,9 @@ export function TaskDetailPage() {
         </Card>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-3">
-        <div className="space-y-3 lg:col-span-2">
-          <h2 className="text-sm font-semibold">任务流程图</h2>
+      <div className="grid min-w-0 gap-4 lg:grid-cols-3">
+        <div className="min-w-0 space-y-3 lg:col-span-2">
+          <h2 className="min-w-0 break-words text-sm font-semibold">任务流程图</h2>
           <Card>
             <CardContent className="p-0">
               <TaskGraphRenderer
@@ -1030,10 +1036,12 @@ export function TaskDetailPage() {
           </p>
         </div>
 
-        <aside className="space-y-3">
+        <aside className="min-w-0 space-y-3">
           <Card>
             <CardHeader>
-              <CardTitle className="text-sm">{selectedNode ? selectedNode.name || selectedPreset?.name || '节点详情' : '节点详情'}</CardTitle>
+              <CardTitle className="min-w-0 break-words text-sm">
+                {selectedNode ? selectedNode.name || selectedPreset?.name || '节点详情' : '节点详情'}
+              </CardTitle>
             </CardHeader>
             <CardContent className="space-y-2 text-sm">
               {selectedNode ? (
@@ -1074,7 +1082,7 @@ export function TaskDetailPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-sm">任务信息</CardTitle>
+              <CardTitle className="min-w-0 break-words text-sm">任务信息</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2 text-sm">
               <Row icon={Calendar} label="统计开始" value={task.startDate ? <DateTime value={task.startDate} mode="datetime" /> : '不限'} />
@@ -1112,7 +1120,7 @@ export function TaskDetailPage() {
           {task.description && (
             <Card>
               <CardHeader>
-                <CardTitle className="text-sm">描述</CardTitle>
+                <CardTitle className="min-w-0 break-words text-sm">描述</CardTitle>
               </CardHeader>
               <CardContent>
                 <p className="whitespace-pre-wrap text-sm text-muted-foreground">{task.description}</p>
@@ -1127,12 +1135,12 @@ export function TaskDetailPage() {
 
 function Row({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: ReactNode }) {
   return (
-    <div className="flex items-center justify-between">
-      <span className="flex items-center gap-1.5 text-muted-foreground">
+    <div className="flex min-w-0 items-start justify-between gap-2">
+      <span className="flex shrink-0 items-center gap-1.5 text-muted-foreground">
         <Icon className="size-3.5" />
         {label}
       </span>
-      <span className="font-medium">{value}</span>
+      <span className="min-w-0 break-words text-right font-medium">{value}</span>
     </div>
   );
 }

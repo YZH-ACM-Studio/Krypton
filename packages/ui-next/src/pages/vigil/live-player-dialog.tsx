@@ -39,7 +39,7 @@ import { useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
 import mpegts from 'mpegts.js';
 import { Camera, Lock, MessageSquare, X, AlertTriangle } from 'lucide-react';
-import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { buildFlvStreamUrl, buildHlsStreamUrl, type VigilStudentCard } from '@/lib/vigil-api';
 import { cn } from '@/lib/cn';
@@ -91,16 +91,16 @@ export function LivePlayerDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[85vh] w-[90vw] max-w-[1400px] flex-col overflow-hidden p-0">
-        <div className="flex items-center justify-between border-b px-4 py-2.5">
+      <DialogContent className="flex h-[min(85dvh)] w-[90vw] max-w-[1400px] flex-col overflow-hidden p-0" showCloseButton={false}>
+        <DialogHeader className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5">
           <div className="min-w-0">
-            <DialogTitle className="truncate text-sm font-semibold">
+            <DialogTitle className="truncate pr-0 text-sm font-semibold">
               直播 · {student.name}
               {student.studentId && <span className="ml-2 font-mono text-xs text-muted-foreground">{student.studentId}</span>}
             </DialogTitle>
             <p className="truncate font-mono text-[10px] text-muted-foreground">{student.machineId}</p>
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex flex-wrap items-center gap-1">
             <Button size="sm" variant="ghost" className="h-7 gap-1.5 text-xs" onClick={onCaptureScreenshot}>
               <Camera className="size-3.5" />
               截屏
@@ -117,27 +117,29 @@ export function LivePlayerDialog({
               <X className="size-4" />
             </Button>
           </div>
-        </div>
+        </DialogHeader>
 
-        {overLimit ? (
-          <div className="flex flex-1 flex-col items-center justify-center gap-3 bg-muted/20 p-10">
-            <AlertTriangle className="size-10 text-amber-500" />
-            <p className="text-sm font-medium">已达 {MAX_CONCURRENT_PLAYERS} 路直播上限</p>
-            <p className="max-w-md text-center text-xs text-muted-foreground">
-              为保证机房网络稳定，同时打开的直播窗口数有限制。请先关闭其他直播窗口，再尝试打开新的直播。
-            </p>
-            <Button size="sm" variant="outline" onClick={() => onOpenChange(false)}>
-              关闭
-            </Button>
-          </div>
-        ) : (
-          <LiveVideoCanvas
-            contestId={contestId}
-            machineId={student.machineId}
-            recordEnabled={recordEnabled}
-            cameraEnabled={student.streamState?.camera === 'started'}
-          />
-        )}
+        <DialogBody className="flex min-h-0 flex-1 flex-col overflow-hidden p-0">
+          {overLimit ? (
+            <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 bg-muted/20 p-10">
+              <AlertTriangle className="size-10 text-amber-500" />
+              <p className="text-sm font-medium">已达 {MAX_CONCURRENT_PLAYERS} 路直播上限</p>
+              <p className="max-w-md text-center text-xs text-muted-foreground">
+                为保证机房网络稳定，同时打开的直播窗口数有限制。请先关闭其他直播窗口，再尝试打开新的直播。
+              </p>
+              <Button size="sm" variant="outline" onClick={() => onOpenChange(false)}>
+                关闭
+              </Button>
+            </div>
+          ) : (
+            <LiveVideoCanvas
+              contestId={contestId}
+              machineId={student.machineId}
+              recordEnabled={recordEnabled}
+              cameraEnabled={student.streamState?.camera === 'started'}
+            />
+          )}
+        </DialogBody>
       </DialogContent>
     </Dialog>
   );
@@ -193,7 +195,7 @@ function LiveVideoCanvas({
   };
 
   return (
-    <div ref={containerRef} className="relative flex-1 overflow-hidden bg-black">
+    <div ref={containerRef} className="relative min-h-0 flex-1 overflow-hidden bg-black">
       <LiveVideo
         flvSrc={buildFlvStreamUrl(contestId, machineId, 'screen', recordEnabled)}
         hlsSrc={buildHlsStreamUrl(contestId, machineId, 'screen', recordEnabled)}
@@ -202,7 +204,7 @@ function LiveVideoCanvas({
       />
       {cameraEnabled && (
         <div
-          className="group absolute bottom-4 right-4 aspect-[4/3] w-56 cursor-move overflow-hidden rounded-md border-2 border-white/20 bg-black shadow-xl select-none"
+          className="group absolute bottom-4 right-4 aspect-[4/3] w-24 cursor-move overflow-hidden rounded-md border-2 border-white/20 bg-black shadow-xl select-none sm:w-40 lg:w-56"
           // Translate by user-drag offset relative to the bottom-right anchor.
           // Negative dy moves up, negative dx moves left (since the anchor is
           // bottom-right, positive deltas move outside the container).

@@ -1,5 +1,6 @@
 import { ArrowLeftRight, ExternalLink, Link2, Loader2, LockKeyhole, Plus, Save, Search, Trash2, Unlink, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -23,6 +24,82 @@ const COLOR_OPTIONS = [
 
 function sameStrings(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function useAnchorRect(anchor: HTMLElement | null, active: boolean): DOMRect | null {
+  const [rect, setRect] = useState<DOMRect | null>(null);
+  useEffect(() => {
+    if (!active || !anchor) {
+      setRect(null);
+      return;
+    }
+    const update = () => setRect(anchor.getBoundingClientRect());
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(anchor);
+    window.addEventListener('resize', update);
+    document.addEventListener('scroll', update, true);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', update);
+      document.removeEventListener('scroll', update, true);
+    };
+  }, [active, anchor]);
+  return rect;
+}
+
+function ProblemSearchResults({
+  anchor,
+  open,
+  searching,
+  searchError,
+  searchResults,
+  problemIds,
+  onPick,
+}: {
+  anchor: HTMLElement | null;
+  open: boolean;
+  searching: boolean;
+  searchError: string | null;
+  searchResults: ProblemOption[];
+  problemIds: string[];
+  onPick: (problem: ProblemOption) => void;
+}) {
+  const rect = useAnchorRect(anchor, open);
+  if (!open || !rect || typeof document === 'undefined') return null;
+  const maxHeight = Math.min(256, Math.max(window.innerHeight - rect.bottom - 12, 120));
+  return createPortal(
+    <div
+      data-mindmap-problem-search="results"
+      className="z-[250] overflow-auto rounded-xl border bg-popover p-1.5 shadow-xl"
+      style={{
+        position: 'fixed',
+        left: rect.left,
+        top: rect.bottom + 4,
+        width: rect.width,
+        maxHeight,
+      }}
+    >
+      {searchError ? <p className="px-3 py-3 text-xs text-destructive">{searchError}</p> : null}
+      {!searching && !searchError && !searchResults.length ? <p className="px-3 py-3 text-xs text-muted-foreground">没有匹配题目</p> : null}
+      {searchResults.map((problem) => (
+        <button
+          key={problem.docId}
+          type="button"
+          className="flex min-h-10 w-full items-center gap-2 rounded-lg px-3 py-2 text-left transition-[background-color,color,scale] duration-150 ease-out hover:bg-accent active:scale-[0.96] disabled:opacity-50 motion-reduce:transition-none"
+          disabled={problemIds.includes(problem.pid)}
+          onClick={() => onPick(problem)}
+        >
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-medium">{problem.title}</span>
+            <span className="font-mono text-[11px] text-muted-foreground">{problem.pid}</span>
+          </span>
+          {problem.hidden ? <Badge variant="outline">隐藏</Badge> : null}
+        </button>
+      ))}
+    </div>,
+    document.body,
+  );
 }
 
 export function MindmapInspector({
@@ -130,6 +207,7 @@ function NodeInspectorForm({
   const [searchResults, setSearchResults] = useState<ProblemOption[]>([]);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [searchAnchor, setSearchAnchor] = useState<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -385,7 +463,7 @@ function NodeInspectorForm({
               <h3 className="text-xs font-medium">手动关联题目</h3>
               <p className="mt-1 text-xs leading-5 text-muted-foreground">按题号或标题搜索。移除关联不会删除题目，也不会修改题目标签。</p>
             </div>
-            <div className="relative">
+            <div ref={setSearchAnchor} className="relative">
               <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={problemQuery}
@@ -394,29 +472,15 @@ function NodeInspectorForm({
                 className="h-10 pl-8 pr-9"
               />
               {searching ? <Loader2 className="absolute right-2.5 top-1/2 size-4 -translate-y-1/2 animate-spin text-muted-foreground" /> : null}
-              {problemQuery.trim() ? (
-                <div className="absolute inset-x-0 top-[calc(100%+4px)] z-30 max-h-64 overflow-auto rounded-xl border bg-popover p-1.5 shadow-xl">
-                  {searchError ? <p className="px-3 py-3 text-xs text-destructive">{searchError}</p> : null}
-                  {!searching && !searchError && !searchResults.length ? (
-                    <p className="px-3 py-3 text-xs text-muted-foreground">没有匹配题目</p>
-                  ) : null}
-                  {searchResults.map((problem) => (
-                    <button
-                      key={problem.docId}
-                      type="button"
-                      className="flex min-h-10 w-full items-center gap-2 rounded-lg px-3 py-2 text-left transition-[background-color,color,scale] duration-150 ease-out hover:bg-accent active:scale-[0.96] disabled:opacity-50 motion-reduce:transition-none"
-                      disabled={problemIds.includes(problem.pid)}
-                      onClick={() => addProblem(problem)}
-                    >
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-medium">{problem.title}</span>
-                        <span className="font-mono text-[11px] text-muted-foreground">{problem.pid}</span>
-                      </span>
-                      {problem.hidden ? <Badge variant="outline">隐藏</Badge> : null}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
+              <ProblemSearchResults
+                anchor={searchAnchor}
+                open={!!problemQuery.trim()}
+                searching={searching}
+                searchError={searchError}
+                searchResults={searchResults}
+                problemIds={problemIds}
+                onPick={addProblem}
+              />
             </div>
             <div className="space-y-1.5">
               {problemIds.map((pid) => {

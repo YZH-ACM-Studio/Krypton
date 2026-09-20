@@ -257,28 +257,28 @@ export function AdminMindmapPage() {
 
   return (
     <ReactFlowProvider>
-      <div className="flex h-[calc(100dvh-4.5rem)] min-h-[42rem] w-full min-w-0 flex-col gap-4 overflow-hidden sm:h-[calc(100dvh-6rem)] xl:h-[calc(100dvh-7rem)]">
-        <header className="shrink-0 space-y-3">
+      <div className="flex h-[calc(100dvh-4.5rem)] min-h-[min(42rem,calc(100dvh-4.5rem))] w-full min-w-0 flex-col gap-3 sm:h-[calc(100dvh-6rem)] sm:min-h-[min(42rem,calc(100dvh-6rem))] xl:h-[calc(100dvh-7rem)] xl:min-h-[min(42rem,calc(100dvh-7rem))] xl:gap-4 xl:overflow-hidden">
+        <header className="shrink-0 space-y-2 xl:space-y-3">
           {initial.staleMapId ? (
             <p role="alert" className="rounded-lg border border-amber-500/35 bg-amber-500/[0.06] px-3 py-2 text-sm text-amber-800 dark:text-amber-300">
               当前链接里的导图已不可用，已打开默认或第一张可用导图。
             </p>
           ) : null}
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex min-w-0 items-center gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 xl:gap-3">
+            <div className="flex min-w-0 items-center gap-2 xl:gap-3">
               <a
                 href="/mindmap"
-                className="grid size-10 shrink-0 place-items-center rounded-xl bg-muted/70 text-muted-foreground shadow-sm ring-1 ring-border/60 transition-[background-color,color,box-shadow,scale] duration-150 ease-out hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96] motion-reduce:transition-none"
+                className="grid size-9 shrink-0 place-items-center rounded-xl bg-muted/70 text-muted-foreground shadow-sm ring-1 ring-border/60 transition-[background-color,color,box-shadow,scale] duration-150 ease-out hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96] motion-reduce:transition-none xl:size-10"
                 aria-label="返回公开导图"
               >
                 <ChevronLeft className="size-4" />
               </a>
-              <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary" aria-hidden="true">
-                <Network className="size-5" />
+              <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary xl:size-10" aria-hidden="true">
+                <Network className="size-4 xl:size-5" />
               </span>
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
-                  <h1 className="truncate text-2xl font-semibold tracking-tight text-balance">导图管理</h1>
+                  <h1 className="truncate text-lg font-semibold tracking-tight text-balance xl:text-2xl">导图管理</h1>
                   <Badge variant="outline" className="hidden sm:inline-flex">
                     {snapshot.nodes.length} 节点
                   </Badge>
@@ -289,13 +289,13 @@ export function AdminMindmapPage() {
                     </Badge>
                   ) : null}
                 </div>
-                <p className="mt-0.5 truncate text-sm text-muted-foreground">每张导图独立维护结构与题目标签；节点位置始终由结构自动计算。</p>
+                <p className="mt-0.5 hidden truncate text-sm text-muted-foreground xl:block">每张导图独立维护结构与题目标签；节点位置始终由结构自动计算。</p>
               </div>
             </div>
             <SaveStatus state={saveState} savedAt={savedAt} />
           </div>
-          <div className="flex flex-wrap items-center gap-2 rounded-2xl bg-card/80 p-2 shadow-sm ring-1 ring-border/60 backdrop-blur">
-            <div className="min-w-[15rem] flex-1 sm:max-w-md">
+          <div className="flex flex-wrap items-center gap-2 rounded-2xl bg-card/80 p-1.5 shadow-sm ring-1 ring-border/60 backdrop-blur xl:p-2">
+            <div className="min-w-0 flex-1 sm:min-w-[15rem] sm:max-w-md">
               <SimpleSelect
                 ariaLabel="切换知识导图"
                 value={config?._id || ''}
@@ -322,21 +322,6 @@ export function AdminMindmapPage() {
                 </a>
               </Button>
             ) : null}
-          </div>
-          <div className="xl:hidden">
-            <MiniTabs
-              value={mobilePane}
-              onValueChange={(value) => setMobilePane(value as MobilePane)}
-              size="md"
-              fullWidth
-              className="h-11"
-              aria-label="导图工作区面板"
-              items={[
-                { value: 'outline', label: '大纲' },
-                { value: 'preview', label: '预览' },
-                { value: 'inspector', label: '检查器' },
-              ]}
-            />
           </div>
           {failure ? (
             <div
@@ -382,10 +367,26 @@ export function AdminMindmapPage() {
           ) : null}
         </header>
 
+        <div className="sticky top-0 z-20 bg-background/95 py-1 backdrop-blur xl:hidden">
+          <MiniTabs
+            value={mobilePane}
+            onValueChange={(value) => setMobilePane(value as MobilePane)}
+            size="md"
+            fullWidth
+            className="h-11"
+            aria-label="导图工作区面板"
+            items={[
+              { value: 'outline', label: '大纲' },
+              { value: 'preview', label: '预览' },
+              { value: 'inspector', label: '检查器' },
+            ]}
+          />
+        </div>
+
         {config ? (
           <main
             aria-label="导图管理工作区"
-            className="grid min-h-0 flex-1 grid-cols-1 gap-3 xl:grid-cols-[18rem_minmax(18rem,1fr)_20rem] 2xl:grid-cols-[21rem_minmax(0,1fr)_23rem]"
+            className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-hidden xl:grid-cols-[18rem_minmax(18rem,1fr)_20rem] 2xl:grid-cols-[21rem_minmax(0,1fr)_23rem]"
           >
             <aside
               data-mindmap-panel="outline"
@@ -440,7 +441,10 @@ export function AdminMindmapPage() {
                     nodes={snapshot.nodes}
                     config={config}
                     selectedId={selectedId}
-                    onSelect={selectNode}
+                    onSelect={(id) => {
+                      selectNode(id);
+                      if (id) setMobilePane('inspector');
+                    }}
                     collapsed={previewCollapsed}
                     onCollapsedChange={setPreviewCollapsed}
                   />

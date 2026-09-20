@@ -13,6 +13,7 @@ import { MarkdownView } from '@/components/markdown-renderer';
 import { useBootstrap, type GenericUserDoc } from '@/lib/bootstrap';
 import { formatPlainTextSummary, makeInitials, replaceRouteTokens } from '@/lib/format';
 import { cn } from '@/lib/cn';
+import { rankingShowsExternalRatingColumns } from './ranking-external-rating';
 
 type ExternalRatingSiteId = 'codeforces' | 'nowcoder';
 
@@ -273,10 +274,8 @@ export function RankingPage() {
   const studentDict = data.studentDict || {};
   const hasStudentColumn = Object.keys(studentDict).length > 0;
   const publicRatingDicts = readPublicRatingDicts(data);
-  const visibleUsers = self ? [self, ...rows] : rows;
-  const hasCfRatingColumn = visibleUsers.some((user) => readUserPublicRating(user, 'codeforces', publicRatingDicts).included);
-  const hasNowcoderRatingColumn = visibleUsers.some((user) => readUserPublicRating(user, 'nowcoder', publicRatingDicts).included);
-  const extraRatingColumns = (hasCfRatingColumn ? 1 : 0) + (hasNowcoderRatingColumn ? 1 : 0);
+  const hasExternalRatingColumns = rankingShowsExternalRatingColumns(data);
+  const extraRatingColumns = hasExternalRatingColumns ? EXTERNAL_RATING_SITE_IDS.length : 0;
   const [bioUser, setBioUser] = useState<RankingUser | null>(null);
 
   return (
@@ -300,15 +299,13 @@ export function RankingPage() {
                     {RP_LABELS[key] || key}
                   </TableHead>
                 ))}
-                {EXTERNAL_RATING_SITE_IDS.map((site) => {
-                  const show = site === 'codeforces' ? hasCfRatingColumn : hasNowcoderRatingColumn;
-                  if (!show) return null;
-                  return (
-                    <TableHead key={site} className="hidden w-20 text-right md:table-cell">
-                      {EXTERNAL_RATING_SITE_LABEL[site]}
-                    </TableHead>
-                  );
-                })}
+                {hasExternalRatingColumns
+                  ? EXTERNAL_RATING_SITE_IDS.map((site) => (
+                      <TableHead key={site} className="hidden w-20 text-right md:table-cell">
+                        {EXTERNAL_RATING_SITE_LABEL[site]}
+                      </TableHead>
+                    ))
+                  : null}
                 <TableHead className="w-20 text-right">AC</TableHead>
                 <TableHead className="hidden min-w-40 lg:table-cell">简介</TableHead>
               </TableRow>
@@ -322,7 +319,7 @@ export function RankingPage() {
                   current
                   onShowBio={setBioUser}
                   studentInfo={hasStudentColumn ? (studentDict[String(self._id)] ?? null) : undefined}
-                  {...publicRatingRowProps(self, publicRatingDicts, hasCfRatingColumn, hasNowcoderRatingColumn)}
+                  {...publicRatingRowProps(self, publicRatingDicts, hasExternalRatingColumns, hasExternalRatingColumns)}
                 />
               ) : null}
               {rows.length === 0 ? (
@@ -343,7 +340,7 @@ export function RankingPage() {
                     rpKeys={rpKeys}
                     onShowBio={setBioUser}
                     studentInfo={hasStudentColumn ? (studentDict[String(user._id)] ?? null) : undefined}
-                    {...publicRatingRowProps(user, publicRatingDicts, hasCfRatingColumn, hasNowcoderRatingColumn)}
+                    {...publicRatingRowProps(user, publicRatingDicts, hasExternalRatingColumns, hasExternalRatingColumns)}
                   />
                 ))
               )}

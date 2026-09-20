@@ -67,7 +67,7 @@ async function thrown(run: () => Promise<unknown> | unknown): Promise<unknown> {
 }
 
 describe('eportal login URL', () => {
-    it('POSTs login() to 192.168.4.252:801 /eportal/portal/login', async () => {
+    it('POSTs login() to 192.168.100.200:801 /eportal/portal/login', async () => {
         let captured: URL | undefined;
         stubFetch(async (input) => {
             captured = toUrl(input);
@@ -77,7 +77,7 @@ describe('eportal login URL', () => {
         const result = await login('campus-user', SECRET_PASSWORD);
 
         expect(captured).to.be.instanceOf(URL);
-        expect(captured!.host).to.equal('192.168.4.252:801');
+        expect(captured!.host).to.equal('192.168.100.200:801');
         expect(captured!.pathname).to.include('/eportal/portal/login');
         expect(result).to.deep.equal({ alreadyOnline: false, msg: 'ok' });
     });

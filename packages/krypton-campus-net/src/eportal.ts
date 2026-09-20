@@ -1,7 +1,7 @@
 /**
  * Machine-room DrCOM EPortal login client (PLAN P4.1 / Grill G5).
  *
- * Live portal (oj, 2026-09-13): Vue SPA at http://192.168.4.252:801/eportal/,
+ * Live portal (oj, 2026-09-20): Vue SPA at http://192.168.100.200:801/eportal/,
  * nginx. Student auth is JSONP `/eportal/portal/login`, not srun/Ruijie
  * InterFace.cgi/.do (404) and not ACSetting (returns the admin SPA HTML).
  * loadConfig.login_method is "0"; login_method=1 returns 没有配置接入服务器.
@@ -9,7 +9,7 @@
  * ignored. Do not log the request URL (it contains the password).
  */
 
-export const EPORTAL_ORIGIN = 'http://192.168.4.252:801';
+export const EPORTAL_ORIGIN = 'http://192.168.100.200:801';
 export const EPORTAL_BASE_URL = `${EPORTAL_ORIGIN}/eportal/`;
 export const EPORTAL_LOGIN_PATH = '/eportal/portal/login';
 export const EPORTAL_LOGIN_URL = `${EPORTAL_ORIGIN}${EPORTAL_LOGIN_PATH}`;

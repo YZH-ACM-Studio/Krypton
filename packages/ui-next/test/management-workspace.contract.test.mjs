@@ -51,6 +51,22 @@ it('management workspace navigation is accessible, compact, and reduced-motion a
     assert.doesNotMatch(workspace, /backdrop-blur|gradient/);
 });
 
+it('keeps compact pills below lg, a sticky 15rem rail from lg, and full width when nav is hidden', () => {
+    assert.match(workspace, /<section aria-labelledby=\{titleId\} className="min-w-0 max-w-full space-y-5">/);
+    assert.doesNotMatch(workspace, /overflow-x-clip/);
+    assert.match(workspace, /<nav aria-label=\{navAriaLabel\} className="-mx-1 overflow-x-auto px-1 pb-1 touch-pan-x lg:hidden">/);
+    assert.match(workspace, /overflow-x-auto/);
+    assert.match(workspace, /touch-pan-x/);
+    assert.match(workspace, /whitespace-nowrap/);
+    assert.match(workspace, /shrink-0/);
+    assert.match(workspace, /lg:hidden/);
+    assert.match(workspace, /lg:grid-cols-\[15rem_minmax\(0,1fr\)\]/);
+    assert.match(workspace, /sticky top-0/);
+    assert.match(workspace, /hidden min-w-0 lg:block/);
+    assert.match(workspace, /flex min-h-11 min-w-0 flex-wrap/);
+    assert.match(workspace, /hideNav \? \([\s\S]*?toolbarSection[\s\S]*?mainContent[\s\S]*?lg:grid-cols-\[15rem_minmax\(0,1fr\)\]/);
+});
+
 it('userbind admin pages use one workspace and no longer register an admin-nav section', () => {
     assert.doesNotMatch(userbind, /registerAdminNavSection/);
     assert.match(userbind, /ModuleWorkspace/);

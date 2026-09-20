@@ -78,13 +78,18 @@ export function useFormDirtyState(formRef: RefObject<HTMLFormElement | null>, re
   return { dirty, recompute, markClean, snapshot };
 }
 
+export interface UnsavedChangesGuardCopy {
+  description?: string;
+}
+
 /**
  * Custom confirmation for same-origin links and both history traversal directions.
  * The Navigation API path does not add entries, so enabling the guard never
  * destroys an existing Forward stack. Older browsers retain their history and
  * use the native beforeunload prompt for traversal, refresh, close and address-bar exits.
+ * Copy defaults to the current page; callers may inject problem-specific wording.
  */
-export function useUnsavedChangesGuard(dirty: boolean) {
+export function useUnsavedChangesGuard(dirty: boolean, copy: UnsavedChangesGuardCopy = {}) {
   const dirtyRef = useRef(dirty);
   const bypassRef = useRef(false);
   const pendingRef = useRef<PendingNavigation | null>(null);
@@ -226,13 +231,13 @@ export function useUnsavedChangesGuard(dirty: boolean) {
       <DialogContent size="sm" onClose={cancelNavigation}>
         <DialogHeader>
           <DialogTitle>放弃未保存的更改？</DialogTitle>
-          <DialogDescription>当前题目还有未保存的修改。离开后这些修改不会自动恢复。</DialogDescription>
+          <DialogDescription>{copy.description ?? '当前页面还有未保存的修改。离开后这些修改不会自动恢复。'}</DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={cancelNavigation}>
+          <Button type="button" variant="outline" className="min-h-11 w-full sm:w-auto" onClick={cancelNavigation}>
             继续编辑
           </Button>
-          <Button type="button" variant="destructive" onClick={discardAndLeave}>
+          <Button type="button" variant="destructive" className="min-h-11 w-full sm:w-auto" onClick={discardAndLeave}>
             放弃更改并离开
           </Button>
         </DialogFooter>

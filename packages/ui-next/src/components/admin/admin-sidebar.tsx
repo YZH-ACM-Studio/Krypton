@@ -25,7 +25,7 @@ export function AdminSidebar({ currentTemplate }: { currentTemplate: string }) {
   }
 
   return (
-    <aside className="hidden h-full w-56 shrink-0 min-h-0 lg:block">
+    <aside className="hidden h-full min-h-0 w-56 shrink-0 lg:block">
       {/* Own scroll area: scrolls independently from the right column. */}
       <ScrollArea className="h-full" viewportClassName="pr-1 pt-2 pb-6">
         <nav className="space-y-5">

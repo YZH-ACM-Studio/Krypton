@@ -61,38 +61,41 @@ export function AdminPage({
     if (!allowed) return <ForbiddenPanel />;
   }
 
-  // Layout note (round-10 split scroll):
-  // The outer admin frame is pinned to viewport height minus the top bar
-  // (h-12 = 48px) and main's own vertical padding (24-32px depending on
-  // breakpoint). Both panes are flex children with min-h-0 + their own
-  // overflow-y-auto, so they scroll independently — the sidebar never
-  // drifts when the right column scrolls a long page, and a long sidebar
-  // doesn't push the content area down.
+  const body = (
+    <motion.div className={cn('min-w-0 space-y-5', contentClassName)} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.15 }}>
+      {(title || actions || description) && (
+        <header className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0 space-y-1">
+            {title ? typeof title === 'string' ? <h1 className="text-xl font-semibold tracking-tight">{title}</h1> : title : null}
+            {description ? typeof description === 'string' ? <p className="text-sm text-muted-foreground">{description}</p> : description : null}
+          </div>
+          {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
+        </header>
+      )}
+
+      {children}
+    </motion.div>
+  );
+
+  // Full-bleed modules (ModuleWorkspace, etc.) keep page-level scroll. Pinning
+  // them to the split-pane height would nest a viewport inside router padding
+  // and clip or double-scroll the content.
+  if (hideSidebar) {
+    return <div className="w-full min-w-0">{body}</div>;
+  }
+
+  // Split scroll: pin to 100dvh minus topbar (h-12 / 3rem) and main padding
+  // from router.tsx (`p-3 sm:p-6 xl:p-8`). Same formula as mindmap/admin.
   return (
     <div
       className={cn(
-        'flex w-full items-stretch gap-6 min-h-0',
-        // 6rem = topbar (3rem) + main top padding (1.5rem) + main bottom padding (1.5rem).
-        // sm/xl variants match main's responsive padding in router.tsx.
-        'h-[calc(100dvh-6rem)] sm:h-[calc(100dvh-6rem)] xl:h-[calc(100dvh-7rem)]',
+        'flex min-h-0 w-full min-w-0 items-stretch gap-6',
+        'h-[calc(100dvh-4.5rem)] sm:h-[calc(100dvh-6rem)] xl:h-[calc(100dvh-7rem)]',
       )}
     >
-      {!hideSidebar ? <AdminSidebar currentTemplate={bs.page.templateName} /> : null}
-
-      <ScrollArea className="min-w-0 min-h-0 flex-1" viewportClassName="pr-1">
-        <motion.div className={cn('space-y-5', contentClassName)} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.15 }}>
-          {(title || actions || description) && (
-            <header className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-              <div className="space-y-1">
-                {title ? typeof title === 'string' ? <h1 className="text-xl font-semibold tracking-tight">{title}</h1> : title : null}
-                {description ? typeof description === 'string' ? <p className="text-sm text-muted-foreground">{description}</p> : description : null}
-              </div>
-              {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
-            </header>
-          )}
-
-          {children}
-        </motion.div>
+      <AdminSidebar currentTemplate={bs.page.templateName} />
+      <ScrollArea className="min-h-0 min-w-0 flex-1" viewportLayout="block" viewportClassName="pr-1 [&>div]:min-w-0 [&>div]:w-full">
+        {body}
       </ScrollArea>
     </div>
   );

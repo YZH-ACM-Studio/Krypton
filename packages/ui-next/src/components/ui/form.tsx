@@ -60,7 +60,7 @@ export function FormRow({
     3: 'grid-cols-1 md:grid-cols-3',
     4: 'grid-cols-1 md:grid-cols-2 lg:grid-cols-4',
   }[columns];
-  return <div className={cn('grid gap-4', cols, className)}>{children}</div>;
+  return <div className={cn('grid gap-4 [&>*]:min-w-0', cols, className)}>{children}</div>;
 }
 
 export function FormField({

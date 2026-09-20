@@ -90,10 +90,10 @@ export function SheetContent({ side = 'right', className, children, ...props }: 
       data-krypton-sheet=""
       data-side={side}
       className={cn(
-        'fixed flex flex-col overflow-hidden overscroll-contain bg-background shadow-2xl',
+        'fixed flex flex-col overflow-hidden overscroll-contain bg-background pb-[env(safe-area-inset-bottom)] shadow-2xl',
         sideClasses[side],
         // Default sizing — consumers can override via className.
-        side === 'right' || side === 'left' ? 'w-[400px] max-w-[calc(100vw-2rem)]' : 'h-[400px] max-h-[calc(100vh-2rem)]',
+        side === 'right' || side === 'left' ? 'w-[400px] max-w-[calc(100dvw-2rem)]' : 'h-[400px] max-h-[calc(100dvh-2rem)]',
         className,
       )}
       {...props}

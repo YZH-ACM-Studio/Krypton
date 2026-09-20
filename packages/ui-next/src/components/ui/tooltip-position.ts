@@ -25,6 +25,15 @@ export interface TooltipPosition {
   side: TooltipSide;
 }
 
+export interface AnchoredPopoverBox {
+  left: number;
+  width: number;
+  maxHeight: number;
+  side: 'top' | 'bottom';
+  top?: number;
+  bottom?: number;
+}
+
 const oppositeSide: Record<TooltipSide, TooltipSide> = {
   top: 'bottom',
   bottom: 'top',
@@ -71,4 +80,24 @@ export function calculateTooltipPosition(
     top: clamp(Math.round(top), viewportPadding, maxTop),
     side,
   };
+}
+
+/** Place a portaled menu against a trigger, flipping on short remaining viewport. */
+export function calculateAnchoredPopoverBox(
+  trigger: RectLike,
+  viewport: ViewportLike,
+  options: { gap?: number; padding?: number } = {},
+): AnchoredPopoverBox {
+  const gap = options.gap ?? 4;
+  const padding = options.padding ?? 8;
+  const spaceBelow = viewport.height - trigger.bottom - gap;
+  const spaceAbove = trigger.top - gap;
+  const side: 'top' | 'bottom' = spaceBelow >= spaceAbove ? 'bottom' : 'top';
+  const maxHeight = Math.max(0, side === 'bottom' ? spaceBelow : spaceAbove);
+  const width = Math.max(0, Math.min(trigger.width, Math.max(0, viewport.width - padding * 2)));
+  const left = clamp(trigger.left, padding, Math.max(padding, viewport.width - width - padding));
+  if (side === 'bottom') {
+    return { left, width, maxHeight, side, top: trigger.bottom + gap };
+  }
+  return { left, width, maxHeight, side, bottom: viewport.height - trigger.top + gap };
 }

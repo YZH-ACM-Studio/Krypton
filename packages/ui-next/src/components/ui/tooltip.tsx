@@ -186,7 +186,7 @@ export function TooltipContent({
       role="tooltip"
       data-side={position?.side || side}
       className={cn(
-        'pointer-events-none fixed z-200 whitespace-nowrap rounded-[10px] bg-popover/95 px-3 py-2 text-sm font-medium text-popover-foreground shadow-[0_8px_24px_oklch(0_0_0_/_0.16),0_0_0_1px_oklch(0_0_0_/_0.07)] backdrop-blur-md animate-in fade-in-0 zoom-in-95 duration-150 dark:shadow-[0_8px_24px_oklch(0_0_0_/_0.45),0_0_0_1px_oklch(1_0_0_/_0.10)]',
+        'pointer-events-none fixed z-200 max-w-[min(20rem,calc(100dvw-1rem))] whitespace-normal break-words rounded-[10px] bg-popover/95 px-3 py-2 text-sm font-medium text-popover-foreground shadow-[0_8px_24px_oklch(0_0_0_/_0.16),0_0_0_1px_oklch(0_0_0_/_0.07)] backdrop-blur-md animate-in fade-in-0 zoom-in-95 duration-150 dark:shadow-[0_8px_24px_oklch(0_0_0_/_0.45),0_0_0_1px_oklch(1_0_0_/_0.10)]',
         className,
       )}
       style={{

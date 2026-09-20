@@ -22,15 +22,17 @@ export type TableDensity = 'comfortable' | 'compact' | 'flush';
 
 interface TableProps extends HTMLAttributes<HTMLTableElement> {
   density?: TableDensity;
+  /** Horizontal overflow only by default; pass `both` when the body must also scroll vertically. */
+  orientation?: 'horizontal' | 'both';
 }
 
 /**
  * Density is passed via a data attribute so descendant Head/Cell components
  * can adapt their padding without us threading props through every level.
  */
-const Table = forwardRef<HTMLTableElement, TableProps>(({ className, density = 'comfortable', ...props }, ref) => (
+const Table = forwardRef<HTMLTableElement, TableProps>(({ className, density = 'comfortable', orientation = 'horizontal', ...props }, ref) => (
   <ScrollArea
-    orientation="horizontal"
+    orientation={orientation}
     className={cn(
       'krypton-table-shell relative w-full',
       // Tiny vertical breathing room so first/last row aren't flush against

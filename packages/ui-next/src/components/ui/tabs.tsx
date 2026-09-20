@@ -13,7 +13,7 @@ export function Tabs({ items, defaultValue, className }: { items: TabItem[]; def
 
   return (
     <div className={className}>
-      <div className="inline-flex h-9 items-center justify-center rounded-lg bg-muted p-1 text-muted-foreground">
+      <div className="inline-flex h-9 max-w-full items-center justify-center overflow-x-auto overscroll-x-contain rounded-lg bg-muted p-1 text-muted-foreground">
         {items.map((tab) => (
           <button
             key={tab.value}

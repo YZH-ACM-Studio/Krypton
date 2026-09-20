@@ -68,5 +68,26 @@ describe('unified Sheet chrome', () => {
     expect(content.querySelector('[data-scroll-owner="sheet"]')).not.toBeNull();
     expect(content).not.toHaveAttribute('data-scroll-owner');
     expect(content).not.toHaveClass('overflow-y-auto');
+    expect(content.className).to.include('max-h-[calc(100dvh-2rem)]');
+    expect(content.className).to.include('pb-[env(safe-area-inset-bottom)]');
+  });
+
+  it('caps left and right sheets with dvw instead of vw', () => {
+    function RightSheet() {
+      return (
+        <Sheet open onOpenChange={() => {}}>
+          <SheetContent side="right">
+            <SheetHeader>
+              <SheetTitle>侧栏</SheetTitle>
+            </SheetHeader>
+            <SheetBody>正文</SheetBody>
+          </SheetContent>
+        </Sheet>
+      );
+    }
+    render(<RightSheet />);
+    const content = screen.getByRole('dialog', { name: '侧栏' });
+    expect(content.className).to.include('max-w-[calc(100dvw-2rem)]');
+    expect(content.querySelector('[data-scroll-owner="sheet"]')).not.toBeNull();
   });
 });

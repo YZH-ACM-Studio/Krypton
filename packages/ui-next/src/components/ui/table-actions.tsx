@@ -221,7 +221,7 @@ export function TableActions({
   align?: 'start' | 'end' | 'center';
 }) {
   return (
-    <div className={cn('flex items-center gap-1.5', align === 'end' && 'justify-end', align === 'center' && 'justify-center', className)}>
+    <div className={cn('flex flex-wrap items-center gap-1.5', align === 'end' && 'justify-end', align === 'center' && 'justify-center', className)}>
       {children}
     </div>
   );

@@ -19,7 +19,7 @@ export function Pagination({ current, total, baseUrl }: { current: number; total
   };
 
   return (
-    <nav className="flex items-center justify-center gap-1 pt-4">
+    <nav className="flex max-w-full flex-wrap items-center justify-center gap-1 pt-4">
       <Button asChild variant="ghost" size="icon" disabled={current <= 1}>
         <a href={current > 1 ? href(current - 1) : '#'}>
           <ChevronLeft className="size-4" />

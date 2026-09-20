@@ -183,6 +183,23 @@ describe('dialog modal environment', () => {
     expect(screen.getByRole('button', { name: '关闭弹窗' })).not.toHaveFocus();
   });
 
+  it('sizes the shell with max-w-full instead of 100vw to avoid iOS overflow', () => {
+    render(
+      <Dialog open onOpenChange={vi.fn()}>
+        <DialogContent>
+          <DialogTitle>壳宽</DialogTitle>
+          <p>正文</p>
+        </DialogContent>
+      </Dialog>,
+    );
+
+    const dialog = screen.getByRole('dialog', { name: '壳宽' });
+    expect(dialog.parentElement?.className).to.include('max-w-full');
+    expect(dialog.parentElement?.className).not.to.include('100vw');
+    expect(dialog.className).to.include('overflow-hidden');
+    expect(dialog.querySelector('[data-scroll-owner="dialog"]')).not.to.equal(null);
+  });
+
   it('keeps the accessible name when callers pass a custom labelledby id', () => {
     render(
       <Dialog open onOpenChange={vi.fn()}>

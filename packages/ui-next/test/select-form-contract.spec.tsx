@@ -4,6 +4,8 @@ import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { SimpleSelect } from '../src/components/ui/select';
 
+const selectSource = readFileSync(resolve(import.meta.dirname, '../src/components/ui/select.tsx'), 'utf8');
+
 const options = [
   { value: 'acm', label: 'XCPC' },
   { value: 'oi', label: 'OI' },
@@ -43,5 +45,11 @@ describe('team contest rule form contract', () => {
     expect(readFileSync(resolve(import.meta.dirname, '../src/pages/contest-manage.tsx'), 'utf8')).to.include(
       "name={canUpdatePlannedTeamBatch ? 'plannedTeamBatchId' : undefined}",
     );
+  });
+
+  it('sizes the menu from available height instead of locking the viewport to the trigger', () => {
+    expect(selectSource).to.include('--radix-select-content-available-height');
+    expect(selectSource).not.to.include('h-[var(--radix-select-trigger-height)]');
+    expect(selectSource).to.include("EMPTY_VALUE = '__EMPTY__'");
   });
 });

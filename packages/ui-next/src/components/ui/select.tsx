@@ -130,7 +130,7 @@ export const SelectContent = React.forwardRef<React.ElementRef<typeof RSelect.Co
           position={position}
           sideOffset={4}
           className={cn(
-            'relative z-[250] max-h-96 min-w-[8rem] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md',
+            'relative z-[250] max-h-[var(--radix-select-content-available-height)] min-w-[8rem] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md',
             // Match the trigger width when using popper positioning.
             position === 'popper' && 'w-[var(--radix-select-trigger-width)] min-w-[var(--radix-select-trigger-width)]',
             className,
@@ -141,7 +141,8 @@ export const SelectContent = React.forwardRef<React.ElementRef<typeof RSelect.Co
             <ChevronUp className="size-4" />
           </RSelect.ScrollUpButton>
           <RSelect.Viewport
-            className={cn('p-1', position === 'popper' && 'h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)]')}
+            // Do not lock height to the trigger — that shows one option on short 320/768 selects.
+            className={cn('p-1', position === 'popper' && 'w-full min-w-[var(--radix-select-trigger-width)]')}
           >
             {children}
           </RSelect.Viewport>

@@ -116,7 +116,7 @@ export function ToastProvider() {
   }, []);
 
   return createPortal(
-    <div className="pointer-events-none fixed right-4 top-4 z-[300] flex w-[360px] max-w-[calc(100vw-2rem)] flex-col gap-2">
+    <div className="pointer-events-none fixed right-4 top-[max(1rem,env(safe-area-inset-top))] z-[300] flex w-[360px] max-h-[calc(100dvh-1rem-max(1rem,env(safe-area-inset-top)))] max-w-[calc(100dvw-2rem)] flex-col gap-2 overflow-y-auto overscroll-contain">
       {items.map((t) => (
         <ToastCard key={t.id} t={t} onDismiss={(id) => dismissEmit(id)} />
       ))}

@@ -13,13 +13,15 @@
  *
  * Designed for the multi-language and multi-problem pickers but generic.
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { Check, ChevronDown, Loader2, Search, X } from 'lucide-react';
 import { DndContext, type DragEndEvent, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, arrayMove, horizontalListSortingStrategy, useSortable, sortableKeyboardCoordinates } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { cn } from '@/lib/cn';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { calculateAnchoredPopoverBox, type AnchoredPopoverBox } from '@/components/ui/tooltip-position';
 
 export interface MultiSelectProps<T> {
   /** Sync mode: complete option list, filtered client-side. */
@@ -64,6 +66,18 @@ export interface MultiSelectProps<T> {
   valueFormat?: 'csv' | 'repeated';
 }
 
+function popoverStyle(box: AnchoredPopoverBox): CSSProperties {
+  return {
+    position: 'fixed',
+    left: box.left,
+    width: box.width,
+    maxHeight: box.maxHeight,
+    top: box.top,
+    bottom: box.bottom,
+    zIndex: 250,
+  };
+}
+
 /* ------------------------------------------------------------------ */
 /*  Main component                                                     */
 /* ------------------------------------------------------------------ */
@@ -97,6 +111,9 @@ export function MultiSelect<T>({
   const popoverRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLDivElement | null>(null);
   const requestSeq = useRef(0);
+  const swallowOverlayClickRef = useRef(false);
+  const [popoverBox, setPopoverBox] = useState<AnchoredPopoverBox | null>(null);
+  const [portalEl, setPortalEl] = useState<HTMLElement | null>(null);
 
   const selectedKeys = useMemo(() => new Set(value.map(getKey)), [value, getKey]);
 
@@ -123,17 +140,78 @@ export function MultiSelect<T>({
     };
   }, [query, open, isAsync]);
 
-  /* Click-outside to close */
+  useEffect(() => {
+    const onClick = (event: MouseEvent) => {
+      if (!swallowOverlayClickRef.current) return;
+      swallowOverlayClickRef.current = false;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    document.addEventListener('click', onClick, true);
+    return () => document.removeEventListener('click', onClick, true);
+  }, []);
+
+  /* Bubble mousedown closes the menu; only a Dialog overlay click is swallowed so the Dialog stays open. */
   useEffect(() => {
     if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (!triggerRef.current || !popoverRef.current) return;
-      if (triggerRef.current.contains(e.target as Node)) return;
-      if (popoverRef.current.contains(e.target as Node)) return;
+    const isInside = (target: EventTarget | null) =>
+      target instanceof Node && Boolean(triggerRef.current?.contains(target) || popoverRef.current?.contains(target));
+    const isDialogOverlay = (target: EventTarget | null) => {
+      if (!(target instanceof Element)) return false;
+      const dialogRoot = triggerRef.current?.closest('[data-krypton-dialog-root="true"]');
+      if (!(dialogRoot instanceof HTMLElement) || !dialogRoot.contains(target)) return false;
+      const panel = dialogRoot.querySelector('[role="dialog"]');
+      if (panel?.contains(target)) return false;
+      if (popoverRef.current?.contains(target)) return false;
+      return true;
+    };
+    const onMouseDown = (event: MouseEvent) => {
+      if (isInside(event.target)) return;
+      setOpen(false);
+      if (isDialogOverlay(event.target)) swallowOverlayClickRef.current = true;
+    };
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
       setOpen(false);
     };
-    document.addEventListener('mousedown', onDoc);
-    return () => document.removeEventListener('mousedown', onDoc);
+    document.addEventListener('mousedown', onMouseDown);
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown);
+      document.removeEventListener('keydown', onKeyDown, true);
+    };
+  }, [open]);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setPopoverBox(null);
+      setPortalEl(null);
+      return;
+    }
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+    const dialogRoot = trigger.closest('[data-krypton-dialog-root="true"]');
+    setPortalEl(dialogRoot instanceof HTMLElement ? dialogRoot : document.body);
+    const update = () => {
+      setPopoverBox(
+        calculateAnchoredPopoverBox(trigger.getBoundingClientRect(), {
+          width: window.innerWidth,
+          height: window.innerHeight,
+        }),
+      );
+    };
+    update();
+    window.addEventListener('resize', update);
+    document.addEventListener('scroll', update, true);
+    const observer = new ResizeObserver(update);
+    observer.observe(trigger);
+    return () => {
+      window.removeEventListener('resize', update);
+      document.removeEventListener('scroll', update, true);
+      observer.disconnect();
+    };
   }, [open]);
 
   /* Filter for sync mode */
@@ -192,7 +270,8 @@ export function MultiSelect<T>({
   };
 
   /* Keyboard nav inside input */
-  const onInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const onInputKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    e.stopPropagation();
     if (e.key === 'ArrowDown') {
       e.preventDefault();
       setOpen(true);
@@ -215,6 +294,7 @@ export function MultiSelect<T>({
       e.preventDefault();
       removeItem(getKey(value[value.length - 1]));
     } else if (e.key === 'Escape') {
+      e.preventDefault();
       setOpen(false);
     }
   };
@@ -265,6 +345,7 @@ export function MultiSelect<T>({
               }}
               onFocus={() => setOpen(true)}
               onKeyDown={onInputKeyDown}
+              onMouseDown={(e) => e.stopPropagation()}
               placeholder={value.length === 0 ? placeholder : ''}
               className="flex-1 min-w-0 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
               disabled={disabled}
@@ -290,61 +371,72 @@ export function MultiSelect<T>({
         )
       ) : null}
 
-      {/* Popover */}
-      {open ? (
-        <ScrollArea
-          ref={popoverRef}
-          className="absolute z-50 mt-1 max-h-72 w-full rounded-md border bg-popover shadow-lg"
-          viewportClassName="p-1"
-        >
-          {loading ? (
-            <p className="flex items-center justify-center gap-2 py-3 text-xs text-muted-foreground">
-              <Loader2 className="size-3 animate-spin" /> 搜索中…
-            </p>
-          ) : visibleOptions.length === 0 ? (
-            <p className="py-3 text-center text-xs text-muted-foreground">{emptyText}</p>
-          ) : (
-            visibleOptions.map((item, i) => {
-              const k = getKey(item);
-              const selected = selectedKeys.has(k);
-              return (
-                <button
-                  key={k}
-                  type="button"
-                  className={cn(
-                    'flex w-full items-start gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors',
-                    highlightedIndex === i ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50',
-                  )}
-                  onMouseEnter={() => setHighlightedIndex(i)}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    toggleItem(item);
-                  }}
-                >
-                  <span
-                    className={cn(
-                      'mt-0.5 inline-flex size-4 shrink-0 items-center justify-center rounded-sm border',
-                      selected ? 'border-primary bg-primary text-primary-foreground' : 'border-input',
-                    )}
-                  >
-                    {selected ? <Check className="size-3" /> : null}
-                  </span>
-                  <span className="flex-1 min-w-0">
-                    {renderOption ? (
-                      renderOption(item, { selected })
-                    ) : (
-                      <>
-                        <span className="block truncate">{getLabel(item)}</span>
-                        {getDescription ? <span className="block truncate text-[11px] text-muted-foreground">{getDescription(item)}</span> : null}
-                      </>
-                    )}
-                  </span>
-                </button>
-              );
-            })
-          )}
-        </ScrollArea>
-      ) : null}
+      {open && popoverBox && portalEl
+        ? createPortal(
+            <ScrollArea
+              ref={popoverRef}
+              className="z-[250] rounded-md border bg-popover shadow-lg"
+              style={popoverStyle(popoverBox)}
+              viewportClassName="p-1"
+              onMouseDown={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === 'Escape') {
+                  e.preventDefault();
+                  setOpen(false);
+                }
+              }}
+            >
+              {loading ? (
+                <p className="flex items-center justify-center gap-2 py-3 text-xs text-muted-foreground">
+                  <Loader2 className="size-3 animate-spin" /> 搜索中…
+                </p>
+              ) : visibleOptions.length === 0 ? (
+                <p className="py-3 text-center text-xs text-muted-foreground">{emptyText}</p>
+              ) : (
+                visibleOptions.map((item, i) => {
+                  const k = getKey(item);
+                  const selected = selectedKeys.has(k);
+                  return (
+                    <button
+                      key={k}
+                      type="button"
+                      className={cn(
+                        'flex w-full items-start gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors',
+                        highlightedIndex === i ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50',
+                      )}
+                      onMouseEnter={() => setHighlightedIndex(i)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleItem(item);
+                      }}
+                    >
+                      <span
+                        className={cn(
+                          'mt-0.5 inline-flex size-4 shrink-0 items-center justify-center rounded-sm border',
+                          selected ? 'border-primary bg-primary text-primary-foreground' : 'border-input',
+                        )}
+                      >
+                        {selected ? <Check className="size-3" /> : null}
+                      </span>
+                      <span className="flex-1 min-w-0">
+                        {renderOption ? (
+                          renderOption(item, { selected })
+                        ) : (
+                          <>
+                            <span className="block truncate">{getLabel(item)}</span>
+                            {getDescription ? <span className="block truncate text-[11px] text-muted-foreground">{getDescription(item)}</span> : null}
+                          </>
+                        )}
+                      </span>
+                    </button>
+                  );
+                })
+              )}
+            </ScrollArea>,
+            portalEl,
+          )
+        : null}
     </div>
   );
 }
@@ -355,7 +447,7 @@ export function MultiSelect<T>({
 
 function Chip({ id, label, onRemove }: { id: string; label: ReactNode; onRemove: () => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
-  const style: React.CSSProperties = {
+  const style: CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0.5 : 1,

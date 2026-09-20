@@ -303,7 +303,7 @@ export function Dialog({ open, onOpenChange, children, closeOnOverlayClick = tru
         }}
       />
       <div
-        className="relative w-full max-w-[100vw] sm:w-auto sm:max-w-[calc(100vw-3rem)]"
+        className="relative w-full min-w-0 max-w-full sm:w-auto sm:max-w-[calc(100dvw-3rem)]"
         onClick={(event) => event.stopPropagation()}
       >
         <DialogContext.Provider value={{ titleId, descriptionId, onOpenChange, hasDescription, setHasDescription, requestClose: () => requestCloseRef.current(), closeHandlerRef: requestCloseRef }}>

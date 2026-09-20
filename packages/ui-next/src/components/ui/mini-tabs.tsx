@@ -75,7 +75,12 @@ export function MiniTabs<T extends string = string>({
     <div
       role="tablist"
       aria-label={ariaLabel}
-      className={cn('relative inline-flex items-center gap-0.5 rounded-lg bg-muted/70 backdrop-blur-sm', sizeClass, fullWidth && 'w-full', className)}
+      className={cn(
+        'relative inline-flex max-w-full items-center gap-0.5 overflow-x-auto overscroll-x-contain rounded-lg bg-muted/70 backdrop-blur-sm',
+        sizeClass,
+        fullWidth && 'w-full min-w-0',
+        className,
+      )}
     >
       {items.map((item) => {
         const active = item.value === value;
@@ -107,7 +112,7 @@ export function MiniTabs<T extends string = string>({
         );
 
         const sharedClass = cn(
-          'relative inline-flex items-center justify-center rounded-md font-medium transition-colors',
+          'relative inline-flex items-center justify-center whitespace-nowrap rounded-md font-medium transition-colors',
           itemPadding,
           'h-full',
           fullWidth && 'flex-1',

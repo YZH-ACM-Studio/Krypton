@@ -20,7 +20,7 @@
  *   - Category management: PRIV_EDIT_SYSTEM (system-wide list).
  */
 import type { Context } from 'hydrooj';
-import { localizedErrorText, Handler, NotFoundError, ObjectId, param, PERM, PermissionError, PRIV, PrivilegeError, Types } from 'hydrooj';
+import { localizedErrorText, Handler, NotFoundError, ObjectId, param, PERM, PermissionError, PRIV, PrivilegeError, Types, ValidationError } from 'hydrooj';
 import {
     countUnreadForUser,
     createAnnouncement,
@@ -244,7 +244,7 @@ class AdminAnnounceEditHandler extends Handler {
         unpublishAt?: string,
         aid?: ObjectId,
     ) {
-        if (!aid) throw new Error('aid required');
+        if (!aid) throw new ValidationError('aid');
         const doc = await getAnnouncement(aid);
         if (!doc) throw new NotFoundError(localizedErrorText`announcement`, String(aid));
         ensureCanEditAnnouncement(this.user, doc);
@@ -262,7 +262,7 @@ class AdminAnnounceEditHandler extends Handler {
 
     @param('aid', Types.ObjectId, true)
     async postDelete(_ctx: any, aid?: ObjectId) {
-        if (!aid) throw new Error('aid required');
+        if (!aid) throw new ValidationError('aid');
         const doc = await getAnnouncement(aid);
         if (!doc) throw new NotFoundError(localizedErrorText`announcement`, String(aid));
         ensureCanEditAnnouncement(this.user, doc);
@@ -290,7 +290,7 @@ class AdminCategoriesHandler extends Handler {
     @param('order', Types.Int, true)
     @param('hidden', Types.Boolean, true)
     async postUpsert(_ctx: any, key?: string, name?: string, color?: string, order?: number, hidden?: boolean) {
-        if (!key || !name || !color) throw new Error('key/name/color required');
+        if (!key || !name || !color) throw new ValidationError('key');
         await upsertCategory({
             key,
             name,

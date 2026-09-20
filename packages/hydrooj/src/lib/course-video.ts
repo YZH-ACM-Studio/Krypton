@@ -1,6 +1,7 @@
 import { createHash } from 'crypto';
 import { createReadStream } from 'fs';
 import { extname } from 'path';
+import { localizedErrorText, ValidationError, type LocalizedErrorText } from '@hydrooj/framework';
 import { nanoid } from 'nanoid';
 import type { CourseVideo, TrainingNode, TrainingSection } from '../interface';
 export type { CourseVideo };
@@ -31,6 +32,12 @@ const VIDEO_KEYS = ['id', 'title', 'filename', 'ext', 'size', 'sha256', 'duratio
 const VIDEO_ID_RE = /^cv_[A-Za-z0-9_-]{16,32}$/;
 const SHA256_RE = /^[a-f0-9]{64}$/;
 
+function throwValidation(field: string, detail: LocalizedErrorText): never {
+    const error = new ValidationError(field, null, detail);
+    Object.defineProperty(error, 'message', { configurable: true, value: detail.raw });
+    throw error;
+}
+
 export function isCourseVideoExt(value: string): value is CourseVideoExt {
     return (COURSE_VIDEO_EXTS as readonly string[]).includes(value);
 }
@@ -41,15 +48,15 @@ export function courseVideoId(): string {
 
 export function courseVideoExtOf(filename: string): CourseVideoExt {
     const ext = extname(filename).replace(/^\./, '').toLowerCase();
-    if (!isCourseVideoExt(ext)) throw new Error('视频只接受 mp4 或 webm');
+    if (!isCourseVideoExt(ext)) throwValidation('file', localizedErrorText`视频只接受 mp4 或 webm`);
     return ext;
 }
 
 export function courseVideoStoragePath(domainId: string, courseId: string, videoId: string, contentRevision: number, ext: CourseVideoExt): string {
-    if (!domainId || domainId.includes('/') || domainId.includes('..')) throw new Error('invalid domainId');
-    if (!courseId || courseId.includes('/') || courseId.includes('..')) throw new Error('invalid courseId');
-    if (!VIDEO_ID_RE.test(videoId)) throw new Error('invalid videoId');
-    if (!Number.isSafeInteger(contentRevision) || contentRevision < 1) throw new Error('invalid contentRevision');
+    if (!domainId || domainId.includes('/') || domainId.includes('..')) throw new TypeError('invalid domainId');
+    if (!courseId || courseId.includes('/') || courseId.includes('..')) throw new TypeError('invalid courseId');
+    if (!VIDEO_ID_RE.test(videoId)) throw new TypeError('invalid videoId');
+    if (!Number.isSafeInteger(contentRevision) || contentRevision < 1) throw new TypeError('invalid contentRevision');
     return `course/${domainId}/${courseId}/video/${videoId}/r${contentRevision}.${ext}`;
 }
 
@@ -160,7 +167,7 @@ export function mutateCourseVideos(
         if (sectionId == null) {
             found = true;
             const videos = mutate([...(chapter.videos || [])]);
-            if (videos.length > COURSE_VIDEO_MAX_PER_NODE) throw new Error(`章节 ${chapterId} 最多 ${COURSE_VIDEO_MAX_PER_NODE} 个视频`);
+            assertCourseVideoCapacity(videos);
             return { ...chapter, ...(videos.length ? { videos } : { videos: undefined }) };
         }
         return {
@@ -169,12 +176,17 @@ export function mutateCourseVideos(
                 if (section._id !== sectionId) return section;
                 found = true;
                 const videos = mutate([...(section.videos || [])]);
-                if (videos.length > COURSE_VIDEO_MAX_PER_NODE) throw new Error(`章节 ${chapterId} 小节 ${sectionId} 最多 ${COURSE_VIDEO_MAX_PER_NODE} 个视频`);
+                assertCourseVideoCapacity(videos);
                 return { ...section, ...(videos.length ? { videos } : { videos: undefined }) };
             }),
         };
     });
-    if (!found) throw new Error(sectionId == null ? `章节 ${chapterId} 不存在` : `章节 ${chapterId} 小节 ${sectionId} 不存在`);
+    if (!found) {
+        throwValidation(
+            sectionId == null ? 'chapterId' : 'sectionId',
+            localizedErrorText`章节 ${sectionId == null ? chapterId : `${chapterId} 小节 ${sectionId}`} 不存在`,
+        );
+    }
     return next;
 }
 
@@ -214,18 +226,21 @@ export function isCourseVideoComplete(ranges: CoverageRange[], durationMs: numbe
 }
 
 export function parseRequireRewatch(raw: unknown): boolean {
-    if (raw === undefined || raw === null || raw === '') throw new Error('换片必须明确是否要求重看');
     if (raw === true || raw === 'true' || raw === 'on' || raw === '1') return true;
     if (raw === false || raw === 'false' || raw === 'off' || raw === '0') return false;
-    throw new Error('换片必须明确是否要求重看');
+    throwValidation('requireRewatch', localizedErrorText`换片必须明确是否要求重看`);
 }
 
 export function parseHeartbeatCovered(raw: unknown): CoverageRange {
-    if (!Array.isArray(raw) || raw.length !== 2) throw new Error('本拍覆盖区间无效');
+    if (!Array.isArray(raw) || raw.length !== 2) throwValidation('covered', localizedErrorText`本拍覆盖区间无效`);
     const start = Number(raw[0]);
     const end = Number(raw[1]);
-    if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end <= start) throw new Error('本拍覆盖区间无效');
-    if (end - start > COURSE_VIDEO_MAX_HEARTBEAT_SPAN_SEC) throw new Error('本拍覆盖区间过长');
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end <= start) {
+        throwValidation('covered', localizedErrorText`本拍覆盖区间无效`);
+    }
+    if (end - start > COURSE_VIDEO_MAX_HEARTBEAT_SPAN_SEC) {
+        throwValidation('covered', localizedErrorText`本拍覆盖区间过长`);
+    }
     return [start, end];
 }
 
@@ -371,6 +386,12 @@ function rewriteList(
         copies.push({ from: video, to });
         return to;
     });
+}
+
+function assertCourseVideoCapacity(videos: CourseVideo[]): void {
+    if (videos.length > COURSE_VIDEO_MAX_PER_NODE) {
+        throwValidation('videos', localizedErrorText`该章节最多 ${COURSE_VIDEO_MAX_PER_NODE} 个视频`);
+    }
 }
 
 function extraSeekReason(attempts: number): HeartbeatResult['rejectedReason'] {

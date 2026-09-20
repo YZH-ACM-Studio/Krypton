@@ -23,19 +23,37 @@
 
 import { timingSafeEqual } from 'node:crypto';
 import { Logger } from '@hydrooj/utils';
-import { Handler } from '../service/server';
+import { CreateError as Err, HydroError, localizeError, UserFacingError } from '../error';
 import system from '../model/system';
+import type { Handler } from '../service/server';
 
 const logger = new Logger('service-token');
 
 /** Header inspected on incoming requests. Lower-cased to match koa normalization. */
 const HEADER = 'x-service-token';
 
-export class ServiceTokenError extends Error {
-    code = 401;
-    constructor(public reason: 'missing' | 'invalid' | 'no-accepted-list') {
-        super(`Service token ${reason}`);
-        this.name = 'ServiceTokenError';
+export type ServiceTokenRejectReason = 'missing' | 'invalid' | 'no-accepted-list';
+
+/** 401 UserFacingError so a bad Vigil/service token stays a 4xx envelope, not a 500 toast. */
+const ServiceTokenErrorBase = Err(
+    'ServiceTokenError',
+    UserFacingError,
+    function (this: HydroError) {
+        if (this.params[0] === 'missing') return 'Service token missing';
+        if (this.params[0] === 'invalid') return 'Service token invalid';
+        if (this.params[0] === 'no-accepted-list') return 'Service token no-accepted-list';
+        throw new TypeError('Unknown service-token rejection reason');
+    },
+    401,
+);
+
+export class ServiceTokenError extends ServiceTokenErrorBase {
+    constructor(public reason: ServiceTokenRejectReason) {
+        super(reason);
+        if (reason === 'missing') localizeError(this, 'Service token missing');
+        else if (reason === 'invalid') localizeError(this, 'Service token invalid');
+        else if (reason === 'no-accepted-list') localizeError(this, 'Service token no-accepted-list');
+        else throw new TypeError('Unknown service-token rejection reason');
     }
 }
 

@@ -1,5 +1,6 @@
 import type { Filter } from 'mongodb';
 import { Logger } from '@hydrooj/utils';
+import { ValidationError } from '../error';
 import type { ProblemDict } from '../interface';
 import problem, { type ProblemDoc } from '../model/problem';
 import { PROBLEM_ACL_INTERNAL_FIELDS, readContextViewableProblems } from '../model/problem-access';
@@ -10,10 +11,10 @@ const STABLE_VIEW_AUTHORIZATION_FIELDS = ['domainId', 'docId', 'owner', 'hidden'
 
 /** Normalize container JSON problem references without probing the problem table. */
 export function normalizeProblemDocIds(values: unknown): number[] {
-    if (!Array.isArray(values)) throw new TypeError('problem ids must be an array');
+    if (!Array.isArray(values)) throw new ValidationError('pids');
     const pids = values.map((value) => Number(value));
     if (!pids.every((pid) => Number.isSafeInteger(pid) && pid > 0)) {
-        throw new TypeError('problem ids must be positive numeric docIds');
+        throw new ValidationError('pids');
     }
     return Array.from(new Set(pids));
 }

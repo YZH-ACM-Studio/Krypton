@@ -21,7 +21,7 @@
  *   - Cancellation only CASes active, transition-free assignments; it cannot
  *      overwrite a concurrent admission or terminal confirmation.
  */
-import { localizeError, localizedErrorText, NotFoundError, ObjectId, PermissionError } from 'hydrooj';
+import { localizeError, localizedErrorText, ForbiddenError, NotFoundError, ObjectId, PermissionError, ValidationError } from 'hydrooj';
 import type { LocalizedErrorText } from 'hydrooj';
 import { userBindModel } from '@hydrooj/krypton-userbind';
 import { assignmentsColl, auditColl, gpltScoreColl, settingsColl, stayEventsColl, tasksColl } from './db';
@@ -175,7 +175,7 @@ async function assignTask(domainId: string, taskId: ObjectId, userId: number, as
     const task = await getTask(domainId, taskId);
     if (!task) throw taskNotFound();
     if (task.maxAssignments && task.currentAssignments >= task.maxAssignments) {
-        throw new Error('该任务认领数已满');
+        throw new ValidationError('tid', null, localizedErrorText`该任务认领数已满`);
     }
     const doc: TaskAssignmentDoc = {
         _id: new ObjectId(),
@@ -206,8 +206,10 @@ async function cancelAssignment(domainId: string, assignmentId: ObjectId, actorU
     const a = await assignmentsColl.findOne({ _id: assignmentId, domainId });
     if (!a) throw assignmentNotFound();
     if (a.userId !== actorUid) throw new PermissionError(localizedErrorText`无权操作`);
-    if (!a.canCancel) throw new Error('该任务由管理员分配，无法取消');
-    if (!['pending', 'qualified', 'admitted'].includes(a.status)) throw new Error('该状态的任务无法取消');
+    if (!a.canCancel) throw new ForbiddenError(localizedErrorText`该任务由管理员分配，无法取消`);
+    if (!['pending', 'qualified', 'admitted'].includes(a.status)) {
+        throw new ValidationError('aid', null, localizedErrorText`该状态的任务无法取消`);
+    }
     const result = await assignmentsColl.updateOne(
         {
             _id: assignmentId,
@@ -220,7 +222,7 @@ async function cancelAssignment(domainId: string, assignmentId: ObjectId, actorU
         },
         { $set: { status: 'cancelled' } },
     );
-    if (result.matchedCount !== 1) throw new Error('任务状态已变化，请刷新后重试');
+    if (result.matchedCount !== 1) throw new ValidationError('aid', null, localizedErrorText`任务状态已变化，请刷新后重试`);
     await tasksColl.updateOne({ _id: a.taskId, domainId }, { $inc: { currentAssignments: -1 } });
 }
 

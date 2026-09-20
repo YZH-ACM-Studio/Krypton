@@ -1,3 +1,4 @@
+import { ManagedProblemMetadataConflictError } from 'hydrooj/src/error';
 import type { PermitRole } from './types';
 
 export type PermitSourceType = 'direct' | 'contest';
@@ -107,12 +108,17 @@ export class AclMutationError extends Error {
     }
 }
 
-export class AclMutationConflictError extends AclMutationError {
+export class AclMutationConflictError extends ManagedProblemMetadataConflictError {
     status = 409;
 
-    constructor(pair: AclPair, requestId: string, activeRequestId: string) {
-        super(`ACL pair is fenced by request ${activeRequestId}; request ${requestId} cannot proceed`, pair, requestId);
+    constructor(
+        public readonly pair: AclPair,
+        public readonly requestId: string,
+        activeRequestId: string,
+    ) {
+        super(activeRequestId);
         this.name = 'AclMutationConflictError';
+        this.code = 409;
     }
 }
 
@@ -352,7 +358,7 @@ export function createAclCoordinator(repo: AclRepository, options: { now?: () =>
                     );
                 }
             }
-            if (error instanceof AclMutationError) throw error;
+            if (error instanceof AclMutationError || error instanceof AclMutationConflictError) throw error;
             throw new AclMutationError(`ACL mutation ${input.requestId} failed: ${errorText(error)}`, pair, input.requestId, { cause: error });
         }
     }

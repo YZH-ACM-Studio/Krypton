@@ -79,6 +79,12 @@ function stayValidation(reason: LocalizedErrorText): never {
     throw new ValidationError('studentId', null, reason);
 }
 
+function scalarBatchFailureReason(value: unknown): string {
+    if (typeof value !== 'string') throw new TypeError('Candidate-pool batch failure reason must be a string');
+    // Residual `{n}` tokens in interpolated params fail-close as unresolved placeholders.
+    return value.replace(/\{(\d+)\}/g, '[$1]');
+}
+
 function assertCanCreateTasks(user: { hasPerm(p: bigint): boolean; hasPriv(p: number): boolean }) {
     if (!canCreateTask(user)) throw new ForbiddenError();
 }
@@ -1094,7 +1100,8 @@ class AdminTasksCandidatesHandler extends Handler {
             return;
         }
         if (errors.length) {
-            throw new ValidationError('aids', null, localizedErrorText`候选池批量操作完成 ${ok} 项，失败 ${errors.length} 项：${errors[0].reason}`);
+            const reason = scalarBatchFailureReason(errors[0].reason);
+            throw new ValidationError('aids', null, localizedErrorText`候选池批量操作完成 ${ok} 项，失败 ${errors.length} 项：${reason}`);
         }
         this.response.redirect = this.url('admin_tasks_candidates', { tid });
     }

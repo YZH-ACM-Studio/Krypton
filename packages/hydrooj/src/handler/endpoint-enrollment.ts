@@ -1,6 +1,7 @@
 import { Logger } from '@hydrooj/utils';
 import { ObjectId } from 'mongodb';
 import { Context, Handler, OplogModel, param, PRIV, requireServiceToken, Types, ValidationError } from 'hydrooj';
+import { throwExamTeacherValidationError } from '../lib/exam-teacher-http-error';
 import {
     EndpointEnrollmentBatchDoc,
     EndpointEnrollmentError,
@@ -58,14 +59,30 @@ function enrollmentErrorStatus(reason: string): number {
     return 409;
 }
 
+function translate(error: unknown): never {
+    if (error instanceof EndpointEnrollmentError) {
+        logger.warn('Endpoint enrollment rejected reason=%s', error.reason);
+        throwExamTeacherValidationError('endpointEnrollment', error.reason);
+    }
+    if (error instanceof TypeError) {
+        logger.warn('Endpoint enrollment rejected reason=%s', error.message);
+        throwExamTeacherValidationError('endpointEnrollment', error.message);
+    }
+    throw error;
+}
+
 class EndpointEnrollmentAdminHandler extends Handler {
     async prepare() {
         this.checkPriv(PRIV.PRIV_EDIT_SYSTEM);
     }
 
     async get() {
-        const batches = await endpointEnrollmentBatchService.list(this.domain._id, 200);
-        this.response.body = { batches: batches.map(serializeBatch) };
+        try {
+            const batches = await endpointEnrollmentBatchService.list(this.domain._id, 200);
+            this.response.body = { batches: batches.map(serializeBatch) };
+        } catch (error) {
+            translate(error);
+        }
     }
 
     @param('expiresAt', Types.String)
@@ -93,8 +110,7 @@ class EndpointEnrollmentAdminHandler extends Handler {
                 warning: 'This enrollment code is shown only in this response.',
             };
         } catch (error) {
-            if (!(error instanceof EndpointEnrollmentError)) throw error;
-            throw new ValidationError('endpointEnrollment', null, error.reason);
+            translate(error);
         }
     }
 }
@@ -119,8 +135,7 @@ class EndpointEnrollmentBatchRevokeHandler extends Handler {
             });
             this.response.body = { batch: serializeBatch(batch) };
         } catch (error) {
-            if (!(error instanceof EndpointEnrollmentError)) throw error;
-            throw new ValidationError('endpointEnrollment', null, error.reason);
+            translate(error);
         }
     }
 }

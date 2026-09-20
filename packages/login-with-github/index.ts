@@ -49,12 +49,15 @@ export default class LoginWithGithubService extends Service {
                     })
                     .set('accept', 'application/json');
                 if (res.body.error) {
+                    const error = typeof res.body.error === 'string' ? res.body.error : '';
+                    const description = typeof res.body.error_description === 'string' ? res.body.error_description : '';
+                    const uri = typeof res.body.error_uri === 'string' ? res.body.error_uri : '';
                     throw localizeError(
-                        new UserFacingError(res.body.error, res.body.error_description, res.body.error_uri),
+                        new UserFacingError(error, description, uri),
                         'External service returned an error: {0}. {1} {2}',
-                        res.body.error,
-                        res.body.error_description || '',
-                        res.body.error_uri || '',
+                        error,
+                        description,
+                        uri,
                     );
                 }
                 const t = res.body.access_token;
@@ -77,7 +80,8 @@ export default class LoginWithGithubService extends Service {
                         .set('Accept', 'application/vnd.github.v3+json')
                         .set('Authorization', `token ${t}`);
                     if (emailInfo.body.length) {
-                        ret.email = emailInfo.body.find((e) => e.primary && e.verified).email;
+                        const verified = emailInfo.body.find((e) => e.primary && e.verified);
+                        if (verified) ret.email = verified.email;
                     }
                 }
                 await TokenModel.del(s._id, TokenModel.TYPE_OAUTH);

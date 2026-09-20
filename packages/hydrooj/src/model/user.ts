@@ -406,7 +406,7 @@ class UserModel {
                         uid++;
                         continue;
                     }
-                    throw new UserAlreadyExistError(Object.values(e?.keyValue || {}));
+                    throw new UserAlreadyExistError(uniq(Object.values(e?.keyValue || {})).join(', ') || uname);
                 }
                 throw e;
             }

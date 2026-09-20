@@ -4,6 +4,7 @@ import {
     examTeacherError,
     examTeacherErrorEn,
     examTeacherErrorZh,
+    examTeacherExactZh,
     examTeacherFieldLabel,
     EXAM_TEACHER_UNKNOWN_ERROR_ZH,
 } from '../exam-teacher-errors';
@@ -17,6 +18,10 @@ describe('exam teacher error copy', () => {
         expect(examTeacherFieldLabel('examNetwork')).to.equal('考试网络');
         expect(examTeacherFieldLabel('examNetworkExecution')).to.equal('考试网络');
         expect(examTeacherFieldLabel('eventId')).to.equal('考试活动');
+        expect(examTeacherFieldLabel('endpointEnrollment')).to.equal('终端入网');
+        expect(examTeacherFieldLabel('endpointSeatBinding')).to.equal('座位绑定');
+        expect(examTeacherFieldLabel('seatOperationalProfile')).to.equal('座位运行档案');
+        expect(examTeacherFieldLabel('examClassroom')).to.equal('教室');
     });
 
     it('returns complete Chinese sentences for teacher-facing reasons', () => {
@@ -52,6 +57,18 @@ describe('exam teacher error copy', () => {
         expect(unknown.zh).not.to.match(/未知诊断/);
         expect(examTeacherErrorEn('totally_unknown_exam_reason')).not.to.match(/totally_unknown_exam_reason/);
         expect(examTeacherErrorZh('totally_unknown_exam_reason')).to.equal('操作无法完成，请重试或联系管理员。');
+        expect(examTeacherExactZh('totally_unknown_exam_reason')).to.equal(null);
+    });
+
+    it('maps classroom_unavailable to an exact catalog sentence', () => {
+        const zh = '教室数据暂不可用，请检查教室布局后再继续。';
+        const en = 'Classroom data is temporarily unavailable. Check the classroom layout and try again.';
+        expect(examTeacherExactZh('classroom_unavailable')).to.equal(zh);
+        expect(examTeacherErrorZh('classroom_unavailable')).to.equal(zh);
+        expect(examTeacherErrorEn('classroom_unavailable')).to.equal(en);
+        expect(examTeacherError('classroom_unavailable')).to.deep.equal({ zh, en });
+        expect(examTeacherErrorZh('classroom_unavailable')).not.to.equal(EXAM_TEACHER_UNKNOWN_ERROR_ZH);
+        expect(examTeacherErrorZh('classroom_unavailable')).not.to.match(/classroom_unavailable|_/);
     });
 
     it('keeps existing catalog sentences when page labels diverge', () => {

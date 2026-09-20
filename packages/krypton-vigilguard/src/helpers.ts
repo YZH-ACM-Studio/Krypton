@@ -9,6 +9,7 @@
  *     `vigil.client_sessions` lives here.
  */
 import type { ObjectId, Tdoc } from 'hydrooj';
+import { ContestTeamConflictError } from 'hydrooj/src/error';
 import * as contest from 'hydrooj/src/model/contest';
 import { clientSessionsColl } from './db';
 import type { ClientSessionDoc } from './types';
@@ -106,7 +107,7 @@ export async function assertActiveTeamSubmissionSession(
         !session.teamId?.equals(teamId) ||
         session.capabilities?.canSubmit !== true
     ) {
-        throw new Error('An active captain Vigil session is required for team submission.');
+        throw new ContestTeamConflictError('active_vigil_captain_session_required');
     }
     return session;
 }
@@ -135,7 +136,7 @@ export async function assertActiveTeamVirtualPrintSession(
         session.capabilities?.canUseVirtualPrint !== true ||
         !session.clientVersion
     ) {
-        throw new Error('An active captain Vigil session with virtual-print capability is required.');
+        throw new ContestTeamConflictError('active_vigil_captain_session_required');
     }
     return session;
 }

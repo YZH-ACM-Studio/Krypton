@@ -1,6 +1,8 @@
 import { expect } from 'chai';
 import { beforeEach, describe, it } from 'node:test';
 import { ObjectId } from 'mongodb';
+import { UserFacingError } from '@hydrooj/framework';
+import { ContestTeamConflictError } from '../src/error';
 import { buildVigilContestRoleResolution } from '../src/model/vigil-contest-role';
 
 const Module = require('module');
@@ -119,16 +121,21 @@ beforeEach(() => {
     sessions.length = 0;
 });
 
+function expectCaptainSessionRequired(error: any) {
+    expect(error).to.be.instanceOf(ContestTeamConflictError);
+    expect(error).to.be.instanceOf(UserFacingError);
+    expect(error.code).to.equal(409);
+    expect(error.params).to.deep.equal(['active_vigil_captain_session_required']);
+}
+
 async function rejectsActiveSession(work: Promise<unknown>) {
     const error: any = await work.catch((caught) => caught);
-    expect(error).to.be.instanceOf(Error);
-    expect(error.message).to.include('active captain Vigil session');
+    expectCaptainSessionRequired(error);
 }
 
 async function rejectsVirtualPrintSession(work: Promise<unknown>) {
     const error: any = await work.catch((caught) => caught);
-    expect(error).to.be.instanceOf(Error);
-    expect(error.message).to.include('virtual-print capability');
+    expectCaptainSessionRequired(error);
 }
 
 describe('P1.15 authoritative team client sessions', () => {

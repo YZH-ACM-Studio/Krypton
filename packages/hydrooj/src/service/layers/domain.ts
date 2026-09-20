@@ -1,4 +1,4 @@
-import { localizeError, KoaContext, NotFoundError } from '@hydrooj/framework';
+import { localizeError, KoaContext, ForbiddenError, NotFoundError } from '@hydrooj/framework';
 import BlackListModel from '../../model/blacklist';
 import DomainModel from '../../model/domain';
 import system from '../../model/system';
@@ -17,10 +17,7 @@ export default async (ctx: KoaContext, next) => {
         forceDomain ? Promise.resolve(null) : DomainModel.getByHost(host),
         BlackListModel.get(`ip::${ip}`),
     ]);
-    if (bdoc) {
-        ctx.body = 'blacklisted'; // Just return 404 if blacklisted
-        return;
-    }
+    if (bdoc) throw new ForbiddenError();
     ctx.domainId = inferDomain?._id || domainId;
     ctx.domainInfo = inferDomain || absoluteDomain;
     if (ctx.domainInfo && ctx.domainId !== ctx.domainInfo._id) ctx.redirect(ctx.originalPath.replace(/^\/d\/[^/]+\//, `/d/${ctx.domainInfo._id}/`));

@@ -67,6 +67,7 @@ import {
     previewLegacyProgrammingStatement,
     programmingStatementClientView,
     programmingStatementLimits,
+    ProgrammingStatementValidationError,
 } from '../lib/programming-statement';
 import { parseStoredProblemReactions } from '../lib/problem-reaction';
 import { resolveProblemKnowledgeNodeIds } from '../lib/problem-tag-canonical';
@@ -2024,6 +2025,14 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
                     this.pdoc.structureRevision ?? '-',
                     error,
                 );
+                if (error instanceof ProgrammingStatementValidationError) {
+                    throw localizeErrorParameter(
+                        new ValidationError(error.field, null, error.message),
+                        2,
+                        error.localizedMessage.template,
+                        ...error.localizedMessage.params,
+                    );
+                }
                 throw error;
             }
         } else {

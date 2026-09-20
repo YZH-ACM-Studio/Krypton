@@ -118,7 +118,15 @@ export class StorageHandler extends Handler {
     async get({}, target: string, filename = '', expire: number, secret: string) {
         if (expire < Date.now()) throw new AccessDeniedError();
         if (!(await this.ctx.get('storage')?.isLinkValid?.(`${target}/${expire}/${secret}`))) throw new AccessDeniedError();
-        this.response.body = await storage.get(target);
+        try {
+            this.response.body = await storage.get(target);
+        } catch (e) {
+            const message = typeof e?.message === 'string' ? e.message : '';
+            if (message.includes('Invalid path') || message.startsWith('File not found:')) {
+                throw localizeError(new NotFoundError(target), 'Resource {0} not found.', target);
+            }
+            throw e;
+        }
         this.response.type = target.endsWith('.out') || target.endsWith('.ans') ? 'text/plain' : lookup(target) || 'application/octet-stream';
         if (filename) this.response.disposition = `attachment; filename="${encodeRFC5987ValueChars(filename)}"`;
     }

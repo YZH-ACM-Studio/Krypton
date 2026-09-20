@@ -4,6 +4,7 @@ import {
     ConnectionHandler,
     createEarlyErrorBoundary,
     dispatchWebSocketMessage,
+    ErrorMessageResolutionError,
     fitWebSocketCloseReason,
     Handler,
     localizeError,
@@ -134,19 +135,74 @@ describe('P2.44 shared error transport resolver', () => {
     it('fails closed with one trace ID when a user-facing descriptor cannot be resolved', () => {
         const error = localizeError(new UserFacingError('value'), 'Missing catalog entry {0}', 'value');
         const result = resolve(error);
+        const serialized = JSON.stringify(result.error);
+
+        assert.equal(result.status, 400);
+        assert.equal(result.template, 'error.html');
+        assert.equal(result.userFacing, true);
+        assert.equal(result.traceId, 'error-transport-test');
+        assert.equal(result.error.name, 'UserFacingError');
+        assert.equal(result.error.errorCode, 'UserFacingError');
+        assert.equal(result.error.status, 400);
+        assert.deepEqual(result.error.params, ['value']);
+        assert.equal(result.error.message, 'Missing catalog entry value');
+        assert.doesNotMatch(result.error.message, /未预期错误|错误编号/);
+        const diagnostic = result.internalError;
+        assert.ok(diagnostic instanceof ErrorMessageResolutionError);
+        assert.equal(diagnostic.reason, 'missing_translation');
+        assert.match(serialized, /Missing catalog entry value/);
+        assert.doesNotMatch(serialized, /stack|Error:/);
+    });
+
+    it('interpolates nested source templates when a child translation is missing', () => {
+        const child = localizeError(new NotFoundError('P1000'), 'Missing child {0}', 'P1000');
+        const parent = localizeError(new UserFacingError(child), 'Access denied: {0}', child);
+        const result = resolve(parent);
+
+        assert.equal(result.status, 400);
+        assert.equal(result.template, 'error.html');
+        assert.equal(result.userFacing, true);
+        assert.equal(result.error.name, 'UserFacingError');
+        assert.equal(result.error.message, '访问被拒绝：Missing child P1000');
+        assert.equal(result.error.nested?.[0]?.name, 'NotFoundError');
+        assert.equal(result.error.nested?.[0]?.status, 404);
+        assert.equal(result.error.nested?.[0]?.message, 'Missing child P1000');
+        assert.equal(result.traceId, 'error-transport-test');
+        assert.equal(result.internalError?.name, 'ErrorMessageResolutionError');
+        assert.doesNotMatch(result.error.message, /未预期错误|错误编号/);
+        assert.doesNotMatch(JSON.stringify(result.error), /stack|Error:/);
+    });
+
+    it('keeps 4xx identity when a scalar parameter contains placeholder-looking braces', () => {
+        const path = '/d/{0}/problem';
+        const error = localizeError(new NotFoundError(path), 'Resource {0} not found.', path);
+        const result = resolve(error);
+
+        assert.equal(result.status, 404);
+        assert.equal(result.template, 'error.html');
+        assert.equal(result.userFacing, true);
+        assert.equal(result.error.name, 'NotFoundError');
+        assert.deepEqual(result.error.params, [path]);
+        assert.equal(result.error.message, '资源 /d/{0}/problem 不存在。');
+        assert.equal(result.internalError, undefined);
+        assert.doesNotMatch(result.error.message, /未预期错误|错误编号/);
+    });
+
+    it('fails closed with a 500 when a user-facing placeholder is not a scalar', () => {
+        const error = localizeError(new NotFoundError({ pid: 'P1' }), 'Problem {0} not found.', { pid: 'P1' });
+        const result = resolve(error);
+        const serialized = JSON.stringify(result.error);
 
         assert.equal(result.status, 500);
         assert.equal(result.template, 'bsod.html');
         assert.equal(result.userFacing, false);
         assert.equal(result.traceId, 'error-transport-test');
-        assert.equal(result.error.traceId, 'error-transport-test');
         assert.equal(result.error.name, 'SystemError');
-        assert.equal(result.error.errorCode, 'SystemError');
-        assert.equal(result.error.status, 500);
-        assert.deepEqual(result.error.params, []);
         assert.equal(result.error.message, '服务器发生了未预期错误。错误编号：error-transport-test');
-        assert.equal(result.internalError?.name, 'ErrorMessageResolutionError');
-        assert.doesNotMatch(JSON.stringify(result.error), /Missing catalog entry|value|\{\d+\}/);
+        const diagnostic = result.internalError;
+        assert.ok(diagnostic instanceof ErrorMessageResolutionError);
+        assert.equal(diagnostic.reason, 'invalid_parameter');
+        assert.doesNotMatch(serialized, /P1|pid|stack|Error:/);
     });
 
     it('returns a safe traceable 500 without leaking an unexpected error or stack', () => {
@@ -273,7 +329,7 @@ describe('P2.44 framework HTTP and WebSocket boundaries', () => {
 
         assert.deepEqual(payloads, []);
         assert.equal(failures.length, 2);
-        assert.equal(failures[0].name, 'SyntaxError');
+        assert.equal(failures[0].name, 'BadRequestError');
         assert.equal(failures[1].name, 'NotFoundError');
     });
 });
@@ -386,7 +442,7 @@ describe('P2.44 outer HTTP response boundary', () => {
         assert.match(String(logs[0][0]), /error-transport-test/);
     });
 
-    it('turns an error-page renderer failure into a safe traceable 500', async () => {
+    it('keeps a resolved 4xx message when error-page rendering fails', async () => {
         const logs: unknown[][] = [];
         const layer = baseLayer({ error: (...values: unknown[]) => logs.push(values) }, null, null);
         const context = fakeKoaContext('text/html');
@@ -403,11 +459,11 @@ describe('P2.44 outer HTTP response boundary', () => {
             throw userFacingError();
         });
 
-        assert.equal(context.response.status, 500);
+        assert.equal(context.response.status, 404);
         assert.equal(context.response.type, 'text/plain');
-        assert.equal(context.body, '服务器发生了未预期错误。错误编号：error-transport-test');
-        assert.ok(logs.some((entry) => String(entry[0]).includes('error-transport-test')));
-        assert.doesNotMatch(String(context.body), /secret|template path/);
+        assert.equal(context.body, '题目 P1000 不存在。');
+        assert.ok(logs.length >= 1);
+        assert.doesNotMatch(String(context.body), /secret|template path|未预期错误|错误编号/);
     });
 });
 

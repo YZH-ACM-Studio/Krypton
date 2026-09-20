@@ -6,6 +6,7 @@ import Schema from 'schemastery';
 import { randomstring } from '@hydrooj/utils';
 import type { Context } from '../context';
 import {
+    localizeError,
     localizedErrorText,
     AuthOperationError,
     BadRequestError,
@@ -14,7 +15,7 @@ import {
     ForbiddenError,
     InvalidTokenError,
     NotFoundError,
-    SystemError,
+    SendMailError,
     UserAlreadyExistError,
     UserFacingError,
     UserNotFoundError,
@@ -345,8 +346,9 @@ class UserRegisterWithCodeHandler extends Handler {
     @param('uname', Types.Username, true)
     @param('code', Types.String)
     async post(domainId: string, password: string, verify: string, uname = '', code: string) {
+        const providerName = String(this.tdoc.identity.provider);
         const provider = this.ctx.oauth.providers[this.tdoc.identity.provider];
-        if (!provider) throw new SystemError(`OAuth provider ${this.tdoc.identity.provider} not found`);
+        if (!provider) throw localizeError(new NotFoundError(providerName), 'Resource {0} not found.', providerName);
         if (provider.lockUsername) uname = this.tdoc.identity.username;
         if (!Types.Username[1](uname)) throw new ValidationError('uname');
         if (password !== verify) throw new VerifyPasswordError();
@@ -377,7 +379,7 @@ class UserLostPassHandler extends Handler {
 
     @param('mail', Types.Email)
     async post(domainId: string, mail: string) {
-        if (!system.get('smtp.user')) throw new SystemError('Cannot send mail');
+        if (!system.get('smtp.user')) throw new SendMailError(mail, 'SMTP unconfigured');
         const udoc = await user.getByEmail('system', mail);
         if (!udoc) throw new UserNotFoundError(mail);
         await Promise.all([this.limitRate('send_mail', 3600, 30), this.limitRate('send_mail', 60, 1, mail), oplog.log(this, 'user.lostpass', {})]);

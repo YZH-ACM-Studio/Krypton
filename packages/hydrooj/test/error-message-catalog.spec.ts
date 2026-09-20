@@ -44,7 +44,15 @@ import { examTeacherCatalogTranslations } from '@hydrooj/common';
 import { getProblemConfigErrorText, validateStructuredCodeTemplate } from '../src/lib/problem-config';
 
 const workspaceRoot = process.cwd();
-const canonicalFiles = ['framework/framework/error.ts', 'packages/hydrooj/src/error.ts', 'packages/hydrooj/src/lib/auth-token.ts'] as const;
+const canonicalFiles = [
+    'framework/framework/error.ts',
+    'packages/hydrooj/src/error.ts',
+    'packages/hydrooj/src/lib/auth-token.ts',
+    'packages/krypton-collect/src/errors.ts',
+    'packages/krypton-admin-dropbox/src/errors.ts',
+    'packages/krypton-userbind/src/errors.ts',
+    'packages/krypton-mindmap/src/error.ts',
+] as const;
 const userFacingConstructors = new Map([
     ['ValidationError', 2],
     ['BadRequestError', 0],
@@ -62,6 +70,36 @@ function placeholderIndexes(template: string): number[] {
     return [...template.matchAll(/\{(0|[1-9]\d*)\}/g)].map((match) => Number(match[1])).sort((a, b) => a - b);
 }
 
+function expressionTemplateLiterals(expression: ts.Expression): ts.StringLiteralLike[] {
+    if (ts.isStringLiteralLike(expression)) return [expression];
+    if (ts.isParenthesizedExpression(expression) || ts.isAsExpression(expression) || ts.isTypeAssertionExpression(expression)) {
+        return expressionTemplateLiterals(expression.expression);
+    }
+    if (ts.isConditionalExpression(expression)) {
+        return [...expressionTemplateLiterals(expression.whenTrue), ...expressionTemplateLiterals(expression.whenFalse)];
+    }
+    if (ts.isBinaryExpression(expression) && [ts.SyntaxKind.BarBarToken, ts.SyntaxKind.QuestionQuestionToken].includes(expression.operatorToken.kind)) {
+        return [...expressionTemplateLiterals(expression.left), ...expressionTemplateLiterals(expression.right)];
+    }
+    if (ts.isCallExpression(expression)) {
+        return expression.arguments.flatMap((argument) => (ts.isSpreadElement(argument) ? [] : expressionTemplateLiterals(argument)));
+    }
+    return [];
+}
+
+function classMessageTemplateLiterals(argument: ts.Expression): ts.StringLiteralLike[] {
+    if (ts.isStringLiteralLike(argument)) return [argument];
+    if (!ts.isFunctionExpression(argument) && !ts.isArrowFunction(argument)) return [];
+    const found: ts.StringLiteralLike[] = [];
+    if (ts.isExpression(argument.body)) found.push(...expressionTemplateLiterals(argument.body));
+    const findReturns = (child: ts.Node) => {
+        if (ts.isReturnStatement(child) && child.expression) found.push(...expressionTemplateLiterals(child.expression));
+        ts.forEachChild(child, findReturns);
+    };
+    findReturns(argument);
+    return found;
+}
+
 function canonicalTemplates(): Array<{ file: string; line: number; template: string }> {
     const result: Array<{ file: string; line: number; template: string }> = [];
     for (const file of canonicalFiles) {
@@ -76,15 +114,11 @@ function canonicalTemplates(): Array<{ file: string; line: number; template: str
         };
         const walk = (node: ts.Node) => {
             if (ts.isCallExpression(node) && ['Err', 'CreateError'].includes(node.expression.getText(sourceFile))) {
+                // Skip name (machine code) and parent class; only message templates and msg() fallbacks.
                 for (const argument of node.arguments.slice(2)) {
-                    if (ts.isStringLiteralLike(argument)) add(argument);
-                    const findReturns = (child: ts.Node) => {
-                        if (ts.isReturnStatement(child) && child.expression && ts.isStringLiteralLike(child.expression)) {
-                            add(child.expression);
-                        }
-                        ts.forEachChild(child, findReturns);
-                    };
-                    if (ts.isFunctionExpression(argument) || ts.isArrowFunction(argument)) findReturns(argument);
+                    if (ts.isExpression(argument)) {
+                        for (const literal of classMessageTemplateLiterals(argument)) add(literal);
+                    }
                 }
             }
             ts.forEachChild(node, walk);
@@ -110,23 +144,18 @@ function canonicalConstructorRequirements(): Map<string, number> {
                 let requiredArguments = 0;
                 let hasDeterministicTemplate = false;
                 for (const argument of node.initializer.arguments.slice(2)) {
-                    if (ts.isStringLiteralLike(argument)) {
+                    if (!ts.isExpression(argument)) continue;
+                    const templates = classMessageTemplateLiterals(argument);
+                    if (ts.isStringLiteralLike(argument) && templates.length) {
                         hasDeterministicTemplate = true;
                         for (const index of placeholderIndexes(argument.text)) {
                             requiredArguments = Math.max(requiredArguments, index + 1);
                         }
                     }
-                    const returnedRequirements: number[] = [];
-                    const findReturns = (child: ts.Node) => {
-                        if (ts.isReturnStatement(child) && child.expression && ts.isStringLiteralLike(child.expression)) {
-                            returnedRequirements.push(
-                                placeholderIndexes(child.expression.text).reduce((maximum, index) => Math.max(maximum, index + 1), 0),
-                            );
-                        }
-                        ts.forEachChild(child, findReturns);
-                    };
                     if (ts.isFunctionExpression(argument) || ts.isArrowFunction(argument)) {
-                        findReturns(argument);
+                        const returnedRequirements = templates.map((literal) =>
+                            placeholderIndexes(literal.text).reduce((maximum, index) => Math.max(maximum, index + 1), 0),
+                        );
                         if (returnedRequirements.length && new Set(returnedRequirements).size === 1) {
                             hasDeterministicTemplate = true;
                             requiredArguments = Math.max(requiredArguments, returnedRequirements[0]);
@@ -647,8 +676,16 @@ function uiDefaultLocalErrorTemplates(): {
 
 describe('P2.43 error message catalog', () => {
     it('classifies every canonical user-facing template without broad exceptions', () => {
-        const unclassified = canonicalTemplates().filter(
-            ({ template }) => !(template in ERROR_MESSAGE_TRANSLATIONS) && !(template in ERROR_MESSAGE_CLASSIFICATIONS),
+        const templates = canonicalTemplates();
+        const forbiddenBarePlaceholder = templates.filter(({ template }) => template === '{0}');
+        assert.deepEqual(
+            forbiddenBarePlaceholder,
+            [],
+            forbiddenBarePlaceholder.map(({ file, line }) => `${file}:${line} {0} as a class template is forbidden`).join('\n'),
+        );
+        const unclassified = templates.filter(
+            ({ template }) =>
+                template !== '{0}' && !(template in ERROR_MESSAGE_TRANSLATIONS) && !(template in ERROR_MESSAGE_CLASSIFICATIONS),
         );
         assert.deepEqual(unclassified, [], unclassified.map(({ file, line, template }) => `${file}:${line} ${JSON.stringify(template)}`).join('\n'));
         assert.deepEqual(ERROR_MESSAGE_CLASSIFICATIONS.SystemError, {
@@ -1161,10 +1198,15 @@ describe('P2.43 error message catalog', () => {
         );
 
         const announcementSource = readFileSync(resolve(workspaceRoot, 'packages/krypton-announcement/src/handler.ts'), 'utf8');
-        assert.match(announcementSource, /if \(!aid\) throw new Error\('aid required'\);/);
-        assert.match(announcementSource, /if \(!key \|\| !name \|\| !color\) throw new Error\('key\/name\/color required'\);/);
+        assert.match(announcementSource, /if \(!aid\) throw new ValidationError\('aid'\);/);
+        assert.match(announcementSource, /if \(!key \|\| !name \|\| !color\) throw new ValidationError\('key'\);/);
+        assert.doesNotMatch(announcementSource, /throw new Error\('aid required'\)/);
+        assert.doesNotMatch(announcementSource, /throw new Error\('key\/name\/color required'\)/);
 
         const taskSource = readFileSync(resolve(workspaceRoot, 'packages/krypton-tasks/src/model.ts'), 'utf8');
+        assert.match(taskSource, /throw new ValidationError\('tid', null, localizedErrorText`该任务认领数已满`\);/);
+        assert.match(taskSource, /throw new ForbiddenError\(localizedErrorText`该任务由管理员分配，无法取消`\);/);
+        assert.match(taskSource, /throw new ValidationError\('aid', null, localizedErrorText`该状态的任务无法取消`\);/);
         for (const message of [
             '该任务认领数已满',
             '该任务由管理员分配，无法取消',
@@ -1172,7 +1214,7 @@ describe('P2.43 error message catalog', () => {
             '该任务非配额模式，无需 admit',
             '该任务非配额模式，无需 confirm',
         ]) {
-            assert.match(taskSource, new RegExp(`throw new Error\\('${message}'\\)`));
+            assert.doesNotMatch(taskSource, new RegExp(`throw new Error\\('${message}'\\)`));
         }
     });
 

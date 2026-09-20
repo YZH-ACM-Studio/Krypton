@@ -133,7 +133,7 @@ class FpsProblemImportHandler extends Handler {
             const result = await xml2js.parseStringPromise(content);
             tasks.push(result);
         } catch (e) {
-            if (e instanceof FileTooLargeError) throw e;
+            if (e instanceof ValidationError) throw e;
             console.log(e);
             const zip = new Zip.ZipReader(Readable.toWeb(fs.createReadStream(file.filepath)));
             let entries: Zip.Entry[];
@@ -149,7 +149,17 @@ class FpsProblemImportHandler extends Handler {
                     const content = entry.getData(new Zip.TextWriter());
                     const result = await xml2js.parseStringPromise(content);
                     tasks.push(result);
-                } catch {}
+                } catch (err) {
+                    if (err instanceof ValidationError) throw err;
+                    if (err instanceof Error && err.message === 'CANT_EXTRACT_FILE') {
+                        throw localizeErrorParameter(
+                            new ValidationError('zip', null, err.message),
+                            2,
+                            'Unable to read the archive: {0}',
+                            err.message,
+                        );
+                    }
+                }
             }
         }
         if (!tasks.length) throw new ValidationError('file', null, localizedErrorText`No valid fps format file found`);

@@ -6,6 +6,10 @@ export const EXAM_TEACHER_FIELD_LABELS = Object.freeze({
     examNetwork: '考试网络',
     examNetworkExecution: '考试网络',
     eventId: '考试活动',
+    endpointEnrollment: '终端入网',
+    endpointSeatBinding: '座位绑定',
+    seatOperationalProfile: '座位运行档案',
+    examClassroom: '教室',
 });
 
 export type ExamTeacherField = keyof typeof EXAM_TEACHER_FIELD_LABELS;
@@ -274,6 +278,7 @@ const EXAM_TEACHER_ERROR_ENTRIES: Readonly<Record<string, ExamTeacherErrorText>>
     contest_not_enterable: CONTEST_NOT_ENTERABLE,
     classroom_school_mismatch: SCHOOL_MISMATCH,
     classroom_not_found: { zh: '教室不存在。', en: 'The classroom does not exist.' },
+    classroom_unavailable: { zh: '教室数据暂不可用，请检查教室布局后再继续。', en: 'Classroom data is temporarily unavailable. Check the classroom layout and try again.' },
     seat_plan_v2_writer_required: V2_WRITER_REQUIRED,
     seat_plan_revision_conflict: REVISION_CONFLICT,
     seat_plan_classroom_missing: { zh: '座位计划引用的教室不存在。', en: 'A classroom referenced by the seat plan does not exist.' },

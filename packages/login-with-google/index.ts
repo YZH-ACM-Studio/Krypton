@@ -1,4 +1,4 @@
-import { localizeError, Context, Handler, Schema, Service, superagent, SystemModel, TokenModel, UserFacingError } from 'hydrooj';
+import { localizeError, localizedErrorText, Context, ForbiddenError, Handler, Schema, Service, superagent, SystemModel, TokenModel, UserFacingError } from 'hydrooj';
 
 function unescapedString(escapedString: string) {
     escapedString += Array.from({ length: 5 - (escapedString.length % 4) }).join('=');
@@ -7,7 +7,7 @@ function unescapedString(escapedString: string) {
 
 function decodeJWT(idToken: string) {
     const token = idToken.split('.');
-    if (token.length !== 3) throw new Error('Invalid idToken');
+    if (token.length !== 3) throw new ForbiddenError(localizedErrorText`Invalid idToken`);
     try {
         const headerSegment = JSON.parse(Buffer.from(token[0], 'base64').toString('utf8'));
         const payloadSegment = JSON.parse(Buffer.from(token[1], 'base64').toString('utf8'));
@@ -19,7 +19,7 @@ function decodeJWT(idToken: string) {
             signature,
         };
     } catch (e) {
-        throw new Error('Invalid payload');
+        throw new ForbiddenError(localizedErrorText`Invalid payload`);
     }
 }
 
@@ -39,7 +39,11 @@ export default class GoogleOAuthService extends Service {
             name: 'Google',
             canRegister: config.canRegister,
             callback: async function callback(this: Handler, { state, code, error }) {
-                if (error) throw localizeError(new UserFacingError(error), 'External service returned an error: {0}', error);
+                if (error) {
+                    const raw = Array.isArray(error) ? error[0] : error;
+                    const errorText = typeof raw === 'string' ? raw : '';
+                    throw localizeError(new UserFacingError(errorText), 'External service returned an error: {0}', errorText);
+                }
                 const [url, s] = await Promise.all([SystemModel.get('server.url'), TokenModel.get(state, TokenModel.TYPE_OAUTH)]);
                 const res = await superagent.post('https://oauth2.googleapis.com/token').send({
                     client_id: config.id,

@@ -198,7 +198,28 @@ function scalarParameter(value: unknown): string | null {
     return null;
 }
 
+type MissingTranslationPolicy = 'fail' | 'use_source';
+
+const LITERAL_BRACE_OPEN = '\uE000';
+const LITERAL_BRACE_CLOSE = '\uE001';
+
+function escapePlaceholderLiterals(value: string): string {
+    return value.replace(/\{/g, LITERAL_BRACE_OPEN).replace(/\}/g, LITERAL_BRACE_CLOSE);
+}
+
+function unescapePlaceholderLiterals(value: string): string {
+    return value.split(LITERAL_BRACE_OPEN).join('{').split(LITERAL_BRACE_CLOSE).join('}');
+}
+
 export function resolveErrorMessage(descriptor: ErrorMessageDescriptor, options: ResolveErrorMessageOptions): ResolvedErrorMessage {
+    return resolveErrorMessageInternal(descriptor, options, 'fail');
+}
+
+function resolveErrorMessageInternal(
+    descriptor: ErrorMessageDescriptor,
+    options: ResolveErrorMessageOptions,
+    missingTranslation: MissingTranslationPolicy,
+): ResolvedErrorMessage {
     const locale = normalizeLocale(options.locale, 'locale');
     let traceId: string | undefined;
     const parameterTypes = Array.isArray(descriptor?.params) ? descriptor.params.map(describeParameter) : [];
@@ -252,6 +273,20 @@ export function resolveErrorMessage(descriptor: ErrorMessageDescriptor, options:
         return indexes;
     };
 
+    const interpolate = (template: string, params: Record<number, string>): string => {
+        const escaped: Record<number, string> = {};
+        for (const [key, value] of Object.entries(params)) {
+            escaped[Number(key)] = escapePlaceholderLiterals(value);
+        }
+        const interpolated = template.replace(/\{\d+\}/g, (token) => {
+            const value = escaped[Number(token.slice(1, -1))];
+            if (value === undefined) fail('unresolved_placeholder');
+            return value;
+        });
+        if (RESIDUAL_PLACEHOLDER_PATTERN.test(interpolated)) fail('unresolved_placeholder');
+        return unescapePlaceholderLiterals(interpolated);
+    };
+
     const sourceIndexes = parseIndexes(descriptor.template);
     let localizedTemplate: string | null | undefined;
     try {
@@ -259,7 +294,10 @@ export function resolveErrorMessage(descriptor: ErrorMessageDescriptor, options:
     } catch (error) {
         fail('translation_lookup_failed', error);
     }
-    if (typeof localizedTemplate !== 'string' || !localizedTemplate) fail('missing_translation');
+    if (typeof localizedTemplate !== 'string' || !localizedTemplate) {
+        if (missingTranslation !== 'use_source') fail('missing_translation');
+        localizedTemplate = descriptor.template;
+    }
     const localizedIndexes = parseIndexes(localizedTemplate);
     if (!sameIndexes(sourceIndexes, localizedIndexes)) fail('placeholder_mismatch');
 
@@ -292,8 +330,7 @@ export function resolveErrorMessage(descriptor: ErrorMessageDescriptor, options:
         displayParams[index] = scalar;
     }
 
-    const message = localizedTemplate.replace(/\{\d+\}/g, (token) => displayParams[Number(token.slice(1, -1))]);
-    if (RESIDUAL_PLACEHOLDER_PATTERN.test(message)) fail('unresolved_placeholder');
+    const message = interpolate(localizedTemplate, displayParams);
 
     const { nested: _nestedDescriptors, ...baseDescriptor } = descriptor;
     return {
@@ -304,14 +341,18 @@ export function resolveErrorMessage(descriptor: ErrorMessageDescriptor, options:
     };
 
     function resolveInternal(child: ErrorMessageDescriptor): ResolvedErrorMessage {
-        return resolveErrorMessage(child, {
-            ...options,
-            locale,
-            createTraceId: () => {
-                traceId ||= (options.createTraceId || createErrorTraceId)();
-                return traceId;
+        return resolveErrorMessageInternal(
+            child,
+            {
+                ...options,
+                locale,
+                createTraceId: () => {
+                    traceId ||= (options.createTraceId || createErrorTraceId)();
+                    return traceId;
+                },
             },
-        });
+            missingTranslation,
+        );
     }
 }
 
@@ -454,6 +495,20 @@ function safeInternalErrorTransport(
     };
 }
 
+function userFacingErrorTransport(
+    resolved: ResolvedErrorMessage,
+    extras: { traceId?: string; internalError?: Error } = {},
+): ResolvedErrorTransport {
+    return {
+        status: resolved.status,
+        template: 'error.html',
+        userFacing: true,
+        error: toTransportPayload(resolved),
+        ...(extras.traceId ? { traceId: extras.traceId } : {}),
+        ...(extras.internalError ? { internalError: extras.internalError } : {}),
+    };
+}
+
 export function resolveErrorTransport(error: unknown, options: ResolveErrorTransportOptions): ResolvedErrorTransport {
     if (!(error instanceof UserFacingError)) {
         const traceId = (options.createTraceId || createErrorTraceId)();
@@ -461,14 +516,10 @@ export function resolveErrorTransport(error: unknown, options: ResolveErrorTrans
         return safeInternalErrorTransport(options.locale, traceId, internalError, options);
     }
 
+    let descriptor: ErrorMessageDescriptor | undefined;
     try {
-        const resolved = resolveErrorMessage(describeHydroError(error), options);
-        return {
-            status: resolved.status,
-            template: 'error.html',
-            userFacing: true,
-            error: toTransportPayload(resolved),
-        };
+        descriptor = describeHydroError(error);
+        return userFacingErrorTransport(resolveErrorMessageInternal(descriptor, options, 'fail'));
     } catch (resolutionError) {
         const internalError =
             resolutionError instanceof Error
@@ -476,6 +527,21 @@ export function resolveErrorTransport(error: unknown, options: ResolveErrorTrans
                 : new Error('Non-error value interrupted error transport resolution', { cause: resolutionError });
         const traceId =
             resolutionError instanceof ErrorMessageResolutionError ? resolutionError.traceId : (options.createTraceId || createErrorTraceId)();
+        // Missing catalog keys stay 4xx with the interpolated source template; logs keep the resolution error.
+        if (descriptor && resolutionError instanceof ErrorMessageResolutionError && resolutionError.reason === 'missing_translation') {
+            try {
+                return userFacingErrorTransport(
+                    resolveErrorMessageInternal(descriptor, { ...options, createTraceId: () => traceId }, 'use_source'),
+                    { traceId, internalError },
+                );
+            } catch (recoveryError) {
+                const recoveryInternal =
+                    recoveryError instanceof Error
+                        ? new AggregateError([internalError, recoveryError], `Error transport failed closed [${traceId}]`)
+                        : internalError;
+                return safeInternalErrorTransport(options.locale, traceId, recoveryInternal, options);
+            }
+        }
         return safeInternalErrorTransport(options.locale, traceId, internalError, options);
     }
 }

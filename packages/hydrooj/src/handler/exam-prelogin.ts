@@ -22,10 +22,11 @@ import {
     ExamPreloginTicketDoc,
     ExamPreloginWorkflowBinding,
 } from '../model/exam-prelogin';
-import { examSeatAssignmentService, isExamSeatAssignmentV2 } from '../model/exam-seat-assignment';
+import { ExamSeatAssignmentError, examSeatAssignmentService, isExamSeatAssignmentV2 } from '../model/exam-seat-assignment';
 import { ExamSeatAssignmentReadinessError } from '../model/exam-seat-assignment-readiness';
+import { ExamSeatPlanError } from '../model/exam-seat-plan';
 import { getExamPreloginService, isExamPreloginV2WriterEnabled, isExamPreloginWorkflowWriterEnabled } from '../service/exam-prelogin';
-import { parseVigilExamPreloginProjection, preflightExamPreloginOnVigil } from '../service/vigil-bridge';
+import { classifyVigilBridgeFailure, parseVigilExamPreloginProjection, preflightExamPreloginOnVigil } from '../service/vigil-bridge';
 import { studentDirectory } from '../service/student-directory';
 
 const logger = new Logger('exam-prelogin');
@@ -74,13 +75,38 @@ function translate(error: unknown): never {
         const detail = [error.stage, location || null, error.detail.uid ? `uid=${error.detail.uid}` : null].filter(Boolean).join(':');
         throwExamTeacherValidationError('examPrelogin', `${error.reason}:${detail}`);
     }
-    if (error instanceof ExamPreloginError || error instanceof ExamNetworkConfigError) {
+    if (
+        error instanceof ExamPreloginError
+        || error instanceof ExamNetworkConfigError
+        || error instanceof ExamSeatPlanError
+        || error instanceof ExamSeatAssignmentError
+    ) {
         logger.warn('Exam prelogin rejected reason=%s', error.reason);
         throwExamTeacherValidationError('examPrelogin', error.reason);
     }
     if (error instanceof TypeError) {
         logger.warn('Exam prelogin rejected reason=%s', error.message);
         throwExamTeacherValidationError('examPrelogin', error.message);
+    }
+    const failure = classifyVigilBridgeFailure(error);
+    if (
+        (failure.errorName === 'VigilProtocolError'
+            || failure.errorName === 'VigilHttpError'
+            || failure.errorName === 'VigilConfigurationError')
+        && (
+            failure.reason === 'vigil_protocol_invalid'
+            || failure.reason === 'vigil_http_rejected'
+            || failure.reason === 'vigil_configuration_invalid'
+            || failure.reason === 'vigil_delivery_unknown'
+        )
+    ) {
+        logger.warn(
+            'Exam prelogin rejected reason=%s errorName=%s httpStatus=%s',
+            failure.reason,
+            failure.errorName,
+            failure.httpStatus ?? '-',
+        );
+        throwExamTeacherValidationError('examPrelogin', failure.reason);
     }
     throw error;
 }

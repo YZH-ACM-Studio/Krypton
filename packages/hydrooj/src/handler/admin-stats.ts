@@ -1,6 +1,6 @@
 import { Filter, ObjectId } from 'mongodb';
 import { Context } from '../context';
-import { localizedErrorText, NotFoundError, ValidationError } from '../error';
+import { localizedErrorText, NotFoundError, TrainingNotFoundError, UserNotFoundError, ValidationError } from '../error';
 import { TrainingDoc } from '../interface';
 import {
     ADMIN_STATS_MAX_TIME_MS,
@@ -95,7 +95,7 @@ class AdminStatsHandler extends Handler {
             problems = await this.problemSummaries(domainId, selectedContest.pids || []);
         } else if (selectedTrainingId) {
             selectedTraining = await training.get(domainId, selectedTrainingId);
-            if (!isProblemSetKind(selectedTraining.kind)) throw new NotFoundError(localizedErrorText`training`);
+            if (!isProblemSetKind(selectedTraining.kind)) throw new TrainingNotFoundError(domainId, selectedTrainingId);
             await problemSetAccessService.assertAccessible(domainId, this.user, selectedTraining);
             const pids = training.getPids(selectedTraining.dag || []);
             const enrollmentRows = await document.collStatus
@@ -135,7 +135,7 @@ class AdminStatsHandler extends Handler {
             userSearchResults = q.trim() ? await UserModel.getPrefixList(domainId, q.trim(), 20) : [];
             if (uid) {
                 selectedUser = await UserModel.getById(domainId, uid);
-                if (!selectedUser) throw new NotFoundError(localizedErrorText`user`);
+                if (!selectedUser) throw new UserNotFoundError(uid);
                 const dayWindow = shanghaiDayWindow(30);
                 const [rows, contestStatuses, trainingStatuses, studentDict] = await Promise.all([
                     RecordModel.coll

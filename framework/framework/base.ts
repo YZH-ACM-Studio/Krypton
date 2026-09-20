@@ -102,52 +102,70 @@ export default (logger, xff, xhost) => async (ctx: KoaContext, next: Next) => {
             ctx.set('Cache-Control', 'public');
         }
     } catch (err) {
-        const transport =
-            typeof ctx.handler?.resolveErrorTransport === 'function'
-                ? ctx.handler.resolveErrorTransport(err, request.json ? 'api' : 'legacy-ui')
-                : resolveErrorTransport(err, {
-                      locale: 'zh-CN',
-                      lookup: lookupErrorMessageTranslation,
-                  });
-        if (transport.traceId) {
-            logger.error(`[${transport.traceId}] Unhandled error at the response boundary`, err, transport.internalError);
-        }
-        response.status = transport.status;
-        if (request.json) response.body = { error: transport.error };
-        else {
-            try {
-                response.body = await ctx.handler.renderHTML(transport.template, {
-                    UserFacingError,
-                    error: transport.error,
-                });
-                response.type = 'text/html';
-            } catch (renderError) {
-                const renderFailure = new AggregateError(
-                    [
-                        err instanceof Error ? err : new Error('Non-error value reached the response boundary', { cause: err }),
-                        renderError instanceof Error
-                            ? renderError
-                            : new Error('Non-error value interrupted error-page rendering', { cause: renderError }),
-                    ],
-                    'Error-page rendering failed',
-                );
-                const fallback =
-                    typeof ctx.handler?.resolveErrorTransport === 'function'
-                        ? ctx.handler.resolveErrorTransport(renderFailure, request.json ? 'api' : 'legacy-ui')
-                        : resolveErrorTransport(renderFailure, {
-                              locale: 'zh-CN',
-                              lookup: lookupErrorMessageTranslation,
-                          });
-                logger.error(
-                    `[${fallback.traceId || fallback.error.errorCode}] Error-page rendering failed`,
-                    err,
-                    renderError,
-                    fallback.internalError,
-                );
-                response.status = fallback.status;
-                response.template = fallback.template;
-                response.body = fallback.error.message;
-                response.type = 'text/plain';
+        const existingClientMessage =
+            !request.json && Number.isSafeInteger(response.status) && response.status >= 400 && response.status <= 499
+                ? response.body?.error?.message
+                : undefined;
+        if (typeof existingClientMessage === 'string' && existingClientMessage) {
+            logger.error('Error-page rendering failed after a user-facing error', err);
+            response.body = existingClientMessage;
+            response.type = 'text/plain';
+        } else {
+            const transport =
+                typeof ctx.handler?.resolveErrorTransport === 'function'
+                    ? ctx.handler.resolveErrorTransport(err, request.json ? 'api' : 'legacy-ui')
+                    : resolveErrorTransport(err, {
+                          locale: 'zh-CN',
+                          lookup: lookupErrorMessageTranslation,
+                      });
+            if (transport.traceId) {
+                logger.error(`[${transport.traceId}] Unhandled error at the response boundary`, err, transport.internalError);
+            }
+            response.status = transport.status;
+            if (request.json) response.body = { error: transport.error };
+            else {
+                try {
+                    response.body = await ctx.handler.renderHTML(transport.template, {
+                        UserFacingError,
+                        error: transport.error,
+                    });
+                    response.type = 'text/html';
+                } catch (renderError) {
+                    if (transport.status >= 400 && transport.status <= 499) {
+                        logger.error('Error-page rendering failed after a user-facing error', err, renderError);
+                        response.status = transport.status;
+                        response.template = transport.template;
+                        response.body = transport.error.message;
+                        response.type = 'text/plain';
+                    } else {
+                        const renderFailure = new AggregateError(
+                            [
+                                err instanceof Error ? err : new Error('Non-error value reached the response boundary', { cause: err }),
+                                renderError instanceof Error
+                                    ? renderError
+                                    : new Error('Non-error value interrupted error-page rendering', { cause: renderError }),
+                            ],
+                            'Error-page rendering failed',
+                        );
+                        const fallback =
+                            typeof ctx.handler?.resolveErrorTransport === 'function'
+                                ? ctx.handler.resolveErrorTransport(renderFailure, request.json ? 'api' : 'legacy-ui')
+                                : resolveErrorTransport(renderFailure, {
+                                      locale: 'zh-CN',
+                                      lookup: lookupErrorMessageTranslation,
+                                  });
+                        logger.error(
+                            `[${fallback.traceId || fallback.error.errorCode}] Error-page rendering failed`,
+                            err,
+                            renderError,
+                            fallback.internalError,
+                        );
+                        response.status = fallback.status;
+                        response.template = fallback.template;
+                        response.body = fallback.error.message;
+                        response.type = 'text/plain';
+                    }
+                }
             }
         }
     } finally {

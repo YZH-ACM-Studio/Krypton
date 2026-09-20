@@ -13,11 +13,22 @@ export const DOMAIN_PERMISSION_DEFINITIONS = PERMS.map((permission) => ({
 const PERMISSION_BY_KEY = new Map(DOMAIN_PERMISSION_DEFINITIONS.map((permission) => [permission.key.toString(), permission]));
 export const KNOWN_DOMAIN_PERMISSION_MASK = DOMAIN_PERMISSION_DEFINITIONS.reduce((mask, permission) => mask | permission.key, 0n);
 
+function scalarValidationParam(value: unknown): string | null {
+    if (typeof value === 'string') return value;
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+    if (typeof value === 'boolean' || typeof value === 'bigint') return String(value);
+    return null;
+}
+
 export function resolveCurrentDomainId(requestedDomainId: unknown, authoritativeDomainId: unknown): string {
     const requested = typeof requestedDomainId === 'string' ? requestedDomainId : '';
     const authoritative = typeof authoritativeDomainId === 'string' ? authoritativeDomainId : '';
     if (!requested || !authoritative || requested !== authoritative) {
-        throw new ValidationError('domainId', requestedDomainId, localizedErrorText`The requested domain does not match the current domain.`);
+        throw new ValidationError(
+            'domainId',
+            scalarValidationParam(requestedDomainId),
+            localizedErrorText`The requested domain does not match the current domain.`,
+        );
     }
     return authoritative;
 }
@@ -66,9 +77,9 @@ function validateRoleName(role: string) {
 
 function parseNonNegativeMask(raw: unknown, field: string): bigint {
     const value = typeof raw === 'bigint' ? raw.toString() : typeof raw === 'string' ? raw.trim() : '';
-    if (!/^\d+$/.test(value)) throw new ValidationError(field, raw);
+    if (!/^\d+$/.test(value)) throw new ValidationError(field);
     const mask = BigInt(value);
-    if (mask < 0n) throw new ValidationError(field, raw);
+    if (mask < 0n) throw new ValidationError(field);
     return mask;
 }
 
@@ -79,15 +90,15 @@ function normalizePermissionValues(raw: unknown): unknown[] {
     if (typeof raw === 'object') {
         const entries = Object.entries(raw);
         if (!entries.length || entries.some(([key]) => !/^(?:0|[1-9]\d*)$/.test(key))) {
-            throw new ValidationError('permissions', raw);
+            throw new ValidationError('permissions');
         }
         entries.sort(([left], [right]) => Number(left) - Number(right));
         if (entries.some(([key], index) => Number(key) !== index)) {
-            throw new ValidationError('permissions', raw);
+            throw new ValidationError('permissions');
         }
         return entries.map(([, value]) => value);
     }
-    throw new ValidationError('permissions', raw);
+    throw new ValidationError('permissions');
 }
 
 export function parseDomainPermissionSelection(raw: unknown): { mask: bigint; keys: string[] } {
@@ -97,9 +108,9 @@ export function parseDomainPermissionSelection(raw: unknown): { mask: bigint; ke
         const bit = parseNonNegativeMask(entry, 'permissions');
         const key = bit.toString();
         if (bit === 0n || (bit & (bit - 1n)) !== 0n || !PERMISSION_BY_KEY.has(key)) {
-            throw new ValidationError('permissions', entry, localizedErrorText`Unknown domain permission bit.`);
+            throw new ValidationError('permissions', null, localizedErrorText`Unknown domain permission bit.`);
         }
-        if (seen.has(key)) throw new ValidationError('permissions', entry, localizedErrorText`Duplicate domain permission bit.`);
+        if (seen.has(key)) throw new ValidationError('permissions', null, localizedErrorText`Duplicate domain permission bit.`);
         seen.add(key);
         mask |= bit;
     }
@@ -112,7 +123,7 @@ export function buildDomainRolePermissionUpdate(input: { expectedMask: unknown; 
     const selection = parseDomainPermissionSelection(input.permissions);
     const next = (expected & ~KNOWN_DOMAIN_PERMISSION_MASK) | selection.mask;
     if (submitted !== next) {
-        throw new ValidationError('mask', input.submittedMask, localizedErrorText`Permission mask does not match selected permission bits.`);
+        throw new ValidationError('mask', null, localizedErrorText`Permission mask does not match selected permission bits.`);
     }
     const added = DOMAIN_PERMISSION_DEFINITIONS.filter((permission) => !(expected & permission.key) && next & permission.key).map(
         (permission) => permission.desc,

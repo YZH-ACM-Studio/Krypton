@@ -21,6 +21,8 @@ let confirmClaim: Promise<void>;
 let auditFailures = 0;
 let finalizeFailures = 0;
 let taskCountsAsStay: boolean | undefined;
+let taskMaxAssignments: number | null = null;
+let taskCurrentAssignments = 0;
 let taskCounterUpdates = 0;
 const audits: Array<Record<string, any>> = [];
 const stayEvents: Array<Record<string, any>> = [];
@@ -77,6 +79,8 @@ const tasksColl = {
             _id: taskId,
             domainId,
             admissionMode: 'quota',
+            maxAssignments: taskMaxAssignments,
+            currentAssignments: taskCurrentAssignments,
             ...(taskCountsAsStay === undefined ? {} : { countsAsStay: taskCountsAsStay }),
         };
     },
@@ -167,6 +171,8 @@ beforeEach(() => {
     auditFailures = 0;
     finalizeFailures = 0;
     taskCountsAsStay = undefined;
+    taskMaxAssignments = null;
+    taskCurrentAssignments = 0;
     taskCounterUpdates = 0;
     audits.length = 0;
     stayEvents.length = 0;
@@ -199,6 +205,9 @@ describe('task admission state-machine CAS', () => {
 
         expect(confirmed.status).to.equal('fulfilled');
         expect(cancelled.status).to.equal('rejected');
+        if (cancelled.status !== 'rejected') throw new Error('Expected cancel to lose the CAS race');
+        expect(cancelled.reason).to.be.instanceOf(framework.ValidationError);
+        expect(cancelled.reason.params[2]).to.equal('任务状态已变化，请刷新后重试');
         expect(assignment.status).to.equal('completed');
         expect(taskCounterUpdates).to.equal(0);
         expect(audits.map((audit) => audit.eventType)).to.deep.equal(['confirm']);
@@ -287,5 +296,56 @@ describe('task admission state-machine CAS', () => {
         expect((observed as Error).message).to.equal('任务分配不存在或不属于当前任务');
         expect(assignment.status).to.equal('admitted');
         expect(audits).to.have.lengthOf(0);
+    });
+});
+
+describe('task assignment user-facing errors', () => {
+    it('rejects a full task with a localized validation error', async () => {
+        taskMaxAssignments = 1;
+        taskCurrentAssignments = 1;
+
+        let observed: unknown;
+        try {
+            await taskModel.assignTask(domainId, taskId, 999, 0);
+        } catch (error) {
+            observed = error;
+        }
+
+        expect(observed).to.be.instanceOf(framework.ValidationError);
+        expect((observed as { params: unknown[] }).params[2]).to.equal('该任务认领数已满');
+        expect(taskCounterUpdates).to.equal(0);
+    });
+
+    it('forbids cancelling an admin-assigned task', async () => {
+        assignment.canCancel = false;
+
+        let observed: unknown;
+        try {
+            await taskModel.cancelAssignment(domainId, assignmentId, assignment.userId);
+        } catch (error) {
+            observed = error;
+        }
+
+        expect(observed).to.be.instanceOf(framework.ForbiddenError);
+        expect((observed as { params: unknown[] }).params[0]).to.equal('该任务由管理员分配，无法取消');
+        expect(assignment.status).to.equal('admitted');
+        expect(taskCounterUpdates).to.equal(0);
+    });
+
+    it('rejects cancelling a completed assignment', async () => {
+        assignment.canCancel = true;
+        assignment.status = 'completed';
+
+        let observed: unknown;
+        try {
+            await taskModel.cancelAssignment(domainId, assignmentId, assignment.userId);
+        } catch (error) {
+            observed = error;
+        }
+
+        expect(observed).to.be.instanceOf(framework.ValidationError);
+        expect((observed as { params: unknown[] }).params[2]).to.equal('该状态的任务无法取消');
+        expect(assignment.status).to.equal('completed');
+        expect(taskCounterUpdates).to.equal(0);
     });
 });

@@ -60,7 +60,7 @@ function assertAttemptContest(attempt: { sourceContestId: ObjectId }, tid: Objec
 export class VirtualContestHandler extends ContestDetailBaseHandler {
     async prepare() {
         requireContestViewUnlessEditor(this, this.tdoc);
-        if (contest.RULES[this.tdoc.rule]?.hidden) throw new ContestNotFoundError(this.tdoc.docId);
+        if (contest.RULES[this.tdoc.rule]?.hidden) throw new ContestNotFoundError(this.authoritativeDomainId(), this.tdoc.docId);
     }
 
     @param('tid', Types.ObjectId)
@@ -160,7 +160,7 @@ export class VirtualContestHandler extends ContestDetailBaseHandler {
 export class VirtualContestScoreboardHandler extends ContestDetailBaseHandler {
     async prepare() {
         requireContestViewUnlessEditor(this, this.tdoc);
-        if (contest.RULES[this.tdoc.rule]?.hidden) throw new ContestNotFoundError(this.tdoc.docId);
+        if (contest.RULES[this.tdoc.rule]?.hidden) throw new ContestNotFoundError(this.authoritativeDomainId(), this.tdoc.docId);
     }
 
     @param('tid', Types.ObjectId)

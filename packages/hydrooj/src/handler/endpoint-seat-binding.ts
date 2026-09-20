@@ -2,6 +2,7 @@ import { Logger } from '@hydrooj/utils';
 import { ObjectId } from 'mongodb';
 import { Context, Handler, OplogModel, param, PermissionError, requireServiceToken, Types, ValidationError } from 'hydrooj';
 import { ClassSigninClassroomMigrationError, type ExamClassroomDoc } from '../lib/classsignin-classroom-migration';
+import { throwExamTeacherValidationError } from '../lib/exam-teacher-http-error';
 import { PERM } from '../model/builtin';
 import { examClassroomService } from '../model/exam-classroom';
 import { isExamInfrastructureAdmin } from '../model/exam-event-access';
@@ -189,15 +190,29 @@ function isClassroomIntegrityError(error: unknown): boolean {
 function translate(error: unknown): never {
     if (isClassroomIntegrityError(error)) {
         logger.warn('Endpoint seat binding classroom integrity rejected');
-        throw new ValidationError('classroomId');
+        throwExamTeacherValidationError('examClassroom', 'classroom_unavailable');
     }
-    if (!(error instanceof EndpointSeatBindingError)) throw error;
-    throw new ValidationError('endpointSeatBinding', null, error.reason);
+    if (error instanceof EndpointSeatBindingError) {
+        logger.warn('Endpoint seat binding rejected reason=%s', error.reason);
+        throwExamTeacherValidationError('endpointSeatBinding', error.reason);
+    }
+    if (error instanceof TypeError) {
+        logger.warn('Endpoint seat binding rejected reason=%s', error.message);
+        throwExamTeacherValidationError('endpointSeatBinding', error.message);
+    }
+    throw error;
 }
 
 function translateSeatOperationalProfile(error: unknown): never {
-    if (!(error instanceof ExamSeatOperationalProfileError)) throw error;
-    throw new ValidationError('seatOperationalProfile', null, error.reason);
+    if (error instanceof ExamSeatOperationalProfileError) {
+        logger.warn('Seat operational profile rejected reason=%s', error.reason);
+        throwExamTeacherValidationError('seatOperationalProfile', error.reason);
+    }
+    if (error instanceof TypeError) {
+        logger.warn('Seat operational profile rejected reason=%s', error.message);
+        throwExamTeacherValidationError('seatOperationalProfile', error.message);
+    }
+    throw error;
 }
 
 abstract class EndpointSeatAdminHandler extends Handler {

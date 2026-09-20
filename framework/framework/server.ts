@@ -20,6 +20,7 @@ import { lookupErrorMessageTranslation } from './error-catalog';
 import { type ErrorSurface, resolveErrorTransport as resolveTransport, type ResolvedErrorTransport } from './error-resolver';
 import {
     localizeError,
+    BadRequestError,
     CsrfTokenError,
     HttpStatusError,
     HydroError,
@@ -47,13 +48,52 @@ function normalizeThrownError(error: unknown): Error {
     return error instanceof Error ? error : new Error('Non-error value was thrown', { cause: error });
 }
 
+function isClientErrorTransport(transport: ResolvedErrorTransport | undefined): transport is ResolvedErrorTransport {
+    return !!transport && Number.isSafeInteger(transport.status) && transport.status >= 400 && transport.status <= 499;
+}
+
+function clientErrorTransportFromHttpResponse(response: HydroResponse | undefined): ResolvedErrorTransport | undefined {
+    if (!response) return undefined;
+    const status = response.status;
+    if (!Number.isSafeInteger(status) || status < 400 || status > 499) return undefined;
+    const error = response.body?.error;
+    if (!error || typeof error !== 'object' || typeof error.message !== 'string') return undefined;
+    return {
+        status,
+        template: response.template === 'bsod.html' ? 'bsod.html' : 'error.html',
+        userFacing: true,
+        error,
+    };
+}
+
+function malformedWebSocketFrameError() {
+    return localizeError(new BadRequestError(), 'Invalid request: {0}', 'JSON');
+}
+
+export function preferResolvedClientErrorTransport(
+    original: unknown,
+    secondary: unknown,
+    resolve: (error: unknown) => ResolvedErrorTransport,
+    alreadyComputed?: ResolvedErrorTransport,
+    aggregateMessage = 'Error handler failed',
+): ResolvedErrorTransport {
+    if (isClientErrorTransport(alreadyComputed)) return alreadyComputed;
+    if (original instanceof UserFacingError) return resolve(original);
+    return resolve(new AggregateError([normalizeThrownError(original), normalizeThrownError(secondary)], aggregateMessage));
+}
+
 export async function dispatchWebSocketMessage(
     data: unknown,
     onMessage: (payload: unknown) => void | Promise<void>,
     onError: (error: Error) => void | Promise<void>,
 ): Promise<void> {
     try {
-        const payload = JSON.parse(typeof data === 'string' ? data : String(data));
+        let payload: unknown;
+        try {
+            payload = JSON.parse(typeof data === 'string' ? data : String(data));
+        } catch {
+            throw malformedWebSocketFrameError();
+        }
         await onMessage(payload);
     } catch (error) {
         await onError(normalizeThrownError(error));
@@ -726,17 +766,26 @@ ${c.response.status} ${endTime - startTime}ms ${c.response.length}`);
                 } else current++;
             }
         } catch (e) {
+            const surface: ErrorSurface = h.request.json ? 'api' : 'legacy-ui';
             try {
                 // FIXME: should pass type check
                 await (this.ctx.serial as any)(`handler/error/${name}`, h, e);
                 await (this.ctx.serial as any)('handler/error', h, e);
                 await h.onerror(e);
             } catch (errorHandlerFailure) {
-                const transport = h.resolveErrorTransport(
-                    new AggregateError([e, errorHandlerFailure], 'HTTP error handler failed'),
-                    h.request.json ? 'api' : 'legacy-ui',
+                const transport = preferResolvedClientErrorTransport(
+                    e,
+                    errorHandlerFailure,
+                    (error) => h.resolveErrorTransport(error, surface),
+                    clientErrorTransportFromHttpResponse(h.response),
+                    'HTTP error handler failed',
                 );
-                logger.error(`[${transport.traceId}] HTTP error handler failed`, e, errorHandlerFailure, transport.internalError);
+                logger.error(
+                    transport.traceId ? `[${transport.traceId}] HTTP error handler failed` : 'HTTP error handler failed',
+                    e,
+                    errorHandlerFailure,
+                    transport.internalError,
+                );
                 h.response.status = transport.status;
                 h.response.type = '';
                 h.response.template = transport.template;
@@ -786,19 +835,35 @@ ${c.response.status} ${endTime - startTime}ms ${c.response.length}`);
         const clean = async (err?: Error) => {
             if (closed) return;
             closed = true;
+            let errorTransport: ResolvedErrorTransport | undefined;
             try {
                 try {
                     if (err) {
                         try {
                             await h.onerror(err);
+                            errorTransport = h.resolveErrorTransport(err, 'websocket');
                         } catch (errorHandlerFailure) {
-                            const transport = h.resolveErrorTransport(
-                                new AggregateError([err, errorHandlerFailure], 'WebSocket error handler failed'),
-                                'websocket',
+                            errorTransport = preferResolvedClientErrorTransport(
+                                err,
+                                errorHandlerFailure,
+                                (error) => h.resolveErrorTransport(error, 'websocket'),
+                                errorTransport,
+                                'WebSocket error handler failed',
                             );
-                            logger.error(`[${transport.traceId}] WebSocket error handler failed`, err, errorHandlerFailure, transport.internalError);
-                            h.send({ error: transport.error });
-                            h.close(4000, fitWebSocketCloseReason(transport.error.message));
+                            logger.error(
+                                errorTransport.traceId
+                                    ? `[${errorTransport.traceId}] WebSocket error handler failed`
+                                    : 'WebSocket error handler failed',
+                                err,
+                                errorHandlerFailure,
+                                errorTransport.internalError,
+                            );
+                            try {
+                                h.send({ error: errorTransport.error });
+                                h.close(4000, fitWebSocketCloseReason(errorTransport.error.message));
+                            } catch (deliveryFailure) {
+                                logger.error('WebSocket error delivery failed', deliveryFailure);
+                            }
                         }
                     } else {
                         // FIXME: should pass type check
@@ -807,7 +872,7 @@ ${c.response.status} ${endTime - startTime}ms ${c.response.length}`);
                 } finally {
                     h.active = false;
                     if (layer) layer.clients.delete(conn);
-                    if (err && !layer) ctx.status = 500;
+                    if (err && !layer) ctx.status = errorTransport?.status ?? 500;
                     await h.cleanup?.(args);
                 }
             } finally {

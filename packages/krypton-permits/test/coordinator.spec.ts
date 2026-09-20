@@ -1,6 +1,8 @@
 import { expect } from 'chai';
+import { lookupErrorMessageTranslation, resolveErrorTransport, UserFacingError } from '@hydrooj/framework';
 import { beforeEach, describe, it } from 'node:test';
 import {
+    AclMutationConflictError,
     AclMutationError,
     type AclMutationFence,
     type AclPair,
@@ -392,8 +394,22 @@ describe('ACL mutation coordinator', () => {
             error = caught;
         }
 
+        expect(error).to.be.instanceOf(AclMutationConflictError);
+        expect(error).to.be.instanceOf(UserFacingError);
         expect(error?.name).to.equal('AclMutationConflictError');
         expect(error?.status).to.equal(409);
+        expect(error?.code).to.equal(409);
+        expect(error?.message).to.equal('Managed problem metadata changed ({0}). Reselect the affected item and try again.');
+        expect(error?.params).to.deep.equal(['original']);
+        const transport = resolveErrorTransport(error, {
+            locale: 'zh-CN',
+            lookup: lookupErrorMessageTranslation,
+            createTraceId: () => 'acl-conflict-test',
+        });
+        expect(transport.status).to.equal(409);
+        expect(transport.userFacing).to.equal(true);
+        expect(transport.error.name).to.equal('AclMutationConflictError');
+        expect(transport.error.message).to.equal('托管题元数据已变化（original），请重新选择受影响的项目后重试。');
         expect(repo.fences.get(keyOf(pair))?.requestId).to.equal('original');
     });
 
@@ -436,7 +452,13 @@ describe('ACL mutation coordinator', () => {
                 grantedBy: 2,
             })
             .catch((error) => error);
+        expect(conflict).to.be.instanceOf(AclMutationConflictError);
+        expect(conflict).to.be.instanceOf(UserFacingError);
         expect(conflict?.name).to.equal('AclMutationConflictError');
+        expect(conflict?.status).to.equal(409);
+        expect(conflict?.code).to.equal(409);
+        expect(conflict?.message).to.equal('Managed problem metadata changed ({0}). Reselect the affected item and try again.');
+        expect(conflict?.params).to.deep.equal(['orphan-owner']);
         expect(repo.problemRevisions.get('system:301')).to.equal(1);
 
         await coordinator.mutate({

@@ -298,10 +298,22 @@ describe('task candidate admission HTTP route', () => {
         expect(response.status).to.equal(403);
         expect(response.redirect).to.equal(undefined);
         expect(response.body.error.name).to.equal('ValidationError');
-        expect(response.body.error.params[2]).to.include('当前 qualified');
+        expect(response.body.error.params[2]).to.equal('候选池批量操作完成 0 项，失败 1 项：只能确认状态为 admitted 的分配（当前 qualified）');
         expect(calls.oplog).to.have.lengthOf(1);
         expect(calls.oplog[0].payload).to.deep.include({ count: 0, errors: 1 });
         expect(calls.oplog[0].payload.failureReasons).to.deep.equal({ assignment_state_changed: 1 });
+    });
+
+    it('keeps HTML batch failure reasons as scalar strings without residual placeholders', async () => {
+        const aid = new ObjectId();
+        confirmFailure = new TaskAssignmentTransitionError('assignment_state_changed', '候选状态已变化 {0} 次，请刷新');
+
+        const response = await dispatchCandidates({ operation: 'confirm', aids: aid.toHexString(), note: '' });
+
+        expect(response.status).to.equal(403);
+        expect(response.body.error.name).to.equal('ValidationError');
+        expect(response.body.error.params[2]).to.equal('候选池批量操作完成 0 项，失败 1 项：候选状态已变化 [0] 次，请刷新');
+        expect(response.body.error.params[2]).to.not.match(/\{\d+\}/);
     });
 
     it('rethrows an unexpected write failure without exposing it as a row conflict', async () => {

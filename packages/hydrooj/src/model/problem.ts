@@ -25,6 +25,7 @@ import {
     ProblemNotFoundError,
     ProblemStructureConflictError,
     ProblemTagConflictError,
+    UserFacingError,
     ValidationError,
 } from '../error';
 import type { Document, ProblemDataWriteConfirmation, ProblemDataWriteOperation, ProblemDict, ProblemStatusDoc, User } from '../interface';
@@ -6049,6 +6050,9 @@ export class ProblemModel {
                 } catch (e) {
                     logger.error('Problem import failed domain=%s source=%s actor=%d stage=problem error=%o', domainId, i, operator, e);
                     (process.env.HYDRO_CLI ? logger.error : progress)?.(`Error importing problem ${i}: ${e.message}`);
+                    if (e instanceof UserFacingError && Array.isArray(e.params)) {
+                        throw localizeError(new UserFacingError(e), 'Problem import failed: {0}', e);
+                    }
                     throw new Error(`Failed to import problem ${i}`, { cause: e });
                 }
             }

@@ -368,9 +368,18 @@ export function validateStructuredCodeTestdataFiles(config: any, files: Array<{ 
     if ((kindInput === 'program_fill' || config.type === 'program_fill') && config.mode !== 'compile') {
         throw problemConfigError(localizedErrorText`program_fill: text mode does not use testdata files`);
     }
+    const kind = kindInput || config.type;
+    for (const [index, item] of (config.cases || []).entries()) {
+        if (typeof item?.input !== 'string' || !item.input) {
+            throw problemConfigError(localizedErrorText`${kind}: ${`testdata case ${index + 1} input`} is invalid`);
+        }
+        if (typeof item?.output !== 'string' || !item.output) {
+            throw problemConfigError(localizedErrorText`${kind}: ${`testdata case ${index + 1} output`} is invalid`);
+        }
+    }
     const available = new Set((files || []).map((item) => item.name));
     const missing = (config.cases || []).flatMap((item) => [item.input, item.output]).find((name) => !available.has(name));
-    if (missing) throw problemConfigError(localizedErrorText`${kindInput || config.type}: missing testdata file ${missing}`);
+    if (missing) throw problemConfigError(localizedErrorText`${kind}: missing testdata file ${missing}`);
 }
 
 /** Parse and validate a student region payload before inserting a Record. */

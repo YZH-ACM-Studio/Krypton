@@ -1,6 +1,6 @@
-import { localizedErrorText, ValidationError } from '../error';
+import { localizeErrorParameter, localizedErrorText, ValidationError } from '../error';
 import { clientProblemConfig } from './problem-config';
-import { compileProgrammingStatement, programmingStatementClientView } from './programming-statement';
+import { compileProgrammingStatement, programmingStatementClientView, ProgrammingStatementValidationError } from './programming-statement';
 
 export function projectStudentPdoc(pdoc: Record<string, unknown>): Record<string, unknown> {
     const next = { ...pdoc };
@@ -8,11 +8,23 @@ export function projectStudentPdoc(pdoc: Record<string, unknown>): Record<string
     delete next.reactions;
     delete next.antiAiMarkers;
     if (next.statementFormat === 'structured-v1') {
-        const view = programmingStatementClientView(next.programmingStatement, next.config);
-        if (compileProgrammingStatement(next.programmingStatement) !== next.content) {
-            throw new ValidationError('content', null, localizedErrorText`结构化题面投影不一致`);
+        try {
+            const view = programmingStatementClientView(next.programmingStatement, next.config);
+            if (compileProgrammingStatement(next.programmingStatement) !== next.content) {
+                throw new ValidationError('content', null, localizedErrorText`结构化题面投影不一致`);
+            }
+            next.programmingStatementView = view;
+        } catch (error) {
+            if (error instanceof ProgrammingStatementValidationError) {
+                throw localizeErrorParameter(
+                    new ValidationError(error.field, null, error.message),
+                    2,
+                    error.localizedMessage.template,
+                    ...error.localizedMessage.params,
+                );
+            }
+            throw error;
         }
-        next.programmingStatementView = view;
     }
     delete next.programmingStatement;
     next.config = clientProblemConfig(next.config);

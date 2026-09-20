@@ -1,5 +1,6 @@
 import { cloneDeep } from 'lodash';
 import { PRIV } from '@hydrooj/common';
+import { localizedErrorText, ValidationError } from '../error';
 import { isCredentialSecretKey } from './credential-sanitizer';
 
 export const SUPERADMIN_UID = 2;
@@ -289,7 +290,7 @@ const IMPORT_EXTRA_LIMITS: Record<string, number> = {
 
 export function parseAccountImportForCommit(text: string): AccountImportSecretRow[] {
     const lines = String(text || '').split(/\r?\n/);
-    if (lines.length > 1000) throw new Error('单次最多导入 1000 行');
+    if (lines.length > 1000) throw new ValidationError('__users', null, localizedErrorText`单次最多导入 1000 行`);
     const seenEmails = new Set<string>();
     const seenUsernames = new Set<string>();
     const rows: AccountImportSecretRow[] = [];

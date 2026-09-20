@@ -256,7 +256,7 @@ describe('P2.42 strict localized error resolver', () => {
         );
     });
 
-    it('fails closed on malformed braces and placeholder-looking output', () => {
+    it('fails closed on malformed braces', () => {
         expectFailure(
             () =>
                 resolveErrorMessage(descriptor('Problem {x} changed.', ['P1']), {
@@ -266,15 +266,15 @@ describe('P2.42 strict localized error resolver', () => {
                 }),
             'malformed_template',
         );
-        expectFailure(
-            () =>
-                resolveErrorMessage(descriptor('Problem {0} changed.', ['{1}']), {
-                    locale: 'zh-CN',
-                    lookup,
-                    createTraceId: traceId,
-                }),
-            'unresolved_placeholder',
-        );
+    });
+
+    it('treats placeholder-looking scalar parameters as literal text', () => {
+        const result = resolveErrorMessage(descriptor('Problem {0} changed.', ['{1}']), {
+            locale: 'zh-CN',
+            lookup,
+            createTraceId: traceId,
+        });
+        assert.equal(result.message, '题目 {1} 已发生变化。');
     });
 
     it('fails closed on non-scalar parameters unless they are explicit nested errors', () => {

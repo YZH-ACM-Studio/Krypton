@@ -659,7 +659,7 @@ export async function getNode(mapId: ObjectId | string, id: ObjectId | string): 
 
 function normalizeMaterializeMapId(value: unknown): ObjectId {
     const normalized = value instanceof ObjectId ? value.toHexString() : typeof value === 'string' ? value.trim() : '';
-    if (!normalized || !ObjectId.isValid(normalized)) throw new MindmapRequestError(localizedErrorText`knowledgeMapId 无效`);
+    if (!normalized || !ObjectId.isValid(normalized)) throw new MindmapRequestError(localizedErrorText`${'knowledgeMapId'} 无效`);
     return new ObjectId(normalized);
 }
 

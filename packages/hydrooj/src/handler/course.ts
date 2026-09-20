@@ -24,6 +24,7 @@ import {
     localizedErrorText,
     FileLimitExceededError,
     FileUploadError,
+    HydroError,
     NotFoundError,
     PermissionError,
     TrainingNotFoundError,
@@ -541,13 +542,13 @@ async function parseChaptersJson(domainId: string, raw: string, previous: Traini
                 ...(videos.length ? { videos } : {}),
             });
         }
-    } catch (e: any) {
-        throw localizeErrorParameter(new ValidationError('chapters', null, e.message), 2, 'The course structure is invalid: {0}', e.message);
-    }
-    try {
         return reconcileCourseDagVideos(parsed, previous);
-    } catch (e: any) {
-        throw localizeErrorParameter(new ValidationError('chapters', null, e.message), 2, 'The course structure is invalid: {0}', e.message);
+    } catch (error: unknown) {
+        // HydroError.message is the uninterpolated template; wrapping it as {0} leaves residual placeholders.
+        if (error instanceof HydroError) throw error;
+        const message = error instanceof Error ? error.message : String(error);
+        const detail = /\{\d+\}/.test(message) ? '无法解析该课程结构。' : message;
+        throw localizeErrorParameter(new ValidationError('chapters', null, detail), 2, 'The course structure is invalid: {0}', detail);
     }
 }
 

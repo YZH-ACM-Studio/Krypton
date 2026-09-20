@@ -1532,7 +1532,7 @@ export function ProblemEditPage() {
             ) : null}
             {isCreate && managed ? <input type="hidden" name="managed" value="true" /> : null}
 
-            <section aria-labelledby="problem-content-heading" className="overflow-hidden rounded-2xl border border-border/70 bg-card/30">
+            <section aria-labelledby="problem-content-heading" className="min-w-0 rounded-2xl border border-border/70 bg-card/30">
               <header className="border-b border-border/60 px-5 py-4">
                 <h2 id="problem-content-heading" className="flex items-center gap-2 text-base font-semibold tracking-tight">
                   <FileText className="size-4 text-muted-foreground" aria-hidden="true" />

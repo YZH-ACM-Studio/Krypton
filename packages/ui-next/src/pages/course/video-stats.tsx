@@ -163,7 +163,7 @@ export function CourseVideoStatsPage() {
           <h1 className="truncate text-xl font-semibold tracking-tight">{title}</h1>
         </div>
         {rosterBlocked ? null : (
-          <Button asChild variant="outline" size="sm" className="h-9 gap-1.5">
+          <Button asChild variant="outline" size="sm" className="min-h-11 gap-1.5">
             <a href={`/course/${tid}/videos.csv`}>
               <Download className="size-3.5" strokeWidth={1.75} />
               导出 CSV
@@ -187,7 +187,7 @@ export function CourseVideoStatsPage() {
                 ? '请先在编辑页重新选择可见班级。'
                 : '全站可见的课不会把所有用户列进统计。请先在编辑页选择可见班级。'}
             </p>
-            <Button asChild size="sm">
+            <Button asChild className="min-h-11">
               <a href={`/course/${tid}/edit`}>去设置班级</a>
             </Button>
           </CardContent>
@@ -222,6 +222,7 @@ export function CourseVideoStatsPage() {
           </div>
 
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="max-w-full overflow-x-auto">
             <MiniTabs<WatchMemberFilter>
               value={filter}
               onValueChange={setFilter}
@@ -233,13 +234,14 @@ export function CourseVideoStatsPage() {
                 { value: 'done', label: '已完成', count: doneCount },
               ]}
             />
+            </div>
             <div className="relative w-full sm:max-w-xs">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="搜索学号或姓名"
-                className="pl-9"
+                className="min-h-11 pl-9"
                 aria-label="搜索学生"
               />
             </div>
@@ -266,7 +268,7 @@ export function CourseVideoStatsPage() {
                     <li key={member.uid} className="border-b border-border/60 last:border-b-0">
                       <button
                         type="button"
-                        className="flex w-full items-center gap-4 px-4 py-3 text-left hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        className="flex min-h-11 w-full items-center gap-4 px-4 py-3 text-left hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                         aria-expanded={open}
                         onClick={() => setOpenUid(open ? null : member.uid)}
                       >

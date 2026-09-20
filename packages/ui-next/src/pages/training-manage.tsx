@@ -2,7 +2,7 @@
  * Training management pages — edit and files.
  */
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'motion/react';
 import { ArrowLeft, FolderOpen, GripVertical, Plus, Save, Trash2, Upload } from 'lucide-react';
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
@@ -66,6 +66,23 @@ interface TrainingManagePageData {
   files?: TrainingFile[];
   groups?: TrainingManageGroup[];
   audience?: { public?: boolean; groupIds?: string[] };
+}
+
+const MARKDOWN_EDITOR_MIN_HEIGHT = 280;
+const MARKDOWN_EDITOR_MIN_HEIGHT_SHORT = 160;
+const SHORT_MARKDOWN_QUERY = '(max-height: 56rem)';
+
+function useShortScreenMarkdownMinHeight(): number {
+  const [minHeight, setMinHeight] = useState(MARKDOWN_EDITOR_MIN_HEIGHT);
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+    const media = window.matchMedia(SHORT_MARKDOWN_QUERY);
+    const apply = () => setMinHeight(media.matches ? MARKDOWN_EDITOR_MIN_HEIGHT_SHORT : MARKDOWN_EDITOR_MIN_HEIGHT);
+    apply();
+    media.addEventListener('change', apply);
+    return () => media.removeEventListener('change', apply);
+  }, []);
+  return minHeight;
 }
 
 const DEFAULT_PLAN: TrainingPlanNode[] = [
@@ -142,6 +159,7 @@ function formatSize(bytes: number) {
 
 export function TrainingEditPage() {
   const bs = useBootstrap();
+  const markdownMinHeight = useShortScreenMarkdownMinHeight();
   const data = bs.page.data as TrainingManagePageData;
   const tdoc = data.tdoc || {};
   const isEdit = data.page_name === 'problem_set_edit';
@@ -218,14 +236,14 @@ export function TrainingEditPage() {
   };
 
   return (
-    <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-      <div className="flex items-center gap-3">
+    <motion.div className="min-w-0 space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
+      <div className="flex min-w-0 flex-wrap items-center gap-3">
         <Button asChild variant="ghost" size="icon">
           <a href={trainingUrl}>
             <ArrowLeft className="size-4" />
           </a>
         </Button>
-        <h1 className="text-xl font-semibold">{isEdit ? '编辑题集' : '创建题集'}</h1>
+        <h1 className="min-w-0 truncate text-xl font-semibold">{isEdit ? '编辑题集' : '创建题集'}</h1>
       </div>
 
       <Card>
@@ -242,14 +260,14 @@ export function TrainingEditPage() {
               <label htmlFor="description" className="text-sm font-medium">
                 简介 (Markdown)
               </label>
-              <MarkdownEditor name="description" value={tdoc.description || ''} minHeight={280} preferredLang={bs.locale} />
+              <MarkdownEditor name="description" value={tdoc.description || ''} minHeight={markdownMinHeight} preferredLang={bs.locale} />
             </div>
 
             <div className="space-y-1.5">
               <label htmlFor="content" className="text-sm font-medium">
                 详细说明 (Markdown)
               </label>
-              <MarkdownEditor name="content" value={tdoc.content || ''} minHeight={280} preferredLang={bs.locale} />
+              <MarkdownEditor name="content" value={tdoc.content || ''} minHeight={markdownMinHeight} preferredLang={bs.locale} />
             </div>
 
             <StagePlanEditor
@@ -300,7 +318,7 @@ export function TrainingEditPage() {
             </div>
 
             {isEdit && (tdoc.docId || tdoc._id) ? (
-              <div className="space-y-2 rounded-md border p-3">
+              <div className="min-w-0 space-y-2 rounded-md border p-3">
                 <div>
                   <p className="text-sm font-medium">真实性训练</p>
                   <p className="text-xs text-muted-foreground">默认全部关闭。保存草稿不会影响学生；点发布后才对受众生效。</p>
@@ -411,8 +429,8 @@ function StagePlanEditor({ planNodes, setPlanNodes, addNode, removeNode, updateN
   return (
     <div className="space-y-1.5">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <label className="text-sm font-medium">题集阶段 ({planNodes.length})</label>
-        <div className="flex items-center gap-2">
+        <label className="min-w-0 truncate text-sm font-medium">题集阶段 ({planNodes.length})</label>
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           <SimpleSelect
             value=""
             onValueChange={(v) => {
@@ -596,16 +614,16 @@ export function TrainingFilesPage() {
   const trainingUrl = replaceRouteTokens(bs.urls.trainingDetail, { TID: String(tid) });
 
   return (
-    <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-      <div className="flex items-center gap-3">
+    <motion.div className="min-w-0 space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
+      <div className="flex min-w-0 flex-wrap items-center gap-3">
         <Button asChild variant="ghost" size="icon">
           <a href={trainingUrl}>
             <ArrowLeft className="size-4" />
           </a>
         </Button>
-        <div>
-          <h1 className="text-xl font-semibold">题集文件</h1>
-          <p className="text-sm text-muted-foreground">{tdoc.title}</p>
+        <div className="min-w-0">
+          <h1 className="truncate text-xl font-semibold">题集文件</h1>
+          <p className="truncate text-sm text-muted-foreground">{tdoc.title}</p>
         </div>
       </div>
 

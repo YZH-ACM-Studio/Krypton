@@ -4,7 +4,7 @@ import { ManagedPublishProtocolFields } from '@/components/managed-programming-a
 import { ProblemBankNav } from '@/components/problem-bank-nav';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { MultiSelect } from '@/components/ui/multi-select';
 import { Pagination } from '@/components/ui/pagination';
@@ -222,14 +222,14 @@ function ReviewMetadataEditor({
               </label>
               <p className="text-xs text-muted-foreground">退回只记录说明并保留草稿，不撤销作者原有的逐题权限。</p>
             </DialogBody>
-            <div className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3">
+            <DialogFooter className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3 flex-row">
               <Button type="button" variant="outline" className="min-h-11" onClick={() => setReturnOpen(false)}>
                 取消
               </Button>
               <Button type="submit" className="min-h-11">
                 确认退回
               </Button>
-            </div>
+            </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
@@ -347,14 +347,14 @@ function NamespaceCorrection({
                 ) : null}
               </div>
             </DialogBody>
-            <div className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3">
+            <DialogFooter className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3 flex-row">
               <Button type="button" variant="outline" className="min-h-11" onClick={() => setOpen(false)}>
                 取消
               </Button>
               <Button type="submit" className="min-h-11" disabled={!namespaceId || !template}>
                 分配新题号并纠正
               </Button>
-            </div>
+            </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
@@ -606,7 +606,7 @@ export function ProblemReviewPage() {
                   <form
                     method="post"
                     action={bs.urls.problems}
-                    className="grid gap-3 border-t border-border/70 pt-4 sm:grid-cols-[minmax(0,1fr)_9rem_auto] sm:items-end"
+                    className="grid grid-cols-1 gap-3 border-t border-border/70 pt-4 md:grid-cols-[minmax(0,1fr)_9rem_auto] md:items-end"
                     onSubmit={(event) => requestManagedPublish(event, title, pending)}
                   >
                     <ManagedPublishProtocolFields docId={pdoc.docId} expectedStructureRevision={pdoc.structureRevision} />
@@ -643,7 +643,7 @@ export function ProblemReviewPage() {
                       />
                     </label>
                     {metadataDraft ? (
-                      <label className="flex min-h-11 items-center gap-2 rounded-xl border border-border/75 px-3 text-sm sm:col-span-2">
+                      <label className="flex min-h-11 items-center gap-2 rounded-xl border border-border/75 px-3 text-sm md:col-span-2">
                         <Switch name="finalHidden" value="true" />
                         <span>
                           <span className="block font-medium">审核后保持隐藏</span>
@@ -693,14 +693,14 @@ export function ProblemReviewPage() {
             </ul>
             <p className="text-xs text-muted-foreground">继续发布不会完成、撤销或公开这些任务。</p>
           </DialogBody>
-          <div className="flex shrink-0 justify-end gap-2 border-t bg-muted/20 px-5 py-3">
+          <DialogFooter className="flex shrink-0 justify-end gap-2 border-t bg-muted/20 px-5 py-3 flex-row">
             <Button type="button" variant="outline" className="min-h-11" autoFocus onClick={closePublishConfirm}>
               取消
             </Button>
             <Button type="button" className="min-h-11" onClick={confirmManagedPublish}>
               确认发布
             </Button>
-          </div>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </main>

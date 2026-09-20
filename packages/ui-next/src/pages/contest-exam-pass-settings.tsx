@@ -83,15 +83,15 @@ export function ContestExamPassSettings({
   }, [attemptLimit, kinds, limitText, passText, pids, quotas, scores]);
 
   return (
-    <section className="space-y-3 rounded-xl border bg-muted/20 p-4">
+    <section className="min-w-0 space-y-3 rounded-xl border bg-muted/20 p-4">
       <div>
         <h3 className="text-sm font-medium">及格与补考</h3>
         <p className="text-xs text-muted-foreground">
           留空及格分则交卷即结束，不能补考。填写后不及格且次数未满、整场还够再开一轮时可再考。
         </p>
       </div>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <label className="space-y-1.5">
+      <div className="grid min-w-0 gap-3 sm:grid-cols-2">
+        <label className="min-w-0 space-y-1.5">
           <span className="text-xs text-muted-foreground">及格分</span>
           <Input
             name="examPassScore"
@@ -103,7 +103,7 @@ export function ContestExamPassSettings({
             placeholder="留空表示不设及格线"
           />
         </label>
-        <label className="space-y-1.5">
+        <label className="min-w-0 space-y-1.5">
           <span className="text-xs text-muted-foreground">最多考几次</span>
           <Input
             name="examAttemptLimit"

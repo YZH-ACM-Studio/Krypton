@@ -55,41 +55,41 @@ export function DiscussionCreatePage() {
 
   return (
     <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-      <div className="flex items-center gap-3">
+      <div className="flex min-w-0 flex-wrap items-center gap-3">
         {backUrl ? (
-          <Button asChild variant="ghost" size="icon">
+          <Button asChild variant="ghost" size="icon" className="shrink-0">
             <a href={backUrl}>
               <ArrowLeft className="size-4" />
             </a>
           </Button>
         ) : (
-          <Button variant="ghost" size="icon" onClick={() => window.history.back()}>
+          <Button variant="ghost" size="icon" className="shrink-0" onClick={() => window.history.back()}>
             <ArrowLeft className="size-4" />
           </Button>
         )}
-        <div>
-          <h1 className="text-xl font-semibold">发起讨论</h1>
-          {vnode.title && <p className="text-sm text-muted-foreground">{vnode.title}</p>}
+        <div className="min-w-0">
+          <h1 className="truncate text-xl font-semibold">发起讨论</h1>
+          {vnode.title && <p className="truncate text-sm text-muted-foreground">{vnode.title}</p>}
         </div>
       </div>
 
       <Card>
-        <CardContent className="p-6">
+        <CardContent className="p-4 sm:p-6">
           <form method="post" className="space-y-4">
             <div className="space-y-1.5">
               <label htmlFor="title" className="text-sm font-medium">
                 标题
               </label>
-              <Input id="title" name="title" required autoFocus placeholder="讨论标题" />
+              <Input id="title" name="title" required autoFocus placeholder="讨论标题" className="text-base sm:text-sm" />
             </div>
 
             <div className="space-y-1.5">
               <label className="text-sm font-medium">内容 (Markdown)</label>
-              <MarkdownEditor name="content" value="" minHeight={320} />
+              <MarkdownEditor name="content" value="" minHeight={220} />
             </div>
 
             {canHighlightDiscussion || canPinDiscussion ? (
-              <div className="flex items-center gap-4">
+              <div className="flex flex-wrap items-center gap-4">
                 {canHighlightDiscussion ? (
                   <label className="flex items-center gap-2 text-sm">
                     <Switch name="highlight" value="true" />
@@ -129,32 +129,32 @@ export function DiscussionEditPage() {
 
   return (
     <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-      <div className="flex items-center gap-3">
-        <Button asChild variant="ghost" size="icon">
+      <div className="flex min-w-0 flex-wrap items-center gap-3">
+        <Button asChild variant="ghost" size="icon" className="shrink-0">
           <a href={detailUrl}>
             <ArrowLeft className="size-4" />
           </a>
         </Button>
-        <h1 className="text-xl font-semibold">编辑讨论</h1>
+        <h1 className="min-w-0 truncate text-xl font-semibold">编辑讨论</h1>
       </div>
 
       <Card>
-        <CardContent className="p-6">
+        <CardContent className="p-4 sm:p-6">
           <form method="post" className="space-y-4">
             <div className="space-y-1.5">
               <label htmlFor="title" className="text-sm font-medium">
                 标题
               </label>
-              <Input id="title" name="title" defaultValue={ddoc.title || ''} required />
+              <Input id="title" name="title" defaultValue={ddoc.title || ''} required className="text-base sm:text-sm" />
             </div>
 
             <div className="space-y-1.5">
               <label className="text-sm font-medium">内容 (Markdown)</label>
-              <MarkdownEditor name="content" value={ddoc.content || ''} minHeight={320} />
+              <MarkdownEditor name="content" value={ddoc.content || ''} minHeight={220} />
             </div>
 
             {canHighlightDiscussion || canPinDiscussion ? (
-              <div className="flex items-center gap-4">
+              <div className="flex flex-wrap items-center gap-4">
                 {canHighlightDiscussion ? (
                   <label className="flex items-center gap-2 text-sm">
                     <Switch name="highlight" value="true" defaultChecked={ddoc.highlight} />
@@ -172,7 +172,7 @@ export function DiscussionEditPage() {
 
             <Separator />
 
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               <Button type="submit" name="operation" value="update">
                 <Save className="mr-1 size-4" />
                 保存
@@ -182,7 +182,7 @@ export function DiscussionEditPage() {
           {canDeleteDiscussion ? (
             <form
               method="post"
-              className="flex items-center"
+              className="flex flex-wrap items-center"
               onSubmit={(e) => {
                 void confirmFormSubmit(e, '确定要删除此讨论吗？', { destructive: true });
               }}

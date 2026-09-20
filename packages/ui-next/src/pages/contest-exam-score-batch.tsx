@@ -144,7 +144,7 @@ export function ContestExamScoreBatch({
                 </Button>
               </form>
             </div>
-            <div className="overflow-hidden rounded-lg border">
+            <div className="rounded-lg border">
               <Table density="compact">
                 <TableHeader>
                   <TableRow>

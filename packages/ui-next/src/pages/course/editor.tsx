@@ -6,7 +6,6 @@ import {
   FileText,
   EyeOff,
   Layers,
-  Link2,
   ListTree,
   Loader2,
   Network,
@@ -16,7 +15,6 @@ import {
   Trash2,
   Trophy,
   Users,
-  Video,
 } from 'lucide-react';
 import { type FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { MarkdownEditor } from '@/components/markdown-renderer';
@@ -28,6 +26,7 @@ import { Input } from '@/components/ui/input';
 import { MultiSelect } from '@/components/ui/multi-select';
 import { SimpleSelect } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { Sheet, SheetBody, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs-compound';
 import { FileUploader } from '@/components/uploader';
@@ -164,24 +163,17 @@ function SettingsGroup({
 }
 
 function SaveIndicator({ state }: { state: SaveState }) {
+  const label = state === 'saving' ? '正在保存…' : state === 'dirty' ? '有未保存更改' : '已保存';
   return (
-    <div aria-live="polite" className="krypton-course-meta inline-flex items-center gap-1.5">
+    <div aria-live="polite" aria-label={label} className="krypton-course-meta inline-flex shrink-0 items-center gap-1.5">
       {state === 'saving' ? (
-        <>
-          <Loader2 className="size-3.5 animate-spin text-primary" strokeWidth={2} />
-          正在保存…
-        </>
+        <Loader2 className="size-3.5 animate-spin text-primary" strokeWidth={2} />
       ) : state === 'dirty' ? (
-        <>
-          <span aria-hidden="true" className="size-1.5 rounded-full bg-amber-500" />
-          <span className="text-amber-700 dark:text-amber-400">有未保存更改</span>
-        </>
+        <span aria-hidden="true" className="size-1.5 rounded-full bg-amber-500" />
       ) : (
-        <>
-          <Check className="size-3.5 text-emerald-600 dark:text-emerald-400" strokeWidth={2.5} />
-          已保存
-        </>
+        <Check className="size-3.5 text-emerald-600 dark:text-emerald-400" strokeWidth={2.5} />
       )}
+      <span className={cn('hidden sm:inline', state === 'dirty' && 'text-amber-700 dark:text-amber-400')}>{label}</span>
     </div>
   );
 }
@@ -504,11 +496,11 @@ export function CourseEditPage() {
 
   return (
     <main className="w-full min-w-0 pb-10">
-      {/* The action bar follows the scroll. A long chapter draft used to push
-          save state and the save button off screen entirely. */}
+      {/* Sticky action bar is a single h-14 row. Copy/delete collapse to
+          icons on narrow viewports and can overflow; save stays outside. */}
       <header
         className={cn(
-          'krypton-course-panel sticky top-0 z-30 mb-6 flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2.5',
+          'krypton-course-panel sticky top-0 z-30 mb-6 flex h-14 items-center gap-2 px-3',
           'bg-card/85 backdrop-blur-xl',
         )}
       >
@@ -522,44 +514,57 @@ export function CourseEditPage() {
           <p className="krypton-course-eyebrow truncate">课程工作区</p>
           <h1 className="krypton-course-title mt-0.5 truncate">{isEdit ? course.title || '编辑课程' : '新建课程'}</h1>
         </div>
-        <Button type="button" variant="outline" size="sm" className="h-10 shrink-0 gap-1.5 lg:hidden" onClick={() => setOutlineOpen(true)}>
-          <ListTree className="size-3.5" strokeWidth={1.75} />
-          章节
-        </Button>
-        <SaveIndicator state={saveState} />
-        {isEdit && data.canCreate ? (
-          <Button
-            type="button"
-            variant="outline"
-            disabled={saveState !== 'idle' || copying}
-            onClick={() => void copyCourse()}
-            className="h-10 shrink-0 gap-1.5"
-            title={saveState === 'dirty' ? '请先保存课程修改。复制使用已保存的章节，不会带走未保存草稿、课件、报名或真实性策略。' : undefined}
-          >
-            {copying ? <Loader2 className="size-4 animate-spin" strokeWidth={1.75} /> : <Copy className="size-4" strokeWidth={1.75} />}
-            复制为新课程
+        <div className="flex min-w-0 items-center gap-1.5 overflow-x-auto">
+          <Button type="button" variant="outline" size="sm" className="h-10 shrink-0 gap-1.5 lg:hidden" onClick={() => setOutlineOpen(true)}>
+            <ListTree className="size-3.5" strokeWidth={1.75} />
+            章节
           </Button>
-        ) : null}
-        {isEdit ? (
-          <form
-            method="post"
-            action={`/course/${tid}/edit`}
-            onSubmit={(event) => {
-              const title = course.title || '该课程';
-              void confirmFormSubmit(
-                event,
-                `确定删除课程「${title}」？课件、视频和观看记录会一并删除，不能恢复。`,
-                { destructive: true },
-              );
-            }}
-          >
-            <input type="hidden" name="operation" value="delete" />
-            <Button type="submit" variant="destructive" size="sm" formNoValidate disabled={copying} className="h-10 shrink-0 gap-1.5">
-              <Trash2 className="size-3.5" strokeWidth={1.75} />
-              删除课程
+          <SaveIndicator state={saveState} />
+          {isEdit && data.canCreate ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              disabled={saveState !== 'idle' || copying}
+              onClick={() => void copyCourse()}
+              className="size-10 shrink-0 lg:h-10 lg:w-auto lg:gap-1.5 lg:px-3"
+              title={saveState === 'dirty' ? '请先保存课程修改。复制使用已保存的章节，不会带走未保存草稿、课件、报名或真实性策略。' : '复制为新课程'}
+              aria-label="复制为新课程"
+            >
+              {copying ? <Loader2 className="size-4 animate-spin" strokeWidth={1.75} /> : <Copy className="size-4" strokeWidth={1.75} />}
+              <span className="hidden lg:inline">复制为新课程</span>
             </Button>
-          </form>
-        ) : null}
+          ) : null}
+          {isEdit ? (
+            <form
+              method="post"
+              action={`/course/${tid}/edit`}
+              className="shrink-0"
+              onSubmit={(event) => {
+                const title = course.title || '该课程';
+                void confirmFormSubmit(
+                  event,
+                  `确定删除课程「${title}」？课件、视频和观看记录会一并删除，不能恢复。`,
+                  { destructive: true },
+                );
+              }}
+            >
+              <input type="hidden" name="operation" value="delete" />
+              <Button
+                type="submit"
+                variant="destructive"
+                size="icon"
+                formNoValidate
+                disabled={copying}
+                className="size-10 shrink-0 lg:h-10 lg:w-auto lg:gap-1.5 lg:px-3"
+                aria-label="删除课程"
+              >
+                <Trash2 className="size-3.5" strokeWidth={1.75} />
+                <span className="hidden lg:inline">删除课程</span>
+              </Button>
+            </form>
+          ) : null}
+        </div>
         <Button
           form="course-editor-form"
           type="submit"
@@ -589,9 +594,9 @@ export function CourseEditPage() {
         <input type="hidden" name="chapters" value={chaptersJson} />
         <input type="hidden" name="description" value={course.description || ''} />
 
-        <aside className="hidden self-start lg:sticky lg:top-20 lg:block">
-          <div className="krypton-course-panel overflow-hidden">
-            <div className="flex items-center justify-between gap-2 border-b border-border/50 px-3 py-2.5">
+        <aside className="hidden self-start lg:sticky lg:top-14 lg:block lg:max-h-[calc(100dvh-8rem)]">
+          <div className="krypton-course-panel flex max-h-[inherit] flex-col overflow-hidden">
+            <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border/50 px-3 py-2.5">
               <div className="flex items-center gap-2">
                 <span aria-hidden="true" className="grid size-7 place-items-center rounded-lg bg-primary/10 text-primary">
                   <Layers className="size-3.5" strokeWidth={1.75} />
@@ -603,24 +608,26 @@ export function CourseEditPage() {
                   </p>
                 </div>
               </div>
-              <Button type="button" variant="ghost" size="sm" className="h-9 gap-1 px-2" onClick={addChapter}>
+              <Button type="button" variant="ghost" size="sm" className="min-h-11 gap-1 px-2" onClick={addChapter}>
                 <Plus className="size-3.5" strokeWidth={2} />
                 添加
               </Button>
             </div>
-            <div className="p-1.5">
-              <ChapterOutline
-                chapters={chapters}
-                activeId={activeChapter._id}
-                activeSectionId={activeSectionId}
-                onSelect={openChapter}
-                onMove={moveChapter}
-                onRemove={removeChapter}
-                onAddSection={addSection}
-                onMoveSection={moveSection}
-                onRemoveSection={removeSection}
-              />
-            </div>
+            <ScrollArea className="min-h-0 flex-1">
+              <div className="p-1.5">
+                <ChapterOutline
+                  chapters={chapters}
+                  activeId={activeChapter._id}
+                  activeSectionId={activeSectionId}
+                  onSelect={openChapter}
+                  onMove={moveChapter}
+                  onRemove={removeChapter}
+                  onAddSection={addSection}
+                  onMoveSection={moveSection}
+                  onRemoveSection={removeSection}
+                />
+              </div>
+            </ScrollArea>
           </div>
         </aside>
 
@@ -679,20 +686,20 @@ export function CourseEditPage() {
           </Card>
 
           <Tabs value={chapterTab} onValueChange={setChapterTab} className="space-y-4">
-            <TabsList className={cn('grid h-10 w-full', editingSection ? 'grid-cols-3' : 'grid-cols-4')}>
-              <TabsTrigger value="video" className="gap-1.5">
-                <Video className="size-3.5" strokeWidth={1.75} />
+            <TabsList className="flex h-10 w-full min-w-0 overflow-x-auto">
+              <TabsTrigger value="video" className="min-h-10 min-w-0 flex-1 shrink-0">
                 视频
                 {videoCount ? <span className="tabular-nums text-muted-foreground">{videoCount}</span> : null}
               </TabsTrigger>
-              <TabsTrigger value="notes">讲义</TabsTrigger>
-              <TabsTrigger value="problems">
+              <TabsTrigger value="notes" className="min-h-10 min-w-0 flex-1 shrink-0">
+                讲义
+              </TabsTrigger>
+              <TabsTrigger value="problems" className="min-h-10 min-w-0 flex-1 shrink-0">
                 题目
                 {unitPids.length ? <span className="tabular-nums text-muted-foreground">{unitPids.length}</span> : null}
               </TabsTrigger>
               {editingSection ? null : (
-                <TabsTrigger value="links" className="gap-1.5">
-                  <Link2 className="size-3.5" strokeWidth={1.75} />
+                <TabsTrigger value="links" className="min-h-10 min-w-0 flex-1 shrink-0">
                   关联
                 </TabsTrigger>
               )}
@@ -766,7 +773,9 @@ export function CourseEditPage() {
         {/* Settings rail. Four titled groups instead of one long undivided
             stack, so course identity, mindmap, audience and files stop
             reading as a single anonymous column of labels. */}
-        <aside className="space-y-4 self-start lg:col-span-2 xl:col-span-1 xl:sticky xl:top-20">
+        <aside className="self-start lg:col-span-2 xl:sticky xl:top-14 xl:col-span-1 xl:max-h-[calc(100dvh-8rem)]">
+          <ScrollArea className="xl:max-h-[inherit]">
+            <div className="space-y-4">
           <SettingsGroup title="课程" icon={Layers}>
             <label className="block space-y-1.5">
               <span className="text-sm font-medium">名称</span>
@@ -931,6 +940,8 @@ export function CourseEditPage() {
               </SettingsGroup>
             ) : null}
           </div>
+            </div>
+          </ScrollArea>
         </aside>
       </form>
 
@@ -938,7 +949,7 @@ export function CourseEditPage() {
         <SheetContent side="left" className="w-[23rem] max-w-[calc(100vw-1rem)]">
           <SheetHeader className="flex items-center justify-between gap-2 pr-12">
             <SheetTitle>章节目录</SheetTitle>
-            <Button type="button" variant="ghost" size="sm" className="gap-1" onClick={addChapter}>
+            <Button type="button" variant="ghost" size="sm" className="min-h-11 gap-1" onClick={addChapter}>
               <Plus className="size-3.5" strokeWidth={2} />
               添加
             </Button>

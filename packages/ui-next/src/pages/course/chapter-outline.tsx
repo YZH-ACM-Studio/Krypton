@@ -41,28 +41,22 @@ function AuthoringTools({
 }) {
   if (!onAdd && !onMove && !onRemove) return null;
   return (
-    <div
-      className={cn(
-        'mr-1 flex shrink-0 items-center self-center',
-        'lg:opacity-0 lg:transition-opacity lg:duration-150 lg:group-hover:opacity-100 lg:group-focus-within:opacity-100',
-        'motion-reduce:transition-none',
-      )}
-    >
+    <div className="mr-1 flex min-h-11 shrink-0 items-center self-center">
       {onAdd ? (
-        <Button type="button" variant="ghost" size="icon" className="size-8" onClick={onAdd} aria-label={addLabel || `添加${label}的小节`}>
+        <Button type="button" variant="ghost" size="icon" className="size-11" onClick={onAdd} aria-label={addLabel || `添加${label}的小节`}>
           <Plus className="size-3.5" strokeWidth={2} />
         </Button>
       ) : null}
       {onMove ? (
         <>
-          <Button type="button" variant="ghost" size="icon" className="size-8" disabled={disableUp} onClick={() => onMove(-1)} aria-label={`上移${label}`}>
+          <Button type="button" variant="ghost" size="icon" className="size-11" disabled={disableUp} onClick={() => onMove(-1)} aria-label={`上移${label}`}>
             <ArrowUp className="size-3.5" strokeWidth={1.75} />
           </Button>
           <Button
             type="button"
             variant="ghost"
             size="icon"
-            className="size-8"
+            className="size-11"
             disabled={disableDown}
             onClick={() => onMove(1)}
             aria-label={`下移${label}`}
@@ -76,7 +70,7 @@ function AuthoringTools({
           type="button"
           variant="ghost"
           size="icon"
-          className="size-8 text-destructive hover:bg-destructive/10"
+          className="size-11 text-destructive hover:bg-destructive/10"
           disabled={disableRemove}
           onClick={onRemove}
           aria-label={`删除${label}`}
@@ -268,7 +262,7 @@ export function ChapterOutline({
                 type="button"
                 onClick={() => onAddSection(chapter._id)}
                 className={cn(
-                  'ml-5 flex w-[calc(100%-1.25rem)] items-center gap-2 rounded-[0.625rem] px-3 py-2 text-left',
+                  'ml-5 flex min-h-11 w-[calc(100%-1.25rem)] items-center gap-2 rounded-[0.625rem] px-3 py-2 text-left',
                   'text-[12px] text-muted-foreground hover:bg-muted/60 hover:text-foreground',
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
                 )}

@@ -86,42 +86,46 @@ function GradeRow({ row, pid }: { row: ManualGradingRow; pid: number }) {
     <article className="space-y-4 border-t border-border/70 py-5 first:border-t-0">
       <header>
         <div className="flex flex-wrap items-center gap-2">
-          <h2 className="text-base font-semibold">{row.displayName || row.uname}</h2>
+          <h2 className="min-w-0 break-words text-base font-semibold">{row.displayName || row.uname}</h2>
           {row.studentId ? <Badge variant="outline">{row.studentId}</Badge> : null}
           <span className="ml-auto font-mono text-xs text-muted-foreground">{row.latestRid.slice(-8)}</span>
         </div>
       </header>
-      <div className="space-y-4">
-        <div className="whitespace-pre-wrap rounded-md border bg-muted/20 p-4 text-sm leading-6">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(16rem,20rem)] lg:items-start">
+        <div className="max-h-[min(70vh,36rem)] min-w-0 overflow-y-auto whitespace-pre-wrap rounded-md border bg-muted/20 p-4 text-sm leading-6">
           {row.answer || <span className="text-muted-foreground">未填写答案</span>}
         </div>
-        <div className="grid gap-3 sm:grid-cols-[8rem_minmax(0,1fr)]">
-          <label className="space-y-1">
-            <span className="text-xs font-medium">得分（0–100）</span>
-            <Input type="number" min={0} max={100} value={score} onChange={(e) => setScore(e.target.value)} />
-          </label>
-          <label className="space-y-1">
-            <span className="text-xs font-medium">评语</span>
-            <Input value={comment} onChange={(e) => setComment(e.target.value)} placeholder="可选" />
-          </label>
-        </div>
-        {revision > 0 ? (
-          <label className="block space-y-1">
-            <span className="text-xs font-medium">改分原因</span>
-            <Input value={reason} onChange={(e) => setReason(e.target.value)} required placeholder="改分时必填" />
-          </label>
-        ) : null}
-        {error ? (
-          <p role="alert" className="text-sm text-destructive">
-            {error}
-          </p>
-        ) : null}
-        <div className="flex items-center justify-between gap-3">
-          <span className="text-xs text-muted-foreground">{grade ? `已评分 ${grade.score}/100 · revision ${grade.revision}` : '等待首次评分'}</span>
-          <Button onClick={save} disabled={saving || !score || (revision > 0 && !reason.trim())} className="gap-1.5">
-            {saving ? <RefreshCw className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />}
-            {revision ? '保存改分' : '提交评分'}
-          </Button>
+        <div className="space-y-3 lg:sticky lg:top-20 lg:self-start lg:rounded-md lg:border lg:bg-card lg:p-4">
+          <div className="grid gap-3 sm:grid-cols-[8rem_minmax(0,1fr)] lg:grid-cols-1">
+            <label className="space-y-1">
+              <span className="text-xs font-medium">得分（0–100）</span>
+              <Input type="number" min={0} max={100} value={score} onChange={(e) => setScore(e.target.value)} />
+            </label>
+            <label className="space-y-1">
+              <span className="text-xs font-medium">评语</span>
+              <Input value={comment} onChange={(e) => setComment(e.target.value)} placeholder="可选" />
+            </label>
+          </div>
+          {revision > 0 ? (
+            <label className="block space-y-1">
+              <span className="text-xs font-medium">改分原因</span>
+              <Input value={reason} onChange={(e) => setReason(e.target.value)} required placeholder="改分时必填" />
+            </label>
+          ) : null}
+          {error ? (
+            <p role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
+          ) : null}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span className="min-w-0 break-words text-xs text-muted-foreground">
+              {grade ? `已评分 ${grade.score}/100 · revision ${grade.revision}` : '等待首次评分'}
+            </span>
+            <Button onClick={save} disabled={saving || !score || (revision > 0 && !reason.trim())} className="shrink-0 gap-1.5">
+              {saving ? <RefreshCw className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />}
+              {revision ? '保存改分' : '提交评分'}
+            </Button>
+          </div>
         </div>
       </div>
     </article>
@@ -135,10 +139,10 @@ export function ManualGradingPage() {
   const pid = Number(data.pid || 0);
 
   return (
-    <main className="mx-auto w-full max-w-6xl space-y-5 pb-10">
+    <main className="w-full min-w-0 space-y-5 pb-10">
       <header className="space-y-1 border-b border-border/70 pb-4">
         <p className="text-xs text-muted-foreground">{data.tdoc?.rule} · 容器阅卷</p>
-        <h1 className="text-2xl font-semibold tracking-tight">{data.tdoc?.title || '人工阅卷'}</h1>
+        <h1 className="min-w-0 break-words text-2xl font-semibold tracking-tight">{data.tdoc?.title || '人工阅卷'}</h1>
         <p className="text-sm text-muted-foreground">仅显示每名学生当前最新提交；陈旧窗口保存会返回冲突。</p>
       </header>
 
@@ -150,7 +154,7 @@ export function ManualGradingPage() {
         ))}
       </nav>
 
-      <form method="get" className="flex max-w-md items-end gap-2">
+      <form method="get" className="flex max-w-md flex-wrap items-end gap-2">
         <input type="hidden" name="pid" value={pid || ''} />
         <label className="min-w-0 flex-1 space-y-1">
           <span className="text-xs font-medium">按学生 UID 筛选</span>
@@ -164,7 +168,7 @@ export function ManualGradingPage() {
       {problems.find((item) => item.pid === pid)?.gradingInstructions ? (
         <section className="border-y border-border/70 py-4">
           <h2 className="text-sm font-semibold">阅卷说明</h2>
-          <div className="mt-2 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
+          <div className="mt-2 max-w-[80ch] whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
             {problems.find((item) => item.pid === pid)?.gradingInstructions}
           </div>
         </section>

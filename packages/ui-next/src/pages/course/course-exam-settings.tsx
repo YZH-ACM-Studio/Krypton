@@ -100,7 +100,7 @@ export function CourseExamSettings({
 
   return (
     <>
-      <div className="space-y-1.5">
+      <div className="space-y-2">
         <span className="text-sm font-medium">考试</span>
         <MultiSelect<ExamOption>
           value={selected}
@@ -124,16 +124,17 @@ export function CourseExamSettings({
       {examId && gate === 'chapter' ? <input type="hidden" name="courseExamChapterId" value={String(chapterId)} /> : null}
 
       {examId ? (
-        <>
-          <div className="space-y-1.5">
+        <div className="space-y-3">
+          <div className="space-y-2">
             <span className="text-sm font-medium">观看门槛</span>
-            <RadioGroup aria-label="观看门槛">
+            <RadioGroup aria-label="观看门槛" className="gap-2">
               <RadioGroupItem
                 value="all"
                 checked={gate === 'all'}
                 onChange={() => setWatchGate('all')}
                 label="全部章"
                 description="本课全部已确认视频都看完"
+                wrapperClassName="min-h-11 w-full rounded-lg border px-3 py-2.5"
               />
               <RadioGroupItem
                 value="chapter"
@@ -141,6 +142,7 @@ export function CourseExamSettings({
                 onChange={() => setWatchGate('chapter')}
                 label="指定章"
                 description="该章及其小节的视频都看完"
+                wrapperClassName="min-h-11 w-full rounded-lg border px-3 py-2.5"
               />
               <RadioGroupItem
                 value="percent"
@@ -148,12 +150,13 @@ export function CourseExamSettings({
                 onChange={() => setWatchGate('percent')}
                 label="整课百分比"
                 description="整课已确认视频达到设定比例"
+                wrapperClassName="min-h-11 w-full rounded-lg border px-3 py-2.5"
               />
             </RadioGroup>
           </div>
 
           {gate === 'chapter' ? (
-            <label className="block space-y-1.5">
+            <label className="block space-y-2">
               <span className="text-sm font-medium">指定章节</span>
               <SimpleSelect
                 value={String(chapterId)}
@@ -170,7 +173,7 @@ export function CourseExamSettings({
           ) : null}
 
           {gate === 'percent' ? (
-            <label className="block space-y-1.5">
+            <label className="block space-y-2">
               <span className="text-sm font-medium">完成百分比</span>
               <Input
                 type="number"
@@ -187,7 +190,7 @@ export function CourseExamSettings({
               <span className="block text-xs text-muted-foreground">1–100 的整数，默认 100。按条数比例向下取整。</span>
             </label>
           ) : null}
-        </>
+        </div>
       ) : null}
     </>
   );

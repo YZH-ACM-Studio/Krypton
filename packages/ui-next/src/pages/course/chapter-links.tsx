@@ -275,7 +275,7 @@ export function ChapterLinks({
               href="/contest/create"
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
+              className="inline-flex min-h-11 items-center gap-1 font-medium text-primary hover:underline"
             >
               去创建比赛
               <ExternalLink className="size-3" strokeWidth={1.75} />
@@ -284,7 +284,7 @@ export function ChapterLinks({
               href="/homework/create"
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
+              className="inline-flex min-h-11 items-center gap-1 font-medium text-primary hover:underline"
             >
               去创建作业
               <ExternalLink className="size-3" strokeWidth={1.75} />
@@ -319,7 +319,7 @@ export function ChapterLinks({
                 </p>
               </div>
               {quizNeedsSave ? null : (
-                <Button asChild type="button" className="h-9 gap-1.5">
+                <Button asChild type="button" className="min-h-11 gap-1.5">
                   <a href={`/homework/create?fromCourse=${encodeURIComponent(courseId)}&chapter=${chapterId}`}>
                     <ClipboardPlus className="size-4" strokeWidth={1.75} />
                     创建本章小测

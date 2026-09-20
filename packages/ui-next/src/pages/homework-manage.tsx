@@ -167,16 +167,16 @@ export function HomeworkEditPage() {
 
   return (
     <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-      <div className="flex items-center gap-3">
-        <Button asChild variant="ghost" size="icon">
+      <div className="flex min-w-0 items-center gap-3">
+        <Button asChild variant="ghost" size="icon" className="shrink-0">
           <a href={hwUrl}>
             <ArrowLeft className="size-4" />
           </a>
         </Button>
-        <div>
-          <h1 className="text-xl font-semibold">{isEdit ? '编辑作业' : '创建作业'}</h1>
+        <div className="min-w-0">
+          <h1 className="min-w-0 break-words text-xl font-semibold">{isEdit ? '编辑作业' : '创建作业'}</h1>
           {data.courseContext ? (
-            <p className="mt-1 text-xs text-muted-foreground">
+            <p className="mt-1 min-w-0 break-words text-xs text-muted-foreground">
               {data.courseContext.courseTitle} · {data.courseContext.chapterTitle}
             </p>
           ) : null}
@@ -352,15 +352,16 @@ export function HomeworkEditPage() {
             </div>
 
             <div className="space-y-1.5">
-              <div className="flex items-center justify-between gap-3">
-                <div>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
                   <label className="text-sm font-medium">延期扣分规则</label>
-                  <p className="text-xs text-muted-foreground">超过截止时间后，按提交延迟小时数乘以对应分数系数。</p>
+                  <p className="break-words text-xs text-muted-foreground">超过截止时间后，按提交延迟小时数乘以对应分数系数。</p>
                 </div>
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
+                  className="shrink-0"
                   onClick={() => setPenaltyRules((rows) => [...rows, { id: `new-${Date.now()}`, hours: '', coefficient: '1' }])}
                 >
                   <Plus className="mr-1 size-3" />
@@ -416,7 +417,7 @@ export function HomeworkEditPage() {
 
             <Separator />
 
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               <Button type="submit" name="operation" value="update">
                 <Save className="mr-1 size-4" />
                 {isEdit ? '保存修改' : '创建作业'}
@@ -434,7 +435,7 @@ export function HomeworkEditPage() {
           {isEdit ? (
             <form
               method="post"
-              className="flex items-center"
+              className="mt-8 flex items-center border-t pt-6"
               onSubmit={(event) => {
                 void confirmFormSubmit(event, '确定要删除此作业吗？', { destructive: true });
               }}
@@ -464,15 +465,15 @@ export function HomeworkFilesPage() {
 
   return (
     <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-      <div className="flex items-center gap-3">
-        <Button asChild variant="ghost" size="icon">
+      <div className="flex min-w-0 items-center gap-3">
+        <Button asChild variant="ghost" size="icon" className="shrink-0">
           <a href={hwUrl}>
             <ArrowLeft className="size-4" />
           </a>
         </Button>
-        <div>
+        <div className="min-w-0">
           <h1 className="text-xl font-semibold">作业文件</h1>
-          <p className="text-sm text-muted-foreground">{tdoc.title}</p>
+          <p className="min-w-0 break-words text-sm text-muted-foreground">{tdoc.title}</p>
         </div>
       </div>
 
@@ -482,8 +483,8 @@ export function HomeworkFilesPage() {
             <FolderOpen className="size-4" />
             文件 ({files.length})
           </CardTitle>
-          <form method="post" encType="multipart/form-data" className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
-            <input type="file" name="file" className="text-xs" />
+          <form method="post" encType="multipart/form-data" className="flex w-full max-w-full flex-wrap items-center gap-2 sm:w-auto">
+            <input type="file" name="file" className="max-w-full text-xs" />
             <Button type="submit" name="operation" value="upload_file" size="sm" variant="outline">
               <Upload className="mr-1 size-3" />
               上传
@@ -492,35 +493,58 @@ export function HomeworkFilesPage() {
         </CardHeader>
         <CardContent className="p-0">
           {files.length > 0 ? (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>文件名</TableHead>
-                  <TableHead className="w-28 text-right">大小</TableHead>
-                  <TableHead className="w-40 text-right">修改时间</TableHead>
-                  <TableHead className="w-20 text-center">操作</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+            <>
+              <ul className="space-y-2 p-4 sm:hidden">
                 {files.map((f) => (
-                  <TableRow key={f.name}>
-                    <TableCell className="font-mono text-sm">{f.name}</TableCell>
-                    <TableCell className="text-right text-sm text-muted-foreground">{formatSize(f.size || 0)}</TableCell>
-                    <TableCell className="text-right text-sm text-muted-foreground">
-                      {f.lastModified ? formatDateTime(f.lastModified, bs.locale) : '-'}
-                    </TableCell>
-                    <TableCell className="text-center">
-                      <form method="post" className="inline">
-                        <input type="hidden" name="files" value={f.name} />
-                        <Button type="submit" name="operation" value="delete_files" variant="ghost" size="icon" className="size-7">
-                          <Trash2 className="size-3 text-destructive" />
-                        </Button>
-                      </form>
-                    </TableCell>
-                  </TableRow>
+                  <li key={f.name} className="flex items-start justify-between gap-3 rounded-lg border p-3">
+                    <div className="min-w-0">
+                      <p className="break-all font-mono text-sm">{f.name}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {formatSize(f.size || 0)}
+                        {f.lastModified ? ` · ${formatDateTime(f.lastModified, bs.locale)}` : ''}
+                      </p>
+                    </div>
+                    <form method="post" className="shrink-0">
+                      <input type="hidden" name="files" value={f.name} />
+                      <Button type="submit" name="operation" value="delete_files" variant="ghost" size="icon" className="size-7">
+                        <Trash2 className="size-3 text-destructive" />
+                      </Button>
+                    </form>
+                  </li>
                 ))}
-              </TableBody>
-            </Table>
+              </ul>
+              <div className="hidden sm:block">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>文件名</TableHead>
+                      <TableHead className="w-28 text-right">大小</TableHead>
+                      <TableHead className="w-40 text-right">修改时间</TableHead>
+                      <TableHead className="w-20 text-center">操作</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {files.map((f) => (
+                      <TableRow key={f.name}>
+                        <TableCell className="min-w-0 break-all font-mono text-sm">{f.name}</TableCell>
+                        <TableCell className="text-right text-sm text-muted-foreground">{formatSize(f.size || 0)}</TableCell>
+                        <TableCell className="text-right text-sm text-muted-foreground">
+                          {f.lastModified ? formatDateTime(f.lastModified, bs.locale) : '-'}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <form method="post" className="inline">
+                            <input type="hidden" name="files" value={f.name} />
+                            <Button type="submit" name="operation" value="delete_files" variant="ghost" size="icon" className="size-7">
+                              <Trash2 className="size-3 text-destructive" />
+                            </Button>
+                          </form>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </>
           ) : (
             <p className="p-4 text-sm text-muted-foreground">暂无文件</p>
           )}

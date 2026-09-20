@@ -28,6 +28,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { confirmFormSubmit } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useBootstrap } from '@/lib/bootstrap';
+import { cn } from '@/lib/cn';
 import { examContestId, isExamRule, readContestId } from '@/lib/contest-exam-display';
 import { replaceRouteTokens } from '@/lib/format';
 import { isSystemAdmin } from '@/lib/perms';
@@ -183,38 +184,67 @@ export function ExamManagementChrome({
   const canGradeSubjective = tdoc.owner === bs.user.id || isSystemAdmin(bs.user.priv);
   const items = examManagementItems(tdoc, contestUrl, canGradeSubjective);
   return (
-    <div className="grid gap-5 lg:grid-cols-[220px_minmax(0,1fr)]">
-      <aside className="space-y-3">
-        <div className="rounded-xl border bg-card p-3">
-          <a href={contestUrl} className="group block rounded-lg px-2 py-2 hover:bg-accent/40">
-            <p className="line-clamp-2 text-sm font-medium group-hover:text-primary">{tdoc.title || '考试'}</p>
-            <p className="mt-1 text-xs text-muted-foreground">返回考试详情</p>
-          </a>
-          <div className="my-2 h-px bg-border" />
-          <nav className="space-y-1" aria-label="考试管理">
-            {items.map((item) => {
-              const Icon = item.icon;
-              const current = item.key === active;
-              return (
-                <a
-                  key={item.key}
-                  href={item.href}
-                  className={`flex items-center gap-2 rounded-md px-2.5 py-2 text-sm transition-colors ${
-                    current ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground'
-                  }`}
-                >
-                  <Icon className="size-4" />
-                  <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                  {!['overview', 'edit', 'users', 'clarification', 'print'].includes(String(item.key)) ? (
-                    <ExternalLink className="size-3 opacity-60" />
-                  ) : null}
-                </a>
-              );
-            })}
-          </nav>
+    <div className="min-w-0 space-y-5">
+      <nav aria-hidden="true" className="-mx-1 overflow-x-auto px-1 pb-1 lg:hidden">
+        <div className="inline-flex min-w-max items-center gap-1 rounded-xl bg-muted/70 p-1">
+          {items.map((item) => {
+            const Icon = item.icon;
+            const current = item.key === active;
+            return (
+              <a
+                key={item.key}
+                href={item.href}
+                tabIndex={-1}
+                className={cn(
+                  'inline-flex min-h-11 shrink-0 items-center gap-2 rounded-lg px-3 text-sm font-medium',
+                  'transition-[color,background-color,box-shadow] duration-200 ease-out motion-reduce:transition-none',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+                  current
+                    ? 'bg-background text-foreground shadow-sm ring-1 ring-border/60'
+                    : 'text-muted-foreground hover:bg-background/60 hover:text-foreground',
+                )}
+              >
+                <Icon className="size-4 shrink-0" />
+                {item.label}
+              </a>
+            );
+          })}
         </div>
-      </aside>
-      <main className="min-w-0">{children}</main>
+      </nav>
+      <div className="grid min-w-0 gap-5 lg:grid-cols-[220px_minmax(0,1fr)]">
+        <aside className="hidden space-y-3 lg:block">
+          <div className="rounded-xl border bg-card p-3">
+            <a href={contestUrl} className="group block rounded-lg px-2 py-2 hover:bg-accent/40">
+              <p className="line-clamp-2 text-sm font-medium group-hover:text-primary">{tdoc.title || '考试'}</p>
+              <p className="mt-1 text-xs text-muted-foreground">返回考试详情</p>
+            </a>
+            <div className="my-2 h-px bg-border" />
+            <nav className="space-y-1" aria-label="考试管理">
+              {items.map((item) => {
+                const Icon = item.icon;
+                const current = item.key === active;
+                return (
+                  <a
+                    key={item.key}
+                    href={item.href}
+                    aria-current={current ? 'page' : undefined}
+                    className={`flex items-center gap-2 rounded-md px-2.5 py-2 text-sm transition-colors ${
+                      current ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+                    }`}
+                  >
+                    <Icon className="size-4" />
+                    <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                    {!['overview', 'edit', 'users', 'clarification', 'print'].includes(String(item.key)) ? (
+                      <ExternalLink className="size-3 opacity-60" />
+                    ) : null}
+                  </a>
+                );
+              })}
+            </nav>
+          </div>
+        </aside>
+        <main className="min-w-0">{children}</main>
+      </div>
     </div>
   );
 }
@@ -323,9 +353,9 @@ function ExamFileCard({
           <CardDescription>{description}</CardDescription>
         </div>
         <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
-          <form method="post" encType="multipart/form-data" className="flex flex-wrap items-center gap-2">
+          <form method="post" encType="multipart/form-data" className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
             <input type="hidden" name="type" value={type} />
-            <input type="file" name="file" className="text-xs" />
+            <input type="file" name="file" className="max-w-full min-w-0 text-xs" />
             <Button type="submit" name="operation" value="upload_file" size="sm" variant="outline">
               <Upload className="mr-1 size-3" />
               上传

@@ -60,8 +60,9 @@ import {
   type ProblemOption,
 } from '@/lib/multi-select-presets';
 import { useBootstrap, type GenericUserDoc } from '@/lib/bootstrap';
-import { getContestProblemStatus, getPersonalPracticeStatus, type PersonalPracticeStatusSnapshot } from '@/lib/contest-exam-display';
+import { cn } from '@/lib/cn';
 import { companionContestEligibility, contestProblemLetter } from '@/lib/competitive-companion';
+import { getContestProblemStatus, getPersonalPracticeStatus, type PersonalPracticeStatusSnapshot } from '@/lib/contest-exam-display';
 import { fetchHydroResponse, presentHydroResponseError, readHydroResponseError, type PresentedResponseError } from '@/lib/error-presenter';
 import { formatDateTime, formatRelativeTime, makeInitials, replaceRouteTokens } from '@/lib/format';
 import { isSystemAdmin } from '@/lib/perms';
@@ -296,19 +297,21 @@ function MiniTabsNav<T extends string>({
   onChange: (next: T) => void;
 }) {
   return (
-    <div className="inline-flex items-center rounded-lg bg-muted p-1 text-muted-foreground">
-      {items.map((tab) => (
-        <button
-          key={tab.value}
-          type="button"
-          onClick={() => onChange(tab.value)}
-          className={`whitespace-nowrap rounded-md px-3 py-1 text-sm font-medium transition-all ${
-            active === tab.value ? 'bg-background text-foreground shadow' : 'hover:text-foreground/80'
-          }`}
-        >
-          {tab.label}
-        </button>
-      ))}
+    <div className="-mx-1 overflow-x-auto px-1">
+      <div className="inline-flex min-w-max items-center rounded-lg bg-muted p-1 text-muted-foreground">
+        {items.map((tab) => (
+          <button
+            key={tab.value}
+            type="button"
+            onClick={() => onChange(tab.value)}
+            className={`whitespace-nowrap rounded-md px-3 py-1 text-sm font-medium transition-all ${
+              active === tab.value ? 'bg-background text-foreground shadow' : 'hover:text-foreground/80'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -620,40 +623,69 @@ function ContestManagementChrome({ tdoc, active, children }: { tdoc: ContestDoc;
     (tdoc.owner === bs.user.id || isSystemAdmin(bs.user.priv));
   const items = managementItems(tdoc, contestUrl, canGradeSubjective);
   return (
-    <div className="grid gap-5 lg:grid-cols-[220px_minmax(0,1fr)]">
-      <aside className="space-y-3">
-        <div className="rounded-xl border bg-card p-3">
-          <a href={contestUrl} className="group block rounded-lg px-2 py-2 hover:bg-accent/40">
-            <p className="line-clamp-2 text-sm font-medium group-hover:text-primary">
-              {tdoc.title || (isExamRule(tdoc.rule) ? '考试' : '比赛')}
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">{isExamRule(tdoc.rule) ? '返回考试详情' : '返回比赛详情'}</p>
-          </a>
-          <div className="my-2 h-px bg-border" />
-          <nav className="space-y-1">
-            {items.map((item) => {
-              const Icon = item.icon;
-              const current = item.key === active;
-              return (
-                <a
-                  key={item.key}
-                  href={item.href}
-                  className={`flex items-center gap-2 rounded-md px-2.5 py-2 text-sm transition-colors ${
-                    current ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground'
-                  }`}
-                >
-                  <Icon className="size-4" />
-                  <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                  {!['overview', 'edit', 'users', 'clarification', 'balloon', 'print'].includes(String(item.key)) ? (
-                    <ExternalLink className="size-3 opacity-60" />
-                  ) : null}
-                </a>
-              );
-            })}
-          </nav>
+    <div className="min-w-0 space-y-5">
+      <nav aria-hidden="true" className="-mx-1 overflow-x-auto px-1 pb-1 lg:hidden">
+        <div className="inline-flex min-w-max items-center gap-1 rounded-xl bg-muted/70 p-1">
+          {items.map((item) => {
+            const Icon = item.icon;
+            const current = item.key === active;
+            return (
+              <a
+                key={item.key}
+                href={item.href}
+                tabIndex={-1}
+                className={cn(
+                  'inline-flex min-h-11 shrink-0 items-center gap-2 rounded-lg px-3 text-sm font-medium',
+                  'transition-[color,background-color,box-shadow] duration-200 ease-out motion-reduce:transition-none',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+                  current
+                    ? 'bg-background text-foreground shadow-sm ring-1 ring-border/60'
+                    : 'text-muted-foreground hover:bg-background/60 hover:text-foreground',
+                )}
+              >
+                <Icon className="size-4 shrink-0" />
+                {item.label}
+              </a>
+            );
+          })}
         </div>
-      </aside>
-      <main className="min-w-0">{children}</main>
+      </nav>
+      <div className="grid min-w-0 gap-5 lg:grid-cols-[220px_minmax(0,1fr)]">
+        <aside className="hidden space-y-3 lg:block">
+          <div className="rounded-xl border bg-card p-3">
+            <a href={contestUrl} className="group block rounded-lg px-2 py-2 hover:bg-accent/40">
+              <p className="line-clamp-2 text-sm font-medium group-hover:text-primary">
+                {tdoc.title || (isExamRule(tdoc.rule) ? '考试' : '比赛')}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">{isExamRule(tdoc.rule) ? '返回考试详情' : '返回比赛详情'}</p>
+            </a>
+            <div className="my-2 h-px bg-border" />
+            <nav className="space-y-1" aria-label="比赛管理">
+              {items.map((item) => {
+                const Icon = item.icon;
+                const current = item.key === active;
+                return (
+                  <a
+                    key={item.key}
+                    href={item.href}
+                    aria-current={current ? 'page' : undefined}
+                    className={`flex items-center gap-2 rounded-md px-2.5 py-2 text-sm transition-colors ${
+                      current ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+                    }`}
+                  >
+                    <Icon className="size-4" />
+                    <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                    {!['overview', 'edit', 'users', 'clarification', 'balloon', 'print'].includes(String(item.key)) ? (
+                      <ExternalLink className="size-3 opacity-60" />
+                    ) : null}
+                  </a>
+                );
+              })}
+            </nav>
+          </div>
+        </aside>
+        <main className="min-w-0">{children}</main>
+      </div>
     </div>
   );
 }
@@ -937,7 +969,7 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
       </div>
 
       <ContestManagementChrome tdoc={tdoc} active="edit">
-        <Card>
+        <Card className="max-w-5xl">
           <CardContent className="p-6">
             <form
               ref={formRef}
@@ -1383,10 +1415,12 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
 
               {/* ─── Tab 4: 客户端与反作弊 (Krypton) ─── */}
               <div className="space-y-4" hidden={activeTab !== 'vigil'}>
-                <label className="flex items-center gap-2 text-sm">
+                <label className="flex cursor-pointer items-start justify-between gap-4 rounded-lg border p-4">
+                  <span className="min-w-0 space-y-1">
+                    <span className="block text-sm font-medium leading-none">启用 Vigil 反作弊</span>
+                    <span className="block text-xs text-muted-foreground">开启后比赛的会话会被推送到 Vigil Server</span>
+                  </span>
                   <Switch checked={vigilEnabled} disabled={participationMode === 'team'} onCheckedChange={(v) => setVigilEnabled(!!v)} />
-                  启用 Vigil 反作弊
-                  <span className="ml-auto text-[11px] text-muted-foreground">开启后比赛的会话会被推送到 Vigil Server</span>
                 </label>
                 <input type="hidden" name="vigilEnabled" value={vigilEnabled ? 'true' : 'false'} />
                 {isEdit && isSystemAdmin(bs.user.priv) && typeof editableContestId === 'string' && editableContestId ? (
@@ -1461,7 +1495,7 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
                       </div>
                     </div>
 
-                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                       <div className="space-y-1.5">
                         <label className="text-sm font-medium">截图间隔 (ms)</label>
                         <Input type="number" name="screenshotIntervalMs" min={1000} step={1000} defaultValue={tdoc.screenshotIntervalMs || 60000} />
@@ -2205,9 +2239,9 @@ function ContestAcmManagePage() {
           {title} ({fileList.length})
         </CardTitle>
         <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
-          <form method="post" encType="multipart/form-data" className="flex flex-wrap items-center gap-2">
+          <form method="post" encType="multipart/form-data" className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
             <input type="hidden" name="type" value={type} />
-            <input type="file" name="file" className="text-xs" />
+            <input type="file" name="file" className="max-w-full min-w-0 text-xs" />
             <Button type="submit" name="operation" value="upload_file" size="sm" variant="outline">
               <Upload className="mr-1 size-3" />
               上传
@@ -2301,18 +2335,20 @@ function ContestAcmManagePage() {
       <ContestManagementChrome tdoc={tdoc} active="overview">
         <div className="space-y-4">
           {typeof tid === 'string' ? <ContestExamSeatEntry tdoc={tdoc} contestId={tid} scopeGroups={data.scopeGroups || []} /> : null}
-          <MiniTabs<'score' | 'stats' | 'public' | 'private'>
-            value={activeManageTab}
-            onValueChange={setActiveManageTab}
-            items={[
-              { value: 'score' as const, label: '题目分值', count: pids.length, icon: ListChecks },
-              ...(submissionStats ? [{ value: 'stats' as const, label: '提交统计', count: submissionStats.total || 0, icon: Clock }] : []),
-              { value: 'public' as const, label: '公开文件', count: files.length, icon: FolderOpen },
-              { value: 'private' as const, label: '私有材料', count: privateFiles.length, icon: ShieldCheck },
-            ]}
-            size="md"
-            aria-label="比赛管理功能"
-          />
+          <div className="-mx-1 overflow-x-auto px-1">
+            <MiniTabs<'score' | 'stats' | 'public' | 'private'>
+              value={activeManageTab}
+              onValueChange={setActiveManageTab}
+              items={[
+                { value: 'score' as const, label: '题目分值', count: pids.length, icon: ListChecks },
+                ...(submissionStats ? [{ value: 'stats' as const, label: '提交统计', count: submissionStats.total || 0, icon: Clock }] : []),
+                { value: 'public' as const, label: '公开文件', count: files.length, icon: FolderOpen },
+                { value: 'private' as const, label: '私有材料', count: privateFiles.length, icon: ShieldCheck },
+              ]}
+              size="md"
+              aria-label="比赛管理功能"
+            />
+          </div>
 
           {activeManageTab === 'score' ? (
             <Card>
@@ -2554,17 +2590,19 @@ export function ContestProblemListPage() {
         />
       </div>
 
-      <MiniTabs
-        value={workspaceTab}
-        onValueChange={setWorkspaceTab}
-        items={[
-          { value: 'problems', label: '题目', count: pids.length, icon: ListChecks },
-          { value: 'submissions', label: teamMode ? '本队提交' : '我的提交', count: rdocs.length, icon: Send },
-          { value: 'clarifications', label: '澄清', count: tcdocs.length, icon: MessageSquare },
-        ]}
-        size="md"
-        aria-label="比赛入口"
-      />
+      <div className="-mx-1 overflow-x-auto px-1">
+        <MiniTabs
+          value={workspaceTab}
+          onValueChange={setWorkspaceTab}
+          items={[
+            { value: 'problems', label: '题目', count: pids.length, icon: ListChecks },
+            { value: 'submissions', label: teamMode ? '本队提交' : '我的提交', count: rdocs.length, icon: Send },
+            { value: 'clarifications', label: '澄清', count: tcdocs.length, icon: MessageSquare },
+          ]}
+          size="md"
+          aria-label="比赛入口"
+        />
+      </div>
 
       {workspaceTab === 'problems' ? (
         <div className="space-y-3">
@@ -2850,15 +2888,15 @@ export function ContestUserPage() {
 
   return (
     <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-      <div className="flex items-center gap-3">
+      <div className="flex min-w-0 items-center gap-3">
         <Button asChild variant="ghost" size="icon">
           <a href={contestUrl}>
             <ArrowLeft className="size-4" />
           </a>
         </Button>
-        <div>
-          <h1 className="text-xl font-semibold">{isExamRule(tdoc.rule) ? '考生名单' : '参赛选手'}</h1>
-          <p className="text-sm text-muted-foreground">
+        <div className="min-w-0">
+          <h1 className="truncate text-xl font-semibold">{isExamRule(tdoc.rule) ? '考生名单' : '参赛选手'}</h1>
+          <p className="truncate text-sm text-muted-foreground">
             {tdoc.title} — 共 {tsdocs.length} 人
           </p>
         </div>
@@ -2875,16 +2913,18 @@ export function ContestUserPage() {
               设置打星。
             </p>
           ) : null}
-          <MiniTabs
-            value={userTab}
-            onValueChange={setUserTab}
-            items={[
-              { value: 'list', label: isExamRule(tdoc.rule) ? '考生列表' : '选手列表', count: tsdocs.length, icon: Users },
-              { value: 'add', label: isExamRule(tdoc.rule) ? '添加考生' : '添加选手', icon: UserPlus },
-            ]}
-            size="md"
-            aria-label={isExamRule(tdoc.rule) ? '考生管理' : '选手管理'}
-          />
+          <div className="-mx-1 overflow-x-auto px-1">
+            <MiniTabs
+              value={userTab}
+              onValueChange={setUserTab}
+              items={[
+                { value: 'list', label: isExamRule(tdoc.rule) ? '考生列表' : '选手列表', count: tsdocs.length, icon: Users },
+                { value: 'add', label: isExamRule(tdoc.rule) ? '添加考生' : '添加选手', icon: UserPlus },
+              ]}
+              size="md"
+              aria-label={isExamRule(tdoc.rule) ? '考生管理' : '选手管理'}
+            />
+          </div>
 
           {userTab === 'add' ? (
             <Card>
@@ -2955,12 +2995,12 @@ export function ContestUserPage() {
                       const u = getUser(udict, ts.uid);
                       return (
                         <TableRow key={String(ts.uid)}>
-                          <TableCell>
-                            <div className="flex items-center gap-2">
-                              <Avatar className="size-6">
+                          <TableCell className="min-w-0">
+                            <div className="flex min-w-0 items-center gap-2">
+                              <Avatar className="size-6 shrink-0">
                                 <AvatarFallback className="text-[10px]">{makeInitials(u?.uname || '?')}</AvatarFallback>
                               </Avatar>
-                              <span className="text-sm">{u?.uname || `UID ${ts.uid}`}</span>
+                              <span className="min-w-0 truncate text-sm">{u?.uname || `UID ${ts.uid}`}</span>
                             </div>
                           </TableCell>
                           <TableCell className="text-center">
@@ -3055,40 +3095,42 @@ export function ContestBalloonPage() {
 
   return (
     <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-      <div className="flex items-center gap-3">
+      <div className="flex min-w-0 items-center gap-3">
         <Button asChild variant="ghost" size="icon">
           <a href={contestUrl}>
             <ArrowLeft className="size-4" />
           </a>
         </Button>
-        <div>
-          <h1 className="text-xl font-semibold">气球分发</h1>
-          <p className="text-sm text-muted-foreground">{tdoc.title}</p>
+        <div className="min-w-0">
+          <h1 className="truncate text-xl font-semibold">气球分发</h1>
+          <p className="truncate text-sm text-muted-foreground">{tdoc.title}</p>
         </div>
       </div>
 
       <ContestManagementChrome tdoc={tdoc} active="balloon">
         <div className="space-y-4">
-          <MiniTabs
-            value={balloonTab}
-            onValueChange={setBalloonTab}
-            items={[
-              { value: 'pending', label: '待处理', count: pendingBalloons.length, icon: Clock },
-              { value: 'sent', label: '已送达', count: sentBalloons.length, icon: CheckCircle2 },
-              { value: 'all', label: '全部', count: bdocs.length, icon: Trophy },
-            ]}
-            size="md"
-            aria-label="气球任务"
-          />
+          <div className="-mx-1 overflow-x-auto px-1">
+            <MiniTabs
+              value={balloonTab}
+              onValueChange={setBalloonTab}
+              items={[
+                { value: 'pending', label: '待处理', count: pendingBalloons.length, icon: Clock },
+                { value: 'sent', label: '已送达', count: sentBalloons.length, icon: CheckCircle2 },
+                { value: 'all', label: '全部', count: bdocs.length, icon: Trophy },
+              ]}
+              size="md"
+              aria-label="气球任务"
+            />
+          </div>
 
           {balloonRows.length > 0 && (
             <div className="rounded-lg border bg-card p-4">
               <form method="post" className="space-y-3">
                 <input type="hidden" name="operation" value="set_color" />
                 <input type="hidden" name="color" value={serializeBalloonRows(balloonRows)} readOnly />
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <h2 className="text-sm font-medium">题目气球配置</h2>
+                <div className="flex min-w-0 items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <h2 className="truncate text-sm font-medium">题目气球配置</h2>
                     <p className="text-xs text-muted-foreground">为每道题设置发放时显示的颜色和气球名称。</p>
                   </div>
                   <Button type="submit" size="sm">
@@ -3157,13 +3199,13 @@ export function ContestBalloonPage() {
                           </Badge>
                         </TableCell>
                         <TableCell className="font-mono text-xs text-muted-foreground">{String(b._id || '').slice(0, 8) || '-'}</TableCell>
-                        <TableCell className="text-sm">
-                          <div className="flex items-center gap-2">
+                        <TableCell className="min-w-0 text-sm">
+                          <div className="flex min-w-0 items-center gap-2">
                             <span
-                              className="size-3 rounded-full border"
+                              className="size-3 shrink-0 rounded-full border"
                               style={{ backgroundColor: typeof config === 'object' ? config.color : undefined }}
                             />
-                            <span className="font-semibold">{getAlphabeticId(index)}</span>
+                            <span className="shrink-0 font-semibold">{getAlphabeticId(index)}</span>
                             <span className="min-w-0 truncate">
                               {typeof config === 'object' && config.name ? config.name : p.title || `P${b.pid}`}
                             </span>
@@ -3234,31 +3276,33 @@ export function ContestClarificationPage() {
 
   return (
     <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-      <div className="flex items-center gap-3">
+      <div className="flex min-w-0 flex-wrap items-center gap-3">
         <Button asChild variant="ghost" size="icon">
           <a href={contestUrl}>
             <ArrowLeft className="size-4" />
           </a>
         </Button>
-        <div>
-          <h1 className="text-xl font-semibold">答疑管理</h1>
-          <p className="text-sm text-muted-foreground">{tdoc.title}</p>
+        <div className="min-w-0">
+          <h1 className="truncate text-xl font-semibold">答疑管理</h1>
+          <p className="truncate text-sm text-muted-foreground">{tdoc.title}</p>
         </div>
       </div>
 
       <ContestManagementChrome tdoc={tdoc} active="clarification">
         <div className="space-y-4">
-          <MiniTabs
-            value={clarificationTab}
-            onValueChange={setClarificationTab}
-            items={[
-              { value: 'broadcast', label: '广播', icon: MessageSquare },
-              { value: 'pending', label: '待回复', count: pendingClarifications.length, icon: HelpCircle },
-              { value: 'all', label: '全部答疑', count: tcdocs.length, icon: ListChecks },
-            ]}
-            size="md"
-            aria-label="答疑管理"
-          />
+          <div className="-mx-1 overflow-x-auto px-1">
+            <MiniTabs
+              value={clarificationTab}
+              onValueChange={setClarificationTab}
+              items={[
+                { value: 'broadcast', label: '广播', icon: MessageSquare },
+                { value: 'pending', label: '待回复', count: pendingClarifications.length, icon: HelpCircle },
+                { value: 'all', label: '全部答疑', count: tcdocs.length, icon: ListChecks },
+              ]}
+              size="md"
+              aria-label="答疑管理"
+            />
+          </div>
 
           {clarificationTab === 'broadcast' ? (
             <Card>
@@ -3306,15 +3350,15 @@ export function ContestClarificationPage() {
                 return (
                   <Card key={String(tc._id)}>
                     <CardContent className="p-4">
-                      <div className="flex items-center gap-2">
-                        <Avatar className="size-6">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Avatar className="size-6 shrink-0">
                           <AvatarFallback className="text-[9px]">{makeInitials(u?.uname || '?')}</AvatarFallback>
                         </Avatar>
-                        <span className="text-sm font-medium">{u?.uname || '管理员'}</span>
-                        <Badge variant="outline" className="text-xs">
+                        <span className="min-w-0 truncate text-sm font-medium">{u?.uname || '管理员'}</span>
+                        <Badge variant="outline" className="max-w-full truncate text-xs">
                           {clarificationSubjectLabel(tdoc, pdict, tc.subject)}
                         </Badge>
-                        <span className="ml-auto text-xs text-muted-foreground">{tc.updateAt ? formatRelativeTime(tc.updateAt, bs.locale) : ''}</span>
+                        <span className="ml-auto truncate text-xs text-muted-foreground">{tc.updateAt ? formatRelativeTime(tc.updateAt, bs.locale) : ''}</span>
                       </div>
                       <MarkdownView content={tc.content || ''} className="mt-3" preferredLang={bs.locale} />
                       {Array.isArray(tc.reply) && tc.reply.length > 0 ? (
@@ -3505,42 +3549,44 @@ export function ContestPrintPage() {
 
   return (
     <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-      <div className="flex items-center gap-3">
+      <div className="flex min-w-0 items-center gap-3">
         <Button asChild variant="ghost" size="icon">
           <a href={contestUrl}>
             <ArrowLeft className="size-4" />
           </a>
         </Button>
-        <div>
-          <h1 className="text-xl font-semibold">打印服务</h1>
-          <p className="text-sm text-muted-foreground">{tdoc.title}</p>
+        <div className="min-w-0">
+          <h1 className="truncate text-xl font-semibold">打印服务</h1>
+          <p className="truncate text-sm text-muted-foreground">{tdoc.title}</p>
         </div>
       </div>
 
       <PrintChrome>
         <div className="space-y-4">
-          <MiniTabs
-            value={printTab === 'submit' && !canSubmitPrint ? 'queue' : printTab}
-            onValueChange={setPrintTab}
-            items={[
-              ...(canSubmitPrint ? [{ value: 'submit' as const, label: '提交打印', icon: Upload }] : []),
-              { value: 'queue', label: '打印队列', count: tasks.length, icon: FileText },
-              { value: 'kiosk', label: '打印亭', icon: Printer, disabled: !isPrintAdmin },
-            ]}
-            size="md"
-            aria-label="打印服务"
-          />
+          <div className="-mx-1 overflow-x-auto px-1">
+            <MiniTabs
+              value={printTab === 'submit' && !canSubmitPrint ? 'queue' : printTab}
+              onValueChange={setPrintTab}
+              items={[
+                ...(canSubmitPrint ? [{ value: 'submit' as const, label: '提交打印', icon: Upload }] : []),
+                { value: 'queue', label: '打印队列', count: tasks.length, icon: FileText },
+                { value: 'kiosk', label: '打印亭', icon: Printer, disabled: !isPrintAdmin },
+              ]}
+              size="md"
+              aria-label="打印服务"
+            />
+          </div>
 
           {canSubmitPrint && printTab === 'submit' ? (
             <Card>
               <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Printer className="size-4" />
+                <CardTitle className="flex min-w-0 items-center gap-2 text-base">
+                  <Printer className="size-4 shrink-0" />
                   提交打印
                 </CardTitle>
-                <form method="post" encType="multipart/form-data" className="flex items-center gap-2">
+                <form method="post" encType="multipart/form-data" className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
                   <input type="hidden" name="operation" value="print" />
-                  <input type="file" name="file" className="text-xs" />
+                  <input type="file" name="file" className="max-w-full min-w-0 text-xs" />
                   <Button type="submit" size="sm" variant="outline">
                     <Upload className="mr-1 size-3.5" />
                     上传文件
@@ -3593,8 +3639,8 @@ export function ContestPrintPage() {
           {printTab !== 'submit' ? (
             <Card>
               <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <FileText className="size-4" />
+                <CardTitle className="flex min-w-0 items-center gap-2 text-base">
+                  <FileText className="size-4 shrink-0" />
                   打印队列
                 </CardTitle>
                 <Button type="button" size="sm" variant="outline" onClick={() => refreshTasks().catch((error) => void alertDialog(error instanceof Error ? error.message : String(error)))}>
@@ -3626,7 +3672,7 @@ export function ContestPrintPage() {
                         return (
                           <TableRow key={String(task._id)}>
                             <TableCell className="pl-5 text-sm">{owner.uname || `UID ${task.owner}`}</TableCell>
-                            <TableCell className="font-mono text-sm">{task.title || '—'}</TableCell>
+                            <TableCell className="min-w-0 truncate font-mono text-sm">{task.title || '—'}</TableCell>
                             <TableCell className="text-sm text-muted-foreground">{formatObjectIdTime(task._id, bs.locale) || '—'}</TableCell>
                             <TableCell className="text-center">
                               <Badge variant={String(task.status).includes('printed') ? 'secondary' : 'outline'} className="text-xs">

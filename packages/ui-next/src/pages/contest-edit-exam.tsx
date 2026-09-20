@@ -193,7 +193,7 @@ function ExamCard({ title, description, children }: { title: string; description
 
 function SettingsRow({ label, description, children }: { label: string; description?: string; children: ReactNode }) {
   return (
-    <div className="flex items-start justify-between gap-4 rounded-lg border p-4">
+    <div className="flex flex-col gap-3 rounded-lg border p-4 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
       <div className="min-w-0 space-y-1">
         <p className="text-sm font-medium leading-none">{label}</p>
         {description ? <p className="text-xs leading-5 text-muted-foreground">{description}</p> : null}
@@ -319,47 +319,47 @@ export function ContestEditExam({ rule, onRuleChange, children }: ContestEditExa
   }, [networkLockdownMode, networkFailurePolicy]);
 
   return (
-    <div className="space-y-6">
-      <header className="sticky top-0 z-10 -mx-1 flex flex-wrap items-start gap-3 rounded-xl border bg-background/95 px-3 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/80">
-        <Button asChild variant="ghost" size="icon">
-          <a href={contestUrl} aria-label="返回">
-            <ArrowLeft className="size-4" />
-          </a>
-        </Button>
-        <div className="min-w-0 flex-1 space-y-2">
-          <div className="space-y-1">
-            <h1 className="text-xl font-semibold tracking-tight">{isEdit ? '编辑考试' : '创建考试'}</h1>
-            <p className="text-sm text-muted-foreground">个人答卷考试。先定时间和题池，说明可以后写。</p>
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            <Badge variant="secondary" className="font-normal tabular-nums">
-              {beginDate && beginTime ? `${beginDate} ${beginTime} 开门` : '未设开始时间'}
-            </Badge>
-            <Badge variant="secondary" className="font-normal tabular-nums">
-              {duration || '—'} 小时关门
-            </Badge>
-            <Badge variant="outline" className="font-normal">
-              {personalClock === null && !isEdit ? '未设个人时长' : personalClockLabel}
-            </Badge>
-            <Badge variant="outline" className="font-normal">
-              {permission === 'invite' ? '邀请码' : '公开'}
-              {scopeMode === 'schools' ? ' · 指定学校' : scopeMode === 'groups' ? ' · 指定用户组' : ''}
-            </Badge>
-          </div>
-        </div>
+    <div className="max-w-5xl space-y-6">
+      <header className="sticky top-0 z-10 -mx-1 space-y-2 rounded-xl border bg-background/95 px-3 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/80">
         <div className="flex flex-wrap items-center gap-2">
-          {isEdit ? (
-            <Button type="submit" form="exam-edit-form" name="operation" value="update" variant="outline" formAction={`${bs.urls.contests}/create`}>
-              <Copy className="size-4" />
-              复制为新考试
-            </Button>
-          ) : null}
-          <Button type="submit" form="exam-edit-form" name="operation" value="update">
-            <Save className="size-4" />
-            {isEdit ? '保存修改' : '创建考试'}
+          <Button asChild variant="ghost" size="icon">
+            <a href={contestUrl} aria-label="返回">
+              <ArrowLeft className="size-4" />
+            </a>
           </Button>
+          <div className="min-w-0 flex-1">
+            <h1 className="truncate text-lg font-semibold tracking-tight">{isEdit ? '编辑考试' : '创建考试'}</h1>
+            <p className="hidden truncate text-xs text-muted-foreground sm:block">个人答卷考试。先定时间和题池，说明可以后写。</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {isEdit ? (
+              <Button type="submit" form="exam-edit-form" name="operation" value="update" variant="outline" formAction={`${bs.urls.contests}/create`}>
+                <Copy className="size-4" />
+                复制为新考试
+              </Button>
+            ) : null}
+            <Button type="submit" form="exam-edit-form" name="operation" value="update">
+              <Save className="size-4" />
+              {isEdit ? '保存修改' : '创建考试'}
+            </Button>
+          </div>
         </div>
-        <div className="w-full overflow-x-auto">
+        <div className="flex flex-wrap gap-1.5">
+          <Badge variant="secondary" className="font-normal tabular-nums">
+            {beginDate && beginTime ? `${beginDate} ${beginTime} 开门` : '未设开始时间'}
+          </Badge>
+          <Badge variant="secondary" className="font-normal tabular-nums">
+            {duration || '—'} 小时关门
+          </Badge>
+          <Badge variant="outline" className="font-normal">
+            {personalClock === null && !isEdit ? '未设个人时长' : personalClockLabel}
+          </Badge>
+          <Badge variant="outline" className="font-normal">
+            {permission === 'invite' ? '邀请码' : '公开'}
+            {scopeMode === 'schools' ? ' · 指定学校' : scopeMode === 'groups' ? ' · 指定用户组' : ''}
+          </Badge>
+        </div>
+        <div className="-mx-1 overflow-x-auto px-1">
           <MiniTabs<ExamEditTab>
             value={tab}
             onValueChange={setTab}
@@ -405,8 +405,8 @@ export function ContestEditExam({ rule, onRuleChange, children }: ContestEditExa
             <Input id="title" name="title" defaultValue={readString(tdoc.title)} required placeholder="例如：2026 秋 程序设计期末" />
           </div>
 
-          <div className="grid gap-3 md:grid-cols-3">
-            <div className="space-y-3 rounded-lg border bg-muted/20 p-4 md:col-span-1">
+          <div className="grid gap-3 lg:grid-cols-3">
+            <div className="space-y-3 rounded-lg border bg-muted/20 p-4">
               <p className="text-xs font-medium text-muted-foreground">开门</p>
               <div className="space-y-1.5">
                 <label htmlFor="beginAtDate" className="text-sm font-medium">
@@ -689,7 +689,7 @@ export function ContestEditExam({ rule, onRuleChange, children }: ContestEditExa
                   </SettingsRow>
                 </div>
 
-                <div className="grid gap-4 sm:grid-cols-2">
+                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                   <div className="space-y-1.5">
                     <label className="text-sm font-medium">截图间隔 (ms)</label>
                     <Input

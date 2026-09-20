@@ -183,28 +183,31 @@ function ConfirmDialog({ action, onClose }: { action: ConfirmAction | null; onCl
 function MemberList({ team, users, actions }: { team: TeamView; users: Record<string, TeamUser>; actions?: (uid: number) => ReactNode }) {
   return (
     <div className="divide-y rounded-xl border bg-background/60">
-      {team.memberUids.map((uid) => (
-        <div key={uid} className="flex min-h-14 items-center gap-3 px-3 py-2">
-          <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold">
-            {userLabel(users, uid).slice(0, 1).toUpperCase()}
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="truncate text-sm font-medium">{userLabel(users, uid)}</span>
-              {team.captainUid === uid ? (
-                <Badge variant="secondary" className="gap-1 text-[10px]">
-                  <Crown className="size-3" /> 队长
-                </Badge>
-              ) : null}
+      {team.memberUids.map((uid) => {
+        const action = actions?.(uid);
+        return (
+          <div key={uid} className="flex min-h-14 items-center gap-3 px-3 py-2">
+            <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold">
+              {userLabel(users, uid).slice(0, 1).toUpperCase()}
             </div>
-            <p className="truncate text-[11px] text-muted-foreground">
-              {studentIdentity(teamUser(users, uid)) || '未绑定学生档案'}
-              <span className="font-mono"> · UID {uid}</span>
-            </p>
+            <div className="min-w-0 flex-1">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="min-w-0 truncate text-sm font-medium">{userLabel(users, uid)}</span>
+                {team.captainUid === uid ? (
+                  <Badge variant="secondary" className="shrink-0 gap-1 text-[10px]">
+                    <Crown className="size-3" /> 队长
+                  </Badge>
+                ) : null}
+              </div>
+              <p className="truncate text-[11px] text-muted-foreground">
+                {studentIdentity(teamUser(users, uid)) || '未绑定学生档案'}
+                <span className="font-mono"> · UID {uid}</span>
+              </p>
+            </div>
+            {action ? <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">{action}</div> : null}
           </div>
-          {actions?.(uid)}
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -396,18 +399,18 @@ export function ContestTeamsPage() {
         </div>
 
         {ownTeam ? (
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.75fr)]">
-            <Card>
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,0.75fr)]">
+            <Card className="min-w-0">
               <CardHeader className="pb-3">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <CardTitle className="flex items-center gap-2 text-xl">
-                      {ownTeam.name}
-                      <Badge variant={ownTeam.managementMode === 'admin' ? 'default' : 'secondary'}>
+                <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <CardTitle className="flex min-w-0 items-center gap-2 text-xl">
+                      <span className="min-w-0 truncate">{ownTeam.name}</span>
+                      <Badge variant={ownTeam.managementMode === 'admin' ? 'default' : 'secondary'} className="shrink-0">
                         {ownTeam.managementMode === 'admin' ? '管理员编队' : '自主队伍'}
                       </Badge>
                       {ownTeam.unrank ? (
-                        <Badge variant="outline" className="gap-1">
+                        <Badge variant="outline" className="shrink-0 gap-1">
                           <Star className="size-3" />
                           已打星
                         </Badge>
@@ -424,11 +427,12 @@ export function ContestTeamsPage() {
                   users={users}
                   actions={(uid) =>
                     capabilities.canEditOwn && ownIsCaptain && ownIsSelfManaged && uid !== currentUid ? (
-                      <div className="flex items-center gap-1">
+                      <>
                         <Button
                           type="button"
                           size="sm"
                           variant="ghost"
+                          className="min-h-11"
                           onClick={() =>
                             setConfirmAction({
                               title: `转让队长给 ${userLabel(users, uid)}？`,
@@ -444,7 +448,7 @@ export function ContestTeamsPage() {
                           type="button"
                           size="sm"
                           variant="ghost"
-                          className="text-destructive"
+                          className="min-h-11 text-destructive"
                           onClick={() =>
                             setConfirmAction({
                               title: `移除 ${userLabel(users, uid)}？`,
@@ -459,7 +463,7 @@ export function ContestTeamsPage() {
                         >
                           <X className="size-3" /> 移除
                         </Button>
-                      </div>
+                      </>
                     ) : null
                   }
                 />
@@ -510,7 +514,7 @@ export function ContestTeamsPage() {
               </CardContent>
             </Card>
 
-            <div className="space-y-4">
+            <div className="min-w-0 space-y-4">
               {capabilities.canEditOwn ? (
                 <Card>
                   <CardHeader className="pb-3">
@@ -575,21 +579,28 @@ export function ContestTeamsPage() {
                 {invitations.length ? (
                   invitations.map((invite) => (
                     <div key={invite.inviteId} className="rounded-xl border bg-background/60 p-4">
-                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <p className="font-medium">{invite.teamName}</p>
-                            <Badge variant="outline">{invite.memberUids.length}/3 人</Badge>
-                            {!invite.canAccept ? <Badge variant="destructive">邀请已失效</Badge> : null}
+                      <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0">
+                          <div className="flex min-w-0 flex-wrap items-center gap-2">
+                            <p className="min-w-0 truncate font-medium">{invite.teamName}</p>
+                            <Badge variant="outline" className="shrink-0">
+                              {invite.memberUids.length}/3 人
+                            </Badge>
+                            {!invite.canAccept ? (
+                              <Badge variant="destructive" className="shrink-0">
+                                邀请已失效
+                              </Badge>
+                            ) : null}
                           </div>
                           <p className="mt-1 text-xs text-muted-foreground">
                             邀请人：{userLabel(users, invite.inviterUid)} · {formatDateTime(invite.createdAt, bs.locale)}
                           </p>
                         </div>
-                        <div className="flex gap-2">
+                        <div className="flex flex-wrap gap-2">
                           <Button
                             type="button"
                             size="sm"
+                            className="min-h-11"
                             disabled={!invite.canAccept}
                             onClick={() =>
                               setConfirmAction({
@@ -606,6 +617,7 @@ export function ContestTeamsPage() {
                             type="button"
                             size="sm"
                             variant="outline"
+                            className="min-h-11"
                             disabled={capabilities.started}
                             onClick={() =>
                               setConfirmAction({
@@ -715,7 +727,7 @@ export function ContestTeamsPage() {
               </form>
             </div>
 
-            <div className="hidden grid-cols-[minmax(12rem,0.8fr)_minmax(24rem,1.7fr)_10.5rem] gap-5 bg-muted/25 px-5 py-2.5 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground xl:grid">
+            <div className="hidden grid-cols-[minmax(12rem,0.8fr)_minmax(24rem,1.7fr)_minmax(16rem,auto)] gap-5 bg-muted/25 px-5 py-2.5 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground xl:grid">
               <span>队伍</span>
               <span>成员与绑定身份</span>
               <span className="text-right">操作</span>
@@ -725,11 +737,11 @@ export function ContestTeamsPage() {
               {managedTeams.map((team) => (
                 <article
                   key={team.teamId}
-                  className="grid gap-4 px-4 py-4 transition-[background-color] duration-150 hover:bg-muted/20 sm:px-5 xl:grid-cols-[minmax(12rem,0.8fr)_minmax(24rem,1.7fr)_10.5rem] xl:items-center xl:gap-5"
+                  className="grid gap-4 px-4 py-4 transition-[background-color] duration-150 hover:bg-muted/20 sm:px-5 xl:grid-cols-[minmax(12rem,0.8fr)_minmax(24rem,1.7fr)_minmax(16rem,auto)] xl:items-center xl:gap-5"
                 >
                   <div className="min-w-0">
-                    <div className="flex min-w-0 flex-wrap items-center gap-2">
-                      <h3 className="truncate text-sm font-semibold">{team.name}</h3>
+                    <div className="flex min-w-0 items-center gap-2">
+                      <h3 className="min-w-0 truncate text-sm font-semibold">{team.name}</h3>
                       <Badge variant={team.managementMode === 'admin' ? 'default' : 'secondary'} className="shrink-0 text-[10px]">
                         {team.managementMode === 'admin' ? '管理员' : '自主'}
                       </Badge>
@@ -768,11 +780,11 @@ export function ContestTeamsPage() {
                     })}
                   </div>
 
-                  <div className="flex justify-end gap-2 xl:justify-self-end">
+                  <div className="flex min-w-0 flex-wrap justify-end gap-2 xl:justify-self-end">
                     <Button
                       type="button"
                       variant="outline"
-                      className="h-10 rounded-xl px-3 transition-[scale,background-color,border-color] duration-150 active:scale-[0.96] motion-reduce:transition-none"
+                      className="h-10 min-h-11 rounded-xl px-3 transition-[scale,background-color,border-color] duration-150 active:scale-[0.96] motion-reduce:transition-none"
                       onClick={() => setConfirmAction(unrankConfirm(team, !team.unrank))}
                     >
                       <Star className="size-3.5" /> {team.unrank ? '恢复正式' : '打星'}
@@ -780,7 +792,7 @@ export function ContestTeamsPage() {
                     <Button
                       type="button"
                       variant="outline"
-                      className="h-10 rounded-xl px-3 transition-[scale,background-color,border-color] duration-150 active:scale-[0.96] motion-reduce:transition-none"
+                      className="h-10 min-h-11 rounded-xl px-3 transition-[scale,background-color,border-color] duration-150 active:scale-[0.96] motion-reduce:transition-none"
                       disabled={capabilities.started && !capabilities.canEmergencyEdit}
                       onClick={() => openAdminEdit(team)}
                     >
@@ -789,7 +801,7 @@ export function ContestTeamsPage() {
                     <Button
                       type="button"
                       variant="ghost"
-                      className="h-10 rounded-xl px-3 text-destructive transition-[scale,background-color,color] duration-150 hover:bg-destructive/10 hover:text-destructive active:scale-[0.96] motion-reduce:transition-none"
+                      className="h-10 min-h-11 rounded-xl px-3 text-destructive transition-[scale,background-color,color] duration-150 hover:bg-destructive/10 hover:text-destructive active:scale-[0.96] motion-reduce:transition-none"
                       disabled={capabilities.started}
                       onClick={() =>
                         setConfirmAction({

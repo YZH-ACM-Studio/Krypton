@@ -193,7 +193,7 @@ function ObjectiveEditorShell({
       ) : null}
       {statementGuard.notice}
       {error ? (
-        <p role="alert" className="border-y border-destructive/40 bg-destructive/5 px-3 py-3 text-sm text-destructive">
+        <p role="alert" className="break-words border-y border-destructive/40 bg-destructive/5 px-3 py-3 text-sm text-destructive">
           {error}
         </p>
       ) : null}
@@ -206,7 +206,7 @@ function ObjectiveEditorShell({
         onChange={dirtyState.recompute}
         inert={saving}
         aria-busy={saving}
-        className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_18rem]"
+        className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,18rem)]"
       >
         <input type="hidden" name="editorProblemKind" value={kind} />
         <input type="hidden" name="structuredConfig" value={JSON.stringify(config)} />
@@ -306,7 +306,7 @@ function ChoiceRows({
   return (
     <div className="space-y-2">
       {options.map((option, index) => (
-        <div key={index} className="flex min-h-11 items-center gap-2">
+        <div key={index} className="flex min-h-11 min-w-0 items-center gap-2">
           <label className="flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-md border border-border/70">
             <input
               type={single ? 'radio' : 'checkbox'}
@@ -321,7 +321,7 @@ function ChoiceRows({
             value={option}
             onChange={(event) => setOptions(options.map((value, i) => (i === index ? event.target.value : value)))}
             placeholder={`选项 ${String.fromCharCode(65 + index)}`}
-            className="min-h-11 flex-1"
+            className="min-h-11 min-w-0 flex-1"
           />
           <Button
             type="button"

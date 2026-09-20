@@ -135,6 +135,7 @@ export function CourseAssignForm({
           renderChip={(item) => <span>{item.displayName || item.uname || `UID ${item._id}`}</span>}
           renderOption={(item) => <DomainUserSearchOption user={item} />}
           maxItems={1}
+          minHeight={44}
           placeholder="搜索 UID / OJ 用户 / 学号 / 姓名"
           emptyText="没有匹配的用户"
         />
@@ -149,6 +150,7 @@ export function CourseAssignForm({
           getLabel={domainUserSearchLabel}
           renderChip={(item) => <span>{item.displayName || item.uname || `UID ${item._id}`}</span>}
           renderOption={(item) => <DomainUserSearchOption user={item} />}
+          minHeight={44}
           placeholder="可选，搜索后添加"
           emptyText="没有匹配的用户"
         />

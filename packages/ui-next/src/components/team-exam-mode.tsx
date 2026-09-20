@@ -83,9 +83,11 @@ export function TeamExamModeSummary({ context, includeTeamName = true }: { conte
           ? '管理员预览模式'
           : '团队身份异常 · 已锁定';
   return (
-    <span data-team-exam-role={context.teamRole}>
-      {includeTeamName && context.teamInfo?.name ? `${context.teamInfo.name} · ` : ''}
-      {roleLabel}
+    <span data-team-exam-role={context.teamRole} className="inline-flex min-w-0 max-w-full items-center">
+      <span className="min-w-0 truncate">
+        {includeTeamName && context.teamInfo?.name ? `${context.teamInfo.name} · ` : ''}
+        {roleLabel}
+      </span>
     </span>
   );
 }

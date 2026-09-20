@@ -17,7 +17,7 @@ export function ContestParticipationField({ rule, value, onValueChange }: Contes
   if (rule !== 'acm') return <input type="hidden" name="participationMode" value="individual" />;
 
   return (
-    <div className="space-y-1.5">
+    <div className="min-w-0 space-y-1.5">
       <label className="text-sm font-medium">参赛身份</label>
       <SimpleSelect
         name="participationMode"

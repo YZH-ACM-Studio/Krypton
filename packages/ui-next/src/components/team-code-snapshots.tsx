@@ -198,7 +198,7 @@ export function TeamCodeSendDialog({
                     <label
                       key={target.uid}
                       className={cn(
-                        'group flex cursor-pointer items-center gap-3 rounded-2xl p-3.5 ring-1 transition-[scale,background-color,box-shadow] duration-150 ease-out active:scale-[0.99] motion-reduce:transition-none',
+                        'group flex min-h-11 cursor-pointer items-center gap-3 rounded-2xl p-3.5 ring-1 transition-[scale,background-color,box-shadow] duration-150 ease-out active:scale-[0.99] motion-reduce:transition-none',
                         checked ? 'bg-primary/8 ring-primary/35' : 'bg-muted/20 ring-foreground/10 hover:bg-muted/40',
                       )}
                     >
@@ -362,7 +362,7 @@ export function TeamCodeSnapshotDrawer({
           </SheetTitle>
           <p className="mt-1 text-xs text-muted-foreground">最近的定向代码版本保存在 OJ；这里只读展示，不提供运行、提交或下载。</p>
         </SheetHeader>
-        <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[19rem_minmax(0,1fr)]">
+        <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,40%)_minmax(0,1fr)] overflow-hidden md:grid-cols-[19rem_minmax(0,1fr)] md:grid-rows-[minmax(0,1fr)]">
           <ScrollArea className="h-full min-h-0 border-b bg-muted/15 md:border-b-0 md:border-r" viewportClassName="overscroll-contain">
             <div className="p-3">
               {loading && snapshots.length === 0 ? (
@@ -412,7 +412,7 @@ export function TeamCodeSnapshotDrawer({
             </div>
           </ScrollArea>
 
-          <div className="flex min-h-[18rem] min-w-0 flex-col overflow-hidden">
+          <div className="flex min-h-0 min-w-0 flex-col overflow-hidden">
             {detail ? (
               <>
                 <div className="flex shrink-0 flex-wrap items-center gap-2 border-b px-4 py-3 text-xs">

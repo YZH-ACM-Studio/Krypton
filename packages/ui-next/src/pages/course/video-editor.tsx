@@ -117,7 +117,7 @@ export function CourseVideoEditor({
           {videos.map((video) => (
             <li key={video.id}>
               <Card>
-                <CardContent className="flex items-center gap-3 p-3">
+                <CardContent className="flex flex-wrap items-center gap-3 p-3">
                   <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
                     <Film className="size-4" strokeWidth={1.75} />
                   </span>
@@ -130,7 +130,7 @@ export function CourseVideoEditor({
                   ) : (
                     <Badge variant="outline">待确认</Badge>
                   )}
-                  <Button type="button" variant="outline" size="sm" className="h-8" onClick={() => setPending(video)}>
+                  <Button type="button" variant="outline" size="sm" className="min-h-11" onClick={() => setPending(video)}>
                     预览
                   </Button>
                   <ReplaceVideoButton
@@ -146,7 +146,7 @@ export function CourseVideoEditor({
                     type="button"
                     variant="ghost"
                     size="icon"
-                    className="size-8 text-destructive hover:bg-destructive/10"
+                    className="size-11 text-destructive hover:bg-destructive/10"
                     onClick={() => void remove(video)}
                     aria-label={`删除${video.title}`}
                   >
@@ -218,14 +218,14 @@ function ReplaceVideoButton({
   const [requireRewatch, setRequireRewatch] = useState(true);
   if (!open) {
     return (
-      <Button type="button" variant="ghost" size="sm" className="h-8" onClick={() => setOpen(true)}>
+      <Button type="button" variant="ghost" size="sm" className="min-h-11" onClick={() => setOpen(true)}>
         替换
       </Button>
     );
   }
   return (
-    <div className="min-w-52 space-y-2 rounded-lg border bg-background p-2">
-      <label className="flex items-center gap-2 text-xs">
+    <div className="w-full basis-full space-y-2 rounded-lg border bg-background p-2">
+      <label className="flex min-h-11 items-center gap-2 text-xs">
         <Switch checked={requireRewatch} onChange={() => setRequireRewatch((current) => !current)} />
         替换后要求重看
       </label>
@@ -246,7 +246,7 @@ function ReplaceVideoButton({
           }
         }}
       />
-      <Button type="button" variant="ghost" size="sm" className="h-8 w-full" onClick={() => setOpen(false)}>
+      <Button type="button" variant="ghost" size="sm" className="min-h-11 w-full" onClick={() => setOpen(false)}>
         取消
       </Button>
     </div>

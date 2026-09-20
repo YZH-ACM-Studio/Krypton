@@ -115,7 +115,7 @@ export function SubjectiveProblemEditorPage() {
 
   return (
     <main className="w-full min-w-0 space-y-5 pb-10">
-      <header className="flex items-center gap-3 border-b border-border/70 pb-4">
+      <header className="flex flex-wrap items-center gap-3 border-b border-border/70 pb-4">
         <Button asChild variant="ghost" size="icon" className="size-11">
           <a href={isCreate ? '/problem/create' : `/p/${pid}`} aria-label="返回">
             <ArrowLeft className="size-4" />
@@ -138,7 +138,7 @@ export function SubjectiveProblemEditorPage() {
       ) : null}
       {statementGuard.notice}
       {error ? (
-        <p role="alert" className="border-y border-destructive/40 px-3 py-3 text-sm text-destructive">
+        <p role="alert" className="break-words border-y border-destructive/40 px-3 py-3 text-sm text-destructive">
           {error}
         </p>
       ) : null}
@@ -151,7 +151,7 @@ export function SubjectiveProblemEditorPage() {
         onChange={dirtyState.recompute}
         inert={saving}
         aria-busy={saving}
-        className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_18rem]"
+        className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,18rem)]"
       >
         <input type="hidden" name="editorProblemKind" value={PROBLEM_KIND_TO_SLUG.subjective} />
         <input type="hidden" name="structuredConfig" value={JSON.stringify({ main: { gradingInstructions: instructions } })} />

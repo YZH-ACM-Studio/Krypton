@@ -1,15 +1,16 @@
 /**
  * Problem config editor — judge configuration UI rebuilt from scratch.
  *
- * Layout: 3-column Kanban (Files | Cases | Subtasks).
+ * Layout: Files / Cases / Subtasks kanban.
  * Workflow: Files → pair into Cases → assign Cases to Subtasks → set scoring & deps.
  *
  * Bidirectional sync: structured form ⇄ raw YAML. Form edits regenerate
  * the YAML (losing comments on structural changes). YAML edits, when
  * valid, push state back into the form.
  *
- * Responsive: 3 cols on desktop, 2 cols on tablet (files + cases merge
- * into MiniTabs), single column read-only with raw YAML on mobile.
+ * Responsive: the programming-editor sidebar at lg makes window-width
+ * 3-column layouts fake. Files and Cases share MiniTabs beside Subtasks.
+ * Mobile is a read-only notice; use the YAML tab to edit.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -342,6 +343,20 @@ export function ProblemConfigEditor({
       return newConfig;
     });
   };
+  const addSubtaskFromCases = (cases: JudgeCase[]) => {
+    const existing = config.subtasks || [];
+    const nextId = (existing.length ? Math.max(...existing.map((s) => s.id ?? 0)) : 0) + 1;
+    const newSt: JudgeSubtask = { id: nextId, score: 0, type: 'min', cases };
+    updateConfig((cfg) => {
+      const nextSubs = [...existing, newSt];
+      const out: JudgeConfig = { ...cfg, subtasks: nextSubs };
+      if (cfg.cases) {
+        out.cases = cfg.cases.filter((c) => !cases.some((cc) => cc.input === c.input && cc.output === c.output));
+        if (out.cases.length === 0) delete out.cases;
+      }
+      return out;
+    });
+  };
   const removeSubtask = (stid: number) => {
     updateConfig((cfg) => {
       const subs = (cfg.subtasks || []).filter((s) => s.id !== stid);
@@ -357,34 +372,12 @@ export function ProblemConfigEditor({
     }));
   };
 
-  /* ── responsive viewport detection ── */
-  const [viewport, setViewport] = useState<'desktop' | 'tablet' | 'mobile'>(() => {
-    if (typeof window === 'undefined') return 'desktop';
-    if (window.innerWidth >= 1024) return 'desktop';
-    if (window.innerWidth >= 640) return 'tablet';
-    return 'mobile';
-  });
-  useEffect(() => {
-    const onResize = () => {
-      const w = window.innerWidth;
-      setViewport(w >= 1024 ? 'desktop' : w >= 640 ? 'tablet' : 'mobile');
-    };
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, []);
-
   return (
     <motion.div
-      // Viewport-constrained flex layout — keeps the 3 kanban columns inside
-      // the visible area with internal scroll, and the AppShell footer
-      // anchored to the bottom of the viewport. The calc accounts for the
-      // AppShell topbar (3rem) + main padding (varies) + this page's
-      // breathing room; everything below the kanban (sticky footer) is
-      // outside this motion.div but still inside the main ScrollArea.
       className={
         embedded
-          ? 'flex h-[calc(100dvh-13rem)] min-h-[560px] flex-col gap-4'
-          : 'flex h-[calc(100dvh-5rem)] min-h-[520px] flex-col gap-4 sm:h-[calc(100dvh-6rem)] xl:h-[calc(100dvh-7rem)]'
+          ? 'flex h-[calc(100dvh-13rem)] min-h-0 min-w-0 flex-col gap-4'
+          : 'flex h-[calc(100dvh-5rem)] min-h-0 min-w-0 flex-col gap-4 sm:h-[calc(100dvh-6rem)] xl:h-[calc(100dvh-7rem)]'
       }
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
@@ -490,15 +483,12 @@ export function ProblemConfigEditor({
             <BasicConfigStrip config={config} updateConfig={updateConfig} files={files} />
           </div>
 
-          {/* Mobile read-only notice */}
-          {viewport === 'mobile' ? (
-            <Card className="shrink-0">
-              <CardContent className="p-4 text-sm text-muted-foreground space-y-2">
-                <p>当前为小屏只读视图。如需配置测试点、拖拽用例，请使用桌面端。</p>
-                <p>可切到「原始 YAML」标签直接编辑。</p>
-              </CardContent>
-            </Card>
-          ) : null}
+          <Card className="shrink-0 sm:hidden">
+            <CardContent className="space-y-2 p-4 text-sm text-muted-foreground">
+              <p>当前为小屏只读视图。如需配置测试点、拖拽用例，请使用桌面端。</p>
+              <p>可切到「原始 YAML」标签直接编辑。</p>
+            </CardContent>
+          </Card>
 
           {/* Issues panel */}
           {issues.length > 0 ? (
@@ -507,104 +497,53 @@ export function ProblemConfigEditor({
             </div>
           ) : null}
 
-          {/* Main kanban area — flex-1 so the 3 columns fill remaining
-              vertical space; each column then scrolls internally. */}
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={onDragStart} onDragEnd={onDragEnd}>
-            {viewport === 'mobile' ? null : viewport === 'desktop' ? (
-              <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[280px_minmax(0,1fr)_minmax(0,1.2fr)] xl:grid-cols-[300px_minmax(0,1fr)_minmax(0,1.3fr)]">
-                <FilesColumn
-                  files={files}
-                  usedInPairs={usedInPairs}
-                  problemUrl={problemUrl}
-                  addCase={addCase}
-                  onOpenFile={setEditingFile}
-                  confirmWrite={dataGuard.confirm}
+            <div className="hidden min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)] gap-3 sm:grid">
+              <div className="flex min-h-0 min-w-0 flex-col">
+                <MiniTabs
+                  value={mobileTab === 'subtasks' ? 'cases' : mobileTab}
+                  onValueChange={(v) => setMobileTab(v as 'files' | 'cases')}
+                  items={[
+                    { value: 'files', label: '文件' },
+                    { value: 'cases', label: '用例' },
+                  ]}
                 />
-                <CasesColumn
-                  config={config}
-                  fileSet={fileSet}
-                  addCase={addCase}
-                  removeCase={removeCase}
-                  updateCase={updateCase}
-                  addSubtaskFromCases={(cases) => {
-                    const existing = config.subtasks || [];
-                    const nextId = (existing.length ? Math.max(...existing.map((s) => s.id ?? 0)) : 0) + 1;
-                    const newSt: JudgeSubtask = { id: nextId, score: 0, type: 'min', cases };
-                    updateConfig((cfg) => {
-                      const nextSubs = [...existing, newSt];
-                      const out: JudgeConfig = { ...cfg, subtasks: nextSubs };
-                      // remove these cases from flat list
-                      if (cfg.cases) {
-                        out.cases = cfg.cases.filter((c) => !cases.some((cc) => cc.input === c.input && cc.output === c.output));
-                        if (out.cases.length === 0) delete out.cases;
-                      }
-                      return out;
-                    });
-                  }}
-                  autoPairAll={() => {
-                    const result = autoPair(fileNames);
-                    updateConfig((cfg) => ({ ...cfg, cases: result.pairs, subtasks: undefined }));
-                  }}
-                />
-                <SubtasksColumn
-                  config={config}
-                  updateSubtask={updateSubtask}
-                  removeSubtask={removeSubtask}
-                  addSubtask={addSubtask}
-                  removeCase={removeCase}
-                  updateCase={updateCase}
-                />
-              </div>
-            ) : (
-              // tablet
-              <div className="grid min-h-0 flex-1 grid-cols-[1fr_1.3fr] gap-3">
-                <div className="flex min-h-0 flex-col">
-                  <MiniTabs
-                    value={mobileTab === 'subtasks' ? 'cases' : mobileTab}
-                    onValueChange={(v) => setMobileTab(v as 'files' | 'cases')}
-                    items={[
-                      { value: 'files', label: '文件' },
-                      { value: 'cases', label: '用例' },
-                    ]}
-                  />
-                  <div className="mt-3 min-h-0 flex-1">
-                    {mobileTab === 'files' ? (
-                      <FilesColumn
-                        files={files}
-                        usedInPairs={usedInPairs}
-                        problemUrl={problemUrl}
-                        addCase={addCase}
-                        onOpenFile={setEditingFile}
-                        confirmWrite={dataGuard.confirm}
-                      />
-                    ) : (
-                      <CasesColumn
-                        config={config}
-                        fileSet={fileSet}
-                        addCase={addCase}
-                        removeCase={removeCase}
-                        updateCase={updateCase}
-                        addSubtaskFromCases={() => {}}
-                        autoPairAll={() => {
-                          const result = autoPair(fileNames);
-                          updateConfig((cfg) => ({ ...cfg, cases: result.pairs, subtasks: undefined }));
-                        }}
-                      />
-                    )}
-                  </div>
+                <div className="mt-3 min-h-0 min-w-0 flex-1">
+                  {mobileTab === 'files' ? (
+                    <FilesColumn
+                      files={files}
+                      usedInPairs={usedInPairs}
+                      problemUrl={problemUrl}
+                      addCase={addCase}
+                      onOpenFile={setEditingFile}
+                      confirmWrite={dataGuard.confirm}
+                    />
+                  ) : (
+                    <CasesColumn
+                      config={config}
+                      fileSet={fileSet}
+                      addCase={addCase}
+                      removeCase={removeCase}
+                      updateCase={updateCase}
+                      addSubtaskFromCases={addSubtaskFromCases}
+                      autoPairAll={() => {
+                        const result = autoPair(fileNames);
+                        updateConfig((cfg) => ({ ...cfg, cases: result.pairs, subtasks: undefined }));
+                      }}
+                    />
+                  )}
                 </div>
-                <SubtasksColumn
-                  config={config}
-                  updateSubtask={updateSubtask}
-                  removeSubtask={removeSubtask}
-                  addSubtask={addSubtask}
-                  removeCase={removeCase}
-                  updateCase={updateCase}
-                />
               </div>
-            )}
+              <SubtasksColumn
+                config={config}
+                updateSubtask={updateSubtask}
+                removeSubtask={removeSubtask}
+                addSubtask={addSubtask}
+                removeCase={removeCase}
+                updateCase={updateCase}
+              />
+            </div>
 
-            {/* DragOverlay */}
             <DragOverlay>{draggedItem ? <DragPreview item={draggedItem} /> : null}</DragOverlay>
           </DndContext>
         </>
@@ -891,7 +830,7 @@ function PerLangLimits({ config, updateConfig }: { config: JudgeConfig; updateCo
           </p>
         </div>
         <div className="space-y-1">
-          <div className="flex items-center gap-1">
+          <div className="flex flex-wrap items-center gap-1">
             <SimpleSelect
               value=""
               onValueChange={(v) => {
@@ -916,7 +855,7 @@ function PerLangLimits({ config, updateConfig }: { config: JudgeConfig; updateCo
               placeholder="或自定义 id"
               disabled={!canAddLanguageLimit}
               title={canAddLanguageLimit ? undefined : '先填写上方默认时间限制或默认内存限制'}
-              className="w-28 rounded border bg-background px-1.5 py-1 text-[11px] disabled:cursor-not-allowed disabled:opacity-60"
+              className="w-28 min-w-0 rounded border bg-background px-1.5 py-1 text-[11px] disabled:cursor-not-allowed disabled:opacity-60"
             />
           </div>
           {!canAddLanguageLimit ? (
@@ -935,14 +874,7 @@ function PerLangLimits({ config, updateConfig }: { config: JudgeConfig; updateCo
       {langKeys.length === 0 ? (
         <p className="py-2 text-center text-[11px] text-muted-foreground">尚未为任何语言设置覆写</p>
       ) : (
-        <div className="space-y-1.5">
-          {/* Header */}
-          <div className="grid grid-cols-[1fr_minmax(0,140px)_minmax(0,140px)_24px] gap-2 text-[10px] text-muted-foreground">
-            <span>语言</span>
-            <span>时间</span>
-            <span>内存</span>
-            <span />
-          </div>
+        <div className="space-y-2">
           {langKeys.map((id) => {
             const tr = config.time_limit_rate?.[id];
             const mr = config.memory_limit_rate?.[id];
@@ -950,29 +882,35 @@ function PerLangLimits({ config, updateConfig }: { config: JudgeConfig; updateCo
             const langMemAbs = baseMemMb && typeof mr === 'number' ? formatMemory(baseMemMb * mr) : '';
             const label = COMMON_LANG_OPTIONS.find((o) => o.value === id)?.label || id;
             return (
-              <div key={id} className="grid grid-cols-[1fr_minmax(0,140px)_minmax(0,140px)_24px] items-center gap-2">
-                <div className="min-w-0">
-                  <p className="text-xs font-medium truncate" title={id}>
+              <div key={id} className="flex flex-wrap items-end gap-2 rounded border bg-background/60 p-2">
+                <div className="min-w-0 flex-1 basis-full sm:basis-40">
+                  <p className="truncate text-xs font-medium" title={id}>
                     {label}
                   </p>
-                  {label !== id ? <p className="font-mono text-[9px] text-muted-foreground truncate">{id}</p> : null}
+                  {label !== id ? <p className="truncate font-mono text-[9px] text-muted-foreground">{id}</p> : null}
                 </div>
-                <DurationInput
-                  value={langTimeAbs}
-                  onChange={(v) => updateLangTime(id, v)}
-                  placeholder={baseTimeMs ? formatTime(baseTimeMs) : '未设基准'}
-                  disabled={!hasTimeBase}
-                />
-                <MemoryInput
-                  value={langMemAbs}
-                  onChange={(v) => updateLangMemory(id, v)}
-                  placeholder={baseMemMb ? formatMemory(baseMemMb) : '未设基准'}
-                  disabled={!hasMemoryBase}
-                />
+                <label className="min-w-0 flex-1 basis-[9rem]">
+                  <span className="mb-0.5 block text-[10px] text-muted-foreground">时间</span>
+                  <DurationInput
+                    value={langTimeAbs}
+                    onChange={(v) => updateLangTime(id, v)}
+                    placeholder={baseTimeMs ? formatTime(baseTimeMs) : '未设基准'}
+                    disabled={!hasTimeBase}
+                  />
+                </label>
+                <label className="min-w-0 flex-1 basis-[9rem]">
+                  <span className="mb-0.5 block text-[10px] text-muted-foreground">内存</span>
+                  <MemoryInput
+                    value={langMemAbs}
+                    onChange={(v) => updateLangMemory(id, v)}
+                    placeholder={baseMemMb ? formatMemory(baseMemMb) : '未设基准'}
+                    disabled={!hasMemoryBase}
+                  />
+                </label>
                 <button
                   type="button"
                   onClick={() => removeLang(id)}
-                  className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                  className="shrink-0 self-center rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                   title="移除"
                 >
                   <X className="size-3" />
@@ -1192,9 +1130,9 @@ function FilesColumn({
   return (
     <Card className="flex h-full min-h-0 flex-col">
       <CardHeader className="shrink-0 pb-2 space-y-2">
-        <div className="flex items-center justify-between">
-          <CardTitle className="text-base flex items-center gap-1.5">
-            <FolderOpen className="size-4" />
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <CardTitle className="flex min-w-0 items-center gap-1.5 text-base">
+            <FolderOpen className="size-4 shrink-0" />
             文件池
           </CardTitle>
           <Button type="button" size="sm" variant="outline" onClick={() => void openUpload()}>
@@ -1272,31 +1210,33 @@ function FileRow({ f, onOpen }: { f: ProblemFileEntry; onOpen?: () => void }) {
   return (
     <div
       ref={setNodeRef}
-      className={`group flex items-center gap-1 rounded border text-xs transition-all ${isDragging ? 'opacity-30' : 'hover:border-primary/40 hover:bg-accent/30'}`}
+      className={`group flex min-w-0 items-center gap-1 rounded border text-xs transition-all ${isDragging ? 'opacity-30' : 'hover:border-primary/40 hover:bg-accent/30'}`}
     >
       {/* Drag handle — ONLY this small grip area triggers drag. */}
       <span
         {...attributes}
         {...listeners}
         title="拖动以分配"
-        className="flex items-center justify-center px-1 py-1.5 cursor-grab active:cursor-grabbing text-muted-foreground/40 hover:text-muted-foreground"
+        className="flex shrink-0 cursor-grab items-center justify-center px-1 py-1.5 text-muted-foreground/40 hover:text-muted-foreground active:cursor-grabbing"
       >
         <GripVertical className="size-3.5" />
       </span>
-      <FileTypeBadge cls={cls.kind} />
+      <span className="shrink-0">
+        <FileTypeBadge cls={cls.kind} />
+      </span>
       {/* Click body opens the file editor; not draggable. */}
       <button
         type="button"
         onClick={onOpen}
-        className="flex-1 min-w-0 px-1 py-1.5 text-left font-mono truncate hover:text-primary"
-        title="点击编辑文件"
+        className="min-w-0 flex-1 truncate px-1 py-1.5 text-left font-mono hover:text-primary"
+        title={f.name}
       >
         {f.name}
       </button>
       <button
         type="button"
         onClick={onOpen}
-        className="opacity-0 group-hover:opacity-100 transition-opacity px-1.5 text-muted-foreground hover:text-foreground"
+        className="shrink-0 px-1.5 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
         title="编辑文件"
       >
         <FileEdit className="size-3.5" />
@@ -1364,12 +1304,12 @@ function CasesColumn({
   return (
     <Card className="flex h-full min-h-0 flex-col">
       <CardHeader className="shrink-0 pb-2 space-y-2">
-        <div className="flex items-center justify-between">
-          <CardTitle className="text-base flex items-center gap-1.5">
-            <Link2 className="size-4" />
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <CardTitle className="flex min-w-0 items-center gap-1.5 text-base">
+            <Link2 className="size-4 shrink-0" />
             测试用例 {hasSubtasks ? '(已分组)' : `(${flatCases.length})`}
           </CardTitle>
-          <div className="flex items-center gap-1">
+          <div className="flex flex-wrap items-center gap-1">
             <Button size="sm" variant="outline" onClick={autoPairAll} title="按命名自动配对所有文件">
               自动配对
             </Button>
@@ -1380,7 +1320,7 @@ function CasesColumn({
           </div>
         </div>
         {selected.size > 0 ? (
-          <div className="flex items-center gap-2 text-xs">
+          <div className="flex flex-wrap items-center gap-2 text-xs">
             <span className="text-muted-foreground">{selected.size} 已选</span>
             <Button
               size="sm"
@@ -1481,19 +1421,19 @@ function CaseRow({
       ref={setNodeRef}
       className={`rounded border bg-card text-xs transition-all ${isDragging ? 'opacity-30' : ''} ${selected ? 'border-primary' : ''}`}
     >
-      <div className="flex items-center gap-1 p-1.5">
+      <div className="flex min-w-0 flex-wrap items-center gap-1 p-1.5">
         {onToggleSelect ? <Checkbox checked={selected} onChange={onToggleSelect} /> : null}
         {/* Dedicated drag handle — only this grip triggers drag, so the input fields stay typeable. */}
         <span
           {...attributes}
           {...listeners}
-          className="flex items-center cursor-grab active:cursor-grabbing text-muted-foreground/50 hover:text-muted-foreground shrink-0"
+          className="flex shrink-0 cursor-grab items-center text-muted-foreground/50 hover:text-muted-foreground active:cursor-grabbing"
           title="拖动用例"
         >
           <GripVertical className="size-3.5" />
         </span>
-        <span className="font-mono text-[10px] text-muted-foreground w-5 shrink-0 text-center">#{idx + 1}</span>
-        <div className="flex-1 grid grid-cols-2 gap-1">
+        <span className="w-5 shrink-0 text-center font-mono text-[10px] text-muted-foreground">#{idx + 1}</span>
+        <div className="grid min-w-0 flex-1 grid-cols-1 gap-1 sm:grid-cols-2">
           <div
             ref={dropInputRef}
             className={`flex items-center gap-1 rounded border px-1.5 py-1 ${overInput ? 'border-primary bg-primary/5' : inputMissing ? 'border-destructive/40 bg-destructive/5' : 'border-border'}`}
@@ -1522,17 +1462,17 @@ function CaseRow({
         <button
           type="button"
           onClick={() => setExpanded(!expanded)}
-          className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
           title="高级"
         >
           <Settings className="size-3" />
         </button>
-        <button type="button" onClick={onRemove} className="rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive">
+        <button type="button" onClick={onRemove} className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive">
           <X className="size-3" />
         </button>
       </div>
       {expanded ? (
-        <div className="grid grid-cols-2 gap-2 border-t bg-muted/20 p-1.5">
+        <div className="grid grid-cols-1 gap-2 border-t bg-muted/20 p-1.5 sm:grid-cols-2">
           <label className="space-y-0.5">
             <span className="text-[10px] text-muted-foreground">时间覆写</span>
             <DurationInput value={c.time} onChange={(v) => onUpdate({ time: v })} placeholder="留空 = 默认" />
@@ -1541,7 +1481,7 @@ function CaseRow({
             <span className="text-[10px] text-muted-foreground">内存覆写</span>
             <MemoryInput value={c.memory} onChange={(v) => onUpdate({ memory: v })} placeholder="留空 = 默认" />
           </label>
-          <label className="col-span-2 space-y-0.5">
+          <label className="space-y-0.5 sm:col-span-2">
             <span className="text-[10px] text-muted-foreground">测试点提示（PTA 风格，显示在评测详情该测试点旁）</span>
             <textarea
               value={c.hint || ''}
@@ -1551,11 +1491,11 @@ function CaseRow({
               className="w-full resize-y rounded border bg-transparent px-1.5 py-1 text-[11px] outline-none focus:border-primary"
             />
           </label>
-          <label className="col-span-2 flex items-center gap-1.5">
+          <label className="flex items-center gap-1.5 sm:col-span-2">
             <Switch checked={!!c.hintPublic} onChange={() => onUpdate({ hintPublic: !c.hintPublic })} />
             <span className="text-[10px] text-muted-foreground">提示对外公开（题库/训练显示；比赛进行中自动隐藏，赛后恢复）</span>
           </label>
-          <label className="col-span-2 space-y-0.5">
+          <label className="space-y-0.5 sm:col-span-2">
             <span className="text-[10px] text-muted-foreground">讲解视频链接（显示在评测详情该测试点旁）</span>
             <input
               type="url"
@@ -1565,7 +1505,7 @@ function CaseRow({
               className="w-full rounded border bg-transparent px-1.5 py-1 text-[11px] outline-none focus:border-primary"
             />
           </label>
-          <label className="col-span-2 flex items-center gap-1.5">
+          <label className="flex items-center gap-1.5 sm:col-span-2">
             <Switch checked={c.videoPublic ?? !!c.hintPublic} onChange={() => onUpdate({ videoPublic: !(c.videoPublic ?? !!c.hintPublic) })} />
             <span className="text-[10px] text-muted-foreground">视频对外公开（未单独设置时跟随提示的公开状态）</span>
           </label>
@@ -1598,12 +1538,12 @@ function SubtasksColumn({
   return (
     <Card className="flex h-full min-h-0 flex-col">
       <CardHeader className="shrink-0 pb-2">
-        <div className="flex items-center justify-between">
-          <CardTitle className="text-base flex items-center gap-1.5">
-            <Grid3X3 className="size-4" />
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <CardTitle className="flex min-w-0 items-center gap-1.5 text-base">
+            <Grid3X3 className="size-4 shrink-0" />
             测试点 ({subtasks.length})
           </CardTitle>
-          <div className="flex items-center gap-1">
+          <div className="flex flex-wrap items-center gap-1">
             <Button size="sm" variant="outline" onClick={addSubtask}>
               <Plus className="size-3 mr-1" />
               新建
@@ -1676,24 +1616,24 @@ function SubtaskCard({
 
   return (
     <div ref={setNodeRef} className={`rounded-md border bg-card transition-all ${isOver ? 'border-primary bg-primary/5' : ''}`}>
-      <div className="flex items-center gap-2 border-b bg-muted/30 p-2">
-        <button type="button" onClick={() => setCollapsed(!collapsed)} className="text-muted-foreground hover:text-foreground">
+      <div className="flex flex-wrap items-center gap-2 border-b bg-muted/30 p-2">
+        <button type="button" onClick={() => setCollapsed(!collapsed)} className="shrink-0 text-muted-foreground hover:text-foreground">
           {collapsed ? <ChevronRight className="size-3.5" /> : <ChevronDown className="size-3.5" />}
         </button>
-        <span className="font-mono text-[10px] text-muted-foreground">#{subtask.id}</span>
-        <span className="font-medium text-sm flex-1">Subtask {subtask.id}</span>
+        <span className="shrink-0 font-mono text-[10px] text-muted-foreground">#{subtask.id}</span>
+        <span className="min-w-0 flex-1 basis-24 truncate text-sm font-medium">Subtask {subtask.id}</span>
         <Input
           type="number"
           value={subtask.score ?? ''}
           onChange={(e) => onUpdate({ score: e.target.value === '' ? undefined : Number.parseInt(e.target.value, 10) })}
           placeholder="分数"
-          className="w-16 text-xs h-7"
+          className="h-7 w-16 shrink-0 text-xs"
         />
         <SimpleSelect
           value={subtask.type || 'min'}
           onValueChange={(v) => onUpdate({ type: v as ScoreMode })}
           size="sm"
-          className="w-auto min-w-[5rem] text-[11px]"
+          className="w-auto min-w-[5rem] shrink-0 text-[11px]"
           options={[
             { value: 'min', label: 'min' },
             { value: 'sum', label: 'sum' },
@@ -1703,12 +1643,12 @@ function SubtaskCard({
         <button
           type="button"
           onClick={() => setShowDepPicker(!showDepPicker)}
-          className="rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground border"
+          className="shrink-0 rounded border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground"
           title="依赖"
         >
           if: [{(subtask.if || []).join(', ') || '—'}]
         </button>
-        <button type="button" onClick={onRemove} className="text-muted-foreground hover:text-destructive">
+        <button type="button" onClick={onRemove} className="shrink-0 text-muted-foreground hover:text-destructive">
           <Trash2 className="size-3.5" />
         </button>
       </div>
@@ -1760,7 +1700,7 @@ function SubtaskCard({
           )}
           {/* Subtask-level overrides — apply to every case in this subtask
               unless the case sets its own. */}
-          <div className="mt-1 grid grid-cols-2 gap-2 border-t pt-1.5">
+          <div className="mt-1 grid grid-cols-1 gap-2 border-t pt-1.5 sm:grid-cols-2">
             <label className="space-y-0.5">
               <span className="text-[10px] text-muted-foreground">组级时间覆写</span>
               <DurationInput value={subtask.time} onChange={(v) => onUpdate({ time: v })} placeholder="留空 = 默认" />

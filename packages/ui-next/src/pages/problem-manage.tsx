@@ -320,13 +320,13 @@ export function ProblemFilesPage() {
       ) : null}
       <CardContent className="p-0">
         {files.length > 0 ? (
-          <Table>
+          <Table className="table-fixed">
             <TableHeader>
               <TableRow>
                 <TableHead className="w-8">
                   <Checkbox checked={selected.size === files.length && files.length > 0} onChange={() => toggleAll(files, selected, setSelected)} />
                 </TableHead>
-                <TableHead>文件名</TableHead>
+                <TableHead className="min-w-0">文件名</TableHead>
                 <TableHead className="w-28 text-right">大小</TableHead>
                 <TableHead className="w-40 text-right">修改时间</TableHead>
               </TableRow>
@@ -337,20 +337,21 @@ export function ProblemFilesPage() {
                   <TableCell>
                     <Checkbox checked={selected.has(f.name)} onChange={() => toggleFile(selected, setSelected, f.name)} />
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="min-w-0">
                     {type === 'testdata' ? (
                       <button
                         type="button"
                         onClick={() => setPreviewingTestdataFile(f)}
-                        className="font-mono text-sm text-primary hover:underline"
-                        title="查看或编辑文件"
+                        className="block w-full min-w-0 truncate text-left font-mono text-sm text-primary hover:underline"
+                        title={f.name}
                       >
                         {f.name}
                       </button>
                     ) : (
                       <a
                         href={`${problemUrl}/file/${encodeURIComponent(f.name)}?type=${type}`}
-                        className="font-mono text-sm text-primary hover:underline"
+                        className="block min-w-0 truncate font-mono text-sm text-primary hover:underline"
+                        title={f.name}
                       >
                         {f.name}
                       </a>
@@ -409,9 +410,11 @@ export function ProblemFilesPage() {
               <input type="hidden" name="operation" value="rename_files" />
               <input type="hidden" name="type" value={renamingType} />
               {renameKeys.map((oldName) => (
-                <div key={oldName} className="grid items-center gap-2 sm:grid-cols-[10rem_auto_minmax(0,20rem)]">
+                <div key={oldName} className="grid min-w-0 items-center gap-2 sm:grid-cols-[minmax(0,10rem)_auto_minmax(0,20rem)]">
                   <input type="hidden" name="files" value={oldName} />
-                  <span className="truncate font-mono text-sm text-muted-foreground">{oldName}</span>
+                  <span className="min-w-0 truncate font-mono text-sm text-muted-foreground" title={oldName}>
+                    {oldName}
+                  </span>
                   <span className="text-muted-foreground">→</span>
                   <Input
                     name="newNames"

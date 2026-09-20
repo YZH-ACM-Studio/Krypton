@@ -471,7 +471,7 @@ export function ContestExamPaperPool({
   const problemHref = (row: ExamPaperPoolRow) => replaceRouteTokens(bs.urls.problemDetail, { PID: String(row.pid || row.docId || row.key) });
 
   return (
-    <div className="space-y-5">
+    <div className="min-w-0 space-y-5">
       <input type="hidden" name={name} value={pids.join(',')} />
       <input type="hidden" name="examScores" value={examScoresPayload(pids, scores)} />
       <ContestExamPassSettings
@@ -484,9 +484,9 @@ export function ContestExamPaperPool({
       />
 
       <section className="space-y-3 rounded-xl border bg-muted/20 p-4">
-        <div className="flex flex-wrap items-end justify-between gap-2">
-          <div>
-            <h3 className="text-sm font-medium">从题库加入</h3>
+        <div className="flex min-w-0 flex-wrap items-end justify-between gap-2">
+          <div className="min-w-0">
+            <h3 className="min-w-0 text-sm font-medium">从题库加入</h3>
             <p className="text-xs text-muted-foreground">搜索按页预览，可以加入本页或全部匹配；也可以一次加入整个题号命名空间。</p>
           </div>
           <Button type="button" variant="outline" size="sm" onClick={() => setPasteOpen(true)}>
@@ -494,8 +494,8 @@ export function ContestExamPaperPool({
             粘贴题号
           </Button>
         </div>
-        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_10rem_auto]">
-          <label className="space-y-1.5">
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_10rem_auto]">
+          <label className="min-w-0 space-y-1.5">
             <span className="text-xs text-muted-foreground">搜索</span>
             <span className="relative block">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -513,7 +513,7 @@ export function ContestExamPaperPool({
               />
             </span>
           </label>
-          <label className="space-y-1.5">
+          <label className="min-w-0 space-y-1.5">
             <span className="text-xs text-muted-foreground">题型</span>
             <SimpleSelect
               value={bankKind}
@@ -522,12 +522,12 @@ export function ContestExamPaperPool({
               options={[{ value: '', label: '全部题型' }, ...PROBLEM_KINDS.map((kind) => ({ value: problemKindToSlug(kind), label: KIND_LABEL[kind] }))]}
             />
           </label>
-          <Button type="button" className="md:mt-6" disabled={bankBusy} onClick={() => void searchBank()}>
+          <Button type="button" className="lg:mt-6" disabled={bankBusy} onClick={() => void searchBank()}>
             {bankBusy ? '搜索中…' : '搜索'}
           </Button>
         </div>
-        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
-          <label className="space-y-1.5">
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto]">
+          <label className="min-w-0 space-y-1.5">
             <span className="text-xs text-muted-foreground">题号命名空间</span>
             <SimpleSelect
               value={namespaceId}
@@ -542,7 +542,7 @@ export function ContestExamPaperPool({
               ]}
             />
           </label>
-          <Button type="button" variant="outline" className="md:mt-6" disabled={bankBusy || !namespaceId} onClick={() => void addNamespace()}>
+          <Button type="button" variant="outline" className="lg:mt-6" disabled={bankBusy || !namespaceId} onClick={() => void addNamespace()}>
             加入该命名空间全部题目
           </Button>
         </div>
@@ -610,9 +610,9 @@ export function ContestExamPaperPool({
       </section>
 
       <section className="space-y-3">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h3 className="text-sm font-medium">题池</h3>
+        <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h3 className="min-w-0 text-sm font-medium">题池</h3>
             <p className="text-xs text-muted-foreground">
               {pids.length} 道题{visible.length !== pids.length ? ` · 当前显示 ${visible.length}` : ''}
               {visibleSelected.length ? ` · 已选 ${visibleSelected.length}` : ''}
@@ -838,8 +838,8 @@ function PoolTable({
   const headerChecked = allSelected ?? (rows.length > 0 && rows.every((row) => selectedSet.has(row.key)));
   const headerIndeterminate = indeterminate ?? (rows.some((row) => selectedSet.has(row.key)) && !headerChecked);
   return (
-    <div className="overflow-hidden rounded-lg border">
-      <Table density="compact">
+    <div className="rounded-lg border">
+      <Table density="compact" className="min-w-max">
         <TableHeader>
           <TableRow>
             <TableHead className="w-10">
@@ -875,7 +875,7 @@ function PoolTable({
                   {row.pid || row.key}
                 </a>
               </TableCell>
-              <TableCell>
+              <TableCell className="min-w-0">
                 <span className="line-clamp-1">{row.title || '未命名题目'}</span>
                 {alreadyIn?.has(row.key) ? (
                   <Badge variant="outline" className="ml-2 text-[10px]">

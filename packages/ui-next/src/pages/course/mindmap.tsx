@@ -37,7 +37,7 @@ function CourseProblemPanel({
   integrityControlled: boolean;
 }) {
   return (
-    <div className="krypton-course-panel flex min-h-[16rem] min-w-0 flex-col overflow-hidden lg:min-h-0">
+    <div className="krypton-course-panel flex min-h-0 min-w-0 flex-col overflow-hidden">
       <header className="shrink-0 border-b border-border/50 px-4 py-4">
         {selected ? (
           <>
@@ -124,7 +124,7 @@ export function CourseMindmapView({
 
   if (!data) {
     return (
-      <section className="krypton-course-hero krypton-course-grain grid min-h-[30rem] place-items-center px-6 text-center">
+      <section className="krypton-course-hero krypton-course-grain grid place-items-center px-6 py-16 text-center">
         <div className="relative z-10 max-w-md">
           <span aria-hidden="true" className="mx-auto grid size-14 place-items-center rounded-2xl bg-background/80 text-muted-foreground shadow-sm">
             <Network className="size-6" strokeWidth={1.5} />
@@ -148,11 +148,11 @@ export function CourseMindmapView({
 
   return (
     <ReactFlowProvider>
-      <section aria-label="课程知识导图" className="grid min-w-0 gap-4 lg:h-[calc(100dvh-15rem)] lg:min-h-[34rem] lg:grid-cols-[minmax(0,1fr)_21rem]">
+      <section aria-label="课程知识导图" className="grid min-w-0 gap-4 lg:h-[calc(100dvh-15rem)] lg:grid-cols-[minmax(0,1fr)_21rem]">
         {/* Flex column rather than an absolute header over a padded canvas —
             the old `absolute` + `pt-16` pair silently broke whenever the
             header wrapped to a second line. */}
-        <div className="krypton-course-panel flex h-[62dvh] min-h-[30rem] min-w-0 flex-col overflow-hidden lg:h-full">
+        <div className="krypton-course-panel flex h-[62dvh] min-w-0 flex-col overflow-hidden lg:h-full">
           <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border/50 px-4 py-3">
             <div className="flex min-w-0 items-center gap-2.5">
               <span aria-hidden="true" className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">

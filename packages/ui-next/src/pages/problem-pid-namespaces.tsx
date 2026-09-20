@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Switch } from '@/components/ui/switch';
-import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { MultiSelect } from '@/components/ui/multi-select';
 import { SimpleSelect } from '@/components/ui/select';
@@ -166,7 +166,7 @@ export function ProblemPidNamespacesPage() {
           </p>
         </div>
         {isAdmin ? (
-          <Button type="button" className="min-h-11 active:scale-[0.96] transition-transform" onClick={() => setDialog({ type: 'create' })}>
+          <Button type="button" className="min-h-11 w-full sm:w-auto active:scale-[0.96] transition-transform" onClick={() => setDialog({ type: 'create' })}>
             <Plus className="size-4" />
             新建命名空间
           </Button>
@@ -213,7 +213,7 @@ export function ProblemPidNamespacesPage() {
       </section>
 
       {namespaces.length ? (
-        <section aria-label="命名空间列表" className="grid gap-4 xl:grid-cols-2">
+        <section aria-label="命名空间列表" className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
           {namespaces.map((namespace) => (
             <article
               key={namespace.namespaceId}
@@ -237,13 +237,13 @@ export function ProblemPidNamespacesPage() {
                     <span className="tabular-nums">rev.{namespace.revision}</span>
                   </div>
                 </div>
-                <div className="flex shrink-0 gap-1">
+                <div className="flex w-full shrink-0 flex-wrap gap-1 sm:w-auto">
                   {isAdmin ? (
                     <Button
                       type="button"
                       size="sm"
                       variant="ghost"
-                      className="min-h-10 active:scale-[0.96] transition-transform"
+                      className="min-h-10 w-full sm:w-auto active:scale-[0.96] transition-transform"
                       onClick={() => setDialog({ type: 'config', namespace })}
                     >
                       <Pencil className="size-3.5" />
@@ -255,7 +255,7 @@ export function ProblemPidNamespacesPage() {
                       type="button"
                       size="sm"
                       variant="ghost"
-                      className="min-h-10 text-destructive hover:text-destructive active:scale-[0.96] transition-transform"
+                      className="min-h-10 w-full sm:w-auto text-destructive hover:text-destructive active:scale-[0.96] transition-transform"
                       onClick={() => setDialog({ type: 'delete', namespace })}
                     >
                       <Trash2 className="size-3.5" />
@@ -429,7 +429,7 @@ export function ProblemPidNamespacesPage() {
                 </p>
               ) : null}
             </DialogBody>
-            <div className="flex justify-end gap-2 border-t border-border/70 px-5 py-3">
+            <DialogFooter className="flex justify-end gap-2 border-t border-border/70 px-5 py-3 flex-row">
               <Button type="button" variant="outline" className="min-h-11" onClick={() => setDialog(null)}>
                 取消
               </Button>
@@ -437,7 +437,7 @@ export function ProblemPidNamespacesPage() {
                 <Plus className="size-4" />
                 创建
               </Button>
-            </div>
+            </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
@@ -509,7 +509,7 @@ export function ProblemPidNamespacesPage() {
                   </p>
                 ) : null}
               </DialogBody>
-              <div className="flex justify-end gap-2 border-t border-border/70 px-5 py-3">
+              <DialogFooter className="flex justify-end gap-2 border-t border-border/70 px-5 py-3 flex-row">
                 <Button type="button" variant="outline" className="min-h-11" onClick={() => setDialog(null)}>
                   取消
                 </Button>
@@ -517,7 +517,7 @@ export function ProblemPidNamespacesPage() {
                   <Power className="size-4" />
                   保存配置
                 </Button>
-              </div>
+              </DialogFooter>
             </form>
           </DialogContent>
         ) : null}
@@ -592,7 +592,7 @@ export function ProblemPidNamespacesPage() {
                   </p>
                 ) : null}
               </DialogBody>
-              <div className="flex flex-wrap justify-between gap-2 border-t border-border/70 px-5 py-3">
+              <DialogFooter className="flex flex-wrap justify-between gap-2 border-t border-border/70 px-5 py-3 sm:flex-row">
                 {dialog.member ? (
                   <Button
                     type="button"
@@ -632,7 +632,7 @@ export function ProblemPidNamespacesPage() {
                     保存权限
                   </Button>
                 </div>
-              </div>
+              </DialogFooter>
             </form>
           </DialogContent>
         ) : null}
@@ -652,7 +652,7 @@ export function ProblemPidNamespacesPage() {
                 </p>
               ) : null}
             </DialogBody>
-            <div className="flex justify-end gap-2 border-t border-border/70 px-5 py-3">
+            <DialogFooter className="flex justify-end gap-2 border-t border-border/70 px-5 py-3 flex-row">
               <Button type="button" variant="outline" className="min-h-11" onClick={() => setDialog(null)}>
                 取消
               </Button>
@@ -681,7 +681,7 @@ export function ProblemPidNamespacesPage() {
                 <Trash2 className="size-4" />
                 确认删除
               </Button>
-            </div>
+            </DialogFooter>
           </DialogContent>
         ) : null}
       </Dialog>

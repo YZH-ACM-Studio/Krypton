@@ -73,9 +73,9 @@ export function TeamBatchesPage() {
             return (
               <Card key={String(batch.batchId)} className="group flex h-full flex-col transition-colors hover:border-primary/40">
                 <CardHeader className="space-y-3 pb-3">
-                  <div className="flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <CardTitle className="truncate text-lg">{batch.name}</CardTitle>
+                      <CardTitle className="min-w-0 truncate text-lg">{batch.name}</CardTitle>
                       <p className="mt-1 line-clamp-2 min-h-10 text-sm leading-5 text-muted-foreground">{batch.description || '暂无批次说明'}</p>
                     </div>
                     <Badge variant={open ? 'secondary' : 'outline'} className="shrink-0 gap-1">

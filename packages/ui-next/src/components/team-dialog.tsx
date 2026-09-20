@@ -22,7 +22,7 @@ export const TEAM_DIALOG_MULTI_SELECT_CLASS =
   '[&>div:first-child]:min-h-12 [&>div:first-child]:rounded-[14px] [&>div:first-child]:border-border/70 [&>div:first-child]:bg-muted/30 [&>div:first-child]:px-3 [&>div:first-child]:py-2.5 [&>div:first-child]:transition-[border-color,box-shadow,background-color]';
 
 export const TEAM_DIALOG_BUTTON_CLASS =
-  'h-11 rounded-[14px] transition-[scale,background-color,color,box-shadow] duration-150 ease-out active:scale-[0.96] motion-reduce:transition-none';
+  'h-11 min-w-0 rounded-[14px] transition-[scale,background-color,color,box-shadow] duration-150 ease-out active:scale-[0.96] motion-reduce:transition-none';
 
 export function TeamDialogContent({
   titleId,
@@ -48,6 +48,8 @@ export function TeamDialogContent({
   const destructive = tone === 'destructive';
   return (
     <DialogContent
+      role="dialog"
+      aria-modal="true"
       onClose={onClose}
       closeLabel="关闭弹窗"
       closeClassName="right-5 top-5 size-10 rounded-full bg-muted/65 p-0 ring-1 ring-foreground/10 hover:bg-muted hover:text-foreground"
@@ -66,7 +68,7 @@ export function TeamDialogContent({
           {icon}
         </div>
         <div className="min-w-0 flex-1 pt-0.5">
-          <DialogTitle id={titleId} className="text-balance text-xl font-semibold leading-tight tracking-tight">
+          <DialogTitle id={titleId} className="pr-12 text-balance text-xl font-semibold leading-tight tracking-tight">
             {title}
           </DialogTitle>
           <DialogDescription id={descriptionId} className="mt-1.5 text-pretty leading-6">
@@ -88,7 +90,7 @@ markDialogSlot(TeamDialogBody, 'body');
 
 export function TeamDialogFooter({ className, children }: { className?: string; children: ReactNode }) {
   return (
-    <DialogFooter className={cn('mt-1 grid grid-cols-2 gap-2.5 border-foreground/10 bg-muted/20 px-6 py-5 sm:px-7 sm:justify-stretch', className)}>
+    <DialogFooter className={cn('mt-1 grid min-w-0 grid-cols-2 gap-2.5 border-foreground/10 bg-muted/20 px-4 py-4 sm:px-7 sm:py-5 sm:justify-stretch', className)}>
       {children}
     </DialogFooter>
   );

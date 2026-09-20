@@ -260,6 +260,9 @@ describe('course exam completion', () => {
         expect(finalize).to.include('examAttemptsUsed');
         expect(finalize).to.include("paperFinalizedAt: { $exists: false }");
         expect(updateAt).to.be.at.least(0);
+        expect(finalize).to.not.include('updateStatus(domainId, tid, uid, rid, 0)');
+        expect(finalize).to.include('record.get(domainId, rid)');
+        expect(finalize).to.include('updateStatus(domainId, tid, uid, rid, rdoc.pid, rdoc)');
         expect(writeAt, 'finalize must persist paperFinalizedAt').to.be.greaterThan(updateAt);
         expect(returnAt).to.be.greaterThan(writeAt);
     });

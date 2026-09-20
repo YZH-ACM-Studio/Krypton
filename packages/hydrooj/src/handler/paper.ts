@@ -1272,7 +1272,12 @@ export async function finalizePaperForUser(
 
     for (const rid of rids) {
         if (manualRids.has(String(rid))) continue;
-        await contest.updateStatus(domainId, tid, uid, rid, 0);
+        const rdoc = await record.get(domainId, rid);
+        if (!rdoc) throw new ValidationError('record');
+        if (rdoc.uid !== uid) throw new ValidationError('record');
+        if (!Number.isSafeInteger(rdoc.pid) || rdoc.pid <= 0) throw new ValidationError('pid');
+        if (!(rdoc.contest instanceof ObjectId) || !rdoc.contest.equals(tid)) throw new ValidationError('contest');
+        await contest.updateStatus(domainId, tid, uid, rid, rdoc.pid, rdoc);
     }
     const tsdoc = await contest.getStatus(domainId, tid, uid);
     if (!(tsdoc?.paperFinalizedAt instanceof Date) || Number.isNaN(tsdoc.paperFinalizedAt.getTime())) {

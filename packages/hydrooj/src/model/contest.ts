@@ -33,7 +33,13 @@ import {
     loadContestListParticipantScope,
     resolveContestListParticipantScope,
 } from '../lib/contest-list-access';
-import { examJournalFloorFilter, examStatusAcceptsJournalRid, readExamPaperQuotas } from '../lib/exam-paper';
+import {
+    examJournalFloorFilter,
+    examStatusAcceptsJournalRid,
+    mergeExamJournalEntry,
+    rebuildExamJournalFromRecords,
+    readExamPaperQuotas,
+} from '../lib/exam-paper';
 import { annotateScoreboardPercentages } from '../lib/scoreboard-score-percentage';
 import bus, { parallelAllSettled } from '../service/bus';
 import db from '../service/db';
@@ -1490,7 +1496,7 @@ export async function updateStatus(domainId: string, tid: ObjectId, uid: number,
             return synced.status;
         }
         if (tdoc.balloon && status === STATUS.STATUS_ACCEPTED && !isLocked(tdoc)) await addBalloon(domainId, tid, uid, rid, pid);
-        const journalEntry = {
+        const incomingJournalEntry = {
             rid,
             pid,
             status,
@@ -1500,8 +1506,11 @@ export async function updateStatus(domainId: string, tid: ObjectId, uid: number,
             ...(manual === true ? { manual: true } : {}),
         };
         if (tdoc.rule === 'exam') {
+            if (!Number.isSafeInteger(pid) || pid <= 0) throw new ValidationError('pid');
             const current = await getStatus(domainId, tid, uid);
             if (!examStatusAcceptsJournalRid(current, rid)) return current;
+            const existingJournalEntry = (current?.journal || []).find((item) => item?.rid instanceof ObjectId && item.rid.equals(rid));
+            const journalEntry = mergeExamJournalEntry(existingJournalEntry, incomingJournalEntry);
             const examFilter = {
                 domainId: tdoc.domainId,
                 docType: document.TYPE_CONTEST,
@@ -1532,7 +1541,7 @@ export async function updateStatus(domainId: string, tid: ObjectId, uid: number,
             tdoc.docId,
             uid,
             'journal',
-            journalEntry,
+            incomingJournalEntry,
             'rid',
         );
         const journal = _getStatusJournal(tsdoc);
@@ -1599,10 +1608,40 @@ export async function recalcStatus(domainId: string, tid: ObjectId) {
         }
         const tasks = [];
         for (const tsdoc of tsdocs || []) {
+            if (tdoc.rule === 'exam') {
+                if (tsdoc.journal || tsdoc.paperFinalizedAt || tsdoc.startAt) {
+                    tasks.push(recalculateExamStatus(tdoc, tsdoc));
+                }
+                continue;
+            }
             if (tsdoc.journal) tasks.push(recalculateIndividualStatus(tdoc, tsdoc));
         }
         return await Promise.all(tasks);
     });
+
+    async function recalculateExamStatus(contestDoc: Tdoc, initialStatus: any) {
+        const records = await RecordModel.getMulti(domainId, { contest: tid, uid: initialStatus.uid }).toArray();
+        let current = initialStatus;
+        for (;;) {
+            const journal = rebuildExamJournalFromRecords(current, records, { uid: current.uid, contestId: tid });
+            const stats = RULES[contestDoc.rule].stat(contestDoc, journal);
+            const updated = await document.revSetStatus(domainId, document.TYPE_CONTEST, tid, current.uid, current.rev, { journal, ...stats });
+            if (updated) {
+                logger.info(
+                    'exam journal rebuilt domain=%s contest=%s uid=%d journal=%d score=%s previousScore=%s',
+                    domainId,
+                    String(tid),
+                    current.uid,
+                    journal.length,
+                    stats.score,
+                    current.score,
+                );
+                return updated;
+            }
+            current = await document.getStatus(domainId, document.TYPE_CONTEST, tid, current.uid);
+            if (!current) return null;
+        }
+    }
 
     async function recalculateIndividualStatus(contestDoc: Tdoc, initialStatus: any) {
         let current = initialStatus;

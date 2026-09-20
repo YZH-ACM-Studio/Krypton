@@ -184,6 +184,10 @@ describe('exam paper wiring', () => {
         expect(retake.indexOf('contest.get(')).to.be.lessThan(retake.indexOf('drawExamPaperPids'));
         expect(retake).to.include('if (updated && isExamPaperStarted(updated)');
         expect(paper).to.include('scaleByContestProblemScore(this.tdoc, pid');
+        expect(readHydrooj('src/handler/paper.ts')).to.not.include('updateStatus(domainId, tid, uid, rid, 0)');
+        expect(readHydrooj('src/model/contest.ts')).to.include('rebuildExamJournalFromRecords');
+        expect(readHydrooj('src/model/contest.ts')).to.include('mergeExamJournalEntry');
+        expect(readHydrooj('bin/commands.ts')).to.include('contest-recalc-status');
         expect(readHydrooj('src/handler/contest.ts')).to.include('async postSetScores');
         expect(readHydrooj('src/handler/contest.ts')).to.include('assignContestProblemScores');
         expect(readHydrooj('src/handler/contest.ts')).to.include("'tag', 'problemKind'");

@@ -168,6 +168,29 @@ function sameIndexes(left: ReadonlySet<number>, right: ReadonlySet<number>) {
     return true;
 }
 
+const OBJECT_ID_HEX_PATTERN = /^[0-9a-f]{24}$/;
+
+function objectIdHex(value: unknown): string | null {
+    if (value === null || typeof value !== 'object') return null;
+    const candidate = value as { _bsontype?: unknown; toHexString?: unknown };
+    if (candidate._bsontype !== 'ObjectId' && candidate._bsontype !== 'ObjectID') return null;
+    if (typeof candidate.toHexString !== 'function') return null;
+    let hex: unknown;
+    try {
+        hex = candidate.toHexString();
+    } catch {
+        return null;
+    }
+    if (typeof hex !== 'string') return null;
+    const normalized = hex.toLowerCase();
+    return OBJECT_ID_HEX_PATTERN.test(normalized) ? normalized : null;
+}
+
+function displayErrorParameter(value: unknown): unknown {
+    const hex = objectIdHex(value);
+    return hex === null ? value : hex;
+}
+
 function scalarParameter(value: unknown): string | null {
     if (typeof value === 'string') return value;
     if (typeof value === 'boolean' || typeof value === 'bigint') return value.toString();
@@ -323,7 +346,7 @@ export function describeHydroError(error: HydroError): ErrorMessageDescriptor {
         const nested: Record<number, ErrorMessageDescriptor> = {};
         for (const match of sourceTemplate.matchAll(/\{(0|[1-9]\d*)\}/g)) {
             const index = Number(match[1]);
-            messageParams[index] = rawParams[index];
+            messageParams[index] = displayErrorParameter(rawParams[index]);
             if (rawParams[index] instanceof HydroError) nested[index] = describeHydroError(rawParams[index]);
         }
         return {

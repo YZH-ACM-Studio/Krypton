@@ -861,8 +861,13 @@ export class ProblemMainHandler extends Handler {
             const contestGroups = (await user.listGroup(domainId, canBrowseAssignRestricted ? undefined : this.user._id)).map(
                 (item) => item.name,
             );
+            const participantScope = await contest.resolveContestListParticipantScope(
+                domainId,
+                this.user._id,
+                canBrowseAssignRestricted,
+            );
             contestAccessFilter = {
-                ...contest.listAccessQuery(this.user._id, contestGroups, canBrowseAssignRestricted),
+                ...contest.listAccessQuery(this.user._id, contestGroups, canBrowseAssignRestricted, participantScope),
                 rule: { $ne: 'homework' },
             };
         }
@@ -2227,9 +2232,15 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
                 this.response.body.rdoc = await record.get(this.pdoc.domainId, this.psdoc.rid);
             }
             const canEditContest = this.user.hasPerm(PERM.PERM_EDIT_CONTEST);
+            const canBrowseAssignRestricted = canBrowseAssignRestrictedContests(this.user);
+            const participantScope = await contest.resolveContestListParticipantScope(
+                this.pdoc.domainId,
+                this.user._id,
+                canBrowseAssignRestricted,
+            );
             const projectRelatedContests = async (tdocs: Awaited<ReturnType<typeof contest.getRelated>>) => {
                 const visible = tdocs.filter((tdoc) =>
-                    contest.isListVisibleToUser(tdoc, this.user._id, this.user.group, canBrowseAssignRestrictedContests(this.user)),
+                    contest.isListVisibleToUser(tdoc, this.user._id, this.user.group, canBrowseAssignRestricted, participantScope),
                 );
                 if (!visible.length) return visible;
                 const tsdict = await contest.getListStatus(

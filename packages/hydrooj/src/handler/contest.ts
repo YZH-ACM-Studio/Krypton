@@ -350,11 +350,16 @@ export class ContestListHandler extends Handler {
             await user.listGroup(authoritativeDomainId, canBrowseAssignRestricted ? undefined : this.user._id)
         ).map((i) => i.name);
         if (group && !groups.includes(group)) throw new NotAssignedError(group);
+        const participantScope = await contest.resolveContestListParticipantScope(
+            authoritativeDomainId,
+            this.user._id,
+            canBrowseAssignRestricted,
+        );
         const rules = Object.keys(contest.RULES).filter((i) => !contest.RULES[i].hidden);
         const escaped = escapeRegExp(q.toLowerCase());
         const $regex = new RegExp(q.length >= 2 ? escaped : `\\A${escaped}`, 'gim');
         const filter = {
-            ...contest.listAccessQuery(this.user._id, groups, canBrowseAssignRestricted && !group),
+            ...contest.listAccessQuery(this.user._id, groups, canBrowseAssignRestricted && !group, participantScope),
             ...(rule ? { rule } : { rule: { $in: rules } }),
             ...(group ? { assign: { $in: [group] } } : {}),
             ...(q ? { title: { $regex } } : {}),

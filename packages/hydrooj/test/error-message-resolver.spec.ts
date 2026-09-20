@@ -12,7 +12,8 @@ import {
     UserFacingError,
     ValidationError,
 } from '@hydrooj/framework';
-import { ProblemNotFoundError, ProblemStructureConflictError } from '../src/error';
+import { ObjectId } from 'mongodb';
+import { ContestNotFoundError, ProblemNotFoundError, ProblemStructureConflictError } from '../src/error';
 
 const translations = new Map<string, string>([
     ['zh-CN:Problem {0} changed.', '题目 {0} 已发生变化。'],
@@ -286,6 +287,28 @@ describe('P2.42 strict localized error resolver', () => {
                 }),
             'invalid_parameter',
         );
+        assert.throws(
+            () =>
+                resolveErrorMessage(
+                    describeHydroError(
+                        new ContestNotFoundError('system', {
+                            toHexString: () => '6aa0beed2f2f1ea8af181532',
+                        }),
+                    ),
+                    {
+                        locale: 'zh-CN',
+                        lookup: (template, locale) =>
+                            template === 'Contest {1} not found.' && locale === 'zh-CN' ? '比赛 {1} 不存在。' : lookup(template, locale),
+                        createTraceId: traceId,
+                    },
+                ),
+            (error: unknown) => {
+                assert.ok(error instanceof ErrorMessageResolutionError);
+                assert.equal(error.reason, 'invalid_parameter');
+                assert.equal(error.errorName, 'ContestNotFoundError');
+                return true;
+            },
+        );
     });
 
     it('keeps raw machine params while only validating the parameters referenced by an existing Hydro template', () => {
@@ -308,6 +331,18 @@ describe('P2.42 strict localized error resolver', () => {
         assert.deepEqual(notFoundResult.params, ['system', 123]);
         assert.deepEqual(notFoundResult.messageParams, { 1: 123 });
         assert.equal(notFoundResult.message, '题目 123 不存在。');
+
+        const contestId = new ObjectId('6aacef7ef6e8b68176be808b');
+        const missingContest = new ContestNotFoundError('system', contestId);
+        const missingContestResult = resolveErrorMessage(describeHydroError(missingContest), {
+            locale: 'zh-CN',
+            lookup: (template, locale) =>
+                template === 'Contest {1} not found.' && locale === 'zh-CN' ? '比赛 {1} 不存在。' : lookup(template, locale),
+            createTraceId: traceId,
+        });
+        assert.deepEqual(missingContestResult.params, ['system', contestId]);
+        assert.deepEqual(missingContestResult.messageParams, { 1: '6aacef7ef6e8b68176be808b' });
+        assert.equal(missingContestResult.message, '比赛 6aacef7ef6e8b68176be808b 不存在。');
     });
 
     it('keeps raw params while separating dynamic display params', () => {

@@ -105,9 +105,14 @@ export class HomeHandler extends Handler {
         const groups = (await user.listGroup(domainId, canBrowseAssignRestricted ? undefined : this.user._id)).map(
             (i) => i.name,
         );
+        const participantScope = await contest.resolveContestListParticipantScope(
+            domainId,
+            this.user._id,
+            canBrowseAssignRestricted,
+        );
         const q = {
             rule: { $in: rules },
-            ...contest.listAccessQuery(this.user._id, groups, canBrowseAssignRestricted),
+            ...contest.listAccessQuery(this.user._id, groups, canBrowseAssignRestricted, participantScope),
         };
         const tdocs = await contest.getMulti(domainId, q).sort({ endAt: -1, beginAt: -1, _id: -1 }).limit(limit).toArray();
         const tsdict = await contest.getListStatus(

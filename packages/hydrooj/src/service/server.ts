@@ -274,7 +274,10 @@ export async function apply(ctx: Context) {
                     });
                 } else {
                     if (transport.traceId) {
-                        logger.error(`[${transport.traceId}] Error transport diagnostic`, transport.internalError);
+                        logger.error(
+                            `[${transport.traceId}] Error transport diagnostic User: ${this.user._id}(${this.user.uname}) ${this.request.method}: /d/${this.domain._id}${this.request.path}`,
+                            transport.internalError,
+                        );
                     }
                     this.response.status = transport.status;
                     this.response.template = transport.template;
@@ -293,7 +296,10 @@ export async function apply(ctx: Context) {
                     logger.error(err);
                 }
                 if (transport.traceId) {
-                    logger.error(`[${transport.traceId}] WebSocket error transport diagnostic`, transport.internalError);
+                    logger.error(
+                        `[${transport.traceId}] WebSocket error transport diagnostic User: ${this.user?._id}(${this.user?.uname}) Path:${this.request.path}`,
+                        transport.internalError,
+                    );
                 }
                 if (err instanceof UserFacingError) err.stack = this.request.path;
                 this.send({

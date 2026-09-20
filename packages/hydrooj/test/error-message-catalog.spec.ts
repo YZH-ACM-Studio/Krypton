@@ -39,6 +39,7 @@ import {
     SendMailError,
     UserNotFoundError,
 } from '../src/error';
+import { ObjectId } from 'mongodb';
 import { examTeacherCatalogTranslations } from '@hydrooj/common';
 import { getProblemConfigErrorText, validateStructuredCodeTemplate } from '../src/lib/problem-config';
 
@@ -1193,6 +1194,17 @@ describe('P2.43 error message catalog', () => {
             }).message,
             '比赛 C1000 不存在。',
         );
+
+        const contestId = new ObjectId('6aa0beed2f2f1ea8af181532');
+        const missingContestByObjectId = new ContestNotFoundError('system', contestId);
+        const missingContestByObjectIdResult = resolveErrorMessage(describeHydroError(missingContestByObjectId), {
+            locale: 'zh-CN',
+            lookup: lookupErrorMessageTranslation,
+            createTraceId: () => 'catalog-test-trace',
+        });
+        assert.deepEqual(missingContestByObjectIdResult.params, ['system', contestId]);
+        assert.deepEqual(missingContestByObjectIdResult.messageParams, { 1: '6aa0beed2f2f1ea8af181532' });
+        assert.equal(missingContestByObjectIdResult.message, '比赛 6aa0beed2f2f1ea8af181532 不存在。');
 
         const legacyRecordContest = localizeError(new ContestNotFoundError('system', undefined), 'Contest {0} not found.', 'C1000');
         assert.deepEqual(legacyRecordContest.params, ['system', undefined]);

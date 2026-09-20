@@ -27,7 +27,12 @@ import {
 import avatar from '../lib/avatar';
 import { contestScoreboardRankValue } from '../lib/contest-unrank';
 import { effectiveLockoutWindow } from '../lib/contest-lockout';
-import { isListVisibleToUser, listAccessQuery } from '../lib/contest-list-access';
+import {
+    isListVisibleToUser,
+    listAccessQuery,
+    loadContestListParticipantScope,
+    resolveContestListParticipantScope,
+} from '../lib/contest-list-access';
 import { examJournalFloorFilter, examStatusAcceptsJournalRid, readExamPaperQuotas } from '../lib/exam-paper';
 import { annotateScoreboardPercentages } from '../lib/scoreboard-score-percentage';
 import bus, { parallelAllSettled } from '../service/bus';
@@ -1573,7 +1578,7 @@ export function getMulti(domainId: string, query: Filter<document.DocType['30']>
     return document.getMulti(domainId, document.TYPE_CONTEST, query).sort({ beginAt: -1 });
 }
 
-export { isListVisibleToUser, listAccessQuery };
+export { isListVisibleToUser, listAccessQuery, loadContestListParticipantScope, resolveContestListParticipantScope };
 
 export async function getAndListStatus(domainId: string, tid: ObjectId): Promise<[Tdoc, any[]]> {
     // TODO(iceboy): projection, pagination.
@@ -1874,6 +1879,8 @@ global.Hydro.model.contest = {
     getMulti,
     listAccessQuery,
     isListVisibleToUser,
+    loadContestListParticipantScope,
+    resolveContestListParticipantScope,
     setStatus,
     getAndListStatus,
     recalcStatus,

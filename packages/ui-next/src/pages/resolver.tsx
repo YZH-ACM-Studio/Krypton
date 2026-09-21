@@ -99,6 +99,7 @@ import { ManageConfigPage, ManageScriptPage, ManageSettingPage } from '@/pages/s
 import { TaskCenterPage, TaskDetailPage, TaskMyPage } from '@/pages/tasks';
 import { ProblemSetDetailPage, ProblemSetPage } from '@/pages/training';
 import { ProblemSetFilesPage, ProblemSetManagePage } from '@/pages/training-manage';
+import { ProblemSetRosterPage } from '@/pages/problem-set-roster';
 import { UserDetailPage } from '@/pages/user';
 import { UserAccountPage } from '@/pages/user-account';
 import {
@@ -186,6 +187,7 @@ const PAGE_MAP: Record<string, PageComponent> = {
   'problem_set_detail.html': ProblemSetDetailPage,
   'problem_set_edit.html': ProblemSetManagePage,
   'problem_set_files.html': ProblemSetFilesPage,
+  'problem_set_roster.html': ProblemSetRosterPage,
 
   // Discussions
   'discussion_main_or_node.html': DiscussionsPage,

@@ -172,7 +172,7 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
           label: '题集',
           href: bs.urls.training,
           icon: GraduationCap,
-          templates: ['problem_set_main.html', 'problem_set_detail.html', 'problem_set_edit.html', 'problem_set_files.html'],
+          templates: ['problem_set_main.html', 'problem_set_detail.html', 'problem_set_edit.html', 'problem_set_files.html', 'problem_set_roster.html'],
         },
         { label: '任务', href: '/tasks', icon: ListChecks, templates: ['tasks_center.html', 'tasks_my.html', 'tasks_detail.html'] },
         { label: '文件收集', href: '/collect', icon: FolderUp, templates: ['collect_main.html', 'collect_detail.html'] },

@@ -150,9 +150,12 @@ describe('small interface fixes', () => {
     expect(trainingHandler).to.include("ctx.Route('training_detail', '/problem-sets/:tid', TrainingDetailHandler);");
     expect(trainingHandler).to.include("ctx.Route('training_files', '/problem-sets/:tid/file', TrainingFilesHandler);");
     expect(trainingHandler).to.include("ctx.Route('training_file_download', '/problem-sets/:tid/file/:filename', TrainingFileDownloadHandler);");
+    expect(trainingHandler).to.include("ctx.Route('training_roster', '/problem-sets/:tid/roster', TrainingRosterHandler);");
     expect(trainingHandler).not.to.include("ctx.Route('training_detail', '/problem-sets/:tid', TrainingDetailHandler, PERM.PERM_VIEW_TRAINING)");
+    expect(trainingHandler).not.to.include("ctx.Route('training_roster', '/problem-sets/:tid/roster', TrainingRosterHandler, PERM.PERM_VIEW_TRAINING)");
     expect(trainingHandler).to.include("ctx.Route('training_main', '/problem-sets', TrainingMainHandler);");
     expect(trainingHandler).not.to.include("ctx.Route('training_main', '/problem-sets', TrainingMainHandler, PERM.PERM_VIEW_TRAINING)");
+    expect(trainingPage).to.include('${trainingUrl}/roster');
     const courseHandler = source('packages/hydrooj/src/handler/course.ts');
     expect(courseHandler).to.include("ctx.Route('course_detail', '/course/:tid', CourseDetailHandler);");
     expect(courseHandler).not.to.include("ctx.Route('course_detail', '/course/:tid', CourseDetailHandler, PERM.PERM_VIEW_TRAINING)");

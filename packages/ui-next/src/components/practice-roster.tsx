@@ -236,7 +236,7 @@ export function PracticeRosterCard({
         .includes(keyword),
     );
   });
-  const matrixColumns = groupFilter ? columns.filter((column) => column.id === groupFilter) : columns;
+  const matrixColumns = groupFilter ? columns.filter((column) => column.id === groupFilter) : [];
   const columnCount = 4 + (showProblems ? 1 : 0) + (showExam ? 2 : 0);
 
   const exportMembers = () => {
@@ -305,9 +305,9 @@ export function PracticeRosterCard({
           <SimpleSelect
             value={groupFilter}
             onValueChange={setGroupFilter}
-            className="h-8 w-44 min-w-0"
-            ariaLabel="按用户组筛选"
-            options={[{ value: '', label: '全部组' }, ...columns.map((column) => ({ value: column.id, label: column.name }))]}
+            className="h-8 w-44 min-w-0 max-w-full"
+            ariaLabel="按班级筛选"
+            options={[{ value: '', label: '全部学生' }, ...columns.map((column) => ({ value: column.id, label: column.name }))]}
           />
           <Input
             value={query}
@@ -329,7 +329,7 @@ export function PracticeRosterCard({
             {examWarning}
           </p>
         ) : null}
-        {columns.length ? (
+        {columns.length > 0 && columns.length <= 8 ? (
           <ul className="mt-2 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
             {columns.map((column) => {
               const examColumn = examColumns.find((item) => item.id === column.id);

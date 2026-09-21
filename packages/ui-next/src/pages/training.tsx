@@ -12,7 +12,6 @@ import { Pagination } from '@/components/ui/pagination';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useBootstrap } from '@/lib/bootstrap';
 import { formatPlainTextSummary, replaceRouteTokens } from '@/lib/format';
-import { PracticeRosterCard, type PracticeRosterMember, type PracticeRosterProblem } from '@/components/practice-roster';
 import { practiceProblemEntryUrl } from '@/lib/practice-integrity';
 import { useChapterQuery } from './course/chapter-query';
 import {
@@ -106,9 +105,6 @@ interface TrainingListEntry {
 }
 
 interface TrainingPageData {
-  members?: PracticeRosterMember[];
-  membersTruncated?: boolean;
-  rosterProblems?: PracticeRosterProblem[];
   completedProblemCount?: number;
   integrityControlled?: boolean;
   missing?: unknown[];
@@ -126,6 +122,7 @@ interface TrainingPageData {
   udoc?: { uname?: string };
   access?: ProblemSetAccessDecision | Record<string, ProblemSetAccessDecision | undefined>;
   canManage?: boolean;
+  canViewRoster?: boolean;
 }
 
 /* ────────────────────────────────────────────────────────────────── */
@@ -629,6 +626,7 @@ export function TrainingDetailPage() {
   const selectedEnterable = selected ? isStageEnterable(selectedStatus) : false;
   const selectedLock = selected ? stageLockReason(selectedStatus) : null;
   const canManage = data.canManage === true;
+  const canViewRoster = data.canViewRoster === true;
   const trainingUrl = replaceRouteTokens(bs.urls.trainingDetail, { TID: String(tdoc.docId) });
   const [problemQuery, setProblemQuery] = useState('');
   const problemSearch = useMemo(
@@ -718,6 +716,14 @@ export function TrainingDetailPage() {
               <a href={continueLink}>
                 <PlayCircle className="mr-1.5 size-4" />
                 继续题集
+              </a>
+            </Button>
+          ) : null}
+          {canViewRoster ? (
+            <Button asChild variant="outline" size="sm">
+              <a href={`${trainingUrl}/roster`}>
+                <Users className="size-4" />
+                名单
               </a>
             </Button>
           ) : null}
@@ -1061,16 +1067,6 @@ export function TrainingDetailPage() {
           </Card>
         </div>
       </div>
-
-      {/* 参加名单（P2.3）：服务端仅对管理员/教师下发 members 字段 */}
-      {Array.isArray(data.members) ? (
-        <PracticeRosterCard
-          members={data.members}
-          problems={Array.isArray(data.rosterProblems) ? data.rosterProblems : []}
-          title={tdoc.title || '题集'}
-          truncated={!!data.membersTruncated}
-        />
-      ) : null}
     </motion.div>
   );
 }

@@ -44,6 +44,7 @@ const TEMPLATE_LABELS: Record<string, string> = {
   'homework_files.html': '作业文件',
   'problem_set_edit.html': '编辑题集',
   'problem_set_files.html': '题集文件',
+  'problem_set_roster.html': '参加名单',
   'discussion_create.html': '发起讨论',
   'discussion_edit.html': '编辑讨论',
   'domain_create.html': '创建域',

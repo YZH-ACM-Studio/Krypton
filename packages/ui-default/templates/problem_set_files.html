@@ -42,6 +42,11 @@
             <span class="icon icon-file"></span> {{ _('Files') }}
           </a></li>
         {% endif %}
+        {% if handler.user.hasPerm(perm.PERM_USERBIND_MANAGE_STUDENTS) %}
+          <li class="menu__item"><a class="menu__link" href="{{ url('training_roster', tid=tdoc.docId) }}">
+            <span class="icon icon-user"></span> {{ _('problem_set_roster') }}
+          </a></li>
+        {% endif %}
           <li class="menu__item"><a class="menu__link" href="{{ url('wiki_help', anchor='training') }}">
             <span class="icon icon-help"></span> {{ _('Help') }}
           </a></li>

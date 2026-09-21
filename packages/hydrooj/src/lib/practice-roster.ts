@@ -25,8 +25,53 @@ export interface PracticeRosterProblemPayload {
 export interface PracticeRosterStudentRecord {
     realName?: string;
     studentId?: string;
+    schoolId?: ObjectId | string;
     groupIds?: Array<ObjectId | string>;
     boundUserId?: number | null;
+}
+
+export interface PracticeRosterGroupCatalogEntry {
+    id: string;
+    name: string;
+    schoolId?: string;
+    archivedAt?: Date | string | null;
+}
+
+function namedPracticeRosterGroup(groupNameById: ReadonlyMap<string, string>, groupId: string): string | null {
+    const name = groupNameById.get(groupId);
+    if (typeof name !== 'string' || name.length === 0) return null;
+    return name;
+}
+
+export function projectPracticeRosterGroups(input: {
+    groupIds: readonly string[];
+    groupNameById: ReadonlyMap<string, string>;
+    audienceGroupIds?: readonly string[];
+    studentSchoolId?: string | null;
+    groupCatalogById?: ReadonlyMap<string, PracticeRosterGroupCatalogEntry>;
+}): { groupIds: string[]; groups: string[] } {
+    const audienceFilter = input.audienceGroupIds && input.audienceGroupIds.length > 0
+        ? new Set(input.audienceGroupIds.map((groupId) => String(groupId)))
+        : null;
+    const studentSchoolId = typeof input.studentSchoolId === 'string' && input.studentSchoolId.length > 0
+        ? input.studentSchoolId
+        : null;
+    const groupIds: string[] = [];
+    const groups: string[] = [];
+    for (const groupId of input.groupIds) {
+        const name = namedPracticeRosterGroup(input.groupNameById, groupId);
+        if (name === null) continue;
+        if (audienceFilter) {
+            if (!audienceFilter.has(groupId)) continue;
+        } else if (input.groupCatalogById) {
+            const catalog = input.groupCatalogById.get(groupId);
+            if (catalog?.archivedAt) continue;
+            if (studentSchoolId && String(catalog?.schoolId) !== String(studentSchoolId)) continue;
+        }
+        groupIds.push(groupId);
+        groups.push(name);
+    }
+    return { groupIds, groups };
 }
 
 export function serializePracticeRosterProblems(
@@ -52,10 +97,18 @@ export function assemblePracticeRosterMembers(input: {
     completedPidsByUid: ReadonlyMap<number, ReadonlySet<number>>;
     total: number;
     examFactsByUid?: ReadonlyMap<number, CourseExamRosterFact>;
+    audienceGroupIds?: readonly string[];
+    groupCatalogById?: ReadonlyMap<string, PracticeRosterGroupCatalogEntry>;
 }): PracticeRosterMemberPayload[] {
     return input.memberUids.map((uid) => {
         const student = input.students[String(uid)];
-        const groupIds = (student?.groupIds || []).map((groupId) => String(groupId));
+        const { groupIds, groups } = projectPracticeRosterGroups({
+            groupIds: (student?.groupIds || []).map((groupId) => String(groupId)),
+            groupNameById: input.groupNameById,
+            audienceGroupIds: input.audienceGroupIds,
+            studentSchoolId: student?.schoolId == null ? null : String(student.schoolId),
+            groupCatalogById: input.groupCatalogById,
+        });
         const completedPids = [...(input.completedPidsByUid.get(uid) || [])]
             .filter((pid) => Number.isSafeInteger(pid) && pid > 0)
             .sort((a, b) => a - b);
@@ -69,7 +122,7 @@ export function assemblePracticeRosterMembers(input: {
             realName: student?.realName || '',
             studentId: student?.studentId || '',
             groupIds,
-            groups: groupIds.map((groupId) => input.groupNameById.get(groupId)).filter((name): name is string => Boolean(name)),
+            groups,
             done: completedPids.length,
             total: input.total,
             completedPids,

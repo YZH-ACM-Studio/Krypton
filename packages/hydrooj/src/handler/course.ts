@@ -1014,10 +1014,27 @@ class CourseDetailHandler extends Handler {
                 memberUids,
                 udict: memberUdict,
                 students,
-                groupNameById: new Map((ubGroups as Array<{ _id: ObjectId; name: string }>).map((group) => [String(group._id), group.name])),
+                groupNameById: new Map(ubGroups.map((group) => [String(group._id), group.name])),
                 completedPidsByUid,
                 total: rosterPids.length,
                 ...(examRoster?.facts ? { examFactsByUid: examRoster.facts } : {}),
+                audienceGroupIds: courseGroups.length ? courseGroups.map((groupId) => String(groupId)) : undefined,
+                groupCatalogById: new Map(
+                    ubGroups
+                        .filter((group) => group._id != null
+                            && typeof group.name === 'string'
+                            && group.name
+                            && group.schoolId != null)
+                        .map((group) => [
+                            String(group._id),
+                            {
+                                id: String(group._id),
+                                name: group.name,
+                                schoolId: String(group.schoolId),
+                                archivedAt: group.archivedAt,
+                            },
+                        ]),
+                ),
             });
             this.response.body.rosterProblems = serializePracticeRosterProblems(rosterPids, pdict);
             if (courseGroups.length) this.response.body.rosterGroupIds = courseGroups.map((groupId) => String(groupId));

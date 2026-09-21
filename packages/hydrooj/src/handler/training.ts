@@ -237,51 +237,11 @@ class TrainingDetailHandler extends Handler {
             integrityControlled: !!publishedIntegrity,
             access,
             canManage: canManageProblemSet(this.user, tdoc),
+            canViewRoster: this.user.hasPerm(PERM.PERM_USERBIND_MANAGE_STUDENTS),
         };
         this.response.body.tdoc.description = this.response.body.tdoc.description
             .replace(/\(file:\/\//g, `(./${tdoc.docId}/file/`)
             .replace(/="file:\/\//g, `="./${tdoc.docId}/file/`);
-
-        // ── Krypton P2.3：参加名单（服务端 gate：管理员+教师）────────────
-        // PERM_USERBIND_MANAGE_STUDENTS 是教师档的"学生数据操作"位
-        // （permission.ts PERM_TEACHER 含之，学生无）——名单含真实姓名/
-        // 学号 PII，与审批页/record 学号列同档。学生响应不含 members 字段。
-        // 纯读聚合（PLAN Rev.8）：4 条批量查询 + 内存归并，零写库零 N+1。
-        if (this.user.hasPerm(PERM.PERM_USERBIND_MANAGE_STUDENTS)) {
-            const enrollDocs = await training
-                .getMultiStatus(domainId, { docId: tid, uid: { $gt: 1 }, enroll: 1 })
-                .project({ uid: 1 })
-                .limit(PRACTICE_ROSTER_ENROLL_LIMIT)
-                .toArray();
-            const memberUids = enrollDocs.map((x) => +x.uid);
-            const ub = studentDirectory();
-            const scopePids = new Map<number, ReadonlySet<number>>(tdoc.dag.map((node) => [node._id, new Set(node.pids)]));
-            const [memberUdict, students, ubGroups, completedPidsByUid] = await Promise.all([
-                user.getListForRender(domainId, memberUids, false),
-                memberUids.length ? ub.findStudentsByUserIds(domainId, memberUids) : {},
-                ub.listUserGroups(domainId),
-                loadCompletedPidsByUid({
-                    domainId,
-                    memberUids,
-                    pids: exist,
-                    publishedIntegrity: !!publishedIntegrity,
-                    containerKind: 'problemSet',
-                    containerId: tdoc.docId,
-                    scopePids,
-                }),
-            ]);
-            this.response.body.membersTruncated = enrollDocs.length >= PRACTICE_ROSTER_ENROLL_LIMIT;
-            const groupNameById = new Map((ubGroups as Array<{ _id: ObjectId; name: string }>).map((group) => [String(group._id), group.name]));
-            this.response.body.members = assemblePracticeRosterMembers({
-                memberUids,
-                udict: memberUdict,
-                students,
-                groupNameById,
-                completedPidsByUid,
-                total: exist.length,
-            });
-            this.response.body.rosterProblems = serializePracticeRosterProblems(exist, pdict);
-        }
 
         this.response.pjax = 'partials/training_detail.html';
         this.response.template = 'problem_set_detail.html';
@@ -489,6 +449,89 @@ export class TrainingFileDownloadHandler extends Handler {
     }
 }
 
+export class TrainingRosterHandler extends Handler {
+    tdoc: TrainingDoc;
+
+    @param('tid', Types.ObjectId)
+    async prepare(_domainId: string, tid: ObjectId) {
+        const domainId = String(this.domain?._id);
+        problem.assertProblemAclDomain(this.user, domainId);
+        this.tdoc = await training.get(domainId, tid);
+        assertProblemSet(this.tdoc);
+        if (!canManageProblemSet(this.user, this.tdoc)) {
+            await problemSetAccessService.assertAccessible(domainId, this.user, this.tdoc);
+        }
+        if (!this.user.hasPerm(PERM.PERM_USERBIND_MANAGE_STUDENTS)) {
+            throw new PermissionError(PERM.PERM_USERBIND_MANAGE_STUDENTS);
+        }
+    }
+
+    @param('tid', Types.ObjectId)
+    async get(_domainId: string, tid: ObjectId) {
+        const domainId = String(this.domain?._id);
+        const tdoc = this.tdoc;
+        const pids = problemSetIntroPids(tdoc);
+        const audience = problemSetAudienceOf(tdoc);
+        const ub = studentDirectory();
+        const [enrollDocs, pdict, publishedIntegrity] = await Promise.all([
+            training
+                .getMultiStatus(domainId, { docId: tid, uid: { $gt: 1 }, enroll: 1 })
+                .project({ uid: 1 })
+                .limit(PRACTICE_ROSTER_ENROLL_LIMIT)
+                .toArray(),
+            getVisibleReferencedProblems(domainId, pids, this.user),
+            practiceIntegrityService.getLatestPublished(domainId, 'problemSet', tdoc.docId),
+        ]);
+        const memberUids = enrollDocs.map((row) => +row.uid);
+        const exist = pids.filter((pid) => pdict[pid]?.docId);
+        const scopePids = new Map<number, ReadonlySet<number>>(tdoc.dag.map((node) => [node._id, new Set(node.pids)]));
+        const [memberUdict, students, ubGroups, completedPidsByUid] = await Promise.all([
+            user.getListForRender(domainId, memberUids, false),
+            memberUids.length ? ub.findStudentsByUserIds(domainId, memberUids) : {},
+            ub.listUserGroups(domainId),
+            loadCompletedPidsByUid({
+                domainId,
+                memberUids,
+                pids: exist,
+                publishedIntegrity: !!publishedIntegrity,
+                containerKind: 'problemSet',
+                containerId: tdoc.docId,
+                scopePids,
+            }),
+        ]);
+        const groupNameById = new Map(ubGroups.map((group) => [String(group._id), group.name]));
+        const groupCatalogById = new Map(
+            ubGroups.map((group) => [
+                String(group._id),
+                {
+                    id: String(group._id),
+                    name: group.name,
+                    schoolId: String(group.schoolId),
+                    archivedAt: group.archivedAt,
+                },
+            ]),
+        );
+        this.response.body = {
+            tdoc,
+            members: assemblePracticeRosterMembers({
+                memberUids,
+                udict: memberUdict,
+                students,
+                groupNameById,
+                completedPidsByUid,
+                total: exist.length,
+                audienceGroupIds: audience.groupIds.length ? audience.groupIds : undefined,
+                groupCatalogById,
+            }),
+            membersTruncated: enrollDocs.length >= PRACTICE_ROSTER_ENROLL_LIMIT,
+            rosterProblems: serializePracticeRosterProblems(exist, pdict),
+            canViewRoster: true,
+        };
+        if (audience.groupIds.length) this.response.body.rosterGroupIds = audience.groupIds;
+        this.response.template = 'problem_set_roster.html';
+    }
+}
+
 function requestQuery(handler: Handler): Record<string, string> {
     const raw = handler.request.query;
     if (!raw || typeof raw !== 'object') return {};
@@ -505,6 +548,7 @@ function canonicalTrainingRouteName(path: string, tid?: ObjectId, filename?: str
     if (/\/edit\/?$/.test(path)) return 'training_edit';
     if (/\/file\/?$/.test(path)) return 'training_files';
     if (/\/create\/?$/.test(path)) return 'training_create';
+    if (/\/roster\/?$/.test(path)) return 'training_roster';
     if (tid) return 'training_detail';
     return 'training_main';
 }
@@ -542,10 +586,12 @@ export async function apply(ctx) {
     ctx.Route('training_edit', '/problem-sets/:tid/edit', TrainingEditHandler);
     ctx.Route('training_files', '/problem-sets/:tid/file', TrainingFilesHandler);
     ctx.Route('training_file_download', '/problem-sets/:tid/file/:filename', TrainingFileDownloadHandler);
+    ctx.Route('training_roster', '/problem-sets/:tid/roster', TrainingRosterHandler);
     ctx.Route('training_compat_main', '/training', TrainingCompatRedirectHandler);
     ctx.Route('training_compat_create', '/training/create', TrainingCompatRedirectHandler);
     ctx.Route('training_compat_detail', '/training/:tid', TrainingCompatRedirectHandler);
     ctx.Route('training_compat_edit', '/training/:tid/edit', TrainingCompatRedirectHandler);
     ctx.Route('training_compat_files', '/training/:tid/file', TrainingCompatRedirectHandler);
     ctx.Route('training_compat_file_download', '/training/:tid/file/:filename', TrainingCompatRedirectHandler);
+    ctx.Route('training_compat_roster', '/training/:tid/roster', TrainingCompatRedirectHandler);
 }

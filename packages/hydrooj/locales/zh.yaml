@@ -873,11 +873,13 @@ training_create: 创建题集
 training_detail: 题集详情
 training_edit: 编辑题集
 training_files: 题集文件
+training_roster: 参加名单
 training_main: 题集
 problem_set_create: 创建题集
 problem_set_detail: 题集详情
 problem_set_edit: 编辑题集
 problem_set_files: 题集文件
+problem_set_roster: 参加名单
 problem_set_main: 题集
 manage_redemption_codes: 兑换码
 redeem: 兑换码

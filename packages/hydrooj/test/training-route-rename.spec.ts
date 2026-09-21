@@ -99,6 +99,7 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
                     if (name === 'training_detail') return `/problem-sets/${args.tid}${qs}`;
                     if (name === 'training_edit') return `/problem-sets/${args.tid}/edit${qs}`;
                     if (name === 'training_files') return `/problem-sets/${args.tid}/file${qs}`;
+                    if (name === 'training_roster') return `/problem-sets/${args.tid}/roster${qs}`;
                     if (name === 'training_file_download') return `/problem-sets/${args.tid}/file/${args.filename}${qs}`;
                     return `/${name}${qs}`;
                 }
@@ -152,8 +153,10 @@ describe('P3.2 problem-set routes and training redirects', () => {
         expect(routes.training_edit.path).to.equal('/problem-sets/:tid/edit');
         expect(routes.training_files.path).to.equal('/problem-sets/:tid/file');
         expect(routes.training_file_download.path).to.equal('/problem-sets/:tid/file/:filename');
+        expect(routes.training_roster.path).to.equal('/problem-sets/:tid/roster');
         expect(routes.training_compat_main.path).to.equal('/training');
         expect(routes.training_compat_detail.path).to.equal('/training/:tid');
+        expect(routes.training_compat_roster.path).to.equal('/training/:tid/roster');
         expect(routes.training_compat_main.Handler).to.not.equal(routes.training_main.Handler);
     });
 
@@ -184,6 +187,18 @@ describe('P3.2 problem-set routes and training redirects', () => {
         await files.prepare();
         await files.get('system', tid);
         expect(files.response.redirect).to.equal(`/problem-sets/${tid}/file`);
+
+        const roster = makeRedirect('training_compat_roster', `/training/${tid}/roster`);
+        await roster.prepare();
+        await roster.get('system', tid);
+        expect(roster.response.status).to.equal(301);
+        expect(roster.response.redirect).to.equal(`/problem-sets/${tid}/roster`);
+
+        const rosterQuery = makeRedirect('training_compat_roster', `/training/${tid}/roster`, 'GET', { q: 'alice' });
+        await rosterQuery.prepare();
+        await rosterQuery.get('system', tid);
+        expect(rosterQuery.response.status).to.equal(301);
+        expect(rosterQuery.response.redirect).to.equal(`/problem-sets/${tid}/roster?q=alice`);
 
         const download = makeRedirect('training_compat_file_download', `/training/${tid}/file/a.txt`);
         await download.prepare();

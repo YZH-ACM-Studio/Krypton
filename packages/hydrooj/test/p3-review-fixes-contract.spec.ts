@@ -12,6 +12,7 @@ describe('P3 review must-fix contracts', () => {
         expect(readSrc('src/lib/ui.ts')).to.include("prefix: 'problem_set'");
         expect(readSrc('../ui-default/templates/training_main.html')).to.include('problem_set_main.html');
         expect(readSrc('../ui-default/templates/training_detail.html')).to.include('problem_set_detail.html');
+        expect(readSrc('../ui-default/templates/training_roster.html')).to.include('problem_set_roster.html');
         const overlay = readSrc('../ui-default/locales/zh.yaml');
         expect(overlay).to.include('Create Training Plan: 创建题集');
         expect(overlay).to.include('Create training plans: 创建题集');

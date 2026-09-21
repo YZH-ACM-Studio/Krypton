@@ -117,6 +117,9 @@ problem_set_create: Create Problem Set
 problem_set_detail: Problem Set
 problem_set_edit: Edit Problem Set
 problem_set_files: Problem Set Files
+training_files: Problem Set Files
+training_roster: Problem Set Roster
+problem_set_roster: Problem Set Roster
 user_detail: User Detail
 user_login: Login
 user_logout: Logout

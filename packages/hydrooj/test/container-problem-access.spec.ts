@@ -1639,6 +1639,7 @@ describe('P3.1 training kind canonical handlers', () => {
             () => makeHandler(trainingRoutes.training_detail).get('forged-domain', 'course'),
             () => makeHandler(trainingRoutes.training_edit).prepare('forged-domain', 'course'),
             () => makeHandler(trainingRoutes.training_files).prepare('forged-domain', 'course'),
+            () => makeHandler(trainingRoutes.training_roster).prepare('forged-domain', 'course'),
             () => makeHandler(trainingRoutes.training_file_download).get('forged-domain', 'course', 'a.txt'),
             () => makeHandler(trainingRoutes.training_detail).postEnroll('forged-domain', 'course'),
             () => makeHandler(trainingRoutes.training_detail).postDelete('forged-domain', 'course'),
@@ -1693,10 +1694,12 @@ describe('P3.3 problem set access handler gates', () => {
         await visible.get('forged-domain', 'set');
         expect(calls.trainingStatusWrites).to.deep.equal([]);
         expect(visible.response.body.access.accessible).to.equal(true);
+        expect(visible.response.body.canViewRoster).to.equal(false);
         expect(Object.keys(visible.response.body).sort()).to.deep.equal(
             [
                 'access',
                 'canManage',
+                'canViewRoster',
                 'completedProblemCount',
                 'groups',
                 'integrityControlled',

@@ -2,6 +2,7 @@ import { type ReactNode, useState } from 'react';
 import type { BarSeriesOption, LineSeriesOption } from 'echarts/charts';
 import { Download, LineChart as LineChartIcon, Search } from 'lucide-react';
 import { AdminPage } from '@/components/admin/admin-page';
+import { StatsGroupFields } from '@/components/stats-group-filter';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { EChart } from '@/components/ui/echart';
@@ -112,6 +113,7 @@ interface AdminStatsData {
   selectedUser: { uid: number; uname: string } | null;
   q: string;
   groupIds: string[];
+  groupMemberCount: number | null;
   range: 30 | 90;
   tag: string;
   maxTimeMs: number;
@@ -318,17 +320,16 @@ function problemLabel(problemById: Map<number, ProblemSummary>, pid: number): st
   return `${problem?.pid || `#${pid}`} ${problem?.title || ''}`.trim();
 }
 
-function Selector({ view, docs, selectedId }: { view: 'contest' | 'training'; docs: SelectorDoc[]; selectedId?: string }) {
-  const name = view === 'contest' ? 'contestId' : 'trainingId';
+function Selector({ docs, selectedId }: { docs: SelectorDoc[]; selectedId?: string }) {
   return (
     <form method="get" action="/admin/stats" className="flex w-full min-w-0 flex-col gap-2 sm:flex-row sm:items-end">
-      <input type="hidden" name="view" value={view} />
+      <input type="hidden" name="view" value="training" />
       <div className="min-w-0 flex-1 space-y-1.5">
-        <label className="text-xs text-muted-foreground" htmlFor={`stats-${name}`}>
-          {view === 'contest' ? '选择比赛' : '选择题集'}
+        <label className="text-xs text-muted-foreground" htmlFor="stats-trainingId">
+          选择题集
         </label>
         <SimpleSelect
-          name={name}
+          name="trainingId"
           defaultValue={selectedId || ''}
           options={docs.map((doc) => ({ value: String(doc.docId), label: doc.title }))}
           placeholder={docs.length ? '请选择' : '暂无可统计项目'}
@@ -358,11 +359,38 @@ function ContestView({ data }: { data: AdminStatsData }) {
   return (
     <div className="w-full min-w-0 space-y-5">
       <div className="flex w-full min-w-0 flex-col gap-2 lg:flex-row lg:items-end">
-        <div className="min-w-0 flex-1">
-          <Selector view="contest" docs={data.contests} selectedId={data.selectedContest?.docId} />
-        </div>
+        <form method="get" action="/admin/stats" className="flex min-w-0 flex-1 flex-col gap-3">
+          <input type="hidden" name="view" value="contest" />
+          <div className="grid w-full min-w-0 gap-3 lg:grid-cols-2 lg:items-end">
+            <div className="min-w-0 space-y-1.5">
+              <label className="text-xs text-muted-foreground" htmlFor="stats-contestId">
+                选择比赛
+              </label>
+              <SimpleSelect
+                id="stats-contestId"
+                name="contestId"
+                defaultValue={data.selectedContest?.docId || ''}
+                options={data.contests.map((doc) => ({ value: String(doc.docId), label: doc.title }))}
+                placeholder={data.contests.length ? '请选择' : '暂无可统计项目'}
+              />
+            </div>
+            <StatsGroupFields
+              groups={data.groups || []}
+              selectedIds={data.groupIds || []}
+              hint="不选则统计全部提交。选择后只统计这些用户组里已绑定学生的提交。"
+            />
+          </div>
+          <div>
+            <Button type="submit" disabled={!data.contests.length}>
+              查看
+            </Button>
+          </div>
+        </form>
         <CsvButton filename="比赛统计.csv" headers={['题号', '题目', '提交', 'AC', '通过率']} rows={csvRows} disabled={!stats} />
       </div>
+      {typeof data.groupMemberCount === 'number' ? (
+        <p className="text-sm text-muted-foreground">已按所选用户组过滤，共 {data.groupMemberCount} 名已绑定学生。</p>
+      ) : null}
       {!stats || !data.selectedContest ? (
         <Card className="w-full min-w-0 shadow-none">
           <CardContent className="py-12 text-center text-sm text-muted-foreground">暂无比赛可统计</CardContent>
@@ -439,7 +467,7 @@ function TrainingView({ data }: { data: AdminStatsData }) {
     <div className="w-full min-w-0 space-y-5">
       <div className="flex w-full min-w-0 flex-col gap-2 lg:flex-row lg:items-end">
         <div className="min-w-0 flex-1">
-          <Selector view="training" docs={data.trainings} selectedId={data.selectedTraining?.docId} />
+          <Selector docs={data.trainings} selectedId={data.selectedTraining?.docId} />
         </div>
         <CsvButton filename="题集成员进度.csv" headers={['UID', '用户名', '姓名', '学号', '完成', '总题数', '完成率']} rows={csvRows} disabled={!stats} />
       </div>

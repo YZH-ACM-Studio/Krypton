@@ -1,4 +1,5 @@
 import { Filter, ObjectId } from 'mongodb';
+import { Logger } from '@hydrooj/utils';
 import { Context } from '../context';
 import { localizedErrorText, NotFoundError, TrainingNotFoundError, UserNotFoundError, ValidationError } from '../error';
 import { TrainingDoc } from '../interface';
@@ -18,6 +19,7 @@ import {
     trainingEnrollmentPipeline,
     userStatsPipeline,
 } from '../lib/admin-stats';
+import { boundUserIdsForStats, parseStatsGroupIds, statsGroupOption } from '../lib/stats-group-scope';
 import { isProblemSetKind, withProblemSetKind } from '../lib/training-kind';
 import { problemSetAccessService } from '../model/problem-set-access';
 import { Handler, param, Types } from '../service/server';
@@ -32,6 +34,7 @@ import UserModel from '../model/user';
 
 const STATS_VIEWS = ['contest', 'training', 'user', 'group', 'dashboard', 'problem'] as const;
 type StatsView = (typeof STATS_VIEWS)[number];
+const logger = new Logger('admin-stats');
 
 function objectIdAt(date: Date) {
     return ObjectId.createFromTime(Math.floor(date.getTime() / 1000));
@@ -81,18 +84,51 @@ class AdminStatsHandler extends Handler {
         let groups: any[] = [];
         let userSearchResults: any[] = [];
         let selectedUser: any = null;
+        let responseGroupIds = groupIds;
+        let groupMemberCount: number | null = null;
         const userbind = studentDirectory();
 
-        if (selectedContestId) {
-            selectedContest = await contest.get(domainId, selectedContestId);
-            if (selectedContest.rule === 'homework') throw new NotFoundError(localizedErrorText`contest`);
-            const rows = await RecordModel.coll
-                .aggregate(contestStatsPipeline(domainId, selectedContestId, STATUS.STATUS_ACCEPTED), { maxTimeMS: ADMIN_STATS_MAX_TIME_MS })
-                .toArray();
-            stats = normalizeContestStats(rows);
-            const byProblem = new Map(stats.byProblem.map((row) => [row.pid, row]));
-            stats.byProblem = (selectedContest.pids || []).map((pid) => byProblem.get(pid) || { pid, total: 0, accepted: 0 });
-            problems = await this.problemSummaries(domainId, selectedContest.pids || []);
+        if (view === 'contest') {
+            const listedGroups = await userbind.listUserGroups(domainId);
+            groups = listedGroups.map((group) => statsGroupOption(group));
+            const selectedGroupIds = parseStatsGroupIds(groupIds, new Set(groups.map((group) => group._id)));
+            responseGroupIds = selectedGroupIds ? selectedGroupIds.map((id) => id.toHexString()) : [];
+            if (selectedContestId) {
+                selectedContest = await contest.get(domainId, selectedContestId);
+                if (selectedContest.rule === 'homework') throw new NotFoundError(localizedErrorText`contest`);
+                let memberUids: number[] | null = null;
+                if (selectedGroupIds) {
+                    const students = await userbind.findBoundStudentsByGroupIds(domainId, selectedGroupIds);
+                    memberUids = boundUserIdsForStats(students);
+                    groupMemberCount = memberUids.length;
+                    logger.info(
+                        'Admin contest stats group filter domain=%s contest=%s groups=%d members=%d',
+                        domainId,
+                        selectedContestId,
+                        selectedGroupIds.length,
+                        memberUids.length,
+                    );
+                }
+                const rows =
+                    memberUids && memberUids.length === 0
+                        ? []
+                        : await RecordModel.coll
+                              .aggregate(
+                                  contestStatsPipeline(
+                                      domainId,
+                                      selectedContestId,
+                                      STATUS.STATUS_ACCEPTED,
+                                      'Asia/Shanghai',
+                                      memberUids || undefined,
+                                  ),
+                                  { maxTimeMS: ADMIN_STATS_MAX_TIME_MS },
+                              )
+                              .toArray();
+                stats = normalizeContestStats(rows);
+                const byProblem = new Map(stats.byProblem.map((row) => [row.pid, row]));
+                stats.byProblem = (selectedContest.pids || []).map((pid) => byProblem.get(pid) || { pid, total: 0, accepted: 0 });
+                problems = await this.problemSummaries(domainId, selectedContest.pids || []);
+            }
         } else if (selectedTrainingId) {
             selectedTraining = await training.get(domainId, selectedTrainingId);
             if (!isProblemSetKind(selectedTraining.kind)) throw new TrainingNotFoundError(domainId, selectedTrainingId);
@@ -299,7 +335,8 @@ class AdminStatsHandler extends Handler {
             userSearchResults,
             selectedUser: selectedUser ? { uid: selectedUser._id, uname: selectedUser.uname } : null,
             q,
-            groupIds,
+            groupIds: responseGroupIds,
+            groupMemberCount,
             range,
             tag,
             maxTimeMs: ADMIN_STATS_MAX_TIME_MS,

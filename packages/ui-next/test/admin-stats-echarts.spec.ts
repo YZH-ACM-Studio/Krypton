@@ -24,6 +24,8 @@ describe('admin stats echarts dashboard', () => {
     expect(page).to.include('name="q"');
     expect(page).to.include('uid=');
     expect(page).to.include('name="groupIds"');
+    expect(page).to.include('<StatsGroupFields');
+    expect(page).to.include('groupMemberCount');
     expect(page).to.include('range=');
     expect(page).to.include('name="tag"');
     expect(page).to.include('if (/^[=+\\-@\\t\\r]/.test(text))');

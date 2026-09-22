@@ -1537,6 +1537,7 @@ const CHINESE_ERROR_MESSAGE_ENGLISH_TRANSLATIONS: Readonly<Record<string, string
     不能切换到已禁用账号: 'Cannot switch to a disabled account',
     不能移除最后一个可用系统管理员: 'The last active system administrator cannot be removed',
     所选用户组不存在: 'The selected user group does not exist.',
+    所选用户组无效: 'The selected user group is invalid.',
     所选用户组域不存在: 'The selected user-group domain does not exist.',
     所选角色域不存在: 'The selected role domain does not exist.',
     所选域不存在: 'The selected domain does not exist.',

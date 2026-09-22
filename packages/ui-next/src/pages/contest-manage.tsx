@@ -34,6 +34,7 @@ import {
   Users,
   WifiOff,
 } from 'lucide-react';
+import { StatsGroupFilterForm, type StatsGroupChoice } from '@/components/stats-group-filter';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -426,8 +427,38 @@ interface ContestManagePageData {
   pdict?: Record<string, ProblemBrief>;
   privateFiles?: ContestFileInfo[];
   scopeGroups?: ScopeGroupPayload[];
+  statsGroups?: unknown;
+  statsGroupIds?: unknown;
+  statsGroupMemberCount?: number | null;
   submissionStats?: ContestSubmissionStats | null;
   tdoc?: ContestDoc;
+}
+
+export function manageTabFromLocation(search: string): 'score' | 'stats' | 'public' | 'private' {
+  const tab = new URLSearchParams(search).get('tab');
+  if (tab === 'stats' || tab === 'public' || tab === 'private' || tab === 'score') return tab;
+  return 'score';
+}
+
+function readStatsGroups(value: unknown): StatsGroupChoice[] {
+  if (value == null) return [];
+  if (!Array.isArray(value)) throw new TypeError('statsGroups must be an array');
+  return value.map((item, index) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) throw new TypeError(`statsGroups[${index}] is invalid`);
+    const group = item as { _id?: unknown; name?: unknown; archivedAt?: unknown };
+    if (typeof group._id !== 'string' || typeof group.name !== 'string') throw new TypeError(`statsGroups[${index}] is invalid`);
+    return {
+      _id: group._id,
+      name: group.name,
+      archivedAt: typeof group.archivedAt === 'string' && group.archivedAt ? group.archivedAt : null,
+    };
+  });
+}
+
+function readStatsGroupIds(value: unknown): string[] {
+  if (value == null) return [];
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) throw new TypeError('statsGroupIds must be a string array');
+  return value;
 }
 
 interface ContestExamEventSummary {
@@ -2209,8 +2240,12 @@ function ContestAcmManagePage() {
   const contestUrl = replaceRouteTokens(bs.urls.contestDetail, { TID: String(tid) });
   const [selectedPublic, setSelectedPublic] = useState<Set<string>>(new Set());
   const [selectedPrivate, setSelectedPrivate] = useState<Set<string>>(new Set());
-  const [activeManageTab, setActiveManageTab] = useState<'score' | 'stats' | 'public' | 'private'>('score');
+  const [activeManageTab, setActiveManageTab] = useState<'score' | 'stats' | 'public' | 'private'>(() =>
+    typeof window === 'undefined' ? 'score' : manageTabFromLocation(window.location.search),
+  );
   const submissionStats: ContestSubmissionStats | null = data.submissionStats || null;
+  const statsGroups = readStatsGroups(data.statsGroups);
+  const statsGroupIds = readStatsGroupIds(data.statsGroupIds);
 
   const toggleContestFile = (selected: Set<string>, setSelected: (next: Set<string>) => void, name: string) => {
     const next = new Set(selected);
@@ -2400,6 +2435,16 @@ function ContestAcmManagePage() {
                 <CardTitle className="text-base">提交统计</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
+                <StatsGroupFilterForm
+                  action={`${contestUrl}/management`}
+                  hidden={{ tab: 'stats' }}
+                  groups={statsGroups}
+                  selectedIds={statsGroupIds}
+                  hint="不选则统计全部提交。选择后只统计这些用户组里已绑定学生的提交。"
+                />
+                {typeof data.statsGroupMemberCount === 'number' ? (
+                  <p className="text-sm text-muted-foreground">已按所选用户组过滤，共 {data.statsGroupMemberCount} 名已绑定学生。</p>
+                ) : null}
                 <div className="grid gap-2 sm:grid-cols-4">
                   {[
                     ['总提交', submissionStats.total ?? 0],

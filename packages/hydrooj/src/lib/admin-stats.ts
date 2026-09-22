@@ -65,9 +65,17 @@ export interface ContestStats {
     byLanguage: Array<{ language: string; count: number; percent: number }>;
 }
 
-export function contestStatsPipeline(domainId: string, contestId: unknown, acceptedStatus: number, timezone = 'Asia/Shanghai') {
+export function contestStatsPipeline(
+    domainId: string,
+    contestId: unknown,
+    acceptedStatus: number,
+    timezone = 'Asia/Shanghai',
+    uids?: readonly number[],
+) {
+    const match: { domainId: string; contest: unknown; uid?: { $in: number[] } } = { domainId, contest: contestId };
+    if (uids) match.uid = { $in: [...uids] };
     return [
-        { $match: { domainId, contest: contestId } },
+        { $match: match },
         {
             $facet: {
                 overall: [

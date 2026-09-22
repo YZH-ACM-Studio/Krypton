@@ -180,6 +180,9 @@ describe('course video wiring', () => {
         expect(videoSource).not.to.include('CourseVideoProgressHandler, PERM.PERM_VIEW_TRAINING');
         expect(videoSource).to.include("ctx.Route('course_videos'");
         expect(videoSource).to.include("ctx.Route('course_videos_csv'");
+        expect(videoSource).to.include("@param('groupIds', Types.CommaSeperatedArray, true)");
+        expect(videoSource).to.include('parseStatsGroupIds');
+        expect(videoSource).to.include('courseStatsQueryGroupIds');
         expect(videoSource).to.include("rosterUnavailable: 'no_groups'");
         expect(videoSource).to.include('未指定班级，无法出观看名单');
         expect(videoSource).to.include('requireRewatch');

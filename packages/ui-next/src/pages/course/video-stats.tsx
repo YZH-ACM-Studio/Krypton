@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { ArrowLeft, ChevronDown, Download, Search } from 'lucide-react';
+import { StatsGroupFilterForm, type StatsGroupChoice } from '@/components/stats-group-filter';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -41,6 +42,27 @@ export interface StatsMember {
 
 export type WatchMemberFilter = 'all' | 'incomplete' | 'done';
 export type WatchMemberStatus = 'done' | 'in_progress' | 'not_started';
+
+function readGroups(value: unknown): StatsGroupChoice[] {
+  if (value == null) return [];
+  if (!Array.isArray(value)) throw new TypeError('groups must be an array');
+  return value.map((item, index) => {
+    if (!isRecord(item) || typeof item._id !== 'string' || typeof item.name !== 'string') {
+      throw new TypeError(`groups[${index}] is invalid`);
+    }
+    return {
+      _id: item._id,
+      name: item.name,
+      archivedAt: typeof item.archivedAt === 'string' && item.archivedAt ? item.archivedAt : null,
+    };
+  });
+}
+
+function readGroupIds(value: unknown): string[] {
+  if (value == null) return [];
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) throw new TypeError('groupIds must be a string array');
+  return value;
+}
 
 function readVideos(value: unknown): StatsVideo[] {
   if (!Array.isArray(value)) throw new TypeError('videos must be an array');
@@ -137,6 +159,8 @@ export function CourseVideoStatsPage() {
   const title = typeof data.tdoc.title === 'string' ? data.tdoc.title : '课程';
   const videos = readVideos(data.videos);
   const members = readMembers(data.members);
+  const groups = readGroups(data.groups);
+  const groupIds = readGroupIds(data.groupIds);
   const noGroups = data.rosterUnavailable === 'no_groups';
   const invalidGroups = data.rosterUnavailable === 'invalid_groups';
   const rosterBlocked = noGroups || invalidGroups;
@@ -164,7 +188,7 @@ export function CourseVideoStatsPage() {
         </div>
         {rosterBlocked ? null : (
           <Button asChild variant="outline" size="sm" className="min-h-11 gap-1.5">
-            <a href={`/course/${tid}/videos.csv`}>
+            <a href={`/course/${tid}/videos.csv${groupIds.length ? `?groupIds=${encodeURIComponent(groupIds.join(','))}` : ''}`}>
               <Download className="size-3.5" strokeWidth={1.75} />
               导出 CSV
             </a>
@@ -194,6 +218,15 @@ export function CourseVideoStatsPage() {
         </Card>
       ) : (
         <div className="space-y-6">
+          <StatsGroupFilterForm
+            action={`/course/${tid}/videos`}
+            groups={groups}
+            selectedIds={groupIds}
+            hint="不选则统计本课全部班级。选择后只看这些用户组里已绑定的学生。"
+          />
+          {groupIds.length ? (
+            <p className="text-sm text-muted-foreground">已按所选用户组过滤，共 {members.length} 名已绑定学生。</p>
+          ) : null}
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <Card>
               <CardContent className="p-4">

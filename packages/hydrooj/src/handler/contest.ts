@@ -30,6 +30,7 @@ import {
 } from '../error';
 import { FileInfo, ScoreboardConfig, Tdoc } from '../interface';
 import { canUsePostContestPractice, getPostContestPracticeState } from '../lib/contest-correction';
+import { boundUserIdsForStats, parseStatsGroupIds, statsGroupOption } from '../lib/stats-group-scope';
 import { assertCourseExamWatchGate } from '../lib/course-exam-gate';
 import { assertIndividualContestUnrankAllowed } from '../lib/contest-unrank';
 import {
@@ -1871,64 +1872,111 @@ export class ContestManagementHandler extends ContestManagementBaseHandler {
     @param('tid', Types.ObjectId)
     @param('d', Types.Range(['public', 'private']), true)
     @param('sidebar', Types.Boolean)
-    async get(_domainId: string, tid: ObjectId, d?: string, sidebar?: boolean) {
+    @param('groupIds', Types.CommaSeperatedArray, true)
+    async get(_domainId: string, tid: ObjectId, d?: string, sidebar?: boolean, groupIds: string[] = []) {
         const authoritativeDomainId = this.authoritativeDomainId();
         // 本场提交统计（PLAN 2026-07-02 §8）：总量/AC/参与人数 + 按题分布 +
         // 按小时曲线。本 handler 已由 ContestManagementBaseHandler 限定
         // own || PERM_EDIT_CONTEST，学生不可达。聚合失败不阻塞页面。
+        // 用户组过滤在聚合之前校验；空选择保持原来的全场统计。
+        const statsGroupDocs = await listContestScopeGroups(authoritativeDomainId, groupIds.some((id) => id.trim()));
+        const statsGroups = statsGroupDocs.map((group) => statsGroupOption(group));
+        const selectedGroupIds = parseStatsGroupIds(groupIds, new Set(statsGroups.map((group) => group._id)));
+        const statsGroupIds = selectedGroupIds ? selectedGroupIds.map((id) => id.toHexString()) : [];
+        let statsGroupMemberCount: number | null = null;
+        let memberUids: number[] | null = null;
+        if (selectedGroupIds) {
+            const students = await studentDirectory().findBoundStudentsByGroupIds(authoritativeDomainId, selectedGroupIds);
+            memberUids = boundUserIdsForStats(students);
+            statsGroupMemberCount = memberUids.length;
+            logger.info(
+                'Contest management stats group filter domain=%s contest=%s groups=%d members=%d',
+                authoritativeDomainId,
+                tid,
+                selectedGroupIds.length,
+                memberUids.length,
+            );
+        }
+        const teamMode = contest.getParticipationMode(this.tdoc) === 'team';
+        const participantUnit = teamMode ? 'team' : 'user';
         let submissionStats: any = null;
-        try {
-            const scope = { domainId: authoritativeDomainId, contest: tid };
-            const [overall, byProblem, byHour] = await Promise.all([
-                record.stat(authoritativeDomainId, tid),
-                record.coll
-                    .aggregate([
-                        { $match: scope },
-                        {
-                            $group: {
-                                _id: '$pid',
-                                total: { $sum: 1 },
-                                accepted: { $sum: { $cond: [{ $eq: ['$status', STATUS.STATUS_ACCEPTED] }, 1, 0] } },
-                            },
-                        },
-                        { $sort: { _id: 1 } },
-                    ])
-                    .toArray(),
-                record.coll
-                    .aggregate([
-                        { $match: scope },
-                        {
-                            $group: {
-                                _id: {
-                                    $dateToString: {
-                                        format: '%Y-%m-%dT%H',
-                                        date: { $toDate: '$_id' },
-                                        // 不带 timezone 时 mongo 按 UTC 分桶，中国部署下
-                                        // 曲线整体偏 8 小时（对抗性审查发现 #3）。
-                                        timezone: (this.user as any).timeZone || 'Asia/Shanghai',
-                                    },
-                                },
-                                count: { $sum: 1 },
-                            },
-                        },
-                        { $sort: { _id: 1 } },
-                    ])
-                    .toArray(),
-            ]);
-            const participants =
-                contest.getParticipationMode(this.tdoc) === 'team'
-                    ? await record.coll.distinct('contestTeamId', { ...scope, contestTeamId: { $type: 'objectId' } }).then((ids) => ids.length)
-                    : ((overall as any).participants ?? 0);
+        if (memberUids && memberUids.length === 0) {
             submissionStats = {
-                total: overall.total,
-                accepted: (overall as any).accepted ?? 0,
-                participants,
-                participantUnit: contest.getParticipationMode(this.tdoc) === 'team' ? 'team' : 'user',
-                byProblem: byProblem.map((r) => ({ pid: r._id, total: r.total, accepted: r.accepted })),
-                byHour: byHour.map((r) => ({ hour: r._id, count: r.count })),
+                total: 0,
+                accepted: 0,
+                participants: 0,
+                participantUnit,
+                byProblem: [],
+                byHour: [],
             };
-        } catch (error) {
-            logger.error('Contest management statistics failed domain=%s contest=%s error=%o', authoritativeDomainId, tid, error);
+        } else {
+            try {
+                const scope = memberUids
+                    ? { domainId: authoritativeDomainId, contest: tid, uid: { $in: memberUids } }
+                    : { domainId: authoritativeDomainId, contest: tid };
+                const [overall, byProblem, byHour] = await Promise.all([
+                    memberUids
+                        ? Promise.all([
+                              record.coll.countDocuments(scope),
+                              record.coll.countDocuments({ ...scope, status: STATUS.STATUS_ACCEPTED }),
+                          ]).then(([total, accepted]) => ({ total, accepted }))
+                        : record.stat(authoritativeDomainId, tid),
+                    record.coll
+                        .aggregate([
+                            { $match: scope },
+                            {
+                                $group: {
+                                    _id: '$pid',
+                                    total: { $sum: 1 },
+                                    accepted: { $sum: { $cond: [{ $eq: ['$status', STATUS.STATUS_ACCEPTED] }, 1, 0] } },
+                                },
+                            },
+                            { $sort: { _id: 1 } },
+                        ])
+                        .toArray(),
+                    record.coll
+                        .aggregate([
+                            { $match: scope },
+                            {
+                                $group: {
+                                    _id: {
+                                        $dateToString: {
+                                            format: '%Y-%m-%dT%H',
+                                            date: { $toDate: '$_id' },
+                                            // 不带 timezone 时 mongo 按 UTC 分桶，中国部署下
+                                            // 曲线整体偏 8 小时（对抗性审查发现 #3）。
+                                            timezone: (this.user as any).timeZone || 'Asia/Shanghai',
+                                        },
+                                    },
+                                    count: { $sum: 1 },
+                                },
+                            },
+                            { $sort: { _id: 1 } },
+                        ])
+                        .toArray(),
+                ]);
+                const participants = teamMode
+                    ? await record.coll.distinct('contestTeamId', { ...scope, contestTeamId: { $type: 'objectId' } }).then((ids) => ids.length)
+                    : memberUids
+                      ? await record.coll.distinct('uid', scope).then((ids) => ids.length)
+                      : ((overall as any).participants ?? 0);
+                submissionStats = {
+                    total: overall.total,
+                    accepted: (overall as any).accepted ?? 0,
+                    participants,
+                    participantUnit,
+                    byProblem: byProblem.map((r) => ({ pid: r._id, total: r.total, accepted: r.accepted })),
+                    byHour: byHour.map((r) => ({ hour: r._id, count: r.count })),
+                };
+            } catch (error) {
+                logger.error(
+                    'Contest management statistics failed domain=%s contest=%s groups=%d error=%o',
+                    authoritativeDomainId,
+                    tid,
+                    statsGroupIds.length,
+                    error,
+                );
+            }
         }
         const scopeGroups =
             contest.getParticipationMode(this.tdoc) !== 'team' && this.tdoc.participantScopeMode === 'groups'
@@ -1942,6 +1990,9 @@ export class ContestManagementHandler extends ContestManagementBaseHandler {
             files: sortFiles(this.tdoc.files || []),
             privateFiles: sortFiles(this.tdoc.privateFiles || []),
             scopeGroups,
+            statsGroups,
+            statsGroupIds,
+            statsGroupMemberCount,
             urlForFile: (filename: string, type: string) => this.url('contest_file_download', { tid, filename, type }),
             submissionStats,
         };

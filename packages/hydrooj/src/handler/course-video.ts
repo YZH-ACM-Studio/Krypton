@@ -40,6 +40,7 @@ import * as training from '../model/training';
 import user from '../model/user';
 import { Handler, param, Types } from '../service/server';
 import { studentDirectory } from '../service/student-directory';
+import { courseStatsQueryGroupIds, parseStatsGroupIds, statsGroupOption } from '../lib/stats-group-scope';
 import { isCourseKind } from '../lib/training-kind';
 
 const logger = new Logger('course-video');
@@ -406,6 +407,8 @@ function videoStatus(doc: CourseVideoProgressDoc | undefined, dueAt?: Date) {
 interface CourseVideoRoster {
     tdoc: { docId: ObjectId; title: string; courseVideoDueAt: Date | null };
     videos: Array<{ id: string; title: string; chapterId: number; sectionId: number | null; durationMs: number }>;
+    groups: Array<{ _id: string; name: string; archivedAt: string | null }>;
+    groupIds: string[];
     rosterUnavailable?: 'no_groups';
     members: Array<{
         uid: number;
@@ -430,22 +433,36 @@ interface CourseVideoRoster {
     }>;
 }
 
-async function buildCourseVideoRoster(handler: Handler, domainId: string, tid: ObjectId): Promise<CourseVideoRoster> {
+async function buildCourseVideoRoster(
+    handler: Handler,
+    domainId: string,
+    tid: ObjectId,
+    requestedGroupIds: string[] = [],
+): Promise<CourseVideoRoster> {
     const tdoc = await loadCourse(domainId, tid);
     await assertCanManage(handler, domainId, tdoc);
     const groups = tdoc.courseGroupIds || [];
     if (!groups.length) {
+        if (requestedGroupIds.some((id) => id.trim())) {
+            throw new ValidationError('groupIds', null, localizedErrorText`所选用户组无效`);
+        }
         return {
             tdoc: { docId: tdoc.docId, title: tdoc.title, courseVideoDueAt: tdoc.courseVideoDueAt || null },
             videos: [],
+            groups: [],
+            groupIds: [],
             members: [],
             rosterUnavailable: 'no_groups',
         };
     }
-    const bound = await studentDirectory().findBoundStudentsByGroupIds(
-        domainId,
-        groups.map((id) => (id instanceof ObjectId ? id : new ObjectId(String(id)))),
-    );
+    const directory = studentDirectory();
+    const courseGroupKeys = new Set(groups.map((id) => String(id).toLowerCase()));
+    const statsGroups = (await directory.listUserGroups(domainId))
+        .filter((group) => courseGroupKeys.has(String(group._id).toLowerCase()))
+        .map((group) => statsGroupOption(group))
+        .sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'));
+    const selectedGroupIds = parseStatsGroupIds(requestedGroupIds, new Set(statsGroups.map((group) => group._id)));
+    const bound = await directory.findBoundStudentsByGroupIds(domainId, courseStatsQueryGroupIds(groups, selectedGroupIds));
     const seen = new Set<number>();
     const membersSource: Array<{ uid: number; studentId: string; realName: string }> = [];
     for (const row of bound as Array<{ boundUserId?: number; studentId?: string; realName?: string }>) {
@@ -453,6 +470,15 @@ async function buildCourseVideoRoster(handler: Handler, domainId: string, tid: O
         if (!Number.isSafeInteger(uid) || uid < 2 || seen.has(uid)) continue;
         seen.add(uid);
         membersSource.push({ uid, studentId: row.studentId || '', realName: row.realName || '' });
+    }
+    if (selectedGroupIds) {
+        logger.info(
+            'Course video stats group filter domain=%s course=%s groups=%d members=%d',
+            domainId,
+            tid,
+            selectedGroupIds.length,
+            membersSource.length,
+        );
     }
     const confirmed = listCourseVideos(tdoc.dag || []).filter((item) => item.video.confirmed);
     const progress = await loadCourseProgress(domainId, tid, membersSource.map((row) => row.uid));
@@ -468,6 +494,8 @@ async function buildCourseVideoRoster(handler: Handler, domainId: string, tid: O
             sectionId: item.sectionId,
             durationMs: item.video.durationMs,
         })),
+        groups: statsGroups,
+        groupIds: selectedGroupIds ? selectedGroupIds.map((id) => id.toHexString()) : [],
         members: membersSource.map((row) => {
             const videos = confirmed.map((item) => {
                 const doc = progressMap.get(`${row.uid}:${item.video.id}:${item.video.contentRevision}`);
@@ -496,20 +524,22 @@ async function buildCourseVideoRoster(handler: Handler, domainId: string, tid: O
 
 class CourseVideoStatsHandler extends Handler {
     @param('tid', Types.ObjectId)
-    async get(_domainId: string, tid: ObjectId) {
+    @param('groupIds', Types.CommaSeperatedArray, true)
+    async get(_domainId: string, tid: ObjectId, groupIds: string[] = []) {
         const domainId = String(this.domain?._id);
         problem.assertProblemAclDomain(this.user, domainId);
         this.response.template = 'course_videos.html';
-        this.response.body = await buildCourseVideoRoster(this, domainId, tid);
+        this.response.body = await buildCourseVideoRoster(this, domainId, tid, groupIds);
     }
 }
 
 class CourseVideoCsvHandler extends Handler {
     @param('tid', Types.ObjectId)
-    async get(_domainId: string, tid: ObjectId) {
+    @param('groupIds', Types.CommaSeperatedArray, true)
+    async get(_domainId: string, tid: ObjectId, groupIds: string[] = []) {
         const domainId = String(this.domain?._id);
         problem.assertProblemAclDomain(this.user, domainId);
-        const body = await buildCourseVideoRoster(this, domainId, tid);
+        const body = await buildCourseVideoRoster(this, domainId, tid, groupIds);
         if (body.rosterUnavailable === 'no_groups') {
             throw new ValidationError('courseGroupIds', null, localizedErrorText`未指定班级，无法出观看名单`);
         }

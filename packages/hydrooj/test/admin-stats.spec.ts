@@ -36,6 +36,14 @@ describe('admin statistics aggregation contracts', () => {
         expect(JSON.stringify(facet.byHour)).to.include('accepted');
     });
 
+    it('limits a contest facet to the supplied user ids', () => {
+        const pipeline = contestStatsPipeline('system', 'contest-id', 12, 'Asia/Shanghai', [8, 4]);
+        expect(pipeline[0]).to.deep.equal({ $match: { domainId: 'system', contest: 'contest-id', uid: { $in: [8, 4] } } });
+        expect(contestStatsPipeline('system', 'contest-id', 12, 'Asia/Shanghai', [])[0]).to.deep.equal({
+            $match: { domainId: 'system', contest: 'contest-id', uid: { $in: [] } },
+        });
+    });
+
     it('normalizes an empty or populated contest facet without NaN values', () => {
         expect(normalizeContestStats([])).to.deep.equal({
             total: 0,

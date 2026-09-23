@@ -89,6 +89,12 @@ export const ProblemContributionConflictError = Err(
     409,
 );
 export const ProblemDataActiveContainerError = Err('ProblemDataActiveContainerError', UserFacingError, '题目 {0} 正在比赛或考试中使用：{1}。', 409);
+export const ProblemWriteLockedError = Err(
+    'ProblemWriteLockedError',
+    UserFacingError,
+    'This problem has an unfinished write and cannot be edited yet.',
+    409,
+);
 export const ManagedProblemMetadataConflictError = Err(
     'ManagedProblemMetadataConflictError',
     UserFacingError,

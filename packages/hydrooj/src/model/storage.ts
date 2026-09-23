@@ -7,6 +7,7 @@ import { Context } from '../context';
 import { FileNode } from '../interface';
 import { allSettledOrThrow } from '../lib/all-settled';
 import mime from '../lib/mime';
+import { replaceStoredObject } from '../lib/storage-replacement';
 import db from '../service/db';
 import storage from '../service/storage';
 import ScheduleModel from './schedule';
@@ -21,23 +22,28 @@ export class StorageModel {
 
     static async put(path: string, file: string | Buffer | Readable, owner?: number) {
         const meta = {};
-        await StorageModel.del([path]);
         meta['Content-Type'] = mime(path);
         let _id = StorageModel.generateId(extname(path));
         // Make sure id is not used
 
         while (await StorageModel.coll.findOne({ _id })) _id = StorageModel.generateId(extname(path));
-        await storage.put(_id, file, meta);
-        const { metaData, size, etag } = await storage.getMeta(_id);
-        await StorageModel.coll.insertOne({
-            _id,
-            meta: metaData,
-            path,
-            size,
-            etag,
-            lastModified: new Date(),
-            owner,
-        });
+        await replaceStoredObject(
+            file,
+            () => storage.put(_id, file, meta),
+            () => storage.getMeta(_id),
+            () => StorageModel.del([path]),
+            async ({ metaData, size, etag }) => {
+                await StorageModel.coll.insertOne({
+                    _id,
+                    meta: metaData,
+                    path,
+                    size,
+                    etag,
+                    lastModified: new Date(),
+                    owner,
+                });
+            },
+        );
         return path;
     }
 

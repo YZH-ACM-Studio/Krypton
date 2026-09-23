@@ -580,7 +580,9 @@ ${c.response.status} ${endTime - startTime}ms ${c.response.length}`);
             });
         }
         if (this.config.upload) {
-            const uploadDir = join(tmpdir(), 'hydro', 'upload', process.env.NODE_APP_INSTANCE || '0');
+            // Each process keeps its own directory. A shared upload/0 is emptied
+            // when any Hydro process exits, including a CLI, and that deletes uploads still in flight.
+            const uploadDir = join(tmpdir(), 'hydro', 'upload', `${process.env.NODE_APP_INSTANCE || '0'}-${process.pid}`);
             fs.ensureDirSync(uploadDir);
             logger.debug('Using upload dir: %s', uploadDir);
             this.server.use(
@@ -606,7 +608,10 @@ ${c.response.status} ${endTime - startTime}ms ${c.response.length}`);
                         for (const k in c.request.files) {
                             if (c.holdFiles.includes(k)) continue;
                             const files = Array.isArray(c.request.files[k]) ? c.request.files[k] : [c.request.files[k]];
-                            for (const f of files) if (!c.holdFiles.includes(f as any)) fs.rmSync(f.filepath);
+                            for (const f of files) {
+                                if (!f?.filepath || c.holdFiles.includes(f as any)) continue;
+                                fs.rmSync(f.filepath, { force: true });
+                            }
                         }
                     }
                 }

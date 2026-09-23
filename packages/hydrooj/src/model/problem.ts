@@ -50,6 +50,7 @@ import {
 } from '../lib/problem-reaction';
 import { resolveProblemKnowledgeNodeIds } from '../lib/problem-tag-canonical';
 import { normalizeProblemTestdataUpload } from '../lib/problem-testdata-upload';
+import { problemWritePreflightFailure } from '../lib/problem-write-preflight';
 import { parseConfig } from '../lib/testdataConfig';
 import bus, { parallelAllSettled } from '../service/bus';
 import db from '../service/db';
@@ -3849,9 +3850,7 @@ export class ProblemModel {
                 operation,
                 error,
             );
-            const denied = new PermissionError(PERM.PERM_EDIT_PROBLEM_SELF);
-            Object.defineProperty(denied, 'cause', { value: error, configurable: true });
-            throw denied;
+            throw problemWritePreflightFailure(error);
         }
         await ProblemModel.refreshProblemAcl(user, domainId);
         const authorizedPdoc = await document.get(domainId, document.TYPE_PROBLEM, _id, [

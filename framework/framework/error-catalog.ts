@@ -207,6 +207,14 @@ const CORE_ERROR_MESSAGE_TRANSLATIONS: Readonly<Record<string, ErrorMessageTrans
         'zh-CN': '字段 {0} 验证失败。',
     },
     'File upload failed.': { en: 'File upload failed.', 'zh-CN': '文件上传失败。' },
+    'The uploaded file is no longer available. Choose it again and retry.': {
+        en: 'The uploaded file is no longer available. Choose it again and retry.',
+        'zh-CN': '上传文件已失效，请重新选择后再试。',
+    },
+    'This problem has an unfinished write and cannot be edited yet.': {
+        en: 'This problem has an unfinished write and cannot be edited yet.',
+        'zh-CN': '这道题有一次未完成的写入，暂时不能修改。请稍后重试；如果仍然失败，请联系管理员解除写入锁。',
+    },
     'File {0} already exists.': { en: 'File {0} already exists.', 'zh-CN': '文件 {0} 已存在。' },
     'File {0} limit exceeded.': { en: 'File {0} limit exceeded.', 'zh-CN': '文件 {0} 超出限制。' },
     ForbiddenError: { en: 'You are not allowed to perform this operation.', 'zh-CN': '您无权执行此操作。' },

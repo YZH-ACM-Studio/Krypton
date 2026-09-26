@@ -1000,7 +1000,13 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
       </div>
 
       <ContestManagementChrome tdoc={tdoc} active="edit">
-        <Card className="max-w-5xl">
+        <div
+          className={cn(
+            'grid min-w-0 items-start gap-6',
+            isEdit && typeof editableContestId === 'string' && '2xl:grid-cols-[minmax(0,1fr)_minmax(24rem,32rem)]',
+          )}
+        >
+        <Card className="min-w-0">
           <CardContent className="p-6">
             <form
               ref={formRef}
@@ -1735,8 +1741,14 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
           </CardContent>
         </Card>
         {isEdit && typeof editableContestId === 'string' ? (
-          <ContestExamSeatEntry tdoc={tdoc} contestId={editableContestId} scopeGroups={data.scopeGroups || []} />
+          <ContestExamSeatEntry
+            className="2xl:sticky 2xl:top-6"
+            tdoc={tdoc}
+            contestId={editableContestId}
+            scopeGroups={data.scopeGroups || []}
+          />
         ) : null}
+        </div>
         <Dialog open={modeClearOpen} onOpenChange={setModeClearOpen}>
           <TeamDialogContent
             titleId="clear-contest-teams-dialog-title"
@@ -1916,11 +1928,13 @@ export function ContestExamSeatEntry({
   contestId: linkedContestId,
   scopeGroups = [],
   onNavigate = (url: string) => window.location.assign(url),
+  className,
 }: {
   tdoc: ContestDoc;
   contestId: string;
   scopeGroups?: ScopeGroupPayload[];
   onNavigate?: (url: string) => void;
+  className?: string;
 }) {
   const [events, setEvents] = useState<ContestExamEventSummary[]>([]);
   const [schools, setSchools] = useState<ContestExamSchoolSummary[]>([]);
@@ -2089,7 +2103,7 @@ export function ContestExamSeatEntry({
   };
 
   return (
-    <Card>
+    <Card className={cn('@container min-w-0', className)}>
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
           <LayoutDashboard className="size-4" />
@@ -2164,7 +2178,7 @@ export function ContestExamSeatEntry({
           </Button>
         ) : fixedAudience ? (
           <div className="space-y-3 rounded-md border p-3">
-            <div className="grid gap-2 text-sm sm:grid-cols-3">
+            <div className="grid gap-2 text-sm @min-[36rem]:grid-cols-3">
               <div>
                 <p className="text-xs text-muted-foreground">活动名称</p>
                 <p className="font-medium">{tdoc.title || '未命名考试'}</p>

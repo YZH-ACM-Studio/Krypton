@@ -1,3 +1,4 @@
+import { MultiSelect } from '@/components/ui/multi-select';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 
 export interface DomainUserOption {
@@ -31,6 +32,97 @@ export async function loadDomainUsers(domainId: string, query: string): Promise<
     throw new Error('用户搜索响应格式错误');
   }
   return users;
+}
+
+function optionalUserText(value: unknown) {
+  return typeof value === 'string' && value ? value : undefined;
+}
+
+function readDomainUser(value: unknown, invalidMessage: string): DomainUserOption {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(invalidMessage);
+  const record = value as Record<string, unknown>;
+  if (!Number.isSafeInteger(record._id) || Number(record._id) <= 0) throw new Error(invalidMessage);
+  const uname = optionalUserText(record.uname);
+  const displayName = optionalUserText(record.displayName);
+  const mail = optionalUserText(record.mail);
+  const avatarUrl = optionalUserText(record.avatarUrl);
+  const studentId = optionalUserText(record.studentId);
+  const realName = optionalUserText(record.realName);
+  return {
+    _id: Number(record._id),
+    ...(uname ? { uname } : {}),
+    ...(displayName ? { displayName } : {}),
+    ...(mail ? { mail } : {}),
+    ...(avatarUrl ? { avatarUrl } : {}),
+    ...(studentId ? { studentId } : {}),
+    ...(realName ? { realName } : {}),
+  };
+}
+
+export async function loadDomainUsersByIds(domainId: string, ids: number[]): Promise<DomainUserOption[]> {
+  const unique = [...new Set(ids.filter((id) => Number.isSafeInteger(id) && id > 0))];
+  if (!unique.length) return [];
+  const response = await fetchHydroResponse(`/d/${encodeURIComponent(domainId)}/api/users`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      args: { ids: unique },
+      projection: ['_id', 'uname', 'displayName', 'mail', 'avatarUrl', 'studentId', 'realName'],
+    }),
+  });
+  if (!response.ok) throw new Error(await readHydroResponseError(response, '用户资料加载失败'));
+  const users = await response.json();
+  if (!Array.isArray(users)) throw new Error('用户资料响应格式错误');
+  return users.map((item) => readDomainUser(item, '用户资料响应格式错误'));
+}
+
+export function DomainUserMultiSelect({
+  domainId,
+  value,
+  onChange,
+  name,
+  placeholder = '搜索 UID / OJ 用户 / 学号 / 姓名',
+  emptyText = '没有匹配的用户',
+  maxItems,
+  minHeight = 44,
+  disabled,
+}: {
+  domainId: string;
+  value: DomainUserOption[];
+  onChange: (next: DomainUserOption[]) => void;
+  name?: string;
+  placeholder?: string;
+  emptyText?: string;
+  maxItems?: number;
+  minHeight?: number;
+  disabled?: boolean;
+}) {
+  return (
+    <MultiSelect<DomainUserOption>
+      value={value}
+      onChange={onChange}
+      loadOptions={(query) => loadDomainUsers(domainId, query)}
+      getKey={(user) => String(user._id)}
+      getLabel={domainUserSearchLabel}
+      renderChip={(user) => (
+        <span className="inline-flex max-w-full items-center gap-1">
+          <span className="truncate">{user.displayName || user.uname || `UID ${user._id}`}</span>
+          <span className="font-mono text-[10px] text-muted-foreground">#{user._id}</span>
+        </span>
+      )}
+      renderOption={(user) => <DomainUserSearchOption user={user} />}
+      name={name}
+      placeholder={placeholder}
+      emptyText={emptyText}
+      maxItems={maxItems}
+      minHeight={minHeight}
+      disabled={disabled}
+    />
+  );
 }
 
 export function domainUserSearchLabel(user: DomainUserOption) {

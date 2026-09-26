@@ -70,7 +70,10 @@ describe('p2.35 domain user workspace', () => {
     const domainUserSource = source.slice(start, end);
     expect(domainUserSource).to.include('name="operation" value="set_users"');
     expect(domainUserSource).to.include('name="operation" value="kick"');
+    expect(domainUserSource).to.include('<DomainUserMultiSelect');
     expect(domainUserSource).to.include('name="uids"');
+    expect(domainUserSource).to.not.include('例如：1001, 1002, 1003');
+    expect(domainUserSource).to.not.include('英文逗号分隔');
     expect(domainUserSource).to.include('name="role"');
     expect(domainUserSource).to.include('name="join"');
     expect(domainUserSource).to.include('<RoleQuickSelect');

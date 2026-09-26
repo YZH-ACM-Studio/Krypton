@@ -16,6 +16,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Switch } from '@/components/ui/switch';
 import { SimpleSelect } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { DomainUserMultiSelect, type DomainUserOption } from '@/components/domain-user-search';
 import { useBootstrap } from '@/lib/bootstrap';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import {
@@ -275,15 +276,19 @@ function restoreDialogTrigger(trigger: React.RefObject<HTMLElement | null>) {
 function AddDomainUsersDialog({
   open,
   onClose,
+  domainId,
   roleOptions,
   returnFocusRef,
 }: {
   open: boolean;
   onClose: () => void;
+  domainId: string;
   roleOptions: string[];
   returnFocusRef: React.RefObject<HTMLElement | null>;
 }) {
+  const [users, setUsers] = useState<DomainUserOption[]>([]);
   const close = () => {
+    setUsers([]);
     onClose();
     restoreDialogTrigger(returnFocusRef);
   };
@@ -302,17 +307,16 @@ function AddDomainUsersDialog({
               <UserPlus className="size-4 text-primary" />
               添加或更新域用户
             </DialogTitle>
-            <p className="mt-1 text-sm text-muted-foreground">一次可填写多个 UID，并为这些账号统一设置当前域角色。</p>
+            <p className="mt-1 text-sm text-muted-foreground">搜索用户名、UID、学号或姓名，再为这些账号统一设置当前域角色。</p>
           </DialogHeader>
           <DialogBody>
             <div className="space-y-5 px-5 py-4">
               <input type="hidden" name="operation" value="set_users" />
-              <div className="space-y-2">
-                <label className="text-sm font-medium" htmlFor="domain-user-uids">
-                  用户 UID
-                </label>
-                <Input className="h-10" id="domain-user-uids" name="uids" placeholder="例如：1001, 1002, 1003" autoFocus required />
-                <p className="text-xs text-muted-foreground">使用英文逗号分隔多个 UID。</p>
+              <div className="space-y-2" role="group" aria-labelledby="domain-user-uids-label">
+                <span id="domain-user-uids-label" className="text-sm font-medium">
+                  用户
+                </span>
+                <DomainUserMultiSelect domainId={domainId} value={users} onChange={setUsers} name="uids" />
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium" htmlFor="domain-user-role">
@@ -339,7 +343,7 @@ function AddDomainUsersDialog({
             <Button type="button" variant="ghost" className="h-10" onClick={close}>
               取消
             </Button>
-            <Button type="submit" className="h-10" disabled={roleOptions.length === 0}>
+            <Button type="submit" className="h-10" disabled={roleOptions.length === 0 || users.length === 0}>
               <UserPlus className="size-4" />
               保存用户
             </Button>
@@ -809,6 +813,7 @@ export function DomainUserPage() {
       <AddDomainUsersDialog
         open={addOpen}
         onClose={() => setAddOpen(false)}
+        domainId={bs.domain.id}
         roleOptions={assignableRoles.length > 0 ? assignableRoles : roleOptions}
         returnFocusRef={addReturnFocusRef}
       />

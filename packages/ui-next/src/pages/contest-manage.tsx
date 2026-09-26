@@ -44,6 +44,7 @@ import { Separator } from '@/components/ui/separator';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { ContestCompanionBridge } from '@/components/competitive-companion-bridge';
+import { DomainUserMultiSelect, loadDomainUsersByIds, type DomainUserOption } from '@/components/domain-user-search';
 import { ContestParticipationField } from '@/components/contest-participation-field';
 import { MarkdownEditor, MarkdownView } from '@/components/markdown-renderer';
 import { TEAM_DIALOG_BUTTON_CLASS, TeamDialogBody, TeamDialogContent, TeamDialogFooter } from '@/components/team-dialog';
@@ -227,6 +228,18 @@ function formatDateTimeInput(dateText: string, timeText: string, durationHours: 
 
 function formatCommaValue(value: unknown) {
   return Array.isArray(value) ? value.join(',') : String(value || '');
+}
+
+function maintainerUsers(ids: number[] | undefined): DomainUserOption[] {
+  if (!Array.isArray(ids)) return [];
+  const seen = new Set<number>();
+  const users: DomainUserOption[] = [];
+  for (const id of ids) {
+    if (!Number.isSafeInteger(id) || id <= 0 || seen.has(id)) continue;
+    seen.add(id);
+    users.push({ _id: id });
+  }
+  return users;
 }
 
 interface BalloonColorRow {
@@ -890,6 +903,29 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
   }, []);
   const initialLangIds: string[] = Array.isArray(tdoc.langs) ? tdoc.langs : [];
   const [langValue, setLangValue] = useState<LangOption[]>(() => resolveLangs(initialLangIds));
+  const initialMaintainerIds = useRef(maintainerUsers(tdoc.maintainer).map((user) => user._id));
+  const maintainerEdited = useRef(false);
+  const [maintainers, setMaintainers] = useState<DomainUserOption[]>(() => maintainerUsers(tdoc.maintainer));
+  const [maintainerError, setMaintainerError] = useState('');
+  useEffect(() => {
+    const ids = initialMaintainerIds.current;
+    const domainId = bs.domain?.id || '';
+    if (!domainId || ids.length === 0) return;
+    let cancelled = false;
+    loadDomainUsersByIds(domainId, ids)
+      .then((users) => {
+        if (cancelled || maintainerEdited.current) return;
+        const byId = new Map(users.map((user) => [user._id, user]));
+        setMaintainers(ids.map((id) => byId.get(id) || { _id: id }));
+      })
+      .catch((error: unknown) => {
+        if (cancelled || maintainerEdited.current) return;
+        setMaintainerError(error instanceof Error ? error.message : '用户资料加载失败');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [bs.domain?.id]);
 
   // ── Krypton: client-required & participant scope ─────────────────────
   const [activeTab, setActiveTab] = useState<'basic' | 'access' | 'scope' | 'vigil' | 'settings'>('basic');
@@ -1348,10 +1384,22 @@ function ContestEditAcmForm({ rule, onRuleChange }: { rule: string; onRuleChange
                 <div className="space-y-3 rounded-md border bg-muted/20 p-4">
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div className="space-y-1.5">
-                      <label htmlFor="maintainer" className="text-sm font-medium">
-                        比赛维护者
-                      </label>
-                      <Input id="maintainer" name="maintainer" defaultValue={formatCommaValue(tdoc.maintainer)} placeholder="UID，逗号分隔" />
+                      <span className="text-sm font-medium">比赛维护者</span>
+                      <DomainUserMultiSelect
+                        domainId={bs.domain?.id || ''}
+                        value={maintainers}
+                        onChange={(next) => {
+                          maintainerEdited.current = true;
+                          setMaintainerError('');
+                          setMaintainers(next);
+                        }}
+                        name="maintainer"
+                      />
+                      {maintainerError ? (
+                        <p role="alert" className="text-xs text-destructive">
+                          {maintainerError}。保存时仍会提交当前 UID。
+                        </p>
+                      ) : null}
                     </div>
                     <div className="space-y-1.5">
                       <label htmlFor="permission" className="text-sm font-medium">

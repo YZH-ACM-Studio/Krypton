@@ -158,6 +158,40 @@ describe('contest exam seat entry', () => {
     expect(layout?.querySelector('.max-w-5xl')).toBeNull();
   });
 
+  it('loads contest maintainers into the searchable user picker', async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).includes('/api/users') && init?.method === 'POST') {
+          const body = JSON.parse(String(init.body)) as { args?: { ids?: number[] } };
+          expect(body.args?.ids).toEqual([168, 8]);
+          return json([
+            { _id: 8, uname: 'other', displayName: '另一位' },
+            { _id: 168, uname: 'wang', displayName: '王新凯', studentId: '240240001', realName: '王新凯' },
+          ]);
+        }
+        return json({ events: [], schools: [SCHOOL_ONE] });
+      }),
+    );
+    const bootstrap = pageBootstrap('contest_edit', 'acm');
+    const data = bootstrap.page.data as { tdoc: { maintainer?: number[] } };
+    data.tdoc.maintainer = [168, 8];
+
+    render(
+      <BootstrapProvider bootstrap={bootstrap}>
+        <ContestEditPage />
+      </BootstrapProvider>,
+    );
+
+    await user.click(screen.getByRole('button', { name: '访问控制' }));
+    expect(await screen.findByText('王新凯')).toBeInTheDocument();
+    expect(screen.getByText('另一位')).toBeInTheDocument();
+    expect(screen.getByText('#168')).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText('UID，逗号分隔')).not.toBeInTheDocument();
+    expect(document.querySelector<HTMLInputElement>('input[name="maintainer"]')?.value).toBe('168,8');
+  });
+
   it('shows ContestExamSeatEntry on the exam edit page as a chrome sibling', async () => {
     const linked = event('66bf00000000000000000109', '创建后的机房场次');
     vi.stubGlobal(

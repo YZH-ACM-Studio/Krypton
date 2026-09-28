@@ -314,6 +314,15 @@ interface CourseMindmapService {
     getPublicMap(id: ObjectId | string): Promise<any | null>;
     getPublicSnapshot(id: ObjectId | string): Promise<{ config: any; nodes: any[] } | null>;
     listPublicMaps(): Promise<any[]>;
+    getCourseOwnedMap?(domainId: string, courseId: ObjectId): Promise<any | null>;
+    getCourseOwnedSnapshot?(domainId: string, courseId: ObjectId, mapId: string): Promise<{ config: any; nodes: any[] } | null>;
+    createCourseOwnedMap?(input: { domainId: string; actor: number; courseId: ObjectId; title: string }): Promise<any>;
+    updateCourseOwnedMap?(input: any): Promise<any>;
+    deleteCourseOwnedMap?(input: any): Promise<any>;
+    createCourseOwnedNode?(input: any): Promise<any>;
+    updateCourseOwnedNode?(input: any): Promise<any>;
+    moveCourseOwnedNode?(input: any): Promise<any>;
+    deleteCourseOwnedNode?(input: any): Promise<void>;
 }
 
 function courseMindmapService(): CourseMindmapService {
@@ -327,6 +336,47 @@ function courseMindmapService(): CourseMindmapService {
         throw new TypeError('mindmap model service is unavailable');
     }
     return service;
+}
+
+function courseOwnedMindmapService(): Required<Pick<
+    CourseMindmapService,
+    | 'getCourseOwnedMap'
+    | 'getCourseOwnedSnapshot'
+    | 'createCourseOwnedMap'
+    | 'updateCourseOwnedMap'
+    | 'deleteCourseOwnedMap'
+    | 'createCourseOwnedNode'
+    | 'updateCourseOwnedNode'
+    | 'moveCourseOwnedNode'
+    | 'deleteCourseOwnedNode'
+>> {
+    const service = courseMindmapService();
+    if (
+        typeof service.getCourseOwnedMap !== 'function' ||
+        typeof service.getCourseOwnedSnapshot !== 'function' ||
+        typeof service.createCourseOwnedMap !== 'function' ||
+        typeof service.updateCourseOwnedMap !== 'function' ||
+        typeof service.deleteCourseOwnedMap !== 'function' ||
+        typeof service.createCourseOwnedNode !== 'function' ||
+        typeof service.updateCourseOwnedNode !== 'function' ||
+        typeof service.moveCourseOwnedNode !== 'function' ||
+        typeof service.deleteCourseOwnedNode !== 'function'
+    ) {
+        logger.error('Course owned mindmap service unavailable');
+        throw new TypeError('mindmap model service is unavailable');
+    }
+    return service as Required<Pick<
+        CourseMindmapService,
+        | 'getCourseOwnedMap'
+        | 'getCourseOwnedSnapshot'
+        | 'createCourseOwnedMap'
+        | 'updateCourseOwnedMap'
+        | 'deleteCourseOwnedMap'
+        | 'createCourseOwnedNode'
+        | 'updateCourseOwnedNode'
+        | 'moveCourseOwnedNode'
+        | 'deleteCourseOwnedNode'
+    >>;
 }
 
 function storedObjectIdString(value: unknown, field: string): string {
@@ -435,6 +485,147 @@ function serializeCourseMindmapSnapshot(snapshot: { config: any; nodes: any[] },
     };
 }
 
+function serializeOwnedCourseMindmapSnapshot(snapshot: { config: any; nodes: any[] }, expectedMapId: string) {
+    const configId = storedObjectIdString(snapshot.config?._id, 'mindmap.config._id');
+    if (configId !== expectedMapId || snapshot.config?.visibility !== 'hidden' || !snapshot.config?.ownerCourseId) {
+        throw new TypeError(`course owned mindmap snapshot mismatch expected=${expectedMapId} actual=${configId}`);
+    }
+    if (!Array.isArray(snapshot.nodes)) throw new TypeError(`mindmap snapshot nodes must be an array map=${expectedMapId}`);
+    const nodes = snapshot.nodes.map((node, index) => {
+        const nodeId = storedObjectIdString(node?._id, `mindmap.nodes[${index}]._id`);
+        const mapId = storedObjectIdString(node?.mapId, `mindmap.nodes[${index}].mapId`);
+        if (mapId !== expectedMapId) throw new TypeError(`mindmap snapshot contains cross-map node map=${expectedMapId} node=${nodeId}`);
+        return {
+            _id: nodeId,
+            mapId,
+            parentId: node.parentId === null ? null : storedObjectIdString(node.parentId, `mindmap.nodes[${index}].parentId`),
+            topic: String(node.topic || ''),
+            ...(node.description ? { description: String(node.description) } : {}),
+            ...(node.color ? { color: String(node.color) } : {}),
+            ...(node.layoutSide === 'left' || node.layoutSide === 'right' ? { layoutSide: node.layoutSide } : {}),
+            tags: [],
+            problemIds: [],
+            order: Number(node.order),
+            createdAt: serializedDate(node.createdAt, `mindmap.nodes[${index}].createdAt`),
+            updatedAt: serializedDate(node.updatedAt, `mindmap.nodes[${index}].updatedAt`),
+        };
+    });
+    return {
+        config: {
+            _id: configId,
+            title: String(snapshot.config.title || ''),
+            rootNodeId: storedObjectIdString(snapshot.config.rootNodeId, 'mindmap.config.rootNodeId'),
+            visibility: 'hidden' as const,
+            layoutDirection: snapshot.config.layoutDirection,
+            createdAt: serializedDate(snapshot.config.createdAt, 'mindmap.config.createdAt'),
+            updatedAt: serializedDate(snapshot.config.updatedAt, 'mindmap.config.updatedAt'),
+        },
+        nodes,
+    };
+}
+
+function coursePinDocIds(node: any, index: number): number[] {
+    if (node?.coursePins === undefined) return [];
+    if (!Array.isArray(node.coursePins)) throw new TypeError(`course mindmap pins must be an array nodeIndex=${index}`);
+    return node.coursePins.map((docId: unknown) => {
+        if (!Number.isSafeInteger(docId) || Number(docId) < 1) throw new TypeError(`course mindmap pin is invalid nodeIndex=${index}`);
+        return Number(docId);
+    });
+}
+
+async function buildOwnedCourseMindmapView(
+    domainId: string,
+    tdoc: TrainingDoc,
+    expectedMapId: string,
+    pids: number[],
+    currentUser: any,
+    referencedPidsByChapter: Map<number, number[]>,
+) {
+    const snapshot = await courseOwnedMindmapService().getCourseOwnedSnapshot(domainId, tdoc.docId, expectedMapId);
+    if (!snapshot) {
+        throw new TypeError(`course owned mindmap snapshot missing domain=${domainId} tid=${tdoc.docId} map=${expectedMapId}`);
+    }
+    const memberIds = new Set(pids);
+    const nodePins = new Map<string, number[]>();
+    snapshot.nodes.forEach((node, index) => {
+        nodePins.set(storedObjectIdString(node?._id, `mindmap.nodes[${index}]._id`), coursePinDocIds(node, index));
+    });
+    const serialized = serializeOwnedCourseMindmapSnapshot(snapshot, expectedMapId);
+    const projection = [...problem.PROJECTION_LIST, 'knowledgeMapId', 'knowledgeNodeIds', 'managedAuthoring'] as any;
+    const visible = await problem.getListViewableAuthorized(domainId, pids, currentUser, projection, false, true);
+    const nodeIdsByDoc = new Map<number, string[]>();
+    for (const node of serialized.nodes) {
+        for (const docId of nodePins.get(node._id) || []) {
+            if (!memberIds.has(docId) || !visible[docId]) continue;
+            const selected = nodeIdsByDoc.get(docId) || [];
+            if (!selected.includes(node._id)) selected.push(node._id);
+            nodeIdsByDoc.set(docId, selected);
+        }
+    }
+    const problems: Array<{
+        domainId: string;
+        docId: number;
+        pid: string;
+        title: string;
+        nodeIds: string[];
+        chapters: Array<{ id: number; title: string }>;
+    }> = [];
+    const usedNodeIds = new Set<string>();
+    for (const [docId, selectedNodeIds] of nodeIdsByDoc) {
+        const pdoc = visible[docId];
+        const chapters = tdoc.dag
+            .filter((chapter) => courseNodePids(chapter).includes(docId) || (referencedPidsByChapter.get(chapter._id) || []).includes(docId))
+            .map((chapter) => ({ id: chapter._id, title: chapter.title }));
+        if (!chapters.length) continue;
+        for (const nodeId of selectedNodeIds) usedNodeIds.add(nodeId);
+        problems.push({
+            domainId: String(pdoc.domainId || domainId),
+            docId,
+            pid: String(pdoc.pid || docId),
+            title: String(pdoc.title || pdoc.pid || docId),
+            nodeIds: selectedNodeIds,
+            chapters,
+        });
+    }
+    return { ...serialized, problems, usedNodeIds: [...usedNodeIds] };
+}
+
+async function courseMindmapForView(
+    domainId: string,
+    tdoc: TrainingDoc,
+    pids: number[],
+    currentUser: any,
+    referencedPidsByChapter: Map<number, number[]>,
+) {
+    const ownedProbe = (global as any).Hydro?.model?.mindmap;
+    if (typeof ownedProbe?.getCourseOwnedMap === 'function') {
+        const owned = await ownedProbe.getCourseOwnedMap(domainId, tdoc.docId);
+        if (owned) {
+            const bound =
+                tdoc.mindmapId === undefined || tdoc.mindmapId === null
+                    ? ''
+                    : storedObjectIdString(tdoc.mindmapId, 'course.mindmapId');
+            const ownedId = storedObjectIdString(owned._id, 'courseOwnedMindmap._id');
+            if (bound !== ownedId || owned.ownerDomainId !== domainId) {
+                throw new TypeError(
+                    `course owned mindmap binding mismatch domain=${domainId} tid=${tdoc.docId} map=${bound} owned=${ownedId}`,
+                );
+            }
+        }
+    }
+    if (tdoc.mindmapId === undefined || tdoc.mindmapId === null) return null;
+    return buildCourseMindmapView(domainId, tdoc, pids, currentUser, referencedPidsByChapter);
+}
+
+async function savedCourseProblemDocIds(domainId: string, tdoc: TrainingDoc): Promise<Set<number>> {
+    const ids = new Set<number>(training.getPids(tdoc.dag || []));
+    for (const node of tdoc.dag || []) {
+        const live = await liveReferencedPidsForCourseGet(domainId, tdoc.docId, node);
+        for (const docId of live.pids) ids.add(docId);
+    }
+    return ids;
+}
+
 async function buildCourseMindmapView(
     domainId: string,
     tdoc: TrainingDoc,
@@ -443,6 +634,19 @@ async function buildCourseMindmapView(
     referencedPidsByChapter: Map<number, number[]>,
 ) {
     const expectedMapId = storedObjectIdString(tdoc.mindmapId, 'course.mindmapId');
+    const ownedProbe = (global as any).Hydro?.model?.mindmap;
+    if (typeof ownedProbe?.getCourseOwnedMap === 'function') {
+        const owned = await ownedProbe.getCourseOwnedMap(domainId, tdoc.docId);
+        if (owned) {
+            const ownedId = storedObjectIdString(owned._id, 'courseOwnedMindmap._id');
+            if (ownedId !== expectedMapId || owned.ownerDomainId !== domainId) {
+                throw new TypeError(
+                    `course owned mindmap binding mismatch domain=${domainId} tid=${tdoc.docId} map=${expectedMapId} owned=${ownedId}`,
+                );
+            }
+            return buildOwnedCourseMindmapView(domainId, tdoc, expectedMapId, pids, currentUser, referencedPidsByChapter);
+        }
+    }
     const snapshot = await courseMindmapService().getPublicSnapshot(expectedMapId);
     if (!snapshot) {
         logger.error('Course mindmap binding is unavailable domain=%s tid=%s map=%s', domainId, tdoc.docId, expectedMapId);
@@ -819,9 +1023,7 @@ class CourseDetailHandler extends Handler {
         const [udoc, tsdoc, courseMindmap, publishedIntegrity, [pdict, psdict, ctdocs], collectResult] = await Promise.all([
             user.getById(domainId, tdoc.owner),
             this.user.hasPriv(PRIV.PRIV_USER_PROFILE) ? training.getStatus(domainId, tdoc.docId, this.user._id) : null,
-            activeView === 'mindmap' && tdoc.mindmapId !== undefined && tdoc.mindmapId !== null
-                ? buildCourseMindmapView(domainId, tdoc, pids, this.user, referencedPidsByChapter)
-                : null,
+            activeView === 'mindmap' ? courseMindmapForView(domainId, tdoc, pids, this.user, referencedPidsByChapter) : null,
             practiceIntegrityService.getLatestPublished(domainId, 'course', tdoc.docId),
             overviewData,
             collectQuery,
@@ -1091,9 +1293,23 @@ class CourseEditHandler extends Handler {
             studentDirectory().listUserGroups(authoritativeDomainId),
             listCourseMindmapOptions(),
         ]);
+        let courseOwnedMindmap: { _id: string; title: string; updatedAt: string } | null = null;
         if (this.tdoc && this.tdoc.mindmapId !== undefined && this.tdoc.mindmapId !== null) {
             const currentMindmapId = storedObjectIdString(this.tdoc.mindmapId, 'course.mindmapId');
-            if (!mindmaps.some((map) => map._id === currentMindmapId)) {
+            const owned = await courseOwnedMindmapService().getCourseOwnedMap(authoritativeDomainId, this.tdoc.docId);
+            if (owned) {
+                const ownedId = storedObjectIdString(owned._id, 'courseOwnedMindmap._id');
+                if (ownedId !== currentMindmapId || owned.ownerDomainId !== authoritativeDomainId) {
+                    throw new TypeError(
+                        `course owned mindmap binding mismatch domain=${authoritativeDomainId} tid=${this.tdoc.docId} map=${currentMindmapId} owned=${ownedId}`,
+                    );
+                }
+                courseOwnedMindmap = {
+                    _id: ownedId,
+                    title: String(owned.title || ''),
+                    updatedAt: serializedDate(owned.updatedAt, 'courseOwnedMindmap.updatedAt'),
+                };
+            } else if (!mindmaps.some((map) => map._id === currentMindmapId)) {
                 logger.error(
                     'Course editor found unavailable mindmap binding domain=%s tid=%s map=%s',
                     authoritativeDomainId,
@@ -1102,6 +1318,13 @@ class CourseEditHandler extends Handler {
                 );
                 throw new TypeError(
                     `course references an unavailable public mindmap domain=${authoritativeDomainId} tid=${this.tdoc.docId} map=${currentMindmapId}`,
+                );
+            }
+        } else if (this.tdoc) {
+            const owned = await courseOwnedMindmapService().getCourseOwnedMap(authoritativeDomainId, this.tdoc.docId);
+            if (owned) {
+                throw new TypeError(
+                    `course owned mindmap is not bound domain=${authoritativeDomainId} tid=${this.tdoc.docId} owned=${storedObjectIdString(owned._id, 'courseOwnedMindmap._id')}`,
                 );
             }
         }
@@ -1115,6 +1338,7 @@ class CourseEditHandler extends Handler {
             canAssign: !!this.tdoc && canAssignCourse(this.user),
             files: sortFiles(this.tdoc?.files || []),
             mindmaps,
+            ...(courseOwnedMindmap ? { courseOwnedMindmap } : {}),
         };
         if (this.tdoc) {
             this.response.body.tdoc = this.tdoc;
@@ -1172,7 +1396,17 @@ class CourseEditHandler extends Handler {
         problem.assertProblemAclDomain(this.user, authoritativeDomainId);
         const dag = await parseChaptersJson(authoritativeDomainId, chaptersJson, this.tdoc?.dag || []);
         const courseVideoDueAt = parseCourseVideoDueAt(courseVideoDueAtRaw);
-        const selectedMindmapId = await resolveCourseMindmapId(authoritativeDomainId, tid || null, this.user._id, String(mindmapId || ''));
+        const ownedForSave = tid ? await courseOwnedMindmapService().getCourseOwnedMap(authoritativeDomainId, tid) : null;
+        let selectedMindmapId: ObjectId | null;
+        if (ownedForSave) {
+            const ownedId = storedObjectIdString(ownedForSave._id, 'courseOwnedMindmap._id');
+            if (String(mindmapId || '').trim() !== ownedId) {
+                throw new ValidationError('mindmapId', null, localizedErrorText`删除本课导图后才能改绑或取消绑定`);
+            }
+            selectedMindmapId = ownedForSave._id;
+        } else {
+            selectedMindmapId = await resolveCourseMindmapId(authoritativeDomainId, tid || null, this.user._id, String(mindmapId || ''));
+        }
         const pids = training.getPids(dag);
         const existingPids = training.getPids(this.tdoc?.dag || []);
         await assertProblemBankSelection(authoritativeDomainId, pids, this.user, existingPids);
@@ -1204,6 +1438,18 @@ class CourseEditHandler extends Handler {
             const collect = loadCollectCourseQuery();
             if (typeof collect?.existsRequiringCourseExam === 'function' && (await collect.existsRequiringCourseExam(authoritativeDomainId, tid))) {
                 throw new ValidationError('courseExam', null, localizedErrorText`仍有收集要求先完成结业考试，不能解除绑定`);
+            }
+        }
+        if (tid) {
+            const ownedNow = await courseOwnedMindmapService().getCourseOwnedMap(authoritativeDomainId, tid);
+            if (ownedNow) {
+                const ownedId = storedObjectIdString(ownedNow._id, 'courseOwnedMindmap._id');
+                if (String(mindmapId || '').trim() !== ownedId) {
+                    throw new ValidationError('mindmapId', null, localizedErrorText`删除本课导图后才能改绑或取消绑定`);
+                }
+                selectedMindmapId = ownedNow._id;
+            } else if (ownedForSave) {
+                throw new ValidationError('mindmapId', null, localizedErrorText`课程导图已变更，请刷新后重试`);
             }
         }
         try {
@@ -1241,6 +1487,29 @@ class CourseEditHandler extends Handler {
                         ...(courseExam ? {} : { courseExam: 1 }),
                     },
                 );
+                const fresh = await training.get(authoritativeDomainId, tid);
+                const bound =
+                    !fresh || fresh.mindmapId === undefined || fresh.mindmapId === null
+                        ? ''
+                        : storedObjectIdString(fresh.mindmapId, 'course.mindmapId');
+                const wrote = selectedMindmapId ? storedObjectIdString(selectedMindmapId, 'course.mindmapId') : '';
+                const ownedAfter = await courseOwnedMindmapService().getCourseOwnedMap(authoritativeDomainId, tid);
+                const ownedId = ownedAfter ? storedObjectIdString(ownedAfter._id, 'courseOwnedMindmap._id') : '';
+                if (bound === wrote && ownedAfter && bound !== ownedId && fresh && isCourseKind(fresh.kind)) {
+                    await training.casCourseMindmap(
+                        authoritativeDomainId,
+                        tid,
+                        fresh.mindmapId === undefined || fresh.mindmapId === null ? null : fresh.mindmapId,
+                        ownedAfter._id,
+                    );
+                    throw new ValidationError('mindmapId', null, localizedErrorText`课程导图已变更，请刷新后重试`);
+                }
+                if (ownedAfter && bound !== ownedId) {
+                    throw new ValidationError('mindmapId', null, localizedErrorText`课程导图已变更，请刷新后重试`);
+                }
+                if (!ownedAfter && ownedForSave) {
+                    throw new ValidationError('mindmapId', null, localizedErrorText`课程导图已变更，请刷新后重试`);
+                }
                 await oplog.log(this, 'course.edit', {
                     tid,
                     title,
@@ -1280,8 +1549,11 @@ class CourseEditHandler extends Handler {
         const { dag: copiedDag, copies } = rewriteCourseVideosForCopy(dag);
         const pids = training.getPids(copiedDag);
         await assertProblemBankSelection(authoritativeDomainId, pids, this.user, training.getPids(this.tdoc.dag || []));
+        const copiedOwned = await courseOwnedMindmapService().getCourseOwnedMap(authoritativeDomainId, tid);
         const mindmapRaw =
-            this.tdoc.mindmapId === undefined || this.tdoc.mindmapId === null ? '' : storedObjectIdString(this.tdoc.mindmapId, 'course.mindmapId');
+            copiedOwned || this.tdoc.mindmapId === undefined || this.tdoc.mindmapId === null
+                ? ''
+                : storedObjectIdString(this.tdoc.mindmapId, 'course.mindmapId');
         const selectedMindmapId = await resolveCourseMindmapId(authoritativeDomainId, null, this.user._id, mindmapRaw);
         const groupIds = (this.tdoc.courseGroupIds || []).map((groupId) => {
             if (groupId instanceof ObjectId) return groupId;
@@ -1368,6 +1640,7 @@ class CourseEditHandler extends Handler {
         if (typeof collect?.existsByCourse === 'function' && (await collect.existsByCourse(domainId, tid))) {
             throw new ValidationError('tid', null, localizedErrorText`课程仍有文件收集，不能删除`);
         }
+        await deleteOwnedCourseMapIfPresent(domainId, tid, this.user._id);
         const stored = await storage.list(courseFilePrefix(domainId, tid));
         await Promise.all([
             training.del(domainId, tid),
@@ -1377,6 +1650,7 @@ class CourseEditHandler extends Handler {
             ),
             deleteCourseVideoProgress(domainId, tid),
         ]);
+        await deleteOwnedCourseMapIfPresent(domainId, tid, this.user._id);
         await oplog.log(this, 'course.delete', { tid });
         this.response.redirect = this.url('course_main');
     }
@@ -1416,6 +1690,89 @@ class CourseEditHandler extends Handler {
             owner: serializeCourseAssignUser(udict[updated.owner]),
             maintainers: (updated.maintainer || []).map((uid) => serializeCourseAssignUser(udict[uid])),
         };
+    }
+
+    @param('tid', Types.ObjectId)
+    async postCreateMindmap(_domainId: string, tid: ObjectId) {
+        if (!this.tdoc?.docId?.equals(tid)) throw new ValidationError('tid', null, localizedErrorText`请先保存课程，再创建本课导图`);
+        const domainId = String(this.domain?._id);
+        const service = courseOwnedMindmapService();
+        const existing = await service.getCourseOwnedMap(domainId, tid);
+        if (existing) throw new ValidationError('mindmapId', null, localizedErrorText`这门课已经有自己的导图`);
+        const created = await service.createCourseOwnedMap({
+            domainId,
+            actor: this.user._id,
+            courseId: tid,
+            title: String(this.tdoc.title || ''),
+        });
+        let bound = false;
+        try {
+            bound = await training.casCourseMindmap(domainId, tid, 'course', created._id);
+            if (!bound) {
+                await discardCreatedCourseMap(domainId, tid, this.user._id);
+                throw new ValidationError('mindmapId', null, localizedErrorText`课程已更新，请刷新后重试`);
+            }
+        } catch (error) {
+            if (!bound) {
+                try {
+                    await discardCreatedCourseMap(domainId, tid, this.user._id);
+                } catch (cleanup) {
+                    logger.error(
+                        'Course mindmap create rollback failed domain=%s tid=%s map=%s error=%o',
+                        domainId,
+                        tid,
+                        created._id,
+                        cleanup,
+                    );
+                    throw cleanup;
+                }
+            }
+            throw error;
+        }
+        await oplog.log(this, 'course.mindmap.create', { tid, mapId: created._id.toHexString() });
+        logger.info('Course mindmap created domain=%s tid=%s actor=%d map=%s result=success', domainId, tid, this.user._id, created._id);
+        this.response.body = { ok: true, tid: tid.toHexString(), mapId: created._id.toHexString() };
+        this.response.redirect = this.url('course_mindmap_edit', { tid });
+    }
+
+    @param('tid', Types.ObjectId)
+    @param('expectedUpdatedAt', Types.String, true)
+    async postDeleteMindmap(_domainId: string, tid: ObjectId, expectedUpdatedAt = '') {
+        if (!this.tdoc?.docId?.equals(tid)) throw new ValidationError('tid', null, localizedErrorText`课程不存在`);
+        const domainId = String(this.domain?._id);
+        const service = courseOwnedMindmapService();
+        const owned = await service.getCourseOwnedMap(domainId, tid);
+        if (!owned) throw new ValidationError('mindmapId', null, localizedErrorText`这门课没有专属导图`);
+        const ownedId = storedObjectIdString(owned._id, 'courseOwnedMindmap._id');
+        const bound =
+            this.tdoc.mindmapId === undefined || this.tdoc.mindmapId === null
+                ? ''
+                : storedObjectIdString(this.tdoc.mindmapId, 'course.mindmapId');
+        if (bound !== ownedId || owned.ownerDomainId !== domainId) {
+            throw new TypeError(`course owned mindmap binding mismatch domain=${domainId} tid=${tid} map=${bound} owned=${ownedId}`);
+        }
+        const deleted = await service.deleteCourseOwnedMap({
+            domainId,
+            actor: this.user._id,
+            courseId: tid,
+            expectedUpdatedAt: parseCourseMindmapDate(expectedUpdatedAt),
+        });
+        if (storedObjectIdString(deleted._id, 'courseOwnedMindmap._id') !== ownedId) {
+            throw new TypeError(`course owned mindmap delete returned another map domain=${domainId} tid=${tid} expected=${ownedId}`);
+        }
+        const cleared = await training.casCourseMindmap(domainId, tid, owned._id, null);
+        if (!cleared) {
+            logger.error(
+                'Course mindmap delete left a different binding domain=%s tid=%s deleted=%s',
+                domainId,
+                tid,
+                ownedId,
+            );
+        }
+        await oplog.log(this, 'course.mindmap.delete', { tid, mapId: deleted._id.toHexString() });
+        logger.info('Course mindmap deleted domain=%s tid=%s actor=%d map=%s result=success', domainId, tid, this.user._id, deleted._id);
+        this.response.body = { ok: true };
+        this.response.redirect = this.url('course_edit', { tid });
     }
 }
 
@@ -1504,11 +1861,286 @@ class CourseFileDownloadHandler extends Handler {
     }
 }
 
+function parseCourseMindmapDate(raw: string): Date {
+    const value = new Date(raw);
+    if (!raw || Number.isNaN(value.getTime()) || value.toISOString() !== raw) {
+        throw new ValidationError('expectedUpdatedAt', null, localizedErrorText`导图版本无效，请刷新后重试`);
+    }
+    return value;
+}
+
+function parseCourseMindmapPayload(payload: string | undefined): Record<string, unknown> {
+    if (!payload) throw new ValidationError('payload', null, localizedErrorText`缺少导图操作数据`);
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(payload);
+    } catch {
+        throw new ValidationError('payload', null, localizedErrorText`导图操作数据不是有效 JSON`);
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new ValidationError('payload', null, localizedErrorText`导图操作数据必须是对象`);
+    }
+    return parsed as Record<string, unknown>;
+}
+
+async function deleteOwnedCourseMapIfPresent(domainId: string, tid: ObjectId, actor: number) {
+    const service = courseOwnedMindmapService();
+    const owned = await service.getCourseOwnedMap(domainId, tid);
+    if (!owned) return;
+    await service.deleteCourseOwnedMap({
+        domainId,
+        actor,
+        courseId: tid,
+        expectedUpdatedAt: owned.updatedAt,
+    });
+}
+
+async function discardCreatedCourseMap(domainId: string, tid: ObjectId, actor: number) {
+    const service = courseOwnedMindmapService();
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+        const current = await service.getCourseOwnedMap(domainId, tid);
+        if (!current) return;
+        try {
+            await service.deleteCourseOwnedMap({
+                domainId,
+                actor,
+                courseId: tid,
+                expectedUpdatedAt: current.updatedAt,
+            });
+            return;
+        } catch (error) {
+            lastError = error;
+        }
+    }
+    logger.error('Course mindmap create rollback failed domain=%s tid=%s error=%o', domainId, tid, lastError);
+    throw lastError instanceof Error ? lastError : new Error('course mindmap create rollback failed');
+}
+
+function assertCourseMindmapKeys(value: Record<string, unknown>, allowed: readonly string[]) {
+    const unknown = Object.keys(value).filter((key) => !allowed.includes(key));
+    if (unknown.length) throw new ValidationError('payload', null, localizedErrorText`导图操作包含不支持的字段`);
+}
+
+class CourseMindmapEditHandler extends Handler {
+    tdoc: TrainingDoc;
+
+    @param('tid', Types.ObjectId)
+    async prepare(_domainId: string, tid: ObjectId) {
+        const domainId = String(this.domain?._id);
+        problem.assertProblemAclDomain(this.user, domainId);
+        this.tdoc = await training.get(domainId, tid);
+        if (!isCourseKind(this.tdoc.kind)) throw new TrainingNotFoundError(domainId, tid);
+        if (!canManageCourse(this.user, this.tdoc, PERM.PERM_EDIT_COURSE)) {
+            await assertCourseAccessible(domainId, this.user._id, this.tdoc);
+            throw new PermissionError(PERM.PERM_EDIT_COURSE);
+        }
+    }
+
+    private async assertOwnedBinding() {
+        const domainId = String(this.domain?._id);
+        const fresh = await training.get(domainId, this.tdoc.docId);
+        if (!fresh?.docId || String(fresh.docId) !== String(this.tdoc.docId) || !isCourseKind(fresh.kind)) {
+            throw new TrainingNotFoundError(domainId, this.tdoc.docId);
+        }
+        this.tdoc = fresh;
+        const owned = await courseOwnedMindmapService().getCourseOwnedMap(domainId, this.tdoc.docId);
+        if (!owned) throw new ValidationError('mindmapId', null, localizedErrorText`这门课没有专属导图`);
+        const bound =
+            this.tdoc.mindmapId === undefined || this.tdoc.mindmapId === null
+                ? ''
+                : storedObjectIdString(this.tdoc.mindmapId, 'course.mindmapId');
+        const ownedId = storedObjectIdString(owned._id, 'courseOwnedMindmap._id');
+        if (bound !== ownedId || owned.ownerDomainId !== domainId) {
+            throw new TypeError(`course owned mindmap binding mismatch domain=${domainId} tid=${this.tdoc.docId} map=${bound} owned=${ownedId}`);
+        }
+    }
+
+    private async payload(): Promise<Record<string, unknown>> {
+        await this.assertOwnedBinding();
+        const domainId = String(this.domain?._id);
+        const service = courseOwnedMindmapService();
+        const owned = await service.getCourseOwnedMap(domainId, this.tdoc.docId);
+        if (!owned) throw new ValidationError('mindmapId', null, localizedErrorText`这门课没有专属导图`);
+        const bound =
+            this.tdoc.mindmapId === undefined || this.tdoc.mindmapId === null
+                ? ''
+                : storedObjectIdString(this.tdoc.mindmapId, 'course.mindmapId');
+        const ownedId = storedObjectIdString(owned._id, 'courseOwnedMindmap._id');
+        if (bound !== ownedId || owned.ownerDomainId !== domainId) {
+            throw new TypeError(`course owned mindmap binding mismatch domain=${domainId} tid=${this.tdoc.docId} map=${bound} owned=${ownedId}`);
+        }
+        const snapshot = await service.getCourseOwnedSnapshot(domainId, this.tdoc.docId, ownedId);
+        if (!snapshot) throw new TypeError(`course owned mindmap snapshot missing domain=${domainId} tid=${this.tdoc.docId} map=${ownedId}`);
+        const members = await savedCourseProblemDocIds(domainId, this.tdoc);
+        const pinned = new Set<number>();
+        const nodes = snapshot.nodes.map((node, index) => {
+            const pins = coursePinDocIds(node, index);
+            for (const docId of pins) pinned.add(docId);
+            const nodeId = storedObjectIdString(node?._id, `mindmap.nodes[${index}]._id`);
+            const mapId = storedObjectIdString(node?.mapId, `mindmap.nodes[${index}].mapId`);
+            if (mapId !== ownedId) throw new TypeError(`course mindmap editor node crossed maps map=${ownedId} node=${nodeId}`);
+            return {
+                _id: nodeId,
+                mapId,
+                parentId: node.parentId === null ? null : storedObjectIdString(node.parentId, `mindmap.nodes[${index}].parentId`),
+                topic: String(node.topic || ''),
+                ...(node.description ? { description: String(node.description) } : {}),
+                ...(node.color ? { color: String(node.color) } : {}),
+                ...(node.layoutSide === 'left' || node.layoutSide === 'right' ? { layoutSide: node.layoutSide } : {}),
+                tags: [] as string[],
+                problemIds: [] as string[],
+                coursePins: pins,
+                order: Number(node.order),
+                createdAt: serializedDate(node.createdAt, `mindmap.nodes[${index}].createdAt`),
+                updatedAt: serializedDate(node.updatedAt, `mindmap.nodes[${index}].updatedAt`),
+            };
+        });
+        const wanted = [...new Set([...members, ...pinned])];
+        const docs = wanted.length
+            ? await problem.getMulti(domainId, { docId: { $in: wanted } }, ['docId', 'pid', 'title', 'hidden']).toArray()
+            : [];
+        const byId = new Map<number, any>(docs.map((doc) => [Number(doc.docId), doc]));
+        const problems = wanted.map((docId) => {
+            const doc = byId.get(docId);
+            if (!doc) return { docId, pid: String(docId), title: '题目已不存在', hidden: false, inCourse: false };
+            return {
+                docId,
+                pid: String(doc.pid || docId),
+                title: String(doc.title || doc.pid || docId),
+                hidden: doc.hidden === true,
+                inCourse: members.has(docId),
+            };
+        });
+        return {
+            course: { docId: this.tdoc.docId.toHexString(), title: String(this.tdoc.title || '') },
+            config: {
+                _id: ownedId,
+                title: String(owned.title || ''),
+                rootNodeId: storedObjectIdString(owned.rootNodeId, 'courseOwnedMindmap.rootNodeId'),
+                visibility: 'hidden' as const,
+                layoutDirection: owned.layoutDirection,
+                createdAt: serializedDate(owned.createdAt, 'courseOwnedMindmap.createdAt'),
+                updatedAt: serializedDate(owned.updatedAt, 'courseOwnedMindmap.updatedAt'),
+            },
+            nodes,
+            problems,
+        };
+    }
+
+    async get() {
+        this.response.template = 'course_mindmap_edit.html';
+        this.response.body = await this.payload();
+    }
+
+    private ownedInput(extra: Record<string, unknown>) {
+        return {
+            domainId: String(this.domain?._id),
+            actor: this.user._id,
+            courseId: this.tdoc.docId,
+            mapId: storedObjectIdString(this.tdoc.mindmapId, 'course.mindmapId'),
+            ...extra,
+        };
+    }
+
+    @param('payload', Types.String, true)
+    async postUpdateMap(_domainId: string, payload?: string) {
+        await this.assertOwnedBinding();
+        const body = parseCourseMindmapPayload(payload);
+        assertCourseMindmapKeys(body, ['expectedUpdatedAt', 'fields']);
+        if (!body.fields || typeof body.fields !== 'object' || Array.isArray(body.fields)) {
+            throw new ValidationError('fields', null, localizedErrorText`导图字段无效`);
+        }
+        assertCourseMindmapKeys(body.fields as Record<string, unknown>, ['title', 'layoutDirection']);
+        await courseOwnedMindmapService().updateCourseOwnedMap({
+            ...this.ownedInput({}),
+            expectedUpdatedAt: parseCourseMindmapDate(String(body.expectedUpdatedAt || '')),
+            patch: body.fields,
+        });
+        this.response.body = { ok: true, ...(await this.payload()) };
+    }
+
+    @param('payload', Types.String, true)
+    async postCreateNode(_domainId: string, payload?: string) {
+        await this.assertOwnedBinding();
+        const body = parseCourseMindmapPayload(payload);
+        assertCourseMindmapKeys(body, ['parentId', 'expectedParentUpdatedAt', 'expectedMapUpdatedAt', 'topic', 'description', 'color']);
+        await courseOwnedMindmapService().createCourseOwnedNode({
+            ...this.ownedInput({}),
+            parentId: String(body.parentId || ''),
+            expectedParentUpdatedAt: parseCourseMindmapDate(String(body.expectedParentUpdatedAt || '')),
+            expectedMapUpdatedAt: parseCourseMindmapDate(String(body.expectedMapUpdatedAt || '')),
+            topic: body.topic,
+            description: body.description,
+            color: body.color,
+        });
+        this.response.body = { ok: true, ...(await this.payload()) };
+    }
+
+    @param('payload', Types.String, true)
+    async postUpdateNode(_domainId: string, payload?: string) {
+        await this.assertOwnedBinding();
+        const body = parseCourseMindmapPayload(payload);
+        assertCourseMindmapKeys(body, ['id', 'expectedUpdatedAt', 'expectedMapUpdatedAt', 'fields']);
+        if (!body.fields || typeof body.fields !== 'object' || Array.isArray(body.fields)) {
+            throw new ValidationError('fields', null, localizedErrorText`节点字段无效`);
+        }
+        const fields = body.fields as Record<string, unknown>;
+        assertCourseMindmapKeys(fields, ['topic', 'description', 'color', 'coursePins']);
+        const members = Object.hasOwn(fields, 'coursePins') ? [...(await savedCourseProblemDocIds(String(this.domain?._id), this.tdoc))] : undefined;
+        await courseOwnedMindmapService().updateCourseOwnedNode({
+            ...this.ownedInput({}),
+            id: String(body.id || ''),
+            expectedUpdatedAt: parseCourseMindmapDate(String(body.expectedUpdatedAt || '')),
+            expectedMapUpdatedAt: parseCourseMindmapDate(String(body.expectedMapUpdatedAt || '')),
+            patch: fields,
+            ...(members !== undefined ? { memberDocIds: members } : {}),
+        });
+        this.response.body = { ok: true, ...(await this.payload()) };
+    }
+
+    @param('payload', Types.String, true)
+    async postMoveNode(_domainId: string, payload?: string) {
+        await this.assertOwnedBinding();
+        const body = parseCourseMindmapPayload(payload);
+        assertCourseMindmapKeys(body, ['id', 'newParentId', 'targetIndex', 'layoutSide', 'expectedUpdatedAt', 'expectedParentUpdatedAt', 'expectedMapUpdatedAt']);
+        if (!Number.isSafeInteger(body.targetIndex) || Number(body.targetIndex) < 0) {
+            throw new ValidationError('targetIndex', null, localizedErrorText`目标顺序无效`);
+        }
+        await courseOwnedMindmapService().moveCourseOwnedNode({
+            ...this.ownedInput({}),
+            id: String(body.id || ''),
+            newParentId: String(body.newParentId || ''),
+            targetIndex: Number(body.targetIndex),
+            ...(body.layoutSide === undefined ? {} : { layoutSide: body.layoutSide }),
+            expectedUpdatedAt: parseCourseMindmapDate(String(body.expectedUpdatedAt || '')),
+            expectedParentUpdatedAt: parseCourseMindmapDate(String(body.expectedParentUpdatedAt || '')),
+            expectedMapUpdatedAt: parseCourseMindmapDate(String(body.expectedMapUpdatedAt || '')),
+        });
+        this.response.body = { ok: true, ...(await this.payload()) };
+    }
+
+    @param('payload', Types.String, true)
+    async postDeleteNode(_domainId: string, payload?: string) {
+        await this.assertOwnedBinding();
+        const body = parseCourseMindmapPayload(payload);
+        assertCourseMindmapKeys(body, ['id', 'expectedUpdatedAt', 'expectedMapUpdatedAt']);
+        await courseOwnedMindmapService().deleteCourseOwnedNode({
+            ...this.ownedInput({}),
+            id: String(body.id || ''),
+            expectedUpdatedAt: parseCourseMindmapDate(String(body.expectedUpdatedAt || '')),
+            expectedMapUpdatedAt: parseCourseMindmapDate(String(body.expectedMapUpdatedAt || '')),
+        });
+        this.response.body = { ok: true, ...(await this.payload()) };
+    }
+}
+
 export async function apply(ctx) {
     ctx.Route('course_main', '/course', CourseMainHandler);
     ctx.Route('course_create', '/course/create', CourseEditHandler);
     ctx.Route('course_detail', '/course/:tid', CourseDetailHandler);
     ctx.Route('course_edit', '/course/:tid/edit', CourseEditHandler);
+    ctx.Route('course_mindmap_edit', '/course/:tid/mindmap', CourseMindmapEditHandler);
     ctx.Route('course_files', '/course/:tid/file', CourseFilesHandler);
     ctx.Route('course_file_download', '/course/:tid/file/:filename', CourseFileDownloadHandler);
 }

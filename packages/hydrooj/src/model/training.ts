@@ -147,6 +147,36 @@ export function edit(domainId: string, tid: ObjectId, $set: Partial<TrainingDoc>
     return document.set(domainId, document.TYPE_TRAINING, tid, $set, $unset as any);
 }
 
+/** Change a course mindmap binding only while the course still exists and still has the observed id. Never upserts. */
+export async function casCourseMindmap(
+    domainId: string,
+    tid: ObjectId,
+    expected: ObjectId | 'course' | null,
+    next: ObjectId | null,
+): Promise<boolean> {
+    const filter: Record<string, unknown> = {
+        domainId,
+        docType: document.TYPE_TRAINING,
+        docId: tid,
+        kind: 'course',
+    };
+    if (expected instanceof ObjectId) filter.mindmapId = expected;
+    else if (expected === null) filter.$or = [{ mindmapId: { $exists: false } }, { mindmapId: null }];
+    const update = next ? { $set: { mindmapId: next } } : { $unset: { mindmapId: '' } };
+    const updated = await document.coll.findOneAndUpdate(filter as Filter<TrainingDoc>, update, { upsert: false, returnDocument: 'after' });
+    if (!updated) {
+        logger.warn(
+            'Course mindmap compare-and-set missed domain=%s tid=%s expected=%s next=%s',
+            domainId,
+            tid,
+            expected instanceof ObjectId ? expected.toHexString() : String(expected),
+            next ? next.toHexString() : 'none',
+        );
+        return false;
+    }
+    return true;
+}
+
 function canonicalCourseAssignUid(value: unknown, field: string): number {
     const uid = typeof value === 'number' ? value : Number(value);
     if (!Number.isSafeInteger(uid) || uid < 1) {

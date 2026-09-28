@@ -53,6 +53,10 @@ function serializeNode(node: MindmapNode) {
     };
 }
 
+function isCourseOwnedMap(map: KnowledgeMapDoc): boolean {
+    return Boolean(map.ownerCourseId || map.ownerDomainId);
+}
+
 function serializeMap(config: KnowledgeMapDoc) {
     return {
         ...config,
@@ -127,14 +131,18 @@ class MindmapPage extends Handler {
         const nodes = config ? await listAllNodes(config._id) : [];
         this.response.template = 'mindmap_main.html';
         this.response.body = {
-            nodes: nodes.map((node) => ({
-                ...serializeNode(node),
-                // Manual associations can include hidden or otherwise scoped
-                // problems. The public page resolves related problems through
-                // ProblemsApi, so raw PIDs never belong in its bootstrap.
-                problemIds: [],
-                ...(exposeProblemMetadata ? {} : { tags: [] }),
-            })),
+            nodes: nodes.map((node) => {
+                const serialized = serializeNode(node) as ReturnType<typeof serializeNode> & { coursePins?: number[] };
+                delete serialized.coursePins;
+                return {
+                    ...serialized,
+                    // Manual associations can include hidden or otherwise scoped
+                    // problems. The public page resolves related problems through
+                    // ProblemsApi, so raw PIDs never belong in its bootstrap.
+                    problemIds: [],
+                    ...(exposeProblemMetadata ? {} : { tags: [] }),
+                };
+            }),
             config: config ? serializeMap(config) : null,
             maps: maps.map(serializeMap),
         };
@@ -148,7 +156,7 @@ class ProblemsApi extends Handler {
     async get(_args: { domainId: string }, mapId: ObjectId, nodeId: ObjectId) {
         const domainId = String(this.domain?._id);
         const map = await getKnowledgeMap(mapId);
-        if (!map || map.visibility !== 'public') throw new NotFoundError(localizedErrorText`mindmap`, String(mapId));
+        if (!map || map.visibility !== 'public' || isCourseOwnedMap(map)) throw new NotFoundError(localizedErrorText`mindmap`, String(mapId));
         const problems = await listProblemsForNode(domainId, mapId, nodeId, {});
         this.response.body = { problems };
     }
@@ -180,7 +188,8 @@ class AdminProblemSearchApi extends AdminBase {
     @param('mapId', Types.ObjectId)
     @param('q', Types.String, true)
     async get(_args: unknown, mapId: ObjectId, q = '') {
-        if (!(await getKnowledgeMap(mapId))) throw new NotFoundError(localizedErrorText`mindmap`, String(mapId));
+        const map = await getKnowledgeMap(mapId);
+        if (!map || isCourseOwnedMap(map)) throw new NotFoundError(localizedErrorText`mindmap`, String(mapId));
         this.response.body = { problems: await searchProblemsForAdmin(String(this.domain?._id), mapId, q) };
     }
 }
@@ -189,7 +198,8 @@ class AdminNodeProblemsApi extends AdminBase {
     @param('mapId', Types.ObjectId)
     @param('nodeId', Types.ObjectId)
     async get(_args: unknown, mapId: ObjectId, nodeId: ObjectId) {
-        if (!(await getKnowledgeMap(mapId))) throw new NotFoundError(localizedErrorText`mindmap`, String(mapId));
+        const map = await getKnowledgeMap(mapId);
+        if (!map || isCourseOwnedMap(map)) throw new NotFoundError(localizedErrorText`mindmap`, String(mapId));
         const problems = await listProblemsForNode(String(this.domain?._id), mapId, nodeId, {}, { includeHidden: true });
         this.response.body = { problems };
     }

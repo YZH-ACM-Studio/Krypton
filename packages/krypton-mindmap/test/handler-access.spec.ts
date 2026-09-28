@@ -118,7 +118,8 @@ const modelStub = {
         return Object.fromEntries(bootstrapNodes.map((node) => [node._id.toHexString(), 0]));
     },
     listAllNodes: async (mapId: any) => bootstrapNodes.filter((node) => node.mapId.equals(mapId)),
-    listKnowledgeMaps: async (includeHidden = false) => bootstrapMaps.filter((map) => includeHidden || map.visibility === 'public'),
+    listKnowledgeMaps: async (includeHidden = false) =>
+        bootstrapMaps.filter((map) => (includeHidden || map.visibility === 'public') && !map.ownerCourseId && !map.ownerDomainId),
     async listProblemsForNode(...args: any[]) {
         calls.listProblems.push(args);
         return sensitiveProblems;
@@ -629,6 +630,15 @@ describe('mindmap page bootstrap metadata boundary', () => {
         expect(response.status).to.equal(404);
         expectNoProblemDisclosure(response.body);
     });
+
+    it('omits course pins from the public tree', async () => {
+        bootstrapNodes[0].coursePins = [11];
+        const { response } = await dispatchMindmapPage(makeUser(), 'system', bootstrapMaps[0]._id.toHexString());
+        expect(response.status).to.equal(200);
+        expect(response.body.nodes[0].topic).to.equal('公开根节点');
+        expect(response.body.nodes[0].coursePins).to.equal(undefined);
+        expect(JSON.stringify(response.body.nodes)).not.to.include('coursePins');
+    });
 });
 
 describe('mindmap problem enumeration HTTP boundary', () => {
@@ -652,6 +662,17 @@ describe('mindmap problem enumeration HTTP boundary', () => {
 
     it('never enumerates problems through a hidden map', async () => {
         bootstrapMaps[0].visibility = 'hidden';
+        const { response } = await dispatchProblemsApi();
+
+        expect(response.status).to.equal(404);
+        expect(calls.listProblems).to.deep.equal([]);
+        expectNoProblemDisclosure(response.body);
+    });
+
+    it('never enumerates problems through a course-owned map even when its visibility is public', async () => {
+        bootstrapMaps[0].visibility = 'public';
+        bootstrapMaps[0].ownerDomainId = 'system';
+        bootstrapMaps[0].ownerCourseId = new ObjectId();
         const { response } = await dispatchProblemsApi();
 
         expect(response.status).to.equal(404);
@@ -734,6 +755,51 @@ describe('mindmap administrator HTTP boundary', () => {
         expect(response.body.staleMapId).to.equal(staleMapId);
         expect(response.body.config._id).to.equal(bootstrapMaps[0]._id.toHexString());
         expect(response.body.maps).to.have.lengthOf(1);
+    });
+
+    it('does not open a course-owned map from the admin page or its problem APIs', async () => {
+        const courseMapId = new ObjectId();
+        bootstrapMaps.push({
+            ...bootstrapMaps[0],
+            _id: courseMapId,
+            rootNodeId: new ObjectId(),
+            title: '课程导图',
+            visibility: 'hidden',
+            ownerDomainId: 'system',
+            ownerCourseId: new ObjectId(),
+        });
+        const page = await dispatchAdminRoute({
+            route: 'admin_mindmap',
+            path: '/admin/mindmap',
+            user: makeAdminUser(),
+            json: false,
+            args: { map: courseMapId.toHexString() },
+            query: { map: courseMapId.toHexString() },
+        });
+        const nodeId = bootstrapNodes[0]._id.toHexString();
+        const search = await dispatchAdminRoute({
+            route: 'admin_mindmap_problem_search',
+            path: '/api/mindmap/admin/problems',
+            user: makeAdminUser(),
+            args: { mapId: courseMapId.toHexString(), q: 'P1' },
+            query: { mapId: courseMapId.toHexString(), q: 'P1' },
+        });
+        const associations = await dispatchAdminRoute({
+            route: 'admin_mindmap_node_problems',
+            path: '/api/mindmap/admin/node-problems',
+            user: makeAdminUser(),
+            args: { mapId: courseMapId.toHexString(), nodeId },
+            query: { mapId: courseMapId.toHexString(), nodeId },
+        });
+
+        expect(page.status).to.equal(200);
+        expect(page.body.staleMapId).to.equal(courseMapId.toHexString());
+        expect(page.body.config?._id).to.not.equal(courseMapId.toHexString());
+        expect(page.body.maps.map((map: { _id: string }) => map._id)).to.not.include(courseMapId.toHexString());
+        expect(search.status).to.equal(404);
+        expect(associations.status).to.equal(404);
+        expect(calls.searchProblems).to.deep.equal([]);
+        expect(calls.listProblems).to.deep.equal([]);
     });
 
     it('uses the authoritative domain for administrator problem search and association queries', async () => {

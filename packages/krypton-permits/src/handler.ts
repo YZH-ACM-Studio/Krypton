@@ -85,6 +85,11 @@ function canRevokeProblemRole(user: any, pdoc: any, role: PermitRole): boolean {
     return ProblemModel.canManageProblemCollaborators(user, pdoc);
 }
 
+/** Managed maintainer changes are accepted only under a publish claim. */
+function permitWriteCapability(maintainerInvolved: boolean): 'publish' | 'collaborators' {
+    return maintainerInvolved ? 'publish' : 'collaborators';
+}
+
 async function logManagedPermitDenied(handler: Handler, pdoc: any, action: 'grant' | 'revoke', role: PermitRole) {
     logger.warn(
         'Managed permit denied domain=%s pid=%d actor=%d role=%s action=%s result=denied',
@@ -238,7 +243,10 @@ class ProblemPermitGrantHandler extends Handler {
         }
         const initialMaintainerInvolved =
             pdoc.authoringMode === 'managed' && (role === 'maintainer' || (await targetHasMaintainerSource(domainId, pdoc.docId, targetUids)));
-        if (initialMaintainerInvolved && !ProblemModel.canManageProblemMaintainers(this.user, pdoc)) {
+        if (
+            initialMaintainerInvolved &&
+            (!ProblemModel.canManageProblemMaintainers(this.user, pdoc) || !ProblemModel.canPublishProblem(this.user, pdoc))
+        ) {
             await logManagedPermitDenied(this, pdoc, 'grant', role as PermitRole);
             throw new PermissionError(localizedErrorText`无权授予或覆盖该题目角色`);
         }
@@ -270,7 +278,7 @@ class ProblemPermitGrantHandler extends Handler {
                     !currentAllowed.includes(role as PermitRole) ||
                     (currentPdoc.authoringMode === 'managed' &&
                         maintainerInvolved &&
-                        !ProblemModel.canManageProblemMaintainers(this.user, currentPdoc))
+                        (!ProblemModel.canManageProblemMaintainers(this.user, currentPdoc) || claim.capability !== 'publish'))
                 ) {
                     deniedInsideClaim = true;
                     return;
@@ -303,7 +311,7 @@ class ProblemPermitGrantHandler extends Handler {
                     targetUids,
                 );
             },
-            { requestId: mutationId, capability: 'collaborators' },
+            { requestId: mutationId, capability: permitWriteCapability(initialMaintainerInvolved) },
         );
         if (deniedInsideClaim) {
             await logManagedPermitDenied(this, pdoc, 'grant', role as PermitRole);
@@ -352,7 +360,7 @@ class ProblemPermitRevokeHandler extends Handler {
         const canManageInitialRole = initialMaintainerInvolved
             ? ProblemModel.canManageProblemMaintainers(this.user, pdoc)
             : canSelfRevoke || canRevokeProblemRole(this.user, pdoc, row.role);
-        if (!canManageInitialRole) {
+        if (!canManageInitialRole || (initialMaintainerInvolved && !ProblemModel.canPublishProblem(this.user, pdoc))) {
             if (pdoc.authoringMode === 'managed') await logManagedPermitDenied(this, pdoc, 'revoke', row.role);
             throw new PermissionError(localizedErrorText`无权撤销该权限`);
         }
@@ -384,7 +392,7 @@ class ProblemPermitRevokeHandler extends Handler {
                 const maintainerInvolved = await targetHasMaintainerSource(domainId, currentPdoc.docId, [currentRow.uid]);
                 const allowed =
                     currentPdoc.authoringMode === 'managed' && maintainerInvolved
-                        ? ProblemModel.canManageProblemMaintainers(this.user, currentPdoc)
+                        ? ProblemModel.canManageProblemMaintainers(this.user, currentPdoc) && claim.capability === 'publish'
                         : currentCanSelfRevoke || canRevokeProblemRole(this.user, currentPdoc, currentRow.role);
                 if (!allowed) {
                     deniedInsideClaim = currentRow.role;
@@ -417,7 +425,7 @@ class ProblemPermitRevokeHandler extends Handler {
             {
                 requestId: mutationId,
                 selfRevokeUid: canSelfRevoke && !initialMaintainerInvolved ? row.uid : undefined,
-                capability: 'collaborators',
+                capability: permitWriteCapability(initialMaintainerInvolved),
             },
         );
         if (missingInsideClaim) throw permitNotFound();

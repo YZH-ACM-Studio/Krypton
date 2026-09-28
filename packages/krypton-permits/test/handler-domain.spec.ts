@@ -20,6 +20,7 @@ const calls = {
     manageCollaborators: [] as any[],
     manageContributions: [] as any[],
     manageMaintainers: [] as any[],
+    publish: [] as any[],
     message: [] as any[],
     oplog: [] as any[],
     grant: [] as any[],
@@ -42,6 +43,7 @@ let maintainResults: boolean[] = [];
 let manageCollaboratorResults: boolean[] = [];
 let manageContributionResults: boolean[] = [];
 let manageMaintainerResults: boolean[] = [];
+let publishResults: boolean[] = [];
 let permitRow: any = null;
 let permitRows: any[] | null = null;
 let permitFindOneResults: any[] = [];
@@ -236,6 +238,10 @@ const hydroojStub = {
             calls.manageMaintainers.push(args);
             return manageMaintainerResults.length ? manageMaintainerResults.shift() : true;
         },
+        canPublishProblem(...args: any[]) {
+            calls.publish.push(args);
+            return publishResults.length ? publishResults.shift() : true;
+        },
         async withAuthorizedWriteClaim(...args: any[]) {
             calls.writeClaim.push(args.slice(0, 4).concat(args[5]));
             const work = args[4];
@@ -304,6 +310,9 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
                 },
             },
         };
+    }
+    if (request === 'hydrooj/src/handler/contest') {
+        return { hideAssignRestrictedContest: async () => undefined };
     }
     if (request === 'hydrooj/src/model/problem-access') {
         return {
@@ -382,6 +391,7 @@ beforeEach(() => {
     manageCollaboratorResults = [];
     manageContributionResults = [];
     manageMaintainerResults = [];
+    publishResults = [];
     permitRow = null;
     permitRows = null;
     permitFindOneResults = [];
@@ -871,7 +881,7 @@ describe('permit handler authoritative domain boundary', () => {
         await grantHandler.post({ domainId: 'system' }, 42, 8, undefined, 'maintainer', '', 'admin-maintainer');
 
         expect(calls.grant[0][3]).to.equal('maintainer');
-        expect(calls.writeClaim[0][4]).to.include({ capability: 'collaborators' });
+        expect(calls.writeClaim[0][4]).to.include({ capability: 'publish' });
 
         const revokeHandler = makeHandler('problem_permit_revoke');
         permitRow = { _id: permitId, domainId: 'system', pid: 42, uid: 8, active: true, role: 'maintainer' };
@@ -896,8 +906,23 @@ describe('permit handler authoritative domain boundary', () => {
         manageMaintainerResults = [true];
         await revokeHandler.post({ domainId: 'system' }, 42, permitId, 'admin-revoke');
         expect(calls.revoke).to.have.lengthOf(1);
-        expect(calls.writeClaim.at(-1)?.[4]).to.include({ capability: 'collaborators' });
+        expect(calls.writeClaim.at(-1)?.[4]).to.include({ capability: 'publish' });
         expect(calls.oplog.at(-1)?.[1]).to.equal('problem.permit.revoke');
+    });
+
+    it('refuses a managed maintainer grant before taking a claim when publish is unavailable', async () => {
+        const managed = { ...pdoc, authoringMode: 'managed' };
+        const handler = makeHandler('problem_permit_grant');
+        rawProblemResults = [managed];
+        manageMaintainerResults = [true];
+        publishResults = [false];
+
+        const error = await capture(() => handler.post({ domainId: 'system' }, 42, 8, undefined, 'maintainer', '', 'no-publish'));
+
+        expect(error?.name).to.equal('PermissionError');
+        expect(calls.writeClaim).to.have.lengthOf(0);
+        expect(calls.grant).to.have.lengthOf(0);
+        expect(calls.oplog.at(-1)?.[1]).to.equal('problem.permit.denied');
     });
 
     it('rejects managed multi-user grants before acquiring a claim or changing any role', async () => {

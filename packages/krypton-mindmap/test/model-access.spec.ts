@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { expect } from 'chai';
 import { localizeError, localizedErrorText } from '@hydrooj/framework';
@@ -39,6 +40,7 @@ interface NodeDocument {
     layoutSide?: 'left' | 'right';
     tags: string[];
     problemIds: string[];
+    coursePins?: number[];
     order: number;
     createdAt: Date;
     updatedAt: Date;
@@ -1324,5 +1326,213 @@ describe('problem-write knowledge materialize', () => {
         await expectRejected(model.materialize(config._id, ['not-an-object-id']), MindmapRequestError, 'knowledgeNodeIds');
         await expectRejected(model.materialize(config._id, [123] as any), MindmapRequestError, 'knowledgeNodeIds');
         await expectRejected(model.materialize(config._id, [null] as any), MindmapRequestError, 'knowledgeNodeIds');
+    });
+});
+
+describe('course owned maps', () => {
+    it('stays out of the site catalog and only pins saved course problems', async () => {
+        const courseId = new ObjectId();
+        const created = await model.createCourseOwnedMap({ domainId: 'system', actor: 2, courseId, title: ' 操作系统 ' });
+        const root = nodes.find((node) => node._id.equals(created.rootNodeId));
+        expect(created.visibility).to.equal('hidden');
+        expect(created.layoutDirection).to.equal('RIGHT');
+        expect(created.title).to.equal('操作系统');
+        expect(root?.topic).to.equal('操作系统');
+        expect(root?.coursePins).to.deep.equal([]);
+        expect((await model.listKnowledgeMaps(false)).some((map) => map._id.equals(created._id))).to.equal(false);
+        expect((await model.listKnowledgeMaps(true)).some((map) => map._id.equals(created._id))).to.equal(false);
+        expect((await model.listKnowledgeMaps(true)).some((map) => map.title === 'Test map')).to.equal(true);
+        expect(await model.getPublicKnowledgeMap(created._id)).to.equal(null);
+        created.visibility = 'public';
+        expect(await model.getPublicKnowledgeMap(created._id)).to.equal(null);
+        expect((await model.listKnowledgeMaps(false)).some((map) => map._id.equals(created._id))).to.equal(false);
+        created.visibility = 'hidden';
+
+        await expectRejected(
+            model.updateKnowledgeMap({
+                domainId: 'system',
+                actor: 2,
+                id: created._id,
+                expectedUpdatedAt: created.updatedAt,
+                patch: { visibility: 'public' },
+            }),
+            MindmapConflictError,
+            '课程里编辑',
+        );
+        await expectRejected(
+            model.createNode({
+                domainId: 'system',
+                actor: 2,
+                mapId: created._id,
+                expectedMapUpdatedAt: created.updatedAt,
+                parentId: created.rootNodeId,
+                expectedParentUpdatedAt: root!.updatedAt,
+                topic: '子节点',
+            }),
+            MindmapConflictError,
+            '课程里编辑',
+        );
+        await expectRejected(model.materialize(created._id, []), MindmapConflictError, '课程导图不能作为题目的知识导图');
+        await expectRejected(
+            model.createCourseOwnedMap({ domainId: 'system', actor: 3, courseId, title: '另一张' }),
+            MindmapConflictError,
+            '已经有自己的导图',
+        );
+
+        const child = await model.createCourseOwnedNode({
+            domainId: 'system',
+            actor: 2,
+            courseId,
+            mapId: created._id,
+            expectedMapUpdatedAt: created.updatedAt,
+            parentId: created.rootNodeId,
+            expectedParentUpdatedAt: root!.updatedAt,
+            topic: '进程',
+        });
+        expect(child.tags).to.deep.equal([]);
+        expect(child.problemIds).to.deep.equal([]);
+        expect(child.coursePins).to.deep.equal([]);
+        await expectRejected(
+            model.updateCourseOwnedNode({
+                domainId: 'system',
+                actor: 2,
+                courseId,
+                mapId: created._id,
+                expectedMapUpdatedAt: created.updatedAt,
+                id: child._id,
+                expectedUpdatedAt: child.updatedAt,
+                patch: { tags: ['os'] },
+            }),
+            MindmapRequestError,
+            '不可编辑',
+        );
+        await expectRejected(
+            model.updateCourseOwnedNode({
+                domainId: 'system',
+                actor: 2,
+                courseId,
+                mapId: created._id,
+                expectedMapUpdatedAt: created.updatedAt,
+                id: child._id,
+                expectedUpdatedAt: child.updatedAt,
+                patch: { problemIds: ['11'] },
+            }),
+            MindmapRequestError,
+            '不可编辑',
+        );
+        expect(nodes.find((node) => node._id.equals(child._id))?.problemIds).to.deep.equal([]);
+        await expectRejected(
+            model.updateCourseOwnedNode({
+                domainId: 'system',
+                actor: 2,
+                courseId,
+                mapId: created._id,
+                expectedMapUpdatedAt: created.updatedAt,
+                id: child._id,
+                expectedUpdatedAt: child.updatedAt,
+                memberDocIds: [11],
+                patch: { coursePins: [12] },
+            }),
+            MindmapRequestError,
+            '已保存章节',
+        );
+        const pinned = await model.updateCourseOwnedNode({
+            domainId: 'system',
+            actor: 2,
+            courseId,
+            mapId: created._id,
+            expectedMapUpdatedAt: created.updatedAt,
+            id: child._id,
+            expectedUpdatedAt: child.updatedAt,
+            memberDocIds: [11],
+            patch: { coursePins: [11, 11] },
+        });
+        expect(pinned.coursePins).to.deep.equal([11]);
+        const kept = await model.updateCourseOwnedNode({
+            domainId: 'system',
+            actor: 2,
+            courseId,
+            mapId: created._id,
+            expectedMapUpdatedAt: created.updatedAt,
+            id: child._id,
+            expectedUpdatedAt: pinned.updatedAt,
+            memberDocIds: [],
+            patch: { coursePins: [11] },
+        });
+        expect(kept.coursePins).to.deep.equal([11]);
+        const cleared = await model.updateCourseOwnedNode({
+            domainId: 'system',
+            actor: 2,
+            courseId,
+            mapId: created._id,
+            expectedMapUpdatedAt: created.updatedAt,
+            id: child._id,
+            expectedUpdatedAt: kept.updatedAt,
+            memberDocIds: [11],
+            patch: { coursePins: [] },
+        });
+        expect(cleared.coursePins).to.deep.equal([]);
+        const clearedDeparted = await model.updateCourseOwnedNode({
+            domainId: 'system',
+            actor: 2,
+            courseId,
+            mapId: created._id,
+            expectedMapUpdatedAt: created.updatedAt,
+            id: child._id,
+            expectedUpdatedAt: cleared.updatedAt,
+            memberDocIds: [],
+            patch: { coursePins: [] },
+        });
+        expect(clearedDeparted.coursePins).to.deep.equal([]);
+
+        const laid = await model.updateCourseOwnedMap({
+            domainId: 'system',
+            actor: 2,
+            courseId,
+            expectedUpdatedAt: created.updatedAt,
+            patch: { title: '课内结构', layoutDirection: 'DOWN' },
+        });
+        expect(laid.title).to.equal('课内结构');
+        expect(laid.layoutDirection).to.equal('DOWN');
+        expect(nodes.find((node) => node._id.equals(created.rootNodeId))?.topic).to.equal('操作系统');
+        await expectRejected(
+            model.updateCourseOwnedMap({
+                domainId: 'system',
+                actor: 2,
+                courseId,
+                expectedUpdatedAt: laid.updatedAt,
+                patch: { visibility: 'public' } as any,
+            }),
+            MindmapRequestError,
+            '只能修改名称和布局方向',
+        );
+        const siteRoot = nodes.find((node) => node.mapId.equals(config._id) && node.parentId === null);
+        await expectRejected(
+            model.updateNode({
+                domainId: 'system',
+                actor: 2,
+                mapId: config._id,
+                expectedMapUpdatedAt: config.updatedAt,
+                id: siteRoot!._id,
+                expectedUpdatedAt: siteRoot!.updatedAt,
+                patch: { coursePins: [11] },
+            }),
+            MindmapRequestError,
+            '不可编辑',
+        );
+        expect(siteRoot?.coursePins).to.equal(undefined);
+
+        await model.deleteCourseOwnedMap({ domainId: 'system', actor: 2, courseId, expectedUpdatedAt: laid.updatedAt });
+        expect(maps.some((map) => map._id.equals(created._id))).to.equal(false);
+        expect(nodes.some((node) => node.mapId.equals(created._id))).to.equal(false);
+        expect(await model.getCourseOwnedMap('system', courseId)).to.equal(null);
+        expect(maps.some((map) => map.title === 'Test map')).to.equal(true);
+    });
+
+    it('keeps one exclusive map per course in the partial index', () => {
+        const source = readFileSync(require.resolve('../src/db.ts'), 'utf8');
+        expect(source).to.include("name: 'mindmap_one_map_per_course'");
+        expect(source).to.include('unique: true');
+        expect(source).to.include('ownerCourseId: { $exists: true }');
     });
 });

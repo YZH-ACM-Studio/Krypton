@@ -25,6 +25,10 @@ export async function ensureIndexes(): Promise<void> {
             { isDefault: 1 },
             { unique: true, partialFilterExpression: { isDefault: true }, name: 'mindmap_one_default_map' },
         ),
+        mapsColl.createIndex(
+            { ownerDomainId: 1, ownerCourseId: 1 },
+            { unique: true, partialFilterExpression: { ownerCourseId: { $exists: true } }, name: 'mindmap_one_map_per_course' },
+        ),
     ]);
 }
 

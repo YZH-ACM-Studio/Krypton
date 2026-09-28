@@ -7,7 +7,21 @@ import { Context } from 'hydrooj';
 import { ensureIndexes } from './src/db';
 import { applyHandlers } from './src/handler';
 import { migrationScripts } from './src/migration';
-import { getPublicKnowledgeMap, getPublicKnowledgeMapSnapshot, listKnowledgeMaps, materialize } from './src/model';
+import {
+    createCourseOwnedMap,
+    createCourseOwnedNode,
+    deleteCourseOwnedMap,
+    deleteCourseOwnedNode,
+    getCourseOwnedMap,
+    getCourseOwnedSnapshot,
+    getPublicKnowledgeMap,
+    getPublicKnowledgeMapSnapshot,
+    listKnowledgeMaps,
+    materialize,
+    moveCourseOwnedNode,
+    updateCourseOwnedMap,
+    updateCourseOwnedNode,
+} from './src/model';
 
 export * from './src/types';
 export { materialize };
@@ -17,6 +31,15 @@ export const mindmapModel = {
     getPublicSnapshot: getPublicKnowledgeMapSnapshot,
     listPublicMaps: () => listKnowledgeMaps(false),
     materialize,
+    getCourseOwnedMap,
+    getCourseOwnedSnapshot,
+    createCourseOwnedMap,
+    updateCourseOwnedMap,
+    deleteCourseOwnedMap,
+    createCourseOwnedNode,
+    updateCourseOwnedNode,
+    moveCourseOwnedNode,
+    deleteCourseOwnedNode,
 };
 
 export function apply(ctx: Context) {

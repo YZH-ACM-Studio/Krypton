@@ -21,7 +21,9 @@
 - canonical 模型为 `mindmap.maps` 中的一等导图记录、`mindmap.nodes.mapId` 和 `document.knowledgeMapId`；不得恢复 `_id:'global'` 单例配置或无 map scope 的读写兜底。
 - P2.28 多图源码与 P2.29 全量归属迁移是不可拆部署单元。现存单图节点和 Problem 只允许通过 P2.29 的备份、只读 plan、fingerprint、CAS apply/verify 流程迁移，禁止在启动或请求路径中静默回填。
 - 节点创建、移动、排序、删除、引用保护和题目搜索必须显式限定 `mapId`；发现 Problem 的 `knowledgeMapId` 与节点归属不一致时 fail closed。
-- 课程仅通过可选 `TrainingDoc.mindmapId` 引用一张公开导图，不拥有或复制导图节点。课程可继续引用其它导图或无节点题；课程导图视图只能投影课程章节内、当前用户可见且 canonical 节点直接属于该图的题目。
+- 全站导图仍只通过可选 `TrainingDoc.mindmapId` 引用一张公开图。课程另可独占一张专属导图：`mindmap.maps` 上同时有 `ownerDomainId` 与 `ownerCourseId`，`visibility` 恒为 `hidden`，不能公开、不能成为默认、不出现在公开页和全站导图管理列表。一门课最多一张，用 `{ownerDomainId, ownerCourseId}` 唯一部分索引。课程绑定的 `mindmapId` 必须等于这张图；复制课程不复制专属图。删除课程时删除它。
+- 专属图的题目钉选只写节点 `coursePins`（题目 docId）。禁止写入 `problemIds`、`tags` 或 `document.knowledgeMapId`，也禁止 `materialize` 把专属图当成题目知识导图。钉选只接受该课已保存章节的直接题目和实时题集引用；离开课程的旧钉选保留，学生视图不投影，编辑器标成已不在本课。学生视图只投影这些钉选里、当前用户可见且仍在本课章节中的题目。
+- 没有专属图时，课程继续只引用公开导图，视图仍只投影课程章节内、当前用户可见、且 canonical 节点直接属于该公开图的题目。专属图存在时不能改绑或解绑公开图，必须先显式删除专属图。全站默认导图与 `/admin/mindmap` 仍只有 `PRIV_EDIT_SYSTEM`。
 - 公开页与管理页在未指定 `map` 时只打开 `isDefault:true` 的导图；缺该标记时仅回退到标题恰好为 `算法知识图谱` 的唯一一张。禁止用 title 排序的 `maps[0]` 当默认。隐藏图不能为默认；同一时刻最多一张默认，用 unique partial index `{isDefault:true}`。缺字段 = 不是默认，禁止请求路径回填。
 
 ## 结构化代码单源码协议

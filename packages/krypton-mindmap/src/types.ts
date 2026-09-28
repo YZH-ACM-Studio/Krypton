@@ -15,6 +15,8 @@ export interface MindmapNode {
     tags: string[];
     /** Manually-pinned problem PIDs. Union with `tags`-matched problems. */
     problemIds: string[];
+    /** Course-owned maps only. Problem docIds pinned for that course, not site knowledge membership. */
+    coursePins?: number[];
     /** Sibling ordering within the same parent (smaller = first). */
     order: number;
     createdAt: Date;
@@ -30,6 +32,9 @@ export interface KnowledgeMapDoc {
     layoutDirection: 'RIGHT' | 'DOWN';
     /** Missing or false = not the public landing default. At most one public map may be true. */
     isDefault?: boolean;
+    /** Both fields together mean this hidden map belongs to one course and is not a site map. */
+    ownerDomainId?: string;
+    ownerCourseId?: ObjectId;
     createdAt: Date;
     updatedAt: Date;
 }

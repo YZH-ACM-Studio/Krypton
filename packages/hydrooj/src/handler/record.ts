@@ -1165,6 +1165,16 @@ export class RecordDetailConnectionHandler extends ConnectionHandler {
         this.canViewCode ||= this.user.hasPriv(PRIV.PRIV_READ_RECORD_CODE);
         this.canViewCode ||= this.user.hasPerm(PERM.PERM_READ_RECORD_CODE);
         this.canViewCode ||= this.user.hasPerm(PERM.PERM_READ_RECORD_CODE_ACCEPT) && self?.status === STATUS.STATUS_ACCEPTED;
+        // Same grant as RecordDetailHandler.get. The page bootstrap includes
+        // source for a contest owner or maintainer, then this socket's first
+        // push used to replace it with an empty string.
+        if (realContestRecord && this.tdoc) {
+            this.canViewCode ||= this.user.own(this.tdoc);
+            if (contest.getParticipationMode(this.tdoc) !== 'team' && this.tdoc.allowViewCode && contest.isDone(this.tdoc)) {
+                const tsdoc = await contest.getStatus(domainId, this.tdoc.docId, this.user._id);
+                this.canViewCode ||= !!tsdoc?.attend;
+            }
+        }
 
         if (!pdoc) throw new PermissionError(PERM.PERM_VIEW_PROBLEM_HIDDEN);
 

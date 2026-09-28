@@ -8,6 +8,7 @@ export interface MindmapNode {
   layoutSide?: 'left' | 'right';
   tags: string[];
   problemIds: string[];
+  coursePins?: number[];
   order: number;
   createdAt: string;
   updatedAt: string;

@@ -167,7 +167,7 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
           icon: ClipboardList,
           templates: ['homework_main.html', 'homework_detail.html', 'homework_edit.html', 'homework_files.html'],
         },
-        { label: '课程', href: '/course', icon: BookMarked, templates: ['course_main.html', 'course_detail.html', 'course_edit.html', 'course_videos.html'] },
+        { label: '课程', href: '/course', icon: BookMarked, templates: ['course_main.html', 'course_detail.html', 'course_edit.html', 'course_mindmap_edit.html', 'course_videos.html'] },
         {
           label: '题集',
           href: bs.urls.training,

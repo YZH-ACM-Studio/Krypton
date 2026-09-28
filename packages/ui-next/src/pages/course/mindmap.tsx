@@ -131,7 +131,7 @@ export function CourseMindmapView({
           </span>
           <h2 className="krypton-course-display mt-5">本课程尚未绑定知识导图</h2>
           <p className="krypton-course-meta mx-auto mt-2.5 max-w-sm text-pretty">
-            课程内容不受影响。绑定一张公开导图后，这里会标出本课题目直接覆盖的节点。
+            课程内容不受影响。绑定公开导图或创建本课导图后，这里会显示本课的知识结构。
           </p>
           {canManage ? (
             <Button asChild variant="outline" className="mt-6 min-h-11 gap-1.5">

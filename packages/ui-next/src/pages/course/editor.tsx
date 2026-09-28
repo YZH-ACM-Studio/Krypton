@@ -21,7 +21,7 @@ import { MarkdownEditor } from '@/components/markdown-renderer';
 import { ProblemPicker } from '@/components/problem-picker';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { confirmFormSubmit } from '@/components/ui/dialog';
+import { confirmDialog, confirmFormSubmit } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { MultiSelect } from '@/components/ui/multi-select';
 import { SimpleSelect } from '@/components/ui/select';
@@ -194,6 +194,7 @@ export function CourseEditPage() {
     maintainerUsers?: DomainUserOption[];
     files: CourseFile[];
     mindmaps: Array<{ _id: string; title: string; visibility: 'public' }>;
+    courseOwnedMindmap?: { _id: string; title: string; updatedAt: string };
     courseExamContest?: unknown;
   };
   const isEdit = data.page_name === 'course_edit';
@@ -416,6 +417,57 @@ export function CourseEditPage() {
       setCourseFiles((current) => current.filter((file) => file.name !== filename));
     } catch (error) {
       setFileError((error as { message?: string } | null)?.message || '课件删除失败');
+    }
+  };
+
+  const ownedMindmap = data.courseOwnedMindmap;
+  const createOwnedMindmap = async () => {
+    if (!isEdit || saveState !== 'idle') return;
+    if (course.mindmapId) {
+      const accepted = await confirmDialog('创建后会解除当前公开导图绑定，学生将看到新的本课导图。公开导图本身不会被修改。', {
+        title: '创建本课导图',
+        confirmLabel: '创建',
+      });
+      if (!accepted) return;
+    }
+    setSaveError('');
+    setCopying(true);
+    try {
+      const response = await fetchHydroResponse(`/course/${tid}/edit`, {
+        method: 'POST',
+        body: new URLSearchParams({ operation: 'create_mindmap' }),
+        credentials: 'same-origin',
+        headers: { Accept: 'application/json' },
+      });
+      if (!response.ok) throw new Error(await readHydroResponseError(response, '本课导图创建失败'));
+      window.location.assign(response.redirected ? response.url : `/course/${tid}/mindmap`);
+    } catch (error) {
+      setSaveError((error as { message?: string } | null)?.message || '本课导图创建失败');
+      setCopying(false);
+    }
+  };
+  const deleteOwnedMindmap = async () => {
+    if (!isEdit || !ownedMindmap || saveState !== 'idle') return;
+    const accepted = await confirmDialog('确定删除本课导图？节点和钉选都会删掉，不能恢复。题目本身不会删除，之后可以再绑定公开导图。', {
+      title: '删除本课导图',
+      confirmLabel: '删除',
+      destructive: true,
+    });
+    if (!accepted) return;
+    setSaveError('');
+    setCopying(true);
+    try {
+      const response = await fetchHydroResponse(`/course/${tid}/edit`, {
+        method: 'POST',
+        body: new URLSearchParams({ operation: 'delete_mindmap', expectedUpdatedAt: ownedMindmap.updatedAt }),
+        credentials: 'same-origin',
+        headers: { Accept: 'application/json' },
+      });
+      if (!response.ok) throw new Error(await readHydroResponseError(response, '本课导图删除失败'));
+      window.location.assign(response.redirected ? response.url : `/course/${tid}/edit`);
+    } catch (error) {
+      setSaveError((error as { message?: string } | null)?.message || '本课导图删除失败');
+      setCopying(false);
     }
   };
 
@@ -797,21 +849,53 @@ export function CourseEditPage() {
           </SettingsGroup>
 
           <SettingsGroup id="course-mindmap-settings" title="知识导图" icon={Network} collapsible>
-            <SimpleSelect
-              name="mindmapId"
-              value={selectedMindmapId}
-              onValueChange={(value) => {
-                setSelectedMindmapId(value);
-                markDirty();
-              }}
-              options={[
-                { value: '', label: '不绑定知识导图' },
-                ...(data.mindmaps || []).map((map) => ({ value: map._id, label: `${map.title} · 已公开` })),
-              ]}
-              ariaLabel="选择课程知识导图"
-              className="min-h-11"
-              contentClassName="[&_[role=option]]:min-h-10"
-            />
+            {isEdit && ownedMindmap ? (
+              <div className="space-y-3">
+                <p className="text-sm font-medium">{ownedMindmap.title}</p>
+                <p className="text-sm text-muted-foreground">这是本课专属导图。学生进入课程就能看到当前结构。要改绑公开导图，需要先删除它。</p>
+                <input type="hidden" name="mindmapId" value={ownedMindmap._id} />
+                <div className="flex flex-wrap gap-2">
+                  <Button asChild type="button" variant="outline" className="min-h-11">
+                    <a href={`/course/${tid}/mindmap`}>编辑本课导图</a>
+                  </Button>
+                  <Button type="button" variant="destructive" className="min-h-11" disabled={saveState !== 'idle' || copying} onClick={() => void deleteOwnedMindmap()}>
+                    删除本课导图
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <SimpleSelect
+                  name="mindmapId"
+                  value={selectedMindmapId}
+                  onValueChange={(value) => {
+                    setSelectedMindmapId(value);
+                    markDirty();
+                  }}
+                  options={[
+                    { value: '', label: '不绑定知识导图' },
+                    ...(data.mindmaps || []).map((map) => ({ value: map._id, label: `${map.title} · 已公开` })),
+                  ]}
+                  ariaLabel="选择课程知识导图"
+                  className="min-h-11"
+                  contentClassName="[&_[role=option]]:min-h-10"
+                />
+                {isEdit ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="min-h-11"
+                    disabled={saveState !== 'idle' || copying}
+                    title={saveState === 'dirty' ? '请先保存课程' : '创建本课导图'}
+                    onClick={() => void createOwnedMindmap()}
+                  >
+                    创建本课导图
+                  </Button>
+                ) : (
+                  <p className="text-sm text-muted-foreground">保存课程后才能创建本课导图。</p>
+                )}
+              </div>
+            )}
           </SettingsGroup>
 
           <SettingsGroup

@@ -29,6 +29,17 @@ describe('P3.13 problem testdata config boundary', () => {
         });
     }
 
+    it('rejects a missing config upload before any storage write', async () => {
+        await assert.rejects(
+            normalizeProblemTestdataUpload('config.yaml', '/tmp/hydro/upload/0/iom56zio9lmt13zdkqpdppwbp.yaml'),
+            (error: any) => {
+                assert.equal(error?.name, 'ValidationError');
+                assert.match(String(error?.params?.[2] || ''), /no longer available/);
+                return true;
+            },
+        );
+    });
+
     it('rejects malformed or non-object config instead of storing latent failures', async () => {
         await assert.rejects(normalizeProblemTestdataUpload('config.yaml', Buffer.from('type: [')), hasDetail('配置 YAML 无法解析'));
         await assert.rejects(normalizeProblemTestdataUpload('config.yaml', Buffer.from('default')), hasDetail('配置 YAML 必须是对象'));

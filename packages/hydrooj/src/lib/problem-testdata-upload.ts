@@ -4,6 +4,13 @@ import yaml from 'js-yaml';
 import { localizedErrorText, ValidationError } from '../error';
 import { isProblemConfigFilename } from './problem-config';
 
+function isMissingUploadFile(error: unknown): boolean {
+    if (!error || typeof error !== 'object') return false;
+    if ((error as { code?: unknown }).code === 'ENOENT') return true;
+    const message = (error as { message?: unknown }).message;
+    return typeof message === 'string' && message.startsWith('ENOENT:');
+}
+
 /**
  * P3.13 removes the legacy multi-question objective/fill-function authoring
  * model. Validate config.yaml at the model boundary so HTTP, zip, Hydro import,
@@ -18,7 +25,15 @@ export async function normalizeProblemTestdataUpload(name: string, source: Reada
         }
         return Buffer.concat(chunks);
     };
-    const content = Buffer.isBuffer(source) ? source : typeof source === 'string' ? await fs.readFile(source) : await readStream(source);
+    let content: Buffer;
+    try {
+        content = Buffer.isBuffer(source) ? source : typeof source === 'string' ? await fs.readFile(source) : await readStream(source);
+    } catch (error) {
+        if (typeof source === 'string' && isMissingUploadFile(error)) {
+            throw new ValidationError('file', null, localizedErrorText`The uploaded file is no longer available. Choose it again and retry.`);
+        }
+        throw error;
+    }
     let parsed: any;
     try {
         parsed = yaml.load(content.toString('utf8'));

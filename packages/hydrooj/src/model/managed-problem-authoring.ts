@@ -8,6 +8,7 @@ import {
     deriveProgrammingStatementContent,
     emptyProgrammingStatement,
     normalizeProgrammingStatement,
+    programmingStatementFormError,
     type ProgrammingStatement,
     type ProgrammingStatementFormat,
 } from '../lib/programming-statement';
@@ -684,8 +685,14 @@ export async function prepareManagedProblemDraft(domainId: string, input: Manage
     let programmingStatement: ProgrammingStatement | undefined;
     let content: string;
     if (statementFormat === 'structured-v1') {
-        programmingStatement = normalizeProgrammingStatement(input.programmingStatement ?? emptyProgrammingStatement());
-        content = deriveProgrammingStatementContent(programmingStatement, input.content);
+        try {
+            programmingStatement = normalizeProgrammingStatement(input.programmingStatement ?? emptyProgrammingStatement());
+            content = deriveProgrammingStatementContent(programmingStatement, input.content);
+        } catch (error) {
+            const formError = programmingStatementFormError(error);
+            if (formError) throw formError;
+            throw error;
+        }
     } else if (statementFormat === 'legacy-import-v1') {
         if (typeof input.content !== 'string') throw new ValidationError('content');
         if (input.programmingStatement !== undefined) throw new ValidationError('programmingStatement');

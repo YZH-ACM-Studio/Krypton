@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { expect } from 'chai';
 import { describe, it } from 'node:test';
 import { lookupErrorMessageTranslation, resolveErrorTransport, UserFacingError } from '@hydrooj/framework';
@@ -230,5 +232,17 @@ describe('programming statement canonical protocol', () => {
         expect(malformed.statement.examples.state).to.equal('undecided');
         expect(malformed.unclassified).to.include('```input1');
         expect(malformed.unclassified).to.include('```output2');
+    });
+
+    it('converts statement validation at each request entry that accepts author input', () => {
+        const root = resolve(__dirname, '..', 'src');
+        const problem = readFileSync(resolve(root, 'model/problem.ts'), 'utf8');
+        const handler = readFileSync(resolve(root, 'handler/problem.ts'), 'utf8');
+        const capture = problem.slice(problem.indexOf('function captureProgrammingStatementWrite('), problem.indexOf('function assertProgrammingStatementWriteUnchanged('));
+        const preview = handler.slice(handler.indexOf('legacyStatementPreview'), handler.indexOf('legacyStatementConversionRequired'));
+        const exported = problem.slice(problem.indexOf('static async export('), problem.indexOf('async function assertConfigTestdataEventAllowed('));
+        expect(capture).to.include('programmingStatementFormError(error)');
+        expect(preview).to.include('programmingStatementFormError(error)');
+        expect(exported).to.include('programmingStatementFormError(error)');
     });
 });

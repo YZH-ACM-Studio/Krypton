@@ -479,8 +479,16 @@ function canonicalizeProgrammingStatementPatch(current: ProblemDoc, $set: Partia
 
 function captureProgrammingStatementWrite($set: Partial<ProblemDoc>) {
     if ($set.statementFormat !== 'structured-v1' || !Object.hasOwn($set, 'programmingStatement')) return null;
+    let programmingStatement: ProblemDoc['programmingStatement'];
+    try {
+        programmingStatement = normalizeProgrammingStatement($set.programmingStatement);
+    } catch (error) {
+        const formError = programmingStatementFormError(error);
+        if (formError) throw formError;
+        throw error;
+    }
     return {
-        programmingStatement: normalizeProgrammingStatement($set.programmingStatement),
+        programmingStatement,
         content: $set.content,
         html: $set.html,
     };
@@ -6101,7 +6109,14 @@ export class ProblemModel {
                 await fs.writeFile(problemContent, pdoc.content);
             }
             if (pdoc.statementFormat === 'structured-v1') {
-                const canonical = normalizeProgrammingStatement(pdoc.programmingStatement);
+                let canonical: ReturnType<typeof normalizeProgrammingStatement>;
+                try {
+                    canonical = normalizeProgrammingStatement(pdoc.programmingStatement);
+                } catch (error) {
+                    const formError = programmingStatementFormError(error);
+                    if (formError) throw formError;
+                    throw error;
+                }
                 if (compileProgrammingStatement(canonical) !== pdoc.content) {
                     throw new ValidationError(
                         'content',

@@ -566,6 +566,7 @@ describe('P2.14 managed problem source templates', () => {
     it('derives structured Markdown and knowledge tags through the shared helpers', () => {
         const authoringSource = readFileSync(resolve(process.cwd(), 'packages/hydrooj/src/model/managed-problem-authoring.ts'), 'utf8');
         expect(authoringSource).to.include('deriveProgrammingStatementContent(');
+        expect(authoringSource).to.include('programmingStatementFormError(error)');
         expect(authoringSource).not.to.include('compileProgrammingStatement(');
         expect(authoringSource).to.include('getMindmapMaterialize()(mapId, nodeIds');
         expect(authoringSource).to.include('allowSolePublicMap');

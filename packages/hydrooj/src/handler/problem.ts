@@ -66,6 +66,7 @@ import {
     emptyProgrammingStatement,
     previewLegacyProgrammingStatement,
     programmingStatementClientView,
+    programmingStatementFormError,
     programmingStatementLimits,
     ProgrammingStatementValidationError,
 } from '../lib/programming-statement';
@@ -2941,7 +2942,20 @@ export class ProblemEditHandler extends ProblemManageHandler {
             }
         }
         if (problemKind === 'programming' && rawPdoc.statementFormat !== 'structured-v1') {
-            this.response.body.legacyStatementPreview = previewLegacyProgrammingStatement(rawPdoc.content || '');
+            try {
+                this.response.body.legacyStatementPreview = previewLegacyProgrammingStatement(rawPdoc.content || '');
+            } catch (error) {
+                logger.warn(
+                    'Legacy statement preview rejected domain=%s pid=%d actor=%d stage=author-preview result=denied error=%o',
+                    rawPdoc.domainId,
+                    rawPdoc.docId,
+                    this.user._id,
+                    error,
+                );
+                const formError = programmingStatementFormError(error);
+                if (formError) throw formError;
+                throw error;
+            }
             this.response.body.legacyStatementConversionRequired =
                 rawPdoc.authoringMode === 'managed' && rawPdoc.managedAuthoring?.metadataStatus === 'draft';
         }

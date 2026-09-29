@@ -578,5 +578,11 @@ describe('P2.12 YAGNI lifecycle contract', () => {
         expect(save).to.include("if (effectiveProblemKind(current) !== 'programming') throw new ValidationError('problemKind')");
         expect(save).to.include('assertStructureRevision(input.expectedStructureRevision)');
         expect(save).not.to.include('parseProblemKind(current.problemKind)');
+        const deniedLog = save.lastIndexOf('result=denied error=%o');
+        const formError = save.indexOf('programmingStatementFormError(error)', deniedLog);
+        const rethrow = save.indexOf('throw error;', formError);
+        expect(deniedLog).to.be.greaterThan(-1);
+        expect(formError).to.be.greaterThan(deniedLog);
+        expect(rethrow).to.be.greaterThan(formError);
     });
 });

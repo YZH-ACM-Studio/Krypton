@@ -39,6 +39,7 @@ import {
     compileProgrammingStatement,
     deriveProgrammingStatementContent,
     normalizeProgrammingStatement,
+    programmingStatementFormError,
     ProgrammingStatementValidationError,
 } from '../lib/programming-statement';
 import {
@@ -4753,6 +4754,8 @@ export class ProblemModel {
                 converting ? 'convert' : 'edit',
                 error,
             );
+            const formError = programmingStatementFormError(error);
+            if (formError) throw formError;
             throw error;
         }
     }

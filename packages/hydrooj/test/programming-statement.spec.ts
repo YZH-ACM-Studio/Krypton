@@ -1,5 +1,6 @@
 import { expect } from 'chai';
 import { describe, it } from 'node:test';
+import { lookupErrorMessageTranslation, resolveErrorTransport, UserFacingError } from '@hydrooj/framework';
 import { ValidationError } from '../src/error';
 import {
     assertLegacyProgrammingStatementFingerprint,
@@ -11,6 +12,8 @@ import {
     normalizeProgrammingStatement,
     previewLegacyProgrammingStatement,
     programmingStatementClientView,
+    programmingStatementFormError,
+    ProgrammingStatementValidationError,
 } from '../src/lib/programming-statement';
 
 function completeStatement() {
@@ -76,6 +79,42 @@ describe('programming statement canonical protocol', () => {
                 },
             }),
         ).to.throw(/both sides empty/);
+        let rejected: unknown;
+        try {
+            normalizeProgrammingStatement({
+                ...completeStatement(),
+                examples: {
+                    state: 'present',
+                    items: [
+                        { input: '1', inputEmpty: false, output: '2', outputEmpty: false, note: '' },
+                        { input: '', inputEmpty: true, output: '', outputEmpty: true, note: '' },
+                    ],
+                },
+            });
+        } catch (error) {
+            rejected = error;
+        }
+        expect(rejected).to.be.instanceOf(ProgrammingStatementValidationError);
+        expect(rejected).to.not.be.instanceOf(UserFacingError);
+        const rawTransport = resolveErrorTransport(rejected, {
+            locale: 'zh-CN',
+            lookup: lookupErrorMessageTranslation,
+            createTraceId: () => 'statement-validation-raw',
+        });
+        expect(rawTransport.userFacing).to.equal(false);
+        expect(rawTransport.error.message).to.match(/未预期错误/);
+        const formError = programmingStatementFormError(rejected);
+        expect(formError).to.be.instanceOf(ValidationError);
+        expect(formError?.params[0]).to.equal('examples.items.1');
+        expect(programmingStatementFormError(new Error('other'))).to.equal(undefined);
+        const formTransport = resolveErrorTransport(formError, {
+            locale: 'zh-CN',
+            lookup: lookupErrorMessageTranslation,
+            createTraceId: () => 'statement-validation-form',
+        });
+        expect(formTransport.userFacing).to.equal(true);
+        expect(formTransport.error.message).to.not.match(/未预期错误/);
+        expect(formTransport.error.message).to.match(/不能同时为空/);
         expect(
             normalizeProgrammingStatement({
                 ...completeStatement(),

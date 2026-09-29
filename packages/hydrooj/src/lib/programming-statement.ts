@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { parseMemoryMB, parseTimeMS } from '@hydrooj/utils';
-import { localizedErrorText, ValidationError } from '../error';
+import { localizeErrorParameter, localizedErrorText, ValidationError } from '../error';
 import type { LocalizedErrorText } from '../error';
 import { parseProblemConfigObject } from './problem-config';
 
@@ -80,6 +80,17 @@ export class ProgrammingStatementValidationError extends Error {
 
 function fail(field: string, message: LocalizedErrorText): never {
     throw new ProgrammingStatementValidationError(field, message);
+}
+
+/** Map a statement-shape rejection onto the form ValidationError the editor already shows. */
+export function programmingStatementFormError(error: unknown): InstanceType<typeof ValidationError> | undefined {
+    if (!(error instanceof ProgrammingStatementValidationError)) return undefined;
+    return localizeErrorParameter(
+        new ValidationError(error.field, null, error.message),
+        2,
+        error.localizedMessage.template,
+        ...error.localizedMessage.params,
+    );
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

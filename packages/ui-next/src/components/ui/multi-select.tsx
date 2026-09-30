@@ -112,8 +112,38 @@ export function MultiSelect<T>({
   const triggerRef = useRef<HTMLDivElement | null>(null);
   const requestSeq = useRef(0);
   const swallowOverlayClickRef = useRef(false);
+  const menuOpenRef = useRef(false);
+  const focusFrameRef = useRef<number | null>(null);
   const [popoverBox, setPopoverBox] = useState<AnchoredPopoverBox | null>(null);
   const [portalEl, setPortalEl] = useState<HTMLElement | null>(null);
+
+  const cancelScheduledInputFocus = useCallback(() => {
+    if (focusFrameRef.current == null) return;
+    cancelAnimationFrame(focusFrameRef.current);
+    focusFrameRef.current = null;
+  }, []);
+
+  const openMenu = useCallback(() => {
+    menuOpenRef.current = true;
+    setOpen(true);
+  }, []);
+
+  const closeMenu = useCallback(() => {
+    // The trigger click focuses the input on the next frame. If that frame lands
+    // after an outside press, onFocus would reopen the menu.
+    menuOpenRef.current = false;
+    cancelScheduledInputFocus();
+    setOpen(false);
+  }, [cancelScheduledInputFocus]);
+
+  const scheduleInputFocus = useCallback(() => {
+    cancelScheduledInputFocus();
+    focusFrameRef.current = requestAnimationFrame(() => {
+      focusFrameRef.current = null;
+      if (!menuOpenRef.current) return;
+      inputRef.current?.focus();
+    });
+  }, [cancelScheduledInputFocus]);
 
   const selectedKeys = useMemo(() => new Set(value.map(getKey)), [value, getKey]);
 
@@ -151,6 +181,8 @@ export function MultiSelect<T>({
     return () => document.removeEventListener('click', onClick, true);
   }, []);
 
+  useEffect(() => cancelScheduledInputFocus, [cancelScheduledInputFocus]);
+
   /* Bubble mousedown closes the menu; only a Dialog overlay click is swallowed so the Dialog stays open. */
   useEffect(() => {
     if (!open) return;
@@ -167,14 +199,14 @@ export function MultiSelect<T>({
     };
     const onMouseDown = (event: MouseEvent) => {
       if (isInside(event.target)) return;
-      setOpen(false);
+      closeMenu();
       if (isDialogOverlay(event.target)) swallowOverlayClickRef.current = true;
     };
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       event.preventDefault();
       event.stopPropagation();
-      setOpen(false);
+      closeMenu();
     };
     document.addEventListener('mousedown', onMouseDown);
     document.addEventListener('keydown', onKeyDown, true);
@@ -182,7 +214,7 @@ export function MultiSelect<T>({
       document.removeEventListener('mousedown', onMouseDown);
       document.removeEventListener('keydown', onKeyDown, true);
     };
-  }, [open]);
+  }, [open, closeMenu]);
 
   useLayoutEffect(() => {
     if (!open) {
@@ -242,9 +274,9 @@ export function MultiSelect<T>({
       }
       setQuery('');
       setHighlightedIndex(0);
-      requestAnimationFrame(() => inputRef.current?.focus());
+      scheduleInputFocus();
     },
-    [disabled, getKey, selectedKeys, value, onChange, atMax],
+    [disabled, getKey, selectedKeys, value, onChange, atMax, scheduleInputFocus],
   );
 
   const removeItem = useCallback(
@@ -274,14 +306,14 @@ export function MultiSelect<T>({
     e.stopPropagation();
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setOpen(true);
+      openMenu();
       setHighlightedIndex((i) => Math.min(visibleOptions.length - 1, i + 1));
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setHighlightedIndex((i) => Math.max(0, i - 1));
     } else if (e.key === 'Enter') {
       if (!open) {
-        setOpen(true);
+        openMenu();
         return;
       }
       const item = visibleOptions[highlightedIndex];
@@ -295,7 +327,7 @@ export function MultiSelect<T>({
       removeItem(getKey(value[value.length - 1]));
     } else if (e.key === 'Escape') {
       e.preventDefault();
-      setOpen(false);
+      closeMenu();
     }
   };
 
@@ -314,8 +346,8 @@ export function MultiSelect<T>({
         style={{ minHeight }}
         onClick={() => {
           if (!disabled) {
-            setOpen(true);
-            requestAnimationFrame(() => inputRef.current?.focus());
+            openMenu();
+            scheduleInputFocus();
           }
         }}
       >
@@ -341,9 +373,9 @@ export function MultiSelect<T>({
               value={query}
               onChange={(e) => {
                 setQuery(e.target.value);
-                setOpen(true);
+                openMenu();
               }}
-              onFocus={() => setOpen(true)}
+              onFocus={() => openMenu()}
               onKeyDown={onInputKeyDown}
               onMouseDown={(e) => e.stopPropagation()}
               placeholder={value.length === 0 ? placeholder : ''}
@@ -383,7 +415,7 @@ export function MultiSelect<T>({
                 e.stopPropagation();
                 if (e.key === 'Escape') {
                   e.preventDefault();
-                  setOpen(false);
+                  closeMenu();
                 }
               }}
             >

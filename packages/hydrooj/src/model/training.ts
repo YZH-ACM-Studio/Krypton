@@ -624,6 +624,7 @@ global.Hydro.model.training = {
     withProblemSetKind,
     add,
     edit,
+    casCourseMindmap,
     assignCourseOwnership,
     ensureProblemBatchChapter,
     assertProblemBatchChapterAudit,

@@ -45,6 +45,13 @@ export { registerStudentDirectory, studentDirectory, StudentDirectoryUnavailable
 export type { StudentDirectory } from './service/student-directory';
 export { isSchoolInStaffScope, resolveStaffSchoolScope } from './lib/staff-school-scope';
 export type { StaffScopeActor } from './lib/staff-school-scope';
+export {
+    assertGroupsAttachable,
+    describeGroupRefs,
+    listAttachableGroups,
+    parseGroupIdList,
+} from './lib/user-group-attach';
+export type { AttachActor, GroupRefView } from './lib/user-group-attach';
 export { Context, Fiber, FiberState, Service } from './context';
 export { buildContent } from './lib/content';
 export { default as mime } from './lib/mime';

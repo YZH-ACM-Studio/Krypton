@@ -2656,6 +2656,10 @@ const CHINESE_ERROR_MESSAGE_ENGLISH_TRANSLATIONS: Readonly<Record<string, string
     未填写账号不能公开: 'An unset account cannot be made public.',
     '快照 handle 与已保存账号不一致': 'The snapshot handle does not match the saved account.',
     快照不能修改公开开关: 'The snapshot cannot change the public-visibility switch.',
+    '所选用户组已被删除，请先移除后再保存': 'The selected user group has been deleted. Remove it before saving.',
+    '你不能使用用户组「{0}」，只能使用自己的用户组或管理员开放给老师的本校用户组':
+        'You cannot use the user group "{0}". You can only use your own user groups, or school groups at your own school that an administrator has opened to teachers.',
+    用户组参数无效: 'The user group parameter is invalid.',
 });
 
 export const ERROR_MESSAGE_TRANSLATIONS: Readonly<Record<string, ErrorMessageTranslation>> = Object.freeze({

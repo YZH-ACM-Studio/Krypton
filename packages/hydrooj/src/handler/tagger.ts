@@ -31,7 +31,7 @@ import { resolveProblemKnowledgeNodeIds } from '../lib/problem-tag-canonical';
 import { Logger } from '../logger';
 import { ProblemTagConflictError } from '../error';
 import * as document from '../model/document';
-import problem from '../model/problem';
+import problem, { type ProblemDoc } from '../model/problem';
 import system from '../model/system';
 
 const CHANNEL = 'tagger';
@@ -670,7 +670,7 @@ class TaggerApplyHandler extends TaggerApiHandler {
                         continue;
                     }
                     const draftManaged = old.authoringMode === 'managed' && old.managedAuthoring?.metadataStatus === 'draft';
-                    const titlePatch = draftManaged
+                    const titlePatch: Partial<ProblemDoc> = draftManaged
                         ? {
                               title: `待审核 · ${title}`,
                               managedAuthoring: {

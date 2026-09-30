@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Download, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { SimpleSelect } from '@/components/ui/select';
+import { useBootstrap } from '@/lib/bootstrap';
 import {
   buildCompanionTask,
   companionTaskFromProblemPage,
@@ -52,23 +53,63 @@ export function HydroCompanionMarkup({
   );
 }
 
+function problemIdentity(pdoc: Record<string, unknown>): string {
+  if (typeof pdoc.pid === 'string' && pdoc.pid) return pdoc.pid;
+  if (typeof pdoc.docId === 'number' || typeof pdoc.docId === 'string') return String(pdoc.docId);
+  return '';
+}
+
+function hrefTargetsProblem(href: string, identity: string): boolean {
+  if (!identity) return false;
+  let pathname = href;
+  try {
+    pathname = new URL(href, 'http://localhost').pathname;
+  } catch {
+    return false;
+  }
+  const segments = pathname.replace(/\/+$/, '').split('/');
+  if (segments.at(-2) !== 'p') return false;
+  const last = segments.at(-1) || '';
+  try {
+    return decodeURIComponent(last) === identity;
+  } catch {
+    return false;
+  }
+}
+
 export function SendProblemToCph({ href, compact = false }: { href: string; compact?: boolean }) {
+  const bootstrap = useBootstrap();
   const [task, setTask] = useState<CompanionTask | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [status, setStatus] = useState<'idle' | 'sending' | 'sent' | 'failed'>('idle');
   const [sendError, setSendError] = useState<string | null>(null);
+  const localPdoc = useMemo(() => {
+    const data = bootstrap.page.data;
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
+    const pdoc = (data as { pdoc?: unknown }).pdoc;
+    if (!pdoc || typeof pdoc !== 'object' || Array.isArray(pdoc)) return null;
+    const record = pdoc as Record<string, unknown>;
+    return hrefTargetsProblem(href, problemIdentity(record)) ? record : null;
+  }, [bootstrap.page.data, href]);
 
   useEffect(() => {
     let cancelled = false;
     setTask(null);
     setLoadError(null);
+    const pageUrl = new URL(href, window.location.origin).href;
+    if (localPdoc) {
+      const built = companionTaskFromProblemPage({ payload: { pdoc: localPdoc }, url: pageUrl });
+      // The editor already loaded this problem. A detail GET is not the
+      // files-upload confirmation and must not run ahead of that write.
+      if (built.ok) {
+        setTask(built.task);
+        return undefined;
+      }
+    }
     void fetchCompanionProblemPayload(href)
       .then((payload) => {
         if (cancelled) return;
-        const built = companionTaskFromProblemPage({
-          payload,
-          url: new URL(href, window.location.origin).href,
-        });
+        const built = companionTaskFromProblemPage({ payload, url: pageUrl });
         if (!built.ok) {
           setLoadError(built.reason);
           return;
@@ -81,7 +122,7 @@ export function SendProblemToCph({ href, compact = false }: { href: string; comp
     return () => {
       cancelled = true;
     };
-  }, [href]);
+  }, [href, localPdoc]);
 
   return (
     <div className="flex flex-col items-stretch gap-1 sm:items-end">

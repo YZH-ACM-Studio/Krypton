@@ -20,6 +20,7 @@ import {
     Types,
     UserModel,
     ValidationError,
+    LocalizedErrorText,
     localizedErrorText,
 } from 'hydrooj';
 import {
@@ -165,9 +166,25 @@ function coerceFormBoolean(raw: unknown): unknown {
     return raw;
 }
 
+function localizedErrorTextFromMessage(message: string): LocalizedErrorText {
+    // `{` in producer text is literal, not a catalog placeholder.
+    if (message && !message.includes('{') && !message.includes('}')) {
+        const strings = [message] as unknown as TemplateStringsArray;
+        Object.defineProperty(strings, 'raw', { value: [message] });
+        return new LocalizedErrorText(strings, []);
+    }
+    const strings = ['', ''] as unknown as TemplateStringsArray;
+    Object.defineProperty(strings, 'raw', { value: ['', ''] });
+    return new LocalizedErrorText(strings, [message]);
+}
+
+function throwExternalRatingValidation(field: string, detail: LocalizedErrorText): never {
+    throw new ValidationError(field, null, detail);
+}
+
 function wrapClientError(error: unknown): never {
     if (error instanceof ExternalRatingTypeError) {
-        throw new ValidationError(error.field, null, error.message);
+        throwExternalRatingValidation(error.field, localizedErrorTextFromMessage(error.message));
     }
     if (error instanceof ExternalRatingRefreshRateLimitError) {
         throw new ForbiddenError(localizedErrorText`外站 rating 刷新过于频繁，请一分钟后再试`);

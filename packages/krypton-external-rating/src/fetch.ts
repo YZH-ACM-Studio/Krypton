@@ -88,6 +88,18 @@ function readNowcoderUid(result: { rating: number; uid?: string }): string | und
     return uid || undefined;
 }
 
+function readHistoryContestName(value: unknown, index: number): string | null {
+    if (typeof value === 'string') return value === '' ? null : value;
+    if (value == null) return null;
+    throw new TypeError(`contest history row ${index} contestName is malformed`);
+}
+
+function readHistoryInteger(value: unknown, index: number, field: string): number | null {
+    if (value == null) return null;
+    if (typeof value === 'number' && Number.isSafeInteger(value)) return value;
+    throw new TypeError(`contest history row ${index} ${field} is malformed`);
+}
+
 function mapHistoryPoints(handle: string, rows: unknown): Array<{
     handle: string;
     contestId: string;
@@ -110,22 +122,13 @@ function mapHistoryPoints(handle: string, rows: unknown): Array<{
         if (typeof row.rating !== 'number' || !Number.isSafeInteger(row.rating)) {
             throw new TypeError(`contest history row ${index} rating is malformed`);
         }
-        const contestName = row.contestName == null ? null : row.contestName;
-        if (contestName !== null && typeof contestName !== 'string') {
-            throw new TypeError(`contest history row ${index} contestName is malformed`);
-        }
-        const oldRating = row.oldRating == null ? null : row.oldRating;
-        if (oldRating !== null && (typeof oldRating !== 'number' || !Number.isSafeInteger(oldRating))) {
-            throw new TypeError(`contest history row ${index} oldRating is malformed`);
-        }
-        const rank = row.rank == null ? null : row.rank;
-        if (rank !== null && (typeof rank !== 'number' || !Number.isSafeInteger(rank))) {
-            throw new TypeError(`contest history row ${index} rank is malformed`);
-        }
+        const contestName = readHistoryContestName(row.contestName, index);
+        const oldRating = readHistoryInteger(row.oldRating, index, 'oldRating');
+        const rank = readHistoryInteger(row.rank, index, 'rank');
         return {
             handle,
             contestId: contestKey.trim(),
-            contestName: contestName === '' ? null : contestName,
+            contestName,
             ratedAt: row.ratedAt,
             rating: row.rating,
             oldRating,

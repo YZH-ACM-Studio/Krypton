@@ -4,6 +4,7 @@
  * Collection: `externalRating.history`. History is not stored on `user.externalRating`.
  */
 import { db } from 'hydrooj';
+import type { Collection } from 'mongodb';
 import type { ExternalRatingSiteId } from './types';
 
 export interface ExternalRatingHistoryDoc {
@@ -19,7 +20,7 @@ export interface ExternalRatingHistoryDoc {
     ingestedAt: Date;
 }
 
-export const historyColl = db.collection<ExternalRatingHistoryDoc>('externalRating.history');
+export const historyColl: Collection<ExternalRatingHistoryDoc> = db.collection<ExternalRatingHistoryDoc>('externalRating.history');
 
 let indexesEnsured = false;
 

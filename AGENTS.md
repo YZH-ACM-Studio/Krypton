@@ -148,7 +148,7 @@
 
 - `exam.events` 是 Krypton Contest 与纯外部考试共用的 OJ 业务根；`type:'krypton'` 可在草稿期不关联 Contest，但进入计划态前必须关联当前域内且操作者可管理的 Contest，`type:'external'` 禁止伪造空 Contest。Contest 不拥有或驱动 ExamEvent 生命周期。
 - ExamEvent 写入态只使用 `draft / scheduled / archived`；`active / ended` 由已计划活动的时间窗确定性派生，不通过后台任务改写。所有 mutation 使用 `revision` CAS，活动开始后 school/type/contest/time window 冻结，title 与 collaborator 仍可维护；归档是当前唯一移除路径，不开放绕过后续引用检查的硬删除。
-- 基础设施管理员是 `PRIV_EDIT_SYSTEM` 或显式 `PERM_MANAGE_EXAM_INFRASTRUCTURE` 持有者。普通教师必须持有 `PERM_CREATE_EXAM_EVENT`，并在每次请求重新满足 userbind canonical 学校范围、owner/collaborator 与关联 Contest 权限；URL、前端 capability、schoolId 或 collaborator 列表均不能自证授权。
+- 基础设施管理员是 `PRIV_EDIT_SYSTEM` 或显式 `PERM_MANAGE_EXAM_INFRASTRUCTURE` 持有者。普通教师必须持有 `PERM_CREATE_EXAM_EVENT`，并在每次请求重新满足 userbind canonical 学校范围、owner/collaborator 与关联 Contest 权限；该学校范围与教师用户组同一口径：该教师的父学校、该教师本人学生记录所在学校，以及 `staffUids` 包含该教师的学校，再去掉不存在的学校；URL、前端 capability、schoolId 或 collaborator 列表均不能自证授权。
 - 每个 revision 保存确定性的 `auditRef=exam-event:<eventId>:<revision>`，并由 OJ oplog 记录 actor、event、revision、变更字段和关联身份。P1.13 不创建网络策略、终端目标、Vigil execution session 或真实考试活动；这些只能由后续任务引用 eventId。
 
 ## 考试名单与候选座位快照协议
@@ -228,8 +228,29 @@
 
 - `TrainingDoc.courseHidden` 是课程对学生是否可见的唯一开关。缺省或 `false` 仍按 `courseGroupIds` 发现和进入；`true` 时学生列表、详情、视频、课件、报名和真实性 Context 一律 fail closed。兑换权益不能绕过隐藏。
 - 指定 `courseGroupIds` 后不展示、不写入 `enroll`；进课、视频、结业考试和花名册只认用户组（及课管 / 兑换）。无用户组的全站课仍可用报名作为个人学习记录和花名册回退。
+- `courseGroupIds` 的新增项受可挂规则约束，保存时非法 id 或已删除的组 fail fast。
 - 所有者、维护者和 `PERM_EDIT_COURSE` / 系统管理员仍可在列表看到「已隐藏」、进入并编辑。隐藏不是草稿态，也不改章节、视频或观看记录。
 - 删除走现有 `postDelete`：删 Training 文档与 status、`course/{domain}/{tid}/` 下课件和视频 blob、观看进度。课程仍被文件收集引用时拒绝删除。不级联删作业、题集、导图或真实性历史。删除不可恢复，UI 必须二次确认。
+
+## 教师用户组协议
+
+- 教师用户组是普通 `userbind.user_groups` 文档，属于一所学校。成员关系只存在该校学生记录的 `groupIds` 里，不另建 uid 名单。
+- 组可以有所有者 `ownerUid`。缺该字段就是学校/管理员组，存量不回填。教师用户组可以挂到所有者自己的多门课上。删除课程不删除该组。
+- 学校组可以开放给教师（`teacherAttachable`）。缺字段即为不开放，不回填，由管理员逐个打开。有所有者的组上禁止写该字段。
+- 学校可以列出教职工用户 `staffUids`，由管理员维护。教师的学校范围是其父学校（`user.parentSchoolId`）、本人学生记录所在学校，以及 `staffUids` 包含本人的学校，再去掉不存在的学校。考试基础设施使用同一口径。
+- 教师拥有管理自己的用户组及其成员的权限 `PERM_MANAGE_OWN_USER_GROUP`，该权限属于 `PERM_TEACHER`。普通账号没有该权限。
+- 只有所有者可以改名、改成员、归档、删除或清空该组。课程维护者只能挂上自己可挂的组，或把组摘掉。没有组协作者。管理员全权。
+- 教师可以从本校学生记录里勾选成员加入或移出自己的组；也可以批量粘贴「学号 姓名」：学号已存在且姓名一致就入组，姓名不一致按既有规则失败，学号不存在就新建由该教师创建的学生记录，之后照常自动绑定。不开放教师侧邀请链接。
+- 教师只能删除同时满足以下全部条件的学生记录：`createdBy` 为本人、`boundUserId` 为空、`groupIds` 里只有本人拥有的组（可以为空）。教师不能编辑任何学生记录的学号、姓名、入学年或绑定关系。
+- 受限执行者只能挂同时满足以下全部条件的组：组存在、未归档、组所属学校在本人学校范围内，且要么本人是所有者，要么没有所有者且已开放给教师。不受限执行者可以挂本域任意存在的组，包括已归档的组。
+- 不受限执行者是：课程为系统管理员（`PRIV_EDIT_SYSTEM`）或持有课程编辑权限（`PERM_EDIT_COURSE`）；比赛为系统管理员或持有比赛编辑权限（`PERM_EDIT_CONTEST`）；作业为系统管理员或持有作业编辑权限（`PERM_EDIT_HOMEWORK`）；收集为系统管理员或持有收集管理权限（`PERM_MANAGE_COLLECT`）；任务为系统管理员。其余人都是受限执行者。
+- 保存时只对新增的组 id 做可挂判断。未改变的 id 只要求组仍然存在。移除任何 id 不做检查。新建或复制的对象没有先前的 id。
+- 复制课程要检查源课程上的每个组。受限执行者若有不能挂的组，保存失败并列出组名，不得静默丢弃。
+- 作业与比赛的参赛范围、文件收集的受众、任务的可见范围使用同一套可挂规则。
+- 删除自己的组与管理员同一规则：已归档、无成员、没有活引用。不级联删除。
+- 管理员转移所有者时，目标用户必须存在，且该组所属学校在目标用户的学校范围内，否则拒绝。清除所有者后该组成为学校组，`teacherAttachable` 保持缺省（不开放）。
+- 不做迁移、回填或主动清理。
+- 教师打开不属于自己或不在本人学校范围内的组，一律得到「用户组不存在或不属于你」，不泄露该组是否存在。面向教师的报错都是完整中文句子。
 
 ## 课程视频协议
 

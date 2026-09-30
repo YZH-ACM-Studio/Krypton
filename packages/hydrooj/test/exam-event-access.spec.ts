@@ -12,6 +12,7 @@ const { ContestNotFoundError } = require('../src/error.ts') as typeof import('..
 
 const schoolA = new ObjectId('66b800000000000000000301');
 const schoolB = new ObjectId('66b800000000000000000302');
+const schoolC = new ObjectId('66b800000000000000000303');
 
 function actor(uid: number, permissions: bigint[] = [], privileges: number[] = [], schools: ObjectId[] = []) {
     return {
@@ -41,6 +42,7 @@ registerStudentDirectory(
         schools: [
             { _id: schoolA, domainId: 'system', name: 'A' },
             { _id: schoolB, domainId: 'system', name: 'B' },
+            { _id: schoolC, domainId: 'system', name: 'C', staffUids: [7] },
         ],
     }),
 );
@@ -141,5 +143,14 @@ describe('ExamEvent school and role authorization', () => {
         const dangling = event({ type: 'krypton', contestId: new ObjectId('66b800000000000000000999') });
         await access.assertCanManageExamEvent('system', dangling, administrator);
         await access.assertCanManageExamEvent('system', dangling, owner);
+    });
+
+    it('admits a teacher listed only in staffUids and rejects a teacher who is not listed', async () => {
+        const listed = actor(7, [PERM.PERM_CREATE_EXAM_EVENT], [], []);
+        const unlisted = actor(8, [PERM.PERM_CREATE_EXAM_EVENT], [], []);
+        expect((await access.resolveExamEventSchoolScope('system', listed)).map((id) => id.toHexString())).to.deep.equal([schoolC.toHexString()]);
+        expect(await rejects(() => access.assertExamEventSchoolAccess('system', schoolC, listed))).to.equal(null);
+        expect((await access.resolveExamEventSchoolScope('system', unlisted)).map((id) => id.toHexString())).to.deep.equal([]);
+        expect(await rejects(() => access.assertExamEventSchoolAccess('system', schoolC, unlisted))).to.have.property('name', 'PermissionError');
     });
 });

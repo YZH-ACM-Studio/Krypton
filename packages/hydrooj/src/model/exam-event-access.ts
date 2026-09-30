@@ -2,6 +2,7 @@ import { ObjectId } from 'mongodb';
 import { ContestNotFoundError, PermissionError, ValidationError } from '../error';
 import { PERM, PRIV } from './builtin';
 import type { ExamEventDoc } from './exam-event';
+import { resolveStaffSchoolScope } from '../lib/staff-school-scope';
 import { studentDirectory } from '../service/student-directory';
 
 export interface ExamEventActor {
@@ -16,16 +17,7 @@ export function isExamInfrastructureAdmin(actor: ExamEventActor): boolean {
 }
 
 export async function resolveExamEventSchoolScope(domainId: string, actor: ExamEventActor): Promise<ObjectId[]> {
-    const userbind = studentDirectory();
-    const values: ObjectId[] = [];
-    for (const schoolId of actor.parentSchoolId || []) {
-        if (schoolId instanceof ObjectId) values.push(schoolId);
-    }
-    const student = await userbind.findStudentByUserId(domainId, actor._id);
-    if (student?.schoolId instanceof ObjectId) values.push(student.schoolId);
-    const unique = Array.from(new Map(values.map((schoolId) => [schoolId.toHexString(), schoolId])).values());
-    const existing = await Promise.all(unique.map(async (schoolId) => ((await userbind.getSchool(domainId, schoolId)) ? schoolId : null)));
-    return existing.filter((schoolId): schoolId is ObjectId => schoolId !== null);
+    return resolveStaffSchoolScope(domainId, actor);
 }
 
 export async function assertExamEventSchoolAccess(domainId: string, schoolId: ObjectId, actor: ExamEventActor): Promise<void> {

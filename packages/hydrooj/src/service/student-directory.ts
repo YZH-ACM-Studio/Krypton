@@ -16,6 +16,7 @@ export interface StudentDirectorySchool {
     _id: ObjectId;
     domainId: string;
     name: string;
+    staffUids?: number[];
 }
 
 export interface StudentDirectoryGroup {
@@ -24,6 +25,8 @@ export interface StudentDirectoryGroup {
     schoolId: ObjectId;
     name: string;
     archivedAt?: Date | null;
+    ownerUid?: number;
+    teacherAttachable?: boolean;
 }
 
 export interface ExamRosterUserbindSnapshot {

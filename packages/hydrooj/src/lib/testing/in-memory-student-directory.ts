@@ -41,6 +41,8 @@ function byStudentIdThenRecordId(left: StudentDirectoryStudent, right: StudentDi
  * Test adapter answering the directory from plain arrays with the filters krypton-userbind applies in Mongo.
  * Exam roster snapshots and Vigil student lookup depend on krypton-userbind's own canonicalization and contest
  * eligibility, so tests that reach them assign those two methods on the instance.
+ * Optional `staffUids`, `ownerUid`, and `teacherAttachable` are returned as stored.
+ * A missing field stays missing; do not default it to an empty array or false.
  */
 export class InMemoryStudentDirectory implements StudentDirectory {
     students: StudentDirectoryStudent[];

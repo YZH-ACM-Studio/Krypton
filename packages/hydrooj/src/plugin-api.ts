@@ -43,6 +43,8 @@ export { Collections } from './service/db';
 export { ConnectionHandler, Handler, requireSudo } from './service/server';
 export { registerStudentDirectory, studentDirectory, StudentDirectoryUnavailableError, withStudentDirectory } from './service/student-directory';
 export type { StudentDirectory } from './service/student-directory';
+export { isSchoolInStaffScope, resolveStaffSchoolScope } from './lib/staff-school-scope';
+export type { StaffScopeActor } from './lib/staff-school-scope';
 export { Context, Fiber, FiberState, Service } from './context';
 export { buildContent } from './lib/content';
 export { default as mime } from './lib/mime';
@@ -58,12 +60,12 @@ export * from './lib/problem-config';
 export * from './lib/exam-lock';
 export { tryReadStoredCourseExam } from './lib/course-exam';
 export {
+    buildCourseExamCompletionResolution,
     COURSE_EXAM_FINALIZE_GRACE_MS,
     isCourseExamCompleteFromStatus,
     isCourseExamEnded,
     isCourseExamWindowClosed,
     shouldSettleCourseExam,
-    buildCourseExamCompletionResolution,
 } from './lib/course-exam-complete';
 export type { CourseExamCompletionLockKind, CourseExamCompletionResolution } from './lib/course-exam-complete';
 export { hasCompletedCourseExam, resolveCourseExamCompletion } from './lib/course-exam-gate';

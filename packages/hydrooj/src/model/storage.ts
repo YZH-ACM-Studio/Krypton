@@ -13,6 +13,29 @@ import storage from '../service/storage';
 import ScheduleModel from './schedule';
 import system from './system';
 
+function assertStorageMetaRecord(metaData: unknown): asserts metaData is Record<string, string | number> {
+    if (typeof metaData !== 'object' || metaData === null || Array.isArray(metaData)) {
+        throw new TypeError('storage metadata must be a record of string or number');
+    }
+    const prototype = Object.getPrototypeOf(metaData);
+    if (prototype !== Object.prototype && prototype !== null) {
+        throw new TypeError('storage metadata must be a record of string or number');
+    }
+    if (Object.getOwnPropertySymbols(metaData).length > 0) {
+        throw new TypeError('storage metadata must be a record of string or number');
+    }
+    for (const key of Object.getOwnPropertyNames(metaData)) {
+        const descriptor = Object.getOwnPropertyDescriptor(metaData, key);
+        if (!descriptor || !Object.hasOwn(descriptor, 'value')) {
+            throw new TypeError(`storage metadata field ${key} must be a string or number`);
+        }
+        const value: unknown = descriptor.value;
+        if (typeof value !== 'string' && typeof value !== 'number') {
+            throw new TypeError(`storage metadata field ${key} must be a string or number`);
+        }
+    }
+}
+
 export class StorageModel {
     static coll = db.collection('storage');
 
@@ -33,6 +56,7 @@ export class StorageModel {
             () => storage.getMeta(_id),
             () => StorageModel.del([path]),
             async ({ metaData, size, etag }) => {
+                assertStorageMetaRecord(metaData);
                 await StorageModel.coll.insertOne({
                     _id,
                     meta: metaData,

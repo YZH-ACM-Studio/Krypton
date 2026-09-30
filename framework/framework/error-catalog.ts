@@ -2664,6 +2664,8 @@ const CHINESE_ERROR_MESSAGE_ENGLISH_TRANSLATIONS: Readonly<Record<string, string
     你不能在这所学校建用户组: 'You cannot create a user group in this school.',
     '部分学生不属于该用户组所在学校，请刷新后重试': 'Some students do not belong to the school of this user group. Reload and try again.',
     学生记录参数无效: 'The student record parameter is invalid.',
+    用户不存在: 'The user does not exist.',
+    目标用户不在该学校的教师范围内: "The target user is not in this school's teacher scope.",
 });
 
 export const ERROR_MESSAGE_TRANSLATIONS: Readonly<Record<string, ErrorMessageTranslation>> = Object.freeze({

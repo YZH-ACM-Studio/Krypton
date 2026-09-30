@@ -4,7 +4,8 @@
  * Templates set on `this.response.template` are consumed by ui-next's PAGE_MAP
  * (see packages/ui-next/src/pages/resolver.tsx).
  */
-import { localizedErrorText, Context, Handler, NotFoundError, ObjectId, OplogModel, param, PRIV, Types, UserModel, ValidationError } from 'hydrooj';
+import { Logger } from '@hydrooj/utils';
+import { localizedErrorText, Context, Handler, isSchoolInStaffScope, NotFoundError, ObjectId, OplogModel, param, PRIV, Types, UserModel, ValidationError } from 'hydrooj';
 import { bindingRequestsColl, bindTokensColl, schoolsColl, studentsColl, userGroupsColl } from './db';
 import { BindingRequiredError } from './errors';
 import { decideForceBind, isForceBindEnabled, shouldForceBindSubject, wantsForceBindHtml, type ForceBindSubject } from './force-bind';
@@ -46,6 +47,39 @@ class UserbindAdminHandler extends Handler {
     }
 }
 
+const logger = new Logger('userbind.admin');
+
+function warnAdminRejection(domainId: string, uid: number, stage: string, reason: string): void {
+    logger.warn('domain=%s uid=%s stage=%s reason=%s', domainId, uid, stage, reason);
+}
+
+async function loadUsernames(domainId: string, uids: readonly number[]): Promise<Map<number, string>> {
+    const names = new Map<number, string>();
+    await Promise.all(
+        [...new Set(uids)].map(async (uid) => {
+            const user = await UserModel.getById(domainId, uid);
+            if (user && typeof user.uname === 'string') names.set(uid, user.uname);
+        }),
+    );
+    return names;
+}
+
+// 响应投影。缺字段保持数据库原样，不回填。
+function projectAdminGroup<T extends { ownerUid?: number; teacherAttachable?: boolean }>(group: T, names: ReadonlyMap<number, string>) {
+    const ownerUid = typeof group.ownerUid === 'number' ? group.ownerUid : null;
+    return {
+        ...group,
+        ownerUid,
+        ownerName: ownerUid === null ? null : (names.get(ownerUid) ?? null),
+        teacherAttachable: group.teacherAttachable === true,
+    };
+}
+
+function projectSchoolStaff(staffUids: readonly number[] | undefined, names: ReadonlyMap<number, string>) {
+    if (!staffUids) return [];
+    return staffUids.map((uid) => ({ uid, uname: names.get(uid) ?? '' }));
+}
+
 async function buildSchoolDetailData(
     domainId: string,
     schoolId: ObjectId,
@@ -72,8 +106,9 @@ async function buildSchoolDetailData(
     const groupQuery = (options.groupQuery || '').trim();
     const importQuery = (options.importQuery || '').trim();
     const tab = ['students', 'import', 'groups', 'links'].includes(options.tab || '') ? options.tab : 'students';
+    const staffIds = (school.staffUids || []).filter((uid): uid is number => typeof uid === 'number');
 
-    const [allGroups, { docs: students, total: studentTotal }, schoolTokens, groupCounts, importSearchResults] = await Promise.all([
+    const [allGroups, { docs: students, total: studentTotal }, schoolTokens, groupCounts, importSearchResults, staffNames] = await Promise.all([
         userBindModel.listUserGroups(domainId, schoolId),
         userBindModel.listStudents(domainId, {
             schoolId,
@@ -94,6 +129,7 @@ async function buildSchoolDetailData(
             }>([{ $match: { domainId, schoolId } }, { $unwind: '$groupIds' }, { $group: { _id: '$groupIds', count: { $sum: 1 } } }])
             .toArray(),
         importQuery ? userBindModel.searchBindableUsers(domainId, schoolId, importQuery, 50) : Promise.resolve([]),
+        loadUsernames(domainId, staffIds),
     ]);
 
     const groupMemberCount: Record<string, number> = {};
@@ -124,6 +160,7 @@ async function buildSchoolDetailData(
         importSearchResults,
         importQ: importQuery,
         importReport: options.importReport || null,
+        staff: projectSchoolStaff(school.staffUids, staffNames),
     };
 }
 
@@ -181,7 +218,7 @@ class AdminSchoolsHandler extends UserbindAdminHandler {
     }
 }
 
-class AdminSchoolDetailHandler extends UserbindAdminHandler {
+export class AdminSchoolDetailHandler extends UserbindAdminHandler {
     @param('schoolId', Types.ObjectId)
     @param('tab', Types.String, true)
     @param('q', Types.String, true)
@@ -272,14 +309,59 @@ class AdminSchoolDetailHandler extends UserbindAdminHandler {
             importReport: { ...importReport, preflightInvalid },
         });
     }
+
+    @param('schoolId', Types.ObjectId)
+    @param('uid', Types.Int)
+    async postAddStaff({ domainId }: { domainId: string }, schoolId: ObjectId, uid: number) {
+        const user = await UserModel.getById(domainId, uid);
+        if (!user) {
+            warnAdminRejection(domainId, this.user._id, 'add_staff', 'user_not_found');
+            throw new ValidationError('uid', null, localizedErrorText`用户不存在`);
+        }
+        try {
+            await userBindModel.addSchoolStaff(domainId, schoolId, uid);
+        } catch (error) {
+            warnAdminRejection(domainId, this.user._id, 'add_staff', 'model_rejected');
+            throw error;
+        }
+        await OplogModel.log(this, 'userbind.admin.add_staff', {
+            uid: this.user._id,
+            schoolId,
+            staffUid: uid,
+        });
+        this.response.redirect = this.url('admin_userbind_school_detail', { schoolId });
+    }
+
+    @param('schoolId', Types.ObjectId)
+    @param('uid', Types.Int)
+    async postRemoveStaff({ domainId }: { domainId: string }, schoolId: ObjectId, uid: number) {
+        const school = await userBindModel.getSchool(domainId, schoolId);
+        if (!school) {
+            warnAdminRejection(domainId, this.user._id, 'remove_staff', 'school_not_found');
+            throw new ValidationError('schoolId', null, localizedErrorText`School not found`);
+        }
+        await userBindModel.removeSchoolStaff(domainId, schoolId, uid);
+        await OplogModel.log(this, 'userbind.admin.remove_staff', {
+            uid: this.user._id,
+            schoolId,
+            staffUid: uid,
+        });
+        this.response.redirect = this.url('admin_userbind_school_detail', { schoolId });
+    }
 }
 
-class AdminGroupsHandler extends UserbindAdminHandler {
+export class AdminGroupsHandler extends UserbindAdminHandler {
     @param('schoolId', Types.ObjectId, true)
     async get({ domainId }: { domainId: string }, schoolId?: ObjectId) {
         const [groups, schools] = await Promise.all([userBindModel.listUserGroups(domainId, schoolId), userBindModel.listSchools(domainId)]);
+        const ownerIds = groups.flatMap((group) => (typeof group.ownerUid === 'number' ? [group.ownerUid] : []));
+        const ownerNames = await loadUsernames(domainId, ownerIds);
         this.response.template = 'admin_userbind_groups.html';
-        this.response.body = { groups, schools, filterSchoolId: schoolId };
+        this.response.body = {
+            groups: groups.map((group) => projectAdminGroup(group, ownerNames)),
+            schools,
+            filterSchoolId: schoolId,
+        };
     }
 
     @param('schoolId', Types.ObjectId)
@@ -364,7 +446,7 @@ async function buildGroupDetailData(
     const membersLimit = 50;
     const page = Math.max(1, options.memberPage || 1);
     const membersSkip = (page - 1) * membersLimit;
-    const [{ docs: rawMembers, total: memberTotal }, groupTokens, school, unboundMemberCount] = await Promise.all([
+    const [{ docs: rawMembers, total: memberTotal }, groupTokens, school, unboundMemberCount, ownerNames] = await Promise.all([
         userBindModel.listStudents(domainId, {
             groupId,
             skip: membersSkip,
@@ -377,6 +459,7 @@ async function buildGroupDetailData(
             groupIds: groupId,
             $or: [{ boundUserId: null }, { boundUserId: { $exists: false } }],
         } as any),
+        loadUsernames(domainId, typeof group.ownerUid === 'number' ? [group.ownerUid] : []),
     ]);
 
     const boundUids = Array.from(new Set(rawMembers.map((m) => m.boundUserId).filter((uid): uid is number => typeof uid === 'number')));
@@ -409,7 +492,7 @@ async function buildGroupDetailData(
     }
 
     return {
-        group,
+        group: projectAdminGroup(group, ownerNames),
         members,
         groupTokens,
         school,
@@ -424,7 +507,7 @@ async function buildGroupDetailData(
     };
 }
 
-class AdminGroupDetailHandler extends UserbindAdminHandler {
+export class AdminGroupDetailHandler extends UserbindAdminHandler {
     @param('groupId', Types.ObjectId)
     @param('tab', Types.String, true)
     @param('q', Types.String, true)
@@ -538,6 +621,79 @@ class AdminGroupDetailHandler extends UserbindAdminHandler {
             tab: 'add',
             importReport: { ...importReport, preflightInvalid },
         });
+    }
+
+    @param('groupId', Types.ObjectId)
+    @param('value', Types.Any)
+    async postSetTeacherAttachable({ domainId }: { domainId: string }, groupId: ObjectId, value: unknown) {
+        // 表单提交字符串 true/false。Types.Boolean 会把布尔 false 当成缺省丢掉。
+        let normalized: boolean | undefined;
+        if (value === true || value === 'true') normalized = true;
+        else if (value === false || value === 'false') normalized = false;
+        if (normalized === undefined) {
+            warnAdminRejection(domainId, this.user._id, 'set_teacher_attachable', 'invalid_value');
+            throw new ValidationError('value');
+        }
+        const group = await userBindModel.getUserGroup(domainId, groupId);
+        try {
+            await userBindModel.setGroupTeacherAttachable(domainId, groupId, normalized);
+        } catch (error) {
+            warnAdminRejection(domainId, this.user._id, 'set_teacher_attachable', 'model_rejected');
+            throw error;
+        }
+        await OplogModel.log(this, 'userbind.admin.set_teacher_attachable', {
+            uid: this.user._id,
+            groupId,
+            schoolId: group?.schoolId,
+            value: normalized,
+        });
+        this.response.redirect = this.url('admin_userbind_group_detail', { groupId });
+    }
+
+    @param('groupId', Types.ObjectId)
+    @param('ownerUid', Types.Int)
+    async postTransferOwner({ domainId }: { domainId: string }, groupId: ObjectId, ownerUid: number) {
+        const group = await userBindModel.getUserGroup(domainId, groupId);
+        if (!group) {
+            warnAdminRejection(domainId, this.user._id, 'transfer_owner', 'group_not_found');
+            throw new ValidationError('groupId', null, localizedErrorText`用户组不存在`);
+        }
+        const user = await UserModel.getById(domainId, ownerUid);
+        if (!user) {
+            warnAdminRejection(domainId, this.user._id, 'transfer_owner', 'user_not_found');
+            throw new ValidationError('ownerUid', null, localizedErrorText`用户不存在`);
+        }
+        // 范围 actor 只带目标用户的 _id，不带 parentSchoolId，也不是当前管理员。
+        const inScope = await isSchoolInStaffScope(domainId, { _id: ownerUid }, group.schoolId);
+        if (!inScope) {
+            warnAdminRejection(domainId, this.user._id, 'transfer_owner', 'school_out_of_scope');
+            throw new ValidationError('ownerUid', null, localizedErrorText`目标用户不在该学校的教师范围内`);
+        }
+        await userBindModel.setGroupOwner(domainId, groupId, ownerUid);
+        await OplogModel.log(this, 'userbind.admin.transfer_owner', {
+            uid: this.user._id,
+            groupId,
+            schoolId: group.schoolId,
+            ownerUid,
+        });
+        this.response.redirect = this.url('admin_userbind_group_detail', { groupId });
+    }
+
+    @param('groupId', Types.ObjectId)
+    async postClearOwner({ domainId }: { domainId: string }, groupId: ObjectId) {
+        const group = await userBindModel.getUserGroup(domainId, groupId);
+        if (!group) {
+            warnAdminRejection(domainId, this.user._id, 'clear_owner', 'group_not_found');
+            throw new ValidationError('groupId', null, localizedErrorText`用户组不存在`);
+        }
+        // 只清 ownerUid。不写 teacherAttachable。
+        await userBindModel.clearGroupOwner(domainId, groupId);
+        await OplogModel.log(this, 'userbind.admin.clear_owner', {
+            uid: this.user._id,
+            groupId,
+            schoolId: group.schoolId,
+        });
+        this.response.redirect = this.url('admin_userbind_group_detail', { groupId });
     }
 }
 

@@ -39,6 +39,7 @@ import { MiniTabs } from '@/components/ui/mini-tabs';
 import { Pagination } from '@/components/ui/pagination';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { SimpleSelect } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { TableAction, TableActions } from '@/components/ui/table-actions';
 import { type ImportResult, ImportResultPanel, RosterImporter } from '@/components/userbind/roster-importer';
@@ -524,10 +525,156 @@ function SchoolGroupsList({
   );
 }
 
+interface UserGroupAdminOwnership {
+  ownerUid: number | null;
+  ownerName: string | null;
+  teacherAttachable: boolean;
+}
+
+interface SchoolStaffMember {
+  uid: number;
+  uname: string;
+}
+
+function isTeacherOwnedGroup(ownerUid: number | null): ownerUid is number {
+  return typeof ownerUid === 'number';
+}
+
+function teacherGroupTypeLabel(ownerName: string | null): string {
+  if (ownerName) return `老师组 · ${ownerName}`;
+  return '老师组';
+}
+
+function teacherOwnerText(ownerUid: number, ownerName: string | null): string {
+  if (ownerName) return `${ownerName}（UID ${ownerUid}）`;
+  return `UID ${ownerUid}`;
+}
+
+function TeacherAttachableForm({ enabled }: { enabled: boolean }) {
+  const [openToTeachers, setOpenToTeachers] = useState(enabled);
+  return (
+    <Card>
+      <CardHeader className="px-5 pb-3 pt-5">
+        <CardTitle className="text-base">开放给老师</CardTitle>
+      </CardHeader>
+      <CardContent className="px-5 pb-5">
+        <form method="post" className="flex flex-wrap items-center gap-3">
+          <input type="hidden" name="operation" value="setTeacherAttachable" />
+          {/* 未勾选的 checkbox 不会进 POST；这里始终提交 true 或 false。 */}
+          <input type="hidden" name="value" value={openToTeachers ? 'true' : 'false'} />
+          <div className="flex items-center gap-2 text-sm">
+            <Switch id="teacher-attachable" checked={openToTeachers} onCheckedChange={setOpenToTeachers} aria-label="开放给老师" />
+            <label htmlFor="teacher-attachable">开放给老师</label>
+          </div>
+          <Button type="submit" size="sm">
+            保存
+          </Button>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}
+
+function GroupOwnershipPanel({ group }: { group: { _id: string; name: string } & UserGroupAdminOwnership }) {
+  if (isTeacherOwnedGroup(group.ownerUid)) {
+    return (
+      <section aria-label="用户组归属">
+        <Card>
+          <CardHeader className="px-5 pb-3 pt-5">
+            <CardTitle className="text-base">所有者</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4 px-5 pb-5">
+            <p className="text-sm">所有者：{teacherOwnerText(group.ownerUid, group.ownerName)}</p>
+            <form method="post" className="flex flex-wrap items-end gap-2">
+              <input type="hidden" name="operation" value="transferOwner" />
+              <label className="space-y-1 text-xs font-medium text-muted-foreground">
+                新所有者 UID
+                <Input name="ownerUid" type="number" required inputMode="numeric" />
+              </label>
+              <Button type="submit" size="sm">
+                转移所有者
+              </Button>
+            </form>
+            <TableActions>
+              <TableAction
+                formAction=""
+                variant="destructive"
+                confirm={`确认把用户组「${group.name}」改为学校组？改完后不再属于原来的老师，并且默认不开放给老师。`}
+                hidden={{ operation: 'clearOwner' }}
+              >
+                改为学校组
+              </TableAction>
+            </TableActions>
+          </CardContent>
+        </Card>
+      </section>
+    );
+  }
+  return (
+    <section aria-label="用户组归属">
+      <TeacherAttachableForm key={`${group._id}:${group.teacherAttachable === true ? '1' : '0'}`} enabled={group.teacherAttachable === true} />
+    </section>
+  );
+}
+
+function SchoolStaffSection({ staff }: { staff: SchoolStaffMember[] }) {
+  return (
+    <section aria-label="本校教师">
+      <Card>
+        <CardHeader className="px-5 pb-3 pt-5">
+          <CardTitle className="text-base">本校教师</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4 px-5 pb-5">
+          {staff.length === 0 ? (
+            <p className="text-sm text-muted-foreground">还没有本校教师。</p>
+          ) : (
+            <ul className="divide-y divide-border/60 rounded-md border">
+              {staff.map((member) => {
+                const who = member.uname ? `「${member.uname}」（UID ${member.uid}）` : ` UID ${member.uid} `;
+                return (
+                  <li key={member.uid} className="flex flex-wrap items-center justify-between gap-3 px-3 py-2.5">
+                    <span className="min-w-0 text-sm">
+                      {member.uname ? <span className="font-medium">{member.uname}</span> : null}
+                      <span className={member.uname ? 'ml-2 font-mono text-xs text-muted-foreground' : 'font-mono text-xs text-muted-foreground'}>
+                        UID {member.uid}
+                      </span>
+                    </span>
+                    <TableActions>
+                      <TableAction
+                        formAction=""
+                        variant="destructive"
+                        confirm={`确认将${who}从本校教师名单中移除？`}
+                        hidden={{ operation: 'removeStaff', uid: member.uid }}
+                      >
+                        移除
+                      </TableAction>
+                    </TableActions>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <form method="post" className="flex flex-wrap items-end gap-2">
+            <input type="hidden" name="operation" value="addStaff" />
+            <label className="space-y-1 text-xs font-medium text-muted-foreground">
+              用户 UID
+              <Input name="uid" type="number" required inputMode="numeric" />
+            </label>
+            <Button type="submit" size="sm">
+              添加教师
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+    </section>
+  );
+}
+
 export function AdminUserbindSchoolDetailPage() {
   const bs = useBootstrap();
   const data = bs.page.data as {
     school: { _id: string; name: string };
+    staff: SchoolStaffMember[];
     groups: Array<{ _id: string; name: string; memberCount: number }>;
     groupTotal: number;
     groupPage: number;
@@ -604,6 +751,8 @@ export function AdminUserbindSchoolDetailPage() {
           value={activeTab}
         />
       </div>
+
+      <SchoolStaffSection staff={data.staff} />
 
       {activeTab === 'students' && (
         <div className="space-y-4">
@@ -792,7 +941,7 @@ export function AdminUserbindSchoolDetailPage() {
 
 export function AdminUserbindGroupsPage() {
   const data = useBootstrap().page.data as {
-    groups: Array<{ _id: string; name: string; schoolId: string; archivedAt?: string }>;
+    groups: Array<{ _id: string; name: string; schoolId: string; archivedAt?: string } & UserGroupAdminOwnership>;
     schools: Array<{ _id: string; name: string }>;
   };
   const schoolNameById = new Map(data.schools.map((s) => [s._id, s.name]));
@@ -834,6 +983,7 @@ export function AdminUserbindGroupsPage() {
               <TableRow>
                 <TableHead className="pl-5">名称</TableHead>
                 <TableHead>所属学校</TableHead>
+                <TableHead>类型</TableHead>
                 <TableHead className="w-72">操作</TableHead>
               </TableRow>
             </TableHeader>
@@ -849,6 +999,20 @@ export function AdminUserbindGroupsPage() {
                     ) : null}
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">{schoolNameById.get(g.schoolId) || g.schoolId}</TableCell>
+                  <TableCell>
+                    {isTeacherOwnedGroup(g.ownerUid) ? (
+                      teacherGroupTypeLabel(g.ownerName)
+                    ) : (
+                      <span className="inline-flex flex-wrap items-center gap-2">
+                        <span>学校组</span>
+                        {g.teacherAttachable === true ? (
+                          <Badge variant="secondary" className="text-[10px]">
+                            开放给老师
+                          </Badge>
+                        ) : null}
+                      </span>
+                    )}
+                  </TableCell>
                   <TableCell>
                     <TableActions>
                       <TableAction href={`/admin/userbind/groups/${g._id}`}>查看</TableAction>
@@ -884,7 +1048,7 @@ export function AdminUserbindGroupsPage() {
               ))}
               {visibleGroups.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={3} className="py-8 text-center text-sm text-muted-foreground">
+                  <TableCell colSpan={4} className="py-8 text-center text-sm text-muted-foreground">
                     {data.schools.length === 0
                       ? '请先在「学校」页创建一个学校，再回来创建用户组。'
                       : data.groups.length > 0
@@ -976,7 +1140,7 @@ function CreateGroupDialog({ open, onClose, schools }: { open: boolean; onClose:
 
 export function AdminUserbindGroupDetailPage() {
   const data = useBootstrap().page.data as {
-    group: { _id: string; name: string; archivedAt?: string };
+    group: { _id: string; name: string; archivedAt?: string } & UserGroupAdminOwnership;
     school: { _id: string; name: string } | null;
     members: Array<{
       _id: string;
@@ -1028,6 +1192,7 @@ export function AdminUserbindGroupDetailPage() {
       }
     >
       <div className="flex flex-col gap-4">
+        <GroupOwnershipPanel group={data.group} />
         <div className="min-w-0 max-w-full overflow-x-auto">
           <MiniTabs
             value={activeTab}
@@ -1756,7 +1921,10 @@ export function AdminUserbindRequestsPage() {
                             const form = e.currentTarget;
                             const reason = await promptDialog('驳回理由（必填）：');
                             if (reason === null) return;
-                            if (!reason.trim()) { await alertDialog('请填写驳回理由'); return; }
+                            if (!reason.trim()) {
+                              await alertDialog('请填写驳回理由');
+                              return;
+                            }
                             const reasonInput = form.querySelector('input[name=reason]');
                             if (!(reasonInput instanceof HTMLInputElement)) return;
                             reasonInput.value = reason;

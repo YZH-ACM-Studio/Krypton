@@ -10,6 +10,8 @@ export interface School {
     name: string;
     createdAt: Date;
     createdBy: number;
+    /** 本校教师，只由管理员维护。 */
+    staffUids?: number[];
 }
 
 /**
@@ -23,6 +25,10 @@ export interface UserGroup {
     name: string;
     createdAt: Date;
     createdBy: number;
+    /** 老师组的所有者；缺字段表示学校组。 */
+    ownerUid?: number;
+    /** 只对学校组有意义；缺字段表示不开放。 */
+    teacherAttachable?: boolean;
     /**
      * Soft-delete marker (PLAN 2026-07-02 §9). Archived groups keep student
      * membership intact and stay resolvable in历史筛选; pickers render them

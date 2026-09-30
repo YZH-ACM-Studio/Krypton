@@ -290,6 +290,16 @@ export async function deleteSchool(domainId: string, id: ObjectId): Promise<void
     await schoolsColl.deleteOne({ domainId, _id: id });
 }
 
+export async function addSchoolStaff(domainId: string, schoolId: ObjectId, uid: number): Promise<void> {
+    const school = await schoolsColl.findOne({ domainId, _id: schoolId });
+    if (!school) throw new ValidationError('schoolId', null, localizedErrorText`School not found`);
+    await schoolsColl.updateOne({ domainId, _id: schoolId }, { $addToSet: { staffUids: uid } as any });
+}
+
+export async function removeSchoolStaff(domainId: string, schoolId: ObjectId, uid: number): Promise<void> {
+    await schoolsColl.updateOne({ domainId, _id: schoolId }, { $pull: { staffUids: uid } as any });
+}
+
 // ─── UserGroups ───────────────────────────────────────────────────────────
 
 export async function createUserGroup(
@@ -298,6 +308,7 @@ export async function createUserGroup(
     name: string,
     createdBy: number,
     groupId = new ObjectId(),
+    options: { ownerUid?: number } = {},
 ): Promise<UserGroup> {
     name = name.trim();
     if (!name) throw new ValidationError('name');
@@ -311,6 +322,7 @@ export async function createUserGroup(
         createdAt: nowDate(),
         createdBy,
     };
+    if (options.ownerUid !== undefined) doc.ownerUid = options.ownerUid;
     try {
         await userGroupsColl.insertOne(doc);
     } catch (e: any) {
@@ -426,31 +438,60 @@ export async function deleteUserGroup(domainId: string, id: ObjectId): Promise<v
     }
     // References that would dangle: task graphs store the group as a hex
     // string in node params; task访问范围 (TaskDoc.access) stores it as an
-    // ObjectId; courses/trainings via groupIds; contests/homework via
+    // ObjectId; courses/trainings via courseGroupIds; contests/homework via
     // participantGroupIds. Query raw collections to avoid cross-plugin
     // import cycles.
     const hex = id.toHexString();
-    const [taskRefs, courseRefs, contestRefs] = await Promise.all([
+    const [taskRefs, courseRefs, contestRefs, collectRefs] = await Promise.all([
         // $or 保证同一任务的图节点 + 可见范围双引用只计一次。
         db.collection('tasks.tasks' as any).countDocuments({
             domainId,
             $or: [{ 'graph.nodes.params.targetId': hex }, { 'access.type': 'user_group', 'access.targetId': id }],
         }),
-        db.collection('document' as any).countDocuments({ domainId, docType: 40, groupIds: id }),
+        db.collection('document' as any).countDocuments({ domainId, docType: 40, courseGroupIds: id }),
         db.collection('document' as any).countDocuments({ domainId, docType: 30, participantGroupIds: id }),
+        db.collection('collect.requests' as any).countDocuments({ domainId, groupIds: id }),
     ]);
     if (taskRefs > 0) {
         throw new ValidationError('groupId', null, localizedErrorText`该用户组被 ${taskRefs} 个任务引用（图节点或可见范围），请先在任务中移除`);
     }
     if (courseRefs > 0) {
-        throw new ValidationError('groupId', null, localizedErrorText`该用户组被 ${courseRefs} 个课程/训练引用，请先在其中移除`);
+        throw new ValidationError('groupId', null, localizedErrorText`该用户组被 ${courseRefs} 门课程引用，请先在课程中移除`);
     }
     if (contestRefs > 0) {
         throw new ValidationError('groupId', null, localizedErrorText`该用户组被 ${contestRefs} 个比赛/作业的参赛范围引用，请先在其中移除`);
     }
+    if (collectRefs > 0) {
+        throw new ValidationError('groupId', null, localizedErrorText`该用户组被 ${collectRefs} 个文件收集引用，请先在其中移除`);
+    }
     // Clean up group invite tokens (ephemeral), then the group itself.
     await bindTokensColl.deleteMany({ domainId, kind: 'user_group', userGroupId: id } as any);
     await userGroupsColl.deleteOne({ domainId, _id: id });
+}
+
+export async function setGroupTeacherAttachable(domainId: string, groupId: ObjectId, value: boolean): Promise<void> {
+    const group = await userGroupsColl.findOne({ domainId, _id: groupId });
+    if (!group) throw new ValidationError('groupId', null, localizedErrorText`用户组不存在`);
+    if (group.ownerUid !== undefined) {
+        throw new ValidationError('groupId', null, localizedErrorText`老师的用户组不需要开放给老师使用`);
+    }
+    if (value === true) {
+        await userGroupsColl.updateOne({ domainId, _id: groupId }, { $set: { teacherAttachable: true } });
+    } else {
+        await userGroupsColl.updateOne({ domainId, _id: groupId }, { $unset: { teacherAttachable: '' } });
+    }
+}
+
+export async function setGroupOwner(domainId: string, groupId: ObjectId, ownerUid: number): Promise<void> {
+    await userGroupsColl.updateOne({ domainId, _id: groupId }, { $set: { ownerUid }, $unset: { teacherAttachable: '' } });
+}
+
+export async function clearGroupOwner(domainId: string, groupId: ObjectId): Promise<void> {
+    await userGroupsColl.updateOne({ domainId, _id: groupId }, { $unset: { ownerUid: '' } });
+}
+
+export async function listTeacherGroups(domainId: string, ownerUid: number): Promise<UserGroup[]> {
+    return await userGroupsColl.find({ domainId, ownerUid }).sort({ name: 1 }).toArray();
 }
 
 // ─── Student records ──────────────────────────────────────────────────────
@@ -976,6 +1017,36 @@ export async function deleteStudent(domainId: string, id: ObjectId): Promise<voi
     }
 }
 
+export async function deleteTeacherCreatedStudent(
+    domainId: string,
+    recordId: ObjectId,
+    actorUid: number,
+    ownedGroupIds: ObjectId[],
+): Promise<void> {
+    const doc = await studentsColl.findOne({ domainId, _id: recordId });
+    if (!doc) return;
+    if (doc.createdBy !== actorUid) {
+        throw new ValidationError('student', null, localizedErrorText`这条学生记录不是你新建的，请联系管理员处理`);
+    }
+    if (doc.boundUserId !== null) {
+        throw new ValidationError('student', null, localizedErrorText`这条学生记录已绑定账号，请联系管理员处理`);
+    }
+    if (doc.groupIds.some((groupId) => !ownedGroupIds.some((ownedId) => ownedId.equals(groupId)))) {
+        throw new ValidationError('student', null, localizedErrorText`这条学生记录还在其他用户组中，请联系管理员处理`);
+    }
+    const deleted = await studentsColl.deleteOne({
+        domainId,
+        _id: recordId,
+        createdBy: actorUid,
+        boundUserId: null,
+        groupIds: doc.groupIds,
+    });
+    if (deleted.deletedCount === 0) {
+        throw new ValidationError('student', null, localizedErrorText`学生记录刚刚被修改，请刷新后重试`);
+    }
+    await bindTokensColl.deleteMany({ domainId, kind: 'student', studentRecordId: recordId } as any);
+}
+
 export async function assignStudentsToGroup(domainId: string, groupId: ObjectId, studentRecordIds: ObjectId[]): Promise<void> {
     if (studentRecordIds.length === 0) return;
     const group = await userGroupsColl.findOne({ domainId, _id: groupId });
@@ -1024,16 +1095,22 @@ export const userBindModel = {
     getSchool,
     updateSchool,
     deleteSchool,
+    addSchoolStaff,
+    removeSchoolStaff,
 
     // Groups
     createUserGroup,
     createGroupFromBoundUsers,
     listUserGroups,
+    listTeacherGroups,
     getUserGroup,
     updateUserGroup,
     archiveUserGroup,
     unarchiveUserGroup,
     deleteUserGroup,
+    setGroupTeacherAttachable,
+    setGroupOwner,
+    clearGroupOwner,
 
     // Students
     importStudents,
@@ -1052,6 +1129,7 @@ export const userBindModel = {
     loadExamRosterUserbindSnapshot,
     updateStudent,
     deleteStudent,
+    deleteTeacherCreatedStudent,
     assignStudentsToGroup,
     removeStudentsFromGroup,
     parseRosterText,

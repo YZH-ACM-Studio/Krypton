@@ -25,6 +25,7 @@ export async function ensureIndexes(): Promise<void> {
 
         userGroupsColl.createIndex({ domainId: 1, schoolId: 1, name: 1 }, { unique: true }),
         userGroupsColl.createIndex({ domainId: 1, schoolId: 1 }),
+        userGroupsColl.createIndex({ domainId: 1, ownerUid: 1 }),
 
         studentsColl.createIndex({ domainId: 1, schoolId: 1, studentId: 1 }, { unique: true }),
         studentsColl.createIndex({ domainId: 1, boundUserId: 1 }),

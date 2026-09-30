@@ -2660,6 +2660,10 @@ const CHINESE_ERROR_MESSAGE_ENGLISH_TRANSLATIONS: Readonly<Record<string, string
     '你不能使用用户组「{0}」，只能使用自己的用户组或管理员开放给老师的本校用户组':
         'You cannot use the user group "{0}". You can only use your own user groups, or school groups at your own school that an administrator has opened to teachers.',
     用户组参数无效: 'The user group parameter is invalid.',
+    用户组不存在或不属于你: 'This user group does not exist or does not belong to you.',
+    你不能在这所学校建用户组: 'You cannot create a user group in this school.',
+    '部分学生不属于该用户组所在学校，请刷新后重试': 'Some students do not belong to the school of this user group. Reload and try again.',
+    学生记录参数无效: 'The student record parameter is invalid.',
 });
 
 export const ERROR_MESSAGE_TRANSLATIONS: Readonly<Record<string, ErrorMessageTranslation>> = Object.freeze({

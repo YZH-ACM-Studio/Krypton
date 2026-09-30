@@ -35,7 +35,6 @@ describe('course exam roster facts', () => {
         expect(courseExamRosterFact(tdoc, {
             startAt: new Date('2026-09-20T11:00:00.000Z'),
             paperFinalizedAt: finalizedAt,
-            examPaperPids: [2],
             score: 92,
         })).to.deep.equal({
             state: 'finalized',

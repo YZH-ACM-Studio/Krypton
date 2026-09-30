@@ -18,7 +18,7 @@ import {
 } from '../error';
 import { RecordDoc, Tdoc } from '../interface';
 import { canAccessPostContestPracticeRecord, canUsePostContestPractice } from '../lib/contest-correction';
-import { projectStudentContestTdoc, studentContestProblemPids } from '../lib/exam-paper';
+import { projectStudentContestTdoc, studentContestProblemPids, type ExamPaperStatusClock } from '../lib/exam-paper';
 import { canViewVirtualContestRecord, isVirtualAttemptOpen } from '../lib/virtual-contest';
 import { buildPersonalPracticeRecordQuery } from '../lib/contest-problem-status';
 import { buildExamModeRecordCodePayload, shouldUseLiveClientRecordCodeOnly } from '../lib/exam-mode-record';
@@ -50,7 +50,12 @@ import user from '../model/user';
 import { ConnectionHandler, param, subscribe, Types } from '../service/server';
 import { studentDirectory } from '../service/student-directory';
 import { buildProjection, Time } from '../utils';
-import { canManageVirtualContest, virtualContestService, type VirtualContestAttemptDoc } from '../model/virtual-contest';
+import {
+    canManageVirtualContest,
+    virtualContestService,
+    type VirtualContestActor,
+    type VirtualContestAttemptDoc,
+} from '../model/virtual-contest';
 import { assertHomeworkAccessOrHide, ContestDetailBaseHandler, hideAssignRestrictedContest } from './contest';
 
 function isContestNotFoundError(error: unknown): boolean {
@@ -64,7 +69,7 @@ async function hideLoadedContest(domainId: string, tdoc: Tdoc, actor: any) {
 }
 
 function canRejudgeVirtualOnList(
-    actor: { hasPerm(...perm: bigint[]): boolean; hasPriv(...priv: number[]): boolean; own: (doc: { owner?: number }) => boolean },
+    actor: VirtualContestActor,
     tdoc: Tdoc | undefined,
     rdocs: RecordDoc[],
 ): boolean {
@@ -163,10 +168,11 @@ async function assertVirtualContestRecordAccess(
 }
 
 export class RecordListHandler extends ContestDetailBaseHandler {
-    async __prepare(args: { tid?: ObjectId }) {
-        if (!args?.tid) return;
+    @param('tid', Types.ObjectId, true)
+    async __prepare(domainId: string, tid: ObjectId) {
+        if (!tid) return;
         try {
-            await ContestDetailBaseHandler.prototype.__prepare.call(this, args);
+            await super.__prepare(domainId, tid);
         } catch (error) {
             if (this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM) && this.tdoc && isContestNotFoundError(error)) return;
             throw error;
@@ -807,7 +813,7 @@ export class RecordMainConnectionHandler extends ConnectionHandler {
     pretest = false;
     practice = false;
     practiceTid?: string;
-    practiceTsdoc?: { attend?: number };
+    practiceTsdoc?: { attend?: number } & Pick<ExamPaperStatusClock, 'startAt' | 'examPaperPids'>;
     tdoc: Tdoc;
     applyProjection = false;
     noTemplate = false;
@@ -1001,7 +1007,9 @@ export class RecordMainConnectionHandler extends ConnectionHandler {
         const studentTdoc = tdoc
             ? projectStudentContestTdoc(
                   tdoc,
-                  this.practiceTsdoc,
+                  this.practiceTsdoc
+                      ? { startAt: this.practiceTsdoc.startAt, examPaperPids: this.practiceTsdoc.examPaperPids }
+                      : undefined,
                   this.user.own(tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST),
               )
             : tdoc;

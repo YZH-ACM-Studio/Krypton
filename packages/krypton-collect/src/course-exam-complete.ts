@@ -8,6 +8,7 @@ import {
     TrainingModel,
     TrainingNotFoundError,
     tryReadStoredCourseExam,
+    type ObjectId,
 } from 'hydrooj';
 import { CollectForbiddenError } from './errors';
 import type { CollectCourseRef, CollectRequestDoc } from './types';
@@ -142,7 +143,7 @@ export async function resolveCollectExamGate(
 async function loadContestExamGate(
     domainId: string,
     uid: number,
-    contestId: { toHexString(): string },
+    contestId: ObjectId,
 ): Promise<CollectExamGateView> {
     const raw = await resolveCourseExamCompletion({ domainId, contestId, uid });
     if (!raw || typeof raw !== 'object' || typeof raw.complete !== 'boolean') {

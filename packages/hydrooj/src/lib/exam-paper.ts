@@ -97,7 +97,7 @@ export function isExamJournalPendingStatus(status: unknown): boolean {
 }
 
 function assertExamJournalPid(pid: unknown): asserts pid is number {
-    if (!Number.isSafeInteger(pid) || pid <= 0) throw new TypeError('exam_journal_pid_invalid');
+    if (typeof pid !== 'number' || !Number.isSafeInteger(pid) || pid <= 0) throw new TypeError('exam_journal_pid_invalid');
 }
 
 function assertSameRid(left: ObjectId, right: ObjectId): void {

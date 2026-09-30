@@ -3,6 +3,7 @@
  * Same attend / exam-mode / scoreboard / manage routes as the old shared
  * contest detail page; ACM and homework stay on ContestDetailPage.
  */
+import type { DateInput } from '@hydrooj/common';
 import { useEffect, useState, type ReactNode } from 'react';
 import { motion } from 'motion/react';
 import {
@@ -37,9 +38,9 @@ interface ExamDetailTdoc {
   docId: string;
   title: string;
   content?: string | Record<string, string>;
-  beginAt?: unknown;
-  endAt?: unknown;
-  lockAt?: unknown;
+  beginAt: DateInput;
+  endAt: DateInput;
+  lockAt: DateInput;
   attend: number;
   entryMode?: string;
   hidden?: boolean;
@@ -55,8 +56,8 @@ interface ExamDetailTsdoc {
   attend?: number;
   rank?: number;
   score?: number;
-  startAt?: unknown;
-  endAt?: unknown;
+  startAt: DateInput;
+  endAt: DateInput;
 }
 
 interface ExamDetailData {
@@ -75,6 +76,23 @@ interface ExamDetailData {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isStringRecord(value: unknown): value is Record<string, string> {
+  if (!isRecord(value) || Object.getPrototypeOf(value) !== Object.prototype) return false;
+  return Object.values(value).every((item) => typeof item === 'string');
+}
+
+function readContent(value: unknown): string | Record<string, string> | undefined {
+  if (typeof value === 'string') return value;
+  if (!isStringRecord(value)) return undefined;
+  return value;
+}
+
+function readDateInput(value: unknown): DateInput {
+  if (typeof value === 'string' || typeof value === 'number') return value;
+  if (value instanceof Date) return value;
+  return null;
 }
 
 function readOptionalInt(value: unknown, min: number): number | null {
@@ -103,10 +121,10 @@ function readExamDetailData(raw: unknown): ExamDetailData {
     tdoc: {
       docId: examContestId(tdocRaw),
       title: typeof tdocRaw.title === 'string' && tdocRaw.title ? tdocRaw.title : '考试',
-      content: typeof tdocRaw.content === 'string' || isRecord(tdocRaw.content) ? tdocRaw.content : undefined,
-      beginAt: tdocRaw.beginAt,
-      endAt: tdocRaw.endAt,
-      lockAt: tdocRaw.lockAt,
+      content: readContent(tdocRaw.content),
+      beginAt: readDateInput(tdocRaw.beginAt),
+      endAt: readDateInput(tdocRaw.endAt),
+      lockAt: readDateInput(tdocRaw.lockAt),
       attend: typeof tdocRaw.attend === 'number' && Number.isFinite(tdocRaw.attend) ? tdocRaw.attend : 0,
       entryMode: typeof tdocRaw.entryMode === 'string' ? tdocRaw.entryMode : undefined,
       hidden: tdocRaw.hidden === true,
@@ -121,8 +139,8 @@ function readExamDetailData(raw: unknown): ExamDetailData {
       attend: typeof tsdocRaw.attend === 'number' ? tsdocRaw.attend : undefined,
       rank: typeof tsdocRaw.rank === 'number' ? tsdocRaw.rank : undefined,
       score: typeof tsdocRaw.score === 'number' ? tsdocRaw.score : undefined,
-      startAt: tsdocRaw.startAt,
-      endAt: tsdocRaw.endAt,
+      startAt: readDateInput(tsdocRaw.startAt),
+      endAt: readDateInput(tsdocRaw.endAt),
     },
     pids,
     attended: attendFlag,

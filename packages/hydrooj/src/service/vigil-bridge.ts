@@ -7,6 +7,7 @@
  * See docs/service-tokens.md for token rotation. See PRD §2.7 for the
  * full Vigil-side endpoint surface.
  */
+import { LocalizedErrorText } from '@hydrooj/framework';
 import { Logger } from '@hydrooj/utils';
 import type {
     ExamPreloginDispatchPayload,
@@ -36,11 +37,31 @@ class VigilHttpError extends Error {
     }
 }
 
+function localizedErrorTextFromMessage(message: string): LocalizedErrorText {
+    // `{` in producer text is literal, not a catalog placeholder.
+    if (message && !message.includes('{') && !message.includes('}')) {
+        const strings = [message] as unknown as TemplateStringsArray;
+        Object.defineProperty(strings, 'raw', { value: [message] });
+        return new LocalizedErrorText(strings, []);
+    }
+    const strings = ['', ''] as unknown as TemplateStringsArray;
+    Object.defineProperty(strings, 'raw', { value: ['', ''] });
+    return new LocalizedErrorText(strings, [message]);
+}
+
 class VigilProtocolError extends Error {
+    readonly localizedMessage: LocalizedErrorText;
+
     constructor(message: string) {
         super(message);
         this.name = 'VigilProtocolError';
+        this.localizedMessage = localizedErrorTextFromMessage(message);
     }
+}
+
+export function vigilProtocolLocalizedMessage(error: unknown): LocalizedErrorText | undefined {
+    if (!(error instanceof VigilProtocolError)) return undefined;
+    return error.localizedMessage;
 }
 
 class VigilConfigurationError extends Error {

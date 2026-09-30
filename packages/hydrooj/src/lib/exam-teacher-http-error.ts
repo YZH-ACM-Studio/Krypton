@@ -13,6 +13,10 @@ export function examTeacherLocalizedError(reason: string): LocalizedErrorText {
     return sourceLocalizedErrorText(examTeacherErrorZh(reason));
 }
 
+function throwLocalizedExamTeacherValidationError(field: ExamTeacherField, message: LocalizedErrorText): never {
+    throw new ValidationError(examTeacherFieldLabel(field), null, message);
+}
+
 export function throwExamTeacherValidationError(field: ExamTeacherField, reason: string): never {
-    throw new ValidationError(examTeacherFieldLabel(field), null, examTeacherLocalizedError(reason));
+    throwLocalizedExamTeacherValidationError(field, examTeacherLocalizedError(reason));
 }

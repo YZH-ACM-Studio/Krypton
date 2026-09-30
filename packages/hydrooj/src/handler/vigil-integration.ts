@@ -15,6 +15,7 @@ import { randomBytes } from 'node:crypto';
 import { escapeRegExp } from 'lodash';
 import { ObjectId } from 'mongodb';
 import {
+    LocalizedErrorText,
     localizedErrorText,
     Context,
     Handler,
@@ -33,7 +34,12 @@ import * as document from '../model/document';
 import { buildVigilContestRoleResolution, type VigilContestRoleResolution } from '../model/vigil-contest-role';
 import system from '../model/system';
 import db from '../service/db';
-import { executeRecordingDelete, previewRecordingDelete, parseVigilExamNetworkProjection } from '../service/vigil-bridge';
+import {
+    executeRecordingDelete,
+    parseVigilExamNetworkProjection,
+    previewRecordingDelete,
+    vigilProtocolLocalizedMessage,
+} from '../service/vigil-bridge';
 import { studentDirectory } from '../service/student-directory';
 import { ensureVigilContestParticipation } from '../lib/vigil-integration-attendance';
 import {
@@ -306,13 +312,35 @@ class VigilApiHandler extends Handler {
     }
 }
 
+function localizedErrorTextFromMessage(message: string): LocalizedErrorText {
+    // `{` in producer text is literal, not a catalog placeholder.
+    if (message && !message.includes('{') && !message.includes('}')) {
+        const strings = [message] as unknown as TemplateStringsArray;
+        Object.defineProperty(strings, 'raw', { value: [message] });
+        return new LocalizedErrorText(strings, []);
+    }
+    const strings = ['', ''] as unknown as TemplateStringsArray;
+    Object.defineProperty(strings, 'raw', { value: ['', ''] });
+    return new LocalizedErrorText(strings, [message]);
+}
+
+function throwProjectionValidationError(detail: LocalizedErrorText): never {
+    throw new ValidationError('projection', null, detail);
+}
+
+function examNetworkProjectionParseDetail(error: unknown): LocalizedErrorText {
+    const protocolMessage = vigilProtocolLocalizedMessage(error);
+    if (protocolMessage) return protocolMessage;
+    return localizedErrorTextFromMessage(error instanceof Error ? error.message : 'invalid_projection');
+}
+
 class VigilExamNetworkProjectionHandler extends VigilApiHandler {
     async post() {
         let projection;
         try {
             projection = parseVigilExamNetworkProjection(this.request.body);
         } catch (error) {
-            throw new ValidationError('projection', null, error instanceof Error ? error.message : 'invalid_projection');
+            throwProjectionValidationError(examNetworkProjectionParseDetail(error));
         }
         try {
             const applied = await examNetworkExecutionService.applyProjection(projection);
@@ -329,7 +357,7 @@ class VigilExamNetworkProjectionHandler extends VigilApiHandler {
             this.response.body = { ok: true, changed: applied.changed };
         } catch (error) {
             if (!(error instanceof ExamNetworkExecutionError)) throw error;
-            throw new ValidationError('projection', null, error.reason);
+            throwProjectionValidationError(error.localizedMessage);
         }
     }
 }

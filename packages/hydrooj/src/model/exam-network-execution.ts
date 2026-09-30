@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { LocalizedErrorText } from '@hydrooj/framework';
 import { Collection, ObjectId } from 'mongodb';
 import db from '../service/db';
 import type { VigilExamNetworkProjection, VigilExamNetworkProjectionItem } from '../service/vigil-bridge';
@@ -78,10 +79,25 @@ async function resolveApplyProjectionTargetEndpointIds(
     return [...target.endpointIds].sort();
 }
 
+function localizedErrorTextFromMessage(message: string): LocalizedErrorText {
+    // `{` in producer text is literal, not a catalog placeholder.
+    if (message && !message.includes('{') && !message.includes('}')) {
+        const strings = [message] as unknown as TemplateStringsArray;
+        Object.defineProperty(strings, 'raw', { value: [message] });
+        return new LocalizedErrorText(strings, []);
+    }
+    const strings = ['', ''] as unknown as TemplateStringsArray;
+    Object.defineProperty(strings, 'raw', { value: ['', ''] });
+    return new LocalizedErrorText(strings, [message]);
+}
+
 export class ExamNetworkExecutionError extends Error {
+    readonly localizedMessage: LocalizedErrorText;
+
     constructor(public readonly reason: string) {
         super(reason);
         this.name = 'ExamNetworkExecutionError';
+        this.localizedMessage = localizedErrorTextFromMessage(reason);
     }
 }
 

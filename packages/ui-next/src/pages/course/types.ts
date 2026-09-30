@@ -54,6 +54,46 @@ export function courseAssignsUserGroups(course: Pick<CourseRecord, 'courseGroupI
   return (course.courseGroupIds || []).length > 0;
 }
 
+export interface GroupRefView {
+  _id: string;
+  name: string | null;
+  schoolName: string | null;
+  state: 'active' | 'archived' | 'deleted';
+  kind: 'own' | 'school' | 'other-teacher' | 'unknown';
+  attachable: boolean;
+}
+
+/** Server fields only. This does not decide whether the actor may attach the group. */
+export function courseGroupOptionLabel(group: GroupRefView, attached: boolean): string {
+  if (group.state === 'deleted') return '已删除的组';
+  let label = group.name ?? '';
+  if (group.kind === 'own') label += '（我的）';
+  if (group.state === 'archived') label += '（已归档）';
+  if (attached && group.attachable === false) label += '（仅可移除）';
+  return label;
+}
+
+/** `groupOptions` ∪ `attachedGroups`, one row per `_id`. The attached view wins on a collision. */
+export function mergeCourseGroupOptions(
+  groupOptions: readonly GroupRefView[],
+  attachedGroups: readonly GroupRefView[],
+): GroupRefView[] {
+  const attachedById = new Map(attachedGroups.map((group) => [group._id, group]));
+  const seen = new Set<string>();
+  const merged: GroupRefView[] = [];
+  for (const group of groupOptions) {
+    if (seen.has(group._id)) continue;
+    seen.add(group._id);
+    merged.push(attachedById.get(group._id) ?? group);
+  }
+  for (const group of attachedGroups) {
+    if (seen.has(group._id)) continue;
+    seen.add(group._id);
+    merged.push(group);
+  }
+  return merged;
+}
+
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

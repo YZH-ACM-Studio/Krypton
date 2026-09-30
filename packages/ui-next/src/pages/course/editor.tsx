@@ -42,12 +42,15 @@ import { ChapterOutline } from './chapter-outline';
 import { useChapterQuery } from './chapter-query';
 import { CourseExamSettings } from './course-exam-settings';
 import {
+  courseGroupOptionLabel,
+  mergeCourseGroupOptions,
   readCourseExam,
   readCourseExamContest,
   type ChapterDraft,
   type CourseAuthorVideo,
   type CourseFile,
   type CourseRecord,
+  type GroupRefView,
   type SectionDraft,
 } from './types';
 import { CourseMark } from './ui';
@@ -178,25 +181,35 @@ function SaveIndicator({ state }: { state: SaveState }) {
   );
 }
 
+interface CourseEditorPageData {
+  tdoc?: CourseRecord;
+  chapters?: string;
+  page_name: string;
+  groupOptions: GroupRefView[];
+  attachedGroups: GroupRefView[];
+  canManageOwnGroups: boolean;
+  canManageFiles: boolean;
+  canCreate?: boolean;
+  canCreateQuiz: boolean;
+  canAssign?: boolean;
+  expectedOwner?: number;
+  ownerUser?: DomainUserOption;
+  maintainerUsers?: DomainUserOption[];
+  files: CourseFile[];
+  mindmaps: Array<{ _id: string; title: string; visibility: 'public' }>;
+  courseOwnedMindmap?: { _id: string; title: string; updatedAt: string };
+  courseExamContest?: unknown;
+}
+
+function assertCourseGroupPayload(data: CourseEditorPageData): void {
+  if (!Array.isArray(data.groupOptions) || !Array.isArray(data.attachedGroups) || typeof data.canManageOwnGroups !== 'boolean') {
+    throw new TypeError('Invalid course group payload');
+  }
+}
+
 export function CourseEditPage() {
   const bs = useBootstrap();
-  const data = bs.page.data as {
-    tdoc?: CourseRecord;
-    chapters?: string;
-    page_name: string;
-    groups: Array<{ _id: string; name: string; archivedAt?: string | null }>;
-    canManageFiles: boolean;
-    canCreate?: boolean;
-    canCreateQuiz: boolean;
-    canAssign?: boolean;
-    expectedOwner?: number;
-    ownerUser?: DomainUserOption;
-    maintainerUsers?: DomainUserOption[];
-    files: CourseFile[];
-    mindmaps: Array<{ _id: string; title: string; visibility: 'public' }>;
-    courseOwnedMindmap?: { _id: string; title: string; updatedAt: string };
-    courseExamContest?: unknown;
-  };
+  const data = bs.page.data as CourseEditorPageData;
   const isEdit = data.page_name === 'course_edit';
   const course = data.tdoc || {};
   const tid = String(course.docId || course._id || '');
@@ -385,7 +398,16 @@ export function CourseEditPage() {
       ...(parseRefs(chapter.stageIds || '').length ? { stageIds: parseRefs(chapter.stageIds || '').map(Number) } : {}),
     })),
   );
-  const activeGroups = (data.groups || []).filter((group) => !group.archivedAt || selectedGroups.has(group._id));
+  assertCourseGroupPayload(data);
+  const attachedIds = new Set(data.attachedGroups.map((group) => group._id));
+  const mergedGroups = mergeCourseGroupOptions(data.groupOptions, data.attachedGroups);
+  const mergedIds = new Set(mergedGroups.map((group) => group._id));
+  for (const groupId of selectedGroups) {
+    if (!mergedIds.has(groupId)) throw new TypeError(`Course group selection has no server view: ${groupId}`);
+  }
+  // Deleted groups stay selectable only while checked, so they cannot be added again.
+  const selectableGroups = mergedGroups.filter((group) => group.state !== 'deleted' || selectedGroups.has(group._id));
+  const selectedGroupViews = selectableGroups.filter((group) => selectedGroups.has(group._id));
   const formAction = isEdit ? `/course/${tid}/edit` : '/course/create';
   const fileEndpoint = isEdit ? `/course/${tid}/file` : '';
   const activeIndex = chapters.findIndex((chapter) => chapter._id === activeChapter._id);
@@ -913,15 +935,15 @@ export function CourseEditPage() {
           </SettingsGroup>
 
           <SettingsGroup title="可见班级" icon={Users}>
-            <MultiSelect<(typeof activeGroups)[number]>
-              options={activeGroups}
-              value={activeGroups.filter((group) => selectedGroups.has(group._id))}
+            <MultiSelect<GroupRefView>
+              options={selectableGroups}
+              value={selectedGroupViews}
               onChange={(next) => {
                 setSelectedGroups(new Set(next.map((group) => group._id)));
                 markDirty();
               }}
               getKey={(group) => group._id}
-              getLabel={(group) => (group.archivedAt ? `${group.name}（已归档）` : group.name)}
+              getLabel={(group) => courseGroupOptionLabel(group, attachedIds.has(group._id))}
               name="courseGroupIds"
               placeholder="搜索班级"
               emptyText="没有匹配的班级"
@@ -930,6 +952,14 @@ export function CourseEditPage() {
             <p className="text-xs text-muted-foreground">
               {selectedGroups.size ? `已选 ${selectedGroups.size} 个班级` : '未选班级时，课程对全站可见。'}
             </p>
+            {data.canManageOwnGroups ? (
+              <a
+                href="/user-groups"
+                className="inline-flex min-h-10 items-center text-sm font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                管理我的用户组
+              </a>
+            ) : null}
             <input type="hidden" name="courseHidden" value={courseHidden ? 'true' : 'false'} />
             <label className="flex min-h-10 cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2.5">
               <Switch

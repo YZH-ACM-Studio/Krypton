@@ -46,6 +46,7 @@ import user from '../model/user';
 import { Handler, param, post, Types } from '../service/server';
 import { studentDirectory } from '../service/student-directory';
 import { assertCourseAccessible, canManageCourse, courseAssignsUserGroups, courseUserGroupIds, isCourseHidden } from '../lib/course-access';
+import { assertGroupsAttachable, describeGroupRefs, listAttachableGroups, parseGroupIdList } from '../lib/user-group-attach';
 import { isCourseExamCompleteFromStatus } from '../lib/course-exam-complete';
 import { courseExamRosterFactsByUid, courseExamRosterMeta } from '../lib/course-exam-roster';
 import {
@@ -95,6 +96,16 @@ function canCreateCourse(actor: { hasPerm: (...perm: bigint[]) => boolean; hasPr
 
 function canCreateCourseQuiz(actor: { hasPerm: (...perm: bigint[]) => boolean; hasPriv: (priv: number) => boolean }) {
     return actor.hasPriv(PRIV.PRIV_EDIT_SYSTEM) || actor.hasPerm(PERM.PERM_CREATE_HOMEWORK);
+}
+
+/** 库存的 courseGroupIds 只能是 ObjectId。其它值直接报错，不能丢弃，也不能交给只收字符串的 parseGroupIdList。 */
+function storedCourseGroupIds(raw: unknown): ObjectId[] {
+    if (raw == null) return [];
+    if (!Array.isArray(raw)) throw new ValidationError('courseGroupIds', null, localizedErrorText`课程可见范围无效`);
+    return raw.map((groupId) => {
+        if (groupId instanceof ObjectId) return groupId;
+        throw new ValidationError('courseGroupIds', null, localizedErrorText`课程可见范围无效`);
+    });
 }
 
 async function hydrateCourseExamContest(
@@ -813,7 +824,7 @@ class CourseMainHandler extends Handler {
         // 课程(空/无 courseGroupIds)或用户所属班级的课程。管理者看全部。
         if (!canManageAll) {
             const myGroups = await courseUserGroupIds(domainId, this.user._id);
-            // 容错构造（对齐 post 路径）：畸形 id 跳过，避免整个列表页 500。
+            // 列表查询跳过畸形 id，避免整个列表页 500。保存路径不能静默丢弃。
             const groupOids = Array.from(myGroups)
                 .map((s) => {
                     try {
@@ -1289,8 +1300,11 @@ class CourseEditHandler extends Handler {
     async get(_domainId: string) {
         const authoritativeDomainId = String(this.domain?._id);
         problem.assertProblemAclDomain(this.user, authoritativeDomainId);
-        const [groups, mindmaps] = await Promise.all([
-            studentDirectory().listUserGroups(authoritativeDomainId),
+        const unrestricted = this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM) || this.user.hasPerm(PERM.PERM_EDIT_COURSE);
+        const storedGroupIds = this.tdoc ? storedCourseGroupIds(this.tdoc.courseGroupIds) : [];
+        const [groupOptions, attachedGroups, mindmaps] = await Promise.all([
+            listAttachableGroups(authoritativeDomainId, this.user, { unrestricted }),
+            describeGroupRefs(authoritativeDomainId, this.user, storedGroupIds, { unrestricted }),
             listCourseMindmapOptions(),
         ]);
         let courseOwnedMindmap: { _id: string; title: string; updatedAt: string } | null = null;
@@ -1331,7 +1345,9 @@ class CourseEditHandler extends Handler {
         this.response.template = 'course_edit.html';
         this.response.body = {
             page_name: this.tdoc ? 'course_edit' : 'course_create',
-            groups: groups.map((g: any) => ({ _id: String(g._id), name: g.name, archivedAt: g.archivedAt || null })),
+            groupOptions,
+            attachedGroups,
+            canManageOwnGroups: this.user.hasPerm(PERM.PERM_MANAGE_OWN_USER_GROUP),
             canManageFiles: !!this.tdoc && canManageCourse(this.user, this.tdoc, PERM.PERM_EDIT_COURSE),
             canCreate: canCreateCourse(this.user),
             canCreateQuiz: !!this.tdoc && canCreateCourseQuiz(this.user),
@@ -1410,15 +1426,15 @@ class CourseEditHandler extends Handler {
         const pids = training.getPids(dag);
         const existingPids = training.getPids(this.tdoc?.dag || []);
         await assertProblemBankSelection(authoritativeDomainId, pids, this.user, existingPids);
-        const groupIds = (courseGroupIds || [])
-            .map((s) => {
-                try {
-                    return new ObjectId(s);
-                } catch {
-                    return null;
-                }
-            })
-            .filter((x): x is ObjectId => !!x);
+        const groupIds = parseGroupIdList('courseGroupIds', courseGroupIds);
+        const unrestricted = this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM) || this.user.hasPerm(PERM.PERM_EDIT_COURSE);
+        const previous = tid ? storedCourseGroupIds(this.tdoc.courseGroupIds) : [];
+        await assertGroupsAttachable(authoritativeDomainId, this.user, {
+            field: 'courseGroupIds',
+            previous,
+            next: groupIds,
+            unrestricted,
+        });
         const parsedExam = parseCourseExamForm({
             contestId: courseExamContestId,
             gate: courseExamGate,
@@ -1499,7 +1515,7 @@ class CourseEditHandler extends Handler {
                     await training.casCourseMindmap(
                         authoritativeDomainId,
                         tid,
-                        fresh.mindmapId === undefined || fresh.mindmapId === null ? null : fresh.mindmapId,
+                        fresh.mindmapId ?? null,
                         ownedAfter._id,
                     );
                     throw new ValidationError('mindmapId', null, localizedErrorText`课程导图已变更，请刷新后重试`);
@@ -1555,13 +1571,13 @@ class CourseEditHandler extends Handler {
                 ? ''
                 : storedObjectIdString(this.tdoc.mindmapId, 'course.mindmapId');
         const selectedMindmapId = await resolveCourseMindmapId(authoritativeDomainId, null, this.user._id, mindmapRaw);
-        const groupIds = (this.tdoc.courseGroupIds || []).map((groupId) => {
-            if (groupId instanceof ObjectId) return groupId;
-            try {
-                return new ObjectId(String(groupId));
-            } catch {
-                throw new ValidationError('courseGroupIds', null, localizedErrorText`课程可见范围无效`);
-            }
+        const groupIds = storedCourseGroupIds(this.tdoc.courseGroupIds);
+        const unrestricted = this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM) || this.user.hasPerm(PERM.PERM_EDIT_COURSE);
+        await assertGroupsAttachable(authoritativeDomainId, this.user, {
+            field: 'courseGroupIds',
+            previous: [],
+            next: groupIds,
+            unrestricted,
         });
         let newTid: ObjectId | null = null;
         const copiedPaths: string[] = [];

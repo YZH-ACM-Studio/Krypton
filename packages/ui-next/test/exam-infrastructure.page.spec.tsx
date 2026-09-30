@@ -706,7 +706,7 @@ describe('exam infrastructure workspace', () => {
         if (url.startsWith('/api/admin/exam-policy-templates')) {
           return json({ templates: posts.length ? [created] : [] });
         }
-        return load(input, init);
+        return load(input);
       }),
     );
     const user = userEvent.setup();
@@ -753,7 +753,7 @@ describe('exam infrastructure workspace', () => {
         if (url.startsWith('/api/admin/exam-policy-templates')) {
           return json({ templates: [submitted ? saved : template] });
         }
-        return load(input, init);
+        return load(input);
       }),
     );
     const user = userEvent.setup();
@@ -829,7 +829,7 @@ describe('exam infrastructure workspace', () => {
         if (url.startsWith('/api/admin/exam-policy-templates')) {
           return json({ templates: posts.length ? [archived, other] : [active, other] });
         }
-        return load(input, init);
+        return load(input);
       }),
     );
     const user = userEvent.setup();

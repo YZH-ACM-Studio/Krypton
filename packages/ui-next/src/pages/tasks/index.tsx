@@ -669,7 +669,7 @@ export function TaskCenterPage() {
               <Card
                 key={task._id}
                 className={cn(
-                  'h-full w-full min-w-0 transition-[box-shadow,opacity] duration-200 ease-out hover:shadow-md motion-reduce:transition-none',
+                  'h-full transition-[box-shadow,opacity] w-full min-w-0 duration-200 ease-out hover:shadow-md motion-reduce:transition-none',
                   !task.isActive && 'opacity-60',
                 )}
               >

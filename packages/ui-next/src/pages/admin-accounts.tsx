@@ -855,7 +855,7 @@ function AccountFiltersPanel({ data }: { data: AdminAccountsData }) {
   const permissionsView = isAdminAccountPermissionsView(window.location.href);
   return (
     <Card className="min-w-0">
-      <details className="group min-w-0" defaultOpen>
+      <details className="group min-w-0" open>
         <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-5 py-3 [&::-webkit-details-marker]:hidden">
           <CardTitle className="flex min-w-0 items-center gap-2 text-sm">
             <Search className="size-4 shrink-0" />搜索与筛选

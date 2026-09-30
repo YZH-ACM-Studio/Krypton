@@ -28,7 +28,7 @@ import {
     PermissionError,
     ValidationError,
 } from '../error';
-import { FileInfo, ScoreboardConfig, Tdoc } from '../interface';
+import { FileInfo, type ProblemDict, ScoreboardConfig, Tdoc } from '../interface';
 import { canUsePostContestPractice, getPostContestPracticeState } from '../lib/contest-correction';
 import { boundUserIdsForStats, parseStatsGroupIds, statsGroupOption } from '../lib/stats-group-scope';
 import { assertCourseExamWatchGate } from '../lib/course-exam-gate';
@@ -529,11 +529,10 @@ export class ContestDetailBaseHandler extends Handler {
     }
 }
 
-function pdictForStudentPids<T>(pdict: Record<string, T>, pids: number[]): Record<string, T> {
-    const out: Record<string, T> = {};
+function pdictForStudentPids(pdict: ProblemDict, pids: number[]): ProblemDict {
+    const out: ProblemDict = {};
     for (const pid of pids) {
         if (pdict[pid] !== undefined) out[pid] = pdict[pid];
-        else if (pdict[String(pid)] !== undefined) out[String(pid)] = pdict[String(pid)];
     }
     return out;
 }
@@ -2172,7 +2171,7 @@ export class ContestFileDownloadHandler extends ContestDetailBaseHandler {
             throw new ContestNotFoundError(authoritativeDomainId, tid);
         }
         const published = type === 'private' ? this.tdoc.privateFiles : this.tdoc.files;
-        if (!(published || []).some((file) => file.name === filename)) throw new NotFoundError(filename);
+        if (!(published || []).some((file) => file.name === filename)) throw localizeError(new NotFoundError(filename), 'Resource {0} not found.', filename);
         if (type === 'private' && !this.user.own(this.tdoc) && !this.user.hasPerm(PERM.PERM_EDIT_CONTEST)) {
             if (!this.tsdoc?.attend) throw new ContestNotAttendedError(authoritativeDomainId, tid);
             if (!contest.isOngoing(this.tdoc) && !contest.isDone(this.tdoc)) throw new ContestNotLiveError(authoritativeDomainId, tid);

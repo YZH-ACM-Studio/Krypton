@@ -670,8 +670,8 @@ describe('P3.7 course homework scope', () => {
             contest.indexOf('export class ContestUserHandler'),
         );
         expect(fileDownload).to.include('requireContestViewUnlessEditor(this, this.tdoc)');
-        expect(fileDownload).to.include('throw new NotFoundError(filename)');
-        expect(fileDownload.indexOf('throw new NotFoundError(filename)')).to.be.lessThan(
+        expect(fileDownload).to.include("throw localizeError(new NotFoundError(filename), 'Resource {0} not found.', filename)");
+        expect(fileDownload.indexOf("throw localizeError(new NotFoundError(filename), 'Resource {0} not found.', filename)")).to.be.lessThan(
             fileDownload.indexOf("type === 'private' && !this.user.own(this.tdoc)"),
         );
         const codeHandler = contest.slice(contest.indexOf('export class ContestCodeHandler'), contest.indexOf('export class ContestManagementHandler'));

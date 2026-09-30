@@ -207,8 +207,10 @@ it('contest detail base ignores forged method domains before contest and status 
     assert.match(detailBase, /const authoritativeDomainId = String\(this\.domain\?\._id\)/);
     assert.match(detailBase, /contest\.get\(authoritativeDomainId, tid\)/);
     assert.match(detailBase, /contest\.getStatus\(authoritativeDomainId, tid/);
-    assert.match(detailBase, /user\.listGroup\(authoritativeDomainId/);
+    assert.match(detailBase, /hideAssignRestrictedContest\(authoritativeDomainId,/);
     assert.doesNotMatch(detailBase, /contest\.get\(domainId|contest\.getStatus\(domainId|user\.listGroup\(domainId/);
+    const hiddenAssign = methodBody(contest, 'export async function hideAssignRestrictedContest', 'export async function assertHomeworkAccessOrHide');
+    assert.match(hiddenAssign, /user\.listGroup\(domainId/);
 });
 
 it('shared training/course picker stays on the core-scoped /p?quick endpoint', () => {

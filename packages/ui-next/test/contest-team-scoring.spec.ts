@@ -33,7 +33,7 @@ describe('p1.13 team scoring and record-access contracts', () => {
   it('uses teams for live problem statistics, management participant counts and balloons', () => {
     expect(contestHandler).to.include("contestTeamId: { $type: 'objectId' }");
     expect(contestHandler).to.include("liveStatsParticipantUnit = teamMode ? 'team' : 'user'");
-    expect(contestHandler).to.include("participantUnit: contest.getParticipationMode(this.tdoc) === 'team' ? 'team' : 'user'");
+    expect(contestHandler).to.include("const participantUnit = teamMode ? 'team' : 'user'");
     expect(contestHandler).to.include('teamDict: Object.fromEntries');
     expect(contestModel).to.match(/const identityKey = contestTeamId \? `t:\$\{contestTeamId\.toHexString\(\)\}` : `u:\$\{uid\}`/);
     expect(contestModel).to.match(/identityIndexed: true/);

@@ -39,6 +39,7 @@ import {
     mergeExamJournalEntry,
     rebuildExamJournalFromRecords,
     readExamPaperQuotas,
+    type ExamJournalEntry,
 } from '../lib/exam-paper';
 import { annotateScoreboardPercentages } from '../lib/scoreboard-score-percentage';
 import bus, { parallelAllSettled } from '../service/bus';
@@ -1496,14 +1497,14 @@ export async function updateStatus(domainId: string, tid: ObjectId, uid: number,
             return synced.status;
         }
         if (tdoc.balloon && status === STATUS.STATUS_ACCEPTED && !isLocked(tdoc)) await addBalloon(domainId, tid, uid, rid, pid);
-        const incomingJournalEntry = {
+        const incomingJournalEntry: ExamJournalEntry = {
             rid,
             pid,
             status,
             score,
             subtasks,
             lang,
-            ...(manual === true ? { manual: true } : {}),
+            ...(manual === true ? { manual: true as const } : {}),
         };
         if (tdoc.rule === 'exam') {
             if (!Number.isSafeInteger(pid) || pid <= 0) throw new ValidationError('pid');
@@ -1518,12 +1519,18 @@ export async function updateStatus(domainId: string, tid: ObjectId, uid: number,
                 uid,
                 ...examJournalFloorFilter(current),
             };
-            let examTsdoc = await document.collStatus.findOneAndUpdate(
+            // Collections['document.status'] is any, and UpdateFilter<any> types every $push value as never.
+            interface ExamContestJournalStatus {
+                journal: ExamJournalEntry[];
+                rev: number;
+            }
+            const examStatus = db.collection<ExamContestJournalStatus>('document.status');
+            let examTsdoc = await examStatus.findOneAndUpdate(
                 { ...examFilter, 'journal.rid': rid },
                 { $set: { 'journal.$': journalEntry }, $inc: { rev: 1 } },
                 { returnDocument: 'after' },
             );
-            examTsdoc ||= await document.collStatus.findOneAndUpdate(
+            examTsdoc ||= await examStatus.findOneAndUpdate(
                 examFilter,
                 { $push: { journal: journalEntry }, $inc: { rev: 1 } },
                 { returnDocument: 'after' },

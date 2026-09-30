@@ -70,7 +70,7 @@ describe('small interface fixes', () => {
     expect(page).to.include(': problemStatusByPid[String(pid)] || null');
     expect(page).to.include('getContestProblemStatus(statusDoc?.status)');
     expect(paper).to.include('protected latestProblemStatusesEnabled = true;');
-    expect(handler).to.include('buildLatestContestProblemStatusByPid(statusJournal, this.tdoc.pids)');
+    expect(handler).to.include('buildLatestContestProblemStatusByPid(statusJournal, visiblePids)');
     expect(record).to.include("if (args.type === 'pretest')");
     expect(record).to.include('data.contest = RecordModel.RECORD_PRETEST;');
   });
@@ -83,7 +83,7 @@ describe('small interface fixes', () => {
   it('sends print isAdmin and shows balloon without an ACM-only nav gate', () => {
     const page = source('packages/ui-next/src/pages/contest-manage.tsx');
     const handler = source('packages/hydrooj/src/handler/contest.ts');
-    expect(handler).to.include('isAdmin: this.user.own(this.tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST)');
+    expect(handler).to.include('isAdmin: this.canManageLoadedContest()');
     expect(handler).to.include('canSubmitPrint: !!this.tsdoc?.attend && contest.isOngoing(this.tdoc, this.tsdoc)');
     expect(handler).to.include('canSubmitClarification: !!this.tsdoc?.attend && contest.isOngoing(this.tdoc)');
     expect(page).to.include('const canSubmitPrint = data.canSubmitPrint === true');
@@ -241,7 +241,8 @@ describe('small interface fixes', () => {
   it('exposes scoreboard unlock and problem archive on the same trusted write the list already has', () => {
     const contestHandler = source('packages/hydrooj/src/handler/contest.ts');
     const contestManage = source('packages/ui-next/src/pages/contest-manage.tsx');
-    const contestEdit = contestManage.slice(contestManage.indexOf('name="operation" value="update"'), contestManage.indexOf('ContestExamSeatEntry'));
+    const contestUpdateAt = contestManage.indexOf('name="operation" value="update"');
+    const contestEdit = contestManage.slice(contestUpdateAt, contestManage.indexOf('ContestExamSeatEntry', contestUpdateAt));
     const contestSaveClose = contestEdit.indexOf('</form>');
     expect(contestEdit.slice(0, contestSaveClose)).not.to.include('name="operation" value="delete"');
     expect(contestEdit.slice(contestSaveClose)).to.include('name="operation" value="delete"');

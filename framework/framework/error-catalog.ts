@@ -2804,6 +2804,9 @@ const INTERNAL_ERROR_TEMPLATES = [
     '只能 confirm 状态为 admitted 的分配（当前 {0}）',
     'krypton-external-rating: /user/external-rating is not registered',
     'Invalid task admission transition: {0}',
+    '{0}格式不正确',
+    '{0}缺少 {1}',
+    '确认提交时找不到表单',
 ] as const;
 
 export const ERROR_MESSAGE_CLASSIFICATIONS: Readonly<Record<string, ClassifiedErrorMessage>> = Object.freeze({

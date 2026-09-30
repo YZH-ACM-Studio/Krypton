@@ -118,6 +118,7 @@ import {
   UserBindPage,
   UserBindSuccessPage,
 } from '@/pages/userbind';
+import { TeacherUserGroupDetailPage, TeacherUserGroupsPage } from '@/pages/userbind/teacher-groups';
 import { AdminVigilExamDetailPage, AdminVigilOverviewPage } from '@/pages/vigil';
 import { AboutPage, WikiHelpPage } from '@/pages/wiki';
 
@@ -284,6 +285,10 @@ const PAGE_MAP: Record<string, PageComponent> = {
   'user_bind_landing.html': UserBindLandingPage,
   'user_bind_success.html': UserBindSuccessPage,
   'user_bind_claim.html': UserBindClaimPage,
+
+  // krypton-userbind teacher groups
+  'teacher_user_groups.html': TeacherUserGroupsPage,
+  'teacher_user_group_detail.html': TeacherUserGroupDetailPage,
 
   // Phase 0 spike
   '_spike-webview.html': SpikeWebViewProbePage,

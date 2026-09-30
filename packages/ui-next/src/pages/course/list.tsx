@@ -167,6 +167,12 @@ export function CoursePage() {
 
   return (
     <main className="w-full min-w-0 pb-10">
+      {/* 课程列表没有「管理自己的用户组」数据，入口对能打开本页的人可见；没有权限时由 /user-groups 拒绝。 */}
+      <div className="mb-4">
+        <Button asChild variant="outline" className="min-h-10">
+          <a href="/user-groups">我的用户组</a>
+        </Button>
+      </div>
       <header className="mb-8 flex flex-col gap-4 border-b pb-6 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
           <h1 className="text-2xl font-semibold tracking-tight">课程</h1>

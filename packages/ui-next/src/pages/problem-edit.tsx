@@ -1366,6 +1366,10 @@ export function ProblemEditPage() {
         return;
       }
     }
+    // The hidden revision field is the structured-statement CAS token. A legacy
+    // metadata edit does not change the statement, so sending it would lock the
+    // title write to the statement revision.
+    if (!structuredSave && !statementChanged) fd.delete('expectedStructureRevision');
     const confirmation = !isCreate && statementChanged ? await statementGuard.confirm('保存题面勘误', 'statement-edit') : true;
     if (!confirmation) {
       setSaveError('此题正在比赛或考试中使用，当前角色不能修改题面。');

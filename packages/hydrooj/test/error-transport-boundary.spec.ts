@@ -62,6 +62,14 @@ function fakeService() {
     };
 }
 
+interface TransportResponseBody {
+    error?: {
+        name: string;
+        message: string;
+        status?: number;
+    };
+}
+
 function fakeHttpContext() {
     const request = {
         method: 'get',
@@ -81,8 +89,9 @@ function fakeHttpContext() {
         json: false,
         websocket: false,
     };
+    const body: TransportResponseBody = {};
     const response = {
-        body: {},
+        body,
         type: '',
         status: null as number | null,
         template: null as string | null,

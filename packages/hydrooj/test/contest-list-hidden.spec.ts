@@ -116,7 +116,7 @@ describe('contest list hidden', () => {
         expect(isListVisibleToUser(scopedSchoolContest, 8, ['default'], false, { groupIds: [], schoolId: schoolId })).to.equal(true);
         expect(
             isListVisibleToUser(
-                { owner: 1, assign: [], participantScopeMode: 'legacy' } as Parameters<typeof isListVisibleToUser>[0],
+                { owner: 1, assign: [], participantScopeMode: 'legacy' } as unknown as Parameters<typeof isListVisibleToUser>[0],
                 8,
                 ['default'],
                 false,

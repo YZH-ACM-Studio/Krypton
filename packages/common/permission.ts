@@ -126,6 +126,9 @@ export const PERM = {
     PERM_CREATE_COLLECT: 1n << 84n,
     PERM_MANAGE_COLLECT: 1n << 85n,
 
+    // Krypton: teachers manage their own user groups and their members.
+    PERM_MANAGE_OWN_USER_GROUP: 1n << 86n,
+
     // Placeholder
     PERM_ALL: -1n,
     PERM_BASIC: 0n,
@@ -237,7 +240,8 @@ PERM.PERM_TEACHER =
     PERM.PERM_USERBIND_MANAGE_STUDENTS |
     PERM.PERM_CREATE_EXAM_EVENT |
     PERM.PERM_CREATE_REDEMPTION_CODE |
-    PERM.PERM_CREATE_COLLECT;
+    PERM.PERM_CREATE_COLLECT |
+    PERM.PERM_MANAGE_OWN_USER_GROUP;
 
 export const PRIV = {
     PRIV_NONE: 0,

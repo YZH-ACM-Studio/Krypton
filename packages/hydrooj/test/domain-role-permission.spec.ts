@@ -1,3 +1,4 @@
+import { PERM } from '@hydrooj/common';
 import { expect } from 'chai';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -87,10 +88,16 @@ describe('domain role permission workspace service', () => {
         expectValidationError(() => resolveCurrentDomainId('system', undefined));
     });
 
-    it('exposes the complete 80-permission, 15-family catalog', () => {
-        expect(DOMAIN_PERMISSION_DEFINITIONS).to.have.lengthOf(80);
+    it('exposes the complete 81-permission, 15-family catalog', () => {
+        expect(DOMAIN_PERMISSION_DEFINITIONS).to.have.lengthOf(81);
         expect(new Set(DOMAIN_PERMISSION_DEFINITIONS.map((permission: any) => permission.family)).size).to.equal(15);
-        expect(new Set(DOMAIN_PERMISSION_DEFINITIONS.map((permission: any) => permission.key.toString())).size).to.equal(80);
+        expect(new Set(DOMAIN_PERMISSION_DEFINITIONS.map((permission: any) => permission.key.toString())).size).to.equal(81);
+    });
+
+    it('registers manage-own user groups in the userbind family', () => {
+        const entry = DOMAIN_PERMISSION_DEFINITIONS.find((permission: any) => permission.key === PERM.PERM_MANAGE_OWN_USER_GROUP);
+        expect(entry?.family).to.equal('perm_userbind');
+        expect(entry?.desc).to.equal('Manage own user groups and their members');
     });
 
     it('has explicit Simplified Chinese names for every permission and family', () => {
@@ -101,6 +108,7 @@ describe('domain role permission workspace service', () => {
         for (const family of new Set<string>(DOMAIN_PERMISSION_DEFINITIONS.map((permission: any) => String(permission.family)))) {
             expect(locale.some((line) => line.startsWith(`${family}:`)), family).to.equal(true);
         }
+        expect(locale).to.include('Manage own user groups and their members: 管理自己的用户组及成员');
     });
 
     it('round-trips the highest permission bit and keeps unrelated roles unchanged', async () => {
@@ -121,7 +129,7 @@ describe('domain role permission workspace service', () => {
         expect(repository.roles.get('other')).to.equal(4n);
     });
 
-    it('round-trips every known bit from 0 through 80 in one role mask', async () => {
+    it('round-trips every known bit in one role mask', async () => {
         const repository = new FakeRoleRepository();
         const bits = DOMAIN_PERMISSION_DEFINITIONS.map((permission: any) => permission.key.toString());
         const allMask = DOMAIN_PERMISSION_DEFINITIONS.reduce((mask: bigint, permission: any) => mask | permission.key, 0n);
@@ -132,7 +140,7 @@ describe('domain role permission workspace service', () => {
             submittedMask: allMask.toString(),
             permissions: bits,
         });
-        expect(result.permissionCount).to.equal(80);
+        expect(result.permissionCount).to.equal(81);
         expect(result.mask).to.equal(allMask.toString());
         expect(repository.roles.get('reviewer')).to.equal(allMask);
     });

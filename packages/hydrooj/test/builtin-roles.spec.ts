@@ -15,4 +15,12 @@ describe('builtin domain roles', () => {
         expect(BUILTIN_ROLES.teacher & PERM.PERM_CREATE_COLLECT).to.equal(PERM.PERM_CREATE_COLLECT);
         expect(BUILTIN_ROLES.teacher & PERM.PERM_MANAGE_COLLECT).to.equal(0n);
     });
+
+    it('puts manage own user groups on teacher and keeps the bit off default, guest, and student', () => {
+        expect(PERM.PERM_MANAGE_OWN_USER_GROUP).to.equal(1n << 86n);
+        expect(BUILTIN_ROLES.teacher & PERM.PERM_MANAGE_OWN_USER_GROUP).to.equal(PERM.PERM_MANAGE_OWN_USER_GROUP);
+        expect(BUILTIN_ROLES.default & PERM.PERM_MANAGE_OWN_USER_GROUP).to.equal(0n);
+        expect(BUILTIN_ROLES.guest & PERM.PERM_MANAGE_OWN_USER_GROUP).to.equal(0n);
+        expect(PERM.PERM_STUDENT & PERM.PERM_MANAGE_OWN_USER_GROUP).to.equal(0n);
+    });
 });

@@ -10,7 +10,7 @@
  *   - base 8       — pure-OJ presets (this file's `basePresets`)
  *   - Krypton 4    — added in `kryptonPresets` (exam-finalized, group membership,
  *                    homework progress, training progress)
- *   - score 6      — added in `scorePresets` (PAT/GPLT/CSP)
+ *   - score 8      — added in `scorePresets` (PAT/GPLT/CSP/CACC)
  *
  * The exported `taskPointPresets` is the merged registry; checkers reference
  * the live collections by `import` so we don't pay the registry cost twice.
@@ -28,7 +28,8 @@ import {
 } from 'hydrooj';
 import { Logger } from '@hydrooj/utils';
 import { userBindModel } from '@hydrooj/krypton-userbind';
-import { cspScoreColl, gpltScoreColl, patScoreColl, stayEventsColl } from './db';
+import { bestCaccScore, caccAwardAtLeast, CACC_AWARD_LABELS, CACC_AWARD_OPTIONS, CACC_STAGE_LABELS, CACC_STAGE_OPTIONS, isCaccAward, isCaccStage, isCaccYear } from './cacc';
+import { caccScoreColl, cspScoreColl, gpltScoreColl, patScoreColl, stayEventsColl } from './db';
 import type { TaskCheckerContext, TaskGraph, TaskPointParamSchema, TaskPointPreset, TaskPointResult } from './types';
 
 const logger = new Logger('krypton-tasks-presets');
@@ -816,7 +817,7 @@ const kryptonPresets: TaskPointPreset[] = [
     boundToUserbindPreset,
 ];
 
-// ============ Score presets (PAT / GPLT / CSP) ============
+// ============ Score presets (PAT / GPLT / CSP / CACC) ============
 
 const PAT_SEASONS: TaskPointParamSchema['options'] = [
     { value: 'spring', label: '春季' },
@@ -987,7 +988,65 @@ const cspAnyPreset: TaskPointPreset = {
     },
 };
 
-const scorePresets: TaskPointPreset[] = [patSpecificPreset, patAnyPreset, gpltSpecificPreset, gpltAnyPreset, cspSpecificPreset, cspAnyPreset];
+function caccRequirement(stage: keyof typeof CACC_STAGE_LABELS, minAward: keyof typeof CACC_AWARD_LABELS): string {
+    return `需 ${CACC_STAGE_LABELS[stage]}${CACC_AWARD_LABELS[minAward]}及以上`;
+}
+
+const caccSpecificPreset: TaskPointPreset = {
+    id: 'cacc_specific_year',
+    name: 'CACC 指定年份达标',
+    category: 'behavior',
+    description: '用户在指定年份、指定级别的 CACC 中达到指定等级',
+    params: [
+        { name: 'year', type: 'number', label: '年份', default: new Date().getFullYear(), required: true },
+        { name: 'stage', type: 'select', label: '比赛级别', default: 'regional', required: true, options: CACC_STAGE_OPTIONS },
+        { name: 'minAward', type: 'select', label: '最低等级', default: 'third', required: true, options: CACC_AWARD_OPTIONS },
+    ],
+    async checker(ctx, params) {
+        const year = Number(params.year);
+        const { stage, minAward } = params;
+        if (!isCaccYear(year) || !isCaccStage(stage) || !isCaccAward(minAward)) throw new Error('CACC 任务点参数无效');
+        const studentDocId = await scoreStudentDocId(ctx);
+        if (!studentDocId) return pct(0, 1, false, '未绑定学生档案');
+        const doc = await caccScoreColl.findOne({ domainId: ctx.domainId, studentDocId, year, stage });
+        if (!doc) return pct(0, 1, false, `未参加 ${year} 年 CACC ${CACC_STAGE_LABELS[stage]}（${caccRequirement(stage, minAward)}）`);
+        const completed = caccAwardAtLeast(doc.award, minAward);
+        return pct(completed ? 1 : 0, 1, completed, `${year} 年 ${CACC_STAGE_LABELS[stage]}${CACC_AWARD_LABELS[doc.award]}（${caccRequirement(stage, minAward)}）`);
+    },
+};
+
+const caccAnyPreset: TaskPointPreset = {
+    id: 'cacc_any_year',
+    name: 'CACC 任意年份达标',
+    category: 'behavior',
+    description: '用户在任意一年指定级别的 CACC 中达到指定等级即可',
+    params: [
+        { name: 'stage', type: 'select', label: '比赛级别', default: 'regional', required: true, options: CACC_STAGE_OPTIONS },
+        { name: 'minAward', type: 'select', label: '最低等级', default: 'third', required: true, options: CACC_AWARD_OPTIONS },
+    ],
+    async checker(ctx, params) {
+        const { stage, minAward } = params;
+        if (!isCaccStage(stage) || !isCaccAward(minAward)) throw new Error('CACC 任务点参数无效');
+        const studentDocId = await scoreStudentDocId(ctx);
+        if (!studentDocId) return pct(0, 1, false, '未绑定学生档案');
+        const docs = await caccScoreColl.find({ domainId: ctx.domainId, studentDocId, stage }).toArray();
+        const best = bestCaccScore(docs);
+        if (!best) return pct(0, 1, false, `暂无 CACC ${CACC_STAGE_LABELS[stage]}成绩（${caccRequirement(stage, minAward)}）`);
+        const completed = caccAwardAtLeast(best.award, minAward);
+        return pct(completed ? 1 : 0, 1, completed, `最佳: ${best.year} 年 ${CACC_STAGE_LABELS[stage]}${CACC_AWARD_LABELS[best.award]}（${caccRequirement(stage, minAward)}）`);
+    },
+};
+
+const scorePresets: TaskPointPreset[] = [
+    patSpecificPreset,
+    patAnyPreset,
+    gpltSpecificPreset,
+    gpltAnyPreset,
+    cspSpecificPreset,
+    cspAnyPreset,
+    caccSpecificPreset,
+    caccAnyPreset,
+];
 
 // ============ exported registry ============
 

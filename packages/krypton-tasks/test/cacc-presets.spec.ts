@@ -365,8 +365,8 @@ describe('CACC task point presets', { concurrency: false }, () => {
 
     it('uses the best same-stage award and ignores the other stage', async () => {
         seed([
-            { year: 2024, stage: 'regional', award: 'first' },
             { year: 2026, stage: 'regional', award: 'third' },
+            { year: 2024, stage: 'regional', award: 'first' },
             { year: 2026, stage: 'final', award: 'first' },
         ]);
 

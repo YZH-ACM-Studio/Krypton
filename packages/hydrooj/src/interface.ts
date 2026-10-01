@@ -375,6 +375,8 @@ export interface ScoreboardNode {
     scorePercentage?: number; // 按该题实际满分归一化后的展示百分比
     style?: string;
     hover?: string;
+    /** Admin live board only. This cell is not what the locked student board shows. */
+    studentDivergence?: boolean;
 }
 export type ScoreboardRow = ScoreboardNode[] & { raw?: any };
 
@@ -826,6 +828,8 @@ export interface ScoreboardConfig {
     isExport: boolean;
     showDisplayName: boolean;
     lockAt?: Date;
+    /** Admin live board while the contest is locked. Never set for a student request. */
+    revealLocked?: boolean;
 }
 
 export type Feature = 'scoreboard' | 'download';

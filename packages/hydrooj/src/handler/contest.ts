@@ -29,6 +29,7 @@ import {
     ValidationError,
 } from '../error';
 import { FileInfo, type ProblemDict, ScoreboardConfig, Tdoc } from '../interface';
+import { scoreboardLockView } from '../lib/contest-scoreboard-live';
 import { canUsePostContestPractice, getPostContestPracticeState } from '../lib/contest-correction';
 import { boundUserIdsForStats, parseStatsGroupIds, statsGroupOption } from '../lib/stats-group-scope';
 import { assertCourseExamWatchGate } from '../lib/course-exam-gate';
@@ -2570,13 +2571,21 @@ export async function apply(ctx: Context) {
             { tdoc: 'tdoc', groups: 'groups', realtime: Types.Boolean },
             {
                 async display({ realtime, tdoc, groups }) {
-                    if (realtime && !this.user.own(tdoc)) {
-                        this.checkPerm(PERM.PERM_VIEW_CONTEST_HIDDEN_SCOREBOARD);
-                    }
-                    const config: ScoreboardConfig = { isExport: false, showDisplayName: this.user.hasPerm(PERM.PERM_VIEW_USER_PRIVATE_INFO) };
-                    if (!realtime && this.tdoc.lockAt && !this.tdoc.unlocked) {
-                        config.lockAt = this.tdoc.lockAt;
-                    }
+                    const canViewHiddenScoreboard = this.user.own(tdoc) || this.user.hasPerm(PERM.PERM_VIEW_CONTEST_HIDDEN_SCOREBOARD);
+                    if (realtime && !canViewHiddenScoreboard) this.checkPerm(PERM.PERM_VIEW_CONTEST_HIDDEN_SCOREBOARD);
+                    const lockView = scoreboardLockView({
+                        realtime: !!realtime,
+                        locked: contest.isLocked(this.tdoc),
+                        rule: this.tdoc.rule,
+                        allowed: canViewHiddenScoreboard,
+                        team: contest.getParticipationMode(this.tdoc) === 'team',
+                    });
+                    const config: ScoreboardConfig = {
+                        isExport: false,
+                        showDisplayName: this.user.hasPerm(PERM.PERM_VIEW_USER_PRIVATE_INFO),
+                        ...(lockView.revealLocked ? { revealLocked: true } : {}),
+                        ...(lockView.lockAtActive && this.tdoc.lockAt ? { lockAt: this.tdoc.lockAt } : {}),
+                    };
                     const [, rows, udict, pdict] = await contest.getScoreboard.call(this, tdoc.domainId, tdoc._id, config);
                     const canManageContest = this.canManageLoadedContest();
                     const studentTdoc = this.projectLoadedContestForStudent();
@@ -2619,6 +2628,7 @@ export async function apply(ctx: Context) {
                         canExportScoreboardImage: scoreboardExportCapabilities.canExportImage,
                         canExportScoreboardPrivateIdentity: scoreboardExportCapabilities.canIncludePrivateIdentity,
                         scoreboardSnapshotMode: getScoreboardSnapshotMode(!!realtime, contest.isLocked(this.tdoc)),
+                        canViewLockedRealtime: lockView.canToggle,
                     };
                     this.response.pjax = 'partials/scoreboard.html';
                     this.response.template = 'contest_scoreboard.html';

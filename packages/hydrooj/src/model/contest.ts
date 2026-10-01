@@ -41,6 +41,7 @@ import {
     readExamPaperQuotas,
     type ExamJournalEntry,
 } from '../lib/exam-paper';
+import { compareByStatusSort, markStudentDivergence, projectContestStatus, supportsLockedRealtime } from '../lib/contest-scoreboard-live';
 import { annotateScoreboardPercentages } from '../lib/scoreboard-score-percentage';
 import bus, { parallelAllSettled } from '../service/bus';
 import db from '../service/db';
@@ -1760,6 +1761,35 @@ async function getTeamScoreboard(this: Handler, tdoc: Tdoc, config: ScoreboardCo
     return [rows, udict];
 }
 
+async function individualScoreboard(
+    translate: (text: string) => string,
+    domainId: string,
+    tid: ObjectId,
+    tdoc: Tdoc,
+    pdict: ProblemDict,
+    config: ScoreboardConfig,
+): Promise<[ScoreboardRow[], BaseUserDict]> {
+    const rule = RULES[tdoc.rule];
+    if (!config.revealLocked || !isLocked(tdoc) || !supportsLockedRealtime(tdoc.rule)) {
+        return rule.scoreboard(config, translate, tdoc, pdict, getMultiStatus(domainId, { docId: tid }).sort(rule.statusSort));
+    }
+    const stored = await getMultiStatus(domainId, { docId: tid }).toArray();
+    const liveDocs = stored.map((tsdoc) => projectContestStatus(rule, tdoc, tsdoc, 'live')).sort(compareByStatusSort(rule.statusSort));
+    const frozenDocs = stored.map((tsdoc) => projectContestStatus(rule, tdoc, tsdoc, 'frozen')).sort(compareByStatusSort(rule.statusSort));
+    const liveConfig: ScoreboardConfig = { ...config, revealLocked: false };
+    delete liveConfig.lockAt;
+    const [frozenRows] = await rule.scoreboard(
+        { ...config, revealLocked: false, lockAt: tdoc.lockAt },
+        translate,
+        tdoc,
+        pdict,
+        frozenDocs as any,
+    );
+    const [liveRows, udict] = await rule.scoreboard(liveConfig, translate, tdoc, pdict, liveDocs as any);
+    markStudentDivergence(liveRows, frozenRows);
+    return [liveRows, udict];
+}
+
 export async function getScoreboard(
     this: Handler,
     domainId: string,
@@ -1772,13 +1802,7 @@ export async function getScoreboard(
     const [rows, udict] =
         getParticipationMode(tdoc) === 'team'
             ? await getTeamScoreboard.call(this, tdoc, config, pdict)
-            : await RULES[tdoc.rule].scoreboard(
-                  config,
-                  this.translate.bind(this),
-                  tdoc,
-                  pdict,
-                  getMultiStatus(domainId, { docId: tid }).sort(RULES[tdoc.rule].statusSort),
-              );
+            : await individualScoreboard(this.translate.bind(this), domainId, tid, tdoc, pdict, config);
     await bus.parallel('contest/scoreboard', tdoc, rows, udict, pdict);
     if (readExamPaperQuotas(tdoc.examPaperQuotas) === null) {
         annotateScoreboardPercentages(tdoc, rows, pdict);

@@ -11,6 +11,7 @@ import {
     OplogModel,
     PERM,
     PRIV,
+    parseGroupIdList,
     PermissionError,
     StorageModel,
     TrainingModel,
@@ -39,6 +40,7 @@ import {
     getFileForDownload,
     getRequest,
     isAudienceMember,
+    listCollectEditorGroups,
     listExpectedMissingRows,
     listPackEntries,
     listPendingForUser,
@@ -70,11 +72,19 @@ function domainIdOf(handler: Handler): string {
 }
 
 function actorOf(handler: Handler) {
-    return {
-        _id: handler.user._id,
-        hasPerm: (perm: bigint) => handler.user.hasPerm(perm),
-        hasPriv: (priv: number) => handler.user.hasPriv(priv),
+    const user = handler.user as Handler['user'] & { parentSchoolId?: ObjectId[] };
+    const actor: {
+        _id: number;
+        hasPerm(perm: bigint): boolean;
+        hasPriv(priv: number): boolean;
+        parentSchoolId?: ObjectId[];
+    } = {
+        _id: user._id,
+        hasPerm: (perm: bigint) => user.hasPerm(perm),
+        hasPriv: (priv: number) => user.hasPriv(priv),
     };
+    if (Array.isArray(user.parentSchoolId)) actor.parentSchoolId = user.parentSchoolId;
+    return actor;
 }
 
 async function assertCanViewCollectOrHide(
@@ -629,14 +639,17 @@ class AdminCollectEditHandler extends CollectBaseHandler {
     @param('chapter', Types.Int, true)
     async get(_domainId: string, id?: ObjectId, fromCourse?: ObjectId, chapter?: number) {
         const domainId = domainIdOf(this);
+        const actor = actorOf(this);
         const catalog = await loadCatalog(domainId);
         const prefill = await coursePrefill(domainId, fromCourse ? String(fromCourse) : '', chapter != null ? String(chapter) : '');
         let requestView = null as ReturnType<typeof serializeRequest> | null;
         let hasSubmissions = false;
         let hasFiles = false;
+        let savedGroupIds: ObjectId[] = [];
         if (id) {
             const request = await getRequest(domainId, id);
             await assertCanViewCollectOrHide(this.user, request, domainId, '无权查看该收集');
+            savedGroupIds = request.groupIds;
             const [submitted, file] = await Promise.all([
                 submissionsColl.findOne({ domainId, requestId: request._id, status: 'submitted' }),
                 filesColl.findOne({ domainId, requestId: request._id }),
@@ -646,12 +659,20 @@ class AdminCollectEditHandler extends CollectBaseHandler {
             requestView = serializeRequest(request, {
                 hasSubmissions,
                 hasFiles,
-                canEdit: canEditCollect(actorOf(this), request),
+                canEdit: canEditCollect(actor, request),
             });
         }
+        // Create has no saved ids, so course prefill must be in the selector to be unchecked.
+        // Edit ignores fromCourse and only unions this collect's saved ids.
+        const editorGroupIds = id
+            ? savedGroupIds
+            : parseGroupIdList('groupIds', prefill.prefillGroupIds);
+        // Selector only. Schools stay the full catalog. Missing ids have no schoolId.
+        const groups = await listCollectEditorGroups(domainId, actor, editorGroupIds);
         this.response.template = 'admin_collect_edit.html';
         this.response.body = {
             ...catalog,
+            groups,
             request: requestView,
             hasSubmissions,
             hasFiles,
@@ -773,7 +794,7 @@ class AdminCollectEditHandler extends CollectBaseHandler {
 
         if (operation === 'create' || operation === 'publish' || (!id && operation === 'update')) {
             if (!id) {
-                const created = await createRequest(domainId, this.user._id, patch);
+                const created = await createRequest(domainId, this.user._id, patch, actorOf(this));
                 const collaborators = parseUidList(body.collaboratorUids);
                 const withCollab = collaborators.length
                     ? await setCollaborators(domainId, created._id, actorOf(this), created.revision, collaborators)
@@ -840,10 +861,10 @@ class AdminCollectStatsHandler extends CollectBaseHandler {
             .sort({ createdAt: -1, _id: -1 })
             .toArray();
         const historyByUid = new Map<number, typeof historyDocs>();
-        for (const file of historyDocs) {
-            const list = historyByUid.get(file.uid) || [];
-            list.push(file);
-            historyByUid.set(file.uid, list);
+        for (const historyFile of historyDocs) {
+            const list = historyByUid.get(historyFile.uid) || [];
+            list.push(historyFile);
+            historyByUid.set(historyFile.uid, list);
         }
         this.response.template = 'admin_collect_stats.html';
         this.response.body = {
@@ -859,27 +880,27 @@ class AdminCollectStatsHandler extends CollectBaseHandler {
                 status: row.status === 'submitted' ? 'submitted' : 'missing',
                 submittedAt: row.submittedAt ? row.submittedAt.toISOString() : null,
                 leftGroup: row.leftGroup,
-                files: row.currentFiles.map((file) => ({
-                    ...file,
-                    originalName: file.originalName,
+                files: row.currentFiles.map((currentFile) => ({
+                    ...currentFile,
+                    originalName: currentFile.originalName,
                     assignedName: assignedNameForFile(
                         request,
                         { uid: row.uid, studentId: row.studentId, realName: row.realName },
-                        { title: slotTitleOf(request, file.slotId) },
-                        file,
-                        fileIndexInSlot(row.currentFiles, file.slotId, file.fileId),
+                        { title: slotTitleOf(request, currentFile.slotId) },
+                        currentFile,
+                        fileIndexInSlot(row.currentFiles, currentFile.slotId, currentFile.fileId),
                     ),
-                    duplicateCount: file.duplicateCount,
-                    duplicateStudentIds: file.duplicateStudentIds,
-                    url: `/admin/collect/${String(request._id)}/file/${file.fileId}`,
+                    duplicateCount: currentFile.duplicateCount,
+                    duplicateStudentIds: currentFile.duplicateStudentIds,
+                    url: `/admin/collect/${String(request._id)}/file/${currentFile.fileId}`,
                 })),
-                history: (historyByUid.get(row.uid) || []).map((file) => ({
-                    slotId: file.slotId,
-                    fileId: file.fileId,
-                    originalName: file.originalName,
-                    size: file.size,
-                    version: file.version,
-                    url: `/admin/collect/${String(request._id)}/file/${file.fileId}`,
+                history: (historyByUid.get(row.uid) || []).map((historyFile) => ({
+                    slotId: historyFile.slotId,
+                    fileId: historyFile.fileId,
+                    originalName: historyFile.originalName,
+                    size: historyFile.size,
+                    version: historyFile.version,
+                    url: `/admin/collect/${String(request._id)}/file/${historyFile.fileId}`,
                 })),
             })),
         };

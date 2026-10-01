@@ -13,6 +13,9 @@ import {
 
 const framework = require('../../../framework/framework');
 const Module = require('module');
+const attachLib = require('../../hydrooj/src/lib/user-group-attach');
+const { InMemoryStudentDirectory } = require('../../hydrooj/src/lib/testing/in-memory-student-directory');
+const { registerStudentDirectory } = require('../../hydrooj/src/service/student-directory');
 
 const domainId = 'system';
 const schoolId = new ObjectId('66b900000000000000000001');
@@ -121,6 +124,10 @@ const hydroojStub = {
     nanoid: () => 'slotid01',
     StorageModel: {},
     UserModel: {},
+    assertGroupsAttachable: attachLib.assertGroupsAttachable,
+    describeGroupRefs: attachLib.describeGroupRefs,
+    listAttachableGroups: attachLib.listAttachableGroups,
+    studentDirectory: require('../../hydrooj/src/service/student-directory').studentDirectory,
 };
 
 Module._load = function load(request: string, parent: NodeModule, isMain: boolean) {
@@ -225,12 +232,18 @@ async function expectNamedError(run: Promise<unknown>, name: string) {
     expect.fail(`expected ${name}`);
 }
 
+const attachDirectory = new InMemoryStudentDirectory();
+
 beforeEach(() => {
     requests.splice(0, requests.length);
     submissions.splice(0, submissions.length);
     boundStudents.splice(0, boundStudents.length);
     hydroHolder.Hydro = { model: { userbind: userBindModel } };
     requests.push(makeRequest());
+    attachDirectory.schools = [{ _id: schoolId, domainId, name: '学校' }];
+    attachDirectory.groups = [{ _id: groupId, domainId, schoolId, name: '一班' }];
+    attachDirectory.students = [];
+    registerStudentDirectory(attachDirectory);
 });
 
 describe('krypton-collect publish', () => {

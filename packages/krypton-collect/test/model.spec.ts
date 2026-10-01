@@ -9,6 +9,9 @@ import { beforeEach, describe, it } from 'node:test';
 
 const Module = require('module');
 const framework = require('../../../framework/framework');
+const attachLib = require('../../hydrooj/src/lib/user-group-attach');
+const { InMemoryStudentDirectory } = require('../../hydrooj/src/lib/testing/in-memory-student-directory');
+const { registerStudentDirectory } = require('../../hydrooj/src/service/student-directory');
 
 const modelPath = require.resolve('../src/model.ts');
 const authPath = require.resolve('../src/auth.ts');
@@ -231,6 +234,10 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
                     return usersById.get(uid) ?? null;
                 },
             },
+            assertGroupsAttachable: attachLib.assertGroupsAttachable,
+            describeGroupRefs: attachLib.describeGroupRefs,
+            listAttachableGroups: attachLib.listAttachableGroups,
+            studentDirectory: require('../../hydrooj/src/service/student-directory').studentDirectory,
         };
     }
     if (request === './db' && filename === modelPath) {
@@ -295,6 +302,24 @@ function futureDate(ms = 60 * 60 * 1000) {
     return new Date(Date.now() + ms);
 }
 
+const attachDirectory = new InMemoryStudentDirectory();
+
+function syncAttachDirectory() {
+    attachDirectory.schools = [
+        { _id: schoolId, domainId, name: '本校', staffUids: [teacher._id, manager._id, collaborator._id] },
+        { _id: otherSchoolId, domainId, name: '外校', staffUids: [teacher._id, manager._id, collaborator._id] },
+    ];
+    attachDirectory.groups = groups.map((group) => ({
+        _id: group._id,
+        domainId: group.domainId,
+        schoolId: group.schoolId,
+        name: '用户组',
+        teacherAttachable: true as const,
+    }));
+    attachDirectory.students = [];
+    registerStudentDirectory(attachDirectory);
+}
+
 async function createDraft(overrides: Record<string, unknown> = {}) {
     return model.createRequest(domainId, teacher._id, {
         schoolId,
@@ -304,7 +329,7 @@ async function createDraft(overrides: Record<string, unknown> = {}) {
         slots: [{ title: '报告', required: true, allowedExt: ['pdf', 'zip', 'jpg'], maxFiles: 2 }],
         dueAt: futureDate(),
         ...overrides,
-    });
+    }, teacher);
 }
 
 async function createPublished(overrides: Record<string, unknown> = {}) {
@@ -365,6 +390,7 @@ beforeEach(() => {
             },
         },
     };
+    syncAttachDirectory();
 });
 
 describe('krypton-collect model helpers', () => {

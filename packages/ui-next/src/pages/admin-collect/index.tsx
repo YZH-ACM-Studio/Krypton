@@ -71,7 +71,7 @@ interface SchoolRef {
 
 interface GroupRef {
   _id: string;
-  schoolId: string;
+  schoolId?: string;
   name: string;
   archivedAt?: string;
 }
@@ -350,12 +350,26 @@ function parseSchoolRefs(value: unknown): SchoolRef[] {
   return value.map(parseSchoolRef);
 }
 
+const DELETED_COLLECT_GROUP_NAME = '已删除的组';
+
+function isBlankSchoolId(value: unknown): boolean {
+  if (value === undefined || value === null) return true;
+  return typeof value === 'string' && value.trim() === '';
+}
+
+/** 目录文档已不存在。服务端不下发 schoolId，勾选列表仍要留下，老师才能取消。 */
+function isDeletedCollectGroupWithoutSchool(group: GroupRef): boolean {
+  return group.name === DELETED_COLLECT_GROUP_NAME && !group.schoolId;
+}
+
 function parseGroupRef(value: unknown): GroupRef {
   const rec = asRecord(value, '用户组');
+  const name = asString(rec.name, '用户组名称');
+  const deletedWithoutSchool = name === DELETED_COLLECT_GROUP_NAME && isBlankSchoolId(rec.schoolId);
   return {
     _id: asId(rec._id, '用户组'),
-    schoolId: asId(rec.schoolId, '用户组学校'),
-    name: asString(rec.name, '用户组名称'),
+    ...(deletedWithoutSchool ? {} : { schoolId: asId(rec.schoolId, '用户组学校') }),
+    name,
     ...(typeof rec.archivedAt === 'string' && rec.archivedAt ? { archivedAt: rec.archivedAt } : {}),
   };
 }
@@ -887,7 +901,8 @@ export function AdminCollectEditPage() {
     if (initial?.schoolId) return initial.schoolId;
     if (data.prefillSchoolId) return data.prefillSchoolId;
     const prefillGroups = data.groups.filter((group) => data.prefillGroupIds.includes(group._id));
-    if (prefillGroups[0]) return prefillGroups[0].schoolId;
+    const prefillSchoolId = prefillGroups[0]?.schoolId;
+    if (prefillSchoolId) return prefillSchoolId;
     return data.schools.length === 1 ? data.schools[0]._id : '';
   });
   const [groupIds, setGroupIds] = useState<string[]>(() => initial?.groupIds || data.prefillGroupIds);
@@ -961,7 +976,12 @@ export function AdminCollectEditPage() {
   }, [bs.domain.id, collaboratorUidsKey]);
 
   const schoolGroups = useMemo(
-    () => data.groups.filter((group) => group.schoolId === schoolId && (!group.archivedAt || groupIds.includes(group._id))),
+    () =>
+      data.groups.filter(
+        (group) =>
+          (group.schoolId === schoolId || isDeletedCollectGroupWithoutSchool(group)) &&
+          (!group.archivedAt || groupIds.includes(group._id)),
+      ),
     [data.groups, schoolId, groupIds],
   );
   const selectedCourse = data.courses.find((course) => course._id === courseId) || null;
@@ -1098,7 +1118,13 @@ export function AdminCollectEditPage() {
                     value={schoolId}
                     onValueChange={(next) => {
                       setSchoolId(next);
-                      setGroupIds((ids) => ids.filter((id) => data.groups.some((group) => group._id === id && group.schoolId === next)));
+                      setGroupIds((ids) =>
+                        ids.filter((id) =>
+                          data.groups.some(
+                            (group) => group._id === id && (group.schoolId === next || isDeletedCollectGroupWithoutSchool(group)),
+                          ),
+                        ),
+                      );
                     }}
                     disabled={!canEdit}
                     className="min-h-10"

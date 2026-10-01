@@ -6,7 +6,16 @@
  */
 import { createHash, randomBytes } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
-import { nanoid, ObjectId, StorageModel, UserModel } from 'hydrooj';
+import {
+    assertGroupsAttachable,
+    describeGroupRefs,
+    listAttachableGroups,
+    nanoid,
+    ObjectId,
+    StorageModel,
+    studentDirectory,
+    UserModel,
+} from 'hydrooj';
 import type { Filter } from 'mongodb';
 import { canCreateCollect, canEditCollect, canManageAllCollect, canViewCollect } from './auth';
 import { filesColl, requestsColl, submissionsColl } from './db';
@@ -55,6 +64,16 @@ export interface CollectActor {
     _id: number;
     hasPerm(perm: bigint): boolean;
     hasPriv(priv: number): boolean;
+    /** This request's user. Missing means no parent schools, not every school. */
+    parentSchoolId?: ObjectId[];
+}
+
+/** Editor checkbox row. Live groups copy directory fields; deleted rows omit schoolId. */
+export interface CollectEditorGroupOption {
+    _id: string;
+    name: string;
+    schoolId?: string;
+    archivedAt?: string;
 }
 
 export interface CollectBoundStudent {
@@ -508,6 +527,68 @@ export async function isAudienceMember(
     return studentMatchesAudience(student, request);
 }
 
+const DELETED_COLLECT_GROUP_NAME = '已删除的组';
+
+function assertCreateActor(actorUid: number, actor: CollectActor): void {
+    if (!actor || actor._id !== actorUid || typeof actor.hasPerm !== 'function' || typeof actor.hasPriv !== 'function') {
+        throw new TypeError('collect create actor must be the requesting user');
+    }
+}
+
+/** New ids only. `previous` is the stored list from before this write. */
+async function assertCollectGroupsAttachable(
+    domainId: string,
+    actor: CollectActor,
+    previous: readonly ObjectId[],
+    next: readonly ObjectId[],
+): Promise<void> {
+    await assertGroupsAttachable(domainId, actor, {
+        field: 'groupIds',
+        previous,
+        next,
+        unrestricted: canManageAllCollect(actor),
+    });
+}
+
+function editorGroupOption(id: string, doc: { _id: ObjectId; schoolId: ObjectId; name: string; archivedAt?: Date | null } | undefined): CollectEditorGroupOption {
+    if (!doc) return { _id: id, name: DELETED_COLLECT_GROUP_NAME };
+    if (!(doc.schoolId instanceof ObjectId)) throw new TypeError(`user group ${id} is missing schoolId`);
+    const row: CollectEditorGroupOption = {
+        _id: doc._id.toHexString(),
+        name: doc.name,
+        schoolId: doc.schoolId.toHexString(),
+    };
+    if (doc.archivedAt) row.archivedAt = doc.archivedAt.toISOString();
+    return row;
+}
+
+/** Attachable groups plus this collect's saved ids. Not the admin-wide catalog. */
+export async function listCollectEditorGroups(
+    domainId: string,
+    actor: CollectActor,
+    savedGroupIds: readonly ObjectId[],
+): Promise<CollectEditorGroupOption[]> {
+    assertDomainId(domainId);
+    for (const id of savedGroupIds) {
+        if (!(id instanceof ObjectId)) throw new TypeError('collect groupIds must be ObjectId');
+    }
+    const unrestricted = canManageAllCollect(actor);
+    const [attachable, described, docs] = await Promise.all([
+        listAttachableGroups(domainId, actor, { unrestricted }),
+        describeGroupRefs(domainId, actor, savedGroupIds, { unrestricted }),
+        studentDirectory().listUserGroups(domainId),
+    ]);
+    const byId = new Map(docs.map((group) => [group._id.toHexString(), group]));
+    const ordered: string[] = [];
+    const seen = new Set<string>();
+    for (const view of [...attachable, ...described]) {
+        if (seen.has(view._id)) continue;
+        seen.add(view._id);
+        ordered.push(view._id);
+    }
+    return ordered.map((id) => editorGroupOption(id, byId.get(id)));
+}
+
 async function assertGroupsBelongToSchool(domainId: string, schoolId: ObjectId, groupIds: ObjectId[]): Promise<void> {
     if (!groupIds.length) rejectFile('必须选择用户组');
     const ub = await userbindOrThrow();
@@ -586,9 +667,11 @@ export async function createRequest(
     domainId: string,
     actorUid: number,
     input: CreateCollectRequestInput,
+    actor: CollectActor,
 ): Promise<CollectRequestDoc> {
     assertDomainId(domainId);
     if (!Number.isSafeInteger(actorUid) || actorUid < 2) throw new CollectForbiddenError('无权创建收集');
+    assertCreateActor(actorUid, actor);
     const now = new Date();
     const quotas = normalizeCollectQuotas(input);
     const doc: CollectRequestDoc = {
@@ -620,6 +703,8 @@ export async function createRequest(
         lastNudgeBy: 0,
     };
     assertRequireCourseExamCompleteAllowed(doc.courseRef, doc.requireCourseExamComplete === true);
+    // Drafts skip the same-school check. New ids must still be attachable before insert.
+    await assertCollectGroupsAttachable(domainId, actor, [], doc.groupIds);
     await requestsColl.insertOne(doc);
     return doc;
 }
@@ -693,6 +778,9 @@ async function applyRequestUpdate(
         const groupIds = set.groupIds || current.groupIds;
         await assertGroupsBelongToSchool(domainId, schoolId, groupIds);
     }
+    // [] is an explicit clear. Only an omitted patch keeps the stored ids.
+    const nextGroupIds = patch.groupIds !== undefined ? set.groupIds ?? [] : current.groupIds;
+    await assertCollectGroupsAttachable(domainId, actor, current.groupIds, nextGroupIds);
 
     const nextCourseRef = patch.courseRef !== undefined ? set.courseRef ?? null : current.courseRef;
     const nextRequire = patch.requireCourseExamComplete !== undefined
@@ -731,6 +819,7 @@ export async function publishRequest(
         const ids = new Set(current.slots.map((slot) => slot.id));
         if (ids.size !== current.slots.length) rejectFile('槽位编号重复');
         await assertGroupsBelongToSchool(domainId, current.schoolId, current.groupIds);
+        await assertCollectGroupsAttachable(domainId, actor, current.groupIds, current.groupIds);
         const audience = await resolveAudience(domainId, current.schoolId, current.groupIds);
         if (!audience.length) throw new CollectAudienceEmptyError();
         const now = new Date();

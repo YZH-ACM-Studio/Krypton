@@ -45,6 +45,7 @@ const deletedId = new ObjectId('66d220000000000000000016');
 
 const writes = { audit: 0, create: 0, update: 0, assign: 0 };
 let cloneCalls = 0;
+let lastCloneGraph: any = null;
 let allowModify = true;
 let existingTask: any = null;
 let directory = mainDirectory();
@@ -99,6 +100,12 @@ function bareGraph() {
         ],
         edges: [],
     };
+}
+
+function membershipNode(graph: { nodes: Array<{ presetId?: string; params?: { targetId?: unknown; scope?: unknown } }> }) {
+    const node = graph.nodes.find((item) => item.presetId === 'group_membership');
+    if (!node?.params) throw new Error('missing group_membership node');
+    return node;
 }
 
 function membershipGraph(targetId: unknown, scope = 'user_group') {
@@ -176,8 +183,9 @@ const taskModel = {
     async assignTask() {
         writes.assign += 1;
     },
-    async cloneTask() {
+    async cloneTask(_domainId: string, _sourceId: unknown, _actorUid: number, graph: unknown) {
         cloneCalls += 1;
+        lastCloneGraph = graph;
         return new ObjectId();
     },
 };
@@ -455,6 +463,7 @@ beforeEach(() => {
     writes.update = 0;
     writes.assign = 0;
     cloneCalls = 0;
+    lastCloneGraph = null;
     listStudentCalls = 0;
     lastStudentDomain = null;
     lastStudentFilter = null;
@@ -875,5 +884,34 @@ describe('task user-group attach', { concurrency: false }, () => {
         expectValidation(graphError, 'graph', invalidMessage);
         expect(graphError.name).to.not.equal('BSONError');
         expect(cloneCalls).to.equal(0);
+    });
+
+    it('新建 group_membership 时把大写用户组 id 收成小写 hex', async () => {
+        const upper = ownId.toHexString().toUpperCase();
+        const instance = handler(false);
+        await using(() => save(instance, undefined, accessJson('public'), membershipGraph(upper, 'user_group')));
+        expect(writes.create).to.equal(1);
+        expect(membershipNode(lastCreateData.graph).params.targetId).to.equal(ownId.toHexString());
+    });
+
+    it('新建 group_membership 且 scope 为 school 时大写 targetId 原样保存', async () => {
+        const upper = ownId.toHexString().toUpperCase();
+        const instance = handler(false);
+        await using(() => save(instance, undefined, accessJson('public'), membershipGraph(upper, 'school')));
+        expect(writes.create).to.equal(1);
+        expect(instance.response.redirect).to.equal('/admin_tasks');
+        expect(membershipNode(lastCreateData.graph).params.targetId).to.equal(upper);
+    });
+
+    it('复制时把非 school 的大写 targetId 收成小写 hex 传给 cloneTask', async () => {
+        const upper = ownId.toHexString().toUpperCase();
+        existingTask = publicTask({ graph: membershipGraph(upper, 'user_group') });
+        await using(() => clone(listHandler(false)));
+        expect(cloneCalls).to.equal(1);
+        const source = membershipNode(existingTask.graph);
+        const copied = membershipNode(lastCloneGraph);
+        expect(copied.params.targetId).to.equal(ownId.toHexString());
+        expect(source.params.targetId).to.equal(upper);
+        expect(copied.params).to.not.equal(source.params);
     });
 });

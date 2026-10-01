@@ -135,14 +135,15 @@ async function deleteTask(domainId: string, taskId: ObjectId): Promise<void> {
     await auditColl.deleteMany({ domainId, taskId });
 }
 
-async function cloneTask(domainId: string, sourceId: ObjectId, actorUid: number): Promise<ObjectId | null> {
+async function cloneTask(domainId: string, sourceId: ObjectId, actorUid: number, graph: TaskGraph): Promise<ObjectId | null> {
+    if (graph == null) throw new TypeError('cloneTask requires a normalized graph');
     const src = await getTask(domainId, sourceId);
     if (!src) return null;
     return createTask(domainId, actorUid, {
         title: `${src.title} (副本)`,
         description: src.description,
         tags: src.tags,
-        graph: JSON.parse(JSON.stringify(src.graph)) as TaskGraph,
+        graph,
         access: src.access,
         isActive: false,
         startDate: null,

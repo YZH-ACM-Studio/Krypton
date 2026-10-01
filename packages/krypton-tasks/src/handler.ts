@@ -178,7 +178,7 @@ function parseTaskGraphJson(json: string): TaskGraph {
             to,
         });
     }
-    return { nodes, edges };
+    return normalizeGraphUserGroupParams({ nodes, edges });
 }
 
 function parseAdmissionMode(s: string | undefined): AdmissionMode {
@@ -266,6 +266,51 @@ function graphUserGroupIds(graph: TaskGraph | null | undefined, strict: boolean)
         }
     }
     return ids;
+}
+
+/**
+ * 与 graphUserGroupIds(graph, true) 同一批参数。用户组 id 写成小写 hex，删除查询才能命中。
+ * 学校 scope 的 targetId 不是用户组，原样保留。未知 preset 不猜测、不抛错。
+ */
+function normalizeGraphUserGroupParams(graph: TaskGraph): TaskGraph {
+    if (!graph || !Array.isArray(graph.nodes)) return graph;
+    const presetMap = new Map(presetSummaries().map((preset) => [preset.id, preset]));
+    const nodes = graph.nodes.map((node) => {
+        if (!node || node.type !== 'task' || !node.presetId) return node;
+        const preset = presetMap.get(node.presetId);
+        if (!preset) return node;
+        const sourceParams = node.params && typeof node.params === 'object' ? node.params : {};
+        const params: Record<string, any> = { ...sourceParams };
+        let wrote = false;
+        for (const spec of preset.params || []) {
+            if (node.presetId === 'group_membership' && spec.name === 'targetId') {
+                if (sourceParams.scope === 'school') continue;
+            } else if (spec.type !== 'user_group') continue;
+            const value = sourceParams[spec.name] ?? spec.default;
+            if (value == null || value === '') continue;
+            params[spec.name] = requireGroupId('graph', value).toHexString();
+            wrote = true;
+        }
+        if (!wrote) return node;
+        return { ...node, params };
+    });
+    return { nodes, edges: graph.edges };
+}
+
+/** 复制图的节点、边和 params，保留 ObjectId 引用，不走 JSON。 */
+function copyTaskGraph(graph: TaskGraph): TaskGraph {
+    const nodes = Array.isArray(graph?.nodes) ? graph.nodes : [];
+    const edges = Array.isArray(graph?.edges) ? graph.edges : [];
+    return {
+        nodes: nodes.map((node) => {
+            if (!node || typeof node !== 'object') return node;
+            const copy: TaskGraphNode = { ...node };
+            if (node.position && typeof node.position === 'object') copy.position = { ...node.position };
+            if (node.params && typeof node.params === 'object') copy.params = { ...node.params };
+            return copy;
+        }),
+        edges: edges.map((edge) => (edge && typeof edge === 'object' ? { ...edge } : edge)),
+    };
 }
 
 function savedTaskGroupIds(task: TaskDoc | null): ObjectId[] {
@@ -742,7 +787,12 @@ export class AdminTasksListHandler extends Handler {
                 });
             }
         }
-        const newId = await taskModel.cloneTask(authoritativeDomainId, tid, this.user._id);
+        const newId = await taskModel.cloneTask(
+            authoritativeDomainId,
+            tid,
+            this.user._id,
+            normalizeGraphUserGroupParams(copyTaskGraph(src.graph)),
+        );
         await OplogModel.log(this, 'tasks.clone', { from: tid, to: newId });
         if (newId) this.response.redirect = this.url('admin_tasks_edit', { tid: newId });
         else this.response.redirect = this.url('admin_tasks');

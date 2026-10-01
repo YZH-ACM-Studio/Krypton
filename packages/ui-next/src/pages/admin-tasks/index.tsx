@@ -1927,6 +1927,18 @@ interface CspScore {
   score: number;
   createdAt: string;
 }
+type CaccStage = 'regional' | 'final';
+type CaccAward = 'first' | 'second' | 'third' | 'participant';
+interface CaccScore {
+  _id: string;
+  studentDocId: string;
+  year: number;
+  stage: CaccStage;
+  award: CaccAward;
+  createdAt: string;
+}
+const CACC_STAGE_LABELS: Record<CaccStage, string> = { regional: '区域赛', final: '决赛' };
+const CACC_AWARD_LABELS: Record<CaccAward, string> = { first: '一等奖', second: '二等奖', third: '三等奖', participant: '参赛' };
 
 interface DomainSettings {
   maxPatScore: number;
@@ -1942,7 +1954,7 @@ interface StayEvent {
   createdAt: string;
 }
 
-type ScoresTab = 'pat' | 'gplt' | 'csp' | 'stay';
+type ScoresTab = 'pat' | 'gplt' | 'csp' | 'cacc' | 'stay';
 
 /** Score rows join student records for display; keyed by studentDocId. */
 type StudentDict = Record<string, { studentId: string; realName: string; schoolId: string; boundUserId: number | null }>;
@@ -1963,6 +1975,7 @@ type ScoresPageData = {
   | { tab: 'pat'; scores: PatScore[] }
   | { tab: 'gplt'; scores: GpltScore[] }
   | { tab: 'csp'; scores: CspScore[] }
+  | { tab: 'cacc'; scores: CaccScore[] }
   | { tab: 'stay'; scores: never[] }
 );
 
@@ -1972,6 +1985,7 @@ export function AdminTasksScoresPage() {
     { key: 'pat', label: 'PAT 认证' },
     { key: 'gplt', label: '天梯赛' },
     { key: 'csp', label: 'CSP 认证' },
+    { key: 'cacc', label: 'CACC' },
     { key: 'stay', label: '留校次数' },
   ];
 
@@ -1979,7 +1993,7 @@ export function AdminTasksScoresPage() {
     <ModuleWorkspace
       {...TASK_WORKSPACE_PROPS}
       title="比赛分数"
-      description="录入 PAT / GPLT / CSP 等外部比赛成绩；这些分数会被任务点用作完成判定的输入。"
+      description="录入 PAT / GPLT / CSP / CACC 等外部比赛成绩；这些成绩会被任务点用作完成判定的输入。"
     >
       <div className="max-w-full overflow-x-auto">
         <MiniTabs size="md" value={data.tab} items={tabs.map((t) => ({ value: t.key, label: t.label, href: `/admin/tasks/scores?tab=${t.key}` }))} />
@@ -1988,6 +2002,7 @@ export function AdminTasksScoresPage() {
       {data.tab === 'pat' && <PatScoreTab scores={data.scores} udict={data.udict} studentDict={data.studentDict} settings={data.settings} />}
       {data.tab === 'gplt' && <GpltScoreTab scores={data.scores} udict={data.udict} studentDict={data.studentDict} settings={data.settings} />}
       {data.tab === 'csp' && <CspScoreTab scores={data.scores} udict={data.udict} studentDict={data.studentDict} settings={data.settings} />}
+      {data.tab === 'cacc' && <CaccScoreTab scores={data.scores} udict={data.udict} studentDict={data.studentDict} year={data.year} level={data.level} />}
       {data.tab === 'stay' && <StayCountTab events={data.stayEvents || []} schools={data.schools || []} udict={data.udict} />}
     </ModuleWorkspace>
   );
@@ -2344,6 +2359,163 @@ function CspScoreTab({
                     <TableCell className="font-medium">{s.score}</TableCell>
                     <TableCell className="text-xs text-muted-foreground">
                       <DateTime value={s.createdAt} mode="date" />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+    </>
+  );
+}
+
+function CaccScoreTab({
+  scores,
+  udict,
+  studentDict,
+  year,
+  level,
+}: {
+  scores: CaccScore[];
+  udict: UserDict;
+  studentDict: StudentDict;
+  year: number;
+  level: string;
+}) {
+  const [yearText, setYearText] = useState(year ? String(year) : '');
+  const [stageFilter, setStageFilter] = useState<string>(level === 'regional' || level === 'final' ? level : '');
+  return (
+    <>
+      <p className="text-xs text-muted-foreground">批量导入只升不降：库里已有更高等级的行会跳过并列在结果里；要改成更低等级，请用下方单条录入。</p>
+      <BulkScoreImport action="/admin/tasks/scores?tab=cacc" operation="cacc_import" formatHint="学号,年份,区域赛|决赛,一等奖|二等奖|三等奖|参赛" />
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm">添加 / 更新 CACC 成绩</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form method="post" action="/admin/tasks/scores?tab=cacc" className="space-y-3">
+            <input type="hidden" name="operation" value="cacc" />
+            <FormRow columns={4}>
+              <FormField label="学号" required>
+                <Input name="studentId" required placeholder="学号" />
+              </FormField>
+              <FormField label="年份" required>
+                <Input name="year" type="number" min={2000} max={2099} defaultValue={new Date().getFullYear()} required />
+              </FormField>
+              <FormField label="比赛级别" required>
+                <SimpleSelect
+                  name="stage"
+                  required
+                  defaultValue="regional"
+                  options={[
+                    { value: 'regional', label: '区域赛' },
+                    { value: 'final', label: '决赛' },
+                  ]}
+                />
+              </FormField>
+              <FormField label="等级" required>
+                <SimpleSelect
+                  name="award"
+                  required
+                  defaultValue="third"
+                  options={[
+                    { value: 'first', label: '一等奖' },
+                    { value: 'second', label: '二等奖' },
+                    { value: 'third', label: '三等奖' },
+                    { value: 'participant', label: '参赛' },
+                  ]}
+                />
+              </FormField>
+            </FormRow>
+            <p className="text-xs text-muted-foreground">单条录入会直接覆盖该学生同年同级别的已有等级。</p>
+            <Button type="submit">
+              <Plus className="mr-1 size-4" />
+              保存
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardContent>
+          <form
+            className="flex flex-wrap items-end gap-3"
+            onSubmit={(ev) => {
+              ev.preventDefault();
+              const params = new URLSearchParams();
+              params.set('tab', 'cacc');
+              if (yearText.trim()) params.set('year', yearText.trim());
+              if (stageFilter) params.set('level', stageFilter);
+              window.location.assign(`/admin/tasks/scores?${params.toString()}`);
+            }}
+          >
+            <FormField label="年份" className="w-36">
+              <Input type="number" value={yearText} onChange={(ev) => setYearText(ev.target.value)} />
+            </FormField>
+            <FormField label="比赛级别" className="w-44">
+              <SimpleSelect
+                value={stageFilter}
+                onValueChange={setStageFilter}
+                options={[
+                  { value: '', label: '全部级别' },
+                  { value: 'regional', label: '区域赛' },
+                  { value: 'final', label: '决赛' },
+                ]}
+              />
+            </FormField>
+            <Button type="submit" size="sm">
+              筛选
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm">已录入成绩 ({scores.length})</CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          {scores.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">还没有 CACC 成绩</p>
+          ) : (
+            <Table className="min-w-[44rem]">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>学号 / 姓名</TableHead>
+                  <TableHead>年份</TableHead>
+                  <TableHead>级别</TableHead>
+                  <TableHead>等级</TableHead>
+                  <TableHead>录入时间</TableHead>
+                  <TableHead>操作</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {scores.map((s) => (
+                  <TableRow key={s._id}>
+                    <TableCell>
+                      <StudentCell studentDict={studentDict} udict={udict} studentDocId={s.studentDocId} />
+                    </TableCell>
+                    <TableCell>{s.year}</TableCell>
+                    <TableCell>{CACC_STAGE_LABELS[s.stage]}</TableCell>
+                    <TableCell>{CACC_AWARD_LABELS[s.award]}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      <DateTime value={s.createdAt} mode="date" />
+                    </TableCell>
+                    <TableCell>
+                      <form
+                        method="post"
+                        action="/admin/tasks/scores?tab=cacc"
+                        className="inline"
+                        onSubmit={(ev) => {
+                          void confirmFormSubmit(ev, '确定删除这条 CACC 成绩？已完成的任务不会因此撤销', { destructive: true });
+                        }}
+                      >
+                        <input type="hidden" name="operation" value="cacc_delete" />
+                        <input type="hidden" name="id" value={s._id} />
+                        <Button type="submit" size="sm" variant="ghost" className="h-7 text-xs text-destructive">
+                          删除
+                        </Button>
+                      </form>
                     </TableCell>
                   </TableRow>
                 ))}

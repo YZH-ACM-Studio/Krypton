@@ -54,6 +54,13 @@ import {
 import { isContestGloballyEnded } from '../lib/virtual-contest';
 import { virtualContestService } from '../model/virtual-contest';
 import { withContestEditBoundary } from '../lib/contest-edit-boundary';
+import {
+    assertGroupsAttachable,
+    describeGroupRefs,
+    listAttachableGroups,
+    parseGroupIdList,
+    type AttachActor,
+} from '../lib/user-group-attach';
 import { getScoreboardExportCapabilities, getScoreboardSnapshotMode } from '../lib/contest-scoreboard-export';
 import {
     buildLatestContestProblemStatusByPid,
@@ -92,6 +99,82 @@ async function listContestScopeGroups(domainId: string, required: boolean): Prom
     }
 }
 
+function contestGroupsUnrestricted(actor: { hasPriv(...priv: number[]): boolean; hasPerm(...perm: bigint[]): boolean }): boolean {
+    return actor.hasPriv(PRIV.PRIV_EDIT_SYSTEM) || actor.hasPerm(PERM.PERM_EDIT_CONTEST);
+}
+
+/** 库存的 participantGroupIds 只能是 ObjectId。其它值直接报错，不能丢弃，也不能交给只收字符串的 parseGroupIdList。 */
+function storedParticipantGroupIds(raw: unknown): ObjectId[] {
+    if (raw == null) return [];
+    if (!Array.isArray(raw)) throw new ValidationError('participantGroupIds', null, localizedErrorText`用户组参数无效`);
+    return raw.map((groupId) => {
+        if (!(groupId instanceof ObjectId)) throw new ValidationError('participantGroupIds', null, localizedErrorText`用户组参数无效`);
+        return groupId;
+    });
+}
+
+interface ParticipantScopeGroupRow {
+    _id: ObjectId;
+    name: string;
+    schoolId?: ObjectId;
+    archivedAt?: Date | null;
+}
+
+function participantScopeGroupRows(
+    attachable: ReadonlyArray<{ _id: string }>,
+    described: ReadonlyArray<{ _id: string }>,
+    groups: ReadonlyArray<{ _id: ObjectId; name: string; schoolId: ObjectId; archivedAt?: Date | null }>,
+    savedIds: readonly ObjectId[],
+): ParticipantScopeGroupRow[] {
+    const byHex = new Map(groups.map((group) => [group._id.toHexString(), group]));
+    const savedByHex = new Map(savedIds.map((id) => [id.toHexString(), id]));
+    const order: string[] = [];
+    const seen = new Set<string>();
+    for (const view of attachable) {
+        if (seen.has(view._id)) continue;
+        seen.add(view._id);
+        order.push(view._id);
+    }
+    for (const view of described) {
+        if (seen.has(view._id)) continue;
+        seen.add(view._id);
+        order.push(view._id);
+    }
+    return order.map((hex) => {
+        const group = byHex.get(hex);
+        if (!group) {
+            const saved = savedByHex.get(hex);
+            if (!saved) throw new Error(`contest scope catalog missing saved group ${hex}`);
+            return { _id: saved, name: '已删除的组' };
+        }
+        const row: ParticipantScopeGroupRow = {
+            _id: group._id,
+            name: group.name,
+            schoolId: group.schoolId,
+        };
+        if (group.archivedAt != null) row.archivedAt = group.archivedAt;
+        return row;
+    });
+}
+
+async function listScopeDirectoryGroups(domainId: string) {
+    return studentDirectory().listUserGroups(domainId);
+}
+
+async function contestEditScopeGroups(
+    domainId: string,
+    actor: AttachActor,
+    savedIds: readonly ObjectId[],
+    unrestricted: boolean,
+): Promise<ParticipantScopeGroupRow[]> {
+    const [attachable, described, groups] = await Promise.all([
+        listAttachableGroups(domainId, actor, { unrestricted }),
+        describeGroupRefs(domainId, actor, savedIds, { unrestricted }),
+        listScopeDirectoryGroups(domainId),
+    ]);
+    return participantScopeGroupRows(attachable, described, groups, savedIds);
+}
+
 export function requireContestViewUnlessEditor(handler: { user: any; checkPerm(perm: bigint): void }, tdoc?: Tdoc) {
     if (handler.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM) || handler.user.hasPerm(PERM.PERM_EDIT_CONTEST) || (tdoc && handler.user.own(tdoc))) {
         return;
@@ -99,12 +182,12 @@ export function requireContestViewUnlessEditor(handler: { user: any; checkPerm(p
     handler.checkPerm(PERM.PERM_VIEW_CONTEST);
 }
 
-function canAutoHideContestProblems(user: { hasPerm(...perm: bigint[]): boolean; hasPriv(...priv: number[]): boolean }) {
-    return user.hasPerm(PERM.PERM_EDIT_PROBLEM) || user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
+function canAutoHideContestProblems(actor: { hasPerm(...perm: bigint[]): boolean; hasPriv(...priv: number[]): boolean }) {
+    return actor.hasPerm(PERM.PERM_EDIT_PROBLEM) || actor.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
 }
 
-export function canBrowseAssignRestrictedContests(user: { hasPerm(...perm: bigint[]): boolean }) {
-    return user.hasPerm(PERM.PERM_EDIT_CONTEST) || user.hasPerm(PERM.PERM_VIEW_HIDDEN_CONTEST);
+export function canBrowseAssignRestrictedContests(actor: { hasPerm(...perm: bigint[]): boolean }) {
+    return actor.hasPerm(PERM.PERM_EDIT_CONTEST) || actor.hasPerm(PERM.PERM_VIEW_HIDDEN_CONTEST);
 }
 
 export async function hideAssignRestrictedContest(domainId: string, tdoc: Tdoc, actor: any) {
@@ -116,9 +199,9 @@ export async function hideAssignRestrictedContest(domainId: string, tdoc: Tdoc, 
     }
 }
 
-export async function assertHomeworkAccessOrHide(domainId: string, tdoc: Tdoc, user: any) {
+export async function assertHomeworkAccessOrHide(domainId: string, tdoc: Tdoc, actor: any) {
     try {
-        await assertHomeworkAccess(domainId, tdoc, user);
+        await assertHomeworkAccess(domainId, tdoc, actor);
     } catch (error) {
         if (error instanceof NotAssignedError || (error instanceof Error && error.name === 'NotAssignedError')) {
             throw new ContestNotFoundError(domainId, tdoc.docId);
@@ -1046,10 +1129,22 @@ export class ContestEditHandler extends Handler {
         } catch {
             /* best-effort */
         }
-        const scopeGroups = await listContestScopeGroups(
-            authoritativeDomainId,
-            Boolean(this.tdoc && (this.tdoc.participationMode || 'individual') !== 'team' && this.tdoc.participantScopeMode === 'groups'),
+        const savedGroupIds = this.tdoc ? storedParticipantGroupIds(this.tdoc.participantGroupIds) : [];
+        const scopeGroupsRequired = Boolean(
+            this.tdoc && (this.tdoc.participationMode || 'individual') !== 'team' && this.tdoc.participantScopeMode === 'groups',
         );
+        let scopeGroups: ParticipantScopeGroupRow[] = [];
+        try {
+            scopeGroups = await contestEditScopeGroups(
+                authoritativeDomainId,
+                this.user,
+                savedGroupIds,
+                contestGroupsUnrestricted(this.user),
+            );
+        } catch (error) {
+            logger.error('Contest group catalog lookup failed domain=%s error=%o', authoritativeDomainId, error);
+            if (scopeGroupsRequired) throw error;
+        }
 
         this.response.body = {
             rules,
@@ -1548,7 +1643,20 @@ export class ContestEditHandler extends Handler {
         // Participant scope normalization (§5.2): the two lists are
         // mutually exclusive — clear whichever isn't active.
         const sids = participantScopeMode === 'schools' ? participantSchoolIds.map((s) => new ObjectId(s.trim())).filter(Boolean) : [];
-        const gids = participantScopeMode === 'groups' ? participantGroupIds.map((s) => new ObjectId(s.trim())).filter(Boolean) : [];
+        let gids: ObjectId[] = [];
+        // tid 在 contest.add 之后会被改成新 id。创建时的 previous 仍按创建前的 creatingContest 取 []，不用残留 tdoc，也不用客户端提交。
+        const previous = creatingContest || !this.tdoc ? [] : storedParticipantGroupIds(this.tdoc.participantGroupIds);
+        if (participantScopeMode === 'groups') {
+            gids = parseGroupIdList('participantGroupIds', participantGroupIds);
+            // 空白 token 会被 parseGroupIdList 跳过。全被跳过时不能静默存成空范围。
+            if (!gids.length && participantGroupIds.length) throw new ValidationError('participantGroupIds');
+            await assertGroupsAttachable(authoritativeDomainId, this.user, {
+                field: 'participantGroupIds',
+                previous,
+                next: gids,
+                unrestricted: contestGroupsUnrestricted(this.user),
+            });
+        }
 
         const unsetExamPassScore = rule === 'exam' && nextExamPassScore === null && this.tdoc?.examPassScore != null;
         const unsetExamAttemptLimit = rule === 'exam' && nextExamAttemptLimit <= 1 && this.tdoc?.examAttemptLimit != null;

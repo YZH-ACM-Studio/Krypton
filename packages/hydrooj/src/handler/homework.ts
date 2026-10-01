@@ -9,6 +9,7 @@ import {
     FileLimitExceededError,
     FileUploadError,
     HomeworkNotLiveError,
+    localizedErrorText,
     NotAssignedError,
     PermissionError,
     ValidationError,
@@ -16,6 +17,13 @@ import {
 import { PenaltyRules, ProblemDict, Tdoc, TrainingDoc, TrainingNode } from '../interface';
 import { assertCourseAccessible, canManageCourse } from '../lib/course-access';
 import { isCourseKind } from '../lib/training-kind';
+import {
+    assertGroupsAttachable,
+    describeGroupRefs,
+    listAttachableGroups,
+    parseGroupIdList,
+    type AttachActor,
+} from '../lib/user-group-attach';
 import { PERM, PRIV } from '../model/builtin';
 import * as contest from '../model/contest';
 import * as discussion from '../model/discussion';
@@ -79,14 +87,14 @@ function assertCanDeleteHomework(
 async function assertHomeworkManageOrHide(
     domainId: string,
     tdoc: Tdoc,
-    user: any,
+    actor: any,
     allowed: boolean,
     deny: () => void,
 ) {
     if (tdoc.rule !== 'homework') throw new ContestNotFoundError(domainId, tdoc.docId);
     if (allowed) return;
     try {
-        await assertHomeworkAccess(domainId, tdoc, user);
+        await assertHomeworkAccess(domainId, tdoc, actor);
     } catch (error) {
         if (error instanceof NotAssignedError || (error instanceof Error && error.name === 'NotAssignedError')) {
             throw new ContestNotFoundError(domainId, tdoc.docId);
@@ -96,9 +104,81 @@ async function assertHomeworkManageOrHide(
     deny();
 }
 
-async function listHomeworkScopeGroups(domainId: string): Promise<any[]> {
+function homeworkGroupsUnrestricted(actor: { hasPriv(...priv: number[]): boolean; hasPerm(...perm: bigint[]): boolean }): boolean {
+    return actor.hasPriv(PRIV.PRIV_EDIT_SYSTEM) || actor.hasPerm(PERM.PERM_EDIT_HOMEWORK);
+}
+
+/** 库存的 participantGroupIds 只能是 ObjectId。其它值直接报错，不能丢弃，也不能交给只收字符串的 parseGroupIdList。 */
+function storedParticipantGroupIds(raw: unknown): ObjectId[] {
+    if (raw == null) return [];
+    if (!Array.isArray(raw)) throw new ValidationError('participantGroupIds', null, localizedErrorText`用户组参数无效`);
+    return raw.map((groupId) => {
+        if (!(groupId instanceof ObjectId)) throw new ValidationError('participantGroupIds', null, localizedErrorText`用户组参数无效`);
+        return groupId;
+    });
+}
+
+interface ParticipantScopeGroupRow {
+    _id: ObjectId;
+    name: string;
+    schoolId?: ObjectId;
+    archivedAt?: Date | null;
+}
+
+function participantScopeGroupRows(
+    attachable: ReadonlyArray<{ _id: string }>,
+    described: ReadonlyArray<{ _id: string }>,
+    groups: ReadonlyArray<{ _id: ObjectId; name: string; schoolId: ObjectId; archivedAt?: Date | null }>,
+    savedIds: readonly ObjectId[],
+): ParticipantScopeGroupRow[] {
+    const byHex = new Map(groups.map((group) => [group._id.toHexString(), group]));
+    const savedByHex = new Map(savedIds.map((id) => [id.toHexString(), id]));
+    const order: string[] = [];
+    const seen = new Set<string>();
+    for (const view of attachable) {
+        if (seen.has(view._id)) continue;
+        seen.add(view._id);
+        order.push(view._id);
+    }
+    for (const view of described) {
+        if (seen.has(view._id)) continue;
+        seen.add(view._id);
+        order.push(view._id);
+    }
+    return order.map((hex) => {
+        const group = byHex.get(hex);
+        if (!group) {
+            const saved = savedByHex.get(hex);
+            if (!saved) throw new Error(`homework scope catalog missing saved group ${hex}`);
+            return { _id: saved, name: '已删除的组' };
+        }
+        const row: ParticipantScopeGroupRow = {
+            _id: group._id,
+            name: group.name,
+            schoolId: group.schoolId,
+        };
+        if (group.archivedAt != null) row.archivedAt = group.archivedAt;
+        return row;
+    });
+}
+
+async function listScopeDirectoryGroups(domainId: string) {
+    return studentDirectory().listUserGroups(domainId);
+}
+
+async function homeworkEditScopeGroups(
+    domainId: string,
+    actor: AttachActor,
+    savedIds: readonly ObjectId[],
+    unrestricted: boolean,
+): Promise<ParticipantScopeGroupRow[]> {
     try {
-        return await studentDirectory().listUserGroups(domainId);
+        const [attachable, described, groups] = await Promise.all([
+            listAttachableGroups(domainId, actor, { unrestricted }),
+            describeGroupRefs(domainId, actor, savedIds, { unrestricted }),
+            listScopeDirectoryGroups(domainId),
+        ]);
+        return participantScopeGroupRows(attachable, described, groups, savedIds);
     } catch (error) {
         logger.error('Homework group catalog lookup failed domain=%s error=%o', domainId, error);
         throw error;
@@ -110,15 +190,27 @@ function normalizeParticipantGroups(
     rawGroupIds: string[],
 ): { participantScopeMode: 'none' | 'groups'; participantGroupIds: ObjectId[] } {
     if (mode === 'none') return { participantScopeMode: 'none', participantGroupIds: [] };
-    if (!rawGroupIds.length) throw new ValidationError('participantGroupIds');
-    try {
-        return {
-            participantScopeMode: 'groups',
-            participantGroupIds: Array.from(new Set(rawGroupIds.map((groupId) => groupId.trim()))).map((groupId) => new ObjectId(groupId)),
-        };
-    } catch {
-        throw new ValidationError('participantGroupIds');
-    }
+    const participantGroupIds = parseGroupIdList('participantGroupIds', rawGroupIds);
+    if (!participantGroupIds.length) throw new ValidationError('participantGroupIds');
+    return { participantScopeMode: 'groups', participantGroupIds };
+}
+
+async function checkedHomeworkParticipantGroups(
+    domainId: string,
+    actor: AttachActor & { hasPriv(...priv: number[]): boolean; hasPerm(...perm: bigint[]): boolean },
+    tdoc: { participantGroupIds?: unknown } | null,
+    mode: 'none' | 'groups',
+    rawGroupIds: string[],
+) {
+    const scope = normalizeParticipantGroups(mode, rawGroupIds);
+    const previous = tdoc ? storedParticipantGroupIds(tdoc.participantGroupIds) : [];
+    await assertGroupsAttachable(domainId, actor, {
+        field: 'participantGroupIds',
+        previous,
+        next: scope.participantGroupIds,
+        unrestricted: homeworkGroupsUnrestricted(actor),
+    });
+    return scope;
 }
 
 async function loadCourseQuizContext(
@@ -352,7 +444,9 @@ class HomeworkEditHandler extends Handler {
         let quizContext: { course: TrainingDoc; chapter: TrainingNode } | null = null;
         if (fromCourse) quizContext = await loadCourseQuizContext(authoritativeDomainId, fromCourse, chapter, this.user);
         if (!fromCourse && chapter) throw new ValidationError('chapter');
-        const courseGroupIds = (quizContext?.course.courseGroupIds || []).map(String);
+        // 测验还没写入作业时，页面用课程上的组做只读展示，候选里要能解析这些组的名字。
+        const storedIds = tdoc ? storedParticipantGroupIds(tdoc.participantGroupIds) : [];
+        const courseGroupIds = quizContext ? storedParticipantGroupIds(quizContext.course.courseGroupIds) : [];
         const participantScopeMode = quizContext
             ? courseGroupIds.length
                 ? 'groups'
@@ -360,8 +454,13 @@ class HomeworkEditHandler extends Handler {
             : tdoc?.participantScopeMode === 'groups'
               ? 'groups'
               : 'none';
-        const participantGroupIds = quizContext ? courseGroupIds : (tdoc?.participantGroupIds || []).map(String);
-        const scopeGroups = await listHomeworkScopeGroups(authoritativeDomainId);
+        const participantGroupIds = (quizContext ? courseGroupIds : storedIds).map((groupId) => groupId.toHexString());
+        const scopeGroups = await homeworkEditScopeGroups(
+            authoritativeDomainId,
+            this.user,
+            quizContext ? [...storedIds, ...courseGroupIds] : storedIds,
+            homeworkGroupsUnrestricted(this.user),
+        );
         const formDoc =
             tdoc ||
             (quizContext
@@ -389,11 +488,7 @@ class HomeworkEditHandler extends Handler {
             page_name: tid ? 'homework_edit' : 'homework_create',
             participantScopeMode,
             participantGroupIds,
-            scopeGroups: scopeGroups.map((scopeGroup: any) => ({
-                _id: String(scopeGroup._id),
-                name: scopeGroup.name,
-                archivedAt: scopeGroup.archivedAt || null,
-            })),
+            scopeGroups,
             fromCourse: fromCourse ? String(fromCourse) : '',
             chapter: chapter || '',
             courseContext: quizContext
@@ -464,12 +559,19 @@ class HomeworkEditHandler extends Handler {
         await assertProblemBankSelection(authoritativeDomainId, pids, this.user, tdoc?.pids);
         const quizContext = fromCourse ? await loadCourseQuizContext(authoritativeDomainId, fromCourse, chapter, this.user) : null;
         if (!fromCourse && chapter) throw new ValidationError('chapter');
+        // 课程测验的组来自课程文档。课程保存时已经校验过，这里不解析客户端提交，也不做可挂校验。
         const participantScope = quizContext
             ? {
                   participantScopeMode: quizContext.course.courseGroupIds?.length ? ('groups' as const) : ('none' as const),
                   participantGroupIds: quizContext.course.courseGroupIds || [],
               }
-            : normalizeParticipantGroups(participantScopeMode, participantGroupIds);
+            : await checkedHomeworkParticipantGroups(
+                  authoritativeDomainId,
+                  this.user,
+                  tdoc,
+                  participantScopeMode,
+                  participantGroupIds,
+              );
         if (!tid) {
             tid = await contest.add(authoritativeDomainId, title, content, this.user._id, 'homework', beginAt.toDate(), endAt.toDate(), pids, rated, {
                 penaltySince: penaltySince.toDate(),

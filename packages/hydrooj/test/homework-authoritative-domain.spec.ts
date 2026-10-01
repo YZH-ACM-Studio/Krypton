@@ -627,7 +627,7 @@ describe('P3.7 course homework scope', () => {
         expect(homework).to.include("ContestCodeHandler, PERM.PERM_VIEW_HOMEWORK");
         expect(homework).to.include('async function assertHomeworkManageOrHide(');
         expect(homework).to.include("tdoc.rule !== 'homework'");
-        expect(homework).to.include('assertHomeworkAccess(domainId, tdoc, user)');
+        expect(homework).to.include('assertHomeworkAccess(domainId, tdoc, actor)');
         expect(homework).to.include("error.name === 'NotAssignedError'");
         const editSection = homework.slice(homework.indexOf('class HomeworkEditHandler'), homework.indexOf('export class HomeworkFilesHandler'));
         const filesSection = homework.slice(homework.indexOf('export class HomeworkFilesHandler'), homework.indexOf('export async function apply'));

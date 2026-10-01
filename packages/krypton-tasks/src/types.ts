@@ -33,7 +33,7 @@
  *    `confirm`/`unconfirm`, and `condition_change` events. Every irreversible
  *    or sensitive action writes a row.
  *
- *  - PAT/GPLT/CSP scores are keyed by `studentDocId` (userbind.students._id),
+ *  - PAT/GPLT/CSP/CACC scores are keyed by `studentDocId` (userbind.students._id),
  *    NOT userId — a score belongs to the student, which covers unbound students
  *    and aligns with the rankboard. Admin-fed via studentId paste-import /
  *    single entry; task checkers resolve userId→studentDocId at check time.
@@ -275,6 +275,10 @@ export const DEFAULT_DOMAIN_SETTINGS = {
 export type PatLevel = 'advanced' | 'basic';
 export type PatSeason = 'spring' | 'summer' | 'autumn' | 'winter';
 export type GpltLevel = 'school' | 'national';
+/** CACC stage. Regional and final results never substitute for each other. */
+export type CaccStage = 'regional' | 'final';
+/** CACC result, highest first: first > second > third > participant. */
+export type CaccAward = 'first' | 'second' | 'third' | 'participant';
 
 export interface PatScoreDoc {
     _id: ObjectId;
@@ -319,6 +323,20 @@ export interface CspScoreDoc {
     studentDocId: ObjectId;
     round: number;
     score: number;
+    createdAt: Date;
+    createdBy: number;
+    updatedAt?: Date;
+    updatedBy?: number;
+}
+
+export interface CaccScoreDoc {
+    _id: ObjectId;
+    domainId: string;
+    /** Student identity = userbind.students._id. */
+    studentDocId: ObjectId;
+    year: number;
+    stage: CaccStage;
+    award: CaccAward;
     createdAt: Date;
     createdBy: number;
     updatedAt?: Date;
@@ -415,6 +433,7 @@ declare module 'hydrooj' {
         'tasks.score_pat': PatScoreDoc;
         'tasks.score_gplt': GpltScoreDoc;
         'tasks.score_csp': CspScoreDoc;
+        'tasks.score_cacc': CaccScoreDoc;
         'tasks.stay_events': StayEventDoc;
     }
 

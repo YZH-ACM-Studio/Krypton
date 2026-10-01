@@ -5,7 +5,7 @@
  * other Hydro plugins like `userbind.students` and `vjudge.account`).
  */
 import { db } from 'hydrooj';
-import type { AuditLogDoc, CspScoreDoc, DomainSettingsDoc, GpltScoreDoc, PatScoreDoc, StayEventDoc, TaskAssignmentDoc, TaskDoc } from './types';
+import type { AuditLogDoc, CaccScoreDoc, CspScoreDoc, DomainSettingsDoc, GpltScoreDoc, PatScoreDoc, StayEventDoc, TaskAssignmentDoc, TaskDoc } from './types';
 
 export const tasksColl = db.collection<TaskDoc>('tasks.tasks');
 export const assignmentsColl = db.collection<TaskAssignmentDoc>('tasks.assignments');
@@ -14,6 +14,7 @@ export const settingsColl = db.collection<DomainSettingsDoc>('tasks.settings');
 export const patScoreColl = db.collection<PatScoreDoc>('tasks.score_pat');
 export const gpltScoreColl = db.collection<GpltScoreDoc>('tasks.score_gplt');
 export const cspScoreColl = db.collection<CspScoreDoc>('tasks.score_csp');
+export const caccScoreColl = db.collection<CaccScoreDoc>('tasks.score_cacc');
 export const stayEventsColl = db.collection<StayEventDoc>('tasks.stay_events');
 
 let indexesEnsured = false;
@@ -81,6 +82,9 @@ export async function ensureIndexes(): Promise<void> {
 
         cspScoreColl.createIndex({ domainId: 1, studentDocId: 1, round: 1 }, { unique: true }),
         cspScoreColl.createIndex({ domainId: 1, round: 1 }),
+
+        caccScoreColl.createIndex({ domainId: 1, studentDocId: 1, year: 1, stage: 1 }, { unique: true }),
+        caccScoreColl.createIndex({ domainId: 1, year: 1, stage: 1 }),
 
         // Stay events: unique on source makes the auto-trigger idempotent —
         // re-evaluating a completed task with countsAsStay=true tries to

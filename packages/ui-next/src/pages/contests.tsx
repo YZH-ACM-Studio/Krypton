@@ -10,6 +10,7 @@ import {
   Code,
   Crown,
   Download,
+  Eye,
   FileText,
   Flag,
   ImageDown,
@@ -110,6 +111,7 @@ interface ScoreboardCell {
   scorePercentage?: number;
   hover?: string;
   style?: string;
+  studentDivergence?: boolean;
 }
 
 interface TeamScoreboardCellMeta {
@@ -125,6 +127,7 @@ interface ContestsPageData {
   canExportScoreboardPrivateIdentity?: boolean;
   canManageContest?: boolean;
   canUnlockScoreboard?: boolean;
+  canViewLockedRealtime?: boolean;
   canViewRecord?: boolean;
   currentUserId?: unknown;
   examMode?: {
@@ -1195,6 +1198,15 @@ export function ContestScoreboardPage() {
       TID: String(tdoc.docId),
     });
   const scoreboardUrl = examUrls.ranking || `${detailUrl}/scoreboard`;
+  const viewingLockedRealtime = !!data.canViewLockedRealtime && data.scoreboardSnapshotMode === 'realtime';
+  const lockFreezesBoard = ['acm', 'oi', 'ioi'].includes(String(tdoc.rule || '').toLowerCase()) && tdoc.participationMode !== 'team';
+  function snapshotHref(realtime: boolean) {
+    if (typeof window === 'undefined') return realtime ? `${scoreboardUrl}?realtime=true` : scoreboardUrl;
+    const url = new URL(window.location.href);
+    if (realtime) url.searchParams.set('realtime', 'true');
+    else url.searchParams.delete('realtime');
+    return `${url.pathname}${url.search}${url.hash}`;
+  }
   const availableViews = Array.isArray(data.availableViews) ? data.availableViews : [];
   const extraViews = availableViews.filter(([id]) => !['html', 'csv', 'default', 'ghost'].includes(id));
 
@@ -1397,6 +1409,22 @@ export function ContestScoreboardPage() {
     return isFirstBlood(cell) ? 'bg-[#d9f0c7] dark:bg-emerald-950/50' : '';
   }
 
+  function cellChrome(cell: ScoreboardCell) {
+    if (cell.studentDivergence) return 'bg-violet-100 dark:bg-violet-950/50';
+    return firstBloodClass(cell);
+  }
+
+  function renderMarkedCell(cell: ScoreboardCell, content: ReactNode) {
+    if (!cell.studentDivergence) return content;
+    return (
+      <span className="inline-flex items-center justify-center gap-1">
+        <Eye className="size-3.5 shrink-0 text-violet-700 dark:text-violet-200" aria-label="和学生榜不同" />
+        {isFirstBlood(cell) ? <span className="size-2 shrink-0 rounded-full bg-emerald-600" aria-label="一血" /> : null}
+        {content}
+      </span>
+    );
+  }
+
   function scoreStyle(cell: ScoreboardCell) {
     const color = scoreboardScoreColor(cell.scorePercentage ?? cell.score ?? cell.value);
     return color ? { color } : undefined;
@@ -1511,7 +1539,10 @@ export function ContestScoreboardPage() {
 
   function renderBodyCell(cell: ScoreboardCell) {
     if (cell.type === 'rank') {
-      return <span className="font-mono text-sm text-muted-foreground">{cell.value === '0' || cell.value === 0 ? '*' : cellText(cell)}</span>;
+      return renderMarkedCell(
+        cell,
+        <span className="font-mono text-sm text-muted-foreground">{cell.value === '0' || cell.value === 0 ? '*' : cellText(cell)}</span>,
+      );
     }
     if (cell.type === 'user') {
       const user = udict[String(cell.raw)] || null;
@@ -1531,9 +1562,10 @@ export function ContestScoreboardPage() {
     if (cell.type === 'realName') {
       return <span className="text-xs text-muted-foreground">{cellText(cell)}</span>;
     }
-    if (cell.type === 'record') return renderRecordCell(cell);
+    if (cell.type === 'record') return renderMarkedCell(cell, renderRecordCell(cell));
     if (cell.type === 'records' && Array.isArray(cell.raw)) {
-      return (
+      return renderMarkedCell(
+        cell,
         <span className="space-x-1">
           {cell.raw.map((record: ScoreboardCell, index: number) => (
             <span key={`${record.raw || record.value || index}`}>
@@ -1541,27 +1573,29 @@ export function ContestScoreboardPage() {
               {record.raw ? renderRecordCell(record) : <span className="whitespace-pre-line">{renderScoreboardText(record)}</span>}
             </span>
           ))}
-        </span>
+        </span>,
       );
     }
     if (teamMode && cell.type === 'time') {
       const [solved = '0', totalTime = '0:00'] = cellText(cell).split('\n');
-      return (
+      return renderMarkedCell(
+        cell,
         <span className="inline-grid justify-items-end gap-0.5 tabular-nums" title={cell.hover || undefined}>
           <span className="text-base font-semibold leading-none text-foreground">{solved}</span>
           <span className="text-xs leading-none text-muted-foreground">{totalTime}</span>
-        </span>
+        </span>,
       );
     }
     if (cell.type === 'total_score' || cell.type === 'solved' || cell.type === 'time') {
-      return (
+      return renderMarkedCell(
+        cell,
         <span
           className="whitespace-pre-line font-medium tabular-nums"
           title={cell.hover || undefined}
           style={cell.type === 'total_score' ? scoreStyle(cell) : undefined}
         >
           {renderScoreboardText(cell)}
-        </span>
+        </span>,
       );
     }
     return (
@@ -1631,15 +1665,49 @@ export function ContestScoreboardPage() {
 
       {tdoc.lockAt && !tdoc.unlocked ? (
         <Card className="border-amber-200 bg-amber-50/60 dark:border-amber-900/60 dark:bg-amber-950/20">
-          <CardContent className="p-4 text-sm text-amber-800 dark:text-amber-200">
-            <p>排行榜已封榜，封榜后的提交可能会暂时显示为待定。</p>
-            {data.canUnlockScoreboard ? (
-              <form method="post" className="mt-3">
-                <input type="hidden" name="operation" value="unlock" />
-                <Button type="submit" size="sm" variant="outline">
-                  解除封榜
-                </Button>
-              </form>
+          <CardContent className="flex flex-col gap-3 p-4 text-sm text-amber-800 dark:text-amber-200 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0 space-y-2">
+              <p>
+                {viewingLockedRealtime
+                  ? '这是实时榜，名次和分数包含封榜后的提交。'
+                  : lockFreezesBoard
+                    ? '排行榜已封榜，封榜后的提交可能会暂时显示为待定。'
+                    : '封榜时间已到。'}
+              </p>
+              {viewingLockedRealtime ? (
+                <p className="flex items-center gap-2 text-violet-800 dark:text-violet-200">
+                  <span className="inline-flex size-5 items-center justify-center rounded bg-violet-100 dark:bg-violet-950/60">
+                    <Eye className="size-3.5" aria-hidden="true" />
+                  </span>
+                  紫色格子和学生榜不同。
+                </p>
+              ) : null}
+            </div>
+            {data.canViewLockedRealtime || data.canUnlockScoreboard ? (
+              <div className="flex shrink-0 flex-wrap items-center gap-2">
+                {data.canViewLockedRealtime ? (
+                  <div className="flex gap-2" role="group" aria-label="榜单视图">
+                    <Button asChild size="sm" variant={viewingLockedRealtime ? 'outline' : 'default'}>
+                      <a href={snapshotHref(false)} aria-current={viewingLockedRealtime ? undefined : 'page'}>
+                        学生榜
+                      </a>
+                    </Button>
+                    <Button asChild size="sm" variant={viewingLockedRealtime ? 'default' : 'outline'}>
+                      <a href={snapshotHref(true)} aria-current={viewingLockedRealtime ? 'page' : undefined}>
+                        实时榜
+                      </a>
+                    </Button>
+                  </div>
+                ) : null}
+                {data.canUnlockScoreboard ? (
+                  <form method="post">
+                    <input type="hidden" name="operation" value="unlock" />
+                    <Button type="submit" size="sm" variant="outline">
+                      解除封榜
+                    </Button>
+                  </form>
+                ) : null}
+              </div>
             ) : null}
           </CardContent>
         </Card>
@@ -1688,7 +1756,7 @@ export function ContestScoreboardPage() {
                               className={cn(
                                 head.type === 'problem' || cell.type === 'record' || cell.type === 'records' ? 'text-center' : '',
                                 teamMode && cell.type === 'time' && 'text-right',
-                                firstBloodClass(cell),
+                                cellChrome(cell),
                               )}
                             >
                               {isCurrent && columnIndex === participantColumn && !isTeamParticipant ? (

@@ -25,7 +25,7 @@
  *   POST /admin/tasks/scores/pat      (add/update)
  *   POST /admin/tasks/scores/pat/import
  *   POST /admin/tasks/scores/pat/delete
- *   (… same for gplt, csp)
+ *   (… same for gplt, csp, cacc)
  *   GET  /admin/tasks/settings        admin_tasks_settings.html
  *   POST /admin/tasks/settings
  */
@@ -54,7 +54,17 @@ import {
 import type { LocalizedErrorText } from 'hydrooj';
 import { userBindModel } from '@hydrooj/krypton-userbind';
 import { canCreateTask, canManageAllTasks, canModifyTask } from './auth';
-import { cspScoreColl, gpltScoreColl, patScoreColl } from './db';
+import {
+    CACC_AWARD_LABELS,
+    CACC_STAGE_LABELS,
+    decideCaccImport,
+    isCaccStage,
+    isCaccYear,
+    parseCaccAward,
+    parseCaccStage,
+    parseCaccYear,
+} from './cacc';
+import { caccScoreColl, cspScoreColl, gpltScoreColl, patScoreColl } from './db';
 import { taskModel, TaskAssignmentTransitionError } from './model';
 import { listTagAcCountOptions, presetSummaries, validateTagAcCountGraph } from './presets';
 import { buildTaskStatsCsv, defaultTaskGroupName } from './stats-export';
@@ -1472,7 +1482,7 @@ function parseScoreImport(text: string, columns: string[]): { rows: Record<strin
     return { rows, errors };
 }
 
-class AdminScoresHandler extends Handler {
+export class AdminScoresHandler extends Handler {
     async prepare() {
         if (!canManageAllTasks(this.user as any)) this.checkPriv(PRIV.PRIV_EDIT_SYSTEM);
     }
@@ -1498,6 +1508,11 @@ class AdminScoresHandler extends Handler {
         } else if (tab === 'csp') {
             const filter: any = { domainId };
             scores = await cspScoreColl.find(filter).sort({ round: -1, studentDocId: 1 }).limit(500).toArray();
+        } else if (tab === 'cacc') {
+            const filter: any = { domainId };
+            if (isCaccStage(level)) filter.stage = level;
+            if (year) filter.year = year;
+            scores = await caccScoreColl.find(filter).sort({ year: -1, stage: 1, studentDocId: 1 }).limit(500).toArray();
         } else if (tab === 'stay') {
             stayEvents = await taskModel.listStayEvents(domainId, year ? { year } : {});
             schools = (await loadTaskDirectoryCatalog(domainId)).schools;
@@ -1729,6 +1744,82 @@ class AdminScoresHandler extends Handler {
                 },
                 { upsert: true },
             );
+            imported++;
+        }
+        this.response.body = { success: true, imported, errors: rowErrors };
+    }
+
+    // CACC single entry — overwrites (may lower) the award for (student, year, stage).
+    @param('studentId', Types.String)
+    @param('year', Types.Int)
+    @param('stage', Types.String)
+    @param('award', Types.String)
+    async postCacc({ domainId }: { domainId: string }, studentId: string, year: number, stage: string, award: string) {
+        if (!isCaccYear(year)) throw new ValidationError('year', null, localizedErrorText`年份无效，请填写 2000 到 2099 之间的年份`);
+        const safeStage = parseCaccStage(stage);
+        if (!safeStage) throw new ValidationError('stage', null, localizedErrorText`CACC 级别无效，请选择区域赛或决赛`);
+        const safeAward = parseCaccAward(award);
+        if (!safeAward) throw new ValidationError('award', null, localizedErrorText`CACC 等级无效，请选择一等奖、二等奖、三等奖或参赛`);
+        const student = await findStudentDoc(domainId, studentId);
+        if (!student) throw new ValidationError('studentId', null, localizedErrorText`学号 ${studentId}: 未找到学生档案`);
+        await caccScoreColl.updateOne(
+            { domainId, studentDocId: student._id, year, stage: safeStage },
+            {
+                $set: { award: safeAward, updatedAt: new Date(), updatedBy: this.user._id },
+                $setOnInsert: { _id: new ObjectId(), createdAt: new Date(), createdBy: this.user._id },
+            },
+            { upsert: true },
+        );
+        this.response.redirect = this.url('admin_tasks_scores', { query: { tab: 'cacc' } });
+    }
+
+    @param('id', Types.ObjectId)
+    async postCaccDelete({ domainId }: { domainId: string }, id: ObjectId) {
+        await caccScoreColl.deleteOne({ domainId, _id: id });
+        this.response.redirect = this.url('admin_tasks_scores', { query: { tab: 'cacc' } });
+    }
+
+    // CACC bulk import — format per line: 学号,年份,级别,等级. Never lowers an existing award.
+    @param('text', Types.Content)
+    async postCaccImport({ domainId }: { domainId: string }, text: string) {
+        const { rows, errors } = parseScoreImport(text, ['studentId', 'year', 'stage', 'award']);
+        let imported = 0;
+        const rowErrors: string[] = [...errors];
+        for (const r of rows) {
+            const year = parseCaccYear(r.year);
+            if (year === null) {
+                rowErrors.push(`学号 ${r.studentId}: 年份无效 (2000-2099)`);
+                continue;
+            }
+            const stage = parseCaccStage(r.stage);
+            if (!stage) {
+                rowErrors.push(`学号 ${r.studentId}: 级别无效 (区域赛/决赛)`);
+                continue;
+            }
+            const award = parseCaccAward(r.award);
+            if (!award) {
+                rowErrors.push(`学号 ${r.studentId}: 等级无效 (一等奖/二等奖/三等奖/参赛)`);
+                continue;
+            }
+            const student = await findStudentDoc(domainId, r.studentId);
+            if (!student) {
+                rowErrors.push(`学号 ${r.studentId}: 未找到学生档案`);
+                continue;
+            }
+            const key = { domainId, studentDocId: student._id, year, stage };
+            const existing = await caccScoreColl.findOne(key);
+            const decision = decideCaccImport(existing?.award ?? null, award);
+            if (decision === 'skip') {
+                rowErrors.push(
+                    `学号 ${r.studentId}: ${year} 年${CACC_STAGE_LABELS[stage]}已有更高等级（${CACC_AWARD_LABELS[existing!.award]}），本行${CACC_AWARD_LABELS[award]}已跳过`,
+                );
+                continue;
+            }
+            if (decision === 'insert') {
+                await caccScoreColl.insertOne({ _id: new ObjectId(), ...key, award, createdAt: new Date(), createdBy: this.user._id });
+            } else if (decision === 'upgrade') {
+                await caccScoreColl.updateOne({ _id: existing!._id }, { $set: { award, updatedAt: new Date(), updatedBy: this.user._id } });
+            }
             imported++;
         }
         this.response.body = { success: true, imported, errors: rowErrors };

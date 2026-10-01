@@ -46,6 +46,10 @@ import {
     Types,
     UserModel,
     ValidationError,
+    assertGroupsAttachable,
+    describeGroupRefs,
+    listAttachableGroups,
+    parseGroupIdList,
 } from 'hydrooj';
 import type { LocalizedErrorText } from 'hydrooj';
 import { userBindModel } from '@hydrooj/krypton-userbind';
@@ -181,6 +185,156 @@ function parseAdmissionMode(s: string | undefined): AdmissionMode {
     return s === 'quota' ? 'quota' : 'auto';
 }
 
+interface TaskGroupActor {
+    _id: number;
+    hasPriv(priv: number): boolean;
+    parentSchoolId?: ObjectId[];
+}
+
+function rejectMissingGroupId(field: string): never {
+    // 空值不会让 parseGroupIdList 抛错；用一个非法 token 走它的原句和日志。
+    parseGroupIdList(field, ['*']);
+    throw new ValidationError(field, null, localizedErrorText`用户组参数无效`);
+}
+
+function hexStringOf(value: unknown): string | null {
+    if (!value || typeof value !== 'object') return null;
+    const toHexString = (value as { toHexString?: unknown }).toHexString;
+    if (typeof toHexString !== 'function') return null;
+    const hex = toHexString.call(value);
+    return typeof hex === 'string' ? hex : null;
+}
+
+/** 合法 hex 或 ObjectId。其它值是 ValidationError，不交给会变成 500 的 ObjectId 构造器。 */
+function requireGroupId(field: string, value: unknown): ObjectId {
+    if (value instanceof ObjectId) return value;
+    const hex = hexStringOf(value);
+    if (hex !== null) return requireGroupId(field, hex);
+    if (typeof value !== 'string') return rejectMissingGroupId(field);
+    const ids = parseGroupIdList(field, [value]);
+    if (ids.length !== 1) return rejectMissingGroupId(field);
+    return ids[0];
+}
+
+function readGroupId(field: string, value: unknown): ObjectId | null {
+    try {
+        return requireGroupId(field, value);
+    } catch (error) {
+        if (error instanceof ValidationError) return null;
+        throw error;
+    }
+}
+
+function dedupeGroupIds(ids: readonly ObjectId[]): ObjectId[] {
+    const seen = new Set<string>();
+    const out: ObjectId[] = [];
+    for (const id of ids) {
+        const hex = id.toHexString();
+        if (seen.has(hex)) continue;
+        seen.add(hex);
+        out.push(id);
+    }
+    return out;
+}
+
+/**
+ * 图节点里的用户组：preset 参数 type 为 user_group，以及 group_membership 在 scope 不是 school 时的 targetId。
+ * strict 用于提交值和保存比较用的 previous，非法 id 拒绝。非 strict 只给编辑页目录收集能解析的库存 id。
+ */
+function graphUserGroupIds(graph: TaskGraph | null | undefined, strict: boolean): ObjectId[] {
+    if (!graph || !Array.isArray(graph.nodes)) return [];
+    const ids: ObjectId[] = [];
+    const seen = new Set<string>();
+    const presetMap = new Map(presetSummaries().map((preset) => [preset.id, preset]));
+    for (const node of graph.nodes) {
+        if (!node || node.type !== 'task' || !node.presetId) continue;
+        const preset = presetMap.get(node.presetId);
+        if (!preset) continue;
+        const params = node.params || {};
+        for (const spec of preset.params || []) {
+            const value = params[spec.name] ?? spec.default;
+            if (value == null || value === '') continue;
+            if (node.presetId === 'group_membership' && spec.name === 'targetId') {
+                if (params.scope === 'school') continue;
+            } else if (spec.type !== 'user_group') continue;
+            const id = strict ? requireGroupId('graph', value) : readGroupId('graph', value);
+            if (!id) continue;
+            const hex = id.toHexString();
+            if (seen.has(hex)) continue;
+            seen.add(hex);
+            ids.push(id);
+        }
+    }
+    return ids;
+}
+
+function savedTaskGroupIds(task: TaskDoc | null): ObjectId[] {
+    if (!task) return [];
+    const ids: ObjectId[] = [];
+    if (task.access?.type === 'user_group') {
+        const id = readGroupId('access', task.access.targetId);
+        if (id) ids.push(id);
+    }
+    ids.push(...graphUserGroupIds(task.graph, false));
+    return dedupeGroupIds(ids);
+}
+
+async function assertTaskGroupsForSave(
+    domainId: string,
+    actor: TaskGroupActor,
+    existing: TaskDoc | null,
+    access: TaskAccess,
+    graph: TaskGraph,
+): Promise<void> {
+    const nextAccess = access?.type === 'user_group' ? [access.targetId] : [];
+    const nextGraph = graphUserGroupIds(graph, true);
+    if (!nextAccess.length && !nextGraph.length) return;
+    const unrestricted = actor.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
+    if (nextAccess.length) {
+        const previousId = existing?.access?.type === 'user_group' ? requireGroupId('access', existing.access.targetId) : null;
+        await assertGroupsAttachable(domainId, actor, {
+            field: 'access',
+            previous: previousId ? [previousId] : [],
+            next: nextAccess,
+            unrestricted,
+        });
+    }
+    if (nextGraph.length) {
+        await assertGroupsAttachable(domainId, actor, {
+            field: 'graph',
+            previous: existing ? graphUserGroupIds(existing.graph, true) : [],
+            next: nextGraph,
+            unrestricted,
+        });
+    }
+}
+
+async function taskEditorUserGroups(domainId: string, actor: TaskGroupActor, task: TaskDoc | null, directoryGroups: readonly any[]): Promise<any[]> {
+    const unrestricted = actor.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
+    const [attachable, described] = await Promise.all([
+        listAttachableGroups(domainId, actor, { unrestricted }),
+        describeGroupRefs(domainId, actor, savedTaskGroupIds(task), { unrestricted }),
+    ]);
+    const wanted = new Set<string>();
+    for (const view of attachable) wanted.add(view._id);
+    for (const view of described) wanted.add(view._id);
+    const selected: any[] = [];
+    const seen = new Set<string>();
+    for (const group of directoryGroups) {
+        const hex = objectIdHex(group?._id).trim().toLowerCase();
+        if (!hex || !wanted.has(hex) || seen.has(hex)) continue;
+        seen.add(hex);
+        selected.push(group);
+    }
+    for (const view of described) {
+        if (view.state !== 'deleted' || seen.has(view._id)) continue;
+        seen.add(view._id);
+        // 已保存但目录里没有的组。没有学校文档，不能编造 schoolId。
+        selected.push({ _id: new ObjectId(view._id), name: '已删除的组' });
+    }
+    return selected;
+}
+
 function parseTaskAccessJson(json: string): TaskAccess {
     if (!json) return { type: 'public' };
     let parsed: any;
@@ -189,8 +343,8 @@ function parseTaskAccessJson(json: string): TaskAccess {
     } catch {
         return { type: 'public' };
     }
-    if (parsed?.type === 'user_group' && parsed.targetId) {
-        return { type: 'user_group', targetId: new ObjectId(String(parsed.targetId)) };
+    if (parsed?.type === 'user_group') {
+        return { type: 'user_group', targetId: requireGroupId('access', parsed.targetId) };
     }
     if (parsed?.type === 'school' && parsed.targetId) {
         return { type: 'school', targetId: new ObjectId(String(parsed.targetId)) };
@@ -566,6 +720,28 @@ export class AdminTasksListHandler extends Handler {
         await validateTagAcCountGraph(authoritativeDomainId, src.graph, this.user._id);
         const problemIds = Array.from(collectTaskParamRefs(src.graph).problemIds);
         await ProblemModel.assertProblemBankSelection(authoritativeDomainId, problemIds, this.user as any);
+        // 复制得到的是新任务，源任务上的组都算新增，previous 必须是空。
+        const accessGroupId = src.access?.type === 'user_group' ? requireGroupId('access', src.access.targetId) : null;
+        const graphGroupIds = graphUserGroupIds(src.graph, true);
+        if (accessGroupId || graphGroupIds.length) {
+            const unrestricted = this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
+            if (accessGroupId) {
+                await assertGroupsAttachable(authoritativeDomainId, this.user, {
+                    field: 'access',
+                    previous: [],
+                    next: [accessGroupId],
+                    unrestricted,
+                });
+            }
+            if (graphGroupIds.length) {
+                await assertGroupsAttachable(authoritativeDomainId, this.user, {
+                    field: 'graph',
+                    previous: [],
+                    next: graphGroupIds,
+                    unrestricted,
+                });
+            }
+        }
         const newId = await taskModel.cloneTask(authoritativeDomainId, tid, this.user._id);
         await OplogModel.log(this, 'tasks.clone', { from: tid, to: newId });
         if (newId) this.response.redirect = this.url('admin_tasks_edit', { tid: newId });
@@ -605,7 +781,7 @@ export class AdminTasksEditHandler extends Handler {
         // Bootstrap small-cardinality picker sources so the right-side editor
         // can use dropdowns (no manual ObjectId entry). Problems are too many
         // to bootstrap — see admin_tasks_api_problems for autocomplete.
-        const [{ schools, userGroups }, contestDocs, homeworkDocs, trainingDocs, tagOptions] = await Promise.all([
+        const [{ schools, userGroups: directoryGroups }, contestDocs, homeworkDocs, trainingDocs, tagOptions] = await Promise.all([
             loadTaskDirectoryCatalog(authoritativeDomainId),
             DocumentModel.coll
                 .find({ domainId: authoritativeDomainId, docType: DocumentModel.TYPE_CONTEST })
@@ -627,6 +803,7 @@ export class AdminTasksEditHandler extends Handler {
             listTagAcCountOptions(authoritativeDomainId),
         ]);
         const toRef = (d: any) => ({ _id: d.docId, title: d.title, beginAt: d.beginAt, rule: d.rule });
+        const userGroups = await taskEditorUserGroups(authoritativeDomainId, this.user, task, directoryGroups as any[]);
         this.response.template = 'admin_tasks_edit.html';
         this.response.body = {
             task,
@@ -702,6 +879,7 @@ export class AdminTasksEditHandler extends Handler {
             await validateTagAcCountGraph(authoritativeDomainId, data.graph as TaskGraph, this.user._id);
             const existingProblemIds = Array.from(collectTaskParamRefs(existing.graph).problemIds);
             await ProblemModel.assertProblemBankSelection(authoritativeDomainId, problemIds, this.user as any, existingProblemIds);
+            await assertTaskGroupsForSave(authoritativeDomainId, this.user, existing, data.access as TaskAccess, data.graph as TaskGraph);
             // Audit task-level edits so we can correlate "condition tightened
             // on date X" with "user Y suddenly downgraded" later.
             await taskModel.writeAudit({
@@ -724,6 +902,7 @@ export class AdminTasksEditHandler extends Handler {
         } else {
             await validateTagAcCountGraph(authoritativeDomainId, data.graph as TaskGraph, this.user._id);
             await ProblemModel.assertProblemBankSelection(authoritativeDomainId, problemIds, this.user as any);
+            await assertTaskGroupsForSave(authoritativeDomainId, this.user, null, data.access as TaskAccess, data.graph as TaskGraph);
             const newId = await taskModel.createTask(authoritativeDomainId, this.user._id, data);
             await OplogModel.log(this, 'tasks.create', { taskId: newId });
             this.response.redirect = this.url('admin_tasks');
@@ -731,7 +910,7 @@ export class AdminTasksEditHandler extends Handler {
     }
 }
 
-class AdminTasksAssignHandler extends Handler {
+export class AdminTasksAssignHandler extends Handler {
     async prepare() {
         assertCanCreateTasks(this.user);
     }
@@ -771,7 +950,13 @@ class AdminTasksAssignHandler extends Handler {
         let uids: number[] = [];
         if (scope === 'uid' && uid) uids = [uid];
         else if (scope === 'user_group' && targetId) {
-            const gid = new ObjectId(targetId);
+            const gid = requireGroupId('targetId', targetId);
+            await assertGroupsAttachable(domainId, this.user, {
+                field: 'targetId',
+                previous: [],
+                next: [gid],
+                unrestricted: this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM),
+            });
             const { docs } = await userBindModel.listStudents(domainId, {
                 groupId: gid,
                 boundOnly: true,

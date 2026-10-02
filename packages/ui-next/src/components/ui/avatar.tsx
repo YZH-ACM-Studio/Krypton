@@ -2,14 +2,20 @@ import type * as React from 'react';
 import { cn } from '@/lib/cn';
 
 export function Avatar({ className, ...props }: React.ComponentProps<'span'>) {
-  return <span data-slot="avatar" className={cn('relative flex size-10 shrink-0 overflow-hidden rounded-full', className)} {...props} />;
+  return (
+    <span
+      data-slot="avatar"
+      className={cn('relative flex size-10 shrink-0 overflow-hidden rounded-full ring-2 ring-surface', className)}
+      {...props}
+    />
+  );
 }
 
 export function AvatarFallback({ className, ...props }: React.ComponentProps<'span'>) {
   return (
     <span
       data-slot="avatar-fallback"
-      className={cn('flex size-full items-center justify-center rounded-full bg-muted text-sm font-medium', className)}
+      className={cn('flex size-full items-center justify-center rounded-full bg-surface-active text-sm font-medium text-fg-muted', className)}
       {...props}
     />
   );
@@ -25,9 +31,8 @@ export function AvatarImage({ className, alt = '', ...props }: React.ComponentPr
       data-slot="avatar-image"
       alt={alt}
       className={cn('absolute inset-0 h-full w-full object-cover', className)}
-      onError={(e) => {
-        // Hide on error — the AvatarFallback (z-stacked behind) becomes visible.
-        (e.currentTarget as HTMLImageElement).style.display = 'none';
+      onError={(event) => {
+        event.currentTarget.style.display = 'none';
       }}
       {...props}
     />

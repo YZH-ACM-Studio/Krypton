@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { motion } from 'motion/react';
-import { ArrowLeftRight, Cpu } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { ArrowLeftRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Code } from '@/components/ui/display';
+import { Page, PageHeader } from '@/components/ui/page';
+import { Panel } from '@/components/ui/panel';
 import { ScrollArea } from '@/components/ui/scroll-area';
 
 // Phase 0 spike probe page. Paired with ecosystems/KryptonVigilSystem/Client/spike-webview.
@@ -61,13 +62,13 @@ export function SpikeWebViewProbePage() {
       }
       // eslint-disable-next-line no-new
       new QWebChannelCtor(window.qt.webChannelTransport, (channel) => {
-        const b = channel.objects.bridge;
-        if (!b) {
+        const next = channel.objects.bridge;
+        if (!next) {
           log('from', '[probe] bridge object not registered');
           return;
         }
-        b.toWeb.connect((msg: string) => log('from', msg));
-        setBridge(b);
+        next.toWeb.connect((msg: string) => log('from', msg));
+        setBridge(next);
         log('from', '[probe] channel connected');
       });
     }
@@ -102,52 +103,45 @@ export function SpikeWebViewProbePage() {
   }
 
   return (
-    <motion.div className="space-y-6" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }}>
-      <div className="flex items-center gap-2">
-        <Cpu className="size-5 text-primary" />
-        <h1 className="text-xl font-semibold">WebView Spike Probe</h1>
-      </div>
+    <Page width="wide">
+      <PageHeader title="WebView Spike Probe" />
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Bridge controls</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-wrap gap-2">
-          <Button onClick={ping} disabled={!bridge}>
+      <Panel title="Bridge controls">
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" variant="primary" onClick={ping} disabled={!bridge}>
             Ping C++
           </Button>
-          <Button onClick={readPlatform} disabled={!bridge} variant="outline">
+          <Button type="button" variant="secondary" onClick={readPlatform} disabled={!bridge}>
             Read platform name
           </Button>
-        </CardContent>
-      </Card>
+        </div>
+      </Panel>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
+      <Panel
+        title={
+          <span className="inline-flex items-center gap-1.5">
             <ArrowLeftRight className="size-4" />
             Message log
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ScrollArea className="max-h-72 rounded-md border bg-muted/30 font-mono text-xs" viewportClassName="p-3">
-            {messages.length === 0 ? (
-              <p className="text-muted-foreground">(no messages yet — click a control above)</p>
-            ) : (
-              messages.map((m, i) => (
-                <p key={i} className={m.direction === 'from' ? 'break-all text-emerald-500' : 'break-all text-blue-500'}>
-                  [{m.timestamp}] {m.direction === 'from' ? '←' : '→'} {m.text}
-                </p>
-              ))
-            )}
-          </ScrollArea>
-          {platformName ? (
-            <p className="mt-3 text-xs text-muted-foreground">
-              host platform: <code className="font-mono">{platformName}</code>
-            </p>
-          ) : null}
-        </CardContent>
-      </Card>
-    </motion.div>
+          </span>
+        }
+      >
+        <ScrollArea className="max-h-72 rounded-md border border-line bg-surface-sunken font-mono text-xs" viewportClassName="p-3">
+          {messages.length === 0 ? (
+            <p className="text-fg-subtle">(no messages yet — click a control above)</p>
+          ) : (
+            messages.map((message, index) => (
+              <p key={index} className={message.direction === 'from' ? 'break-all text-fg' : 'break-all text-fg-muted'}>
+                [{message.timestamp}] {message.direction === 'from' ? '←' : '→'} {message.text}
+              </p>
+            ))
+          )}
+        </ScrollArea>
+        {platformName ? (
+          <p className="mt-3 text-xs text-fg-subtle">
+            host platform: <Code>{platformName}</Code>
+          </p>
+        ) : null}
+      </Panel>
+    </Page>
   );
 }

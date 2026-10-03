@@ -42,5 +42,5 @@ export function useSensitive() {
 export function Sensitive({ children, placeholder = '••••••' }: PropsWithChildren<{ placeholder?: string }>) {
   const { visible } = useSensitive();
   if (visible) return <>{children}</>;
-  return <span className="select-none text-muted-foreground/60">{placeholder}</span>;
+  return <span className="select-none text-fg-subtle">{placeholder}</span>;
 }

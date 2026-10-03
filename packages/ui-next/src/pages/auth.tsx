@@ -1,8 +1,9 @@
-import { motion } from 'motion/react';
-import { Clock, Mail as MailIcon, Swords } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { FormField } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
+import { Page, PageHeader } from '@/components/ui/page';
+import { Panel } from '@/components/ui/panel';
 import { useBootstrap } from '@/lib/bootstrap';
 
 interface AuthPageData {
@@ -11,69 +12,58 @@ interface AuthPageData {
   uname?: string;
 }
 
-const AUTH_INPUT_CLASS = 'h-11 text-base md:h-9 md:text-sm';
+// 手机输入用 text-lg（--fs-lg = 16px）。1rem 等于根字号 --fs-md（14px），挡不住 iOS 聚焦放大。
+const AUTH_INPUT_CLASS = 'text-lg md:text-sm';
 
+// 结构测试按每个 return 的源码字面量检查，Page / PageHeader / Panel 必须写在函数体内。
 export function LoginPage() {
   const bs = useBootstrap();
+  const oauth = (bs.page.data as AuthPageData).oauth;
 
   return (
-    <motion.div
-      className="mx-auto max-w-sm space-y-6 pt-8"
-      initial={{ opacity: 0, y: 16 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.35 }}
-    >
-      <div className="text-center">
-        <Swords className="mx-auto size-8 text-primary" />
-        <h1 className="mt-3 text-2xl font-bold">登录 Krypton</h1>
-        <p className="mt-1 text-sm text-muted-foreground">{bs.domain.name}</p>
-      </div>
-
-      <Card>
-        <CardContent className="p-6">
-          <form method="post" className="space-y-4">
-            <div className="space-y-2">
-              <label htmlFor="uname" className="text-sm font-medium">
-                用户名或邮箱
-              </label>
-              <Input id="uname" name="uname" autoComplete="username" autoFocus required className={AUTH_INPUT_CLASS} />
-            </div>
-            <div className="space-y-2">
-              <label htmlFor="password" className="text-sm font-medium">
-                密码
-              </label>
-              <Input id="password" name="password" type="password" autoComplete="current-password" required className={AUTH_INPUT_CLASS} />
-            </div>
-            <Button type="submit" className="min-h-11 w-full">
-              登录
-            </Button>
-          </form>
-          <div className="mt-4 flex items-center justify-between text-sm">
-            <a href={bs.urls.register} className="text-primary hover:underline">
-              注册账号
-            </a>
-            <a href="/lostpass" className="text-muted-foreground hover:text-primary">
-              忘记密码?
-            </a>
-          </div>
-        </CardContent>
-      </Card>
-
-      {(bs.page.data as AuthPageData).oauth?.length ? (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-center text-sm text-muted-foreground">第三方登录</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-wrap justify-center gap-2">
-            {(bs.page.data as AuthPageData).oauth!.map((o) => (
-              <Button key={o.type} asChild variant="outline" className="min-h-11">
-                <a href={`/oauth/${o.type}/login`}>{o.name || o.type}</a>
+    <Page width="form">
+      <PageHeader title="登录 Krypton" description={bs.domain.name} />
+      <Panel>
+        <form method="post" className="flex flex-col gap-5">
+          <FormField label="用户名或邮箱" htmlFor="uname">
+            <Input id="uname" name="uname" autoComplete="username" autoFocus required size="lg" className={AUTH_INPUT_CLASS} />
+          </FormField>
+          <FormField label="密码" htmlFor="password">
+            <Input
+              id="password"
+              name="password"
+              type="password"
+              autoComplete="current-password"
+              required
+              size="lg"
+              className={AUTH_INPUT_CLASS}
+            />
+          </FormField>
+          <Button type="submit" variant="primary" size="lg" className="w-full sm:w-auto">
+            登录
+          </Button>
+        </form>
+        <div className="mt-4 flex items-center justify-between text-sm">
+          <a href={bs.urls.register} className="text-brand-fg underline-offset-4 hover:underline">
+            注册账号
+          </a>
+          <a href="/lostpass" className="text-fg-muted hover:text-brand-fg">
+            忘记密码?
+          </a>
+        </div>
+      </Panel>
+      {oauth && oauth.length > 0 ? (
+        <Panel title="第三方登录">
+          <div className="flex flex-wrap justify-center gap-2">
+            {oauth.map((item) => (
+              <Button key={item.type} asChild variant="secondary">
+                <a href={`/oauth/${item.type}/login`}>{item.name || item.type}</a>
               </Button>
             ))}
-          </CardContent>
-        </Card>
+          </div>
+        </Panel>
       ) : null}
-    </motion.div>
+    </Page>
   );
 }
 
@@ -81,89 +71,76 @@ export function RegisterPage() {
   const bs = useBootstrap();
   const tpl = bs.page.templateName;
 
-  // Step 2: user_register_with_code.html — user has a code, show username/password form
   if (tpl === 'user_register_with_code.html') {
     const mail = (bs.page.data as AuthPageData).mail || '';
     return (
-      <motion.div
-        className="mx-auto max-w-sm space-y-6 pt-8"
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.35 }}
-      >
-        <div className="text-center">
-          <Swords className="mx-auto size-8 text-primary" />
-          <h1 className="mt-3 text-2xl font-bold">完成注册</h1>
-          {mail ? <p className="mt-1 break-all text-sm text-muted-foreground">{mail}</p> : null}
-        </div>
-
-        <Card>
-          <CardContent className="p-6">
-            <form method="post" className="space-y-4">
-              <div className="space-y-2">
-                <label htmlFor="uname" className="text-sm font-medium">
-                  用户名
-                </label>
-                <Input id="uname" name="uname" autoComplete="username" autoFocus required placeholder="设置你的用户名" className={AUTH_INPUT_CLASS} />
-              </div>
-              <div className="space-y-2">
-                <label htmlFor="password" className="text-sm font-medium">
-                  密码
-                </label>
-                <Input id="password" name="password" type="password" autoComplete="new-password" required className={AUTH_INPUT_CLASS} />
-              </div>
-              <div className="space-y-2">
-                <label htmlFor="verifyPassword" className="text-sm font-medium">
-                  确认密码
-                </label>
-                <Input id="verifyPassword" name="verifyPassword" type="password" autoComplete="new-password" required className={AUTH_INPUT_CLASS} />
-              </div>
-              <Button type="submit" className="min-h-11 w-full">
-                注册
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
-      </motion.div>
+      <Page width="form">
+        <PageHeader title="完成注册" description={mail ? <span className="break-all">{mail}</span> : undefined} />
+        <Panel>
+          <form method="post" className="flex flex-col gap-5">
+            <FormField label="用户名" htmlFor="uname">
+              <Input
+                id="uname"
+                name="uname"
+                autoComplete="username"
+                autoFocus
+                required
+                placeholder="设置你的用户名"
+                size="lg"
+                className={AUTH_INPUT_CLASS}
+              />
+            </FormField>
+            <FormField label="密码" htmlFor="password">
+              <Input
+                id="password"
+                name="password"
+                type="password"
+                autoComplete="new-password"
+                required
+                size="lg"
+                className={AUTH_INPUT_CLASS}
+              />
+            </FormField>
+            <FormField label="确认密码" htmlFor="verifyPassword">
+              <Input
+                id="verifyPassword"
+                name="verifyPassword"
+                type="password"
+                autoComplete="new-password"
+                required
+                size="lg"
+                className={AUTH_INPUT_CLASS}
+              />
+            </FormField>
+            <Button type="submit" variant="primary" className="w-full sm:w-auto">
+              注册
+            </Button>
+          </form>
+        </Panel>
+      </Page>
     );
   }
 
-  // Step 1: user_register.html — enter email
   return (
-    <motion.div
-      className="mx-auto max-w-sm space-y-6 pt-8"
-      initial={{ opacity: 0, y: 16 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.35 }}
-    >
-      <div className="text-center">
-        <Swords className="mx-auto size-8 text-primary" />
-        <h1 className="mt-3 text-2xl font-bold">注册 Krypton</h1>
-        <p className="mt-1 text-sm text-muted-foreground">{bs.domain.name}</p>
-      </div>
-
-      <Card>
-        <CardContent className="p-6">
-          <form method="post" className="space-y-4">
-            <div className="space-y-2">
-              <label htmlFor="mail" className="text-sm font-medium">
-                邮箱
-              </label>
-              <Input id="mail" name="mail" type="email" autoComplete="email" autoFocus required className={AUTH_INPUT_CLASS} />
-            </div>
-            <Button type="submit" className="min-h-11 w-full">
-              发送验证邮件
-            </Button>
-          </form>
-          <div className="mt-4 text-center text-sm">
-            <span className="text-muted-foreground">已有账号？</span>{' '}
-            <a href={bs.urls.login} className="text-primary hover:underline">
-              去登录
-            </a>
-          </div>
-        </CardContent>
-      </Card>
-    </motion.div>
+    <Page width="form">
+      <PageHeader title="注册 Krypton" description={bs.domain.name} />
+      <Panel>
+        <form method="post" className="flex flex-col gap-5">
+          <FormField label="邮箱" htmlFor="mail">
+            <Input id="mail" name="mail" type="email" autoComplete="email" autoFocus required size="lg" className={AUTH_INPUT_CLASS} />
+          </FormField>
+          <Button type="submit" variant="primary" className="w-full sm:w-auto">
+            发送验证邮件
+          </Button>
+        </form>
+        <div className="mt-4 text-center text-sm">
+          <span className="text-fg-muted">已有账号？</span>{' '}
+          <a href={bs.urls.login} className="text-brand-fg underline-offset-4 hover:underline">
+            去登录
+          </a>
+        </div>
+      </Panel>
+    </Page>
   );
 }
 
@@ -171,30 +148,21 @@ export function LogoutPage() {
   const bs = useBootstrap();
 
   return (
-    <motion.div
-      className="mx-auto max-w-sm space-y-6 pt-12"
-      initial={{ opacity: 0, y: 16 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.35 }}
-    >
-      <Card>
-        <CardContent className="p-6 text-center">
-          <Swords className="mx-auto size-8 text-muted-foreground" />
-          <h1 className="mt-3 text-xl font-semibold">确认退出</h1>
-          <p className="mt-1 text-sm text-muted-foreground">你确定要退出登录吗？</p>
-          <div className="mt-6 flex gap-3">
-            <Button asChild variant="outline" className="min-h-11 flex-1">
-              <a href={bs.urls.home}>取消</a>
+    <Page width="form">
+      <PageHeader title="确认退出" description="你确定要退出登录吗？" />
+      <Panel>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Button asChild variant="secondary" className="w-full sm:w-auto">
+            <a href={bs.urls.home}>取消</a>
+          </Button>
+          <form method="post">
+            <Button type="submit" variant="danger" className="w-full sm:w-auto">
+              退出
             </Button>
-            <form method="post" className="flex-1">
-              <Button type="submit" variant="destructive" className="min-h-11 w-full">
-                退出
-              </Button>
-            </form>
-          </div>
-        </CardContent>
-      </Card>
-    </motion.div>
+          </form>
+        </div>
+      </Panel>
+    </Page>
   );
 }
 
@@ -202,67 +170,45 @@ export function LostPasswordPage() {
   const bs = useBootstrap();
 
   return (
-    <motion.div
-      className="mx-auto max-w-sm space-y-6 pt-8"
-      initial={{ opacity: 0, y: 16 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.35 }}
-    >
-      <div className="text-center">
-        <h1 className="text-2xl font-bold">找回密码</h1>
-        <p className="mt-1 text-sm text-muted-foreground">输入你注册时使用的邮箱</p>
-      </div>
-
-      <Card>
-        <CardContent className="p-6">
-          <form method="post" className="space-y-4">
-            <div className="space-y-2">
-              <label htmlFor="mail" className="text-sm font-medium">
-                邮箱
-              </label>
-              <Input id="mail" name="mail" type="email" autoFocus required className={AUTH_INPUT_CLASS} />
-            </div>
-            <Button type="submit" className="min-h-11 w-full">
-              发送重置邮件
-            </Button>
-          </form>
-          <div className="mt-4 text-center text-sm">
-            <a href={bs.urls.login} className="text-primary hover:underline">
-              返回登录
-            </a>
-          </div>
-        </CardContent>
-      </Card>
-    </motion.div>
+    <Page width="form">
+      <PageHeader title="找回密码" description="输入你注册时使用的邮箱" />
+      <Panel>
+        <form method="post" className="flex flex-col gap-5">
+          <FormField label="邮箱" htmlFor="mail">
+            <Input id="mail" name="mail" type="email" autoFocus required size="lg" className={AUTH_INPUT_CLASS} />
+          </FormField>
+          <Button type="submit" variant="primary" className="w-full sm:w-auto">
+            发送重置邮件
+          </Button>
+        </form>
+        <div className="mt-4 text-center text-sm">
+          <a href={bs.urls.login} className="text-brand-fg underline-offset-4 hover:underline">
+            返回登录
+          </a>
+        </div>
+      </Panel>
+    </Page>
   );
 }
-
-/* ---------- Mail Sent (register) ---------- */
 
 export function RegisterMailSentPage() {
   const bs = useBootstrap();
   const mail = (bs.page.data as AuthPageData).mail || '';
 
   return (
-    <motion.div
-      className="mx-auto max-w-sm space-y-6 pt-12"
-      initial={{ opacity: 0, y: 16 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.35 }}
-    >
-      <Card>
-        <CardContent className="p-6 text-center sm:p-8">
-          <MailIcon className="mx-auto size-10 text-primary" />
-          <h1 className="mt-4 text-xl font-semibold leading-snug">验证邮件已发送</h1>
-          <p className="mt-2 text-sm text-muted-foreground">
-            我们已向 <strong className="break-all">{mail}</strong> 发送了一封验证邮件，请查看你的收件箱并点击链接完成注册。
-          </p>
-          <Button asChild variant="outline" className="mt-6 min-h-11">
+    <Page width="form">
+      <PageHeader title="验证邮件已发送" />
+      <Panel>
+        <Alert tone="info">
+          我们已向 <strong className="break-all">{mail}</strong> 发送了一封验证邮件，请查看你的收件箱并点击链接完成注册。
+        </Alert>
+        <div className="mt-4">
+          <Button asChild variant="secondary">
             <a href={bs.urls.login}>返回登录</a>
           </Button>
-        </CardContent>
-      </Card>
-    </motion.div>
+        </div>
+      </Panel>
+    </Page>
   );
 }
 
@@ -271,115 +217,87 @@ export function LostPasswordMailSentPage() {
   const mail = (bs.page.data as AuthPageData).mail || '';
 
   return (
-    <motion.div
-      className="mx-auto max-w-sm space-y-6 pt-12"
-      initial={{ opacity: 0, y: 16 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.35 }}
-    >
-      <Card>
-        <CardContent className="p-6 text-center sm:p-8">
-          <MailIcon className="mx-auto size-10 text-primary" />
-          <h1 className="mt-4 text-xl font-semibold leading-snug">重置邮件已发送</h1>
-          <p className="mt-2 text-sm text-muted-foreground">
-            {mail ? (
-              <>
-                我们已向 <strong className="break-all">{mail}</strong> 发送了一封密码重置邮件，请查看收件箱并按邮件中的链接继续。
-              </>
-            ) : (
-              '如果邮箱匹配已有账号，我们会发送密码重置链接，请稍后查看收件箱。'
-            )}
-          </p>
-          <Button asChild variant="outline" className="mt-6 min-h-11">
+    <Page width="form">
+      <PageHeader title="重置邮件已发送" />
+      <Panel>
+        <Alert tone="info">
+          {mail ? (
+            <>
+              我们已向 <strong className="break-all">{mail}</strong> 发送了一封密码重置邮件，请查看收件箱并按邮件中的链接继续。
+            </>
+          ) : (
+            '如果邮箱匹配已有账号，我们会发送密码重置链接，请稍后查看收件箱。'
+          )}
+        </Alert>
+        <div className="mt-4">
+          <Button asChild variant="secondary">
             <a href={bs.urls.login}>返回登录</a>
           </Button>
-        </CardContent>
-      </Card>
-    </motion.div>
+        </div>
+      </Panel>
+    </Page>
   );
 }
-
-/* ---------- Lost Password with Code ---------- */
 
 export function LostPasswordWithCodePage() {
   const bs = useBootstrap();
   const uname = (bs.page.data as AuthPageData).uname || '';
 
   return (
-    <motion.div
-      className="mx-auto max-w-sm space-y-6 pt-8"
-      initial={{ opacity: 0, y: 16 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.35 }}
-    >
-      <div className="text-center">
-        <h1 className="text-2xl font-bold">重置密码</h1>
-        {uname && <p className="mt-1 text-sm text-muted-foreground">用户: {uname}</p>}
-      </div>
-
-      <Card>
-        <CardContent className="p-6">
-          <form method="post" className="space-y-4">
-            <div className="space-y-2">
-              <label htmlFor="password" className="text-sm font-medium">
-                新密码
-              </label>
-              <Input id="password" name="password" type="password" autoComplete="new-password" autoFocus required className={AUTH_INPUT_CLASS} />
-            </div>
-            <div className="space-y-2">
-              <label htmlFor="verifyPassword" className="text-sm font-medium">
-                确认密码
-              </label>
-              <Input id="verifyPassword" name="verifyPassword" type="password" autoComplete="new-password" required className={AUTH_INPUT_CLASS} />
-            </div>
-            <Button type="submit" className="min-h-11 w-full">
-              重置密码
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
-    </motion.div>
+    <Page width="form">
+      <PageHeader title="重置密码" description={uname ? `用户: ${uname}` : undefined} />
+      <Panel>
+        <form method="post" className="flex flex-col gap-5">
+          <FormField label="新密码" htmlFor="password">
+            <Input
+              id="password"
+              name="password"
+              type="password"
+              autoComplete="new-password"
+              autoFocus
+              required
+              size="lg"
+              className={AUTH_INPUT_CLASS}
+            />
+          </FormField>
+          <FormField label="确认密码" htmlFor="verifyPassword">
+            <Input
+              id="verifyPassword"
+              name="verifyPassword"
+              type="password"
+              autoComplete="new-password"
+              required
+              size="lg"
+              className={AUTH_INPUT_CLASS}
+            />
+          </FormField>
+          <Button type="submit" variant="primary" className="w-full sm:w-auto">
+            重置密码
+          </Button>
+        </form>
+      </Panel>
+    </Page>
   );
 }
-
-/* ---------- Delete Pending ---------- */
 
 export function UserDeletePendingPage() {
   return (
-    <motion.div
-      className="mx-auto max-w-sm space-y-6 pt-12"
-      initial={{ opacity: 0, y: 16 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.35 }}
-    >
-      <Card>
-        <CardContent className="p-8 text-center">
-          <Clock className="mx-auto size-10 text-amber-500" />
-          <h1 className="mt-4 text-xl font-semibold">账号删除已提交</h1>
-          <p className="mt-2 text-sm text-muted-foreground">你的账号将在 7 天后被永久删除。在此期间，你可以取消删除操作。</p>
-        </CardContent>
-      </Card>
-    </motion.div>
+    <Page width="form">
+      <PageHeader title="账号删除已提交" />
+      <Panel>
+        <Alert tone="warning">你的账号将在 7 天后被永久删除。在此期间，你可以取消删除操作。</Alert>
+      </Panel>
+    </Page>
   );
 }
 
-/* ---------- Change Mail Sent ---------- */
-
 export function ChangeMailSentPage() {
   return (
-    <motion.div
-      className="mx-auto max-w-sm space-y-6 pt-12"
-      initial={{ opacity: 0, y: 16 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.35 }}
-    >
-      <Card>
-        <CardContent className="p-6 text-center sm:p-8">
-          <MailIcon className="mx-auto size-10 text-green-500" />
-          <h1 className="mt-4 text-xl font-semibold">验证邮件已发送</h1>
-          <p className="mt-2 text-sm text-muted-foreground">请查看新邮箱的收件箱，点击链接完成邮箱更换。</p>
-        </CardContent>
-      </Card>
-    </motion.div>
+    <Page width="form">
+      <PageHeader title="验证邮件已发送" />
+      <Panel>
+        <Alert tone="success">请查看新邮箱的收件箱，点击链接完成邮箱更换。</Alert>
+      </Panel>
+    </Page>
   );
 }

@@ -1,7 +1,8 @@
-import { KeyRound } from 'lucide-react';
+import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Page, PageHeader } from '@/components/ui/page';
+import { Panel } from '@/components/ui/panel';
 import { useBootstrap } from '@/lib/bootstrap';
 
 interface RedeemPageData {
@@ -11,37 +12,33 @@ interface RedeemPageData {
 export function RedeemPage() {
   const bs = useBootstrap();
   const data = bs.page.data as RedeemPageData;
+  const result = data.result;
   return (
-    <div className="mx-auto min-w-0 max-w-lg space-y-4">
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <KeyRound className="size-5 shrink-0 text-primary" />
-        <h1 className="text-xl font-semibold break-words">兑换码</h1>
-      </div>
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">输入兑换码</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <p className="text-sm text-muted-foreground">成功后会写入对应题集或课程的访问权益并开始学习记录。猜码会被限速。</p>
-          {data.result?.ok ? (
-            <p className="rounded-md border border-green-300 bg-green-50 px-3 py-2 text-sm text-green-800 dark:bg-green-950/40 dark:text-green-200">
-              兑换成功{typeof data.result.title === 'string' && data.result.title ? `：${data.result.title}` : '。可以打开对应内容继续学习。'}
-              {typeof data.result.href === 'string' && /^\/(?:course|problem-sets)\/[A-Za-z0-9]+$/.test(data.result.href) ? (
+    <Page width="form">
+      <PageHeader title="兑换码" />
+      <Panel title="输入兑换码" description="成功后会写入对应题集或课程的访问权益并开始学习记录。猜码会被限速。">
+        <div className="flex flex-col gap-4">
+          {result?.ok ? (
+            <Alert tone="success">
+              兑换成功{typeof result.title === 'string' && result.title ? `：${result.title}` : '。可以打开对应内容继续学习。'}
+              {typeof result.href === 'string' && /^\/(?:course|problem-sets)\/[A-Za-z0-9]+$/.test(result.href) ? (
                 <>
                   {' '}
-                  <a href={data.result.href} className="font-medium underline-offset-2 hover:underline">
+                  <a href={result.href} className="font-medium text-brand-fg underline-offset-2 hover:underline">
                     打开内容
                   </a>
                 </>
               ) : null}
-            </p>
+            </Alert>
           ) : null}
-          <form method="post" className="space-y-3" autoComplete="off">
-            <Input name="code" required placeholder="兑换码" aria-label="兑换码" />
-            <Button type="submit">兑换</Button>
+          <form method="post" className="flex flex-col items-start gap-5" autoComplete="off">
+            <Input name="code" required placeholder="兑换码" aria-label="兑换码" className="text-lg md:text-sm" />
+            <Button type="submit" variant="primary">
+              兑换
+            </Button>
           </form>
-        </CardContent>
-      </Card>
-    </div>
+        </div>
+      </Panel>
+    </Page>
   );
 }

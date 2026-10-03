@@ -1,10 +1,10 @@
 import { type FormEvent, useState } from 'react';
 import { KeyRound } from 'lucide-react';
+import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
-import { cn } from '@/lib/cn';
 
 export interface RedeemResultView {
   ok: true;
@@ -81,22 +81,19 @@ export function RedeemForm({ onRedeemed }: { onRedeemed?: (result: RedeemResultV
   };
 
   return (
-    <form className="space-y-3" autoComplete="off" onSubmit={submit}>
+    <form className="flex flex-col gap-5" autoComplete="off" onSubmit={submit}>
       {result ? (
-        <div
-          role="status"
-          className="rounded-md border border-green-300 bg-green-50 px-3 py-2 text-sm text-green-800 dark:bg-green-950/40 dark:text-green-200"
-        >
+        <Alert tone="success">
           <p>兑换成功{result.title ? `：${result.title}` : '。可以打开对应内容继续学习。'}</p>
           {result.href ? (
-            <a href={result.href} className="mt-1 inline-flex font-medium underline-offset-2 hover:underline">
+            <a href={result.href} className="mt-1 inline-flex font-medium text-brand-fg underline-offset-2 hover:underline">
               打开{result.targetKind === 'course' ? '课程' : '题集'}
             </a>
           ) : null}
-        </div>
+        </Alert>
       ) : null}
       {error ? (
-        <p role="alert" className="text-sm text-destructive">
+        <p role="alert" className="text-sm text-danger-fg">
           {error}
         </p>
       ) : null}
@@ -108,9 +105,9 @@ export function RedeemForm({ onRedeemed }: { onRedeemed?: (result: RedeemResultV
         placeholder="兑换码"
         aria-label="兑换码"
         autoComplete="off"
-        className="text-base md:text-sm"
+        className="text-lg md:text-sm"
       />
-      <Button type="submit" disabled={busy} className="min-h-11 w-full">
+      <Button type="submit" variant="primary" disabled={busy} className="w-full">
         {busy ? '兑换中' : '兑换'}
       </Button>
     </form>
@@ -120,12 +117,12 @@ export function RedeemForm({ onRedeemed }: { onRedeemed?: (result: RedeemResultV
 export function RedeemDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md" onClose={() => onOpenChange(false)}>
+      <DialogContent size="sm" onClose={() => onOpenChange(false)}>
         <DialogHeader>
           <DialogTitle>兑换码</DialogTitle>
           <DialogDescription>成功后会写入对应题集或课程的访问权益并开始学习记录。猜码会被限速。</DialogDescription>
         </DialogHeader>
-        <DialogBody className="px-6 py-4">
+        <DialogBody>
           <RedeemForm />
         </DialogBody>
       </DialogContent>
@@ -153,12 +150,13 @@ export function RedeemDialogButton({
         type="button"
         variant={variant}
         size={size}
-        className={cn(iconOnly ? 'size-8' : 'gap-1.5', className)}
+        iconOnly={iconOnly}
+        className={className}
         title={label}
         aria-label={label}
         onClick={() => setOpen(true)}
       >
-        <KeyRound className="size-4" />
+        <KeyRound />
         {iconOnly ? <span className="sr-only">{label}</span> : label}
       </Button>
       <RedeemDialog open={open} onOpenChange={setOpen} />

@@ -1,9 +1,11 @@
 import type { ReactNode } from 'react';
-import { motion } from 'motion/react';
 import { ArrowLeft, Boxes, CheckCircle2, CircleOff, FileText, Hash, LinkIcon, ListTree, Table2, Text } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Stat } from '@/components/ui/display';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Page, PageHeader } from '@/components/ui/page';
+import { Panel } from '@/components/ui/panel';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useBootstrap } from '@/lib/bootstrap';
 import { formatDateTime } from '@/lib/format';
@@ -81,27 +83,38 @@ export function GenericPage() {
   const metrics = entries.filter(([, value]) => isScalar(value) || Array.isArray(value) || isPlainObject(value)).slice(0, 6);
 
   return (
-    <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-      <div className="flex flex-wrap items-center gap-3">
-        <Button variant="ghost" size="icon" onClick={() => window.history.back()}>
-          <ArrowLeft className="size-4" />
-        </Button>
-        <div className="min-w-0 flex-1">
-          <h1 className="min-w-0 truncate text-xl font-semibold capitalize">{label}</h1>
-          {title ? <p className="min-w-0 truncate text-sm text-muted-foreground">{title}</p> : null}
-        </div>
-        <Badge variant="outline" className="ml-auto">
-          {tpl}
-        </Badge>
-      </div>
+    <Page width="wide">
+      <PageHeader
+        title={<span className="block min-w-0 truncate capitalize">{label}</span>}
+        description={title ? <span className="block min-w-0 truncate">{title}</span> : undefined}
+        actions={
+          <>
+            <Button type="button" variant="ghost" size="sm" iconOnly className="shrink-0" title="返回" aria-label="返回" onClick={() => window.history.back()}>
+              <ArrowLeft />
+            </Button>
+            <Badge variant="outline" size="sm">
+              {tpl}
+            </Badge>
+          </>
+        }
+      />
 
       {entries.length > 0 ? (
         <>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {metrics.map(([key, value]) => (
-              <MetricTile key={key} name={key} value={value} locale={bs.locale} />
-            ))}
-          </div>
+          {metrics.length > 0 ? (
+            <Panel>
+              <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+                {metrics.map(([key, value]) => (
+                  <div key={key} className="@container min-w-0 overflow-hidden">
+                    <Stat
+                      label={labelFor(key)}
+                      value={<span className="block max-w-[100cqw] truncate">{describeValue(value, bs.locale)}</span>}
+                    />
+                  </div>
+                ))}
+              </div>
+            </Panel>
+          ) : null}
 
           <div className="grid gap-4">
             {entries.map(([key, value]) => (
@@ -110,14 +123,9 @@ export function GenericPage() {
           </div>
         </>
       ) : (
-        <Card>
-          <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
-            <FileText className="size-10 text-muted-foreground/50" />
-            <p className="text-sm text-muted-foreground">此页面尚无额外数据</p>
-          </CardContent>
-        </Card>
+        <EmptyState compact icon={<FileText />} title="此页面尚无额外数据" />
       )}
-    </motion.div>
+    </Page>
   );
 }
 
@@ -203,42 +211,26 @@ function iconFor(value: unknown) {
   return Text;
 }
 
-function MetricTile({ name, value, locale }: { name: string; value: unknown; locale: string }) {
-  const Icon = iconFor(value);
-  return (
-    <Card>
-      <CardContent className="flex items-start gap-3 p-4">
-        <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
-          <Icon className="size-4" />
-        </div>
-        <div className="min-w-0">
-          <p className="text-xs text-muted-foreground">{labelFor(name)}</p>
-          <p className="mt-1 truncate text-sm font-medium">{describeValue(value, locale)}</p>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
 function DataSection({ name, value, locale }: { name: string; value: unknown; locale: string }) {
   const title = labelFor(name);
   const Icon = iconFor(value);
 
   return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="flex items-center gap-2 text-base">
-          <Icon className="size-4 text-primary" />
-          {title}
-          <Badge variant="outline" className="ml-auto font-mono text-[10px]">
-            {name}
-          </Badge>
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <ValueView value={value} locale={locale} depth={0} />
-      </CardContent>
-    </Card>
+    <Panel
+      title={
+        <span className="inline-flex min-w-0 items-center gap-1.5">
+          <Icon className="size-4 shrink-0 text-fg-subtle" />
+          <span className="truncate">{title}</span>
+        </span>
+      }
+      actions={
+        <Badge variant="outline" size="sm" className="font-mono">
+          {name}
+        </Badge>
+      }
+    >
+      <ValueView value={value} locale={locale} depth={0} />
+    </Panel>
   );
 }
 
@@ -246,16 +238,16 @@ function ValueView({ value, locale, depth }: { value: unknown; locale: string; d
   if (isScalar(value)) return <ScalarValue value={value} locale={locale} />;
   if (Array.isArray(value)) return <ArrayValue value={value} locale={locale} depth={depth} />;
   if (isPlainObject(value)) return <ObjectValue value={value} locale={locale} depth={depth} />;
-  return <span className="text-sm text-muted-foreground">{String(value)}</span>;
+  return <span className="text-sm text-fg-muted">{String(value)}</span>;
 }
 
 function ScalarValue({ value, locale }: { value: unknown; locale: string }) {
   if (typeof value === 'boolean') {
-    return <Badge variant={value ? 'secondary' : 'outline'}>{value ? '是' : '否'}</Badge>;
+    return <Badge variant={value ? 'soft' : 'outline'}>{value ? '是' : '否'}</Badge>;
   }
   if (isUrl(value)) {
     return (
-      <a href={String(value)} className="break-all text-sm text-primary hover:underline">
+      <a href={String(value)} className="break-all text-sm text-brand-fg underline-offset-4 hover:underline">
         {String(value)}
       </a>
     );
@@ -278,7 +270,7 @@ function ArrayValue({ value, locale, depth }: { value: unknown[]; locale: string
   return (
     <div className="flex flex-wrap gap-2">
       {value.slice(0, 80).map((item, index) => (
-        <div key={index} className="rounded-md border bg-muted/30 px-2.5 py-1.5 text-sm">
+        <div key={index} className="rounded-md border border-line bg-surface-sunken px-2.5 py-1.5 text-sm">
           <ValueView value={item} locale={locale} depth={depth + 1} />
         </div>
       ))}
@@ -297,20 +289,20 @@ function ObjectValue({ value, locale, depth }: { value: R; locale: string; depth
   }
 
   return (
-    <div className="divide-y rounded-md border">
+    <div className="divide-y divide-line-subtle rounded-md border border-line">
       {entries.map(([key, item]) => (
-        <div key={key} className="grid gap-2 px-3 py-2.5 sm:grid-cols-[180px_1fr]">
+        <div key={key} className="grid gap-2 px-3 py-2.5 sm:grid-cols-[12rem_1fr]">
           <div className="min-w-0">
             <p className="truncate text-sm font-medium">{labelFor(key)}</p>
-            <p className="truncate font-mono text-[10px] text-muted-foreground">{key}</p>
+            <p className="truncate font-mono text-2xs text-fg-subtle">{key}</p>
           </div>
           <div className="min-w-0">
             {isPlainObject(item) || Array.isArray(item) ? (
               depth >= 2 ? (
-                <span className="text-sm text-muted-foreground">{describeValue(item, locale)}</span>
+                <span className="text-sm text-fg-muted">{describeValue(item, locale)}</span>
               ) : (
-                <details className="group">
-                  <summary className="cursor-pointer select-none text-sm text-primary">{describeValue(item, locale)}</summary>
+                <details>
+                  <summary className="cursor-pointer select-none text-sm text-brand-fg">{describeValue(item, locale)}</summary>
                   <div className="mt-2">
                     <ValueView value={item} locale={locale} depth={depth + 1} />
                   </div>
@@ -378,7 +370,7 @@ function ObjectTable({ rows, locale, depth }: { rows: RowDoc[]; locale: string; 
               {columns.map((column) => (
                 <TableCell
                   key={column}
-                  className={cn('max-w-[220px]', isPlainObject(row[column]) || Array.isArray(row[column]) ? 'text-muted-foreground' : '')}
+                  className={cn('max-w-xs', isPlainObject(row[column]) || Array.isArray(row[column]) ? 'text-fg-muted' : '')}
                 >
                   <ValueView value={row[column]} locale={locale} depth={depth + 1} />
                 </TableCell>
@@ -387,15 +379,15 @@ function ObjectTable({ rows, locale, depth }: { rows: RowDoc[]; locale: string; 
           ))}
         </TableBody>
       </Table>
-      {rows.length > 40 ? <p className="text-xs text-muted-foreground">已显示前 40 项，另有 {rows.length - 40} 项。</p> : null}
+      {rows.length > 40 ? <p className="text-xs text-fg-subtle">已显示前 40 项，另有 {rows.length - 40} 项。</p> : null}
     </div>
   );
 }
 
 function EmptyData({ label }: { label: string }) {
   return (
-    <div className="flex items-center gap-2 rounded-md border border-dashed px-3 py-4 text-sm text-muted-foreground">
-      <Boxes className="size-4" />
+    <div className="flex items-center gap-2 rounded-md border border-dashed border-line px-3 py-4 text-sm text-fg-muted">
+      <Boxes className="size-4 text-fg-subtle" />
       {label}
     </div>
   );

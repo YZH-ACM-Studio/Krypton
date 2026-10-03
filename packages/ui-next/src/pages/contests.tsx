@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { motion } from 'motion/react';
 import {
   ArrowRight,
   BookOpen,
@@ -20,22 +19,27 @@ import {
   MessageSquare,
   Pencil,
   Radio,
-  Search,
   Settings,
   ShieldCheck,
   Trophy,
   Users,
 } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
+import { MarkdownView } from '@/components/markdown-renderer';
+import { Alert } from '@/components/ui/alert';
+import { Badge, type BadgeTone } from '@/components/ui/badge';
+import { Breadcrumb } from '@/components/ui/breadcrumb';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Progress, StatusDot } from '@/components/ui/display';
+import { EmptyState } from '@/components/ui/empty-state';
+import { SearchInput } from '@/components/ui/input';
+import { Page, PageHeader } from '@/components/ui/page';
 import { Pagination } from '@/components/ui/pagination';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import { Panel } from '@/components/ui/panel';
 import { SimpleSelect } from '@/components/ui/select';
-import { MarkdownView } from '@/components/markdown-renderer';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { scoreTone } from '@/components/ui/verdict';
 import { useBootstrap, type GenericUserDoc } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 import {
@@ -173,10 +177,16 @@ function contestState(c: ContestDoc) {
   const now = Date.now();
   const begin = toDate(c.beginAt)?.getTime() || 0;
   const end = toDate(c.endAt)?.getTime() || 0;
-  if (!begin || !end) return { label: '待发布', variant: 'secondary' as const, phase: 'draft' as const };
-  if (now < begin) return { label: '即将开始', variant: 'outline' as const, phase: 'upcoming' as const };
-  if (now > end) return { label: '已结束', variant: 'secondary' as const, phase: 'ended' as const };
-  return { label: '进行中', variant: 'default' as const, phase: 'running' as const };
+  if (!begin || !end) return { label: '待发布', phase: 'draft' as const };
+  if (now < begin) return { label: '即将开始', phase: 'upcoming' as const };
+  if (now > end) return { label: '已结束', phase: 'ended' as const };
+  return { label: '进行中', phase: 'running' as const };
+}
+
+function contestStatusTone(phase: ReturnType<typeof contestState>['phase']): { tone: BadgeTone; pulse: boolean } {
+  if (phase === 'running') return { tone: 'success', pulse: true };
+  if (phase === 'upcoming') return { tone: 'info', pulse: false };
+  return { tone: 'neutral', pulse: false };
 }
 
 function ruleLabel(rule?: string): string {
@@ -197,18 +207,6 @@ function ruleLabel(rule?: string): string {
       return '考试';
     default:
       return rule || '—';
-  }
-}
-
-function ruleBadgeVariant(rule?: string): 'default' | 'secondary' | 'outline' {
-  switch ((rule || '').toLowerCase()) {
-    case 'acm':
-      return 'default';
-    case 'ioi':
-    case 'strictioi':
-      return 'secondary';
-    default:
-      return 'outline';
   }
 }
 
@@ -259,13 +257,13 @@ function countdownProgress(phase: ReturnType<typeof contestState>['phase'], begi
 
 function CountdownUnit({ value, label, wide = false }: { value: string | number; label: string; wide?: boolean }) {
   return (
-    <span className="inline-flex items-end gap-0.5 sm:gap-1">
+    <span className="inline-flex items-end gap-1">
       <span
-        className={`inline-flex h-8 items-center justify-center rounded-md border bg-background/80 px-1.5 font-mono text-lg font-semibold tabular-nums sm:h-11 sm:px-2 sm:text-2xl ${wide ? 'min-w-10 sm:min-w-16' : 'min-w-8 sm:min-w-12'}`}
+        className={`inline-flex h-8 items-center justify-center rounded-md border border-line bg-surface px-1.5 font-mono text-lg font-semibold tabular sm:h-10 sm:px-2 ${wide ? 'min-w-10 sm:min-w-16' : 'min-w-8 sm:min-w-12'}`}
       >
         {value}
       </span>
-      <span className="pb-0.5 text-[10px] text-muted-foreground sm:pb-1 sm:text-[11px]">{label}</span>
+      <span className="pb-0.5 text-2xs text-fg-subtle sm:pb-1">{label}</span>
     </span>
   );
 }
@@ -287,49 +285,51 @@ function CountdownStrip({
   const pad = (n: number) => String(n).padStart(2, '0');
   const label = isRunning ? '距离结束' : isUpcoming ? '距离开始' : '比赛已结束';
   const tone = isRunning
-    ? 'border-emerald-500/30 bg-emerald-500/10'
+    ? 'border-success-line bg-success-soft'
     : isUpcoming
-      ? 'border-amber-500/30 bg-amber-500/10'
-      : 'border-border bg-muted/30';
-  const barTone = isRunning ? 'bg-emerald-500' : isUpcoming ? 'bg-amber-500' : 'bg-muted-foreground/40';
-
+      ? 'border-warning-line bg-warning-soft'
+      : 'border-line bg-surface-sunken';
   return (
-    <section className={`rounded-xl border ${tone}`}>
-      <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_auto_minmax(16rem,1fr)] lg:items-center">
+    <section className={`rounded-lg border ${tone}`}>
+      <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] lg:items-center">
         <div className="flex min-w-0 items-center gap-3">
-          <span className="flex size-10 items-center justify-center rounded-lg border bg-background/70">
+          <span className="flex size-10 items-center justify-center rounded-lg border border-line bg-surface">
             {isRunning ? (
-              <Radio className="size-4 text-emerald-600" />
+              <Radio className="size-4 text-success-fg" />
             ) : isUpcoming ? (
-              <Clock className="size-4 text-amber-600" />
+              <Clock className="size-4 text-warning-fg" />
             ) : (
-              <CheckCircle2 className="size-4 text-muted-foreground" />
+              <CheckCircle2 className="size-4 text-fg-subtle" />
             )}
           </span>
           <div className="min-w-0">
-            <p className="text-sm font-medium">{label}</p>
-            <p className="text-xs text-muted-foreground">{isRunning ? '比赛正在进行' : isUpcoming ? '准备阶段' : '可查看赛后信息'}</p>
+            <p className="text-sm font-medium text-fg">{label}</p>
+            <p className="text-xs text-fg-subtle">{isRunning ? '比赛正在进行' : isUpcoming ? '准备阶段' : '可查看赛后信息'}</p>
           </div>
         </div>
 
         <div className="flex min-w-0 flex-wrap items-center gap-1.5 sm:gap-2">
           <CountdownUnit value={cd?.expired ? '0' : cd?.days || 0} label="天" wide />
-          <span className="text-base font-semibold text-muted-foreground sm:text-xl">:</span>
+          <span className="text-lg font-semibold text-fg-subtle">:</span>
           <CountdownUnit value={cd?.expired ? '00' : pad(cd?.hours || 0)} label="时" />
-          <span className="text-base font-semibold text-muted-foreground sm:text-xl">:</span>
+          <span className="text-lg font-semibold text-fg-subtle">:</span>
           <CountdownUnit value={cd?.expired ? '00' : pad(cd?.minutes || 0)} label="分" />
-          <span className="text-base font-semibold text-muted-foreground sm:text-xl">:</span>
+          <span className="text-lg font-semibold text-fg-subtle">:</span>
           <CountdownUnit value={cd?.expired ? '00' : pad(cd?.seconds || 0)} label="秒" />
         </div>
 
-        <div className="w-full min-w-0 space-y-2">
-          <div className="flex items-center justify-between text-xs text-muted-foreground">
+        <div className="flex w-full min-w-0 flex-col gap-2">
+          <div className="flex items-center justify-between text-xs text-fg-subtle">
             <span>{isRunning ? '比赛进度' : isUpcoming ? '等待开始' : '已完成'}</span>
-            <span className="font-mono tabular-nums">{Math.round(progress)}%</span>
+            <span className="font-mono tabular">{Math.round(progress)}%</span>
           </div>
-          <div className="h-2 overflow-hidden rounded-full bg-background/80">
-            <div className={`h-full rounded-full ${barTone} transition-[width] duration-700`} style={{ width: `${progress}%` }} />
-          </div>
+          {isRunning || isUpcoming ? (
+            <Progress value={progress} tone={isRunning ? 'success' : 'warning'} size="sm" />
+          ) : (
+            <div className="h-1 overflow-hidden rounded-full bg-surface-active">
+              <div className="h-full rounded-full bg-fg-subtle" style={{ width: `${progress}%` }} />
+            </div>
+          )}
         </div>
       </div>
     </section>
@@ -405,116 +405,114 @@ export function ContestsPage() {
   })();
 
   return (
-    <motion.div className="space-y-4" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-      {/* Header + create */}
-      <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-        <div className="min-w-0">
-          <h1 className="min-w-0 text-xl font-semibold">比赛</h1>
-          <p className="text-sm text-muted-foreground">{tdocs.length} 场比赛</p>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <Button asChild>
-            <a href={`${bs.urls.contests}/create`}>创建比赛</a>
-          </Button>
-          <Button asChild variant="outline">
-            <a href={`${bs.urls.contests}/create?rule=exam`}>创建考试</a>
-          </Button>
-        </div>
-      </div>
+    <Page width="wide">
+      <PageHeader
+        title="比赛"
+        description={`${tdocs.length} 场比赛`}
+        actions={(
+          <>
+            <Button asChild variant="primary">
+              <a href={`${bs.urls.contests}/create`}>创建比赛</a>
+            </Button>
+            <Button asChild variant="secondary">
+              <a href={`${bs.urls.contests}/create?rule=exam`}>创建考试</a>
+            </Button>
+          </>
+        )}
+      />
 
-      {/* Stats strip */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <StatCell
           label="进行中"
           value={buckets.running.length}
-          icon={<Flag className="size-4 text-green-600" />}
+          marker={<StatusDot tone="success" pulse />}
           active={statusFilter === 'running'}
           onClick={() => setStatusFilter(statusFilter === 'running' ? 'all' : 'running')}
         />
         <StatCell
           label="即将开始"
           value={buckets.upcoming.length}
-          icon={<Clock className="size-4 text-amber-600" />}
+          marker={<StatusDot tone="info" />}
           active={statusFilter === 'upcoming'}
           onClick={() => setStatusFilter(statusFilter === 'upcoming' ? 'all' : 'upcoming')}
         />
         <StatCell
           label="已结束"
           value={buckets.ended.length}
-          icon={<CheckCircle2 className="size-4 text-muted-foreground" />}
+          marker={<StatusDot />}
           active={statusFilter === 'ended'}
           onClick={() => setStatusFilter(statusFilter === 'ended' ? 'all' : 'ended')}
         />
-        <StatCell label="我参加" value={Object.values(tsdict).filter((s) => s?.attend).length} icon={<Trophy className="size-4 text-primary" />} />
+        <StatCell
+          label="我参加"
+          value={Object.values(tsdict).filter((s) => s?.attend).length}
+          marker={<Trophy className="size-3.5 text-brand-fg" />}
+        />
       </div>
 
-      {/* Search + group + rule filter form */}
-      <Card className="min-w-0">
-        <CardContent className="p-4">
-          <form method="get" className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_180px_180px_auto] lg:items-end">
-            <div className="min-w-0 space-y-1.5">
-              <label className="text-xs text-muted-foreground">搜索</label>
-              <div className="relative">
-                <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                <input
-                  name="q"
-                  defaultValue={currentQuery}
-                  className="w-full rounded-md border bg-background py-2 pl-8 pr-3 text-sm"
-                  placeholder="比赛名称"
-                />
-              </div>
-            </div>
-            <div className="min-w-0 space-y-1.5">
-              <label className="text-xs text-muted-foreground">用户组</label>
-              <SimpleSelect
-                name="group"
-                defaultValue={currentGroup}
-                options={[{ value: '', label: '全部' }, ...groups.map((group) => ({ value: group, label: group }))]}
-              />
-            </div>
-            <div className="min-w-0 space-y-1.5">
-              <label className="text-xs text-muted-foreground">赛制</label>
-              <SimpleSelect
-                name="rule"
-                defaultValue={currentRule}
-                options={[{ value: '', label: '全部' }, ...Object.entries(rules).map(([key, label]) => ({ value: key, label }))]}
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <Button type="submit" size="sm">
-                筛选
+      <Panel>
+        <form method="get" className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto_auto_auto] lg:items-end">
+          <label className="flex min-w-0 flex-col gap-1.5">
+            <span className="text-xs text-fg-subtle">搜索</span>
+            <SearchInput name="q" defaultValue={currentQuery} placeholder="比赛名称" className="w-full" />
+          </label>
+          <label className="flex min-w-0 flex-col gap-1.5">
+            <span className="text-xs text-fg-subtle">用户组</span>
+            <SimpleSelect
+              name="group"
+              defaultValue={currentGroup}
+              className="w-full lg:w-44"
+              options={[{ value: '', label: '全部' }, ...groups.map((group) => ({ value: group, label: group }))]}
+            />
+          </label>
+          <label className="flex min-w-0 flex-col gap-1.5">
+            <span className="text-xs text-fg-subtle">赛制</span>
+            <SimpleSelect
+              name="rule"
+              defaultValue={currentRule}
+              className="w-full lg:w-44"
+              options={[{ value: '', label: '全部' }, ...Object.entries(rules).map(([key, label]) => ({ value: key, label }))]}
+            />
+          </label>
+          <div className="flex items-center gap-2">
+            <Button type="submit" size="sm" variant="secondary">
+              筛选
+            </Button>
+            <div className="ml-auto flex items-center gap-1 rounded-md border border-line bg-surface-sunken p-0.5">
+              <Button
+                type="button"
+                size="sm"
+                iconOnly
+                variant={view === 'list' ? 'secondary' : 'ghost'}
+                onClick={() => setView('list')}
+                title="列表视图"
+                aria-label="列表视图"
+              >
+                <List />
               </Button>
-              <div className="ml-auto flex items-center gap-1 rounded-md border bg-muted/30 p-0.5">
-                <button
-                  type="button"
-                  onClick={() => setView('list')}
-                  className={`p-1.5 rounded ${view === 'list' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-                  title="列表视图"
-                >
-                  <List className="size-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setView('cards')}
-                  className={`p-1.5 rounded ${view === 'cards' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-                  title="卡片视图"
-                >
-                  <LayoutGrid className="size-3.5" />
-                </button>
-              </div>
+              <Button
+                type="button"
+                size="sm"
+                iconOnly
+                variant={view === 'cards' ? 'secondary' : 'ghost'}
+                onClick={() => setView('cards')}
+                title="卡片视图"
+                aria-label="卡片视图"
+              >
+                <LayoutGrid />
+              </Button>
             </div>
-          </form>
-        </CardContent>
-      </Card>
+          </div>
+        </form>
+      </Panel>
 
-      {/* Pinned: running contests, only when statusFilter='all' so user can spot them */}
       {statusFilter === 'all' && buckets.running.length > 0 ? (
-        <div>
-          <div className="mb-2 flex items-center gap-2 text-sm font-medium">
-            <Flag className="size-3.5 text-green-600" />
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-2 text-sm font-medium text-fg">
+            <StatusDot tone="success" pulse />
             进行中
           </div>
-          <div className="grid grid-cols-[repeat(auto-fit,minmax(18rem,1fr))] gap-3">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {buckets.running.map((c) => (
               <RunningContestCard key={String(c.docId)} c={c} bs={bs} tsdict={tsdict} />
             ))}
@@ -522,15 +520,12 @@ export function ContestsPage() {
         </div>
       ) : null}
 
-      {/* Main list */}
       {filteredDocs.length === 0 ? (
-        <Card>
-          <CardContent className="py-12 text-center text-sm text-muted-foreground">没有符合条件的比赛</CardContent>
-        </Card>
+        <EmptyState icon={<Trophy />} title="没有符合条件的比赛" compact />
       ) : view === 'list' ? (
         <ContestTable docs={filteredDocs} bs={bs} tsdict={tsdict} locale={locale} />
       ) : (
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(18rem,1fr))] gap-3">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {filteredDocs.map((c) => (
             <ContestCard key={String(c.docId)} c={c} bs={bs} tsdict={tsdict} />
           ))}
@@ -538,48 +533,67 @@ export function ContestsPage() {
       )}
 
       <Pagination current={page} total={tpcount} baseUrl={pageBase} />
-    </motion.div>
+    </Page>
   );
 }
 
 function StatCell({
   label,
   value,
-  icon,
+  marker,
   active,
   onClick,
 }: {
   label: string;
   value: number;
-  icon: React.ReactNode;
+  marker: ReactNode;
   active?: boolean;
   onClick?: () => void;
 }) {
-  const clickable = !!onClick;
+  const body = (
+    <span className="flex w-full items-center justify-between gap-3 text-left">
+      <span>
+        <span className="flex items-center gap-1.5 text-xs font-medium text-fg-subtle">
+          {marker}
+          {label}
+        </span>
+        <span className="mt-1 block text-xl font-semibold tabular text-fg">{value}</span>
+      </span>
+    </span>
+  );
+  if (!onClick) {
+    return <div className="rounded-lg border border-line bg-surface p-3 shadow-xs">{body}</div>;
+  }
   return (
-    <button
+    <Button
       type="button"
+      variant={active ? 'soft' : 'secondary'}
+      className="h-auto w-full justify-start px-3 py-3"
       onClick={onClick}
-      disabled={!clickable}
-      className={`flex items-center justify-between rounded-md border bg-card p-3 text-left transition-colors ${active ? 'border-primary bg-primary/5' : 'border-border'} ${clickable ? 'hover:border-primary/40 hover:bg-accent/30 cursor-pointer' : 'cursor-default'}`}
     >
-      <div>
-        <p className="text-xs text-muted-foreground">{label}</p>
-        <p className="text-xl font-semibold tabular-nums">{value}</p>
-      </div>
-      {icon}
-    </button>
+      {body}
+    </Button>
   );
 }
 
 function HiddenContestBadge({ hidden }: { hidden?: boolean }) {
   if (hidden !== true) return null;
   return (
-    <Badge variant="outline" className="text-[10px]">
+    <Badge variant="outline" size="sm">
       已隐藏
     </Badge>
   );
 }
+
+function RuleBadge({ rule }: { rule?: string }) {
+  return (
+    <Badge variant="outline" size="sm">
+      {ruleLabel(rule)}
+    </Badge>
+  );
+}
+
+const CONTEST_CARD = 'group flex h-full flex-col gap-3 rounded-lg border border-line bg-surface p-4 shadow-xs transition-[border-color,box-shadow] duration-(--dur-2) hover:border-line-strong hover:shadow-sm';
 
 function RunningContestCard({ c, bs, tsdict }: { c: ContestDoc; bs: ReturnType<typeof useBootstrap>; tsdict: Record<string, ContestStatusDoc> }) {
   const endAt = toDate(c.endAt)?.getTime() || 0;
@@ -587,84 +601,76 @@ function RunningContestCard({ c, bs, tsdict }: { c: ContestDoc; bs: ReturnType<t
   const tsdoc: ContestStatusDoc = tsdict[String(c.docId)] || {};
   const detailUrl = replaceRouteTokens(bs.urls.contestDetail, { TID: String(c.docId) });
   return (
-    <Card className="group h-full transition-all hover:border-primary/40 hover:shadow-md">
-      <CardContent className="space-y-2 p-4">
-        <a href={detailUrl} className="block space-y-2">
-          <div className="flex min-w-0 items-start justify-between gap-2">
-            <h3 className="min-w-0 font-medium line-clamp-2 leading-tight">{c.title || '未命名'}</h3>
-            <div className="flex shrink-0 items-center gap-1">
-              <HiddenContestBadge hidden={c.hidden} />
-              <Badge variant={ruleBadgeVariant(c.rule)}>{ruleLabel(c.rule)}</Badge>
-            </div>
-          </div>
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Clock className="size-3" />
-            <span className="font-mono">剩余 {fmtCountdown(cd)}</span>
-          </div>
-          <div className="flex items-center justify-between text-xs">
-            <span className="flex items-center gap-1 text-muted-foreground">
-              <Users className="size-3" />
-              {c.attend || 0}
-            </span>
-            {tsdoc.attend ? (
-              <Badge variant="default" className="text-[10px]">
-                已参加
-              </Badge>
-            ) : (
-              <Badge variant="outline" className="text-[10px]">
-                未参加
-              </Badge>
-            )}
-          </div>
+    <article className={CONTEST_CARD}>
+      <a href={detailUrl} className="flex min-w-0 flex-col gap-3">
+        <div className="flex items-center gap-2 text-xs font-medium text-fg-muted">
+          <StatusDot tone="success" pulse />
+          进行中
+          <span className="ml-auto flex items-center gap-1">
+            <HiddenContestBadge hidden={c.hidden} />
+            <RuleBadge rule={c.rule} />
+          </span>
+        </div>
+        <h3 className="line-clamp-2 text-md font-semibold text-balance text-fg">{c.title || '未命名'}</h3>
+        <div className="mt-auto flex items-center justify-between gap-2 text-xs text-fg-subtle">
+          <span className="inline-flex items-center gap-1 tabular">
+            <Clock className="size-3.5" />
+            剩余 {fmtCountdown(cd)}
+          </span>
+          <span className="inline-flex items-center gap-1 tabular">
+            <Users className="size-3.5" />
+            {c.attend || 0}
+          </span>
+        </div>
+        {tsdoc.attend ? (
+          <Badge size="sm" tone="success">已参加</Badge>
+        ) : (
+          <Badge variant="outline" size="sm">未参加</Badge>
+        )}
+      </a>
+      {isTeamContest(c) ? (
+        <a href={teamWorkspaceUrl(c)} className="inline-flex items-center gap-1 text-xs font-medium text-brand-fg hover:underline">
+          <Users className="size-3.5" />
+          管理我的队伍
         </a>
-        {isTeamContest(c) ? (
-          <a href={teamWorkspaceUrl(c)} className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline">
-            <Users className="size-3" /> 管理我的队伍
-          </a>
-        ) : null}
-      </CardContent>
-    </Card>
+      ) : null}
+    </article>
   );
 }
 
 function ContestCard({ c, bs, tsdict }: { c: ContestDoc; bs: ReturnType<typeof useBootstrap>; tsdict: Record<string, ContestStatusDoc> }) {
   const st = contestState(c);
+  const status = contestStatusTone(st.phase);
   const tsdoc: ContestStatusDoc = tsdict[String(c.docId)] || {};
   const detailUrl = replaceRouteTokens(bs.urls.contestDetail, { TID: String(c.docId) });
   return (
-    <Card className="group h-full transition-all hover:border-primary/40 hover:shadow-md">
-      <CardContent className="space-y-2 p-4">
-        <a href={detailUrl} className="block space-y-2">
-          <div className="flex min-w-0 items-start justify-between gap-2">
-            <h3 className="min-w-0 font-medium line-clamp-2 leading-tight">{c.title || '未命名'}</h3>
-            <div className="flex shrink-0 items-center gap-1">
-              <HiddenContestBadge hidden={c.hidden} />
-              <Badge variant={ruleBadgeVariant(c.rule)}>{ruleLabel(c.rule)}</Badge>
-            </div>
-          </div>
-          <div className="text-xs text-muted-foreground">{formatDateTime(c.beginAt, bs.locale)}</div>
-          <div className="flex items-center justify-between">
-            <Badge variant={st.variant} className="text-[10px]">
-              {st.label}
-            </Badge>
-            <span className="flex items-center gap-1 text-xs text-muted-foreground">
-              <Users className="size-3" />
-              {c.attend || 0}
-            </span>
-            {tsdoc.attend ? (
-              <Badge variant="secondary" className="text-[10px]">
-                已参加
-              </Badge>
-            ) : null}
-          </div>
+    <article className={CONTEST_CARD}>
+      <a href={detailUrl} className="flex min-w-0 flex-col gap-3">
+        <div className="flex items-center gap-2 text-xs font-medium text-fg-muted">
+          <StatusDot tone={status.tone} pulse={status.pulse} />
+          {st.label}
+          <span className="ml-auto flex items-center gap-1">
+            <HiddenContestBadge hidden={c.hidden} />
+            <RuleBadge rule={c.rule} />
+          </span>
+        </div>
+        <h3 className="line-clamp-2 text-md font-semibold text-balance text-fg">{c.title || '未命名'}</h3>
+        <div className="mt-auto flex items-center justify-between gap-2 text-xs text-fg-subtle">
+          <span className="tabular">{formatDateTime(c.beginAt, bs.locale)}</span>
+          <span className="inline-flex items-center gap-1 tabular">
+            <Users className="size-3.5" />
+            {c.attend || 0}
+          </span>
+        </div>
+        {tsdoc.attend ? <Badge size="sm" tone="success">已参加</Badge> : null}
+      </a>
+      {isTeamContest(c) ? (
+        <a href={teamWorkspaceUrl(c)} className="inline-flex items-center gap-1 text-xs font-medium text-brand-fg hover:underline">
+          <Users className="size-3.5" />
+          管理我的队伍
         </a>
-        {isTeamContest(c) ? (
-          <a href={teamWorkspaceUrl(c)} className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline">
-            <Users className="size-3" /> 管理我的队伍
-          </a>
-        ) : null}
-      </CardContent>
-    </Card>
+      ) : null}
+    </article>
   );
 }
 
@@ -680,77 +686,80 @@ function ContestTable({
   locale: string;
 }) {
   return (
-    <Card className="min-w-0">
-      <CardContent className="p-0">
-        <Table className="min-w-max">
-          <TableHeader>
-            <TableRow>
-              <TableHead>比赛名称</TableHead>
-              <TableHead className="w-44">时间</TableHead>
-              <TableHead className="w-24 text-center">规则</TableHead>
-              <TableHead className="w-20 text-center">参与</TableHead>
-              <TableHead className="w-24 text-center">状态</TableHead>
-              <TableHead className="w-24 text-center">我的</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {docs.map((c) => {
-              const st = contestState(c);
-              const ts: ContestStatusDoc = tsdict[String(c.docId)] || {};
-              return (
-                <TableRow key={String(c.docId)}>
-                  <TableCell>
-                    <a
-                      href={replaceRouteTokens(bs.urls.contestDetail, { TID: String(c.docId) })}
-                      className="font-medium hover:text-primary hover:underline"
-                    >
-                      {c.title || '未命名比赛'}
-                    </a>
-                    {c.rated ? (
-                      <Badge variant="secondary" className="ml-2 text-[10px]">
-                        Rated
-                      </Badge>
-                    ) : null}
-                    {c.hidden === true ? (
-                      <Badge variant="outline" className="ml-2 text-[10px]">
-                        已隐藏
-                      </Badge>
-                    ) : null}
-                    {isTeamContest(c) ? (
-                      <a href={teamWorkspaceUrl(c)} className="ml-2 inline-flex items-center gap-1 text-xs text-primary hover:underline">
-                        <Users className="size-3" /> 队伍
-                      </a>
-                    ) : null}
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">{formatDateTime(c.beginAt, locale)}</TableCell>
-                  <TableCell className="text-center">
-                    <Badge variant={ruleBadgeVariant(c.rule)}>{ruleLabel(c.rule)}</Badge>
-                  </TableCell>
-                  <TableCell className="text-center text-sm text-muted-foreground">
-                    <span className="flex items-center justify-center gap-1">
+    <Panel flush>
+      <Table className="min-w-max">
+        <TableHeader>
+          <TableRow>
+            <TableHead>比赛名称</TableHead>
+            <TableHead className="w-44">时间</TableHead>
+            <TableHead className="w-24 text-center">规则</TableHead>
+            <TableHead className="w-20 text-center">参与</TableHead>
+            <TableHead className="w-24 text-center">状态</TableHead>
+            <TableHead className="w-24 text-center">我的</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {docs.map((c) => {
+            const st = contestState(c);
+            const status = contestStatusTone(st.phase);
+            const ts: ContestStatusDoc = tsdict[String(c.docId)] || {};
+            return (
+              <TableRow key={String(c.docId)}>
+                <TableCell>
+                  <a
+                    href={replaceRouteTokens(bs.urls.contestDetail, { TID: String(c.docId) })}
+                    className="font-medium text-fg hover:text-brand-fg hover:underline"
+                  >
+                    {c.title || '未命名比赛'}
+                  </a>
+                  {c.rated ? (
+                    <Badge size="sm" className="ml-2">
+                      Rated
+                    </Badge>
+                  ) : null}
+                  {c.hidden === true ? (
+                    <Badge variant="outline" size="sm" className="ml-2">
+                      已隐藏
+                    </Badge>
+                  ) : null}
+                  {isTeamContest(c) ? (
+                    <a href={teamWorkspaceUrl(c)} className="ml-2 inline-flex items-center gap-1 text-xs text-brand-fg hover:underline">
                       <Users className="size-3" />
-                      {c.attend || 0}
-                    </span>
-                  </TableCell>
-                  <TableCell className="text-center">
-                    <Badge variant={st.variant}>{st.label}</Badge>
-                  </TableCell>
-                  <TableCell className="text-center">
-                    {ts.attend ? (
-                      <Badge variant="default" className="text-[10px]">
-                        已参加
-                      </Badge>
-                    ) : (
-                      <span className="text-[10px] text-muted-foreground">—</span>
-                    )}
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
-      </CardContent>
-    </Card>
+                      队伍
+                    </a>
+                  ) : null}
+                </TableCell>
+                <TableCell className="text-sm tabular text-fg-subtle">{formatDateTime(c.beginAt, locale)}</TableCell>
+                <TableCell className="text-center">
+                  <RuleBadge rule={c.rule} />
+                </TableCell>
+                <TableCell className="text-center text-sm text-fg-subtle">
+                  <span className="flex items-center justify-center gap-1 tabular">
+                    <Users className="size-3" />
+                    {c.attend || 0}
+                  </span>
+                </TableCell>
+                <TableCell className="text-center">
+                  <span className="inline-flex items-center justify-center gap-1.5 text-xs font-medium text-fg-muted">
+                    <StatusDot tone={status.tone} pulse={status.pulse} />
+                    {st.label}
+                  </span>
+                </TableCell>
+                <TableCell className="text-center">
+                  {ts.attend ? (
+                    <Badge size="sm" tone="success">
+                      已参加
+                    </Badge>
+                  ) : (
+                    <span className="text-2xs text-fg-subtle">—</span>
+                  )}
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </Panel>
   );
 }
 
@@ -801,90 +810,98 @@ export function ContestDetailPage() {
   const discussionUrl = replaceRouteTokens(bs.urls.discussionNode, { TYPE: 'contest', NAME: tid });
   const myRecordUrl = `${bs.urls.records}?tid=${encodeURIComponent(tid)}&uidOrName=${encodeURIComponent(String(bs.user.id))}`;
   const allRecordUrl = `${bs.urls.records}?tid=${encodeURIComponent(tid)}`;
+  const detailStatus = contestStatusTone(st.phase);
 
   return (
-    <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-      {/* Breadcrumb */}
-      <div className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
-        <a href={isHomework ? bs.urls.homework : bs.urls.contests} className="shrink-0 hover:text-primary">
-          {isHomework ? '作业' : '比赛'}
-        </a>
-        <ChevronRight className="size-3 shrink-0" />
-        <span className="min-w-0 truncate text-foreground">{tdoc.title || '比赛'}</span>
-      </div>
-
-      <section className="min-w-0 rounded-xl border bg-card p-5 shadow-sm">
-        <div className="flex min-w-0 flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant={st.variant}>{st.label}</Badge>
-              <Badge variant={ruleBadgeVariant(tdoc.rule)}>{ruleLabel(tdoc.rule)}</Badge>
-              {tdoc.rated ? <Badge variant="secondary">Rated</Badge> : null}
-              <HiddenContestBadge hidden={tdoc.hidden} />
-              {isClientRequired ? (
-                <Badge variant="outline" className="gap-1">
-                  <ShieldCheck className="size-3" />
-                  客户端进入
-                </Badge>
-              ) : null}
-              {tdoc.allowViewCode ? <Badge variant="outline">代码可见</Badge> : null}
-            </div>
-            <h1 className="mt-3 min-w-0 break-words text-3xl font-semibold leading-tight">{tdoc.title || '比赛'}</h1>
-            <div className="mt-4 grid gap-3 text-sm text-muted-foreground sm:grid-cols-3">
-              <span className="inline-flex items-center gap-2">
-                <Users className="size-4" />
-                {isTeam ? (data.teamCount ?? 0) : tdoc.attend || 0} {isTeam ? '队参赛' : '人参加'}
-              </span>
-              <span className="inline-flex items-center gap-2">
-                <List className="size-4" />
-                {pids.length} 道题
-              </span>
-              <span className="inline-flex items-center gap-2">
-                <Calendar className="size-4" />
-                {formatDuration(beginAt, endAt)}
-              </span>
-            </div>
-          </div>
-
-          <div className="flex min-w-0 flex-wrap gap-2 lg:justify-end">
+    <Page width="wide">
+      <PageHeader
+        breadcrumb={(
+          <Breadcrumb
+            items={[
+              { label: isHomework ? '作业' : '比赛', href: isHomework ? bs.urls.homework : bs.urls.contests },
+              { label: tdoc.title || '比赛' },
+            ]}
+          />
+        )}
+        title={tdoc.title || '比赛'}
+        meta={(
+          <>
+            <span className="inline-flex items-center gap-1.5 font-medium text-fg-muted">
+              <StatusDot tone={detailStatus.tone} pulse={detailStatus.pulse} />
+              {st.label}
+            </span>
+            <RuleBadge rule={tdoc.rule} />
+            {tdoc.rated ? <Badge size="sm">Rated</Badge> : null}
+            <HiddenContestBadge hidden={tdoc.hidden} />
+            {isClientRequired ? (
+              <Badge variant="outline" size="sm">
+                <ShieldCheck className="size-3" />
+                客户端进入
+              </Badge>
+            ) : null}
+            {tdoc.allowViewCode ? (
+              <Badge variant="outline" size="sm">
+                代码可见
+              </Badge>
+            ) : null}
+            <span className="inline-flex items-center gap-1.5 tabular">
+              <Users className="size-3.5" />
+              {isTeam ? (data.teamCount ?? 0) : tdoc.attend || 0}
+              {' '}
+              {isTeam ? '队参赛' : '人参加'}
+            </span>
+            <span className="inline-flex items-center gap-1.5 tabular">
+              <List className="size-3.5" />
+              {pids.length}
+              {' '}
+              道题
+            </span>
+            <span className="inline-flex items-center gap-1.5 tabular">
+              <Calendar className="size-3.5" />
+              {formatDuration(beginAt, endAt)}
+            </span>
+          </>
+        )}
+        actions={(
+          <>
             {!attended && st.phase !== 'ended' ? (
-              <form method="post" className="flex w-full min-w-0 flex-col gap-2 sm:min-w-[16rem]">
+              <form method="post" className="flex w-full min-w-0 flex-col gap-2 sm:min-w-64">
                 <input type="hidden" name="operation" value="attend" />
                 {canSelfStar ? (
-                  <label className="flex cursor-pointer items-start gap-2 rounded-lg border bg-background/70 px-3 py-2 text-sm">
+                  <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-line bg-surface-sunken px-3 py-2 text-sm">
                     <Checkbox name="unrank" value="true" className="mt-0.5" />
                     <span className="min-w-0">
-                      <span className="block font-medium">打星参赛（不计正式名次）</span>
-                      <span className="mt-0.5 block text-xs text-muted-foreground">仍会出现在榜上，名次显示为 *，不影响一血和气球。</span>
+                      <span className="block font-medium text-fg">打星参赛（不计正式名次）</span>
+                      <span className="mt-0.5 block text-xs text-fg-subtle">仍会出现在榜上，名次显示为 *，不影响一血和气球。</span>
                     </span>
                   </label>
                 ) : null}
-                <Button type="submit">
+                <Button type="submit" variant="primary">
                   参加比赛
                   <ArrowRight className="size-4" />
                 </Button>
               </form>
             ) : canOpenProblems ? (
-              <Button asChild>
+              <Button asChild variant="primary">
                 <a href={entryUrl}>
                   {st.phase === 'ended' ? '查看题目' : '进入比赛'}
                   <ArrowRight className="size-4" />
                 </a>
               </Button>
             ) : (
-              <Button type="button" disabled>
+              <Button type="button" variant="secondary" disabled>
                 <Lock className="size-4" />
                 {postContestPracticeWaiting ? '补题尚未开放' : '等待开始'}
               </Button>
             )}
-            <Button asChild variant="outline">
+            <Button asChild variant="secondary">
               <a href={`${detailUrl}/scoreboard`}>
                 <Trophy className="size-4" />
                 排行榜
               </a>
             </Button>
             {isTeam ? (
-              <Button asChild variant="outline">
+              <Button asChild variant="secondary">
                 <a href={`${detailUrl}/teams`}>
                   <Users className="size-4" />
                   我的队伍
@@ -892,7 +909,7 @@ export function ContestDetailPage() {
               </Button>
             ) : null}
             {canManageContest ? (
-              <Button asChild variant="outline">
+              <Button asChild variant="secondary">
                 <a href={`${detailUrl}/management`}>
                   <Settings className="size-4" />
                   管理
@@ -900,7 +917,7 @@ export function ContestDetailPage() {
               </Button>
             ) : null}
             {data.virtualContest?.eligibility?.allowed || data.virtualContest?.attempt ? (
-              <Button asChild>
+              <Button asChild variant="secondary">
                 <a href={`${detailUrl}/virtual`}>
                   {data.virtualContest.attempt?.status === 'active'
                     ? '继续虚拟参赛'
@@ -910,37 +927,34 @@ export function ContestDetailPage() {
                 </a>
               </Button>
             ) : null}
-          </div>
-        </div>
-      </section>
+          </>
+        )}
+      />
 
       {cdForStrip ? <CountdownStrip phase={st.phase} beginAt={beginAt} endAt={endAt} cd={cdForStrip} /> : null}
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_280px]">
-        <div className="min-w-0 space-y-4">
+      {/* ds-allow DS004: 详情侧栏用 rem 网格，没有 17.5rem 的组件宽度档 */}
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_17.5rem]">
+        <div className="flex min-w-0 flex-col gap-4">
           {tdoc.content ? (
-            <Card className="w-full min-w-0">
-              <CardHeader className="pb-2">
-                <CardTitle className="flex min-w-0 items-center gap-2 text-base">
+            <Panel
+              title={(
+                <span className="inline-flex min-w-0 items-center gap-2">
                   <BookOpen className="size-4 shrink-0" />
                   比赛说明
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <MarkdownView
-                  content={tdoc.content}
-                  className="max-w-[80ch]"
-                  preferredLang={locale?.startsWith('zh') ? 'zh' : 'en'}
-                />
-              </CardContent>
-            </Card>
+                </span>
+              )}
+            >
+              <MarkdownView
+                content={tdoc.content}
+                className="max-w-prose"
+                preferredLang={locale?.startsWith('zh') ? 'zh' : 'en'}
+              />
+            </Panel>
           ) : null}
 
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="min-w-0 text-base">比赛入口</CardTitle>
-            </CardHeader>
-            <CardContent className="grid gap-3 sm:grid-cols-2">
+          <Panel title="比赛入口">
+            <div className="grid gap-3 sm:grid-cols-2">
               <DetailAction
                 href={entryUrl}
                 icon={<List className="size-4" />}
@@ -986,48 +1000,39 @@ export function ContestDetailPage() {
                   {isTeam ? '查看本队全部提交与真实提交者' : '查看本场个人提交'}
                 </DetailAction>
               ) : null}
-            </CardContent>
-          </Card>
+            </div>
+          </Panel>
         </div>
 
-        <div className="min-w-0 space-y-3">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="min-w-0 text-sm">{isTeam ? '本队成绩' : '我的成绩'}</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2 text-sm">
+        <div className="flex min-w-0 flex-col gap-3">
+          <Panel title={isTeam ? '本队成绩' : '我的成绩'}>
+            <div className="flex flex-col gap-2 text-sm">
               {attended ? (
                 <>
                   {typeof scoreDoc.rank === 'number' && scoreDoc.rank > 0 ? <Row label="当前排名" value={`# ${scoreDoc.rank}`} /> : null}
                   {typeof scoreDoc.score === 'number' ? <Row label={isACM ? '通过题数' : '总得分'} value={String(scoreDoc.score)} /> : null}
                   {tsdoc.endAt ? <Row label="结束时间" value={formatDateTime(tsdoc.endAt, locale)} /> : null}
-                  <a href={`${detailUrl}/scoreboard`} className="block pt-2 text-xs text-primary hover:underline">
+                  <a href={`${detailUrl}/scoreboard`} className="block pt-2 text-xs text-brand-fg hover:underline">
                     查看完整排行 →
                   </a>
                 </>
               ) : (
-                <p className="text-xs text-muted-foreground">{isTeam ? '加入队伍并参加比赛后显示本队成绩' : '参加比赛后显示个人成绩'}</p>
+                <p className="text-xs text-fg-muted">{isTeam ? '加入队伍并参加比赛后显示本队成绩' : '参加比赛后显示个人成绩'}</p>
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </Panel>
 
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="min-w-0 text-sm">比赛时间</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2 text-sm">
+          <Panel title="比赛时间">
+            <div className="flex flex-col gap-2 text-sm">
               <Row label="开始" value={formatDateTime(tdoc.beginAt, locale)} />
               <Row label="结束" value={formatDateTime(tdoc.endAt, locale)} />
               <Row label="时长" value={formatDuration(beginAt, endAt)} />
               {tdoc.lockAt ? <Row label="封榜" value={formatDateTime(tdoc.lockAt, locale)} /> : null}
-            </CardContent>
-          </Card>
+            </div>
+          </Panel>
 
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="min-w-0 text-sm">操作</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-1.5">
+          <Panel title="操作">
+            <div className="flex flex-col gap-1">
               {canManageContest ? (
                 <>
                   <SidebarLink href={`${detailUrl}/edit`} icon={<Pencil className="size-3.5" />}>
@@ -1036,7 +1041,7 @@ export function ContestDetailPage() {
                   <SidebarLink href={`${detailUrl}/management`} icon={<Settings className="size-3.5" />}>
                     管理比赛
                   </SidebarLink>
-                  <div className="my-1 h-px bg-border" />
+                  <div className="my-1 h-px bg-line" />
                 </>
               ) : null}
               <SidebarLink href={`${detailUrl}/scoreboard`} icon={<Trophy className="size-3.5" />}>
@@ -1085,31 +1090,28 @@ export function ContestDetailPage() {
                   参赛选手
                 </SidebarLink>
               ) : null}
-            </CardContent>
-          </Card>
+            </div>
+          </Panel>
 
           {Array.isArray(data.files) && data.files.length > 0 ? (
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="min-w-0 text-sm">附件</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-1.5">
+            <Panel title="附件">
+              <div className="flex flex-col gap-1.5">
                 {data.files.map((f: { name?: string }) => (
                   <a
                     key={f.name}
                     href={`${detailUrl}/file/private/${encodeURIComponent(f.name || '')}`}
-                    className="flex items-center gap-1.5 text-xs text-primary hover:underline"
+                    className="flex items-center gap-1.5 text-xs text-brand-fg hover:underline"
                   >
                     <Download className="size-3" />
                     <span className="truncate">{f.name}</span>
                   </a>
                 ))}
-              </CardContent>
-            </Card>
+              </div>
+            </Panel>
           ) : null}
         </div>
       </div>
-    </motion.div>
+    </Page>
   );
 }
 
@@ -1121,24 +1123,25 @@ function DetailAction({
   children,
 }: {
   href: string;
-  icon: React.ReactNode;
+  icon: ReactNode;
   title: string;
   muted?: boolean;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   const content = (
     <>
-      <span className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-background">{icon}</span>
+      <span className="flex size-9 shrink-0 items-center justify-center rounded-md border border-line bg-surface text-fg-subtle">{icon}</span>
       <span className="min-w-0 flex-1">
-        <span className="block text-sm font-medium">{title}</span>
-        <span className="block truncate text-xs text-muted-foreground">{children}</span>
+        <span className="block text-sm font-medium text-fg">{title}</span>
+        <span className="block truncate text-xs text-fg-subtle">{children}</span>
       </span>
-      {!muted ? <ChevronRight className="size-4 shrink-0 text-muted-foreground" /> : <Lock className="size-4 shrink-0 text-muted-foreground" />}
+      {!muted ? <ChevronRight className="size-4 shrink-0 text-fg-subtle" /> : <Lock className="size-4 shrink-0 text-fg-subtle" />}
     </>
   );
-  const className = `flex items-center gap-3 rounded-md border p-3 text-left transition-colors ${
-    muted ? 'cursor-not-allowed bg-muted/30 opacity-70' : 'hover:border-primary/40 hover:bg-accent/30'
-  }`;
+  const className = cn(
+    'flex items-center gap-3 rounded-md border border-line p-3 text-left',
+    muted ? 'bg-surface-sunken text-fg-muted' : 'bg-surface transition-colors duration-(--dur-1) hover:border-line-strong hover:bg-surface-hover',
+  );
   if (muted) return <div className={className}>{content}</div>;
   return (
     <a href={href} className={className}>
@@ -1150,15 +1153,15 @@ function DetailAction({
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between gap-2">
-      <span className="text-xs text-muted-foreground">{label}</span>
-      <span className="text-xs font-medium tabular-nums">{value}</span>
+      <span className="text-xs text-fg-subtle">{label}</span>
+      <span className="text-xs font-medium tabular text-fg">{value}</span>
     </div>
   );
 }
 
-function SidebarLink({ href, icon, children }: { href: string; icon: React.ReactNode; children: React.ReactNode }) {
+function SidebarLink({ href, icon, children }: { href: string; icon: ReactNode; children: ReactNode }) {
   return (
-    <a href={href} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-accent hover:text-accent-foreground">
+    <a href={href} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-fg-muted transition-colors duration-(--dur-1) hover:bg-surface-hover hover:text-fg">
       {icon}
       <span>{children}</span>
     </a>
@@ -1377,10 +1380,20 @@ export function ContestScoreboardPage() {
     const nodes: ReactNode[] = [];
     let last = 0;
     let key = 0;
+    let pastFirstLine = false;
     const pushText = (text: string) => {
       text.split('\n').forEach((line, index) => {
-        if (index > 0) nodes.push(<br key={`br-${key++}`} />);
-        if (line) nodes.push(<span key={`t-${key++}`}>{line}</span>);
+        if (index > 0) {
+          nodes.push(<br key={`br-${key++}`} />);
+          pastFirstLine = true;
+        }
+        if (line) {
+          nodes.push(
+            <span key={`t-${key++}`} className={pastFirstLine ? 'text-2xs' : undefined}>
+              {line}
+            </span>,
+          );
+        }
       });
     };
     for (const match of source.matchAll(marker)) {
@@ -1394,7 +1407,7 @@ export function ContestScoreboardPage() {
         );
       } else {
         nodes.push(
-          <span key={`pending-${key++}`} className="font-semibold text-orange-500">
+          <span key={`pending-${key++}`} className="font-semibold text-info-fg">
             {match[1]}
           </span>,
         );
@@ -1405,34 +1418,60 @@ export function ContestScoreboardPage() {
     return nodes.length ? nodes : source;
   }
 
-  function firstBloodClass(cell: ScoreboardCell) {
-    return isFirstBlood(cell) ? 'bg-[#d9f0c7] dark:bg-emerald-950/50' : '';
+  function plainCellText(cell: ScoreboardCell) {
+    return cellText(cell).replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
   }
 
-  function cellChrome(cell: ScoreboardCell) {
-    if (cell.studentDivergence) return 'bg-violet-100 dark:bg-violet-950/50';
-    return firstBloodClass(cell);
+  function scoreTextClass(value: unknown): string {
+    const numeric = typeof value === 'number' ? value : Number(String(value ?? '').replace(/<[^>]*>/g, '').trim());
+    if (!Number.isFinite(numeric)) return '';
+    const tone = scoreTone(Math.min(100, Math.max(0, numeric)));
+    if (tone === 'danger') return 'text-danger-fg';
+    if (tone === 'warning') return 'text-warning-fg';
+    return 'text-success-fg';
+  }
+
+  // 格子文案仍用服务端下发的值；只按 §7.3 上色，不把封榜提交改写成「?」。
+  function recordTone(cell: ScoreboardCell): string {
+    const raw = cellText(cell);
+    const plain = plainCellText(cell);
+    if (!plain || plain === '—' || plain === '-') return '';
+    const accepted = raw.includes('icon-check') || (plain.startsWith('+') && raw.includes('\n'));
+    if (/color:\s*orange/i.test(raw) && !accepted) return 'bg-info-soft text-info-fg';
+    if (accepted) return 'bg-success-soft text-success-fg';
+    if (plain.startsWith('-')) return 'bg-danger-soft text-danger-fg';
+    const ratio = cell.scorePercentage ?? cell.score;
+    const numeric = typeof ratio === 'number' && Number.isFinite(ratio) ? ratio : Number(plain);
+    if (!Number.isFinite(numeric)) return '';
+    if (numeric <= 0) return 'bg-danger-soft text-danger-fg';
+    if (numeric >= 100) return 'bg-success-soft text-success-fg';
+    return 'bg-warning-soft text-warning-fg';
+  }
+
+  function cellChrome(cell: ScoreboardCell, scored: boolean) {
+    if (cell.studentDivergence) return 'bg-violet-soft text-violet-fg';
+    if (isFirstBlood(cell)) return 'bg-success text-on-success';
+    if (!scored || cell.type === 'records') return '';
+    return recordTone(cell);
   }
 
   function renderMarkedCell(cell: ScoreboardCell, content: ReactNode) {
     if (!cell.studentDivergence) return content;
     return (
       <span className="inline-flex items-center justify-center gap-1">
-        <Eye className="size-3.5 shrink-0 text-violet-700 dark:text-violet-200" aria-label="和学生榜不同" />
-        {isFirstBlood(cell) ? <span className="size-2 shrink-0 rounded-full bg-emerald-600" aria-label="一血" /> : null}
+        <Eye className="size-3.5 shrink-0 text-violet-fg" aria-label="和学生榜不同" />
+        {isFirstBlood(cell) ? <span className="size-2 shrink-0 rounded-full bg-success" aria-label="一血" /> : null}
         {content}
       </span>
     );
   }
 
-  function scoreStyle(cell: ScoreboardCell) {
-    const color = scoreboardScoreColor(cell.scorePercentage ?? cell.score ?? cell.value);
-    return color ? { color } : undefined;
-  }
-
-  function renderRecordCell(cell: ScoreboardCell) {
+  function renderRecordCell(cell: ScoreboardCell, colored: boolean) {
     const content = (
-      <span className="whitespace-pre-line font-semibold" title={cell.hover || undefined} style={scoreStyle(cell)}>
+      <span
+        className={cn('whitespace-pre-line font-semibold tabular', colored && scoreTextClass(cell.scorePercentage ?? cell.score ?? cell.value))}
+        title={cell.hover || undefined}
+      >
         {renderScoreboardText(cell)}
       </span>
     );
@@ -1464,11 +1503,11 @@ export function ContestScoreboardPage() {
               ? String(examUrls.problem).replace('__PID__', String(cell.raw))
               : `${replaceRouteTokens(bs.urls.problemDetail, { PID: String(cell.raw) })}?tid=${tdoc.docId}`
           }
-          className="block text-center hover:text-primary hover:underline"
+          className="block text-center hover:text-brand-fg hover:underline"
           title={problem.title || cell.hover || undefined}
         >
           <span>{cellText(cell)}</span>
-          <span className="block text-[10px] text-muted-foreground">
+          <span className="block text-2xs text-fg-subtle">
             {problem.nAccept || 0}/{problem.nSubmit || 0}
           </span>
         </a>
@@ -1489,7 +1528,7 @@ export function ContestScoreboardPage() {
             {teamName}
           </span>
           {isCurrent ? (
-            <Badge variant="outline" className="shrink-0 border-primary/25 bg-primary/10 text-[10px] text-primary">
+            <Badge variant="outline" size="sm" tone="brand">
               本队
             </Badge>
           ) : null}
@@ -1504,7 +1543,7 @@ export function ContestScoreboardPage() {
             {teamName}
           </span>
           {isCurrent ? (
-            <Badge variant="outline" className="shrink-0 border-primary/25 bg-primary/10 text-[10px] text-primary">
+            <Badge variant="outline" size="sm" tone="brand">
               本队
             </Badge>
           ) : null}
@@ -1522,12 +1561,12 @@ export function ContestScoreboardPage() {
               <span
                 key={uid}
                 className={cn(
-                  'inline-flex max-w-[9.5rem] items-center gap-1 rounded-full bg-muted/70 px-2 py-1 text-xs leading-none text-muted-foreground',
-                  isCaptain && 'bg-amber-500/10 text-foreground ring-1 ring-inset ring-amber-500/20',
+                  'inline-flex max-w-36 items-center gap-1 rounded-sm bg-surface-active px-2 py-1 text-xs leading-none text-fg-subtle',
+                  isCaptain && 'bg-warning-soft text-fg ring-1 ring-inset ring-ring',
                 )}
                 title={fullIdentity}
               >
-                {isCaptain ? <Crown className="size-3 shrink-0 text-amber-500" aria-label="队长" /> : null}
+                {isCaptain ? <Crown className="size-3 shrink-0 text-warning-fg" aria-label="队长" /> : null}
                 <span className="truncate">{label}</span>
               </span>
             );
@@ -1541,7 +1580,7 @@ export function ContestScoreboardPage() {
     if (cell.type === 'rank') {
       return renderMarkedCell(
         cell,
-        <span className="font-mono text-sm text-muted-foreground">{cell.value === '0' || cell.value === 0 ? '*' : cellText(cell)}</span>,
+        <span className="font-mono text-sm tabular text-fg-subtle">{cell.value === '0' || cell.value === 0 ? '*' : cellText(cell)}</span>,
       );
     }
     if (cell.type === 'user') {
@@ -1549,7 +1588,7 @@ export function ContestScoreboardPage() {
       const name = user?.uname || cellText(cell);
       if (inExamMode) return <span className="font-medium">{name}</span>;
       return cell.raw ? (
-        <a href={replaceRouteTokens(bs.urls.userDetail, { UID: String(cell.raw) })} className="font-medium hover:text-primary hover:underline">
+        <a href={replaceRouteTokens(bs.urls.userDetail, { UID: String(cell.raw) })} className="font-medium text-fg hover:text-brand-fg hover:underline">
           {name}
         </a>
       ) : (
@@ -1557,20 +1596,20 @@ export function ContestScoreboardPage() {
       );
     }
     if (cell.type === 'studentId') {
-      return <span className="font-mono text-xs text-muted-foreground">{cellText(cell)}</span>;
+      return <span className="font-mono text-xs text-fg-subtle">{cellText(cell)}</span>;
     }
     if (cell.type === 'realName') {
-      return <span className="text-xs text-muted-foreground">{cellText(cell)}</span>;
+      return <span className="text-xs text-fg-subtle">{cellText(cell)}</span>;
     }
-    if (cell.type === 'record') return renderMarkedCell(cell, renderRecordCell(cell));
+    if (cell.type === 'record') return renderMarkedCell(cell, renderRecordCell(cell, false));
     if (cell.type === 'records' && Array.isArray(cell.raw)) {
       return renderMarkedCell(
         cell,
         <span className="space-x-1">
           {cell.raw.map((record: ScoreboardCell, index: number) => (
             <span key={`${record.raw || record.value || index}`}>
-              {index > 0 ? <span className="text-muted-foreground">/</span> : null}
-              {record.raw ? renderRecordCell(record) : <span className="whitespace-pre-line">{renderScoreboardText(record)}</span>}
+              {index > 0 ? <span className="text-fg-subtle">/</span> : null}
+              {record.raw ? renderRecordCell(record, true) : <span className="whitespace-pre-line">{renderScoreboardText(record)}</span>}
             </span>
           ))}
         </span>,
@@ -1581,8 +1620,8 @@ export function ContestScoreboardPage() {
       return renderMarkedCell(
         cell,
         <span className="inline-grid justify-items-end gap-0.5 tabular-nums" title={cell.hover || undefined}>
-          <span className="text-base font-semibold leading-none text-foreground">{solved}</span>
-          <span className="text-xs leading-none text-muted-foreground">{totalTime}</span>
+          <span className="text-md font-semibold leading-none tabular text-fg">{solved}</span>
+          <span className="text-xs leading-none tabular text-fg-subtle">{totalTime}</span>
         </span>,
       );
     }
@@ -1590,9 +1629,8 @@ export function ContestScoreboardPage() {
       return renderMarkedCell(
         cell,
         <span
-          className="whitespace-pre-line font-medium tabular-nums"
+          className={cn('whitespace-pre-line font-medium tabular', cell.type === 'total_score' && scoreTextClass(cell.scorePercentage ?? cell.score ?? cell.value))}
           title={cell.hover || undefined}
-          style={cell.type === 'total_score' ? scoreStyle(cell) : undefined}
         >
           {renderScoreboardText(cell)}
         </span>,
@@ -1606,32 +1644,33 @@ export function ContestScoreboardPage() {
   }
 
   return (
-    <motion.div className="min-w-0 space-y-4" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-      <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-        <div className="min-w-0">
-          <div className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
-            <a href={examUrls.overview || (isHomework ? bs.urls.homework : bs.urls.contests)} className="shrink-0 hover:text-primary">
-              {isHomework ? '作业' : '比赛'}
-            </a>
-            <ChevronRight className="size-3 shrink-0" />
-            <a href={detailUrl} className="min-w-0 truncate hover:text-primary">
-              {tdoc.title || (isHomework ? '作业' : '比赛')}
-            </a>
-            <ChevronRight className="size-3 shrink-0" />
-          </div>
-          <h1 className="mt-1 min-w-0 text-xl font-semibold">排行榜</h1>
-        </div>
-        <div className="flex min-w-0 flex-wrap items-center gap-2 lg:justify-end">
-          <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border bg-background px-3 py-2 text-sm">
-            <Checkbox checked={officialOnly} onCheckedChange={(checked) => setOfficialOnlyFilter(checked === true)} />
-            只看正式排名
-          </label>
+    <Page width="full">
+      <PageHeader
+        breadcrumb={(
+          <Breadcrumb
+            items={[
+              {
+                label: isHomework ? '作业' : '比赛',
+                href: examUrls.overview || (isHomework ? bs.urls.homework : bs.urls.contests),
+              },
+              { label: tdoc.title || (isHomework ? '作业' : '比赛'), href: detailUrl },
+              { label: '排行榜' },
+            ]}
+          />
+        )}
+        title="排行榜"
+        actions={(
+          <>
+            <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-fg">
+              <Checkbox checked={officialOnly} onCheckedChange={(checked) => setOfficialOnlyFilter(checked === true)} />
+              只看正式排名
+            </label>
           {!inExamMode ? (
             <div className="flex flex-wrap gap-2">
               {canExportImage ? (
                 <Button
                   type="button"
-                  variant="outline"
+                  variant="secondary"
                   size="sm"
                   onClick={() => {
                     setIncludePrivateIdentity(false);
@@ -1644,7 +1683,7 @@ export function ContestScoreboardPage() {
                 </Button>
               ) : null}
               {['html', 'csv', 'ghost'].map((view) => (
-                <Button key={view} asChild variant="outline" size="sm">
+                <Button key={view} asChild variant="secondary" size="sm">
                   <a href={`${scoreboardUrl}/${view}`} target="_blank" rel="noreferrer">
                     <Download className="size-4" />
                     {view.toUpperCase()}
@@ -1652,7 +1691,7 @@ export function ContestScoreboardPage() {
                 </Button>
               ))}
               {extraViews.map(([id, name]) => (
-                <Button key={id} asChild variant="outline" size="sm">
+                <Button key={id} asChild variant="secondary" size="sm">
                   <a href={`${scoreboardUrl}/${id}`} target="_blank" rel="noreferrer">
                     {name || id}
                   </a>
@@ -1660,129 +1699,131 @@ export function ContestScoreboardPage() {
               ))}
             </div>
           ) : null}
-        </div>
-      </div>
+          </>
+        )}
+      />
 
       {tdoc.lockAt && !tdoc.unlocked ? (
-        <Card className="border-amber-200 bg-amber-50/60 dark:border-amber-900/60 dark:bg-amber-950/20">
-          <CardContent className="flex flex-col gap-3 p-4 text-sm text-amber-800 dark:text-amber-200 sm:flex-row sm:items-center sm:justify-between">
-            <div className="min-w-0 space-y-2">
-              <p>
-                {viewingLockedRealtime
-                  ? '这是实时榜，名次和分数包含封榜后的提交。'
-                  : lockFreezesBoard
-                    ? '排行榜已封榜，封榜后的提交可能会暂时显示为待定。'
-                    : '封榜时间已到。'}
-              </p>
-              {viewingLockedRealtime ? (
-                <p className="flex items-center gap-2 text-violet-800 dark:text-violet-200">
-                  <span className="inline-flex size-5 items-center justify-center rounded bg-violet-100 dark:bg-violet-950/60">
-                    <Eye className="size-3.5" aria-hidden="true" />
-                  </span>
-                  紫色格子和学生榜不同。
-                </p>
+        <Alert
+          tone="warning"
+          action={data.canViewLockedRealtime || data.canUnlockScoreboard ? (
+            <>
+              {data.canViewLockedRealtime ? (
+                <div className="flex gap-2" role="group" aria-label="榜单视图">
+                  <Button asChild size="sm" variant={viewingLockedRealtime ? 'secondary' : 'primary'}>
+                    <a href={snapshotHref(false)} aria-current={viewingLockedRealtime ? undefined : 'page'}>
+                      学生榜
+                    </a>
+                  </Button>
+                  <Button asChild size="sm" variant={viewingLockedRealtime ? 'primary' : 'secondary'}>
+                    <a href={snapshotHref(true)} aria-current={viewingLockedRealtime ? 'page' : undefined}>
+                      实时榜
+                    </a>
+                  </Button>
+                </div>
               ) : null}
-            </div>
-            {data.canViewLockedRealtime || data.canUnlockScoreboard ? (
-              <div className="flex shrink-0 flex-wrap items-center gap-2">
-                {data.canViewLockedRealtime ? (
-                  <div className="flex gap-2" role="group" aria-label="榜单视图">
-                    <Button asChild size="sm" variant={viewingLockedRealtime ? 'outline' : 'default'}>
-                      <a href={snapshotHref(false)} aria-current={viewingLockedRealtime ? undefined : 'page'}>
-                        学生榜
-                      </a>
-                    </Button>
-                    <Button asChild size="sm" variant={viewingLockedRealtime ? 'default' : 'outline'}>
-                      <a href={snapshotHref(true)} aria-current={viewingLockedRealtime ? 'page' : undefined}>
-                        实时榜
-                      </a>
-                    </Button>
-                  </div>
-                ) : null}
-                {data.canUnlockScoreboard ? (
-                  <form method="post">
-                    <input type="hidden" name="operation" value="unlock" />
-                    <Button type="submit" size="sm" variant="outline">
-                      解除封榜
-                    </Button>
-                  </form>
-                ) : null}
-              </div>
-            ) : null}
-          </CardContent>
-        </Card>
+              {data.canUnlockScoreboard ? (
+                <form method="post">
+                  <input type="hidden" name="operation" value="unlock" />
+                  <Button type="submit" size="sm" variant="secondary">
+                    解除封榜
+                  </Button>
+                </form>
+              ) : null}
+            </>
+          ) : undefined}
+        >
+          <p>
+            {viewingLockedRealtime
+              ? '这是实时榜，名次和分数包含封榜后的提交。'
+              : lockFreezesBoard
+                ? '排行榜已封榜，封榜后的提交可能会暂时显示为待定。'
+                : '封榜时间已到。'}
+          </p>
+          {viewingLockedRealtime ? (
+            <p className="mt-2 flex items-center gap-2 text-violet-fg">
+              <span className="inline-flex size-5 items-center justify-center rounded-sm bg-violet-soft">
+                <Eye className="size-3.5" aria-hidden="true" />
+              </span>
+              紫色格子和学生榜不同。
+            </p>
+          ) : null}
+        </Alert>
       ) : null}
 
-      <Card className="min-w-0">
-        <CardContent className="p-0">
-          {header.length > 0 ? (
-            <ScrollArea className="max-h-[min(70vh,48rem)] w-full" orientation="both">
-              <table className="krypton-table min-w-max w-full caption-bottom text-sm [&_tr>*:first-child]:pl-5 [&_tr>*:last-child]:pr-5">
-                <TableHeader>
-                  <TableRow>
-                    {displayHeader.map((cell, index) => (
-                      <TableHead
-                        key={`${cell.type || 'col'}-${index}`}
-                        className={cn(
-                          cell.type === 'problem' || cell.type === 'record' || cell.type === 'records' ? 'min-w-20 text-center' : 'min-w-24',
-                          teamMode && index === participantColumn && 'w-80 min-w-80 normal-case tracking-normal',
-                          teamMode && cell.type === 'time' && 'text-right',
-                        )}
-                      >
-                        {teamMode && index === participantColumn ? '队伍' : renderHeaderCell(cell, index)}
-                      </TableHead>
-                    ))}
+      <Panel flush>
+        {header.length > 0 ? (
+          <Table orientation="both" className="min-w-max">
+            <TableHeader className="sticky top-0 z-20">
+              <TableRow>
+                {displayHeader.map((cell, index) => (
+                  <TableHead
+                    key={`${cell.type || 'col'}-${index}`}
+                    className={cn(
+                      '3xl:text-md',
+                      cell.type === 'problem' || cell.type === 'record' || cell.type === 'records' ? 'min-w-20 text-center' : 'min-w-24',
+                      teamMode && index === participantColumn && 'w-80 min-w-80 normal-case tracking-normal',
+                      teamMode && cell.type === 'time' && 'text-right',
+                      index === 0 && 'sticky left-0 z-20 w-24 bg-surface-sunken',
+                      participantColumn > 0 && index === participantColumn && 'sticky left-24 z-20 bg-surface-sunken',
+                    )}
+                  >
+                    {teamMode && index === participantColumn ? '队伍' : renderHeaderCell(cell, index)}
+                  </TableHead>
+                ))}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {visibleDisplayBody.map((row, rowIndex) => {
+                const isCurrent = inExamMode && scoreboardRowMatches(row, participantColumn, currentParticipantId);
+                const participantKey = row[participantColumn]?.raw;
+                return (
+                  <TableRow
+                    key={`${String(participantKey ?? 'row')}-${rowIndex}`}
+                    aria-current={isCurrent ? 'true' : undefined}
+                    className={cn('group', isCurrent && 'bg-brand-soft/60')}
+                  >
+                    {displayHeader.map((head, columnIndex) => {
+                      const cell = row[columnIndex] || {};
+                      const isTeamParticipant = teamMode && columnIndex === participantColumn;
+                      const scored = head.type === 'problem' || cell.type === 'record' || cell.type === 'records';
+                      const pinned = columnIndex === 0 || (participantColumn > 0 && columnIndex === participantColumn);
+                      const content = isTeamParticipant ? renderTeamParticipant(cell, isCurrent) : renderBodyCell(cell);
+                      return (
+                        <TableCell
+                          key={`${rowIndex}-${columnIndex}`}
+                          className={cn(
+                            '3xl:text-md',
+                            scored && 'h-12 border-l border-line-subtle text-center tabular',
+                            teamMode && cell.type === 'time' && 'text-right',
+                            columnIndex === 0 && 'sticky left-0 z-10 w-24',
+                            participantColumn > 0 && columnIndex === participantColumn && 'sticky left-24 z-10',
+                            pinned && (isCurrent ? 'bg-brand-soft/60' : 'bg-surface group-hover:bg-surface-hover'),
+                            cellChrome(cell, scored),
+                          )}
+                        >
+                          {isCurrent && columnIndex === participantColumn && !isTeamParticipant ? (
+                            <span className="inline-flex items-center gap-2">
+                              {content}
+                              <Badge variant="outline" size="sm" tone="brand">
+                                {teamMode ? '本队' : '我'}
+                              </Badge>
+                            </span>
+                          ) : (
+                            content
+                          )}
+                        </TableCell>
+                      );
+                    })}
                   </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {visibleDisplayBody.map((row, rowIndex) => {
-                    const isCurrent = inExamMode && scoreboardRowMatches(row, participantColumn, currentParticipantId);
-                    const participantKey = row[participantColumn]?.raw;
-                    return (
-                      <TableRow
-                        key={`${String(participantKey ?? 'row')}-${rowIndex}`}
-                        aria-current={isCurrent ? 'true' : undefined}
-                        className={
-                          isCurrent ? 'bg-primary/[0.08] hover:bg-primary/[0.12] dark:bg-primary/[0.13] dark:hover:bg-primary/[0.17]' : undefined
-                        }
-                      >
-                        {displayHeader.map((head, columnIndex) => {
-                          const cell = row[columnIndex] || {};
-                          const isTeamParticipant = teamMode && columnIndex === participantColumn;
-                          const content = isTeamParticipant ? renderTeamParticipant(cell, isCurrent) : renderBodyCell(cell);
-                          return (
-                            <TableCell
-                              key={`${rowIndex}-${columnIndex}`}
-                              className={cn(
-                                head.type === 'problem' || cell.type === 'record' || cell.type === 'records' ? 'text-center' : '',
-                                teamMode && cell.type === 'time' && 'text-right',
-                                cellChrome(cell),
-                              )}
-                            >
-                              {isCurrent && columnIndex === participantColumn && !isTeamParticipant ? (
-                                <span className="inline-flex items-center gap-2">
-                                  {content}
-                                  <Badge variant="outline" className="border-primary/25 bg-primary/10 text-[10px] text-primary">
-                                    {teamMode ? '本队' : '我'}
-                                  </Badge>
-                                </span>
-                              ) : (
-                                content
-                              )}
-                            </TableCell>
-                          );
-                        })}
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </table>
-            </ScrollArea>
-          ) : (
-            <p className="py-8 text-center text-sm text-muted-foreground">暂无排行数据</p>
-          )}
-        </CardContent>
-      </Card>
+                );
+              })}
+            </TableBody>
+          </Table>
+        ) : (
+          <EmptyState title="暂无排行数据" compact />
+        )}
+      </Panel>
 
       <Dialog
         open={imageExportOpen && canExportImage}
@@ -1792,25 +1833,25 @@ export function ContestScoreboardPage() {
           if (!open) setImageExportError('');
         }}
       >
-        <DialogContent className="w-full sm:w-[520px]" onClose={() => !imageExportBusy && setImageExportOpen(false)}>
+        <DialogContent size="md" onClose={() => !imageExportBusy && setImageExportOpen(false)}>
           <DialogHeader>
             <DialogTitle className="flex min-w-0 items-center gap-2">
-              <ImageDown className="size-4 shrink-0 text-primary" />
+              <ImageDown className="size-4 shrink-0 text-fg-subtle" />
               导出完整排行榜
             </DialogTitle>
           </DialogHeader>
-          <DialogBody className="space-y-4 px-6 py-5">
-            <div className="rounded-xl border bg-muted/35 p-4">
-              <p className="min-w-0 font-medium">{tdoc.title || (isHomework ? '作业排行榜' : '比赛排行榜')}</p>
-              <p className="mt-1 text-sm text-muted-foreground">
+          <DialogBody className="flex flex-col gap-4">
+            <div className="rounded-lg border border-line bg-surface-sunken p-4">
+              <p className="min-w-0 font-medium text-fg">{tdoc.title || (isHomework ? '作业排行榜' : '比赛排行榜')}</p>
+              <p className="mt-1 text-sm text-fg-muted">
                 将全部 {orderedDisplayBody.length} 行、{displayHeader.length} 列生成一张完整 PNG，含打星（*），不受屏幕过滤影响。
               </p>
-              <p className="mt-2 text-xs font-medium text-muted-foreground">
+              <p className="mt-2 text-xs font-medium text-fg-subtle">
                 {data.scoreboardSnapshotMode === 'frozen' ? '封榜快照：不会绕过封榜读取真实结果' : '实时排行榜：导出当前已显示的实时数据'}
               </p>
             </div>
             {canExportPrivateIdentity ? (
-              <label className="group flex cursor-pointer items-start gap-3 rounded-xl border p-4 transition-colors hover:bg-muted/30">
+              <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-line p-4 transition-colors duration-(--dur-1) hover:bg-surface-hover">
                 <Checkbox
                   className="mt-0.5"
                   checked={includePrivateIdentity}
@@ -1818,30 +1859,26 @@ export function ContestScoreboardPage() {
                   disabled={imageExportBusy}
                 />
                 <span className="min-w-0">
-                  <span className="block text-sm font-medium">包含学号和姓名</span>
-                  <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
+                  <span className="block text-sm font-medium text-fg">包含学号和姓名</span>
+                  <span className="mt-0.5 block text-xs leading-relaxed text-fg-subtle">
                     仅全站系统管理员可选。图片可能包含个人信息，请按管理用途妥善保存。
                   </span>
                 </span>
               </label>
             ) : null}
-            {imageExportError ? (
-              <div role="alert" className="rounded-xl border border-destructive/35 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-                {imageExportError}
-              </div>
-            ) : null}
+            {imageExportError ? <Alert tone="danger">{imageExportError}</Alert> : null}
           </DialogBody>
           <DialogFooter>
-            <Button type="button" variant="outline" disabled={imageExportBusy} onClick={() => setImageExportOpen(false)}>
+            <Button type="button" variant="secondary" disabled={imageExportBusy} onClick={() => setImageExportOpen(false)}>
               取消
             </Button>
-            <Button type="button" disabled={imageExportBusy || displayHeader.length === 0} onClick={() => void downloadScoreboardImage()}>
+            <Button type="button" variant="primary" disabled={imageExportBusy || displayHeader.length === 0} onClick={() => void downloadScoreboardImage()}>
               <ImageDown className="size-4" />
               {imageExportBusy ? '正在生成…' : '生成并下载'}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </motion.div>
+    </Page>
   );
 }

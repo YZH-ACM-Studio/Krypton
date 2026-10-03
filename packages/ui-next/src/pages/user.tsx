@@ -6,7 +6,6 @@
  *   - CF / 牛客 charts consume server `externalRatingHistory` only (no browser fetch)
  */
 import { useState, type ReactNode } from 'react';
-import { motion } from 'motion/react';
 import {
   Activity,
   BookOpen,
@@ -14,7 +13,6 @@ import {
   Clipboard,
   Globe,
   Hash,
-  ListChecks,
   Mail,
   MessageSquare,
   Network,
@@ -24,14 +22,16 @@ import {
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
 import { EChart, type KryptonEChartsOption } from '@/components/ui/echart';
+import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { SimpleSelect } from '@/components/ui/select';
-import { Separator } from '@/components/ui/separator';
+import { Progress, Stat } from '@/components/ui/display';
+import { Page, PageHeader } from '@/components/ui/page';
+import { DescriptionList, Panel } from '@/components/ui/panel';
 import { MarkdownEditor, MarkdownView } from '@/components/markdown-renderer';
-import { Checkbox } from '@/components/ui/checkbox';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 import { formatDateTime, makeInitials, replaceRouteTokens, toDate } from '@/lib/format';
@@ -497,218 +497,187 @@ export function UserDetailPage() {
 
   const avatarUrl = udoc.avatarUrl || (udoc.avatar && /^https?:|^\//.test(udoc.avatar) ? udoc.avatar : null);
 
+  const externalRatingTitle = (
+    <span className="inline-flex items-center gap-1.5">
+      <Globe className="size-4 text-fg-subtle" />
+      外站 Rating
+    </span>
+  );
+  const profileSubtitle = isBound && binding?.realName ? (
+    <>
+      {binding.realName}
+      {binding.studentId ? <span className="ml-1.5 font-mono tabular">{binding.studentId}</span> : null}
+    </>
+  ) : udoc.displayName || undefined;
+
   return (
-    <motion.div className="w-full min-w-0 space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-      <header className="flex w-full min-w-0 flex-col gap-4 border-b border-border/70 pb-6 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex min-w-0 items-start gap-4">
-          <Avatar className="size-16 shrink-0 ring-1 ring-border sm:size-20">
-            {avatarUrl ? <AvatarImage src={avatarUrl} alt={name} /> : null}
-            <AvatarFallback className="text-xl sm:text-2xl">{makeInitials(name)}</AvatarFallback>
-          </Avatar>
-          <div className="min-w-0 space-y-2">
-            <div className="space-y-1">
-              <h1 className="truncate text-2xl font-semibold tracking-tight sm:text-3xl">{name}</h1>
-              {isBound && binding.realName ? (
-                <p className="text-sm text-muted-foreground">
-                  {binding.realName}
-                  {binding.studentId ? <span className="ml-1.5 font-mono tabular-nums">{binding.studentId}</span> : null}
-                </p>
-              ) : udoc.displayName ? (
-                <p className="text-sm text-muted-foreground">{udoc.displayName}</p>
-              ) : null}
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {udoc.role ? (
-                <Badge variant="outline" className="text-[10px]">
-                  {udoc.role}
+    <Page width="wide">
+      <div className="flex min-w-0 items-start gap-4">
+        <Avatar className="size-16">
+          {avatarUrl ? <AvatarImage src={avatarUrl} alt={name} /> : null}
+          <AvatarFallback className="text-lg">{makeInitials(name)}</AvatarFallback>
+        </Avatar>
+        <div className="min-w-0 flex-1">
+          <PageHeader
+            title={name}
+            description={profileSubtitle}
+            meta={(
+              <>
+                {udoc.role ? <Badge variant="outline" size="sm">{udoc.role}</Badge> : null}
+                {binding ? (
+                  isBound ? <Badge tone="success" size="sm">已绑定</Badge> : <Badge variant="outline" size="sm">未绑定</Badge>
+                ) : null}
+                {isBound && binding.schoolName ? <Badge size="sm">{binding.schoolName}</Badge> : null}
+                <Badge variant="outline" size="sm" className="font-mono">
+                  UID {udoc._id ?? '?'}
                 </Badge>
-              ) : null}
-              {binding ? (
-                isBound ? (
-                  <Badge className="border-transparent bg-green-600/15 text-[10px] text-green-700 dark:text-green-400">已绑定</Badge>
-                ) : (
-                  <Badge variant="outline" className="text-[10px] text-muted-foreground">
-                    未绑定
-                  </Badge>
-                )
-              ) : null}
-              {isBound && binding.schoolName ? (
-                <Badge variant="secondary" className="text-[10px]">
-                  {binding.schoolName}
-                </Badge>
-              ) : null}
-              <Badge variant="outline" className="font-mono text-[10px] tabular-nums">
-                UID {udoc._id ?? '?'}
-              </Badge>
-            </div>
-          </div>
+              </>
+            )}
+            actions={isSelfProfile || (bs.user.signedIn && udoc._id) ? (
+              <>
+                {isSelfProfile ? (
+                  <Button asChild variant="secondary" size="sm">
+                    <a href="/home/settings/account">
+                      <SettingsIcon />
+                      编辑资料
+                    </a>
+                  </Button>
+                ) : null}
+                {bs.user.signedIn && udoc._id ? (
+                  <Button asChild variant="secondary" size="sm">
+                    <a href={`/home/messages?target=${udoc._id}`} target="_blank" rel="noreferrer">
+                      <MessageSquare />
+                      发消息
+                    </a>
+                  </Button>
+                ) : null}
+              </>
+            ) : undefined}
+          />
         </div>
-        <div className="flex shrink-0 flex-wrap gap-2">
-          {isSelfProfile ? (
-            <Button asChild variant="outline" size="sm">
-              <a href="/home/settings/account">
-                <SettingsIcon className="size-4" />
-                编辑资料
-              </a>
-            </Button>
-          ) : null}
-          {bs.user.signedIn && udoc._id ? (
-            <Button asChild variant="outline" size="sm">
-              <a href={`/home/messages?target=${udoc._id}`} target="_blank" rel="noreferrer">
-                <MessageSquare className="size-4" />
-                发消息
-              </a>
-            </Button>
-          ) : null}
-        </div>
-      </header>
-
-      {bio ? (
-        <Card className="w-full min-w-0">
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-1.5 text-base">
-              <UserIcon className="size-4" />
-              个人简介
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <MarkdownView content={bio} preferredLang={bs.locale} />
-          </CardContent>
-        </Card>
-      ) : null}
-
-      <div className="grid w-full grid-cols-2 gap-3 xl:grid-cols-4">
-        <KpiCard label="RP" value={rp} icon={<Trophy className="size-4 text-amber-500" />} />
-        <KpiCard label="通过" value={acCount} icon={<ListChecks className="size-4 text-green-600" />} />
-        <KpiCard label="提交" value={submitCount} icon={<Hash className="size-4 text-muted-foreground" />} />
-        <KpiCard label="排名" value={udoc.rank ? `#${udoc.rank}` : '—'} icon={<Trophy className="size-4 text-muted-foreground" />} />
       </div>
 
+      {bio ? (
+        <Panel title={<span className="inline-flex items-center gap-1.5"><UserIcon className="size-4 text-fg-subtle" />个人简介</span>}>
+          <MarkdownView content={bio} preferredLang={bs.locale} />
+        </Panel>
+      ) : null}
+
+      <Panel>
+        <div className="grid grid-cols-2 gap-x-6 gap-y-6 md:grid-cols-4 md:divide-x md:divide-line-subtle [&>*]:md:pl-6 [&>*:first-child]:md:pl-0">
+          <Stat label="RP" value={rp} />
+          <Stat label="通过" value={acCount} />
+          <Stat label="提交" value={submitCount} />
+          <Stat label="排名" value={udoc.rank ? `#${udoc.rank}` : '—'} />
+        </div>
+      </Panel>
+
       {visibleExternalRatingSites.length ? (
-        <Card className="w-full min-w-0">
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-1.5 text-base">
-              <Globe className="size-4" />
-              外站 Rating
-            </CardTitle>
-            <CardDescription className="text-xs">Codeforces / 牛客快照，不是本站 RP</CardDescription>
-          </CardHeader>
-          <CardContent
-            className={cn('grid w-full min-w-0 gap-6', visibleExternalRatingSites.length > 1 && 'sm:grid-cols-2')}
+        <div data-slot="card" className="min-w-0">
+          <Panel
+            className="w-full"
+            title={externalRatingTitle}
+            description="Codeforces / 牛客快照，不是本站 RP"
           >
-            {visibleExternalRatingSites.map((site) => (
-              <ExternalRatingSiteBlock
-                key={site.id}
-                siteId={site.id}
-                view={site.view}
-                history={historyBySite[site.id]}
-                canViewPrivate={canViewPrivateExternalRating}
-                locale={bs.locale}
-              />
-            ))}
-          </CardContent>
-        </Card>
+            <div
+              data-slot="card-content"
+              className={cn('grid w-full min-w-0 gap-6', visibleExternalRatingSites.length > 1 && 'sm:grid-cols-2')}
+            >
+              {visibleExternalRatingSites.map((site) => (
+                <ExternalRatingSiteBlock
+                  key={site.id}
+                  siteId={site.id}
+                  view={site.view}
+                  history={historyBySite[site.id]}
+                  canViewPrivate={canViewPrivateExternalRating}
+                  locale={bs.locale}
+                />
+              ))}
+            </div>
+          </Panel>
+        </div>
       ) : null}
 
       <ActivityHeatmap daily={data.daily || {}} />
 
       <div className="grid w-full min-w-0 gap-6 xl:grid-cols-2">
-        <div className="min-w-0 space-y-6">
-          <CompletionList title="题集完成" icon={<BookOpen className="size-4" />} items={problemSetCompletions} unit="题" />
-          <CompletionList title="知识点完成" icon={<Network className="size-4" />} items={knowledgeNodeCompletions} unit="题" />
+        <div className="flex min-w-0 flex-col gap-6">
+          <CompletionList title="题集完成" icon={<BookOpen className="size-4 text-fg-subtle" />} items={problemSetCompletions} unit="题" />
+          <CompletionList title="知识点完成" icon={<Network className="size-4 text-fg-subtle" />} items={knowledgeNodeCompletions} unit="题" />
 
           {tdocs.length ? (
-            <Card className="w-full min-w-0">
-              <CardHeader className="pb-2">
-                <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-base">
-                  <span className="flex items-center gap-1.5">
-                    <Trophy className="size-4" />
-                    参加过的比赛
-                  </span>
-                  <span className="text-xs font-normal tabular-nums text-muted-foreground">{tdocs.length}</span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="p-0">
-                <div className="divide-y">
-                  {tdocs.slice(0, 12).map((t) => (
-                    <a
-                      key={String(t.docId)}
-                      href={replaceRouteTokens(bs.urls.contestDetail, { TID: String(t.docId) })}
-                      className="flex items-center gap-2 px-4 py-2 text-sm transition-colors hover:bg-accent"
-                    >
-                      <span className="truncate">{t.title || '未命名'}</span>
-                      <Badge variant="outline" className="ml-auto shrink-0 text-[10px]">
-                        {t.rule || '—'}
-                      </Badge>
-                    </a>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
+            <Panel
+              flush
+              title={<span className="inline-flex items-center gap-1.5"><Trophy className="size-4 text-fg-subtle" />参加过的比赛</span>}
+              actions={<span className="text-xs font-normal tabular text-fg-subtle">{tdocs.length}</span>}
+            >
+              <div className="divide-y divide-line-subtle">
+                {tdocs.slice(0, 12).map((t) => (
+                  <a
+                    key={String(t.docId)}
+                    href={replaceRouteTokens(bs.urls.contestDetail, { TID: String(t.docId) })}
+                    className="flex min-h-12 items-center gap-2 px-4 py-3 text-sm transition-colors duration-(--dur-1) ease-(--ease-standard) hover:bg-surface-hover"
+                  >
+                    <span className="truncate">{t.title || '未命名'}</span>
+                    <Badge variant="outline" size="sm" className="ml-auto">
+                      {t.rule || '—'}
+                    </Badge>
+                  </a>
+                ))}
+              </div>
+            </Panel>
           ) : null}
         </div>
 
-        <div className="min-w-0 space-y-6">
-          <Card className="w-full min-w-0">
-            <CardHeader className="pb-2">
-              <CardTitle className="flex items-center gap-1.5 text-base">
-                <Calendar className="size-3.5" />
-                账号信息
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2 text-sm">
-              <Row label="UID" value={String(udoc._id ?? '—')} mono />
-              <Row label="注册" value={udoc.regat ? formatDateTime(udoc.regat, bs.locale) : '—'} />
-              <Row label="最近活跃" value={lastActive ? formatDateTime(lastActive, bs.locale) : '离线'} />
-              {udoc.timezone ? <Row label="时区" value={String(udoc.timezone)} /> : null}
-            </CardContent>
-          </Card>
+        <div className="flex min-w-0 flex-col gap-6">
+          <Panel title={<span className="inline-flex items-center gap-1.5"><Calendar className="size-4 text-fg-subtle" />账号信息</span>}>
+            <DescriptionList
+              items={[
+                { term: 'UID', detail: <span className="font-mono">{String(udoc._id ?? '—')}</span> },
+                { term: '注册', detail: udoc.regat ? formatDateTime(udoc.regat, bs.locale) : '—' },
+                { term: '最近活跃', detail: lastActive ? formatDateTime(lastActive, bs.locale) : '离线' },
+                ...(udoc.timezone ? [{ term: '时区', detail: String(udoc.timezone) }] : []),
+              ]}
+            />
+          </Panel>
 
           {contactItems.length ? (
-            <Card className="w-full min-w-0">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">联系方式</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-1.5">
+            <Panel title="联系方式">
+              <div className="flex flex-col gap-2">
                 {contactItems.map(({ label, value, icon: Icon }) => (
-                  <ContactRow key={label} label={label} value={String(value)} icon={<Icon className="size-3.5 text-muted-foreground" />} />
+                  <ContactRow key={label} label={label} value={String(value)} icon={<Icon className="text-fg-subtle" />} />
                 ))}
-              </CardContent>
-            </Card>
+              </div>
+            </Panel>
           ) : null}
 
           {psdocs.length ? (
-            <Card className="w-full min-w-0">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">最近题解</CardTitle>
-              </CardHeader>
-              <CardContent className="p-0">
-                <div className="divide-y">
-                  {psdocs.slice(0, 8).map((ps) => {
-                    const p = pdict[String(ps.parentId)];
-                    return (
-                      <a
-                        key={String(ps._id)}
-                        href={`${replaceRouteTokens(bs.urls.problemDetail, { PID: String(ps.parentId) })}/solution/${ps._id}`}
-                        className="flex items-center gap-2 px-3 py-2 text-xs transition-colors hover:bg-accent"
-                      >
-                        <span className="font-mono text-[10px] text-muted-foreground">{ps.parentId}</span>
-                        <span className="truncate">{p?.title || ps.title || '题解'}</span>
-                        {ps.vote ? (
-                          <Badge variant="outline" className="ml-auto text-[10px]">
-                            {ps.vote}↑
-                          </Badge>
-                        ) : null}
-                      </a>
-                    );
-                  })}
-                </div>
-              </CardContent>
-            </Card>
+            <Panel title="最近题解" flush>
+              <div className="divide-y divide-line-subtle">
+                {psdocs.slice(0, 8).map((ps) => {
+                  const p = pdict[String(ps.parentId)];
+                  return (
+                    <a
+                      key={String(ps._id)}
+                      href={`${replaceRouteTokens(bs.urls.problemDetail, { PID: String(ps.parentId) })}/solution/${ps._id}`}
+                      className="flex min-h-12 items-center gap-2 px-4 py-3 text-xs transition-colors duration-(--dur-1) ease-(--ease-standard) hover:bg-surface-hover"
+                    >
+                      <span className="font-mono text-2xs text-fg-subtle">{ps.parentId}</span>
+                      <span className="truncate">{p?.title || ps.title || '题解'}</span>
+                      {ps.vote ? (
+                        <Badge variant="outline" size="sm" className="ml-auto">
+                          {ps.vote}↑
+                        </Badge>
+                      ) : null}
+                    </a>
+                  );
+                })}
+              </div>
+            </Panel>
           ) : null}
         </div>
       </div>
-    </motion.div>
+    </Page>
   );
 }
 
@@ -727,65 +696,42 @@ function CompletionList({
   const shown = items.slice(0, 12);
   const maxCount = Math.max(...shown.map((item) => item.count));
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="text-base flex flex-wrap items-center justify-between gap-2">
-          <span className="flex min-w-0 items-center gap-1.5">
-            {icon}
-            {title}
-          </span>
-          <span className="shrink-0 text-xs font-normal text-muted-foreground">{shown.length}</span>
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="p-0">
-        <ol className="divide-y">
-          {shown.map((item, index) => {
-            const pct = maxCount > 0 ? Math.round((item.count / maxCount) * 100) : 0;
-            const row = (
-              <div className="flex items-start gap-3">
-                <span className="w-5 shrink-0 pt-0.5 text-right font-mono text-[11px] tabular-nums text-muted-foreground">{index + 1}</span>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium leading-snug break-words">{item.title}</p>
-                  {item.subtitle ? <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">{item.subtitle}</p> : null}
-                  <div className="mt-2 h-1 overflow-hidden rounded-full bg-muted">
-                    <div className="h-full rounded-full bg-primary/80" style={{ width: `${pct}%` }} />
-                  </div>
-                </div>
-                <span className="shrink-0 pt-px text-right">
-                  <span className="block text-base font-semibold tabular-nums leading-none">{item.count}</span>
-                  <span className="mt-0.5 block text-[10px] text-muted-foreground">{unit}</span>
-                </span>
+    <Panel
+      flush
+      title={<span className="inline-flex min-w-0 items-center gap-1.5">{icon}{title}</span>}
+      actions={<span className="shrink-0 text-xs font-normal text-fg-subtle">{shown.length}</span>}
+    >
+      <ol className="divide-y divide-line-subtle">
+        {shown.map((item, index) => {
+          const pct = maxCount > 0 ? Math.round((item.count / maxCount) * 100) : 0;
+          const row = (
+            <div className="flex items-start gap-3">
+              <span className="w-5 shrink-0 pt-0.5 text-right font-mono text-2xs tabular text-fg-subtle">{index + 1}</span>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium leading-snug break-words">{item.title}</p>
+                {item.subtitle ? <p className="mt-0.5 text-2xs leading-snug text-fg-subtle">{item.subtitle}</p> : null}
+                <Progress value={pct} size="sm" className="mt-2" />
               </div>
-            );
-            return (
-              <li key={item.id}>
-                {item.href ? (
-                  <a href={item.href} className="block px-5 py-3 transition-colors hover:bg-accent" title={item.title}>
-                    {row}
-                  </a>
-                ) : (
-                  <div className="px-5 py-3">{row}</div>
-                )}
-              </li>
-            );
-          })}
-        </ol>
-      </CardContent>
-    </Card>
-  );
-}
-
-function KpiCard({ label, value, icon }: { label: string; value: ReactNode; icon: ReactNode }) {
-  return (
-    <Card className="w-full min-w-0">
-      <CardContent className="flex items-center justify-between gap-3 p-5">
-        <div className="min-w-0">
-          <p className="truncate text-xs text-muted-foreground">{label}</p>
-          <p className="mt-1 text-2xl font-semibold tabular-nums leading-none tracking-tight">{value}</p>
-        </div>
-        <div className="rounded-md bg-muted/40 p-2">{icon}</div>
-      </CardContent>
-    </Card>
+              <span className="shrink-0 text-right">
+                <span className="block text-md font-semibold tabular leading-none">{item.count}</span>
+                <span className="mt-0.5 block text-2xs text-fg-subtle">{unit}</span>
+              </span>
+            </div>
+          );
+          return (
+            <li key={item.id}>
+              {item.href ? (
+                <a href={item.href} className="block px-4 py-3 transition-colors duration-(--dur-1) ease-(--ease-standard) hover:bg-surface-hover" title={item.title}>
+                  {row}
+                </a>
+              ) : (
+                <div className="px-4 py-3">{row}</div>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+    </Panel>
   );
 }
 
@@ -810,7 +756,7 @@ function ExternalRatingSiteBlock({
       <div className="flex items-center justify-between gap-2">
         <p className="text-sm font-medium">{EXTERNAL_RATING_SITE_LABEL[siteId]}</p>
         {canViewPrivate && view.publicShow !== true ? (
-          <Badge variant="outline" className="text-[10px] text-muted-foreground">
+          <Badge variant="outline" size="sm">
             未公开
           </Badge>
         ) : null}
@@ -822,28 +768,31 @@ function ExternalRatingSiteBlock({
               href={profileHref}
               target="_blank"
               rel="noreferrer"
-              className="truncate font-mono text-sm hover:underline"
+              className="block max-w-full truncate font-mono text-sm text-brand-fg hover:underline"
               title={handle}
             >
               {handle}
             </a>
           ) : (
-            <span className="truncate font-mono text-sm">{handle || '—'}</span>
+            <span className="block max-w-full truncate font-mono text-sm">{handle || '—'}</span>
           )}
           {canViewPrivate || fetchedAt ? (
-            <p className="mt-1 text-[11px] text-muted-foreground">
+            <p className="mt-1 text-2xs text-fg-subtle">
               抓取 {fetchedAt ? formatDateTime(fetchedAt, locale) : '—'}
             </p>
           ) : null}
         </div>
-        <span className="shrink-0 text-3xl font-semibold tabular-nums leading-none">{formatExternalRatingValue(view.rating)}</span>
+        <span className="shrink-0 text-3xl font-semibold tabular leading-none">{formatExternalRatingValue(view.rating)}</span>
       </div>
       {canViewPrivate && view.lastError ? (
-        <p className="break-words text-[11px] text-destructive">失败 {formatExternalRatingLastError(view.lastError)}</p>
+        <p className="break-words text-2xs text-danger-fg">失败 {formatExternalRatingLastError(view.lastError)}</p>
       ) : null}
-      {!canViewPrivate && view.stale ? <p className="text-[11px] text-muted-foreground">快照可能过期</p> : null}
+      {!canViewPrivate && view.stale ? <p className="text-2xs text-fg-subtle">快照可能过期</p> : null}
       {history.length >= 1 ? (
-        <EChart option={buildExternalRatingChartOption(history)} className="h-[240px] w-full min-w-0" />
+        <EChart
+          option={buildExternalRatingChartOption(history)}
+          className={"h-[240px] w-full min-w-0" /* ds-allow DS004: 历史曲线高度由既有契约固定为 240px，间距阶梯没有这一档 */}
+        />
       ) : null}
     </div>
   );
@@ -929,84 +878,66 @@ function ActivityHeatmap({ daily }: { daily: Record<string, number> }) {
   });
 
   const bucketClass: Record<0 | 1 | 2 | 3 | 4, string> = {
-    0: 'bg-muted/40',
-    1: 'bg-primary/20',
-    2: 'bg-primary/45',
-    3: 'bg-primary/70',
-    4: 'bg-primary',
+    0: 'bg-surface-sunken',
+    1: 'bg-brand-soft/60',
+    2: 'bg-brand-soft',
+    3: 'bg-brand-soft-hover',
+    4: 'bg-brand',
   };
 
   return (
-    <Card className="w-full min-w-0">
-      <CardHeader className="pb-2">
-        <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-base">
-          <span className="flex items-center gap-1.5">
-            <Activity className="size-4" />
-            最近一年的提交活跃度
-          </span>
-          <span className="text-xs font-normal tabular-nums text-muted-foreground">
-            共 {totalSubmissions} 次 · 活跃 {activeDays} 天
-          </span>
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="overflow-x-auto">
-          <div className="inline-flex flex-col gap-1 text-[10px] text-muted-foreground">
-            {/* Month axis */}
-            <div className="ml-7 flex gap-[3px]">
+    <Panel
+      title={<span className="inline-flex items-center gap-1.5"><Activity className="size-4 text-fg-subtle" />最近一年的提交活跃度</span>}
+      actions={<span className="text-xs font-normal tabular text-fg-subtle">共 {totalSubmissions} 次 · 活跃 {activeDays} 天</span>}
+    >
+      <div className="overflow-x-auto overflow-y-hidden">
+        <div className="inline-flex flex-col gap-1 text-2xs text-fg-subtle">
+          <div className="flex gap-1">
+            <div className="w-6 shrink-0" />
+            <div className="flex gap-0.5">
               {columns.map((_, ci) => {
                 const label = monthLabels.find((m) => m.col === ci);
                 return (
-                  <div key={ci} className="w-[11px] text-left" style={{ minWidth: 11 }}>
-                    {label ? <span className="pl-0">{label.label}</span> : null}
+                  <div key={ci} className="w-3 shrink-0 text-left">
+                    {label ? <span className="whitespace-nowrap">{label.label}</span> : null}
                   </div>
                 );
               })}
             </div>
-            <div className="flex gap-1">
-              {/* Day-of-week axis */}
-              <div className="mr-1 flex flex-col gap-[3px] justify-around pt-px text-right">
-                {['', '一', '', '三', '', '五', ''].map((d, i) => (
-                  <div key={i} className="h-[11px] w-6 leading-[11px]">
-                    {d}
-                  </div>
-                ))}
-              </div>
-              {/* Cells */}
-              <div className="flex gap-[3px]">
-                {columns.map((col, ci) => (
-                  <div key={ci} className="flex flex-col gap-[3px]">
-                    {col.map((cell, ri) => (
-                      <div
-                        key={ri}
-                        className={`size-[11px] rounded-[2px] ${cell.isFuture ? 'opacity-0' : bucketClass[bucket(cell.count)]}`}
-                        title={cell.isFuture ? '' : `${cell.date} · ${cell.count} 次提交`}
-                      />
-                    ))}
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="ml-7 mt-1 flex items-center gap-1.5">
-              <span>少</span>
-              {([0, 1, 2, 3, 4] as const).map((b) => (
-                <span key={b} className={`size-[11px] rounded-[2px] ${bucketClass[b]}`} />
+          </div>
+          <div className="flex gap-1">
+            <div className="flex w-6 shrink-0 flex-col justify-around gap-0.5 text-right">
+              {['', '一', '', '三', '', '五', ''].map((d, i) => (
+                <div key={i} className="flex h-3 items-center justify-end">
+                  {d}
+                </div>
               ))}
-              <span>多</span>
+            </div>
+            <div className="flex gap-0.5">
+              {columns.map((col, ci) => (
+                <div key={ci} className="flex flex-col gap-0.5">
+                  {col.map((cell, ri) => (
+                    <div
+                      key={ri}
+                      className={`size-3 shrink-0 rounded-sm ${cell.isFuture ? 'opacity-0' : bucketClass[bucket(cell.count)]}`}
+                      title={cell.isFuture ? '' : `${cell.date} · ${cell.count} 次提交`}
+                    />
+                  ))}
+                </div>
+              ))}
             </div>
           </div>
+          <div className="mt-1 flex items-center gap-1.5">
+            <div className="w-6 shrink-0" />
+            <span>少</span>
+            {([0, 1, 2, 3, 4] as const).map((b) => (
+              <span key={b} className={`size-3 shrink-0 rounded-sm ${bucketClass[b]}`} />
+            ))}
+            <span>多</span>
+          </div>
         </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function Row({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
-  return (
-    <div className="flex items-center justify-between gap-2">
-      <span className="text-xs text-muted-foreground">{label}</span>
-      <span className={`text-xs font-medium tabular-nums ${mono ? 'font-mono' : ''}`}>{value}</span>
-    </div>
+      </div>
+    </Panel>
   );
 }
 
@@ -1019,18 +950,13 @@ function ContactRow({ label, value, icon }: { label: string; value: string; icon
     setTimeout(() => setCopied(false), 1200);
   };
   return (
-    <button
-      type="button"
-      onClick={handleCopy}
-      className="flex w-full items-center gap-2 rounded-md border bg-background px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-accent"
-      title="点击复制"
-    >
+    <Button type="button" variant="secondary" className="w-full" onClick={handleCopy} title="点击复制">
       {icon}
-      <span className="font-medium shrink-0">{label}</span>
-      <span className="truncate text-muted-foreground">{value}</span>
-      <Clipboard className={`size-3 ml-auto shrink-0 ${copied ? 'text-green-600' : 'text-muted-foreground/40'}`} />
-      {copied ? <span className="text-[10px] text-green-600">已复制</span> : null}
-    </button>
+      <span className="shrink-0 font-medium">{label}</span>
+      <span className="min-w-0 flex-1 truncate text-left text-fg-muted">{value}</span>
+      <Clipboard className={copied ? 'text-success-fg' : 'text-fg-subtle'} />
+      {copied ? <span className="text-2xs text-success-fg">已复制</span> : null}
+    </Button>
   );
 }
 
@@ -1045,25 +971,19 @@ export function SettingsPage() {
   const current = data.current || {};
 
   return (
-    <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-      <h1 className="text-xl font-semibold">{data.page_name === 'home_account' ? '账号' : '设置'}</h1>
-
-      <form method="post" className="space-y-6">
+    <Page width="form">
+      <PageHeader title={data.page_name === 'home_account' ? '账号' : '设置'} />
+      <form method="post" className="flex flex-col gap-6">
         {settings.map((s) => (
-          <Card key={String(s.key)}>
-            <CardHeader>
-              <CardTitle className="text-base">{s.name || s.key}</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <SettingControl setting={s} value={current[s.key]} />
-            </CardContent>
-          </Card>
+          <Panel key={String(s.key)} title={s.name || s.key}>
+            <SettingControl setting={s} value={current[s.key]} />
+          </Panel>
         ))}
         <div className="flex justify-end">
-          <Button type="submit">保存</Button>
+          <Button type="submit" variant="primary">保存</Button>
         </div>
       </form>
-    </motion.div>
+    </Page>
   );
 }
 
@@ -1095,55 +1015,43 @@ export function SecurityPage() {
   const sessions = data.sessions || [];
 
   return (
-    <motion.div className="space-y-4" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-      <h1 className="text-xl font-semibold">账号安全</h1>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">修改密码</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form method="post" action="/home/security/password" className="space-y-3">
-            <Input name="currentPassword" placeholder="当前密码" type="password" />
-            <Input name="newPassword" placeholder="新密码" type="password" />
-            <Input name="newPasswordAgain" placeholder="重复新密码" type="password" />
-            <Button type="submit">修改密码</Button>
-          </form>
-        </CardContent>
-      </Card>
-
-      <Separator />
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">会话</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {sessions.length === 0 ? (
-            <p className="text-sm text-muted-foreground">暂无会话</p>
-          ) : (
-            <div className="divide-y">
-              {sessions.map((s) => (
-                <div key={String(s._id)} className="flex flex-wrap items-center gap-3 py-2 text-sm">
-                  <div className="min-w-0">
-                    <p className="font-medium truncate">{s.userAgent || 'Unknown'}</p>
-                    <p className="text-xs text-muted-foreground">{s.updateAt ? formatDateTime(s.updateAt, bs.locale) : '—'}</p>
-                  </div>
-                  {s._id ? (
-                    <form method="post" action="/home/security/session" className="ml-auto">
-                      <input type="hidden" name="sid" value={String(s._id)} />
-                      <Button type="submit" variant="outline" size="sm">
-                        登出
-                      </Button>
-                    </form>
-                  ) : null}
+    <Page width="form">
+      <PageHeader title="账号安全" />
+      <Panel title="修改密码">
+        <form method="post" action="/home/security/password" className="flex flex-col gap-5">
+          <Input name="currentPassword" placeholder="当前密码" type="password" />
+          <Input name="newPassword" placeholder="新密码" type="password" />
+          <Input name="newPasswordAgain" placeholder="重复新密码" type="password" />
+          <div className="flex justify-end">
+            <Button type="submit" variant="primary">修改密码</Button>
+          </div>
+        </form>
+      </Panel>
+      <Panel title="会话" flush={sessions.length > 0}>
+        {sessions.length === 0 ? (
+          <EmptyState compact title="暂无会话" />
+        ) : (
+          <div className="divide-y divide-line-subtle">
+            {sessions.map((s) => (
+              <div key={String(s._id)} className="flex flex-wrap items-center gap-3 px-4 py-3 text-sm">
+                <div className="min-w-0">
+                  <p className="truncate font-medium">{s.userAgent || 'Unknown'}</p>
+                  <p className="text-xs text-fg-subtle">{s.updateAt ? formatDateTime(s.updateAt, bs.locale) : '—'}</p>
                 </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-    </motion.div>
+                {s._id ? (
+                  <form method="post" action="/home/security/session" className="ml-auto">
+                    <input type="hidden" name="sid" value={String(s._id)} />
+                    <Button type="submit" variant="secondary" size="sm">
+                      登出
+                    </Button>
+                  </form>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        )}
+      </Panel>
+    </Page>
   );
 }
 
@@ -1153,25 +1061,23 @@ export function MessagesPage() {
   const mdocs = data.mdocs || [];
 
   return (
-    <motion.div className="space-y-4" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-      <h1 className="text-xl font-semibold">消息</h1>
-      <Card>
-        <CardContent className="p-0">
-          {mdocs.length === 0 ? (
-            <p className="p-8 text-center text-sm text-muted-foreground">没有消息</p>
-          ) : (
-            <div className="divide-y">
-              {mdocs.map((m) => (
-                <div key={String(m._id)} className="p-3 text-sm">
-                  <p className="font-medium">{m.from || '系统'}</p>
-                  <p className="text-xs text-muted-foreground">{m.updateAt ? formatDateTime(m.updateAt, bs.locale) : '—'}</p>
-                  <p className="mt-1 whitespace-pre-wrap">{m.content}</p>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-    </motion.div>
+    <Page width="wide">
+      <PageHeader title="消息" />
+      <Panel flush={mdocs.length > 0}>
+        {mdocs.length === 0 ? (
+          <EmptyState compact title="没有消息" />
+        ) : (
+          <div className="divide-y divide-line-subtle">
+            {mdocs.map((m) => (
+              <div key={String(m._id)} className="px-4 py-3 text-sm">
+                <p className="font-medium">{m.from || '系统'}</p>
+                <p className="text-xs text-fg-subtle">{m.updateAt ? formatDateTime(m.updateAt, bs.locale) : '—'}</p>
+                <p className="mt-1 whitespace-pre-wrap">{m.content}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </Panel>
+    </Page>
   );
 }

@@ -27,9 +27,8 @@ import {
   X,
   XCircle,
 } from 'lucide-react';
-import { motion } from 'motion/react';
 import { Component, type ErrorInfo, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { getLangEntry, getStatus, KryptonIDE, type RecordEntry } from '@/components/krypton-ide';
+import { getLangEntry, KryptonIDE, type RecordEntry } from '@/components/krypton-ide';
 import { AntiAiCopyBoundary, AntiAiMarkerRenderError } from '@/components/anti-ai-copy-boundary';
 import { MarkdownView } from '@/components/markdown-renderer';
 import { ObjectiveAnswerPanel, type ObjectiveClientQuestion } from '@/components/objective-answer-panel';
@@ -40,17 +39,21 @@ import { TeamCodeSendDialog, type TeamCodeBuffer } from '@/components/team-code-
 import { readTeamExamModeContext } from '@/components/team-exam-mode';
 import { Badge } from '@/components/ui/badge';
 import { CompetitiveCompanionBridge } from '@/components/competitive-companion-bridge';
+import { Breadcrumb } from '@/components/ui/breadcrumb';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
 import { confirmFormSubmit } from '@/components/ui/dialog';
+import { Page, PageHeader, Toolbar, Workspace } from '@/components/ui/page';
+import { Panel } from '@/components/ui/panel';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Difficulty, Verdict } from '@/components/ui/verdict';
 import { useRecordSocket } from '@/hooks/use-record-socket';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 import { canSubmitProblemMode } from '@/lib/contest-exam-display';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { replaceRouteTokens } from '@/lib/format';
-import { isPendingJudgeStatus, isTerminalJudgeStatus } from '@/lib/pretest-results';
+import { isTerminalJudgeStatus } from '@/lib/pretest-results';
 import { shouldShowNoTestdataWarning } from '@/lib/problem-testcase-warning';
 import {
   practiceDraftIdentity,
@@ -244,39 +247,33 @@ function ProblemReactionBar({
             <span
               key={item.key}
               title={item.label}
-              className="inline-flex h-8 items-center gap-1 rounded-md border border-border/70 bg-muted/40 px-2 text-xs text-muted-foreground"
+              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-line bg-surface-sunken px-2 text-xs text-fg-subtle"
             >
               <Icon className="size-3.5" strokeWidth={1.75} />
-              <span className="tabular-nums">{item.count}</span>
+              <span className="tabular">{item.count}</span>
               <span className="sr-only">{item.label}</span>
             </span>
           );
         }
         return (
-          <button
+          <Button
             key={item.key}
             type="button"
+            size="sm"
+            variant={active ? 'soft' : 'secondary'}
             title={item.label}
             aria-pressed={active}
             aria-label={item.label}
             disabled={pending}
             onClick={() => onSelect(item.key)}
-            className={cn(
-              'inline-flex h-8 items-center gap-1 rounded-md border px-2 text-xs font-medium',
-              'transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-              'disabled:opacity-60 motion-reduce:transition-none',
-              active
-                ? 'border-primary/40 bg-primary/10 text-primary'
-                : 'border-border/70 bg-background text-muted-foreground hover:border-primary/30 hover:text-foreground',
-            )}
           >
             <Icon className="size-3.5" strokeWidth={active ? 2.25 : 1.75} />
-            <span className="tabular-nums">{item.count}</span>
-          </button>
+            <span className="tabular">{item.count}</span>
+          </Button>
         );
       })}
       {error ? (
-        <p role="alert" className="w-full text-xs text-destructive">
+        <p role="alert" className="w-full text-xs text-danger-fg">
           {error}
         </p>
       ) : null}
@@ -291,7 +288,7 @@ function ProblemReactionBar({
 function statusBadge(status: number | undefined) {
   if (status === 1) {
     return (
-      <Badge className="gap-1 bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/20">
+      <Badge tone="success" variant="soft" size="sm">
         <CheckCircle2 className="size-3" />
         已通过
       </Badge>
@@ -299,7 +296,7 @@ function statusBadge(status: number | undefined) {
   }
   if (status === 2) {
     return (
-      <Badge variant="destructive" className="gap-1">
+      <Badge tone="danger" variant="soft" size="sm">
         <XCircle className="size-3" />
         未通过
       </Badge>
@@ -310,14 +307,11 @@ function statusBadge(status: number | undefined) {
 
 function NoTestdataWarning() {
   return (
-    <div
-      role="alert"
-      className="flex items-start gap-2 rounded-xl border border-amber-300/70 bg-amber-50/70 px-3 py-2.5 text-amber-950 dark:border-amber-800/70 dark:bg-amber-950/30 dark:text-amber-100"
-    >
-      <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+    <div role="alert" className="flex items-start gap-2 rounded-lg border border-warning-line bg-warning-soft px-3 py-2.5 text-sm text-fg">
+      <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning-fg" />
       <div>
-        <p className="text-sm font-medium">此题没有测试点</p>
-        <p className="text-xs opacity-80">当前没有可用于评测的测试用例。</p>
+        <p className="font-medium">此题没有测试点</p>
+        <p className="text-xs text-fg-subtle">当前没有可用于评测的测试用例。</p>
       </div>
     </div>
   );
@@ -483,23 +477,6 @@ function origStatChipValue(os: { accepted: number; submitted: number }) {
   return `${os.accepted}/${os.submitted} (${rate}%)`;
 }
 
-function difficultyBadge(d: number | undefined) {
-  if (!d) return null;
-  const colors: Record<number, string> = {
-    1: 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300',
-    2: 'bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-300',
-    3: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300',
-    4: 'bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300',
-    5: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300',
-  };
-  const labels: Record<number, string> = { 1: '入门', 2: '普及', 3: '提高', 4: '省选', 5: 'NOI' };
-  return (
-    <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-medium ${colors[d] || 'bg-muted'}`}>
-      {labels[d] || `Lv.${d}`}
-    </span>
-  );
-}
-
 /** Contest entry banner with live countdown and a back-to-contest link. */
 function ContestBanner({
   tdoc,
@@ -555,29 +532,23 @@ function ContestBanner({
   const remS = Math.floor((remaining / 1000) % 60);
   const pad = (n: number) => String(n).padStart(2, '0');
 
-  const phaseColor = running
-    ? 'border-green-300 bg-green-50/40 dark:border-green-900/50 dark:bg-green-950/20'
-    : ended
-      ? 'border-muted-foreground/20 bg-muted/30'
-      : 'border-amber-300 bg-amber-50/40 dark:border-amber-900/50 dark:bg-amber-950/20';
-
   const modeBadge = (() => {
     switch (mode) {
       case 'contest':
         return (
-          <Badge variant="default" className="text-[10px]">
+          <Badge tone="success" size="sm">
             {virtual ? '虚拟参赛' : '比赛中'}
           </Badge>
         );
       case 'view':
         return (
-          <Badge variant="outline" className="text-[10px]">
+          <Badge variant="outline" size="sm">
             观看模式
           </Badge>
         );
       case 'correction':
         return (
-          <Badge variant="secondary" className="text-[10px]">
+          <Badge tone="warning" variant="outline" size="sm">
             订正模式
           </Badge>
         );
@@ -589,38 +560,36 @@ function ContestBanner({
   })();
 
   return (
-    <Card className={phaseColor}>
-      <CardContent className="flex flex-wrap items-center gap-3 p-3">
-        <a href={contestUrl} className="flex items-center gap-1.5 text-sm font-medium hover:underline">
-          <ChevronRight className="size-3.5 rotate-180" />
-          返回 {virtual ? '虚拟参赛' : isHomework ? '作业' : '比赛'}
-        </a>
-        <span className="text-muted-foreground">|</span>
-        <span className="text-sm font-medium truncate min-w-0 max-w-[40ch]">{tdoc.title || '比赛'}</span>
-        {letter ? (
-          <Badge variant="outline" className="text-[10px] font-mono">
-            题 {letter}
-          </Badge>
-        ) : null}
-        {modeBadge}
-        <div className="ml-auto flex items-center gap-2">
-          {running ? (
-            <span className="flex items-center gap-1 text-sm">
-              <Clock className="size-3.5" />
-              <span className="font-mono tabular-nums">
-                {remH > 0 ? `${remH}:` : ''}
-                {pad(remM)}:{pad(remS)}
-              </span>
-              <span className="text-xs text-muted-foreground">剩余</span>
+    <div className="flex flex-wrap items-center gap-3 rounded-lg border border-line bg-surface p-3 shadow-xs">
+      <a href={contestUrl} className="flex items-center gap-1.5 text-sm font-medium text-fg hover:underline">
+        <ChevronRight className="size-3.5 rotate-180" />
+        返回 {virtual ? '虚拟参赛' : isHomework ? '作业' : '比赛'}
+      </a>
+      <span className="text-fg-subtle">|</span>
+      <span className="min-w-0 max-w-[40ch] truncate text-sm font-medium text-fg">{tdoc.title || '比赛'}</span>
+      {letter ? (
+        <Badge variant="outline" size="sm" className="font-mono">
+          题 {letter}
+        </Badge>
+      ) : null}
+      {modeBadge}
+      <div className="ml-auto flex items-center gap-2">
+        {running ? (
+          <span className="flex items-center gap-1.5 text-sm text-fg">
+            <Clock className="size-3.5 text-fg-subtle" />
+            <span className="font-mono tabular">
+              {remH > 0 ? `${remH}:` : ''}
+              {pad(remM)}:{pad(remS)}
             </span>
-          ) : ended ? (
-            <span className="text-xs text-muted-foreground">已结束</span>
-          ) : (
-            <span className="text-xs text-muted-foreground">未开始</span>
-          )}
-        </div>
-      </CardContent>
-    </Card>
+            <span className="text-xs text-fg-subtle">剩余</span>
+          </span>
+        ) : ended ? (
+          <span className="text-xs text-fg-subtle">已结束</span>
+        ) : (
+          <span className="text-xs text-fg-subtle">未开始</span>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -702,7 +671,7 @@ function ResizableSplit({
       </div>
       <div
         className={cn(
-          'krypton-split-handle shrink-0 bg-border transition-colors hover:bg-primary/40 active:bg-primary/60',
+          'krypton-split-handle shrink-0 bg-line transition-colors hover:bg-line-strong',
           stacked ? 'h-1.5 w-full cursor-row-resize' : 'w-1.5 cursor-col-resize',
         )}
         onMouseDown={() => {
@@ -723,19 +692,19 @@ function ResizableSplit({
 function InfoChip({ icon: Icon, label, value, href }: { icon: LucideIcon; label: string; value: React.ReactNode; href?: string }) {
   const body = (
     <>
-      <Icon className="size-3.5 text-muted-foreground" />
-      <span className="text-muted-foreground">{label}</span>
-      <span className="font-medium">{value}</span>
+      <Icon className="size-3.5 text-fg-subtle" />
+      <span className="text-fg-subtle">{label}</span>
+      <span className="font-medium text-fg tabular">{value}</span>
     </>
   );
   if (href) {
     return (
-      <a href={href} className="inline-flex items-center gap-1.5 text-xs hover:text-primary">
+      <a href={href} className="inline-flex items-center gap-1.5 text-xs text-fg hover:text-brand-fg">
         {body}
       </a>
     );
   }
-  return <div className="flex items-center gap-1.5 text-xs">{body}</div>;
+  return <div className="flex items-center gap-1.5 text-xs text-fg">{body}</div>;
 }
 
 function InheritedPracticeEnforcementNotice({
@@ -751,7 +720,7 @@ function InheritedPracticeEnforcementNotice({
   const parts = [...(blockExternalCode ? ['禁止粘贴或拖入外部代码'] : []), ...(ideOnlySubmit ? ['只能用题面内的 Krypton IDE 提交'] : [])];
   if (!parts.length) return null;
   return (
-    <div role="status" className="border-y border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
+    <div role="status" className="border-y border-warning-line bg-warning-soft px-3 py-2 text-xs text-fg">
       当前课程或题集要求：{parts.join('，')}。本题库或作业提交不计入真实性完成。
     </div>
   );
@@ -764,10 +733,8 @@ function PracticeIntegrityNotice({ context, problemUrl }: { context: PracticeInt
     <div
       role="status"
       className={cn(
-        'flex flex-wrap items-center gap-2 border-y px-3 py-2 text-xs',
-        context.bypassed
-          ? 'border-blue-500/25 bg-blue-500/10 text-blue-800 dark:text-blue-200'
-          : 'border-amber-500/25 bg-amber-500/10 text-amber-800 dark:text-amber-200',
+        'flex flex-wrap items-center gap-2 border-y px-3 py-2 text-xs text-fg',
+        context.bypassed ? 'border-info-line bg-info-soft' : 'border-warning-line bg-warning-soft',
       )}
     >
       <span className="font-medium">
@@ -779,7 +746,7 @@ function PracticeIntegrityNotice({ context, problemUrl }: { context: PracticeInt
       </span>
       {context.previewAvailable ? (
         <a
-          className="ml-auto rounded-sm font-medium underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="ml-auto rounded-sm font-medium text-brand-fg underline underline-offset-2 outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
           href={practiceProblemEntryUrl(problemUrl, context.entry, !preview)}
         >
           {preview ? '退出学生预览' : '进入学生预览'}
@@ -871,26 +838,26 @@ function LimitsSection({ config }: { config: ProblemConfig }) {
   const hasMemoryVariation = baseMemMb == null && displayMemMin !== displayMemMax;
 
   return (
-    <div className="space-y-2">
-      <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-        <Cpu className="size-3.5" />
+    <div className="flex flex-col gap-2">
+      <h3 className="flex items-center gap-1.5 text-sm font-semibold text-fg">
+        <Cpu className="size-3.5 text-fg-subtle" />
         限制
       </h3>
       <div className="grid gap-2 text-sm sm:grid-cols-2">
-        <div className="flex items-center gap-2 rounded-md border px-3 py-2">
-          <Clock className="size-3.5 text-muted-foreground" />
+        <div className="flex items-center gap-2 rounded-md bg-surface-sunken px-3 py-2">
+          <Clock className="size-3.5 text-fg-subtle" />
           <div>
-            <p className="text-[11px] text-muted-foreground">时间</p>
-            <p className="font-mono text-xs font-medium">
+            <p className="text-2xs text-fg-subtle">时间</p>
+            <p className="font-mono text-xs font-medium tabular">
               {hasTimeVariation ? `${formatTime(displayTimeMin)} — ${formatTime(displayTimeMax)}` : formatTime(displayTimeMax ?? displayTimeMin)}
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2 rounded-md border px-3 py-2">
-          <HardDrive className="size-3.5 text-muted-foreground" />
+        <div className="flex items-center gap-2 rounded-md bg-surface-sunken px-3 py-2">
+          <HardDrive className="size-3.5 text-fg-subtle" />
           <div>
-            <p className="text-[11px] text-muted-foreground">内存</p>
-            <p className="font-mono text-xs font-medium">
+            <p className="text-2xs text-fg-subtle">内存</p>
+            <p className="font-mono text-xs font-medium tabular">
               {hasMemoryVariation
                 ? `${formatConfigMemory(displayMemMin)} — ${formatConfigMemory(displayMemMax)}`
                 : formatConfigMemory(displayMemMax ?? displayMemMin)}
@@ -899,45 +866,41 @@ function LimitsSection({ config }: { config: ProblemConfig }) {
         </div>
       </div>
       {perLangKeys.length > 0 ? (
-        <div className="pt-1 space-y-1">
-          <p className="text-[11px] text-muted-foreground">分语言限制</p>
-          <div className="rounded-md border">
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[18rem] text-[11px]">
-                <thead className="bg-muted/40 text-muted-foreground">
-                  <tr>
-                    <th className="px-2 py-1 text-left font-normal">语言</th>
-                    <th className="px-2 py-1 text-right font-normal">时间</th>
-                    <th className="px-2 py-1 text-right font-normal">内存</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {perLangKeys.map((id) => {
-                    const tr = Number(timeRates[id]);
-                    const mr = Number(memRates[id]);
-                    const absMs = languageBaseTimeMs != null && Number.isFinite(tr) && tr > 0 ? languageBaseTimeMs * tr : null;
-                    const absMb = languageBaseMemMb != null && Number.isFinite(mr) && mr > 0 ? languageBaseMemMb * mr : null;
-                    return (
-                      <tr key={id} className="border-t">
-                        <td className="px-2 py-1">
-                          <span className="font-medium">{langLabel(id)}</span>
-                          {langLabel(id) !== id ? <span className="ml-1 font-mono text-[9px] text-muted-foreground">{id}</span> : null}
-                        </td>
-                        <td className="px-2 py-1 text-right font-mono tabular-nums">{absMs != null ? formatHumanTime(absMs) : '默认'}</td>
-                        <td className="px-2 py-1 text-right font-mono tabular-nums">{absMb != null ? formatHumanMemory(absMb) : '默认'}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
+        <div className="flex flex-col gap-1 pt-1">
+          <p className="text-2xs text-fg-subtle">分语言限制</p>
+          <Table density="compact" className="min-w-72 text-xs">
+            <TableHeader>
+              <TableRow>
+                <TableHead>语言</TableHead>
+                <TableHead className="text-right">时间</TableHead>
+                <TableHead className="text-right">内存</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {perLangKeys.map((id) => {
+                const tr = Number(timeRates[id]);
+                const mr = Number(memRates[id]);
+                const absMs = languageBaseTimeMs != null && Number.isFinite(tr) && tr > 0 ? languageBaseTimeMs * tr : null;
+                const absMb = languageBaseMemMb != null && Number.isFinite(mr) && mr > 0 ? languageBaseMemMb * mr : null;
+                return (
+                  <TableRow key={id}>
+                    <TableCell>
+                      <span className="font-medium">{langLabel(id)}</span>
+                      {langLabel(id) !== id ? <span className="ml-1 font-mono text-2xs text-fg-subtle">{id}</span> : null}
+                    </TableCell>
+                    <TableCell className="text-right font-mono tabular">{absMs != null ? formatHumanTime(absMs) : '默认'}</TableCell>
+                    <TableCell className="text-right font-mono tabular">{absMb != null ? formatHumanMemory(absMb) : '默认'}</TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
         </div>
       ) : null}
       {langs.length > 0 && (
-        <div className="mt-2 rounded-md border bg-muted/30 px-3 py-2">
-          <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">允许的语言</p>
-          {langs.includes('_') ? <div className="text-[11px] text-muted-foreground">任意语言</div> : <AllowedLangs ids={langs} />}
+        <div className="mt-2 rounded-md bg-surface-sunken px-3 py-2">
+          <p className="mb-1.5 text-2xs font-medium text-fg-subtle">允许的语言</p>
+          {langs.includes('_') ? <div className="text-2xs text-fg-subtle">任意语言</div> : <AllowedLangs ids={langs} />}
         </div>
       )}
     </div>
@@ -952,19 +915,19 @@ function LimitsSection({ config }: { config: ProblemConfig }) {
 function AllowedLangs({ ids }: { ids: string[] }) {
   const groups = useMemo(() => organizeAllowedLangs(ids), [ids]);
   return (
-    <div className="space-y-1">
+    <div className="flex flex-col gap-1">
       {groups.map((g) => {
         const onlyBaseVariant = g.variants.length === 1 && g.variants[0].suffix === '';
         return (
-          <div key={g.family} className="flex min-w-0 flex-wrap items-baseline gap-2 text-[11px]">
-            <span className="min-w-[60px] shrink-0 font-medium">{g.familyLabel}</span>
+          <div key={g.family} className="flex min-w-0 flex-wrap items-baseline gap-2 text-2xs">
+            <span className="min-w-16 shrink-0 font-medium text-fg">{g.familyLabel}</span>
             {onlyBaseVariant ? (
-              // Single-variant families collapse to a green check; no chip soup.
-              <span className="text-emerald-600 dark:text-emerald-400">✓</span>
+              // Single-variant families collapse to a check; no chip soup.
+              <span className="text-success-fg">✓</span>
             ) : (
               <div className="flex flex-wrap gap-1">
                 {g.variants.map((v) => (
-                  <Badge key={v.id} variant="outline" className="px-1.5 py-0 text-[10px]" title={v.fullLabel}>
+                  <Badge key={v.id} variant="outline" size="sm" title={v.fullLabel}>
                     {v.suffix || v.fullLabel}
                   </Badge>
                 ))}
@@ -1026,7 +989,7 @@ function formatConfigMemory(mb: number | undefined | null): string {
 
 function ControlledStatementFailure() {
   return (
-    <div role="alert" className="rounded-xl border border-destructive/40 bg-destructive/10 p-5 text-sm text-destructive">
+    <div role="alert" className="rounded-lg border border-danger-line bg-danger-soft p-5 text-sm text-fg">
       <p className="font-semibold">真实性题面初始化失败</p>
       <p className="mt-1">当前题面无法验证复制保护数据，已阻止进入和提交。请返回课程或题集后重新进入；若仍失败，请联系管理员。</p>
     </div>
@@ -1110,6 +1073,10 @@ export function ProblemDetailPage() {
   const ctdocs: RelatedContestDoc[] = data.ctdocs || [];
   const htdocs: RelatedContestDoc[] = data.htdocs || [];
   const rate = nSubmit > 0 ? Math.round((nAccept / nSubmit) * 100) : 0;
+  const headerTimeLimit = formatTime(parseConfigTimeMS(config.time) ?? parseConfigTimeMS(config.timeMax) ?? parseConfigTimeMS(config.timeMin));
+  const headerMemoryLimit = formatConfigMemory(
+    parseConfigMemoryMB(config.memory) ?? parseConfigMemoryMB(config.memoryMax) ?? parseConfigMemoryMB(config.memoryMin),
+  );
 
   /* ── Contest mode ── */
   const tdoc: ContestDoc | null = data.tdoc || null;
@@ -1438,49 +1405,46 @@ export function ProblemDetailPage() {
 
   if (antiAiCopyFailed) return <ControlledStatementFailure />;
 
-  /* Fullscreen IDE mode */
+  /* IDE workspace. Exam mode still escapes the padded shell so the countdown stays visible. */
   if (ideMode) {
     return (
-      <div
-        className={cn(
-          'flex min-h-0 min-w-0 flex-col bg-background',
-          // Leave the exam shell countdown (h-14) visible; keep 退出 IDE on-screen.
-          examMode?.enabled ? 'fixed inset-x-0 bottom-0 top-14 z-30' : 'fixed inset-0 z-50',
-        )}
-      >
-        {/* IDE top bar */}
-        <div className="flex h-10 min-w-0 shrink-0 items-center gap-2 border-b bg-muted/50 px-3">
-          <div className="flex min-w-0 flex-1 items-center gap-2">
-            <Code2 className="size-4 shrink-0 text-primary" />
-            <span className="min-w-0 truncate text-sm font-medium">{title}</span>
-            <span className="hidden min-w-0 truncate text-xs text-muted-foreground sm:inline">— {pid}</span>
-            {teamCodeReadOnly ? (
-              <Badge variant="outline" className="shrink-0 border-amber-500/40 text-amber-600 dark:text-amber-300">
-                {teamExamMode?.teamRole === 'invalid'
-                  ? '团队身份异常 · 已锁定'
-                  : teamExamMode?.teamRole === 'admin_preview'
-                    ? '管理员只读预览'
-                    : '队员只读'}
-              </Badge>
-            ) : null}
-          </div>
-          <Button variant="ghost" size="sm" className="h-7 shrink-0 gap-1 text-xs" onClick={() => setIdeMode(false)}>
-            <X className="size-3.5" />
-            退出 IDE
-          </Button>
-        </div>
+      <Workspace className={cn(examMode?.enabled && 'fixed inset-x-0 bottom-0 top-14 z-30 h-auto')}>
+        <Toolbar
+          className="h-10 shrink-0 border-b border-line bg-surface px-2"
+          end={(
+            <Button variant="ghost" size="sm" className="shrink-0" onClick={() => setIdeMode(false)}>
+              <X />
+              退出 IDE
+            </Button>
+          )}
+        >
+          <Code2 className="size-4 shrink-0 text-brand-fg" />
+          <span className="min-w-0 truncate text-sm font-semibold text-fg">{title}</span>
+          <span className="hidden min-w-0 truncate text-xs text-fg-subtle sm:inline">— {pid}</span>
+          {teamCodeReadOnly ? (
+            <Badge variant="outline" tone="warning" size="sm" className="shrink-0">
+              {teamExamMode?.teamRole === 'invalid'
+                ? '团队身份异常 · 已锁定'
+                : teamExamMode?.teamRole === 'admin_preview'
+                  ? '管理员只读预览'
+                  : '队员只读'}
+            </Badge>
+          ) : null}
+        </Toolbar>
         {/* Resizable split view */}
         <ResizableSplit
           left={
             <div ref={recordsPanelRef} className="flex h-full min-h-0 min-w-0 flex-col">
               {/* Problem content area */}
-              <ScrollArea viewportClassName="p-4 sm:p-6 space-y-4" style={{ height: showIdeRecords ? `${ideRecordsPct}%` : '100%' }}>
+              <ScrollArea viewportClassName="p-4 sm:p-6" style={{ height: showIdeRecords ? `${ideRecordsPct}%` : '100%' }}>
+                <div className="flex flex-col gap-4">
                 {/* Problem header */}
                 <div className="min-w-0">
                   <div className="flex min-w-0 flex-wrap items-center gap-2">
-                    <h1 className="min-w-0 text-lg font-bold leading-tight break-words">{title}</h1>
+                    <h2 className="min-w-0 break-words text-lg font-semibold text-fg">{title}</h2>
                     {statusBadge(psdoc.status)}
-                    {difficultyBadge(difficulty)}
+                    {/* Hide difficulty during contest (gives away problem hardness) */}
+                    {!inContest && difficulty ? <Difficulty level={difficulty} /> : null}
                   </div>
                   {showProblemReactions && reactionCounts ? (
                     <ProblemReactionBar
@@ -1492,19 +1456,20 @@ export function ProblemDetailPage() {
                       onSelect={submitProblemReaction}
                     />
                   ) : null}
-                  {tags.length > 0 && (
+                  {/* Hide tags during contest (gives away algorithm) */}
+                  {!inContest && tags.length > 0 && (
                     <div className="mt-1.5 flex flex-wrap gap-1">
                       {tags.map((t) => (
-                        <Badge key={t} variant="secondary" className="text-[10px] px-1.5 py-0">
-                          <Tag className="mr-0.5 size-2.5" />
+                        <Badge key={t} tone="neutral" variant="soft" size="sm">
+                          <Tag className="size-2.5" />
                           {t}
                         </Badge>
                       ))}
                     </div>
                   )}
                   {!inContest && knowledgeMapView ? (
-                    <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                      <span className="inline-flex items-center gap-1 font-medium text-foreground/80">
+                    <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-fg-subtle">
+                      <span className="inline-flex items-center gap-1 font-medium text-fg">
                         <Network className="size-3" aria-hidden="true" />
                         {knowledgeMapView.title}
                       </span>
@@ -1528,9 +1493,9 @@ export function ProblemDetailPage() {
                 {showNoTestdataWarning ? <NoTestdataWarning /> : null}
 
                 {/* Info chips */}
-                <div className="flex flex-wrap gap-x-4 gap-y-1.5 rounded-lg border bg-muted/30 px-3 py-2">
-                  {!virtualContestActive ? <InfoChip icon={User} label="出题人" value={<ProblemAuthorText authors={authorUdocs} />} /> : null}
-                  {!virtualContestActive && dataContributorUdocs.length ? (
+                <div className="flex flex-wrap gap-x-4 gap-y-1.5 rounded-lg border border-line bg-surface-sunken px-3 py-2">
+                  {!inContest ? <InfoChip icon={User} label="出题人" value={<ProblemAuthorText authors={authorUdocs} />} /> : null}
+                  {!inContest && dataContributorUdocs.length ? (
                     <InfoChip icon={HardDrive} label="数据贡献者" value={<ProblemAuthorText authors={dataContributorUdocs} />} />
                   ) : null}
                   {!virtualContestActive ? <InfoChip icon={Send} label="提交" value={nSubmit} href={problemRecordsHref} /> : null}
@@ -1538,7 +1503,7 @@ export function ProblemDetailPage() {
                     <InfoChip
                       icon={CheckCircle2}
                       label="通过"
-                      value={<span className="text-green-600 dark:text-green-400">{nAccept}</span>}
+                      value={<span className="text-success-fg">{nAccept}</span>}
                       href={acceptedRecordsHref}
                     />
                   ) : null}
@@ -1547,6 +1512,7 @@ export function ProblemDetailPage() {
                 </div>
 
                 {renderStatement(true)}
+                </div>
               </ScrollArea>
 
               {/* Records panel — bottom of left side */}
@@ -1554,7 +1520,7 @@ export function ProblemDetailPage() {
                 <>
                   {/* Drag handle for records height */}
                   <div
-                    className="h-1.5 shrink-0 cursor-row-resize bg-border transition-colors hover:bg-primary/40 active:bg-primary/60"
+                    className="h-1.5 shrink-0 cursor-row-resize bg-line transition-colors hover:bg-line-strong"
                     onMouseDown={() => {
                       recordsDragging.current = true;
                       document.body.style.cursor = 'row-resize';
@@ -1562,37 +1528,38 @@ export function ProblemDetailPage() {
                     }}
                   />
                   <div className="flex flex-col min-h-0 overflow-hidden" style={{ height: `${100 - ideRecordsPct}%` }}>
-                    <div className="flex items-center gap-2 border-b bg-muted/30 px-3 py-1.5 shrink-0">
-                      <History className="size-3.5 text-muted-foreground" />
-                      <span className="text-xs font-medium">{teamExamMode ? '本队提交记录' : '提交记录'}</span>
-                      <span className="text-[10px] text-muted-foreground">({ideRecords.length})</span>
+                    <div className="flex shrink-0 items-center gap-2 border-b border-line bg-surface-sunken px-3 py-1.5">
+                      <History className="size-3.5 text-fg-subtle" />
+                      <span className="text-xs font-medium text-fg">{teamExamMode ? '本队提交记录' : '提交记录'}</span>
+                      <span className="text-2xs text-fg-subtle tabular">({ideRecords.length})</span>
                       <div className="flex-1" />
-                      <a href={problemRecordsHref} className="text-xs text-primary hover:underline">
+                      <a href={problemRecordsHref} className="text-xs text-brand-fg hover:underline">
                         全部
                       </a>
-                      <button type="button" onClick={() => setShowIdeRecords(false)} className="text-xs text-muted-foreground hover:text-foreground">
+                      <Button type="button" variant="ghost" size="sm" onClick={() => setShowIdeRecords(false)}>
                         收起
-                      </button>
+                      </Button>
                     </div>
                     <ScrollArea className="min-h-0 flex-1" orientation="both">
                       {ideRecordsLoading && ideRecords.length === 0 ? (
-                        <div className="flex h-full items-center justify-center gap-2 text-xs text-muted-foreground">
+                        <div className="flex h-full items-center justify-center gap-2 text-xs text-fg-subtle">
                           <Loader2 className="size-3.5 animate-spin" />
                           加载提交记录
                         </div>
                       ) : ideRecordsError && ideRecords.length === 0 ? (
-                        <div className="flex h-full items-center justify-center gap-2 px-4 text-xs text-destructive">
+                        <div className="flex h-full items-center justify-center gap-2 px-4 text-xs text-danger-fg">
                           <XCircle className="size-3.5" />
                           {ideRecordsError}
                         </div>
                       ) : ideRecords.length === 0 ? (
-                        <div className="flex h-full items-center justify-center px-4 text-xs text-muted-foreground">
+                        <div className="flex h-full items-center justify-center px-4 text-xs text-fg-subtle">
                           {teamExamMode ? '暂无本队提交记录' : '暂无个人提交记录'}
                         </div>
                       ) : (
+                        // ds-allow DS004: 620px 下限是既有双向滚动契约，不能改成间距档位。ds-allow DS005: 提交记录表必须保留原生 table，测试按状态列表头锁定。
                         <table className="min-w-[620px] w-full text-xs">
                           <thead>
-                            <tr className="border-b bg-muted/20 text-muted-foreground">
+                            <tr className="border-b border-line-subtle bg-surface-sunken text-fg-subtle">
                               <th className="px-3 py-1.5 text-left font-medium">状态</th>
                               <th className="px-3 py-1.5 text-left font-medium">语言</th>
                               <th className="px-3 py-1.5 text-right font-medium">分数</th>
@@ -1603,39 +1570,29 @@ export function ProblemDetailPage() {
                             </tr>
                           </thead>
                           <tbody>
-                            {ideRecords.map((r) => {
-                              const st = getStatus(r.status);
-                              return (
-                                <tr key={r.rid} className="border-b last:border-0 hover:bg-muted/20">
-                                  <td className={cn('whitespace-nowrap px-3 py-1.5 font-medium', st.className)}>
-                                    {isPendingJudgeStatus(r.status) ? (
-                                      <span className="inline-flex items-center gap-1">
-                                        <Loader2 className="size-3 animate-spin" />
-                                        {st.label}
-                                      </span>
-                                    ) : (
-                                      st.label
-                                    )}
-                                  </td>
-                                  <td className="whitespace-nowrap px-3 py-1.5">{getLangEntry(r.lang).label}</td>
-                                  <td className="px-3 py-1.5 text-right font-mono tabular-nums">{r.score ?? '—'}</td>
-                                  <td className="px-3 py-1.5 text-right font-mono tabular-nums">{r.time != null ? `${r.time} ms` : '—'}</td>
-                                  <td className="px-3 py-1.5 text-right font-mono tabular-nums">{r.memory != null ? formatMemory(r.memory) : '—'}</td>
-                                  <td className="whitespace-nowrap px-3 py-1.5 text-muted-foreground">{formatRecordTimestamp(r.timestamp)}</td>
-                                  <td className="px-3 py-1.5">
-                                    {teamCodeReadOnly ? (
-                                      <button type="button" onClick={() => void loadReadonlySource(r)} className="text-primary hover:underline">
-                                        查看代码
-                                      </button>
-                                    ) : (
-                                      <a href={r.url} className="text-primary hover:underline">
-                                        详情
-                                      </a>
-                                    )}
-                                  </td>
-                                </tr>
-                              );
-                            })}
+                            {ideRecords.map((r) => (
+                              <tr key={r.rid} className="border-b border-line-subtle last:border-0 hover:bg-surface-hover">
+                                <td className="whitespace-nowrap px-3 py-1.5">
+                                  <Verdict status={r.status} compact />
+                                </td>
+                                <td className="whitespace-nowrap px-3 py-1.5 text-fg">{getLangEntry(r.lang).label}</td>
+                                <td className="px-3 py-1.5 text-right font-mono tabular">{r.score ?? '—'}</td>
+                                <td className="px-3 py-1.5 text-right font-mono tabular">{r.time != null ? `${r.time} ms` : '—'}</td>
+                                <td className="px-3 py-1.5 text-right font-mono tabular">{r.memory != null ? formatMemory(r.memory) : '—'}</td>
+                                <td className="whitespace-nowrap px-3 py-1.5 text-fg-subtle">{formatRecordTimestamp(r.timestamp)}</td>
+                                <td className="px-3 py-1.5">
+                                  {teamCodeReadOnly ? (
+                                    <Button type="button" variant="link" size="sm" onClick={() => void loadReadonlySource(r)}>
+                                      查看代码
+                                    </Button>
+                                  ) : (
+                                    <a href={r.url} className="text-brand-fg hover:underline">
+                                      详情
+                                    </a>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
                           </tbody>
                         </table>
                       )}
@@ -1648,12 +1605,12 @@ export function ProblemDetailPage() {
           right={
             teamCodeReadOnly ? (
               <div className="flex h-full min-h-0 min-w-0 flex-col">
-                <div className="flex h-10 min-w-0 shrink-0 items-center gap-2 border-b bg-muted/30 px-3 text-xs">
-                  <span className="shrink-0 font-medium">只读源码</span>
-                  {readonlySource ? <span className="min-w-0 truncate font-mono text-muted-foreground">#{readonlySource.rid.slice(-8)}</span> : null}
+                <div className="flex h-10 min-w-0 shrink-0 items-center gap-2 border-b border-line bg-surface-sunken px-3 text-xs">
+                  <span className="shrink-0 font-medium text-fg">只读源码</span>
+                  {readonlySource ? <span className="min-w-0 truncate font-mono text-fg-subtle">#{readonlySource.rid.slice(-8)}</span> : null}
                   <div className="flex-1" />
-                  {readonlySourceLoading ? <Loader2 className="size-3.5 animate-spin text-muted-foreground" /> : null}
-                  {readonlySourceError ? <span className="text-destructive">{readonlySourceError}</span> : null}
+                  {readonlySourceLoading ? <Loader2 className="size-3.5 animate-spin text-fg-subtle" /> : null}
+                  {readonlySourceError ? <span className="text-danger-fg">{readonlySourceError}</span> : null}
                 </div>
                 {readonlySource ? (
                   <KryptonIDE
@@ -1666,7 +1623,7 @@ export function ProblemDetailPage() {
                     className="h-full min-h-0 flex-1 rounded-none border-0"
                   />
                 ) : (
-                  <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-muted-foreground">
+                  <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-fg-muted">
                     {!teamCanViewRecords
                       ? '当前服务端能力不允许查看本队源码。'
                       : readonlySourceLoading
@@ -1727,12 +1684,12 @@ export function ProblemDetailPage() {
             buffer={teamCodeBuffer}
           />
         ) : null}
-      </div>
+      </Workspace>
     );
   }
 
   return (
-    <motion.div className="w-full min-w-0 space-y-4" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
+    <Page width="wide">
       <ProblemRejudgeDialog open={rejudgeOpen} onOpenChange={setRejudgeOpen} endpoint={problemUrl} pid={String(pid)} title={baseTitle} />
       {/* Contest mode banner — visible whenever we entered via a contest tid */}
       {inContest && contestUrl ? (
@@ -1753,168 +1710,173 @@ export function ProblemDetailPage() {
 
       {showNoTestdataWarning ? <NoTestdataWarning /> : null}
 
-      {/* Breadcrumb + title row */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-            {inContest && contestUrl ? (
-              <>
-                <a href={examUrls.overview || (isHomework ? bs.urls.homework : bs.urls.contests)} className="hover:text-primary">
-                  {isHomework ? '作业' : '比赛'}
-                </a>
-                <ChevronRight className="size-3" />
-                <a href={contestUrl} className="min-w-0 truncate hover:text-primary">
-                  {tdoc?.title || '比赛'}
-                </a>
-                <ChevronRight className="size-3" />
-                <span className="font-mono">{contestLetter || pid}</span>
-              </>
-            ) : (
-              <>
-                <a href={bs.urls.problems} className="hover:text-primary">
-                  题库
-                </a>
-                <ChevronRight className="size-3" />
-                <span className="font-mono">{pid}</span>
-              </>
-            )}
-          </div>
-          <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2">
-            <h1 className="min-w-0 text-lg font-bold leading-tight break-words sm:text-xl">{title}</h1>
+      <PageHeader
+        breadcrumb={
+          inContest && contestUrl ? (
+            <Breadcrumb
+              items={[
+                {
+                  label: isHomework ? '作业' : '比赛',
+                  href: examUrls.overview || (isHomework ? bs.urls.homework : bs.urls.contests),
+                },
+                { label: tdoc?.title || '比赛', href: contestUrl },
+                { label: <span className="font-mono">{contestLetter || pid}</span> },
+              ]}
+            />
+          ) : (
+            <Breadcrumb
+              items={[
+                { label: '题库', href: bs.urls.problems },
+                { label: <span className="font-mono">{pid}</span> },
+              ]}
+            />
+          )
+        }
+        title={<span className="break-words">{title}</span>}
+        meta={(
+          <>
             {statusBadge(psdoc.status)}
             {/* Hide difficulty during contest (gives away problem hardness) */}
-            {!inContest ? difficultyBadge(difficulty) : null}
-          </div>
-          {showProblemReactions && reactionCounts ? (
-            <ProblemReactionBar
-              counts={reactionCounts}
-              mine={myReaction}
-              canReact={!!bs.user?.signedIn}
-              pending={reactionPending}
-              error={reactionError}
-              onSelect={submitProblemReaction}
-            />
-          ) : null}
-          {/* Hide tags during contest (gives away algorithm) */}
-          {!inContest && tags.length > 0 && (
-            <div className="mt-1.5 flex flex-wrap gap-1">
-              {tags.map((t) => (
-                <Badge key={t} variant="secondary" className="text-[10px] px-1.5 py-0">
-                  <Tag className="mr-0.5 size-2.5" />
-                  {t}
-                </Badge>
-              ))}
-            </div>
-          )}
-          {!inContest && knowledgeMapView ? (
-            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-              <span className="inline-flex items-center gap-1 font-medium text-foreground/80">
-                <Network className="size-3" aria-hidden="true" />
-                {knowledgeMapView.title}
-              </span>
-              {knowledgeMapView.nodes.map((node) => (
-                <Badge key={node.id} variant="outline" className="font-normal">
-                  {node.label}
-                </Badge>
-              ))}
-              {!knowledgeMapView.nodes.length ? <span>尚未归类知识节点</span> : null}
-            </div>
-          ) : null}
-        </div>
-        <div className="flex shrink-0 flex-wrap items-start justify-end gap-2">
-          {showCompanion ? (
-            <CompetitiveCompanionBridge
-              name={companionName}
-              group={companionGroup}
-              url={companionUrl}
-              timeLimitMs={companionTimeMs}
-              memoryLimitMb={companionMemoryMb}
-              tests={samples}
-              canSubmitBack={canSubmitBack}
-              submitUrl={submitUrl}
-              allowedLangs={config.langs || []}
-              tid={tid || undefined}
-              practiceContextId={practiceContextId}
-              recordDetailUrl={(rid) => replaceRouteTokens(recordDetailRoute, { RID: rid })}
-            />
-          ) : null}
-          {/* 客观题在下方面板作答，IDE 模式无意义 */}
-          {canSubmit && !isObjective && !isStructuredAnswer ? (
-            <Button
-              size="sm"
-              variant="default"
-              className="gap-1"
-              onClick={() => {
-                if (teamCanViewRecords) setShowIdeRecords(true);
-                setIdeMode(true);
-              }}
-            >
-              <Code2 className="size-3.5" />
-              {teamCodeReadOnly ? '只读代码' : 'IDE 模式'}
-            </Button>
-          ) : null}
-          {bs.user?.signedIn ? (
-            <Button asChild size="sm" variant="outline">
-              <a href={problemRecordsHref}>
-                <History className="mr-1 size-3.5" />
-                提交记录
-              </a>
-            </Button>
-          ) : null}
-          {canSubmit && (isStructuredAnswer || (!examMode?.enabled && !ideOnlySubmit)) ? (
-            <Button asChild size="sm" variant="outline">
-              <a href={independentSubmitUrl}>
-                <Send className="mr-1 size-3.5" />
-                {ideOnlySubmit && isStructuredAnswer ? '作答' : '提交'}
-              </a>
-            </Button>
-          ) : null}
-          {canRejudgeProblem && !inContest ? (
-            <Button type="button" size="sm" variant="ghost" onClick={() => setRejudgeOpen(true)}>
-              <RotateCcw className="mr-1 size-3.5" />
-              整题重测
-            </Button>
-          ) : null}
-          <ProblemEditGate canEditProblem={canEditProblem} inContest={!!inContest}>
-            <Button asChild size="sm" variant="ghost">
-              <a href={`${problemUrl}/edit`}>
-                <Edit3 className="mr-1 size-3.5" />
-                编辑
-              </a>
-            </Button>
-          </ProblemEditGate>
-          {canArchiveProblem && !inContest ? (
-            <form
-              method="post"
-              action={bs.urls.problems}
-              onSubmit={(event) => {
-                void confirmFormSubmit(
-                  event,
-                  `归档题目「${pdoc.title || pid}」？归档后将强制隐藏。`,
-                  { destructive: true },
-                );
-              }}
-            >
-              <input type="hidden" name="operation" value="archive" />
-              <input type="hidden" name="pid" value={String(pdoc.docId)} />
-              <input type="hidden" name="reason" value="Archived from problem detail" />
-              <Button type="submit" size="sm" variant="ghost">
-                <Archive className="mr-1 size-3.5" />
-                归档
+            {!inContest && difficulty ? <Difficulty level={difficulty} /> : null}
+            <span className="tabular">时间 {headerTimeLimit}</span>
+            <span className="tabular">内存 {headerMemoryLimit}</span>
+            {!virtualContestActive ? <span className="tabular">通过 {nAccept} / 提交 {nSubmit}</span> : null}
+          </>
+        )}
+        actions={(
+          <>
+            {showCompanion ? (
+              <CompetitiveCompanionBridge
+                name={companionName}
+                group={companionGroup}
+                url={companionUrl}
+                timeLimitMs={companionTimeMs}
+                memoryLimitMb={companionMemoryMb}
+                tests={samples}
+                canSubmitBack={canSubmitBack}
+                submitUrl={submitUrl}
+                allowedLangs={config.langs || []}
+                tid={tid || undefined}
+                practiceContextId={practiceContextId}
+                recordDetailUrl={(rid) => replaceRouteTokens(recordDetailRoute, { RID: rid })}
+              />
+            ) : null}
+            {/* 客观题在下方面板作答，IDE 模式无意义 */}
+            {canSubmit && !isObjective && !isStructuredAnswer ? (
+              <Button
+                size="sm"
+                variant="primary"
+                onClick={() => {
+                  if (teamCanViewRecords) setShowIdeRecords(true);
+                  setIdeMode(true);
+                }}
+              >
+                <Code2 />
+                {teamCodeReadOnly ? '只读代码' : 'IDE 模式'}
               </Button>
-            </form>
-          ) : null}
+            ) : null}
+            {bs.user?.signedIn ? (
+              <Button asChild size="sm" variant="secondary">
+                <a href={problemRecordsHref}>
+                  <History />
+                  提交记录
+                </a>
+              </Button>
+            ) : null}
+            {canSubmit && (isStructuredAnswer || (!examMode?.enabled && !ideOnlySubmit)) ? (
+              <Button asChild size="sm" variant="secondary">
+                <a href={independentSubmitUrl}>
+                  <Send />
+                  {ideOnlySubmit && isStructuredAnswer ? '作答' : '提交'}
+                </a>
+              </Button>
+            ) : null}
+            {canRejudgeProblem && !inContest ? (
+              <Button type="button" size="sm" variant="ghost" onClick={() => setRejudgeOpen(true)}>
+                <RotateCcw />
+                整题重测
+              </Button>
+            ) : null}
+            <ProblemEditGate canEditProblem={canEditProblem} inContest={!!inContest}>
+              <Button asChild size="sm" variant="ghost">
+                <a href={`${problemUrl}/edit`}>
+                  <Edit3 />
+                  编辑
+                </a>
+              </Button>
+            </ProblemEditGate>
+            {canArchiveProblem && !inContest ? (
+              <form
+                method="post"
+                action={bs.urls.problems}
+                onSubmit={(event) => {
+                  void confirmFormSubmit(
+                    event,
+                    '归档后将强制隐藏。',
+                    {
+                      destructive: true,
+                      title: `归档题目「${pdoc.title || pid}」？`,
+                      confirmLabel: '归档',
+                    },
+                  );
+                }}
+              >
+                <input type="hidden" name="operation" value="archive" />
+                <input type="hidden" name="pid" value={String(pdoc.docId)} />
+                <input type="hidden" name="reason" value="Archived from problem detail" />
+                <Button type="submit" size="sm" variant="danger-soft">
+                  <Archive />
+                  归档
+                </Button>
+              </form>
+            ) : null}
+          </>
+        )}
+      />
+      {showProblemReactions && reactionCounts ? (
+        <ProblemReactionBar
+          counts={reactionCounts}
+          mine={myReaction}
+          canReact={!!bs.user?.signedIn}
+          pending={reactionPending}
+          error={reactionError}
+          onSelect={submitProblemReaction}
+        />
+      ) : null}
+      {/* Hide tags during contest (gives away algorithm) */}
+      {!inContest && tags.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {tags.map((t) => (
+            <Badge key={t} tone="neutral" variant="soft" size="sm">
+              <Tag className="size-2.5" />
+              {t}
+            </Badge>
+          ))}
         </div>
-      </div>
+      )}
+      {!inContest && knowledgeMapView ? (
+        <div className="flex flex-wrap items-center gap-1.5 text-xs text-fg-subtle">
+          <span className="inline-flex items-center gap-1 font-medium text-fg">
+            <Network className="size-3" aria-hidden="true" />
+            {knowledgeMapView.title}
+          </span>
+          {knowledgeMapView.nodes.map((node) => (
+            <Badge key={node.id} variant="outline" className="font-normal">
+              {node.label}
+            </Badge>
+          ))}
+          {!knowledgeMapView.nodes.length ? <span>尚未归类知识节点</span> : null}
+        </div>
+      ) : null}
 
       {/* Dense info bar — during contest, hide owner/solutions/discussions to avoid info leak */}
-      <div className="flex flex-wrap gap-x-4 gap-y-1.5 rounded-lg border bg-muted/30 px-3 py-2">
+      <div className="flex flex-wrap gap-x-4 gap-y-1.5 rounded-lg border border-line bg-surface-sunken px-3 py-2">
         {!virtualContestActive ? <InfoChip icon={Send} label="提交" value={nSubmit} href={problemRecordsHref} /> : null}
         {!virtualContestActive ? (
           <InfoChip
             icon={CheckCircle2}
             label="通过"
-            value={<span className="text-green-600 dark:text-green-400">{nAccept}</span>}
+            value={<span className="text-success-fg">{nAccept}</span>}
             href={acceptedRecordsHref}
           />
         ) : null}
@@ -1929,13 +1891,11 @@ export function ProblemDetailPage() {
       </div>
 
       {/* Main content area: two-column layout */}
-      <div className="grid gap-4 lg:grid-cols-[1fr_260px]">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_16rem]">
         {/* Left: statement only (mini tabs removed — submit moved to its own page
             and "题解" is reachable via the sidebar quick links / its own button). */}
-        <div className="min-w-0 space-y-3">
-          <Card>
-            <CardContent className="p-4 sm:p-6">{renderStatement(false)}</CardContent>
-          </Card>
+        <div className="flex min-w-0 flex-col gap-6">
+          <Panel>{renderStatement(false)}</Panel>
           {canSubmit && isObjective && (!teamExamMode || teamExamMode.canSubmit) && (!isSubjective || inContest || canPreviewSubjective) ? (
             <ObjectiveAnswerPanel
               questions={objectiveQuestions}
@@ -1948,105 +1908,104 @@ export function ProblemDetailPage() {
             />
           ) : null}
           {showExternals && solutionCount > 0 ? (
-            <Card>
-              <CardContent className="flex items-center justify-between gap-3 p-4 text-sm">
-                <span className="flex items-center gap-1.5 text-muted-foreground">
+            <Panel>
+              <div className="flex items-center justify-between gap-3 text-sm">
+                <span className="flex items-center gap-1.5 text-fg-muted">
                   <BookOpen className="size-3.5" />共 {solutionCount} 篇题解
                 </span>
-                <a href={`${problemUrl}/solution`} className="text-primary hover:underline">
+                <a href={`${problemUrl}/solution`} className="text-brand-fg hover:underline">
                   查看全部 →
                 </a>
-              </CardContent>
-            </Card>
+              </div>
+            </Panel>
           ) : null}
         </div>
 
         {/* Right: sidebar info panel */}
-        <aside className="space-y-4">
+        <aside className="flex flex-col gap-4">
           {/* Limits */}
           {!structuredStatement ? (
-            <Card>
-              <CardContent className="p-4">
-                <LimitsSection config={config} />
-              </CardContent>
-            </Card>
+            <Panel>
+              <LimitsSection config={config} />
+            </Panel>
           ) : null}
 
           {/* Related contests — hide during contest (would reveal source) */}
           {showExternals && (ctdocs.length > 0 || htdocs.length > 0) && (
-            <Card>
-              <CardContent className="p-4 space-y-2">
-                <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  <Trophy className="size-3.5" />
+            <Panel
+              title={(
+                <span className="inline-flex items-center gap-1.5">
+                  <Trophy className="size-3.5 text-fg-subtle" />
                   相关比赛 & 作业
-                </h3>
-                <div className="space-y-1">
-                  {[...ctdocs, ...htdocs].slice(0, 5).map((td) => (
-                    <a
-                      key={String(td._id)}
-                      href={replaceRouteTokens(bs.urls.contestDetail, { TID: String(td._id) })}
-                      className="block truncate text-xs text-primary hover:underline"
-                    >
-                      {td.title || String(td._id)}
-                    </a>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
+                </span>
+              )}
+            >
+              <div className="flex flex-col gap-1">
+                {[...ctdocs, ...htdocs].slice(0, 5).map((td) => (
+                  <a
+                    key={String(td._id)}
+                    href={replaceRouteTokens(bs.urls.contestDetail, { TID: String(td._id) })}
+                    className="block truncate text-xs text-brand-fg hover:underline"
+                  >
+                    {td.title || String(td._id)}
+                  </a>
+                ))}
+              </div>
+            </Panel>
           )}
 
           {/* Quick links — hide solution/discussion/stats during contest */}
           {showExternals ? (
-            <Card>
-              <CardContent className="p-4 space-y-1">
-                <a href={`${problemUrl}/solution`} className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary">
+            <Panel>
+              <div className="flex flex-col gap-1">
+                <a href={`${problemUrl}/solution`} className="flex items-center gap-1.5 text-xs text-fg-muted hover:text-brand-fg">
                   <BookOpen className="size-3" />
                   题解 ({solutionCount})
                 </a>
-                <a href={`${problemUrl}/discuss`} className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary">
+                <a href={`${problemUrl}/discuss`} className="flex items-center gap-1.5 text-xs text-fg-muted hover:text-brand-fg">
                   <MessageSquare className="size-3" />
                   讨论 ({discussionCount})
                 </a>
-                <a href={`${problemUrl}/statistics`} className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary">
+                <a href={`${problemUrl}/statistics`} className="flex items-center gap-1.5 text-xs text-fg-muted hover:text-brand-fg">
                   <Trophy className="size-3" />
                   统计
                 </a>
-                <a href={`${problemUrl}/files`} className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary">
+                <a href={`${problemUrl}/files`} className="flex items-center gap-1.5 text-xs text-fg-muted hover:text-brand-fg">
                   <FileText className="size-3" />
                   附件
                 </a>
                 {bs.user?.signedIn ? (
-                  <a href={problemRecordsHref} className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary">
+                  <a href={problemRecordsHref} className="flex items-center gap-1.5 text-xs text-fg-muted hover:text-brand-fg">
                     <History className="size-3" />
                     提交记录
                   </a>
                 ) : null}
-              </CardContent>
-            </Card>
+              </div>
+            </Panel>
           ) : (
-            <Card>
-              <CardContent className="p-4 space-y-1">
-                <a href={`${problemUrl}/files${contestQS}`} className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary">
+            <Panel>
+              <div className="flex flex-col gap-1">
+                <a href={`${problemUrl}/files${contestQS}`} className="flex items-center gap-1.5 text-xs text-fg-muted hover:text-brand-fg">
                   <FileText className="size-3" />
                   附件
                 </a>
                 {bs.user?.signedIn ? (
-                  <a href={problemRecordsHref} className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary">
+                  <a href={problemRecordsHref} className="flex items-center gap-1.5 text-xs text-fg-muted hover:text-brand-fg">
                     <History className="size-3" />
                     提交记录
                   </a>
                 ) : null}
                 {contestUrl ? (
-                  <a href={contestUrl} className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary">
+                  <a href={contestUrl} className="flex items-center gap-1.5 text-xs text-fg-muted hover:text-brand-fg">
                     <ChevronRight className="size-3 rotate-180" />
-                    返回比赛
+                    返回 {isHomework ? '作业' : '比赛'}
                   </a>
                 ) : null}
-              </CardContent>
-            </Card>
+              </div>
+            </Panel>
           )}
         </aside>
       </div>
-    </motion.div>
+    </Page>
   );
 }

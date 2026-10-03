@@ -860,7 +860,7 @@ API **全部不变**（`Dialog`、`DialogContent`、`DialogHeader`、`DialogTitl
 | 入场 | ≥ sm：`opacity 0→1`、`scale .97→1`、`y 8→0`，`MOTION.enter`；< sm：`y 100%→0` |
 | Header | `px-5 pt-4 pb-3`；标题 `text-lg font-semibold tracking-tight`；描述 `mt-1 text-sm text-fg-muted` |
 | Body | `px-5 pb-4`，滚动 |
-| Footer | `border-t border-line-subtle bg-surface-sunken/60 px-5 py-3`；≥ sm 右对齐横排，< sm 纵向堆叠且按钮满宽，主按钮在**下**（`flex-col-reverse`） |
+| Footer | `border-t border-line-subtle bg-surface-sunken/60 px-5 py-3`；≥ sm 右对齐横排，< sm 纵向堆叠且按钮满宽；DOM 顺序保持「取消在前、主按钮在后」，用 `flex-col-reverse` 让主按钮显示在**上**、取消在下 |
 | 关闭 X | `Button variant="ghost" size="sm" iconOnly` |
 | 层级 | `z-50`（原 `z-200`） |
 | 尺寸 | `sm/md/lg/xl/full` 不变 |

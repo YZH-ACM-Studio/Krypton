@@ -1,8 +1,9 @@
-import { motion } from 'motion/react';
-import { BookOpen, CircleHelp, Code2, Database, Flag, Gauge, Info, MessageSquareText, Trophy } from 'lucide-react';
-import { Card, CardContent } from '@/components/ui/card';
+import { Code2, Database, Flag, Gauge, MessageSquareText, Trophy } from 'lucide-react';
+import type { ElementType, ReactNode } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { MarkdownView } from '@/components/markdown-renderer';
+import { Page, PageHeader } from '@/components/ui/page';
+import { Panel } from '@/components/ui/panel';
 import { useBootstrap } from '@/lib/bootstrap';
 
 interface AboutSection {
@@ -11,7 +12,7 @@ interface AboutSection {
   content?: string;
 }
 
-const HELP_SECTIONS = [
+const HELP_SECTIONS: Array<{ id: string; title: string; icon: ElementType; body: string[] }> = [
   {
     id: 'domain',
     title: '域与空间',
@@ -69,6 +70,59 @@ const HELP_SECTIONS = [
   },
 ];
 
+const WIKI_DESCRIPTION = '常用规则、平台说明与格式约定。';
+
+function sectionId(section: AboutSection) {
+  return (
+    section.id ||
+    String(section.title || 'section')
+      .toLowerCase()
+      .replace(/\s+/g, '-')
+  );
+}
+
+function WikiNav({ items }: { items: Array<{ id: string; title: string }> }) {
+  return (
+    <aside className="lg:sticky lg:top-0 lg:self-start">
+      <div className="rounded-lg border border-line bg-surface p-3 shadow-xs">
+        <div className="flex flex-col gap-1 text-sm">
+          {items.map((item) => (
+            <a
+              key={item.id}
+              href={`#${item.id}`}
+              className="block rounded-md px-2 py-1.5 text-fg-muted hover:bg-surface-hover hover:text-fg"
+            >
+              {item.title}
+            </a>
+          ))}
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+function WikiColumns({ nav, children }: { nav: ReactNode; children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+      <div className="lg:w-60 lg:shrink-0">{nav}</div>
+      <div className="flex min-w-0 flex-1 flex-col gap-4">{children}</div>
+    </div>
+  );
+}
+
+function ArticleSection({ id, title, content }: { id?: string; title: string; content: string }) {
+  return (
+    <section id={id}>
+      <Panel>
+        <h2 className="text-lg font-semibold text-fg">{title}</h2>
+        <div className="krypton-prose mt-4 min-w-0">
+          <MarkdownView content={content} />
+        </div>
+      </Panel>
+    </section>
+  );
+}
+
 export function AboutPage() {
   const bs = useBootstrap();
   const { sections = [] } = bs.page.data as { sections?: AboutSection[] };
@@ -80,118 +134,51 @@ export function AboutPage() {
     : [{ id: 'about', title: bs.siteName || 'Krypton' }];
 
   return (
-    <WikiShell title={`关于 ${bs.siteName || bs.domain.name}`} icon={Info} nav={nav}>
-      {sections.length ? (
-        sections.map((section) => (
-          <ArticleSection key={sectionId(section)} id={sectionId(section)} title={section.title || '说明'} content={section.content || ''} />
-        ))
-      ) : (
-        <ArticleSection id="about" title={bs.siteName || 'Krypton'} content={`${bs.siteName || 'Krypton'} 是面向信息学教学与竞赛的在线评测系统。`} />
-      )}
-    </WikiShell>
+    <Page width="prose">
+      <PageHeader title={`关于 ${bs.siteName || bs.domain.name}`} description={WIKI_DESCRIPTION} />
+      <WikiColumns nav={<WikiNav items={nav} />}>
+        {sections.length ? (
+          sections.map((section) => (
+            <ArticleSection key={sectionId(section)} id={sectionId(section)} title={section.title || '说明'} content={section.content || ''} />
+          ))
+        ) : (
+          <ArticleSection id="about" title={bs.siteName || 'Krypton'} content={`${bs.siteName || 'Krypton'} 是面向信息学教学与竞赛的在线评测系统。`} />
+        )}
+      </WikiColumns>
+    </Page>
   );
 }
 
 export function WikiHelpPage() {
   return (
-    <WikiShell title="帮助中心" icon={CircleHelp} nav={HELP_SECTIONS.map((section) => ({ id: section.id, title: section.title }))}>
-      <div className="grid gap-4">
+    <Page width="prose">
+      <PageHeader title="帮助中心" description={WIKI_DESCRIPTION} />
+      <WikiColumns nav={<WikiNav items={HELP_SECTIONS.map((section) => ({ id: section.id, title: section.title }))} />}>
         {HELP_SECTIONS.map((section) => (
-          <Card key={section.id} id={section.id}>
-            <CardContent className="p-5">
+          <section key={section.id} id={section.id}>
+            <Panel>
               <div className="flex items-start gap-3">
-                <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+                <div className="grid size-8 shrink-0 place-items-center rounded-md bg-surface-sunken text-fg-subtle">
                   <section.icon className="size-4" />
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <h2 className="text-base font-semibold">{section.title}</h2>
-                    <Badge variant="outline" className="font-mono text-[10px]">
+                    <h2 className="text-lg font-semibold text-fg">{section.title}</h2>
+                    <Badge variant="outline" size="sm" className="font-mono">
                       #{section.id}
                     </Badge>
                   </div>
-                  <div className="mt-3 space-y-2 text-sm leading-6 text-muted-foreground">
+                  <div className="krypton-prose mt-3">
                     {section.body.map((line) => (
                       <p key={line}>{line}</p>
                     ))}
                   </div>
                 </div>
               </div>
-            </CardContent>
-          </Card>
+            </Panel>
+          </section>
         ))}
-      </div>
-    </WikiShell>
-  );
-}
-
-function WikiShell({
-  title,
-  icon: Icon,
-  nav,
-  children,
-}: {
-  title: string;
-  icon: React.ElementType;
-  nav: Array<{ id: string; title: string }>;
-  children: React.ReactNode;
-}) {
-  return (
-    <motion.div
-      className="grid min-w-0 gap-6 lg:grid-cols-[220px_minmax(0,1fr)]"
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-    >
-      <aside className="lg:sticky lg:top-0 lg:self-start">
-        <div className="rounded-md border bg-card p-3">
-          <div className="flex items-center gap-2 px-2 py-1.5">
-            <Icon className="size-4 shrink-0 text-primary" />
-            <span className="min-w-0 text-sm font-medium">{title}</span>
-          </div>
-          <div className="mt-2 space-y-1 text-sm">
-            {nav.map((item) => (
-              <a
-                key={item.id}
-                href={`#${item.id}`}
-                className="block rounded-md px-2 py-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-              >
-                {item.title}
-              </a>
-            ))}
-          </div>
-        </div>
-      </aside>
-      <div className="min-w-0 max-w-3xl space-y-4">
-        <div>
-          <h1 className="flex min-w-0 items-center gap-2 text-xl font-semibold">
-            <BookOpen className="size-5 shrink-0 text-primary" />
-            {title}
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">常用规则、平台说明与格式约定。</p>
-        </div>
-        {children}
-      </div>
-    </motion.div>
-  );
-}
-
-function ArticleSection({ id, title, content }: { id?: string; title: string; content: string }) {
-  return (
-    <Card id={id}>
-      <CardContent className="p-5">
-        <h2 className="mb-4 text-lg font-semibold">{title}</h2>
-        <MarkdownView content={content} />
-      </CardContent>
-    </Card>
-  );
-}
-
-function sectionId(section: AboutSection) {
-  return (
-    section.id ||
-    String(section.title || 'section')
-      .toLowerCase()
-      .replace(/\s+/g, '-')
+      </WikiColumns>
+    </Page>
   );
 }

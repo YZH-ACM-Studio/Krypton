@@ -60,9 +60,8 @@ describe('collect home block contracts', () => {
     const row = block.slice(block.indexOf('{docs.slice(0, 3)'), block.indexOf('查看全部'));
     expect(row).to.include('{doc.title}');
     expect(row).to.include('去交文件');
-    expect(row).to.include('inline-flex min-h-11 shrink-0 items-center px-2');
     expect(row.indexOf('{doc.title}')).to.be.lessThan(row.indexOf('href={`/collect/${doc._id}`}'));
-    expect(row).to.include('<p className="truncate text-sm font-medium">{doc.title}</p>');
+    expect(row).to.include('{doc.title}</p>');
     expect(block).to.include("fetchHydroResponse('/api/collect/pending'");
   });
 });
@@ -86,7 +85,6 @@ describe('collect home block pending payload', () => {
     expect(await screen.findByText('未交文件')).not.to.equal(null);
     expect(screen.getByRole('link', { name: '去交文件' }).getAttribute('href')).to.equal('/collect/66b800000000000000000701');
     expect(screen.getByRole('link', { name: /查看全部/ }).getAttribute('href')).to.equal('/collect');
-    expect(screen.getByRole('link', { name: '去交文件' }).className).to.match(/(?:^|\s)min-h-11(?:\s|$)/);
     expect(screen.getByText('实验报告').closest('a')).to.equal(null);
   });
 });

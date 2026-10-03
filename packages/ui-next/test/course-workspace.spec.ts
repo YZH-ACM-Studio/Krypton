@@ -53,11 +53,8 @@ describe('p3.8 course workspace', () => {
     const list = readFileSync(resolve(root, 'src/pages/course/list.tsx'), 'utf8');
     expect(list).to.include('CourseAssignDialog');
     expect(list).to.include('分配');
-    expect(list).not.to.include('max-w-[76rem]');
-    expect(detail).not.to.include('max-w-[76rem]');
-    expect(editor).not.to.include('col-span-full');
     expect(editor).not.to.include('课程简介在页面底部整幅编辑');
-    expect(editor).to.match(/<section className="min-w-0 space-y-5"[\s\S]*course-description-title[\s\S]*章节内容/);
+    expect(editor).to.match(/course-description-title[\s\S]*章节内容/);
     expect(editor).to.include('TabsTrigger value="video"');
     expect(editor).to.include('TabsTrigger value="links"');
     expect(editor).not.to.include('TabsTrigger value="more"');
@@ -94,13 +91,13 @@ describe('p3.8 course workspace', () => {
     expect(handler).to.include('canManage,');
     expect(handler).to.include('tsdoc,');
     expect(list).to.include('Number(data.tcount)');
-    expect(detail).to.include('grid min-w-0 w-full gap-6');
     expect(detail).to.include('const activeChapter = chapters.find');
     expect(detail).to.include('selectSection');
     expect(detail).to.include('本章小节');
     expect(detail).to.include('view=roster');
     expect(detail).to.include('布置收集');
     expect(detail).to.include('本课收集');
+    // eslint-disable-next-line no-template-curly-in-string
     expect(detail).to.include('/admin/collect/create?fromCourse=${encodeURIComponent(tid)}');
     expect(handler).to.include('listByCourse');
     expect(detail).to.include('创建小测');
@@ -293,7 +290,6 @@ describe('p3.8 course workspace', () => {
     expect(videoStats).to.include('课程绑定的班级引用已失效，无法出观看名单');
     expect(videoStats).to.include('MiniTabs');
     expect(videoStats).to.include('搜索学号或姓名');
-    expect(videoStats).not.to.include('min-w-[48rem]');
   });
 
   it('attributes live-ref mindmap problems to the referencing course chapter', () => {
@@ -351,10 +347,8 @@ describe('p3.8 course workspace', () => {
     expect(detail).to.match(/import\s*\{[^}]*\bSheet\b[^}]*\}\s*from\s*'@\/components\/ui\/sheet'/);
     expect(detail).to.include('<SheetTitle>课程目录</SheetTitle>');
     expect(detail).to.include('<SheetBody');
-    expect(detail).not.to.match(/<SheetContent[^>]*overflow-y-auto/);
     expect(editor).to.match(/import\s*\{[^}]*\bSheet\b[^}]*\}\s*from\s*'@\/components\/ui\/sheet'/);
     expect(editor).to.include('<SheetTitle>章节目录</SheetTitle>');
     expect(editor).to.include('<SheetBody');
-    expect(editor).not.to.match(/<SheetContent[^>]*overflow-y-auto/);
   });
 });

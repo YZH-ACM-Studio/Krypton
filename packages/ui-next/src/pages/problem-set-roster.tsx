@@ -2,11 +2,10 @@
  * Problem-set roster page — template problem_set_roster.html.
  */
 
-import { ArrowLeft } from 'lucide-react';
-import { motion } from 'motion/react';
 import { PracticeRosterCard, type PracticeRosterMember, type PracticeRosterProblem } from '@/components/practice-roster';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+import { Breadcrumb } from '@/components/ui/breadcrumb';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Page, PageHeader } from '@/components/ui/page';
 import { useBootstrap } from '@/lib/bootstrap';
 import { replaceRouteTokens } from '@/lib/format';
 
@@ -33,19 +32,19 @@ export function ProblemSetRosterPage() {
   const trainingUrl = replaceRouteTokens(bs.urls.trainingDetail, { TID: String(tid) });
 
   return (
-    <motion.div className="w-full min-w-0 space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-      <div className="flex min-w-0 flex-wrap items-center gap-3">
-        <Button asChild variant="ghost" size="icon">
-          <a href={trainingUrl}>
-            <ArrowLeft className="size-4" />
-          </a>
-        </Button>
-        <div className="min-w-0">
-          <h1 className="truncate text-xl font-semibold">参加名单</h1>
-          <p className="truncate text-sm text-muted-foreground">{tdoc.title}</p>
-        </div>
-      </div>
-
+    <Page width="wide" className="w-full min-w-0">
+      <PageHeader
+        breadcrumb={(
+          <Breadcrumb
+            items={[
+              { label: tdoc.title || '题集', href: trainingUrl },
+              { label: '参加名单' },
+            ]}
+          />
+        )}
+        title="参加名单"
+        description={tdoc.title}
+      />
       {data.canViewRoster === true ? (
         <PracticeRosterCard
           className="mt-0 w-full min-w-0"
@@ -56,10 +55,8 @@ export function ProblemSetRosterPage() {
           visibleGroupIds={Array.isArray(data.rosterGroupIds) ? data.rosterGroupIds : undefined}
         />
       ) : (
-        <Card>
-          <CardContent className="py-10 text-center text-sm text-muted-foreground">没有名单权限</CardContent>
-        </Card>
+        <EmptyState compact title="没有名单权限" />
       )}
-    </motion.div>
+    </Page>
   );
 }

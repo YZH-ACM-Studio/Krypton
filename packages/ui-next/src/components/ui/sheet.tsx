@@ -10,16 +10,27 @@
  * SheetContent and any consumer-rendered close affordances can dismiss
  * without an explicit prop. API mirrors shadcn's Sheet.
  *
- * Chrome: overlay matches Dialog; the panel owns overflow-hidden; SheetBody
- * is the single scroll owner (ScrollArea).
+ * Chrome: opaque scrim, raised panel, z-50. SheetContent owns overflow-hidden;
+ * SheetBody is the single scroll owner (ScrollArea). Enter and leave are
+ * declarative `motion` poses so the first frame is off-screen.
  */
-import { createContext, useContext, useEffect, useId, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useId, useRef, useState, type HTMLAttributes, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { AnimatePresence, motion, useIsPresent } from 'motion/react';
 import { X } from 'lucide-react';
-import { cn } from '@/lib/cn';
+import { Button } from '@/components/ui/button';
 import { ScrollArea, type ScrollAreaProps } from '@/components/ui/scroll-area';
+import { cn } from '@/lib/cn';
+import { MOTION } from './motion';
 
 type SheetSide = 'left' | 'right' | 'top' | 'bottom';
+
+const HIDDEN_POSE: Record<SheetSide, { x: string } | { y: string }> = {
+  right: { x: '100%' },
+  left: { x: '-100%' },
+  top: { y: '-100%' },
+  bottom: { y: '100%' },
+};
 
 interface SheetContextValue {
   onOpenChange: (open: boolean) => void;
@@ -33,92 +44,199 @@ function useSheetContext(): SheetContextValue {
   return v;
 }
 
+function sheetTransition(token: typeof MOTION.enter, duration = token.duration) {
+  const [x1, y1, x2, y2] = token.ease;
+  if (token.ease.length !== 4 || x1 === undefined || y1 === undefined || x2 === undefined || y2 === undefined) {
+    throw new TypeError('Sheet motion ease must be a four-number bezier');
+  }
+  return { duration, ease: [x1, y1, x2, y2] as const };
+}
+
+/** Caller width includes `w-` / `max-w-` and variants such as `sm:max-w-[640px]`. */
+function callerSetsWidth(className: string | undefined): boolean {
+  return /(?:^|\s)(?:[\w-]+:)*(?:max-w|w)-/.test(className ?? '');
+}
+
 interface SheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   children: ReactNode;
 }
 
-export function Sheet({ open, onOpenChange, children }: SheetProps) {
-  const titleId = useId();
-  useEffect(() => {
-    if (!open) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onOpenChange(false);
-    };
-    document.addEventListener('keydown', handler);
-    return () => {
-      document.body.style.overflow = prev;
-      document.removeEventListener('keydown', handler);
-    };
-  }, [open, onOpenChange]);
-
-  if (!open) return null;
-
-  return createPortal(
+function SheetSurface({
+  titleId,
+  onOpenChange,
+  children,
+}: {
+  titleId: string;
+  onOpenChange: (open: boolean) => void;
+  children: ReactNode;
+}) {
+  return (
     <SheetContext.Provider value={{ onOpenChange, titleId }}>
-      <div className="fixed inset-0 z-200">
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={() => onOpenChange(false)} />
-        <div className="relative h-full w-full" onClick={(e) => e.stopPropagation()}>
+      <div className="pointer-events-none fixed inset-0 z-50">
+        <motion.div
+          className="pointer-events-auto fixed inset-0 bg-scrim"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1, transition: sheetTransition(MOTION.enter) }}
+          exit={{ opacity: 0, transition: sheetTransition(MOTION.exit) }}
+          onClick={() => onOpenChange(false)}
+        />
+        <div className="pointer-events-none relative h-full w-full">
           {children}
         </div>
       </div>
-    </SheetContext.Provider>,
+    </SheetContext.Provider>
+  );
+}
+
+export function Sheet({ open, onOpenChange, children }: SheetProps) {
+  const titleId = useId();
+  const openRef = useRef(open);
+  openRef.current = open;
+  const lockedOverflow = useRef<string | null>(null);
+  const aliveRef = useRef(true);
+  // Keep the portal through the exit. Dropping it when open becomes false
+  // unmounts AnimatePresence before the leave can finish.
+  const [mounted, setMounted] = useState(open);
+  if (open && !mounted) {
+    setMounted(true);
+  }
+
+  const releaseScrollLock = () => {
+    if (lockedOverflow.current === null) return;
+    document.body.style.overflow = lockedOverflow.current;
+    lockedOverflow.current = null;
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    if (lockedOverflow.current === null) {
+      lockedOverflow.current = document.body.style.overflow;
+    }
+    document.body.style.overflow = 'hidden';
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onOpenChange(false);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [open, onOpenChange]);
+
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+      releaseScrollLock();
+    };
+  }, []);
+
+  if (!mounted) return null;
+
+  return createPortal(
+    <AnimatePresence
+      onExitComplete={() => {
+        if (!aliveRef.current || openRef.current) return;
+        releaseScrollLock();
+        setMounted(false);
+      }}
+    >
+      {open ? (
+        <SheetSurface
+          key="krypton-sheet"
+          titleId={titleId}
+          onOpenChange={onOpenChange}
+        >
+          {children}
+        </SheetSurface>
+      ) : null}
+    </AnimatePresence>,
     document.body,
   );
 }
 
-interface SheetContentProps extends React.HTMLAttributes<HTMLDivElement> {
+interface SheetContentProps extends HTMLAttributes<HTMLDivElement> {
   side?: SheetSide;
 }
 
 export function SheetContent({ side = 'right', className, children, ...props }: SheetContentProps) {
   const ctx = useSheetContext();
+  const shown = useIsPresent();
+  const hidden = HIDDEN_POSE[side];
+  const horizontal = side === 'right' || side === 'left';
   const sideClasses: Record<SheetSide, string> = {
     right: 'right-0 top-0 h-full border-l',
     left: 'left-0 top-0 h-full border-r',
     top: 'left-0 top-0 w-full border-b',
     bottom: 'left-0 bottom-0 w-full border-t',
   };
+  // motion.div treats these names as gestures, so they cannot be spread through.
+  const {
+    onDrag: _onDrag,
+    onDragStart: _onDragStart,
+    onDragEnd: _onDragEnd,
+    onAnimationStart: _onAnimationStart,
+    onAnimationEnd: _onAnimationEnd,
+    onAnimationIteration: _onAnimationIteration,
+    ...panelProps
+  } = props;
   return (
-    <div
+    <motion.div
+      {...panelProps}
       role="dialog"
       aria-modal="true"
+      // Exit keeps the node mounted. Drop the dialog role until the leave
+      // finishes so it is not still exposed as open. Keep the literals above.
+      {...(shown ? {} : { role: undefined, 'aria-modal': undefined })}
       aria-labelledby={ctx.titleId}
+      // Same render that starts the leave: the node stays mounted for the
+      // exit pose, but it must not take clicks or focus.
+      inert={shown ? undefined : true}
       data-krypton-sheet=""
       data-side={side}
+      initial={hidden}
+      animate={{ x: 0, y: 0, transition: sheetTransition(MOTION.enter, MOTION.enter.duration * 1.25) }}
+      exit={{ ...hidden, transition: sheetTransition(MOTION.exit) }}
       className={cn(
-        'fixed flex flex-col overflow-hidden overscroll-contain bg-background pb-[env(safe-area-inset-bottom)] shadow-2xl',
+        'pointer-events-auto fixed flex flex-col overflow-hidden overscroll-contain border-line bg-surface-raised pb-[env(safe-area-inset-bottom)] shadow-pop',
         sideClasses[side],
-        // Default sizing — consumers can override via className.
-        side === 'right' || side === 'left' ? 'w-[400px] max-w-[calc(100dvw-2rem)]' : 'h-[400px] max-h-[calc(100dvh-2rem)]',
+        horizontal ? 'w-full max-w-[calc(100dvw-2rem)]' : 'h-[400px] max-h-[calc(100dvh-2rem)]',
+        horizontal && !callerSetsWidth(className) && 'md:max-w-md',
         className,
       )}
-      {...props}
     >
-      <button
+      <Button
         type="button"
-        onClick={() => ctx.onOpenChange(false)}
-        className="absolute right-3 top-3 z-10 rounded-sm p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
+        variant="ghost"
+        size="sm"
+        iconOnly
+        className="absolute top-3 right-3 z-10"
         aria-label="关闭"
         title="关闭"
+        onClick={() => ctx.onOpenChange(false)}
       >
-        <X className="size-4" aria-hidden="true" />
-      </button>
+        <X aria-hidden="true" />
+      </Button>
       {children}
-    </div>
+    </motion.div>
   );
 }
 
-export function SheetHeader({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn('shrink-0 border-b px-6 py-4', className)} {...props} />;
+export function SheetHeader({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
+  // Block flow, not a flex row: title, description, and tags stack. shrink-0
+  // keeps a multi-line header from collapsing to min-h-14 under the body.
+  return (
+    <div
+      className={cn('relative min-h-14 shrink-0 border-b border-line-subtle px-5 py-3 pr-12', className)}
+      {...props}
+    />
+  );
 }
 
-export function SheetTitle({ className, ...props }: React.HTMLAttributes<HTMLHeadingElement>) {
+export function SheetTitle({ className, ...props }: HTMLAttributes<HTMLHeadingElement>) {
   const ctx = useSheetContext();
-  return <h2 id={ctx.titleId} className={cn('pr-8 text-base font-semibold', className)} {...props} />;
+  return <h2 id={ctx.titleId} className={cn('text-md font-semibold', className)} {...props} />;
 }
 
 /**

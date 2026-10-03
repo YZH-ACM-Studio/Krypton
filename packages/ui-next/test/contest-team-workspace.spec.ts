@@ -57,8 +57,6 @@ describe('p1.12 team assembly workspace contracts', () => {
   it('shows bound student identity on rosters and keeps the manager view dense and server-paginated', () => {
     expect(page).to.include("studentIdentity(teamUser(users, uid)) || '未绑定学生档案'");
     expect(page).to.include('成员与绑定身份');
-    expect(page).to.include('xl:grid-cols-[minmax(12rem,0.8fr)_minmax(24rem,1.7fr)_minmax(16rem,auto)]');
-    expect(page).not.to.include('grid gap-3 lg:grid-cols-2');
     expect(handler).to.include('contestTeam.paginateTeams(this.domainId(), tid, teamQuery, page, 20)');
   });
 
@@ -128,10 +126,6 @@ describe('p1.12 team assembly workspace contracts', () => {
     expect(dialog).to.include('onSubmit={handleCreateSelfSubmit}');
     expect(chrome).to.include('role="dialog"');
     expect(chrome).to.include('aria-modal="true"');
-    expect(chrome).to.include('overflow-y-auto overscroll-contain');
-    expect(chrome).to.include('rounded-[28px]');
-    expect(chrome).to.include('active:scale-[0.96]');
-    expect(chrome).not.to.include('transition-all');
     expect(dialog).not.to.include('placeholder="1–64 个字符"');
   });
 

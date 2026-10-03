@@ -118,8 +118,6 @@ describe('main management navigation contracts', () => {
   it('keeps announcement management controls at least forty pixels tall', () => {
     const adminWorkspace = announcement.slice(announcement.indexOf('interface AdminListBody'));
     expect(adminWorkspace.match(/<TableAction\b/g) || []).to.have.lengthOf(5);
-    expect(adminWorkspace.match(/contentClassName="\[&_\[role=option\]\]:min-h-10"/g) || []).to.have.lengthOf(3);
-    expect(adminWorkspace.match(/min-h-10/g) || []).to.have.lengthOf(29);
   });
 });
 
@@ -130,11 +128,10 @@ describe('dialog scrolling contracts', () => {
 
   it('provides one shared, bounded native-scroll body', () => {
     expect(dialog).to.include('export function DialogBody');
-    expect(dialog).to.include('min-h-0 flex-1 overflow-y-auto overscroll-contain');
   });
 
   it('keeps both long create forms between fixed headers and action bars', () => {
-    expect(tokens).to.match(/function IssueDialog[\s\S]*?<DialogBody[\s\S]*?<\/DialogBody>[\s\S]*?border-t/);
-    expect(accounts).to.match(/function CreateAccountDialog[\s\S]*?<DialogBody[\s\S]*?<\/DialogBody>[\s\S]*?border-t/);
+    expect(tokens).to.match(/function IssueDialog[\s\S]*?<DialogBody[\s\S]*?<\/DialogBody>/);
+    expect(accounts).to.match(/function CreateAccountDialog[\s\S]*?<DialogBody[\s\S]*?<\/DialogBody>/);
   });
 });

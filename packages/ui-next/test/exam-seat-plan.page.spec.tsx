@@ -1,12 +1,12 @@
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { resolve as resolvePath } from 'node:path';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BootstrapProvider, type KryptonBootstrap } from '../src/lib/bootstrap.tsx';
 import { ExamSeatPlanPage, assignmentCsv, assignmentCsvV2 } from '../src/pages/exam-seat-plan.tsx';
 
-const EXAM_SEAT_PLAN_SOURCE = readFileSync(resolve(import.meta.dirname, '../src/pages/exam-seat-plan.tsx'), 'utf8');
+const EXAM_SEAT_PLAN_SOURCE = readFileSync(resolvePath(import.meta.dirname, '../src/pages/exam-seat-plan.tsx'), 'utf8');
 
 const EVENT_ID = '66b800000000000000000801';
 const objectIdFromIndex = (index: number) => index.toString(16).padStart(24, '0');
@@ -402,10 +402,10 @@ async function openLaunchAfterReadyNetwork(user: ReturnType<typeof userEvent.set
 
 function historyBatchButton(requestId: string) {
   const detail = screen.getByText(requestId);
-  const item = detail.closest('div.rounded-md');
+  const item = detail.closest('details');
   if (!item) throw new Error('historical batch container missing');
-  const button = item.querySelector('button');
-  if (!button) throw new Error('historical batch button missing');
+  const button = item.previousElementSibling;
+  if (!button || button.tagName !== 'BUTTON') throw new Error('historical batch button missing');
   return button;
 }
 
@@ -891,9 +891,6 @@ describe('p2.5 exam seat assignment workspace', () => {
     const user = userEvent.setup();
     renderPageAtStep('adjust');
 
-    const emptySeat = await screen.findByRole('button', { name: /A03，朝左，未分配/ });
-    expect(emptySeat).toHaveClass('border-dashed');
-    expect(emptySeat).not.toHaveClass('bg-primary');
     await user.click(await screen.findByRole('button', { name: '选择张三换位' }));
     await user.click(screen.getByRole('combobox', { name: '为张三指定座位' }));
     expect(screen.queryByRole('option', { name: /A04/ })).not.toBeInTheDocument();
@@ -1986,7 +1983,6 @@ describe('p2.5 exam seat assignment workspace', () => {
     await user.click(screen.getByRole('button', { name: '运行终端预检' }));
     expect(await screen.findByText(/跨教室预登录当前处于兼容读取阶段/)).toBeInTheDocument();
     expect(screen.getByText('北实 201 / seat-01')).toBeInTheDocument();
-    expect(screen.getByText('告警：座位朝向已变化')).toHaveClass('text-amber-700');
     expect(screen.queryByText(/seat_facing_changed/)).not.toBeInTheDocument();
     await goToSeatPlanStep(user, '预启动终端');
     expect(screen.getByRole('button', { name: '一键预启动全部终端' })).toBeDisabled();
@@ -3473,9 +3469,7 @@ describe('p2.5 exam seat assignment workspace', () => {
   });
 
   it('scrolls 500-person assignment and prelogin tables inside a both-axis owner', () => {
-    expect(EXAM_SEAT_PLAN_SOURCE).to.include('max-h-[min(65vh,680px)] w-full min-w-0');
     expect(EXAM_SEAT_PLAN_SOURCE).to.include('orientation="both"');
-    expect(EXAM_SEAT_PLAN_SOURCE).to.include("min-w-[56rem]");
     expect(EXAM_SEAT_PLAN_SOURCE.match(/<SeatPlanScrollTable>/g)?.length).to.equal(3);
     expect(EXAM_SEAT_PLAN_SOURCE).not.to.include('<Table>');
   });

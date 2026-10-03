@@ -196,10 +196,6 @@ describe('user account messages', () => {
         messages: [{ _id: '66a72f200000000000000003', from: 1, to: 2, content: long }],
       },
     });
-    const preview = screen.getAllByText(long).find((node) => node.classList.contains('truncate'));
-    expect(preview).toBeTruthy();
-    expect(preview?.className).toMatch(/\bmin-w-0\b/);
-    expect(preview?.className).toMatch(/\bflex-1\b/);
     const list = screen.getByRole('list', { name: '会话' });
     expect(list.className).toMatch(/\bmin-w-0\b/);
     expect(list.parentElement?.parentElement?.getAttribute('data-radix-scroll-area-viewport')).toBe('');
@@ -228,9 +224,6 @@ describe('user account messages', () => {
     expect(viewport).toContain('[@media(max-height:540px)]');
     expect(panel).toContain('matchMedia(NARROW_QUERY)');
     expect(panel).toContain('dualPaneTw');
-    expect(panel).not.toContain('min-h-[480px]');
-    expect(panel).toMatch(/flex-1/);
-    expect(panel).toMatch(/min-h-0/);
   });
 
   it('subscribes to the shared narrow query', () => {

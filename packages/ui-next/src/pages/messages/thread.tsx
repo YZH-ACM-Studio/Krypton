@@ -76,7 +76,7 @@ export function MessageThread(props: {
   if (!conv) {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center">
-        <p className="text-sm text-muted-foreground">选择一个会话</p>
+        <p className="text-sm text-fg-muted">选择一个会话</p>
       </div>
     );
   }
@@ -89,33 +89,34 @@ export function MessageThread(props: {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-2.5">
         <div className="flex min-w-0 items-center gap-2">
           {onBack ? (
-            <Button type="button" variant="ghost" size="sm" name="返回" onClick={onBack} className="h-8 shrink-0 px-2">
-              <ChevronLeft className="size-4" aria-hidden="true" />
+            <Button type="button" variant="ghost" size="sm" name="返回" onClick={onBack} className="shrink-0">
+              <ChevronLeft aria-hidden="true" />
               返回
             </Button>
           ) : null}
-          <Avatar className="size-7 shrink-0">
+          <Avatar className="size-8 shrink-0">
             {conv.udoc.avatarUrl ? <AvatarImage src={String(conv.udoc.avatarUrl)} alt={displayName} /> : null}
-            <AvatarFallback className="text-[10px]">{makeInitials(displayName)}</AvatarFallback>
+            <AvatarFallback className="text-2xs">{makeInitials(displayName)}</AvatarFallback>
           </Avatar>
           <div className="min-w-0">
             <p className="truncate text-sm font-medium">{displayName}</p>
-            <p className="text-[10px] text-muted-foreground">{conv.messages.length} 条消息</p>
+            <p className="text-2xs text-fg-subtle tabular">{conv.messages.length} 条消息</p>
           </div>
         </div>
         <a
           href={profileHref}
-          className="shrink-0 rounded-sm text-xs text-primary hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          className="shrink-0 rounded-sm text-xs text-brand-fg hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
         >
           资料
         </a>
       </div>
 
       <div className="relative flex min-h-0 flex-1 flex-col">
-        <ScrollArea className="min-h-0 flex-1" viewportRef={setViewportRef} viewportClassName="space-y-2 p-4">
+        <ScrollArea className="min-h-0 flex-1" viewportRef={setViewportRef} viewportClassName="p-4">
+          <div className="space-y-2">
           {conv.messages.map((message, index) => {
             const fromMe = message.from === selfUid;
             const time = objectIdDate(message._id);
@@ -125,17 +126,17 @@ export function MessageThread(props: {
             return (
               <div key={String(message._id) || index} className="space-y-1">
                 {showDate && time ? (
-                  <p className="my-2 text-center text-[11px] text-muted-foreground">{formatDateSeparator(time, locale)}</p>
+                  <p className="my-2 text-center text-2xs text-fg-subtle">{formatDateSeparator(time, locale)}</p>
                 ) : null}
                 {index === firstUnreadIndex ? (
                   <div className="my-2 flex items-center gap-2">
-                    <span className="h-px flex-1 bg-border" />
-                    <span className="text-[10px] font-medium text-destructive">未读消息</span>
-                    <span className="h-px flex-1 bg-border" />
+                    <span className="h-px flex-1 bg-line" />
+                    <span className="text-2xs font-medium text-brand-fg">未读消息</span>
+                    <span className="h-px flex-1 bg-line" />
                   </div>
                 ) : null}
                 {showTime && time ? (
-                  <p className="my-1 text-center text-[10px] text-muted-foreground/70">{formatClock(time, locale)}</p>
+                  <p className="my-1 text-center text-2xs text-fg-subtle tabular">{formatClock(time, locale)}</p>
                 ) : null}
                 <div
                   className={cn(
@@ -147,8 +148,8 @@ export function MessageThread(props: {
                 >
                   <div
                     className={cn(
-                      'max-w-full min-w-0 break-words rounded-2xl px-3 py-2 text-sm leading-6',
-                      fromMe ? 'rounded-br-md bg-primary text-primary-foreground' : 'rounded-bl-md bg-muted',
+                      'max-w-full min-w-0 break-words rounded-lg px-3 py-2 text-sm',
+                      fromMe ? 'rounded-br-md bg-brand text-on-brand' : 'rounded-bl-md bg-surface-sunken text-fg',
                       dualPaneTw('max-w-[75%]'),
                     )}
                   >
@@ -159,10 +160,11 @@ export function MessageThread(props: {
               </div>
             );
           })}
+          </div>
         </ScrollArea>
         {showJump ? (
           <div className="pointer-events-none absolute inset-x-0 bottom-3 z-10 flex justify-center">
-            <Button type="button" size="sm" variant="secondary" className="pointer-events-auto shadow-sm" onClick={onJumpToLatest}>
+            <Button type="button" size="sm" variant="secondary" className="pointer-events-auto" onClick={onJumpToLatest}>
               有新消息
             </Button>
           </div>
@@ -183,7 +185,7 @@ function MessageActions(props: {
   return (
     <div
       className={cn(
-        'flex shrink-0 flex-row gap-0.5 opacity-100 transition-opacity duration-150 motion-reduce:transition-none',
+        'flex shrink-0 flex-row gap-0.5 opacity-100',
         dualPaneTw('flex-col'),
         dualPaneTw('opacity-0'),
         dualPaneTw('group-hover:opacity-100'),
@@ -192,14 +194,14 @@ function MessageActions(props: {
       )}
     >
       <ThreadIconButton title="引用" onClick={() => onQuote(message)}>
-        <Quote className="size-3" aria-hidden="true" />
+        <Quote aria-hidden="true" />
       </ThreadIconButton>
       <ThreadIconButton title="复制" onClick={() => onCopy(message)}>
-        <Copy className="size-3" aria-hidden="true" />
+        <Copy aria-hidden="true" />
       </ThreadIconButton>
       {fromMe ? (
         <ThreadIconButton title="删除" destructive onClick={() => onAskDelete(message)}>
-          <Trash2 className="size-3" aria-hidden="true" />
+          <Trash2 aria-hidden="true" />
         </ThreadIconButton>
       ) : null}
     </div>
@@ -214,20 +216,9 @@ function ThreadIconButton(props: {
 }): JSX.Element {
   const { title, onClick, destructive, children } = props;
   return (
-    <button
-      type="button"
-      title={title}
-      aria-label={title}
-      onClick={onClick}
-      className={cn(
-        'rounded p-0.5 text-muted-foreground transition-colors duration-150 motion-reduce:transition-none',
-        'hover:bg-accent hover:text-foreground',
-        'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
-        destructive && 'hover:bg-destructive/10 hover:text-destructive',
-      )}
-    >
+    <Button type="button" variant={destructive ? 'danger-soft' : 'ghost'} size="sm" iconOnly title={title} aria-label={title} onClick={onClick}>
       {children}
-    </button>
+    </Button>
   );
 }
 

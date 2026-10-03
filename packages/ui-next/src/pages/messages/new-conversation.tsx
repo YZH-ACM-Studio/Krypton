@@ -1,6 +1,7 @@
 import { useCallback, useState, type JSX } from 'react';
 import { MessageSquarePlus } from 'lucide-react';
 import { DomainUserSearchOption, type DomainUserOption, domainUserSearchLabel, loadDomainUsers } from '@/components/domain-user-search';
+import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { MultiSelect } from '@/components/ui/multi-select';
@@ -74,14 +75,14 @@ export function NewConversation(props: {
       </Button>
       <Dialog open={open} onOpenChange={handleOpenChange}>
         {/* overflow-visible keeps the absolute MultiSelect popover from clipping */}
-        <DialogContent className="w-full overflow-visible sm:w-[480px]" onClose={() => handleOpenChange(false)}>
+        <DialogContent className="overflow-visible" onClose={() => handleOpenChange(false)}>
           <DialogHeader>
             <DialogTitle>新会话</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 p-5">
-            <p className="text-sm text-muted-foreground">输入对方的 UID、用户名、学号或姓名进行搜索，选中一名用户后点击「开始」即可打开会话。</p>
-            <div className="space-y-1.5">
-              <label className="text-xs text-muted-foreground">收件人</label>
+          <div className="flex flex-col gap-4 p-5">
+            <p className="text-sm text-fg-muted">输入对方的 UID、用户名、学号或姓名进行搜索，选中一名用户后点击「开始」即可打开会话。</p>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs text-fg-subtle">收件人</label>
               <MultiSelect<DomainUserOption>
                 value={selected}
                 onChange={(next) => {
@@ -101,16 +102,12 @@ export function NewConversation(props: {
                 emptyText="没有找到用户"
               />
             </div>
-            {error ? (
-              <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-                {error}
-              </p>
-            ) : null}
-            <div className="flex justify-end gap-2 pt-1">
-              <Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>
+            {error ? <Alert tone="danger">{error}</Alert> : null}
+            <div className="flex flex-wrap justify-end gap-2 pt-1">
+              <Button type="button" variant="secondary" onClick={() => handleOpenChange(false)}>
                 取消
               </Button>
-              <Button type="button" disabled={!canStart} onClick={startConversation}>
+              <Button type="button" variant="primary" disabled={!canStart} onClick={startConversation}>
                 开始
               </Button>
             </div>

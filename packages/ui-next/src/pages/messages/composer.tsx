@@ -43,11 +43,11 @@ export function MessageComposer(props: {
         rows={compact ? 1 : 3}
         disabled={disabled}
         placeholder="输入消息… Markdown · Enter 发送 · Shift+Enter 换行"
-        className={cn('min-h-[80px] resize-none', compact && 'min-h-9 py-1.5', narrowTw('min-h-9'), narrowTw('py-1.5'))}
+        className={cn('resize-none', compact && 'min-h-8 py-1.5', narrowTw('min-h-8'), narrowTw('py-1.5'))}
       />
       <div className="flex items-center justify-between gap-2">
-        <span className="text-[10px] text-muted-foreground">{value.length} 字符</span>
-        <Button type="button" size="sm" disabled={sendDisabled} onClick={onSend}>
+        <span className="text-2xs text-fg-subtle tabular">{value.length} 字符</span>
+        <Button type="button" variant="primary" size="sm" disabled={sendDisabled} onClick={onSend}>
           <Send className="size-3.5" aria-hidden="true" />
           {sending ? '发送中…' : '发送'}
         </Button>

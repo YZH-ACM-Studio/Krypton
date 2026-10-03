@@ -3,6 +3,7 @@
  */
 
 import { useEffect, useRef, useState, type JSX } from 'react';
+import { Alert } from '@/components/ui/alert';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
@@ -474,11 +475,11 @@ export function MessagesPanel(): JSX.Element {
   const showThread = selectedUid != null;
 
   return (
-    <div className="flex h-[calc(100dvh-11rem)] min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-background">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-line bg-surface">
       {errorText ? (
-        <p role="alert" className="shrink-0 border-b bg-destructive/10 px-4 py-2 text-xs text-destructive">
+        <Alert tone="danger" className="shrink-0 rounded-none border-x-0 border-t-0">
           {errorText}
-        </p>
+        </Alert>
       ) : null}
       <div className={cn('grid min-h-0 min-w-0 flex-1', dualPaneTw('grid-cols-[minmax(0,20rem)_minmax(0,1fr)]'))}>
         <section className={cn('h-full min-h-0 min-w-0 overflow-hidden flex-col', showThread ? cn('hidden', dualPaneTw('flex')) : 'flex')}>
@@ -535,16 +536,16 @@ export function MessagesPanel(): JSX.Element {
       </div>
 
       <Dialog open={!!pendingDelete} onOpenChange={(open) => !open && setPendingDelete(null)}>
-        <DialogContent className="w-full sm:w-[400px]" onClose={() => setPendingDelete(null)}>
+        <DialogContent size="sm" onClose={() => setPendingDelete(null)}>
           <DialogHeader>
             <DialogTitle>删除消息</DialogTitle>
             <DialogDescription>此操作无法撤销。该消息将从你和对方的会话中移除。</DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setPendingDelete(null)}>
+            <Button type="button" variant="secondary" onClick={() => setPendingDelete(null)}>
               取消
             </Button>
-            <Button type="button" variant="destructive" onClick={() => pendingDelete && void confirmDelete(pendingDelete)}>
+            <Button type="button" variant="danger" onClick={() => pendingDelete && void confirmDelete(pendingDelete)}>
               删除
             </Button>
           </DialogFooter>

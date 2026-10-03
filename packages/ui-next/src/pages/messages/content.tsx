@@ -38,7 +38,7 @@ export function MessageBody({ message, fromMe }: { message: MessageDoc; fromMe: 
   if (system) {
     const linkClassName = fromMe
       ? 'font-medium underline underline-offset-2'
-      : 'font-medium text-primary underline underline-offset-2';
+      : 'font-medium text-brand-fg underline underline-offset-2';
     return <>{renderMessageContent(message, linkClassName)}</>;
   }
   return (
@@ -46,8 +46,8 @@ export function MessageBody({ message, fromMe }: { message: MessageDoc; fromMe: 
       content={String(message.content || '')}
       className={
         fromMe
-          ? 'text-sm leading-6 break-words [&_p]:my-0 [&_a]:underline [&_a]:text-primary-foreground'
-          : 'text-sm leading-6 break-words [&_p]:my-0 [&_a]:underline [&_a]:text-primary'
+          ? 'text-sm break-words [&_p]:my-0 [&_a]:text-on-brand [&_a]:underline'
+          : 'text-sm break-words [&_p]:my-0 [&_a]:text-brand-fg [&_a]:underline'
       }
     />
   );

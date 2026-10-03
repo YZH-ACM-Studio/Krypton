@@ -7,6 +7,7 @@ const SETTING_LABELS: Record<string, string> = {
   timeZone: '时区',
   codeLang: '默认编程语言',
   codeTemplate: '默认代码模板',
+  // ds-allow DS012: 键名 rounded 是 Hydro 设置项，不是圆角工具类，组件和 token 改不了服务端键
   rounded: '圆角',
   skipAnimate: '减少动画',
   showTimeAgo: '相对时间',
@@ -29,6 +30,7 @@ const SETTING_HINTS: Record<string, string> = {
   timeZone: '用于时间显示，不会改服务器时钟。',
   codeLang: '打开编程题时默认选中的语言。',
   codeTemplate: '留空则使用该语言的内置模板。',
+  // ds-allow DS012: 键名 rounded 是 Hydro 设置项，不是圆角工具类，组件和 token 改不了服务端键
   rounded: '界面卡片和按钮使用圆角。',
   skipAnimate: '关闭大部分过渡动画。',
   showTimeAgo: '把时间显示成「3 分钟前」这类相对写法。',
@@ -69,6 +71,7 @@ const FAMILY_DESCRIPTIONS: Record<string, string> = {
 
 const OPTION_LABELS: Record<string, string> = {
   light: '浅色',
+  // ds-allow DS010: 键名 dark 是主题选项值，不是 dark: 变体，token 改不了服务端取值
   dark: '深色',
   sv: '分栏预览',
   monaco: 'Monaco 编辑器',

@@ -1,5 +1,5 @@
 import { type FormEvent, useState } from 'react';
-import { Archive, CheckCircle2, Copy, Eye, EyeOff, LockKeyhole, Pencil, Search, SlidersHorizontal, Users, XCircle } from 'lucide-react';
+import { Archive, CheckCircle2, Copy, Eye, EyeOff, LockKeyhole, Pencil, SlidersHorizontal, Users, XCircle } from 'lucide-react';
 import { effectiveProblemKind, type ProblemKind } from '@hydrooj/common';
 import { DomainUserSearchOption, type DomainUserOption, domainUserSearchLabel, loadDomainUsers } from '@/components/domain-user-search';
 import { ManagedPublishProtocolFields } from '@/components/managed-programming-authority';
@@ -9,12 +9,17 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { confirmFormSubmit, Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
+import { DataTable, type Column } from '@/components/ui/data-table';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Panel } from '@/components/ui/panel';
+import { Input, SearchInput } from '@/components/ui/input';
 import { MultiSelect } from '@/components/ui/multi-select';
+import { Page, PageHeader, Toolbar } from '@/components/ui/page';
 import { Pagination } from '@/components/ui/pagination';
 import { SimpleSelect } from '@/components/ui/select';
 import { Sheet, SheetBody, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Switch } from '@/components/ui/switch';
+import { Difficulty } from '@/components/ui/verdict';
 import { useBootstrap } from '@/lib/bootstrap';
 import { replaceRouteTokens } from '@/lib/format';
 import { managedSourceFieldViews, type ManagedSourceMetaView, type ManagedSourceTemplateOption } from '@/lib/managed-problem-source';
@@ -210,31 +215,29 @@ function FilterFields({
   canReviewManaged: boolean;
   compact?: boolean;
 }) {
+  const fieldClass = compact ? 'flex min-w-0 flex-col gap-1.5' : 'flex w-full min-w-0 flex-col gap-1.5 sm:w-40';
+  const searchClass = compact ? 'flex min-w-0 flex-col gap-1.5' : 'flex w-full min-w-0 flex-col gap-1.5 sm:w-72';
+  const wideClass = compact ? 'flex min-w-0 flex-col gap-1.5' : 'flex w-full min-w-0 flex-col gap-1.5 sm:w-56';
   return (
     <>
-      <label className={compact ? 'block min-w-0 space-y-1.5' : 'min-w-0 space-y-1.5 lg:col-span-2'}>
-        <span className="text-xs font-medium text-muted-foreground">关键词或题号</span>
-        <span className="relative block min-w-0">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input name="q" defaultValue={query} placeholder="标题、PID、题号或标签" className="min-h-11 min-w-0 pl-9" />
-        </span>
+      <label className={searchClass}>
+        <span className="text-xs font-medium text-fg-subtle">关键词或题号</span>
+        <SearchInput name="q" defaultValue={query} placeholder="标题、PID、题号或标签" />
       </label>
-      <label className="min-w-0 space-y-1.5">
-        <span className="text-xs font-medium text-muted-foreground">题型</span>
+      <label className={fieldClass}>
+        <span className="text-xs font-medium text-fg-subtle">题型</span>
         <SimpleSelect
           name="kind"
           defaultValue={filters.kind || ''}
-          className="min-h-11"
           options={[{ value: '', label: '全部题型' }, ...problemKinds.map((item) => ({ value: item.slug, label: KIND_LABEL[item.kind] }))]}
         />
       </label>
       {contestOptions.length ? (
-        <label className="min-w-0 space-y-1.5">
-          <span className="text-xs font-medium text-muted-foreground">所属比赛</span>
+        <label className={wideClass}>
+          <span className="text-xs font-medium text-fg-subtle">所属比赛</span>
           <SimpleSelect
             name="contest"
             defaultValue={filters.contest || ''}
-            className="min-h-11"
             options={[
               { value: '', label: '全部比赛' },
               ...contestOptions.map((item) => {
@@ -245,12 +248,11 @@ function FilterFields({
           />
         </label>
       ) : null}
-      <label className="min-w-0 space-y-1.5">
-        <span className="text-xs font-medium text-muted-foreground">题号命名空间</span>
+      <label className={wideClass}>
+        <span className="text-xs font-medium text-fg-subtle">题号命名空间</span>
         <SimpleSelect
           name="pidNamespaceId"
           defaultValue={filters.pidNamespaceId || ''}
-          className="min-h-11"
           options={[
             { value: '', label: '全部命名空间' },
             ...pidNamespaces.map((namespace) => ({
@@ -260,23 +262,22 @@ function FilterFields({
           ]}
         />
       </label>
-      <label className="min-w-0 space-y-1.5">
-        <span className="text-xs font-medium text-muted-foreground">标签</span>
-        <Input name="tag" defaultValue={filters.tag || ''} placeholder="精确标签" className="min-h-11 min-w-0" />
+      <label className={fieldClass}>
+        <span className="text-xs font-medium text-fg-subtle">标签</span>
+        <Input name="tag" defaultValue={filters.tag || ''} placeholder="精确标签" />
       </label>
       {canFilterOwner ? (
-        <label className="min-w-0 space-y-1.5">
-          <span className="text-xs font-medium text-muted-foreground">出题人 UID</span>
-          <Input name="owner" type="number" min={1} defaultValue={filters.owner || ''} placeholder="全部" className="min-h-11 min-w-0" />
+        <label className={fieldClass}>
+          <span className="text-xs font-medium text-fg-subtle">出题人 UID</span>
+          <Input name="owner" type="number" min={1} defaultValue={filters.owner || ''} placeholder="全部" />
         </label>
       ) : null}
       {canReviewManaged ? (
-        <label className="min-w-0 space-y-1.5">
-          <span className="text-xs font-medium text-muted-foreground">托管审核</span>
+        <label className={fieldClass}>
+          <span className="text-xs font-medium text-fg-subtle">托管审核</span>
           <SimpleSelect
             name="managedReview"
             defaultValue={filters.managedReview || 'all'}
-            className="min-h-11"
             options={[
               { value: 'all', label: '全部' },
               { value: 'pending', label: '元数据待确认' },
@@ -284,12 +285,11 @@ function FilterFields({
           />
         </label>
       ) : null}
-      <label className="min-w-0 space-y-1.5">
-        <span className="text-xs font-medium text-muted-foreground">可见性</span>
+      <label className={fieldClass}>
+        <span className="text-xs font-medium text-fg-subtle">可见性</span>
         <SimpleSelect
           name="visibility"
           defaultValue={filters.visibility || 'all'}
-          className="min-h-11"
           options={[
             { value: 'all', label: '全部' },
             { value: 'hidden', label: '隐藏' },
@@ -297,12 +297,11 @@ function FilterFields({
           ]}
         />
       </label>
-      <label className="min-w-0 space-y-1.5">
-        <span className="text-xs font-medium text-muted-foreground">生命周期</span>
+      <label className={fieldClass}>
+        <span className="text-xs font-medium text-fg-subtle">生命周期</span>
         <SimpleSelect
           name="lifecycle"
           defaultValue={filters.lifecycle || 'active'}
-          className="min-h-11"
           options={[
             { value: 'active', label: '使用中' },
             { value: 'archived', label: '已归档' },
@@ -310,12 +309,11 @@ function FilterFields({
           ]}
         />
       </label>
-      <label className="min-w-0 space-y-1.5">
-        <span className="text-xs font-medium text-muted-foreground">排序</span>
+      <label className={fieldClass}>
+        <span className="text-xs font-medium text-fg-subtle">排序</span>
         <SimpleSelect
           name="sort"
           defaultValue={sort}
-          className="min-h-11"
           options={[
             { value: 'default', label: '题号顺序' },
             { value: 'recent', label: '最近创建' },
@@ -329,17 +327,11 @@ function FilterFields({
 
 function FilterActions({ action, compact = false }: { action: string; compact?: boolean }) {
   return (
-    <div
-      className={
-        compact
-          ? 'flex shrink-0 gap-2 border-t px-5 py-3'
-          : 'flex min-w-0 flex-wrap items-end gap-2'
-      }
-    >
-      <Button type="submit" className="min-h-11 min-w-0 flex-1">
+    <div className={compact ? 'flex shrink-0 gap-2 border-t border-line px-5 py-3' : 'flex shrink-0 items-center gap-2'}>
+      <Button type="submit" variant="secondary" className={compact ? 'w-full' : undefined}>
         应用
       </Button>
-      <Button asChild type="button" variant="ghost" className="min-h-11 shrink-0">
+      <Button asChild type="button" variant="ghost" className="shrink-0">
         <a href={action}>清空</a>
       </Button>
     </div>
@@ -385,25 +377,146 @@ function FilterForm({
   if (compact) {
     return (
       <form method="get" action={action} className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <SheetBody className="p-5">
-          <div className="space-y-4">{fields}</div>
+        <SheetBody>
+          <div className="flex flex-col gap-5">{fields}</div>
         </SheetBody>
         <FilterActions action={action} compact />
       </form>
     );
   }
   return (
-    <form method="get" action={action} className="grid min-w-0 gap-3 lg:grid-cols-4 xl:grid-cols-8">
-      {fields}
-      <FilterActions action={action} />
+    <form method="get" action={action}>
+      <Toolbar className="items-end">
+        {fields}
+        <FilterActions action={action} />
+      </Toolbar>
     </form>
   );
 }
 
 function SubmissionStatus({ status }: { status?: number }) {
-  if (status === 1) return <CheckCircle2 className="size-4 text-emerald-600" aria-label="已通过" />;
-  if (status === 2) return <XCircle className="size-4 text-rose-600" aria-label="未通过" />;
+  if (status === 1) return <CheckCircle2 className="size-4 text-success-fg" aria-label="已通过" />;
+  if (status === 2) return <XCircle className="size-4 text-danger-fg" aria-label="未通过" />;
   return <span className="size-4" aria-hidden="true" />;
+}
+
+function problemDifficultyLevel(value: string | number | undefined): number | undefined {
+  if (value === undefined || value === '') return undefined;
+  const numeric = typeof value === 'number' ? value : Number(value);
+  if (!Number.isInteger(numeric)) return undefined;
+  return numeric;
+}
+
+function ProblemManagedReview({
+  pdoc,
+  managedSourceTemplates,
+  managedTrainingOptions,
+  pendingContributions,
+  pendingFingerprint,
+  contributionUdict,
+  onPublish,
+}: {
+  pdoc: ProblemListDocument;
+  managedSourceTemplates: ManagedSourceTemplateOption[];
+  managedTrainingOptions: ManagedTrainingListOption[];
+  pendingContributions: Array<{ uid: number; scope: 'data' | 'tag' }>;
+  pendingFingerprint: string;
+  contributionUdict: Record<string, { _id: number; uname?: string }>;
+  onPublish: (event: FormEvent<HTMLFormElement>, title: string, pending: Array<{ uid: number; scope: 'data' | 'tag' }>) => void;
+}) {
+  const displayPid = String(pdoc.pid || pdoc.docId);
+  const sourceTemplate = managedSourceTemplates.find((template) => template.id === pdoc.sourceMeta?.template);
+  const sourceFields = managedSourceFieldViews(pdoc.sourceMeta, sourceTemplate);
+  const pendingPlacement = pdoc.managedAuthoring?.pendingTrainingPlacement;
+  const pendingTraining = managedTrainingOptions.find((training) => training.id === String(pendingPlacement?.trainingId || ''));
+  const pendingChapter = pendingTraining?.chapters?.find((chapter) => chapter.id === pendingPlacement?.chapterId);
+  return (
+    <section className="space-y-3 rounded-lg border border-brand-line bg-brand-soft p-4" aria-label="托管草稿审核">
+      <div className="grid gap-2 text-xs text-fg-subtle sm:grid-cols-2 lg:grid-cols-4">
+        <span>
+          工作标题 · <strong className="font-medium text-fg">{pdoc.managedAuthoring?.workingTitle || '—'}</strong>
+        </span>
+        {sourceFields.map((field) => (
+          <span key={field.label}>
+            {field.label} · <strong className="font-medium text-fg">{field.value}</strong>
+          </span>
+        ))}
+        {pdoc.managedAuthoring?.metadataStatus === 'draft' ? (
+          <span>
+            待挂训练 ·{' '}
+            <strong className="font-medium text-fg">
+              {pendingPlacement
+                ? `${pendingTraining?.title || '训练已失效'} / ${pendingChapter?.title || `章节 ${pendingPlacement.chapterId}`}`
+                : '不挂入训练'}
+            </strong>
+          </span>
+        ) : null}
+      </div>
+      {pendingContributions.length ? (
+        <div className="rounded-lg border border-warning-line bg-warning-soft px-4 py-3 text-xs text-fg">
+          <p className="font-medium">仍有 {pendingContributions.length} 项协作任务待完成，发布不会自动完成或撤销这些任务。</p>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {pendingContributions.map((item, index) => (
+              <Badge key={`${item.uid}:${item.scope}:${index}`} variant="outline" size="sm">
+                {contributionUdict[item.uid]?.uname || `UID ${item.uid}`} · {item.scope === 'data' ? '数据' : '标签'}
+              </Badge>
+            ))}
+          </div>
+        </div>
+      ) : null}
+      <form
+        method="post"
+        className="grid gap-3 sm:grid-cols-2"
+        onSubmit={(event) => onPublish(event, pdoc.title || displayPid, pendingContributions)}
+      >
+        <ManagedPublishProtocolFields docId={pdoc.docId} expectedStructureRevision={pdoc.structureRevision} />
+        <input type="hidden" name="pendingContributionsConfirmed" value="false" />
+        <input type="hidden" name="pendingContributionFingerprint" value={pendingFingerprint} />
+        {pdoc.managedAuthoring?.metadataStatus === 'draft' ? (
+          <label className="space-y-1.5">
+            <span className="text-xs font-medium text-fg-subtle">正式标题</span>
+            <Input
+              name="formalTitle"
+              defaultValue={pdoc.managedAuthoring?.workingTitle || ''}
+              required
+            />
+          </label>
+        ) : (
+          <div className="space-y-1.5">
+            <span className="text-xs font-medium text-fg-subtle">正式标题</span>
+            <p className="text-sm font-medium text-fg">{pdoc.title || '未命名题目'}</p>
+            <p className="text-xs text-fg-subtle">重新公开不会改正式标题。题库管理员请到题目编辑页更正。</p>
+            <input type="hidden" name="formalTitle" value={pdoc.title || ''} />
+          </div>
+        )}
+        <label className="space-y-1.5">
+          <span className="text-xs font-medium text-fg-subtle">难度</span>
+          <SimpleSelect
+            name="difficulty"
+            defaultValue={String(pdoc.difficulty ?? 0)}
+            options={Array.from({ length: 11 }, (_, value) => ({
+              value: String(value),
+              label: value === 0 ? '未设置' : String(value),
+            }))}
+          />
+        </label>
+        {pdoc.managedAuthoring?.metadataStatus === 'draft' ? (
+          <label className="flex min-h-10 items-center gap-2 rounded-lg border border-line px-3 text-sm sm:col-span-2">
+            <Switch name="finalHidden" value="true" />
+            <span>
+              <span className="block font-medium">审核后保持隐藏</span>
+              <span className="block text-xs text-fg-subtle">确认元数据与训练归属，但暂不向普通用户公开。</span>
+            </span>
+          </label>
+        ) : null}
+        <div className="sm:col-span-2 sm:justify-self-end">
+          <Button type="submit" variant="primary">
+            {pdoc.managedAuthoring?.metadataStatus === 'draft' ? '确认并发布' : '重新公开'}
+          </Button>
+        </div>
+      </form>
+    </section>
+  );
 }
 
 export function ProblemsPage() {
@@ -576,62 +689,69 @@ export function ProblemsPage() {
     form.requestSubmit();
   }
 
-  return (
-    <main className="w-full min-w-0 space-y-6 overflow-x-clip pb-12">
-      <header className="flex min-w-0 flex-col gap-4 border-b border-border/70 pb-5 sm:flex-row sm:items-end sm:justify-between">
-        <div className="min-w-0 space-y-1">
-          <p className="text-xs font-medium tracking-wide text-muted-foreground">统一题库</p>
-          <h1 className="text-3xl font-semibold tracking-tight">题目</h1>
-          <p className="text-sm text-muted-foreground">当前条件下共 {pcount} 道题</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {pdocs.some((pdoc) => canManageContributionsByDocId[String(pdoc.docId)]) ? (
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => {
-                setBatchError('');
-                setBatchVerifierResults(null);
-                setBatchOpen(true);
-              }}
-              disabled={selectedContributionPids.size === 0}
-            >
-              <Users className="size-4" />
-              批量分配协作{selectedContributionPids.size ? ` · ${selectedContributionPids.size}` : ''}
-            </Button>
-          ) : null}
-          <Button type="button" variant="outline" className="sm:hidden" onClick={() => setMobileFiltersOpen(true)}>
-            <SlidersHorizontal className="size-4" />
-            筛选{filtersActive ? ' · 已启用' : ''}
-          </Button>
-          <ProblemCreationActions {...problemCreationCapabilities} />
-        </div>
-      </header>
+  const showBankNav = !!data.canReviewManaged || !!data.canManagePidNamespaces;
 
-      <ProblemBankNav
-        active="problems"
-        problemsUrl={bs.urls.problems}
-        reviewUrl={String(data.problemReviewUrl || '')}
-        canReview={!!data.canReviewManaged}
-        namespaceUrl={String(data.pidNamespaceUrl || '')}
-        canManageNamespaces={!!data.canManagePidNamespaces}
+  return (
+    <main className="w-full min-w-0 overflow-x-clip">
+      <Page width="wide">
+      <PageHeader
+        title="题目"
+        description={(
+          <>
+            <span className="mb-1 block text-xs font-medium text-fg-subtle">统一题库</span>
+            当前条件下共 <span className="tabular">{pcount}</span> 道题
+          </>
+        )}
+        actions={(
+          <>
+            {pdocs.some((pdoc) => canManageContributionsByDocId[String(pdoc.docId)]) ? (
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  setBatchError('');
+                  setBatchVerifierResults(null);
+                  setBatchOpen(true);
+                }}
+                disabled={selectedContributionPids.size === 0}
+              >
+                <Users />
+                批量分配协作{selectedContributionPids.size ? ` · ${selectedContributionPids.size}` : ''}
+              </Button>
+            ) : null}
+            <div className="sm:hidden">
+              <Button type="button" variant="secondary" onClick={() => setMobileFiltersOpen(true)}>
+                <SlidersHorizontal />
+                筛选{filtersActive ? ' · 已启用' : ''}
+              </Button>
+            </div>
+            <ProblemCreationActions {...problemCreationCapabilities} />
+          </>
+        )}
+        tabs={showBankNav ? (
+          <ProblemBankNav
+            active="problems"
+            problemsUrl={bs.urls.problems}
+            reviewUrl={String(data.problemReviewUrl || '')}
+            canReview={!!data.canReviewManaged}
+            namespaceUrl={String(data.pidNamespaceUrl || '')}
+            canManageNamespaces={!!data.canManagePidNamespaces}
+          />
+        ) : undefined}
       />
 
       {batchMessage ? (
-        <p
-          role="status"
-          className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-300"
-        >
+        <p role="status" className="rounded-lg border border-success-line bg-success-soft px-4 py-3 text-sm text-fg">
           {batchMessage}
         </p>
       ) : null}
       {batchError ? (
-        <p role="alert" className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+        <p role="alert" className="rounded-lg border border-danger-line bg-danger-soft px-4 py-3 text-sm text-fg">
           {batchError}
         </p>
       ) : null}
 
-      <section aria-label="题库筛选" className="hidden rounded-2xl bg-muted/45 p-4 sm:block">
+      <section aria-label="题库筛选" className="hidden sm:block">
         <FilterForm
           action={bs.urls.problems}
           query={query}
@@ -646,7 +766,7 @@ export function ProblemsPage() {
       </section>
 
       <Sheet open={mobileFiltersOpen} onOpenChange={setMobileFiltersOpen}>
-        <SheetContent side="bottom" className="max-h-[88vh] min-h-0 pb-[env(safe-area-inset-bottom)]">
+        <SheetContent side="bottom" className="min-h-0">
           <SheetHeader>
             <SheetTitle>筛选题库</SheetTitle>
           </SheetHeader>
@@ -665,66 +785,94 @@ export function ProblemsPage() {
         </SheetContent>
       </Sheet>
 
-      <section aria-label="题目列表" className="min-w-0 overflow-hidden rounded-2xl border border-border/80 bg-background">
-        {pdocs.length === 0 ? (
-          <div className="grid min-h-56 place-items-center px-6 py-12 text-center">
-            <div className="space-y-2">
-              <p className="font-medium">没有符合条件的题目</p>
-              <p className="text-sm text-muted-foreground">调整筛选条件，或创建一道新题。</p>
-              {filtersActive ? (
-                <Button asChild variant="outline" size="sm">
-                  <a href={bs.urls.problems}>清空筛选</a>
-                </Button>
-              ) : null}
-            </div>
-          </div>
-        ) : (
-          <ul className="divide-y divide-border/70">
-            {pdocs.map((pdoc) => {
-              const docId = String(pdoc.docId);
-              const displayPid = String(pdoc.pid || pdoc.docId);
-              const kind = effectiveProblemKind(pdoc);
-              const canManage = !!canManageByDocId[docId];
-              const canArchive = !!canArchiveByDocId[docId];
-              const canManageContributions = !!canManageContributionsByDocId[docId];
-              const canClone = !!canCloneByDocId[docId];
-              const canReviewManaged = !!managedReviewableByDocId[docId];
-              const detailUrl = replaceRouteTokens(bs.urls.problemDetail, { PID: displayPid });
-              const status = psdict[docId]?.status;
-              const sourceTemplate = managedSourceTemplates.find((template) => template.id === pdoc.sourceMeta?.template);
-              const sourceFields = managedSourceFieldViews(pdoc.sourceMeta, sourceTemplate);
-              const pendingPlacement = pdoc.managedAuthoring?.pendingTrainingPlacement;
-              const pendingTraining = managedTrainingOptions.find((training) => training.id === String(pendingPlacement?.trainingId || ''));
-              const pendingChapter = pendingTraining?.chapters?.find((chapter) => chapter.id === pendingPlacement?.chapterId);
-              const pendingContributions = pendingContributionsByDocId[docId] || [];
-              return (
-                <li key={docId} className="min-w-0 px-4 py-4 sm:px-5">
-                  <div className="grid min-w-0 gap-3 sm:grid-cols-[1.2rem_1.2rem_minmax(0,1fr)_auto] sm:items-center">
-                    <SubmissionStatus status={status} />
-                    {canManageContributions ? (
-                      <Checkbox
-                        size="sm"
-                        checked={selectedContributionPids.has(Number(pdoc.docId))}
-                        onCheckedChange={(checked) => toggleContributionPid(Number(pdoc.docId), checked)}
-                        aria-label={`选择 ${pdoc.title || displayPid} 进行协作分配`}
-                      />
-                    ) : (
-                      <span className="size-3.5" aria-hidden="true" />
-                    )}
+      <section aria-label="题目列表">
+        <Panel flush footer={ppcount > 1 ? <Pagination current={page} total={ppcount} baseUrl={problemsBaseUrl} /> : undefined}>
+          {(() => {
+            const problemEmpty = (
+              <EmptyState
+                compact
+                title="没有符合条件的题目"
+                description="调整筛选条件，或创建一道新题。"
+                action={filtersActive ? (
+                  <Button asChild variant="secondary" size="sm">
+                    <a href={bs.urls.problems}>清空筛选</a>
+                  </Button>
+                ) : undefined}
+              />
+            );
+            const columns: Column<ProblemListDocument>[] = [
+              {
+                key: 'status',
+                header: '状态',
+                width: '2.5rem',
+                stackRole: 'hidden',
+                cell: (pdoc) => <SubmissionStatus status={psdict[String(pdoc.docId)]?.status} />,
+              },
+              {
+                key: 'pick',
+                header: '选择',
+                width: '2.5rem',
+                stackRole: 'hidden',
+                cell: (pdoc) => {
+                  const docId = String(pdoc.docId);
+                  const displayPid = String(pdoc.pid || pdoc.docId);
+                  if (!canManageContributionsByDocId[docId]) return <span className="size-4" aria-hidden="true" />;
+                  return (
+                    <Checkbox
+                      size="sm"
+                      checked={selectedContributionPids.has(Number(pdoc.docId))}
+                      onCheckedChange={(checked) => toggleContributionPid(Number(pdoc.docId), checked)}
+                      aria-label={`选择 ${pdoc.title || displayPid} 进行协作分配`}
+                    />
+                  );
+                },
+              },
+              {
+                key: 'pid',
+                header: '题号',
+                width: '6rem',
+                stackRole: 'hidden',
+                cell: (pdoc) => <span className="font-mono text-xs text-fg-subtle">{String(pdoc.pid || pdoc.docId)}</span>,
+              },
+              {
+                key: 'title',
+                header: '标题',
+                stackRole: 'title',
+                cell: (pdoc) => {
+                  const docId = String(pdoc.docId);
+                  const displayPid = String(pdoc.pid || pdoc.docId);
+                  const kind = effectiveProblemKind(pdoc);
+                  const canReviewManaged = !!managedReviewableByDocId[docId];
+                  const canManageContributions = !!canManageContributionsByDocId[docId];
+                  const detailUrl = replaceRouteTokens(bs.urls.problemDetail, { PID: displayPid });
+                  const status = psdict[docId]?.status;
+                  const pendingContributions = pendingContributionsByDocId[docId] || [];
+                  return (
                     <div className="min-w-0 space-y-2">
                       <div className="flex min-w-0 flex-wrap items-center gap-2">
-                        <Badge variant="secondary" className="font-normal">
-                          {KIND_LABEL[kind]}
-                        </Badge>
-                        <a href={detailUrl} className="min-w-0 truncate font-medium hover:text-primary hover:underline">
+                        <span className="md:hidden"><SubmissionStatus status={status} /></span>
+                        {canManageContributions ? (
+                          <span className="md:hidden">
+                            <Checkbox
+                              size="sm"
+                              checked={selectedContributionPids.has(Number(pdoc.docId))}
+                              onCheckedChange={(checked) => toggleContributionPid(Number(pdoc.docId), checked)}
+                              aria-label={`选择 ${pdoc.title || displayPid} 进行协作分配`}
+                            />
+                          </span>
+                        ) : null}
+                        <Badge variant="outline" size="sm">{KIND_LABEL[kind]}</Badge>
+                        <a href={detailUrl} className="min-w-0 truncate font-medium text-fg hover:text-brand-fg hover:underline">
                           {pdoc.title || '未命名题目'}
                         </a>
-                        <span className="font-mono text-xs text-muted-foreground">{displayPid}</span>
+                        <span className="font-mono text-xs text-fg-subtle md:hidden">{displayPid}</span>
                         {canReviewManaged ? (
-                          <Badge variant="outline">{pdoc.managedAuthoring?.metadataStatus === 'draft' ? '元数据待确认' : '等待重新公开'}</Badge>
+                          <Badge variant="outline" tone="warning" size="sm">
+                            {pdoc.managedAuthoring?.metadataStatus === 'draft' ? '元数据待确认' : '等待重新公开'}
+                          </Badge>
                         ) : null}
                       </div>
-                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-fg-subtle">
                         <span>出题人 · {ownerNames[String(pdoc.owner)] || `UID ${pdoc.owner}`}</span>
                         <span className="inline-flex items-center gap-1">
                           {pdoc.hidden ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
@@ -746,101 +894,46 @@ export function ProblemsPage() {
                       {pdoc.tag?.length ? (
                         <div className="flex flex-wrap gap-1">
                           {(pdoc.tag as string[]).slice(0, 5).map((tag) => (
-                            <Badge key={tag} variant="outline" className="font-normal">
+                            <Badge key={tag} variant="outline" size="sm">
                               {tag}
                             </Badge>
                           ))}
                         </div>
                       ) : null}
                       {canReviewManaged ? (
-                        <section className="mt-3 space-y-3 rounded-xl border border-primary/20 bg-primary/[0.025] p-4" aria-label="托管草稿审核">
-                          <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 lg:grid-cols-4">
-                            <span>
-                              工作标题 · <strong className="font-medium text-foreground">{pdoc.managedAuthoring?.workingTitle || '—'}</strong>
-                            </span>
-                            {sourceFields.map((field) => (
-                              <span key={field.label}>
-                                {field.label} · <strong className="font-medium text-foreground">{field.value}</strong>
-                              </span>
-                            ))}
-                            {pdoc.managedAuthoring?.metadataStatus === 'draft' ? (
-                              <span>
-                                待挂训练 ·{' '}
-                                <strong className="font-medium text-foreground">
-                                  {pendingPlacement
-                                    ? `${pendingTraining?.title || '训练已失效'} / ${pendingChapter?.title || `章节 ${pendingPlacement.chapterId}`}`
-                                    : '不挂入训练'}
-                                </strong>
-                              </span>
-                            ) : null}
-                          </div>
-                          {pendingContributions.length ? (
-                            <div className="rounded-xl border border-amber-500/35 bg-amber-500/[0.06] px-4 py-3 text-xs text-amber-800 dark:text-amber-300">
-                              <p className="font-medium">仍有 {pendingContributions.length} 项协作任务待完成，发布不会自动完成或撤销这些任务。</p>
-                              <div className="mt-2 flex flex-wrap gap-1.5">
-                                {pendingContributions.map((item, index) => (
-                                  <Badge key={`${item.uid}:${item.scope}:${index}`} variant="outline">
-                                    {contributionUdict[item.uid]?.uname || `UID ${item.uid}`} · {item.scope === 'data' ? '数据' : '标签'}
-                                  </Badge>
-                                ))}
-                              </div>
-                            </div>
-                          ) : null}
-                          <form
-                            method="post"
-                            className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_9rem_auto] sm:items-end"
-                            onSubmit={(event) => requestManagedPublish(event, pdoc.title || displayPid, pendingContributions)}
-                          >
-                            <ManagedPublishProtocolFields docId={pdoc.docId} expectedStructureRevision={pdoc.structureRevision} />
-                            <input type="hidden" name="pendingContributionsConfirmed" value="false" />
-                            <input type="hidden" name="pendingContributionFingerprint" value={pendingContributionFingerprintByDocId[docId] || ''} />
-                            {pdoc.managedAuthoring?.metadataStatus === 'draft' ? (
-                              <label className="space-y-1.5">
-                                <span className="text-xs font-medium text-muted-foreground">正式标题</span>
-                                <Input
-                                  name="formalTitle"
-                                  defaultValue={pdoc.managedAuthoring?.workingTitle || ''}
-                                  required
-                                  className="min-h-10"
-                                />
-                              </label>
-                            ) : (
-                              <div className="space-y-1.5">
-                                <span className="text-xs font-medium text-muted-foreground">正式标题</span>
-                                <p className="text-sm font-medium">{pdoc.title || '未命名题目'}</p>
-                                <p className="text-xs text-muted-foreground">重新公开不会改正式标题。题库管理员请到题目编辑页更正。</p>
-                                <input type="hidden" name="formalTitle" value={pdoc.title || ''} />
-                              </div>
-                            )}
-                            <label className="space-y-1.5">
-                              <span className="text-xs font-medium text-muted-foreground">难度</span>
-                              <SimpleSelect
-                                name="difficulty"
-                                defaultValue={String(pdoc.difficulty ?? 0)}
-                                className="min-h-10"
-                                options={Array.from({ length: 11 }, (_, value) => ({
-                                  value: String(value),
-                                  label: value === 0 ? '未设置' : String(value),
-                                }))}
-                              />
-                            </label>
-                            {pdoc.managedAuthoring?.metadataStatus === 'draft' ? (
-                              <label className="flex min-h-10 items-center gap-2 rounded-xl border border-border/75 px-3 text-sm sm:col-span-2">
-                                <Switch name="finalHidden" value="true" />
-                                <span>
-                                  <span className="block font-medium">审核后保持隐藏</span>
-                                  <span className="block text-xs text-muted-foreground">确认元数据与训练归属，但暂不向普通用户公开。</span>
-                                </span>
-                              </label>
-                            ) : null}
-                            <Button type="submit" className="min-h-10">
-                              {pdoc.managedAuthoring?.metadataStatus === 'draft' ? '确认并发布' : '重新公开'}
-                            </Button>
-                          </form>
-                        </section>
+                        <ProblemManagedReview
+                          pdoc={pdoc}
+                          managedSourceTemplates={managedSourceTemplates}
+                          managedTrainingOptions={managedTrainingOptions}
+                          pendingContributions={pendingContributions}
+                          pendingFingerprint={pendingContributionFingerprintByDocId[docId] || ''}
+                          contributionUdict={contributionUdict}
+                          onPublish={requestManagedPublish}
+                        />
                       ) : null}
                     </div>
-                    <div className="flex min-w-0 flex-wrap items-center gap-1 sm:justify-end">
+                  );
+                },
+              },
+              {
+                key: 'difficulty',
+                header: '难度',
+                width: '5rem',
+                stackRole: 'meta',
+                cell: (pdoc) => <Difficulty level={problemDifficultyLevel(pdoc.difficulty)} />,
+              },
+              {
+                key: 'actions',
+                header: '操作',
+                cell: (pdoc) => {
+                  const docId = String(pdoc.docId);
+                  const displayPid = String(pdoc.pid || pdoc.docId);
+                  const canManage = !!canManageByDocId[docId];
+                  const canArchive = !!canArchiveByDocId[docId];
+                  const canClone = !!canCloneByDocId[docId];
+                  const detailUrl = replaceRouteTokens(bs.urls.problemDetail, { PID: displayPid });
+                  return (
+                    <div className="flex min-w-0 flex-wrap items-center gap-1">
                       <Button asChild variant="ghost" size="sm">
                         <a href={detailUrl}>查看</a>
                       </Button>
@@ -848,7 +941,7 @@ export function ProblemsPage() {
                         <>
                           <Button asChild variant="ghost" size="sm">
                             <a href={`${detailUrl}/edit`}>
-                              <Pencil className="size-3.5" />
+                              <Pencil />
                               编辑
                             </a>
                           </Button>
@@ -857,7 +950,7 @@ export function ProblemsPage() {
                               <input type="hidden" name="operation" value="clone" />
                               <input type="hidden" name="pid" value={docId} />
                               <Button type="submit" variant="ghost" size="sm">
-                                <Copy className="size-3.5" />
+                                <Copy />
                                 克隆
                               </Button>
                             </form>
@@ -876,8 +969,8 @@ export function ProblemsPage() {
                               <input type="hidden" name="operation" value="archive" />
                               <input type="hidden" name="pid" value={docId} />
                               <input type="hidden" name="reason" value="Archived from problem bank" />
-                              <Button type="submit" variant="ghost" size="sm">
-                                <Archive className="size-3.5" />
+                              <Button type="submit" variant="danger-soft" size="sm">
+                                <Archive />
                                 归档
                               </Button>
                             </form>
@@ -885,31 +978,61 @@ export function ProblemsPage() {
                         </>
                       ) : null}
                     </div>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        )}
+                  );
+                },
+              },
+            ];
+            const titleColumn = columns.find((column) => column.stackRole === 'title');
+            if (titleColumn === undefined) {
+              throw new TypeError('Problem bank stack layout needs a title column');
+            }
+            const metaColumn = columns.find((column) => column.stackRole === 'meta');
+            const restColumns = columns.filter((column) => column !== titleColumn && column !== metaColumn && column.stackRole !== 'hidden');
+            return (
+              <>
+                <div className="hidden md:block">
+                  <DataTable
+                    mobile="stack"
+                    rows={pdocs}
+                    rowKey={(pdoc) => String(pdoc.docId)}
+                    empty={problemEmpty}
+                    columns={columns}
+                  />
+                </div>
+                <ul className="divide-y divide-line-subtle md:hidden">
+                  {pdocs.length === 0 ? <li>{problemEmpty}</li> : pdocs.map((pdoc) => (
+                    <li key={String(pdoc.docId)} className="flex flex-col gap-2 px-4 py-3">
+                      <div className="flex w-full items-start justify-between gap-3">
+                        <div className="min-w-0">{titleColumn.cell(pdoc)}</div>
+                        {metaColumn ? <div className="shrink-0">{metaColumn.cell(pdoc)}</div> : null}
+                      </div>
+                      {restColumns.map((column) => (
+                        <div key={column.key} className="min-w-0">{column.cell(pdoc)}</div>
+                      ))}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            );
+          })()}
+        </Panel>
       </section>
 
-      <Pagination current={page} total={ppcount} baseUrl={problemsBaseUrl} />
-
       <Dialog open={batchOpen} onOpenChange={(open) => !batchBusy && setBatchOpen(open)}>
-        <DialogContent className="w-full sm:w-[580px]" onClose={() => !batchBusy && setBatchOpen(false)}>
+        <DialogContent size="lg" onClose={() => !batchBusy && setBatchOpen(false)}>
           <DialogHeader>
             <DialogTitle>批量分配题目协作</DialogTitle>
           </DialogHeader>
           <form onSubmit={submitContributionBatch}>
-            <DialogBody className="space-y-4 p-5">
-            <p className="text-sm text-muted-foreground">只处理本页已明确勾选的 {selectedContributionPids.size} 道题。</p>
+            <DialogBody className="space-y-4">
+            <p className="text-sm text-fg-muted">只处理本页已明确勾选的 {selectedContributionPids.size} 道题。</p>
             {batchError ? (
-              <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+              <p role="alert" className="rounded-lg border border-danger-line bg-danger-soft px-3 py-2 text-sm text-fg">
                 {batchError}
               </p>
             ) : null}
             <div className="space-y-1.5">
-              <label className="text-xs text-muted-foreground">目标用户</label>
+              <label className="text-xs text-fg-subtle">目标用户</label>
               <MultiSelect<DomainUserOption>
                 value={batchUser}
                 onChange={(next) => {
@@ -935,7 +1058,7 @@ export function ProblemsPage() {
               />
             </div>
             <fieldset className="space-y-2">
-              <legend className="text-xs text-muted-foreground">协作类型</legend>
+              <legend className="text-xs text-fg-subtle">协作类型</legend>
               <label className="flex items-center gap-2 text-sm">
                 <Checkbox
                   checked={batchDataScope}
@@ -978,21 +1101,21 @@ export function ProblemsPage() {
                 />
                 <span>
                   <span className="block">只读验题人</span>
-                  <span className="block text-xs leading-5 text-muted-foreground">可查看题面、测试数据和提交记录，不能编辑题目。</span>
+                  <span className="block text-xs text-fg-subtle">可查看题面、测试数据和提交记录，不能编辑题目。</span>
                 </span>
               </label>
             </fieldset>
             <div className="space-y-1.5">
-              <label htmlFor="batch-contribution-note" className="text-xs text-muted-foreground">
+              <label htmlFor="batch-contribution-note" className="text-xs text-fg-subtle">
                 备注（可选）
               </label>
               <Input id="batch-contribution-note" name="note" placeholder="会进入任务箱和站内信" />
             </div>
             {batchVerifierResults ? (
-              <div className="space-y-3 rounded-xl border border-border/70 bg-muted/30 p-3 text-sm">
+              <div className="space-y-3 rounded-lg border border-line bg-surface-sunken p-3 text-sm">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="font-medium">逐题结果</p>
-                  <p className="font-mono text-xs text-muted-foreground">{batchVerifierResults.requestId}</p>
+                  <p className="font-mono text-xs text-fg-subtle">{batchVerifierResults.requestId}</p>
                 </div>
                 {(
                   [
@@ -1006,12 +1129,12 @@ export function ProblemsPage() {
                   if (!items.length) return null;
                   return (
                     <div key={status} className="space-y-1">
-                      <p className="text-xs font-medium text-muted-foreground">
+                      <p className="text-xs font-medium text-fg-subtle">
                         {label} · {items.length}
                       </p>
                       <ul className="flex flex-wrap gap-1.5">
                         {items.map((item) => (
-                          <li key={item.pid} className="rounded-md border border-border/70 bg-background px-2 py-1 font-mono text-xs">
+                          <li key={item.pid} className="rounded-md border border-line bg-surface px-2 py-1 font-mono text-xs">
                             {item.publicPid}
                           </li>
                         ))}
@@ -1022,12 +1145,13 @@ export function ProblemsPage() {
               </div>
             ) : null}
             </DialogBody>
-            <DialogFooter className="flex justify-end gap-2 flex-row">
+            <DialogFooter>
               <Button type="button" variant="ghost" disabled={batchBusy} onClick={() => setBatchOpen(false)}>
                 取消
               </Button>
               <Button
                 type="submit"
+                variant="primary"
                 disabled={batchBusy || !selectedContributionPids.size || !batchUser[0] || (!batchVerifierRole && !batchDataScope && !batchTagScope)}
               >
                 {batchBusy ? '分配中…' : batchVerifierRole && batchVerifierResults?.retryPids.length ? '重试失败项' : '确认分配'}
@@ -1038,14 +1162,14 @@ export function ProblemsPage() {
       </Dialog>
 
       <Dialog open={publishConfirm !== null} onOpenChange={(open) => !open && setPublishConfirm(null)}>
-        <DialogContent className="w-full sm:w-[520px]" onClose={() => setPublishConfirm(null)}>
+        <DialogContent size="md" onClose={() => setPublishConfirm(null)}>
           <DialogHeader>
             <DialogTitle>确认发布题目</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 p-5">
-            <p className="text-sm leading-6 text-muted-foreground">确认发布「{publishConfirm?.title || '题目'}」？</p>
+          <DialogBody className="space-y-4">
+            <p className="text-sm text-fg-muted text-pretty">确认发布「{publishConfirm?.title || '题目'}」？</p>
             {publishConfirm?.pending.length ? (
-              <div className="rounded-xl border border-amber-500/35 bg-amber-500/[0.06] px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
+              <div className="rounded-lg border border-warning-line bg-warning-soft px-4 py-3 text-sm text-fg">
                 <p className="font-medium">下列协作任务仍未完成：</p>
                 <ul className="mt-2 space-y-1 text-xs">
                   {publishConfirm.pending.map((item, index) => (
@@ -1057,17 +1181,18 @@ export function ProblemsPage() {
                 <p className="mt-2 text-xs">继续发布不会完成、撤销或公开这些任务。</p>
               </div>
             ) : null}
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => setPublishConfirm(null)}>
-                取消
-              </Button>
-              <Button type="button" onClick={confirmManagedPublish}>
-                确认发布
-              </Button>
-            </div>
-          </div>
+          </DialogBody>
+          <DialogFooter>
+            <Button type="button" variant="secondary" onClick={() => setPublishConfirm(null)}>
+              取消
+            </Button>
+            <Button type="button" variant="primary" onClick={confirmManagedPublish}>
+              确认发布
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
+      </Page>
     </main>
   );
 }

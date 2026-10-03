@@ -1,10 +1,10 @@
 import { type ReactNode } from 'react';
-import { motion } from 'motion/react';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 import { canAccessDomainAdmin, hasAnyPriv, type PrivBit } from '@/lib/perms';
 import { AdminSidebar } from '@/components/admin/admin-sidebar';
 import { ForbiddenPanel } from '@/components/admin/forbidden';
+import { Page, PageHeader, Workspace } from '@/components/ui/page';
 import { ScrollArea } from '@/components/ui/scroll-area';
 
 export interface AdminPageProps {
@@ -33,6 +33,28 @@ export interface AdminPageProps {
  * - the secondary `AdminSidebar` (per-section nav registered via admin-nav-registry)
  * - consistent header (title, description, actions)
  */
+function AdminHeading({ title, description, actions }: Pick<AdminPageProps, 'title' | 'description' | 'actions'>) {
+  if (typeof title === 'string') {
+    return <PageHeader title={title} description={description} actions={actions} />;
+  }
+  if (!title && !description && !actions) {
+    return null;
+  }
+  return (
+    <header className="flex flex-col gap-3 border-b border-line pb-5 sm:flex-row sm:items-end sm:justify-between sm:gap-6">
+      <div className="min-w-0">
+        {title || null}
+        {description
+          ? typeof description === 'string'
+            ? <p className="mt-1.5 max-w-prose text-sm text-pretty text-fg-muted">{description}</p>
+            : description
+          : null}
+      </div>
+      {actions ? <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div> : null}
+    </header>
+  );
+}
+
 export function AdminPage({
   title,
   actions,
@@ -61,42 +83,33 @@ export function AdminPage({
     if (!allowed) return <ForbiddenPanel />;
   }
 
-  const body = (
-    <motion.div className={cn('min-w-0 space-y-5', contentClassName)} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.15 }}>
-      {(title || actions || description) && (
-        <header className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-          <div className="min-w-0 space-y-1">
-            {title ? typeof title === 'string' ? <h1 className="text-xl font-semibold tracking-tight">{title}</h1> : title : null}
-            {description ? typeof description === 'string' ? <p className="text-sm text-muted-foreground">{description}</p> : description : null}
-          </div>
-          {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
-        </header>
-      )}
+  const heading = <AdminHeading title={title} description={description} actions={actions} />;
+  const content = <div className={cn('min-w-0', contentClassName)}>{children}</div>;
 
-      {children}
-    </motion.div>
-  );
-
-  // Full-bleed modules (ModuleWorkspace, etc.) keep page-level scroll. Pinning
-  // them to the split-pane height would nest a viewport inside router padding
-  // and clip or double-scroll the content.
+  // Full-bleed modules scroll with the shell page. The split shell below owns
+  // its height, so those pages must not be pinned inside it.
   if (hideSidebar) {
-    return <div className="w-full min-w-0">{body}</div>;
+    return (
+      <Page width="wide">
+        {heading}
+        {content}
+      </Page>
+    );
   }
 
-  // Split scroll: pin to 100dvh minus topbar (h-12 / 3rem) and main padding
-  // from router.tsx (`p-3 sm:p-6 xl:p-8`). Same formula as mindmap/admin.
   return (
-    <div
-      className={cn(
-        'flex min-h-0 w-full min-w-0 items-stretch gap-6',
-        'h-[calc(100dvh-4.5rem)] sm:h-[calc(100dvh-6rem)] xl:h-[calc(100dvh-7rem)]',
-      )}
-    >
-      <AdminSidebar currentTemplate={bs.page.templateName} />
-      <ScrollArea className="min-h-0 min-w-0 flex-1" viewportLayout="block" viewportClassName="pr-1 [&>div]:min-w-0 [&>div]:w-full">
-        {body}
-      </ScrollArea>
-    </div>
+    <Workspace className="w-full min-w-0">
+      <div className="flex min-h-0 flex-1">
+        <AdminSidebar currentTemplate={bs.page.templateName} />
+        <ScrollArea viewportLayout="block" className="min-h-0 min-w-0 flex-1">
+          <div className="mx-auto w-full max-w-7xl px-4 pt-5 pb-16 sm:px-6 sm:pt-8 lg:px-8">
+            <div className="flex flex-col gap-6 short:gap-4">
+              {heading}
+              {content}
+            </div>
+          </div>
+        </ScrollArea>
+      </div>
+    </Workspace>
   );
 }

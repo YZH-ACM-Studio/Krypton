@@ -8,8 +8,10 @@ import { useState } from 'react';
 import { AlertCircle, ArrowLeft, Award as AwardIcon, Camera, CircleCheck, ImageOff, LoaderCircle, Trophy, Users, ZoomIn } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Page, PageHeader } from '@/components/ui/page';
+import { Panel } from '@/components/ui/panel';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
@@ -98,37 +100,39 @@ function TeamCard({ card, canUpload, uid, onLightbox }: { card: GalleryCard; can
   };
 
   return (
-    <Card className="w-full min-w-0 overflow-hidden">
-      {/* 封面区 */}
-      <div className="relative h-44 w-full overflow-hidden bg-muted">
+    <Panel flush className="h-full">
+      <div className="relative aspect-video w-full overflow-hidden bg-surface-sunken">
         {cover ? (
-          <button type="button" onClick={() => onLightbox(cover)} className="block size-full">
+          <Button type="button" variant="ghost" onClick={() => onLightbox(cover)} className="block h-auto! w-full rounded-none p-0">
             <img src={cover} alt={card.title} className="size-full object-cover" />
-          </button>
+          </Button>
         ) : (
-          <div className="flex size-full flex-col items-center justify-center gap-1.5 bg-muted/40 text-muted-foreground">
+          <div className="flex size-full flex-col items-center justify-center gap-1.5 text-fg-subtle">
             <ImageOff className="size-6" />
             <span className="text-xs">暂无照片</span>
           </div>
         )}
         {cover || canUpload ? (
-          <div className="absolute right-2 top-2 flex items-center gap-1">
+          <div className="absolute top-2 right-2 flex items-center gap-1">
             {cover ? (
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="sm"
+                iconOnly
                 title="查看大图"
                 onClick={() => onLightbox(cover)}
-                className="rounded-full bg-black/50 p-1.5 text-white"
+                className="rounded-full bg-scrim text-bg hover:bg-scrim hover:text-bg"
               >
-                <ZoomIn className="size-3.5" />
-              </button>
+                <ZoomIn />
+              </Button>
             ) : null}
             {canUpload ? (
               <label
                 title={imageUrls.length ? '替换照片' : '上传照片'}
                 className={cn(
-                  'flex size-8 cursor-pointer items-center justify-center rounded-full bg-black/50 text-white',
-                  uploading && 'pointer-events-none opacity-50',
+                  'flex size-8 cursor-pointer items-center justify-center rounded-full bg-scrim text-bg',
+                  uploading && 'pointer-events-none opacity-45',
                 )}
               >
                 <Camera className="size-3.5" />
@@ -138,10 +142,10 @@ function TeamCard({ card, canUpload, uid, onLightbox }: { card: GalleryCard; can
                   aria-label={imageUrls.length ? '替换照片' : '上传照片'}
                   className="hidden"
                   disabled={uploading}
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) upload(f);
-                    e.target.value = '';
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) upload(file);
+                    event.target.value = '';
                   }}
                 />
               </label>
@@ -149,19 +153,17 @@ function TeamCard({ card, canUpload, uid, onLightbox }: { card: GalleryCard; can
           </div>
         ) : null}
       </div>
-      <CardContent className="space-y-2.5 p-4">
+      <div className="space-y-2.5 p-4">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold" title={card.title}>
               {card.title}
             </p>
             <div className="mt-1 flex flex-wrap items-center gap-1.5">
-              <Badge variant="secondary" className="text-[10px]">
-                {card.typeName}
-              </Badge>
+              <Badge tone="neutral" size="sm">{card.typeName}</Badge>
               {card.team ? (
-                <Badge variant="outline" className="text-[10px]">
-                  <Users className="mr-0.5 size-2.5" />
+                <Badge variant="outline" tone="neutral" size="sm">
+                  <Users className="size-3" />
                   {card.team}
                 </Badge>
               ) : null}
@@ -169,56 +171,55 @@ function TeamCard({ card, canUpload, uid, onLightbox }: { card: GalleryCard; can
             {teamRankLabel ? (
               <p
                 className={cn(
-                  'mt-1.5 text-xs font-medium',
+                  'mt-1.5 text-xs font-semibold tabular',
                   teamRankStatus === 'confirmed'
-                    ? 'text-foreground'
+                    ? 'text-fg'
                     : teamRankStatus === 'conflict'
-                      ? 'text-destructive'
-                      : 'text-amber-600 dark:text-amber-400',
+                      ? 'text-danger-fg'
+                      : 'text-warning-fg',
                 )}
               >
                 {teamRankLabel}
               </p>
             ) : null}
           </div>
-          {card.kind === 'ladder' ? <Trophy className="size-4 shrink-0 text-amber-500" /> : <AwardIcon className="size-4 shrink-0 text-primary" />}
+          {card.kind === 'ladder' ? <Trophy className="size-4 shrink-0 text-fg-subtle" /> : <AwardIcon className="size-4 shrink-0 text-fg-subtle" />}
         </div>
 
-        {/* 成员与成绩 */}
         <div className="flex flex-wrap gap-1">
-          {card.members.map((m) => (
+          {card.members.map((member) => (
             <span
-              key={`${m.personId}-${m.awardIndex}`}
-              className="inline-flex items-center gap-1 rounded bg-muted/60 px-1.5 py-0.5 text-[11px]"
-              title={m.studentId}
+              key={`${member.personId}-${member.awardIndex}`}
+              className="inline-flex items-center gap-1 rounded-sm bg-surface-active px-1.5 py-0.5 text-2xs"
+              title={member.studentId}
             >
-              {m.realName}
-              {m.score != null ? <span className="font-mono text-muted-foreground">{m.score}</span> : null}
+              {member.realName}
+              {member.score != null ? <span className="tabular text-fg-muted">{member.score}</span> : null}
             </span>
           ))}
         </div>
 
-        {/* 更多照片 + 上传 */}
         <div className="flex items-center gap-1.5">
           {imageUrls
-            .filter((u) => u !== cover)
+            .filter((url) => url !== cover)
             .slice(0, 4)
-            .map((u) => (
-              <button
-                key={u}
+            .map((url) => (
+              <Button
+                key={url}
                 type="button"
-                onClick={() => onLightbox(u)}
-                className="size-10 overflow-hidden rounded border bg-muted hover:opacity-80"
+                variant="ghost"
+                onClick={() => onLightbox(url)}
+                className="size-10 h-10! w-10! overflow-hidden rounded-md p-0"
               >
-                <img src={u} alt="" className="size-full object-cover" />
-              </button>
+                <img src={url} alt="" className="size-full object-cover" />
+              </Button>
             ))}
           {canUpload ? (
             <label
               title={imageUrls.length ? '替换照片' : '上传照片'}
               className={cn(
-                'flex size-10 cursor-pointer items-center justify-center rounded border border-dashed text-muted-foreground transition-colors hover:border-primary hover:text-primary',
-                uploading && 'pointer-events-none opacity-50',
+                'flex size-10 cursor-pointer items-center justify-center rounded-md border border-dashed border-line text-fg-muted hover:border-brand hover:text-brand-fg',
+                uploading && 'pointer-events-none opacity-45',
               )}
             >
               <Camera className="size-4" />
@@ -228,46 +229,62 @@ function TeamCard({ card, canUpload, uid, onLightbox }: { card: GalleryCard; can
                 aria-label={imageUrls.length ? '替换照片' : '上传照片'}
                 className="hidden"
                 disabled={uploading}
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) upload(f);
-                  e.target.value = '';
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) upload(file);
+                  event.target.value = '';
                 }}
               />
             </label>
           ) : null}
           {uploading ? (
-            <span role="status" aria-live="polite" className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+            <span role="status" aria-live="polite" className="inline-flex items-center gap-1 text-xs text-fg-muted">
               <LoaderCircle className="size-3.5 animate-spin" />
               上传中…
             </span>
           ) : uploadSucceeded ? (
-            <span role="status" aria-live="polite" className="inline-flex items-center gap-1 text-xs text-emerald-600">
+            <span role="status" aria-live="polite" className="inline-flex items-center gap-1 text-xs text-success-fg">
               <CircleCheck className="size-3.5" />
               照片已保存
             </span>
           ) : null}
         </div>
-      </CardContent>
+      </div>
       <Dialog open={!!errorMessage} onOpenChange={(open) => !open && setErrorMessage('')}>
-        <DialogContent className="w-full sm:w-[440px]" onClose={() => setErrorMessage('')}>
+        <DialogContent onClose={() => setErrorMessage('')}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <AlertCircle className="size-4 text-destructive" />
+              <AlertCircle className="size-4 text-danger-fg" />
               照片上传失败
             </DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 px-6 py-5">
-            <p className="text-sm leading-6 text-muted-foreground">{errorMessage}</p>
-            <div className="flex justify-end">
-              <Button type="button" onClick={() => setErrorMessage('')}>
-                知道了
-              </Button>
-            </div>
-          </div>
+          <DialogBody>
+            <p className="text-sm text-fg-muted">{errorMessage}</p>
+          </DialogBody>
+          <DialogFooter>
+            <Button type="button" variant="primary" onClick={() => setErrorMessage('')}>
+              知道了
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
-    </Card>
+    </Panel>
+  );
+}
+
+function GalleryGrid({ cards, canUpload, uid, onLightbox }: { cards: GalleryCard[]; canUpload: boolean; uid: number; onLightbox: (url: string) => void }) {
+  return (
+    <div className="grid w-full min-w-0 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      {cards.map((card, index) => (
+        <TeamCard
+          key={`${card.contest || ''}-${card.typeKey}-${card.team || index}`}
+          card={card}
+          canUpload={canUpload}
+          uid={uid}
+          onLightbox={onLightbox}
+        />
+      ))}
+    </div>
   );
 }
 
@@ -276,82 +293,63 @@ export function RankBoardGalleryPage() {
   const data = bs.page.data as { years: YearBucket[]; canUpload: boolean };
   const years: YearBucket[] = data.years || [];
   const [lightbox, setLightbox] = useState<string | null>(null);
+  const description = `按年展示天梯赛团队与 ICPC / CCPC 队伍的获奖照片和成绩${data.canUpload ? '。点卡片上的相机图标可直接上传照片。' : ''}`;
 
   return (
-    <div className="min-w-0 space-y-6">
-      <div className="flex flex-wrap items-start gap-3">
-        <Button asChild variant="ghost" size="icon" className="shrink-0">
-          <a href="/rankboard">
-            <ArrowLeft className="size-4" />
-          </a>
-        </Button>
-        <div className="min-w-0 flex-1">
-          <h1 className="text-xl font-semibold">荣誉照片墙</h1>
-          <p className="text-sm text-muted-foreground">
-            按年展示天梯赛团队与 ICPC / CCPC 队伍的获奖照片和成绩
-            {data.canUpload ? '。点卡片上的相机图标可直接上传照片。' : ''}
-          </p>
-        </div>
-      </div>
+    <Page width="full">
+      <PageHeader
+        title="荣誉照片墙"
+        description={description}
+        actions={(
+          <Button asChild variant="ghost" size="sm" iconOnly>
+            <a href="/rankboard" aria-label="返回荣誉榜" title="返回荣誉榜">
+              <ArrowLeft className="size-4" />
+            </a>
+          </Button>
+        )}
+      />
 
       {years.length === 0 ? (
-        <Card>
-          <CardContent className="py-16 text-center text-sm text-muted-foreground">还没有可展示的获奖记录。</CardContent>
-        </Card>
+        <EmptyState compact title="还没有可展示的获奖记录。" />
       ) : (
         years.map((bucket) => (
           <section key={bucket.year ?? 'unknown'} className="space-y-4">
-            <h2 className="flex items-center gap-2 border-b pb-2 text-lg font-semibold">
+            <h2 className="flex items-center gap-2 border-b border-line pb-2 text-lg font-semibold">
               {bucket.year ?? '年份未知'}
-              <span className="text-xs font-normal text-muted-foreground">{bucket.ladder.length + bucket.icpc.length} 项</span>
+              <span className="text-xs font-normal text-fg-subtle">{bucket.ladder.length + bucket.icpc.length} 项</span>
             </h2>
             {bucket.ladder.length > 0 ? (
               <div>
-                <h3 className="mb-2 flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
-                  <Trophy className="size-3.5 text-amber-500" />
+                <h3 className="mb-2 flex items-center gap-1.5 text-sm font-medium text-fg-subtle">
+                  <Trophy className="size-3.5" />
                   天梯赛（团队）
                 </h3>
-                <div className="grid w-full min-w-0 grid-cols-[repeat(auto-fit,minmax(16rem,1fr))] gap-4">
-                  {bucket.ladder.map((card, i) => (
-                    <TeamCard
-                      key={`${card.typeKey}-${card.team || i}`}
-                      card={card}
-                      canUpload={data.canUpload}
-                      uid={bs.user.id}
-                      onLightbox={setLightbox}
-                    />
-                  ))}
-                </div>
+                <GalleryGrid cards={bucket.ladder} canUpload={data.canUpload} uid={bs.user.id} onLightbox={setLightbox} />
               </div>
             ) : null}
             {bucket.icpc.length > 0 ? (
               <div>
-                <h3 className="mb-2 flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
-                  <AwardIcon className="size-3.5 text-primary" />
+                <h3 className="mb-2 flex items-center gap-1.5 text-sm font-medium text-fg-subtle">
+                  <AwardIcon className="size-3.5" />
                   ICPC / CCPC（队伍）
                 </h3>
-                <div className="grid w-full min-w-0 grid-cols-[repeat(auto-fit,minmax(16rem,1fr))] gap-4">
-                  {bucket.icpc.map((card, i) => (
-                    <TeamCard
-                      key={`${card.contest || ''}-${card.typeKey}-${card.team || i}`}
-                      card={card}
-                      canUpload={data.canUpload}
-                      uid={bs.user.id}
-                      onLightbox={setLightbox}
-                    />
-                  ))}
-                </div>
+                <GalleryGrid cards={bucket.icpc} canUpload={data.canUpload} uid={bs.user.id} onLightbox={setLightbox} />
               </div>
             ) : null}
           </section>
         ))
       )}
 
-      {lightbox && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-6" onClick={() => setLightbox(null)}>
-          <img src={lightbox} alt="" className="max-h-[90vh] max-w-[90vw] object-contain" />
-        </div>
-      )}
-    </div>
+      <Dialog open={lightbox !== null} onOpenChange={(open) => !open && setLightbox(null)}>
+        <DialogContent size="xl" onClose={() => setLightbox(null)}>
+          <DialogHeader>
+            <DialogTitle className="sr-only">照片</DialogTitle>
+          </DialogHeader>
+          <DialogBody>
+            {lightbox ? <img src={lightbox} alt="" className="w-full object-contain" /> : null}
+          </DialogBody>
+        </DialogContent>
+      </Dialog>
+    </Page>
   );
 }

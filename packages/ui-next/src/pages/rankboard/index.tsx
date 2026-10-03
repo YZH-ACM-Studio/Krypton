@@ -3,27 +3,23 @@
  *
  *   rankboard_main.html    → RankBoardMainPage
  *   rankboard_detail.html  → RankBoardDetailPage
- *
- * Layout:
- *   - Top 3 podium cards (gold / silver / bronze)
- *   - Filter bar: search + college + award-type multi-select
- *   - Dense table (rank + person + total + per-category counts + OJ AC count)
- *   - Row click opens a right drawer with the full awards list, images,
- *     and per-award scores.
  */
-import { useMemo, useState } from 'react';
-import { Award as AwardIcon, Calendar, ChevronRight, Crown, Medal, Search, Trophy, Users, X, ZoomIn } from 'lucide-react';
+import { useMemo, useState, type ReactNode } from 'react';
+import { Calendar, ChevronRight, Crown, Medal, Trophy, Users, ZoomIn } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { makeInitials } from '@/lib/format';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import { DataTable, type Column } from '@/components/ui/data-table';
+import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { EmptyState } from '@/components/ui/empty-state';
+import { SearchInput } from '@/components/ui/input';
+import { Page, PageHeader, Toolbar } from '@/components/ui/page';
+import { Panel } from '@/components/ui/panel';
 import { SimpleSelect } from '@/components/ui/select';
-import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Sheet, SheetBody, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
+import { makeInitials } from '@/lib/format';
 import {
   LADDER_DETAIL_COLUMNS,
   MEDAL_TEXT_CLASS,
@@ -33,6 +29,7 @@ import {
   isRankboardStatsMode,
   ladderColumnCount,
   mergeAwardTally,
+  rankMedal,
   rankboardCollege,
   rankboardTableRows,
   rowMatchesAwardFilter,
@@ -88,7 +85,27 @@ interface LeaderboardRow {
   awardScores: number[];
 }
 
-/* ─── helpers ─── */
+interface BoardTableRow {
+  key: string;
+  rank: number;
+  kind: 'person' | 'total';
+  name: string;
+  studentId: string;
+  college: string;
+  employment: string;
+  counts: AwardTally;
+  ladderCounts: Record<string, number>;
+  nAccept: number | null;
+  totalScore: number;
+  personCount: number;
+  source: LeaderboardRow | null;
+}
+
+const PODIUM_MARK: Record<MedalMetal, { icon: typeof Crown; label: string }> = {
+  gold: { icon: Crown, label: '冠军' },
+  silver: { icon: Trophy, label: '亚军' },
+  bronze: { icon: Medal, label: '季军' },
+};
 
 /**
  * Field visibility per award category — kept in sync with the admin form.
@@ -116,71 +133,96 @@ function awardFields(typeKey: string) {
 
 function IcpcMedalCell({ pair, metal }: { pair: MedalPair; metal: MedalMetal }) {
   if (pair.regular === 0 && pair.extra === 0) return null;
-  if (pair.extra === 0) return pair.regular;
+  if (pair.extra === 0) return <span className="tabular">{pair.regular}</span>;
   return (
-    <>
+    <span className="tabular">
       {pair.regular}
       <span className={MEDAL_TEXT_CLASS[metal]}>（+{pair.extra}）</span>
-    </>
+    </span>
   );
 }
 
-function CountCell({ value }: { value: number }) {
-  return value > 0 ? value : null;
+function CountValue({ value }: { value: number }) {
+  return value > 0 ? <span className="tabular">{value}</span> : null;
 }
 
-function LeaderboardCountCells({
-  awards,
-  typeMap,
-  showLadderDetails,
-  counts,
-  ladderCounts,
-}: {
-  awards: Award[];
-  typeMap: Map<string, AwardType>;
-  showLadderDetails: boolean;
-  counts: AwardTally;
-  ladderCounts?: Record<string, number>;
-}) {
-  return (
-    <>
-      <TableCell className="text-center text-xs">
-        <IcpcMedalCell pair={counts.icpc.gold} metal="gold" />
-      </TableCell>
-      <TableCell className="text-center text-xs">
-        <IcpcMedalCell pair={counts.icpc.silver} metal="silver" />
-      </TableCell>
-      <TableCell className="text-center text-xs">
-        <IcpcMedalCell pair={counts.icpc.bronze} metal="bronze" />
-      </TableCell>
-      <TableCell className="text-center text-xs">
-        <CountCell value={counts.ccpc.gold} />
-      </TableCell>
-      <TableCell className="text-center text-xs">
-        <CountCell value={counts.ccpc.silver} />
-      </TableCell>
-      <TableCell className="text-center text-xs">
-        <CountCell value={counts.ccpc.bronze} />
-      </TableCell>
-      <TableCell className="text-center text-xs">
-        <CountCell value={counts.pat} />
-      </TableCell>
-      {showLadderDetails ? (
-        LADDER_DETAIL_COLUMNS.map((column) => (
-          <TableCell key={column.key} className="text-center text-xs">
-            <CountCell value={ladderCounts?.[column.key] ?? ladderColumnCount(awards, typeMap, column.key)} />
-          </TableCell>
-        ))
+function leaderboardColumns(showLadderDetails: boolean): Column<BoardTableRow>[] {
+  const countColumn = (key: string, header: string, read: (row: BoardTableRow) => ReactNode, width = '4.5rem'): Column<BoardTableRow> => ({
+    key,
+    header,
+    align: 'center',
+    width,
+    cell: read,
+  });
+  const ladder = showLadderDetails
+    ? LADDER_DETAIL_COLUMNS.map((column) => countColumn(
+        column.key,
+        column.label,
+        (row) => <CountValue value={row.ladderCounts[column.key] ?? 0} />,
+        '3.5rem',
+      ))
+    : [countColumn('ladder', '天梯赛', (row) => <CountValue value={row.counts.ladder} />)];
+  return [
+    {
+      key: 'rank',
+      header: '排名',
+      width: '4.5rem',
+      cell: (row) => (row.kind === 'total'
+        ? <span className="font-semibold">合计</span>
+        : <span className="tabular font-semibold">#{row.rank}</span>),
+    },
+    {
+      key: 'name',
+      header: '姓名',
+      cell: (row) => (row.kind === 'total' ? (
+        <span className="text-xs text-fg-muted">{row.personCount} 人</span>
       ) : (
-        <TableCell className="text-center text-xs">
-          <CountCell value={counts.ladder} />
-        </TableCell>
-      )}
-      <TableCell className="text-center text-xs">
-        <CountCell value={counts.other} />
-      </TableCell>
-    </>
-  );
+        <div className="min-w-0">
+          <p className="truncate text-sm font-medium">{row.name}</p>
+          <p className="truncate font-mono text-2xs text-fg-subtle">{row.studentId}</p>
+        </div>
+      )),
+    },
+    {
+      key: 'college',
+      header: '学院',
+      width: '8rem',
+      cell: (row) => (row.kind === 'total' ? null : (
+        <span className="block truncate text-xs text-fg-muted">{row.college || '—'}</span>
+      )),
+    },
+    {
+      key: 'employment',
+      header: '就业去向',
+      width: '8rem',
+      cell: (row) => (row.kind === 'total' ? null : (
+        <span className="block truncate text-xs text-fg-muted">{row.employment || '—'}</span>
+      )),
+    },
+    countColumn('icpc-gold', 'ICPC 金', (row) => <IcpcMedalCell pair={row.counts.icpc.gold} metal="gold" />),
+    countColumn('icpc-silver', 'ICPC 银', (row) => <IcpcMedalCell pair={row.counts.icpc.silver} metal="silver" />),
+    countColumn('icpc-bronze', 'ICPC 铜', (row) => <IcpcMedalCell pair={row.counts.icpc.bronze} metal="bronze" />),
+    countColumn('ccpc-gold', 'CCPC 金', (row) => <CountValue value={row.counts.ccpc.gold} />, '3.5rem'),
+    countColumn('ccpc-silver', 'CCPC 银', (row) => <CountValue value={row.counts.ccpc.silver} />, '3.5rem'),
+    countColumn('ccpc-bronze', 'CCPC 铜', (row) => <CountValue value={row.counts.ccpc.bronze} />, '3.5rem'),
+    countColumn('pat', 'PAT', (row) => <CountValue value={row.counts.pat} />, '3.5rem'),
+    ...ladder,
+    countColumn('other', '其它', (row) => <CountValue value={row.counts.other} />, '3.5rem'),
+    {
+      key: 'ac',
+      header: 'OJ AC',
+      align: 'right',
+      width: '5rem',
+      cell: (row) => <span className="tabular">{row.nAccept === null ? '—' : row.nAccept}</span>,
+    },
+    {
+      key: 'score',
+      header: '总分',
+      align: 'right',
+      width: '5.5rem',
+      cell: (row) => <span className="tabular font-semibold">{row.totalScore.toFixed(1)}</span>,
+    },
+  ];
 }
 
 function FilterChip({
@@ -191,207 +233,196 @@ function FilterChip({
 }: {
   pressed: boolean;
   onClick: () => void;
-  children: React.ReactNode;
+  children: ReactNode;
   title?: string;
 }) {
   return (
-    <button
+    <Button
       type="button"
+      variant={pressed ? 'soft' : 'secondary'}
+      size="sm"
       title={title}
       aria-pressed={pressed}
       onClick={onClick}
-      className={cn(
-        'inline-flex min-h-8 items-center rounded-full border px-2.5 text-[11px] font-medium transition-colors',
-        pressed
-          ? 'border-primary bg-primary text-primary-foreground'
-          : 'border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground',
-      )}
+      className="rounded-full"
     >
       {children}
-    </button>
+    </Button>
   );
 }
 
-/* ─── podium card ─── */
-
-const PODIUM_STYLES: Array<{
-  border: string;
-  gradient: string;
-  icon: React.ElementType;
-  iconColor: string;
-  label: string;
-}> = [
-  {
-    border: 'border-amber-400/60',
-    gradient: 'from-amber-200/40 via-card to-card dark:from-amber-900/30',
-    icon: Crown,
-    iconColor: 'text-amber-500',
-    label: '冠军',
-  },
-  {
-    border: 'border-slate-300/70',
-    gradient: 'from-slate-200/50 via-card to-card dark:from-slate-700/30',
-    icon: Trophy,
-    iconColor: 'text-slate-400',
-    label: '亚军',
-  },
-  {
-    border: 'border-orange-400/50',
-    gradient: 'from-orange-200/40 via-card to-card dark:from-orange-900/30',
-    icon: Medal,
-    iconColor: 'text-orange-500',
-    label: '季军',
-  },
-];
-
 function PodiumCard({ row, rank }: { row: LeaderboardRow; rank: number }) {
-  const style = PODIUM_STYLES[rank - 1];
-  const Icon = style.icon;
+  const metal = rankMedal(rank);
+  if (metal === null) throw new RangeError(`名次 ${rank} 不是金银铜`);
+  const mark = PODIUM_MARK[metal];
+  const Icon = mark.icon;
   const college = rankboardCollege(row.person, row.student);
   return (
-    <a
-      href={`/rankboard/${row.student._id}`}
-      className={cn(
-        'group relative flex w-full min-w-0 flex-col gap-2 rounded-xl border bg-linear-to-br p-5 transition-transform hover:-translate-y-1',
-        style.border,
-        style.gradient,
-      )}
-    >
-      <div className="flex items-center justify-between">
-        <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          <Icon className={cn('size-4', style.iconColor)} />
-          {style.label}
-        </span>
-        <span className="rounded-full bg-background/80 px-2 py-0.5 font-mono text-xs">#{rank}</span>
-      </div>
-      <div className="flex items-center gap-3">
-        <Avatar className="size-10 shrink-0">
-          {row.user?.avatarUrl ? <AvatarImage src={row.user.avatarUrl} alt={row.student.realName} /> : null}
-          <AvatarFallback className="text-xs">{makeInitials(row.user?.uname || row.student.realName)}</AvatarFallback>
-        </Avatar>
-        <div className="min-w-0">
-          <p className="truncate text-lg font-semibold">{row.student.realName}</p>
-          <p className="truncate font-mono text-xs text-muted-foreground">{row.student.studentId}</p>
-          {college ? <p className="truncate text-xs text-muted-foreground">{college}</p> : null}
+    <a href={`/rankboard/${row.student._id}`} className="block min-w-0">
+      <Panel className="h-full">
+        <div className="flex items-center justify-between gap-2">
+          <span className="flex items-center gap-1.5 text-xs font-medium text-fg-subtle">
+            <Icon className={cn('size-4', MEDAL_TEXT_CLASS[metal])} />
+            {mark.label}
+          </span>
+          <span className={cn('tabular font-semibold', MEDAL_TEXT_CLASS[metal])}>#{rank}</span>
         </div>
-      </div>
-      <div className="mt-1 flex items-baseline gap-2">
-        <span className="text-3xl font-bold tabular-nums">{row.totalScore.toFixed(1)}</span>
-        <span className="text-xs text-muted-foreground">分 · {row.awardCount} 奖</span>
-      </div>
+        <div className="mt-3 flex items-center gap-3">
+          <Avatar className="size-10 shrink-0">
+            {row.user?.avatarUrl ? <AvatarImage src={row.user.avatarUrl} alt={row.student.realName} /> : null}
+            <AvatarFallback className="text-xs">{makeInitials(row.user?.uname || row.student.realName)}</AvatarFallback>
+          </Avatar>
+          <div className="min-w-0">
+            <p className="truncate text-lg font-semibold">{row.student.realName}</p>
+            <p className="truncate font-mono text-xs text-fg-muted">{row.student.studentId}</p>
+            {college ? <p className="truncate text-xs text-fg-muted">{college}</p> : null}
+          </div>
+        </div>
+        <div className="mt-3 flex items-baseline gap-2">
+          <span className="text-3xl font-semibold tabular tracking-tight">{row.totalScore.toFixed(1)}</span>
+          <span className="text-xs text-fg-muted">分 · {row.awardCount} 奖</span>
+        </div>
+      </Panel>
     </a>
   );
 }
 
-/* ─── awards drawer ─── */
+function AwardCard({
+  award,
+  typeName,
+  score,
+  onLightbox,
+  plainMeta = false,
+}: {
+  award: Award;
+  typeName: string;
+  score: number;
+  onLightbox?: (url: string) => void;
+  plainMeta?: boolean;
+}) {
+  const fields = awardFields(award.type);
+  const cover = award.imageUrls?.[award.coverIndex ?? 0];
+  const thumbs = onLightbox ? (award.imageUrls || []).filter((_, index) => index !== (award.coverIndex ?? 0)) : [];
+  return (
+    <Panel flush className="h-full">
+      {cover ? (
+        onLightbox ? (
+          <Button type="button" variant="ghost" onClick={() => onLightbox(cover)} className="block h-auto! w-full rounded-none p-0">
+            <span className="relative block aspect-video w-full overflow-hidden bg-surface-sunken">
+              <img src={cover} alt={award.contest || ''} className="size-full object-cover" />
+              <span className="absolute top-2 right-2 grid size-6 place-items-center rounded-full bg-scrim text-bg">
+                <ZoomIn className="size-3.5" />
+              </span>
+            </span>
+          </Button>
+        ) : (
+          <div className="aspect-video w-full overflow-hidden bg-surface-sunken">
+            <img src={cover} alt={award.contest || ''} className="size-full object-cover" />
+          </div>
+        )
+      ) : null}
+      <div className="space-y-2 p-4">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold">{typeName}</p>
+            {award.contest ? <p className="text-xs text-fg-muted">{award.contest}</p> : null}
+          </div>
+          <Badge variant="outline" tone="neutral" size="sm">+{score.toFixed(1)}</Badge>
+        </div>
+        <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-fg-muted">
+          {award.date ? (
+            plainMeta ? <span>📅 {award.date}</span> : (
+              <span className="inline-flex items-center gap-1">
+                <Calendar className="size-3" />
+                {award.date}
+              </span>
+            )
+          ) : null}
+          {award.team ? (
+            plainMeta ? <span>🤝 {award.team}</span> : (
+              <span className="inline-flex items-center gap-1">
+                <Users className="size-3" />
+                {award.team}
+              </span>
+            )
+          ) : null}
+          {award.liveRank != null && fields.hasDualRank ? <span className="tabular font-semibold">现场 #{award.liveRank}</span> : null}
+          {award.schoolRank != null && fields.hasDualRank ? <span className="tabular font-semibold">校内 #{award.schoolRank}</span> : null}
+          {award.liveRank != null && fields.hasSingleRank ? <span className="tabular font-semibold">排名 #{award.liveRank}</span> : null}
+          {award.score != null && fields.hasExamScore ? <span className="tabular font-semibold text-fg">考试 {award.score} 分</span> : null}
+          {award.score != null && fields.hasLadderScore ? <span className="tabular font-semibold text-fg">天梯赛 {award.score} 分</span> : null}
+        </div>
+        {award.teammates && award.teammates.length > 0 ? (
+          <p className="text-xs text-fg-muted">队友：{award.teammates.join(' · ')}</p>
+        ) : null}
+        {thumbs.length > 0 ? (
+          <div className="flex flex-wrap gap-1.5">
+            {thumbs.map((url, index) => (
+              <Button
+                key={`${url}-${index}`}
+                type="button"
+                variant="ghost"
+                onClick={() => onLightbox?.(url)}
+                className="size-12 h-12! w-12! overflow-hidden rounded-md p-0"
+              >
+                <img src={url} alt="" className="size-full object-cover" />
+              </Button>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    </Panel>
+  );
+}
 
 function AwardsDrawer({ row, typeMap, onClose }: { row: LeaderboardRow; typeMap: Map<string, AwardType>; onClose: () => void }) {
   const [lightbox, setLightbox] = useState<string | null>(null);
   const college = rankboardCollege(row.person, row.student);
   return (
     <>
-      <div className="fixed inset-0 z-40 bg-black/30" onClick={onClose} />
-      <aside className="fixed right-0 top-0 z-50 flex h-dvh w-full max-w-md flex-col border-l bg-card shadow-2xl">
-        <header className="flex items-center justify-between border-b px-5 py-3.5">
-          <div>
-            <p className="text-sm text-muted-foreground">
-              第 {row.rank} 名 · {row.totalScore.toFixed(1)} 分
-            </p>
-            <h2 className="text-xl font-semibold">{row.student.realName}</h2>
-            <p className="font-mono text-xs text-muted-foreground">{row.student.studentId}</p>
-            {college ? <p className="text-xs text-muted-foreground">{college}</p> : null}
-          </div>
-          <Button variant="ghost" size="icon" onClick={onClose}>
-            <X className="size-4" />
-          </Button>
-        </header>
-        <ScrollArea className="flex-1" viewportClassName="space-y-3 p-5">
-          {row.person.awards.length === 0 ? (
-            <p className="text-center text-sm text-muted-foreground">尚无奖项</p>
-          ) : (
-            row.person.awards.map((award, idx) => {
-              const type = typeMap.get(award.type);
-              const score = row.awardScores[idx] || 0;
-              const cover = award.imageUrls?.[award.coverIndex ?? 0];
-              const thumbs = (award.imageUrls || []).filter((_, i) => i !== (award.coverIndex ?? 0));
-              const fields = awardFields(award.type);
-              return (
-                <Card key={idx} className="overflow-hidden">
-                  {cover && (
-                    <button
-                      type="button"
-                      onClick={() => setLightbox(cover)}
-                      className="relative block aspect-video w-full overflow-hidden bg-muted"
-                    >
-                      <img src={cover} alt={award.contest} className="size-full object-cover" />
-                      <span className="absolute right-2 top-2 rounded-full bg-black/40 p-1 text-white">
-                        <ZoomIn className="size-3.5" />
-                      </span>
-                    </button>
-                  )}
-                  <CardContent className="p-3.5">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-semibold">{type?.name || award.type}</p>
-                        {award.contest && <p className="text-xs text-muted-foreground">{award.contest}</p>}
-                      </div>
-                      <Badge variant="outline" className="font-mono text-[10px]">
-                        +{score.toFixed(1)}
-                      </Badge>
-                    </div>
-                    <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-                      {award.date && (
-                        <span className="inline-flex items-center gap-1">
-                          <Calendar className="size-3" />
-                          {award.date}
-                        </span>
-                      )}
-                      {award.team && (
-                        <span className="inline-flex items-center gap-1">
-                          <Users className="size-3" />
-                          {award.team}
-                        </span>
-                      )}
-                      {award.liveRank != null && fields.hasDualRank && <span>现场 #{award.liveRank}</span>}
-                      {award.schoolRank != null && fields.hasDualRank && <span>校内 #{award.schoolRank}</span>}
-                      {award.liveRank != null && fields.hasSingleRank && <span>排名 #{award.liveRank}</span>}
-                      {award.score != null && fields.hasExamScore && <span className="font-semibold text-foreground">考试 {award.score} 分</span>}
-                      {award.score != null && fields.hasLadderScore && <span className="font-semibold text-foreground">天梯赛 {award.score} 分</span>}
-                    </div>
-                    {award.teammates && award.teammates.length > 0 && (
-                      <p className="mt-1.5 text-[11px] text-muted-foreground">队友：{award.teammates.join(' · ')}</p>
-                    )}
-                    {thumbs.length > 0 && (
-                      <div className="mt-2.5 flex flex-wrap gap-1.5">
-                        {thumbs.map((u, j) => (
-                          <button
-                            key={j}
-                            type="button"
-                            onClick={() => setLightbox(u)}
-                            className="size-12 overflow-hidden rounded border bg-muted hover:opacity-80"
-                          >
-                            <img src={u} alt="" className="size-full object-cover" />
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              );
-            })
-          )}
-        </ScrollArea>
-      </aside>
-      {lightbox && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-6" onClick={() => setLightbox(null)}>
-          <img src={lightbox} alt="" className="max-h-[90vh] max-w-[90vw] object-contain" />
-        </div>
-      )}
+      <Sheet open onOpenChange={(open) => { if (!open) onClose(); }}>
+        <SheetContent side="right">
+          <SheetHeader>
+            <p className="text-xs font-semibold tabular text-fg-subtle">第 {row.rank} 名 · {row.totalScore.toFixed(1)} 分</p>
+            <SheetTitle>{row.student.realName}</SheetTitle>
+            <p className="font-mono text-xs text-fg-muted">{row.student.studentId}</p>
+            {college ? <p className="text-xs text-fg-muted">{college}</p> : null}
+          </SheetHeader>
+          <SheetBody>
+            {row.person.awards.length === 0 ? (
+              <EmptyState compact title="尚无奖项" />
+            ) : (
+              <div className="flex flex-col gap-3">
+                {row.person.awards.map((award, index) => {
+                  const type = typeMap.get(award.type);
+                  return (
+                    <AwardCard
+                      key={`${award.type}-${index}`}
+                      award={award}
+                      typeName={type?.name || award.type}
+                      score={row.awardScores[index] || 0}
+                      onLightbox={setLightbox}
+                    />
+                  );
+                })}
+              </div>
+            )}
+          </SheetBody>
+        </SheetContent>
+      </Sheet>
+      <Dialog open={lightbox !== null} onOpenChange={(open) => { if (!open) setLightbox(null); }}>
+        <DialogContent size="xl" onClose={() => setLightbox(null)}>
+          <DialogHeader>
+            <DialogTitle className="sr-only">照片</DialogTitle>
+          </DialogHeader>
+          <DialogBody>
+            {lightbox ? <img src={lightbox} alt="" className="w-full object-contain" /> : null}
+          </DialogBody>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
-
-/* ─── main page ─── */
 
 export function RankBoardMainPage() {
   const data = useBootstrap().page.data as {
@@ -399,7 +430,7 @@ export function RankBoardMainPage() {
     awardTypes: AwardType[];
     config: { baseScore: number; decayFactor: number };
   };
-  const typeMap = useMemo(() => new Map(data.awardTypes.map((t) => [t.key, t])), [data.awardTypes]);
+  const typeMap = useMemo(() => new Map(data.awardTypes.map((type) => [type.key, type])), [data.awardTypes]);
 
   const [search, setSearch] = useState('');
   const [collegeFilter, setCollegeFilter] = useState<string>('all');
@@ -420,28 +451,27 @@ export function RankBoardMainPage() {
     return [...set].sort();
   }, [data.rows]);
 
-  // 年级（入学年）列表——来自 userbind 派生的 enrollmentYear（PLAN §5）。
   const enrollmentYears = useMemo(() => {
     const set = new Set<string | number>();
     for (const r of data.rows) {
-      const y = r.student.enrollmentYear;
-      if (y) set.add(y);
+      const year = r.student.enrollmentYear;
+      if (year) set.add(year);
     }
     return [...set].sort((a, b) => Number(b) - Number(a));
   }, [data.rows]);
 
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    const query = search.trim().toLowerCase();
     return data.rows.filter((r) => {
       if (collegeFilter !== 'all' && rankboardCollege(r.person, r.student) !== collegeFilter) return false;
       if (yearFilter !== 'all') {
-        const y = r.student.enrollmentYear;
-        if (String(y ?? '') !== yearFilter) return false;
+        const year = r.student.enrollmentYear;
+        if (String(year ?? '') !== yearFilter) return false;
       }
       if (!rowMatchesAwardFilter(r.person.awards, typeFilter, ladderGroupSelected, typeMap)) return false;
-      if (q) {
+      if (query) {
         const hay = `${r.student.studentId} ${r.student.realName} ${rankboardCollege(r.person, r.student)} ${r.user?.uname || ''}`.toLowerCase();
-        if (!hay.includes(q)) return false;
+        if (!hay.includes(query)) return false;
       }
       return true;
     });
@@ -475,6 +505,42 @@ export function RankBoardMainPage() {
     return { tally, ladderColumns, nAccept, totalScore };
   }, [statsMode, tableRows, typeMap, showLadderDetails]);
 
+  const boardRows = useMemo(() => {
+    const people: BoardTableRow[] = tableRows.map((row) => ({
+      key: row.person._id,
+      rank: row.rank,
+      kind: 'person',
+      name: row.student.realName,
+      studentId: row.student.studentId,
+      college: rankboardCollege(row.person, row.student),
+      employment: row.person.employmentStatus || '',
+      counts: tallyAwards(row.person.awards, typeMap),
+      ladderCounts: Object.fromEntries(LADDER_DETAIL_COLUMNS.map((column) => [column.key, ladderColumnCount(row.person.awards, typeMap, column.key)])),
+      nAccept: row.user ? row.user.nAccept : null,
+      totalScore: row.totalScore,
+      personCount: 0,
+      source: row,
+    }));
+    if (!tableTotals) return people;
+    people.push({
+      key: 'total',
+      rank: 0,
+      kind: 'total',
+      name: '',
+      studentId: '',
+      college: '',
+      employment: '',
+      counts: tableTotals.tally,
+      ladderCounts: tableTotals.ladderColumns,
+      nAccept: tableTotals.nAccept,
+      totalScore: tableTotals.totalScore,
+      personCount: tableRows.length,
+      source: null,
+    });
+    return people;
+  }, [tableRows, tableTotals, typeMap]);
+
+  const columns = leaderboardColumns(showLadderDetails);
   const ladderKeys = useMemo(() => filterGroups.find((group) => group.id === 'ladder')?.items.map((item) => item.key) || [], [filterGroups]);
 
   const toggleType = (key: string) => {
@@ -511,282 +577,183 @@ export function RankBoardMainPage() {
   const filterActive = typeFilter.size > 0 || ladderGroupSelected;
 
   return (
-    <div className="min-w-0 space-y-5">
-      <header className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <AwardIcon className="size-5 shrink-0 text-primary" />
-          <h1 className="text-xl font-semibold">中国民航大学荣誉榜</h1>
-          <span className="text-xs text-muted-foreground">
-            共 {data.rows.length} 人 · 基础分 {data.config.baseScore} · 衰减 {data.config.decayFactor}
-          </span>
-        </div>
-        <Button asChild variant="outline" size="sm" className="ml-auto">
-          <a href="/rankboard/gallery">荣誉照片墙</a>
-        </Button>
-      </header>
+    <Page width="full">
+      <PageHeader
+        title="中国民航大学荣誉榜"
+        description={`共 ${data.rows.length} 人 · 基础分 ${data.config.baseScore} · 衰减 ${data.config.decayFactor}`}
+        actions={(
+          <Button asChild variant="secondary" size="sm">
+            <a href="/rankboard/gallery">荣誉照片墙</a>
+          </Button>
+        )}
+      />
 
-      {/* Top 3 podium */}
-      {top3.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {top3.map((r, i) => (
-            <PodiumCard key={r.person._id} row={r} rank={i + 1} />
+      {top3.length > 0 ? (
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          {top3.map((row, index) => (
+            <PodiumCard key={row.person._id} row={row} rank={index + 1} />
           ))}
-          {Array.from({ length: 3 - top3.length }).map((_, i) => (
-            <div key={`empty-${i}`} className="w-full min-w-0 rounded-xl border border-dashed bg-muted/20 p-5 text-center text-xs text-muted-foreground">
-              暂无第 {top3.length + i + 1} 名
+          {Array.from({ length: 3 - top3.length }).map((_, index) => (
+            <div key={`empty-${index}`} className="flex items-center justify-center rounded-lg border border-dashed border-line bg-surface-sunken p-5 text-center text-xs text-fg-subtle">
+              暂无第 {top3.length + index + 1} 名
             </div>
           ))}
         </div>
-      )}
+      ) : null}
 
-      {/* Filters */}
-      <Card>
-        <CardContent className="flex flex-wrap items-end gap-3 p-4">
-          <div className="relative min-w-0 flex-1">
-            <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input className="pl-8" placeholder="搜索学号 / 姓名" value={search} onChange={(e) => setSearch(e.target.value)} />
+      <Toolbar>
+        <SearchInput
+          className="min-w-0 flex-1"
+          placeholder="搜索学号 / 姓名"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+        />
+        <SimpleSelect
+          value={collegeFilter}
+          onValueChange={setCollegeFilter}
+          className="w-40"
+          options={[{ value: 'all', label: '全部学院' }, ...colleges.map((college) => ({ value: college, label: college }))]}
+        />
+        <SimpleSelect
+          value={yearFilter}
+          onValueChange={setYearFilter}
+          className="w-32"
+          options={[{ value: 'all', label: '全部年级' }, ...enrollmentYears.map((year) => ({ value: String(year), label: `${year} 级` }))]}
+        />
+      </Toolbar>
+
+      <Panel
+        title="奖项类型"
+        actions={filterActive ? (
+          <div className="flex items-center gap-2">
+            <Badge tone="neutral" size="sm">{typeFilter.size + (ladderGroupSelected ? 1 : 0)}</Badge>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setTypeFilter(new Set());
+                setLadderGroupSelected(false);
+                setShowAllLadderDetails(false);
+              }}
+            >
+              清除筛选
+            </Button>
           </div>
-          <SimpleSelect
-            value={collegeFilter}
-            onValueChange={setCollegeFilter}
-            className="w-auto min-w-[10rem]"
-            options={[{ value: 'all', label: '全部学院' }, ...colleges.map((s) => ({ value: s, label: s }))]}
-          />
-          <SimpleSelect
-            value={yearFilter}
-            onValueChange={setYearFilter}
-            className="w-auto min-w-[8rem]"
-            options={[{ value: 'all', label: '全部年级' }, ...enrollmentYears.map((y) => ({ value: String(y), label: `${y} 级` }))]}
-          />
-        </CardContent>
-      </Card>
-      <Card>
-        <CardContent className="space-y-3 p-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="text-sm font-medium">奖项类型</p>
-            {filterActive ? (
-              <Badge variant="secondary" className="text-[10px]">
-                {typeFilter.size + (ladderGroupSelected ? 1 : 0)}
-              </Badge>
-            ) : null}
-            {filterActive ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-8 px-2 text-xs"
-                onClick={() => {
-                  setTypeFilter(new Set());
-                  setLadderGroupSelected(false);
-                  setShowAllLadderDetails(false);
-                }}
-              >
-                清除筛选
-              </Button>
-            ) : null}
-          </div>
-          <div className="flex flex-wrap gap-3">
-            {filterGroups.map((group) => {
-              const keys = group.items.map((item) => item.key);
-              const selectedCount = group.id === 'ladder' ? (ladderGroupSelected ? keys.length : keys.filter((key) => typeFilter.has(key)).length) : keys.filter((key) => typeFilter.has(key)).length;
-              const parentOn = group.id === 'ladder' ? ladderGroupSelected : keys.length > 0 && keys.every((key) => typeFilter.has(key));
-              return (
-                <section key={group.id} className="min-w-[12rem] flex-1 rounded-xl border bg-muted/25 p-2.5">
-                  <div className="mb-2 flex flex-wrap items-center gap-1.5">
-                    <FilterChip pressed={parentOn} onClick={() => toggleGroup(group.id, keys)}>
-                      {group.label}
-                      {selectedCount > 0 ? ` ${selectedCount}` : ''}
+        ) : undefined}
+      >
+        <div className="flex flex-wrap gap-3">
+          {filterGroups.map((group) => {
+            const keys = group.items.map((item) => item.key);
+            const selectedCount = group.id === 'ladder'
+              ? (ladderGroupSelected ? keys.length : keys.filter((key) => typeFilter.has(key)).length)
+              : keys.filter((key) => typeFilter.has(key)).length;
+            const parentOn = group.id === 'ladder' ? ladderGroupSelected : keys.length > 0 && keys.every((key) => typeFilter.has(key));
+            return (
+              <section key={group.id} className="min-w-48 flex-1 rounded-md bg-surface-sunken p-3">
+                <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                  <FilterChip pressed={parentOn} onClick={() => toggleGroup(group.id, keys)}>
+                    {group.label}
+                    {selectedCount > 0 ? ` ${selectedCount}` : ''}
+                  </FilterChip>
+                  {group.id === 'ladder' ? (
+                    <FilterChip pressed={showAllLadderDetails} onClick={() => setShowAllLadderDetails((current) => !current)}>
+                      {showAllLadderDetails ? '收起明细列' : '展开明细列'}
                     </FilterChip>
-                    {group.id === 'ladder' ? (
-                      <FilterChip pressed={showAllLadderDetails} onClick={() => setShowAllLadderDetails((current) => !current)}>
-                        {showAllLadderDetails ? '收起明细列' : '展开明细列'}
-                      </FilterChip>
-                    ) : null}
-                  </div>
-                  <div className="flex flex-wrap gap-1">
-                    {group.items.map((item) => (
-                      <FilterChip key={item.key} pressed={typeFilter.has(item.key)} onClick={() => toggleType(item.key)} title={item.name}>
-                        {awardFilterChipLabel(item)}
-                      </FilterChip>
-                    ))}
-                  </div>
-                </section>
-              );
-            })}
-          </div>
-        </CardContent>
-      </Card>
+                  ) : null}
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {group.items.map((item) => (
+                    <FilterChip key={item.key} pressed={typeFilter.has(item.key)} onClick={() => toggleType(item.key)} title={item.name}>
+                      {awardFilterChipLabel(item)}
+                    </FilterChip>
+                  ))}
+                </div>
+              </section>
+            );
+          })}
+        </div>
+      </Panel>
 
-      {/* Table */}
-      <Card className="min-w-0">
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-14 pl-5">排名</TableHead>
-                <TableHead>姓名</TableHead>
-                <TableHead className="w-32">学院</TableHead>
-                <TableHead className="w-32">就业去向</TableHead>
-                <TableHead className="w-16 text-center">ICPC 金</TableHead>
-                <TableHead className="w-16 text-center">ICPC 银</TableHead>
-                <TableHead className="w-16 text-center">ICPC 铜</TableHead>
-                <TableHead className="w-12 text-center">CCPC 金</TableHead>
-                <TableHead className="w-12 text-center">CCPC 银</TableHead>
-                <TableHead className="w-12 text-center">CCPC 铜</TableHead>
-                <TableHead className="w-12 text-center">PAT</TableHead>
-                {showLadderDetails ? (
-                  LADDER_DETAIL_COLUMNS.map((column) => (
-                    <TableHead key={column.key} className="w-12 text-center">
-                      {column.label}
-                    </TableHead>
-                  ))
-                ) : (
-                  <TableHead className="w-14 text-center">天梯赛</TableHead>
-                )}
-                <TableHead className="w-12 text-center">其它</TableHead>
-                <TableHead className="w-16 text-right">OJ AC</TableHead>
-                <TableHead className="w-20 pr-5 text-right">总分</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {tableRows.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={showLadderDetails ? 21 : 15} className="py-10 text-center text-sm text-muted-foreground">
-                    {data.rows.length === 0 ? '荣誉榜暂无成员，等待管理员添加。' : '当前筛选下没有匹配的成员。'}
-                  </TableCell>
-                </TableRow>
-              ) : (
-                tableRows.map((r) => {
-                  const counts = tallyAwards(r.person.awards, typeMap);
-                  return (
-                    <TableRow key={r.person._id} className="cursor-pointer" onClick={() => setOpenRow(r)}>
-                      <TableCell className="pl-5 font-mono text-sm font-semibold">#{r.rank}</TableCell>
-                      <TableCell>
-                        <div>
-                          <p className="text-sm font-medium">{r.student.realName}</p>
-                          <p className="font-mono text-[11px] text-muted-foreground">{r.student.studentId}</p>
-                        </div>
-                      </TableCell>
-                      <TableCell className="truncate text-xs text-muted-foreground">
-                        {rankboardCollege(r.person, r.student) || <span className="opacity-40">—</span>}
-                      </TableCell>
-                      <TableCell className="truncate text-xs text-muted-foreground">
-                        {r.person.employmentStatus || <span className="opacity-40">—</span>}
-                      </TableCell>
-                      <LeaderboardCountCells awards={r.person.awards} typeMap={typeMap} showLadderDetails={showLadderDetails} counts={counts} />
-                      <TableCell className="text-right font-mono text-sm">{r.user ? r.user.nAccept : '—'}</TableCell>
-                      <TableCell className="pr-5 text-right font-mono text-sm font-semibold">{r.totalScore.toFixed(1)}</TableCell>
-                    </TableRow>
-                  );
-                })
-              )}
-            </TableBody>
-            {tableTotals ? (
-              <TableFooter>
-                <TableRow className="hover:bg-transparent">
-                  <TableCell className="pl-5 font-semibold">合计</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{tableRows.length} 人</TableCell>
-                  <TableCell />
-                  <TableCell />
-                  <LeaderboardCountCells
-                    awards={[]}
-                    typeMap={typeMap}
-                    showLadderDetails={showLadderDetails}
-                    counts={tableTotals.tally}
-                    ladderCounts={tableTotals.ladderColumns}
-                  />
-                  <TableCell className="text-right font-mono text-sm">{tableTotals.nAccept}</TableCell>
-                  <TableCell className="pr-5 text-right font-mono text-sm font-semibold">{tableTotals.totalScore.toFixed(1)}</TableCell>
-                </TableRow>
-              </TableFooter>
-            ) : null}
-          </Table>
-        </CardContent>
-      </Card>
+      <Panel flush>
+        <DataTable
+          mobile="scroll"
+          columns={columns}
+          rows={boardRows}
+          rowKey={(row) => row.key}
+          onRowClick={(row) => {
+            if (row.source) setOpenRow(row.source);
+          }}
+          empty={(
+            <EmptyState
+              compact
+              title={data.rows.length === 0 ? '荣誉榜暂无成员，等待管理员添加。' : '当前筛选下没有匹配的成员。'}
+            />
+          )}
+        />
+      </Panel>
 
-      {openRow && <AwardsDrawer row={openRow} typeMap={typeMap} onClose={() => setOpenRow(null)} />}
-    </div>
+      {openRow ? <AwardsDrawer row={openRow} typeMap={typeMap} onClose={() => setOpenRow(null)} /> : null}
+    </Page>
   );
 }
-
-/* ─── detail page (linked from podium cards) ─── */
 
 export function RankBoardDetailPage() {
   const data = useBootstrap().page.data as {
     row: LeaderboardRow;
     awardTypes: AwardType[];
   };
-  const typeMap = new Map(data.awardTypes.map((t) => [t.key, t]));
+  const typeMap = new Map(data.awardTypes.map((type) => [type.key, type]));
   const college = rankboardCollege(data.row.person, data.row.student);
   return (
-    <div className="min-w-0 space-y-5">
-      <Button variant="ghost" size="sm" asChild>
-        <a href="/rankboard" className="gap-1.5">
-          <ChevronRight className="size-3.5 rotate-180" />
-          返回荣誉榜
-        </a>
-      </Button>
-      <Card>
-        <CardContent className="space-y-3 p-6">
-          <p className="text-xs text-muted-foreground">
-            第 {data.row.rank} 名 · {data.row.totalScore.toFixed(1)} 分
-          </p>
-          <h1 className="text-3xl font-bold">{data.row.student.realName}</h1>
-          <p className="font-mono text-sm text-muted-foreground">{data.row.student.studentId}</p>
-          {college ? <p className="text-xs text-muted-foreground">学院：{college}</p> : null}
+    <Page width="wide">
+      <PageHeader
+        title={data.row.student.realName}
+        description={(
+          <>
+            第 <span className="tabular font-semibold">{data.row.rank}</span> 名 · <span className="tabular">{data.row.totalScore.toFixed(1)}</span> 分
+          </>
+        )}
+        actions={(
+          <Button variant="ghost" size="sm" asChild>
+            <a href="/rankboard">
+              <ChevronRight className="size-3.5 rotate-180" />
+              返回荣誉榜
+            </a>
+          </Button>
+        )}
+      />
+      <Panel>
+        <div className="space-y-2">
+          <p className="font-mono text-sm text-fg-muted">{data.row.student.studentId}</p>
+          {college ? <p className="text-xs text-fg-muted">学院：{college}</p> : null}
           {data.row.user && data.row.student.boundUserId ? (
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-fg-muted">
               OJ：
-              <a href={`/user/${data.row.student.boundUserId}`} className="text-primary hover:underline">
+              <a href={`/user/${data.row.student.boundUserId}`} className="text-brand-fg hover:underline">
                 {data.row.user.uname}
               </a>{' '}
               · 通过 {data.row.user.nAccept} 题
             </p>
           ) : null}
-          {data.row.person.employmentStatus && <p className="text-xs text-muted-foreground">就业去向：{data.row.person.employmentStatus}</p>}
-        </CardContent>
-      </Card>
-      <h2 className="text-base font-semibold">奖项（{data.row.awardCount}）</h2>
-      <div className="grid w-full min-w-0 grid-cols-[repeat(auto-fit,minmax(16rem,1fr))] gap-4">
-        {data.row.person.awards.map((award, idx) => {
+          {data.row.person.employmentStatus ? <p className="text-xs text-fg-muted">就业去向：{data.row.person.employmentStatus}</p> : null}
+        </div>
+      </Panel>
+      <h2 className="text-lg font-semibold">奖项（{data.row.awardCount}）</h2>
+      <div className="grid w-full min-w-0 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {data.row.person.awards.map((award, index) => {
           const type = typeMap.get(award.type);
-          const score = data.row.awardScores[idx] || 0;
-          const cover = award.imageUrls?.[award.coverIndex ?? 0];
-          const fields = awardFields(award.type);
           return (
-            <Card key={idx} className="w-full min-w-0">
-              {cover && (
-                <div className="aspect-video w-full overflow-hidden bg-muted">
-                  <img src={cover} alt={award.contest} className="size-full object-cover" />
-                </div>
-              )}
-              <CardContent className="space-y-2 p-4">
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <p className="font-semibold">{type?.name || award.type}</p>
-                    {award.contest && <p className="text-xs text-muted-foreground">{award.contest}</p>}
-                  </div>
-                  <Badge variant="outline" className="font-mono text-xs">
-                    +{score.toFixed(1)}
-                  </Badge>
-                </div>
-                <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                  {award.date && <span>📅 {award.date}</span>}
-                  {award.team && <span>🤝 {award.team}</span>}
-                  {award.liveRank != null && fields.hasDualRank && <span>现场 #{award.liveRank}</span>}
-                  {award.schoolRank != null && fields.hasDualRank && <span>校内 #{award.schoolRank}</span>}
-                  {award.liveRank != null && fields.hasSingleRank && <span>排名 #{award.liveRank}</span>}
-                  {award.score != null && fields.hasExamScore && <span className="font-semibold text-foreground">考试 {award.score} 分</span>}
-                  {award.score != null && fields.hasLadderScore && <span className="font-semibold text-foreground">天梯赛 {award.score} 分</span>}
-                </div>
-                {award.teammates && award.teammates.length > 0 && (
-                  <p className="text-xs text-muted-foreground">队友：{award.teammates.join(' · ')}</p>
-                )}
-              </CardContent>
-            </Card>
+            <AwardCard
+              key={`${award.type}-${index}`}
+              award={award}
+              typeName={type?.name || award.type}
+              score={data.row.awardScores[index] || 0}
+              plainMeta
+            />
           );
         })}
       </div>
-    </div>
+    </Page>
   );
 }

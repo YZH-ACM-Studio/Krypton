@@ -23,11 +23,25 @@ export const LADDER_DETAIL_COLUMNS: Array<{ key: string; label: string; matchNam
   { key: 'ladder_individual_3', label: '个三', matchName: /个人三等/ },
 ];
 
-export const MEDAL_TEXT_CLASS: Record<MedalMetal, string> = {
-  gold: 'text-amber-500',
-  silver: 'text-slate-400',
-  bronze: 'text-orange-500',
+/** Gold is warning, silver is neutral, bronze is orange. Neutral has no chromatic ramp, so its text uses the muted foreground. */
+export const MEDAL_TONE: Record<MedalMetal, 'warning' | 'neutral' | 'orange'> = {
+  gold: 'warning',
+  silver: 'neutral',
+  bronze: 'orange',
 };
+
+export const MEDAL_TEXT_CLASS: Record<MedalMetal, string> = {
+  gold: 'text-warning-fg',
+  silver: 'text-fg-muted',
+  bronze: 'text-orange-fg',
+};
+
+export function rankMedal(rank: number): MedalMetal | null {
+  if (rank === 1) return 'gold';
+  if (rank === 2) return 'silver';
+  if (rank === 3) return 'bronze';
+  return null;
+}
 
 function blobOf(type: AwardTypeLike | undefined, fallback: string) {
   return `${type?.key || ''} ${type?.name || ''} ${fallback}`;

@@ -4,6 +4,7 @@
  */
 import { useEffect, useState } from 'react';
 import { FolderInput } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { fetchHydroResponse } from '@/lib/error-presenter';
 
@@ -35,13 +36,13 @@ export function CollectPendingBadge() {
   }, []);
 
   return (
-    <Button asChild variant="ghost" size="icon" className="relative size-8">
-      <a href="/collect" title="文件收集">
-        <FolderInput className="size-4" />
+    <Button asChild variant="ghost" size="icon" className="relative">
+      <a href="/collect" title="文件收集" aria-label="文件收集">
+        <FolderInput />
         {count > 0 && (
-          <span className="absolute -right-0.5 -top-0.5 flex size-4 min-w-4 items-center justify-center rounded-full bg-destructive px-0.5 text-[9px] font-bold text-destructive-foreground">
+          <Badge variant="solid" tone="danger" size="sm" className="absolute -top-0.5 -right-0.5">
             {count > 9 ? '9+' : count}
-          </span>
+          </Badge>
         )}
       </a>
     </Button>

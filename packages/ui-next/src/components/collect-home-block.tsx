@@ -3,9 +3,8 @@
  * Fetches GET /api/collect/pending and returns null when count is 0.
  */
 import { useEffect, useState } from 'react';
-import { FolderInput } from 'lucide-react';
-import { Card, CardContent } from '@/components/ui/card';
 import { DateTime } from '@/components/ui/datetime';
+import { Panel } from '@/components/ui/panel';
 import { fetchHydroResponse } from '@/lib/error-presenter';
 
 interface PendingCollectDoc {
@@ -74,38 +73,32 @@ export function CollectHomeBlock() {
   if (!loaded || count === 0) return null;
 
   return (
-    <Card>
-      <CardContent className="p-0">
-        <div className="flex items-center gap-2 border-b px-4 py-3">
-          <FolderInput className="size-4 text-primary" />
-          <span className="text-sm font-semibold">未交文件</span>
-        </div>
-        <ul className="divide-y">
-          {docs.slice(0, 3).map((doc) => (
-            <li key={doc._id}>
-              <div className="flex min-w-0 items-center gap-3 px-4 py-2.5">
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">{doc.title}</p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
-                    截止 <DateTime value={doc.dueAt} mode="datetime" />
-                  </p>
-                </div>
-                <a
-                  href={`/collect/${doc._id}`}
-                  className="inline-flex min-h-11 shrink-0 items-center px-2 text-xs text-primary hover:underline"
-                >
-                  去交文件
-                </a>
+    <Panel title="未交文件" flush>
+      <ul className="divide-y divide-line-subtle">
+        {docs.slice(0, 3).map((doc) => (
+          <li key={doc._id}>
+            <div className="flex min-w-0 items-center gap-3 px-4 py-2.5">
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium">{doc.title}</p>
+                <p className="mt-0.5 text-xs text-fg-subtle">
+                  截止 <DateTime value={doc.dueAt} mode="datetime" />
+                </p>
               </div>
-            </li>
-          ))}
-        </ul>
-        <div className="border-t px-4 py-2">
-          <a href="/collect" className="text-xs text-primary hover:underline">
-            查看全部 →
-          </a>
-        </div>
-      </CardContent>
-    </Card>
+              <a
+                href={`/collect/${doc._id}`}
+                className="inline-flex min-h-11 shrink-0 items-center px-2 text-xs text-brand-fg hover:underline"
+              >
+                去交文件
+              </a>
+            </div>
+          </li>
+        ))}
+      </ul>
+      <div className="border-t border-line-subtle px-4 py-2.5">
+        <a href="/collect" className="text-xs text-brand-fg hover:underline">
+          查看全部 →
+        </a>
+      </div>
+    </Panel>
   );
 }

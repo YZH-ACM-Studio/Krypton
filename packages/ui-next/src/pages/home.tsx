@@ -2,27 +2,26 @@ import { type ReactNode, startTransition, useDeferredValue, useState } from 'rea
 import { motion } from 'motion/react';
 import {
   ArrowRight,
-  BookOpen,
   ChevronRight,
-  ExternalLink,
-  GraduationCap,
-  MessageSquare,
-  Search,
-  Star,
-  Trophy,
-  type LucideIcon,
-  Users,
   Clock,
   Compass,
+  ExternalLink,
+  MessageSquare,
+  Star,
+  Users,
 } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { MarkdownView } from '@/components/markdown-renderer';
 import { AnnouncementHomeBlock } from '@/components/announcement-home-block';
 import { CollectHomeBlock } from '@/components/collect-home-block';
+import { MarkdownView } from '@/components/markdown-renderer';
+import { Alert } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Stat, StatusDot } from '@/components/ui/display';
+import { EmptyState } from '@/components/ui/empty-state';
+import { SearchInput } from '@/components/ui/input';
+import { Page, PageHeader } from '@/components/ui/page';
+import { Panel } from '@/components/ui/panel';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { type GenericUserDoc, useBootstrap } from '@/lib/bootstrap';
 import { formatDateTime, formatPlainTextSummary, formatRelativeTime, formatShortDate, makeInitials, replaceRouteTokens, toDate } from '@/lib/format';
 
@@ -57,6 +56,8 @@ interface HomePageData {
   contents?: Array<{ sections: Array<[string, unknown]> }>;
 }
 
+type StatusTone = 'neutral' | 'info' | 'success' | 'warning';
+
 // ── data helpers ──────────────────────────────────────────
 
 function readList<T>(v: unknown): T[] {
@@ -84,24 +85,24 @@ function getUser(udict: Record<string, GenericUserDoc>, uid: string | number | u
   return uid != null ? (udict[String(uid)] ?? null) : null;
 }
 
-function contestState(c: HomeContentDocument) {
+function contestState(c: HomeContentDocument): { label: string; tone: StatusTone; pulse: boolean } {
   const now = Date.now();
   const begin = toDate(c.beginAt)?.getTime() || 0;
   const end = toDate(c.endAt)?.getTime() || 0;
-  if (!begin || !end) return { label: '待发布', color: 'secondary' as const };
-  if (now < begin) return { label: '即将开始', color: 'outline' as const };
-  if (now > end) return { label: '已结束', color: 'secondary' as const };
-  return { label: '进行中', color: 'default' as const };
+  if (!begin || !end) return { label: '待发布', tone: 'neutral', pulse: false };
+  if (now < begin) return { label: '即将开始', tone: 'info', pulse: false };
+  if (now > end) return { label: '已结束', tone: 'neutral', pulse: false };
+  return { label: '进行中', tone: 'success', pulse: true };
 }
 
-function homeworkState(h: HomeContentDocument) {
+function homeworkState(h: HomeContentDocument): { label: string; tone: StatusTone; pulse: boolean } {
   const now = Date.now();
   const dl = toDate(h.penaltySince)?.getTime() || 0;
   const hard = toDate(h.endAt)?.getTime() || 0;
-  if (!dl) return '待开放';
-  if (now < dl) return '进行中';
-  if (hard && now < hard) return '宽限期';
-  return '已结束';
+  if (!dl) return { label: '待开放', tone: 'neutral', pulse: false };
+  if (now < dl) return { label: '进行中', tone: 'success', pulse: true };
+  if (hard && now < hard) return { label: '宽限期', tone: 'warning', pulse: false };
+  return { label: '已结束', tone: 'neutral', pulse: false };
 }
 
 export function trainingProgress(t: HomeContentDocument, st: HomeTrainingStatus) {
@@ -118,42 +119,21 @@ export function trainingProgress(t: HomeContentDocument, st: HomeTrainingStatus)
   return Math.round((done / total) * 100);
 }
 
-// ── tiny building blocks ──────────────────────────────────
-
-function StatCard({ icon: Icon, label, value, href, index }: { icon: LucideIcon; label: string; value: number; href: string; index: number }) {
+function StatusLine({ label, tone = 'neutral', pulse = false }: { label: string; tone?: StatusTone; pulse?: boolean }) {
   return (
-    <motion.a href={href} className="min-w-0" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: 0.05 * index }}>
-      <Card className="min-w-0 transition-colors hover:bg-accent/50">
-        <CardContent className="flex min-w-0 items-center gap-4 p-4">
-          <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-            <Icon className="size-5" />
-          </div>
-          <div className="min-w-0">
-            <p className="text-2xl font-semibold tabular-nums">{value}</p>
-            <p className="text-xs text-muted-foreground">{label}</p>
-          </div>
-        </CardContent>
-      </Card>
-    </motion.a>
+    <span className="inline-flex shrink-0 items-center gap-1.5 text-xs text-fg">
+      <StatusDot tone={tone} pulse={pulse} />
+      {label}
+    </span>
   );
 }
 
-function SectionShell({ title, action, delay = 0, children }: { title: string; action?: ReactNode; delay?: number; children: ReactNode }) {
+function SectionLink({ href, children }: { href: string; children: ReactNode }) {
   return (
-    <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35, delay }}>
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
-          <CardTitle className="text-base">{title}</CardTitle>
-          {action}
-        </CardHeader>
-        <CardContent>{children}</CardContent>
-      </Card>
-    </motion.div>
+    <Button asChild variant="ghost" size="sm">
+      <a href={href}>{children}</a>
+    </Button>
   );
-}
-
-function Empty({ text }: { text: string }) {
-  return <p className="py-6 text-center text-sm text-muted-foreground">{text}</p>;
 }
 
 // ── page ──────────────────────────────────────────────────
@@ -163,6 +143,7 @@ export function KryptonHomePage() {
   const { contents = [] } = bs.page.data as HomePageData;
   const { sections, errors } = collectSections(contents);
   const locale = bs.locale || 'zh-CN';
+  const showProblems = bs.user.canBrowseProblemBank === true;
 
   // unpack sections
   const [contests] = readTuple(sections.get('contest'), [[], {}] as [HomeContentDocument[], Record<string, unknown>]);
@@ -191,286 +172,261 @@ export function KryptonHomePage() {
     window.location.assign(kw ? `${bs.urls.problems}?q=${encodeURIComponent(kw)}` : bs.urls.problems);
   };
 
-  const stats: Array<{ icon: LucideIcon; label: string; value: number; href: string }> = [
-    { icon: Trophy, label: '比赛', value: contests.length, href: bs.urls.contests },
-    { icon: BookOpen, label: '作业', value: homework.length, href: bs.urls.homework },
-    { icon: GraduationCap, label: '题集', value: training.length, href: bs.urls.training },
-    { icon: MessageSquare, label: '讨论', value: discussions.length, href: bs.urls.discussions },
+  const stats: Array<{ label: string; value: number; href: string }> = [
+    { label: '比赛', value: contests.length, href: bs.urls.contests },
+    { label: '作业', value: homework.length, href: bs.urls.homework },
+    { label: '题集', value: training.length, href: bs.urls.training },
+    { label: '讨论', value: discussions.length, href: bs.urls.discussions },
   ];
 
   return (
-    <div className="mx-auto w-full max-w-[90rem] space-y-6">
-      {/* ── Announcement block ──────────────────── */}
-      <AnnouncementHomeBlock />
-
-      {/* ── Hero ────────────────────────────────── */}
-      <motion.section initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
-        <Card className="overflow-hidden border-primary/20 bg-linear-to-br from-primary/5 via-background to-background">
-          <CardContent
-            className={
-              bs.user.canBrowseProblemBank === true
-                ? 'grid min-w-0 gap-6 p-6 lg:grid-cols-[1fr_340px]'
-                : 'grid min-w-0 gap-6 p-6'
-            }
-          >
-            <div className="flex min-w-0 flex-col justify-center gap-4">
-              <div>
-                <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">{bs.domain.name}</h1>
-              </div>
-              {bs.domain.bulletin ? (
-                <div className="max-w-xl text-sm leading-relaxed text-foreground/80">
-                  <MarkdownView content={bs.domain.bulletin} />
-                </div>
-              ) : null}
-              <div className="flex flex-wrap gap-2">
-                {bs.user.canBrowseProblemBank === true ? (
-                  <Button asChild>
-                    <a href={bs.urls.problems}>
-                      开始刷题
-                      <ArrowRight className="size-4" />
-                    </a>
-                  </Button>
-                ) : null}
-                <Button asChild variant="outline">
-                  <a href={bs.urls.contests}>查看比赛</a>
-                </Button>
-              </div>
-            </div>
-
-            {/* Search panel */}
-            {bs.user.canBrowseProblemBank === true ? (
-            <div className="flex min-w-0 flex-col gap-3 rounded-lg border bg-card p-4">
-              <p className="text-sm font-medium">快速搜索</p>
-              <form
-                className="flex min-w-0 flex-wrap gap-2"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  submitSearch(search);
-                }}
-              >
-                <div className="relative min-w-0 flex-1">
-                  <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    value={search}
-                    onChange={(e) => startTransition(() => setSearch(e.target.value))}
-                    placeholder="题号或标题…"
-                    className="min-w-0 pl-8 text-base sm:text-sm"
-                  />
-                </div>
-                <Button type="submit" size="sm" className="shrink-0">
-                  搜索
-                </Button>
-              </form>
-              {matched.length > 0 ? (
-                <div className="flex min-w-0 flex-col gap-0.5 rounded-md border p-1">
-                  {matched.map((p) => (
-                    <a
-                      key={String(p.docId)}
-                      className="flex min-w-0 items-center justify-between rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent"
-                      href={replaceRouteTokens(bs.urls.problemDetail, { PID: String(p.docId) })}
-                    >
-                      <span className="min-w-0 flex-1 truncate">
-                        {p.docId}. {p.title || '未命名'}
-                      </span>
-                      <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
-                    </a>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-            ) : null}
-          </CardContent>
-        </Card>
-      </motion.section>
-
-      {/* ── Stats ──────────────────────────────── */}
-      <div className="grid min-w-0 grid-cols-2 gap-3 lg:grid-cols-4">
-        {stats.map((s, i) => (
-          <StatCard key={s.label} {...s} index={i} />
-        ))}
-      </div>
-
-      {/* ── Errors ─────────────────────────────── */}
-      {errors.length > 0 ? (
-        <Card className="border-destructive/30 bg-destructive/5">
-          <CardContent className="p-4">
-            <p className="mb-2 text-sm font-medium text-destructive">部分模块加载失败</p>
-            {errors.map((msg) => (
-              <p key={msg} className="text-sm text-muted-foreground">
-                {msg}
-              </p>
-            ))}
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {/* ── Main grid ──────────────────────────── */}
-      <div className="grid min-w-0 gap-6 lg:grid-cols-[1fr_320px]">
-        {/* Left column */}
-        <div className="min-w-0 space-y-6">
-          {/* Contests */}
-          <SectionShell
-            title="比赛"
-            delay={0.1}
-            action={
-              <Button asChild variant="ghost" size="sm">
-                <a href={bs.urls.contests}>
-                  全部 <ChevronRight className="size-4" />
+    <Page width="wide">
+      <PageHeader
+        title={bs.domain.name}
+        actions={(
+          <>
+            {showProblems ? (
+              <Button asChild variant="primary">
+                <a href={bs.urls.problems}>
+                  开始刷题
+                  <ArrowRight />
                 </a>
               </Button>
-            }
+            ) : null}
+            <Button asChild variant="secondary">
+              <a href={bs.urls.contests}>查看比赛</a>
+            </Button>
+          </>
+        )}
+      />
+
+      <AnnouncementHomeBlock />
+
+      {bs.domain.bulletin ? (
+        <div className="max-w-prose text-sm text-fg-muted">
+          <MarkdownView content={bs.domain.bulletin} />
+        </div>
+      ) : null}
+
+      {showProblems ? (
+        <Panel title="快速搜索">
+          <div className="flex min-w-0 flex-col gap-3">
+            <form
+              className="flex min-w-0 flex-wrap gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                submitSearch(search);
+              }}
+            >
+              <SearchInput
+                value={search}
+                onChange={(e) => startTransition(() => setSearch(e.target.value))}
+                placeholder="题号或标题…"
+                className="min-w-0 flex-1"
+              />
+              <Button type="submit" variant="secondary" size="sm" className="shrink-0">
+                搜索
+              </Button>
+            </form>
+            {matched.length > 0 ? (
+              <div className="flex min-w-0 flex-col divide-y divide-line-subtle overflow-hidden rounded-md bg-surface-sunken">
+                {matched.map((p) => (
+                  <a
+                    key={String(p.docId)}
+                    className="flex min-h-11 min-w-0 items-center justify-between px-2 text-sm hover:bg-surface-hover sm:min-h-0 sm:py-1.5"
+                    href={replaceRouteTokens(bs.urls.problemDetail, { PID: String(p.docId) })}
+                  >
+                    <span className="min-w-0 flex-1 truncate">
+                      {p.docId}. {p.title || '未命名'}
+                    </span>
+                    <ChevronRight className="size-3.5 shrink-0 text-fg-subtle" />
+                  </a>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        </Panel>
+      ) : null}
+
+      <Panel>
+        <div className="grid grid-cols-2 gap-x-6 gap-y-6 md:grid-cols-4 md:divide-x md:divide-line-subtle [&>*]:md:pl-6 [&>*:first-child]:md:pl-0">
+          {stats.map(({ label, value, href }) => (
+            <motion.a href={href} key={label} className="min-w-0 rounded-md hover:bg-surface-hover">
+              <Stat label={label} value={value} />
+            </motion.a>
+          ))}
+        </div>
+      </Panel>
+
+      {errors.length > 0 ? (
+        <Alert tone="danger" title="部分模块加载失败">
+          {errors.map((msg) => (
+            <p key={msg}>{msg}</p>
+          ))}
+        </Alert>
+      ) : null}
+
+      <div className="grid min-w-0 gap-4 lg:grid-cols-2">
+        <div className="flex min-w-0 flex-col gap-4">
+          {/* Contests */}
+          <Panel
+            title="比赛"
+            flush
+            actions={(
+              <SectionLink href={bs.urls.contests}>
+                全部
+                <ChevronRight />
+              </SectionLink>
+            )}
           >
             {contests.length === 0 ? (
-              <Empty text="暂无比赛" />
+              <EmptyState compact title="暂无比赛" />
             ) : (
-              <div className="divide-y">
+              <div className="divide-y divide-line-subtle">
                 {contests.slice(0, 5).map((c) => {
                   const st = contestState(c);
                   return (
                     <a
                       key={String(c.docId)}
-                      className="flex items-center gap-3 py-3 first:pt-0 last:pb-0 transition-colors hover:bg-accent/50 -mx-2 px-2 rounded-md"
+                      className="flex min-w-0 items-center gap-3 px-4 py-3 hover:bg-surface-hover"
                       href={replaceRouteTokens(bs.urls.contestDetail, { TID: String(c.docId) })}
                     >
-                      <div className="flex-1 min-w-0">
+                      <div className="min-w-0 flex-1">
                         <div className="flex min-w-0 items-center gap-2">
                           <p className="min-w-0 flex-1 truncate text-sm font-medium">{c.title || '未命名比赛'}</p>
                           {c.hidden === true ? (
-                            <Badge variant="outline" className="shrink-0 text-[10px]">
+                            <Badge variant="outline" size="sm" className="shrink-0">
                               已隐藏
                             </Badge>
                           ) : null}
                         </div>
-                        <p className="mt-0.5 text-xs text-muted-foreground">
+                        <p className="mt-0.5 text-xs text-fg-subtle">
                           {formatDateTime(c.beginAt, locale)}
                           {c.rule ? ` · ${c.rule}` : ''}
                         </p>
                       </div>
-                      <div className="flex items-center gap-2 shrink-0">
+                      <div className="flex shrink-0 items-center gap-2">
                         {c.attend ? (
-                          <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                            <Users className="size-3" />
+                          <span className="flex items-center gap-1 text-xs text-fg-subtle tabular">
+                            <Users className="size-3.5" />
                             {c.attend}
                           </span>
                         ) : null}
-                        <Badge variant={st.color}>{st.label}</Badge>
+                        <StatusLine label={st.label} tone={st.tone} pulse={st.pulse} />
                       </div>
                     </a>
                   );
                 })}
               </div>
             )}
-          </SectionShell>
+          </Panel>
 
           {/* Homework */}
-          <SectionShell
+          <Panel
             title="作业"
-            delay={0.15}
-            action={
-              <Button asChild variant="ghost" size="sm">
-                <a href={bs.urls.homework}>
-                  全部 <ChevronRight className="size-4" />
-                </a>
-              </Button>
-            }
+            flush
+            actions={(
+              <SectionLink href={bs.urls.homework}>
+                全部
+                <ChevronRight />
+              </SectionLink>
+            )}
           >
             {homework.length === 0 ? (
-              <Empty text="暂无作业" />
+              <EmptyState compact title="暂无作业" />
             ) : (
-              <div className="divide-y">
-                {homework.slice(0, 4).map((h) => (
-                  <a
-                    key={String(h.docId)}
-                    className="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0 transition-colors hover:bg-accent/50 -mx-2 px-2 rounded-md"
-                    href={replaceRouteTokens(bs.urls.homeworkDetail, { TID: String(h.docId) })}
-                  >
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium">{h.title || '未命名作业'}</p>
-                      <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
-                        <Clock className="size-3" />
-                        {formatDateTime(h.penaltySince || h.endAt, locale)}
-                      </p>
-                    </div>
-                    <Badge variant="secondary">{homeworkState(h)}</Badge>
-                  </a>
-                ))}
+              <div className="divide-y divide-line-subtle">
+                {homework.slice(0, 4).map((h) => {
+                  const st = homeworkState(h);
+                  return (
+                    <a
+                      key={String(h.docId)}
+                      className="flex min-w-0 items-center justify-between gap-3 px-4 py-3 hover:bg-surface-hover"
+                      href={replaceRouteTokens(bs.urls.homeworkDetail, { TID: String(h.docId) })}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">{h.title || '未命名作业'}</p>
+                        <p className="mt-0.5 flex items-center gap-1 text-xs text-fg-subtle">
+                          <Clock className="size-3.5" />
+                          {formatDateTime(h.penaltySince || h.endAt, locale)}
+                        </p>
+                      </div>
+                      <StatusLine label={st.label} tone={st.tone} pulse={st.pulse} />
+                    </a>
+                  );
+                })}
               </div>
             )}
-          </SectionShell>
+          </Panel>
 
-          {/* Training */}
-          <SectionShell
+          <Panel
             title="题集"
-            delay={0.2}
-            action={
-              <Button asChild variant="ghost" size="sm">
-                <a href={bs.urls.training}>
-                  全部 <ChevronRight className="size-4" />
-                </a>
-              </Button>
-            }
+            actions={(
+              <SectionLink href={bs.urls.training}>
+                全部
+                <ChevronRight />
+              </SectionLink>
+            )}
           >
             {training.length === 0 ? (
-              <Empty text="暂无题集" />
+              <EmptyState compact title="暂无题集" />
             ) : (
-              <div className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+              <div className="grid min-w-0 gap-4 sm:grid-cols-2 xl:grid-cols-3">
                 {training.slice(0, 4).map((t) => {
                   const pct = trainingProgress(t, trStatus[String(t.docId)] || {});
                   return (
                     <a
                       key={String(t.docId)}
-                      className="group min-w-0 rounded-lg border p-3 transition-colors hover:bg-accent/50"
+                      className="group min-w-0 rounded-lg border border-line p-3 hover:border-line-strong hover:bg-surface-hover"
                       href={replaceRouteTokens(bs.urls.trainingDetail, { TID: String(t.docId) })}
                     >
                       <p className="min-w-0 truncate text-sm font-medium">{t.title || '未命名题集'}</p>
-                      <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+                      <p className="mt-1 line-clamp-2 text-xs text-fg-subtle">
                         {formatPlainTextSummary(t.content || t.desc) || '一组精选题目'}
                       </p>
-                      <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
-                        <span className="flex items-center gap-1">
-                          <Users className="size-3" />
+                      <div className="mt-2 flex items-center justify-between text-xs text-fg-subtle">
+                        <span className="flex items-center gap-1 tabular">
+                          <Users className="size-3.5" />
                           {t.attend || 0}
                         </span>
-                        {pct !== null ? <span className="font-medium text-primary">{pct}%</span> : <span>未参加</span>}
+                        {pct !== null ? <span className="font-medium text-brand-fg tabular">{pct}%</span> : <span>未参加</span>}
                       </div>
                     </a>
                   );
                 })}
               </div>
             )}
-          </SectionShell>
+          </Panel>
 
-          {/* Discussions */}
-          <SectionShell
+          <Panel
             title="讨论"
-            delay={0.25}
-            action={
-              <Button asChild variant="ghost" size="sm">
-                <a href={bs.urls.discussions}>
-                  全部 <ChevronRight className="size-4" />
-                </a>
-              </Button>
-            }
+            flush
+            actions={(
+              <SectionLink href={bs.urls.discussions}>
+                全部
+                <ChevronRight />
+              </SectionLink>
+            )}
           >
             {discussions.length === 0 ? (
-              <Empty text="暂无讨论" />
+              <EmptyState compact title="暂无讨论" />
             ) : (
-              <div className="divide-y">
+              <div className="divide-y divide-line-subtle">
                 {discussions.slice(0, 5).map((d) => {
                   const owner = getUser(bs.udict, d.owner);
                   return (
                     <a
                       key={String(d._id)}
-                      className="flex items-start gap-3 py-3 first:pt-0 last:pb-0 transition-colors hover:bg-accent/50 -mx-2 px-2 rounded-md"
+                      className="flex min-w-0 items-start gap-3 px-4 py-3 hover:bg-surface-hover"
                       href={replaceRouteTokens(bs.urls.discussionDetail, { DID: String(d._id) })}
                     >
-                      <Avatar className="mt-0.5 size-7">
+                      <Avatar className="mt-0.5 size-6">
                         {owner?.avatarUrl ? <AvatarImage src={String(owner.avatarUrl)} alt={String(owner.uname || '')} /> : null}
-                        <AvatarFallback className="text-[10px]">{makeInitials(owner?.uname || '?')}</AvatarFallback>
+                        <AvatarFallback className="text-2xs">{makeInitials(owner?.uname || '?')}</AvatarFallback>
                       </Avatar>
-                      <div className="flex-1 min-w-0">
+                      <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium">{d.title || '无标题'}</p>
-                        <p className="mt-0.5 text-xs text-muted-foreground">
+                        <p className="mt-0.5 text-xs text-fg-subtle">
                           {owner?.uname || '匿名'} · {d.nReply || 0} 回复 · {formatRelativeTime(d.updateAt, locale)}
                         </p>
                       </div>
@@ -479,126 +435,121 @@ export function KryptonHomePage() {
                 })}
               </div>
             )}
-          </SectionShell>
+          </Panel>
         </div>
 
-        {/* Right sidebar */}
-        <div className="min-w-0 space-y-6">
-          {/* User card */}
-          <SectionShell title={bs.user.signedIn ? '个人' : '账号'} delay={0.1}>
-            <div className="flex items-center gap-3">
-              <Avatar>
-                {bs.user.avatarUrl ? <AvatarImage src={bs.user.avatarUrl} alt={bs.user.name} /> : null}
-                <AvatarFallback>{makeInitials(bs.user.name)}</AvatarFallback>
-              </Avatar>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium">{bs.user.name}</p>
-                <p className="text-xs text-muted-foreground">{bs.user.signedIn ? `${bs.user.unreadMessages} 条未读` : '游客'}</p>
+        <div className="flex min-w-0 flex-col gap-4">
+          <Panel title={bs.user.signedIn ? '个人' : '账号'}>
+            <div className="flex min-w-0 flex-col gap-3">
+              <div className="flex items-center gap-3">
+                <Avatar>
+                  {bs.user.avatarUrl ? <AvatarImage src={bs.user.avatarUrl} alt={bs.user.name} /> : null}
+                  <AvatarFallback>{makeInitials(bs.user.name)}</AvatarFallback>
+                </Avatar>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">{bs.user.name}</p>
+                  <p className="text-xs text-fg-subtle tabular">{bs.user.signedIn ? `${bs.user.unreadMessages} 条未读` : '游客'}</p>
+                </div>
               </div>
+              {bs.user.signedIn ? (
+                <div className="flex gap-2">
+                  <Button asChild variant="secondary" size="sm" className="flex-1">
+                    <a href={bs.urls.messages}>
+                      <MessageSquare />
+                      消息
+                    </a>
+                  </Button>
+                  <Button asChild variant="secondary" size="sm" className="flex-1">
+                    <a href={bs.urls.domains}>
+                      <Compass />
+                      域
+                    </a>
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex gap-2">
+                  <Button asChild variant={showProblems ? 'secondary' : 'primary'} size="sm" className="flex-1">
+                    <a href={bs.urls.login}>登录</a>
+                  </Button>
+                  <Button asChild variant="secondary" size="sm" className="flex-1">
+                    <a href={bs.urls.register}>注册</a>
+                  </Button>
+                </div>
+              )}
             </div>
-            {bs.user.signedIn ? (
-              <div className="mt-3 flex gap-2">
-                <Button asChild variant="outline" size="sm" className="flex-1">
-                  <a href={bs.urls.messages}>
-                    <MessageSquare className="size-4" />
-                    消息
-                  </a>
-                </Button>
-                <Button asChild variant="outline" size="sm" className="flex-1">
-                  <a href={bs.urls.domains}>
-                    <Compass className="size-4" />域
-                  </a>
-                </Button>
-              </div>
-            ) : (
-              <div className="mt-3 flex gap-2">
-                <Button asChild size="sm" className="flex-1">
-                  <a href={bs.urls.login}>登录</a>
-                </Button>
-                <Button asChild variant="outline" size="sm" className="flex-1">
-                  <a href={bs.urls.register}>注册</a>
-                </Button>
-              </div>
-            )}
-          </SectionShell>
+          </Panel>
 
           <CollectHomeBlock />
 
           {/* Ranking */}
-          <SectionShell
+          <Panel
             title="排名"
-            delay={0.15}
-            action={
-              <Button asChild variant="ghost" size="sm">
-                <a href={bs.urls.ranking}>更多</a>
-              </Button>
-            }
+            actions={(
+              <SectionLink href={bs.urls.ranking}>更多</SectionLink>
+            )}
           >
             {ranking.length === 0 ? (
-              <Empty text="暂无排名" />
+              <EmptyState compact title="暂无排名" />
             ) : (
-              <div className="space-y-1">
+              <div className="flex flex-col gap-1">
                 {ranking.slice(0, 8).map((uid, i) => {
                   const u = getUser(bs.udict, uid);
                   return (
-                    <div key={uid} className="flex items-center gap-2 rounded-md px-2 py-1.5">
-                      <span className="w-5 text-center text-xs font-medium text-muted-foreground">{i + 1}</span>
+                    <div key={uid} className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5">
+                      <span className="w-5 text-center text-xs font-medium text-fg-subtle tabular">{i + 1}</span>
                       <Avatar className="size-6">
                         {u?.avatarUrl ? <AvatarImage src={String(u.avatarUrl)} alt={String(u?.uname || '')} /> : null}
-                        <AvatarFallback className="text-[10px]">{makeInitials(u?.uname || '?')}</AvatarFallback>
+                        <AvatarFallback className="text-2xs">{makeInitials(u?.uname || '?')}</AvatarFallback>
                       </Avatar>
-                      <span className="flex-1 truncate text-sm">{u?.uname || `#${uid}`}</span>
-                      <span className="text-xs tabular-nums text-muted-foreground">{Math.round(Number(u?.rp || 0))} rp</span>
+                      <span className="min-w-0 flex-1 truncate text-sm">{u?.uname || `#${uid}`}</span>
+                      <span className="text-xs text-fg-subtle tabular">{Math.round(Number(u?.rp || 0))} rp</span>
                     </div>
                   );
                 })}
               </div>
             )}
-          </SectionShell>
+          </Panel>
 
-          {/* Starred */}
           {starred.length > 0 ? (
-            <SectionShell title="收藏题目" delay={0.2}>
-              <div className="space-y-0.5">
+            <Panel title="收藏题目">
+              <div className="flex flex-col gap-0.5">
                 {starred.slice(0, 5).map((p) => (
                   <a
                     key={String(p.docId)}
-                    className="flex min-w-0 items-center justify-between rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent"
+                    className="flex min-h-11 min-w-0 items-center justify-between rounded-md px-2 py-1.5 text-sm hover:bg-surface-hover sm:min-h-0"
                     href={replaceRouteTokens(bs.urls.problemDetail, { PID: String(p.docId) })}
                   >
                     <span className="min-w-0 flex-1 truncate">
                       {p.docId}. {p.title || '未命名'}
                     </span>
-                    <Star className="size-3.5 shrink-0 text-yellow-500" />
+                    <Star className="size-3.5 shrink-0 text-warning-fg" />
                   </a>
                 ))}
               </div>
-            </SectionShell>
+            </Panel>
           ) : null}
 
-          {/* Recent problems */}
           {recent.length > 0 ? (
-            <SectionShell title="最近题目" delay={0.25}>
-              <div className="space-y-0.5">
+            <Panel title="最近题目">
+              <div className="flex flex-col gap-0.5">
                 {recent.slice(0, 5).map((p) => (
                   <a
                     key={String(p.docId)}
-                    className="flex min-w-0 items-center justify-between rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent"
+                    className="flex min-h-11 min-w-0 items-center justify-between rounded-md px-2 py-1.5 text-sm hover:bg-surface-hover sm:min-h-0"
                     href={replaceRouteTokens(bs.urls.problemDetail, { PID: String(p.docId) })}
                   >
                     <span className="min-w-0 flex-1 truncate">
                       {p.docId}. {p.title || '未命名'}
                     </span>
-                    <span className="shrink-0 text-xs text-muted-foreground">{formatShortDate(p._id, locale)}</span>
+                    <span className="shrink-0 text-xs text-fg-subtle">{formatShortDate(p._id, locale)}</span>
                   </a>
                 ))}
               </div>
-            </SectionShell>
+            </Panel>
           ) : null}
 
-          {/* Links */}
-          <SectionShell title="推荐站点" delay={0.3}>
-            <div className="space-y-0.5">
+          <Panel title="推荐站点">
+            <div className="flex flex-col gap-0.5">
               {[
                 { label: 'Codeforces', href: 'https://codeforces.com/' },
                 { label: 'AtCoder', href: 'https://atcoder.jp/' },
@@ -607,19 +558,19 @@ export function KryptonHomePage() {
               ].map((s) => (
                 <a
                   key={s.href}
-                  className="flex items-center justify-between rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent"
+                  className="flex min-h-11 min-w-0 items-center justify-between rounded-md px-2 py-1.5 text-sm hover:bg-surface-hover sm:min-h-0"
                   href={s.href}
                   target="_blank"
                   rel="noreferrer"
                 >
                   <span>{s.label}</span>
-                  <ExternalLink className="size-3.5 text-muted-foreground" />
+                  <ExternalLink className="size-3.5 text-fg-subtle" />
                 </a>
               ))}
             </div>
-          </SectionShell>
+          </Panel>
         </div>
       </div>
-    </div>
+    </Page>
   );
 }

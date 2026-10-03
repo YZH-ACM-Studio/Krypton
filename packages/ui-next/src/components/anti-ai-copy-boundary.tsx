@@ -629,7 +629,7 @@ export function AntiAiCopyBoundary({
         {children}
       </div>
       {copyError ? (
-        <p role="alert" className="mt-2 text-sm text-destructive">
+        <p role="alert" className="mt-2 text-sm text-danger-fg">
           复制或剪切失败：浏览器无法同时写入纯文本和富文本，请重试或更换浏览器。
         </p>
       ) : null}

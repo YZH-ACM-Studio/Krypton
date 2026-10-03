@@ -7,6 +7,7 @@ import { useState, type MouseEvent, type ReactNode } from 'react';
 import { Check, ClipboardCopy, XCircle } from 'lucide-react';
 import type { AntiAiMarkerClientMarker } from '@/lib/anti-ai-marker';
 import type { SampleCase } from '@/lib/samples';
+import { Button } from '@/components/ui/button';
 
 type CopyState = 'idle' | 'copied' | 'failed';
 
@@ -92,9 +93,9 @@ export function SampleBlocks({
   if (!samples.length) return null;
   return (
     <div className={`space-y-3 my-4 ${className || ''}`}>
-      {!suppressHeader && <h3 className="text-sm font-semibold text-foreground">样例</h3>}
+      {!suppressHeader && <h3 className="text-lg font-semibold text-fg">样例</h3>}
       {samples.map((s) => (
-        <div key={s.id} className="grid gap-2 sm:grid-cols-2">
+        <div key={s.id} className="grid gap-3 sm:grid-cols-2">
           <SampleBlock label={`样例输入 #${s.id}`} content={s.input} antiAiMarkers={antiAiMarkers[`input:${s.id}`]} />
           <SampleBlock label={`样例输出 #${s.id}`} content={s.output} antiAiMarkers={antiAiMarkers[`output:${s.id}`]} />
         </div>
@@ -113,12 +114,12 @@ export function SampleBlock({
   antiAiMarkers?: readonly SampleAntiAiMarker[];
 }) {
   return (
-    <div className="rounded-md border bg-muted/20 overflow-hidden">
-      <div className="flex items-center justify-between px-3 py-1.5 border-b bg-muted/40">
-        <span className="text-[11px] font-medium text-muted-foreground">{label}</span>
+    <div className="overflow-hidden rounded-md border border-line bg-surface-sunken">
+      <div className="flex h-8 items-center justify-between border-b border-line-subtle px-3">
+        <span className="text-xs font-medium text-fg-muted">{label}</span>
         <SampleCopyButton label={label} content={antiAiMarkers.length ? injectedSampleContent(content, antiAiMarkers) : content} />
       </div>
-      <pre className="p-3 font-mono text-xs whitespace-pre-wrap break-all min-h-[2em]">
+      <pre className="overflow-x-auto px-3 py-2.5 font-mono text-sm leading-relaxed">
         {antiAiMarkers.length ? <MarkedSampleContent content={content} markers={antiAiMarkers} /> : content}
       </pre>
     </div>
@@ -136,14 +137,9 @@ export function SampleCopyButton({ label, content }: { label: string; content: s
   };
   const Icon = copyState === 'copied' ? Check : copyState === 'failed' ? XCircle : ClipboardCopy;
   return (
-    <button
-      type="button"
-      onClick={handleCopy}
-      className="inline-flex h-8 min-h-8 min-w-8 items-center gap-1 rounded px-2 text-[10px] text-muted-foreground transition-colors hover:bg-background/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-      aria-label={`复制${label}`}
-    >
-      <Icon className="size-3" />
+    <Button type="button" variant="ghost" size="sm" onClick={handleCopy} aria-label={`复制${label}`}>
+      <Icon />
       {copyState === 'copied' ? '已复制' : copyState === 'failed' ? '复制失败' : '复制'}
-    </button>
+    </Button>
   );
 }

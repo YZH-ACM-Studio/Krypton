@@ -32,6 +32,7 @@ import { splitMarkdownBySamples, splitMarkdownBySamplesPositioned, type Position
 import { SampleBlocks, type SampleAntiAiMarker } from '@/components/sample-blocks';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Textarea } from '@/components/ui/textarea';
 import { AntiAiMarkerRenderError, createAntiAiMarkerRehypePlugins } from '@/components/anti-ai-copy-boundary';
 
 /* ------------------------------------------------------------------ */
@@ -173,19 +174,11 @@ function pickInitialLang(langs: Record<string, string>, preferred?: string): str
 function LangTabs({ langs, active, onChange }: { langs: string[]; active: string; onChange: (lang: string) => void }) {
   if (langs.length <= 1) return null;
   return (
-    <div className="mb-3 flex gap-0.5 rounded-md bg-muted p-0.5">
+    <div className="mb-3 inline-flex max-w-full gap-0.5 rounded-md bg-surface-active p-0.5">
       {langs.map((lang) => (
-        <button
-          key={lang}
-          type="button"
-          onClick={() => onChange(lang)}
-          className={cn(
-            'rounded-sm px-3 py-1 text-xs font-medium transition-colors',
-            active === lang ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
-          )}
-        >
+        <Button key={lang} type="button" size="sm" variant={active === lang ? 'secondary' : 'ghost'} onClick={() => onChange(lang)}>
           {resolveLangLabel(lang)}
-        </button>
+        </Button>
       ))}
     </div>
   );
@@ -634,10 +627,10 @@ export function MarkdownEditor({
             setPreview(text);
           }}
         />
-        <div className="flex flex-wrap items-center justify-end gap-2 text-xs text-muted-foreground">
+        <div className="flex flex-wrap items-center justify-end gap-2 text-xs text-fg-subtle">
           {activeAntiAiPath ? (
             <>
-              <Button type="button" size="sm" variant="outline" onClick={addAntiAiMarker}>
+              <Button type="button" size="sm" variant="secondary" onClick={addAntiAiMarker}>
                 在光标处插入防 AI 标记
               </Button>
               <Button type="button" size="sm" variant="ghost" onClick={() => setAntiAiPreview('student')}>
@@ -650,7 +643,7 @@ export function MarkdownEditor({
           ) : (
             <>
               <span>左侧编辑</span>
-              <span className="text-border">|</span>
+              <span>|</span>
               <span>右侧预览</span>
             </>
           )}
@@ -659,24 +652,20 @@ export function MarkdownEditor({
 
       {activeAntiAiPath && activeAntiAiMarkers.length ? (
         <div
-          className="space-y-2 rounded-lg border border-dashed border-amber-500/40 bg-amber-500/[0.04] p-3"
+          className="space-y-2 rounded-lg border border-dashed border-warning-line bg-warning-soft p-3"
           data-testid="anti-ai-marker-boundaries"
         >
-          <p className="text-xs font-medium text-amber-800 dark:text-amber-300">当前区块的防 AI 边界</p>
+          <p className="text-xs font-medium text-warning-fg">当前区块的防 AI 边界</p>
           {activeAntiAiMarkers.map((marker) => {
             const contextStart = Math.max(0, marker.anchor.offset - 14);
             const contextEnd = Math.min(source.length, marker.anchor.offset + 14);
             return (
-              <div key={marker.id} className="rounded-md border bg-background/80 p-3">
+              <div key={marker.id} className="rounded-md bg-surface p-3">
                 <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    className="rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:text-amber-200"
-                    onClick={() => focusAntiAiMarker(marker)}
-                  >
+                  <Button type="button" variant="secondary" size="sm" onClick={() => focusAntiAiMarker(marker)}>
                     防 AI · 位置 {marker.anchor.offset}
-                  </button>
-                  <code className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+                  </Button>
+                  <code className="min-w-0 flex-1 truncate text-xs text-fg-subtle">
                     {source.slice(contextStart, marker.anchor.offset)}│{source.slice(marker.anchor.offset, contextEnd)}
                   </code>
                   <Button
@@ -705,8 +694,7 @@ export function MarkdownEditor({
                   <Button
                     type="button"
                     size="sm"
-                    variant="ghost"
-                    className="text-destructive"
+                    variant="danger-soft"
                     onClick={() => {
                       const nextMarkers = antiAiMarkersRef.current.filter((item) => item.id !== marker.id);
                       antiAiMarkersRef.current = nextMarkers;
@@ -716,15 +704,15 @@ export function MarkdownEditor({
                     删除
                   </Button>
                 </div>
-                {marker.conflict ? <p className="mt-2 text-xs text-destructive">{marker.conflict}</p> : null}
+                {marker.conflict ? <p className="mt-2 text-xs text-danger-fg">{marker.conflict}</p> : null}
                 {editingMarkerId === marker.id ? (
                   <label className="mt-3 block space-y-1.5 text-xs font-medium">
                     注入文本
-                    <textarea
+                    <Textarea
                       value={marker.injectionText}
                       onChange={(event) => updateAntiAiMarker(marker.id, (current) => ({ ...current, injectionText: event.target.value }))}
                       rows={4}
-                      className="w-full resize-y rounded-md border border-input bg-background px-3 py-2 font-mono text-sm font-normal"
+                      className="font-mono"
                     />
                   </label>
                 ) : null}
@@ -735,9 +723,9 @@ export function MarkdownEditor({
       ) : null}
 
       {activeAntiAiPath && antiAiPreview ? (
-        <section className="rounded-lg border bg-muted/15 p-4" aria-label={antiAiPreview === 'student' ? '学生可见效果' : '复制结果预览'}>
+        <section className="rounded-lg border border-line bg-surface p-4" aria-label={antiAiPreview === 'student' ? '学生可见效果' : '复制结果预览'}>
           <div className="mb-3 flex items-center justify-between gap-3">
-            <h4 className="text-sm font-semibold">
+            <h4 className="text-sm font-semibold text-fg">
               {antiAiPreview === 'student' ? '学生可见效果（不显示隐藏文本）' : '复制结果（显式展示注入文本）'}
             </h4>
             <Button type="button" size="sm" variant="ghost" onClick={() => setAntiAiPreview(null)}>
@@ -747,28 +735,28 @@ export function MarkdownEditor({
           {antiAiPreview === 'student' ? (
             <PreviewWithSamples source={source} resolveFileUrl={previewFileUrl} />
           ) : (
-            <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-md border bg-background p-3 text-xs">
+            <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-md border border-line bg-surface-sunken p-3 text-xs text-fg">
               {antiAiCopyPreview(source, activeAntiAiMarkers)}
             </pre>
           )}
         </section>
       ) : null}
 
-      {/* Side-by-side from `lg`, or a single column on short viewports.
-          `--md-shell-h` still drives tall-desktop height; stacked panes cap
-          at ~40svh so two bands cannot each eat most of the screen. */}
+      {/* Column count and pane height live in `.krypton-md-shell`.
+          `--md-shell-h` is the tall-desktop height; narrow and short viewports
+          are capped by that stylesheet, not by component utilities. */}
       <div
-        className="krypton-md-shell grid grid-cols-1 gap-0 overflow-hidden rounded-lg border max-lg:!h-auto lg:grid-cols-2 [@media(max-height:500px)]:!h-auto [@media(max-height:500px)]:grid-cols-1"
+        className="krypton-md-shell grid grid-cols-1 gap-0.5 overflow-hidden rounded-lg border border-line bg-line md:grid-cols-2"
         style={{ '--md-shell-h': `${minHeight}px` } as CSSProperties}
       >
         {/* Editor pane */}
-        <div className="relative h-full min-h-0 border-b max-lg:!max-h-[40svh] lg:border-b-0 lg:border-r [@media(max-height:500px)]:border-b [@media(max-height:500px)]:border-r-0 [@media(max-height:500px)]:!max-h-[40svh]">
-          <div className="pointer-events-none absolute left-0 top-0 select-none px-2 py-2.5 text-right font-mono text-xs leading-[1.625rem] text-muted-foreground/40">
+        <div className="relative h-full min-h-0 bg-bg">
+          <div className="pointer-events-none absolute left-0 top-0 select-none px-2 py-2 text-right font-mono text-xs leading-6 text-fg-subtle">
             {source.split('\n').map((_, i) => (
               <div key={i}>{i + 1}</div>
             ))}
           </div>
-          <textarea
+          <Textarea
             ref={editorRef}
             name={isLocalized ? undefined : name}
             value={source}
@@ -776,7 +764,7 @@ export function MarkdownEditor({
             onScroll={handleScroll}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
-            className="krypton-markdown-editor h-full w-full resize-none bg-background py-2 pl-10 pr-3 font-mono text-sm leading-[1.625rem] focus:outline-none"
+            className="krypton-markdown-editor h-full min-h-0 resize-none rounded-none border-0 bg-bg py-2 pl-10 pr-3 font-mono leading-6 shadow-none focus-visible:border-0 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
             spellCheck={false}
             placeholder={'在此输入 Markdown 内容…\n支持 LaTeX 公式: $x^2$ 或 $$\\sum_{i=1}^n$$\n支持 HTML 标签'}
           />
@@ -786,13 +774,13 @@ export function MarkdownEditor({
         <ScrollArea
           viewportRef={previewRef}
           orientation="both"
-          className="h-full min-h-0 bg-card max-lg:!max-h-[40svh] [@media(max-height:500px)]:!max-h-[40svh]"
+          className="h-full min-h-0 bg-surface"
           viewportClassName="p-4"
         >
           {preview ? (
             <PreviewWithSamples source={preview} resolveFileUrl={previewFileUrl} />
           ) : (
-            <p className="text-sm italic text-muted-foreground">预览区域</p>
+            <p className="text-sm text-fg-muted">预览区域</p>
           )}
         </ScrollArea>
       </div>

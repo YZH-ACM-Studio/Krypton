@@ -5,7 +5,8 @@ import { SampleCopyButton } from '@/components/sample-blocks';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Panel } from '@/components/ui/panel';
 import { SimpleSelect } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import type { AntiAiMarkerClientMarker, AntiAiMarkerDraft } from '@/lib/anti-ai-marker';
@@ -67,8 +68,8 @@ export function structuredStatementSamples(view: ProgrammingStatementViewData | 
 function Section({ title, children, icon = <FileText className="size-4" /> }: { title: string; children: ReactNode; icon?: ReactNode }) {
   return (
     <section className="min-w-0 space-y-3">
-      <h2 className="flex min-w-0 items-center gap-2 text-lg font-semibold tracking-tight">
-        <span className="shrink-0 text-muted-foreground">{icon}</span>
+      <h2 className="flex min-w-0 items-center gap-2 text-lg font-semibold">
+        <span className="shrink-0 text-fg-subtle">{icon}</span>
         <span className="min-w-0">{title}</span>
       </h2>
       {children}
@@ -108,12 +109,12 @@ export function ProgrammingStatementView({
             antiAiMarkers={antiAiMarkers}
           />
         ) : (
-          <p className="text-sm text-amber-600 dark:text-amber-400">题目描述尚未完成。</p>
+          <p className="text-sm text-warning-fg">题目描述尚未完成。</p>
         )}
       </Section>
       <Section title="输入格式">
         {statement.input.state === 'absent' ? (
-          <p className="text-sm">本题无输入。</p>
+          <p className="text-sm text-fg">本题无输入。</p>
         ) : statement.input.state === 'present' ? (
           <MarkdownView
             content={statement.input.content}
@@ -122,12 +123,12 @@ export function ProgrammingStatementView({
             antiAiMarkers={antiAiMarkers}
           />
         ) : (
-          <p className="text-sm text-amber-600 dark:text-amber-400">输入格式尚未决定。</p>
+          <p className="text-sm text-warning-fg">输入格式尚未决定。</p>
         )}
       </Section>
       <Section title="输出格式">
         {statement.output.state === 'absent' ? (
-          <p className="text-sm">本题无输出。</p>
+          <p className="text-sm text-fg">本题无输出。</p>
         ) : statement.output.state === 'present' ? (
           <MarkdownView
             content={statement.output.content}
@@ -136,33 +137,33 @@ export function ProgrammingStatementView({
             antiAiMarkers={antiAiMarkers}
           />
         ) : (
-          <p className="text-sm text-amber-600 dark:text-amber-400">输出格式尚未决定。</p>
+          <p className="text-sm text-warning-fg">输出格式尚未决定。</p>
         )}
       </Section>
       {statement.examples ? (
         <Section title="样例">
           <div className="space-y-4">
             {statement.examples.items.map((item, index) => (
-              <article key={`${index}-${item.input}-${item.output}`} className="min-w-0 overflow-hidden rounded-xl border bg-muted/15">
-                <header className="min-w-0 border-b px-4 py-2 text-sm font-medium">样例 {index + 1}</header>
-                <div className="grid min-w-0 gap-px bg-border md:grid-cols-2">
-                  <div className="min-w-0 bg-card p-4">
-                    <div className="mb-2 flex min-w-0 items-center justify-between gap-2">
-                      <p className="min-w-0 text-xs font-medium text-muted-foreground">输入</p>
+              <article key={`${index}-${item.input}-${item.output}`} className="min-w-0 space-y-3">
+                <header className="text-sm font-medium text-fg">样例 {index + 1}</header>
+                <div className="grid min-w-0 gap-3 sm:grid-cols-2">
+                  <div className="min-w-0 overflow-hidden rounded-md border border-line bg-surface-sunken">
+                    <div className="flex h-8 items-center justify-between border-b border-line-subtle px-3">
+                      <p className="min-w-0 text-xs font-medium text-fg-muted">输入</p>
                       <SampleCopyButton label={`样例 ${index + 1} 输入`} content={item.inputEmpty ? '' : item.input} />
                     </div>
-                    <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-sm">{item.inputEmpty ? '（空）' : item.input}</pre>
+                    <pre className="overflow-x-auto px-3 py-2.5 font-mono text-sm leading-relaxed">{item.inputEmpty ? '（空）' : item.input}</pre>
                   </div>
-                  <div className="min-w-0 bg-card p-4">
-                    <div className="mb-2 flex min-w-0 items-center justify-between gap-2">
-                      <p className="min-w-0 text-xs font-medium text-muted-foreground">输出</p>
+                  <div className="min-w-0 overflow-hidden rounded-md border border-line bg-surface-sunken">
+                    <div className="flex h-8 items-center justify-between border-b border-line-subtle px-3">
+                      <p className="min-w-0 text-xs font-medium text-fg-muted">输出</p>
                       <SampleCopyButton label={`样例 ${index + 1} 输出`} content={item.outputEmpty ? '' : item.output} />
                     </div>
-                    <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-sm">{item.outputEmpty ? '（空）' : item.output}</pre>
+                    <pre className="overflow-x-auto px-3 py-2.5 font-mono text-sm leading-relaxed">{item.outputEmpty ? '（空）' : item.output}</pre>
                   </div>
                 </div>
                 {item.note.trim() ? (
-                  <div className="border-t px-4 py-3">
+                  <div className="border-t border-line-subtle pt-3">
                     <MarkdownView
                       content={item.note}
                       preferredLang={preferredLang}
@@ -239,17 +240,25 @@ function EditorCard({
   children: ReactNode;
 }) {
   return (
-    <section className="scroll-mt-6 min-w-0 overflow-hidden rounded-2xl border border-border/70 bg-card/35" id={`statement-${sectionKey}`}>
-      <header className="flex min-w-0 flex-col gap-3 border-b border-border/60 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex min-w-0 items-center gap-2">
-          {state === 'undecided' ? <CircleDashed className="size-4 shrink-0 text-amber-500" /> : <CheckCircle2 className="size-4 shrink-0 text-emerald-500" />}
-          <h3 className="min-w-0 font-semibold">{title}</h3>
-        </div>
-        <SimpleSelect value={state} options={stateOptions(allowAbsent)} onValueChange={(value) => onState(value as StatementState)} />
-      </header>
-      {state === 'present' ? <div className="p-5">{children}</div> : null}
-      {state === 'absent' ? <p className="px-5 py-4 text-sm text-muted-foreground">已明确该区块不存在。</p> : null}
-      {state === 'undecided' ? <p className="px-5 py-4 text-sm text-amber-700 dark:text-amber-300">保存草稿可以保留，发布前必须决定。</p> : null}
+    <section id={`statement-${sectionKey}`} className="scroll-mt-6">
+      <Panel
+        as="div"
+        title={
+          <span className="inline-flex min-w-0 items-center gap-2">
+            {state === 'undecided' ? (
+              <CircleDashed className="size-4 shrink-0 text-warning-fg" />
+            ) : (
+              <CheckCircle2 className="size-4 shrink-0 text-success-fg" />
+            )}
+            <span className="min-w-0">{title}</span>
+          </span>
+        }
+        actions={<SimpleSelect value={state} options={stateOptions(allowAbsent)} onValueChange={(value) => onState(value as StatementState)} />}
+      >
+        {state === 'present' ? children : null}
+        {state === 'absent' ? <p className="text-sm text-fg-muted">已明确该区块不存在。</p> : null}
+        {state === 'undecided' ? <p className="text-sm text-warning-fg">保存草稿可以保留，发布前必须决定。</p> : null}
+      </Panel>
     </section>
   );
 }
@@ -367,35 +376,32 @@ export function ProgrammingStatementEditor({
 
   return (
     <div className="space-y-5">
-      <div className="min-w-0 rounded-2xl border border-border/70 bg-muted/20 p-5">
-        <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="min-w-0">
-            <p className="min-w-0 font-semibold">
-              已决定 {summary.completed}/{summary.total} 个区块
-            </p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {summary.missing.length
-                ? `待决定：${summary.missing.map((item) => item.label).join('、')}`
-                : '区块状态已全部决定；发布仍会校验正文、样例和评测限制。'}
-            </p>
-          </div>
-          <Button type="button" variant="outline" className="gap-2" onClick={() => setPreviewOpen(true)}>
-            <Eye className="size-4" />
+      <Panel
+        title={<span className="tabular">已决定 {summary.completed}/{summary.total} 个区块</span>}
+        description={
+          summary.missing.length
+            ? `待决定：${summary.missing.map((item) => item.label).join('、')}`
+            : '区块状态已全部决定；发布仍会校验正文、样例和评测限制。'
+        }
+        actions={
+          <Button type="button" variant="secondary" onClick={() => setPreviewOpen(true)}>
+            <Eye />
             完整题面预览
           </Button>
-        </div>
+        }
+      >
         {summary.missing.length ? (
-          <div className="mt-3 flex flex-wrap gap-1.5">
+          <div className="flex flex-wrap gap-1.5">
             {summary.missing.map((item) => (
               <Badge key={item.key} variant="outline">
-                <a href={`#statement-${item.key}`} className="rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                <a href={`#statement-${item.key}`} className="rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
                   {item.label}
                 </a>
               </Badge>
             ))}
           </div>
         ) : null}
-      </div>
+      </Panel>
 
       <EditorCard
         sectionKey="background"
@@ -460,34 +466,37 @@ export function ProgrammingStatementEditor({
       <EditorCard sectionKey="examples" title="样例" state={value.examples.state} allowAbsent onState={setExamplesState}>
         <div className="space-y-4">
           {value.examples.items.map((item, index) => (
-            <article key={index} className="min-w-0 overflow-hidden rounded-xl border">
-              <header className="flex min-w-0 items-center gap-2 border-b bg-muted/25 px-4 py-3">
-                <span className="min-w-0 font-medium">样例 {index + 1}</span>
-                <div className="ml-auto flex gap-1">
+            <article key={index} className="min-w-0 overflow-hidden rounded-md bg-surface-sunken">
+              <header className="flex min-w-0 items-center gap-2 border-b border-line-subtle px-3 py-2">
+                <span className="min-w-0 text-sm font-medium text-fg">样例 {index + 1}</span>
+                <div className="ml-auto flex gap-2">
                   <Button
                     type="button"
-                    size="icon"
+                    size="sm"
+                    iconOnly
                     variant="ghost"
                     disabled={index === 0}
                     onClick={() => moveExample(index, -1)}
                     aria-label={`上移样例 ${index + 1}`}
                   >
-                    <ArrowUp className="size-4" />
+                    <ArrowUp />
                   </Button>
                   <Button
                     type="button"
-                    size="icon"
+                    size="sm"
+                    iconOnly
                     variant="ghost"
                     disabled={index === value.examples.items.length - 1}
                     onClick={() => moveExample(index, 1)}
                     aria-label={`下移样例 ${index + 1}`}
                   >
-                    <ArrowDown className="size-4" />
+                    <ArrowDown />
                   </Button>
                   <Button
                     type="button"
-                    size="icon"
-                    variant="ghost"
+                    size="sm"
+                    iconOnly
+                    variant="danger-soft"
                     onClick={() => removeExample(index)}
                     disabled={antiAiMarkers.some((marker) => marker.anchor.path === `programmingStatement.examples.${index}.note`)}
                     title={
@@ -497,18 +506,18 @@ export function ProgrammingStatementEditor({
                     }
                     aria-label={`删除样例 ${index + 1}`}
                   >
-                    <Trash2 className="size-4 text-destructive" />
+                    <Trash2 />
                   </Button>
                 </div>
               </header>
-              <div className="grid min-w-0 gap-4 p-4 md:grid-cols-2">
+              <div className="grid min-w-0 gap-4 p-4 sm:grid-cols-2">
                 {(['input', 'output'] as const).map((side) => {
                   const emptyKey = `${side}Empty` as const;
                   return (
                     <div key={side} className="space-y-2">
                       <div className="flex items-center justify-between gap-2">
-                        <label className="text-sm font-medium">{side === 'input' ? '输入' : '输出'}</label>
-                        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <label className="text-sm font-medium text-fg">{side === 'input' ? '输入' : '输出'}</label>
+                        <label className="flex items-center gap-2 text-xs text-fg-subtle">
                           <Checkbox
                             checked={item[emptyKey]}
                             onCheckedChange={(checked) => updateExample(index, { [emptyKey]: checked, ...(checked ? { [side]: '' } : {}) })}
@@ -526,8 +535,8 @@ export function ProgrammingStatementEditor({
                   );
                 })}
               </div>
-              <div className="border-t p-4">
-                <p className="mb-2 text-sm font-medium">样例说明（可选 Markdown）</p>
+              <div className="border-t border-line-subtle p-4">
+                <p className="mb-2 text-sm font-medium text-fg">样例说明（可选 Markdown）</p>
                 <MarkdownEditor
                   value={item.note}
                   onChange={(note) => updateExample(index, { note })}
@@ -543,8 +552,8 @@ export function ProgrammingStatementEditor({
           ))}
           <Button
             type="button"
-            variant="outline"
-            className="w-full gap-2"
+            variant="secondary"
+            className="w-full"
             onClick={() =>
               onChange({
                 ...value,
@@ -555,16 +564,14 @@ export function ProgrammingStatementEditor({
               })
             }
           >
-            <Plus className="size-4" />
+            <Plus />
             新增样例
           </Button>
         </div>
       </EditorCard>
-      <section className="rounded-2xl border border-border/70 bg-card/35 p-5">
-        <h3 className="font-semibold">时空限制</h3>
-        <p className="mt-1 text-sm text-muted-foreground">始终读取当前评测配置，不在题面中保存第二份限制。</p>
-        <div className="mt-4">{limitsPreview || <p className="text-sm text-amber-600">请在评测配置中完成时间与内存限制。</p>}</div>
-      </section>
+      <Panel title="时空限制" description="始终读取当前评测配置，不在题面中保存第二份限制。">
+        {limitsPreview || <p className="text-sm text-warning-fg">请在评测配置中完成时间与内存限制。</p>}
+      </Panel>
       <EditorCard sectionKey="hints" title="总提示" state={value.hints.state} allowAbsent onState={(state) => setTextState('hints', state)}>
         <MarkdownEditor
           value={value.hints.content}
@@ -579,33 +586,33 @@ export function ProgrammingStatementEditor({
       </EditorCard>
 
       <Dialog open={pendingAbsent !== null} onOpenChange={(open) => !open && setPendingAbsent(null)}>
-        <DialogContent className="w-full sm:w-[480px]" onClose={() => setPendingAbsent(null)}>
+        <DialogContent size="md" onClose={() => setPendingAbsent(null)}>
           <DialogHeader>
             <DialogTitle>确认清空区块</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 p-5">
-            <p className="text-sm leading-6 text-muted-foreground">
+          <DialogBody>
+            <p className="text-sm text-fg-muted">
               切换为“明确没有”会永久清空{pendingAbsent ? SECTION_LABELS[pendingAbsent] : '该区块'}当前内容和防 AI 标记，保存后无法恢复。
             </p>
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => setPendingAbsent(null)}>
-                取消
-              </Button>
-              <Button type="button" variant="destructive" onClick={confirmAbsent}>
-                清空并标记为无
-              </Button>
-            </div>
-          </div>
+          </DialogBody>
+          <DialogFooter>
+            <Button type="button" variant="secondary" onClick={() => setPendingAbsent(null)}>
+              取消
+            </Button>
+            <Button type="button" variant="danger" onClick={confirmAbsent}>
+              清空并标记为无
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
-        <DialogContent className="min-h-0 min-w-0 w-full max-h-[min(88dvh,calc(100dvh-2rem))] sm:w-[900px]" onClose={() => setPreviewOpen(false)}>
+        <DialogContent size="xl" className="min-h-0 min-w-0" onClose={() => setPreviewOpen(false)}>
           <DialogHeader>
             <DialogTitle className="min-w-0">完整题面预览</DialogTitle>
           </DialogHeader>
-          <DialogBody className="min-h-0 overflow-y-auto p-6">
-            <ProgrammingStatementView statement={preview} limits={limitsPreview || <p className="text-sm text-amber-600">评测限制尚未完成。</p>} />
+          <DialogBody>
+            <ProgrammingStatementView statement={preview} limits={limitsPreview || <p className="text-sm text-warning-fg">评测限制尚未完成。</p>} />
           </DialogBody>
         </DialogContent>
       </Dialog>

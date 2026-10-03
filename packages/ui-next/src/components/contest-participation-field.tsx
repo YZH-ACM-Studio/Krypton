@@ -17,15 +17,15 @@ export function ContestParticipationField({ rule, value, onValueChange }: Contes
   if (rule !== 'acm') return <input type="hidden" name="participationMode" value="individual" />;
 
   return (
-    <div className="min-w-0 space-y-1.5">
-      <label className="text-sm font-medium">参赛身份</label>
+    <div className="flex min-w-0 flex-col gap-1.5">
+      <label className="text-sm font-medium text-fg">参赛身份</label>
       <SimpleSelect
         name="participationMode"
         value={value}
         onValueChange={(nextValue) => onValueChange(nextValue as ContestParticipationMode)}
         options={ACM_PARTICIPATION_OPTIONS}
       />
-      <p className="text-[11px] text-muted-foreground">团队模式强制通过 Vigil Client 进入且不计个人 Rating。</p>
+      <p className="text-2xs text-fg-subtle">团队模式强制通过 Vigil Client 进入且不计个人 Rating。</p>
     </div>
   );
 }

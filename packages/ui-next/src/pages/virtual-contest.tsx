@@ -1,11 +1,17 @@
 import { Clock, Flag, List, Trophy } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { Breadcrumb } from '@/components/ui/breadcrumb';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { StatusDot } from '@/components/ui/display';
+import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
+import { Page, PageHeader } from '@/components/ui/page';
+import { Panel } from '@/components/ui/panel';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { scoreTone } from '@/components/ui/verdict';
 import { useBootstrap } from '@/lib/bootstrap';
+import { cn } from '@/lib/cn';
 import { contestProblemLetter } from '@/lib/competitive-companion';
 import { formatDateTime, replaceRouteTokens } from '@/lib/format';
 import { scoreboardExportPlainText } from '@/lib/scoreboard-image-export';
@@ -51,6 +57,9 @@ function remainingLabel(ms: number): string {
 interface VirtualScoreboardCell {
   type?: string;
   value?: unknown;
+  score?: number;
+  scorePercentage?: number;
+  style?: string;
 }
 
 function isProblemScoreboardColumn(type: string | undefined): boolean {
@@ -66,9 +75,54 @@ function scoreboardCellClass(type: string | undefined, kind: 'head' | 'body'): s
     return kind === 'head' ? 'min-w-20 whitespace-nowrap text-center' : 'min-w-20 whitespace-pre-line text-center';
   }
   if (kind === 'body' && (type === 'time' || type === 'total_score' || type === 'solved')) {
-    return 'min-w-24 whitespace-pre-line';
+    return 'min-w-24 whitespace-pre-line tabular';
   }
-  return 'min-w-24 whitespace-nowrap';
+  return 'min-w-24 whitespace-nowrap tabular';
+}
+
+const SCOREBOARD_PROBLEM_CELL = 'h-12 text-center font-semibold tabular border-l border-line-subtle 3xl:text-md';
+
+function scoreboardStickyClass(index: number, kind: 'head' | 'body'): string | undefined {
+  if (index === 0) {
+    return kind === 'head'
+      ? 'sticky left-0 z-20 w-24 bg-surface'
+      : 'sticky left-0 z-10 w-24 bg-surface group-hover:bg-surface-hover';
+  }
+  if (index === 1) {
+    return kind === 'head'
+      ? 'sticky left-24 z-20 bg-surface'
+      : 'sticky left-24 z-10 bg-surface group-hover:bg-surface-hover';
+  }
+  return undefined;
+}
+
+function isFirstBlood(cell: VirtualScoreboardCell): boolean {
+  return typeof cell.style === 'string' && /background-color/i.test(cell.style);
+}
+
+function numericScore(cell: VirtualScoreboardCell, text: string): number | undefined {
+  if (typeof cell.scorePercentage === 'number' && Number.isFinite(cell.scorePercentage)) return cell.scorePercentage;
+  if (typeof cell.score === 'number' && Number.isFinite(cell.score)) return cell.score;
+  const parsed = Number(text);
+  if (text.trim() !== '' && Number.isFinite(parsed)) return parsed;
+  return undefined;
+}
+
+function scoreboardToneClass(cell: VirtualScoreboardCell): string {
+  if (!isProblemScoreboardColumn(cell.type)) return '';
+  if (isFirstBlood(cell)) return 'bg-success text-on-success';
+  const raw = cell.value == null ? '' : String(cell.value);
+  const text = scoreboardCellText(cell);
+  if (text === '—' || text === '-' || text === '') return '';
+  if (raw.includes('icon-check') || /^\+\d*\n/.test(text)) return 'bg-success-soft text-success-fg';
+  if (/color:\s*orange/i.test(raw)) return 'bg-info-soft text-info-fg';
+  if (/^-\d/.test(text)) return 'bg-danger-soft text-danger-fg';
+  const score = numericScore(cell, text);
+  if (score === undefined) return '';
+  const tone = scoreTone(score);
+  if (tone === 'success') return 'bg-success-soft text-success-fg';
+  if (tone === 'danger') return 'bg-danger-soft text-danger-fg';
+  return 'bg-warning-soft text-warning-fg';
 }
 
 const REASON: Record<string, string> = {
@@ -94,25 +148,23 @@ export function VirtualContestPage() {
   const locale = bs.locale || 'zh';
 
   return (
-    <div className="space-y-6">
-      <div>
-        <p className="text-sm text-muted-foreground">
-          <a href={detailUrl} className="hover:text-primary">
-            {data.tdoc?.title || '比赛'}
-          </a>
-        </p>
-        <h1 className="text-2xl font-semibold">虚拟参赛</h1>
-        <p className="mt-1 max-w-prose text-sm text-muted-foreground">
-          这是普通浏览器里的自律计时训练，不启动考试客户端、不加网络锁，也不能当作防作弊。源比赛题目顺序和赛制会被快照，之后改题面不会改这次计时。
-        </p>
-      </div>
+    <Page width="wide">
+      <PageHeader
+        title="虚拟参赛"
+        breadcrumb={(
+          <Breadcrumb
+            items={[
+              { label: data.tdoc?.title || '比赛', href: detailUrl },
+              { label: '虚拟参赛' },
+            ]}
+          />
+        )}
+        description="这是普通浏览器里的自律计时训练，不启动考试客户端、不加网络锁，也不能当作防作弊。源比赛题目顺序和赛制会被快照，之后改题面不会改这次计时。"
+      />
 
       {data.rejudgePreview ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">确认重测范围</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3 text-sm">
+        <Panel title="确认重测范围">
+          <div className="space-y-3 text-sm">
             <p>
               即将重测 {data.rejudgePreview.count || 0} 条记录，规则快照 {data.rejudgePreview.snapshotRule}。Record ID：
               {(data.rejudgePreview.recordIds || []).map((id) => String(id)).join(', ') || '无'}
@@ -120,25 +172,22 @@ export function VirtualContestPage() {
             <form method="post" action={`/contest/${tid}/virtual/rejudge`} className="space-y-2">
               <input type="hidden" name="attemptId" value={String(data.rejudgePreview.attemptId || '')} />
               {data.rejudgePreview.pid ? <input type="hidden" name="pid" value={String(data.rejudgePreview.pid)} /> : null}
-              <label className="block space-y-1">
+              <label className="flex flex-col gap-1.5">
                 确认口令
                 <Input name="confirmation" required placeholder={`REJUDGE-VP:${data.rejudgePreview.attemptId}:${data.rejudgePreview.count}`} />
               </label>
-              <Button type="submit">确认重测</Button>
+              <Button type="submit" variant="primary">确认重测</Button>
             </form>
-          </CardContent>
-        </Card>
+          </div>
+        </Panel>
       ) : null}
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">入口</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-wrap items-center gap-2">
+      <Panel title="入口">
+        <div className="flex flex-wrap items-center gap-2">
           {data.eligibility?.allowed && !attempt ? (
             <form method="post" className="flex">
               <input type="hidden" name="operation" value="start" />
-              <Button type="submit" className="h-auto whitespace-normal">
+              <Button type="submit" variant="primary" className="h-auto whitespace-normal">
                 开始虚拟参赛
               </Button>
             </form>
@@ -148,7 +197,7 @@ export function VirtualContestPage() {
               <form method="post" className="flex">
                 <input type="hidden" name="operation" value="end" />
                 <input type="hidden" name="attemptId" value={String(attempt._id)} />
-                <Button type="submit" variant="outline" className="h-auto whitespace-normal">
+                <Button type="submit" variant="secondary" className="h-auto whitespace-normal">
                   提前结束
                 </Button>
               </form>
@@ -164,58 +213,67 @@ export function VirtualContestPage() {
             </>
           ) : null}
           {attempt?.status === 'ended' ? (
-            <Button asChild variant="outline" className="h-auto whitespace-normal">
+            <Button asChild variant="secondary" className="h-auto whitespace-normal">
               <a href={`/contest/${tid}/virtual/scoreboard`}>
-                <Trophy className="size-4" />
+                <Trophy />
                 虚拟榜单
               </a>
             </Button>
           ) : null}
-          <Button asChild variant="outline" className="h-auto whitespace-normal">
+          <Button asChild variant="secondary" className="h-auto whitespace-normal">
             <a href={`${detailUrl}/problems`}>继续赛后练习</a>
           </Button>
-        </CardContent>
-      </Card>
+        </div>
+      </Panel>
 
       {!data.eligibility?.allowed && !attempt ? (
-        <p className="text-sm text-muted-foreground">{REASON[data.eligibility?.reason || ''] || '当前不能开始虚拟参赛。'}</p>
+        <p className="text-sm text-fg-muted">{REASON[data.eligibility?.reason || ''] || '当前不能开始虚拟参赛。'}</p>
       ) : null}
 
       {attempt ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex flex-wrap items-center gap-2 text-base">
-              <span className="inline-flex items-center gap-2">
-                <Clock className="size-4 shrink-0" />
-                {attempt.status === 'active' ? '进行中' : attempt.status}
+        <Panel
+          title={(
+            <span className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center gap-1.5">
+                <Clock className="size-4 shrink-0 text-fg-subtle" />
+                {attempt.status === 'active' ? (
+                  <>
+                    <StatusDot tone="success" pulse />
+                    进行中
+                  </>
+                ) : (
+                  attempt.status
+                )}
               </span>
               {attempt.status === 'active' ? (
-                <Badge variant="secondary" className="max-w-full whitespace-nowrap">
+                <Badge variant="soft" className="max-w-full whitespace-nowrap tabular">
                   {remainingLabel(attempt.remainingMs || 0)} 剩余
                 </Badge>
               ) : null}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 text-sm text-muted-foreground">
-            <p>
+            </span>
+          )}
+        >
+          <div className="space-y-2 text-sm text-fg-muted">
+            <p className="tabular">
               {formatDateTime(attempt.startAt, locale)} → {formatDateTime(attempt.endAt, locale)}
             </p>
-            <p>
+            <p className="tabular">
               通过 {attempt.accept || 0} · 罚时/用时 {attempt.time || 0} · 得分 {attempt.score || 0}
             </p>
-          </CardContent>
-        </Card>
+          </div>
+        </Panel>
       ) : null}
 
       {pids.length ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <List className="size-4" />
+        <Panel
+          title={(
+            <span className="inline-flex items-center gap-1.5">
+              <List className="size-4 text-fg-subtle" />
               题目
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
+            </span>
+          )}
+        >
+          <div className="space-y-2">
             {pids.map((pid, index) => {
               const title = data.pdict?.[String(pid)]?.title || `P${pid}`;
               const cell = attempt?.detail?.[String(pid)];
@@ -223,68 +281,74 @@ export function VirtualContestPage() {
                 attempt?.status === 'active'
                   ? `/p/${pid}?tid=${encodeURIComponent(tid)}&virtual=1`
                   : `/p/${pid}?tid=${encodeURIComponent(tid)}`;
+              const submitted = Boolean(cell);
+              const accepted = cell?.status === 1;
               return (
                 <a
                   key={pid}
                   href={href}
-                  className="flex min-w-0 items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm hover:bg-muted/40"
+                  className="flex min-w-0 items-center justify-between gap-2 rounded-md border border-line px-3 py-2 text-sm hover:bg-surface-hover"
                 >
                   <span className="min-w-0 truncate">
                     {contestProblemLetter(index)}. {title}
                   </span>
-                  <Badge variant="outline" className="shrink-0">
-                    {cell?.status === 1 ? 'AC' : cell ? '已交' : '未交'}
+                  <Badge
+                    variant="soft"
+                    tone={accepted ? 'success' : submitted ? 'info' : 'neutral'}
+                    className="shrink-0"
+                  >
+                    {accepted ? 'AC' : submitted ? '已交' : '未交'}
                   </Badge>
                 </a>
               );
             })}
-          </CardContent>
-        </Card>
+          </div>
+        </Panel>
       ) : null}
 
       {data.canManage ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">管理</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {(data.adminAttempts || []).map((row) => (
-              <div key={String(row._id)} className="space-y-2 rounded-md border p-3 text-sm">
-                <p>
-                  {row.uname || row.uid} · {row.status} · 通过 {row.accept || 0}
-                </p>
-                {row.status === 'active' ? (
-                  <form method="post">
-                    <input type="hidden" name="operation" value="end" />
-                    <input type="hidden" name="attemptId" value={String(row._id)} />
-                    <Button type="submit" size="sm" variant="outline">
-                      提前结束
-                    </Button>
-                  </form>
-                ) : null}
-                {row.status === 'active' || row.status === 'ended' ? (
-                  <form method="post" className="space-y-2">
-                    <input type="hidden" name="operation" value="void" />
-                    <input type="hidden" name="attemptId" value={String(row._id)} />
-                    <Input name="confirmation" required placeholder={row.voidConfirmation} />
-                    <Button type="submit" size="sm" variant="destructive">
-                      确认作废
-                    </Button>
-                  </form>
-                ) : null}
-                <Button asChild size="sm" variant="outline">
-                  <a href={`/contest/${tid}/virtual/rejudge?attemptId=${encodeURIComponent(String(row._id))}`}>
-                    <Flag className="size-4" />
-                    预览并重测
-                  </a>
-                </Button>
-              </div>
-            ))}
-            {!(data.adminAttempts || []).length ? <p className="text-sm text-muted-foreground">还没有虚拟参赛记录。</p> : null}
-          </CardContent>
-        </Card>
+        <Panel title="管理">
+          {(data.adminAttempts || []).length ? (
+            <div className="divide-y divide-line-subtle">
+              {(data.adminAttempts || []).map((row) => (
+                <div key={String(row._id)} className="space-y-2 py-3 text-sm first:pt-0 last:pb-0">
+                  <p>
+                    {row.uname || row.uid} · {row.status} · 通过 {row.accept || 0}
+                  </p>
+                  {row.status === 'active' ? (
+                    <form method="post">
+                      <input type="hidden" name="operation" value="end" />
+                      <input type="hidden" name="attemptId" value={String(row._id)} />
+                      <Button type="submit" size="sm" variant="secondary">
+                        提前结束
+                      </Button>
+                    </form>
+                  ) : null}
+                  {row.status === 'active' || row.status === 'ended' ? (
+                    <form method="post" className="space-y-2">
+                      <input type="hidden" name="operation" value="void" />
+                      <input type="hidden" name="attemptId" value={String(row._id)} />
+                      <Input name="confirmation" required placeholder={row.voidConfirmation} />
+                      <Button type="submit" size="sm" variant="danger">
+                        确认作废
+                      </Button>
+                    </form>
+                  ) : null}
+                  <Button asChild size="sm" variant="secondary">
+                    <a href={`/contest/${tid}/virtual/rejudge?attemptId=${encodeURIComponent(String(row._id))}`}>
+                      <Flag />
+                      预览并重测
+                    </a>
+                  </Button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyState compact title="还没有虚拟参赛记录。" />
+          )}
+        </Panel>
       ) : null}
-    </div>
+    </Page>
   );
 }
 
@@ -295,18 +359,25 @@ export function VirtualContestScoreboardPage() {
   const header = rows[0] || [];
   const body = rows.slice(1);
   return (
-    <div className="min-w-0 space-y-4">
-      <h1 className="text-2xl font-semibold">虚拟参赛榜单</h1>
-      <p className="max-w-prose text-sm text-muted-foreground">按各自相对时间计分，与正式榜单完全分开。</p>
-      <Card className="min-w-0">
-        <CardContent className="p-0">
+    <Page width="full">
+      <PageHeader title="虚拟参赛榜单" description="按各自相对时间计分，与正式榜单完全分开。" />
+      <div className="min-w-0 space-y-4">
+        <Panel flush className="min-w-0">
           {header.length > 0 ? (
             <ScrollArea className="w-full" orientation="both">
+              {/* ds-allow DS005: Table 自带 krypton-table-shell 横向滚动，套不进本页要求的 orientation=both ScrollArea */}
               <table className="krypton-table min-w-max w-full caption-bottom text-sm [&_tr>*:first-child]:pl-5 [&_tr>*:last-child]:pr-5">
                 <TableHeader>
                   <TableRow>
                     {header.map((cell, index) => (
-                      <TableHead key={`${cell.type || 'col'}-${index}`} className={scoreboardCellClass(cell.type, 'head')}>
+                      <TableHead
+                        key={`${cell.type || 'col'}-${index}`}
+                        className={cn(
+                          '3xl:text-md',
+                          scoreboardCellClass(cell.type, 'head'),
+                          scoreboardStickyClass(index, 'head'),
+                        )}
+                      >
                         {scoreboardCellText(cell)}
                       </TableHead>
                     ))}
@@ -314,9 +385,18 @@ export function VirtualContestScoreboardPage() {
                 </TableHeader>
                 <TableBody>
                   {body.map((row, rowIndex) => (
-                    <TableRow key={rowIndex}>
+                    <TableRow key={rowIndex} className="group">
                       {row.map((cell, cellIndex) => (
-                        <TableCell key={`${rowIndex}-${cellIndex}`} className={scoreboardCellClass(cell.type, 'body')}>
+                        <TableCell
+                          key={`${rowIndex}-${cellIndex}`}
+                          className={cn(
+                            '3xl:text-md',
+                            scoreboardCellClass(cell.type, 'body'),
+                            isProblemScoreboardColumn(cell.type) ? SCOREBOARD_PROBLEM_CELL : undefined,
+                            scoreboardStickyClass(cellIndex, 'body'),
+                            scoreboardToneClass(cell),
+                          )}
+                        >
                           {scoreboardCellText(cell)}
                         </TableCell>
                       ))}
@@ -326,10 +406,10 @@ export function VirtualContestScoreboardPage() {
               </table>
             </ScrollArea>
           ) : (
-            <p className="px-5 py-8 text-center text-sm text-muted-foreground">暂无排行数据</p>
+            <EmptyState compact title="暂无排行数据" />
           )}
-        </CardContent>
-      </Card>
-    </div>
+        </Panel>
+      </div>
+    </Page>
   );
 }

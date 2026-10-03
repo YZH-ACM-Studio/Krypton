@@ -6,27 +6,24 @@
  *   - collect_detail.html  → CollectDetailPage
  */
 import { useEffect, useMemo, useState } from 'react';
-import { motion } from 'motion/react';
 import {
-  AlertTriangle,
-  CheckCircle2,
   ChevronRight,
   Clock,
   Download,
   FolderUp,
-  Hourglass,
-  Loader2,
   Lock,
   Trash2,
 } from 'lucide-react';
 import { FileUploader } from '@/components/uploader';
 import { MarkdownView } from '@/components/markdown-renderer';
+import { Alert } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { DateTime } from '@/components/ui/datetime';
+import { EmptyState } from '@/components/ui/empty-state';
 import { MiniTabs } from '@/components/ui/mini-tabs';
-import { cn } from '@/lib/cn';
+import { Page, PageHeader } from '@/components/ui/page';
+import { Panel } from '@/components/ui/panel';
 import { useBootstrap } from '@/lib/bootstrap';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import {
@@ -80,31 +77,9 @@ function actionErrorMessage(error: unknown, fallback: string): string {
 
 function PayloadError({ message }: { message: string }) {
   return (
-    <Card>
-      <CardContent className="py-12 text-center">
-        <AlertTriangle className="mx-auto size-12 text-destructive/50" />
-        <p role="alert" className="mt-3 text-sm text-destructive">
-          页面数据无效：{message}
-        </p>
-      </CardContent>
-    </Card>
-  );
-}
-
-function SubmitStatusBadge({ submitted }: { submitted: boolean }) {
-  if (submitted) {
-    return (
-      <Badge variant="default" className="gap-1 bg-emerald-500 text-white hover:bg-emerald-500/90">
-        <CheckCircle2 className="size-3" />
-        已交文件
-      </Badge>
-    );
-  }
-  return (
-    <Badge variant="outline" className="gap-1">
-      <Hourglass className="size-3" />
-      未交文件
-    </Badge>
+    <Page width="wide">
+      <Alert tone="danger">页面数据无效：{message}</Alert>
+    </Page>
   );
 }
 
@@ -136,22 +111,14 @@ function CollectCountdownNotice({
 }) {
   const notice = collectCountdownNotice(dueAtMs, now, closed, alwaysShowRemaining);
   if (!notice) return null;
-  const toneClass: Record<CountdownTone, string> = {
-    info: 'border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300',
-    warning: 'border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300',
-    danger: 'border-destructive/30 bg-destructive/10 text-destructive',
-    muted: 'border-border bg-muted/60 text-muted-foreground',
-  };
+  const tone = notice.tone === 'muted' ? 'neutral' : notice.tone;
   return (
-    <div className={cn('mt-2 flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-medium', toneClass[notice.tone])}>
-      {notice.tone === 'danger' || notice.tone === 'warning' ? (
-        <AlertTriangle className="size-3.5 shrink-0" />
-      ) : (
-        <Clock className="size-3.5 shrink-0" />
-      )}
-      <span>{notice.label}</span>
-      {notice.target ? <span className="ml-auto font-mono tabular-nums">{formatCountdown(notice.target - now)}</span> : null}
-    </div>
+    <Alert tone={tone}>
+      <span className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1">
+        <span className="min-w-0">{notice.label}</span>
+        {notice.target ? <span className="ml-auto font-mono tabular">{formatCountdown(notice.target - now)}</span> : null}
+      </span>
+    </Alert>
   );
 }
 
@@ -219,94 +186,95 @@ export function CollectListPage() {
   const filtered = parsed.value.requests.filter((item) => classifyListItem(item, now) === tab);
 
   return (
-    <div className="space-y-6">
-      <motion.header
-        initial={{ opacity: 0, y: -6 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.25 }}
-        className="flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-xl border bg-card p-6 shadow-sm"
-      >
-        <div className="min-w-0 space-y-1">
-          <div className="flex min-w-0 items-center gap-2">
-            <FolderUp className="size-5 shrink-0 text-primary" />
-            <h1 className="min-w-0 break-words text-xl font-semibold">文件收集</h1>
-          </div>
-          <p className="min-w-0 break-words text-sm text-muted-foreground">按槽位上传文件，截止前可替换，确认后才算已交。</p>
+    <Page width="wide">
+      <div className="flex w-full min-w-0 flex-wrap items-center justify-between gap-3">
+        <div className="w-full min-w-0 flex-1">
+          <PageHeader
+            title={<span className="min-w-0 break-words">文件收集</span>}
+            description="按槽位上传文件，截止前可替换，确认后才算已交。"
+            actions={bs.user.canManageCollect ? (
+              <Button asChild variant="secondary" size="sm">
+                <a href="/admin/collect">
+                  <FolderUp />
+                  管理收集
+                </a>
+              </Button>
+            ) : undefined}
+            tabs={(
+              <MiniTabs
+                value={tab}
+                onValueChange={setTab}
+                aria-label="文件收集分类"
+                className="max-w-full overflow-x-auto overflow-y-hidden scrollbar-none"
+                items={[
+                  { value: 'pending', label: '未交文件', count: counts.pending },
+                  { value: 'submitted', label: '已交文件', count: counts.submitted },
+                  { value: 'closed', label: '已截止', count: counts.closed },
+                ]}
+              />
+            )}
+          />
         </div>
-        {bs.user.canManageCollect ? (
-          <Button asChild variant="default" size="sm" className="shrink-0">
-            <a href="/admin/collect">
-              <FolderUp className="mr-1 size-4" />
-              管理收集
-            </a>
-          </Button>
-        ) : null}
-      </motion.header>
-
-      <MiniTabs
-        value={tab}
-        onValueChange={setTab}
-        aria-label="文件收集分类"
-        className="max-w-full overflow-x-auto"
-        items={[
-          { value: 'pending', label: '未交文件', count: counts.pending },
-          { value: 'submitted', label: '已交文件', count: counts.submitted },
-          { value: 'closed', label: '已截止', count: counts.closed },
-        ]}
-      />
+      </div>
 
       {filtered.length === 0 ? (
-        <Card>
-          <CardContent className="py-12 text-center">
-            <FolderUp className="mx-auto size-12 text-muted-foreground/40" />
-            <p className="mt-3 text-sm text-muted-foreground">当前没有文件收集</p>
-          </CardContent>
-        </Card>
+        <Panel as="div">
+          <EmptyState compact icon={<FolderUp />} title="当前没有文件收集" />
+        </Panel>
       ) : (
-        <div className="grid w-full min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+        <div className="grid w-full min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map((item) => {
             const dueAtMs = collectDueMs(item.dueAt);
             const closed = dueAtMs === null || isCollectWindowClosed(item.status, dueAtMs, now);
             return (
-              <Card key={item._id} className="h-full w-full min-w-0 transition-[box-shadow,opacity] duration-200 ease-out hover:shadow-md motion-reduce:transition-none">
-                <CardContent className="flex h-full flex-col gap-3">
+              <Panel key={item._id} as="div" className="h-full">
+                <div className="flex h-full flex-col gap-3">
                   <div className="flex min-h-10 min-w-0 items-start justify-between gap-2">
-                    <h3 className="min-w-0 flex-1 break-words font-semibold line-clamp-2">{item.title}</h3>
-                    <div className="flex shrink-0 flex-col items-end gap-1">
-                      <SubmitStatusBadge submitted={item.submitted} />
+                    <h3 className="min-w-0 flex-1 break-words text-sm font-semibold text-fg line-clamp-2">{item.title}</h3>
+                    <div className="flex shrink-0 flex-col items-end gap-1.5">
+                      {item.submitted ? (
+                        <Badge tone="success" dot>已交文件</Badge>
+                      ) : (
+                        <Badge tone="neutral" dot>未交文件</Badge>
+                      )}
                       {item.examLocked && !item.submitted ? (
-                        <Badge variant="outline" className="gap-1 text-muted-foreground">
+                        <Badge tone="warning">
                           <Lock className="size-3" />
                           须先考试
                         </Badge>
                       ) : null}
                     </div>
                   </div>
-                  <div className="space-y-1.5 rounded-md border bg-muted/20 p-2.5 text-xs">
-                    <div className="flex min-w-0 items-start gap-1.5 text-muted-foreground">
+                  <div className="flex flex-col gap-1.5 rounded-md bg-surface-sunken p-2.5 text-xs">
+                    <div className="flex min-w-0 items-start gap-1.5 text-fg-subtle">
                       <Clock className="mt-0.5 size-3 shrink-0" />
-                      <span className="shrink-0 text-foreground/70">截止</span>
-                      <span className="min-w-0 flex-1 break-words">
+                      <span className="shrink-0">截止</span>
+                      <span className="min-w-0 flex-1 break-words text-fg">
                         <DateTime value={item.dueAt} mode="datetime" />
                       </span>
                     </div>
                     {dueAtMs !== null ? <CollectCountdownNotice dueAtMs={dueAtMs} now={now} closed={closed} /> : null}
                   </div>
                   <div className="mt-auto pt-1">
-                    <Button asChild className="min-h-10 w-full" variant={item.submitted || closed ? 'outline' : 'default'} size="sm">
+                    <Button
+                      asChild
+                      className="w-full"
+                      variant={item.submitted || closed ? 'secondary' : 'soft'}
+                      size="md"
+                    >
                       <a href={`/collect/${encodeURIComponent(item._id)}`}>
                         {item.submitted || closed ? '查看' : '去交文件'}
-                        <ChevronRight className="size-4" />
+                        <ChevronRight />
                       </a>
                     </Button>
                   </div>
-                </CardContent>
-              </Card>
+                </div>
+              </Panel>
             );
           })}
         </div>
       )}
-    </div>
+    </Page>
   );
 }
 
@@ -330,45 +298,47 @@ function SlotFiles({
   onDelete: (file: CollectCurrentFileView) => void;
 }) {
   if (files.length === 0) {
-    return <p className="text-xs text-muted-foreground">还没有文件</p>;
+    return <p className="text-xs text-fg-subtle">还没有文件</p>;
   }
   return (
-    <ul className="space-y-1.5">
+    <ul className="flex flex-col gap-1.5">
       {files.map((file) => {
         const assignedName = file.assignedName || file.originalName;
         return (
-          <li key={file.fileId} className="rounded-md border bg-card px-2.5 py-2 text-xs">
-            <div className="flex flex-wrap items-start gap-2">
+          <li key={file.fileId} className="min-w-0 rounded-md bg-surface-sunken px-2.5 py-2 text-xs">
+            <div className="flex min-w-0 flex-wrap items-start gap-2">
               <div className="min-w-0 flex-1">
                 <span className="block break-all font-medium">{assignedName}</span>
                 {file.originalName !== assignedName ? (
-                  <span className="block break-all text-muted-foreground">{file.originalName}</span>
+                  <span className="block break-all text-fg-subtle">{file.originalName}</span>
                 ) : null}
-                <span className="mt-0.5 block text-muted-foreground">{formatSize(file.size)}</span>
+                <span className="mt-0.5 block text-fg-subtle tabular">{formatSize(file.size)}</span>
               </div>
-              <div className="flex shrink-0 flex-wrap items-center gap-1">
-                <a
-                  href={collectFileHref(requestId, file)}
-                  className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-                  aria-label={`下载${assignedName}`}
-                >
-                  <Download className="size-3.5" />
-                </a>
+              <div className="flex shrink-0 flex-wrap items-center gap-2">
+                <Button variant="ghost" size="sm" iconOnly asChild>
+                  <a
+                    href={collectFileHref(requestId, file)}
+                    aria-label={`下载${assignedName}`}
+                  >
+                    <Download />
+                  </a>
+                </Button>
                 {open ? (
                   <>
-                    <Button type="button" variant="ghost" size="sm" className="h-8 px-2" onClick={() => onReplace(file.fileId)}>
+                    <Button type="button" variant="ghost" size="sm" onClick={() => onReplace(file.fileId)}>
                       替换
                     </Button>
                     <Button
                       type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="size-8 text-destructive hover:bg-destructive/10"
+                      variant="danger-soft"
+                      size="sm"
+                      iconOnly
+                      loading={busyFileId === file.fileId}
                       disabled={busyFileId === file.fileId}
                       onClick={() => onDelete(file)}
                       aria-label={`删除${file.originalName}`}
                     >
-                      {busyFileId === file.fileId ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
+                      <Trash2 />
                     </Button>
                   </>
                 ) : null}
@@ -406,40 +376,34 @@ function CollectHistory({
 }) {
   const slotTitle = new Map(slots.map((slot) => [slot.id, slot.title]));
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">历史版本</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
+    <Panel title="历史版本">
+      <div className="flex flex-col gap-4">
         {historyBySlot(history).map((group) => (
-          <div key={group.slotId} className="space-y-1.5">
-            <p className="text-xs font-medium text-muted-foreground">{slotTitle.get(group.slotId) || group.slotId}</p>
-            <ul className="space-y-1">
+          <div key={group.slotId} className="flex flex-col gap-1.5">
+            <p className="text-xs font-medium text-fg-subtle">{slotTitle.get(group.slotId) || group.slotId}</p>
+            <ul className="divide-y divide-line-subtle">
               {group.files.map((file) => (
-                <li key={`${file.fileId}:${file.version}`} className="flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs">
-                  <span className="min-w-0 flex-1 truncate">{file.originalName}</span>
-                  <span className="text-muted-foreground">v{file.version}</span>
-                  <span className="text-muted-foreground">{formatSize(file.size)}</span>
-                  <DateTime value={file.createdAt} mode="datetime" className="text-muted-foreground" />
-                  {file.current ? (
-                    <Badge variant="secondary" className="text-[10px]">
-                      当前
-                    </Badge>
-                  ) : null}
-                  <a
-                    href={collectFileHref(requestId, file)}
-                    className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-                    aria-label={`下载${file.originalName} 第 ${file.version} 版`}
-                  >
-                    <Download className="size-3.5" />
-                  </a>
+                <li key={`${file.fileId}:${file.version}`} className="flex min-w-0 flex-wrap items-center gap-2 py-1.5 text-xs">
+                  <span className="min-w-0 flex-1 break-all">{file.originalName}</span>
+                  <span className="shrink-0 text-fg-subtle tabular">v{file.version}</span>
+                  <span className="shrink-0 text-fg-subtle tabular">{formatSize(file.size)}</span>
+                  <DateTime value={file.createdAt} mode="datetime" className="shrink-0 text-fg-subtle" />
+                  {file.current ? <Badge size="sm">当前</Badge> : null}
+                  <Button variant="ghost" size="sm" iconOnly asChild>
+                    <a
+                      href={collectFileHref(requestId, file)}
+                      aria-label={`下载${file.originalName} 第 ${file.version} 版`}
+                    >
+                      <Download />
+                    </a>
+                  </Button>
                 </li>
               ))}
             </ul>
           </div>
         ))}
-      </CardContent>
-    </Card>
+      </div>
+    </Panel>
   );
 }
 
@@ -492,110 +456,100 @@ export function CollectDetailPage() {
   };
 
   return (
-    <div className="space-y-6">
-      <motion.header initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} className="min-w-0 rounded-xl border bg-card p-6 shadow-sm">
-        <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0 flex-1 space-y-1">
-            <Button variant="ghost" size="sm" asChild className="-ml-2 mb-1">
+    <Page width="wide">
+      <div className="flex min-w-0 flex-col gap-3">
+        <PageHeader
+          breadcrumb={(
+            <Button variant="ghost" size="sm" asChild>
               <a href="/collect">返回文件收集</a>
             </Button>
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <h1 className="min-w-0 break-words text-xl font-semibold">{data.title}</h1>
-              <SubmitStatusBadge submitted={data.submitted} />
-              {closed ? (
-                <Badge variant="outline" className="gap-1 text-muted-foreground">
-                  已截止
-                </Badge>
-              ) : null}
-            </div>
-            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-              <span className="inline-flex items-center gap-1">
+          )}
+          title={<span className="min-w-0 break-words">{data.title}</span>}
+          meta={(
+            <>
+              {data.submitted ? (
+                <Badge tone="success" dot>已交文件</Badge>
+              ) : (
+                <Badge tone="neutral" dot>未交文件</Badge>
+              )}
+              {closed ? <Badge tone="warning" dot>已截止</Badge> : null}
+              <span className="inline-flex items-center gap-1.5">
                 <Clock className="size-3" />
                 截止 <DateTime value={data.dueAt} mode="datetime" />
               </span>
-            </div>
-            {dueAtMs !== null ? <CollectCountdownNotice dueAtMs={dueAtMs} now={now} closed={closed} alwaysShowRemaining /> : null}
-          </div>
-          <div className="flex shrink-0 flex-wrap items-center gap-2">
-            {bs.user.canManageCollect ? (
-              <Button asChild variant="outline" size="sm">
-                <a href={`/admin/collect/${encodeURIComponent(data._id)}`}>进度</a>
-              </Button>
-            ) : null}
-            {writable && !data.submitted ? (
-              <Button type="button" size="sm" className="min-h-11" disabled={!data.filled || confirming} onClick={() => void confirm()}>
-                {confirming ? <Loader2 className="mr-1 size-4 animate-spin" /> : null}
-                确认提交
-              </Button>
-            ) : null}
-          </div>
-        </div>
-        {closed ? (
-          <p className="mt-3 rounded-md border border-border bg-muted/60 px-3 py-2 text-xs text-muted-foreground">收集已截止</p>
-        ) : null}
+            </>
+          )}
+          actions={(
+            <>
+              {bs.user.canManageCollect ? (
+                <Button asChild variant="secondary" size="sm">
+                  <a href={`/admin/collect/${encodeURIComponent(data._id)}`}>进度</a>
+                </Button>
+              ) : null}
+              {writable && !data.submitted ? (
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="sm"
+                  className="min-h-11"
+                  disabled={!data.filled || confirming}
+                  loading={confirming}
+                  onClick={() => void confirm()}
+                >
+                  确认提交
+                </Button>
+              ) : null}
+            </>
+          )}
+        />
+        {dueAtMs !== null ? <CollectCountdownNotice dueAtMs={dueAtMs} now={now} closed={closed} alwaysShowRemaining /> : null}
+        {closed ? <Alert tone="neutral">收集已截止</Alert> : null}
         {examLocked ? (
-          <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+          <Alert tone="warning">
             {/* 考试已结束且未参加，无法提交 is shown via examGate.message when the server sends it. */}
             {data.examGate.message || '须先完成课程结业考试才能提交'}
             {data.examGate.examHref ? (
               <>
                 {' '}
-                <a href={data.examGate.examHref} className="font-medium underline underline-offset-2">
+                <a href={data.examGate.examHref} className="font-medium text-brand-fg underline underline-offset-2">
                   去考试
                 </a>
               </>
             ) : null}
-          </p>
+          </Alert>
         ) : null}
         {writable && !data.submitted && !data.filled ? (
-          <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
-            请先为每个必填槽上传文件，再点确认提交。
-          </p>
+          <Alert tone="warning">请先为每个必填槽上传文件，再点确认提交。</Alert>
         ) : null}
-      </motion.header>
+      </div>
 
-      {actionError ? (
-        <p role="alert" className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-          {actionError}
-        </p>
-      ) : null}
+      {actionError ? <Alert tone="danger">{actionError}</Alert> : null}
 
       {data.description.trim() ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">说明</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <MarkdownView content={data.description} className="prose prose-sm dark:prose-invert max-w-none" />
-          </CardContent>
-        </Card>
+        <Panel title="说明">
+          <MarkdownView content={data.description} />
+        </Panel>
       ) : null}
 
       {data.slots.map((slot) => {
         const files = filesForSlot(data.currentFiles, slot.id);
         return (
-          <Card key={slot.id}>
-            <CardHeader className="flex min-w-0 flex-row items-start justify-between gap-3 space-y-0">
-              <div className="min-w-0 space-y-1.5">
-                <CardTitle className="min-w-0 break-words text-base">{slot.title}</CardTitle>
-                <div className="flex flex-wrap gap-1.5">
-                  {slot.required ? (
-                    <Badge>必填</Badge>
-                  ) : (
-                    <Badge variant="outline" className="text-muted-foreground">
-                      选填
-                    </Badge>
-                  )}
-                  <Badge variant="outline" className="text-[10px]">
-                    {slot.allowedExt.map((ext) => `.${ext}`).join(' / ')}
-                  </Badge>
-                  <Badge variant="secondary" className="text-[10px]">
-                    {files.length}/{slot.maxFiles} 个文件
-                  </Badge>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-3">
+          <Panel
+            key={slot.id}
+            title={<span className="min-w-0 break-words">{slot.title}</span>}
+            description={(
+              <span className="flex min-w-0 flex-wrap gap-1.5">
+                {slot.required ? <Badge tone="warning">必填</Badge> : <Badge tone="neutral">选填</Badge>}
+                <Badge variant="outline" tone="neutral" size="sm">
+                  {slot.allowedExt.map((ext) => `.${ext}`).join(' / ')}
+                </Badge>
+                <Badge tone="neutral" size="sm">
+                  {files.length}/{slot.maxFiles} 个文件
+                </Badge>
+              </span>
+            )}
+          >
+            <div className="flex flex-col gap-3">
               <SlotFiles
                 requestId={data._id}
                 slot={slot}
@@ -607,10 +561,8 @@ export function CollectDetailPage() {
                 onDelete={(file) => void deleteFile(file)}
               />
               {writable && files.length < slot.maxFiles ? (
-                <div className="space-y-2">
-                  <p className="break-all text-xs text-muted-foreground">
-                    将保存为 {slot.nextAssignedName}
-                  </p>
+                <div className="flex flex-col gap-2">
+                  <p className="break-all text-xs text-fg-subtle">将保存为 {slot.nextAssignedName}</p>
                   <FileUploader
                     endpoint={`/collect/${encodeURIComponent(data._id)}`}
                     meta={{ operation: 'upload_file', slotId: slot.id }}
@@ -623,21 +575,27 @@ export function CollectDetailPage() {
                   />
                 </div>
               ) : null}
-            </CardContent>
-          </Card>
+            </div>
+          </Panel>
         );
       })}
 
       {writable && !data.submitted ? (
         <div className="flex justify-end">
-          <Button type="button" className="min-h-11" disabled={!data.filled || confirming} onClick={() => void confirm()}>
-            {confirming ? <Loader2 className="mr-1 size-4 animate-spin" /> : null}
+          <Button
+            type="button"
+            variant="secondary"
+            className="min-h-11"
+            disabled={!data.filled || confirming}
+            loading={confirming}
+            onClick={() => void confirm()}
+          >
             确认提交
           </Button>
         </div>
       ) : null}
 
       {data.history && data.history.length > 0 ? <CollectHistory requestId={data._id} slots={data.slots} history={data.history} /> : null}
-    </div>
+    </Page>
   );
 }

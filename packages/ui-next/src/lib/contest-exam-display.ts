@@ -1,4 +1,5 @@
-import { getScoreColor } from '@hydrooj/common';
+import { scoreTone } from '@/components/ui/verdict';
+import { readToken } from '@/lib/read-token';
 
 export interface ScoreboardDisplayCell {
   type?: string;
@@ -6,11 +7,15 @@ export interface ScoreboardDisplayCell {
   value?: string | number;
 }
 
+// ds-allow DS003: 无 DOM 环境（图片导出 worker、测试）下的回退色
+const FALLBACK = { danger: '#d73a3a', warning: '#e0a526', success: '#1f9d55' } as const;
+
 export function scoreboardScoreColor(percentage: unknown): string | undefined {
   if (percentage === null || percentage === undefined || percentage === '') return undefined;
   const numeric = Number(percentage);
   if (!Number.isFinite(numeric)) return undefined;
-  return getScoreColor(Math.min(100, Math.max(0, numeric)));
+  const tone = scoreTone(Math.min(100, Math.max(0, numeric)));
+  return readToken(`--${tone}-solid`, FALLBACK[tone]);
 }
 
 export interface ContestProblemStatusDisplay {

@@ -1,3 +1,5 @@
+import { readToken } from '@/lib/read-token';
+
 export type ScoreboardSnapshotMode = 'frozen' | 'realtime';
 
 export interface ScoreboardImageColumn {
@@ -141,6 +143,17 @@ function canvasContext(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
   return context;
 }
 
+function readExportColor(name: `--${string}`, fallback: string): string {
+  if (
+    typeof document === 'undefined' ||
+    document.documentElement == null ||
+    typeof globalThis.getComputedStyle !== 'function'
+  ) {
+    return fallback;
+  }
+  return readToken(name, fallback);
+}
+
 export async function renderScoreboardImage(model: ScoreboardImageModel): Promise<Blob> {
   if (typeof document === 'undefined') throw new Error('排行榜图片只能在浏览器中生成');
   if (model.columns.length === 0) throw new Error('排行榜没有可导出的列');
@@ -191,20 +204,28 @@ export async function renderScoreboardImage(model: ScoreboardImageModel): Promis
   canvas.height = Math.max(1, Math.floor(logicalHeight * exportScale));
   const context = canvasContext(canvas);
   context.scale(exportScale, exportScale);
-  context.fillStyle = '#f8fafc';
+  // ds-allow DS003: 无 DOM 环境（图片导出 worker、测试）下的回退色
+  context.fillStyle = readExportColor('--bg', '#f8fafc');
   context.fillRect(0, 0, logicalWidth, logicalHeight);
 
-  context.fillStyle = '#0f172a';
+  // ds-allow DS003: 无 DOM 环境（图片导出 worker、测试）下的回退色
+  context.fillStyle = readExportColor('--fg', '#0f172a');
   context.font = '700 26px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
   context.textAlign = 'left';
   context.textBaseline = 'top';
   context.fillText(model.title || '比赛排行榜', margin, margin);
   context.font = '500 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-  context.fillStyle = '#475569';
+  // ds-allow DS003: 无 DOM 环境（图片导出 worker、测试）下的回退色
+  context.fillStyle = readExportColor('--fg-muted', '#475569');
   context.fillText(`生成时间：${model.generatedAt}`, margin, margin + 45);
-  context.fillStyle = model.snapshotMode === 'frozen' ? '#b45309' : '#047857';
+  context.fillStyle = model.snapshotMode === 'frozen'
+    // ds-allow DS003: 无 DOM 环境（图片导出 worker、测试）下的回退色
+    ? readExportColor('--warning-fg', '#b45309')
+    // ds-allow DS003: 无 DOM 环境（图片导出 worker、测试）下的回退色
+    : readExportColor('--success-fg', '#047857');
   context.fillText(model.snapshotMode === 'frozen' ? '封榜快照 · 未包含封榜后的真实结果' : '实时排行榜', margin, margin + 70);
-  context.fillStyle = '#64748b';
+  // ds-allow DS003: 无 DOM 环境（图片导出 worker、测试）下的回退色
+  context.fillStyle = readExportColor('--fg-subtle', '#64748b');
   context.textAlign = 'right';
   context.fillText(`共 ${model.rows.length} 行`, logicalWidth - margin, margin + 70);
 
@@ -213,11 +234,14 @@ export async function renderScoreboardImage(model: ScoreboardImageModel): Promis
   context.textBaseline = 'middle';
   model.columns.forEach((column, columnIndex) => {
     const width = columnWidths[columnIndex];
-    context.fillStyle = '#172033';
+    // ds-allow DS003: 无 DOM 环境（图片导出 worker、测试）下的回退色
+    context.fillStyle = readExportColor('--surface-sunken', '#172033');
     context.fillRect(tableX, tableY, width, headerHeight);
-    context.strokeStyle = '#334155';
+    // ds-allow DS003: 无 DOM 环境（图片导出 worker、测试）下的回退色
+    context.strokeStyle = readExportColor('--line-strong', '#334155');
     context.strokeRect(tableX, tableY, width, headerHeight);
-    context.fillStyle = '#f8fafc';
+    // ds-allow DS003: 无 DOM 环境（图片导出 worker、测试）下的回退色
+    context.fillStyle = readExportColor('--fg-subtle', '#f8fafc');
     context.font = '700 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
     context.textAlign = columnTextAlign(column.type);
     const textX = context.textAlign === 'left' ? tableX + 12 : context.textAlign === 'right' ? tableX + width - 12 : tableX + width / 2;
@@ -231,15 +255,24 @@ export async function renderScoreboardImage(model: ScoreboardImageModel): Promis
     model.columns.forEach((column, columnIndex) => {
       const width = columnWidths[columnIndex];
       const cell = model.rows[rowIndex].cells[columnIndex] || { text: '—' };
-      context.fillStyle = cell.firstBlood ? '#dcfce7' : rowIndex % 2 === 0 ? '#ffffff' : '#f1f5f9';
+      context.fillStyle = cell.firstBlood
+        // ds-allow DS003: 无 DOM 环境（图片导出 worker、测试）下的回退色
+        ? readExportColor('--success-soft', '#dcfce7')
+        : rowIndex % 2 === 0
+          // ds-allow DS003: 无 DOM 环境（图片导出 worker、测试）下的回退色
+          ? readExportColor('--surface', '#ffffff')
+          // ds-allow DS003: 无 DOM 环境（图片导出 worker、测试）下的回退色
+          : readExportColor('--surface-sunken', '#f1f5f9');
       context.fillRect(tableX, tableY, width, layout.height);
-      context.strokeStyle = '#cbd5e1';
+      // ds-allow DS003: 无 DOM 环境（图片导出 worker、测试）下的回退色
+      context.strokeStyle = readExportColor('--line', '#cbd5e1');
       context.strokeRect(tableX, tableY, width, layout.height);
 
       const align = columnTextAlign(column.type);
       context.textAlign = align;
       context.font = '500 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-      context.fillStyle = cell.color || '#0f172a';
+      // ds-allow DS003: 无 DOM 环境（图片导出 worker、测试）下的回退色
+      context.fillStyle = cell.color || readExportColor('--fg', '#0f172a');
       const textX = align === 'left' ? tableX + 12 : align === 'right' ? tableX + width - 12 : tableX + width / 2;
       const lines = layout.lines[columnIndex];
       const textTop = tableY + (layout.height - lines.length * lineHeight) / 2 + lineHeight / 2;

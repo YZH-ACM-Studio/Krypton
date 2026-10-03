@@ -1,4 +1,6 @@
-// @vitest-environment node
+// @vitest-environment jsdom
+import { spawnSync } from 'node:child_process';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   canSubmitProblemMode,
@@ -16,6 +18,7 @@ import {
   scoreboardParticipantColumn,
   scoreboardRowMatches,
 } from '../src/lib/contest-exam-display.ts';
+import { renderScoreboardImage, type ScoreboardImageModel } from '../src/lib/scoreboard-image-export.ts';
 
 describe('getContestProblemStatus', () => {
   it('returns null for null, undefined, and empty string', () => {
@@ -235,18 +238,77 @@ describe('prioritizeCurrentScoreboardRows', () => {
   });
 });
 
+const packageRoot = resolve(import.meta.dirname, '..');
+
+const SCORE_SOLID = {
+  danger: 'oklch(0.53 0.19 25)',
+  warning: 'oklch(0.78 0.14 95)',
+  success: 'oklch(0.53 0.15 152)',
+} as const;
+
+function setScoreSolids(): void {
+  document.documentElement.style.setProperty('--danger-solid', SCORE_SOLID.danger);
+  document.documentElement.style.setProperty('--warning-solid', SCORE_SOLID.warning);
+  document.documentElement.style.setProperty('--success-solid', SCORE_SOLID.success);
+}
+
+function clearScoreSolids(): void {
+  document.documentElement.style.removeProperty('--danger-solid');
+  document.documentElement.style.removeProperty('--warning-solid');
+  document.documentElement.style.removeProperty('--success-solid');
+}
+
+function designGateReport(relativePath: string): { status: number; output: string } {
+  const result = spawnSync(process.execPath, ['scripts/design-gate.mjs', '--file', relativePath], {
+    cwd: packageRoot,
+    encoding: 'utf8',
+  });
+  if (typeof result.status !== 'number' || typeof result.stdout !== 'string' || typeof result.stderr !== 'string') {
+    throw new TypeError('design-gate did not return a status and string output');
+  }
+  return { status: result.status, output: `${result.stdout}${result.stderr}`.trim() };
+}
+
+function expectDesignGateClean(relativePath: string): void {
+  const report = designGateReport(relativePath);
+  expect(`${relativePath}\nstatus=${report.status}\n${report.output}`).to.equal(`${relativePath}\nstatus=0\n`);
+}
+
 describe('scoreboardScoreColor', () => {
   it('uses the normalized percentage supplied by the scoreboard contract', () => {
-    expect(scoreboardScoreColor(0)).to.equal('#ff4f4f');
-    expect(scoreboardScoreColor(50)).to.equal('#f7bb3b');
-    expect(scoreboardScoreColor(100)).to.equal('#25ad40');
+    setScoreSolids();
+    expect(scoreboardScoreColor(0)).to.equal(SCORE_SOLID.danger);
+    expect(scoreboardScoreColor(50)).to.equal(SCORE_SOLID.warning);
+    expect(scoreboardScoreColor(100)).to.equal(SCORE_SOLID.success);
+  });
+
+  it('keeps every partial score below 100 on the warning tone', () => {
+    setScoreSolids();
+    expect(scoreboardScoreColor(0.4)).to.equal(SCORE_SOLID.warning);
+    expect(scoreboardScoreColor(99)).to.equal(SCORE_SOLID.warning);
+    expect(scoreboardScoreColor(99.9)).to.equal(SCORE_SOLID.warning);
   });
 
   it('clamps out-of-range values and ignores invalid values', () => {
-    expect(scoreboardScoreColor(-20)).to.equal('#ff4f4f');
-    expect(scoreboardScoreColor(140)).to.equal('#25ad40');
+    setScoreSolids();
+    expect(scoreboardScoreColor(-20)).to.equal(SCORE_SOLID.danger);
+    expect(scoreboardScoreColor(140)).to.equal(SCORE_SOLID.success);
     expect(scoreboardScoreColor(undefined)).to.equal(undefined);
     expect(scoreboardScoreColor('not-a-score')).to.equal(undefined);
+  });
+
+  it('returns the fallback hex when the tone token is missing', () => {
+    clearScoreSolids();
+    expect(scoreboardScoreColor(0)).to.equal('#d73a3a');
+    expect(scoreboardScoreColor(50)).to.equal('#e0a526');
+    expect(scoreboardScoreColor(100)).to.equal('#1f9d55');
+  });
+});
+
+describe('scoreboard colour design gate', () => {
+  it('accepts contest-exam-display.ts and scoreboard-image-export.ts', () => {
+    expectDesignGateClean('src/lib/contest-exam-display.ts');
+    expectDesignGateClean('src/lib/scoreboard-image-export.ts');
   });
 });
 
@@ -283,5 +345,175 @@ describe('official-only scoreboard filter', () => {
     expect(officialOnlyFromLocation('#filter=all')).to.equal(false);
     expect(officialOnlyFromLocation('', '1')).to.equal(true);
     expect(officialOnlyFromLocation('', '0')).to.equal(false);
+  });
+});
+
+interface CanvasPaint {
+  op: 'fillRect' | 'strokeRect' | 'fillText';
+  fill: string;
+  stroke: string;
+  text?: string;
+}
+
+const EXPORT_TOKENS = {
+  '--bg': 'token-bg',
+  '--surface': 'token-surface',
+  '--surface-sunken': 'token-surface-sunken',
+  '--fg': 'token-fg',
+  '--fg-muted': 'token-fg-muted',
+  '--fg-subtle': 'token-fg-subtle',
+  '--warning-fg': 'token-warning-fg',
+  '--success-fg': 'token-success-fg',
+  '--success-soft': 'token-success-soft',
+  '--success-solid': 'token-success-solid',
+  '--line': 'token-line',
+  '--line-strong': 'token-line-strong',
+  '--line-subtle': 'token-line-subtle',
+} as const;
+
+const FROZEN_SNAPSHOT_LABEL = '封榜快照 · 未包含封榜后的真实结果';
+const REALTIME_SNAPSHOT_LABEL = '实时排行榜';
+
+function setExportTokens(): void {
+  for (const [name, value] of Object.entries(EXPORT_TOKENS)) {
+    document.documentElement.style.setProperty(name, value);
+  }
+}
+
+function clearExportTokens(): void {
+  for (const name of Object.keys(EXPORT_TOKENS)) {
+    document.documentElement.style.removeProperty(name);
+  }
+}
+
+function scoreboardPaintModel(snapshotMode: ScoreboardImageModel['snapshotMode']): ScoreboardImageModel {
+  return {
+    title: '比赛甲',
+    generatedAt: '2026-10-02 12:00:00',
+    snapshotMode,
+    columns: [{ type: 'rank', label: '排名' }],
+    rows: [
+      { cells: [{ text: 'even-cell', color: 'cell-explicit' }] },
+      { cells: [{ text: 'odd-cell' }] },
+      { cells: [{ text: 'blood-cell', firstBlood: true }] },
+    ],
+  };
+}
+
+async function paintScoreboard(model: ScoreboardImageModel): Promise<CanvasPaint[]> {
+  const paints: CanvasPaint[] = [];
+  const proto = HTMLCanvasElement.prototype;
+  const previousGetContext = proto.getContext;
+  const toBlobDescriptor = Object.getOwnPropertyDescriptor(proto, 'toBlob');
+  proto.getContext = function getContext(kind: string) {
+    if (kind !== '2d') return null;
+    let fillStyle = '';
+    let strokeStyle = '';
+    return {
+      get fillStyle() {
+        return fillStyle;
+      },
+      set fillStyle(value: string) {
+        fillStyle = String(value);
+      },
+      get strokeStyle() {
+        return strokeStyle;
+      },
+      set strokeStyle(value: string) {
+        strokeStyle = String(value);
+      },
+      font: '',
+      textAlign: 'left' as CanvasTextAlign,
+      textBaseline: 'alphabetic' as CanvasTextBaseline,
+      measureText(text: string) {
+        return { width: Array.from(text).length * 8 } as TextMetrics;
+      },
+      scale() {},
+      fillRect() {
+        paints.push({ op: 'fillRect', fill: fillStyle, stroke: strokeStyle });
+      },
+      strokeRect() {
+        paints.push({ op: 'strokeRect', fill: fillStyle, stroke: strokeStyle });
+      },
+      fillText(text: string) {
+        paints.push({ op: 'fillText', fill: fillStyle, stroke: strokeStyle, text });
+      },
+    } as unknown as CanvasRenderingContext2D;
+  } as typeof proto.getContext;
+  proto.toBlob = ((callback: BlobCallback) => {
+    callback(new Blob(['png'], { type: 'image/png' }));
+  }) as typeof proto.toBlob;
+  try {
+    await renderScoreboardImage(model);
+    return paints;
+  } finally {
+    proto.getContext = previousGetContext;
+    if (toBlobDescriptor) Object.defineProperty(proto, 'toBlob', toBlobDescriptor);
+    else Reflect.deleteProperty(proto, 'toBlob');
+  }
+}
+
+function fillTextColor(paints: CanvasPaint[], text: string): string {
+  const matches = paints.filter((paint) => paint.op === 'fillText' && paint.text === text);
+  expect(matches.length).to.equal(1);
+  const match = matches[0];
+  if (!match) throw new TypeError(`missing painted text ${text}`);
+  return match.fill;
+}
+
+describe('scoreboard image export colours', () => {
+  it('paints each scoreboard region from its colour token', async () => {
+    setExportTokens();
+    try {
+      const frozen = await paintScoreboard(scoreboardPaintModel('frozen'));
+      const fills = frozen.filter((paint) => paint.op === 'fillRect').map((paint) => paint.fill);
+      const strokes = frozen.filter((paint) => paint.op === 'strokeRect').map((paint) => paint.stroke);
+      expect(fills).to.deep.equal([
+        EXPORT_TOKENS['--bg'],
+        EXPORT_TOKENS['--surface-sunken'],
+        EXPORT_TOKENS['--surface'],
+        EXPORT_TOKENS['--surface-sunken'],
+        EXPORT_TOKENS['--success-soft'],
+      ]);
+      expect(strokes).to.deep.equal([
+        EXPORT_TOKENS['--line-strong'],
+        EXPORT_TOKENS['--line'],
+        EXPORT_TOKENS['--line'],
+        EXPORT_TOKENS['--line'],
+      ]);
+      expect(fillTextColor(frozen, '比赛甲')).to.equal(EXPORT_TOKENS['--fg']);
+      expect(fillTextColor(frozen, '生成时间：2026-10-02 12:00:00')).to.equal(EXPORT_TOKENS['--fg-muted']);
+      expect(fillTextColor(frozen, FROZEN_SNAPSHOT_LABEL)).to.equal(EXPORT_TOKENS['--warning-fg']);
+      expect(fillTextColor(frozen, '共 3 行')).to.equal(EXPORT_TOKENS['--fg-subtle']);
+      expect(fillTextColor(frozen, '排名')).to.equal(EXPORT_TOKENS['--fg-subtle']);
+      expect(fillTextColor(frozen, 'even-cell')).to.equal('cell-explicit');
+      expect(fillTextColor(frozen, 'odd-cell')).to.equal(EXPORT_TOKENS['--fg']);
+      expect(fillTextColor(frozen, 'blood-cell')).to.equal(EXPORT_TOKENS['--fg']);
+
+      const realtime = await paintScoreboard(scoreboardPaintModel('realtime'));
+      expect(fillTextColor(realtime, REALTIME_SNAPSHOT_LABEL)).to.equal(EXPORT_TOKENS['--success-fg']);
+    } finally {
+      clearExportTokens();
+    }
+  });
+
+  it('paints the original hex fallback when a colour token is missing', async () => {
+    clearExportTokens();
+    const frozen = await paintScoreboard(scoreboardPaintModel('frozen'));
+    const fills = frozen.filter((paint) => paint.op === 'fillRect').map((paint) => paint.fill);
+    const strokes = frozen.filter((paint) => paint.op === 'strokeRect').map((paint) => paint.stroke);
+    expect(fills).to.deep.equal(['#f8fafc', '#172033', '#ffffff', '#f1f5f9', '#dcfce7']);
+    expect(strokes).to.deep.equal(['#334155', '#cbd5e1', '#cbd5e1', '#cbd5e1']);
+    expect(fillTextColor(frozen, '比赛甲')).to.equal('#0f172a');
+    expect(fillTextColor(frozen, '生成时间：2026-10-02 12:00:00')).to.equal('#475569');
+    expect(fillTextColor(frozen, FROZEN_SNAPSHOT_LABEL)).to.equal('#b45309');
+    expect(fillTextColor(frozen, '共 3 行')).to.equal('#64748b');
+    expect(fillTextColor(frozen, '排名')).to.equal('#f8fafc');
+    expect(fillTextColor(frozen, 'even-cell')).to.equal('cell-explicit');
+    expect(fillTextColor(frozen, 'odd-cell')).to.equal('#0f172a');
+    expect(fillTextColor(frozen, 'blood-cell')).to.equal('#0f172a');
+
+    const realtime = await paintScoreboard(scoreboardPaintModel('realtime'));
+    expect(fillTextColor(realtime, REALTIME_SNAPSHOT_LABEL)).to.equal('#047857');
   });
 });

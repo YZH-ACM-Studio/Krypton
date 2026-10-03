@@ -27,9 +27,11 @@ import {
 } from '@/components/practice-roster';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
 import { DateTime } from '@/components/ui/datetime';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import { EmptyState } from '@/components/ui/empty-state';
+import { type MiniTabItem, MiniTabs } from '@/components/ui/mini-tabs';
+import { Toolbar, Workspace } from '@/components/ui/page';
+import { Panel } from '@/components/ui/panel';
 import { Sheet, SheetBody, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
@@ -47,7 +49,7 @@ import {
   type CourseMindmapData,
   type CourseRecord,
 } from './types';
-import { CourseMark, CourseProgressRing } from './ui';
+import { CourseMark, CourseProgressRing, CourseSectionHeader } from './ui';
 import { CourseVideoPlaylist } from './video-player';
 
 const COURSE_COLLECT_STATUSES = ['draft', 'published', 'closed', 'archived'] as const;
@@ -103,6 +105,8 @@ function collectStatusLabel(status: CourseCollectStatus, dueAt: string): string 
   return '收集中';
 }
 
+const ROW_LINK = 'outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring';
+
 /**
  * Chapter problems.
  *
@@ -132,54 +136,45 @@ function ProblemList({
   if (!pids.length) return null;
   const completed = new Set(completedPids || []);
   return (
-    <section aria-labelledby="course-problems-title" className="space-y-3">
-      <div className="flex items-center gap-2">
-        <h3 id="course-problems-title" className="text-sm font-medium">
-          {title}
-        </h3>
-        {count ? <span className="text-xs text-muted-foreground">{count}</span> : null}
-      </div>
-      <ol className="overflow-hidden rounded-xl border bg-card">
-        {pids.map((pid, index) => {
-          const problem = problems[String(pid)] || {};
-          const done = completed.has(pid);
-          return (
-            <li key={pid}>
-              <a
-                href={practiceProblemEntryUrl(`/p/${problem.pid || pid}`, {
-                  containerKind: 'course',
-                  containerId: courseId,
-                  scopeKind: 'chapter',
-                  scopeId: chapterId,
-                })}
-                className={cn(
-                  'group flex min-h-11 items-center gap-3 px-3 py-2.5 hover:bg-muted/50',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                )}
-              >
-                <span
-                  aria-hidden="true"
-                  className={cn(
-                    'grid size-6 shrink-0 place-items-center rounded-md text-[11px] font-semibold tabular-nums leading-none',
-                    done ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400' : 'bg-muted text-muted-foreground',
-                  )}
+    <section aria-labelledby="course-problems-title">
+      <Panel flush>
+        <CourseSectionHeader id="course-problems-title" title={title} count={count} />
+        <ol className="divide-y divide-line-subtle">
+          {pids.map((pid, index) => {
+            const problem = problems[String(pid)] || {};
+            const done = completed.has(pid);
+            return (
+              <li key={pid}>
+                <a
+                  href={practiceProblemEntryUrl(`/p/${problem.pid || pid}`, {
+                    containerKind: 'course',
+                    containerId: courseId,
+                    scopeKind: 'chapter',
+                    scopeId: chapterId,
+                  })}
+                  className={cn('flex min-h-11 items-center gap-3 px-3 py-2.5 hover:bg-surface-hover', ROW_LINK)}
                 >
-                  {done ? <Check className="size-3.5" strokeWidth={2.5} /> : index + 1}
-                </span>
-                <span className="min-w-0 flex-1 truncate text-sm font-medium transition-colors duration-150 group-hover:text-primary motion-reduce:transition-none">
-                  {problem.title || `P${pid}`}
-                </span>
-                {done ? <span className="sr-only">已完成</span> : null}
-                <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{problem.pid || `P${pid}`}</span>
-                <ChevronRight
-                  className="size-4 shrink-0 text-muted-foreground/50 transition-transform duration-150 group-hover:translate-x-0.5 group-hover:text-muted-foreground motion-reduce:transition-none"
-                  strokeWidth={1.75}
-                />
-              </a>
-            </li>
-          );
-        })}
-      </ol>
+                  <span
+                    aria-hidden="true"
+                    className={cn(
+                      'grid size-6 shrink-0 place-items-center rounded-md text-2xs font-semibold tabular leading-none',
+                      done ? 'bg-success-soft text-success-fg' : 'bg-surface-active text-fg-subtle',
+                    )}
+                  >
+                    {done ? <Check className="size-3.5" strokeWidth={2.5} /> : index + 1}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium text-fg">
+                    {problem.title || `P${pid}`}
+                  </span>
+                  {done ? <span className="sr-only">已完成</span> : null}
+                  <span className="shrink-0 font-mono text-2xs text-fg-subtle">{problem.pid || `P${pid}`}</span>
+                  <ChevronRight className="size-4 shrink-0 text-fg-subtle" strokeWidth={1.75} />
+                </a>
+              </li>
+            );
+          })}
+        </ol>
+      </Panel>
     </section>
   );
 }
@@ -196,9 +191,10 @@ function CollectRequestList({
   className?: string;
 }) {
   if (!requests.length) return <div data-course-slot="collect" />;
+  const headingId = title === '本章收集' ? 'course-chapter-collect-title' : 'course-collect-title';
   return (
-    <section data-course-slot="collect" aria-labelledby="course-collect-title" className={cn('space-y-3', className)}>
-      <h3 id="course-collect-title" className="text-sm font-medium">
+    <section data-course-slot="collect" aria-labelledby={headingId} className={cn('flex flex-col gap-3', className)}>
+      <h3 id={headingId} className="text-sm font-semibold text-fg">
         {title}
       </h3>
       <ul className="grid gap-2 sm:grid-cols-2">
@@ -206,19 +202,22 @@ function CollectRequestList({
           const href = canManage ? `/admin/collect/${request._id}` : `/collect/${request._id}`;
           return (
             <li key={request._id}>
-              <a href={href} className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                <Card className="transition-colors hover:bg-muted/40">
-                  <CardContent className="flex min-h-11 items-center gap-3 p-3">
-                    <FolderInput className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.75} />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium">{request.title}</span>
-                      <span className="text-xs text-muted-foreground">
-                        {collectStatusLabel(request.status, request.dueAt)} · <DateTime value={request.dueAt} mode="datetime" />
-                      </span>
-                    </span>
-                    <ChevronRight className="size-4 shrink-0 text-muted-foreground/50" strokeWidth={1.75} />
-                  </CardContent>
-                </Card>
+              <a
+                href={href}
+                className={cn(
+                  'flex min-h-11 items-center gap-3 rounded-lg border border-line bg-surface p-4 shadow-xs',
+                  'transition-[border-color,box-shadow] duration-(--dur-1) ease-(--ease-standard) hover:border-line-strong hover:shadow-sm',
+                  ROW_LINK,
+                )}
+              >
+                <FolderInput className="size-4 shrink-0 text-fg-subtle" strokeWidth={1.75} />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium text-fg">{request.title}</span>
+                  <span className="text-xs text-fg-subtle">
+                    {collectStatusLabel(request.status, request.dueAt)} · <DateTime value={request.dueAt} mode="datetime" />
+                  </span>
+                </span>
+                <ChevronRight className="size-4 shrink-0 text-fg-subtle" strokeWidth={1.75} />
               </a>
             </li>
           );
@@ -231,8 +230,8 @@ function CollectRequestList({
 function ContestList({ chapter, contests }: { chapter: CourseChapter; contests: Record<string, CourseRecord> }) {
   if (!chapter.tids.length) return null;
   return (
-    <section aria-labelledby="course-contests-title" className="space-y-3">
-      <h3 id="course-contests-title" className="text-sm font-medium">
+    <section aria-labelledby="course-contests-title" className="flex flex-col gap-3">
+      <h3 id="course-contests-title" className="text-sm font-semibold text-fg">
         比赛与作业
       </h3>
       <ul className="grid gap-2 sm:grid-cols-2">
@@ -242,17 +241,20 @@ function ContestList({ chapter, contests }: { chapter: CourseChapter; contests: 
           const href = homework ? `/homework/${contestId}` : `/contest/${contestId}`;
           return (
             <li key={contestId}>
-              <a href={href} className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                <Card className="transition-colors hover:bg-muted/40">
-                  <CardContent className="flex min-h-11 items-center gap-3 p-3">
-                    {homework ? <ClipboardPlus className="size-4 text-muted-foreground" strokeWidth={1.75} /> : <Trophy className="size-4 text-muted-foreground" strokeWidth={1.75} />}
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium">{contest.title || '比赛'}</span>
-                      <span className="text-xs text-muted-foreground">{homework ? '作业' : '比赛'}</span>
-                    </span>
-                    <ChevronRight className="size-4 shrink-0 text-muted-foreground/50" strokeWidth={1.75} />
-                  </CardContent>
-                </Card>
+              <a
+                href={href}
+                className={cn(
+                  'flex min-h-11 items-center gap-3 rounded-lg border border-line bg-surface p-4 shadow-xs',
+                  'transition-[border-color,box-shadow] duration-(--dur-1) ease-(--ease-standard) hover:border-line-strong hover:shadow-sm',
+                  ROW_LINK,
+                )}
+              >
+                {homework ? <ClipboardPlus className="size-4 text-fg-subtle" strokeWidth={1.75} /> : <Trophy className="size-4 text-fg-subtle" strokeWidth={1.75} />}
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium text-fg">{contest.title || '比赛'}</span>
+                  <span className="text-xs text-fg-subtle">{homework ? '作业' : '比赛'}</span>
+                </span>
+                <ChevronRight className="size-4 shrink-0 text-fg-subtle" strokeWidth={1.75} />
               </a>
             </li>
           );
@@ -274,29 +276,19 @@ function ChapterPager({
 }) {
   if (!previous && !next) return null;
   return (
-    <nav aria-label="章节导航" className="grid gap-2 pt-2 sm:grid-cols-2">
+    <nav aria-label="章节导航" className="grid gap-2 sm:grid-cols-2">
       {previous ? (
-        <Button type="button" variant="outline" className="h-auto w-full min-w-0 justify-start whitespace-normal px-4 py-3" onClick={() => onSelect(previous._id)}>
-          <span className="flex min-w-0 flex-col items-start gap-0.5">
-            <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-              <ArrowLeft className="size-3.5" strokeWidth={1.75} />
-              上一章
-            </span>
-            <span className="truncate text-sm font-medium">{previous.title}</span>
-          </span>
+        <Button type="button" variant="secondary" className="w-full min-w-0" onClick={() => onSelect(previous._id)}>
+          <ArrowLeft />
+          <span className="truncate">上一章 {previous.title}</span>
         </Button>
       ) : (
         <span aria-hidden="true" className="hidden sm:block" />
       )}
       {next ? (
-        <Button type="button" variant="outline" className="h-auto w-full min-w-0 justify-end whitespace-normal px-4 py-3" onClick={() => onSelect(next._id)}>
-          <span className="flex min-w-0 flex-col items-end gap-0.5">
-            <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-              下一章
-              <ArrowRight className="size-3.5" strokeWidth={1.75} />
-            </span>
-            <span className="truncate text-sm font-medium">{next.title}</span>
-          </span>
+        <Button type="button" variant="secondary" className="w-full min-w-0" onClick={() => onSelect(next._id)}>
+          <span className="truncate">下一章 {next.title}</span>
+          <ArrowRight />
         </Button>
       ) : null}
     </nav>
@@ -359,434 +351,400 @@ export function CourseDetailPage() {
     setOutlineOpen(false);
   };
 
+  const viewItems: MiniTabItem<'overview' | 'mindmap' | 'roster'>[] = [
+    { value: 'overview', label: '内容', href: `/course/${tid}` },
+    { value: 'mindmap', label: '知识导图', href: `/course/${tid}?view=mindmap` },
+  ];
+  if (data.canViewRoster) {
+    viewItems.push({ value: 'roster', label: '名单', icon: Users, href: `/course/${tid}?view=roster` });
+  }
+
   return (
-    <main className="w-full min-w-0 pb-10">
-      {/* Masthead is chrome: it holds identity and actions, and deliberately
-          stays below the chapter in visual weight. Two 2xl headings fighting
-          each other is what made the old page read as centre-less. */}
-      <header className="mb-6 flex flex-wrap items-center gap-3 border-b pb-5">
-        <Button asChild variant="ghost" size="icon" className="-ml-2 size-10 shrink-0">
+    <Workspace className="w-full min-w-0">
+      <Toolbar className="min-h-10 shrink-0 border-b border-line bg-surface px-2">
+        <span className="min-w-0 truncate text-sm font-semibold text-fg">{course.title}</span>
+        <Button asChild variant="ghost" size="sm" iconOnly>
           <a href="/course" aria-label="返回课程列表">
-            <ArrowLeft className="size-4" strokeWidth={1.75} />
+            <ArrowLeft strokeWidth={1.75} />
           </a>
         </Button>
-        <CourseMark seed={tid} title={course.title || ''} className="size-10 text-base" />
-        <div className="min-w-0 flex-1">
-          <h1 className="truncate text-xl font-semibold tracking-tight">{course.title}</h1>
-          <p className="truncate text-sm text-muted-foreground">
-            {data.udoc?.uname || '课程'}
-            {course.term ? ` · ${course.term}` : ''}
-          </p>
-        </div>
+        <CourseMark seed={tid} title={course.title || ''} className="size-6 text-xs" />
+        <span className="hidden min-w-0 truncate text-xs text-fg-subtle sm:inline">
+          {data.udoc?.uname || '课程'}
+          {course.term ? ` · ${course.term}` : ''}
+        </span>
         {data.canManage && course.courseHidden ? (
-          <Badge variant="secondary" className="gap-1 font-normal">
+          <Badge tone="neutral" className="gap-1">
             <EyeOff className="size-3" strokeWidth={1.75} />
             已对学生隐藏
           </Badge>
         ) : null}
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
-          {data.canManage ? (
-            <Button asChild size="sm" className="h-9 gap-1.5">
-              <a
-                href={
-                  activeView === 'mindmap'
-                    ? `/course/${tid}/edit#course-mindmap-settings`
-                    : `/course/${tid}/edit?chapter=${activeChapter?._id || ''}`
-                }
-              >
-                <Pencil className="size-3.5" strokeWidth={1.75} />
-                编辑
-              </a>
-            </Button>
-          ) : null}
-          {data.canManage ? (
-            <Button asChild variant="outline" size="sm" className="h-9">
-              <a href={`/course/${tid}/videos`}>观看统计</a>
-            </Button>
-          ) : null}
-          {data.canCreateCollect ? (
-            <Button asChild variant="outline" size="sm" className="h-9 gap-1.5">
-              <a href={`/admin/collect/create?fromCourse=${encodeURIComponent(tid)}`}>
-                <FolderInput className="size-3.5" strokeWidth={1.75} />
-                布置收集
-              </a>
-            </Button>
-          ) : null}
-          {data.canManage && data.canCreate ? (
-            <form method="post" action={`/course/${tid}/edit`}>
-              <input type="hidden" name="operation" value="copy" />
-              <Button type="submit" variant="ghost" size="sm" className="h-9 gap-1.5">
-                <Copy className="size-3.5" strokeWidth={1.75} />
-                复制为新课程
-              </Button>
-            </form>
-          ) : null}
-          {!courseAssignsUserGroups(course) && data.canEnroll ? (
-            <form method="post" action={`/course/${tid}`}>
-              <input type="hidden" name="operation" value="enroll" />
-              <Button type="submit" size="sm" className="h-9">
-                报名
-              </Button>
-            </form>
-          ) : !courseAssignsUserGroups(course) && data.tsdoc?.enroll ? (
-            <Badge variant="secondary" className="h-9 gap-1 px-3 font-normal">
-              <CheckCircle2 className="size-3.5" strokeWidth={2} />
-              已报名
-            </Badge>
-          ) : null}
-        </div>
-      </header>
-
-      {activeView === 'overview' && course.content ? (
-        <details className="mb-6 rounded-xl border bg-card shadow-sm">
-          <summary className="cursor-pointer list-none px-4 py-3 text-sm font-medium [&::-webkit-details-marker]:hidden">课程说明</summary>
-          <div className="border-t px-4 py-3">
-            <h3 id="course-overview-title" className="sr-only">
-              课程说明
-            </h3>
-            <MarkdownView content={course.content} preferredLang={bs.locale} />
-          </div>
-        </details>
-      ) : null}
-
-      <div className="mb-6 inline-flex h-9 items-center rounded-lg bg-muted p-1 text-muted-foreground" aria-label="课程视图">
-        <a
-          href={`/course/${tid}`}
-          className={cn(
-            'inline-flex items-center rounded-md px-3 py-1 text-sm font-medium',
-            activeView === 'overview' && 'bg-background text-foreground shadow',
-          )}
-        >
-          内容
-        </a>
-        <a
-          href={`/course/${tid}?view=mindmap`}
-          className={cn(
-            'inline-flex items-center rounded-md px-3 py-1 text-sm font-medium',
-            activeView === 'mindmap' && 'bg-background text-foreground shadow',
-          )}
-        >
-          知识导图
-        </a>
-        {data.canViewRoster ? (
-          <a
-            href={`/course/${tid}?view=roster`}
-            className={cn(
-              'inline-flex items-center gap-1.5 rounded-md px-3 py-1 text-sm font-medium',
-              activeView === 'roster' && 'bg-background text-foreground shadow',
-            )}
-          >
-            <Users className="size-3.5" strokeWidth={1.75} />
-            名单
-          </a>
+        {data.canManage ? (
+          <Button asChild variant="primary" size="sm">
+            <a
+              href={
+                activeView === 'mindmap'
+                  ? `/course/${tid}/edit#course-mindmap-settings`
+                  : `/course/${tid}/edit?chapter=${activeChapter?._id || ''}`
+              }
+            >
+              <Pencil strokeWidth={1.75} />
+              编辑
+            </a>
+          </Button>
         ) : null}
+        {data.canManage ? (
+          <Button asChild variant="secondary" size="sm">
+            <a href={`/course/${tid}/videos`}>观看统计</a>
+          </Button>
+        ) : null}
+        {data.canCreateCollect ? (
+          <Button asChild variant="secondary" size="sm">
+            <a href={`/admin/collect/create?fromCourse=${encodeURIComponent(tid)}`}>
+              <FolderInput strokeWidth={1.75} />
+              布置收集
+            </a>
+          </Button>
+        ) : null}
+        {data.canManage && data.canCreate ? (
+          <form method="post" action={`/course/${tid}/edit`}>
+            <input type="hidden" name="operation" value="copy" />
+            <Button type="submit" variant="ghost" size="sm">
+              <Copy strokeWidth={1.75} />
+              复制为新课程
+            </Button>
+          </form>
+        ) : null}
+        {!courseAssignsUserGroups(course) && data.canEnroll ? (
+          <form method="post" action={`/course/${tid}`}>
+            <input type="hidden" name="operation" value="enroll" />
+            <Button type="submit" variant={data.canManage ? 'soft' : 'primary'} size="sm">
+              报名
+            </Button>
+          </form>
+        ) : !courseAssignsUserGroups(course) && data.tsdoc?.enroll ? (
+          <Badge tone="success" className="gap-1">
+            <CheckCircle2 className="size-3.5" strokeWidth={2} />
+            已报名
+          </Badge>
+        ) : null}
+      </Toolbar>
+      <div className="shrink-0 border-b border-line px-2 py-1.5">
+        <MiniTabs<'overview' | 'mindmap' | 'roster'> aria-label="课程视图" size="sm" value={activeView} items={viewItems} />
       </div>
-
-      {Array.isArray(data.staleReferencedProblemSetIds) && data.staleReferencedProblemSetIds.length ? (
-        <p role="alert" className="mb-6 rounded-lg border border-amber-500/35 bg-amber-500/[0.06] px-3 py-2 text-sm text-amber-800 dark:text-amber-300">
-          有 {data.staleReferencedProblemSetIds.length} 个章节引用的题集已不可用，这些章节的引用题目暂时不会出现在进度里。
-        </p>
-      ) : null}
-
-      {activeView === 'overview' ? (
-        <>
-          <CourseExamCard
-            exam={courseExam}
-            contest={courseExamContest}
-            chapters={chapters}
-            canManage={data.canManage}
-            className="mb-6"
-          />
-          <CollectRequestList
-            requests={collectRequests.filter((request) => request.chapterId == null)}
-            canManage={data.canManage}
-            title="本课收集"
-            className="mb-6"
-          />
-        </>
-      ) : null}
-
-      {activeView === 'mindmap' ? (
-        <CourseMindmapView
-          tid={tid}
-          data={data.courseMindmap || null}
-          canManage={data.canManage}
-          integrityControlled={data.integrityControlled === true}
-        />
-      ) : activeView === 'roster' ? (
-        <PracticeRosterCard
-          className="mt-0"
-          members={(Array.isArray(data.members) ? data.members : []).map((member, index) => {
-            const raw = member as PracticeRosterMember & { exam?: unknown };
-            if (raw.exam === undefined) return member;
-            return { ...member, exam: readPracticeRosterExamFact(raw.exam, `members[${index}].exam`) };
-          })}
-          problems={Array.isArray(data.rosterProblems) ? data.rosterProblems : []}
-          title={course.title || '课程'}
-          truncated={!!data.membersTruncated}
-          visibleGroupIds={Array.isArray(data.rosterGroupIds) ? data.rosterGroupIds : undefined}
-          exam={readPracticeRosterExamMeta(data.rosterExam)}
-          examWarning={typeof data.rosterExamWarning === 'string' ? data.rosterExamWarning : undefined}
-        />
-      ) : !chapters.length ? (
-        <Card>
-          <CardContent className="flex flex-col items-center py-16 text-center">
-            <BookOpen className="size-8 text-muted-foreground" strokeWidth={1.5} />
-            <p className="mt-4 text-sm font-medium">还没有章节</p>
-            {data.canManage ? (
-              <Button asChild className="mt-4 gap-1.5">
-                <a href={`/course/${tid}/edit`}>
-                  <Pencil className="size-3.5" strokeWidth={1.75} />
-                  去编辑
-                </a>
-              </Button>
+      {/* ds-allow DS004: 左栏 18rem 加剩余内容的工作区分栏，间距档位写不出这条轨道 */}
+      <div className="grid min-h-0 w-full min-w-0 flex-1 overflow-y-auto lg:grid-cols-[18rem_minmax(0,1fr)] lg:overflow-hidden">
+        <aside className="flex min-h-0 flex-col border-b border-line lg:w-72 lg:overflow-y-auto lg:border-r lg:border-b-0">
+          <div className="flex shrink-0 items-center gap-3 border-b border-line-subtle px-4 py-3">
+            {totalProblems ? (
+              <CourseProgressRing value={overallProgress} size={40} thickness={4} label={`课程完成进度 ${overallProgress}%`} />
             ) : null}
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="grid min-w-0 w-full gap-6 lg:grid-cols-[19rem_minmax(0,1fr)] xl:gap-8">
-          <aside className="hidden self-start lg:sticky lg:top-14 lg:block lg:max-h-[calc(100dvh-4.5rem)]">
-            <Card className="flex max-h-[calc(100dvh-4.5rem)] flex-col overflow-hidden py-0">
-              <div className="flex shrink-0 items-center gap-3 border-b px-4 py-3">
-                {totalProblems ? (
-                  <CourseProgressRing value={overallProgress} size={40} thickness={4} label={`课程完成进度 ${overallProgress}%`} />
-                ) : null}
-                <div className="min-w-0">
-                  <p className="text-sm font-medium">目录</p>
-                  <p className="text-xs text-muted-foreground">
-                    {totalProblems ? `${finishedChapters}/${chapters.length} 章完成` : `${chapters.length} 章`}
-                  </p>
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-fg">目录</p>
+              <p className="text-xs text-fg-subtle">
+                {totalProblems ? `${finishedChapters}/${chapters.length} 章完成` : `${chapters.length} 章`}
+              </p>
+            </div>
+          </div>
+          <div className="p-1.5">
+            <ChapterOutline
+              chapters={chapters}
+              activeId={activeChapter?._id ?? null}
+              activeSectionId={activeSectionId}
+              onSelect={(chapterId, sectionId) => (sectionId == null ? selectChapter(chapterId) : selectSection(chapterId, sectionId))}
+            />
+          </div>
+        </aside>
+        <div className="flex min-h-0 min-w-0 flex-col gap-6 p-4 lg:overflow-y-auto">
+          {activeView === 'overview' && course.content ? (
+            <Panel flush>
+              <details>
+                <summary className="cursor-pointer list-none px-4 py-3 text-sm font-medium text-fg [&::-webkit-details-marker]:hidden">课程说明</summary>
+                <div className="border-t border-line-subtle px-4 py-3">
+                  <h3 id="course-overview-title" className="sr-only">
+                    课程说明
+                  </h3>
+                  <MarkdownView content={course.content} preferredLang={bs.locale} />
                 </div>
-              </div>
-              <ScrollArea className="min-h-0 max-h-[calc(100dvh-8.5rem)] flex-1">
-                <div className="p-1.5">
-                  <ChapterOutline
-                    chapters={chapters}
-                    activeId={activeChapter._id}
-                    activeSectionId={activeSectionId}
-                    onSelect={(chapterId, sectionId) => (sectionId == null ? selectChapter(chapterId) : selectSection(chapterId, sectionId))}
-                  />
-                </div>
-              </ScrollArea>
-            </Card>
-          </aside>
+              </details>
+            </Panel>
+          ) : null}
 
-          <article className="min-w-0 space-y-6">
-            <div className="flex flex-wrap items-end justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-xs text-muted-foreground">
-                  第 {chapterIndex + 1} 章 / 共 {chapters.length} 章
-                  {activeSection
-                    ? ` · ${chapterSections.findIndex((section) => section._id === activeSection._id) + 1}/${chapterSections.length} 节`
-                    : chapterSections.length
-                      ? ` · ${chapterSections.length} 节`
-                      : ''}
-                </p>
-                <h2 className="mt-1 truncate text-2xl font-semibold tracking-tight">
-                  {activeSection ? activeSection.title : activeChapter.title}
-                </h2>
-                <Button type="button" variant="outline" size="sm" className="mt-3 h-9 gap-1.5 lg:hidden" onClick={() => setOutlineOpen(true)}>
-                  <ListTree className="size-3.5" strokeWidth={1.75} />
-                  切换章节
+          {Array.isArray(data.staleReferencedProblemSetIds) && data.staleReferencedProblemSetIds.length ? (
+            <p role="alert" className="rounded-lg border border-warning-line bg-warning-soft px-3 py-2 text-sm text-fg">
+              有 {data.staleReferencedProblemSetIds.length} 个章节引用的题集已不可用，这些章节的引用题目暂时不会出现在进度里。
+            </p>
+          ) : null}
+
+          {activeView === 'overview' ? (
+            <>
+              <CourseExamCard
+                exam={courseExam}
+                contest={courseExamContest}
+                chapters={chapters}
+                canManage={data.canManage}
+              />
+              <CollectRequestList
+                requests={collectRequests.filter((request) => request.chapterId == null)}
+                canManage={data.canManage}
+                title="本课收集"
+              />
+            </>
+          ) : null}
+
+          {activeView === 'mindmap' ? (
+            <CourseMindmapView
+              tid={tid}
+              data={data.courseMindmap || null}
+              canManage={data.canManage}
+              integrityControlled={data.integrityControlled === true}
+            />
+          ) : activeView === 'roster' ? (
+            <PracticeRosterCard
+              className="mt-0"
+              members={(Array.isArray(data.members) ? data.members : []).map((member, index) => {
+                const raw = member as PracticeRosterMember & { exam?: unknown };
+                if (raw.exam === undefined) return member;
+                return { ...member, exam: readPracticeRosterExamFact(raw.exam, `members[${index}].exam`) };
+              })}
+              problems={Array.isArray(data.rosterProblems) ? data.rosterProblems : []}
+              title={course.title || '课程'}
+              truncated={!!data.membersTruncated}
+              visibleGroupIds={Array.isArray(data.rosterGroupIds) ? data.rosterGroupIds : undefined}
+              exam={readPracticeRosterExamMeta(data.rosterExam)}
+              examWarning={typeof data.rosterExamWarning === 'string' ? data.rosterExamWarning : undefined}
+            />
+          ) : !chapters.length ? (
+            <EmptyState
+              icon={<BookOpen />}
+              title="还没有章节"
+              action={data.canManage ? (
+                <Button asChild variant="secondary">
+                  <a href={`/course/${tid}/edit`}>
+                    <Pencil strokeWidth={1.75} />
+                    去编辑
+                  </a>
                 </Button>
-              </div>
-              <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-                {(activeSection ? activeSection.totalCount : activeChapter.totalCount) ? (
-                  <div className="flex items-center gap-3 pr-1">
-                    <CourseProgressRing
-                      value={activeSection ? activeSection.progress : activeChapter.progress}
-                      size={48}
-                      thickness={5}
-                      label={`${activeSection ? '本小节' : '本章'}完成进度 ${activeSection ? activeSection.progress : activeChapter.progress}%`}
-                    />
-                    <p className="text-sm tabular-nums text-muted-foreground">
-                      {activeSection ? activeSection.doneCount : activeChapter.doneCount}/
-                      {activeSection ? activeSection.totalCount : activeChapter.totalCount}
-                    </p>
-                  </div>
-                ) : null}
-                {!activeSection && data.canCreateCollect ? (
-                  <Button asChild variant="outline" size="sm" className="h-9 gap-1.5">
-                    <a href={`/admin/collect/create?fromCourse=${encodeURIComponent(tid)}&chapter=${activeChapter._id}`}>
-                      <FolderInput className="size-3.5" strokeWidth={1.75} />
-                      布置收集
-                    </a>
+              ) : undefined}
+            />
+          ) : (
+            <>
+              <div className="flex flex-wrap items-end justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-xs text-fg-subtle">
+                    第 {chapterIndex + 1} 章 / 共 {chapters.length} 章
+                    {activeSection
+                      ? ` · ${chapterSections.findIndex((section) => section._id === activeSection._id) + 1}/${chapterSections.length} 节`
+                      : chapterSections.length
+                        ? ` · ${chapterSections.length} 节`
+                        : ''}
+                  </p>
+                  <h2 className="mt-1 text-xl font-semibold tracking-tight text-balance text-fg">
+                    {activeSection ? activeSection.title : activeChapter.title}
+                  </h2>
+                  <Button type="button" variant="secondary" size="sm" className="lg:hidden" onClick={() => setOutlineOpen(true)}>
+                    <ListTree strokeWidth={1.75} />
+                    切换章节
                   </Button>
-                ) : null}
-                <span data-course-slot="quiz">
-                  {!activeSection && data.canCreateQuiz ? (
-                    <Button asChild variant="outline" size="sm" className="h-9 gap-1.5">
-                      <a href={`/homework/create?fromCourse=${encodeURIComponent(tid)}&chapter=${activeChapter._id}`}>
-                        <ClipboardPlus className="size-3.5" strokeWidth={1.75} />
-                        创建小测
+                </div>
+                <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                  {(activeSection ? activeSection.totalCount : activeChapter.totalCount) ? (
+                    <div className="flex items-center gap-3 pr-1">
+                      <CourseProgressRing
+                        value={activeSection ? activeSection.progress : activeChapter.progress}
+                        size={48}
+                        thickness={5}
+                        label={`${activeSection ? '本小节' : '本章'}完成进度 ${activeSection ? activeSection.progress : activeChapter.progress}%`}
+                      />
+                      <p className="text-sm text-fg-subtle tabular">
+                        {activeSection ? activeSection.doneCount : activeChapter.doneCount}/
+                        {activeSection ? activeSection.totalCount : activeChapter.totalCount}
+                      </p>
+                    </div>
+                  ) : null}
+                  {!activeSection && data.canCreateCollect ? (
+                    <Button asChild variant="secondary" size="sm">
+                      <a href={`/admin/collect/create?fromCourse=${encodeURIComponent(tid)}&chapter=${activeChapter._id}`}>
+                        <FolderInput strokeWidth={1.75} />
+                        布置收集
                       </a>
                     </Button>
                   ) : null}
-                </span>
+                  <span data-course-slot="quiz">
+                    {!activeSection && data.canCreateQuiz ? (
+                      <Button asChild variant="secondary" size="sm">
+                        <a href={`/homework/create?fromCourse=${encodeURIComponent(tid)}&chapter=${activeChapter._id}`}>
+                          <ClipboardPlus strokeWidth={1.75} />
+                          创建小测
+                        </a>
+                      </Button>
+                    ) : null}
+                  </span>
+                </div>
               </div>
-            </div>
 
-            {activeSection ? (
-              <>
-                <CourseVideoPlaylist courseId={tid} videos={activeSection.videos || []} />
-                {data.canManage && !(activeSection.videos || []).length ? (
-                  <Card>
-                    <CardContent className="flex items-center justify-between gap-3 p-4">
-                      <p className="text-sm text-muted-foreground">这一节还没有视频</p>
-                      <Button asChild size="sm">
-                        <a href={`/course/${tid}/edit?chapter=${activeChapter._id}&section=${activeSection._id}`}>去上传</a>
-                      </Button>
-                    </CardContent>
-                  </Card>
-                ) : null}
-                {activeSection.content ? (
-                  <section data-course-slot="chapterContent" aria-labelledby="chapter-content-title">
-                    <h3 id="chapter-content-title" className="sr-only">
-                      小节讲义
-                    </h3>
-                    <div className="text-pretty leading-relaxed">
-                      <MarkdownView content={activeSection.content} preferredLang={bs.locale} />
-                    </div>
-                  </section>
-                ) : (
-                  <div data-course-slot="chapterContent" />
-                )}
-                <ProblemList
-                  pids={activeSection.pids}
-                  completedPids={activeSection.completedPids}
-                  problems={data.pdict || {}}
-                  courseId={tid}
-                  chapterId={activeChapter._id}
-                  title="小节小测"
-                  count={`${activeSection.doneCount}/${activeSection.totalCount}`}
-                />
-                {!activeSection.content && !activeSection.pids.length && !(activeSection.videos || []).length ? (
-                  <Card>
-                    <CardContent className="py-10 text-center text-sm text-muted-foreground">该小节暂无内容</CardContent>
-                  </Card>
-                ) : null}
-              </>
-            ) : (
-              <>
-                <CourseVideoPlaylist courseId={tid} videos={activeChapter.videos || []} />
-                {data.canManage && !(activeChapter.videos || []).length && !chapterSections.length ? (
-                  <Card>
-                    <CardContent className="flex items-center justify-between gap-3 p-4">
-                      <p className="text-sm text-muted-foreground">这一章还没有视频</p>
-                      <Button asChild size="sm">
-                        <a href={`/course/${tid}/edit?chapter=${activeChapter._id}`}>去上传</a>
-                      </Button>
-                    </CardContent>
-                  </Card>
-                ) : null}
-                {activeChapter.content ? (
-                  <section data-course-slot="chapterContent" aria-labelledby="chapter-content-title">
-                    <h3 id="chapter-content-title" className="sr-only">
-                      章节讲义
-                    </h3>
-                    <div className="text-pretty leading-relaxed">
-                      <MarkdownView content={activeChapter.content} preferredLang={bs.locale} />
-                    </div>
-                  </section>
-                ) : (
-                  <div data-course-slot="chapterContent" />
-                )}
-                {chapterSections.length ? (
-                  <section aria-labelledby="course-sections-title" className="space-y-3">
-                    <h3 id="course-sections-title" className="text-sm font-medium">
-                      本章小节
-                    </h3>
-                    <ol className="overflow-hidden rounded-xl border bg-card">
-                      {chapterSections.map((section, sectionIndex) => (
-                        <li key={section._id} className="border-b last:border-b-0">
-                          <button
-                            type="button"
-                            onClick={() => selectSection(activeChapter._id, section._id)}
-                            className="group flex min-h-11 w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              {activeSection ? (
+                <>
+                  <CourseVideoPlaylist courseId={tid} videos={activeSection.videos || []} />
+                  {data.canManage && !(activeSection.videos || []).length ? (
+                    <Panel>
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <p className="text-sm text-fg-muted">这一节还没有视频</p>
+                        <Button asChild variant="secondary" size="sm">
+                          <a href={`/course/${tid}/edit?chapter=${activeChapter._id}&section=${activeSection._id}`}>去上传</a>
+                        </Button>
+                      </div>
+                    </Panel>
+                  ) : null}
+                  {activeSection.content ? (
+                    <section data-course-slot="chapterContent" aria-labelledby="chapter-content-title">
+                      <h3 id="chapter-content-title" className="sr-only">
+                        小节讲义
+                      </h3>
+                      <div className="text-pretty leading-relaxed">
+                        <MarkdownView content={activeSection.content} preferredLang={bs.locale} />
+                      </div>
+                    </section>
+                  ) : (
+                    <div data-course-slot="chapterContent" />
+                  )}
+                  <ProblemList
+                    pids={activeSection.pids}
+                    completedPids={activeSection.completedPids}
+                    problems={data.pdict || {}}
+                    courseId={tid}
+                    chapterId={activeChapter._id}
+                    title="小节小测"
+                    count={`${activeSection.doneCount}/${activeSection.totalCount}`}
+                  />
+                  {!activeSection.content && !activeSection.pids.length && !(activeSection.videos || []).length ? (
+                    <EmptyState compact title="该小节暂无内容" />
+                  ) : null}
+                </>
+              ) : (
+                <>
+                  <CourseVideoPlaylist courseId={tid} videos={activeChapter.videos || []} />
+                  {data.canManage && !(activeChapter.videos || []).length && !chapterSections.length ? (
+                    <Panel>
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <p className="text-sm text-fg-muted">这一章还没有视频</p>
+                        <Button asChild variant="secondary" size="sm">
+                          <a href={`/course/${tid}/edit?chapter=${activeChapter._id}`}>去上传</a>
+                        </Button>
+                      </div>
+                    </Panel>
+                  ) : null}
+                  {activeChapter.content ? (
+                    <section data-course-slot="chapterContent" aria-labelledby="chapter-content-title">
+                      <h3 id="chapter-content-title" className="sr-only">
+                        章节讲义
+                      </h3>
+                      <div className="text-pretty leading-relaxed">
+                        <MarkdownView content={activeChapter.content} preferredLang={bs.locale} />
+                      </div>
+                    </section>
+                  ) : (
+                    <div data-course-slot="chapterContent" />
+                  )}
+                  {chapterSections.length ? (
+                    <section aria-labelledby="course-sections-title">
+                      <Panel flush>
+                        <CourseSectionHeader id="course-sections-title" title="本章小节" />
+                        <ol className="divide-y divide-line-subtle">
+                          {chapterSections.map((section, sectionIndex) => (
+                            <li key={section._id}>
+                              {/* ds-allow DS005: 小节行同时放序号、标题和进度，固定高度的 Button 会裁掉这三列 */}
+                              <button
+                                type="button"
+                                onClick={() => selectSection(activeChapter._id, section._id)}
+                                className={cn(
+                                  'flex min-h-11 w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-surface-hover',
+                                  ROW_LINK,
+                                )}
+                              >
+                                <span className="grid size-6 shrink-0 place-items-center rounded-md bg-surface-active text-2xs font-semibold tabular text-fg-subtle">
+                                  {sectionIndex + 1}
+                                </span>
+                                <span className="min-w-0 flex-1 truncate text-sm font-medium text-fg">{section.title}</span>
+                                {section.totalCount ? (
+                                  <span className="shrink-0 text-xs text-fg-subtle tabular">
+                                    {section.doneCount}/{section.totalCount}
+                                  </span>
+                                ) : (section.videos || []).length ? (
+                                  <span className="shrink-0 text-xs text-fg-subtle">{(section.videos || []).length} 个视频</span>
+                                ) : null}
+                                <ChevronRight className="size-4 shrink-0 text-fg-subtle" strokeWidth={1.75} />
+                              </button>
+                            </li>
+                          ))}
+                        </ol>
+                      </Panel>
+                    </section>
+                  ) : null}
+                  <ProblemList
+                    pids={activeChapter.loosePids}
+                    completedPids={activeChapter.completedPids}
+                    problems={data.pdict || {}}
+                    courseId={tid}
+                    chapterId={activeChapter._id}
+                    title={chapterSections.length ? '本章题目' : '课堂小测'}
+                    count={`${activeChapter.loosePids.filter((pid) => activeChapter.completedPids.includes(pid)).length}/${activeChapter.loosePids.length}`}
+                  />
+                  <ContestList chapter={activeChapter} contests={data.cdict || {}} />
+                </>
+              )}
+              <CollectRequestList
+                requests={collectRequests.filter((request) => request.chapterId === activeChapter._id)}
+                canManage={data.canManage}
+                title="本章收集"
+              />
+              {data.canDownloadFiles && data.files?.length ? (
+                <section data-course-slot="files" aria-labelledby="course-files-title">
+                  <Panel flush>
+                    <CourseSectionHeader id="course-files-title" title="课件" />
+                    <ul className="divide-y divide-line-subtle">
+                      {data.files.map((file) => (
+                        <li key={file.name}>
+                          <a
+                            href={`/course/${tid}/file/${encodeURIComponent(file.name)}`}
+                            className={cn('flex min-h-11 items-center gap-3 px-3 py-2.5 text-sm hover:bg-surface-hover', ROW_LINK)}
                           >
-                            <span className="grid size-6 shrink-0 place-items-center rounded-md bg-muted text-[11px] font-semibold tabular-nums text-muted-foreground">
-                              {sectionIndex + 1}
-                            </span>
-                            <span className="min-w-0 flex-1 truncate text-sm font-medium">{section.title}</span>
-                            {section.totalCount ? (
-                              <span className="shrink-0 text-xs text-muted-foreground">
-                                {section.doneCount}/{section.totalCount}
-                              </span>
-                            ) : (section.videos || []).length ? (
-                              <span className="shrink-0 text-xs text-muted-foreground">{(section.videos || []).length} 个视频</span>
-                            ) : null}
-                            <ChevronRight className="size-4 shrink-0 text-muted-foreground/50" strokeWidth={1.75} />
-                          </button>
+                            <FileText className="size-4 shrink-0 text-fg-subtle" strokeWidth={1.75} />
+                            <span className="min-w-0 flex-1 truncate font-medium text-fg">{file.name}</span>
+                            <Download className="size-4 shrink-0 text-fg-subtle" strokeWidth={1.75} />
+                          </a>
                         </li>
                       ))}
-                    </ol>
-                  </section>
-                ) : null}
-                <ProblemList
-                  pids={activeChapter.loosePids}
-                  completedPids={activeChapter.completedPids}
-                  problems={data.pdict || {}}
-                  courseId={tid}
-                  chapterId={activeChapter._id}
-                  title={chapterSections.length ? '本章题目' : '课堂小测'}
-                  count={`${activeChapter.loosePids.filter((pid) => activeChapter.completedPids.includes(pid)).length}/${activeChapter.loosePids.length}`}
-                />
-                <ContestList chapter={activeChapter} contests={data.cdict || {}} />
-              </>
-            )}
-            <CollectRequestList
-              requests={collectRequests.filter((request) => request.chapterId === activeChapter._id)}
-              canManage={data.canManage}
-              title="本章收集"
-            />
-            {data.canDownloadFiles && data.files?.length ? (
-              <section data-course-slot="files" aria-labelledby="course-files-title" className="space-y-3">
-                <h3 id="course-files-title" className="text-sm font-medium">
-                  课件
-                </h3>
-                <ul className="overflow-hidden rounded-xl border bg-card">
-                  {data.files.map((file) => (
-                    <li key={file.name} className="border-b last:border-b-0">
-                      <a
-                        href={`/course/${tid}/file/${encodeURIComponent(file.name)}`}
-                        className="flex min-h-11 items-center gap-3 px-3 py-2.5 text-sm hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      >
-                        <FileText className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.75} />
-                        <span className="min-w-0 flex-1 truncate font-medium">{file.name}</span>
-                        <Download className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.75} />
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            ) : (
-              <div data-course-slot="files" />
-            )}
-            {!course.content &&
-            !activeChapter.content &&
-            !(activeChapter.videos || []).length &&
-            !activeChapter.loosePids.length &&
-            !activeChapter.tids.length &&
-            !chapterSections.length &&
-            !activeSection &&
-            !collectRequests.some((request) => request.chapterId === activeChapter._id) &&
-            data.canCreateCollect !== true ? (
-              <Card>
-                <CardContent className="py-10 text-center text-sm text-muted-foreground">本章暂无内容</CardContent>
-              </Card>
-            ) : null}
+                    </ul>
+                  </Panel>
+                </section>
+              ) : (
+                <div data-course-slot="files" />
+              )}
+              {!course.content &&
+              !activeChapter.content &&
+              !(activeChapter.videos || []).length &&
+              !activeChapter.loosePids.length &&
+              !activeChapter.tids.length &&
+              !chapterSections.length &&
+              !activeSection &&
+              !collectRequests.some((request) => request.chapterId === activeChapter._id) &&
+              data.canCreateCollect !== true ? (
+                <EmptyState compact title="本章暂无内容" />
+              ) : null}
 
-            <ChapterPager
-              previous={chapterIndex > 0 ? chapters[chapterIndex - 1] : null}
-              next={chapterIndex >= 0 && chapterIndex < chapters.length - 1 ? chapters[chapterIndex + 1] : null}
-              onSelect={selectChapter}
-            />
-          </article>
+              <ChapterPager
+                previous={chapterIndex > 0 ? chapters[chapterIndex - 1] : null}
+                next={chapterIndex >= 0 && chapterIndex < chapters.length - 1 ? chapters[chapterIndex + 1] : null}
+                onSelect={selectChapter}
+              />
+            </>
+          )}
         </div>
-      )}
+      </div>
 
       <Sheet open={outlineOpen} onOpenChange={setOutlineOpen}>
-        <SheetContent side="left" className="w-[22rem] max-w-[calc(100vw-1rem)]">
+        <SheetContent side="left" className="w-80">
           <SheetHeader>
             <SheetTitle>课程目录</SheetTitle>
           </SheetHeader>
@@ -795,6 +753,6 @@ export function CourseDetailPage() {
           </SheetBody>
         </SheetContent>
       </Sheet>
-    </main>
+    </Workspace>
   );
 }

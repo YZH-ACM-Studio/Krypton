@@ -1,7 +1,7 @@
 import { ArrowDown, ArrowUp, Check, Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/cn';
-import { CourseProgressBar, riseStyle } from './ui';
+import { CourseProgressBar } from './ui';
 
 interface OutlineSection {
   _id: number;
@@ -43,39 +43,39 @@ function AuthoringTools({
   return (
     <div className="mr-1 flex min-h-11 shrink-0 items-center self-center">
       {onAdd ? (
-        <Button type="button" variant="ghost" size="icon" className="size-11" onClick={onAdd} aria-label={addLabel || `添加${label}的小节`}>
-          <Plus className="size-3.5" strokeWidth={2} />
+        <Button type="button" variant="ghost" size="sm" iconOnly onClick={onAdd} aria-label={addLabel || `添加${label}的小节`}>
+          <Plus strokeWidth={2} />
         </Button>
       ) : null}
       {onMove ? (
         <>
-          <Button type="button" variant="ghost" size="icon" className="size-11" disabled={disableUp} onClick={() => onMove(-1)} aria-label={`上移${label}`}>
-            <ArrowUp className="size-3.5" strokeWidth={1.75} />
+          <Button type="button" variant="ghost" size="sm" iconOnly disabled={disableUp} onClick={() => onMove(-1)} aria-label={`上移${label}`}>
+            <ArrowUp strokeWidth={1.75} />
           </Button>
           <Button
             type="button"
             variant="ghost"
-            size="icon"
-            className="size-11"
+            size="sm"
+            iconOnly
             disabled={disableDown}
             onClick={() => onMove(1)}
             aria-label={`下移${label}`}
           >
-            <ArrowDown className="size-3.5" strokeWidth={1.75} />
+            <ArrowDown strokeWidth={1.75} />
           </Button>
         </>
       ) : null}
       {onRemove ? (
         <Button
           type="button"
-          variant="ghost"
-          size="icon"
-          className="size-11 text-destructive hover:bg-destructive/10"
+          variant="danger-soft"
+          size="sm"
+          iconOnly
           disabled={disableRemove}
           onClick={onRemove}
           aria-label={`删除${label}`}
         >
-          <Trash2 className="size-3.5" strokeWidth={1.75} />
+          <Trash2 strokeWidth={1.75} />
         </Button>
       ) : null}
     </div>
@@ -86,10 +86,8 @@ function AuthoringTools({
  * Chapter directory, shared by the reader and the author.
  *
  * A leading ordinal chip carries the position so the title never has to
- * compete with a "第 N 章" line at 11px, and reader rows carry their own
- * progress rail — the chapter list is where a learner looks to decide
- * where to go next, so the numbers belong here rather than buried in the
- * article header.
+ * compete with a "第 N 章" line, and reader rows carry their own progress
+ * rail — the chapter list is where a learner looks to decide where to go next.
  */
 export function ChapterOutline({
   chapters,
@@ -114,7 +112,7 @@ export function ChapterOutline({
 }) {
   const authoring = Boolean(onMove || onRemove || onAddSection);
   return (
-    <nav aria-label="章节目录" className="space-y-0.5">
+    <nav aria-label="章节目录" className="flex flex-col gap-0.5">
       {chapters.map((chapter, index) => {
         const active = chapter._id === activeId;
         const total = typeof chapter.totalCount === 'number' && chapter.totalCount > 0 ? chapter.totalCount : null;
@@ -123,42 +121,34 @@ export function ChapterOutline({
         const sections = chapter.sections || [];
         const chapterSelected = active && activeSectionId == null;
         return (
-          <div key={chapter._id} className="space-y-0.5">
+          <div key={chapter._id} className="flex flex-col gap-0.5">
             <div
-              style={riseStyle(index, 30, 10)}
               className={cn(
-                'krypton-course-rise group relative flex items-stretch gap-0 rounded-[0.625rem]',
-                'transition-[background-color,box-shadow] duration-150 motion-reduce:transition-none',
-                chapterSelected ? 'krypton-course-active' : 'hover:bg-muted/60',
+                'relative flex items-stretch gap-0 rounded-md',
+                'transition-colors duration-(--dur-1) ease-(--ease-standard) motion-reduce:transition-none',
+                chapterSelected ? 'bg-brand-soft' : 'hover:bg-surface-hover',
               )}
             >
-              <span
-                aria-hidden="true"
-                className={cn(
-                  'absolute left-0 top-1/2 w-[3px] -translate-y-1/2 rounded-r-full transition-[height,background-color] duration-200',
-                  'motion-reduce:transition-none',
-                  active ? 'h-[62%] bg-primary' : 'h-0 bg-transparent',
-                )}
-              />
+              {/* ds-allow DS005: 章节行同时放序号、标题和进度条，固定高度的 Button 会裁掉这三列 */}
               <button
                 type="button"
                 onClick={() => onSelect(chapter._id, null)}
                 aria-current={chapterSelected ? 'page' : undefined}
                 className={cn(
-                  'flex min-w-0 flex-1 items-start gap-2.5 rounded-[0.625rem] px-3 py-2.5 text-left',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+                  'flex min-h-11 min-w-0 flex-1 items-start gap-2.5 rounded-md px-3 py-2.5 text-left',
+                  'outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
                 )}
               >
                 <span
                   aria-hidden="true"
                   className={cn(
-                    'mt-px grid size-5 shrink-0 place-items-center rounded-md text-[10px] font-semibold tabular-nums leading-none',
-                    'transition-colors duration-150 motion-reduce:transition-none',
+                    'mt-px grid size-5 shrink-0 place-items-center rounded-md text-2xs font-semibold tabular leading-none',
+                    'transition-colors duration-(--dur-1) ease-(--ease-standard) motion-reduce:transition-none',
                     chapterSelected
-                      ? 'bg-primary text-primary-foreground'
+                      ? 'bg-brand text-on-brand'
                       : complete
-                        ? 'bg-emerald-500/12 text-emerald-700 dark:text-emerald-400'
-                        : 'bg-muted text-muted-foreground',
+                        ? 'bg-success-soft text-success-fg'
+                        : 'bg-surface-active text-fg-subtle',
                   )}
                 >
                   {complete && !chapterSelected ? <Check className="size-3" strokeWidth={2.5} /> : String(index + 1).padStart(2, '0')}
@@ -166,20 +156,20 @@ export function ChapterOutline({
                 <span className="min-w-0 flex-1">
                   <span
                     className={cn(
-                      'block truncate text-[13px] font-medium leading-5 transition-colors duration-150 motion-reduce:transition-none',
-                      chapterSelected ? 'text-foreground' : 'text-foreground/85 group-hover:text-foreground',
+                      'block text-balance text-sm font-medium leading-5 text-fg',
+                      'transition-colors duration-(--dur-1) ease-(--ease-standard) motion-reduce:transition-none',
                     )}
                   >
                     {chapter.title}
                   </span>
                   {total !== null ? (
-                    <span className="mt-1.5 flex max-w-[10.5rem] items-center gap-2">
+                    <span className="mt-1.5 flex max-w-40 items-center gap-2">
                       <CourseProgressBar
                         value={chapter.progress || 0}
                         label={`${chapter.title} 完成进度 ${chapter.progress || 0}%`}
-                        className="h-[3px] flex-1"
+                        className="flex-1"
                       />
-                      <span className="krypton-course-meta shrink-0 text-[10px] leading-none">
+                      <span className="shrink-0 text-xs text-fg-subtle tabular leading-none">
                         {done}/{total}
                       </span>
                     </span>
@@ -208,38 +198,39 @@ export function ChapterOutline({
                 <div
                   key={section._id}
                   className={cn(
-                    'group relative ml-5 flex w-[calc(100%-1.25rem)] items-stretch rounded-[0.625rem]',
-                    sectionActive ? 'krypton-course-active' : 'hover:bg-muted/60',
+                    'relative ml-5 flex items-stretch rounded-md',
+                    sectionActive ? 'bg-brand-soft' : 'hover:bg-surface-hover',
                   )}
                 >
+                  {/* ds-allow DS005: 小节行同时放序号、标题和完成数，固定高度的 Button 会裁掉这三列 */}
                   <button
                     type="button"
                     onClick={() => onSelect(chapter._id, section._id)}
                     aria-current={sectionActive ? 'page' : undefined}
                     className={cn(
-                      'flex min-w-0 flex-1 items-start gap-2 rounded-[0.625rem] px-3 py-2 text-left',
-                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+                      'flex min-h-11 min-w-0 flex-1 items-start gap-2 rounded-md px-3 py-2 text-left',
+                      'outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
                     )}
                   >
                     <span
                       aria-hidden="true"
                       className={cn(
-                        'mt-px grid size-5 shrink-0 place-items-center rounded-md text-[10px] font-semibold tabular-nums leading-none',
+                        'mt-px grid size-5 shrink-0 place-items-center rounded-md text-2xs font-semibold tabular leading-none',
                         sectionActive
-                          ? 'bg-primary text-primary-foreground'
+                          ? 'bg-brand text-on-brand'
                           : sectionComplete
-                            ? 'bg-emerald-500/12 text-emerald-700 dark:text-emerald-400'
-                            : 'bg-muted text-muted-foreground',
+                            ? 'bg-success-soft text-success-fg'
+                            : 'bg-surface-active text-fg-subtle',
                       )}
                     >
                       {sectionComplete && !sectionActive ? <Check className="size-3" strokeWidth={2.5} /> : `${index + 1}.${sectionIndex + 1}`}
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className={cn('block truncate text-[12px] font-medium leading-5', sectionActive ? 'text-foreground' : 'text-foreground/80')}>
+                      <span className="block text-balance text-xs font-medium leading-5 text-fg">
                         {section.title}
                       </span>
                       {sectionTotal !== null ? (
-                        <span className="krypton-course-meta mt-1 block text-[10px] leading-none">
+                        <span className="mt-1 block text-xs text-fg-subtle tabular leading-none">
                           {sectionDone}/{sectionTotal}
                         </span>
                       ) : null}
@@ -258,18 +249,21 @@ export function ChapterOutline({
               );
             })}
             {onAddSection && active ? (
-              <button
-                type="button"
-                onClick={() => onAddSection(chapter._id)}
-                className={cn(
-                  'ml-5 flex min-h-11 w-[calc(100%-1.25rem)] items-center gap-2 rounded-[0.625rem] px-3 py-2 text-left',
-                  'text-[12px] text-muted-foreground hover:bg-muted/60 hover:text-foreground',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-                )}
-              >
-                <Plus className="size-3.5 shrink-0" strokeWidth={2} />
-                添加小节
-              </button>
+              <>
+                {/* ds-allow DS005: 「添加小节」是整条缩进行的命中区，标准 Button 会把文字居中并锁死高度 */}
+                <button
+                  type="button"
+                  onClick={() => onAddSection(chapter._id)}
+                  className={cn(
+                    'ml-5 flex min-h-11 items-center gap-2 rounded-md px-3 py-2 text-left text-xs text-fg-subtle',
+                    'hover:bg-surface-hover hover:text-fg',
+                    'outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
+                  )}
+                >
+                  <Plus className="size-3.5 shrink-0" strokeWidth={2} />
+                  添加小节
+                </button>
+              </>
             ) : null}
           </div>
         );

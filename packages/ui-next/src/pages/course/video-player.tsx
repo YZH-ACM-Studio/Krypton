@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Button } from '@/components/ui/button';
+import { MiniTabs } from '@/components/ui/mini-tabs';
+import { Panel } from '@/components/ui/panel';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import {
   clampPlaybackRate,
@@ -109,59 +110,55 @@ export function CourseVideoPlayer({
   }
 
   return (
-    <section className="krypton-course-panel space-y-3 p-4">
-      <div className="flex min-w-0 flex-wrap items-end justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          <h3 className="min-w-0 truncate text-sm font-semibold">{video.title}</h3>
-          <p className="krypton-course-meta mt-0.5">
-            {completed ? '已看完' : `已覆盖 ${coverage}%`}
-            <span className="ml-2">按播放规则看完，不是监考证明。</span>
+    <Panel>
+      <div className="flex flex-col gap-3">
+        <div className="flex min-w-0 flex-wrap items-end justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            <h3 className="min-w-0 truncate text-sm font-semibold text-fg">{video.title}</h3>
+            <p className="mt-0.5 text-xs text-fg-subtle">
+              {completed ? '已看完' : `已覆盖 ${coverage}%`}
+              <span className="ml-2">按播放规则看完，不是监考证明。</span>
+            </p>
+          </div>
+          <MiniTabs
+            aria-label="播放速度"
+            size="sm"
+            value={String(rate)}
+            onValueChange={(next) => {
+              const item = Number(next);
+              const node = ref.current;
+              if (!node || !Number.isFinite(item)) return;
+              node.playbackRate = item;
+              setRate(item);
+            }}
+            items={COURSE_VIDEO_RATES.map((item) => ({ value: String(item), label: `${item}×` }))}
+          />
+        </div>
+        <video
+          ref={ref}
+          className="block aspect-video w-full min-w-0 rounded-lg bg-surface-sunken object-contain"
+          src={video.playUrl}
+          controls
+          controlsList="nodownload noplaybackrate"
+          disablePictureInPicture
+          playsInline
+          preload="metadata"
+          onContextMenu={(event) => event.preventDefault()}
+        />
+        {error ? (
+          <p role="alert" className="text-xs text-danger-fg">
+            {error}
           </p>
-        </div>
-        <div className="flex gap-1">
-          {COURSE_VIDEO_RATES.map((item) => (
-            <Button
-              key={item}
-              type="button"
-              size="sm"
-              variant={rate === item ? 'default' : 'outline'}
-              className="h-8 px-2.5"
-              onClick={() => {
-                const node = ref.current;
-                if (!node) return;
-                node.playbackRate = item;
-                setRate(item);
-              }}
-            >
-              {item}×
-            </Button>
-          ))}
-        </div>
+        ) : null}
       </div>
-      <video
-        ref={ref}
-        className="block aspect-video max-h-[min(70dvh,36rem)] min-w-0 w-full rounded-lg bg-black object-contain"
-        src={video.playUrl}
-        controls
-        controlsList="nodownload noplaybackrate"
-        disablePictureInPicture
-        playsInline
-        preload="metadata"
-        onContextMenu={(event) => event.preventDefault()}
-      />
-      {error ? (
-        <p role="alert" className="text-xs text-destructive">
-          {error}
-        </p>
-      ) : null}
-    </section>
+    </Panel>
   );
 }
 
 export function CourseVideoPlaylist({ courseId, videos }: { courseId: string; videos: CourseStudentVideo[] }) {
   if (!videos.length) return null;
   return (
-    <div className="space-y-3">
+    <div className="flex flex-col gap-3">
       {videos.map((video) => (
         <CourseVideoPlayer key={`${video.id}:${video.contentRevision}`} courseId={courseId} video={video} />
       ))}

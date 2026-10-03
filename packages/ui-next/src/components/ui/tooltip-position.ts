@@ -82,6 +82,33 @@ export function calculateTooltipPosition(
   };
 }
 
+export type AnchoredPlacement = 'bottom-start' | 'bottom-end' | 'bottom' | 'top';
+
+const POPOVER_VIEWPORT_PADDING = 8;
+
+/**
+ * Horizontal alignment for a box from `calculateAnchoredPopoverBox`.
+ * `bottom-end` pins the floating layer's right edge to the anchor; every
+ * placement is then clipped 8px inside the viewport. Other fields are copied.
+ */
+export function alignAnchoredBox<T extends { left: number }>(
+  box: T,
+  anchorRect: { readonly left: number; readonly right: number },
+  floatingWidth: number,
+  placement: AnchoredPlacement,
+  viewportWidth: number,
+): T {
+  const unclamped = placement === 'bottom-end' ? anchorRect.right - floatingWidth : box.left;
+  const maxLeft = Math.max(
+    POPOVER_VIEWPORT_PADDING,
+    viewportWidth - POPOVER_VIEWPORT_PADDING - floatingWidth,
+  );
+  return {
+    ...box,
+    left: clamp(unclamped, POPOVER_VIEWPORT_PADDING, maxLeft),
+  };
+}
+
 /** Place a portaled menu against a trigger, flipping on short remaining viewport. */
 export function calculateAnchoredPopoverBox(
   trigger: RectLike,

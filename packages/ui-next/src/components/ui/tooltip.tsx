@@ -1,6 +1,7 @@
 import { Slot } from '@radix-ui/react-slot';
 import {
   createContext,
+  type ReactElement,
   type ReactNode,
   type Ref,
   useCallback,
@@ -19,9 +20,9 @@ interface TooltipProviderCtx {
   delayDuration: number;
 }
 
-const ProviderCtx = createContext<TooltipProviderCtx>({ delayDuration: 300 });
+const ProviderCtx = createContext<TooltipProviderCtx>({ delayDuration: 450 });
 
-export function TooltipProvider({ children, delayDuration = 300 }: { children: ReactNode; delayDuration?: number }) {
+export function TooltipProvider({ children, delayDuration = 450 }: { children: ReactNode; delayDuration?: number }) {
   return <ProviderCtx.Provider value={{ delayDuration }}>{children}</ProviderCtx.Provider>;
 }
 
@@ -186,7 +187,7 @@ export function TooltipContent({
       role="tooltip"
       data-side={position?.side || side}
       className={cn(
-        'pointer-events-none fixed z-200 max-w-[min(20rem,calc(100dvw-1rem))] whitespace-normal break-words rounded-[10px] bg-popover/95 px-3 py-2 text-sm font-medium text-popover-foreground shadow-[0_8px_24px_oklch(0_0_0_/_0.16),0_0_0_1px_oklch(0_0_0_/_0.07)] backdrop-blur-md animate-in fade-in-0 zoom-in-95 duration-150 dark:shadow-[0_8px_24px_oklch(0_0_0_/_0.45),0_0_0_1px_oklch(1_0_0_/_0.10)]',
+        'pointer-events-none fixed z-60 max-w-64 whitespace-normal break-words rounded-md bg-fg px-2 py-1 text-xs font-medium text-bg shadow-sm',
         className,
       )}
       style={{
@@ -199,5 +200,26 @@ export function TooltipContent({
       {children}
     </span>,
     document.body,
+  );
+}
+
+export function SimpleTooltip({
+  content,
+  side,
+  children,
+}: {
+  content: ReactNode;
+  side?: TooltipSide;
+  children: ReactElement;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        {children}
+      </TooltipTrigger>
+      <TooltipContent side={side}>
+        {content}
+      </TooltipContent>
+    </Tooltip>
   );
 }

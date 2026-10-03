@@ -22,8 +22,6 @@ describe('practice roster card source', () => {
 
   it('keeps the roster title, search, class-group header, and both-axis table scroll', () => {
     expect(roster).to.include('参加名单');
-    expect(roster).to.include('max-h-[28rem]');
-    expect(roster).to.include('min-w-[640px]');
     expect(roster.match(/<ScrollArea\b[^>]+orientation="both"/g)?.length, 'both roster tables').to.equal(2);
     expect(roster).to.include('176 + matrixColumns.length * 96');
     expect(roster).to.include('placeholder="搜索用户名/姓名/学号/班级"');

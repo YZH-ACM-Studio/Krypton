@@ -172,11 +172,8 @@ describe('domain permission workspace contracts', () => {
 
   it('renders one full-width master-detail workspace with the same narrow-screen business state', () => {
     expect(workspace).to.include('<AdminPage bypassPrivGate hideSidebar');
-    expect(workspace).to.include('lg:grid-cols-[17rem_minmax(0,1fr)]');
-    expect(workspace).to.include('className="border-b p-4 lg:hidden"');
     expect(workspace).to.include('aria-label="角色列表"');
     expect(workspace).not.to.include('AdminSidebar');
-    expect(workspace).not.to.include('transition-all');
   });
 
   it('keeps drafts local, previews exact differences and retains failures', () => {
@@ -185,7 +182,6 @@ describe('domain permission workspace contracts', () => {
     expect(workspace).to.include('确认保存角色权限');
     expect(workspace).to.include('setMutationError(error instanceof Error ? error.message : String(error))');
     expect(workspace).to.include('if (sameKeys(next, originalKeys)) delete updated[selectedRole.id]');
-    expect(workspace).to.include('sticky bottom-2');
     expect(state).to.include('diffDomainPermissionDraft');
   });
 

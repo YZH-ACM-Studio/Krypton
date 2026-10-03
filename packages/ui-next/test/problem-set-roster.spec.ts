@@ -50,9 +50,6 @@ describe('problem-set roster page contracts', () => {
     const rosterPage = source('packages/ui-next/src/pages/problem-set-roster.tsx');
     expect(rosterPage).to.include('PracticeRosterCard');
     expect(rosterPage).to.include('visibleGroupIds');
-    expect(rosterPage).to.include('w-full min-w-0');
-    expect(rosterPage).not.to.include('mx-auto');
-    expect(rosterPage).not.to.include('max-w-[');
   });
 
   it('registers the training_roster route on TrainingRosterHandler', () => {

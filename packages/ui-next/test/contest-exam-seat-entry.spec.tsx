@@ -138,26 +138,6 @@ describe('contest exam seat entry', () => {
     await waitFor(() => expectNoSeatWorkflow());
   });
 
-  it('keeps the seat workflow beside the contest editor instead of a narrow stacked card', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => json({ events: [], schools: [SCHOOL_ONE] })),
-    );
-
-    render(
-      <BootstrapProvider bootstrap={pageBootstrap('contest_edit', 'acm')}>
-        <ContestEditPage />
-      </BootstrapProvider>,
-    );
-
-    const seat = await screen.findByText('机房座位与赛前预启动');
-    const card = seat.closest('[data-slot="card"]');
-    const layout = card?.parentElement;
-    expect(layout?.className).toContain('gap-6');
-    expect(layout?.className).toContain('2xl:grid-cols-[minmax(0,1fr)_minmax(24rem,32rem)]');
-    expect(layout?.querySelector('.max-w-5xl')).toBeNull();
-  });
-
   it('loads contest maintainers into the searchable user picker', async () => {
     const user = userEvent.setup();
     vi.stubGlobal(

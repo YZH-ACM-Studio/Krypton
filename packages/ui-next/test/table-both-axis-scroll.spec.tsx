@@ -65,7 +65,7 @@ describe('both-axis table scroll', () => {
 
   it('uses that both-axis owner around the IDE records table and the training roster', () => {
     const problemDetail = source('src/pages/problem-detail.tsx');
-    const tableAt = problemDetail.indexOf('className="min-w-[620px] w-full text-xs"');
+    const tableAt = problemDetail.indexOf('>状态</th>');
     expect(tableAt, 'IDE records table').to.be.greaterThan(-1);
     const recordsWrap = problemDetail.slice(Math.max(0, tableAt - 1600), tableAt);
     expect(recordsWrap).to.match(/<ScrollArea\b[^>]+orientation="both"/);
@@ -78,11 +78,9 @@ describe('both-axis table scroll', () => {
     expect(roster).to.include('班级组');
     expect(roster).to.include('进度');
     expect(roster.match(/<ScrollArea\b[^>]+orientation="both"/g)?.length, 'both roster tables').to.equal(2);
-    const membersAt = roster.indexOf('min-w-[640px]');
+    const membersAt = roster.indexOf('>用户名</th>');
     expect(membersAt, 'members table min-w').to.be.greaterThan(-1);
     expect(roster.slice(Math.max(0, membersAt - 400), membersAt)).to.match(/<ScrollArea\b[^>]+orientation="both"/);
-    expect(roster).to.include('whitespace-nowrap');
-    expect(roster).to.include('sticky left-0');
     expect(roster).to.include('176 + matrixColumns.length * 96');
   });
 

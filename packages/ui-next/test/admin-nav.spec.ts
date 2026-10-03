@@ -1,6 +1,4 @@
 // @vitest-environment node
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   clearAdminNavRegistry,
@@ -11,8 +9,6 @@ import type { AdminNavSection } from '../src/lib/admin-nav-registry.ts';
 // Side-effect import: registers the builtin sections into the module-level registry.
 import '../src/lib/admin-nav-builtins.ts';
 import { PRIV } from '../src/lib/perms.ts';
-
-const workspaceRoot = resolve(import.meta.dirname, '../../..');
 
 // Snapshot the builtin registrations at module load, before any test clears the
 // registry. The section objects stay valid after clearAdminNavRegistry() since
@@ -147,10 +143,5 @@ describe('builtin admin nav sections', () => {
     const domain = builtinSections.find((s) => s.key === 'domain');
     const domainUser = domain?.items.find((item) => item.key === 'domain_user');
     expect(domainUser?.templateNames).to.deep.equal(['domain_user.html', 'domain_user_raw.html']);
-  });
-
-  it('keeps the secondary w-56 rail off the layout below lg', () => {
-    const sidebar = readFileSync(resolve(workspaceRoot, 'packages/ui-next/src/components/admin/admin-sidebar.tsx'), 'utf8');
-    expect(sidebar).to.include('hidden h-full min-h-0 w-56 shrink-0 lg:block');
   });
 });

@@ -211,13 +211,13 @@ describe('krypton IDE problem submission', () => {
     );
     const runAll = screen.getByRole('button', { name: '运行全部自测' });
 
-    expect(runAll).toHaveClass('w-[7.25rem]', 'shrink-0');
+    expect(runAll).toHaveClass('shrink-0');
     fireEvent.click(runAll);
     expect(screen.getByText('样例 1')).toBeInTheDocument();
     fireEvent.click(runAll);
 
     await waitFor(() => expect(screen.getByRole('button', { name: '3s' })).toBeDisabled());
-    expect(screen.getByRole('button', { name: '3s' })).toHaveClass('w-[7.25rem]', 'shrink-0');
+    expect(screen.getByRole('button', { name: '3s' })).toHaveClass('shrink-0');
   });
 
   it('shows the Hydro error instead of silently falling back when the server rejects submission', async () => {

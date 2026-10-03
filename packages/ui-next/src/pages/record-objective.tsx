@@ -1,17 +1,25 @@
-import { Check, ChevronRight, CircleX, Minus } from 'lucide-react';
+import { Check, CircleX, Minus } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent } from '@/components/ui/card';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Panel } from '@/components/ui/panel';
+import { scoreTone } from '@/components/ui/verdict';
 import { buildObjectiveAnswerRows, isObjectiveRecordProblem } from '@/lib/objective-record';
 import { cn } from '@/lib/cn';
 
 export { isObjectiveRecordProblem };
 
+const SCORE_TONE_CLASS = {
+  danger: 'text-danger-fg',
+  warning: 'text-warning-fg',
+  success: 'text-success-fg',
+} as const;
+
 function verdictCopy(status: number | undefined, score: number | undefined) {
-  if (status === 1) return { label: '回答正确', tone: 'text-emerald-600 dark:text-emerald-400' };
-  if (status === 2) return { label: score ? '部分正确' : '回答错误', tone: 'text-red-600 dark:text-red-400' };
-  if (status === 31) return { label: '提交格式无效', tone: 'text-muted-foreground' };
-  if (status === 0 || status === 20 || status === 21 || status === 22) return { label: '正在评测', tone: 'text-sky-600 dark:text-sky-400' };
-  return { label: '评测结束', tone: 'text-foreground' };
+  if (status === 1) return { label: '回答正确', tone: 'text-success-fg' };
+  if (status === 2) return { label: score ? '部分正确' : '回答错误', tone: score ? 'text-warning-fg' : 'text-danger-fg' };
+  if (status === 31) return { label: '提交格式无效', tone: 'text-fg-muted' };
+  if (status === 0 || status === 20 || status === 21 || status === 22) return { label: '正在评测', tone: 'text-info-fg' };
+  return { label: '评测结束', tone: 'text-fg' };
 }
 
 function kindLabel(kind: string) {
@@ -25,7 +33,7 @@ function kindLabel(kind: string) {
 function ResultMark({ row }: { row: { correct: boolean | null; unanswered: boolean } }) {
   if (row.unanswered) {
     return (
-      <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+      <span className="inline-flex items-center gap-1.5 text-xs text-fg-subtle">
         <Minus className="size-3.5" strokeWidth={1.75} />
         未作答
       </span>
@@ -33,7 +41,7 @@ function ResultMark({ row }: { row: { correct: boolean | null; unanswered: boole
   }
   if (row.correct === true) {
     return (
-      <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-success-fg">
         <Check className="size-3.5" strokeWidth={2} />
         正确
       </span>
@@ -41,13 +49,13 @@ function ResultMark({ row }: { row: { correct: boolean | null; unanswered: boole
   }
   if (row.correct === false) {
     return (
-      <span className="inline-flex items-center gap-1 text-xs font-medium text-red-600 dark:text-red-400">
+      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-danger-fg">
         <CircleX className="size-3.5" strokeWidth={1.75} />
         错误
       </span>
     );
   }
-  return <span className="text-xs text-muted-foreground">待出分</span>;
+  return <span className="text-xs text-fg-subtle">待出分</span>;
 }
 
 export function ObjectiveRecordResult({
@@ -55,7 +63,6 @@ export function ObjectiveRecordResult({
   rdoc,
   code,
   problemUrl,
-  listHref,
   username,
   student,
   submittedAt,
@@ -64,7 +71,6 @@ export function ObjectiveRecordResult({
   rdoc: { status?: number; score?: number; testCases?: Array<{ id?: unknown; status?: unknown; score?: unknown }>; cases?: Array<{ id?: unknown; status?: unknown; score?: unknown }> };
   code: unknown;
   problemUrl: string;
-  listHref: string;
   username: string;
   student: { studentId: string; realName: string } | null;
   submittedAt: string;
@@ -73,96 +79,90 @@ export function ObjectiveRecordResult({
   const rows = buildObjectiveAnswerRows({ pdoc, code, cases });
   const verdict = verdictCopy(rdoc.status, rdoc.score);
   const correctCount = rows.filter((row) => row.correct === true).length;
+  const paperFull = rows.reduce((sum, row) => sum + row.maxScore, 0);
+  const full = paperFull > 0 ? paperFull : 100;
+  const scoreClass = typeof rdoc.score === 'number' ? SCORE_TONE_CLASS[scoreTone(rdoc.score, full)] : 'text-fg';
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-        <a href={listHref} className="hover:text-primary">
-          记录
-        </a>
-        <ChevronRight className="size-3 shrink-0" />
-        <span className="break-words">客观题</span>
-      </div>
-
+    <div className="flex flex-col gap-4">
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
-        <Card className="min-w-0">
-          <CardContent className="flex min-w-0 flex-col flex-wrap gap-5 p-5 sm:flex-row sm:items-center sm:justify-between">
+        <Panel className="min-w-0">
+          <div className="flex min-w-0 flex-col flex-wrap gap-5 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
-              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">结果</p>
-              <p className={cn('mt-1 break-words text-2xl font-semibold tracking-tight', verdict.tone)}>{verdict.label}</p>
-              <p className="mt-1 break-words text-sm text-muted-foreground">{submittedAt}</p>
+              <p className="text-xs font-medium text-fg-subtle">结果</p>
+              <p className={cn('mt-1 break-words text-lg font-semibold', verdict.tone)}>{verdict.label}</p>
+              <p className="mt-1 break-words text-sm text-fg-muted">{submittedAt}</p>
             </div>
             <div className="flex flex-wrap gap-6">
               <div>
-                <p className="text-xs text-muted-foreground">得分</p>
-                <p className="mt-1 text-2xl font-semibold tabular-nums">{rdoc.score ?? '—'}</p>
+                <p className="text-xs text-fg-subtle">得分</p>
+                <p className={cn('mt-1 text-lg font-semibold tabular', scoreClass)}>{rdoc.score ?? '—'}</p>
               </div>
               <div>
-                <p className="text-xs text-muted-foreground">答对</p>
-                <p className="mt-1 text-2xl font-semibold tabular-nums">
+                <p className="text-xs text-fg-subtle">答对</p>
+                <p className="mt-1 text-lg font-semibold tabular text-fg">
                   {correctCount}
-                  <span className="text-sm font-normal text-muted-foreground">/{rows.length || '—'}</span>
+                  <span className="text-sm font-normal text-fg-subtle">/{rows.length || '—'}</span>
                 </p>
               </div>
             </div>
-          </CardContent>
-        </Card>
-        <Card className="min-w-0">
-          <CardContent className="min-w-0 p-5">
-            <p className="text-xs text-muted-foreground">题目 / 用户</p>
-            <a href={problemUrl} className="mt-1 block break-words text-sm font-semibold leading-5 hover:text-primary">
-              {typeof pdoc.title === 'string' ? pdoc.title : '客观题'}
-            </a>
-            <div className="mt-3 flex flex-wrap gap-2 border-t pt-3 text-xs">
-              <span className="break-words rounded-md bg-muted px-2.5 py-1 font-medium">{username}</span>
-              {student?.studentId ? <span className="break-words rounded-md bg-muted px-2.5 py-1 font-mono tabular-nums">{student.studentId}</span> : null}
-              {student?.realName ? <span className="break-words rounded-md bg-muted px-2.5 py-1">{student.realName}</span> : null}
-            </div>
-          </CardContent>
-        </Card>
+          </div>
+        </Panel>
+        <Panel className="min-w-0">
+          <p className="text-xs text-fg-subtle">题目 / 用户</p>
+          <a href={problemUrl} className="mt-1 block break-words text-sm font-semibold text-fg hover:text-brand-fg">
+            {typeof pdoc.title === 'string' ? pdoc.title : '客观题'}
+          </a>
+          <div className="mt-3 flex flex-wrap gap-2 border-t border-line pt-3 text-xs">
+            <span className="break-words rounded-md bg-surface-active px-2.5 py-1 font-medium text-fg">{username}</span>
+            {student?.studentId ? <span className="break-words rounded-md bg-surface-active px-2.5 py-1 font-mono tabular">{student.studentId}</span> : null}
+            {student?.realName ? <span className="break-words rounded-md bg-surface-active px-2.5 py-1 text-fg">{student.realName}</span> : null}
+          </div>
+        </Panel>
       </div>
 
-      <section className="space-y-3">
+      <section className="flex flex-col gap-3">
         <div className="flex flex-wrap items-baseline justify-between gap-3">
-          <h2 className="break-words text-sm font-semibold">作答明细</h2>
-          <p className="break-words text-xs text-muted-foreground">不展示标准答案，只对照你提交的选项。</p>
+          <h2 className="break-words text-lg font-semibold text-fg">作答明细</h2>
+          <p className="break-words text-xs text-fg-subtle">不展示标准答案，只对照你提交的选项。</p>
         </div>
         {rows.length ? (
-          <ul className="space-y-3">
+          <ul className="flex flex-col gap-3">
             {rows.map((row, index) => (
               <li key={row.key}>
-                <Card className={cn(row.correct === true && 'border-emerald-500/30', row.correct === false && !row.unanswered && 'border-red-500/30')}>
-                  <CardContent className="space-y-3 p-4">
+                <Panel>
+                  <div className="flex flex-col gap-3">
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-xs tabular-nums text-muted-foreground">{index + 1}</span>
-                          <Badge variant="outline" className="font-normal">
+                          <span className="text-xs tabular text-fg-subtle">{index + 1}</span>
+                          <Badge variant="outline" size="sm">
                             {kindLabel(row.kind)}
                           </Badge>
                           <ResultMark row={row} />
                         </div>
-                        <p className="mt-2 text-sm font-medium leading-6">{row.prompt}</p>
+                        <p className="mt-2 text-sm font-medium text-fg">{row.prompt}</p>
                       </div>
                       {row.maxScore ? (
-                        <p className="text-xs tabular-nums text-muted-foreground">
-                          {row.score}/{row.maxScore}
+                        <p className="text-xs tabular text-fg-subtle">
+                          <span className={cn('font-semibold', SCORE_TONE_CLASS[scoreTone(row.score, row.maxScore)])}>{row.score}</span>
+                          /{row.maxScore}
                         </p>
                       ) : null}
                     </div>
-                    <div className="rounded-lg bg-muted/40 px-3 py-2 text-sm">
-                      <p className="text-[11px] text-muted-foreground">你的答案</p>
-                      <p className="mt-0.5 leading-6">{row.selectedLabel}</p>
+                    <div className="rounded-md bg-surface-sunken px-3 py-2 text-sm">
+                      <p className="text-2xs text-fg-subtle">你的答案</p>
+                      <p className="mt-0.5 text-fg">{row.selectedLabel}</p>
                     </div>
-                  </CardContent>
-                </Card>
+                  </div>
+                </Panel>
               </li>
             ))}
           </ul>
         ) : (
-          <Card>
-            <CardContent className="py-10 text-center text-sm text-muted-foreground">没有解析到作答内容。</CardContent>
-          </Card>
+          <Panel>
+            <EmptyState compact title="没有解析到作答内容。" />
+          </Panel>
         )}
       </section>
     </div>

@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { motion } from 'motion/react';
 import {
   Check,
   ChevronLeft,
@@ -12,23 +11,27 @@ import {
   LayoutDashboard,
   ListChecks,
   RotateCcw,
-  Search,
-  ShieldAlert,
 } from 'lucide-react';
 import { useRecordSocket } from '@/hooks/use-record-socket';
+import { Alert } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
+import { Breadcrumb } from '@/components/ui/breadcrumb';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { EmptyState } from '@/components/ui/empty-state';
+import { FormField } from '@/components/ui/form';
+import { Input } from '@/components/ui/input';
+import { MiniTabs } from '@/components/ui/mini-tabs';
+import { Page, PageHeader, Toolbar } from '@/components/ui/page';
+import { DescriptionList, Panel } from '@/components/ui/panel';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { SimpleSelect } from '@/components/ui/select';
+import { TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Textarea } from '@/components/ui/textarea';
+import { scoreTone, STATUS_DISPLAY, statusDisplay, Verdict } from '@/components/ui/verdict';
 import { KryptonIDE } from '@/components/krypton-ide';
 import { readTeamExamModeContext } from '@/components/team-exam-mode';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import { SimpleSelect } from '@/components/ui/select';
-import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { MiniTabs } from '@/components/ui/mini-tabs';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Checkbox } from '@/components/ui/checkbox';
 import { useBootstrap, type GenericUserDoc } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 import { formatRelativeTime, replaceRouteTokens, toDate } from '@/lib/format';
@@ -169,6 +172,7 @@ interface RecordDetailPageData extends RecordLanguageContext {
   recordStudent?: { studentId?: unknown; realName?: unknown } | null;
   rev?: string;
   tdoc?: { docId?: unknown };
+  statusTexts?: RecordStatusTexts;
   testHints?: Record<string, { hint?: string; videoUrl?: string }>;
   udoc?: GenericUserDoc;
   virtual?: boolean;
@@ -188,40 +192,46 @@ function getUser(udict: Record<string, GenericUserDoc>, uid: string | number | u
 const RECORD_NATIVE_TABLE_CLASS =
   'krypton-table w-full caption-bottom text-sm [&_tr>*:first-child]:pl-5 [&_tr>*:last-child]:pr-5';
 
-const STATUS_MAP: Record<number, { label: string; color: string }> = {
-  0: { label: '等待评测', color: 'text-muted-foreground' },
-  1: { label: 'Accepted', color: 'text-green-600 dark:text-green-400' },
-  2: { label: 'Wrong Answer', color: 'text-red-600 dark:text-red-400' },
-  3: { label: 'Time Exceeded', color: 'text-yellow-600 dark:text-yellow-400' },
-  4: { label: 'Memory Exceeded', color: 'text-orange-600 dark:text-orange-400' },
-  5: { label: 'Output Exceeded', color: 'text-orange-600 dark:text-orange-400' },
-  6: { label: 'Runtime Error', color: 'text-purple-600 dark:text-purple-400' },
-  7: { label: 'Compile Error', color: 'text-blue-600 dark:text-blue-400' },
-  8: { label: 'System Error', color: 'text-gray-600 dark:text-gray-400' },
-  9: { label: 'Canceled', color: 'text-gray-500' },
-  10: { label: 'Unknown Error', color: 'text-red-600 dark:text-red-400' },
-  11: { label: 'Hacked', color: 'text-red-600 dark:text-red-400' },
-  12: { label: '人工已评分', color: 'text-green-600 dark:text-green-400' },
-  20: { label: 'Running', color: 'text-blue-500' },
-  21: { label: 'Compiling', color: 'text-blue-500' },
-  22: { label: 'Fetched', color: 'text-blue-500' },
-  30: { label: 'Ignored', color: 'text-gray-500' },
-  31: { label: 'Format Error', color: 'text-gray-500' },
-  32: { label: 'Hack Successful', color: 'text-green-600 dark:text-green-400' },
-  33: { label: 'Hack Unsuccessful', color: 'text-red-600 dark:text-red-400' },
-};
+const SCORE_TONE_CLASS = {
+  danger: 'text-danger-fg',
+  warning: 'text-warning-fg',
+  success: 'text-success-fg',
+} as const;
 
-function statusDisplay(status: number | undefined) {
-  const code = typeof status === 'number' ? status : 0;
-  const s = STATUS_MAP[code] || { label: `Status ${status}`, color: 'text-muted-foreground' };
-  return <span className={`text-sm font-medium ${s.color}`}>{s.label}</span>;
+function verdictTexts(statusTexts: RecordStatusTexts): Record<string, string> {
+  const texts: Record<string, string> = {};
+  for (const [key, value] of Object.entries(statusTexts)) {
+    if (typeof value === 'string') texts[key] = value;
+  }
+  return texts;
 }
 
 function statusLabel(status: number | string, statusTexts: RecordStatusTexts) {
-  const value = statusTexts[String(status)] ?? statusTexts[Number(status)];
-  if (typeof value === 'string') return value;
-  const fallback = STATUS_MAP[Number(status)];
-  return fallback?.label || `Status ${status}`;
+  return statusDisplay(Number(status), verdictTexts(statusTexts)).label;
+}
+
+function verdictStatus(status: number | undefined): number {
+  return typeof status === 'number' ? status : 0;
+}
+
+function problemFullScore(config: unknown): number {
+  if (!config || typeof config !== 'object' || Array.isArray(config)) return 100;
+  const parsed = config as { maxScore?: unknown; questions?: unknown };
+  if (typeof parsed.maxScore === 'number' && Number.isFinite(parsed.maxScore) && parsed.maxScore > 0) return parsed.maxScore;
+  if (!Array.isArray(parsed.questions)) return 100;
+  let sum = 0;
+  for (const question of parsed.questions) {
+    if (!question || typeof question !== 'object' || Array.isArray(question)) continue;
+    const score = (question as { score?: unknown }).score;
+    if (typeof score === 'number' && Number.isFinite(score) && score > 0) sum += score;
+  }
+  return sum > 0 ? sum : 100;
+}
+
+function scoreToneClass(value: unknown, full: number): string | undefined {
+  const score = typeof value === 'number' ? value : typeof value === 'string' && value.trim() !== '' ? Number(value) : Number.NaN;
+  if (!Number.isFinite(score)) return undefined;
+  return SCORE_TONE_CLASS[scoreTone(score, full)];
 }
 
 function formatMemory(value: unknown) {
@@ -323,12 +333,11 @@ function DiagnosticPanel({ title, texts }: { title: string; texts: string[] }) {
   if (!texts.length) return null;
 
   return (
-    <section className="overflow-hidden rounded-lg border bg-muted/10">
-      <div className="border-b px-4 py-3 text-sm font-medium">{title}</div>
-      <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words p-4 font-mono text-xs leading-relaxed text-foreground">
+    <Panel title={title} flush>
+      <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words p-4 font-mono text-xs leading-relaxed text-fg">
         {texts.join('\n')}
       </pre>
-    </section>
+    </Panel>
   );
 }
 
@@ -364,50 +373,34 @@ async function copyRecordCode(text: string) {
   if (!copied) throw new Error('浏览器拒绝了复制操作');
 }
 
-function RecordIdentityCard({
+function RecordIdentity({
   problemUrl,
   problemTitle,
   username,
   student,
-  className = '',
 }: {
   problemUrl: string;
   problemTitle: string;
   username: string;
   student: { studentId: string; realName: string } | null;
-  className?: string;
 }) {
-  return (
-    <Card className={className}>
-      <CardContent className="p-4">
-        <p className="text-xs text-muted-foreground">题目 / 用户</p>
-        <a
-          href={problemUrl}
-          title={problemTitle}
-          className="mt-1 block break-words text-sm font-semibold leading-5 text-foreground hover:text-primary"
-        >
+  const items = [
+    {
+      term: '题目',
+      detail: (
+        <a href={problemUrl} title={problemTitle} className="break-words font-medium text-fg hover:text-brand-fg">
           {problemTitle}
         </a>
-        <div className="mt-3 flex flex-wrap gap-2 border-t pt-3 text-xs">
-          <span className="inline-flex min-h-7 items-center gap-1.5 rounded-md bg-muted px-2.5 py-1">
-            <span className="text-muted-foreground">用户</span>
-            <span className="font-medium">{username}</span>
-          </span>
-          {student?.studentId ? (
-            <span className="inline-flex min-h-7 items-center gap-1.5 rounded-md bg-muted px-2.5 py-1">
-              <span className="text-muted-foreground">学号</span>
-              <span className="font-mono tabular-nums">{student.studentId}</span>
-            </span>
-          ) : null}
-          {student?.realName ? (
-            <span className="inline-flex min-h-7 items-center gap-1.5 rounded-md bg-muted px-2.5 py-1">
-              <span className="text-muted-foreground">姓名</span>
-              <span className="font-medium">{student.realName}</span>
-            </span>
-          ) : null}
-        </div>
-      </CardContent>
-    </Card>
+      ),
+    },
+    { term: '用户', detail: username },
+  ];
+  if (student?.studentId) items.push({ term: '学号', detail: <span className="font-mono">{student.studentId}</span> });
+  if (student?.realName) items.push({ term: '姓名', detail: student.realName });
+  return (
+    <Panel title="题目 / 用户">
+      <DescriptionList items={items} />
+    </Panel>
   );
 }
 
@@ -428,27 +421,26 @@ function RecordCodeContent({
 }) {
   return (
     <>
-      <div className="flex flex-col gap-3 border-b px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-3 border-b border-line px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          {examCodeOnly ? <p className="text-sm font-semibold">提交代码</p> : null}
+          {examCodeOnly ? <p className="text-sm font-semibold text-fg">提交代码</p> : null}
           {examCodeOnly ? (
-            <p className="mt-0.5 text-xs leading-5 text-muted-foreground">考试期间仅展示本次提交源码，不提供评测状态、输出或测试点。</p>
+            <p className="mt-0.5 text-xs text-fg-muted">考试期间仅展示本次提交源码，不提供评测状态、输出或测试点。</p>
           ) : null}
-          {!examCodeOnly ? <Badge variant="outline">{langDisplay(data.langs, rdoc.lang)}</Badge> : null}
+          {!examCodeOnly ? <Badge variant="outline" size="sm">{langDisplay(data.langs, rdoc.lang)}</Badge> : null}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {examCodeOnly ? <Badge variant="outline">{langDisplay(data.langs, rdoc.lang)}</Badge> : null}
+          {examCodeOnly ? <Badge variant="outline" size="sm">{langDisplay(data.langs, rdoc.lang)}</Badge> : null}
           {copyState === 'failed' ? (
-            <span role="alert" className="text-xs text-destructive">
+            <span role="alert" className="text-xs text-danger-fg">
               复制失败，请检查浏览器权限
             </span>
           ) : null}
           {code ? (
             <Button
               type="button"
-              variant="outline"
+              variant="secondary"
               size="sm"
-              className="h-10 active:scale-[0.96]"
               aria-label={copyState === 'copied' ? '提交代码已复制' : copyState === 'failed' ? '重新复制提交代码' : '复制提交代码'}
               onClick={onCopy}
             >
@@ -476,9 +468,7 @@ function RecordCodeContent({
           />
         </div>
       ) : (
-        <div className="px-4 py-16 text-center text-sm leading-6 text-muted-foreground">
-          该提交没有可直接预览的文本源码；若为文件提交，请使用页面上方的下载入口。
-        </div>
+        <EmptyState compact title="该提交没有可直接预览的文本源码；若为文件提交，请使用页面上方的下载入口。" />
       )}
     </>
   );
@@ -554,50 +544,42 @@ function RecordScoreActionDialog({
         onOpenChange(next);
       }}
     >
-      <DialogContent className="w-[min(34rem,calc(100vw-1.5rem))]" onClose={() => onOpenChange(false)}>
+      <DialogContent size="lg" onClose={() => onOpenChange(false)}>
         <DialogHeader>
           <DialogTitle>{cancel ? '确认取消单条记录成绩' : '重新评测并恢复成绩'}</DialogTitle>
-          <p className="mt-1 text-sm text-muted-foreground">
+          <p className="mt-1 text-sm text-fg-muted">
             记录 #{String(rdoc?._id || '').slice(-8)} · {problemTitle} · {username}
           </p>
         </DialogHeader>
-        <DialogBody className="space-y-4 px-6 py-5">
-          <div className="rounded-lg border border-amber-500/25 bg-amber-500/[0.07] p-4 text-sm">
-            <div className="flex items-start gap-3">
-              <ShieldAlert className="mt-0.5 size-5 shrink-0 text-amber-600 dark:text-amber-400" />
-              <div>
-                <p className="font-medium">{cancel ? '这会立即把该记录计分归零' : '这会使用当前题目配置和测试数据重新评测'}</p>
-                <p className="mt-1 leading-6 text-muted-foreground">
-                  {cancel
-                    ? '系统将同步重算该用户的题目状态及关联比赛成绩。历史提交统计、气球、讨论和旧计数不会被改写。'
-                    : '恢复结果以本次重新评测为准，不会把取消前的旧快照直接写回。'}
-                </p>
-              </div>
-            </div>
-          </div>
+        <DialogBody className="flex flex-col gap-4">
+          <Alert tone="warning" title={cancel ? '这会立即把该记录计分归零' : '这会使用当前题目配置和测试数据重新评测'}>
+            {cancel
+              ? '系统将同步重算该用户的题目状态及关联比赛成绩。历史提交统计、气球、讨论和旧计数不会被改写。'
+              : '恢复结果以本次重新评测为准，不会把取消前的旧快照直接写回。'}
+          </Alert>
           {action?.contestId ? (
-            <div className="rounded-lg border bg-muted/20 px-4 py-3 text-sm">
-              <p className="font-medium">比赛影响</p>
-              <p className="mt-1 break-all text-muted-foreground">
+            <div className="rounded-lg border border-line bg-surface-sunken px-4 py-3 text-sm">
+              <p className="font-medium text-fg">比赛影响</p>
+              <p className="mt-1 break-all text-fg-muted">
                 比赛 {action.contestId}
                 {action.contestTeamId ? ` · 队伍 ${action.contestTeamId}` : ''}；若比赛仍在进行，榜单会立即按新投影更新。
               </p>
             </div>
           ) : null}
           {cancel ? (
-            <label className="block space-y-2">
-              <span className="text-sm font-medium">备注（可选）</span>
+            <label className="flex flex-col gap-1.5">
+              <span className="text-sm font-medium text-fg">备注（可选）</span>
               <Textarea value={reason} onChange={(event) => setReason(event.target.value)} maxLength={240} placeholder="简要记录取消原因" />
-              <span className="block text-right text-xs tabular-nums text-muted-foreground">{reason.length}/240</span>
+              <span className="block text-right text-xs tabular text-fg-subtle">{reason.length}/240</span>
             </label>
           ) : null}
-          {error ? <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">{error}</div> : null}
+          {error ? <Alert tone="danger">{error}</Alert> : null}
         </DialogBody>
         <DialogFooter>
-          <Button type="button" variant="outline" disabled={busy} onClick={() => onOpenChange(false)}>
+          <Button type="button" variant="secondary" disabled={busy} onClick={() => onOpenChange(false)}>
             取消
           </Button>
-          <Button type="button" variant={cancel ? 'destructive' : 'default'} disabled={busy} onClick={() => void submit()}>
+          <Button type="button" variant={cancel ? 'danger' : 'primary'} disabled={busy} onClick={() => void submit()}>
             {busy ? '处理中…' : cancel ? '确认取消成绩' : '重新评测'}
           </Button>
         </DialogFooter>
@@ -610,17 +592,14 @@ function VirtualRejudgeCard({ record }: { record: RecordDocument }) {
   const vpHref = virtualRejudgeHref(record);
   if (!vpHref) return null;
   return (
-    <Card>
-      <CardContent className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="text-sm font-semibold">虚拟参赛重测</p>
-          <p className="mt-1 text-sm text-muted-foreground">虚拟参赛记录不能从本页直接重测，请到确认页核对 Record ID 后再提交。</p>
-        </div>
-        <Button asChild className="shrink-0">
+    <Panel title="虚拟参赛重测">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-sm text-fg-muted">虚拟参赛记录不能从本页直接重测，请到确认页核对 Record ID 后再提交。</p>
+        <Button asChild variant="primary" className="shrink-0">
           <a href={vpHref}>前往确认重测</a>
         </Button>
-      </CardContent>
-    </Card>
+      </div>
+    </Panel>
   );
 }
 
@@ -636,29 +615,24 @@ function RecordScoreManageCard({
   const vpHref = virtualRejudgeHref(record);
   const useVirtualRejudge = action.kind === 'rejudge' && !!vpHref;
   return (
-    <Card className={action.kind === 'cancel' ? 'border-destructive/25' : ''}>
-      <CardContent className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="text-sm font-semibold">
-            {action.kind === 'cancel' ? '成绩管理' : useVirtualRejudge ? '虚拟参赛重测' : '恢复已取消记录'}
-          </p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {action.kind === 'cancel'
-              ? '仅取消这一条记录的计分，并同步重算它影响到的题目状态与比赛榜单。'
-              : useVirtualRejudge
-                ? '虚拟参赛记录不能从本页直接重测，请到确认页核对 Record ID 后再提交。'
-                : '使用当前题目配置和测试数据重新评测；结果通过正常评测链重新进入计分。'}
-          </p>
-        </div>
+    <Panel title={action.kind === 'cancel' ? '成绩管理' : useVirtualRejudge ? '虚拟参赛重测' : '恢复已取消记录'}>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-sm text-fg-muted">
+          {action.kind === 'cancel'
+            ? '仅取消这一条记录的计分，并同步重算它影响到的题目状态与比赛榜单。'
+            : useVirtualRejudge
+              ? '虚拟参赛记录不能从本页直接重测，请到确认页核对 Record ID 后再提交。'
+              : '使用当前题目配置和测试数据重新评测；结果通过正常评测链重新进入计分。'}
+        </p>
         <div className="flex shrink-0 flex-wrap gap-2">
           {useVirtualRejudge ? (
-            <Button asChild className="shrink-0">
+            <Button asChild variant="primary" className="shrink-0">
               <a href={vpHref}>前往确认重测</a>
             </Button>
           ) : (
             <Button
               type="button"
-              variant={action.kind === 'cancel' ? 'destructive' : 'default'}
+              variant={action.kind === 'cancel' ? 'danger' : 'primary'}
               className="shrink-0"
               onClick={onOpen}
             >
@@ -666,13 +640,13 @@ function RecordScoreManageCard({
             </Button>
           )}
           {action.kind === 'cancel' && vpHref ? (
-            <Button asChild variant="outline" className="shrink-0">
+            <Button asChild variant="secondary" className="shrink-0">
               <a href={vpHref}>确认虚拟重测</a>
             </Button>
           ) : null}
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </Panel>
   );
 }
 
@@ -720,9 +694,10 @@ export function RecordsPage() {
   const prevUrl = buildUrlWithQuery(bs.urls.records, { ...filterParams, page: page - 1 });
   const statistics = data.statistics || null;
   const languageOptions = Object.entries(langs);
+  const listVerdictTexts = verdictTexts(statusTexts);
   const statusOptions: Array<[string, string]> = Object.keys(statusTexts).length
     ? Object.keys(statusTexts).map((key) => [key, statusLabel(key, statusTexts)])
-    : Object.entries(STATUS_MAP).map(([key, value]) => [key, value.label]);
+    : Object.entries(STATUS_DISPLAY).map(([key, value]) => [key, value.label]);
   const selectedScoreRecord = rdocs.find((rdoc) => String(rdoc._id) === scoreActionRid) || null;
   const selectedScoreAction = scoreActionRid ? recordScoreActions[scoreActionRid] || null : null;
   const filtersActive = Boolean(
@@ -780,72 +755,58 @@ export function RecordsPage() {
   });
 
   return (
-    <motion.div className="space-y-4" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
+    <Page width="wide">
       {(data.notification || []).map((item, index) =>
         item?.name ? (
-          <p
-            key={`${item.name}-${index}`}
-            role="status"
-            className="rounded-xl border border-amber-500/35 bg-amber-500/[0.06] px-4 py-3 text-sm text-amber-800 dark:text-amber-300"
-          >
+          <Alert key={`${item.name}-${index}`} tone="warning">
             {item.name}
-          </p>
+          </Alert>
         ) : null,
       )}
       {postContestPracticeActive ? (
-        <div className="rounded-xl border border-sky-500/25 bg-sky-500/[0.06] px-4 py-3 text-sm text-muted-foreground">
+        <Alert tone="info">
           这里只显示你在该题上的普通个人提交，不计入原比赛成绩、罚时或排行榜。
-        </div>
+        </Alert>
       ) : null}
-      <div>
-        <h1 className="text-xl font-semibold">评测记录</h1>
-        <p className="text-sm text-muted-foreground">所有提交记录</p>
-      </div>
+      <PageHeader title="评测记录" description="所有提交记录" />
 
-      <Card>
-        <CardContent className="p-4">
-          <div className="mb-3 flex items-center justify-between lg:hidden">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              aria-expanded={filtersExpanded}
-              aria-controls="record-list-filters"
-              onClick={() => setFiltersExpanded((open) => !open)}
-            >
-              <Filter className="size-4" />
-              {filtersExpanded ? '收起筛选' : `筛选${filtersActive ? ' · 已启用' : ''}`}
-            </Button>
-          </div>
-          <form
-            id="record-list-filters"
-            method="get"
-            action={bs.urls.records}
-            className={cn(
-              'grid gap-3 lg:grid-cols-[repeat(5,minmax(0,1fr))_auto] lg:items-end',
-              filtersExpanded ? 'grid' : 'hidden lg:grid',
-            )}
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center justify-between lg:hidden">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            aria-expanded={filtersExpanded}
+            aria-controls="record-list-filters"
+            onClick={() => setFiltersExpanded((open) => !open)}
           >
-            {postContestPracticeActive ? <input type="hidden" name="practice" value="1" /> : null}
-            {virtualRecords ? <input type="hidden" name="virtual" value="1" /> : null}
-            <div className="space-y-1">
-              <label className="text-xs text-muted-foreground">用户 / UID</label>
-              <Input name="uidOrName" defaultValue={data.filterUidOrName || ''} placeholder="用户名或 UID" />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs text-muted-foreground">题目</label>
-              <Input name="pid" defaultValue={data.filterPid || ''} placeholder="题号" />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs text-muted-foreground">比赛</label>
-              <Input name="tid" defaultValue={data.filterTid || ''} placeholder="比赛 ID" />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs text-muted-foreground">语言</label>
+            <Filter />
+            {filtersExpanded ? '收起筛选' : `筛选${filtersActive ? ' · 已启用' : ''}`}
+          </Button>
+        </div>
+        <form
+          id="record-list-filters"
+          method="get"
+          action={bs.urls.records}
+          className={cn('flex flex-col gap-3', filtersExpanded ? 'flex' : 'hidden lg:flex')}
+        >
+          {postContestPracticeActive ? <input type="hidden" name="practice" value="1" /> : null}
+          {virtualRecords ? <input type="hidden" name="virtual" value="1" /> : null}
+          <Toolbar className="items-end">
+            <FormField label="用户 / UID" className="w-full sm:w-40">
+              <Input name="uidOrName" size="sm" defaultValue={data.filterUidOrName || ''} placeholder="用户名或 UID" />
+            </FormField>
+            <FormField label="题目" className="w-full sm:w-32">
+              <Input name="pid" size="sm" defaultValue={data.filterPid || ''} placeholder="题号" />
+            </FormField>
+            <FormField label="比赛" className="w-full sm:w-32">
+              <Input name="tid" size="sm" defaultValue={data.filterTid || ''} placeholder="比赛 ID" />
+            </FormField>
+            <FormField label="语言" className="w-full sm:w-32">
               <SimpleSelect
                 name="lang"
+                size="sm"
                 defaultValue={data.filterLang || ''}
-                className="h-9"
                 options={[
                   { value: '', label: '全部语言' },
                   ...languageOptions.map(([key, value]) => ({
@@ -854,13 +815,12 @@ export function RecordsPage() {
                   })),
                 ]}
               />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs text-muted-foreground">状态</label>
+            </FormField>
+            <FormField label="状态" className="w-full sm:w-32">
               <SimpleSelect
                 name="status"
+                size="sm"
                 defaultValue={filterStatus}
-                className="h-9"
                 options={[
                   { value: '', label: '全部提交' },
                   ...statusOptions.map(([key, label]) => ({
@@ -869,41 +829,39 @@ export function RecordsPage() {
                   })),
                 ]}
               />
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <Button type="submit" size="sm">
-                <Filter className="size-4" />
-                筛选
-              </Button>
-              <Button asChild variant="outline" size="sm">
-                <a href={bs.urls.records}>
-                  <RotateCcw className="size-4" />
-                  重置
-                </a>
-              </Button>
-            </div>
-            <div className="lg:col-span-6 flex flex-wrap gap-4 text-xs text-muted-foreground">
-              <label className="inline-flex items-center gap-2">
-                <Checkbox size="sm" name="all" value="1" defaultChecked={!!data.all} />
-                包含比赛记录
-              </label>
-              <label className="inline-flex items-center gap-2">
-                <Checkbox size="sm" name="allDomain" value="1" defaultChecked={!!data.allDomain} />
-                全站域记录
-              </label>
-              <label className="inline-flex items-center gap-2">
-                <Checkbox size="sm" name="stat" value="1" defaultChecked={!!statistics} />
-                显示统计
-              </label>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
+            </FormField>
+            <Button type="submit" variant="primary" size="sm">
+              <Filter />
+              筛选
+            </Button>
+            <Button asChild variant="secondary" size="sm">
+              <a href={bs.urls.records}>
+                <RotateCcw />
+                重置
+              </a>
+            </Button>
+          </Toolbar>
+          <div className="flex flex-wrap gap-4 text-xs text-fg-subtle">
+            <label className="inline-flex items-center gap-2">
+              <Checkbox size="sm" name="all" value="1" defaultChecked={!!data.all} />
+              包含比赛记录
+            </label>
+            <label className="inline-flex items-center gap-2">
+              <Checkbox size="sm" name="allDomain" value="1" defaultChecked={!!data.allDomain} />
+              全站域记录
+            </label>
+            <label className="inline-flex items-center gap-2">
+              <Checkbox size="sm" name="stat" value="1" defaultChecked={!!statistics} />
+              显示统计
+            </label>
+          </div>
+        </form>
+      </div>
 
-      <Card className="min-w-0">
-        <CardContent className="p-0">
+      <Panel flush className="min-w-0">
           <ScrollArea className="max-h-[min(65vh,680px)] w-full" orientation="both">
-            <table className={cn(RECORD_NATIVE_TABLE_CLASS, 'min-w-[56rem]')}>
+            {/* ds-allow DS005: 记录宽表必须保留原生 table，才能放进这条双向滚动的 ScrollArea */}
+            <table className={cn(RECORD_NATIVE_TABLE_CLASS, 'min-w-[56rem]')}>{/* ds-allow DS004: 记录表至少 56rem，避免列被压扁，间距档没有这个宽度 */}
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-28">状态</TableHead>
@@ -921,11 +879,8 @@ export function RecordsPage() {
               <TableBody>
               {rdocs.length === 0 ? (
                 <TableRow>
-                  <TableCell
-                    colSpan={8 + (hasStudentColumn ? 1 : 0) + (showRecordManage ? 1 : 0)}
-                    className="py-8 text-center text-sm text-muted-foreground"
-                  >
-                    暂无提交记录
+                  <TableCell colSpan={8 + (hasStudentColumn ? 1 : 0) + (showRecordManage ? 1 : 0)}>
+                    <EmptyState compact title="暂无提交记录" />
                   </TableCell>
                 </TableRow>
               ) : (
@@ -947,47 +902,47 @@ export function RecordsPage() {
                   return (
                     <TableRow key={String(r._id)}>
                       <TableCell>
-                        <a href={recordUrl} className="hover:underline">
-                          {statusDisplay(r.status)}
+                        <a href={recordUrl} className="hover:underline" title={statusDisplay(verdictStatus(r.status), listVerdictTexts).label}>
+                          <Verdict status={verdictStatus(r.status)} texts={listVerdictTexts} compact />
                         </a>
                       </TableCell>
-                      <TableCell className="min-w-0 max-w-[18rem]">
+                      <TableCell className="min-w-0 max-w-72">
                         <a
                           href={problemUrl}
                           title={problemLabel}
-                          className="block min-w-0 truncate font-medium hover:text-primary hover:underline"
+                          className="block min-w-0 truncate font-medium text-fg hover:text-brand-fg hover:underline"
                         >
                           {problemLabel}
                         </a>
                       </TableCell>
-                      <TableCell className="text-sm">{user?.uname || `#${r.uid}`}</TableCell>
+                      <TableCell className="text-sm text-fg">{user?.uname || `#${r.uid}`}</TableCell>
                       {hasStudentColumn ? (
                         <TableCell className="text-xs">
                           {studentDict[String(r.uid)] ? (
                             <>
-                              <div className="font-mono">{studentDict[String(r.uid)].studentId}</div>
-                              <div className="text-muted-foreground">{studentDict[String(r.uid)].realName}</div>
+                              <div className="font-mono tabular">{studentDict[String(r.uid)].studentId}</div>
+                              <div className="text-fg-subtle">{studentDict[String(r.uid)].realName}</div>
                             </>
                           ) : (
-                            <span className="text-muted-foreground/40">—</span>
+                            <span className="text-fg-disabled">—</span>
                           )}
                         </TableCell>
                       ) : null}
                       <TableCell className="text-center">
-                        <Badge variant="outline" className="text-[10px]">
+                        <Badge variant="outline" size="sm">
                           {langDisplay(langs, r.lang)}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-right tabular-nums">
+                      <TableCell className="text-right tabular">
                         {r.score != null ? (
-                          <span className={r.score === 100 ? 'font-medium text-green-600 dark:text-green-400' : ''}>{r.score}</span>
+                          <span className={cn('font-semibold', scoreToneClass(r.score, problemFullScore(pdoc.config)))}>{r.score}</span>
                         ) : (
                           '—'
                         )}
                       </TableCell>
-                      <TableCell className="text-right tabular-nums text-xs text-muted-foreground">{r.time != null ? `${r.time}ms` : '—'}</TableCell>
-                      <TableCell className="text-right tabular-nums text-xs text-muted-foreground">{formatMemory(r.memory)}</TableCell>
-                      <TableCell className="text-right text-xs text-muted-foreground">{formatRecordTime(r._id || r.judgeAt, locale)}</TableCell>
+                      <TableCell align="right" className="text-right tabular text-xs text-fg-subtle">{formatTime(r.time, r.status)}</TableCell>
+                      <TableCell align="right" className="text-right tabular text-xs text-fg-subtle">{formatMemory(r.memory)}</TableCell>
+                      <TableCell className="text-right text-xs tabular text-fg-subtle">{formatRecordTime(r._id || r.judgeAt, locale)}</TableCell>
                       {showRecordManage ? (
                         <TableCell className="whitespace-nowrap text-right">
                           {scoreAction ? (
@@ -1021,8 +976,7 @@ export function RecordsPage() {
               </TableBody>
             </table>
           </ScrollArea>
-        </CardContent>
-      </Card>
+      </Panel>
 
       <RecordScoreActionDialog
         open={!!selectedScoreRecord && !!selectedScoreAction}
@@ -1056,80 +1010,74 @@ export function RecordsPage() {
 
       <div className="flex items-center justify-center gap-2">
         {page > 1 ? (
-          <Button asChild variant="outline" size="sm">
+          <Button asChild variant="secondary" size="sm">
             <a href={prevUrl}>上一页</a>
           </Button>
         ) : (
-          <Button variant="outline" size="sm" disabled>
+          <Button variant="secondary" size="sm" disabled>
             上一页
           </Button>
         )}
-        <span className="text-xs text-muted-foreground">第 {page} 页</span>
+        <span className="text-xs tabular text-fg-subtle">第 {page} 页</span>
         {rdocs.length ? (
-          <Button asChild variant="outline" size="sm">
+          <Button asChild variant="secondary" size="sm">
             <a href={nextUrl}>下一页</a>
           </Button>
         ) : (
-          <Button variant="outline" size="sm" disabled>
+          <Button variant="secondary" size="sm" disabled>
             下一页
           </Button>
         )}
       </div>
 
       {statistics ? (
-        <Card>
-          <CardContent className="p-4">
-            <div className="mb-3 flex items-center gap-2 text-sm font-medium">
-              <Search className="size-4 text-primary" />
-              评测统计
-              {data.statisticsScope === 'contest' ? (
-                <Badge variant="secondary" className="text-[10px]">
-                  本场比赛
-                </Badge>
-              ) : data.statisticsScope === 'all' ? (
-                <Badge variant="secondary" className="text-[10px]">
-                  全站
-                </Badge>
-              ) : null}
-            </div>
-            <div className="grid gap-2 sm:grid-cols-4 lg:grid-cols-7">
-              {[
-                ['5 分钟', 'd5min'],
-                ['1 小时', 'd1h'],
-                ['今日', 'day'],
-                ['本周', 'week'],
-                ['本月', 'month'],
-                ['今年', 'year'],
-                ['总计', 'total'],
-              ].map(([label, key]) => (
-                <div key={key} className="rounded-md border bg-muted/20 px-3 py-2">
-                  <div className="text-[11px] text-muted-foreground">{label}</div>
-                  <div className="font-mono text-sm font-medium">{statistics[key] ?? 0}</div>
-                </div>
-              ))}
-            </div>
-            {data.statisticsScope === 'contest' ? (
-              <div className="mt-2 grid gap-2 sm:grid-cols-3">
-                <div className="rounded-md border bg-muted/20 px-3 py-2">
-                  <div className="text-[11px] text-muted-foreground">本场 AC</div>
-                  <div className="font-mono text-sm font-medium">{statistics.accepted ?? 0}</div>
-                </div>
-                <div className="rounded-md border bg-muted/20 px-3 py-2">
-                  <div className="text-[11px] text-muted-foreground">提交人数</div>
-                  <div className="font-mono text-sm font-medium">{statistics.participants ?? 0}</div>
-                </div>
-                <div className="rounded-md border bg-muted/20 px-3 py-2">
-                  <div className="text-[11px] text-muted-foreground">人均提交</div>
-                  <div className="font-mono text-sm font-medium">
-                    {statistics.participants ? (statistics.total / statistics.participants).toFixed(1) : '—'}
-                  </div>
+        <Panel
+          title="评测统计"
+          actions={
+            data.statisticsScope === 'contest' ? (
+              <Badge variant="outline" size="sm">本场比赛</Badge>
+            ) : data.statisticsScope === 'all' ? (
+              <Badge variant="outline" size="sm">全站</Badge>
+            ) : null
+          }
+        >
+          <div className="grid gap-2 sm:grid-cols-4 lg:grid-cols-7">
+            {[
+              ['5 分钟', 'd5min'],
+              ['1 小时', 'd1h'],
+              ['今日', 'day'],
+              ['本周', 'week'],
+              ['本月', 'month'],
+              ['今年', 'year'],
+              ['总计', 'total'],
+            ].map(([label, key]) => (
+              <div key={key} className="rounded-md border border-line bg-surface-sunken px-3 py-2">
+                <div className="text-2xs text-fg-subtle">{label}</div>
+                <div className="font-mono text-sm font-medium tabular">{statistics[key] ?? 0}</div>
+              </div>
+            ))}
+          </div>
+          {data.statisticsScope === 'contest' ? (
+            <div className="mt-2 grid gap-2 sm:grid-cols-3">
+              <div className="rounded-md border border-line bg-surface-sunken px-3 py-2">
+                <div className="text-2xs text-fg-subtle">本场 AC</div>
+                <div className="font-mono text-sm font-medium tabular">{statistics.accepted ?? 0}</div>
+              </div>
+              <div className="rounded-md border border-line bg-surface-sunken px-3 py-2">
+                <div className="text-2xs text-fg-subtle">提交人数</div>
+                <div className="font-mono text-sm font-medium tabular">{statistics.participants ?? 0}</div>
+              </div>
+              <div className="rounded-md border border-line bg-surface-sunken px-3 py-2">
+                <div className="text-2xs text-fg-subtle">人均提交</div>
+                <div className="font-mono text-sm font-medium tabular">
+                  {statistics.participants ? (statistics.total / statistics.participants).toFixed(1) : '—'}
                 </div>
               </div>
-            ) : null}
-          </CardContent>
-        </Card>
+            </div>
+          ) : null}
+        </Panel>
       ) : null}
-    </motion.div>
+    </Page>
   );
 }
 
@@ -1144,6 +1092,8 @@ export function RecordDetailPage() {
   const canRejudgeVirtual = data.canRejudgeVirtual === true;
   const [scoreActionOpen, setScoreActionOpen] = useState(false);
   const pdoc = data.pdoc || {};
+  const detailVerdictTexts = verdictTexts(data.statusTexts || {});
+  const detailFullScore = problemFullScore(pdoc.config);
   const code = data.code || rdoc.code || '';
   const locale = bs.locale;
   const user = data.udoc || getUser(bs.udict, rdoc.uid);
@@ -1246,13 +1196,17 @@ export function RecordDetailPage() {
 
   if (isObjectiveRecordProblem(pdoc)) {
     return (
-      <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
+      <Page width="wide">
+        <PageHeader
+          breadcrumb={<Breadcrumb items={[{ label: '记录', href: recordListUrl }, { label: '客观题' }]} />}
+          title={`提交记录 #${String(rdoc._id).slice(-8)}`}
+          meta={<span className="tabular">{formatRecordTime(rdoc._id, locale)}</span>}
+        />
         <ObjectiveRecordResult
           pdoc={pdoc}
           rdoc={rdoc}
           code={code}
           problemUrl={problemUrl}
-          listHref={recordListUrl}
           username={recordIdentity.username}
           student={recordIdentity.student}
           submittedAt={formatRecordTime(rdoc._id, locale)}
@@ -1275,92 +1229,63 @@ export function RecordDetailPage() {
             setRecordScoreAction(payload.recordScoreAction || null);
           }}
         />
-      </motion.div>
+      </Page>
     );
   }
 
+  const detailTitle = `${detailMode === 'exam-code' ? '提交代码' : '提交记录'} #${String(rdoc._id).slice(-8)}`;
   return (
-    <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
+    <Page width="wide">
       {postContestPracticeRecordAccess ? (
-        <div className="rounded-xl border border-sky-500/25 bg-sky-500/[0.06] px-4 py-3 text-sm text-muted-foreground">
+        <Alert tone="info">
           这是个人赛后补题记录，不计入原比赛成绩、罚时或排行榜。
-        </div>
+        </Alert>
       ) : null}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <a href={recordListUrl} className="hover:text-primary">
-              记录
-            </a>
-            <ChevronRight className="size-3" />
-          </div>
-          <h1 className="mt-1 text-xl font-semibold text-balance">
-            {detailMode === 'exam-code' ? '提交代码' : '提交记录'} #{String(rdoc._id).slice(-8)}
-          </h1>
-        </div>
-        {codeDownloadAvailable && (!teamExamMode || teamExamMode.canEditCode) ? (
-          <Button asChild variant="outline" size="sm" className="w-fit">
+      <PageHeader
+        breadcrumb={<Breadcrumb items={[{ label: '记录', href: recordListUrl }, { label: detailMode === 'exam-code' ? '提交代码' : '提交记录' }]} />}
+        title={detailTitle}
+        meta={detailMode === 'exam-code' ? undefined : (
+          <>
+            <Verdict status={verdictStatus(rdoc.status)} texts={detailVerdictTexts} size="lg" />
+            <span className={cn('font-semibold', scoreToneClass(rdoc.score, detailFullScore))}>{rdoc.score ?? '—'}</span>
+            <span>{langDisplay(data.langs, rdoc.lang)}</span>
+            <span>{formatRecordTime(rdoc._id, locale)}</span>
+            <span className="tabular">{formatTime(rdoc.time, rdoc.status)}</span>
+            <span className="tabular">{formatMemory(rdoc.memory)}</span>
+          </>
+        )}
+        actions={codeDownloadAvailable && (!teamExamMode || teamExamMode.canEditCode) ? (
+          <Button asChild variant="secondary" size="sm">
             <a href={downloadUrl}>
-              <Download className="size-4" />
+              <Download />
               {rdoc.files?.hack ? '下载 Hack 输入' : '下载代码'}
             </a>
           </Button>
         ) : null}
-      </div>
+      />
 
       {detailMode === 'exam-code' ? (
-        <RecordIdentityCard problemUrl={problemUrl} problemTitle={pdoc.title || String(rdoc.pid)} username={recordIdentity.username} student={null} />
-      ) : (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-[repeat(3,minmax(0,1fr))_minmax(18rem,1.55fr)]">
-          <Card>
-            <CardContent className="p-4">
-              <p className="text-xs text-muted-foreground">状态</p>
-              <div className="mt-1">{statusDisplay(rdoc.status)}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <p className="text-xs text-muted-foreground">得分</p>
-              <p className="mt-1 text-xl font-semibold tabular-nums">{rdoc.score ?? '—'}</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <p className="text-xs text-muted-foreground">用时 / 内存</p>
-              <p className="mt-1 text-sm font-medium tabular-nums">
-                {formatTime(rdoc.time, rdoc.status)} / {formatMemory(rdoc.memory)}
-              </p>
-            </CardContent>
-          </Card>
-          <RecordIdentityCard
-            problemUrl={problemUrl}
-            problemTitle={pdoc.title || String(rdoc.pid)}
-            username={recordIdentity.username}
-            student={recordIdentity.student}
-          />
-        </div>
-      )}
-
-      {detailMode === 'exam-code' ? (
-        <Card className="overflow-hidden">
-          <CardContent className="p-0">
+        <div className="flex flex-col gap-6">
+          <RecordIdentity problemUrl={problemUrl} problemTitle={pdoc.title || String(rdoc.pid)} username={recordIdentity.username} student={null} />
+          <Panel flush>
             <RecordCodeContent data={data} rdoc={rdoc} code={code} copyState={copyState} onCopy={() => void handleCopyCode()} examCodeOnly />
-          </CardContent>
-        </Card>
+          </Panel>
+        </div>
       ) : (
-        <Card className="overflow-hidden">
-          <CardContent className="p-0">
-            <div className="flex min-w-0 flex-col gap-3 border-b bg-muted/10 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
+          <div className="flex min-w-0 flex-col gap-6">
+        <div className="flex min-w-0 flex-col gap-4">
+            <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0">
-                <p className="text-sm font-semibold">评测详情</p>
-                <p className="mt-0.5 text-xs text-muted-foreground">在摘要、测试点和源码之间直接切换</p>
+                <p className="text-sm font-semibold text-fg">评测详情</p>
+                <p className="mt-0.5 text-xs text-fg-subtle">在摘要、测试点和源码之间直接切换</p>
               </div>
-              <div className="min-w-0 overflow-x-auto">
+              <div className="min-w-0 overflow-x-auto scrollbar-none">
                 <MiniTabs
                   value={currentTab}
                   onValueChange={setActiveTab}
                   size="md"
-                  className="max-w-full overflow-x-auto"
+                  className="max-w-full"
                   aria-label="提交详情视图"
                   items={tabs.map((tab) => ({
                     value: tab,
@@ -1373,23 +1298,23 @@ export function RecordDetailPage() {
             </div>
 
             {currentTab === 'overview' ? (
-              <div role="tabpanel" className="space-y-4 p-4">
-                <div className="grid gap-3 rounded-lg border bg-muted/10 p-4 text-sm sm:grid-cols-4">
+              <div role="tabpanel" className="flex flex-col gap-4">
+                <div className="grid gap-3 rounded-lg border border-line bg-surface-sunken p-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
                   <div>
-                    <p className="text-xs text-muted-foreground">语言</p>
-                    <p className="mt-1 font-medium">{langDisplay(data.langs, rdoc.lang)}</p>
+                    <p className="text-xs text-fg-subtle">语言</p>
+                    <p className="mt-1 font-medium text-fg">{langDisplay(data.langs, rdoc.lang)}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-muted-foreground">提交时间</p>
-                    <p className="mt-1 font-medium">{formatRecordTime(rdoc._id, locale)}</p>
+                    <p className="text-xs text-fg-subtle">提交时间</p>
+                    <p className="mt-1 font-medium text-fg">{formatRecordTime(rdoc._id, locale)}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-muted-foreground">评测时间</p>
-                    <p className="mt-1 font-medium">{rdoc.judgeAt ? formatRecordTime(rdoc.judgeAt, locale) : '—'}</p>
+                    <p className="text-xs text-fg-subtle">评测时间</p>
+                    <p className="mt-1 font-medium text-fg">{rdoc.judgeAt ? formatRecordTime(rdoc.judgeAt, locale) : '—'}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-muted-foreground">进度</p>
-                    <p className="mt-1 font-medium tabular-nums">{rdoc.progress != null ? `${Math.trunc(Number(rdoc.progress))}%` : '—'}</p>
+                    <p className="text-xs text-fg-subtle">进度</p>
+                    <p className="mt-1 font-medium tabular text-fg">{rdoc.progress != null ? `${Math.trunc(Number(rdoc.progress))}%` : '—'}</p>
                   </div>
                 </div>
 
@@ -1397,19 +1322,21 @@ export function RecordDetailPage() {
                 <DiagnosticPanel title="评测输出" texts={judgeTexts} />
 
                 {subtasks.length > 0 ? (
-                  <section className="overflow-hidden rounded-lg border">
-                    <div className="border-b px-4 py-3 text-sm font-medium">子任务</div>
-                    <div className="grid w-full min-w-0 grid-cols-[repeat(auto-fit,minmax(14rem,1fr))] gap-3 p-4">
+                  <Panel title="子任务">
+                    <div className="grid w-full min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                       {subtasks.map((subtask) => (
-                        <div key={subtask.id} className="w-full min-w-0 rounded-lg border bg-muted/10 p-3">
+                        <div key={subtask.id} className="w-full min-w-0 rounded-md border border-line bg-surface-sunken p-3">
                           <div className="flex items-center justify-between gap-3">
-                            <span className="text-sm font-medium">#{subtask.id}</span>
-                            {statusDisplay(subtask.status)}
+                            <span className="text-sm font-medium text-fg">#{subtask.id}</span>
+                            <Verdict status={verdictStatus(subtask.status)} texts={detailVerdictTexts} compact />
                           </div>
-                          <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-                            <span className="tabular-nums">得分 {subtask.score ?? '—'}</span>
+                          <div className="mt-2 flex items-center gap-2 text-xs text-fg-subtle">
+                            <span className="tabular">
+                              得分{' '}
+                              <span className={cn('font-semibold', scoreToneClass(subtask.score, detailFullScore))}>{subtask.score ?? '—'}</span>
+                            </span>
                             {subtask.type ? (
-                              <Badge variant="outline" className="text-[10px]">
+                              <Badge variant="outline" size="sm">
                                 {subtask.type}
                               </Badge>
                             ) : null}
@@ -1417,39 +1344,39 @@ export function RecordDetailPage() {
                         </div>
                       ))}
                     </div>
-                  </section>
+                  </Panel>
                 ) : null}
 
                 {!compilerTexts.length && !judgeTexts.length && !subtasks.length ? (
-                  <div className="rounded-lg border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">
-                    当前记录没有额外评测摘要。
-                  </div>
+                  <EmptyState compact title="当前记录没有额外评测摘要。" />
                 ) : null}
               </div>
             ) : null}
 
             {currentTab !== 'overview' ? (
+              <Panel flush>
               <div className={cn(canSplitWorkspace && 'xl:grid xl:grid-cols-2 xl:items-stretch')}>
                 {showCasesPanel ? (
                   <div role="tabpanel" className={cn('min-w-0', currentTab !== 'cases' && 'hidden xl:block')}>
-                    <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-b px-4 py-3 text-xs text-muted-foreground">
+                    <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-line px-4 py-3 text-xs text-fg-subtle">
                       <span>
-                        共 <strong className="font-semibold tabular-nums text-foreground">{caseSummary.total}</strong> 个
+                        共 <strong className="font-semibold tabular text-fg">{caseSummary.total}</strong> 个
                       </span>
                       <span>
-                        通过 <strong className="font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">{caseSummary.accepted}</strong>
+                        通过 <strong className="font-semibold tabular text-success-fg">{caseSummary.accepted}</strong>
                       </span>
                       <span>
-                        未通过 <strong className="font-semibold tabular-nums text-destructive">{caseSummary.failed}</strong>
+                        未通过 <strong className="font-semibold tabular text-danger-fg">{caseSummary.failed}</strong>
                       </span>
                       <span>
-                        评测中 <strong className="font-semibold tabular-nums text-blue-600 dark:text-blue-400">{caseSummary.active}</strong>
+                        评测中 <strong className="font-semibold tabular text-info-fg">{caseSummary.active}</strong>
                       </span>
                       <span>
-                        其他 <strong className="font-semibold tabular-nums text-muted-foreground">{caseSummary.other}</strong>
+                        其他 <strong className="font-semibold tabular text-fg-subtle">{caseSummary.other}</strong>
                       </span>
                     </div>
-                    <div className="max-h-[min(65vh,680px)] overflow-x-auto">
+                    <ScrollArea className="max-h-[min(65vh,680px)] w-full" orientation="both">
+                      {/* ds-allow DS005: 测试点行内嵌输出详情，DataTable 不能表达这张原生表 */}
                       <table className={RECORD_NATIVE_TABLE_CLASS}>
                         <TableHeader>
                           <TableRow>
@@ -1472,29 +1399,29 @@ export function RecordDetailPage() {
                             const hasDetails = !!(message || hint?.hint || hint?.videoUrl);
                             return (
                               <TableRow key={`${subtaskId ?? 'case'}-${caseId}-${absoluteIndex}`}>
-                                <TableCell className="font-mono text-xs tabular-nums text-muted-foreground">
+                                <TableCell className="font-mono text-xs tabular text-fg-subtle">
                                   {subtaskId != null ? `${subtaskId}-${caseId}` : caseId}
                                 </TableCell>
                                 <TableCell>
-                                  <div>{statusDisplay(c.status)}</div>
+                                  <Verdict status={verdictStatus(c.status)} texts={detailVerdictTexts} compact />
                                   {hasDetails ? (
-                                    <details className="group mt-1 max-w-2xl">
-                                      <summary className="flex min-h-10 cursor-pointer list-none items-center text-xs font-medium text-primary hover:underline">
+                                    <details className="group mt-1">
+                                      <summary className="flex min-h-10 cursor-pointer list-none items-center text-xs font-medium text-brand-fg hover:underline">
                                         查看输出与提示
                                       </summary>
-                                      <div className="mb-2 space-y-2 rounded-lg border bg-muted/20 p-3">
+                                      <div className="mb-2 flex flex-col gap-2 rounded-lg border border-line bg-surface-sunken p-3">
                                         {message ? (
-                                          <pre className="whitespace-pre-wrap break-words font-mono text-xs text-muted-foreground">{message}</pre>
+                                          <pre className="whitespace-pre-wrap break-words font-mono text-xs text-fg-muted">{message}</pre>
                                         ) : null}
                                         {hint?.hint ? (
-                                          <p className="whitespace-pre-wrap break-words text-xs text-amber-700 dark:text-amber-300">💡 {hint.hint}</p>
+                                          <p className="whitespace-pre-wrap break-words text-xs text-warning-fg">💡 {hint.hint}</p>
                                         ) : null}
                                         {hint?.videoUrl && /^https?:\/\//i.test(hint.videoUrl) ? (
                                           <a
                                             href={hint.videoUrl}
                                             target="_blank"
                                             rel="noreferrer"
-                                            className="inline-flex min-h-10 items-center text-xs text-primary hover:underline"
+                                            className="inline-flex min-h-10 items-center text-xs text-brand-fg hover:underline"
                                           >
                                             ▶ 讲解视频
                                           </a>
@@ -1503,17 +1430,19 @@ export function RecordDetailPage() {
                                     </details>
                                   ) : null}
                                 </TableCell>
-                                <TableCell className="text-right tabular-nums">{c.score ?? '—'}</TableCell>
-                                <TableCell className="text-right tabular-nums text-sm text-muted-foreground">{formatTime(c.time, c.status)}</TableCell>
-                                <TableCell className="text-right tabular-nums text-sm text-muted-foreground">{formatMemory(c.memory)}</TableCell>
+                                <TableCell className="text-right tabular">
+                                  <span className={cn('font-semibold', scoreToneClass(c.score, detailFullScore))}>{c.score ?? '—'}</span>
+                                </TableCell>
+                                <TableCell className="text-right tabular text-sm text-fg-subtle">{formatTime(c.time, c.status)}</TableCell>
+                                <TableCell className="text-right tabular text-sm text-fg-subtle">{formatMemory(c.memory)}</TableCell>
                               </TableRow>
                             );
                           })}
                         </TableBody>
                       </table>
-                    </div>
-                    <div className="flex flex-col gap-2 border-t bg-muted/10 px-4 py-3 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-                      <span className="tabular-nums">
+                    </ScrollArea>
+                    <div className="flex flex-col gap-2 border-t border-line bg-surface-sunken px-4 py-3 text-xs text-fg-subtle sm:flex-row sm:items-center sm:justify-between">
+                      <span className="tabular">
                         显示 {casePageData.start}–{casePageData.end} / {casePageData.total}
                       </span>
                       {casePageData.totalPages > 1 ? (
@@ -1521,22 +1450,20 @@ export function RecordDetailPage() {
                           <Button
                             type="button"
                             size="sm"
-                            variant="outline"
-                            className="h-10 active:scale-[0.96]"
+                            variant="secondary"
                             disabled={casePageData.page === 1}
                             onClick={() => setCasePage(casePageData.page - 1)}
                           >
                             <ChevronLeft />
                             上一页
                           </Button>
-                          <span className="min-w-16 text-center tabular-nums">
+                          <span className="min-w-16 text-center tabular">
                             {casePageData.page} / {casePageData.totalPages}
                           </span>
                           <Button
                             type="button"
                             size="sm"
-                            variant="outline"
-                            className="h-10 active:scale-[0.96]"
+                            variant="secondary"
                             disabled={casePageData.page === casePageData.totalPages}
                             onClick={() => setCasePage(casePageData.page + 1)}
                           >
@@ -1552,15 +1479,25 @@ export function RecordDetailPage() {
                 {showCodePanel && code ? (
                   <div
                     role="tabpanel"
-                    className={cn('min-w-0', currentTab !== 'code' && 'hidden xl:block', canSplitWorkspace && 'xl:border-l')}
+                    className={cn('min-w-0', currentTab !== 'code' && 'hidden xl:block', canSplitWorkspace && 'xl:border-l xl:border-line')}
                   >
                     <RecordCodeContent data={data} rdoc={rdoc} code={code} copyState={copyState} onCopy={() => void handleCopyCode()} />
                   </div>
                 ) : null}
               </div>
+              </Panel>
             ) : null}
-          </CardContent>
-        </Card>
+        </div>
+          </div>
+          <aside className="flex flex-col gap-4">
+            <RecordIdentity
+              problemUrl={problemUrl}
+              problemTitle={pdoc.title || String(rdoc.pid)}
+              username={recordIdentity.username}
+              student={recordIdentity.student}
+            />
+          </aside>
+        </div>
       )}
 
       {detailMode !== 'exam-code' && recordScoreAction ? (
@@ -1584,28 +1521,25 @@ export function RecordDetailPage() {
       />
 
       {detailMode !== 'exam-code' && allRevs.length > 0 ? (
-        <Card>
-          <CardContent className="p-0">
-            <div className="border-b px-4 py-3 text-sm font-medium">历史版本</div>
-            <div className="divide-y">
-              <a href={recordUrl} className="flex items-center justify-between px-4 py-3 text-sm hover:bg-accent">
-                <span>最新版本</span>
-                {!data.rev ? <Badge variant="outline">当前</Badge> : null}
+        <Panel title="历史版本" flush>
+          <div className="divide-y divide-line-subtle">
+            <a href={recordUrl} className="flex items-center justify-between px-4 py-3 text-sm text-fg hover:bg-surface-hover">
+              <span>最新版本</span>
+              {!data.rev ? <Badge variant="outline" size="sm">当前</Badge> : null}
+            </a>
+            {allRevs.map(([rev, time]) => (
+              <a
+                key={rev}
+                href={buildUrlWithQuery(recordUrl, { rev })}
+                className="flex items-center justify-between px-4 py-3 text-sm text-fg hover:bg-surface-hover"
+              >
+                <span>{formatRecordTime(time, locale)}</span>
+                {String(data.rev || '') === rev ? <Badge variant="outline" size="sm">当前</Badge> : null}
               </a>
-              {allRevs.map(([rev, time]) => (
-                <a
-                  key={rev}
-                  href={buildUrlWithQuery(recordUrl, { rev })}
-                  className="flex items-center justify-between px-4 py-3 text-sm hover:bg-accent"
-                >
-                  <span>{formatRecordTime(time, locale)}</span>
-                  {String(data.rev || '') === rev ? <Badge variant="outline">当前</Badge> : null}
-                </a>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+            ))}
+          </div>
+        </Panel>
       ) : null}
-    </motion.div>
+    </Page>
   );
 }

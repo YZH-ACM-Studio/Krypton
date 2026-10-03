@@ -7,8 +7,7 @@
  *   - tasks_my.html          → TaskMyPage
  *   - tasks_detail.html      → TaskDetailPage
  */
-import { type ReactNode, useEffect, useMemo, useState } from 'react';
-import { motion } from 'motion/react';
+import { type FormEvent, type ReactNode, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   Calendar,
@@ -17,7 +16,6 @@ import {
   Clock,
   ClipboardList,
   Hourglass,
-  Loader2,
   ListChecks,
   Lock,
   type LucideIcon,
@@ -30,13 +28,19 @@ import {
 } from 'lucide-react';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Alert } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { DateTime } from '@/components/ui/datetime';
-import { MiniTabs } from '@/components/ui/mini-tabs';
+import { Card, CardContent } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
+import { DateTime } from '@/components/ui/datetime';
+import { confirmFormSubmit } from '@/components/ui/dialog';
+import { Progress, Spinner } from '@/components/ui/display';
+import { EmptyState } from '@/components/ui/empty-state';
+import { SearchInput } from '@/components/ui/input';
+import { Page, PageHeader, Toolbar } from '@/components/ui/page';
+import { PageTabs } from '@/components/ui/page-tabs';
+import { Panel } from '@/components/ui/panel';
 import { TaskGraphRenderer, type PresetSummary, type TaskGraph, type TaskGraphNode, type TaskPointResult } from '@/components/task-graph';
 
 // ─── Shared types ─────────────────────────────────────────────────────────
@@ -195,7 +199,7 @@ function claimStateFor(
       kind: 'upcoming',
       canClaim: false,
       badge: (
-        <Badge variant="outline" className="gap-1 text-[10px]">
+        <Badge variant="outline" tone="info" size="sm">
           <Clock className="size-3" />
           即将开放
         </Badge>
@@ -213,7 +217,7 @@ function claimStateFor(
       kind: 'closed',
       canClaim: false,
       badge: (
-        <Badge variant="outline" className="gap-1 text-[10px] text-muted-foreground">
+        <Badge variant="outline" tone="warning" size="sm">
           <Lock className="size-3" />
           已截止
         </Badge>
@@ -230,7 +234,7 @@ function claimStateFor(
     kind: 'open',
     canClaim: true,
     badge: (
-      <Badge variant="outline" className="gap-1 text-[10px] text-emerald-700 dark:text-emerald-300">
+      <Badge variant="outline" tone="success" size="sm">
         <UserCheck className="size-3" />
         可认领
       </Badge>
@@ -270,7 +274,7 @@ function TaskTimeBlock({
   compact?: boolean;
 }) {
   return (
-    <div className={cn('space-y-1.5 rounded-md border bg-muted/20 p-2.5 text-xs', compact && 'p-2')}>
+    <div className={cn('flex flex-col gap-1.5 rounded-md border border-line bg-surface-sunken p-2.5 text-xs', compact && 'p-2')}>
       <TimeRow
         icon={Clock}
         label="认领"
@@ -301,9 +305,9 @@ function TaskTimeBlock({
 
 function TimeRow({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: ReactNode }) {
   return (
-    <div className="flex min-w-0 items-start gap-1.5 text-muted-foreground">
+    <div className="flex min-w-0 items-start gap-1.5 text-fg-subtle">
       <Icon className="mt-0.5 size-3 shrink-0" />
-      <span className="shrink-0 text-foreground/70">{label}</span>
+      <span className="shrink-0">{label}</span>
       <span className="min-w-0 flex-1 break-words">{value}</span>
     </div>
   );
@@ -313,28 +317,28 @@ function TaskCountdownNotice({ task, status, now }: { task: TaskDoc; status: Ass
   const notice = countdownNoticeFor(task, status, now);
   if (!notice) return null;
   const toneClass = {
-    info: 'border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300',
-    warning: 'border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300',
-    danger: 'border-destructive/30 bg-destructive/10 text-destructive',
-    muted: 'border-border bg-muted/60 text-muted-foreground',
+    info: 'border-info-line bg-info-soft text-info-fg',
+    warning: 'border-warning-line bg-warning-soft text-warning-fg',
+    danger: 'border-danger-line bg-danger-soft text-danger-fg',
+    muted: 'border-line bg-surface-sunken text-fg-subtle',
   }[notice.tone];
   return (
-    <div className={cn('mt-2 flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-medium', toneClass)}>
+    <div className={cn('mt-2 flex items-center gap-1.5 rounded-md border px-2 py-1 text-2xs font-medium', toneClass)}>
       {notice.tone === 'danger' || notice.tone === 'warning' ? (
         <AlertTriangle className="size-3.5 shrink-0" />
       ) : (
         <Clock className="size-3.5 shrink-0" />
       )}
       <span>{notice.label}</span>
-      {notice.target && <span className="ml-auto font-mono tabular-nums">{formatCountdown(notice.target - now)}</span>}
+      {notice.target && <span className="ml-auto font-mono tabular">{formatCountdown(notice.target - now)}</span>}
     </div>
   );
 }
 
-function StatusPill({ status }: { status: AssignmentStatus | 'not-claimed' }) {
+function AssignmentBadge({ status }: { status: AssignmentStatus | 'not-claimed' }) {
   if (status === 'completed') {
     return (
-      <Badge variant="default" className="gap-1 bg-emerald-500 text-white hover:bg-emerald-500/90">
+      <Badge tone="success">
         <CheckCircle2 className="size-3" />
         已完成
       </Badge>
@@ -342,7 +346,7 @@ function StatusPill({ status }: { status: AssignmentStatus | 'not-claimed' }) {
   }
   if (status === 'admitted') {
     return (
-      <Badge variant="default" className="gap-1 bg-violet-500 text-white hover:bg-violet-500/90">
+      <Badge tone="info">
         <UserCheck className="size-3" />
         已录取
       </Badge>
@@ -350,7 +354,7 @@ function StatusPill({ status }: { status: AssignmentStatus | 'not-claimed' }) {
   }
   if (status === 'qualified') {
     return (
-      <Badge variant="default" className="gap-1 bg-amber-500 text-white hover:bg-amber-500/90">
+      <Badge tone="warning">
         <Trophy className="size-3" />
         候选中
       </Badge>
@@ -358,22 +362,22 @@ function StatusPill({ status }: { status: AssignmentStatus | 'not-claimed' }) {
   }
   if (status === 'pending') {
     return (
-      <Badge variant="default" className="gap-1 bg-sky-500 text-white hover:bg-sky-500/90">
-        <Loader2 className="size-3 animate-spin" />
+      <Badge tone="info">
+        <Spinner className="size-3" />
         进行中
       </Badge>
     );
   }
   if (status === 'cancelled') {
     return (
-      <Badge variant="outline" className="gap-1 text-muted-foreground">
+      <Badge tone="neutral" variant="outline">
         <XCircle className="size-3" />
         已取消
       </Badge>
     );
   }
   return (
-    <Badge variant="outline" className="gap-1">
+    <Badge tone="neutral" variant="outline">
       <Hourglass className="size-3" />
       未认领
     </Badge>
@@ -385,7 +389,7 @@ function AccessPill({ access }: { access: TaskAccess }) {
   const label =
     access.type === 'school' ? '限定学校' : access.type === 'user_group' ? '限定用户组' : access.type === 'grade' ? '限定年级' : '限定可见';
   return (
-    <Badge variant="outline" className="gap-1 text-[10px]">
+    <Badge variant="outline" tone="neutral" size="sm">
       <Lock className="size-3" />
       {label}
     </Badge>
@@ -394,12 +398,7 @@ function AccessPill({ access }: { access: TaskAccess }) {
 
 function ProgressBar({ result }: { result: TaskPointResult }) {
   const pct = result.target > 0 ? Math.min(100, Math.round((result.current / result.target) * 100)) : result.completed ? 100 : 0;
-  const color = result.completed ? 'bg-emerald-500' : result.current > 0 ? 'bg-sky-500' : 'bg-muted-foreground/30';
-  return (
-    <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-      <div className={cn('h-full transition-all', color)} style={{ width: `${pct}%` }} />
-    </div>
-  );
+  return <Progress value={pct} tone={result.completed ? 'success' : 'brand'} />;
 }
 
 function isEmptyParamValue(value: unknown): boolean {
@@ -418,7 +417,7 @@ function RefDisplay({ title, meta }: { title: ReactNode; meta?: ReactNode }) {
   return (
     <span className="inline-flex max-w-full flex-col items-end text-right">
       <span className="max-w-full truncate">{title}</span>
-      {meta && <span className="text-[10px] font-normal text-muted-foreground">{meta}</span>}
+      {meta && <span className="text-2xs font-normal text-fg-subtle">{meta}</span>}
     </span>
   );
 }
@@ -426,7 +425,7 @@ function RefDisplay({ title, meta }: { title: ReactNode; meta?: ReactNode }) {
 function missingRefLabel(value: unknown): ReactNode {
   const id = refId(value);
   if (!id) return '未配置';
-  return <span className="break-all text-muted-foreground">未找到：{id}</span>;
+  return <span className="break-all text-fg-subtle">未找到：{id}</span>;
 }
 
 function effectiveParamValue(
@@ -522,17 +521,17 @@ function formatNodeParamValue(node: TaskGraphNode, spec: PresetSummary['params']
 function NodeParamSummary({ node, preset, task, refs }: { node: TaskGraphNode; preset: PresetSummary; task: TaskDoc; refs?: TaskParamRefs }) {
   if (!preset.params.length) return null;
   return (
-    <div className="border-t pt-3">
-      <div className="mb-2 text-[11px] font-medium text-muted-foreground">任务点配置</div>
-      <dl className="space-y-2">
+    <div className="border-t border-line-subtle pt-3">
+      <div className="mb-2 text-2xs font-medium text-fg-subtle">任务点配置</div>
+      <dl className="flex flex-col gap-2">
         {preset.params.map((spec) => {
           const { note } = effectiveParamValue(node, spec, task);
           return (
-            <div key={spec.name} className="grid grid-cols-[88px_minmax(0,1fr)] gap-3 text-xs">
-              <dt className="text-muted-foreground">{spec.label}</dt>
-              <dd className="min-w-0 text-right font-medium">
+            <div key={spec.name} className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3 text-xs">
+              <dt className="text-fg-subtle">{spec.label}</dt>
+              <dd className="min-w-0 text-right font-medium text-fg">
                 {formatNodeParamValue(node, spec, task, refs)}
-                {note && <span className="ml-1 whitespace-nowrap text-[10px] font-normal text-muted-foreground">({note})</span>}
+                {note && <span className="ml-1 whitespace-nowrap text-2xs font-normal text-fg-subtle">({note})</span>}
               </dd>
             </div>
           );
@@ -582,85 +581,68 @@ export function TaskCenterPage() {
   }, [tasks, query, activeTag, showInactive, data.assignmentMap]);
 
   return (
-    <div className="space-y-6">
-      <motion.header
-        initial={{ opacity: 0, y: -6 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.25 }}
-        className="flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-xl border bg-card p-6 shadow-sm"
-      >
-        <div className="min-w-0 space-y-1">
-          <div className="flex min-w-0 items-center gap-2">
-            <ClipboardList className="size-5 shrink-0 text-primary" />
-            <h1 className="min-w-0 break-words text-xl font-semibold">任务中心</h1>
-          </div>
-          <p className="min-w-0 break-words text-sm text-muted-foreground">完成任务获得比赛资格 — 任务点会根据你的 OJ 记录自动判定。</p>
-        </div>
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
-          <Button asChild variant="outline" size="sm">
-            <a href="/tasks/my">
-              <ListChecks className="mr-1 size-4" />
-              我的任务
-            </a>
-          </Button>
-          {bs.user.canManageTasks ? (
-            <Button asChild variant="default" size="sm">
-              <a href="/admin/tasks">
-                <Trophy className="mr-1 size-4" />
-                管理任务
+    <Page width="wide">
+      <PageHeader
+        title="任务中心"
+        description="完成任务获得比赛资格 — 任务点会根据你的 OJ 记录自动判定。"
+        actions={
+          <>
+            <Button asChild variant="secondary" size="sm">
+              <a href="/tasks/my">
+                <ListChecks />
+                我的任务
               </a>
             </Button>
-          ) : null}
-        </div>
-      </motion.header>
+            {bs.user.canManageTasks ? (
+              <Button asChild variant="primary" size="sm">
+                <a href="/admin/tasks">
+                  <Trophy />
+                  管理任务
+                </a>
+              </Button>
+            ) : null}
+          </>
+        }
+      />
 
-      <Card>
-        <CardContent className="flex flex-wrap items-center gap-3">
-          <Input placeholder="搜索任务标题或描述…" value={query} onChange={(e) => setQuery(e.target.value)} className="max-w-sm" />
-          {allTags.length > 0 && (
-            <div className="flex flex-wrap items-center gap-1.5">
-              <Tag className="size-3.5 text-muted-foreground" />
-              <button
-                onClick={() => setActiveTag(null)}
-                className={cn(
-                  'rounded-md px-2 py-0.5 text-xs',
-                  activeTag === null ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80',
-                )}
+      <Toolbar
+        end={
+          data.canManage ? (
+            <Checkbox checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} label="显示已停用" />
+          ) : undefined
+        }
+      >
+        <SearchInput
+          placeholder="搜索任务标题或描述…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          className="w-full sm:w-72"
+        />
+        {allTags.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Tag className="size-3.5 text-fg-subtle" />
+            <Button type="button" size="sm" variant={activeTag === null ? 'soft' : 'ghost'} onClick={() => setActiveTag(null)}>
+              全部
+            </Button>
+            {allTags.map((t) => (
+              <Button
+                key={t}
+                type="button"
+                size="sm"
+                variant={activeTag === t ? 'soft' : 'ghost'}
+                onClick={() => setActiveTag(t === activeTag ? null : t)}
               >
-                全部
-              </button>
-              {allTags.map((t) => (
-                <button
-                  key={t}
-                  onClick={() => setActiveTag(t === activeTag ? null : t)}
-                  className={cn(
-                    'rounded-md px-2 py-0.5 text-xs',
-                    activeTag === t ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80',
-                  )}
-                >
-                  {t}
-                </button>
-              ))}
-            </div>
-          )}
-          {data.canManage && (
-            <label className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Checkbox checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} />
-              显示已停用
-            </label>
-          )}
-        </CardContent>
-      </Card>
+                {t}
+              </Button>
+            ))}
+          </div>
+        )}
+      </Toolbar>
 
       {filtered.length === 0 ? (
-        <Card>
-          <CardContent className="py-12 text-center">
-            <ClipboardList className="mx-auto size-12 text-muted-foreground/40" />
-            <p className="mt-3 text-sm text-muted-foreground">{tasks.length === 0 ? '当前没有可用的任务' : '没有匹配的任务'}</p>
-          </CardContent>
-        </Card>
+        <EmptyState icon={<ClipboardList />} title={tasks.length === 0 ? '当前没有可用的任务' : '没有匹配的任务'} compact />
       ) : (
-        <div className="grid w-full min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+        <div className="grid w-full min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {filtered.map((task) => {
             const a = data.assignmentMap[task._id];
             const status = ((a?.status as AssignmentStatus | undefined) || 'not-claimed') as AssignmentStatus | 'not-claimed';
@@ -668,26 +650,28 @@ export function TaskCenterPage() {
             return (
               <Card
                 key={task._id}
-                className={cn(
-                  'h-full transition-[box-shadow,opacity] w-full min-w-0 duration-200 ease-out hover:shadow-md motion-reduce:transition-none',
-                  !task.isActive && 'opacity-60',
-                )}
+                className="h-full transition-[box-shadow,opacity] w-full min-w-0 duration-(--dur-2) ease-(--ease-out) hover:border-line-strong hover:shadow-sm motion-reduce:transition-none"
               >
                 <CardContent className="flex h-full flex-col gap-3">
                   <div className="flex min-h-10 min-w-0 items-start justify-between gap-2">
-                    <h3 className="min-w-0 flex-1 break-words font-semibold line-clamp-2">{task.title}</h3>
+                    <h3 className="min-w-0 flex-1 break-words text-md font-semibold text-balance text-fg line-clamp-2">{task.title}</h3>
                     <div className="shrink-0">
-                      <StatusPill status={status} />
+                      <AssignmentBadge status={status} />
                     </div>
                   </div>
-                  {task.description ? <p className="line-clamp-2 text-xs text-muted-foreground">{task.description}</p> : null}
+                  {task.description ? <p className="line-clamp-2 text-xs text-fg-subtle">{task.description}</p> : null}
                   <div className="flex flex-wrap gap-1.5">
-                    <Badge variant="outline" className="gap-1 text-[10px]">
+                    {!task.isActive && (
+                      <Badge variant="outline" tone="neutral" size="sm">
+                        已停用
+                      </Badge>
+                    )}
+                    <Badge variant="outline" tone="neutral" size="sm">
                       <Network className="size-3" />
                       {(task.graph?.nodes || []).filter((n) => n.type === 'task').length} 个节点
                     </Badge>
                     {task.admissionMode === 'quota' && (
-                      <Badge variant="outline" className="gap-1 text-[10px]">
+                      <Badge variant="outline" tone="neutral" size="sm">
                         <UserCheck className="size-3" />
                         配额
                       </Badge>
@@ -695,17 +679,17 @@ export function TaskCenterPage() {
                     <AccessPill access={task.access} />
                     {status === 'not-claimed' && claimState.badge}
                     {task.tags?.slice(0, 2).map((tag) => (
-                      <Badge key={tag} variant="secondary" className="text-[10px]">
+                      <Badge key={tag} tone="neutral" size="sm">
                         {tag}
                       </Badge>
                     ))}
                   </div>
                   <TaskTimeBlock task={task} status={status} assignedAt={a?.assignedAt || null} now={now} compact />
                   <div className="mt-auto pt-1">
-                    <Button asChild className="min-h-10 w-full" variant={status === 'completed' ? 'outline' : 'default'} size="sm">
+                    <Button asChild className="w-full" variant="secondary" size="sm">
                       <a href={`/tasks/${task._id}`}>
                         {status === 'not-claimed' ? '查看详情' : '查看进度'}
-                        <ChevronRight className="size-4" />
+                        <ChevronRight />
                       </a>
                     </Button>
                   </div>
@@ -715,7 +699,7 @@ export function TaskCenterPage() {
           })}
         </div>
       )}
-    </div>
+    </Page>
   );
 }
 
@@ -741,64 +725,56 @@ export function TaskMyPage() {
   };
 
   return (
-    <div className="space-y-6">
-      <motion.header
-        initial={{ opacity: 0, y: -6 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-xl border bg-card p-6 shadow-sm"
-      >
-        <div className="min-w-0 space-y-1">
-          <div className="flex min-w-0 items-center gap-2">
-            <ListChecks className="size-5 shrink-0 text-primary" />
-            <h1 className="min-w-0 break-words text-xl font-semibold">我的任务</h1>
-          </div>
-          <p className="min-w-0 break-words text-sm text-muted-foreground">
-            已认领或分配给你的任务。进度会在你提交代码 / 完成 exam / 加入用户组时自动更新。
-          </p>
-        </div>
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
-          <Button asChild variant="outline" size="sm">
-            <a href="/tasks">
-              <ClipboardList className="mr-1 size-4" />
-              任务中心
-            </a>
-          </Button>
-          {bs.user.canManageTasks ? (
-            <Button asChild variant="default" size="sm">
-              <a href="/admin/tasks">
-                <Trophy className="mr-1 size-4" />
-                管理任务
+    <Page width="wide">
+      <PageHeader
+        title="我的任务"
+        description="已认领或分配给你的任务。进度会在你提交代码 / 完成 exam / 加入用户组时自动更新。"
+        actions={
+          <>
+            <Button asChild variant="secondary" size="sm">
+              <a href="/tasks">
+                <ClipboardList />
+                任务中心
               </a>
             </Button>
-          ) : null}
-        </div>
-      </motion.header>
-
-      <div className="max-w-full overflow-x-auto">
-        <MiniTabs
-          value={filter}
-          onValueChange={setFilter}
-          items={[
-            { value: 'all', label: '全部', count: counts.all },
-            { value: 'pending', label: '进行中', count: counts.pending },
-            { value: 'completed', label: '已完成', count: counts.completed },
-            { value: 'cancelled', label: '已取消', count: counts.cancelled },
-          ]}
-        />
-      </div>
+            {bs.user.canManageTasks ? (
+              <Button asChild variant="primary" size="sm">
+                <a href="/admin/tasks">
+                  <Trophy />
+                  管理任务
+                </a>
+              </Button>
+            ) : null}
+          </>
+        }
+        tabs={
+          <PageTabs
+            aria-label="任务状态"
+            value={filter}
+            onValueChange={setFilter}
+            items={[
+              { value: 'all', label: '全部', count: counts.all },
+              { value: 'pending', label: '进行中', count: counts.pending },
+              { value: 'completed', label: '已完成', count: counts.completed },
+              { value: 'cancelled', label: '已取消', count: counts.cancelled },
+            ]}
+          />
+        }
+      />
 
       {filtered.length === 0 ? (
-        <Card>
-          <CardContent className="py-12 text-center">
-            <Hourglass className="mx-auto size-12 text-muted-foreground/40" />
-            <p className="mt-3 text-sm text-muted-foreground">{assignments.length === 0 ? '还没有认领任何任务' : '没有匹配的任务'}</p>
-            <Button asChild variant="outline" size="sm" className="mt-4">
+        <EmptyState
+          icon={<Hourglass />}
+          title={assignments.length === 0 ? '还没有认领任何任务' : '没有匹配的任务'}
+          action={
+            <Button asChild variant="secondary" size="sm">
               <a href="/tasks">浏览任务</a>
             </Button>
-          </CardContent>
-        </Card>
+          }
+          compact
+        />
       ) : (
-        <div className="space-y-3">
+        <div className="flex flex-col gap-3">
           {filtered.map((a) => {
             const task = data.tasks[a.taskId];
             if (!task) return null;
@@ -807,32 +783,32 @@ export function TaskMyPage() {
             const totalPoints = taskNodes.length;
             const pct = totalPoints > 0 ? Math.round((completedPoints / totalPoints) * 100) : 0;
             return (
-              <Card key={a._id} className="transition-shadow hover:shadow-md">
-                <CardContent className="space-y-3">
+              <Panel key={a._id}>
+                <div className="flex flex-col gap-3">
                   <div className="flex min-w-0 items-start justify-between gap-2">
-                    <a href={`/tasks/${task._id}`} className="min-w-0 flex-1 break-words font-semibold hover:underline">
+                    <a href={`/tasks/${task._id}`} className="min-w-0 flex-1 break-words text-sm font-semibold text-fg hover:underline">
                       {task.title}
                     </a>
                     <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-                      <StatusPill status={a.status} />
+                      <AssignmentBadge status={a.status} />
                       {!a.canCancel && (
-                        <Badge variant="outline" className="gap-1 text-[10px]">
+                        <Badge variant="outline" tone="neutral" size="sm">
                           <Lock className="size-3" />
                           管理员分配
                         </Badge>
                       )}
                     </div>
                   </div>
-                  {a.note && <p className="rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">📝 {a.note}</p>}
+                  {a.note && <p className="rounded-md bg-surface-sunken px-3 py-2 text-xs text-fg-subtle">📝 {a.note}</p>}
                   <div className="flex items-center gap-3">
                     <ProgressBar result={{ current: completedPoints, target: totalPoints, completed: a.status === 'completed' }} />
-                    <span className="whitespace-nowrap text-xs text-muted-foreground">
+                    <span className="whitespace-nowrap text-xs text-fg-subtle tabular">
                       {completedPoints}/{totalPoints} · {pct}%
                     </span>
                   </div>
                   <TaskTimeBlock task={task} status={a.status} assignedAt={a.assignedAt} now={now} />
                   {a.completedAt && (
-                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <div className="flex items-center gap-1.5 text-xs text-fg-subtle">
                       <CheckCircle2 className="size-3" />
                       <span>
                         完成于 <DateTime value={a.completedAt} mode="datetime" />
@@ -840,36 +816,48 @@ export function TaskMyPage() {
                     </div>
                   )}
                   <div className="flex gap-2">
-                    <Button asChild size="sm" variant="outline" className="flex-1">
-                      <a href={`/tasks/${task._id}`}>
-                        查看进度
-                        <ChevronRight className="size-4" />
-                      </a>
-                    </Button>
+                    <div className="flex-1">
+                      <Button asChild size="sm" variant="secondary" className="w-full">
+                        <a href={`/tasks/${task._id}`}>
+                          查看进度
+                          <ChevronRight />
+                        </a>
+                      </Button>
+                    </div>
                     {a.status === 'pending' && (
                       <form method="post" action={`/tasks/assignments/${a._id}`}>
                         <input type="hidden" name="operation" value="recheck" />
-                        <Button type="submit" size="sm" variant="ghost" title="立即重算进度">
-                          <RefreshCw className="size-4" />
+                        <Button type="submit" size="sm" variant="ghost" iconOnly title="立即重算进度" aria-label="立即重算进度">
+                          <RefreshCw />
                         </Button>
                       </form>
                     )}
                     {a.status === 'pending' && a.canCancel && (
-                      <form method="post" action={`/tasks/assignments/${a._id}`}>
+                      <form
+                        method="post"
+                        action={`/tasks/assignments/${a._id}`}
+                        onSubmit={(event: FormEvent<HTMLFormElement>) => {
+                          void confirmFormSubmit(event, '认领窗口关闭后将无法再次认领。', {
+                            destructive: true,
+                            title: `取消认领「${task.title}」？`,
+                            confirmLabel: '取消认领',
+                          });
+                        }}
+                      >
                         <input type="hidden" name="operation" value="cancel" />
-                        <Button type="submit" size="sm" variant="ghost" className="text-destructive">
+                        <Button type="submit" size="sm" variant="danger-soft">
                           取消
                         </Button>
                       </form>
                     )}
                   </div>
-                </CardContent>
-              </Card>
+                </div>
+              </Panel>
             );
           })}
         </div>
       )}
-    </div>
+    </Page>
   );
 }
 
@@ -905,46 +893,48 @@ export function TaskDetailPage() {
   const afterStatsWindow = !!assignment && statsEnd !== null && now > statsEnd;
 
   return (
-    <div className="space-y-6">
-      <motion.header initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} className="min-w-0 rounded-xl border bg-card p-6 shadow-sm">
-        <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0 flex-1 space-y-1">
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <h1 className="min-w-0 break-words text-xl font-semibold">{task.title}</h1>
-              {!task.isActive && <Badge variant="outline">已停用</Badge>}
-              {task.admissionMode === 'quota' && (
-                <Badge variant="outline" className="gap-1">
-                  <UserCheck className="size-3" />
-                  配额制
-                </Badge>
-              )}
-              <StatusPill status={(assignment?.status as AssignmentStatus | undefined) || 'not-claimed'} />
-              {!assignment && claimState.badge}
-            </div>
-            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-              <span>创建者 {data.creatorName}</span>
-              <span>· {data.assignmentCount} 人认领</span>
+    <Page width="wide">
+      <PageHeader
+        title={task.title}
+        meta={
+          <>
+            {!task.isActive && (
+              <Badge variant="outline" tone="neutral" size="sm">
+                已停用
+              </Badge>
+            )}
+            {task.admissionMode === 'quota' && (
+              <Badge variant="outline" tone="neutral" size="sm">
+                <UserCheck className="size-3" />
+                配额制
+              </Badge>
+            )}
+            <AssignmentBadge status={(assignment?.status as AssignmentStatus | undefined) || 'not-claimed'} />
+            {!assignment && claimState.badge}
+            <span>创建者 {data.creatorName}</span>
+            <span>· {data.assignmentCount} 人认领</span>
+            <span>
+              · 统计 {task.startDate ? <DateTime value={task.startDate} mode="datetime" /> : '不限开始'}
+              {' - '}
+              {task.endDate ? <DateTime value={task.endDate} mode="datetime" /> : '不限截止'}
+            </span>
+            {!assignment && <span>· {claimState.detail}</span>}
+            {task.maxAssignments && (
               <span>
-                · 统计 {task.startDate ? <DateTime value={task.startDate} mode="datetime" /> : '不限开始'}
-                {' - '}
-                {task.endDate ? <DateTime value={task.endDate} mode="datetime" /> : '不限截止'}
+                · 名额 {task.currentAssignments}/{task.maxAssignments}
               </span>
-              {!assignment && <span>· {claimState.detail}</span>}
-              {task.maxAssignments && (
-                <span>
-                  · 名额 {task.currentAssignments}/{task.maxAssignments}
-                </span>
-              )}
-              {task.admissionMode === 'quota' && task.quota != null && <span>· 录取名额 {task.quota}</span>}
-            </div>
-          </div>
-          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            )}
+            {task.admissionMode === 'quota' && task.quota != null && <span>· 录取名额 {task.quota}</span>}
+          </>
+        }
+        actions={
+          <>
             {data.canManage && (
               <>
-                <Button asChild variant="outline" size="sm">
+                <Button asChild variant="secondary" size="sm">
                   <a href={`/admin/tasks/${task._id}/edit`}>编辑</a>
                 </Button>
-                <Button asChild variant="outline" size="sm">
+                <Button asChild variant="secondary" size="sm">
                   <a href={`/admin/tasks/${task._id}/stats`}>统计</a>
                 </Button>
               </>
@@ -952,139 +942,116 @@ export function TaskDetailPage() {
             {!assignment && claimState.canClaim && (
               <form method="post" action={`/tasks/${task._id}`}>
                 <input type="hidden" name="operation" value="claim" />
-                <Button type="submit" size="sm">
+                <Button type="submit" size="sm" variant="primary">
                   认领任务
-                  <ChevronRight className="size-4" />
+                  <ChevronRight />
                 </Button>
               </form>
             )}
             {!assignment && !claimState.canClaim && (
-              <Button type="button" size="sm" disabled>
+              <Button type="button" size="sm" variant="secondary" disabled>
                 {claimState.buttonText}
               </Button>
             )}
             {assignment?.status === 'pending' && (
               <form method="post" action={`/tasks/assignments/${assignment._id}`}>
                 <input type="hidden" name="operation" value="recheck" />
-                <Button type="submit" variant="outline" size="sm">
-                  <RefreshCw className="mr-1 size-4" />
+                <Button type="submit" variant="primary" size="sm">
+                  <RefreshCw />
                   立即检查
                 </Button>
               </form>
             )}
-          </div>
-        </div>
-        {!assignment && !claimState.canClaim && (
-          <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
-            {claimState.detail}
-          </p>
-        )}
-      </motion.header>
+          </>
+        }
+      />
+
+      {!assignment && !claimState.canClaim && <Alert tone="warning">{claimState.detail}</Alert>}
 
       {assignment && (
-        <Card>
-          <CardContent>
+        <Panel>
+          <div className="flex flex-col gap-3">
             <div className="flex items-center gap-3">
               <ProgressBar result={{ current: completedNodes, target: totalNodes, completed: assignment.status === 'completed' }} />
-              <span className="whitespace-nowrap text-sm font-medium">
+              <span className="whitespace-nowrap text-sm font-medium tabular text-fg">
                 {completedNodes}/{totalNodes} · {overallPct}%
               </span>
             </div>
-            {assignment.note && <p className="mt-3 rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">📝 {assignment.note}</p>}
+            {assignment.note && <p className="rounded-md bg-surface-sunken px-3 py-2 text-xs text-fg-subtle">📝 {assignment.note}</p>}
             {beforeStatsWindow && (
-              <p className="mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+              <Alert tone="warning">
                 统计窗口尚未开始，将从 <DateTime value={task.startDate!} mode="datetime" /> 起计算；现在仍可手动检查。
-              </p>
+              </Alert>
             )}
             {afterStatsWindow && (
-              <p className="mt-3 rounded-md border border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-700 dark:bg-slate-900/40 dark:text-slate-200">
+              <Alert tone="neutral">
                 统计窗口已截止在 <DateTime value={task.endDate!} mode="datetime" />
                 ；仍可重算进度，结果会按截止窗口计算。
-              </p>
+              </Alert>
             )}
-            {assignment.status === 'qualified' && (
-              <p className="mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
-                ✓ 已达到所有任务点要求，进入候选池等待管理员录取。
-              </p>
-            )}
-            {assignment.status === 'admitted' && (
-              <p className="mt-3 rounded-md border border-violet-300 bg-violet-50 px-3 py-2 text-xs text-violet-800 dark:bg-violet-950/40 dark:text-violet-200">
-                ✓ 已被管理员录取，等待最终确认即可生效。
-              </p>
-            )}
-          </CardContent>
-        </Card>
+            {assignment.status === 'qualified' && <Alert tone="warning">✓ 已达到所有任务点要求，进入候选池等待管理员录取。</Alert>}
+            {assignment.status === 'admitted' && <Alert tone="info">✓ 已被管理员录取，等待最终确认即可生效。</Alert>}
+          </div>
+        </Panel>
       )}
 
-      <div className="grid min-w-0 gap-4 lg:grid-cols-3">
-        <div className="min-w-0 space-y-3 lg:col-span-2">
-          <h2 className="min-w-0 break-words text-sm font-semibold">任务流程图</h2>
-          <Card>
-            <CardContent className="p-0">
-              <TaskGraphRenderer
-                graph={task.graph}
-                presets={presets}
-                progress={progress || {}}
-                selectedNodeId={selectedNodeId}
-                onNodeSelect={setSelectedNodeId}
-                height="60vh"
-              />
-            </CardContent>
-          </Card>
-          <p className="text-xs text-muted-foreground">
+      <div className="grid min-w-0 gap-6 lg:grid-cols-3">
+        <div className="flex min-w-0 flex-col gap-3 lg:col-span-2">
+          <h2 className="min-w-0 break-words text-lg font-semibold text-fg">任务流程图</h2>
+          <TaskGraphRenderer
+            graph={task.graph}
+            presets={presets}
+            progress={progress || {}}
+            selectedNodeId={selectedNodeId}
+            onNodeSelect={setSelectedNodeId}
+            height="60vh"
+          />
+          <p className="text-xs text-fg-subtle">
             点击任意节点查看具体进度。绿色路径 = 已点亮的任务点，存在一条从「开始」到「完成」的全亮路径即任务完成。
           </p>
         </div>
 
-        <aside className="min-w-0 space-y-3">
-          <Card>
-            <CardHeader>
-              <CardTitle className="min-w-0 break-words text-sm">
-                {selectedNode ? selectedNode.name || selectedPreset?.name || '节点详情' : '节点详情'}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2 text-sm">
+        <aside className="flex min-w-0 flex-col gap-4">
+          <Panel title={selectedNode ? selectedNode.name || selectedPreset?.name || '节点详情' : '节点详情'}>
+            <div className="flex flex-col gap-2 text-sm">
               {selectedNode ? (
                 <>
-                  {selectedPreset && <p className="text-xs text-muted-foreground">{selectedPreset.description}</p>}
+                  {selectedPreset && <p className="text-xs text-fg-subtle">{selectedPreset.description}</p>}
                   {selectedPreset && <NodeParamSummary node={selectedNode} preset={selectedPreset} task={task} refs={data.paramRefs} />}
                   {selectedResult ? (
                     <>
                       <div className="flex items-center gap-2">
                         {selectedResult.completed ? (
-                          <Badge className="gap-1 bg-emerald-500 text-white hover:bg-emerald-500/90">
+                          <Badge tone="success">
                             <CheckCircle2 className="size-3" />
                             已完成
                           </Badge>
                         ) : (
-                          <Badge variant="outline">未完成</Badge>
+                          <Badge tone="neutral" variant="outline">
+                            未完成
+                          </Badge>
                         )}
                         {selectedResult.overridden && (
-                          <Badge variant="outline" className="text-[10px]">
+                          <Badge variant="outline" tone="warning" size="sm">
                             人工判定
                           </Badge>
                         )}
                       </div>
                       <ProgressBar result={selectedResult} />
-                      <p className="text-xs text-muted-foreground">
-                        {selectedResult.details || `${selectedResult.current} / ${selectedResult.target}`}
-                      </p>
+                      <p className="text-xs text-fg-subtle">{selectedResult.details || `${selectedResult.current} / ${selectedResult.target}`}</p>
                     </>
                   ) : (
-                    <p className="text-xs text-muted-foreground">尚未评估，认领后会自动检查</p>
+                    <p className="text-xs text-fg-subtle">尚未评估，认领后会自动检查</p>
                   )}
                 </>
               ) : (
-                <p className="text-xs text-muted-foreground">点击流程图上的节点查看详情</p>
+                <p className="text-xs text-fg-subtle">点击流程图上的节点查看详情</p>
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </Panel>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="min-w-0 break-words text-sm">任务信息</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2 text-sm">
+          <Panel title="任务信息">
+            <div className="flex flex-col gap-2 text-sm">
               <Row icon={Calendar} label="统计开始" value={task.startDate ? <DateTime value={task.startDate} mode="datetime" /> : '不限'} />
               <Row icon={Calendar} label="统计截止" value={task.endDate ? <DateTime value={task.endDate} mode="datetime" /> : '不限'} />
               <Row icon={Clock} label="认领开始" value={task.claimStartAt ? <DateTime value={task.claimStartAt} mode="datetime" /> : '不限'} />
@@ -1108,39 +1075,34 @@ export function TaskDetailPage() {
               {task.tags.length > 0 && (
                 <div className="flex flex-wrap gap-1 pt-1">
                   {task.tags.map((t) => (
-                    <Badge key={t} variant="secondary" className="text-[10px]">
+                    <Badge key={t} tone="neutral" size="sm">
                       {t}
                     </Badge>
                   ))}
                 </div>
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </Panel>
 
           {task.description && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="min-w-0 break-words text-sm">描述</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="whitespace-pre-wrap text-sm text-muted-foreground">{task.description}</p>
-              </CardContent>
-            </Card>
+            <Panel title="描述">
+              <p className="whitespace-pre-wrap text-sm text-fg-muted">{task.description}</p>
+            </Panel>
           )}
         </aside>
       </div>
-    </div>
+    </Page>
   );
 }
 
 function Row({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: ReactNode }) {
   return (
     <div className="flex min-w-0 items-start justify-between gap-2">
-      <span className="flex shrink-0 items-center gap-1.5 text-muted-foreground">
+      <span className="flex shrink-0 items-center gap-1.5 text-fg-subtle">
         <Icon className="size-3.5" />
         {label}
       </span>
-      <span className="min-w-0 break-words text-right font-medium">{value}</span>
+      <span className="min-w-0 break-words text-right font-medium text-fg">{value}</span>
     </div>
   );
 }

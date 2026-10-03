@@ -7,9 +7,9 @@
  *   - Admin stats drill-in (read-only)
  *
  * Built on @xyflow/react. Custom NodeComponent handles three node types:
- *   - start  → green pill labelled "开始"
- *   - end    → violet pill labelled "完成"
- *   - task   → card with preset name + (when read-only) progress badge
+ *   - start  → surface node labelled "开始"
+ *   - end    → success-solid node labelled "完成"
+ *   - task   → surface card with preset name + (when read-only) progress
  *
  * Edges have no special semantics beyond "path option" — see
  * krypton-tasks evaluateGraph for the eval rule.
@@ -41,6 +41,7 @@ import '@xyflow/react/dist/style.css';
 import { CheckCircle2, Circle, Flag, Play, UserCheck } from 'lucide-react';
 import { confirmDialog } from '@/components/ui/dialog';
 import { cn } from '@/lib/cn';
+import { readToken } from '@/lib/read-token';
 import { useColorMode } from '@/lib/use-color-mode';
 
 // ─── Public types ─────────────────────────────────────────────────────────
@@ -108,29 +109,40 @@ interface NodeDataShape extends Record<string, unknown> {
 
 // ─── Custom node renderer ─────────────────────────────────────────────────
 
+function graphColors() {
+  return {
+    // ds-allow DS003: xyflow 的 style 对象不能使用工具类，回退色只在读不到 token 时使用
+    surface: readToken('--surface', '#ffffff'),
+    // ds-allow DS003: xyflow 的 style 对象不能使用工具类，回退色只在读不到 token 时使用
+    line: readToken('--line', '#94a3b8'),
+    // ds-allow DS003: xyflow 的 style 对象不能使用工具类，回退色只在读不到 token 时使用
+    success: readToken('--success-solid', '#10b981'),
+    // ds-allow DS003: xyflow 的 style 对象不能使用工具类，回退色只在读不到 token 时使用
+    brand: readToken('--brand-solid', '#6366f1'),
+  };
+}
+
 function TaskGraphNodeComponent({ data, selected }: { data: NodeDataShape; selected?: boolean }) {
   const isStart = data.variant === 'start';
   const isEnd = data.variant === 'end';
   const isCondition = data.category === 'condition';
   const hasProgress = data.done !== undefined;
+  const done = Boolean(data.done);
+  const current = Boolean(selected);
+  const colors = graphColors();
+  const background = isEnd ? colors.success : colors.surface;
+  const borderColor = current ? colors.brand : done || isEnd ? colors.success : colors.line;
 
   return (
     <>
       {!isStart && <Handle type="target" position={Position.Left} className="!size-2 !border-2" />}
       <div
         className={cn(
-          'flex min-w-[140px] max-w-[220px] flex-col gap-1 rounded-lg border px-3 py-2 text-sm shadow-sm transition-all',
-          isStart && 'border-emerald-500 bg-emerald-500 font-semibold text-white',
-          isEnd && 'border-violet-500 bg-violet-500 font-semibold text-white',
-          !isStart &&
-            !isEnd &&
-            isCondition &&
-            'border-amber-400 bg-amber-50 text-amber-900 dark:border-amber-600 dark:bg-amber-950/40 dark:text-amber-100',
-          !isStart && !isEnd && !isCondition && 'border-sky-400 bg-sky-50 text-sky-900 dark:border-sky-600 dark:bg-sky-950/40 dark:text-sky-100',
-          selected && 'ring-2 ring-primary ring-offset-2 ring-offset-background',
-          hasProgress && data.done && 'ring-2 ring-emerald-500 ring-offset-2 ring-offset-background',
-          hasProgress && !data.done && !isStart && !isEnd && 'opacity-60',
+          'flex min-w-36 max-w-60 flex-col gap-1 rounded-lg border px-3 py-2 text-sm shadow-xs',
+          (isStart || isEnd) && 'font-semibold',
+          isEnd ? 'text-on-success' : 'text-fg',
         )}
+        style={{ background, borderColor }}
       >
         <div className="flex min-w-0 items-center gap-1.5">
           {isStart ? (
@@ -139,21 +151,17 @@ function TaskGraphNodeComponent({ data, selected }: { data: NodeDataShape; selec
             <Flag className="size-3.5" />
           ) : isCondition ? (
             <UserCheck className="size-3.5 shrink-0" />
-          ) : hasProgress ? (
-            data.done ? (
-              <CheckCircle2 className="size-3.5 shrink-0 text-emerald-600" />
-            ) : (
-              <Circle className="size-3.5 shrink-0" />
-            )
+          ) : done ? (
+            <CheckCircle2 className="size-3.5 shrink-0 text-success-fg" />
           ) : (
-            <Circle className="size-3.5 shrink-0" />
+            <Circle className="size-3.5 shrink-0 text-fg-subtle" />
           )}
           <span className="min-w-0 truncate font-medium">{isStart ? '开始' : isEnd ? '完成' : data.name || data.presetId || '未命名'}</span>
         </div>
         {hasProgress && !isStart && !isEnd && (
-          <div className="text-[10px] leading-tight opacity-80">
+          <div className="text-2xs leading-tight text-fg-subtle">
             {data.target && data.target > 1 ? `${data.current}/${data.target}` : data.done ? '已完成' : '未完成'}
-            {data.overridden && <span className="ml-1 rounded bg-amber-200 px-1 text-amber-900">手动</span>}
+            {data.overridden && <span className="ml-1 rounded-sm bg-warning-soft px-1 text-warning-fg">手动</span>}
           </div>
         )}
       </div>
@@ -237,30 +245,23 @@ function toRFNodes(graph: TaskGraph, presets: Map<string, PresetSummary>, progre
   });
 }
 
-// Edge styling — values tuned to roughly match GitHub Actions workflow graph:
-//   - Default ~2.5 px slate so lines read well at any zoom level.
-//   - Winning paths (progress mode) flip to emerald + light animation.
-//   - Selected edges glow indigo with a thicker stroke + drop-shadow. Picked
-//     indigo (not emerald or red) so selection is distinguishable from the
-//     "completed path" color overlay even when both apply.
-const EDGE_STROKE_DEFAULT = '#94a3b8'; // slate-400
-const EDGE_STROKE_WINNING = '#10b981'; // emerald-500
-const EDGE_STROKE_SELECTED = '#6366f1'; // indigo-500
+// Edge styling — xyflow style objects cannot take utility classes.
+//   - Default stroke is the container line so paths stay visible at any zoom.
+//   - Winning paths (progress mode) use the success solid.
+//   - Selected edges use the brand solid, thicker, so selection stays distinct
+//     from a completed path even when both apply.
 const EDGE_WIDTH_DEFAULT = 2.5;
 const EDGE_WIDTH_SELECTED = 4;
 
 function buildEdgeStyle(isSelected: boolean, isWinning: boolean): React.CSSProperties {
+  const colors = graphColors();
   if (isSelected) {
-    return {
-      stroke: EDGE_STROKE_SELECTED,
-      strokeWidth: EDGE_WIDTH_SELECTED,
-      filter: 'drop-shadow(0 0 4px rgba(99, 102, 241, 0.55))',
-    };
+    return { stroke: colors.brand, strokeWidth: EDGE_WIDTH_SELECTED };
   }
   if (isWinning) {
-    return { stroke: EDGE_STROKE_WINNING, strokeWidth: EDGE_WIDTH_DEFAULT };
+    return { stroke: colors.success, strokeWidth: EDGE_WIDTH_DEFAULT };
   }
-  return { stroke: EDGE_STROKE_DEFAULT, strokeWidth: EDGE_WIDTH_DEFAULT };
+  return { stroke: colors.line, strokeWidth: EDGE_WIDTH_DEFAULT };
 }
 
 function toRFEdges(
@@ -334,7 +335,15 @@ function TaskGraphInner({ graph, presets, progress, onChange, selectedNodeId, on
     [graph, progress],
   );
   useEffect(() => {
-    setRfNodes(toRFNodes(graph, presetMap, progress));
+    // Replacing the node list drops xyflow's selected flag. The selection
+    // effect only reruns when selectedNodeId changes, so a theme toggle would
+    // clear the brand border while the detail pane still shows that node.
+    setRfNodes(
+      toRFNodes(graph, presetMap, progress).map((node) => ({
+        ...node,
+        selected: selectedNodeId === node.id,
+      })),
+    );
     setRfEdges(toRFEdges(graph, progress, selectedEdgeIds));
     // Drop stale selection ids if the user deleted the underlying edge.
     setSelectedEdgeIds((prev) => {
@@ -347,7 +356,7 @@ function TaskGraphInner({ graph, presets, progress, onChange, selectedNodeId, on
       }
       return changed ? next : prev;
     });
-  }, [graphKey]);
+  }, [graphKey, colorMode]);
 
   // Re-stripe edges whenever selection changes (no full re-derive needed).
   useEffect(() => {
@@ -535,7 +544,7 @@ function TaskGraphInner({ graph, presets, progress, onChange, selectedNodeId, on
   return (
     <div
       ref={wrapperRef}
-      className="relative h-full min-h-0 min-w-0 w-full overflow-hidden rounded-md border bg-card"
+      className="relative h-full min-h-0 min-w-0 w-full overflow-hidden rounded-lg border border-line bg-surface"
       style={{ height: height ?? '70vh' }}
       onDrop={onDrop}
       onDragOver={onDragOver}
@@ -563,7 +572,7 @@ function TaskGraphInner({ graph, presets, progress, onChange, selectedNodeId, on
         proOptions={{ hideAttribution: true }}
         fitView
       >
-        <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
+        <Background variant={BackgroundVariant.Dots} gap={20} size={1} color={graphColors().line} />
         <Controls showInteractive={false} />
         {extraControls}
       </ReactFlow>

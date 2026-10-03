@@ -1,124 +1,202 @@
+/* imports */
 @import 'tailwindcss';
 @import 'katex/dist/katex.min.css';
-@import 'highlight.js/styles/github.css';
+@import './design/tokens.css';
 
+/* variants */
 @custom-variant dark (&:is(.dark *));
+@custom-variant short (@media (max-height: 800px));
 
-:root {
-  --background: hsl(204 20% 99%);
-  --foreground: hsl(222 47% 11%);
-  --card: hsl(0 0% 100%);
-  --card-foreground: hsl(222 47% 11%);
-  --popover: hsl(0 0% 100%);
-  --popover-foreground: hsl(222 47% 11%);
-  --primary: hsl(199 89% 48%);
-  --primary-foreground: hsl(0 0% 100%);
-  --secondary: hsl(210 40% 96%);
-  --secondary-foreground: hsl(222 47% 11%);
-  --muted: hsl(210 40% 96%);
-  --muted-foreground: hsl(215 16% 47%);
-  --accent: hsl(210 40% 96%);
-  --accent-foreground: hsl(222 47% 11%);
-  --destructive: hsl(0 84% 60%);
-  --destructive-foreground: hsl(0 0% 100%);
-  --border: hsl(214 32% 91%);
-  --input: hsl(214 32% 91%);
-  --ring: hsl(199 89% 48%);
-  --radius: 0.625rem;
-  --sidebar-background: hsl(0 0% 100%);
-  --sidebar-foreground: hsl(222 47% 11%);
-  --sidebar-primary: hsl(199 89% 48%);
-  --sidebar-primary-foreground: hsl(0 0% 100%);
-  --sidebar-accent: hsl(210 40% 96%);
-  --sidebar-accent-foreground: hsl(222 47% 11%);
-  --sidebar-border: hsl(214 32% 91%);
-  --sidebar-ring: hsl(199 89% 48%);
-  --chart-1: hsl(199 89% 48%);
-  --chart-2: hsl(173 58% 39%);
-  --chart-3: hsl(197 37% 24%);
-  --chart-4: hsl(43 74% 66%);
-  --chart-5: hsl(27 87% 67%);
+/* fonts */
+@layer fonts {
+  @font-face {
+    font-family: 'Mona Sans Variable';
+    font-style: normal;
+    font-display: swap;
+    font-weight: 100 900;
+    src: url('./assets/fonts/mona-sans-latin-wght.woff2') format('woff2-variations');
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+  }
+
+  @font-face {
+    font-family: 'JetBrains Mono Variable';
+    font-style: normal;
+    font-display: swap;
+    font-weight: 100 800;
+    src: url('./assets/fonts/jetbrains-mono-latin-wght.woff2') format('woff2-variations');
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+  }
 }
 
-.dark {
-  --background: hsl(222 47% 6%);
-  --foreground: hsl(210 40% 98%);
-  --card: hsl(222 47% 9%);
-  --card-foreground: hsl(210 40% 98%);
-  --popover: hsl(222 47% 9%);
-  --popover-foreground: hsl(210 40% 98%);
-  --primary: hsl(199 89% 48%);
-  --primary-foreground: hsl(0 0% 100%);
-  --secondary: hsl(217 33% 17%);
-  --secondary-foreground: hsl(210 40% 98%);
-  --muted: hsl(217 33% 17%);
-  --muted-foreground: hsl(215 20% 65%);
-  --accent: hsl(217 33% 17%);
-  --accent-foreground: hsl(210 40% 98%);
-  --destructive: hsl(0 63% 31%);
-  --destructive-foreground: hsl(0 0% 100%);
-  --border: hsl(217 33% 17%);
-  --input: hsl(217 33% 17%);
-  --ring: hsl(199 89% 48%);
-  --sidebar-background: hsl(222 47% 9%);
-  --sidebar-foreground: hsl(210 40% 98%);
-  --sidebar-primary: hsl(199 89% 48%);
-  --sidebar-primary-foreground: hsl(0 0% 100%);
-  --sidebar-accent: hsl(217 33% 17%);
-  --sidebar-accent-foreground: hsl(210 40% 98%);
-  --sidebar-border: hsl(217 33% 17%);
-  --sidebar-ring: hsl(199 89% 48%);
-  --chart-1: hsl(199 89% 48%);
-  --chart-2: hsl(160 60% 45%);
-  --chart-3: hsl(30 80% 55%);
-  --chart-4: hsl(280 65% 60%);
-  --chart-5: hsl(340 75% 55%);
+/* breakpoints */
+@theme {
+  --breakpoint-3xl: 120rem;
 }
 
+/* theme */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-  --color-popover: var(--popover);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-destructive: var(--destructive);
-  --color-destructive-foreground: var(--destructive-foreground);
-  --color-border: var(--border);
-  --color-input: var(--input);
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-hover: var(--surface-hover);
+  --color-surface-active: var(--surface-active);
+  --color-line-subtle: var(--line-subtle);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-subtle: var(--fg-subtle);
+  --color-fg-disabled: var(--fg-disabled);
+  --color-scrim: var(--scrim);
   --color-ring: var(--ring);
-  --color-sidebar-background: var(--sidebar-background);
-  --color-sidebar: var(--sidebar-background);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-ring: var(--sidebar-ring);
+
+  --color-brand: var(--brand-solid);
+  --color-brand-hover: var(--brand-solid-hover);
+  --color-brand-fg: var(--brand-fg);
+  --color-brand-soft: var(--brand-soft);
+  --color-brand-soft-hover: var(--brand-soft-hover);
+  --color-brand-line: var(--brand-line);
+  --color-on-brand: var(--on-brand);
+
+  --color-success: var(--success-solid);
+  --color-success-fg: var(--success-fg);
+  --color-success-soft: var(--success-soft);
+  --color-success-line: var(--success-line);
+  --color-on-success: var(--on-success);
+  --color-warning: var(--warning-solid);
+  --color-warning-fg: var(--warning-fg);
+  --color-warning-soft: var(--warning-soft);
+  --color-warning-line: var(--warning-line);
+  --color-on-warning: var(--on-warning);
+  --color-danger: var(--danger-solid);
+  --color-danger-hover: var(--danger-solid-hover);
+  --color-danger-fg: var(--danger-fg);
+  --color-danger-soft: var(--danger-soft);
+  --color-danger-soft-hover: var(--danger-soft-hover);
+  --color-danger-line: var(--danger-line);
+  --color-on-danger: var(--on-danger);
+  --color-info: var(--info-solid);
+  --color-info-fg: var(--info-fg);
+  --color-info-soft: var(--info-soft);
+  --color-info-line: var(--info-line);
+  --color-on-info: var(--on-info);
+  --color-violet: var(--violet-solid);
+  --color-violet-fg: var(--violet-fg);
+  --color-violet-soft: var(--violet-soft);
+  --color-violet-line: var(--violet-line);
+  --color-orange: var(--orange-solid);
+  --color-orange-fg: var(--orange-fg);
+  --color-orange-soft: var(--orange-soft);
+  --color-orange-line: var(--orange-line);
+
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
-  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --color-chart-6: var(--chart-6);
+
+  --radius-sm: var(--r-sm);
+  --radius-md: var(--r-md);
+  --radius-lg: var(--r-lg);
+  --radius-xl: var(--r-xl);
+
+  --text-2xs: var(--fs-2xs);
+  --text-2xs--line-height: 1.4;
+  --text-xs: var(--fs-xs);
+  --text-xs--line-height: 1.5;
+  --text-sm: var(--fs-sm);
+  --text-sm--line-height: 1.5;
+  --text-md: var(--fs-md);
+  --text-md--line-height: 1.55;
+  --text-lg: var(--fs-lg);
+  --text-lg--line-height: 1.45;
+  --text-xl: var(--fs-xl);
+  --text-xl--line-height: 1.3;
+  --text-2xl: var(--fs-2xl);
+  --text-2xl--line-height: 1.25;
+  --text-3xl: var(--fs-3xl);
+  --text-3xl--line-height: 1.15;
+
+  --shadow-xs: var(--shadow-xs);
+  --shadow-sm: var(--shadow-sm);
+  --shadow-pop: var(--shadow-pop);
+
+  --ease-out: var(--motion-ease-out);
+  --ease-in: var(--motion-ease-in);
+  --ease-standard: var(--motion-ease-standard);
+
+  --font-sans: var(--font-ui), 'PingFang SC', 'HarmonyOS Sans SC', 'Microsoft YaHei UI', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Source Han Sans SC', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, 'SF Mono', Menlo, Consolas, 'Noto Sans Mono CJK SC', monospace;
+
+  --color-background: var(--bg);
+  --color-foreground: var(--fg);
+  --color-card: var(--surface);
+  --color-card-foreground: var(--fg);
+  --color-popover: var(--surface-raised);
+  --color-popover-foreground: var(--fg);
+  --color-primary: var(--brand-solid);
+  --color-primary-foreground: var(--on-brand);
+  --color-secondary: var(--surface-active);
+  --color-secondary-foreground: var(--fg);
+  --color-muted: var(--surface-sunken);
+  --color-muted-foreground: var(--fg-muted);
+  --color-accent: var(--surface-hover);
+  --color-accent-foreground: var(--fg);
+  --color-destructive: var(--danger-solid);
+  --color-destructive-foreground: var(--on-danger);
+  --color-border: var(--line);
+  --color-input: var(--line-strong);
+  --color-sidebar: var(--surface-sunken);
+  --color-sidebar-background: var(--surface-sunken);
+  --color-sidebar-foreground: var(--fg);
+  --color-sidebar-primary: var(--brand-solid);
+  --color-sidebar-primary-foreground: var(--on-brand);
+  --color-sidebar-accent: var(--surface-active);
+  --color-sidebar-accent-foreground: var(--fg);
+  --color-sidebar-border: var(--line);
+  --color-sidebar-ring: var(--ring);
 }
 
+/* legacy variables */
+:root,
+.dark {
+  --background: var(--bg);
+  --foreground: var(--fg);
+  --card: var(--surface);
+  --card-foreground: var(--fg);
+  --popover: var(--surface-raised);
+  --popover-foreground: var(--fg);
+  --primary: var(--brand-solid);
+  --primary-foreground: var(--on-brand);
+  --secondary: var(--surface-active);
+  --secondary-foreground: var(--fg);
+  --muted: var(--surface-sunken);
+  --muted-foreground: var(--fg-muted);
+  --accent: var(--surface-hover);
+  --accent-foreground: var(--fg);
+  --destructive: var(--danger-solid);
+  --destructive-foreground: var(--on-danger);
+  --border: var(--line);
+  --input: var(--line-strong);
+  --radius: var(--r-md);
+  --sidebar-background: var(--surface-sunken);
+  --sidebar-foreground: var(--fg);
+  --sidebar-primary: var(--brand-solid);
+  --sidebar-primary-foreground: var(--on-brand);
+  --sidebar-accent: var(--surface-active);
+  --sidebar-accent-foreground: var(--fg);
+  --sidebar-border: var(--line);
+  --sidebar-ring: var(--ring);
+}
+
+/* base */
 @layer base {
-  * {
-    @apply border-border;
+  *,
+  ::before,
+  ::after {
+    border-color: var(--line);
   }
 
   html,
@@ -130,43 +208,148 @@
 
   html {
     scroll-behavior: smooth;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-sans);
+    font-size: var(--fs-md);
+    line-height: 1.55;
+    font-feature-settings: 'cv11', 'ss03';
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
   }
 
   body {
-    background: var(--background);
-    color: var(--foreground);
-    font-family: var(--font-sans);
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
+    background: var(--bg);
+    color: var(--fg);
+  }
+
+  ::selection {
+    background: var(--selection);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  code,
+  kbd,
+  pre,
+  samp {
+    font-family: var(--font-mono);
+    font-feature-settings: normal;
   }
 }
 
-@layer utilities {
-  .krypton-scrollbar {
+/* scrollbars */
+:root {
+  --scroll-thumb: color-mix(in oklch, var(--fg-subtle) 28%, transparent);
+  --scroll-thumb-hover: color-mix(in oklch, var(--fg-subtle) 60%, transparent);
+}
+
+@supports not selector(::-webkit-scrollbar) {
+  * {
     scrollbar-width: thin;
-    scrollbar-color: hsl(from var(--muted-foreground) h s l / 0.3) transparent;
+    scrollbar-color: var(--scroll-thumb) transparent;
   }
+}
 
-  .krypton-scrollbar::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+  background: transparent;
+}
+
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-color: var(--scroll-thumb);
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  border-width: 2px;
+  background-color: var(--scroll-thumb-hover);
+}
+
+@utility scrollbar-none {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
   }
+}
 
-  .krypton-scrollbar::-webkit-scrollbar-track {
-    background: transparent;
+/* utilities */
+@utility tabular {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum', 'cv11';
+}
+
+@keyframes kr-shimmer {
+  from {
+    background-position: 150% 0;
   }
-
-  .krypton-scrollbar::-webkit-scrollbar-thumb {
-    border-radius: 9999px;
-    border: 1px solid transparent;
-    background-clip: content-box;
-    background-color: hsl(from var(--muted-foreground) h s l / 0.3);
+  to {
+    background-position: -50% 0;
   }
+}
 
-  .krypton-scrollbar::-webkit-scrollbar-thumb:hover {
-    background-color: hsl(from var(--muted-foreground) h s l / 0.55);
+@utility skeleton {
+  background: linear-gradient(
+      100deg,
+      transparent 30%,
+      color-mix(in oklch, var(--surface) 70%, transparent) 50%,
+      transparent 70%
+    )
+    var(--surface-active);
+  background-size: 200% 100%;
+  animation: kr-shimmer calc(var(--dur-4) * 4) linear infinite;
+}
+
+@keyframes kr-spin {
+  to {
+    transform: rotate(360deg);
   }
+}
 
+@keyframes kr-pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+}
+
+@keyframes kr-pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+@keyframes kr-pop-out {
+  to {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+}
+
+/* layout */
+@layer utilities {
   .krypton-table-shell {
     -webkit-overflow-scrolling: touch;
   }
@@ -234,15 +417,11 @@
   }
 }
 
-/* ------------------------------------------------------------------ */
-/*  Markdown prose — manual replacement for @tailwindcss/typography.   */
-/*  Applied via `.krypton-prose` so MarkdownContent renders nicely      */
-/*  even though we don't ship the typography plugin.                   */
-/* ------------------------------------------------------------------ */
+/* prose */
 .krypton-prose {
-  color: var(--foreground);
-  font-size: 0.875rem;
-  line-height: 1.6;
+  color: var(--fg);
+  font-size: var(--fs-md);
+  line-height: 1.625;
   word-wrap: break-word;
 }
 .krypton-prose > * + * {
@@ -255,55 +434,44 @@
 .krypton-prose h5,
 .krypton-prose h6 {
   font-weight: 600;
-  color: var(--foreground);
-  line-height: 1.25;
+  color: var(--fg);
+  line-height: 1.45;
   margin-top: 1.4em;
   margin-bottom: 0.5em;
   scroll-margin-top: 5rem;
 }
-.krypton-prose h1 {
-  font-size: 1.6em;
-  border-bottom: 1px solid var(--border);
-  padding-bottom: 0.3em;
-}
+.krypton-prose h1,
 .krypton-prose h2 {
-  font-size: 1.35em;
-  border-bottom: 1px solid var(--border);
-  padding-bottom: 0.25em;
+  font-size: var(--fs-lg);
 }
-.krypton-prose h3 {
-  font-size: 1.15em;
-}
-.krypton-prose h4 {
-  font-size: 1em;
-}
-.krypton-prose h5 {
-  font-size: 0.9em;
-}
+.krypton-prose h3,
+.krypton-prose h4,
+.krypton-prose h5,
 .krypton-prose h6 {
-  font-size: 0.85em;
-  color: var(--muted-foreground);
+  font-size: var(--fs-md);
 }
 .krypton-prose p {
   margin: 0.8em 0;
 }
 .krypton-prose a {
-  color: var(--primary);
-  text-decoration: none;
+  color: var(--brand-fg);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: var(--brand-line);
 }
 .krypton-prose a:hover {
-  text-decoration: underline;
+  text-decoration-color: currentColor;
 }
 .krypton-prose strong {
   font-weight: 600;
-  color: var(--foreground);
+  color: var(--fg);
 }
 .krypton-prose em {
   font-style: italic;
 }
 .krypton-prose del {
   text-decoration: line-through;
-  color: var(--muted-foreground);
+  color: var(--fg-muted);
 }
 .krypton-prose ul,
 .krypton-prose ol {
@@ -329,32 +497,32 @@
   margin: 0.25em 0;
 }
 .krypton-prose blockquote {
-  border-left: 3px solid var(--border);
-  padding: 0.2em 1em;
+  border-left: 2px solid var(--line-strong);
+  padding-left: 1rem;
   margin: 1em 0;
-  color: var(--muted-foreground);
-  background: color-mix(in srgb, var(--muted) 40%, transparent);
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  color: var(--fg-muted);
 }
 .krypton-prose blockquote p {
   margin: 0.4em 0;
 }
 .krypton-prose code:not(pre code) {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.85em;
-  padding: 0.15em 0.4em;
-  background: var(--muted);
-  border-radius: var(--radius-sm);
-  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  padding: 0 0.25rem;
+  background: var(--surface-active);
+  border-radius: var(--r-sm);
+  color: var(--fg);
 }
 .krypton-prose pre {
-  background: var(--muted);
-  color: var(--foreground);
-  padding: 0.9em 1em;
-  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  padding: 0.75rem;
+  border-radius: var(--r-md);
   overflow-x: auto;
-  font-size: 0.85em;
-  line-height: 1.55;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
   margin: 1em 0;
 }
 .krypton-prose pre code {
@@ -365,33 +533,34 @@
 }
 .krypton-prose hr {
   border: 0;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--line);
   margin: 1.5em 0;
 }
 .krypton-prose img {
   max-width: 100%;
-  border-radius: var(--radius-sm);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+  border-radius: var(--r-md);
 }
 .krypton-prose table {
   border-collapse: collapse;
   width: max-content;
   max-width: 100%;
   margin: 1em 0;
-  font-size: 0.85em;
+  font-size: var(--fs-sm);
 }
 .krypton-prose th,
 .krypton-prose td {
-  border: 1px solid var(--border);
+  border: 1px solid var(--line-subtle);
   padding: 0.4em 0.75em;
   text-align: left;
 }
 .krypton-prose th {
-  background: color-mix(in srgb, var(--muted) 50%, transparent);
+  background: var(--surface-sunken);
+  color: var(--fg-subtle);
+  font-size: var(--fs-xs);
   font-weight: 600;
 }
 .krypton-prose tr:nth-child(2n) td {
-  background: color-mix(in srgb, var(--muted) 30%, transparent);
+  background: transparent;
 }
 .krypton-prose details {
   margin: 0.8em 0;
@@ -401,267 +570,98 @@
   font-weight: 500;
 }
 .krypton-prose kbd {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.78em;
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
   padding: 0.15em 0.45em;
-  border: 1px solid var(--border);
-  border-bottom-width: 2px;
-  border-radius: 0.3em;
-  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface);
 }
 .krypton-prose input[type='checkbox'] {
   margin-right: 0.4em;
 }
 
-/* ------------------------------------------------------------------ */
-/*  Course workspace design layer.                                    */
-/*                                                                    */
-/*  Namespaced `krypton-course-*` on purpose. The tokens at the top of */
-/*  this file are consumed by every other page, so the course surface  */
-/*  and type scale are built on top of them rather than replacing      */
-/*  them. Nothing here leaks outside `pages/course`.                   */
-/* ------------------------------------------------------------------ */
-
-@keyframes krypton-course-rise {
-  from {
-    opacity: 0;
-    transform: translate3d(0, 12px, 0);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
+/* course */
 @layer components {
-  /* -- Surfaces ---------------------------------------------------- */
-  /* Three levels, no more. Depth is carried by tinted shadow and a
-     hairline ring instead of a hard 1px border, so nested panels stop
-     drawing competing outlines. */
-
-  .krypton-course-panel {
-    position: relative;
-    border-radius: 1rem;
-    background: var(--card);
-    box-shadow:
-      0 0 0 1px color-mix(in srgb, var(--border) 85%, transparent),
-      0 1px 2px -1px hsl(222 47% 11% / 0.07),
-      0 12px 28px -20px hsl(222 47% 11% / 0.25);
-  }
-
-  .dark .krypton-course-panel {
-    box-shadow:
-      0 0 0 1px color-mix(in srgb, var(--border) 95%, transparent),
-      inset 0 1px 0 0 hsl(210 40% 98% / 0.04);
+  .krypton-course-panel,
+  .krypton-course-hero {
+    border: 1px solid var(--line);
+    background: var(--surface);
+    box-shadow: var(--shadow-xs);
+    border-radius: var(--r-lg);
   }
 
   .krypton-course-inset {
-    border-radius: 0.75rem;
-    background: color-mix(in srgb, var(--muted) 48%, transparent);
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--border) 50%, transparent);
+    background: var(--surface-sunken);
+    border-radius: var(--r-md);
   }
 
-  .dark .krypton-course-inset {
-    background: color-mix(in srgb, var(--muted) 38%, transparent);
-  }
-
-  /* Ambient hero. Radial, off-centre and single-hue — a 45deg linear
-     fade is the tell-tale generic gradient. */
-  .krypton-course-hero {
-    position: relative;
-    overflow: hidden;
-    border-radius: 1.25rem;
-    background:
-      radial-gradient(125% 150% at 4% -14%, hsl(199 89% 48% / 0.2) 0%, transparent 60%),
-      radial-gradient(85% 130% at 104% 2%, hsl(186 84% 44% / 0.13) 0%, transparent 54%),
-      var(--card);
-    box-shadow:
-      0 0 0 1px color-mix(in srgb, var(--border) 80%, transparent),
-      0 2px 4px -2px hsl(222 47% 11% / 0.08),
-      0 24px 48px -32px hsl(199 60% 24% / 0.32);
-  }
-
-  .dark .krypton-course-hero {
-    background:
-      radial-gradient(125% 145% at 6% -10%, hsl(199 89% 48% / 0.16) 0%, transparent 58%),
-      radial-gradient(85% 130% at 102% 4%, hsl(186 84% 44% / 0.1) 0%, transparent 52%),
-      var(--card);
-    box-shadow:
-      0 0 0 1px color-mix(in srgb, var(--border) 95%, transparent),
-      inset 0 1px 0 0 hsl(210 40% 98% / 0.05);
-  }
-
-  /* Fine grain over ambient surfaces. Flat vector fills read sterile at
-     this size; the noise sits under content and never intercepts input. */
-  .krypton-course-grain::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    z-index: 0;
-    border-radius: inherit;
-    pointer-events: none;
-    opacity: 0.5;
-    mix-blend-mode: soft-light;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23g)' opacity='0.42'/%3E%3C/svg%3E");
-  }
-
-  .dark .krypton-course-grain::after {
-    opacity: 0.28;
-  }
-
-  /* Cursor-tracked edge light. Driven by --spot-x/--spot-y from JS. */
-  .krypton-course-spotlight::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    z-index: 0;
-    border-radius: inherit;
-    pointer-events: none;
-    opacity: 0;
-    transition: opacity 360ms ease;
-    background: radial-gradient(16rem 16rem at var(--spot-x, 50%) var(--spot-y, 0%), hsl(199 89% 48% / 0.18), transparent 70%);
-  }
-
+  .krypton-course-grain::after,
+  .krypton-course-spotlight::before,
   .krypton-course-spotlight[data-spotlight='on']::before {
-    opacity: 1;
+    content: none;
   }
 
-  /* Course identity monogram. Hue arrives as --mark-h from a stable hash
-     of the course id, held inside one cool band around the primary. */
   .krypton-course-mark {
-    color: hsl(var(--mark-h) 62% 34%);
-    background: hsl(var(--mark-h) 66% 48% / 0.16);
-    box-shadow: inset 0 0 0 1px hsl(var(--mark-h) 62% 46% / 0.26);
+    color: var(--brand-fg);
+    background: var(--brand-soft);
+    box-shadow: inset 0 0 0 1px var(--brand-line);
   }
-
-  .dark .krypton-course-mark {
-    color: hsl(var(--mark-h) 62% 76%);
-    background: hsl(var(--mark-h) 55% 62% / 0.15);
-    box-shadow: inset 0 0 0 1px hsl(var(--mark-h) 55% 62% / 0.24);
-  }
-
-  /* -- Typography -------------------------------------------------- */
-  /* The old pages jumped 3xl -> 2xl -> sm -> xs -> 11px -> 10px with
-     nothing in between, so section labels all collapsed onto one size. */
 
   .krypton-course-display {
-    font-size: clamp(1.625rem, 1.2rem + 1.7vw, 2.125rem);
+    font-size: var(--fs-2xl);
     font-weight: 600;
-    line-height: 1.14;
-    letter-spacing: -0.023em;
-    text-wrap: balance;
   }
 
   .krypton-course-title {
-    font-size: 1.0625rem;
+    font-size: var(--fs-xl);
     font-weight: 600;
-    line-height: 1.35;
-    letter-spacing: -0.012em;
   }
 
   .krypton-course-section {
-    font-size: 0.9375rem;
+    font-size: var(--fs-lg);
     font-weight: 600;
-    line-height: 1.4;
-    letter-spacing: -0.008em;
   }
 
-  /* Sparse editorial label. No uppercase — it is inert on CJK and only
-     mangles the occasional latin token. */
   .krypton-course-eyebrow {
-    font-size: 0.6875rem;
-    font-weight: 500;
-    line-height: 1.4;
-    letter-spacing: 0.1em;
-    color: var(--muted-foreground);
+    font-size: var(--fs-2xs);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--fg-subtle);
   }
 
   .krypton-course-meta {
-    font-size: 0.75rem;
-    line-height: 1.5;
-    color: var(--muted-foreground);
-    font-variant-numeric: tabular-nums;
+    font-size: var(--fs-xs);
+    color: var(--fg-subtle);
   }
 
-  /* Reading measure for chapter prose. */
   .krypton-course-measure {
-    max-width: 68ch;
+    max-width: 65ch;
   }
 
-  /* -- Motion ------------------------------------------------------ */
-  .krypton-course-rise {
-    animation: krypton-course-rise 460ms cubic-bezier(0.22, 1, 0.36, 1) both;
-    animation-delay: var(--rise-delay, 0ms);
-  }
-
-  /* -- Interaction ------------------------------------------------- */
-  .krypton-course-row {
-    border-radius: 0.625rem;
-    transition:
-      background-color 180ms ease,
-      box-shadow 180ms ease,
-      transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
-  }
-
-  .krypton-course-row:hover {
-    background: color-mix(in srgb, var(--muted) 62%, transparent);
-  }
-
-  .krypton-course-row:active {
-    transform: scale(0.994);
-  }
-
-  /* Selected directory row. A tinted fill plus an inset hairline, so the
-     active chapter reads as raised without adding a hard border that
-     would collide with the panel edge next to it. */
-  .krypton-course-active {
-    background: color-mix(in srgb, var(--primary) 7%, transparent);
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 22%, transparent);
-  }
-
-  .dark .krypton-course-active {
-    background: color-mix(in srgb, var(--primary) 13%, transparent);
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 30%, transparent);
-  }
-
-  .krypton-course-lift {
-    transition:
-      box-shadow 240ms ease,
-      transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
-  }
-
-  .krypton-course-lift:hover {
-    transform: translate3d(0, -2px, 0);
-    box-shadow:
-      0 0 0 1px color-mix(in srgb, var(--primary) 32%, transparent),
-      0 2px 4px -2px hsl(222 47% 11% / 0.1),
-      0 18px 36px -22px hsl(199 60% 24% / 0.34);
-  }
-
-  .dark .krypton-course-lift:hover {
-    box-shadow:
-      0 0 0 1px color-mix(in srgb, var(--primary) 42%, transparent),
-      inset 0 1px 0 0 hsl(210 40% 98% / 0.06);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
   .krypton-course-rise {
     animation: none;
   }
 
-  .krypton-course-row,
-  .krypton-course-lift,
-  .krypton-course-spotlight::before {
-    transition: none;
+  .krypton-course-row:hover,
+  .krypton-course-lift:hover {
+    border-color: var(--line-strong);
+    background: var(--surface-hover);
   }
 
   .krypton-course-row:active,
-  .krypton-course-lift:hover {
+  .krypton-course-lift {
     transform: none;
+  }
+
+  .krypton-course-active {
+    background: var(--surface-active);
+    box-shadow: inset 0 0 0 1px var(--line);
   }
 }
 
+/* anti-ai */
 .anti-ai-copy-marker {
   display: inline;
   inline-size: 0;
@@ -679,37 +679,54 @@
   }
 }
 
-/* Dark mode: override highlight.js code block background */
-.dark .hljs {
-  background: hsl(222 47% 12%);
-  color: hsl(210 40% 87%);
+/* highlight */
+.hljs {
+  color: var(--fg);
+  background: transparent;
 }
-.dark .hljs-keyword,
-.dark .hljs-selector-tag {
-  color: #ff7b72;
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-built_in {
+  color: var(--brand-fg);
 }
-.dark .hljs-string,
-.dark .hljs-addition {
-  color: #a5d6ff;
+.hljs-string,
+.hljs-addition,
+.hljs-regexp {
+  color: var(--success-fg);
 }
-.dark .hljs-comment,
-.dark .hljs-quote {
-  color: #8b949e;
+.hljs-number,
+.hljs-literal {
+  color: var(--orange-fg);
 }
-.dark .hljs-number,
-.dark .hljs-literal {
-  color: #79c0ff;
+.hljs-title,
+.hljs-section,
+.hljs-function .hljs-title {
+  color: var(--info-fg);
 }
-.dark .hljs-title,
-.dark .hljs-section,
-.dark .hljs-built_in {
-  color: #d2a8ff;
+.hljs-type,
+.hljs-name,
+.hljs-class .hljs-title {
+  color: var(--violet-fg);
 }
-.dark .hljs-type,
-.dark .hljs-name {
-  color: #7ee787;
+.hljs-attr,
+.hljs-attribute,
+.hljs-variable,
+.hljs-template-variable {
+  color: var(--warning-fg);
 }
-.dark .hljs-attr,
-.dark .hljs-attribute {
-  color: #79c0ff;
+.hljs-comment,
+.hljs-quote {
+  color: var(--fg-subtle);
+}
+.hljs-meta {
+  color: var(--fg-muted);
+}
+.hljs-deletion {
+  color: var(--danger-fg);
+}
+.hljs-emphasis {
+  font-style: italic;
+}
+.hljs-strong {
+  font-weight: 600;
 }

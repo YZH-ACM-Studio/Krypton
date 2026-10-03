@@ -35,7 +35,7 @@ export function StatsGroupFields({
 
   return (
     <div className="min-w-0 flex-1 space-y-1.5" role="group" aria-label="用户组">
-      <p className="text-xs text-muted-foreground">用户组</p>
+      <p className="text-xs text-fg-subtle">用户组</p>
       {options.length ? (
         <MultiSelect
           options={options}
@@ -49,9 +49,9 @@ export function StatsGroupFields({
           minHeight={40}
         />
       ) : (
-        <p className="text-sm text-muted-foreground">暂无用户组</p>
+        <p className="text-sm text-fg-muted">暂无用户组</p>
       )}
-      <p className="text-xs text-muted-foreground">{hint}</p>
+      <p className="text-xs text-fg-subtle">{hint}</p>
     </div>
   );
 }
@@ -75,7 +75,7 @@ export function StatsGroupFilterForm({
         <input key={name} type="hidden" name={name} value={value} />
       ))}
       <StatsGroupFields groups={groups} selectedIds={selectedIds} hint={hint} />
-      <Button type="submit" className="shrink-0">
+      <Button type="submit" variant="secondary" className="shrink-0">
         查看
       </Button>
     </form>

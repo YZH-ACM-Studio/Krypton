@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { BookMarked, ClipboardPlus, ExternalLink, Trophy } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
 import { MultiSelect } from '@/components/ui/multi-select';
+import { Panel } from '@/components/ui/panel';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 
 type ActivityKind = 'contest' | 'homework' | 'unknown';
@@ -201,7 +201,7 @@ function ChapterProblemSetPicker({
   );
 
   return (
-    <div className="space-y-3">
+    <div className="flex flex-col gap-3">
       <MultiSelect<ProblemSetOption>
         value={selected ? [selected] : []}
         onChange={(next) => {
@@ -229,7 +229,7 @@ function ChapterProblemSetPicker({
           minHeight={44}
         />
       ) : selected ? (
-        <p className="text-xs text-muted-foreground">未选阶段时，本章引用整本题集。</p>
+        <p className="text-xs text-fg-subtle">未选阶段时，本章引用整本题集。</p>
       ) : null}
     </div>
   );
@@ -257,16 +257,16 @@ export function ChapterLinks({
   quizNeedsSave: boolean;
 }) {
   return (
-    <div className="space-y-3">
-      <Card>
-        <CardContent className="space-y-3 p-4">
+    <div className="flex flex-col gap-3">
+      <Panel>
+        <div className="flex flex-col gap-3">
           <div className="flex items-start gap-3">
-            <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
+            <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-md bg-surface-active text-fg-subtle">
               <Trophy className="size-4" strokeWidth={1.75} />
             </span>
             <div className="min-w-0 flex-1">
-              <h3 className="text-sm font-medium">比赛与作业</h3>
-              <p className="mt-0.5 text-xs text-muted-foreground">把已经建好的比赛或作业挂到这一章，学生会在本章看到入口。</p>
+              <h3 className="text-sm font-semibold text-fg">比赛与作业</h3>
+              <p className="mt-0.5 text-xs text-fg-subtle">把已经建好的比赛或作业挂到这一章，学生会在本章看到入口。</p>
             </div>
           </div>
           <ChapterActivityPicker value={tids} onChange={onChangeTids} />
@@ -275,7 +275,7 @@ export function ChapterLinks({
               href="/contest/create"
               target="_blank"
               rel="noreferrer"
-              className="inline-flex min-h-11 items-center gap-1 font-medium text-primary hover:underline"
+              className="inline-flex min-h-11 items-center gap-1 font-medium text-brand-fg hover:underline"
             >
               去创建比赛
               <ExternalLink className="size-3" strokeWidth={1.75} />
@@ -284,52 +284,52 @@ export function ChapterLinks({
               href="/homework/create"
               target="_blank"
               rel="noreferrer"
-              className="inline-flex min-h-11 items-center gap-1 font-medium text-primary hover:underline"
+              className="inline-flex min-h-11 items-center gap-1 font-medium text-brand-fg hover:underline"
             >
               去创建作业
               <ExternalLink className="size-3" strokeWidth={1.75} />
             </a>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </Panel>
 
-      <Card>
-        <CardContent className="space-y-3 p-4">
+      <Panel>
+        <div className="flex flex-col gap-3">
           <div className="flex items-start gap-3">
-            <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
+            <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-md bg-surface-active text-fg-subtle">
               <BookMarked className="size-4" strokeWidth={1.75} />
             </span>
             <div className="min-w-0 flex-1">
-              <h3 className="text-sm font-medium">引用题集</h3>
-              <p className="mt-0.5 text-xs text-muted-foreground">题目仍留在题集里。可选若干阶段，留空则引用整集。</p>
+              <h3 className="text-sm font-semibold text-fg">引用题集</h3>
+              <p className="mt-0.5 text-xs text-fg-subtle">题目仍留在题集里。可选若干阶段，留空则引用整集。</p>
             </div>
           </div>
           <ChapterProblemSetPicker problemSetId={problemSetId} stageIds={stageIds} onChange={onChangeProblemSet} />
-        </CardContent>
-      </Card>
+        </div>
+      </Panel>
 
       <section data-course-slot="quiz">
         {canCreateQuiz ? (
-          <Card>
-            <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
+          <Panel as="div">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="min-w-0">
-                <h3 className="text-sm font-medium">本章小测</h3>
-                <p className="mt-0.5 text-xs text-muted-foreground">
+                <h3 className="text-sm font-semibold text-fg">本章小测</h3>
+                <p className="mt-0.5 text-xs text-fg-subtle">
                   {quizNeedsSave ? '请先保存课程修改，再创建小测。' : '用本章题目生成一份作业，发给课程可见班级。'}
                 </p>
               </div>
               {quizNeedsSave ? null : (
-                <Button asChild type="button" className="min-h-11 gap-1.5">
+                <Button asChild type="button" variant="secondary">
                   <a href={`/homework/create?fromCourse=${encodeURIComponent(courseId)}&chapter=${chapterId}`}>
-                    <ClipboardPlus className="size-4" strokeWidth={1.75} />
+                    <ClipboardPlus />
                     创建本章小测
                   </a>
                 </Button>
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </Panel>
         ) : !courseId ? (
-          <p className="text-sm text-muted-foreground">保存课程后可创建小测。</p>
+          <p className="text-sm text-fg-muted">保存课程后可创建小测。</p>
         ) : null}
       </section>
     </div>

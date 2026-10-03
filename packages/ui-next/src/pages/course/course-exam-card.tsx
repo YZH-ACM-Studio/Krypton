@@ -1,7 +1,7 @@
 import { Lock, Trophy } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+import { Panel } from '@/components/ui/panel';
 import type { CourseChapter, CourseExamBinding, CourseExamContestPreview } from './types';
 import {
   canEnterCourseExam,
@@ -11,10 +11,10 @@ import {
 } from './course-exam-watch';
 
 export {
-  COURSE_EXAM_ENTER_GRACE_MS,
   canEnterCourseExam,
   collectCourseExamVideos,
   computeCourseExamWatchState,
+  COURSE_EXAM_ENTER_GRACE_MS,
   isCourseExamEnterClosed,
 } from './course-exam-watch';
 export type { CourseExamWatchState } from './course-exam-watch';
@@ -71,50 +71,50 @@ export function CourseExamCard({
   );
 
   return (
-    <Card className={className}>
-      <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between">
+    <Panel className={className}>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex min-w-0 items-start gap-3">
-          <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
+          <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-md bg-surface-active text-fg-subtle">
             {canEnter ? <Trophy className="size-4" strokeWidth={1.75} /> : <Lock className="size-4" strokeWidth={1.75} />}
           </span>
           <div className="min-w-0">
-            <p className="text-xs text-muted-foreground">结业考试</p>
-            <h3 className="truncate text-sm font-medium">{title}</h3>
+            <p className="text-xs text-fg-subtle">结业考试</p>
+            <h3 className="truncate text-sm font-semibold text-fg">{title}</h3>
             {contest?.missing === true ? (
-              <p className="mt-2 text-sm text-muted-foreground">考试不存在</p>
+              <p className="mt-2 text-sm text-fg-muted">考试不存在</p>
             ) : canManage ? (
-              <p className="mt-2 text-sm text-muted-foreground">
+              <p className="mt-2 text-sm text-fg-muted">
                 {windowClosed ? '考试已结束。' : ''}
                 学生需看完规定视频后才能参加。预览不能交卷。
               </p>
             ) : judging ? (
-              <p className="mt-2 text-sm text-muted-foreground">已交卷，正在评测。</p>
+              <p className="mt-2 text-sm text-fg-muted">已交卷，正在评测。</p>
             ) : passed && paperFinalized ? (
-              <p className="mt-2 text-sm text-muted-foreground">
+              <p className="mt-2 text-sm text-fg-muted">
                 {contest?.examPassScore ? '已及格。' : '已交卷，不能再答。'}
               </p>
             ) : paperFinalized && canRetake ? (
-              <p className="mt-2 text-sm text-muted-foreground">
+              <p className="mt-2 text-sm text-fg-muted">
                 未及格{typeof contest?.examScore === 'number' ? `（${contest.examScore} 分）` : ''}，还可再考 {remainingAttempts} 次。
               </p>
             ) : paperFinalized ? (
-              <p className="mt-2 text-sm text-muted-foreground">
+              <p className="mt-2 text-sm text-fg-muted">
                 {contest?.examPassScore ? '未及格，不能再考。' : '已交卷，不能再答。'}
               </p>
             ) : !canEnter && windowClosed ? (
-              <p className="mt-2 text-sm text-muted-foreground">考试已结束</p>
+              <p className="mt-2 text-sm text-fg-muted">考试已结束</p>
             ) : showWatchLock ? (
               <>
-                <Badge variant="secondary" className="mt-2 font-normal">
+                <Badge tone="neutral" className="mt-2">
                   看完后才能参加考试
                 </Badge>
                 {noOpenVideos ? (
-                  <p className="mt-2 text-sm text-muted-foreground">老师还没开放视频，还不能参加考试</p>
+                  <p className="mt-2 text-sm text-fg-muted">老师还没开放视频，还不能参加考试</p>
                 ) : state.remaining > 0 ? (
-                  <p className="mt-2 text-sm text-muted-foreground">还需看完 {state.remaining} 个视频</p>
+                  <p className="mt-2 text-sm text-fg-muted">还需看完 {state.remaining} 个视频</p>
                 ) : null}
                 {listed.length ? (
-                  <ul className="mt-1 space-y-0.5 text-xs text-muted-foreground">
+                  <ul className="mt-1 space-y-0.5 text-xs text-fg-subtle">
                     {listed.map((video) => (
                       <li key={video.id} className="truncate">
                         {video.title}
@@ -128,28 +128,28 @@ export function CourseExamCard({
           </div>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
-          {canManage ? (
-            <Button asChild variant="outline" size="sm" className="h-9">
+          {contest?.missing === true ? null : canManage ? (
+            <Button asChild variant="secondary" size="sm">
               <a href={href}>预览考试</a>
             </Button>
           ) : paperFinalized ? (
             <>
-              <Button asChild variant="outline" size="sm" className="h-9">
+              <Button asChild variant="secondary" size="sm">
                 <a href={href}>查看答卷</a>
               </Button>
               {canRetake ? (
-                <Button asChild size="sm" className="h-9">
+                <Button asChild variant="primary" size="sm">
                   <a href={href}>再考一次</a>
                 </Button>
               ) : null}
             </>
           ) : canEnter ? (
-            <Button asChild size="sm" className="h-9">
+            <Button asChild variant="primary" size="sm">
               <a href={href}>进入考试</a>
             </Button>
           ) : null}
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </Panel>
   );
 }

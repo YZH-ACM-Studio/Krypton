@@ -1,35 +1,16 @@
 /**
- * Shared visual primitives for the course workspace.
- *
- * The course pages previously carried every section label at the same
- * `text-sm font-semibold`, so nothing ranked against anything else. These
- * primitives define the three levels the pages are allowed to use —
- * display (the subject), section (a block inside it), and meta — plus the
- * progress and identity marks that give each surface a focal point.
+ * Shared course primitives. Marks use one brand color; section headers
+ * match Panel. Hue is no longer derived from the course title.
  */
 import { type CSSProperties, type MouseEvent, type ReactNode, useCallback, useMemo, useState } from 'react';
 import { cn } from '@/lib/cn';
 
 type CssVarStyle<K extends string> = CSSProperties & Record<K, string | number>;
 
-/**
- * Deterministic accent for a course identity mark, kept inside one cool
- * band around the shared primary hue (199) so a wall of courses stays
- * scannable without turning into a rainbow of competing accents.
- */
-const MARK_HUES = [168, 182, 195, 205, 216, 226] as const;
-
-function stableHash(seed: string): number {
-  let hash = 0x811c9dc5;
-  for (let index = 0; index < seed.length; index += 1) {
-    hash ^= seed.charCodeAt(index);
-    hash = Math.imul(hash, 0x01000193) >>> 0;
-  }
-  return hash;
-}
-
+/** Signature kept for callers. Color is no longer chosen from the seed. */
 export function courseMarkHue(seed: string): number {
-  return MARK_HUES[stableHash(seed) % MARK_HUES.length];
+  void seed;
+  return 0;
 }
 
 /** First meaningful glyph of a title, used as the course monogram. */
@@ -50,22 +31,19 @@ export function CourseMark({
   className?: string;
   glyphClassName?: string;
 }) {
-  const style: CssVarStyle<'--mark-h'> = { '--mark-h': courseMarkHue(seed) };
+  void seed;
   return (
     <span
       aria-hidden="true"
-      style={style}
-      className={cn('krypton-course-mark grid shrink-0 place-items-center rounded-xl font-semibold', className)}
+      className={cn('grid shrink-0 place-items-center bg-brand-soft text-brand-fg rounded-lg font-semibold', className)}
     >
-      <span className={cn('translate-y-px leading-none', glyphClassName)}>{courseMarkGlyph(title)}</span>
+      <span className={cn('leading-none', glyphClassName)}>{courseMarkGlyph(title)}</span>
     </span>
   );
 }
 
 /**
- * Ring gauge. Used where progress is the focal point of a surface — the
- * old 1.5px inline bar made the most motivating number on the page the
- * smallest thing on it.
+ * Ring gauge for a single progress focal point.
  */
 export function CourseProgressRing({
   value,
@@ -95,7 +73,7 @@ export function CourseProgressRing({
       aria-label={label || `完成进度 ${clamped}%`}
     >
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90" aria-hidden="true">
-        <circle cx={size / 2} cy={size / 2} r={radius} fill="none" strokeWidth={thickness} className="stroke-muted" />
+        <circle cx={size / 2} cy={size / 2} r={radius} fill="none" strokeWidth={thickness} className="stroke-current text-line" />
         <circle
           cx={size / 2}
           cy={size / 2}
@@ -106,12 +84,12 @@ export function CourseProgressRing({
           strokeDasharray={circumference}
           strokeDashoffset={circumference * (1 - clamped / 100)}
           className={cn(
-            'transition-[stroke-dashoffset] duration-500 ease-out motion-reduce:transition-none',
-            complete ? 'stroke-emerald-500' : 'stroke-primary',
+            'stroke-current transition-[stroke-dashoffset] duration-(--dur-4) ease-(--ease-out) motion-reduce:transition-none',
+            complete ? 'text-success' : 'text-brand',
           )}
         />
       </svg>
-      <span className="absolute inset-0 grid place-items-center text-[0.6875rem] font-semibold tabular-nums leading-none">{clamped}</span>
+      <span className="absolute inset-0 grid place-items-center text-2xs font-semibold tabular leading-none">{clamped}</span>
     </div>
   );
 }
@@ -132,7 +110,7 @@ export function CourseProgressBar({
   const style: CSSProperties = { width: `${clamped}%` };
   return (
     <div
-      className={cn('h-1 overflow-hidden rounded-full bg-muted', trackClassName, className)}
+      className={cn('h-1 overflow-hidden rounded-full bg-surface-active', trackClassName, className)}
       role="progressbar"
       aria-valuemin={0}
       aria-valuemax={100}
@@ -141,8 +119,8 @@ export function CourseProgressBar({
     >
       <div
         className={cn(
-          'h-full rounded-full transition-[width] duration-500 ease-out motion-reduce:transition-none',
-          clamped >= 100 ? 'bg-emerald-500' : 'bg-primary',
+          'h-full rounded-full transition-[width] duration-(--dur-4) ease-(--ease-out) motion-reduce:transition-none',
+          clamped >= 100 ? 'bg-success' : 'bg-brand',
         )}
         style={style}
       />
@@ -151,9 +129,7 @@ export function CourseProgressBar({
 }
 
 /**
- * One section header treatment for the whole workspace. Sits exactly one
- * level under the display title, so blocks read as siblings of each other
- * and children of the subject.
+ * Section header aligned with Panel: title, optional count, description, action.
  */
 export function CourseSectionHeader({
   id,
@@ -178,20 +154,19 @@ export function CourseSectionHeader({
 }) {
   const Heading = level === 2 ? 'h2' : 'h3';
   return (
-    <div className={cn('flex items-start justify-between gap-4', className)}>
-      <div className="min-w-0">
-        <div className="flex items-center gap-2">
-          <span aria-hidden="true" className="h-3.5 w-[3px] shrink-0 rounded-full bg-primary/70" />
-          <Heading id={id} className="krypton-course-section min-w-0 truncate">
+    <div className={cn('flex min-h-12 flex-wrap items-center gap-x-4 gap-y-2 border-b border-line-subtle px-4 py-2.5', className)}>
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 items-center gap-2">
+          <Heading id={id} className="min-w-0 truncate text-sm font-semibold text-fg">
             {title}
           </Heading>
           {count !== undefined && count !== null ? (
-            <span className="krypton-course-meta rounded-md bg-muted px-1.5 py-0.5 text-[11px] leading-4">{count}</span>
+            <span className="rounded-sm bg-surface-active px-1.5 text-2xs text-fg-subtle tabular">{count}</span>
           ) : null}
         </div>
-        {description ? <p className="krypton-course-meta mt-1 pl-[11px] text-pretty">{description}</p> : null}
+        {description ? <p className="text-xs text-fg-subtle text-pretty">{description}</p> : null}
       </div>
-      {action ? <div className="shrink-0">{action}</div> : null}
+      {action ? <div className="flex shrink-0 items-center gap-2">{action}</div> : null}
     </div>
   );
 }

@@ -51,7 +51,7 @@ export function DateTime({ value, mode = 'datetime', fallback = '—', refreshIn
   const parsed = parseDate(value);
   if (!parsed) {
     return (
-      <time className={cn('text-muted-foreground', className)} {...rest}>
+      <time className={cn('text-fg-subtle tabular', className)} {...rest}>
         {fallback}
       </time>
     );
@@ -81,7 +81,7 @@ export function DateTime({ value, mode = 'datetime', fallback = '—', refreshIn
   }
 
   return (
-    <time dateTime={iso} title={title} className={className} {...rest}>
+    <time dateTime={iso} title={title} className={cn('tabular', className)} {...rest}>
       {display}
     </time>
   );
@@ -114,7 +114,7 @@ export function DateTimeRange({
   const a = parseDate(from);
   const b = parseDate(to);
   if (!a || !b) {
-    return <span className={cn('text-muted-foreground', className)}>{fallback}</span>;
+    return <span className={cn('text-fg-subtle', className)}>{fallback}</span>;
   }
   const precision = mode === 'date' ? 'date' : mode === 'datetime-sec' ? 'second' : 'minute';
   const aStr = formatDateTime(a, { precision });
@@ -126,7 +126,7 @@ export function DateTimeRange({
     if (aDate === bDate) {
       const bTimeOnly = bStr.slice(aDate.length).trim();
       return (
-        <time className={className} title={`${aStr} → ${bStr}`}>
+        <time className={cn('tabular', className)} title={`${aStr} → ${bStr}`}>
           {aStr}
           {separator}
           {bTimeOnly}
@@ -135,7 +135,7 @@ export function DateTimeRange({
     }
   }
   return (
-    <time className={className} title={`${aStr} → ${bStr}`}>
+    <time className={cn('tabular', className)} title={`${aStr} → ${bStr}`}>
       {aStr}
       {separator}
       {bStr}

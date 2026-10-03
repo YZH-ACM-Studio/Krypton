@@ -51,7 +51,7 @@ export interface MultiSelectProps<T> {
   maxItems?: number;
   disabled?: boolean;
   className?: string;
-  /** Trigger min-height to keep layout calm with no selection. */
+  /** Trigger min-height in pixels. Omitted uses `--control-lg`. */
   minHeight?: number;
 
   /* Form integration ───────────────────────────── */
@@ -74,9 +74,14 @@ function popoverStyle(box: AnchoredPopoverBox): CSSProperties {
     maxHeight: box.maxHeight,
     top: box.top,
     bottom: box.bottom,
-    zIndex: 250,
+    transformOrigin: box.side === 'top' ? 'bottom center' : 'top center',
   };
 }
+
+const menuSurface =
+  'z-50 rounded-lg border border-line bg-surface-raised text-fg shadow-pop ' +
+  'data-[state=open]:animate-[kr-pop-in_var(--dur-3)_var(--ease-out)] ' +
+  'data-[state=closed]:animate-[kr-pop-out_var(--dur-2)_var(--ease-in)]';
 
 /* ------------------------------------------------------------------ */
 /*  Main component                                                     */
@@ -97,7 +102,7 @@ export function MultiSelect<T>({
   maxItems,
   disabled,
   className,
-  minHeight = 40,
+  minHeight,
   name,
   valueFormat = 'csv',
 }: MultiSelectProps<T>) {
@@ -339,11 +344,14 @@ export function MultiSelect<T>({
       <div
         ref={triggerRef}
         className={cn(
-          'flex flex-wrap items-center gap-1 rounded-md border bg-background px-1.5 py-1 text-sm transition-colors',
-          open ? 'border-primary ring-2 ring-ring/30' : 'border-input',
-          disabled && 'pointer-events-none opacity-60',
+          'flex flex-wrap items-center gap-1 rounded-md border border-line-strong bg-surface px-1.5 py-1 text-sm text-fg shadow-xs',
+          'transition-[border-color,box-shadow] duration-(--dur-1) ease-(--ease-standard)',
+          !disabled && 'hover:border-fg-disabled focus-within:border-brand focus-within:outline-none focus-within:ring-3 focus-within:ring-ring/40',
+          open && !disabled && 'border-brand ring-3 ring-ring/40',
+          minHeight == null && 'min-h-(--control-lg)',
+          disabled && 'cursor-not-allowed bg-surface-sunken text-fg-disabled',
         )}
-        style={{ minHeight }}
+        style={minHeight == null ? undefined : { minHeight }}
         onClick={() => {
           if (!disabled) {
             openMenu();
@@ -358,6 +366,7 @@ export function MultiSelect<T>({
                 key={getKey(item)}
                 id={getKey(item)}
                 label={renderChip ? renderChip(item) : getLabel(item)}
+                disabled={disabled}
                 onRemove={() => removeItem(getKey(item))}
               />
             ))}
@@ -367,7 +376,7 @@ export function MultiSelect<T>({
         {/* Inline search input */}
         {!atMax ? (
           <div className="flex flex-1 min-w-[80px] items-center gap-1 px-1">
-            <Search className="size-3 text-muted-foreground/60" />
+            <Search className={cn('size-4 shrink-0', disabled ? 'text-fg-disabled' : 'text-fg-subtle')} />
             <input
               ref={inputRef}
               value={query}
@@ -379,15 +388,21 @@ export function MultiSelect<T>({
               onKeyDown={onInputKeyDown}
               onMouseDown={(e) => e.stopPropagation()}
               placeholder={value.length === 0 ? placeholder : ''}
-              className="flex-1 min-w-0 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+              className="min-w-0 flex-1 bg-transparent text-sm text-fg outline-none placeholder:text-fg-subtle disabled:cursor-not-allowed disabled:text-fg-disabled"
               disabled={disabled}
             />
           </div>
         ) : (
-          <span className="ml-auto text-[11px] text-muted-foreground">已达上限 {maxItems}</span>
+          <span className={cn('ml-auto text-2xs', disabled ? 'text-fg-disabled' : 'text-fg-subtle')}>已达上限 {maxItems}</span>
         )}
 
-        <ChevronDown className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform', open && 'rotate-180')} />
+        <ChevronDown
+          className={cn(
+            'size-4 shrink-0 transition-transform duration-(--dur-2) ease-(--ease-out)',
+            disabled ? 'text-fg-disabled' : 'text-fg-subtle',
+            open && 'rotate-180',
+          )}
+        />
       </div>
 
       {/* Hidden form input(s) */}
@@ -407,9 +422,9 @@ export function MultiSelect<T>({
         ? createPortal(
             <ScrollArea
               ref={popoverRef}
-              className="z-[250] rounded-md border bg-popover shadow-lg"
+              data-state="open"
+              className={menuSurface}
               style={popoverStyle(popoverBox)}
-              viewportClassName="p-1"
               onMouseDown={(e) => e.stopPropagation()}
               onKeyDown={(e) => {
                 e.stopPropagation();
@@ -419,12 +434,14 @@ export function MultiSelect<T>({
                 }
               }}
             >
+              {/* Pad the scroll content, not the max-height root, so the last row can scroll into view. */}
+              <div className="p-1">
               {loading ? (
-                <p className="flex items-center justify-center gap-2 py-3 text-xs text-muted-foreground">
+                <p className="flex items-center justify-center gap-2 py-3 text-xs text-fg-subtle">
                   <Loader2 className="size-3 animate-spin" /> 搜索中…
                 </p>
               ) : visibleOptions.length === 0 ? (
-                <p className="py-3 text-center text-xs text-muted-foreground">{emptyText}</p>
+                <p className="py-3 text-center text-xs text-fg-subtle">{emptyText}</p>
               ) : (
                 visibleOptions.map((item, i) => {
                   const k = getKey(item);
@@ -434,8 +451,9 @@ export function MultiSelect<T>({
                       key={k}
                       type="button"
                       className={cn(
-                        'flex w-full items-start gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors',
-                        highlightedIndex === i ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50',
+                        'flex min-h-(--control-md) w-full items-start gap-2 rounded-sm px-2 py-1.5 text-left text-sm text-fg',
+                        'transition-colors duration-(--dur-1) ease-(--ease-standard)',
+                        highlightedIndex === i ? 'bg-surface-hover' : 'hover:bg-surface-hover',
                       )}
                       onMouseEnter={() => setHighlightedIndex(i)}
                       onClick={(e) => {
@@ -446,7 +464,7 @@ export function MultiSelect<T>({
                       <span
                         className={cn(
                           'mt-0.5 inline-flex size-4 shrink-0 items-center justify-center rounded-sm border',
-                          selected ? 'border-primary bg-primary text-primary-foreground' : 'border-input',
+                          selected ? 'border-brand bg-brand text-on-brand' : 'border-line-strong bg-surface',
                         )}
                       >
                         {selected ? <Check className="size-3" /> : null}
@@ -457,7 +475,7 @@ export function MultiSelect<T>({
                         ) : (
                           <>
                             <span className="block truncate">{getLabel(item)}</span>
-                            {getDescription ? <span className="block truncate text-[11px] text-muted-foreground">{getDescription(item)}</span> : null}
+                            {getDescription ? <span className="block truncate text-2xs text-fg-subtle">{getDescription(item)}</span> : null}
                           </>
                         )}
                       </span>
@@ -465,6 +483,7 @@ export function MultiSelect<T>({
                   );
                 })
               )}
+              </div>
             </ScrollArea>,
             portalEl,
           )
@@ -477,8 +496,8 @@ export function MultiSelect<T>({
 /*  Chip (sortable)                                                    */
 /* ------------------------------------------------------------------ */
 
-function Chip({ id, label, onRemove }: { id: string; label: ReactNode; onRemove: () => void }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+function Chip({ id, label, onRemove, disabled = false }: { id: string; label: ReactNode; onRemove: () => void; disabled?: boolean }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id, disabled });
   const style: CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -490,7 +509,10 @@ function Chip({ id, label, onRemove }: { id: string; label: ReactNode; onRemove:
       style={style}
       {...attributes}
       {...listeners}
-      className="inline-flex max-w-full cursor-grab items-center gap-1 rounded-md border bg-muted/50 px-1.5 py-0.5 text-xs active:cursor-grabbing"
+      className={cn(
+        'inline-flex max-w-full items-center gap-1 rounded-sm bg-surface-active px-1.5 py-0.5 text-xs',
+        disabled ? 'text-fg-disabled' : 'cursor-grab text-fg active:cursor-grabbing',
+      )}
       onClick={(e) => e.stopPropagation()}
     >
       <span className="min-w-0 truncate">{label}</span>
@@ -502,7 +524,11 @@ function Chip({ id, label, onRemove }: { id: string; label: ReactNode; onRemove:
           onRemove();
         }}
         onPointerDown={(e) => e.stopPropagation()}
-        className="ml-0.5 inline-flex size-3.5 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+        className={cn(
+          'ml-0.5 inline-flex size-3.5 shrink-0 items-center justify-center rounded-sm',
+          disabled ? 'text-fg-disabled' : 'text-fg-subtle hover:bg-surface-hover hover:text-fg',
+        )}
+        disabled={disabled}
         aria-label="移除"
       >
         <X className="size-3" />

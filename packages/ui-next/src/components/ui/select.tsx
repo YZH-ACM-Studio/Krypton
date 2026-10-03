@@ -99,20 +99,22 @@ export const SelectTrigger = React.forwardRef<React.ElementRef<typeof RSelect.Tr
       <RSelect.Trigger
         ref={ref}
         className={cn(
-          'flex w-full items-center justify-between gap-2 rounded-md border',
-          'border-input bg-background text-sm',
-          'placeholder:text-muted-foreground',
-          'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background',
-          'disabled:cursor-not-allowed disabled:opacity-50',
+          'group flex w-full items-center justify-between gap-2 rounded-md border border-line-strong bg-surface px-2.5 text-left text-fg shadow-xs',
+          'transition-[border-color,box-shadow] duration-(--dur-1) ease-(--ease-standard)',
+          'placeholder:text-fg-subtle data-[placeholder]:text-fg-subtle',
+          'hover:border-fg-disabled',
+          'focus-visible:border-brand focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40',
+          'aria-invalid:border-danger aria-invalid:focus-visible:ring-danger/25',
+          'disabled:cursor-not-allowed disabled:bg-surface-sunken disabled:text-fg-disabled',
           '[&>span]:line-clamp-1 [&>span]:text-left',
-          size === 'sm' ? 'px-2 py-1.5' : 'px-3 py-2',
+          size === 'sm' ? 'h-(--control-sm) text-xs' : 'h-(--control-md) text-sm',
           className,
         )}
         {...props}
       >
         {children}
         <RSelect.Icon asChild>
-          <ChevronDown className="size-4 shrink-0 text-muted-foreground/70" />
+          <ChevronDown className="size-4 shrink-0 text-fg-subtle transition-transform duration-(--dur-2) ease-(--ease-out) group-data-[state=open]:rotate-180" />
         </RSelect.Icon>
       </RSelect.Trigger>
     );
@@ -130,23 +132,26 @@ export const SelectContent = React.forwardRef<React.ElementRef<typeof RSelect.Co
           position={position}
           sideOffset={4}
           className={cn(
-            'relative z-[250] max-h-[var(--radix-select-content-available-height)] min-w-[8rem] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md',
+            'relative z-50 max-h-(--radix-select-content-available-height) min-w-[8rem] overflow-hidden rounded-lg border border-line bg-surface-raised p-1 text-fg shadow-pop',
+            'origin-(--radix-select-content-transform-origin)',
+            'data-[state=open]:animate-[kr-pop-in_var(--dur-3)_var(--ease-out)]',
+            'data-[state=closed]:animate-[kr-pop-out_var(--dur-2)_var(--ease-in)]',
             // Match the trigger width when using popper positioning.
-            position === 'popper' && 'w-[var(--radix-select-trigger-width)] min-w-[var(--radix-select-trigger-width)]',
+            position === 'popper' && 'w-(--radix-select-trigger-width) min-w-(--radix-select-trigger-width)',
             className,
           )}
           {...props}
         >
-          <RSelect.ScrollUpButton className="flex h-6 cursor-default items-center justify-center bg-popover">
+          <RSelect.ScrollUpButton className="flex h-6 cursor-default items-center justify-center bg-surface-raised text-fg-subtle">
             <ChevronUp className="size-4" />
           </RSelect.ScrollUpButton>
           <RSelect.Viewport
             // Do not lock height to the trigger — that shows one option on short 320/768 selects.
-            className={cn('p-1', position === 'popper' && 'w-full min-w-[var(--radix-select-trigger-width)]')}
+            className={cn(position === 'popper' && 'w-full min-w-(--radix-select-trigger-width)')}
           >
             {children}
           </RSelect.Viewport>
-          <RSelect.ScrollDownButton className="flex h-6 cursor-default items-center justify-center bg-popover">
+          <RSelect.ScrollDownButton className="flex h-6 cursor-default items-center justify-center bg-surface-raised text-fg-subtle">
             <ChevronDown className="size-4" />
           </RSelect.ScrollDownButton>
         </RSelect.Content>
@@ -159,27 +164,53 @@ export interface SelectItemProps extends Omit<React.ComponentPropsWithoutRef<typ
   value: string;
 }
 
+function OptionHint({ hint }: { hint: React.ReactNode }) {
+  return <span className="ml-auto shrink-0 text-xs text-fg-subtle">{hint}</span>;
+}
+
+function OptionBody({ label, hint }: { label: React.ReactNode; hint?: React.ReactNode }) {
+  const showHint = hint !== undefined && hint !== null && hint !== false;
+  return (
+    <>
+      {label}
+      {showHint ? <OptionHint hint={hint} /> : null}
+    </>
+  );
+}
+
+function isOptionBody(node: React.ReactNode): node is React.ReactElement<{ label: React.ReactNode; hint?: React.ReactNode }> {
+  return React.isValidElement(node) && node.type === OptionBody;
+}
+
 export const SelectItem = React.forwardRef<React.ElementRef<typeof RSelect.Item>, SelectItemProps>(
   ({ className, children, value, ...props }, ref) => {
     // Empty-string values are remapped (see file header) so callers don't have
-    // to know about the sentinel.
+    // to know about the sentinel. A hint sits outside ItemText so the trigger
+    // mirrors only the label.
     const radixValue = value === '' ? EMPTY_VALUE : value;
+    const optionBody = isOptionBody(children) ? children.props : null;
+    const label = optionBody ? optionBody.label : children;
+    const hint = optionBody?.hint;
+    const showHint = hint !== undefined && hint !== null && hint !== false;
     return (
       <RSelect.Item
         ref={ref}
         value={radixValue}
         className={cn(
-          'relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 pl-2 pr-8 text-sm outline-none',
-          'focus:bg-accent focus:text-accent-foreground',
-          'data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
+          'relative flex h-(--control-md) w-full min-w-0 cursor-default select-none items-center gap-2 overflow-hidden rounded-sm px-2 pr-8 text-sm text-fg outline-none',
+          // ItemText drops className, so the label span is truncated from the row.
+          '[&>span:first-child]:min-w-0 [&>span:first-child]:flex-1 [&>span:first-child]:truncate',
+          'data-[highlighted]:bg-surface-hover',
+          'data-[disabled]:pointer-events-none data-[disabled]:text-fg-disabled',
           className,
         )}
         {...props}
       >
-        <RSelect.ItemText>{children}</RSelect.ItemText>
-        <span className="absolute right-2 flex size-3.5 items-center justify-center">
+        <RSelect.ItemText>{label}</RSelect.ItemText>
+        {showHint ? <OptionHint hint={hint} /> : null}
+        <span className="absolute right-2 flex size-4 items-center justify-center">
           <RSelect.ItemIndicator>
-            <Check className="size-3.5 text-primary" />
+            <Check className="size-4 text-brand-fg" />
           </RSelect.ItemIndicator>
         </span>
       </RSelect.Item>
@@ -190,20 +221,20 @@ export const SelectItem = React.forwardRef<React.ElementRef<typeof RSelect.Item>
 export const SelectGroup = RSelect.Group;
 export const SelectLabel = React.forwardRef<React.ElementRef<typeof RSelect.Label>, React.ComponentPropsWithoutRef<typeof RSelect.Label>>(
   ({ className, ...props }, ref) => {
-    return <RSelect.Label ref={ref} className={cn('px-2 py-1.5 text-xs font-medium text-muted-foreground', className)} {...props} />;
+    return <RSelect.Label ref={ref} className={cn('px-2 py-1.5 text-xs font-medium text-fg-subtle', className)} {...props} />;
   },
 );
 
 export const SelectSeparator = React.forwardRef<React.ElementRef<typeof RSelect.Separator>, React.ComponentPropsWithoutRef<typeof RSelect.Separator>>(
   ({ className, ...props }, ref) => {
-    return <RSelect.Separator ref={ref} className={cn('-mx-1 my-1 h-px bg-muted', className)} {...props} />;
+    return <RSelect.Separator ref={ref} className={cn('-mx-1 my-1 h-px bg-line', className)} {...props} />;
   },
 );
 
 /* ─── one-liner shortcut ─── */
 
 export type SimpleSelectOption =
-  | { value: string; label: React.ReactNode; disabled?: boolean }
+  | { value: string; label: React.ReactNode; hint?: React.ReactNode; disabled?: boolean }
   | { type: 'separator' }
   | { type: 'label'; label: React.ReactNode };
 
@@ -225,6 +256,20 @@ export interface SimpleSelectProps {
   id?: string;
   /** Forwarded to the trigger for accessibility. */
   ariaLabel?: string;
+  /** Marks the trigger invalid. Does not change the submitted value. */
+  invalid?: boolean;
+}
+
+function renderSelectOption(
+  option: { value: string; label: React.ReactNode; hint?: React.ReactNode; disabled?: boolean },
+  key: string,
+) {
+  const showHint = option.hint !== undefined && option.hint !== null && option.hint !== false;
+  return (
+    <SelectItem key={key} value={option.value} disabled={option.disabled}>
+      {showHint ? <OptionBody label={option.label} hint={option.hint} /> : option.label}
+    </SelectItem>
+  );
 }
 
 export function renderSimpleSelectOptions(options: SimpleSelectOption[]): React.ReactNode[] {
@@ -243,11 +288,7 @@ export function renderSimpleSelectOptions(options: SimpleSelectOption[]): React.
       while (itemIndex < options.length) {
         const item = options[itemIndex];
         if ('type' in item) break;
-        items.push(
-          <SelectItem key={`item-${itemIndex}-${item.value}`} value={item.value} disabled={item.disabled}>
-            {item.label}
-          </SelectItem>,
-        );
+        items.push(renderSelectOption(item, `item-${itemIndex}-${item.value}`));
         itemIndex++;
       }
       nodes.push(
@@ -259,11 +300,7 @@ export function renderSimpleSelectOptions(options: SimpleSelectOption[]): React.
       index = itemIndex;
       continue;
     }
-    nodes.push(
-      <SelectItem key={`item-${index}-${option.value}`} value={option.value} disabled={option.disabled}>
-        {option.label}
-      </SelectItem>,
-    );
+    nodes.push(renderSelectOption(option, `item-${index}-${option.value}`));
     index++;
   }
   return nodes;
@@ -287,10 +324,11 @@ export function SimpleSelect({
   size = 'md',
   id,
   ariaLabel,
+  invalid,
 }: SimpleSelectProps) {
   return (
     <Select name={name} required={required} disabled={disabled} value={value} defaultValue={defaultValue} onValueChange={onValueChange}>
-      <SelectTrigger size={size} id={id} className={className} aria-label={ariaLabel}>
+      <SelectTrigger size={size} id={id} className={className} aria-label={ariaLabel} aria-invalid={invalid ? true : undefined}>
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
       <SelectContent className={contentClassName}>{renderSimpleSelectOptions(options)}</SelectContent>

@@ -131,7 +131,6 @@ export function SendProblemToCph({ href, compact = false }: { href: string; comp
         type="button"
         size="sm"
         variant="outline"
-        className="gap-1"
         disabled={!task || status === 'sending'}
         onClick={() => {
           if (!task) return;
@@ -150,7 +149,7 @@ export function SendProblemToCph({ href, compact = false }: { href: string; comp
         {status === 'sending' ? '正在发送…' : status === 'sent' ? '已发送到 CPH' : status === 'failed' ? '发送失败' : '发送到 CPH'}
       </Button>
       {compact && status !== 'failed' && !loadError ? null : (
-        <p className="max-w-72 text-[11px] leading-4 text-muted-foreground sm:text-right">
+        <p className="max-w-72 text-2xs text-fg-subtle sm:text-right">
           {status === 'failed'
             ? sendError || '本机没有收到题目。请先打开 VS Code 里的 CPH。'
             : loadError || 'Competitive Companion 请右键绿色加号，选择 Parse with → Hydro。也可点按钮直接发到本机 CPH。'}
@@ -202,7 +201,6 @@ export function CompetitiveCompanionBridge({
           type="button"
           size="sm"
           variant="outline"
-          className={compact ? 'h-7 gap-1 px-2 text-xs' : 'gap-1'}
           disabled={status === 'sending'}
           title={status === 'failed' ? error || '本机没有收到题目。请先打开 VS Code 里的 CPH。' : undefined}
           onClick={() => {
@@ -255,7 +253,6 @@ export function ContestCompanionBridge({
         type="button"
         size="sm"
         variant="outline"
-        className="gap-1"
         disabled={status === 'sending'}
         onClick={() => {
           setStatus('sending');
@@ -276,7 +273,7 @@ export function ContestCompanionBridge({
         <Download className="size-3.5" />
         {status === 'sending' ? '正在导入…' : status === 'sent' ? '已整场导入' : status === 'failed' ? '导入失败' : '整场导入 CPH'}
       </Button>
-      <p className="max-w-72 text-[11px] leading-4 text-muted-foreground sm:text-right">
+      <p className="max-w-72 text-2xs text-fg-subtle sm:text-right">
         {detail || '仅个人 ACM / IOI 赛可以把整场题目一次发到本机 CPH。请先打开 CPH。'}
       </p>
     </div>
@@ -307,25 +304,25 @@ export function CompanionSubmitBack({
 
   return (
     <>
-      <Button type="button" size="sm" variant="outline" className="gap-1" onClick={() => setOpen(true)}>
+      <Button type="button" size="sm" variant="outline" onClick={() => setOpen(true)}>
         <Upload className="size-3.5" />
         回传提交
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent>
           <DialogHeader>
             <DialogTitle>从 CPH 回传提交</DialogTitle>
           </DialogHeader>
-          <DialogBody className="space-y-3 px-6 py-4">
-            <p className="text-sm text-muted-foreground">
+          <DialogBody className="flex flex-col gap-5">
+            <p className="text-sm text-fg-muted">
               CPH 自带的 Submit 只支持 Codeforces / CSES，不会把代码交到本站。请选择本题在 CPH
               里打开的源码文件，本站会用当前登录会话提交到原来的评测入口。
             </p>
-            <label className="block space-y-1 text-sm">
+            <label className="flex flex-col gap-1.5 text-sm">
               <span className="font-medium">源码文件</span>
               <input
                 type="file"
-                className="block w-full text-xs file:mr-2 file:rounded-md file:border file:border-border file:bg-background file:px-2 file:py-1"
+                className="block w-full text-xs file:mr-2 file:rounded-md file:border file:border-line file:bg-bg file:px-2 file:py-1"
                 onChange={(event) => {
                   const file = event.target.files?.[0];
                   setError(null);
@@ -346,9 +343,9 @@ export function CompanionSubmitBack({
                   );
                 }}
               />
-              {fileName ? <span className="text-xs text-muted-foreground">{fileName}</span> : null}
+              {fileName ? <span className="text-xs text-fg-subtle">{fileName}</span> : null}
             </label>
-            <label className="block space-y-1 text-sm">
+            <label className="flex flex-col gap-1.5 text-sm">
               <span className="font-medium">语言</span>
               <SimpleSelect
                 value={lang}
@@ -357,13 +354,14 @@ export function CompanionSubmitBack({
                 placeholder="选择语言"
               />
             </label>
-            {error ? <p className="text-sm text-destructive">{error}</p> : null}
+            {error ? <p className="text-sm text-danger-fg">{error}</p> : null}
             <div className="flex justify-end gap-2">
-              <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={busy}>
+              <Button type="button" variant="secondary" onClick={() => setOpen(false)} disabled={busy}>
                 取消
               </Button>
               <Button
                 type="button"
+                variant="primary"
                 disabled={busy}
                 onClick={() => {
                   setBusy(true);

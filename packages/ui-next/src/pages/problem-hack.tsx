@@ -1,9 +1,11 @@
-import { motion } from 'motion/react';
 import { ArrowLeft, FileUp, Flag, Send, Sparkles } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
+import { FormField } from '@/components/ui/form';
+import { Page, PageHeader } from '@/components/ui/page';
+import { DescriptionList, Panel } from '@/components/ui/panel';
+import { Textarea } from '@/components/ui/textarea';
 import { useBootstrap } from '@/lib/bootstrap';
 import { replaceRouteTokens } from '@/lib/format';
 
@@ -29,120 +31,98 @@ export function ProblemHackPage() {
   const problemUrl = replaceRouteTokens(bs.urls.problemDetail, { PID: String(pid || '') });
 
   return (
-    <motion.div
-      className="grid w-full min-w-0 gap-5 lg:grid-cols-[1fr_260px]"
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-    >
-      <main className="min-w-0 space-y-4">
-        <div className="flex min-w-0 flex-wrap items-center gap-3">
-          <Button asChild variant="ghost" size="icon" className="shrink-0">
-            <a href={problemUrl}>
-              <ArrowLeft className="size-4" />
+    <Page width="form">
+      <PageHeader
+        title="Hack 提交"
+        description={`#${String(rid).slice(-8)} · ${pdoc.title || data.title || '题目'}`}
+        meta={<Badge variant="outline">{pdoc.pid || pdoc.docId || 'Problem'}</Badge>}
+        actions={
+          <Button asChild variant="ghost" size="sm" iconOnly>
+            <a href={problemUrl} aria-label="返回题目">
+              <ArrowLeft />
             </a>
           </Button>
-          <div className="min-w-0 flex-1">
-            <h1 className="truncate text-xl font-semibold">Hack 提交</h1>
-            <p className="mt-1 min-w-0 break-words text-sm text-muted-foreground">
-              #{String(rid).slice(-8)} · {pdoc.title || data.title || '题目'}
-            </p>
-          </div>
-          <Badge variant="outline" className="ml-auto shrink-0">
-            {pdoc.pid || pdoc.docId || 'Problem'}
-          </Badge>
-        </div>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Flag className="size-4 text-primary" />
+        }
+      />
+      {/* ds-allow DS004: sidebar column uses the detail-page grid, rem and fr only */}
+      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
+        <Panel
+          title={
+            <span className="inline-flex items-center gap-2">
+              <Flag className="size-4 text-fg-subtle" />
               构造 Hack 数据
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <form method="post" encType="multipart/form-data" className="space-y-5">
-              <div className="space-y-2">
-                <label htmlFor="hack-input" className="text-sm font-medium">
-                  输入数据
-                </label>
-                <textarea
-                  id="hack-input"
-                  name="input"
-                  rows={18}
-                  autoFocus
-                  spellCheck={false}
-                  className="min-w-0 w-full resize-y rounded-md border bg-background p-4 font-mono text-sm leading-6 focus:outline-none focus:ring-2 focus:ring-ring"
-                  placeholder="在这里粘贴或编写能卡掉目标提交的输入数据"
-                />
-              </div>
+            </span>
+          }
+        >
+          <form method="post" encType="multipart/form-data" className="flex flex-col gap-5">
+            <FormField label="输入数据" htmlFor="hack-input">
+              <Textarea
+                id="hack-input"
+                name="input"
+                rows={18}
+                autoFocus
+                spellCheck={false}
+                className="font-mono"
+                placeholder="在这里粘贴或编写能卡掉目标提交的输入数据"
+              />
+            </FormField>
 
-              <div className="grid min-w-0 gap-4 rounded-md border bg-muted/30 p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
-                <div className="min-w-0">
-                  <label htmlFor="hack-file" className="flex min-w-0 items-center gap-2 text-sm font-medium">
-                    <FileUp className="size-4 shrink-0 text-primary" />
-                    上传输入文件
-                  </label>
-                  <p className="mt-1 text-xs text-muted-foreground">适合较大的测试数据；如果同时填写文本输入，服务端会优先使用上传文件。</p>
-                </div>
-                <input
-                  id="hack-file"
-                  type="file"
-                  name="file"
-                  className="min-w-0 max-w-full text-sm file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-primary-foreground"
-                />
-              </div>
-
-              <label className="flex items-start gap-3 rounded-md border p-4">
-                <Checkbox name="autoOrganizeInput" className="mt-1" />
-                <span>
-                  <span className="flex items-center gap-2 text-sm font-medium">
-                    <Sparkles className="size-4 text-primary" />
-                    自动整理输入格式
-                  </span>
-                  <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                    自动调整换行并移除部分多余空白，适合从网页或文档复制来的数据。
-                  </span>
+            <FormField
+              htmlFor="hack-file"
+              label={
+                <span className="inline-flex items-center gap-2">
+                  <FileUp className="size-4 shrink-0 text-fg-subtle" />
+                  上传输入文件
                 </span>
-              </label>
+              }
+              hint="适合较大的测试数据；如果同时填写文本输入，服务端会优先使用上传文件。"
+            >
+              <input
+                id="hack-file"
+                type="file"
+                name="file"
+                className="min-w-0 max-w-full text-sm file:mr-3 file:rounded-md file:border file:border-line file:bg-surface file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-fg"
+              />
+            </FormField>
 
-              <div className="flex justify-end">
-                <Button type="submit" className="gap-2">
-                  <Send className="size-4" />
-                  提交 Hack
-                </Button>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
-      </main>
+            <Checkbox
+              name="autoOrganizeInput"
+              className="mt-1"
+              label={
+                <span className="inline-flex items-center gap-2 font-medium">
+                  <Sparkles className="size-4 text-fg-subtle" />
+                  自动整理输入格式
+                </span>
+              }
+              description="自动调整换行并移除部分多余空白，适合从网页或文档复制来的数据。"
+            />
 
-      <aside className="space-y-4">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">目标信息</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3 text-sm">
-            <InfoRow label="题目" value={pdoc.title || data.title || '—'} />
-            <InfoRow label="题号" value={String(pdoc.pid || pdoc.docId || '—')} />
-            <InfoRow label="目标提交" value={String(rid || '—')} />
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4 text-sm leading-6 text-muted-foreground">
-            Hack 数据会作为一次特殊提交进入评测队列。请只提交用于证明目标程序错误的最小输入。
-          </CardContent>
-        </Card>
-      </aside>
-    </motion.div>
-  );
-}
+            <div className="flex justify-end">
+              <Button type="submit" variant="primary">
+                <Send />
+                提交 Hack
+              </Button>
+            </div>
+          </form>
+        </Panel>
 
-function InfoRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex min-w-0 items-start justify-between gap-3">
-      <span className="shrink-0 text-muted-foreground">{label}</span>
-      <span className="min-w-0 break-words text-right font-medium">{value}</span>
-    </div>
+        <aside className="flex min-w-0 flex-col gap-4">
+          <Panel title="目标信息">
+            <DescriptionList
+              items={[
+                { term: '题目', detail: pdoc.title || data.title || '—' },
+                { term: '题号', detail: String(pdoc.pid || pdoc.docId || '—') },
+                { term: '目标提交', detail: String(rid || '—') },
+              ]}
+            />
+          </Panel>
+          <Panel>
+            <p className="text-sm text-fg-muted text-pretty">
+              Hack 数据会作为一次特殊提交进入评测队列。请只提交用于证明目标程序错误的最小输入。
+            </p>
+          </Panel>
+        </aside>
+      </div>
+    </Page>
   );
 }

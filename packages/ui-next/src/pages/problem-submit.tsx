@@ -10,14 +10,19 @@
  * editor lives here with full-height real estate.
  */
 import type { ClientStructuredCodeSegment } from '@hydrooj/common';
-import { ChevronRight, Loader2, Play, Send } from 'lucide-react';
-import { motion } from 'motion/react';
+import { Play, Send } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { KryptonIDE, PretestResultInline } from '@/components/krypton-ide';
 import { StructuredRegionInputs } from '@/components/structured-region-inputs';
+import { Alert } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
+import { Breadcrumb } from '@/components/ui/breadcrumb';
 import { Button } from '@/components/ui/button';
+import { FormField, FormRow } from '@/components/ui/form';
+import { Page, PageHeader } from '@/components/ui/page';
+import { Panel } from '@/components/ui/panel';
 import { SimpleSelect } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { useBootstrap } from '@/lib/bootstrap';
 import { replaceRouteTokens } from '@/lib/format';
@@ -205,10 +210,12 @@ export function ProblemSubmitPage() {
   }, [lang, langKey]);
 
   const [submitting, setSubmitting] = useState(false);
+  const [showSubmitLoading, setShowSubmitLoading] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [selfTestInput, setSelfTestInput] = useState('');
   const [selfTestExpected, setSelfTestExpected] = useState('');
   const [selfTestRunning, setSelfTestRunning] = useState(false);
+  const [showSelfTestLoading, setShowSelfTestLoading] = useState(false);
   const [selfTestError, setSelfTestError] = useState('');
   const [selfTestResult, setSelfTestResult] = useState<PretestResult | null>(null);
   const [selfTestResultTab, setSelfTestResultTab] = useState<PretestResultTab>('output');
@@ -220,6 +227,22 @@ export function ProblemSubmitPage() {
     },
     [],
   );
+  useEffect(() => {
+    if (!submitting) {
+      setShowSubmitLoading(false);
+      return undefined;
+    }
+    const timer = setTimeout(() => setShowSubmitLoading(true), 300);
+    return () => clearTimeout(timer);
+  }, [submitting]);
+  useEffect(() => {
+    if (!selfTestRunning) {
+      setShowSelfTestLoading(false);
+      return undefined;
+    }
+    const timer = setTimeout(() => setShowSelfTestLoading(true), 300);
+    return () => clearTimeout(timer);
+  }, [selfTestRunning]);
 
   const handleSelfTest = useCallback(async () => {
     if (!compiledStructuredAnswer || selfTestRunning) return;
@@ -334,179 +357,178 @@ export function ProblemSubmitPage() {
     }
   }, [code, lang, tid, practiceContextId, submitUrl, submitting, bs.urls.recordDetail]);
 
-  return (
-    <motion.div className="w-full min-w-0 space-y-4" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
-      {/* Breadcrumb */}
-      <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-        {tdoc && contestLetter ? (
-          <>
-            <a href={tdoc.rule === 'homework' ? bs.urls.homework : bs.urls.contests} className="hover:text-primary">
-              {tdoc.rule === 'homework' ? '作业' : '比赛'}
-            </a>
-            <ChevronRight className="size-3" />
-            <a
-              href={replaceRouteTokens(tdoc.rule === 'homework' ? bs.urls.homeworkDetail : bs.urls.contestDetail, { TID: tid! })}
-              className="min-w-0 truncate hover:text-primary"
-            >
-              {tdoc.title || '比赛'}
-            </a>
-          </>
-        ) : (
-          <a href={bs.urls.problems} className="hover:text-primary">
-            题库
-          </a>
-        )}
-        <ChevronRight className="size-3" />
-        <a href={problemDetailUrl} className="min-w-0 truncate hover:text-primary">
-          {title}
-        </a>
-        <ChevronRight className="size-3" />
-        <span className="text-foreground">提交代码</span>
-      </div>
+  const breadcrumb = [
+    ...(tdoc && contestLetter
+      ? [
+          {
+            label: tdoc.rule === 'homework' ? '作业' : '比赛',
+            href: tdoc.rule === 'homework' ? bs.urls.homework : bs.urls.contests,
+          },
+          {
+            label: tdoc.title || '比赛',
+            href: replaceRouteTokens(tdoc.rule === 'homework' ? bs.urls.homeworkDetail : bs.urls.contestDetail, { TID: tid! }),
+          },
+        ]
+      : [{ label: '题库', href: bs.urls.problems }]),
+    { label: title, href: problemDetailUrl },
+    { label: '提交代码' },
+  ];
+  // Simple mode reads krypton:ide-lang once and ignores later defaultLang changes.
+  // Seed the key before this render's editor mounts, and remount via key={lang}.
+  if (!isStructuredAnswer) {
+    try {
+      if (localStorage.getItem('krypton:ide-lang') !== lang) localStorage.setItem('krypton:ide-lang', lang);
+    } catch {
+      /* Highlighting falls back to defaultLang only when this key is unreadable. */
+    }
+  }
 
-      {/* Header */}
-      <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className="text-xl font-semibold">{isStructuredAnswer ? '提交作答' : '提交代码'}</h1>
-          <p className="min-w-0 break-words text-sm text-muted-foreground">{title}</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button asChild variant="outline" size="sm">
+  return (
+    <Page width="form">
+      <PageHeader
+        breadcrumb={<Breadcrumb items={breadcrumb} />}
+        title={isStructuredAnswer ? '提交作答' : '提交代码'}
+        description={<span className="break-words">{title}</span>}
+        meta={
+          config.time || config.memory ? (
+            <>
+              {config.time ? (
+                <Badge variant="outline" size="sm">
+                  {config.time}
+                </Badge>
+              ) : null}
+              {config.memory ? (
+                <Badge variant="outline" size="sm">
+                  {config.memory}
+                </Badge>
+              ) : null}
+            </>
+          ) : undefined
+        }
+        actions={
+          <Button asChild variant="secondary" size="sm">
             <a href={problemDetailUrl}>返回题面</a>
           </Button>
-        </div>
-      </div>
+        }
+      />
 
-      {/* Full-width editor — the page is dedicated to pasting + submitting.
-          The statement is one click away via "返回题面". */}
-      <div className="space-y-3 min-w-0">
-        {/* Language picker + meta */}
-        <div className="flex flex-wrap items-center gap-2">
-          <label className="text-xs text-muted-foreground">语言</label>
-          {isStructuredAnswer ? (
-            <Badge variant="outline">{textProgramFill ? '文本比对' : lang}</Badge>
-          ) : (
-            <SimpleSelect
-              value={lang}
-              onValueChange={setLang}
-              size="sm"
-              className="w-auto min-w-[8rem]"
-              options={
-                availableLangs.length === 0 ? [{ value: lang, label: lang }] : availableLangs.map((id) => ({ value: id, label: langRange[id] || id }))
-              }
-            />
-          )}
-          {config.time ? (
-            <Badge variant="outline" className="text-[10px]">
-              {config.time}
-            </Badge>
-          ) : null}
-          {config.memory ? (
-            <Badge variant="outline" className="text-[10px]">
-              {config.memory}
-            </Badge>
-          ) : null}
-          <span className="ml-auto text-[11px] text-muted-foreground">已自动缓存草稿</span>
-        </div>
-
-        {/* Editor in simple mode */}
-        {isStructuredAnswer ? (
-          <div className="border-y border-border/70 py-5">
-            <StructuredRegionInputs
-              surface={surface}
-              values={regionValues}
-              onChange={updateRegion}
-              lang={config.template?.lang || lang}
-              singleLine={singleLineRegion}
-              prohibitExternalCodeInjection={blockExternalCode}
-            />
+      <Panel
+        footer={
+          <div className="flex min-w-0 items-center justify-between gap-2">
+            <div className="min-w-0 text-xs text-fg-subtle">
+              {submitError ? (
+                <span className="text-danger-fg">{submitError}</span>
+              ) : (
+                <span>
+                  <span className="tabular">{code.length}</span> 字符
+                </span>
+              )}
+            </div>
+            <Button type="button" onClick={handleSubmit} disabled={submitting} loading={showSubmitLoading} variant="primary" size="lg" className="shrink-0">
+              <Send />
+              提交
+            </Button>
           </div>
-        ) : (
-          <div
-            className="min-w-0 overflow-hidden rounded-md border"
-            style={{
-              height: 'calc(100dvh - 12.5rem)',
-              minHeight: 'min(480px, calc(100dvh - 12.5rem))',
-            }}
-          >
+        }
+      >
+        <div className="flex min-w-0 flex-col gap-5">
+          <div className="flex flex-wrap items-center gap-2">
+            <label htmlFor={isStructuredAnswer ? undefined : 'submit-lang'} className="text-xs text-fg-subtle">
+              语言
+            </label>
+            {isStructuredAnswer ? (
+              <Badge variant="outline">{textProgramFill ? '文本比对' : lang}</Badge>
+            ) : (
+              <SimpleSelect
+                id="submit-lang"
+                value={lang}
+                onValueChange={setLang}
+                size="sm"
+                className="w-full sm:w-72"
+                options={
+                  availableLangs.length === 0 ? [{ value: lang, label: lang }] : availableLangs.map((id) => ({ value: id, label: langRange[id] || id }))
+                }
+              />
+            )}
+            <span className="ml-auto text-2xs text-fg-subtle">已自动缓存草稿</span>
+          </div>
+
+          {isStructuredAnswer ? (
+            <div className="min-w-0 border-y border-line py-5">
+              <StructuredRegionInputs
+                surface={surface}
+                values={regionValues}
+                onChange={updateRegion}
+                lang={config.template?.lang || lang}
+                singleLine={singleLineRegion}
+                prohibitExternalCodeInjection={blockExternalCode}
+              />
+            </div>
+          ) : (
             <KryptonIDE
+              key={lang}
               mode="simple"
               langs={availableLangs}
               defaultLang={lang}
               value={code}
               onValueChange={setCode}
               prohibitExternalCodeInjection={blockExternalCode}
-              minHeight={0}
-              className="h-full min-h-0"
+              minHeight={480}
+              className="rounded-none border-0 shadow-none"
             />
-          </div>
-        )}
+          )}
 
-        {compiledStructuredAnswer ? (
-          <section className="space-y-3 rounded-xl border border-border/70 p-4" aria-labelledby="structured-self-test-heading">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h2 id="structured-self-test-heading" className="text-sm font-semibold">
-                  自定义输入自测
-                </h2>
-                <p className="mt-1 text-xs text-muted-foreground">运行当前作答拼接出的完整程序；期望输出可留空，留空时只展示实际输出。</p>
+          {compiledStructuredAnswer ? (
+            <section className="flex flex-col gap-4 border-t border-line pt-4" aria-labelledby="structured-self-test-heading">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h2 id="structured-self-test-heading" className="text-sm font-semibold text-fg">
+                    自定义输入自测
+                  </h2>
+                  <p className="mt-1 text-xs text-fg-subtle text-pretty">运行当前作答拼接出的完整程序；期望输出可留空，留空时只展示实际输出。</p>
+                </div>
+                <Button type="button" variant="secondary" disabled={selfTestRunning} loading={showSelfTestLoading} onClick={handleSelfTest}>
+                  <Play />
+                  运行自测
+                </Button>
               </div>
-              <Button type="button" variant="outline" disabled={selfTestRunning} onClick={handleSelfTest} className="min-h-11 gap-1.5">
-                {selfTestRunning ? <Loader2 className="size-4 animate-spin motion-reduce:animate-none" /> : <Play className="size-4" />}
-                {selfTestRunning ? '运行中…' : '运行自测'}
-              </Button>
-            </div>
-            <div className="grid gap-3 md:grid-cols-2">
-              <label className="space-y-1.5">
-                <span className="text-xs font-medium">标准输入</span>
-                <textarea
-                  value={selfTestInput}
-                  onChange={(event) => setSelfTestInput(event.target.value)}
-                  className="min-h-32 w-full resize-y rounded-md border border-input bg-background px-3 py-2 font-mono text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  spellCheck={false}
-                />
-              </label>
-              <label className="space-y-1.5">
-                <span className="text-xs font-medium">期望输出（可选）</span>
-                <textarea
-                  value={selfTestExpected}
-                  onChange={(event) => setSelfTestExpected(event.target.value)}
-                  className="min-h-32 w-full resize-y rounded-md border border-input bg-background px-3 py-2 font-mono text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  spellCheck={false}
-                />
-              </label>
-            </div>
-            {selfTestError ? (
-              <p role="alert" className="text-sm text-destructive">
-                {selfTestError}
-              </p>
-            ) : null}
-            {selfTestResult ? (
-              <div className="min-h-56 overflow-hidden rounded-lg border" aria-live="polite">
-                <PretestResultInline
-                  result={selfTestResult}
-                  expectedOutput={selfTestExpected}
-                  activeResultTab={selfTestResultTab}
-                  onResultTabChange={setSelfTestResultTab}
-                />
-              </div>
-            ) : null}
-          </section>
-        ) : textProgramFill ? (
-          <p className="rounded-lg border border-border/70 px-3 py-2 text-sm text-muted-foreground">文本比对模式不执行程序，请填写后直接提交。</p>
-        ) : null}
-
-        {/* Submit row — sticky so the same handleSubmit stays reachable on short viewports */}
-        <div className="sticky bottom-0 z-10 -mx-1 flex min-w-0 items-center justify-between gap-2 border-t bg-background/95 px-1 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur">
-          <div className="min-w-0 text-xs text-muted-foreground">
-            {submitError ? <span className="text-destructive">{submitError}</span> : <span>{code.length} 字符</span>}
-          </div>
-          <Button onClick={handleSubmit} disabled={submitting} size="lg" className="shrink-0 gap-1.5">
-            {submitting ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
-            {submitting ? '提交中…' : '提交'}
-          </Button>
+              <FormRow columns={2}>
+                <FormField label="标准输入" htmlFor="self-test-input">
+                  <Textarea
+                    id="self-test-input"
+                    value={selfTestInput}
+                    onChange={(event) => setSelfTestInput(event.target.value)}
+                    className="min-h-32 font-mono"
+                    spellCheck={false}
+                  />
+                </FormField>
+                <FormField label="期望输出（可选）" htmlFor="self-test-expected">
+                  <Textarea
+                    id="self-test-expected"
+                    value={selfTestExpected}
+                    onChange={(event) => setSelfTestExpected(event.target.value)}
+                    className="min-h-32 font-mono"
+                    spellCheck={false}
+                  />
+                </FormField>
+              </FormRow>
+              {selfTestError ? <Alert tone="danger">{selfTestError}</Alert> : null}
+              {selfTestResult ? (
+                <div className="min-h-56 overflow-hidden rounded-md border border-line" aria-live="polite">
+                  <PretestResultInline
+                    result={selfTestResult}
+                    expectedOutput={selfTestExpected}
+                    activeResultTab={selfTestResultTab}
+                    onResultTabChange={setSelfTestResultTab}
+                  />
+                </div>
+              ) : null}
+            </section>
+          ) : textProgramFill ? (
+            <Alert tone="neutral">文本比对模式不执行程序，请填写后直接提交。</Alert>
+          ) : null}
         </div>
-      </div>
-    </motion.div>
+      </Panel>
+    </Page>
   );
 }

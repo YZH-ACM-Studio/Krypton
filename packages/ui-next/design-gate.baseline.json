@@ -1,40 +1,6 @@
 {
   "version": 1,
   "files": {
-    "src/components/announcement-home-block.tsx": {
-      "DS001": 25,
-      "DS002": 6,
-      "DS004": 1,
-      "DS009": 1,
-      "DS010": 12,
-      "DS012": 1
-    },
-    "src/components/announcement-popover.tsx": {
-      "DS001": 25,
-      "DS002": 10,
-      "DS009": 4,
-      "DS010": 12,
-      "DS011": 1,
-      "DS012": 1
-    },
-    "src/components/anti-ai-copy-boundary.tsx": {
-      "DS002": 1
-    },
-    "src/components/collect-home-block.tsx": {
-      "DS002": 4
-    },
-    "src/components/collect-pending-badge.tsx": {
-      "DS002": 2,
-      "DS009": 1
-    },
-    "src/components/competitive-companion-bridge.tsx": {
-      "DS002": 7,
-      "DS009": 2
-    },
-    "src/components/contest-participation-field.tsx": {
-      "DS002": 1,
-      "DS009": 1
-    },
     "src/components/domain-user-search.tsx": {
       "DS002": 3,
       "DS009": 3
@@ -68,13 +34,6 @@
       "DS010": 2,
       "DS012": 1
     },
-    "src/components/markdown-renderer.tsx": {
-      "DS001": 8,
-      "DS002": 19,
-      "DS004": 2,
-      "DS005": 4,
-      "DS010": 2
-    },
     "src/components/objective-answer-panel.tsx": {
       "DS001": 6,
       "DS002": 9,
@@ -97,20 +56,8 @@
     "src/components/practice-integrity-policy-panel.tsx": {
       "DS002": 7
     },
-    "src/components/practice-roster.tsx": {
-      "DS001": 2,
-      "DS002": 15,
-      "DS004": 3,
-      "DS005": 2,
-      "DS009": 4,
-      "DS010": 1
-    },
     "src/components/problem-authoring-state.tsx": {
       "DS002": 2
-    },
-    "src/components/problem-bank-nav.tsx": {
-      "DS002": 7,
-      "DS006": 1
     },
     "src/components/problem-data-write-guard.tsx": {
       "DS001": 3,
@@ -139,29 +86,6 @@
       "DS010": 3,
       "DS012": 1
     },
-    "src/components/programming-statement.tsx": {
-      "DS001": 12,
-      "DS002": 21,
-      "DS004": 2,
-      "DS010": 4,
-      "DS012": 3
-    },
-    "src/components/redeem-dialog.tsx": {
-      "DS001": 5,
-      "DS002": 1,
-      "DS009": 1,
-      "DS010": 2
-    },
-    "src/components/sample-blocks.tsx": {
-      "DS002": 7,
-      "DS004": 1,
-      "DS005": 1,
-      "DS009": 2,
-      "DS012": 1
-    },
-    "src/components/stats-group-filter.tsx": {
-      "DS002": 3
-    },
     "src/components/structured-problem-metadata-panel.tsx": {
       "DS001": 8,
       "DS002": 29,
@@ -176,15 +100,6 @@
       "DS002": 8,
       "DS010": 1
     },
-    "src/components/task-graph.tsx": {
-      "DS001": 20,
-      "DS002": 4,
-      "DS003": 4,
-      "DS004": 2,
-      "DS009": 1,
-      "DS010": 6,
-      "DS012": 1
-    },
     "src/components/task-year-set-input.tsx": {
       "DS002": 6,
       "DS005": 1
@@ -198,15 +113,6 @@
       "DS009": 2,
       "DS010": 4,
       "DS012": 5
-    },
-    "src/components/team-dialog.tsx": {
-      "DS002": 29,
-      "DS004": 1,
-      "DS006": 4,
-      "DS009": 2,
-      "DS010": 2,
-      "DS012": 6,
-      "DS013": 1
     },
     "src/components/ui/button.tsx": {
       "DS012": 1
@@ -237,9 +143,6 @@
       "DS009": 6,
       "DS010": 9,
       "DS012": 2
-    },
-    "src/lib/sensitive.tsx": {
-      "DS002": 1
     },
     "src/pages/admin-accounts.tsx": {
       "DS001": 7,
@@ -291,13 +194,6 @@
       "DS010": 18,
       "DS013": 1
     },
-    "src/pages/auth.tsx": {
-      "DS001": 2,
-      "DS002": 23,
-      "DS006": 10,
-      "DS009": 1,
-      "DS015": 10
-    },
     "src/pages/authtoken/index.tsx": {
       "DS002": 28,
       "DS004": 5
@@ -309,27 +205,12 @@
       "DS009": 2,
       "DS010": 3
     },
-    "src/pages/blog.tsx": {
-      "DS002": 15,
-      "DS006": 1,
-      "DS009": 1,
-      "DS015": 1
-    },
     "src/pages/client-required-notice.tsx": {
       "DS001": 6,
       "DS002": 4,
       "DS006": 1,
       "DS010": 1,
       "DS015": 1
-    },
-    "src/pages/collect/index.tsx": {
-      "DS001": 22,
-      "DS002": 44,
-      "DS006": 2,
-      "DS009": 7,
-      "DS010": 9,
-      "DS011": 1,
-      "DS015": 2
     },
     "src/pages/contest-edit-exam.tsx": {
       "DS002": 23,
@@ -386,52 +267,14 @@
       "DS012": 4,
       "DS015": 1
     },
-    "src/pages/contests.tsx": {
-      "DS001": 31,
-      "DS002": 109,
-      "DS003": 1,
-      "DS004": 3,
-      "DS005": 5,
-      "DS006": 4,
-      "DS009": 21,
-      "DS010": 10,
-      "DS011": 2,
-      "DS012": 3,
-      "DS015": 3
-    },
     "src/pages/course/assign.tsx": {
       "DS001": 2,
       "DS002": 3,
       "DS010": 1
     },
-    "src/pages/course/chapter-links.tsx": {
-      "DS002": 11
-    },
-    "src/pages/course/chapter-outline.tsx": {
-      "DS001": 6,
-      "DS002": 24,
-      "DS004": 5,
-      "DS005": 3,
-      "DS006": 4,
-      "DS009": 7,
-      "DS010": 2,
-      "DS012": 5
-    },
-    "src/pages/course/course-exam-card.tsx": {
-      "DS002": 13
-    },
     "src/pages/course/course-exam-settings.tsx": {
       "DS002": 3,
       "DS009": 1
-    },
-    "src/pages/course/detail.tsx": {
-      "DS001": 7,
-      "DS002": 49,
-      "DS004": 5,
-      "DS005": 1,
-      "DS006": 2,
-      "DS009": 4,
-      "DS010": 2
     },
     "src/pages/course/editor.tsx": {
       "DS001": 5,
@@ -444,33 +287,12 @@
       "DS011": 1,
       "DS013": 1
     },
-    "src/pages/course/list.tsx": {
-      "DS002": 12,
-      "DS009": 1
-    },
     "src/pages/course/mindmap-editor.tsx": {
       "DS002": 8,
       "DS004": 2
     },
-    "src/pages/course/mindmap.tsx": {
-      "DS002": 13,
-      "DS004": 1,
-      "DS006": 2,
-      "DS009": 3,
-      "DS012": 1
-    },
-    "src/pages/course/ui.tsx": {
-      "DS001": 2,
-      "DS002": 6,
-      "DS004": 2,
-      "DS006": 2,
-      "DS009": 2
-    },
     "src/pages/course/video-editor.tsx": {
       "DS002": 10
-    },
-    "src/pages/course/video-player.tsx": {
-      "DS002": 1
     },
     "src/pages/course/video-stats.tsx": {
       "DS001": 18,
@@ -482,17 +304,6 @@
       "DS002": 1,
       "DS006": 2,
       "DS009": 2,
-      "DS015": 2
-    },
-    "src/pages/discussions.tsx": {
-      "DS001": 6,
-      "DS002": 47,
-      "DS004": 2,
-      "DS005": 2,
-      "DS006": 2,
-      "DS009": 9,
-      "DS010": 2,
-      "DS012": 3,
       "DS015": 2
     },
     "src/pages/domain-manage.tsx": {
@@ -517,13 +328,6 @@
       "DS010": 1,
       "DS011": 1,
       "DS012": 5
-    },
-    "src/pages/error.tsx": {
-      "DS001": 2,
-      "DS002": 5,
-      "DS006": 2,
-      "DS009": 1,
-      "DS015": 2
     },
     "src/pages/exam-classroom.tsx": {
       "DS001": 73,
@@ -583,22 +387,6 @@
       "DS012": 1,
       "DS013": 1
     },
-    "src/pages/generic.tsx": {
-      "DS002": 16,
-      "DS004": 1,
-      "DS006": 1,
-      "DS009": 3,
-      "DS015": 1
-    },
-    "src/pages/home.tsx": {
-      "DS001": 1,
-      "DS002": 37,
-      "DS004": 1,
-      "DS006": 4,
-      "DS009": 5,
-      "DS014": 1,
-      "DS015": 3
-    },
     "src/pages/homework-manage.tsx": {
       "DS002": 22,
       "DS004": 1,
@@ -606,46 +394,9 @@
       "DS009": 6,
       "DS015": 2
     },
-    "src/pages/homework.tsx": {
-      "DS002": 17,
-      "DS006": 2,
-      "DS010": 1,
-      "DS015": 2
-    },
     "src/pages/manual-grading.tsx": {
       "DS002": 14,
       "DS009": 1
-    },
-    "src/pages/messages/composer.tsx": {
-      "DS002": 1,
-      "DS004": 1,
-      "DS009": 1
-    },
-    "src/pages/messages/content.tsx": {
-      "DS002": 3
-    },
-    "src/pages/messages/conversation-list.tsx": {
-      "DS001": 2,
-      "DS002": 16,
-      "DS005": 2,
-      "DS006": 2,
-      "DS009": 3,
-      "DS012": 1
-    },
-    "src/pages/messages/new-conversation.tsx": {
-      "DS002": 5,
-      "DS004": 1
-    },
-    "src/pages/messages/panel.tsx": {
-      "DS002": 3,
-      "DS004": 2
-    },
-    "src/pages/messages/thread.tsx": {
-      "DS002": 16,
-      "DS005": 1,
-      "DS006": 2,
-      "DS009": 5,
-      "DS012": 2
     },
     "src/pages/mindmap/admin.tsx": {
       "DS001": 22,
@@ -657,49 +408,6 @@
       "DS010": 6,
       "DS012": 8,
       "DS013": 2
-    },
-    "src/pages/mindmap/canvas.tsx": {
-      "DS001": 24,
-      "DS002": 10,
-      "DS005": 1,
-      "DS006": 2,
-      "DS010": 12,
-      "DS011": 1
-    },
-    "src/pages/mindmap/index.tsx": {
-      "DS001": 24,
-      "DS002": 18,
-      "DS004": 6,
-      "DS009": 3,
-      "DS010": 12,
-      "DS012": 4,
-      "DS013": 1
-    },
-    "src/pages/mindmap/inspector.tsx": {
-      "DS001": 3,
-      "DS002": 44,
-      "DS004": 1,
-      "DS005": 3,
-      "DS006": 3,
-      "DS007": 1,
-      "DS009": 10,
-      "DS010": 1,
-      "DS011": 1
-    },
-    "src/pages/mindmap/outline.tsx": {
-      "DS002": 23,
-      "DS005": 5,
-      "DS006": 4,
-      "DS007": 1,
-      "DS009": 2,
-      "DS011": 1
-    },
-    "src/pages/misc.tsx": {
-      "DS001": 1,
-      "DS002": 11,
-      "DS006": 2,
-      "DS009": 3,
-      "DS015": 2
     },
     "src/pages/permits/inbox.tsx": {
       "DS001": 11,
@@ -732,17 +440,6 @@
       "DS002": 10,
       "DS012": 1
     },
-    "src/pages/problem-detail.tsx": {
-      "DS001": 59,
-      "DS002": 98,
-      "DS004": 3,
-      "DS005": 5,
-      "DS006": 2,
-      "DS009": 17,
-      "DS010": 25,
-      "DS012": 1,
-      "DS015": 1
-    },
     "src/pages/problem-edit.tsx": {
       "DS001": 20,
       "DS002": 140,
@@ -750,13 +447,6 @@
       "DS009": 10,
       "DS010": 5,
       "DS012": 7
-    },
-    "src/pages/problem-hack.tsx": {
-      "DS002": 12,
-      "DS005": 1,
-      "DS006": 1,
-      "DS009": 2,
-      "DS015": 1
     },
     "src/pages/problem-manage.tsx": {
       "DS001": 2,
@@ -787,27 +477,6 @@
       "DS010": 3,
       "DS012": 4
     },
-    "src/pages/problem-set-roster.tsx": {
-      "DS002": 2,
-      "DS006": 1,
-      "DS015": 1
-    },
-    "src/pages/problem-submit.tsx": {
-      "DS002": 22,
-      "DS004": 1,
-      "DS005": 2,
-      "DS006": 1,
-      "DS009": 3,
-      "DS013": 1,
-      "DS015": 1
-    },
-    "src/pages/problems.tsx": {
-      "DS001": 14,
-      "DS002": 52,
-      "DS004": 2,
-      "DS010": 3,
-      "DS012": 2
-    },
     "src/pages/rankboard/admin.tsx": {
       "DS001": 2,
       "DS002": 52,
@@ -817,79 +486,17 @@
       "DS011": 1,
       "DS012": 9
     },
-    "src/pages/rankboard/award-display.ts": {
-      "DS001": 3
-    },
-    "src/pages/rankboard/gallery.tsx": {
-      "DS001": 5,
-      "DS002": 21,
-      "DS004": 1,
-      "DS005": 3,
-      "DS007": 1,
-      "DS009": 3,
-      "DS010": 1,
-      "DS012": 3
-    },
-    "src/pages/rankboard/index.tsx": {
-      "DS001": 12,
-      "DS002": 54,
-      "DS004": 3,
-      "DS005": 3,
-      "DS007": 1,
-      "DS009": 7,
-      "DS010": 3,
-      "DS011": 1,
-      "DS012": 1,
-      "DS014": 1
-    },
-    "src/pages/ranking.tsx": {
-      "DS001": 3,
-      "DS002": 16,
-      "DS005": 1,
-      "DS006": 1,
-      "DS009": 3,
-      "DS015": 1
-    },
     "src/pages/realpass-manage.tsx": {
       "DS001": 19,
       "DS002": 13,
       "DS009": 1,
       "DS010": 9
     },
-    "src/pages/record-objective.tsx": {
-      "DS001": 12,
-      "DS002": 22,
-      "DS009": 1,
-      "DS010": 5
-    },
-    "src/pages/records.tsx": {
-      "DS001": 52,
-      "DS002": 83,
-      "DS004": 2,
-      "DS005": 2,
-      "DS006": 3,
-      "DS009": 8,
-      "DS010": 19,
-      "DS015": 3
-    },
-    "src/pages/redeem.tsx": {
-      "DS001": 5,
-      "DS002": 2,
-      "DS009": 1,
-      "DS010": 2
-    },
     "src/pages/redemption-manage.tsx": {
       "DS001": 3,
       "DS002": 10,
       "DS009": 5,
       "DS010": 1
-    },
-    "src/pages/spike-webview.tsx": {
-      "DS001": 2,
-      "DS002": 4,
-      "DS006": 1,
-      "DS009": 2,
-      "DS015": 1
     },
     "src/pages/structured-code-editors.tsx": {
       "DS001": 14,
@@ -904,28 +511,12 @@
       "DS002": 9,
       "DS005": 1
     },
-    "src/pages/sudo.tsx": {
-      "DS002": 4,
-      "DS006": 1,
-      "DS009": 1,
-      "DS015": 2
-    },
     "src/pages/system-manage.tsx": {
       "DS002": 47,
       "DS004": 1,
       "DS005": 6,
       "DS009": 10,
       "DS012": 3
-    },
-    "src/pages/tasks/index.tsx": {
-      "DS001": 48,
-      "DS002": 55,
-      "DS005": 2,
-      "DS006": 2,
-      "DS009": 14,
-      "DS010": 14,
-      "DS011": 2,
-      "DS015": 3
     },
     "src/pages/team-batches.tsx": {
       "DS001": 4,
@@ -942,39 +533,6 @@
       "DS009": 1,
       "DS012": 1,
       "DS015": 2
-    },
-    "src/pages/training.tsx": {
-      "DS001": 28,
-      "DS002": 87,
-      "DS004": 3,
-      "DS005": 8,
-      "DS006": 2,
-      "DS009": 29,
-      "DS010": 7,
-      "DS011": 1,
-      "DS012": 4,
-      "DS015": 2
-    },
-    "src/pages/user-account-settings.ts": {
-      "DS010": 1,
-      "DS012": 2
-    },
-    "src/pages/user-account.tsx": {
-      "DS002": 33,
-      "DS005": 1,
-      "DS006": 1,
-      "DS009": 5
-    },
-    "src/pages/user.tsx": {
-      "DS001": 7,
-      "DS002": 41,
-      "DS004": 10,
-      "DS005": 1,
-      "DS006": 4,
-      "DS009": 29,
-      "DS010": 1,
-      "DS012": 2,
-      "DS015": 4
     },
     "src/pages/userbind/index.tsx": {
       "DS001": 55,
@@ -1055,25 +613,6 @@
       "DS005": 1,
       "DS009": 6,
       "DS010": 2
-    },
-    "src/pages/virtual-contest.tsx": {
-      "DS002": 9,
-      "DS005": 1,
-      "DS009": 5
-    },
-    "src/pages/wiki.tsx": {
-      "DS002": 10,
-      "DS006": 1,
-      "DS009": 2,
-      "DS015": 1
-    },
-    "src/routes/home-page.tsx": {
-      "DS001": 1,
-      "DS002": 37,
-      "DS006": 4,
-      "DS009": 3,
-      "DS014": 1,
-      "DS015": 3
     }
   }
 }

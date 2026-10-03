@@ -20,13 +20,12 @@ import {
   GripVertical,
   MoreHorizontal,
   Plus,
-  Search,
   Trash2,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { SearchInput } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/cn';
 import { resolveRootBranchSides } from './layout';
@@ -83,12 +82,12 @@ function SortableTreeRow({
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition, paddingLeft: `${8 + item.depth * 16}px` }}
       className={cn(
-        'group relative flex min-h-11 items-center border-l-2 pr-2 text-sm outline-none transition-[background-color,border-color,color,opacity] duration-150 ease-out motion-reduce:!transition-none',
-        selected ? 'border-l-primary bg-primary/8 text-foreground' : 'border-l-transparent hover:bg-accent/55',
+        'group relative flex min-h-12 items-center border-l-2 pr-2 text-sm text-fg outline-none transition-[background-color,border-color,color,opacity] duration-(--dur-1) ease-(--ease-standard) motion-reduce:transition-none',
+        selected ? 'border-l-brand bg-brand-soft' : 'border-l-transparent hover:bg-surface-hover',
         isDragging && 'z-20 opacity-45',
-        dropZone === 'inside' && 'bg-primary/8 ring-1 ring-inset ring-primary/40',
-        dropZone === 'before' && 'before:absolute before:inset-x-2 before:top-0 before:h-0.5 before:rounded-full before:bg-primary',
-        dropZone === 'after' && 'after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:rounded-full after:bg-primary',
+        dropZone === 'inside' && 'bg-brand-soft ring-1 ring-inset ring-ring',
+        dropZone === 'before' && 'before:absolute before:inset-x-2 before:top-0 before:h-0.5 before:rounded-full before:bg-brand',
+        dropZone === 'after' && 'after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:rounded-full after:bg-brand',
       )}
       role="treeitem"
       tabIndex={0}
@@ -110,9 +109,12 @@ function SortableTreeRow({
         }
       }}
     >
-      <button
+      <Button
         type="button"
-        className="grid size-11 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-accent disabled:invisible"
+        variant="ghost"
+        size="sm"
+        iconOnly
+        className="disabled:invisible"
         disabled={!item.hasChildren}
         onClick={(event) => {
           event.stopPropagation();
@@ -120,28 +122,29 @@ function SortableTreeRow({
         }}
         aria-label={expanded ? '收起节点' : '展开节点'}
       >
-        {expanded ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
-      </button>
+        {expanded ? <ChevronDown /> : <ChevronRight />}
+      </Button>
       <span className="min-w-0 flex-1 truncate font-medium">{item.node.topic}</span>
-      {layoutSide ? (
-        <span className="mr-1 text-[10px] font-medium uppercase text-muted-foreground">{layoutSide === 'left' ? 'L' : 'R'}</span>
-      ) : null}
+      {layoutSide ? <span className="mr-1 text-2xs font-medium text-fg-subtle">{layoutSide === 'left' ? 'L' : 'R'}</span> : null}
       {referenceCount > 0 ? (
-        <Badge variant="outline" className="mr-1 h-5 min-w-5 justify-center px-1 text-[10px]">
+        <Badge variant="outline" size="sm" className="mr-1">
           {referenceCount}
         </Badge>
       ) : null}
       {!isRoot ? (
-        <button
+        <Button
           type="button"
-          className="grid size-11 shrink-0 touch-none place-items-center rounded-md text-muted-foreground opacity-40 hover:bg-accent group-hover:opacity-100 focus-visible:opacity-100"
+          variant="ghost"
+          size="sm"
+          iconOnly
+          className="touch-none"
           {...attributes}
           {...listeners}
           onClick={(event) => event.stopPropagation()}
           aria-label={`拖动 ${item.node.topic}`}
         >
-          <GripVertical className="size-4" />
-        </button>
+          <GripVertical />
+        </Button>
       ) : null}
     </div>
   );
@@ -236,74 +239,73 @@ export function MindmapOutline(props: OutlineProps) {
   const menuNode = menu ? byId.get(menu.nodeId) || null : null;
 
   return (
-    <section className="flex h-full min-h-0 flex-col bg-transparent">
-      <header className="space-y-3 px-3 pb-3 pt-4">
+    <section className="flex h-full min-h-0 flex-col">
+      <header className="flex flex-col gap-3 px-3 pt-4 pb-3">
         <div>
-          <h2 className="text-sm font-semibold">结构大纲</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">拖到节点中部成为子节点，拖到边缘调整顺序</p>
+          <h2 className="text-sm font-semibold text-fg">结构大纲</h2>
+          <p className="mt-0.5 text-xs text-fg-subtle">拖到节点中部成为子节点，拖到边缘调整顺序</p>
         </div>
-        <div className="relative">
-          <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索节点、说明或标签" className="h-10 pl-8" />
-        </div>
+        <SearchInput value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索节点、说明或标签" size="sm" />
         <div className="flex flex-wrap gap-1" aria-label="节点结构操作">
           <Button
             size="sm"
             variant="ghost"
-            className="min-h-10"
             disabled={!selected || props.busy}
             onClick={() => selected && props.onCreateChild(selected)}
             title="新增子节点"
           >
-            <Plus className="size-3.5" /> 子节点
+            <Plus /> 子节点
           </Button>
           <Button
             size="sm"
             variant="ghost"
-            className="min-h-10"
             disabled={!selected?.parentId || props.busy}
             onClick={() => selected && props.onCreateSibling(selected)}
             title="新增同级节点"
           >
-            <MoreHorizontal className="size-3.5" /> 同级
+            <MoreHorizontal /> 同级
           </Button>
-          <Button className="size-10" size="icon" variant="ghost" disabled={props.busy || currentIndex <= 0} onClick={() => moveSelected('up')} title="上移">
-            <ArrowUp className="size-3.5" />
+          <Button size="sm" variant="ghost" iconOnly disabled={props.busy || currentIndex <= 0} onClick={() => moveSelected('up')} title="上移" aria-label="上移">
+            <ArrowUp />
           </Button>
           <Button
-            size="icon"
+            size="sm"
             variant="ghost"
-            className="size-10"
+            iconOnly
             disabled={props.busy || currentIndex < 0 || currentIndex >= currentSiblings.length - 1}
             onClick={() => moveSelected('down')}
             title="下移"
+            aria-label="下移"
           >
-            <ArrowDown className="size-3.5" />
+            <ArrowDown />
           </Button>
           <Button
-            size="icon"
+            size="sm"
             variant="ghost"
-            className="size-10"
+            iconOnly
             disabled={props.busy || currentIndex <= 0}
             onClick={() => moveSelected('indent')}
             title="缩进为上一节点的子节点"
+            aria-label="缩进为上一节点的子节点"
           >
-            <CornerRightDown className="size-3.5" />
+            <CornerRightDown />
           </Button>
-          <Button className="size-10" size="icon" variant="ghost" disabled={props.busy || !canOutdent} onClick={() => moveSelected('outdent')} title="提升一级">
-            <CornerLeftUp className="size-3.5" />
+          <Button
+            size="sm"
+            variant="ghost"
+            iconOnly
+            disabled={props.busy || !canOutdent}
+            onClick={() => moveSelected('outdent')}
+            title="提升一级"
+            aria-label="提升一级"
+          >
+            <CornerLeftUp />
           </Button>
         </div>
       </header>
 
-      <ScrollArea className="min-h-0 flex-1 border-t border-border/50">
-        <DndContext
-          sensors={sensors}
-          collisionDetection={closestCenter}
-          onDragOver={onDragOver}
-          onDragCancel={() => setDropCue(null)}
-          onDragEnd={onDragEnd}
-        >
+      <ScrollArea className="min-h-0 flex-1 border-t border-line-subtle">
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragOver={onDragOver} onDragCancel={() => setDropCue(null)} onDragEnd={onDragEnd}>
           <SortableContext items={flat.map((item) => item.node._id)} strategy={verticalListSortingStrategy}>
             <div role="tree" aria-label="导图节点">
               {flat.map((item) => (
@@ -326,7 +328,7 @@ export function MindmapOutline(props: OutlineProps) {
                   }}
                 />
               ))}
-              {!flat.length ? <p className="px-4 py-10 text-center text-sm text-muted-foreground">没有匹配节点</p> : null}
+              {!flat.length ? <p className="px-4 py-10 text-center text-sm text-fg-muted">没有匹配节点</p> : null}
             </div>
           </SortableContext>
         </DndContext>
@@ -334,46 +336,49 @@ export function MindmapOutline(props: OutlineProps) {
 
       {menu && menuNode ? (
         <div
-          className="fixed z-[180] min-w-40 rounded-xl bg-popover p-1.5 text-sm shadow-xl ring-1 ring-border/60"
+          className="fixed z-50 min-w-40 rounded-lg border border-line bg-surface-raised p-1 text-sm shadow-pop"
           style={{ left: Math.min(menu.x, window.innerWidth - 180), top: Math.min(menu.y, window.innerHeight - 150) }}
           onPointerDown={(event) => event.stopPropagation()}
         >
-          <button
+          <Button
             type="button"
-            className="flex min-h-10 w-full items-center gap-2 rounded-lg px-3 py-2 transition-[background-color,color,scale] duration-150 ease-out hover:bg-accent active:scale-[0.96] motion-reduce:transition-none"
+            variant="ghost"
+            className="w-full justify-start"
             disabled={props.busy}
             onClick={() => {
               setMenu(null);
               props.onCreateChild(menuNode);
             }}
           >
-            <Plus className="size-4" /> 新增子节点
-          </button>
+            <Plus /> 新增子节点
+          </Button>
           {menuNode.parentId ? (
-            <button
+            <Button
               type="button"
-              className="flex min-h-10 w-full items-center gap-2 rounded-lg px-3 py-2 transition-[background-color,color,scale] duration-150 ease-out hover:bg-accent active:scale-[0.96] motion-reduce:transition-none"
+              variant="ghost"
+              className="w-full justify-start"
               disabled={props.busy}
               onClick={() => {
                 setMenu(null);
                 props.onCreateSibling(menuNode);
               }}
             >
-              <MoreHorizontal className="size-4" /> 新增同级节点
-            </button>
+              <MoreHorizontal /> 新增同级节点
+            </Button>
           ) : null}
           {menuNode._id !== props.rootId ? (
-            <button
+            <Button
               type="button"
-              className="flex min-h-10 w-full items-center gap-2 rounded-lg px-3 py-2 text-destructive transition-[background-color,color,scale] duration-150 ease-out hover:bg-destructive/10 active:scale-[0.96] motion-reduce:transition-none"
+              variant="danger-soft"
+              className="w-full justify-start"
               disabled={props.busy}
               onClick={() => {
                 setMenu(null);
                 props.onDelete(menuNode);
               }}
             >
-              <Trash2 className="size-4" /> 删除节点
-            </button>
+              <Trash2 /> 删除节点
+            </Button>
           ) : null}
         </div>
       ) : null}

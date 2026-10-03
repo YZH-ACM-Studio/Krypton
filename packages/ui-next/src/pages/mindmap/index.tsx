@@ -1,21 +1,24 @@
 /** Public, read-only algorithm mindmap. Editing lives only at /admin/mindmap. */
 import { ReactFlowProvider } from '@xyflow/react';
-import { Network, Search, Sparkles } from 'lucide-react';
+import { Network, Sparkles } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
-import { Card } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
+import { EmptyState } from '@/components/ui/empty-state';
+import { SearchInput } from '@/components/ui/input';
 import { MiniTabs } from '@/components/ui/mini-tabs';
+import { Toolbar, Workspace } from '@/components/ui/page';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { SimpleSelect } from '@/components/ui/select';
 import { Sheet, SheetBody, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { Difficulty } from '@/components/ui/verdict';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 import { loadNodeProblems, mindmapProblemHref, MindmapApiError } from './api';
 import { MindmapCanvas } from './canvas';
 import type { KnowledgeMap, MindmapNode, PanelProblem } from './types';
 
-const PUBLIC_COMPACT_QUERY = '(max-width: 1023px)';
+/** Complement of the `lg` sidebar (`min-width: 1024px`), including fractional widths in between. */
+const PUBLIC_DESKTOP_QUERY = '(min-width: 1024px)';
 
 function useMatchMedia(query: string): boolean {
   const [matches, setMatches] = useState(() => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia(query).matches);
@@ -30,25 +33,16 @@ function useMatchMedia(query: string): boolean {
   return matches;
 }
 
-function difficultyStyle(value: number): string {
-  if (value <= 1) return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200';
-  if (value <= 2) return 'bg-sky-100 text-sky-800 dark:bg-sky-950/40 dark:text-sky-200';
-  if (value <= 3) return 'bg-blue-100 text-blue-800 dark:bg-blue-950/40 dark:text-blue-200';
-  if (value <= 4) return 'bg-amber-100 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200';
-  if (value <= 5) return 'bg-rose-100 text-rose-800 dark:bg-rose-950/40 dark:text-rose-200';
-  return 'bg-red-100 text-red-800 dark:bg-red-950/40 dark:text-red-200';
-}
-
 function NodeSummary({ selected, compact }: { selected: MindmapNode; compact?: boolean }) {
   return (
     <>
-      {compact ? null : <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">知识节点</p>}
-      {compact ? null : <h2 className="mt-1 truncate text-lg font-semibold tracking-tight">{selected.topic}</h2>}
-      {selected.description ? <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{selected.description}</p> : null}
+      {compact ? null : <p className="text-2xs font-medium text-fg-subtle">知识节点</p>}
+      {compact ? null : <h2 className="mt-1 truncate text-lg font-semibold text-fg">{selected.topic}</h2>}
+      {selected.description ? <p className="mt-1 line-clamp-2 text-sm text-fg-muted">{selected.description}</p> : null}
       {selected.tags.length ? (
         <div className={cn('flex flex-wrap gap-1.5', selected.description || !compact ? 'mt-3' : 'mt-1')}>
           {selected.tags.map((tag) => (
-            <Badge key={tag} variant="outline" className="font-normal">
+            <Badge key={tag} variant="outline" size="sm">
               {tag}
             </Badge>
           ))}
@@ -70,11 +64,8 @@ function ProblemFilters({
   onSortChange: (value: 'pid' | 'difficulty' | 'accept') => void;
 }) {
   return (
-    <div className="space-y-2">
-      <div className="relative">
-        <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-        <Input value={query} onChange={(event) => onQueryChange(event.target.value)} placeholder="搜索题号或标题" className="h-9 pl-8" />
-      </div>
+    <div className="flex flex-col gap-2">
+      <SearchInput value={query} onChange={(event) => onQueryChange(event.target.value)} placeholder="搜索题号或标题" size="sm" />
       <MiniTabs
         size="sm"
         value={sort}
@@ -102,23 +93,21 @@ function ProblemResults({
 }) {
   return (
     <>
-      {loading ? <p className="py-10 text-center text-sm text-muted-foreground">正在加载…</p> : null}
-      {!loading && problemError ? <p className="px-5 py-10 text-center text-sm text-destructive">{problemError}</p> : null}
+      {loading ? <p className="py-10 text-center text-sm text-fg-muted">正在加载…</p> : null}
+      {!loading && problemError ? <p className="px-4 py-10 text-center text-sm text-danger-fg">{problemError}</p> : null}
       {!loading && !problemError && !visibleProblems.length ? (
-        <p className="py-10 text-center text-sm text-muted-foreground">{problems.length ? '没有匹配题目' : '此节点暂无关联题目'}</p>
+        <p className="py-10 text-center text-sm text-fg-muted">{problems.length ? '没有匹配题目' : '此节点暂无关联题目'}</p>
       ) : null}
       {!loading && !problemError ? (
-        <ul className="divide-y">
+        <ul className="divide-y divide-line-subtle">
           {visibleProblems.map((problem) => (
             <li key={`${problem.domainId}:${problem.docId}`}>
-              <a href={mindmapProblemHref(problem)} className="flex items-center gap-2.5 px-4 py-3 hover:bg-accent/50">
-                <span className={cn('rounded-md px-2 py-1 text-[10px] font-semibold', difficultyStyle(problem.difficulty))}>
-                  {problem.difficulty}
-                </span>
+              <a href={mindmapProblemHref(problem)} className="flex min-h-12 items-center gap-2 px-4 py-3 hover:bg-surface-hover">
+                <Difficulty level={problem.difficulty} />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-medium">{problem.title}</span>
-                  <span className="block font-mono text-[11px] text-muted-foreground">
-                    {problem.pid} · {problem.nAccept}/{problem.nSubmit}
+                  <span className="block truncate text-sm font-medium text-fg">{problem.title}</span>
+                  <span className="block font-mono text-2xs text-fg-subtle">
+                    {problem.pid} · <span className="tabular">{problem.nAccept}/{problem.nSubmit}</span>
                   </span>
                 </span>
               </a>
@@ -152,20 +141,17 @@ function ProblemPanel({
   onSortChange: (value: 'pid' | 'difficulty' | 'accept') => void;
 }) {
   return (
-    <Card className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl shadow-sm">
-      <header className="border-b px-4 py-4">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+      <header className="border-b border-line-subtle px-4 py-4">
         {selected ? (
           <NodeSummary selected={selected} />
         ) : (
-          <div className="py-8 text-center text-sm text-muted-foreground">
-            <Sparkles className="mx-auto mb-2 size-5" />
-            选择一个节点查看相关题目
-          </div>
+          <EmptyState compact icon={<Sparkles />} title="选择一个节点查看相关题目" />
         )}
       </header>
       {selected ? (
         <>
-          <div className="shrink-0 space-y-2 border-b p-3">
+          <div className="shrink-0 border-b border-line-subtle p-3">
             <ProblemFilters query={query} sort={sort} onQueryChange={onQueryChange} onSortChange={onSortChange} />
           </div>
           <ScrollArea className="min-h-0 flex-1">
@@ -173,7 +159,7 @@ function ProblemPanel({
           </ScrollArea>
         </>
       ) : null}
-    </Card>
+    </div>
   );
 }
 
@@ -228,19 +214,13 @@ export function MindmapPage() {
     else result = [...result].sort((left, right) => left.pid.localeCompare(right.pid, 'zh-CN', { numeric: true }));
     return result;
   }, [problems, query, sort]);
-  const compact = useMatchMedia(PUBLIC_COMPACT_QUERY);
+  const compact = !useMatchMedia(PUBLIC_DESKTOP_QUERY);
 
   if (!data.config) {
     return (
-      <div className="grid min-h-[32rem] place-items-center rounded-2xl border border-dashed bg-muted/15 px-6 text-center">
-        <div>
-          <span className="mx-auto grid size-12 place-items-center rounded-2xl bg-muted text-muted-foreground">
-            <Network className="size-5" />
-          </span>
-          <h1 className="mt-4 text-lg font-semibold">暂无公开知识导图</h1>
-          <p className="mt-1 text-sm text-muted-foreground">管理员发布导图后会在这里显示。</p>
-        </div>
-      </div>
+      <Workspace className="flex w-full min-w-0 overflow-hidden">
+        <EmptyState className="my-auto" icon={<Network />} title="暂无公开知识导图" description="管理员发布导图后会在这里显示。" />
+      </Workspace>
     );
   }
 
@@ -248,18 +228,10 @@ export function MindmapPage() {
 
   return (
     <ReactFlowProvider>
-      <div className="flex h-[calc(100dvh-4.5rem)] min-h-[min(34rem,calc(100dvh-4.5rem))] w-full min-w-0 gap-3 overflow-hidden sm:h-[calc(100dvh-6rem)] sm:min-h-[min(34rem,calc(100dvh-6rem))] xl:h-[calc(100dvh-7rem)] xl:min-h-[min(34rem,calc(100dvh-7rem))]">
-        <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border bg-background shadow-sm">
-          <header className="flex h-12 shrink-0 items-center justify-between gap-2 border-b bg-background/90 px-3 backdrop-blur-sm sm:h-14 sm:gap-3 sm:px-4 xl:h-16">
-            <div className="flex min-w-0 items-center gap-2">
-              <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary sm:size-8">
-                <Network className="size-3.5 sm:size-4" />
-              </span>
-              <div className="min-w-0">
-                <h1 className="truncate text-sm font-semibold">{config.title}</h1>
-                <p className="hidden text-xs text-muted-foreground sm:block">{data.nodes.length} 个知识节点</p>
-              </div>
-            </div>
+      <Workspace className="flex w-full min-w-0 overflow-hidden">
+        <Toolbar
+          className="h-10 shrink-0 flex-nowrap border-b border-line bg-surface px-2"
+          end={
             <SimpleSelect
               value={config._id}
               onValueChange={(mapId) => window.location.assign(`/mindmap?map=${encodeURIComponent(mapId)}`)}
@@ -268,49 +240,53 @@ export function MindmapPage() {
                 label: map.isDefault ? `${map.title}（默认）` : map.title,
               }))}
               ariaLabel="切换知识导图"
-              className="min-h-9 w-32 max-w-[48%] sm:min-h-10 sm:w-48 xl:w-56"
+              size="sm"
+              className="w-32 shrink-0 sm:w-48 xl:w-56"
               contentClassName="[&_[role=option]]:min-h-10"
             />
-          </header>
-          <div className="min-h-0 flex-1">
+          }
+        >
+          <span className="min-w-0 truncate text-sm font-semibold text-fg">{config.title}</span>
+          <span className="hidden text-xs text-fg-subtle tabular sm:inline">{data.nodes.length} 个知识节点</span>
+        </Toolbar>
+        <div className="flex min-h-0 min-w-0 flex-1">
+          <section className="min-h-0 min-w-0 flex-1 overflow-hidden">
             <MindmapCanvas nodes={data.nodes} config={config} selectedId={selectedId} onSelect={setSelectedId} />
-          </div>
-        </section>
-
-        <aside className="hidden w-[22rem] shrink-0 lg:flex">
-          <ProblemPanel
-            selected={selected}
-            problems={problems}
-            visibleProblems={visibleProblems}
-            loading={loading}
-            problemError={problemError}
-            query={query}
-            sort={sort}
-            onQueryChange={setQuery}
-            onSortChange={setSort}
-          />
-        </aside>
-      </div>
-
-      <Sheet
-        open={!!selected && compact}
-        onOpenChange={(open) => {
-          if (!open) setSelectedId(null);
-        }}
-      >
-        <SheetContent side="bottom" className="h-[min(70dvh,34rem)] max-h-[88vh]">
-          <SheetHeader>
-            <SheetTitle>{selected?.topic || '相关题目'}</SheetTitle>
-            {selected ? <NodeSummary selected={selected} compact /> : null}
-          </SheetHeader>
-          <div className="shrink-0 border-b p-3">
-            <ProblemFilters query={query} sort={sort} onQueryChange={setQuery} onSortChange={setSort} />
-          </div>
-          <SheetBody>
-            <ProblemResults problems={problems} visibleProblems={visibleProblems} loading={loading} problemError={problemError} />
-          </SheetBody>
-        </SheetContent>
-      </Sheet>
+          </section>
+          <aside className="hidden min-h-0 w-80 shrink-0 flex-col border-l border-line bg-surface lg:flex">
+            <ProblemPanel
+              selected={selected}
+              problems={problems}
+              visibleProblems={visibleProblems}
+              loading={loading}
+              problemError={problemError}
+              query={query}
+              sort={sort}
+              onQueryChange={setQuery}
+              onSortChange={setSort}
+            />
+          </aside>
+        </div>
+        <Sheet
+          open={!!selected && compact}
+          onOpenChange={(open) => {
+            if (!open) setSelectedId(null);
+          }}
+        >
+          <SheetContent side="bottom">
+            <SheetHeader>
+              <SheetTitle>{selected?.topic || '相关题目'}</SheetTitle>
+              {selected ? <NodeSummary selected={selected} compact /> : null}
+            </SheetHeader>
+            <div className="shrink-0 border-b border-line-subtle p-3">
+              <ProblemFilters query={query} sort={sort} onQueryChange={setQuery} onSortChange={setSort} />
+            </div>
+            <SheetBody>
+              <ProblemResults problems={problems} visibleProblems={visibleProblems} loading={loading} problemError={problemError} />
+            </SheetBody>
+          </SheetContent>
+        </Sheet>
+      </Workspace>
     </ReactFlowProvider>
   );
 }

@@ -3,20 +3,25 @@ import '@xyflow/react/dist/style.css';
 import { Background, BackgroundVariant, Controls, Handle, Position, ReactFlow, useReactFlow, type Node as RFNode } from '@xyflow/react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { cn } from '@/lib/cn';
+import { Button } from '@/components/ui/button';
 import { useColorMode } from '@/lib/use-color-mode';
 import { computeMindmapLayout, type MindmapNodeData } from './layout';
 import type { MindmapConfig, MindmapNode } from './types';
 
-const COLOR_STYLES: Record<string, string> = {
-  gray: 'bg-card border-border',
-  sky: 'bg-sky-50 border-sky-300 dark:bg-sky-950/30 dark:border-sky-700/50',
-  blue: 'bg-blue-50 border-blue-300 dark:bg-blue-950/30 dark:border-blue-700/50',
-  green: 'bg-emerald-50 border-emerald-300 dark:bg-emerald-950/30 dark:border-emerald-700/50',
-  amber: 'bg-amber-50 border-amber-300 dark:bg-amber-950/30 dark:border-amber-700/50',
-  rose: 'bg-rose-50 border-rose-300 dark:bg-rose-950/30 dark:border-rose-700/50',
-  purple: 'bg-purple-50 border-purple-300 dark:bg-purple-950/30 dark:border-purple-700/50',
+/** Author-picked node colors, mapped onto semantic tones. Gray stays on surface. */
+const NODE_TONE_STYLE: Record<string, { backgroundColor: string; borderColor: string }> = {
+  sky: { backgroundColor: 'var(--info-soft)', borderColor: 'var(--info-line)' },
+  blue: { backgroundColor: 'var(--info-soft)', borderColor: 'var(--info-line)' },
+  green: { backgroundColor: 'var(--success-soft)', borderColor: 'var(--success-line)' },
+  amber: { backgroundColor: 'var(--warning-soft)', borderColor: 'var(--warning-line)' },
+  rose: { backgroundColor: 'var(--danger-soft)', borderColor: 'var(--danger-line)' },
+  purple: { backgroundColor: 'var(--violet-soft)', borderColor: 'var(--violet-line)' },
 };
+
+function nodeToneStyle(color: string | undefined, isRoot: boolean): { backgroundColor: string; borderColor: string } | undefined {
+  if (isRoot || !color || color === 'gray') return undefined;
+  return NODE_TONE_STYLE[color];
+}
 
 function MindmapNodeView({ data }: { data: MindmapNodeData }) {
   const toggle = data.onToggleCollapse;
@@ -26,28 +31,28 @@ function MindmapNodeView({ data }: { data: MindmapNodeData }) {
       <Handle type="target" id="tgt-right" position={Position.Right} style={{ opacity: 0 }} />
       <Handle type="target" id="tgt-top" position={Position.Top} style={{ opacity: 0 }} />
       <div
-        className={cn(
-          'flex h-full w-full items-center justify-center rounded-xl border px-3 py-2 text-sm shadow-sm transition-[box-shadow,border-color] duration-200 motion-reduce:transition-none',
-          COLOR_STYLES[data.color || 'gray'] || COLOR_STYLES.gray,
-          data.dimmed && !data.selected && 'opacity-35 grayscale-[0.35]',
-          data.selected && 'ring-2 ring-primary ring-offset-2 ring-offset-background',
-          data.isRoot && 'border-primary/60 bg-primary/10 font-semibold shadow-md',
-        )}
+        className="flex h-full w-full items-center justify-center rounded-lg border border-line bg-surface px-3 py-2 text-sm text-fg shadow-xs transition-[background-color,border-color,box-shadow] duration-(--dur-1) ease-(--ease-standard) motion-reduce:transition-none data-[dimmed=true]:opacity-45 data-[root=true]:border-brand data-[root=true]:bg-brand-soft data-[root=true]:font-semibold data-[selected=true]:ring-2 data-[selected=true]:ring-ring"
+        data-dimmed={data.dimmed && !data.selected ? 'true' : undefined}
+        data-root={data.isRoot ? 'true' : undefined}
+        data-selected={data.selected ? 'true' : undefined}
+        style={nodeToneStyle(data.color, data.isRoot === true)}
       >
         <span className="truncate">{data.topic}</span>
         {data.hasChildren && toggle ? (
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            iconOnly
             onClick={(event) => {
               event.stopPropagation();
               toggle();
             }}
             onPointerDown={(event) => event.stopPropagation()}
-            className="-my-2 -mr-2 ml-1.5 inline-flex size-10 shrink-0 items-center justify-center rounded-lg transition-[background-color,scale] duration-150 ease-out hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96] motion-reduce:transition-none"
+            className="-my-2 -mr-2 ml-1.5 size-10 shrink-0"
             aria-label={data.collapsed ? '展开子节点' : '收起子节点'}
           >
-            {data.collapsed ? <ChevronRight className="size-3.5" /> : <ChevronDown className="size-3.5" />}
-          </button>
+            {data.collapsed ? <ChevronRight /> : <ChevronDown />}
+          </Button>
         ) : null}
       </div>
       <Handle type="source" id="src-left" position={Position.Left} style={{ opacity: 0 }} />
@@ -168,7 +173,7 @@ export function MindmapCanvas({
         <Controls showInteractive={false} />
       </ReactFlow>
       {layoutError ? (
-        <div className="absolute inset-x-4 top-4 z-20 rounded-xl border border-destructive/20 bg-background/95 px-4 py-3 text-sm text-destructive shadow-sm">
+        <div className="absolute inset-x-4 top-4 z-20 rounded-lg border border-danger-line bg-danger-soft px-4 py-3 text-sm text-danger-fg shadow-xs">
           导图布局失败：{layoutError}
         </div>
       ) : null}

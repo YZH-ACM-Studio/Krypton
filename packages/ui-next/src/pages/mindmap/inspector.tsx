@@ -1,9 +1,13 @@
-import { ArrowLeftRight, ExternalLink, Link2, Loader2, LockKeyhole, Plus, Save, Search, Trash2, Unlink, X } from 'lucide-react';
+import { ArrowLeftRight, ExternalLink, Link2, LockKeyhole, Plus, Save, Trash2, Unlink, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { Alert } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { Spinner } from '@/components/ui/display';
+import { EmptyState } from '@/components/ui/empty-state';
+import { FormField } from '@/components/ui/form';
+import { Input, SearchInput } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { SimpleSelect } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
@@ -48,6 +52,19 @@ function useAnchorRect(anchor: HTMLElement | null, active: boolean): DOMRect | n
   return rect;
 }
 
+/** Keep the floating list inside the viewport. A 120px floor overflows when the field sits near the bottom. */
+function searchResultsFrame(rect: DOMRect): { top: number; maxHeight: number } {
+  const gap = 4;
+  const margin = 12;
+  const spaceBelow = Math.max(0, window.innerHeight - rect.bottom - margin);
+  const spaceAbove = Math.max(0, rect.top - margin);
+  const placeBelow = spaceBelow >= 120 || spaceBelow >= spaceAbove;
+  const available = placeBelow ? spaceBelow : spaceAbove;
+  const maxHeight = Math.min(256, available);
+  const top = placeBelow ? rect.bottom + gap : Math.max(margin, rect.top - gap - maxHeight);
+  return { top, maxHeight };
+}
+
 function ProblemSearchResults({
   anchor,
   open,
@@ -67,35 +84,40 @@ function ProblemSearchResults({
 }) {
   const rect = useAnchorRect(anchor, open);
   if (!open || !rect || typeof document === 'undefined') return null;
-  const maxHeight = Math.min(256, Math.max(window.innerHeight - rect.bottom - 12, 120));
+  const frame = searchResultsFrame(rect);
   return createPortal(
     <div
       data-mindmap-problem-search="results"
-      className="z-[250] overflow-auto rounded-xl border bg-popover p-1.5 shadow-xl"
+      className="z-50 overflow-auto rounded-lg border border-line bg-surface-raised p-1 text-sm shadow-pop"
       style={{
         position: 'fixed',
         left: rect.left,
-        top: rect.bottom + 4,
+        top: frame.top,
         width: rect.width,
-        maxHeight,
+        maxHeight: frame.maxHeight,
       }}
     >
-      {searchError ? <p className="px-3 py-3 text-xs text-destructive">{searchError}</p> : null}
-      {!searching && !searchError && !searchResults.length ? <p className="px-3 py-3 text-xs text-muted-foreground">没有匹配题目</p> : null}
+      {searchError ? <p className="px-3 py-3 text-xs text-danger-fg">{searchError}</p> : null}
+      {!searching && !searchError && !searchResults.length ? <p className="px-3 py-3 text-xs text-fg-subtle">没有匹配题目</p> : null}
       {searchResults.map((problem) => (
-        <button
+        <Button
           key={problem.docId}
           type="button"
-          className="flex min-h-10 w-full items-center gap-2 rounded-lg px-3 py-2 text-left transition-[background-color,color,scale] duration-150 ease-out hover:bg-accent active:scale-[0.96] disabled:opacity-50 motion-reduce:transition-none"
+          variant="ghost"
+          className="h-auto w-full justify-start whitespace-normal"
           disabled={problemIds.includes(problem.pid)}
           onClick={() => onPick(problem)}
         >
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-medium">{problem.title}</span>
-            <span className="font-mono text-[11px] text-muted-foreground">{problem.pid}</span>
+          <span className="min-w-0 flex-1 text-left">
+            <span className="block truncate text-sm font-medium text-fg">{problem.title}</span>
+            <span className="font-mono text-2xs text-fg-subtle">{problem.pid}</span>
           </span>
-          {problem.hidden ? <Badge variant="outline">隐藏</Badge> : null}
-        </button>
+          {problem.hidden ? (
+            <Badge variant="outline" size="sm">
+              隐藏
+            </Badge>
+          ) : null}
+        </Button>
       ))}
     </div>,
     document.body,
@@ -133,14 +155,8 @@ export function MindmapInspector({
 }) {
   if (!node) {
     return (
-      <section className="grid h-full min-h-0 place-items-center bg-transparent px-8 text-center">
-        <div>
-          <span className="mx-auto grid size-11 place-items-center rounded-xl bg-muted text-muted-foreground">
-            <Link2 className="size-5" />
-          </span>
-          <h2 className="mt-3 text-sm font-semibold">选择节点开始编辑</h2>
-          <p className="mt-1 text-xs leading-5 text-muted-foreground">节点字段在这里保存；结构调整从左侧大纲完成。</p>
-        </div>
+      <section className="grid h-full min-h-0 place-items-center px-8 text-center">
+        <EmptyState compact icon={<Link2 />} title="选择节点开始编辑" description="节点字段在这里保存；结构调整从左侧大纲完成。" />
       </section>
     );
   }
@@ -298,51 +314,47 @@ function NodeInspectorForm({
   };
 
   return (
-    <section className="flex h-full min-h-0 flex-col bg-transparent">
-      <header className="px-4 pb-3 pt-4">
+    <section className="flex h-full min-h-0 flex-col">
+      <header className="px-4 pt-4 pb-3">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">节点检查器</p>
-            <h2 className="mt-1 truncate text-base font-semibold">{node.topic}</h2>
+            <p className="text-2xs font-medium text-fg-subtle">节点检查器</p>
+            <h2 className="mt-1 truncate text-lg font-semibold text-fg">{node.topic}</h2>
           </div>
-          {dirty ? <Badge className="shrink-0">未保存</Badge> : <Badge variant="outline">已同步</Badge>}
+          {dirty ? (
+            <Badge variant="soft" tone="warning" className="shrink-0">
+              未保存
+            </Badge>
+          ) : (
+            <Badge variant="outline" className="shrink-0">
+              已同步
+            </Badge>
+          )}
         </div>
-        <div className="mt-3 flex flex-wrap gap-1.5">
-          <Button size="sm" variant="outline" className="min-h-10" onClick={() => onCreateChild(node)} disabled={busy}>
-            <Plus className="size-3.5" /> 子节点
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button type="button" size="sm" variant="secondary" onClick={() => onCreateChild(node)} disabled={busy}>
+            <Plus /> 子节点
           </Button>
           {node.parentId ? (
-            <Button size="sm" variant="outline" className="min-h-10" onClick={() => onCreateSibling(node)} disabled={busy}>
-              <Plus className="size-3.5" /> 同级
+            <Button type="button" size="sm" variant="secondary" onClick={() => onCreateSibling(node)} disabled={busy}>
+              <Plus /> 同级
             </Button>
           ) : null}
           {node._id !== rootId ? (
-            <Button
-              size="sm"
-              variant="ghost"
-              className="min-h-10 text-destructive hover:text-destructive"
-              onClick={() => onDelete(node)}
-              disabled={busy}
-            >
-              <Trash2 className="size-3.5" /> 删除
+            <Button type="button" size="sm" variant="danger-soft" onClick={() => onDelete(node)} disabled={busy}>
+              <Trash2 /> 删除
             </Button>
           ) : null}
         </div>
       </header>
 
-      <ScrollArea className="min-h-0 flex-1 border-t border-border/50">
-        <div className="space-y-6 p-4">
-          <div className="space-y-3">
-            <div>
-              <label htmlFor="mindmap-topic" className="text-xs font-medium">
-                名称
-              </label>
-              <Input id="mindmap-topic" value={topic} maxLength={100} onChange={(event) => setTopic(event.target.value)} className="mt-1.5 h-10" />
-            </div>
-            <div>
-              <label htmlFor="mindmap-description" className="text-xs font-medium">
-                说明
-              </label>
+      <ScrollArea className="min-h-0 flex-1 border-t border-line-subtle">
+        <div className="flex flex-col gap-6 p-4">
+          <div className="flex flex-col gap-5">
+            <FormField label="名称" htmlFor="mindmap-topic">
+              <Input id="mindmap-topic" value={topic} maxLength={100} onChange={(event) => setTopic(event.target.value)} />
+            </FormField>
+            <FormField label="说明" htmlFor="mindmap-description">
               <Textarea
                 id="mindmap-description"
                 value={description}
@@ -350,41 +362,39 @@ function NodeInspectorForm({
                 rows={4}
                 onChange={(event) => setDescription(event.target.value)}
                 placeholder="补充这个知识点的范围或学习目标"
-                className="mt-1.5 resize-y"
               />
-            </div>
-            <div>
-              <label className="text-xs font-medium">颜色</label>
+            </FormField>
+            <FormField label="颜色" htmlFor="mindmap-color">
               <SimpleSelect
+                id="mindmap-color"
                 value={color}
                 onValueChange={setColor}
                 options={COLOR_OPTIONS}
-                className="mt-1.5 min-h-10"
                 contentClassName="[&_[role=option]]:min-h-10"
               />
-            </div>
+            </FormField>
           </div>
 
           {layoutDirection === 'RIGHT' && isRootBranch ? (
-            <div className="rounded-xl bg-muted/35 p-3 ring-1 ring-border/50">
-              <div className="flex items-center gap-2 text-xs font-medium">
-                <ArrowLeftRight className="size-3.5 text-muted-foreground" /> 根分支方向
+            <div className="rounded-md bg-surface-sunken p-3">
+              <div className="flex items-center gap-2 text-xs font-medium text-fg">
+                <ArrowLeftRight className="size-3.5 text-fg-subtle" /> 根分支方向
               </div>
-              <p className="mt-1 text-xs text-muted-foreground">只决定相对左右；节点绝对位置始终由结构自动计算。</p>
+              <p className="mt-1 text-xs text-fg-subtle">只决定相对左右；节点绝对位置始终由结构自动计算。</p>
               <div className="mt-3 grid grid-cols-2 gap-2">
                 <Button
-                  variant={rootSide === 'left' ? 'default' : 'outline'}
+                  type="button"
+                  variant={rootSide === 'left' ? 'soft' : 'secondary'}
                   size="sm"
-                  className="min-h-10"
                   disabled={busy || rootSide === 'left'}
                   onClick={() => onMoveSide(node, 'left')}
                 >
                   左侧
                 </Button>
                 <Button
-                  variant={rootSide === 'right' ? 'default' : 'outline'}
+                  type="button"
+                  variant={rootSide === 'right' ? 'soft' : 'secondary'}
                   size="sm"
-                  className="min-h-10"
                   disabled={busy || rootSide === 'right'}
                   onClick={() => onMoveSide(node, 'right')}
                 >
@@ -394,39 +404,39 @@ function NodeInspectorForm({
             </div>
           ) : null}
 
-          <div className="space-y-2">
+          <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between gap-2">
-              <label htmlFor="mindmap-tag" className="text-xs font-medium">
+              <label htmlFor="mindmap-tag" className="text-sm font-medium text-fg">
                 标签
               </label>
               {referenceCount > 0 ? (
-                <Badge variant="outline" className="gap-1 text-[10px]">
+                <Badge variant="outline" size="sm">
                   <LockKeyhole className="size-3" /> {referenceCount} 道题引用
                 </Badge>
               ) : null}
             </div>
             {referenceCount > 0 ? (
-              <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-xs leading-5 text-amber-800 dark:text-amber-200">
-                该节点已进入题目标签链。名称、说明和颜色仍可修改；标签需通过独立迁移流程变更。
-              </p>
+              <Alert tone="warning">该节点已进入题目标签链。名称、说明和颜色仍可修改；标签需通过独立迁移流程变更。</Alert>
             ) : null}
             <div className="flex flex-wrap gap-1.5">
               {tags.map((tag) => (
-                <Badge key={tag} variant="secondary" className="min-h-10 gap-1 pl-3 pr-0">
+                <Badge key={tag} variant="soft" tone="neutral" className="pr-0">
                   {tag}
                   {referenceCount === 0 ? (
-                    <button
+                    <Button
                       type="button"
+                      variant="ghost"
+                      size="sm"
+                      iconOnly
                       onClick={() => setTags((current) => current.filter((value) => value !== tag))}
                       aria-label={`移除标签 ${tag}`}
-                      className="grid size-10 place-items-center rounded-lg transition-[background-color,scale] duration-150 ease-out hover:bg-background/60 active:scale-[0.96] motion-reduce:transition-none"
                     >
-                      <X className="size-3" />
-                    </button>
+                      <X />
+                    </Button>
                   ) : null}
                 </Badge>
               ))}
-              {!tags.length ? <span className="text-xs text-muted-foreground">暂无标签</span> : null}
+              {!tags.length ? <span className="text-xs text-fg-subtle">暂无标签</span> : null}
             </div>
             {referenceCount === 0 ? (
               <div className="flex gap-2">
@@ -441,37 +451,26 @@ function NodeInspectorForm({
                     }
                   }}
                   placeholder="输入标签，回车添加"
-                  className="h-10"
                 />
-                <Button
-                  className="size-10"
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  onClick={addTag}
-                  disabled={!tagDraft.trim()}
-                  aria-label="添加标签"
-                >
-                  <Plus className="size-4" />
+                <Button type="button" variant="secondary" iconOnly onClick={addTag} disabled={!tagDraft.trim()} aria-label="添加标签">
+                  <Plus />
                 </Button>
               </div>
             ) : null}
           </div>
 
-          <div className="space-y-3">
+          <div className="flex flex-col gap-3">
             <div>
-              <h3 className="text-xs font-medium">手动关联题目</h3>
-              <p className="mt-1 text-xs leading-5 text-muted-foreground">按题号或标题搜索。移除关联不会删除题目，也不会修改题目标签。</p>
+              <h3 className="text-sm font-semibold text-fg">手动关联题目</h3>
+              <p className="mt-1 text-xs text-fg-subtle">按题号或标题搜索。移除关联不会删除题目，也不会修改题目标签。</p>
             </div>
-            <div ref={setSearchAnchor} className="relative">
-              <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-              <Input
+            <div ref={setSearchAnchor}>
+              <SearchInput
                 value={problemQuery}
                 onChange={(event) => setProblemQuery(event.target.value)}
                 placeholder="搜索 PID 或标题"
-                className="h-10 pl-8 pr-9"
+                trailing={searching ? <Spinner /> : undefined}
               />
-              {searching ? <Loader2 className="absolute right-2.5 top-1/2 size-4 -translate-y-1/2 animate-spin text-muted-foreground" /> : null}
               <ProblemSearchResults
                 anchor={searchAnchor}
                 open={!!problemQuery.trim()}
@@ -482,86 +481,98 @@ function NodeInspectorForm({
                 onPick={addProblem}
               />
             </div>
-            <div className="space-y-1.5">
+            <div className="flex flex-col gap-1.5">
               {problemIds.map((pid) => {
                 const problem = problemOptions.get(pid);
                 return (
-                  <div key={pid} className="flex min-h-11 items-center gap-2 rounded-lg bg-background px-3 py-2 ring-1 ring-border/50">
-                    <Link2 className="size-3.5 shrink-0 text-primary" />
+                  <div key={pid} className="flex min-h-12 items-center gap-2 rounded-md border border-line bg-surface px-3 py-2">
+                    <Link2 className="size-4 shrink-0 text-brand-fg" />
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-xs font-medium">{problem?.title || pid}</span>
-                      <span className="font-mono text-[10px] text-muted-foreground">{pid}</span>
+                      <span className="block truncate text-xs font-medium text-fg">{problem?.title || pid}</span>
+                      <span className="font-mono text-2xs text-fg-subtle">{pid}</span>
                     </span>
-                    <button
+                    <Button
                       type="button"
-                      className="grid size-10 place-items-center rounded-lg text-muted-foreground transition-[background-color,color,scale] duration-150 ease-out hover:bg-destructive/10 hover:text-destructive active:scale-[0.96] motion-reduce:transition-none"
+                      variant="ghost"
+                      size="sm"
+                      iconOnly
                       onClick={() => setProblemIds((current) => current.filter((value) => value !== pid))}
                       aria-label={`移除手动关联 ${pid}`}
                     >
-                      <Unlink className="size-3.5" />
-                    </button>
+                      <Unlink />
+                    </Button>
                   </div>
                 );
               })}
               {!problemIds.length ? (
-                <p className="rounded-lg border border-dashed px-3 py-4 text-center text-xs text-muted-foreground">暂无手动关联</p>
+                <p className="rounded-md border border-dashed border-line px-3 py-4 text-center text-xs text-fg-subtle">暂无手动关联</p>
               ) : null}
             </div>
           </div>
 
-          <div className="space-y-2">
+          <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between">
-              <h3 className="text-xs font-medium">当前知识归类</h3>
-              <span className="text-[11px] text-muted-foreground">{canonicallyMatched.length} 道</span>
+              <h3 className="text-sm font-semibold text-fg">当前知识归类</h3>
+              <span className="text-xs text-fg-subtle tabular">{canonicallyMatched.length} 道</span>
             </div>
-            {associationLoading ? <p className="py-3 text-xs text-muted-foreground">正在读取关联…</p> : null}
-            {associationError ? <p className="rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">{associationError}</p> : null}
+            {associationLoading ? <p className="py-3 text-xs text-fg-subtle">正在读取关联…</p> : null}
+            {associationError ? <Alert tone="danger">{associationError}</Alert> : null}
             {!associationLoading && !associationError && canonicallyMatched.length ? (
-              <div className="space-y-1.5">
+              <div className="flex flex-col gap-1.5">
                 {canonicallyMatched.slice(0, 40).map((problem) => (
-                  <a key={problem.docId} href={mindmapProblemHref(problem)} className="flex items-center gap-2 rounded-lg px-2 py-2 hover:bg-accent">
+                  <a
+                    key={problem.docId}
+                    href={mindmapProblemHref(problem)}
+                    className="flex min-h-10 items-center gap-2 rounded-md px-2 py-2 hover:bg-surface-hover"
+                  >
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-xs font-medium">{problem.title}</span>
-                      <span className="font-mono text-[10px] text-muted-foreground">{problem.pid}</span>
+                      <span className="block truncate text-xs font-medium text-fg">{problem.title}</span>
+                      <span className="font-mono text-2xs text-fg-subtle">{problem.pid}</span>
                     </span>
                     <div className="flex gap-1">
-                      <Badge variant="outline" className="text-[9px]">
+                      <Badge variant="outline" size="sm">
                         知识节点
                       </Badge>
                       {problem.sources.includes('manual') ? (
-                        <Badge variant="outline" className="text-[9px]">
+                        <Badge variant="outline" size="sm">
                           手动
                         </Badge>
                       ) : null}
                     </div>
-                    <ExternalLink className="size-3 text-muted-foreground" />
+                    <ExternalLink className="size-3 text-fg-subtle" />
                   </a>
                 ))}
                 {canonicallyMatched.length > 40 ? (
-                  <p className="px-2 text-[11px] text-muted-foreground">仅显示前 40 道，公开页面仍按完整关联查询。</p>
+                  <p className="px-2 text-2xs text-fg-subtle">仅显示前 40 道，公开页面仍按完整关联查询。</p>
                 ) : null}
               </div>
             ) : null}
             {!associationLoading && !associationError && !canonicallyMatched.length ? (
-              <p className="text-xs text-muted-foreground">当前节点及其子节点尚无归类题目</p>
+              <p className="text-xs text-fg-subtle">当前节点及其子节点尚无归类题目</p>
             ) : null}
           </div>
 
           {node._id !== rootId ? (
-            <div className="rounded-xl bg-destructive/5 p-3 ring-1 ring-destructive/20">
-              <h3 className="text-xs font-medium text-destructive">危险操作</h3>
-              <p className="mt-1 text-xs leading-5 text-muted-foreground">只允许删除无子节点、无题目引用的叶子。</p>
-              <Button size="sm" variant="destructive" className="mt-3 min-h-10" disabled={busy} onClick={() => onDelete(node)}>
-                <Trash2 className="size-3.5" /> 删除节点
-              </Button>
-            </div>
+            <Alert
+              tone="danger"
+              title="危险操作"
+              action={
+                <Button type="button" size="sm" variant="danger-soft" disabled={busy} onClick={() => onDelete(node)}>
+                  <Trash2 /> 删除节点
+                </Button>
+              }
+            >
+              只允许删除无子节点、无题目引用的叶子。
+            </Alert>
           ) : null}
         </div>
       </ScrollArea>
 
-      <footer className="border-t border-border/50 bg-card p-3">
+      <footer className="border-t border-line-subtle bg-surface-sunken p-3">
         <Button
-          className="min-h-10 w-full"
+          type="button"
+          variant="primary"
+          className="w-full"
           disabled={busy || !dirty || !topic.trim()}
           onClick={() =>
             onSave(node, {
@@ -573,7 +584,7 @@ function NodeInspectorForm({
             })
           }
         >
-          {busy ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
+          {busy ? <Spinner /> : <Save />}
           保存节点
         </Button>
       </footer>

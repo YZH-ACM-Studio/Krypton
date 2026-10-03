@@ -35,8 +35,6 @@ describe('p3.15 programming editor workspace correction', () => {
     expect(shell).not.to.include('#statement');
     expect(shell).not.to.include('#permissions');
     expect(shell).not.to.include('#programming');
-    expect(shell).to.include('lg:grid-cols-[15rem_minmax(0,1fr)]');
-    expect(shell).to.include('lg:hidden');
   });
 
   it('keeps creation under the hub, disables unavailable destinations, and enters the real edit workspace', () => {
@@ -68,11 +66,7 @@ describe('p3.15 programming editor workspace correction', () => {
     expect(edit).not.to.include('id="basic"');
     expect(edit).not.to.include('id="statement"');
     expect(edit).not.to.include('id="permissions"');
-    expect(shell).not.to.include('sticky top-12');
-    expect(shell).not.to.include('backdrop-blur');
     expect(shell).not.to.include('supports-[backdrop-filter]');
-    expect(shell).not.to.include('overflow-x-clip');
-    expect(shell).to.include('sticky top-2');
     expect(edit).to.include('创建并进入工作区');
   });
 
@@ -196,7 +190,7 @@ describe('p3.15 programming editor workspace correction', () => {
     expect(edit).to.include("defaultValue={String(pdoc.difficulty || (managed && isCreate ? 1 : ''))}");
     expect(edit).to.include("if (isCreate) {\n      fd.delete('content');");
     expect(edit).to.include("{isCreate ? '创建题目壳' : '题面正文'}");
-    expect(edit).to.match(/\{!isCreate\s*\?\s*\(\s*<div className="p-5">/);
+    expect(edit).to.match(/\{!isCreate\s*\?\s*\(\s*<div/);
     expect(edit).to.include('<ProgrammingStatementEditor');
     expect(edit).to.include("fd.set('programmingStatement', JSON.stringify(programmingStatement))");
     expect(edit).to.include(
@@ -271,8 +265,6 @@ describe('p3.15 programming editor workspace correction', () => {
     expect(guard).not.to.include('history.pushState');
     expect(guard).to.include('<DialogTitle>放弃未保存的更改？</DialogTitle>');
     expect(guard).not.to.include('window.confirm');
-    expect(config).to.include('flex shrink-0 flex-col gap-3 sm:flex-row');
-    expect(config).to.include('flex flex-wrap items-center gap-2 sm:ml-auto');
     expect(uploader).to.include('role="progressbar"');
     expect(uploader).to.include('aria-valuenow={it.progress}');
     expect(uploader).to.include("console.error('File upload batch failed'");

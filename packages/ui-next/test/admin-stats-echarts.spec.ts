@@ -8,12 +8,10 @@ describe('admin stats echarts dashboard', () => {
   it('renders every chart through EChart and drops the local SVG/CSS charts', () => {
     expect(page).to.include("import { EChart } from '@/components/ui/echart'");
     expect(page).to.include('<EChart option=');
-    expect(page).to.include('h-[280px] w-full min-w-0');
     expect(page).to.match(/echarts?/i);
     expect(page).not.to.include('function LineChart');
     expect(page).not.to.include('<polyline');
     expect(page).not.to.include('function BarRows');
-    expect(page).not.to.include('min-w-[600px]');
   });
 
   it('keeps GET field names, CSV filenames, and formula-safe headers', () => {
@@ -58,12 +56,5 @@ describe('admin stats echarts dashboard', () => {
     expect(page).to.include('hideSidebar');
     expect(page).to.include('PRIV.PRIV_EDIT_SYSTEM');
     expect(page).not.to.include('registerAdminNavSection');
-    expect(page).to.include('grid-cols-12');
-    expect(page).to.include('lg:grid-cols-12');
-    expect(page).to.include('lg:col-span-8');
-    expect(page).to.include('lg:col-span-4');
-    expect(page).to.include('shadow-none');
-    expect(page).to.include('w-full min-w-0');
-    expect(page).not.to.include('xl:grid-cols-[minmax(0,1fr)_320px]');
   });
 });

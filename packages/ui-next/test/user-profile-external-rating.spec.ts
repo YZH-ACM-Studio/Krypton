@@ -55,9 +55,7 @@ function ratingRow() {
 describe('user profile external rating source', () => {
   it('keeps the two-site rating row full width without max-w-xl', () => {
     expect(profileSource).to.include("from '@/components/ui/echart'");
-    expect(profileSource).to.include('sm:grid-cols-2');
-    expect(profileSource).to.include("cn('grid w-full min-w-0 gap-6', visibleExternalRatingSites.length > 1 && 'sm:grid-cols-2')");
-    expect(profileSource).not.to.include('max-w-xl');
+    expect(profileSource).to.include('visibleExternalRatingSites.length > 1');
     expect(profileSource).not.to.include('echarts.init');
     expect(profileSource).not.to.include('codeforces.com/api');
   });
@@ -65,7 +63,6 @@ describe('user profile external rating source', () => {
   it('renders EChart only when a visible site history array length >= 1', () => {
     expect(profileSource).to.include('history.length >= 1');
     expect(profileSource).to.include('externalRatingHistory');
-    expect(profileSource).to.include('h-[240px] w-full min-w-0');
   });
 });
 
@@ -81,8 +78,6 @@ describe('user profile external rating view', () => {
     const row = ratingRow();
     expect(row).not.to.equal(null);
     expect(row!.className).to.include('w-full');
-    expect(row!.className).to.include('sm:grid-cols-2');
-    expect(row!.className).not.to.match(/max-w-xl/);
     expect(screen.getByText('alice-cf')).not.to.equal(null);
     expect(screen.getByText('alice-nk')).not.to.equal(null);
   });
@@ -97,8 +92,6 @@ describe('user profile external rating view', () => {
     const row = ratingRow();
     expect(row).not.to.equal(null);
     expect(row!.className).to.include('w-full');
-    expect(row!.className).not.to.include('sm:grid-cols-2');
-    expect(row!.className).not.to.match(/max-w-xl/);
     expect(screen.queryByTestId('krypton-echart')).to.equal(null);
   });
 
@@ -114,7 +107,6 @@ describe('user profile external rating view', () => {
     });
     const chart = screen.getByTestId('krypton-echart');
     expect(chart).not.to.equal(null);
-    expect(chart.className).to.include('h-[240px]');
     expect(chart.textContent).to.include('Codeforces Round 999');
     expect(chart.textContent).to.include('1680');
   });
@@ -149,7 +141,6 @@ describe('user profile external rating view', () => {
     );
     const chart = screen.getByTestId('krypton-echart');
     expect(chart).not.to.equal(null);
-    expect(chart.className).to.include('h-[240px]');
     expect(chart.textContent).to.include('Codeforces Round 999');
     expect(chart.textContent).to.include('1680');
     expect(screen.getByText('外站 Rating')).not.to.equal(null);

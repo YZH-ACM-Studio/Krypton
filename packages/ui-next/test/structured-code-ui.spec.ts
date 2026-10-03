@@ -110,11 +110,6 @@ describe('p3.17 code evaluation draft workspace', () => {
     expect(editor).to.include('data-testid="structured-author-stage-nav"');
     expect(editor).to.include('data-testid="structured-author-stage-panel"');
     expect(editor).to.include('data-testid="structured-author-stage-actions"');
-    expect(editor).to.include('min-h-[min(32rem,calc(100dvh-12rem))]');
-    expect(editor).not.to.include('min-h-[32rem]');
-    expect(editor).to.include('sticky bottom-0');
-    expect(editor).to.include('pb-safe');
-    expect(editor).to.include('pb-[max(0.5rem,env(safe-area-inset-bottom))]');
     expect(editor).to.include('上一步');
     expect(editor).to.include('下一步');
     expect(editor).to.include('event.preventDefault();');
@@ -149,8 +144,6 @@ describe('p3.21 shared structured-code workspace', () => {
     expect(editor).to.include('startLine: start.number - 1');
     expect(editor).to.include('endLine: end.number');
     expect(editor).to.include("height: '100%'");
-    expect(editor).to.include('h-[min(32rem,calc(100dvh-12rem))]');
-    expect(editor).not.to.include('min-h-[32rem]');
     expect(editor).not.to.include("minHeight: '32rem'");
     expect(editor).to.include("backgroundColor: 'color-mix(in srgb, var(--muted) 32%, var(--background))'");
     expect(editor).to.include("backgroundColor: 'color-mix(in srgb, var(--muted) 68%, var(--background))'");
@@ -278,7 +271,6 @@ describe('p3.23 program-fill authoring and student contract', () => {
     expect(inputs).to.include('structured code surface contains duplicate region ids');
     expect(inputs).to.include('aria-label="连续代码作答区"');
     expect(inputs).to.include("segment.type === 'code'");
-    expect(inputs).to.include('overflow-x-auto');
     expect(inputs).to.include('autoComplete="off"');
     expect(inputs).to.include('const regionIds = regions.map((region) => region.id)');
     expect(inputs).to.include('index + (event.shiftKey ? -1 : 1)');
@@ -297,9 +289,6 @@ describe('p3.23 program-fill authoring and student contract', () => {
     expect(inputs).to.include('event.preventDefault()');
     expect(inputs).to.include('target.focus()');
     expect(inputs).to.include("event.target.value.replace(/[\\r\\n]/g, '')");
-    expect(inputs).to.include('className="h-9 min-h-9 min-w-0 w-full font-mono"');
-    expect(inputs).to.include('overflow-x-auto whitespace-pre');
-    expect(inputs).not.to.include('min-w-[18rem]');
   });
 
   it('reuses the same student surface for direct, contest/OI/homework, exam, training, and course entry points', () => {

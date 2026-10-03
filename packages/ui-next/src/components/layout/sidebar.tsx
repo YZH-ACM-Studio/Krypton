@@ -26,11 +26,12 @@ import {
   Wrench,
   X,
 } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { MOTION } from '@/components/ui/motion';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Separator } from '@/components/ui/separator';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { SimpleTooltip, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 import { canSeeAdminAffordance } from '@/lib/perms';
@@ -49,29 +50,49 @@ interface NavGroup {
   show?: boolean;
 }
 
-// The 44px item is centered in a 64px rail: 10px inset + 8px visual gap.
+// SimpleTooltip cannot set sideOffset. Keep the existing collapsed-rail gap.
 const COLLAPSED_TOOLTIP_OFFSET = 18;
 
-function SidebarLink({ item, active, collapsed }: { item: NavItem; active: boolean; collapsed: boolean }) {
+function sidebarMotion(token: typeof MOTION.state) {
+  const [x1, y1, x2, y2] = token.ease;
+  if (token.ease.length !== 4 || x1 === undefined || y1 === undefined || x2 === undefined || y2 === undefined) {
+    throw new TypeError('Sidebar motion ease must be a four-number bezier');
+  }
+  return { duration: token.duration, ease: [x1, y1, x2, y2] as const };
+}
+
+function SidebarLink({
+  item, active, collapsed, touch,
+}: {
+  item: NavItem;
+  active: boolean;
+  collapsed: boolean;
+  touch: boolean;
+}) {
   const link = (
     <a
       href={item.href}
       aria-current={active ? 'page' : undefined}
       aria-label={collapsed ? item.label : undefined}
       className={cn(
-        'relative flex items-center text-sm font-medium outline-none transition-[background-color,color,box-shadow,scale] duration-150 ease-out focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar-background active:scale-[0.96]',
-        collapsed ? 'mx-auto size-11 justify-center rounded-[14px]' : 'min-h-11 w-full gap-3 rounded-xl px-3 py-2 md:min-h-10',
+        'relative flex w-full items-center rounded-md text-sm outline-none transition-colors duration-(--dur-1) ease-(--ease-standard) focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
+        touch ? 'h-10' : 'h-8',
+        collapsed ? 'justify-center px-0' : 'gap-2.5 px-2',
         active
-          ? 'bg-sidebar-primary/12 text-sidebar-primary shadow-sm'
-          : 'text-sidebar-foreground/68 hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground',
+          ? 'bg-surface-active font-medium text-fg'
+          : 'text-fg-muted hover:bg-surface-hover hover:text-fg',
       )}
     >
-      <item.icon className="size-[18px] shrink-0" aria-hidden="true" />
-      {!collapsed && <span className="truncate">{item.label}</span>}
+      <item.icon
+        className={cn('size-4 shrink-0', active ? 'text-fg' : 'text-fg-subtle')}
+        aria-hidden="true"
+      />
+      {collapsed ? null : <span className="truncate">{item.label}</span>}
       {item.badge ? (
         <Badge
-          variant="destructive"
-          className={cn('h-5 min-w-5 justify-center px-1.5 text-[10px] shadow-sm', collapsed ? 'absolute -right-0.5 -top-0.5' : 'ml-auto')}
+          tone="success"
+          size="sm"
+          className={cn(collapsed ? 'absolute -top-0.5 -right-0.5' : 'ml-auto')}
         >
           {item.badge}
         </Badge>
@@ -86,7 +107,7 @@ function SidebarLink({ item, active, collapsed }: { item: NavItem; active: boole
         <TooltipContent side="right" sideOffset={COLLAPSED_TOOLTIP_OFFSET}>
           <span className="flex items-center gap-2">
             <span>{item.label}</span>
-            {item.badge ? <span className="text-xs tabular-nums text-muted-foreground">{item.badge}</span> : null}
+            {item.badge ? <span className="text-xs tabular text-fg-muted">{item.badge}</span> : null}
           </span>
         </TooltipContent>
       </Tooltip>
@@ -343,46 +364,59 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
 
   const renderSidebarContent = (isCollapsed: boolean, scrollType: 'hover' | 'auto' = 'hover') => (
     <div className="flex h-full flex-col">
-      {/* Logo */}
-      <div className={cn('flex shrink-0 items-center border-b', isCollapsed ? 'h-12 justify-center px-2' : 'h-12 gap-2 px-4')}>
+      <div className={cn('flex h-12 shrink-0 items-center border-b border-line', isCollapsed ? 'justify-center px-2' : 'gap-2 px-3')}>
         <a
           href={bs.urls.home}
           aria-label={isCollapsed ? 'Krypton 首页' : undefined}
           className={cn(
-            'flex items-center gap-2 font-semibold outline-none transition-[background-color,color,scale] duration-150 ease-out focus-visible:ring-2 focus-visible:ring-sidebar-ring active:scale-[0.96]',
-            isCollapsed ? 'size-10 justify-center rounded-xl hover:bg-sidebar-accent' : '',
+            'flex items-center gap-2 text-sm font-semibold text-fg outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
+            isCollapsed ? 'size-8 justify-center rounded-md hover:bg-surface-hover' : '',
           )}
         >
-          <Swords className="size-5 text-primary" />
-          {!isCollapsed && <span>Krypton</span>}
+          <Swords className="size-5 shrink-0" aria-hidden="true" />
+          {isCollapsed ? null : <span>Krypton</span>}
         </a>
-        {!isCollapsed && <div className="flex-1" />}
-        {!isCollapsed && (
-          <Button variant="ghost" size="icon" className="size-8 min-h-11 min-w-11 md:hidden" onClick={onClose}>
-            <X className="size-4" />
-          </Button>
-        )}
+        {isCollapsed ? null : <div className="flex-1" />}
+        {!isCollapsed && scrollType === 'auto' ? (
+          <SimpleTooltip content="关闭菜单">
+            <Button
+              variant="ghost"
+              size="sm"
+              iconOnly
+              aria-label="关闭菜单"
+              onClick={onClose}
+            >
+              <X />
+            </Button>
+          </SimpleTooltip>
+        ) : null}
       </div>
 
-      {/* Nav */}
       <TooltipProvider delayDuration={160}>
-        <ScrollArea type={scrollType} className="min-h-0 flex-1" viewportClassName={cn(isCollapsed ? 'px-2 py-2.5' : 'p-3')}>
+        <ScrollArea type={scrollType} className="min-h-0 flex-1" viewportClassName="px-2 py-2">
           <nav aria-label="主导航">
             {groups.map((group, gi) => {
-              if (group.show === false) return null;
+              if (group.show === false) {
+                return null;
+              }
               return (
-                <div key={gi} className="mb-2">
+                <div key={gi}>
                   {group.label ? (
-                    <>
-                      <Separator className={cn('my-3', isCollapsed ? 'mx-auto w-8' : '')} />
-                      {!isCollapsed && (
-                        <p className="mb-1 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{group.label}</p>
-                      )}
-                    </>
+                    isCollapsed ? (
+                      <div className="mx-auto my-2 h-px w-4 bg-line" />
+                    ) : (
+                      <p className="px-3 pt-4 pb-1 text-2xs font-semibold text-fg-subtle">{group.label}</p>
+                    )
                   ) : null}
-                  <div className="space-y-1">
+                  <div className="flex flex-col gap-0.5">
                     {group.items.map((item) => (
-                      <SidebarLink key={item.href} item={item} active={item.templates.includes(tpl)} collapsed={isCollapsed} />
+                      <SidebarLink
+                        key={item.href}
+                        item={item}
+                        active={item.templates.includes(tpl)}
+                        collapsed={isCollapsed}
+                        touch={scrollType === 'auto'}
+                      />
                     ))}
                   </div>
                 </div>
@@ -396,25 +430,41 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
 
   return (
     <>
-      {/* Desktop sidebar */}
-      <aside
+      <motion.aside
+        initial={false}
+        animate={{ width: collapsed ? 56 : 240 }}
+        transition={sidebarMotion(MOTION.state)}
         className={cn(
-          'hidden shrink-0 border-r border-sidebar-border bg-sidebar-background text-sidebar-foreground transition-[width] duration-200 ease-out md:block',
-          collapsed ? 'w-16' : 'w-56',
+          'hidden h-full shrink-0 flex-col overflow-hidden border-r border-line bg-surface-sunken lg:flex',
+          collapsed ? 'w-14' : 'w-60',
         )}
       >
         {renderSidebarContent(collapsed)}
-      </aside>
+      </motion.aside>
 
-      {/* Mobile overlay */}
-      {open ? (
-        <div className="fixed inset-0 z-50 md:hidden">
-          <div className="absolute inset-0 bg-black/55 backdrop-blur-[2px]" onClick={onClose} />
-          <aside className="relative h-full w-[min(18rem,82vw)] border-r border-sidebar-border bg-sidebar-background text-sidebar-foreground shadow-2xl">
+      <AnimatePresence>
+        {open ? (
+          <motion.div
+            key="sidebar-scrim"
+            className="fixed inset-0 z-40 bg-scrim lg:hidden"
+            initial={{ opacity: 0 /* ds-allow DS015: mobile drawer scrim must enter from transparent; layout is not gate-exempt */ }}
+            animate={{ opacity: 1, transition: sidebarMotion(MOTION.enter) }}
+            exit={{ opacity: 0, transition: sidebarMotion(MOTION.exit) }}
+            onClick={onClose}
+          />
+        ) : null}
+        {open ? (
+          <motion.aside
+            key="sidebar-drawer"
+            className="fixed inset-y-0 left-0 z-40 flex h-full w-72 max-w-[85vw] flex-col bg-surface-raised shadow-pop lg:hidden"
+            initial={{ x: '-100%' /* ds-allow DS015: mobile drawer must start off-screen; layout is not gate-exempt */ }}
+            animate={{ x: 0, transition: sidebarMotion(MOTION.enter) }}
+            exit={{ x: '-100%', transition: sidebarMotion(MOTION.exit) }}
+          >
             {renderSidebarContent(false, 'auto')}
-          </aside>
-        </div>
-      ) : null}
+          </motion.aside>
+        ) : null}
+      </AnimatePresence>
     </>
   );
 }

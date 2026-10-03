@@ -20,13 +20,13 @@ export function KryptonFooter() {
   const domLines = splitLines(bs.footer?.domainHtml);
 
   return (
-    <footer className="mt-12 border-t bg-muted/20 text-muted-foreground">
-      <div className="mx-auto grid max-w-7xl gap-4 px-4 py-5 text-xs sm:grid-cols-3 sm:px-6 lg:px-8">
+    <footer className="border-t border-line-subtle px-4 py-6 text-xs text-fg-subtle">
+      <div className="mx-auto grid max-w-7xl gap-4 sm:grid-cols-3">
         {/* Left: copyright + site */}
         <div className="space-y-1">
-          <p className="font-medium text-foreground">{bs.siteName || bs.appName || 'Krypton'}</p>
+          <p className="font-medium text-fg">{bs.siteName || bs.appName || 'Krypton'}</p>
           <p>
-            © {year} · 由 <span className="text-foreground">{bs.appName || 'Krypton'}</span> 提供
+            © {year} · 由 <span className="text-fg">{bs.appName || 'Krypton'}</span> 提供
           </p>
           <p className="flex items-center gap-1">
             <Heart className="size-3" />
@@ -36,19 +36,19 @@ export function KryptonFooter() {
 
         {/* Middle: links */}
         <nav className="flex flex-wrap items-start gap-3">
-          <a href="/wiki/about" className="inline-flex min-h-11 items-center hover:text-foreground sm:min-h-0">
+          <a href="/wiki/about" className="inline-flex min-h-11 items-center hover:text-fg sm:min-h-0">
             关于
           </a>
-          <a href="/wiki/help" className="inline-flex min-h-11 items-center hover:text-foreground sm:min-h-0">
+          <a href="/wiki/help" className="inline-flex min-h-11 items-center hover:text-fg sm:min-h-0">
             帮助
           </a>
-          <a href="/wiki/tos" className="inline-flex min-h-11 items-center hover:text-foreground sm:min-h-0">
+          <a href="/wiki/tos" className="inline-flex min-h-11 items-center hover:text-fg sm:min-h-0">
             服务条款
           </a>
-          <a href="/wiki/privacy" className="inline-flex min-h-11 items-center hover:text-foreground sm:min-h-0">
+          <a href="/wiki/privacy" className="inline-flex min-h-11 items-center hover:text-fg sm:min-h-0">
             隐私
           </a>
-          <a href="https://github.com/hydro-dev/Hydro" className="inline-flex min-h-11 items-center gap-1 hover:text-foreground sm:min-h-0" target="_blank" rel="noreferrer">
+          <a href="https://github.com/hydro-dev/Hydro" className="inline-flex min-h-11 items-center gap-1 hover:text-fg sm:min-h-0" target="_blank" rel="noreferrer">
             <Github className="size-3" />
             GitHub
           </a>

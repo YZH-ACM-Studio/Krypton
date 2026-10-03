@@ -1,21 +1,13 @@
 /**
  * ScrollArea — branded scroll container built on Radix.
  *
- * Wraps `@radix-ui/react-scroll-area` with our visual style:
- *   - Track stays transparent; thumb is muted-foreground at 30/55% alpha.
- *   - Scrollbars are 10 px wide and only appear when content overflows.
- *   - Works for vertical, horizontal, and both axes automatically — pass
- *     no extra props for the default vertical case.
+ * The track stays transparent. The thumb uses `--scroll-thumb` /
+ * `--scroll-thumb-hover`, is 10px on the cross axis, and inset by 3px.
+ * Scrollbars appear only when content overflows. Pass no orientation for
+ * the default vertical case; `both` mounts the horizontal bar too.
  *
- * The CSS variable `--radix-scroll-area-corner-width` etc. are exposed by
- * Radix so the two scrollbars don't overlap when both are visible.
- *
- * Layout note: Radix's `Viewport` becomes the actual scroll node. If a
- * parent uses `flex` + `flex-1`, set the ScrollArea root to those same
- * classes (so it fills the column) — the Viewport always fills the root.
- *
- * `type="hover"` only shows the bar on hover; `type="auto"` (default) keeps
- * it visible whenever content overflows.
+ * `viewportLayout` overrides Radix's `display: table` content wrapper.
+ * The viewport's `max-height: inherit` lets a `max-h-*` root actually scroll.
  */
 import * as React from 'react';
 import * as RScrollArea from '@radix-ui/react-scroll-area';
@@ -33,13 +25,11 @@ export interface ScrollAreaProps extends React.ComponentPropsWithoutRef<typeof R
    *
    * Radix's Viewport wraps content in a `display: table` element. Tables size
    * to content height, which is what lets the parent's `max-h-*` actually
-   * trigger scrolling — so the default is `table` and that's what works for
-   * popovers, dialogs, lists, and plain block content.
+   * trigger scrolling — so the default is `table`.
    *
-   * Opt out only when the children need a real flex row/column layout —
-   * e.g. a horizontally-scrolling toolbar where children must lay out side by
-   * side. For those, pass `viewportLayout="flex"` and use `viewportClassName`
-   * to set the flex direction / spacing.
+   * Opt out only when the children need a real block or flex layout.
+   * For a horizontal toolbar, pass `viewportLayout="flex"` and set direction
+   * through `viewportClassName`.
    */
   viewportLayout?: 'table' | 'block' | 'flex';
 }
@@ -47,7 +37,7 @@ export interface ScrollAreaProps extends React.ComponentPropsWithoutRef<typeof R
 const viewportLayoutClass = (layout: 'table' | 'block' | 'flex') => {
   if (layout === 'block') return '[&>div]:!block';
   if (layout === 'flex') return '[&>div]:!flex';
-  return ''; // 'table' = Radix default, no override
+  return '';
 };
 
 export const ScrollArea = React.forwardRef<HTMLDivElement, ScrollAreaProps>(
@@ -57,11 +47,6 @@ export const ScrollArea = React.forwardRef<HTMLDivElement, ScrollAreaProps>(
         <RScrollArea.Viewport
           ref={viewportRef}
           className={cn(
-            // `size-full` works when Root has explicit `h-*`; the inline
-            // `max-height: inherit` makes it also work when Root only has
-            // `max-h-*` (the classic CSS percent-height-on-auto-parent trap —
-            // 100% of auto doesn't resolve, but max-h-inherit caps content
-            // at the right height so the viewport's overflow:scroll triggers).
             'size-full rounded-[inherit]',
             viewportLayoutClass(viewportLayout),
             viewportClassName,
@@ -85,14 +70,14 @@ export const ScrollBar = React.forwardRef<HTMLDivElement, React.ComponentPropsWi
         ref={ref}
         orientation={orientation}
         className={cn(
-          'flex touch-none select-none transition-colors motion-reduce:transition-none',
-          orientation === 'vertical' ? 'h-full w-2.5 border-l border-l-transparent p-px' : 'h-2.5 w-full flex-col border-t border-t-transparent p-px',
+          'flex touch-none select-none bg-transparent transition-colors motion-reduce:transition-none',
+          orientation === 'vertical' ? 'h-full w-[10px] p-[3px]' : 'h-[10px] w-full flex-col p-[3px]',
           className,
         )}
         {...props}
       >
         <RScrollArea.ScrollAreaThumb
-          className={cn('relative flex-1 rounded-full bg-muted-foreground/30 transition-colors hover:bg-muted-foreground/55 motion-reduce:transition-none')}
+          className="relative flex-1 rounded-full bg-[var(--scroll-thumb)] transition-colors hover:bg-[var(--scroll-thumb-hover)] motion-reduce:transition-none"
         />
       </RScrollArea.ScrollAreaScrollbar>
     );

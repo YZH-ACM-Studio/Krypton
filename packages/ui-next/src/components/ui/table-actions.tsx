@@ -1,28 +1,15 @@
 /**
- * `<TableActions>` — uniform action group rendered in a table's last column.
+ * `<TableActions>` — action group for a table's last column.
  *
- * The old pattern was a row of ghost `<Button>`s right-aligned via
- * `text-right` + `justify-end`. Visually the header label ended up flush
- * right while the buttons huddled at the right edge — not actually aligned.
- *
- * The new pattern:
- *   - actions left-align inside the cell (so the column reads naturally
- *     left-to-right and the header label sits directly above the first
- *     button)
- *   - every action is a real outline button with a uniform `h-7 px-2.5
- *     text-xs` size — icon-only actions still get the same hit area
- *   - destructive actions render with a red border + text-destructive
+ * Actions left-align under the header. Each `TableAction` is a ghost `sm`
+ * button: destructive uses danger text, primary uses brand text. A
+ * `formAction` renders a real `<form method="post">` so it works without JS.
+ * `formAction=""` submits to the current URL; omit the prop for a plain button.
  *
  *   <TableActions>
  *     <TableAction href={`/admin/tasks/${id}/stats`}>统计</TableAction>
- *     <TableAction href={`/admin/tasks/${id}/edit`}  icon={Pencil}>编辑</TableAction>
- *     <TableAction onSubmit={...} icon={Copy} hint="复制" formAction="..." />
- *     <TableAction onSubmit={...} icon={Trash2} variant="destructive"
- *                  formAction="..." confirm="确定删除？" />
+ *     <TableAction formAction="/admin/tasks" confirm="确定删除？" variant="destructive">删除</TableAction>
  *   </TableActions>
- *
- * If a `formAction` is set, the action renders as a `<form>` so it can
- * POST to a hydrooj handler (no JS required).
  */
 import { useRef, useState, type ComponentType, type ReactNode } from 'react';
 import { type LucideIcon } from 'lucide-react';
@@ -57,6 +44,17 @@ export interface TableActionProps {
   onClick?: () => void;
 }
 
+function toneClass(variant: TableActionVariant): string | undefined {
+  // Ghost hover:text-fg outranks a plain tone color, so the hover color has to win too.
+  if (variant === 'destructive') {
+    return 'text-danger-fg hover:text-danger-fg!';
+  }
+  if (variant === 'primary') {
+    return 'text-brand-fg hover:text-brand-fg!';
+  }
+  return undefined;
+}
+
 export function TableAction({
   children,
   href,
@@ -70,51 +68,44 @@ export function TableAction({
   className,
   onClick,
 }: TableActionProps) {
-  const isIconOnly = !children;
-  const base = cn(
-    // whitespace-nowrap stops cramped action columns from word-wrapping Chinese
-    // characters one-per-line ("置/顶" rendered as a vertical column).
-    'inline-flex h-7 items-center justify-center gap-1 rounded-md border text-xs font-medium whitespace-nowrap transition-colors',
-    isIconOnly ? 'w-7 px-0' : 'px-2.5',
-    variant === 'destructive'
-      ? 'border-destructive/50 text-destructive hover:border-destructive hover:bg-destructive/10'
-      : variant === 'primary'
-        ? 'border-primary/50 text-primary hover:border-primary hover:bg-primary/10'
-        : 'border-border bg-background text-foreground shadow-sm hover:border-foreground/30 hover:bg-muted',
-    disabled && 'pointer-events-none opacity-50',
-    className,
-  );
-
+  const iconOnly = !children;
+  const actionClass = cn('whitespace-nowrap', toneClass(variant), disabled && 'pointer-events-none opacity-45', className);
   const inner = (
     <>
-      {Icon && <Icon className={cn(isIconOnly ? 'size-3.5' : 'size-3')} />}
+      {Icon ? <Icon aria-hidden="true" /> : null}
       {children}
     </>
   );
 
   if (href) {
     return (
-      <a href={href} className={base} title={hint || (isIconOnly ? undefined : undefined)}>
-        {inner}
-      </a>
+      <Button asChild variant="ghost" size="sm" iconOnly={iconOnly} className={actionClass}>
+        <a
+          href={href}
+          title={hint}
+          aria-disabled={disabled || undefined}
+          tabIndex={disabled ? -1 : undefined}
+          onClick={disabled ? (event) => event.preventDefault() : undefined}
+        >
+          {inner}
+        </a>
+      </Button>
     );
   }
 
-  // NOTE: 用 `!== undefined` 而非真值判断——`formAction=""` 是合法值（标准
-  // HTML 里空 action 表示"提交到当前 URL"）。旧的 `if (formAction)` 把空串
-  // 当 falsy，导致「通过 / 撤销 / 单人令牌」等按钮掉进下面的 no-op
-  // `type=button` 分支、点击毫无反应。想要纯按钮的调用方不传 formAction
-  // （undefined），仍走 onClick 分支。
+  // `!== undefined` is required: `formAction=""` is a real submit-to-current-URL.
+  // A truthy check dropped those buttons into the no-op `type="button"` branch.
   if (formAction !== undefined) {
     return (
       <TableActionForm
         formAction={formAction}
         confirm={confirm}
         hidden={hidden}
-        base={base}
+        actionClass={actionClass}
         hint={hint}
         disabled={disabled}
         variant={variant}
+        iconOnly={iconOnly}
         label={typeof children === 'string' ? children : undefined}
       >
         {inner}
@@ -123,34 +114,45 @@ export function TableAction({
   }
 
   return (
-    <button type="button" onClick={onClick} className={base} title={hint} disabled={disabled}>
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      iconOnly={iconOnly}
+      onClick={onClick}
+      className={actionClass}
+      title={hint}
+      disabled={disabled}
+    >
       {inner}
-    </button>
+    </Button>
   );
 }
 
 /**
- * Internal: renders a `<form>` action with an in-page Dialog instead of
- * `window.confirm` for destructive confirmation.
+ * Renders a `<form>` action. Confirmation uses an in-page Dialog;
+ * agreeing calls `HTMLFormElement.submit()`, which skips the submit event.
  */
 function TableActionForm({
   formAction,
   confirm,
   hidden,
-  base,
+  actionClass,
   hint,
   disabled,
   variant,
+  iconOnly,
   label,
   children,
 }: {
   formAction: string;
   confirm?: string;
   hidden?: Record<string, string | number>;
-  base: string;
+  actionClass: string;
   hint?: string;
   disabled?: boolean;
   variant: TableActionVariant;
+  iconOnly: boolean;
   label?: string;
   children: ReactNode;
 }) {
@@ -161,21 +163,28 @@ function TableActionForm({
       <form
         ref={formRef}
         method="post"
-        // 空串省略 action，等同于原生「提交到当前 URL」，避开 React 19 对
-        // 空字符串 action 的特殊处理，与页内正常工作的 <form method="post"> 一致。
+        // An empty string is omitted so React 19 does not special-case action="".
         action={formAction || undefined}
         className="inline-block"
-        onSubmit={(e) => {
+        onSubmit={(event) => {
           if (confirm && !open) {
-            e.preventDefault();
+            event.preventDefault();
             setOpen(true);
           }
         }}
       >
-        {hidden && Object.entries(hidden).map(([k, v]) => <input key={k} type="hidden" name={k} value={v} />)}
-        <button type="submit" className={base} title={hint} disabled={disabled}>
+        {hidden ? Object.entries(hidden).map(([key, value]) => <input key={key} type="hidden" name={key} value={value} />) : null}
+        <Button
+          type="submit"
+          variant="ghost"
+          size="sm"
+          iconOnly={iconOnly}
+          className={actionClass}
+          title={hint}
+          disabled={disabled}
+        >
           {children}
-        </button>
+        </Button>
       </form>
       {confirm ? (
         <Dialog open={open} onOpenChange={setOpen}>
@@ -193,11 +202,8 @@ function TableActionForm({
                 variant={variant === 'destructive' ? 'destructive' : 'default'}
                 onClick={() => {
                   setOpen(false);
-                  // Bypass the confirm path now that the user has agreed.
                   if (formRef.current) {
-                    const f = formRef.current;
-                    // Manually submit (HTMLFormElement.submit skips submit event)
-                    f.submit();
+                    formRef.current.submit();
                   }
                 }}
               >

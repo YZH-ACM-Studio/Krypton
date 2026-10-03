@@ -12,12 +12,16 @@ import {
   type HTMLAttributes,
   type ReactElement,
   type ReactNode,
+  type RefObject,
 } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
+import { AnimatePresence, motion, useIsPresent } from 'motion/react';
 import { cn } from '../../lib/cn';
 import { Button } from './button';
 import { Input } from './input';
+import { useBreakpoint } from './media';
+import { MOTION } from './motion';
 
 export type DialogSize = 'sm' | 'md' | 'lg' | 'xl' | 'full';
 
@@ -204,11 +208,64 @@ function renderDialogChildren(children: ReactNode) {
   return renderPartitionedParts(partitionDialogChildren(children));
 }
 
+function dialogTransition(token: typeof MOTION.enter) {
+  const [x1, y1, x2, y2] = token.ease;
+  if (token.ease.length !== 4 || x1 === undefined || y1 === undefined || x2 === undefined || y2 === undefined) {
+    throw new TypeError('Dialog motion ease must be a four-number bezier');
+  }
+  return { duration: token.duration, ease: [x1, y1, x2, y2] as const };
+}
+
+function DialogViewport({
+  rootRef,
+  closeOnOverlayClick,
+  onOverlayClose,
+  children,
+}: {
+  rootRef: RefObject<HTMLDivElement | null>;
+  closeOnOverlayClick: boolean;
+  onOverlayClose: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      ref={rootRef}
+      data-krypton-dialog-root="true"
+      className="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-6"
+    >
+      <motion.div
+        className="absolute inset-0 bg-scrim"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1, transition: dialogTransition(MOTION.enter) }}
+        exit={{ opacity: 0, transition: dialogTransition(MOTION.exit) }}
+        onClick={() => {
+          if (closeOnOverlayClick) onOverlayClose();
+        }}
+      />
+      <div
+        className="relative w-full min-w-0 max-w-full sm:w-auto sm:max-w-[calc(100dvw-3rem)]"
+        onClick={(event) => event.stopPropagation()}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
 export function Dialog({ open, onOpenChange, children, closeOnOverlayClick = true }: DialogProps) {
   const titleId = useId();
   const descriptionId = useId();
   const [hasDescription, setHasDescription] = useState(false);
+  // Keep the portal through the exit. Dropping it on the same render as open=false
+  // unmounts AnimatePresence before the leave can finish, and a closed dialog must
+  // not call createPortal once that leave is done (static markup has no container).
+  const [present, setPresent] = useState(open);
+  if (open && !present) {
+    setPresent(true);
+  }
   const rootRef = useRef<HTMLDivElement>(null);
+  const openRef = useRef(open);
+  openRef.current = open;
   const restoreFocusRef = useRef<HTMLElement | null>(null);
   const onOpenChangeRef = useRef(onOpenChange);
   const requestCloseRef = useRef(() => {
@@ -283,34 +340,42 @@ export function Dialog({ open, onOpenChange, children, closeOnOverlayClick = tru
           const remainingDialog = remainingTopmost.querySelector<HTMLElement>('[role="dialog"]');
           if (remainingDialog) (focusableElements(remainingDialog)[0] || remainingDialog).focus();
         }
+        // Focusing <body> does not take focus from a control. Drop it here, in the
+        // same cleanup as unregister, so a leaving dialog cannot keep the key trap.
+        const active = document.activeElement;
+        if (active instanceof HTMLElement && root.contains(active)) {
+          active.blur();
+        }
       }
       restoreFocusRef.current = null;
     };
   }, [open]);
 
-  if (!open) return null;
+  if (!present) {
+    return null;
+  }
 
   return createPortal(
-    <div
-      ref={rootRef}
-      data-krypton-dialog-root="true"
-      className="fixed inset-0 z-200 flex items-end justify-center p-0 sm:items-center sm:p-6"
+    <AnimatePresence
+      onExitComplete={() => {
+        if (!openRef.current) {
+          setPresent(false);
+        }
+      }}
     >
-      <div
-        className="fixed inset-0 bg-black/60 backdrop-blur-sm"
-        onClick={() => {
-          if (closeOnOverlayClick) requestCloseRef.current();
-        }}
-      />
-      <div
-        className="relative w-full min-w-0 max-w-full sm:w-auto sm:max-w-[calc(100dvw-3rem)]"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <DialogContext.Provider value={{ titleId, descriptionId, onOpenChange, hasDescription, setHasDescription, requestClose: () => requestCloseRef.current(), closeHandlerRef: requestCloseRef }}>
-          {children}
-        </DialogContext.Provider>
-      </div>
-    </div>,
+      {open ? (
+        <DialogViewport
+          key="krypton-dialog"
+          rootRef={rootRef}
+          closeOnOverlayClick={closeOnOverlayClick}
+          onOverlayClose={() => requestCloseRef.current()}
+        >
+          <DialogContext.Provider value={{ titleId, descriptionId, onOpenChange, hasDescription, setHasDescription, requestClose: () => requestCloseRef.current(), closeHandlerRef: requestCloseRef }}>
+            {children}
+          </DialogContext.Provider>
+        </DialogViewport>
+      ) : null}
+    </AnimatePresence>,
     document.body,
   );
 }
@@ -332,55 +397,76 @@ export function DialogContent({
   closeClassName?: string;
 }) {
   const context = useDialogContext('DialogContent');
+  const present = useIsPresent();
+  const wide = useBreakpoint('sm');
+  const hidden = wide ? { opacity: 0, scale: 0.97, y: 8 } : { y: '100%' };
   const handleClose = () => {
     if (onClose) onClose();
     else context.onOpenChange(false);
   };
   context.closeHandlerRef.current = handleClose;
+  // motion.div treats these names as gestures, so they cannot be spread through.
+  const {
+    onDrag: _onDrag,
+    onDragStart: _onDragStart,
+    onDragEnd: _onDragEnd,
+    onAnimationStart: _onAnimationStart,
+    onAnimationEnd: _onAnimationEnd,
+    onAnimationIteration: _onAnimationIteration,
+    ...panelProps
+  } = props;
   return (
-    <div
-      {...props}
+    <motion.div
+      {...panelProps}
       role="dialog"
       aria-modal="true"
+      // Exit keeps the node mounted. inert is not hidden from Testing Library,
+      // so drop the dialog role until the leave finishes. Keep the literals above.
+      {...(present ? {} : { role: undefined, 'aria-modal': undefined })}
+      inert={present ? undefined : true}
       aria-labelledby={context.titleId}
       aria-describedby={context.hasDescription ? context.descriptionId : undefined}
       tabIndex={-1}
       data-slot="dialog-content"
+      initial={hidden}
+      animate={{ opacity: 1, scale: 1, y: 0, transition: dialogTransition(MOTION.enter) }}
+      exit={{ ...hidden, transition: dialogTransition(MOTION.exit) }}
       className={cn(
-        'relative flex w-full flex-col overflow-hidden border bg-background shadow-2xl',
+        'relative flex w-full flex-col overflow-hidden border border-line bg-surface-raised shadow-pop',
         'max-h-[min(92dvh,calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)))]',
-        'rounded-t-xl pb-[env(safe-area-inset-bottom)] sm:rounded-xl sm:max-h-[85vh] sm:pb-0',
+        'rounded-t-xl pb-[max(.75rem,env(safe-area-inset-bottom))] sm:max-h-[85vh] sm:rounded-xl sm:pb-0',
         SIZE_CLASS[size],
         className,
       )}
     >
+      <div aria-hidden="true" className="mx-auto mt-2 h-1 w-9 shrink-0 rounded-full bg-line-strong sm:hidden" />
       {renderDialogChildren(children)}
       {showCloseButton ? (
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="sm"
+          iconOnly
           aria-label={closeLabel}
           title={closeLabel}
           onClick={handleClose}
-          className={cn(
-            'absolute right-3 top-3 z-10 rounded-sm p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none',
-            closeClassName,
-          )}
+          className={cn('absolute top-3 right-3 z-10', closeClassName)}
         >
-          <X className="size-4" aria-hidden="true" />
-        </button>
+          <X aria-hidden="true" />
+        </Button>
       ) : null}
-    </div>
+    </motion.div>
   );
 }
 
 export function DialogHeader({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
-  return <div data-slot="dialog-header" className={cn('shrink-0 border-b px-6 py-4', className)} {...props} />;
+  return <div data-slot="dialog-header" className={cn('shrink-0 px-5 pt-4 pb-3', className)} {...props} />;
 }
 markDialogSlot(DialogHeader, 'header');
 
 export function DialogTitle({ className, ...props }: HTMLAttributes<HTMLHeadingElement>) {
   const context = useDialogContext('DialogTitle');
-  return <h2 {...props} id={context.titleId} data-slot="dialog-title" className={cn('pr-8 text-base font-semibold', className)} />;
+  return <h2 {...props} id={context.titleId} data-slot="dialog-title" className={cn('pr-8 text-lg font-semibold tracking-tight text-fg', className)} />;
 }
 markDialogSlot(DialogTitle, 'title');
 
@@ -396,7 +482,7 @@ export function DialogDescription({ className, ...props }: HTMLAttributes<HTMLPa
       {...props}
       id={context.descriptionId}
       data-slot="dialog-description"
-      className={cn('mt-1 text-sm text-muted-foreground', className)}
+      className={cn('mt-1 text-sm text-fg-muted', className)}
     />
   );
 }
@@ -408,7 +494,7 @@ export function DialogBody({ className, ...props }: HTMLAttributes<HTMLDivElemen
       {...props}
       data-slot="dialog-body"
       data-scroll-owner="dialog"
-      className={cn('min-h-0 flex-1 overflow-y-auto overscroll-contain krypton-scrollbar', className)}
+      className={cn('min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-4 krypton-scrollbar', className)}
     />
   );
 }
@@ -418,7 +504,7 @@ export function DialogFooter({ className, ...props }: HTMLAttributes<HTMLDivElem
   return (
     <div
       data-slot="dialog-footer"
-      className={cn('flex shrink-0 flex-col-reverse gap-2 border-t px-6 py-4 sm:flex-row sm:justify-end', className)}
+      className={cn('flex shrink-0 flex-col-reverse gap-2 border-t border-line-subtle bg-surface-sunken/60 px-5 py-3 sm:flex-row sm:justify-end [&>*]:w-full sm:[&>*]:w-auto', className)}
       {...props}
     />
   );
@@ -585,60 +671,64 @@ export function DialogHost() {
     };
   }, []);
   const current = useSyncExternalStore(subscribeDialogCommands, getDialogCommandSnapshot, getDialogCommandSnapshot);
+  // Dropping Dialog while open is still true unmounts AnimatePresence before it can play the exit.
+  const retainedRef = useRef<DialogCommand | null>(null);
+  if (current) retainedRef.current = current;
+  const shown = current ?? retainedRef.current;
   const [promptDraft, setPromptDraft] = useState({ id: 0, value: '' });
-  const promptValue = current?.kind === 'prompt'
-    ? (promptDraft.id === current.id ? promptDraft.value : current.defaultValue)
+  const promptValue = shown?.kind === 'prompt'
+    ? (promptDraft.id === shown.id ? promptDraft.value : shown.defaultValue)
     : '';
 
-  if (!current) return null;
+  if (!shown) return null;
 
   const dismiss = () => {
-    if (current.kind === 'alert') finishDialogCommand(current.id, () => current.resolve());
-    else if (current.kind === 'confirm') finishDialogCommand(current.id, () => current.resolve(false));
-    else finishDialogCommand(current.id, () => current.resolve(null));
+    if (shown.kind === 'alert') finishDialogCommand(shown.id, () => shown.resolve());
+    else if (shown.kind === 'confirm') finishDialogCommand(shown.id, () => shown.resolve(false));
+    else finishDialogCommand(shown.id, () => shown.resolve(null));
   };
 
   return (
-    <Dialog key={current.id} open onOpenChange={(open) => !open && dismiss()}>
+    <Dialog key={shown.id} open={current !== null} onOpenChange={(open) => !open && dismiss()}>
       <DialogContent size="sm">
         <DialogHeader>
-          <DialogTitle>{current.title}</DialogTitle>
+          <DialogTitle>{shown.title}</DialogTitle>
         </DialogHeader>
-        <DialogBody className="space-y-3 px-6 py-4">
-          <DialogDescription className="whitespace-pre-wrap">{current.message}</DialogDescription>
-          {current.kind === 'prompt' ? (
+        <DialogBody className="space-y-3">
+          <DialogDescription className="whitespace-pre-wrap">{shown.message}</DialogDescription>
+          {shown.kind === 'prompt' ? (
             <Input
               autoFocus
               value={promptValue}
-              placeholder={current.placeholder}
-              onChange={(event) => setPromptDraft({ id: current.id, value: event.target.value })}
+              placeholder={shown.placeholder}
+              onChange={(event) => setPromptDraft({ id: shown.id, value: event.target.value })}
               onKeyDown={(event) => {
                 if (event.key !== 'Enter') return;
                 event.preventDefault();
-                finishDialogCommand(current.id, () => current.resolve(promptValue));
+                finishDialogCommand(shown.id, () => shown.resolve(promptValue));
               }}
             />
           ) : null}
         </DialogBody>
         <DialogFooter>
-          {current.kind === 'alert' ? (
-            <Button type="button" onClick={() => finishDialogCommand(current.id, () => current.resolve())}>
-              {current.confirmLabel}
+          {shown.kind === 'alert' ? (
+            <Button type="button" variant="primary" onClick={() => finishDialogCommand(shown.id, () => shown.resolve())}>
+              {shown.confirmLabel}
             </Button>
           ) : (
             <>
-              <Button type="button" variant="outline" onClick={dismiss}>
-                {current.cancelLabel}
+              <Button type="button" variant="secondary" onClick={dismiss}>
+                {shown.cancelLabel}
               </Button>
               <Button
                 type="button"
-                variant={current.kind === 'confirm' && current.destructive ? 'destructive' : 'default'}
+                variant={shown.kind === 'confirm' && shown.destructive ? 'danger' : 'primary'}
                 onClick={() => {
-                  if (current.kind === 'confirm') finishDialogCommand(current.id, () => current.resolve(true));
-                  else finishDialogCommand(current.id, () => current.resolve(promptValue));
+                  if (shown.kind === 'confirm') finishDialogCommand(shown.id, () => shown.resolve(true));
+                  else finishDialogCommand(shown.id, () => shown.resolve(promptValue));
                 }}
               >
-                {current.confirmLabel}
+                {shown.confirmLabel}
               </Button>
             </>
           )}

@@ -21,12 +21,19 @@ vi.mock('echarts/core', () => ({
 }));
 
 const REQUIRED_CSS_VARS: Record<string, string> = {
-  '--background': 'rgb(255, 255, 255)',
-  '--foreground': 'rgb(10, 10, 10)',
-  '--muted-foreground': 'rgb(100, 116, 139)',
-  '--border': 'rgb(226, 232, 240)',
-  '--primary': 'rgb(14, 165, 233)',
-  '--card': 'rgb(248, 250, 252)',
+  '--bg': 'rgb(255, 255, 255)',
+  '--fg': 'rgb(10, 10, 10)',
+  '--fg-subtle': 'rgb(100, 116, 139)',
+  '--line': 'rgb(226, 232, 240)',
+  '--line-subtle': 'rgb(241, 245, 249)',
+  '--brand-solid': 'rgb(79, 70, 229)',
+  '--surface-raised': 'rgb(248, 250, 252)',
+  '--chart-1': 'c1',
+  '--chart-2': 'c2',
+  '--chart-3': 'c3',
+  '--chart-4': 'c4',
+  '--chart-5': 'c5',
+  '--chart-6': 'c6',
 };
 
 function mockDocumentCssVars(vars: Record<string, string>): void {
@@ -42,69 +49,45 @@ function mockDocumentCssVars(vars: Record<string, string>): void {
 describe('readEchartTheme', () => {
   it('throws when required CSS variables are missing', () => {
     mockDocumentCssVars({});
-    expect(() => readEchartTheme()).toThrow(/Missing required CSS variable --background/);
+    expect(() => readEchartTheme()).toThrow(/echart theme token missing: --bg/);
   });
 
   it('throws on the first missing required CSS variable', () => {
-    mockDocumentCssVars({
-      '--background': 'bg',
-      '--foreground': 'fg',
-      '--muted-foreground': 'muted',
-      '--border': 'border',
-      '--card': 'card',
-    });
-    expect(() => readEchartTheme()).toThrow(/Missing required CSS variable --primary/);
+    const { '--brand-solid': _omitted, ...withoutBrand } = REQUIRED_CSS_VARS;
+    mockDocumentCssVars(withoutBrand);
+    expect(() => readEchartTheme()).toThrow(/echart theme token missing: --brand-solid/);
   });
 
   it('returns colors from mocked getComputedStyle', () => {
-    mockDocumentCssVars({
-      ...REQUIRED_CSS_VARS,
-      '--chart-1': 'c1',
-      '--chart-2': 'c2',
-      '--chart-3': 'c3',
-      '--chart-4': 'c4',
-      '--chart-5': 'c5',
-    });
+    mockDocumentCssVars(REQUIRED_CSS_VARS);
     expect(readEchartTheme()).toEqual({
       background: 'rgb(255, 255, 255)',
       foreground: 'rgb(10, 10, 10)',
-      mutedForeground: 'rgb(100, 116, 139)',
-      border: 'rgb(226, 232, 240)',
-      primary: 'rgb(14, 165, 233)',
-      card: 'rgb(248, 250, 252)',
-      palette: ['c1', 'c2', 'c3', 'c4', 'c5'],
+      subtleForeground: 'rgb(100, 116, 139)',
+      line: 'rgb(226, 232, 240)',
+      lineSubtle: 'rgb(241, 245, 249)',
+      brand: 'rgb(79, 70, 229)',
+      surfaceRaised: 'rgb(248, 250, 252)',
+      palette: ['c1', 'c2', 'c3', 'c4', 'c5', 'c6'],
     });
   });
 
-  it('omits missing --chart-* tokens from the series palette', () => {
-    mockDocumentCssVars({
-      ...REQUIRED_CSS_VARS,
-      '--chart-1': 'c1',
-      '--chart-3': 'c3',
-    });
-    expect(readEchartTheme().palette).toEqual(['c1', 'c3']);
+  it('throws when a --chart-* token is missing instead of shortening the palette', () => {
+    const { '--chart-6': _omitted, ...withoutChart6 } = REQUIRED_CSS_VARS;
+    mockDocumentCssVars(withoutChart6);
+    expect(() => readEchartTheme()).toThrow(/echart theme token missing: --chart-6/);
   });
 });
 
 describe('applyEchartDefaults', () => {
-  it('fills series color from --chart-* and text from --foreground', () => {
-    mockDocumentCssVars({
-      ...REQUIRED_CSS_VARS,
-      '--chart-1': 'c1',
-      '--chart-2': 'c2',
-    });
+  it('fills series color from --chart-* and text from --fg', () => {
+    mockDocumentCssVars(REQUIRED_CSS_VARS);
     const option: KryptonEChartsOption = { series: [{ type: 'bar', data: [1, 2] }] };
     const themed = applyEchartDefaults(option);
-    expect(themed.color).toEqual(['c1', 'c2']);
+    expect(themed.color).toEqual(['c1', 'c2', 'c3', 'c4', 'c5', 'c6']);
     expect(themed.backgroundColor).toBe('rgb(255, 255, 255)');
     expect(themed.textStyle).toMatchObject({ color: 'rgb(10, 10, 10)' });
     expect(option.color).toBeUndefined();
-  });
-
-  it('falls back to --primary when no chart palette is present', () => {
-    mockDocumentCssVars(REQUIRED_CSS_VARS);
-    const themed = applyEchartDefaults({ series: [] });
-    expect(themed.color).toEqual(['rgb(14, 165, 233)']);
   });
 });
 

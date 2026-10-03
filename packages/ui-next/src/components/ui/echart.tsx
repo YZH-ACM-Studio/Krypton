@@ -65,5 +65,5 @@ export function EChart({
     chart.setOption(applyEchartDefaults(option), { notMerge: true });
   }, [option]);
 
-  return <div ref={containerRef} className={cn('h-[220px] w-full min-w-0', heightClassName, className)} />;
+  return <div ref={containerRef} className={cn('h-56 w-full min-w-0', heightClassName, className)} />;
 }

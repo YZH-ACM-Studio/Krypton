@@ -82,6 +82,7 @@ import { useProctorCommands, notifyCommandResult } from '@/hooks/use-proctor-com
 import { StudentCard } from '@/pages/vigil/student-card';
 import { StudentDetailSheet } from '@/pages/vigil/student-detail-sheet';
 import { LivePlayerDialog } from '@/pages/vigil/live-player-dialog';
+import { MediaNodeBadge } from '@/pages/vigil/media-node-badge';
 import { SendMessageDialog } from '@/pages/vigil/send-message-dialog';
 import { VigilDateTime, parseVigilTimestamp } from '@/pages/vigil/timestamp';
 import { cn } from '@/lib/cn';
@@ -1093,9 +1094,12 @@ export function AdminVigilExamDetailPage() {
       hideSidebar
       description={examTitle ? <span className="font-mono text-[11px]">{examId}</span> : undefined}
       actions={
-        <Button variant="ghost" asChild>
-          <a href="/admin/vigil">返回总览</a>
-        </Button>
+        <div className="flex items-center gap-2">
+          <MediaNodeBadge />
+          <Button variant="ghost" asChild>
+            <a href="/admin/vigil">返回总览</a>
+          </Button>
+        </div>
       }
     >
       <ToastProvider />

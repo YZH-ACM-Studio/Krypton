@@ -1,12 +1,14 @@
 import { useState } from 'react';
-import { motion } from 'motion/react';
-import { ArrowRight, CheckCircle2, Clock3, Plus, Users } from 'lucide-react';
+import { ArrowRight, Plus, Users } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog } from '@/components/ui/dialog';
+import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
+import { Page, PageHeader } from '@/components/ui/page';
 import { Pagination } from '@/components/ui/pagination';
+import { Panel } from '@/components/ui/panel';
+import { Textarea } from '@/components/ui/textarea';
 import {
   TEAM_DIALOG_BUTTON_CLASS,
   TEAM_DIALOG_CONTROL_CLASS,
@@ -16,7 +18,6 @@ import {
   TeamDialogField,
   TeamDialogFooter,
 } from '@/components/team-dialog';
-import { Textarea } from '@/components/ui/textarea';
 import { useBootstrap } from '@/lib/bootstrap';
 import { formatDateTime } from '@/lib/format';
 
@@ -47,86 +48,77 @@ export function TeamBatchesPage() {
   const [createOpen, setCreateOpen] = useState(false);
 
   return (
-    <motion.div className="space-y-6" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22 }}>
-      <header className="flex flex-col gap-4 border-b pb-5 sm:flex-row sm:items-end sm:justify-between">
-        <div className="space-y-2">
-          <div className="flex items-center gap-2 text-sm font-medium text-primary">
-            <Users className="size-4" /> 赛前协作
-          </div>
-          <h1 className="text-2xl font-semibold tracking-tight">队伍中心</h1>
-          <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-            在比赛创建前完成组队。批次关闭后，管理员可在创建团队 ACM 比赛时把当时阵容生成独立快照。
-          </p>
-        </div>
-        {canManage ? (
-          <Button type="button" onClick={() => setCreateOpen(true)}>
-            <Plus className="size-4" /> 新建组队批次
+    <Page width="wide">
+      <PageHeader
+        title="队伍中心"
+        description="在比赛创建前完成组队。批次关闭后，管理员可在创建团队 ACM 比赛时把当时阵容生成独立快照。"
+        meta={(
+          <span className="inline-flex items-center gap-1.5">
+            <Users className="size-3.5 shrink-0" />
+            赛前协作
+          </span>
+        )}
+        actions={canManage ? (
+          <Button type="button" variant="primary" onClick={() => setCreateOpen(true)}>
+            <Plus /> 新建组队批次
           </Button>
-        ) : null}
-      </header>
+        ) : undefined}
+      />
 
       {batches.length ? (
-        <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
+        <div className="grid min-w-0 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {batches.map((batch) => {
             const open = batch.status === 'open';
             const href = `/teams/${encodeURIComponent(String(batch.batchId))}`;
             return (
-              <Card key={String(batch.batchId)} className="group flex h-full flex-col transition-colors hover:border-primary/40">
-                <CardHeader className="space-y-3 pb-3">
-                  <div className="flex min-w-0 items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <CardTitle className="min-w-0 truncate text-lg">{batch.name}</CardTitle>
-                      <p className="mt-1 line-clamp-2 min-h-10 text-sm leading-5 text-muted-foreground">{batch.description || '暂无批次说明'}</p>
-                    </div>
-                    <Badge variant={open ? 'secondary' : 'outline'} className="shrink-0 gap-1">
-                      {open ? <Clock3 className="size-3" /> : <CheckCircle2 className="size-3" />}
-                      {open ? '组队中' : '已关闭 · 可绑定'}
-                    </Badge>
-                  </div>
-                  <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                    <span className="rounded-lg bg-muted px-2 py-1">{Number(batch.teamCount || 0)} 支队伍</span>
-                    <span className="rounded-lg bg-muted px-2 py-1">{Number(batch.memberCount || 0)} 名成员</span>
-                    <span className="rounded-lg bg-muted px-2 py-1">更新于 {formatDateTime(batch.updatedAt, bs.locale)}</span>
-                  </div>
-                </CardHeader>
-                <CardContent className="mt-auto space-y-3">
+              <Panel
+                key={String(batch.batchId)}
+                className="h-full"
+                title={<span className="block min-w-0 truncate">{batch.name}</span>}
+                actions={(
+                  <Badge tone={open ? 'success' : 'neutral'} variant={open ? 'soft' : 'outline'} dot={open}>
+                    {open ? '组队中' : '已关闭 · 可绑定'}
+                  </Badge>
+                )}
+              >
+                <div className="flex flex-col gap-3">
+                  <p className="line-clamp-2 min-h-10 min-w-0 text-sm text-fg-muted">{batch.description || '暂无批次说明'}</p>
+                  <p className="flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-fg-subtle">
+                    <span className="tabular">{Number(batch.teamCount || 0)} 支队伍</span>
+                    <span className="tabular">{Number(batch.memberCount || 0)} 名成员</span>
+                    <span>更新于 {formatDateTime(batch.updatedAt, bs.locale)}</span>
+                  </p>
                   {batch.ownTeam ? (
-                    <div className="rounded-xl border bg-primary/5 px-3 py-2 text-sm">
-                      <p className="text-xs text-muted-foreground">我的队伍</p>
-                      <p className="mt-0.5 font-medium">{batch.ownTeam.name}</p>
+                    <div className="rounded-md bg-surface-sunken px-3 py-2 text-sm">
+                      <p className="text-xs text-fg-subtle">我的队伍</p>
+                      <p className="mt-0.5 min-w-0 truncate font-medium text-fg">{batch.ownTeam.name}</p>
                     </div>
                   ) : Number(batch.pendingInviteCount || 0) > 0 ? (
-                    <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm text-amber-700 dark:text-amber-300">
+                    <p className="rounded-md bg-surface-sunken px-3 py-2 text-sm text-warning-fg">
                       有 {Number(batch.pendingInviteCount)} 条待处理邀请
-                    </div>
+                    </p>
                   ) : (
-                    <div className="rounded-xl border border-dashed px-3 py-2 text-sm text-muted-foreground">
+                    <p className="rounded-md bg-surface-sunken px-3 py-2 text-sm text-fg-muted">
                       {open ? '尚未加入队伍' : '本批次已结束组队'}
-                    </div>
+                    </p>
                   )}
-                  <Button asChild variant="outline" className="w-full justify-between">
+                  <Button asChild variant="secondary" className="w-full">
                     <a href={href}>
                       {open ? '进入组队工作台' : '查看批次阵容'}
-                      <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
+                      <ArrowRight />
                     </a>
                   </Button>
-                </CardContent>
-              </Card>
+                </div>
+              </Panel>
             );
           })}
         </div>
       ) : (
-        <Card>
-          <CardContent className="flex min-h-48 flex-col items-center justify-center gap-3 text-center">
-            <div className="flex size-11 items-center justify-center rounded-2xl bg-muted">
-              <Users className="size-5 text-muted-foreground" />
-            </div>
-            <div>
-              <p className="font-medium">还没有组队批次</p>
-              <p className="mt-1 text-sm text-muted-foreground">管理员创建批次后，参赛者就可以在比赛建立前组队。</p>
-            </div>
-          </CardContent>
-        </Card>
+        <EmptyState
+          icon={<Users />}
+          title="还没有组队批次"
+          description="管理员创建批次后，参赛者就可以在比赛建立前组队。"
+        />
       )}
 
       <Pagination current={Number(data.page || 1)} total={Number(data.pageCount || 1)} baseUrl="/teams" />
@@ -168,13 +160,13 @@ export function TeamBatchesPage() {
               <Button type="button" variant="secondary" onClick={() => setCreateOpen(false)} className={TEAM_DIALOG_BUTTON_CLASS}>
                 取消
               </Button>
-              <Button type="submit" className={TEAM_DIALOG_BUTTON_CLASS}>
+              <Button type="submit" variant="primary" className={TEAM_DIALOG_BUTTON_CLASS}>
                 创建批次
               </Button>
             </TeamDialogFooter>
           </form>
         </TeamDialogContent>
       </Dialog>
-    </motion.div>
+    </Page>
   );
 }

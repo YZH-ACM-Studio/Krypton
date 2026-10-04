@@ -1,3 +1,4 @@
+import { type ReactNode } from 'react';
 import { Clock, Flag, List, Trophy } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Breadcrumb } from '@/components/ui/breadcrumb';
@@ -68,6 +69,28 @@ function isProblemScoreboardColumn(type: string | undefined): boolean {
 
 function scoreboardCellText(cell: VirtualScoreboardCell): string {
   return scoreboardExportPlainText(cell.value);
+}
+
+function isUnsubmittedScoreboardCell(cell: VirtualScoreboardCell): boolean {
+  if (!isProblemScoreboardColumn(cell.type)) return false;
+  const value = cell.value;
+  if (value == null || value === '') return true;
+  const text = scoreboardCellText(cell);
+  return text === '' || text === '—' || text === '-';
+}
+
+function renderScoreboardCellContent(cell: VirtualScoreboardCell, kind: 'head' | 'body'): ReactNode {
+  if (kind === 'body' && isUnsubmittedScoreboardCell(cell)) return null;
+  const text = scoreboardCellText(cell);
+  const lines = text.split('\n');
+  const keepLineBreak = kind === 'head' || isProblemScoreboardColumn(cell.type);
+  if (!keepLineBreak || lines.length < 2) return text;
+  return lines.map((line, index) => (
+    <span key={index}>
+      {index > 0 ? <br /> : null}
+      {kind === 'body' && index > 0 ? <span className="text-2xs">{line}</span> : line}
+    </span>
+  ));
 }
 
 function scoreboardCellClass(type: string | undefined, kind: 'head' | 'body'): string {
@@ -378,7 +401,7 @@ export function VirtualContestScoreboardPage() {
                           scoreboardStickyClass(index, 'head'),
                         )}
                       >
-                        {scoreboardCellText(cell)}
+                        {renderScoreboardCellContent(cell, 'head')}
                       </TableHead>
                     ))}
                   </TableRow>
@@ -397,7 +420,7 @@ export function VirtualContestScoreboardPage() {
                             scoreboardToneClass(cell),
                           )}
                         >
-                          {scoreboardCellText(cell)}
+                          {renderScoreboardCellContent(cell, 'body')}
                         </TableCell>
                       ))}
                     </TableRow>

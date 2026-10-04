@@ -1,16 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowDown, ArrowUp, ClipboardPaste, Copy, Redo2, Search, Trash2, Undo2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, ClipboardPaste, Copy, Redo2, Trash2, Undo2 } from 'lucide-react';
 import { effectiveProblemKind, PROBLEM_KINDS, problemKindToSlug, type ProblemKind } from '@hydrooj/common';
 import { Badge } from '@/components/ui/badge';
+import { EmptyState } from '@/components/ui/empty-state';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
+import { Input, SearchInput } from '@/components/ui/input';
 import { SimpleSelect } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
 import { useBootstrap } from '@/lib/bootstrap';
-import { cn } from '@/lib/cn';
 import { replaceRouteTokens } from '@/lib/format';
 import {
   fetchProblemsByIds,
@@ -464,8 +464,16 @@ export function ContestExamPaperPool({
       setStatus('当前筛选没有题目可复制');
       return;
     }
-    await navigator.clipboard.writeText(text);
-    setStatus(`已复制 ${visible.length} 个题号`);
+    try {
+      if (typeof navigator.clipboard?.writeText !== 'function') {
+        setStatus('无法复制题号');
+        return;
+      }
+      await navigator.clipboard.writeText(text);
+      setStatus(`已复制 ${visible.length} 个题号`);
+    } catch (error) {
+      setStatus(error instanceof Error && error.message ? error.message : '无法复制题号');
+    }
   };
 
   const problemHref = (row: ExamPaperPoolRow) => replaceRouteTokens(bs.urls.problemDetail, { PID: String(row.pid || row.docId || row.key) });
@@ -483,38 +491,35 @@ export function ContestExamPaperPool({
         attemptLimit={attemptLimit}
       />
 
-      <section className="space-y-3 rounded-xl border bg-muted/20 p-4">
+      <section className="space-y-3 rounded-lg bg-surface-sunken p-4">
         <div className="flex min-w-0 flex-wrap items-end justify-between gap-2">
           <div className="min-w-0">
             <h3 className="min-w-0 text-sm font-medium">从题库加入</h3>
-            <p className="text-xs text-muted-foreground">搜索按页预览，可以加入本页或全部匹配；也可以一次加入整个题号命名空间。</p>
+            <p className="text-xs text-fg-subtle">搜索按页预览，可以加入本页或全部匹配；也可以一次加入整个题号命名空间。</p>
           </div>
-          <Button type="button" variant="outline" size="sm" onClick={() => setPasteOpen(true)}>
+          <Button type="button" variant="secondary" size="sm" onClick={() => setPasteOpen(true)}>
             <ClipboardPaste />
             粘贴题号
           </Button>
         </div>
         <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_10rem_auto]">
           <label className="min-w-0 space-y-1.5">
-            <span className="text-xs text-muted-foreground">搜索</span>
-            <span className="relative block">
-              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={bankQuery}
-                onChange={(event) => setBankQuery(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    event.preventDefault();
-                    void searchBank();
-                  }
-                }}
-                placeholder="题号、标题或标签"
-                className="pl-9"
-              />
-            </span>
+            <span className="text-xs text-fg-subtle">搜索</span>
+            <SearchInput
+              value={bankQuery}
+              onChange={(event) => setBankQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  void searchBank();
+                }
+              }}
+              placeholder="题号、标题或标签"
+              aria-label="搜索题目"
+            />
           </label>
           <label className="min-w-0 space-y-1.5">
-            <span className="text-xs text-muted-foreground">题型</span>
+            <span className="text-xs text-fg-subtle">题型</span>
             <SimpleSelect
               value={bankKind}
               onValueChange={setBankKind}
@@ -522,13 +527,13 @@ export function ContestExamPaperPool({
               options={[{ value: '', label: '全部题型' }, ...PROBLEM_KINDS.map((kind) => ({ value: problemKindToSlug(kind), label: KIND_LABEL[kind] }))]}
             />
           </label>
-          <Button type="button" className="lg:mt-6" disabled={bankBusy} onClick={() => void searchBank()}>
+          <Button type="button" variant="secondary" className="lg:mt-6" disabled={bankBusy} onClick={() => void searchBank()}>
             {bankBusy ? '搜索中…' : '搜索'}
           </Button>
         </div>
         <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto]">
           <label className="min-w-0 space-y-1.5">
-            <span className="text-xs text-muted-foreground">题号命名空间</span>
+            <span className="text-xs text-fg-subtle">题号命名空间</span>
             <SimpleSelect
               value={namespaceId}
               onValueChange={setNamespaceId}
@@ -542,14 +547,14 @@ export function ContestExamPaperPool({
               ]}
             />
           </label>
-          <Button type="button" variant="outline" className="lg:mt-6" disabled={bankBusy || !namespaceId} onClick={() => void addNamespace()}>
+          <Button type="button" variant="secondary" className="lg:mt-6" disabled={bankBusy || !namespaceId} onClick={() => void addNamespace()}>
             加入该命名空间全部题目
           </Button>
         </div>
         {bankHits.length || bankTotal ? (
           <div className="space-y-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-xs text-muted-foreground">
+              <p className="text-xs text-fg-subtle">
                 {bankTotal
                   ? `共 ${bankTotal} 道 · 第 ${bankPage}/${Math.max(bankPageCount, 1)} 页 · 本页 ${bankHits.length} 道`
                   : `本页 ${bankHits.length} 道`}
@@ -557,7 +562,7 @@ export function ContestExamPaperPool({
               <div className="flex flex-wrap gap-2">
                 <Button
                   type="button"
-                  variant="outline"
+                  variant="secondary"
                   size="sm"
                   disabled={bankBusy || bankPage <= 1}
                   onClick={() => void loadBankPage(bankPage - 1)}
@@ -566,7 +571,7 @@ export function ContestExamPaperPool({
                 </Button>
                 <Button
                   type="button"
-                  variant="outline"
+                  variant="secondary"
                   size="sm"
                   disabled={bankBusy || bankPageCount <= 0 || bankPage >= bankPageCount}
                   onClick={() => void loadBankPage(bankPage + 1)}
@@ -575,18 +580,18 @@ export function ContestExamPaperPool({
                 </Button>
                 <Button
                   type="button"
-                  variant="outline"
+                  variant="secondary"
                   size="sm"
                   onClick={() => setBankSelected(bankHits.map((row) => row.key))}
                 >
                   全选本页
                 </Button>
-                <Button type="button" size="sm" disabled={!bankHits.length} onClick={addFromBank}>
+                <Button type="button" variant="soft" size="sm" disabled={!bankHits.length} onClick={addFromBank}>
                   加入所选{bankSelected.length ? `（${bankSelected.length}）` : '本页'}
                 </Button>
                 <Button
                   type="button"
-                  variant="outline"
+                  variant="secondary"
                   size="sm"
                   disabled={bankBusy || !examPaperBankCanAddAll(bankQuery, bankKind)}
                   onClick={() => void addAllMatching()}
@@ -613,21 +618,21 @@ export function ContestExamPaperPool({
         <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <h3 className="min-w-0 text-sm font-medium">题池</h3>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-fg-subtle">
               {pids.length} 道题{visible.length !== pids.length ? ` · 当前显示 ${visible.length}` : ''}
               {visibleSelected.length ? ` · 已选 ${visibleSelected.length}` : ''}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="outline" size="sm" disabled={!canUndo} onClick={undo}>
+            <Button type="button" variant="secondary" size="sm" disabled={!canUndo} onClick={undo}>
               <Undo2 />
               撤销
             </Button>
-            <Button type="button" variant="outline" size="sm" disabled={!canRedo} onClick={redo}>
+            <Button type="button" variant="secondary" size="sm" disabled={!canRedo} onClick={redo}>
               <Redo2 />
               重做
             </Button>
-            <Button type="button" variant="outline" size="sm" disabled={!visible.length} onClick={() => void copyVisible()}>
+            <Button type="button" variant="secondary" size="sm" disabled={!visible.length} onClick={() => void copyVisible()}>
               <Copy />
               复制题号
             </Button>
@@ -654,7 +659,7 @@ export function ContestExamPaperPool({
           />
           <Button
             type="button"
-            variant="outline"
+            variant="secondary"
             size="sm"
             disabled={!visible.length}
             onClick={() => setSelected(allVisibleSelected ? selected.filter((id) => !visibleKeys.includes(id)) : uniqueExamPaperPids([...selected, ...visibleKeys]))}
@@ -663,7 +668,7 @@ export function ContestExamPaperPool({
           </Button>
           <Button
             type="button"
-            variant="outline"
+            variant="secondary"
             size="sm"
             disabled={!visible.length}
             onClick={() => {
@@ -675,7 +680,7 @@ export function ContestExamPaperPool({
           </Button>
           <Button
             type="button"
-            variant="outline"
+            variant="secondary"
             size="sm"
             disabled={!selected.length}
             onClick={() => commit(moveExamPaperPoolBlock(pids, selected, -1), '已上移所选')}
@@ -685,7 +690,7 @@ export function ContestExamPaperPool({
           </Button>
           <Button
             type="button"
-            variant="outline"
+            variant="secondary"
             size="sm"
             disabled={!selected.length}
             onClick={() => commit(moveExamPaperPoolBlock(pids, selected, 1), '已下移所选')}
@@ -695,7 +700,7 @@ export function ContestExamPaperPool({
           </Button>
           <Button
             type="button"
-            variant="destructive"
+            variant="danger-soft"
             size="sm"
             disabled={!selected.length}
             onClick={() => commit(
@@ -716,7 +721,7 @@ export function ContestExamPaperPool({
           />
           <Button
             type="button"
-            variant="outline"
+            variant="secondary"
             size="sm"
             disabled={!selected.length}
             onClick={() => {
@@ -752,9 +757,9 @@ export function ContestExamPaperPool({
             onScoreChange={(key, score) => setScores((current) => ({ ...current, [key]: score }))}
           />
         ) : (
-          <p className="rounded-lg border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">题池还是空的。先搜索或粘贴题号。</p>
+          <EmptyState compact title="题池还是空的" description="先搜索或粘贴题号。" />
         )}
-        {status ? <p className="text-xs text-muted-foreground">{status}</p> : null}
+        {status ? <p className="text-xs text-fg-subtle">{status}</p> : null}
       </section>
 
       <ContestExamPaperQuotas pids={quotaPids} pdict={Object.fromEntries(rows.map((row) => [row.key, { problemKind: row.kind }]))} quotas={quotas} />
@@ -765,14 +770,14 @@ export function ContestExamPaperPool({
             <DialogTitle>粘贴题号</DialogTitle>
           </DialogHeader>
           <DialogBody className="space-y-2">
-            <p className="text-sm text-muted-foreground">支持空格、逗号或换行分隔的题号 / 内部 ID。</p>
+            <p className="text-sm text-fg-muted">支持空格、逗号或换行分隔的题号 / 内部 ID。</p>
             <Textarea value={pasteText} onChange={(event) => setPasteText(event.target.value)} rows={8} placeholder="P1001&#10;12, 13" />
           </DialogBody>
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => setPasteOpen(false)}>
               取消
             </Button>
-            <Button type="button" disabled={bankBusy} onClick={() => void addFromPaste()}>
+            <Button type="button" variant="primary" disabled={bankBusy} onClick={() => void addFromPaste()}>
               加入题池
             </Button>
           </DialogFooter>
@@ -794,18 +799,45 @@ function KindChip({
   onClick: () => void;
 }) {
   return (
-    <button
+    <Button
       type="button"
+      variant={active ? 'soft' : 'secondary'}
+      size="sm"
       onClick={onClick}
+      aria-pressed={active}
       aria-label={`${label} ${count}`}
-      className={cn(
-        'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors',
-        active ? 'border-primary bg-primary/10 text-foreground' : 'text-muted-foreground hover:bg-accent/60',
-      )}
     >
       {label}
-      <span className="tabular-nums">{count}</span>
-    </button>
+      <span className="tabular">{count}</span>
+    </Button>
+  );
+}
+
+function ExamPaperScoreInput({
+  value,
+  label,
+  onScoreChange,
+}: {
+  value: number;
+  label: string;
+  onScoreChange: (score: number) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  return (
+    <Input
+      type="number"
+      min={1}
+      value={draft ?? String(value)}
+      onChange={(event) => {
+        const next = event.target.value;
+        setDraft(next);
+        if (!/^[1-9]\d*$/.test(next)) return;
+        onScoreChange(Number(next));
+      }}
+      onBlur={() => setDraft(null)}
+      className="ml-auto w-20 text-right"
+      aria-label={label}
+    />
   );
 }
 
@@ -838,7 +870,7 @@ function PoolTable({
   const headerChecked = allSelected ?? (rows.length > 0 && rows.every((row) => selectedSet.has(row.key)));
   const headerIndeterminate = indeterminate ?? (rows.some((row) => selectedSet.has(row.key)) && !headerChecked);
   return (
-    <div className="rounded-lg border">
+    <div className="min-w-0 overflow-x-auto">
       <Table density="compact" className="min-w-max">
         <TableHeader>
           <TableRow>
@@ -852,7 +884,7 @@ function PoolTable({
               />
             </TableHead>
             {showIndex ? <TableHead className="w-12">#</TableHead> : null}
-            <TableHead className="w-28">题号</TableHead>
+            <TableHead className="w-24">题号</TableHead>
             <TableHead>标题</TableHead>
             <TableHead className="w-24">题型</TableHead>
             {onScoreChange ? <TableHead className="w-24 text-right">本场分数</TableHead> : null}
@@ -869,35 +901,31 @@ function PoolTable({
                   aria-label={`选择 ${row.pid || row.key}`}
                 />
               </TableCell>
-              {showIndex ? <TableCell className="tabular-nums text-muted-foreground">{index + 1}</TableCell> : null}
+              {showIndex ? <TableCell className="tabular text-fg-subtle">{index + 1}</TableCell> : null}
               <TableCell className="font-mono text-xs">
-                <a href={hrefFor(row)} className="hover:text-primary hover:underline" target="_blank" rel="noreferrer">
+                <a href={hrefFor(row)} className="hover:text-brand-fg hover:underline" target="_blank" rel="noreferrer">
                   {row.pid || row.key}
                 </a>
               </TableCell>
               <TableCell className="min-w-0">
-                <span className="line-clamp-1">{row.title || '未命名题目'}</span>
-                {alreadyIn?.has(row.key) ? (
-                  <Badge variant="outline" className="ml-2 text-[10px]">
-                    已在题池
-                  </Badge>
-                ) : null}
+                <span className="flex min-w-0 items-center gap-2">
+                  <span className="min-w-0 line-clamp-1">{row.title || '未命名题目'}</span>
+                  {alreadyIn?.has(row.key) ? (
+                    <Badge variant="outline" tone="neutral" size="sm" className="shrink-0">
+                      已在题池
+                    </Badge>
+                  ) : null}
+                </span>
               </TableCell>
               <TableCell>
-                <Badge variant="secondary">{KIND_LABEL[row.kind]}</Badge>
+                <Badge variant="soft" tone="neutral">{KIND_LABEL[row.kind]}</Badge>
               </TableCell>
               {onScoreChange ? (
                 <TableCell className="text-right">
-                  <Input
-                    type="number"
-                    min={1}
+                  <ExamPaperScoreInput
                     value={examPaperScoreWeight(scores || {}, row.key)}
-                    onChange={(event) => {
-                      const n = Number(event.target.value);
-                      if (Number.isInteger(n) && n >= 1) onScoreChange(row.key, n);
-                    }}
-                    className="ml-auto w-20 text-right"
-                    aria-label={`${row.pid || row.key} 本场分数`}
+                    label={`${row.pid || row.key} 本场分数`}
+                    onScoreChange={(score) => onScoreChange(row.key, score)}
                   />
                 </TableCell>
               ) : null}

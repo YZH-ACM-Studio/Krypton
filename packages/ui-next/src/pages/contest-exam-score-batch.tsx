@@ -1,12 +1,12 @@
 import { useMemo, useState } from 'react';
 import { effectiveProblemKind, PROBLEM_KINDS, type ProblemKind } from '@hydrooj/common';
 import { Badge } from '@/components/ui/badge';
+import { EmptyState } from '@/components/ui/empty-state';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Panel } from '@/components/ui/panel';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { cn } from '@/lib/cn';
 
 export const EXAM_SCORE_KIND_LABEL: Record<ProblemKind, string> = {
   programming: '编程',
@@ -90,12 +90,8 @@ export function ContestExamScoreBatch({
   };
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">题目分值</CardTitle>
-        <p className="text-sm text-muted-foreground">只改这场考试里的分数，不改题库。按题型筛选后多选，再批量设分。</p>
-      </CardHeader>
-      <CardContent className="space-y-3">
+    <Panel title="题目分值" description="只改这场考试里的分数，不改题库。按题型筛选后多选，再批量设分。">
+      <div className="space-y-3">
         {pids.length ? (
           <>
             <div className="flex flex-wrap gap-1.5">
@@ -114,7 +110,7 @@ export function ContestExamScoreBatch({
               <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="筛选题号或标题" className="max-w-sm" />
               <Button
                 type="button"
-                variant="outline"
+                variant="secondary"
                 size="sm"
                 disabled={!visible.length}
                 onClick={() =>
@@ -139,12 +135,12 @@ export function ContestExamScoreBatch({
                   className="w-20 text-right"
                   aria-label="批量分数"
                 />
-                <Button type="submit" size="sm" disabled={!selected.length}>
+                <Button type="submit" variant="primary" size="sm" disabled={!selected.length}>
                   所选设为该分{selected.length ? `（${selected.length}）` : ''}
                 </Button>
               </form>
             </div>
-            <div className="rounded-lg border">
+            <div className="min-w-0 overflow-x-auto">
               <Table density="compact">
                 <TableHeader>
                   <TableRow>
@@ -161,10 +157,10 @@ export function ContestExamScoreBatch({
                         aria-label="全选"
                       />
                     </TableHead>
-                    <TableHead className="w-28">题号</TableHead>
+                    <TableHead className="w-24">题号</TableHead>
                     <TableHead>标题</TableHead>
                     <TableHead className="w-24">题型</TableHead>
-                    <TableHead className="w-32 text-right">分值</TableHead>
+                    <TableHead className="text-right">分值</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -179,11 +175,11 @@ export function ContestExamScoreBatch({
                         />
                       </TableCell>
                       <TableCell className="font-mono text-xs">{row.label}</TableCell>
-                      <TableCell>
-                        <span className="line-clamp-1">{row.title}</span>
+                      <TableCell className="min-w-0">
+                        <span className="block min-w-0 line-clamp-1">{row.title}</span>
                       </TableCell>
                       <TableCell>
-                        <Badge variant="secondary">{EXAM_SCORE_KIND_LABEL[row.kind]}</Badge>
+                        <Badge variant="soft" tone="neutral">{EXAM_SCORE_KIND_LABEL[row.kind]}</Badge>
                       </TableCell>
                       <TableCell className="text-right">
                         <form method="post" className="flex items-center justify-end gap-1">
@@ -200,13 +196,13 @@ export function ContestExamScoreBatch({
                 </TableBody>
               </Table>
             </div>
-            {visible.length !== pids.length ? <p className="text-xs text-muted-foreground">当前显示 {visible.length} / {pids.length} 道题</p> : null}
+            {visible.length !== pids.length ? <p className="text-xs text-fg-subtle">当前显示 {visible.length} / {pids.length} 道题</p> : null}
           </>
         ) : (
-          <p className="p-6 text-center text-sm text-muted-foreground">该考试还没有题目</p>
+          <EmptyState compact title="该考试还没有题目" />
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </Panel>
   );
 }
 
@@ -222,17 +218,16 @@ function KindChip({
   onClick: () => void;
 }) {
   return (
-    <button
+    <Button
       type="button"
+      variant={active ? 'soft' : 'secondary'}
+      size="sm"
       onClick={onClick}
+      aria-pressed={active}
       aria-label={`${label} ${count}`}
-      className={cn(
-        'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors',
-        active ? 'border-primary bg-primary/10 text-foreground' : 'text-muted-foreground hover:bg-accent/60',
-      )}
     >
       {label}
-      <span className="tabular-nums">{count}</span>
-    </button>
+      <span className="tabular">{count}</span>
+    </Button>
   );
 }

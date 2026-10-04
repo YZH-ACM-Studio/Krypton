@@ -5,7 +5,6 @@
  */
 import type { DateInput } from '@hydrooj/common';
 import { useEffect, useState, type ReactNode } from 'react';
-import { motion } from 'motion/react';
 import {
   ArrowRight,
   BookOpen,
@@ -27,8 +26,9 @@ import {
 import { MarkdownView } from '@/components/markdown-renderer';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { DateTime } from '@/components/ui/datetime';
+import { StatusDot } from '@/components/ui/display';
+import { Panel } from '@/components/ui/panel';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 import { examContestId, postContestProblemEntryUrl } from '@/lib/contest-exam-display';
@@ -219,10 +219,10 @@ function windowProgress(phase: ReturnType<typeof examPhase>, beginAt: number, en
 }
 
 function phaseCopy(phase: ReturnType<typeof examPhase>) {
-  if (phase === 'upcoming') return { badge: '即将开考', variant: 'outline' as const };
-  if (phase === 'running') return { badge: '进行中', variant: 'default' as const };
-  if (phase === 'ended') return { badge: '已结束', variant: 'secondary' as const };
-  return { badge: '待发布', variant: 'secondary' as const };
+  if (phase === 'upcoming') return { badge: '即将开考', tone: 'info' as const, pulse: false, draft: false };
+  if (phase === 'running') return { badge: '进行中', tone: 'success' as const, pulse: true, draft: false };
+  if (phase === 'ended') return { badge: '已结束', tone: 'neutral' as const, pulse: false, draft: false };
+  return { badge: '待发布', tone: 'neutral' as const, pulse: false, draft: true };
 }
 
 export function ExamContestDetailPage() {
@@ -270,32 +270,39 @@ export function ExamContestDetailPage() {
             : '考试进行中。报名后进入答题。';
 
   return (
-    <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-      <div className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
-        <a href={bs.urls.contests} className="shrink-0 hover:text-primary">
+    <div className="space-y-6">
+      <div className="flex min-w-0 items-center gap-2 text-sm text-fg-muted">
+        <a href={bs.urls.contests} className="shrink-0 hover:text-brand-fg">
           比赛
         </a>
         <ChevronRight className="size-3 shrink-0" />
-        <span className="min-w-0 truncate text-foreground">{tdoc.title}</span>
+        <span className="min-w-0 truncate text-fg">{tdoc.title}</span>
       </div>
 
-      <Card className="min-w-0">
-        <CardContent className="min-w-0 space-y-6 p-5 sm:p-6">
+      <Panel className="min-w-0">
+        <div className="min-w-0 space-y-6">
           <div className="min-w-0 space-y-3">
             <div className="flex flex-wrap items-center gap-2">
-              <Badge variant={status.variant}>{status.badge}</Badge>
-              <Badge variant="outline">考试</Badge>
-              {tdoc.hidden ? <Badge variant="outline">已隐藏</Badge> : null}
+              {status.draft ? (
+                <Badge tone="neutral">{status.badge}</Badge>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 text-xs text-fg">
+                  <StatusDot tone={status.tone} pulse={status.pulse || undefined} />
+                  {status.badge}
+                </span>
+              )}
+              <Badge variant="outline" tone="neutral">考试</Badge>
+              {tdoc.hidden ? <Badge variant="outline" tone="neutral">已隐藏</Badge> : null}
               {isClientRequired ? (
-                <Badge variant="outline" className="gap-1 font-normal">
+                <Badge variant="outline" tone="neutral">
                   <ShieldCheck className="size-3" />
                   须用客户端
                 </Badge>
               ) : null}
-              {tdoc.allowViewCode ? <Badge variant="outline">代码可见</Badge> : null}
+              {tdoc.allowViewCode ? <Badge variant="outline" tone="neutral">代码可见</Badge> : null}
             </div>
-            <h1 className="min-w-0 break-words text-3xl font-semibold tracking-tight">{tdoc.title}</h1>
-            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">{heroHint}</p>
+            <h2 className="min-w-0 break-words text-lg font-semibold text-balance">{tdoc.title}</h2>
+            <p className="max-w-prose text-sm text-fg-muted">{heroHint}</p>
           </div>
 
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -316,40 +323,40 @@ export function ExamContestDetailPage() {
             {!data.attended && phase !== 'ended' ? (
               <form method="post">
                 <input type="hidden" name="operation" value="attend" />
-                <Button type="submit" className="h-10 active:scale-[0.96] motion-reduce:transform-none">
+                <Button type="submit" variant="primary">
                   报名考试
-                  <ArrowRight className="size-4" />
+                  <ArrowRight />
                 </Button>
               </form>
             ) : canOpenExam ? (
-              <Button asChild className="h-10 active:scale-[0.96] motion-reduce:transform-none">
+              <Button asChild variant="primary">
                 <a href={entryUrl}>
                   {primaryLabel}
-                  <ArrowRight className="size-4" />
+                  <ArrowRight />
                 </a>
               </Button>
             ) : (
-              <Button type="button" disabled className="h-10">
-                <Lock className="size-4" />
+              <Button type="button" variant="primary" disabled>
+                <Lock />
                 {waitLabel}
               </Button>
             )}
-            <Button asChild variant="outline" className="h-10 active:scale-[0.96] motion-reduce:transform-none">
+            <Button asChild variant="secondary">
               <a href={`${detailUrl}/scoreboard`}>
-                <Trophy className="size-4" />
+                <Trophy />
                 排行榜
               </a>
             </Button>
             {data.canManageContest ? (
-              <Button asChild variant="outline" className="h-10 active:scale-[0.96] motion-reduce:transform-none">
+              <Button asChild variant="secondary">
                 <a href={`${detailUrl}/management`}>
-                  <Settings className="size-4" />
+                  <Settings />
                   管理
                 </a>
               </Button>
             ) : null}
             {data.virtualAllowed ? (
-              <Button asChild variant="outline" className="h-10 active:scale-[0.96] motion-reduce:transform-none">
+              <Button asChild variant="secondary">
                 <a href={`${detailUrl}/virtual`}>
                   {data.virtualAttemptStatus === 'active'
                     ? '继续虚拟参赛'
@@ -360,62 +367,58 @@ export function ExamContestDetailPage() {
               </Button>
             ) : null}
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </Panel>
 
       {phase !== 'draft' ? (
-        <Card>
-          <CardContent className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between">
+        <Panel>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
               <p className="text-sm font-medium">
                 {phase === 'upcoming' ? '距离开考' : phase === 'running' ? '距离整场结束' : '整场已结束'}
               </p>
-              <p className="mt-1 font-mono text-xl font-semibold tabular-nums tracking-tight sm:text-2xl">
+              <p className="mt-1 font-mono text-3xl font-semibold tabular tracking-tight">
                 {phase === 'ended' ? '00:00:00' : formatCountdown(cd)}
               </p>
             </div>
             <div className="w-full min-w-0 space-y-1.5 sm:max-w-xs lg:max-w-none lg:flex-1">
-              <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <div className="flex items-center justify-between text-xs text-fg-subtle">
                 <span>{phase === 'upcoming' ? '尚未开始' : phase === 'running' ? '整场进度' : '已结束'}</span>
-                <span className="font-mono tabular-nums">{Math.round(progress)}%</span>
+                <span className="font-mono tabular">{Math.round(progress)}%</span>
               </div>
-              <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+              <div className="h-1.5 overflow-hidden rounded-full bg-surface-active">
                 <div
-                  className="h-full rounded-full bg-primary transition-[width] duration-700"
+                  className="h-full rounded-full bg-brand transition-[width] duration-(--dur-4)"
                   style={{ width: `${progress}%` }}
                 />
               </div>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </Panel>
       ) : null}
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="min-w-0 space-y-4">
           {tdoc.content ? (
-            <Card className="w-full min-w-0">
-              <CardHeader>
-                <CardTitle className="flex min-w-0 items-center gap-2 text-base">
+            <Panel
+              className="w-full min-w-0"
+              title={(
+                <span className="inline-flex min-w-0 items-center gap-2">
                   <BookOpen className="size-4 shrink-0" />
                   考生说明
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="pt-0">
-                <MarkdownView
-                  content={tdoc.content}
-                  className="max-w-[80ch]"
-                  preferredLang={locale?.startsWith('zh') ? 'zh' : 'en'}
-                />
-              </CardContent>
-            </Card>
+                </span>
+              )}
+            >
+              <MarkdownView
+                content={tdoc.content}
+                className="max-w-prose"
+                preferredLang={locale?.startsWith('zh') ? 'zh' : 'en'}
+              />
+            </Panel>
           ) : null}
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="min-w-0 text-base">考试入口</CardTitle>
-              <CardDescription>进入答题工作台，或查看排行与讨论。题目不会出现在这个页面。</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-2 pt-0">
+          <Panel title="考试入口" description="进入答题工作台，或查看排行与讨论。题目不会出现在这个页面。">
+            <div className="divide-y divide-line-subtle">
               <DetailLink
                 href={entryUrl}
                 icon={<FileText className="size-4" />}
@@ -456,16 +459,13 @@ export function ExamContestDetailPage() {
                   查看本场个人提交
                 </DetailLink>
               ) : null}
-            </CardContent>
-          </Card>
+            </div>
+          </Panel>
         </div>
 
         <div className="min-w-0 space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="min-w-0 text-sm">考试安排</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2.5 pt-0 text-sm">
+          <Panel title="考试安排">
+            <div className="space-y-2.5 text-sm">
               <MetaRow icon={<Calendar className="size-3.5" />} label="整场开始">
                 <DateTime value={tdoc.beginAt} />
               </MetaRow>
@@ -493,14 +493,11 @@ export function ExamContestDetailPage() {
                   <DateTime value={tdoc.lockAt} />
                 </MetaRow>
               ) : null}
-            </CardContent>
-          </Card>
+            </div>
+          </Panel>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="min-w-0 text-sm">报名状态</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2.5 pt-0 text-sm">
+          <Panel title="报名状态">
+            <div className="space-y-2.5 text-sm">
               {data.attended ? (
                 <>
                   <MetaRow label="状态">已报名</MetaRow>
@@ -516,21 +513,18 @@ export function ExamContestDetailPage() {
                       <DateTime value={tsdoc.endAt} />
                     </MetaRow>
                   ) : null}
-                  <a href={`${detailUrl}/scoreboard`} className="block pt-1 text-xs text-primary hover:underline">
+                  <a href={`${detailUrl}/scoreboard`} className="block pt-1 text-xs text-brand-fg hover:underline">
                     查看完整排行
                   </a>
                 </>
               ) : (
-                <p className="text-xs leading-5 text-muted-foreground">报名后显示个人状态。这个页面看不到题库。</p>
+                <p className="text-xs text-fg-subtle">报名后显示个人状态。这个页面看不到题库。</p>
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </Panel>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="min-w-0 text-sm">操作</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-1 pt-0">
+          <Panel title="操作">
+            <div className="space-y-1">
               {data.canManageContest ? (
                 <>
                   <SidebarLink href={`${detailUrl}/edit`} icon={<Pencil className="size-3.5" />}>
@@ -577,39 +571,36 @@ export function ExamContestDetailPage() {
                   考生名单
                 </SidebarLink>
               ) : null}
-            </CardContent>
-          </Card>
+            </div>
+          </Panel>
 
           {data.files.length > 0 ? (
-            <Card>
-              <CardHeader>
-                <CardTitle className="min-w-0 text-sm">附件</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-1.5 pt-0">
+            <Panel title="附件">
+              <div className="space-y-1.5">
                 {data.files.map((file) => (
                   <a
                     key={file.name}
                     href={`${detailUrl}/file/private/${encodeURIComponent(file.name)}`}
-                    className="flex items-center gap-1.5 text-xs text-primary hover:underline"
+                    className="flex min-w-0 items-center gap-1.5 text-xs text-brand-fg hover:underline"
                   >
-                    <Download className="size-3" />
-                    <span className="truncate">{file.name}</span>
+                    <Download className="size-3 shrink-0" />
+                    <span className="min-w-0 truncate">{file.name}</span>
                   </a>
                 ))}
-              </CardContent>
-            </Card>
+              </div>
+            </Panel>
           ) : null}
         </div>
       </div>
-    </motion.div>
+    </div>
   );
 }
 
 function Fact({ label, value }: { label: string; value: string }) {
   return (
-    <div className="min-w-0 rounded-lg bg-muted/40 px-3 py-2.5">
-      <p className="text-[11px] text-muted-foreground">{label}</p>
-      <p className="mt-1 break-words text-sm font-medium tabular-nums">{value}</p>
+    <div className="min-w-0 rounded-lg bg-surface-sunken px-3 py-2.5">
+      <p className="text-2xs text-fg-subtle">{label}</p>
+      <p className="mt-1 break-words text-sm font-medium tabular">{value}</p>
     </div>
   );
 }
@@ -629,17 +620,18 @@ function DetailLink({
 }) {
   const body = (
     <>
-      <span className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-background">{icon}</span>
+      <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-surface-sunken text-fg-subtle">{icon}</span>
       <span className="min-w-0 flex-1">
         <span className="block text-sm font-medium">{title}</span>
-        <span className="block truncate text-xs text-muted-foreground">{children}</span>
+        <span className="block min-w-0 truncate text-xs text-fg-subtle">{children}</span>
       </span>
-      {muted ? <Lock className="size-4 shrink-0 text-muted-foreground" /> : <ChevronRight className="size-4 shrink-0 text-muted-foreground" />}
+      {muted ? <Lock className="size-4 shrink-0 text-fg-subtle" /> : <ChevronRight className="size-4 shrink-0 text-fg-subtle" />}
     </>
   );
   const className = cn(
-    'flex items-center gap-3 rounded-lg border p-3 text-left transition-[border-color,background-color] duration-150',
-    muted ? 'cursor-not-allowed bg-muted/30 opacity-70' : 'hover:border-primary/40 hover:bg-accent/30',
+    'flex items-center gap-3 py-3 text-left transition-colors duration-(--dur-1) ease-(--ease-standard)',
+    'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
+    muted ? 'cursor-not-allowed text-fg-muted' : 'hover:bg-surface-hover',
   );
   if (muted) return <div className={className}>{body}</div>;
   return (
@@ -660,11 +652,11 @@ function MetaRow({
 }) {
   return (
     <div className="flex min-w-0 items-center justify-between gap-3">
-      <span className="inline-flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+      <span className="inline-flex min-w-0 items-center gap-1.5 text-xs text-fg-subtle">
         {icon}
         {label}
       </span>
-      <span className="min-w-0 break-words text-right text-xs font-medium tabular-nums">{children}</span>
+      <span className="min-w-0 break-words text-right text-xs font-medium tabular">{children}</span>
     </div>
   );
 }
@@ -673,7 +665,7 @@ function SidebarLink({ href, icon, children }: { href: string; icon: ReactNode; 
   return (
     <a
       href={href}
-      className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-accent hover:text-accent-foreground"
+      className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-fg-muted transition-colors duration-(--dur-1) hover:bg-surface-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
     >
       {icon}
       <span>{children}</span>

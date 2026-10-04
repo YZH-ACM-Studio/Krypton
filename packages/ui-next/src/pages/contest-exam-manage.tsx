@@ -2,8 +2,7 @@
  * Exam /contest/:tid/management workspace and shared exam chrome.
  * ACM stays on ContestManagePage / ContestManagementChrome.
  */
-import { useState, type ReactNode } from 'react';
-import { motion } from 'motion/react';
+import { useEffect, useState, type ReactNode } from 'react';
 import {
   ArrowLeft,
   ClipboardCheck,
@@ -22,9 +21,10 @@ import {
   Users,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { EmptyState } from '@/components/ui/empty-state';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Panel } from '@/components/ui/panel';
 import { confirmFormSubmit } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useBootstrap } from '@/lib/bootstrap';
@@ -168,6 +168,25 @@ function examManagementItems(tdoc: ExamManageTdoc, contestUrl: string, canGradeS
   return items.filter((item) => item.show !== false);
 }
 
+const NARROW_NAV_QUERY = '(max-width: 767px)';
+
+function useNarrowViewport(): boolean {
+  const [narrow, setNarrow] = useState(() => (
+    typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia(NARROW_NAV_QUERY).matches
+  ));
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return undefined;
+    const media = window.matchMedia(NARROW_NAV_QUERY);
+    const sync = () => setNarrow(media.matches);
+    sync();
+    media.addEventListener('change', sync);
+    return () => media.removeEventListener('change', sync);
+  }, []);
+  return narrow;
+}
+
 export function ExamManagementChrome({
   tdoc,
   active,
@@ -178,6 +197,7 @@ export function ExamManagementChrome({
   children: ReactNode;
 }) {
   const bs = useBootstrap();
+  const narrow = useNarrowViewport();
   const tid = examContestId(tdoc);
   if (!tid) return <>{children}</>;
   const contestUrl = examContestUrl(bs.urls.contestDetail, tdoc);
@@ -185,8 +205,12 @@ export function ExamManagementChrome({
   const items = examManagementItems(tdoc, contestUrl, canGradeSubjective);
   return (
     <div className="min-w-0 space-y-5">
-      <nav aria-hidden="true" className="-mx-1 overflow-x-auto px-1 pb-1 lg:hidden">
-        <div className="inline-flex min-w-max items-center gap-1 rounded-xl bg-muted/70 p-1">
+      <nav
+        aria-hidden={narrow ? undefined : true}
+        aria-label={narrow ? '考试管理' : undefined}
+        className="-mx-1 overflow-x-auto px-1 pb-1 md:hidden"
+      >
+        <div className="inline-flex min-w-max items-center gap-1 rounded-lg bg-surface-active p-1">
           {items.map((item) => {
             const Icon = item.icon;
             const current = item.key === active;
@@ -194,14 +218,14 @@ export function ExamManagementChrome({
               <a
                 key={item.key}
                 href={item.href}
-                tabIndex={-1}
+                tabIndex={narrow ? undefined : -1}
                 className={cn(
-                  'inline-flex min-h-11 shrink-0 items-center gap-2 rounded-lg px-3 text-sm font-medium',
-                  'transition-[color,background-color,box-shadow] duration-200 ease-out motion-reduce:transition-none',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+                  'inline-flex min-h-10 shrink-0 items-center gap-2 rounded-md px-3 text-sm font-medium',
+                  'transition-[color,background-color,box-shadow] duration-(--dur-2) ease-(--ease-out) motion-reduce:transition-none',
+                  'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
                   current
-                    ? 'bg-background text-foreground shadow-sm ring-1 ring-border/60'
-                    : 'text-muted-foreground hover:bg-background/60 hover:text-foreground',
+                    ? 'bg-surface text-fg shadow-sm ring-1 ring-line'
+                    : 'text-fg-muted hover:bg-surface-hover hover:text-fg',
                 )}
               >
                 <Icon className="size-4 shrink-0" />
@@ -211,14 +235,14 @@ export function ExamManagementChrome({
           })}
         </div>
       </nav>
-      <div className="grid min-w-0 gap-5 lg:grid-cols-[220px_minmax(0,1fr)]">
-        <aside className="hidden space-y-3 lg:block">
-          <div className="rounded-xl border bg-card p-3">
-            <a href={contestUrl} className="group block rounded-lg px-2 py-2 hover:bg-accent/40">
-              <p className="line-clamp-2 text-sm font-medium group-hover:text-primary">{tdoc.title || '考试'}</p>
-              <p className="mt-1 text-xs text-muted-foreground">返回考试详情</p>
+      <div className="grid min-w-0 gap-5 md:grid-cols-[15rem_minmax(0,1fr)]">
+        <aside className="hidden space-y-3 md:block">
+          <div className="rounded-lg border border-line bg-surface p-3">
+            <a href={contestUrl} className="group block rounded-lg px-2 py-2 hover:bg-surface-hover">
+              <p className="line-clamp-2 min-w-0 text-sm font-medium group-hover:text-brand-fg">{tdoc.title || '考试'}</p>
+              <p className="mt-1 text-xs text-fg-subtle">返回考试详情</p>
             </a>
-            <div className="my-2 h-px bg-border" />
+            <div className="my-2 h-px bg-line" />
             <nav className="space-y-1" aria-label="考试管理">
               {items.map((item) => {
                 const Icon = item.icon;
@@ -228,14 +252,16 @@ export function ExamManagementChrome({
                     key={item.key}
                     href={item.href}
                     aria-current={current ? 'page' : undefined}
-                    className={`flex items-center gap-2 rounded-md px-2.5 py-2 text-sm transition-colors ${
-                      current ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground'
-                    }`}
+                    className={cn(
+                      'flex items-center gap-2 rounded-md px-2.5 py-2 text-sm transition-colors duration-(--dur-1)',
+                      'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
+                      current ? 'bg-brand-soft text-brand-fg' : 'text-fg-muted hover:bg-surface-hover hover:text-fg',
+                    )}
                   >
-                    <Icon className="size-4" />
+                    <Icon className="size-4 shrink-0" />
                     <span className="min-w-0 flex-1 truncate">{item.label}</span>
                     {!['overview', 'edit', 'users', 'clarification', 'print'].includes(String(item.key)) ? (
-                      <ExternalLink className="size-3 opacity-60" />
+                      <ExternalLink className="size-3 shrink-0 text-fg-subtle" />
                     ) : null}
                   </a>
                 );
@@ -258,33 +284,33 @@ export function ExamContestManagePage({ seat }: { seat?: ReactNode }) {
   const [selectedPrivate, setSelectedPrivate] = useState<Set<string>>(new Set());
 
   return (
-    <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
+    <div className="space-y-6">
       <div className="flex items-center gap-3">
-        <Button asChild variant="ghost" size="icon">
+        <Button asChild variant="ghost" iconOnly>
           <a href={contestUrl || bs.urls.contests} aria-label="返回考试详情">
-            <ArrowLeft className="size-4" />
+            <ArrowLeft />
           </a>
         </Button>
         <div className="min-w-0 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-xl font-semibold tracking-tight">考试管理</h1>
-            <Badge variant="outline">考试</Badge>
+            <h2 className="min-w-0 truncate text-lg font-semibold">考试管理</h2>
+            <Badge variant="outline" tone="neutral">考试</Badge>
           </div>
-          <p className="truncate text-sm text-muted-foreground">{tdoc.title}</p>
+          <p className="truncate text-sm text-fg-muted">{tdoc.title}</p>
         </div>
       </div>
 
       <ExamManagementChrome tdoc={tdoc} active="overview">
         <div className="space-y-6">
-          <p className="text-sm leading-6 text-muted-foreground">
+          <p className="text-sm text-fg-muted">
             机房座位、卷面分值和考生材料。排行、全部提交和代码从侧栏进入。
           </p>
           {seat}
           <ContestExamScoreBatch pids={tdoc.pids} pdict={data.pdict} scores={tdoc.score} />
           <div className="space-y-3">
             <div>
-              <h2 className="text-base font-semibold tracking-tight">考试材料</h2>
-              <p className="mt-1 text-sm text-muted-foreground">公开附件考生可见。私有材料只给管理员。</p>
+              <h2 className="text-lg font-semibold">考试材料</h2>
+              <p className="mt-1 text-sm text-fg-muted">公开附件考生可见。私有材料只给管理员。</p>
             </div>
             <div className="grid gap-4 xl:grid-cols-2">
               <ExamFileCard
@@ -311,7 +337,7 @@ export function ExamContestManagePage({ seat }: { seat?: ReactNode }) {
           </div>
         </div>
       </ExamManagementChrome>
-    </motion.div>
+    </div>
   );
 }
 
@@ -342,22 +368,23 @@ function ExamFileCard({
   };
 
   return (
-    <Card>
-      <CardHeader className="gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="space-y-1.5">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Icon className="size-4" />
-            {title}
-            <span className="font-normal text-muted-foreground">({fileList.length})</span>
-          </CardTitle>
-          <CardDescription>{description}</CardDescription>
-        </div>
-        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+    <Panel
+      flush
+      description={description}
+      title={(
+        <span className="inline-flex min-w-0 items-center gap-2">
+          <Icon className="size-4 shrink-0" />
+          {title}
+          <span className="shrink-0 font-normal text-fg-subtle tabular">({fileList.length})</span>
+        </span>
+      )}
+      actions={(
+        <>
           <form method="post" encType="multipart/form-data" className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
             <input type="hidden" name="type" value={type} />
-            <input type="file" name="file" className="max-w-full min-w-0 text-xs" />
-            <Button type="submit" name="operation" value="upload_file" size="sm" variant="outline">
-              <Upload className="mr-1 size-3" />
+            <input type="file" name="file" aria-label={type === 'public' ? '上传公开文件' : '上传私有材料'} className="max-w-full min-w-0 text-xs" />
+            <Button type="submit" name="operation" value="upload_file" size="sm" variant="secondary">
+              <Upload />
               上传
             </Button>
           </form>
@@ -373,15 +400,15 @@ function ExamFileCard({
               {Array.from(selected).map((name) => (
                 <input key={name} type="hidden" name="files" value={name} />
               ))}
-              <Button type="submit" size="sm" variant="destructive">
-                <Trash2 className="mr-1 size-3" />
+              <Button type="submit" size="sm" variant="danger-soft">
+                <Trash2 />
                 删除 ({selected.size})
               </Button>
             </form>
           ) : null}
-        </div>
-      </CardHeader>
-      <CardContent className="p-0">
+        </>
+      )}
+    >
         {fileList.length > 0 ? (
           <Table>
             <TableHeader>
@@ -394,8 +421,8 @@ function ExamFileCard({
                   />
                 </TableHead>
                 <TableHead>文件名</TableHead>
-                <TableHead className="w-28 text-right">大小</TableHead>
-                <TableHead className="w-28 text-center">操作</TableHead>
+                <TableHead className="w-24 text-right">大小</TableHead>
+                <TableHead className="w-24 text-center">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -409,19 +436,26 @@ function ExamFileCard({
                     />
                   </TableCell>
                   <TableCell className="font-mono text-sm">{file.name}</TableCell>
-                  <TableCell className="text-right text-sm text-muted-foreground">{formatSize(file.size || 0)}</TableCell>
+                  <TableCell className="text-right text-sm text-fg-subtle tabular">{formatSize(file.size || 0)}</TableCell>
                   <TableCell className="text-center">
                     <div className="flex justify-center gap-1">
-                      <Button asChild variant="ghost" size="icon" className="size-7">
+                      <Button asChild variant="ghost" size="sm" iconOnly>
                         <a href={`${contestUrl}/file/${type}/${encodeURIComponent(file.name)}`} aria-label={`下载 ${file.name}`}>
-                          <Download className="size-3" />
+                          <Download />
                         </a>
                       </Button>
-                      <form method="post" className="inline">
+                      <form
+                        method="post"
+                        className="inline"
+                        onSubmit={(event) => {
+                          void confirmFormSubmit(event, `确认删除 ${file.name} 吗？`, { destructive: true });
+                        }}
+                      >
+                        <input type="hidden" name="operation" value="delete_files" />
                         <input type="hidden" name="files" value={file.name} />
                         <input type="hidden" name="type" value={type} />
-                        <Button type="submit" name="operation" value="delete_files" variant="ghost" size="icon" className="size-7">
-                          <Trash2 className="size-3 text-destructive" />
+                        <Button type="submit" variant="danger-soft" size="sm" iconOnly aria-label={`删除 ${file.name}`}>
+                          <Trash2 />
                         </Button>
                       </form>
                     </div>
@@ -431,9 +465,8 @@ function ExamFileCard({
             </TableBody>
           </Table>
         ) : (
-          <p className="p-4 text-sm text-muted-foreground">暂无文件</p>
+          <EmptyState compact title="暂无文件" />
         )}
-      </CardContent>
-    </Card>
+    </Panel>
   );
 }

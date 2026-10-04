@@ -83,16 +83,16 @@ export function ContestExamPassSettings({
   }, [attemptLimit, kinds, limitText, passText, pids, quotas, scores]);
 
   return (
-    <section className="min-w-0 space-y-3 rounded-xl border bg-muted/20 p-4">
+    <section className="min-w-0 space-y-3 rounded-lg bg-surface-sunken p-4">
       <div>
         <h3 className="text-sm font-medium">及格与补考</h3>
-        <p className="text-xs text-muted-foreground">
+        <p className="text-xs text-fg-subtle">
           留空及格分则交卷即结束，不能补考。填写后不及格且次数未满、整场还够再开一轮时可再考。
         </p>
       </div>
       <div className="grid min-w-0 gap-3 sm:grid-cols-2">
         <label className="min-w-0 space-y-1.5">
-          <span className="text-xs text-muted-foreground">及格分</span>
+          <span className="text-xs text-fg-subtle">及格分</span>
           <Input
             name="examPassScore"
             type="number"
@@ -104,7 +104,7 @@ export function ContestExamPassSettings({
           />
         </label>
         <label className="min-w-0 space-y-1.5">
-          <span className="text-xs text-muted-foreground">最多考几次</span>
+          <span className="text-xs text-fg-subtle">最多考几次</span>
           <Input
             name="examAttemptLimit"
             type="number"
@@ -116,29 +116,29 @@ export function ContestExamPassSettings({
           />
         </label>
       </div>
-      {helper.passError ? <p className="text-xs text-destructive">{helper.passError}</p> : null}
-      {helper.limitError ? <p className="text-xs text-destructive">{helper.limitError}</p> : null}
-      {helper.aboveMax ? <p className="text-xs text-destructive">及格分高于当前算得出的卷面满分，不能保存。</p> : null}
+      {helper.passError ? <p className="text-xs text-danger-fg">{helper.passError}</p> : null}
+      {helper.limitError ? <p className="text-xs text-danger-fg">{helper.limitError}</p> : null}
+      {helper.aboveMax ? <p className="text-xs text-danger-fg">及格分高于当前算得出的卷面满分，不能保存。</p> : null}
       {helper.mixedDraw ? (
-        <p className="text-xs text-muted-foreground">抽卷后每人卷面不同，且同一题型本场分数不一致，不给出统一最少题数。</p>
+        <p className="text-xs text-fg-subtle">抽卷后每人卷面不同，且同一题型本场分数不一致，不给出统一最少题数。</p>
       ) : null}
       {helper.pass !== null && !helper.passError ? (
         <div className="space-y-1 text-sm">
           {helper.paperMax !== null ? (
             <p>
-              卷面满分 <span className="font-medium tabular-nums">{helper.paperMax}</span>
+              卷面满分 <span className="font-medium tabular">{helper.paperMax}</span>
               {helper.minCount !== null ? (
                 <>
-                  ，至少全对 <span className="font-medium tabular-nums">{helper.minCount}</span> 题才够及格
+                  ，至少全对 <span className="font-medium tabular">{helper.minCount}</span> 题才够及格
                 </>
               ) : (
                 '，按当前分数凑不够及格分'
               )}
             </p>
           ) : (
-            <p className="text-muted-foreground">抽卷后按该生卷面总分判定及格。</p>
+            <p className="text-fg-muted">抽卷后按该生卷面总分判定及格。</p>
           )}
-          {helper.limit > 1 ? <p className="text-xs text-muted-foreground">不及格最多再开 {helper.limit - 1} 轮，含首次共 {helper.limit} 次。</p> : null}
+          {helper.limit > 1 ? <p className="text-xs text-fg-subtle">不及格最多再开 {helper.limit - 1} 轮，含首次共 {helper.limit} 次。</p> : null}
         </div>
       ) : null}
     </section>

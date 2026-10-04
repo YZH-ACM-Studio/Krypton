@@ -2,13 +2,13 @@
  * Exam create/edit form. Parent wraps chrome and seat entry.
  * Wall-clock POSTs as `duration`; personal clock POSTs as `contestDuration`.
  */
-import { useEffect, useState, type ReactNode } from 'react';
+import { cloneElement, isValidElement, useEffect, useId, useState, type ReactElement, type ReactNode } from 'react';
 import { ArrowLeft, Copy, Save, Trash2, WifiOff } from 'lucide-react';
 import { MarkdownEditor } from '@/components/markdown-renderer';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { confirmFormSubmit } from '@/components/ui/dialog';
+import { Panel } from '@/components/ui/panel';
 import { Input } from '@/components/ui/input';
 import { MiniTabs } from '@/components/ui/mini-tabs';
 import { MultiSelect } from '@/components/ui/multi-select';
@@ -179,27 +179,23 @@ function readScopeCatalog(rows: unknown, selectedIds: string[], schools: Array<{
     });
 }
 
-function ExamCard({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">{title}</CardTitle>
-        {description ? <CardDescription>{description}</CardDescription> : null}
-      </CardHeader>
-      <CardContent className="space-y-4 pt-0">{children}</CardContent>
-    </Card>
-  );
-}
-
 function SettingsRow({ label, description, children }: { label: string; description?: string; children: ReactNode }) {
+  const labelId = useId();
+  const descriptionId = useId();
+  const control = isValidElement(children)
+    ? cloneElement(children as ReactElement<{ 'aria-labelledby'?: string; 'aria-describedby'?: string }>, {
+      'aria-labelledby': labelId,
+      ...(description ? { 'aria-describedby': descriptionId } : {}),
+    })
+    : children;
   return (
-    <div className="flex flex-col gap-3 rounded-lg border p-4 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-      <div className="min-w-0 space-y-1">
-        <p className="text-sm font-medium leading-none">{label}</p>
-        {description ? <p className="text-xs leading-5 text-muted-foreground">{description}</p> : null}
-      </div>
-      <div className="shrink-0 pt-0.5">{children}</div>
-    </div>
+    <label className="flex cursor-pointer flex-col gap-3 rounded-lg bg-surface-sunken p-4 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+      <span className="min-w-0 space-y-1">
+        <span id={labelId} className="block text-sm font-medium">{label}</span>
+        {description ? <span id={descriptionId} className="block text-xs text-fg-subtle">{description}</span> : null}
+      </span>
+      <span className="shrink-0">{control}</span>
+    </label>
   );
 }
 
@@ -221,8 +217,8 @@ function ChoiceCard({
       label={label}
       description={description}
       wrapperClassName={cn(
-        'w-full rounded-lg border p-3 transition-colors',
-        checked ? 'border-primary bg-primary/5' : 'hover:bg-accent/40',
+        'w-full rounded-lg border p-3 transition-colors duration-(--dur-1)',
+        checked ? 'border-brand bg-brand-soft/60' : 'border-line hover:bg-surface-hover',
       )}
     />
   );
@@ -320,41 +316,41 @@ export function ContestEditExam({ rule, onRuleChange, children }: ContestEditExa
 
   return (
     <div className="max-w-5xl space-y-6">
-      <header className="sticky top-0 z-10 -mx-1 space-y-2 rounded-xl border bg-background/95 px-3 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+      <header className="sticky top-0 z-10 -mx-1 space-y-2 rounded-lg border border-line bg-surface px-3 py-2">
         <div className="flex flex-wrap items-center gap-2">
-          <Button asChild variant="ghost" size="icon">
+          <Button asChild variant="ghost" iconOnly>
             <a href={contestUrl} aria-label="返回">
-              <ArrowLeft className="size-4" />
+              <ArrowLeft />
             </a>
           </Button>
           <div className="min-w-0 flex-1">
-            <h1 className="truncate text-lg font-semibold tracking-tight">{isEdit ? '编辑考试' : '创建考试'}</h1>
-            <p className="hidden truncate text-xs text-muted-foreground sm:block">个人答卷考试。先定时间和题池，说明可以后写。</p>
+            <h2 className="truncate text-lg font-semibold">{isEdit ? '编辑考试' : '创建考试'}</h2>
+            <p className="hidden truncate text-xs text-fg-subtle sm:block">个人答卷考试。先定时间和题池，说明可以后写。</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <Button type="submit" form="exam-edit-form" name="operation" value="update" variant="primary" className={isEdit ? 'order-2' : undefined}>
+              <Save />
+              {isEdit ? '保存修改' : '创建考试'}
+            </Button>
             {isEdit ? (
-              <Button type="submit" form="exam-edit-form" name="operation" value="update" variant="outline" formAction={`${bs.urls.contests}/create`}>
-                <Copy className="size-4" />
+              <Button type="submit" form="exam-edit-form" name="operation" value="update" variant="secondary" className="order-1" formAction={`${bs.urls.contests}/create`}>
+                <Copy />
                 复制为新考试
               </Button>
             ) : null}
-            <Button type="submit" form="exam-edit-form" name="operation" value="update">
-              <Save className="size-4" />
-              {isEdit ? '保存修改' : '创建考试'}
-            </Button>
           </div>
         </div>
         <div className="flex flex-wrap gap-1.5">
-          <Badge variant="secondary" className="font-normal tabular-nums">
+          <Badge variant="soft" tone="neutral">
             {beginDate && beginTime ? `${beginDate} ${beginTime} 开门` : '未设开始时间'}
           </Badge>
-          <Badge variant="secondary" className="font-normal tabular-nums">
+          <Badge variant="soft" tone="neutral">
             {duration || '—'} 小时关门
           </Badge>
-          <Badge variant="outline" className="font-normal">
+          <Badge variant="outline" tone="neutral">
             {personalClock === null && !isEdit ? '未设个人时长' : personalClockLabel}
           </Badge>
-          <Badge variant="outline" className="font-normal">
+          <Badge variant="outline" tone="neutral">
             {permission === 'invite' ? '邀请码' : '公开'}
             {scopeMode === 'schools' ? ' · 指定学校' : scopeMode === 'groups' ? ' · 指定用户组' : ''}
           </Badge>
@@ -397,7 +393,8 @@ export function ContestEditExam({ rule, onRuleChange, children }: ContestEditExa
         ) : null}
 
         <div hidden={tab !== 'basic'}>
-        <ExamCard title="这场考试" description="标题和开门时间是这场考试的身份。整场关门后不能再开考。">
+        <Panel title="这场考试" description="标题和开门时间是这场考试的身份。整场关门后不能再开考。">
+          <div className="space-y-4">
           <div className="space-y-1.5">
             <label htmlFor="title" className="text-sm font-medium">
               考试标题
@@ -406,8 +403,8 @@ export function ContestEditExam({ rule, onRuleChange, children }: ContestEditExa
           </div>
 
           <div className="grid gap-3 lg:grid-cols-3">
-            <div className="space-y-3 rounded-lg border bg-muted/20 p-4">
-              <p className="text-xs font-medium text-muted-foreground">开门</p>
+            <div className="space-y-3 rounded-lg bg-surface-sunken p-4">
+              <p className="text-xs font-medium text-fg-subtle">开门</p>
               <div className="space-y-1.5">
                 <label htmlFor="beginAtDate" className="text-sm font-medium">
                   开始日期
@@ -436,8 +433,8 @@ export function ContestEditExam({ rule, onRuleChange, children }: ContestEditExa
               </div>
             </div>
 
-            <div className="space-y-3 rounded-lg border bg-muted/20 p-4">
-              <p className="text-xs font-medium text-muted-foreground">个人答卷</p>
+            <div className="space-y-3 rounded-lg bg-surface-sunken p-4">
+              <p className="text-xs font-medium text-fg-subtle">个人答卷</p>
               <div className="space-y-1.5">
                 <label htmlFor="contestDuration" className="text-sm font-medium">
                   开考后个人时长（小时）
@@ -451,12 +448,12 @@ export function ContestEditExam({ rule, onRuleChange, children }: ContestEditExa
                   defaultValue={personalClock === null ? '' : String(personalClock)}
                   placeholder="留空表示只受整场关门时间限制"
                 />
-                <p className="text-xs leading-5 text-muted-foreground">开考后个人时长；剩余整场时间不够一场则不能开考。与整场关门不是同一字段。</p>
+                <p className="text-xs text-fg-subtle">开考后个人时长；剩余整场时间不够一场则不能开考。与整场关门不是同一字段。</p>
               </div>
             </div>
 
-            <div className="space-y-3 rounded-lg border bg-muted/20 p-4">
-              <p className="text-xs font-medium text-muted-foreground">整场窗口</p>
+            <div className="space-y-3 rounded-lg bg-surface-sunken p-4">
+              <p className="text-xs font-medium text-fg-subtle">整场窗口</p>
               <div className="space-y-1.5">
                 <label htmlFor="duration" className="text-sm font-medium">
                   整场关门（小时）
@@ -471,12 +468,12 @@ export function ContestEditExam({ rule, onRuleChange, children }: ContestEditExa
                   onChange={(event) => setDuration(event.target.value)}
                   required
                 />
-                <p className="text-xs leading-5 text-muted-foreground">
+                <p className="text-xs text-fg-subtle">
                   从开始时间起关闭整场。创建默认 {EXAM_CREATE_WALL_CLOCK_HOURS} 小时。
                 </p>
               </div>
-              <p className="text-sm tabular-nums">
-                <span className="text-muted-foreground">预计结束 </span>
+              <p className="text-sm tabular">
+                <span className="text-fg-muted">预计结束 </span>
                 {computedEnd || '填开始时间和整场关门后显示'}
               </p>
             </div>
@@ -487,7 +484,7 @@ export function ContestEditExam({ rule, onRuleChange, children }: ContestEditExa
               赛制
             </label>
             <SimpleSelect id="rule" name="rule" value={rule} onValueChange={onRuleChange} options={ruleOptions} />
-            <p className="text-xs text-muted-foreground">改成 ACM / OI 会切回比赛编辑器。</p>
+            <p className="text-xs text-fg-subtle">改成 ACM / OI 会切回比赛编辑器。</p>
           </div>
 
           <SettingsRow
@@ -497,11 +494,12 @@ export function ContestEditExam({ rule, onRuleChange, children }: ContestEditExa
             <Switch checked={showVerdict} onCheckedChange={(value) => setShowVerdict(!!value)} />
           </SettingsRow>
           <HiddenFlag name="examShowVerdict" value={showVerdict} />
-        </ExamCard>
+          </div>
+        </Panel>
         </div>
 
         <div hidden={tab !== 'paper'}>
-        <ExamCard title="试卷" description="题池可按题型筛选、多选、排序，并批量改这场考试的分数。可设及格分和补考次数。填写配额后按题型抽个人卷，开考或再考时冻结。">
+        <Panel title="试卷" description="题池可按题型筛选、多选、排序，并批量改这场考试的分数。可设及格分和补考次数。填写配额后按题型抽个人卷，开考或再考时冻结。">
           <ContestExamPaperPool
             name="pids"
             value={pids}
@@ -512,11 +510,12 @@ export function ContestEditExam({ rule, onRuleChange, children }: ContestEditExa
             passScore={tdoc.examPassScore}
             attemptLimit={tdoc.examAttemptLimit}
           />
-        </ExamCard>
+        </Panel>
         </div>
 
         <div hidden={tab !== 'access'}>
-        <ExamCard title="谁能考" description="公开或邀请码，再加可选的学校 / 用户组范围。不写入比赛 assign。列表隐藏只影响发现，不影响链接和课程入口。">
+        <Panel title="谁能考" description="公开或邀请码，再加可选的学校 / 用户组范围。不写入比赛 assign。列表隐藏只影响发现，不影响链接和课程入口。">
+          <div className="space-y-4">
           <div className="grid gap-4 lg:grid-cols-2">
             <div className="space-y-2">
               <p className="text-sm font-medium">访问</p>
@@ -602,27 +601,29 @@ export function ContestEditExam({ rule, onRuleChange, children }: ContestEditExa
             <Switch checked={listHidden} onCheckedChange={(value) => setListHidden(!!value)} />
           </SettingsRow>
           <HiddenFlag name="hidden" value={listHidden} />
-        </ExamCard>
+          </div>
+        </Panel>
         </div>
 
         <div hidden={tab !== 'content'}>
-        <ExamCard title="考生说明" description="开考页展示的 Markdown，可后补。">
+        <Panel title="考生说明" description="开考页展示的 Markdown，可后补。">
           <div className="space-y-1.5">
             <label htmlFor="content" className="text-sm font-medium">
               考试说明 (Markdown)
             </label>
             <MarkdownEditor name="content" value={readString(tdoc.content)} minHeight={240} />
           </div>
-        </ExamCard>
+        </Panel>
         </div>
 
         {isEdit ? (
           <div hidden={tab !== 'vigil'}>
-          <ExamCard title="客户端与反作弊" description="创建时默认关闭。这里打开后才会要求 Client、锁屏或网络锁。">
-            <label className="flex cursor-pointer items-start justify-between gap-4 rounded-lg border p-4">
+          <Panel title="客户端与反作弊" description="创建时默认关闭。这里打开后才会要求 Client、锁屏或网络锁。">
+            <div className="space-y-4">
+            <label className="flex cursor-pointer items-start justify-between gap-4 rounded-lg bg-surface-sunken p-4">
               <span className="min-w-0 space-y-1">
-                <span className="block text-sm font-medium leading-none">启用 Vigil 反作弊</span>
-                <span className="block text-xs text-muted-foreground">创建页不展示；编辑后再开</span>
+                <span className="block text-sm font-medium">启用 Vigil 反作弊</span>
+                <span className="block text-xs text-fg-subtle">创建页不展示；编辑后再开</span>
               </span>
               <Switch checked={vigilEnabled} onCheckedChange={(value) => setVigilEnabled(!!value)} />
             </label>
@@ -669,10 +670,10 @@ export function ContestEditExam({ rule, onRuleChange, children }: ContestEditExa
                   <Switch name="exclusive" value="true" defaultChecked={tdoc.exclusive === true} />
                 </SettingsRow>
 
-                <div className="space-y-3 rounded-lg border bg-muted/20 p-4">
+                <div className="space-y-3 rounded-lg bg-surface-sunken p-4">
                   <div className="space-y-1">
                     <h3 className="text-sm font-medium">实时媒体</h3>
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-xs text-fg-subtle">
                       推流到 SRS 媒体服务器；老师在反作弊详情页可看实时画面。<strong>失败不影响考试</strong>。
                     </p>
                   </div>
@@ -735,14 +736,14 @@ export function ContestEditExam({ rule, onRuleChange, children }: ContestEditExa
                   />
                 </div>
 
-                <div className="space-y-4 rounded-lg border bg-muted/20 p-4">
+                <div className="space-y-4 rounded-lg bg-surface-sunken p-4">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div className="space-y-1">
                       <h3 className="flex items-center gap-2 text-sm font-medium">
-                        <WifiOff className="size-4" />
+                        <WifiOff className="size-4 shrink-0 text-fg-subtle" />
                         考试网络锁
                       </h3>
-                      <p className="text-xs text-muted-foreground">只允许默认白名单和下方附加白名单。</p>
+                      <p className="text-xs text-fg-subtle">只允许默认白名单和下方附加白名单。</p>
                     </div>
                     <label className="flex shrink-0 items-center gap-2 text-sm">
                       <Switch
@@ -788,13 +789,14 @@ export function ContestEditExam({ rule, onRuleChange, children }: ContestEditExa
                 </div>
               </div>
             ) : null}
-          </ExamCard>
+            </div>
+          </Panel>
           </div>
         ) : null}
 
         <div className="flex items-center justify-end gap-3">
-          <Button type="submit" name="operation" value="update">
-            <Save className="size-4" />
+          <Button type="submit" name="operation" value="update" variant="secondary">
+            <Save />
             {isEdit ? '保存修改' : '创建考试'}
           </Button>
         </div>
@@ -803,26 +805,20 @@ export function ContestEditExam({ rule, onRuleChange, children }: ContestEditExa
       {isEdit ? children : null}
 
       {isEdit ? (
-        <Card className="border-destructive/30">
-          <CardHeader>
-            <CardTitle className="text-base">危险操作</CardTitle>
-            <CardDescription>删除不可恢复。不会级联删除题目或课程绑定。</CardDescription>
-          </CardHeader>
-          <CardContent className="pt-0">
-            <form
-              method="post"
-              onSubmit={(event) => {
-                void confirmFormSubmit(event, '确定要删除此考试吗？', { destructive: true });
-              }}
-            >
-              <input type="hidden" name="operation" value="delete" />
-              <Button type="submit" variant="destructive" size="sm">
-                <Trash2 className="size-3" />
-                删除考试
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
+        <Panel title="危险操作" description="删除不可恢复。不会级联删除题目或课程绑定。" className="border-danger-line">
+          <form
+            method="post"
+            onSubmit={(event) => {
+              void confirmFormSubmit(event, '确定要删除此考试吗？', { destructive: true });
+            }}
+          >
+            <input type="hidden" name="operation" value="delete" />
+            <Button type="submit" variant="danger-soft" size="sm">
+              <Trash2 />
+              删除考试
+            </Button>
+          </form>
+        </Panel>
       ) : null}
     </div>
   );

@@ -179,7 +179,7 @@ function stageDotTone(ns: TrainingNodeStatus): 'success' | 'info' | 'neutral' {
 function AccessSourceBadges({ sources }: { sources: ProblemSetAccessSource[] }) {
   if (sources.length === 0) return null;
   return (
-    <span className="inline-flex flex-wrap items-center gap-1">
+    <span className="inline-flex shrink-0 flex-wrap items-center gap-1">
       {sources.map((source) => (
         <Badge
           key={`${source.kind}:${source.groupId || source.courseId || source.entitlementId || ''}`}
@@ -307,8 +307,8 @@ function TrainingTable({ rows, bs }: { rows: TrainingListEntry[]; bs: ReturnType
             className="flex items-center gap-4 px-4 py-3 transition-[background-color] duration-(--dur-1) ease-(--ease-standard) hover:bg-surface-hover"
           >
             <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <span className="truncate font-medium text-fg">{e.t.title || '未命名'}</span>
+              <div className="flex min-w-0 items-start gap-2">
+                <span className="min-w-0 line-clamp-2 font-medium text-fg">{e.t.title || '未命名'}</span>
                 <EnrollmentBadge fullyDone={e.fullyDone} enrolled={e.enrolled} />
                 <AccessSourceBadges sources={problemSetAccessSources(e.access)} />
               </div>
@@ -770,10 +770,10 @@ export function TrainingDetailPage() {
                 {problemSearch.results.map((row) => {
                   const searchHref = problemSearchEntryUrl(row);
                   return (
-                    <div key={row.docId} className="flex flex-col gap-2 px-3 py-2.5 sm:flex-row sm:items-center">
+                    <div key={row.docId} className="flex flex-col gap-2 px-3 py-2.5 sm:flex-row sm:items-start">
                       {searchHref ? (
                         <a href={searchHref} className="min-w-0 flex-1 rounded-sm outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
-                          <div className="flex min-w-0 items-center gap-2">
+                          <div className="flex min-w-0 items-start gap-2">
                             {row.status === 'accepted' ? (
                               <CheckCircle2 className="size-4 shrink-0 text-success-fg" />
                             ) : row.status === 'previouslyAccepted' ? (
@@ -786,7 +786,7 @@ export function TrainingDetailPage() {
                               <span className="size-4 shrink-0 rounded-full border border-line-strong" aria-hidden="true" />
                             )}
                             <span className="shrink-0 font-mono text-xs text-fg-subtle">{row.displayPid}</span>
-                            <span className="truncate text-sm font-medium text-fg hover:text-brand-fg">{row.title}</span>
+                            <span className="min-w-0 line-clamp-2 text-sm font-medium text-fg hover:text-brand-fg">{row.title}</span>
                           </div>
                         </a>
                       ) : (
@@ -794,7 +794,7 @@ export function TrainingDetailPage() {
                           <span className="shrink-0 font-mono text-xs">{row.displayPid}</span> {row.title} · 阶段未解锁
                         </div>
                       )}
-                      <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">
+                      <div className="flex min-w-0 flex-wrap items-center gap-1.5 sm:max-w-1/2 sm:justify-end">
                         <ProblemSearchStatusBadge row={row} />
                         {row.chapters.map((chapter) => (
                           <Button
@@ -803,10 +803,10 @@ export function TrainingDetailPage() {
                             variant="secondary"
                             size="sm"
                             onClick={() => selectChapter(chapter.id)}
-                            className="max-w-48 shrink"
-                            title={`切换到章节：${chapter.title}`}
+                            className="min-w-0 max-w-full shrink"
+                            title={chapter.title}
                           >
-                            <span className="truncate">
+                            <span className="min-w-0 truncate">
                               {chapter.completed ? '✓ ' : ''}
                               {chapter.title}
                             </span>
@@ -831,8 +831,8 @@ export function TrainingDetailPage() {
           {selected ? (
             <Panel>
               <div className="flex flex-col gap-3">
-                <div className="flex min-w-0 items-center justify-between gap-2">
-                  <h2 className="min-w-0 truncate text-lg font-semibold text-fg">{selected.title || `阶段 ${selected._id}`}</h2>
+                <div className="flex min-w-0 items-start justify-between gap-2">
+                  <h2 className="min-w-0 line-clamp-2 text-lg font-semibold text-fg">{selected.title || `阶段 ${selected._id}`}</h2>
                   <StageStatusBadge ns={selectedStatus} />
                 </div>
                 <div className="flex items-center gap-2 text-xs text-fg-subtle">
@@ -886,7 +886,7 @@ export function TrainingDetailPage() {
                           className="flex items-center justify-between rounded-md border border-line px-3 py-2 transition-[background-color,border-color] duration-(--dur-1) ease-(--ease-standard) hover:bg-surface-hover"
                         >
                           <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2">
+                            <div className="flex min-w-0 items-start gap-2">
                               {accepted ? (
                                 <CheckCircle2 className="size-3.5 shrink-0 text-success-fg" />
                               ) : previouslyAccepted ? (
@@ -894,8 +894,8 @@ export function TrainingDetailPage() {
                               ) : attempted ? (
                                 <Clock className="size-3.5 shrink-0 text-fg-subtle" />
                               ) : null}
-                              <span className="font-mono text-2xs text-fg-subtle">{p.pid || pid}</span>
-                              <span className="truncate text-sm font-medium text-fg">{p.title || '未命名'}</span>
+                              <span className="shrink-0 font-mono text-2xs text-fg-subtle">{p.pid || pid}</span>
+                              <span className="min-w-0 line-clamp-2 text-sm font-medium text-fg">{p.title || '未命名'}</span>
                             </div>
                             <div className="mt-0.5 ml-5 flex items-center gap-2 text-2xs text-fg-subtle">
                               {p.origStat ? (
@@ -921,7 +921,7 @@ export function TrainingDetailPage() {
                             </div>
                           </div>
                           {accepted ? (
-                            <Verdict status={1} compact />
+                            <span className="shrink-0"><Verdict status={1} compact /></span>
                           ) : previouslyAccepted ? (
                             <Badge variant="outline" tone="neutral" size="sm">曾通过，不计当前题集</Badge>
                           ) : attempted ? (
@@ -959,14 +959,14 @@ export function TrainingDetailPage() {
                       onClick={() => selectChapter(s._id)}
                       className={cn(
                         'h-auto! w-full shrink justify-start gap-3 whitespace-normal! px-4 py-3.5 text-left font-normal',
-                        isSelected && 'border-brand bg-brand-soft',
+                        isSelected && 'bg-surface-active font-medium hover:bg-surface-active',
                       )}
                     >
                       <StatusDot tone={stageDotTone(ns)} />
                       <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono text-2xs text-fg-subtle">#{i + 1}</span>
-                          <span className="truncate text-sm font-medium text-fg">{s.title || `阶段 ${s._id}`}</span>
+                        <div className="flex min-w-0 items-start gap-2">
+                          <span className="shrink-0 font-mono text-2xs text-fg-subtle">#{i + 1}</span>
+                          <span className="min-w-0 line-clamp-2 text-sm font-medium text-fg">{s.title || `阶段 ${s._id}`}</span>
                         </div>
                         <div className="mt-1 flex items-center gap-2 text-2xs text-fg-subtle">
                           <span className="tabular">{s.pids?.length || 0} 题</span>

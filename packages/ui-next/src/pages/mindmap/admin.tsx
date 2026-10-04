@@ -1,11 +1,16 @@
 import { ReactFlowProvider } from '@xyflow/react';
-import { AlertCircle, Check, ChevronLeft, Circle, Eye, EyeOff, Loader2, Network, Plus, Settings2, Trash2 } from 'lucide-react';
+import { AlertCircle, AlertTriangle, Check, ChevronLeft, Eye, EyeOff, Network, Plus, Settings2, Trash2, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Alert } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Spinner, StatusDot } from '@/components/ui/display';
+import { EmptyState } from '@/components/ui/empty-state';
+import { FormField, FormRow } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { MiniTabs } from '@/components/ui/mini-tabs';
+import { Toolbar, Workspace } from '@/components/ui/page';
 import { SimpleSelect } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
@@ -257,123 +262,103 @@ export function AdminMindmapPage() {
 
   return (
     <ReactFlowProvider>
-      <div className="flex h-[calc(100dvh-4.5rem)] min-h-[min(42rem,calc(100dvh-4.5rem))] w-full min-w-0 flex-col gap-3 sm:h-[calc(100dvh-6rem)] sm:min-h-[min(42rem,calc(100dvh-6rem))] xl:h-[calc(100dvh-7rem)] xl:min-h-[min(42rem,calc(100dvh-7rem))] xl:gap-4 xl:overflow-hidden">
-        <header className="shrink-0 space-y-2 xl:space-y-3">
-          {initial.staleMapId ? (
-            <p role="alert" className="rounded-lg border border-amber-500/35 bg-amber-500/[0.06] px-3 py-2 text-sm text-amber-800 dark:text-amber-300">
-              当前链接里的导图已不可用，已打开默认或第一张可用导图。
-            </p>
-          ) : null}
-          <div className="flex flex-wrap items-center justify-between gap-2 xl:gap-3">
-            <div className="flex min-w-0 items-center gap-2 xl:gap-3">
-              <a
-                href="/mindmap"
-                className="grid size-9 shrink-0 place-items-center rounded-xl bg-muted/70 text-muted-foreground shadow-sm ring-1 ring-border/60 transition-[background-color,color,box-shadow,scale] duration-150 ease-out hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96] motion-reduce:transition-none xl:size-10"
-                aria-label="返回公开导图"
-              >
-                <ChevronLeft className="size-4" />
-              </a>
-              <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary xl:size-10" aria-hidden="true">
-                <Network className="size-4 xl:size-5" />
-              </span>
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h1 className="truncate text-lg font-semibold tracking-tight text-balance xl:text-2xl">导图管理</h1>
-                  <Badge variant="outline" className="hidden sm:inline-flex">
-                    {snapshot.nodes.length} 节点
-                  </Badge>
-                  {config ? (
-                    <Badge variant={config.visibility === 'public' ? 'default' : 'outline'} className="gap-1">
-                      {config.visibility === 'public' ? <Eye className="size-3" /> : <EyeOff className="size-3" />}
-                      {config.visibility === 'public' ? '已公开' : '隐藏中'}
-                    </Badge>
-                  ) : null}
-                </div>
-                <p className="mt-0.5 hidden truncate text-sm text-muted-foreground xl:block">每张导图独立维护结构与题目标签；节点位置始终由结构自动计算。</p>
-              </div>
-            </div>
-            <SaveStatus state={saveState} savedAt={savedAt} />
+      <Workspace className="flex w-full min-w-0 flex-col xl:overflow-hidden">
+        {initial.staleMapId ? (
+          <div role="alert" className="flex shrink-0 gap-2 border-b border-warning-line bg-warning-soft px-3 py-2 text-sm text-fg">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning-fg" />
+            <p>当前链接里的导图已不可用，已打开默认或第一张可用导图。</p>
           </div>
-          <div className="flex flex-wrap items-center gap-2 rounded-2xl bg-card/80 p-1.5 shadow-sm ring-1 ring-border/60 backdrop-blur xl:p-2">
-            <div className="min-w-0 flex-1 sm:min-w-[15rem] sm:max-w-md">
-              <SimpleSelect
-                ariaLabel="切换知识导图"
-                value={config?._id || ''}
-                disabled={!snapshot.maps.length || busy}
-                onValueChange={(mapId) => requestMapAction({ kind: 'switch', mapId })}
-                options={snapshot.maps.map((map) => ({
-                  value: map._id,
-                  label: `${map.title} · ${map.visibility === 'public' ? '已公开' : '隐藏'}${map.isDefault ? ' · 默认' : ''}`,
-                }))}
-                placeholder="尚未创建导图"
-                className="h-10 rounded-xl border-0 bg-muted/55 shadow-none"
-              />
-            </div>
-            <Button className="min-h-10 rounded-xl" variant="outline" disabled={busy} onClick={() => requestMapAction({ kind: 'create' })}>
-              <Plus className="size-4" /> 新建导图
+        ) : null}
+        <Toolbar className="h-10 w-full min-w-0 shrink-0 flex-nowrap items-center overflow-x-auto overflow-y-hidden border-b border-line bg-surface px-2 scrollbar-none">
+          <span className="min-w-0 shrink-0 truncate text-sm font-semibold text-fg">导图管理</span>
+          <Badge variant="outline" size="sm" className="hidden shrink-0 sm:inline-flex">
+            {snapshot.nodes.length} 节点
+          </Badge>
+          {config ? (
+            <Badge tone={config.visibility === 'public' ? 'success' : 'neutral'} size="sm" className="shrink-0">
+              {config.visibility === 'public' ? <Eye className="size-3" /> : <EyeOff className="size-3" />}
+              {config.visibility === 'public' ? '已公开' : '隐藏中'}
+            </Badge>
+          ) : null}
+          <div className="ml-auto flex shrink-0 flex-nowrap items-center gap-2">
+            <Button asChild variant="ghost" size="sm" iconOnly>
+              <a href="/mindmap" aria-label="返回公开导图">
+                <ChevronLeft />
+              </a>
             </Button>
-            <Button className="min-h-10 rounded-xl" variant="outline" disabled={busy || !config} onClick={() => setSettingsOpen(true)}>
-              <Settings2 className="size-4" /> 导图设置
+            <SimpleSelect
+              ariaLabel="切换知识导图"
+              value={config?._id || ''}
+              disabled={!snapshot.maps.length || busy}
+              onValueChange={(mapId) => requestMapAction({ kind: 'switch', mapId })}
+              options={snapshot.maps.map((map) => ({
+                value: map._id,
+                label: `${map.title} · ${map.visibility === 'public' ? '已公开' : '隐藏'}${map.isDefault ? ' · 默认' : ''}`,
+              }))}
+              placeholder="尚未创建导图"
+              size="sm"
+              className="w-48 min-w-0 max-w-full shrink"
+            />
+            <Button variant="secondary" size="sm" disabled={busy} onClick={() => requestMapAction({ kind: 'create' })}>
+              <Plus /> 新建导图
+            </Button>
+            <Button variant="secondary" size="sm" disabled={busy || !config} onClick={() => setSettingsOpen(true)}>
+              <Settings2 /> 导图设置
             </Button>
             {config?.visibility === 'public' ? (
-              <Button className="min-h-10 rounded-xl" variant="ghost" asChild>
+              <Button variant="ghost" size="sm" asChild>
                 <a href={`/mindmap?map=${encodeURIComponent(config._id)}`}>
-                  <Eye className="size-4" /> 查看公开页
+                  <Eye /> 查看公开页
                 </a>
               </Button>
             ) : null}
+            <SaveStatus state={saveState} savedAt={savedAt} />
           </div>
-          {failure ? (
-            <div
-              className="flex items-start gap-2 rounded-xl bg-destructive/8 px-3 py-2.5 text-sm text-destructive shadow-sm ring-1 ring-destructive/20"
-              role="alert"
-            >
-              <AlertCircle className="mt-0.5 size-4 shrink-0" />
-              <div className="min-w-0 flex-1">
-                <p>{failure.message}</p>
-                {failure.problems.length ? (
-                  <div className="mt-1.5 flex flex-wrap gap-1.5">
-                    {failure.problems.map((problem) => (
-                      <a
-                        key={problem.docId}
-                        href={mindmapProblemHref(problem)}
-                        className="inline-flex min-h-10 items-center rounded-lg px-3 py-1 text-xs ring-1 ring-destructive/20 transition-[background-color,color,scale] duration-150 ease-out hover:bg-destructive/10 active:scale-[0.96] motion-reduce:transition-none"
-                      >
-                        {problem.pid} · {problem.title}
-                      </a>
-                    ))}
-                  </div>
-                ) : null}
-                {failure.status >= 500 ? <p className="mt-1.5 text-xs">服务器未能确认最终结果；请先刷新核对，不要重复执行刚才的操作。</p> : null}
-                {failure.status === 409 || failure.status >= 500 ? (
-                  <button
-                    type="button"
-                    className="mt-2 min-h-10 rounded-lg px-3 py-1 text-xs ring-1 ring-destructive/20 transition-[background-color,color,scale] duration-150 ease-out hover:bg-destructive/10 active:scale-[0.96] motion-reduce:transition-none"
-                    onClick={() => window.location.reload()}
-                  >
+        </Toolbar>
+        <p className="hidden shrink-0 truncate border-b border-line px-2 py-1.5 text-xs text-fg-subtle xl:block">
+          每张导图独立维护结构与题目标签；节点位置始终由结构自动计算。
+        </p>
+        {failure ? (
+          <div role="alert" className="flex min-w-0 shrink-0 items-start gap-2 border-b border-danger-line bg-danger-soft px-3 py-2 text-sm text-fg">
+            <AlertCircle className="mt-0.5 size-4 shrink-0 text-danger-fg" />
+            <div className="min-w-0 flex-1">
+              <p>{failure.message}</p>
+              {failure.problems.length ? (
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  {failure.problems.map((problem) => (
+                    <a
+                      key={problem.docId}
+                      href={mindmapProblemHref(problem)}
+                      className="block min-h-10 w-full min-w-0 max-w-full whitespace-normal break-words py-2 text-xs text-brand-fg underline-offset-4 outline-none hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                    >
+                      {problem.pid} · {problem.title}
+                    </a>
+                  ))}
+                </div>
+              ) : null}
+              {failure.status >= 500 ? (
+                <p className="mt-1.5 text-xs text-fg-subtle">服务器未能确认最终结果；请先刷新核对，不要重复执行刚才的操作。</p>
+              ) : null}
+              {failure.status === 409 || failure.status >= 500 ? (
+                <div className="mt-2">
+                  <Button type="button" variant="secondary" size="sm" onClick={() => window.location.reload()}>
                     刷新最新导图
-                  </button>
-                ) : null}
-              </div>
-              <button
-                type="button"
-                className="grid size-10 shrink-0 place-items-center rounded-lg transition-[background-color,scale] duration-150 ease-out hover:bg-destructive/10 active:scale-[0.96] motion-reduce:transition-none"
-                onClick={() => setFailure(null)}
-                aria-label="关闭错误提示"
-              >
-                ×
-              </button>
+                  </Button>
+                </div>
+              ) : null}
             </div>
-          ) : null}
-        </header>
+            <Button type="button" variant="ghost" size="sm" iconOnly aria-label="关闭错误提示" onClick={() => setFailure(null)}>
+              <X />
+            </Button>
+          </div>
+        ) : null}
 
-        <div className="sticky top-0 z-20 bg-background/95 py-1 backdrop-blur xl:hidden">
+        <div className="sticky top-0 z-20 shrink-0 border-b border-line bg-surface xl:hidden">
           <MiniTabs
             value={mobilePane}
             onValueChange={(value) => setMobilePane(value as MobilePane)}
             size="md"
             fullWidth
-            className="h-11"
             aria-label="导图工作区面板"
             items={[
               { value: 'outline', label: '大纲' },
@@ -386,13 +371,13 @@ export function AdminMindmapPage() {
         {config ? (
           <main
             aria-label="导图管理工作区"
-            className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-hidden xl:grid-cols-[18rem_minmax(18rem,1fr)_20rem] 2xl:grid-cols-[21rem_minmax(0,1fr)_23rem]"
+            className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden xl:grid-cols-[18rem_minmax(18rem,1fr)_20rem]"
           >
             <aside
               data-mindmap-panel="outline"
               aria-label="结构大纲"
               className={cn(
-                'min-h-0 overflow-hidden rounded-[20px] bg-card shadow-sm ring-1 ring-border/60',
+                'min-h-0 min-w-0 overflow-hidden border-b border-line xl:border-r xl:border-b-0',
                 mobilePane === 'outline' ? 'flex flex-col' : 'hidden xl:flex xl:flex-col',
               )}
             >
@@ -416,14 +401,14 @@ export function AdminMindmapPage() {
               data-mindmap-panel="preview"
               aria-label="实时预览"
               className={cn(
-                'relative min-h-0 overflow-hidden rounded-[20px] bg-card shadow-sm ring-1 ring-border/60',
+                'relative min-h-0 min-w-0 overflow-hidden border-b border-line xl:border-r xl:border-b-0',
                 mobilePane === 'preview' ? 'flex flex-col' : 'hidden xl:flex xl:flex-col',
               )}
             >
-              <div className="flex h-14 shrink-0 items-center justify-between px-4">
+              <div className="flex shrink-0 items-center justify-between gap-2 border-b border-line-subtle px-3 py-2">
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold">{selected ? selected.topic : '实时预览'}</p>
-                  <p className="truncate text-[11px] text-muted-foreground">
+                  <p className="truncate text-sm font-semibold text-fg">{selected ? selected.topic : '实时预览'}</p>
+                  <p className="truncate text-xs text-fg-subtle">
                     {selected
                       ? nodePath(snapshot.nodes, selected._id)
                           .map((node) => node.topic)
@@ -431,12 +416,12 @@ export function AdminMindmapPage() {
                       : '选择节点查看路径'}
                   </p>
                 </div>
-                <Badge variant="outline" className="ml-3 shrink-0 font-normal text-muted-foreground">
+                <Badge variant="outline" size="sm" className="shrink-0">
                   自动布局
                 </Badge>
               </div>
-              <div className="min-h-0 flex-1 p-2 pt-0">
-                <div data-mindmap-canvas className="h-full overflow-hidden rounded-xl bg-muted/20 ring-1 ring-border/50">
+              <div className="min-h-0 flex-1 p-2">
+                <div data-mindmap-canvas className="h-full overflow-hidden bg-surface-sunken">
                   <MindmapCanvas
                     nodes={snapshot.nodes}
                     config={config}
@@ -456,7 +441,7 @@ export function AdminMindmapPage() {
               data-mindmap-panel="inspector"
               aria-label="节点检查器"
               className={cn(
-                'min-h-0 overflow-hidden rounded-[20px] bg-card shadow-sm ring-1 ring-border/60',
+                'min-h-0 min-w-0 overflow-hidden border-b border-line xl:border-b-0',
                 mobilePane === 'inspector' ? 'flex flex-col' : 'hidden xl:flex xl:flex-col',
               )}
             >
@@ -481,22 +466,20 @@ export function AdminMindmapPage() {
             </aside>
           </main>
         ) : (
-          <main className="grid min-h-0 flex-1 place-items-center rounded-[28px] bg-card/80 p-8 text-center shadow-sm ring-1 ring-border/60">
-            <div className="max-w-md">
-              <span className="mx-auto grid size-14 place-items-center rounded-2xl bg-primary/10 text-primary">
-                <Network className="size-7" />
-              </span>
-              <h2 className="mt-5 text-xl font-semibold tracking-tight">创建第一张知识导图</h2>
-              <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                新导图默认隐藏，只包含一个根节点。整理完成并通过结构校验后，再从设置中公开。
-              </p>
-              <Button className="mt-5 min-h-11 rounded-xl" onClick={() => setCreateMapOpen(true)}>
-                <Plus className="size-4" /> 新建导图
-              </Button>
-            </div>
+          <main className="grid min-h-0 flex-1 place-items-center overflow-y-auto">
+            <EmptyState
+              icon={<Network />}
+              title="创建第一张知识导图"
+              description="新导图默认隐藏，只包含一个根节点。整理完成并通过结构校验后，再从设置中公开。"
+              action={
+                <Button variant="primary" onClick={() => setCreateMapOpen(true)}>
+                  <Plus /> 新建导图
+                </Button>
+              }
+            />
           </main>
         )}
-      </div>
+      </Workspace>
 
       <CreateNodeDialog request={createRequest} busy={busy} onClose={() => setCreateRequest(null)} onSubmit={createNode} />
       <DeleteNodeDialog
@@ -557,23 +540,23 @@ export function AdminMindmapPage() {
 function SaveStatus({ state, savedAt }: { state: SaveState; savedAt: Date | null }) {
   if (state === 'saving') {
     return (
-      <span className="inline-flex items-center gap-2 rounded-full bg-blue-500/10 px-3 py-1.5 text-xs font-medium text-blue-700 dark:text-blue-200">
-        <Loader2 className="size-3.5 animate-spin" /> 保存中
-      </span>
+      <Badge tone="info" size="sm" className="shrink-0">
+        <Spinner className="size-3.5" /> 保存中
+      </Badge>
     );
   }
   if (state === 'failed') {
     return (
-      <span className="inline-flex items-center gap-2 rounded-full bg-destructive/10 px-3 py-1.5 text-xs font-medium text-destructive">
+      <Badge tone="danger" size="sm" className="shrink-0">
         <AlertCircle className="size-3.5" /> 保存失败
-      </span>
+      </Badge>
     );
   }
   return (
-    <span className="inline-flex items-center gap-2 rounded-full bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-700 dark:text-emerald-200">
-      {savedAt ? <Check className="size-3.5" /> : <Circle className="size-3 fill-current" />}
+    <Badge tone="success" size="sm" className="shrink-0">
+      {savedAt ? <Check className="size-3.5" /> : <StatusDot tone="success" />}
       {savedAt ? `已保存 ${savedAt.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}` : '已同步'}
-    </span>
+    </Badge>
   );
 }
 
@@ -600,55 +583,48 @@ function CreateNodeDialog({
   };
   return (
     <Dialog open={!!request} onOpenChange={(open) => !open && close()}>
-      <DialogContent className="w-full sm:w-[520px]" onClose={close}>
+      <DialogContent size="md" onClose={close}>
         <DialogHeader>
           <DialogTitle>{request?.kind === 'child' ? '新增子节点' : '新增同级节点'}</DialogTitle>
-          <p className="mt-1 text-xs text-muted-foreground">将添加到「{request?.parent.topic}」下方，保存后立即进入树结构。</p>
+          <DialogDescription>将添加到「{request?.parent.topic}」下方，保存后立即进入树结构。</DialogDescription>
         </DialogHeader>
-        <DialogBody className="space-y-4 p-5">
-          <div>
-            <label htmlFor="create-mindmap-topic" className="text-xs font-medium">
-              名称
-            </label>
+        <DialogBody className="flex flex-col gap-5">
+          <FormField label="名称" htmlFor="create-mindmap-topic">
             <Input
               id="create-mindmap-topic"
               value={topic}
               maxLength={100}
               autoFocus
               onChange={(event) => setTopic(event.target.value)}
-              className="mt-1.5 h-10"
+              className="h-10"
             />
-          </div>
-          <div>
-            <label htmlFor="create-mindmap-description" className="text-xs font-medium">
-              说明（可选）
-            </label>
+          </FormField>
+          <FormField label="说明（可选）" htmlFor="create-mindmap-description">
             <Textarea
               id="create-mindmap-description"
               value={description}
               maxLength={2000}
               rows={3}
               onChange={(event) => setDescription(event.target.value)}
-              className="mt-1.5 resize-y"
+              className="resize-y"
             />
-          </div>
-          <div>
-            <label className="text-xs font-medium">颜色</label>
+          </FormField>
+          <FormField label="颜色">
             <SimpleSelect
               value={color}
               onValueChange={setColor}
               options={COLOR_OPTIONS}
-              className="mt-1.5 min-h-10"
               contentClassName="[&_[role=option]]:min-h-10"
             />
-          </div>
+          </FormField>
         </DialogBody>
-        <div className="flex justify-end gap-2 border-t px-5 py-4">
-          <Button className="min-h-10" variant="outline" onClick={close} disabled={busy}>
+        <DialogFooter>
+          <Button type="button" variant="secondary" onClick={close} disabled={busy}>
             取消
           </Button>
           <Button
-            className="min-h-10"
+            type="button"
+            variant="primary"
             disabled={busy || !topic.trim()}
             onClick={async () => {
               const created = await onSubmit({ topic, description, color });
@@ -659,9 +635,9 @@ function CreateNodeDialog({
               }
             }}
           >
-            {busy ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />} 创建节点
+            {busy ? <Spinner /> : <Plus />} 创建节点
           </Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -685,29 +661,29 @@ function DeleteNodeDialog({
   const blocked = childCount > 0 || referenceCount > 0;
   return (
     <Dialog open={!!node} onOpenChange={(open) => !open && !busy && onClose()}>
-      <DialogContent className="w-full sm:w-[480px]" onClose={busy ? undefined : onClose}>
+      <DialogContent size="md" onClose={busy ? undefined : onClose}>
         <DialogHeader>
           <DialogTitle>删除「{node?.topic}」？</DialogTitle>
         </DialogHeader>
-        <DialogBody className="space-y-3 p-5 text-sm">
+        <DialogBody className="flex flex-col gap-3 text-sm">
           {blocked ? (
-            <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 text-amber-900 dark:text-amber-100">
+            <Alert tone="warning">
               当前不能删除：{childCount > 0 ? `仍有 ${childCount} 个子节点` : ''}
               {childCount > 0 && referenceCount > 0 ? '；' : ''}
               {referenceCount > 0 ? `仍被 ${referenceCount} 道题引用` : ''}。
-            </div>
+            </Alert>
           ) : (
-            <p className="leading-6 text-muted-foreground">该操作只删除这个叶子节点，不会删除任何题目。删除后无法在界面中撤销。</p>
+            <p className="text-fg-muted">该操作只删除这个叶子节点，不会删除任何题目。删除后无法在界面中撤销。</p>
           )}
         </DialogBody>
-        <div className="flex justify-end gap-2 border-t px-5 py-4">
-          <Button className="min-h-10" variant="outline" onClick={onClose} disabled={busy}>
+        <DialogFooter>
+          <Button type="button" variant="secondary" onClick={onClose} disabled={busy}>
             取消
           </Button>
-          <Button className="min-h-10" variant="destructive" disabled={busy || blocked} onClick={() => void onConfirm()}>
-            {busy ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />} 确认删除
+          <Button type="button" variant="danger" disabled={busy || blocked} onClick={() => void onConfirm()}>
+            {busy ? <Spinner /> : <Trash2 />} 确认删除
           </Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -736,55 +712,46 @@ function CreateMapDialog({
   };
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && close()}>
-      <DialogContent className="w-full sm:w-[540px]" onClose={busy ? undefined : close}>
+      <DialogContent size="md" onClose={busy ? undefined : close}>
         <DialogHeader>
           <DialogTitle>新建知识导图</DialogTitle>
-          <p className="mt-1 text-xs leading-5 text-muted-foreground">新导图默认隐藏，创建后可逐步整理节点，再单独公开。</p>
+          <DialogDescription>新导图默认隐藏，创建后可逐步整理节点，再单独公开。</DialogDescription>
         </DialogHeader>
-        <DialogBody className="space-y-4 p-5">
-          <div>
-            <label htmlFor="create-map-title" className="text-xs font-medium">
-              导图名称
-            </label>
+        <DialogBody className="flex flex-col gap-5">
+          <FormField label="导图名称" htmlFor="create-map-title">
             <Input
               id="create-map-title"
               value={title}
               maxLength={100}
               autoFocus
               onChange={(event) => setTitle(event.target.value)}
-              className="mt-1.5 h-10"
               placeholder="例如：面向对象程序设计"
             />
-          </div>
-          <div>
-            <label htmlFor="create-map-root" className="text-xs font-medium">
-              根节点主题
-            </label>
+          </FormField>
+          <FormField label="根节点主题" htmlFor="create-map-root">
             <Input
               id="create-map-root"
               value={rootTopic}
               maxLength={100}
               onChange={(event) => setRootTopic(event.target.value)}
-              className="mt-1.5 h-10"
               placeholder="例如：面向对象"
             />
-          </div>
-          <div>
-            <label className="text-xs font-medium">布局方向</label>
+          </FormField>
+          <FormField label="布局方向">
             <SimpleSelect
               value={layoutDirection}
               onValueChange={(value) => setLayoutDirection(value as 'RIGHT' | 'DOWN')}
               options={LAYOUT_OPTIONS}
-              className="mt-1.5 min-h-10"
             />
-          </div>
+          </FormField>
         </DialogBody>
-        <div className="flex justify-end gap-2 border-t px-5 py-4">
-          <Button className="min-h-10" variant="outline" onClick={close} disabled={busy}>
+        <DialogFooter>
+          <Button type="button" variant="secondary" onClick={close} disabled={busy}>
             取消
           </Button>
           <Button
-            className="min-h-10"
+            type="button"
+            variant="primary"
             disabled={busy || !title.trim() || !rootTopic.trim()}
             onClick={async () => {
               const created = await onSubmit({ title, rootTopic, layoutDirection });
@@ -795,9 +762,9 @@ function CreateMapDialog({
               }
             }}
           >
-            {busy ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />} 创建导图
+            {busy ? <Spinner /> : <Plus />} 创建导图
           </Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -844,38 +811,25 @@ function MapSettingsDialog({
       isDefault !== (map.isDefault === true));
   return (
     <Dialog open={open && !!map} onOpenChange={(nextOpen) => !nextOpen && !busy && onClose()}>
-      <DialogContent className="w-full sm:w-[560px]" onClose={busy ? undefined : onClose}>
+      <DialogContent size="md" onClose={busy ? undefined : onClose}>
         <DialogHeader>
           <DialogTitle>导图设置</DialogTitle>
-          <p className="mt-1 text-xs leading-5 text-muted-foreground">公开状态控制学生可见性；根节点名称直接在右侧节点检查器中编辑。</p>
+          <DialogDescription>公开状态控制学生可见性；根节点名称直接在右侧节点检查器中编辑。</DialogDescription>
         </DialogHeader>
-        <DialogBody className="space-y-4 p-5">
-          <div>
-            <label htmlFor="map-settings-title" className="text-xs font-medium">
-              导图名称
-            </label>
-            <Input
-              id="map-settings-title"
-              value={title}
-              maxLength={100}
-              autoFocus
-              onChange={(event) => setTitle(event.target.value)}
-              className="mt-1.5 h-10"
-            />
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <label className="text-xs font-medium">布局方向</label>
+        <DialogBody className="flex flex-col gap-5">
+          <FormField label="导图名称" htmlFor="map-settings-title">
+            <Input id="map-settings-title" value={title} maxLength={100} autoFocus onChange={(event) => setTitle(event.target.value)} />
+          </FormField>
+          <FormRow columns={2}>
+            <FormField label="布局方向">
               <SimpleSelect
                 value={layoutDirection}
                 onValueChange={(value) => setLayoutDirection(value as 'RIGHT' | 'DOWN')}
                 options={LAYOUT_OPTIONS}
-                className="mt-1.5 min-h-10"
               />
-            </div>
-            <div>
-              <label className="text-xs font-medium">可见性</label>
-              <label className="mt-1.5 flex min-h-10 cursor-pointer items-center gap-2.5">
+            </FormField>
+            <FormField label="可见性">
+              <label className="flex min-h-10 cursor-pointer items-center gap-2">
                 <Switch
                   checked={visibility === 'public'}
                   onCheckedChange={(checked) => {
@@ -883,13 +837,11 @@ function MapSettingsDialog({
                     if (!checked) setIsDefault(false);
                   }}
                 />
-                <span className="text-xs text-muted-foreground">
-                  {visibility === 'public' ? '公开，学生可见' : '隐藏，仅管理员可见'}
-                </span>
+                <span className="text-xs text-fg-subtle">{visibility === 'public' ? '公开，学生可见' : '隐藏，仅管理员可见'}</span>
               </label>
-            </div>
-          </div>
-          <label className="flex min-h-10 cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2.5">
+            </FormField>
+          </FormRow>
+          <label className="flex min-h-10 cursor-pointer items-start gap-2 rounded-lg border border-line px-3 py-2.5">
             <Switch
               checked={isDefault}
               disabled={visibility !== 'public'}
@@ -901,40 +853,37 @@ function MapSettingsDialog({
               aria-label="作为公开页默认导图"
             />
             <span className="min-w-0">
-              <span className="block text-sm font-medium">作为公开页默认导图</span>
-              <span className="mt-0.5 block text-xs text-muted-foreground">
-                {visibility === 'public'
-                  ? '打开 /mindmap 且未指定导图时显示这一张。同时只能有一张默认。'
-                  : '先公开这张导图，才能设为默认。'}
+              <span className="block text-sm font-medium text-fg">作为公开页默认导图</span>
+              <span className="mt-0.5 block text-xs text-fg-subtle">
+                {visibility === 'public' ? '打开 /mindmap 且未指定导图时显示这一张。同时只能有一张默认。' : '先公开这张导图，才能设为默认。'}
               </span>
             </span>
           </label>
-          <div className="grid grid-cols-3 gap-2 rounded-2xl bg-muted/45 p-3 text-center">
+          <div className="grid grid-cols-3 gap-2 rounded-lg bg-surface-sunken p-3 text-center">
             <MapUsageMetric label="节点" value={map?.usage?.nodes} />
             <MapUsageMetric label="题目" value={map?.usage?.problems} />
             <MapUsageMetric label="课程" value={map?.usage?.courses} />
           </div>
           {visibility === 'public' && map?.visibility === 'hidden' ? (
-            <p className="rounded-xl bg-blue-500/10 p-3 text-xs leading-5 text-blue-800 ring-1 ring-blue-500/20 dark:text-blue-200">
-              发布时服务器会验证根节点、父子关系与整棵树的可达性；校验失败不会改变公开状态。
-            </p>
+            <Alert tone="info">发布时服务器会验证根节点、父子关系与整棵树的可达性；校验失败不会改变公开状态。</Alert>
           ) : null}
-          <div className="flex items-center justify-between gap-3 rounded-2xl border border-destructive/20 bg-destructive/5 p-3">
-            <div>
-              <p className="text-sm font-medium text-destructive">删除整张导图</p>
-              <p className="mt-0.5 text-xs text-muted-foreground">仅隐藏、只剩根节点且没有题目或课程引用时可用。</p>
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-danger-line bg-danger-soft p-3">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-danger-fg">删除整张导图</p>
+              <p className="mt-0.5 text-xs text-fg-subtle">仅隐藏、只剩根节点且没有题目或课程引用时可用。</p>
             </div>
-            <Button className="min-h-10 shrink-0" variant="destructive" disabled={busy} onClick={onDelete}>
-              <Trash2 className="size-4" /> 删除
+            <Button type="button" variant="danger-soft" size="sm" className="shrink-0" disabled={busy} onClick={onDelete}>
+              <Trash2 /> 删除
             </Button>
           </div>
         </DialogBody>
-        <div className="flex justify-end gap-2 border-t px-5 py-4">
-          <Button className="min-h-10" variant="outline" onClick={onClose} disabled={busy}>
+        <DialogFooter>
+          <Button type="button" variant="secondary" onClick={onClose} disabled={busy}>
             取消
           </Button>
           <Button
-            className="min-h-10"
+            type="button"
+            variant="primary"
             disabled={busy || !dirty || !title.trim()}
             onClick={() =>
               void onSubmit({
@@ -945,9 +894,9 @@ function MapSettingsDialog({
               })
             }
           >
-            {busy ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />} 保存设置
+            {busy ? <Spinner /> : <Check />} 保存设置
           </Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -956,8 +905,8 @@ function MapSettingsDialog({
 function MapUsageMetric({ label, value }: { label: string; value: number | undefined }) {
   return (
     <div>
-      <p className="text-base font-semibold tabular-nums">{value ?? '—'}</p>
-      <p className="mt-0.5 text-[11px] text-muted-foreground">{label}</p>
+      <p className="text-lg font-semibold text-fg tabular">{value ?? '—'}</p>
+      <p className="mt-0.5 text-2xs text-fg-subtle">{label}</p>
     </div>
   );
 }
@@ -987,32 +936,31 @@ function DeleteMapDialog({
   const blocked = reasons.length > 0;
   return (
     <Dialog open={open && !!map} onOpenChange={(nextOpen) => !nextOpen && !busy && onClose()}>
-      <DialogContent className="w-full sm:w-[500px]" onClose={busy ? undefined : onClose}>
+      <DialogContent size="md" onClose={busy ? undefined : onClose}>
         <DialogHeader>
           <DialogTitle>删除「{map?.title}」？</DialogTitle>
         </DialogHeader>
-        <DialogBody className="space-y-3 p-5 text-sm">
+        <DialogBody className="flex flex-col gap-3 text-sm">
           {blocked ? (
-            <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 text-amber-900 dark:text-amber-100">
-              <p className="font-medium">当前不能删除</p>
-              <ul className="mt-2 list-disc space-y-1 pl-5 text-xs leading-5">
+            <Alert tone="warning" title="当前不能删除">
+              <ul className="list-disc space-y-1 pl-5 text-xs">
                 {reasons.map((reason) => (
                   <li key={reason}>{reason}</li>
                 ))}
               </ul>
-            </div>
+            </Alert>
           ) : (
-            <p className="leading-6 text-muted-foreground">将永久删除这张隐藏导图及其根节点。该操作无法撤销，也不会删除任何题目或课程。</p>
+            <p className="text-fg-muted">将永久删除这张隐藏导图及其根节点。该操作无法撤销，也不会删除任何题目或课程。</p>
           )}
         </DialogBody>
-        <div className="flex justify-end gap-2 border-t px-5 py-4">
-          <Button className="min-h-10" variant="outline" onClick={onClose} disabled={busy}>
+        <DialogFooter>
+          <Button type="button" variant="secondary" onClick={onClose} disabled={busy}>
             取消
           </Button>
-          <Button className="min-h-10" variant="destructive" disabled={busy || blocked} onClick={() => void onConfirm()}>
-            {busy ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />} 永久删除
+          <Button type="button" variant="danger" disabled={busy || blocked} onClick={() => void onConfirm()}>
+            {busy ? <Spinner /> : <Trash2 />} 永久删除
           </Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -1021,21 +969,21 @@ function DeleteMapDialog({
 function UnsavedMapActionDialog({ action, onClose, onDiscard }: { action: PendingMapAction | null; onClose: () => void; onDiscard: () => void }) {
   return (
     <Dialog open={!!action} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="w-full sm:w-[470px]" onClose={onClose}>
+      <DialogContent size="md" onClose={onClose}>
         <DialogHeader>
           <DialogTitle>放弃未保存的节点修改？</DialogTitle>
         </DialogHeader>
-        <DialogBody className="p-5 text-sm leading-6 text-muted-foreground">
+        <DialogBody className="text-sm text-fg-muted">
           {action?.kind === 'switch' ? '切换导图' : '新建导图'}会清除右侧检查器中尚未保存的内容。已保存的导图和节点不会受影响。
         </DialogBody>
-        <div className="flex justify-end gap-2 border-t px-5 py-4">
-          <Button className="min-h-10" variant="outline" onClick={onClose}>
+        <DialogFooter>
+          <Button type="button" variant="secondary" onClick={onClose}>
             留在当前导图
           </Button>
-          <Button className="min-h-10" variant="destructive" onClick={onDiscard}>
+          <Button type="button" variant="danger" onClick={onDiscard}>
             放弃并继续
           </Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

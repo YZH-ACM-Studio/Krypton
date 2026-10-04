@@ -849,7 +849,7 @@ export function ProblemsPage() {
                   const pendingContributions = pendingContributionsByDocId[docId] || [];
                   return (
                     <div className="min-w-0 space-y-2">
-                      <div className="flex min-w-0 flex-wrap items-center gap-2">
+                      <div className="flex items-baseline gap-2 min-w-0">
                         <span className="md:hidden"><SubmissionStatus status={status} /></span>
                         {canManageContributions ? (
                           <span className="md:hidden">
@@ -862,10 +862,10 @@ export function ProblemsPage() {
                           </span>
                         ) : null}
                         <Badge variant="outline" size="sm">{KIND_LABEL[kind]}</Badge>
-                        <a href={detailUrl} className="min-w-0 truncate font-medium text-fg hover:text-brand-fg hover:underline">
+                        <a href={detailUrl} className="min-w-0 line-clamp-2 font-medium text-fg hover:text-brand-fg hover:underline">
                           {pdoc.title || '未命名题目'}
                         </a>
-                        <span className="font-mono text-xs text-fg-subtle md:hidden">{displayPid}</span>
+                        <span className="shrink-0 font-mono text-xs text-fg-subtle md:hidden">{displayPid}</span>
                         {canReviewManaged ? (
                           <Badge variant="outline" tone="warning" size="sm">
                             {pdoc.managedAuthoring?.metadataStatus === 'draft' ? '元数据待确认' : '等待重新公开'}

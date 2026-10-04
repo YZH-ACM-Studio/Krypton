@@ -85,8 +85,8 @@ export function AnnouncementPopover({ signedIn }: { signedIn: boolean }) {
   return (
     <Popover
       placement="bottom-end"
-      // ds-allow DS004: 首选宽是 w-80，窄屏仍须取 min(360px, 100vw-1.5rem)，间距阶梯没有这一档
-      className="w-80 w-[min(360px,calc(100vw-1.5rem))]"
+      // ds-allow DS004: 弹层首选 w-80，窄屏上限必须是视口减去 1rem，间距阶梯没有这一档
+      className="w-80 max-w-[calc(100vw-1rem)]"
       trigger={(props) => (
         <Button
           type="button"

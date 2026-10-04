@@ -9,6 +9,14 @@ import { Page, PageHeader } from '@/components/ui/page';
 import { useBootstrap } from '@/lib/bootstrap';
 import { replaceRouteTokens } from '@/lib/format';
 
+/** Pagination replaces `page`; every other parameter on the current address stays. */
+export function paginationBaseUrl(search: string): string {
+  const params = new URLSearchParams(search);
+  params.delete('page');
+  const query = params.toString();
+  return query ? `?${query}` : '';
+}
+
 interface ProblemSetRosterDocument {
   title?: string;
   docId?: string | number;

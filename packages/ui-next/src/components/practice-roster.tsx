@@ -404,11 +404,11 @@ export function PracticeRosterCard({
           <ScrollArea className="max-h-80" orientation="both">
             {/* ds-allow DS005: 完成人数矩阵的首列必须粘在这份双向 ScrollArea 里，Table 自带的滚动层会拆掉它 */}
             <table className="w-full whitespace-nowrap text-sm" style={{ minWidth: matrixMinWidthPx }}>
-              <thead className="sticky top-0 z-10 bg-surface-sunken">
+              <thead className="sticky top-0 z-20 bg-surface-sunken">
                 <tr className="border-b border-line text-left text-xs text-fg-subtle">
-                  <th className="sticky left-0 z-20 min-w-44 max-w-44 bg-surface-sunken px-4 py-2 font-medium">题目</th>
+                  <th className="sticky left-0 z-30 min-w-44 max-w-44 bg-surface-sunken px-4 py-2 font-medium">题目</th>
                   {matrixColumns.map((column) => (
-                    <th key={column.id} className="min-w-24 px-4 py-2 text-right font-medium">
+                    <th key={column.id} className="min-w-24 bg-surface-sunken px-4 py-2 text-right font-medium">
                       {column.name}
                     </th>
                   ))}

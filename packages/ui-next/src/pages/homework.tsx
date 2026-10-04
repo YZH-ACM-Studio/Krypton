@@ -11,6 +11,7 @@ import { Pagination } from '@/components/ui/pagination';
 import { DescriptionList, Panel } from '@/components/ui/panel';
 import { useBootstrap } from '@/lib/bootstrap';
 import { formatDateTime, replaceRouteTokens, toDate } from '@/lib/format';
+import { paginationBaseUrl } from '@/pages/problem-set-roster';
 
 interface HomeworkDocument {
   docId?: string | number;
@@ -126,7 +127,13 @@ export function HomeworkPage() {
       />
       <Panel
         flush
-        footer={<Pagination current={page} total={tpcount} baseUrl={bs.urls.homework} />}
+        footer={(
+          <Pagination
+            current={page}
+            total={tpcount}
+            baseUrl={typeof window === 'undefined' ? bs.urls.homework : `${bs.urls.homework}${paginationBaseUrl(window.location.search)}`}
+          />
+        )}
       >
         {tdocs.length === 0 ? (
           <EmptyState compact title="暂无作业" />

@@ -2,6 +2,7 @@ import { Download, FileCode, Save } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { KryptonIDE } from '@/components/krypton-ide';
 import { type ProblemDataWriteConfirmationResult, type ProblemDataWriteOperation } from '@/components/problem-data-write-guard';
+import { Alert } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -57,7 +58,7 @@ export function ProblemTestdataFileDialog({
   const [originalContent, setOriginalContent] = useState('');
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [saveNotice, setSaveNotice] = useState<{ text: string; tone: 'success' | 'danger' } | null>(null);
   const [readonly, setReadonly] = useState(tooBig);
 
   useEffect(() => {
@@ -120,7 +121,7 @@ export function ProblemTestdataFileDialog({
     const confirmation = confirmWrite ? await confirmWrite(`保存测试数据文件 ${filename}`, 'files-upload') : true;
     if (!confirmation) return;
     setSaving(true);
-    setSaveMessage(null);
+    setSaveNotice(null);
     try {
       const form = new FormData();
       form.append('operation', 'upload_file');
@@ -142,11 +143,11 @@ export function ProblemTestdataFileDialog({
         throw new Error(await readHydroResponseError(response, '保存失败'));
       }
       setOriginalContent(content);
-      setSaveMessage('已保存');
-      window.setTimeout(() => setSaveMessage(null), 1500);
+      setSaveNotice({ text: '已保存', tone: 'success' });
+      window.setTimeout(() => setSaveNotice(null), 1500);
     } catch (error) {
       console.error('Problem testdata file save failed', { filename, error });
-      setSaveMessage(error instanceof Error ? error.message : '保存失败');
+      setSaveNotice({ text: error instanceof Error ? error.message : '保存失败', tone: 'danger' });
     } finally {
       setSaving(false);
     }
@@ -154,47 +155,46 @@ export function ProblemTestdataFileDialog({
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent
-        className="flex h-[min(92dvh,calc(100dvh-2rem))] max-h-[min(92dvh,calc(100dvh-2rem))] min-h-0 w-[min(92vw,72rem)] max-w-none sm:max-h-[min(92dvh,calc(100dvh-2rem))]"
-        onClose={onClose}
-      >
+      <DialogContent size="full" className="max-sm:h-dvh min-h-0" onClose={onClose}>
         <DialogHeader className="min-w-0">
-          <DialogTitle className="flex min-w-0 items-center gap-2 overflow-hidden">
-            <FileCode className="size-4 shrink-0" />
+          <DialogTitle className="flex w-full min-w-0 items-center gap-2 overflow-hidden">
+            <FileCode className="size-4 shrink-0" aria-hidden="true" />
             <span className="min-w-0 truncate font-mono" title={filename}>
               {filename}
             </span>
-            <Badge variant="outline" className="shrink-0 text-[10px]">
+            <Badge tone="neutral" variant="outline" size="sm" className="shrink-0">
               {bytesLabel(size)}
             </Badge>
-            <Badge variant="secondary" className="shrink-0 text-[10px]">
+            <Badge tone="neutral" variant="soft" size="sm" className="shrink-0">
               {language.toUpperCase()}
             </Badge>
             {dirty ? (
-              <Badge variant="default" className="shrink-0 text-[10px]">
+              <Badge tone="warning" variant="soft" size="sm" className="shrink-0">
                 未保存
               </Badge>
             ) : null}
           </DialogTitle>
         </DialogHeader>
 
-        <DialogBody className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden p-5">
+        <DialogBody className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden">
           {loadError ? (
-            <div className="rounded border border-amber-300 bg-amber-50/40 p-3 text-sm text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-300">
-              {loadError}
-              <div className="mt-2">
-                <Button asChild variant="outline" size="sm">
+            <Alert
+              tone="warning"
+              action={
+                <Button asChild variant="secondary" size="sm">
                   <a href={downloadUrl} download={filename}>
-                    <Download className="mr-1 size-3.5" />
+                    <Download />
                     下载文件
                   </a>
                 </Button>
-              </div>
-            </div>
+              }
+            >
+              {loadError}
+            </Alert>
           ) : content == null ? (
-            <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground">加载中…</div>
+            <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-fg-muted">加载中…</div>
           ) : (
-            <div className="min-h-0 flex-1 overflow-hidden rounded-md border">
+            <div className="min-h-0 flex-1 overflow-hidden rounded-md border border-line">
               <KryptonIDE
                 mode={readonly ? 'readonly' : 'simple'}
                 langs={[]}
@@ -207,25 +207,29 @@ export function ProblemTestdataFileDialog({
             </div>
           )}
         </DialogBody>
-        <DialogFooter className="flex min-w-0 shrink-0 flex-row flex-wrap items-center justify-between gap-2 border-0 px-5 pb-5 pt-0 sm:justify-between">
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              {!tooBig && content != null ? (
-                <label className="flex cursor-pointer items-center gap-1">
-                  <Checkbox checked={readonly} onChange={() => setReadonly(!readonly)} />
-                  只读
-                </label>
-              ) : null}
-              {saveMessage ? <span className="text-foreground">{saveMessage}</span> : null}
-            </div>
-            <div className="flex items-center gap-2">
-              <Button variant="outline" onClick={onClose}>
-                关闭
-              </Button>
-              <Button onClick={handleSave} disabled={!dirty || saving || readonly || tooBig}>
-                <Save className="mr-1 size-3.5" />
-                {saving ? '保存中…' : '保存'}
-              </Button>
-            </div>
+        <DialogFooter className="sm:justify-between">
+          <div className="flex min-w-0 flex-col items-start gap-1">
+            {!tooBig && content != null ? (
+              <label className="flex cursor-pointer items-center gap-1.5 text-xs text-fg-subtle">
+                <Checkbox checked={readonly} onChange={() => setReadonly(!readonly)} />
+                只读
+              </label>
+            ) : null}
+            {saveNotice ? (
+              <p role={saveNotice.tone === 'danger' ? 'alert' : 'status'} className={saveNotice.tone === 'danger' ? 'text-xs text-danger-fg' : 'text-xs text-success-fg'}>
+                {saveNotice.text}
+              </p>
+            ) : null}
+          </div>
+          <div className="flex items-center gap-2">
+            <Button type="button" variant="secondary" onClick={onClose}>
+              关闭
+            </Button>
+            <Button type="button" variant="primary" onClick={handleSave} disabled={!dirty || saving || readonly || tooBig}>
+              <Save />
+              {saving ? '保存中…' : '保存'}
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>

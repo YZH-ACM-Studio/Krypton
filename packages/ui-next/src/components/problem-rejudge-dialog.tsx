@@ -1,8 +1,9 @@
-import { AlertTriangle, Loader2, RotateCcw } from 'lucide-react';
+import { RotateCcw } from 'lucide-react';
 import { useState } from 'react';
+import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { toast, ToastProvider } from '@/components/ui/toast';
+import { toast } from '@/components/ui/toast';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 
 interface ProblemRejudgeDialogProps {
@@ -67,56 +68,37 @@ export function ProblemRejudgeDialog({ open, endpoint, pid, title, onOpenChange,
   };
 
   return (
-    <>
-      <ToastProvider />
-      <Dialog open={open} onOpenChange={(next) => (next ? onOpenChange(true) : close())}>
-        <DialogContent className="w-[min(34rem,calc(100vw-1.5rem))]" onClose={close}>
-          <DialogHeader>
-            <div className="flex items-start gap-3 pr-8">
-              <span className="grid size-9 shrink-0 place-items-center rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400">
-                <RotateCcw className="size-4.5" aria-hidden="true" />
-              </span>
-              <div className="min-w-0">
-                <DialogTitle>整题重测</DialogTitle>
-                <DialogDescription className="whitespace-normal break-words">
-                  {pid} · <span className="text-foreground">{title}</span>
-                </DialogDescription>
-              </div>
+    <Dialog open={open} onOpenChange={(next) => (next ? onOpenChange(true) : close())}>
+      <DialogContent size="md" onClose={close}>
+        <DialogHeader>
+          <div className="flex items-start gap-3">
+            <span className="grid size-8 shrink-0 place-items-center rounded-full bg-warning-soft text-warning-fg">
+              <RotateCcw className="size-4" aria-hidden="true" />
+            </span>
+            <div className="min-w-0">
+              <DialogTitle>整题重测</DialogTitle>
+              <DialogDescription className="whitespace-normal break-words">
+                {pid} · <span className="text-fg">{title}</span>
+              </DialogDescription>
             </div>
-          </DialogHeader>
-          <DialogBody className="space-y-4 px-6 py-5">
-            <div className="rounded-xl border border-amber-500/25 bg-amber-500/[0.06] p-4">
-              <div className="flex items-start gap-3">
-                <AlertTriangle className="mt-0.5 size-5 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden="true" />
-                <div className="space-y-1 text-sm">
-                  <p className="font-medium">所有可自动评测的历史提交都会使用当前配置和测试数据重新评测。</p>
-                  <p className="leading-6 text-muted-foreground">
-                    预评测、生成器、Hack、已取消成绩和人工评分记录不会进入本次队列；相关比赛榜单会随新结果重新计算。
-                  </p>
-                </div>
-              </div>
-            </div>
-            {error ? (
-              <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-                {error}
-              </div>
-            ) : null}
-          </DialogBody>
-          <DialogFooter>
-            <Button type="button" variant="outline" disabled={busy} onClick={close}>
-              取消
-            </Button>
-            <Button type="button" disabled={busy} onClick={() => void submit()}>
-              {busy ? (
-                <Loader2 className="mr-1.5 size-4 animate-spin" aria-hidden="true" />
-              ) : (
-                <RotateCcw className="mr-1.5 size-4" aria-hidden="true" />
-              )}
-              确认重测
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
+          </div>
+        </DialogHeader>
+        <DialogBody className="flex flex-col gap-4">
+          <Alert tone="warning" title="所有可自动评测的历史提交都会使用当前配置和测试数据重新评测。">
+            预评测、生成器、Hack、已取消成绩和人工评分记录不会进入本次队列；相关比赛榜单会随新结果重新计算。
+          </Alert>
+          {error ? <Alert tone="danger">{error}</Alert> : null}
+        </DialogBody>
+        <DialogFooter>
+          <Button type="button" variant="secondary" disabled={busy} onClick={close}>
+            取消
+          </Button>
+          <Button type="button" variant="primary" loading={busy} onClick={() => void submit()}>
+            <RotateCcw aria-hidden="true" />
+            确认重测
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

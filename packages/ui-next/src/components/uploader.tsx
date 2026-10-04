@@ -18,10 +18,13 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { MiniTabs } from '@/components/ui/mini-tabs';
 import { cn } from '@/lib/cn';
 import { fetchHydroResponse, formatHydroErrorResponse, readHydroResponseError } from '@/lib/error-presenter';
 import { fileUploaderAllowedMetaFields } from '@/lib/file-uploader-meta';
 import { makeInitials } from '@/lib/format';
+import { readToken } from '@/lib/read-token';
 
 /** Hydro upload endpoints answer with a parsed JSON object (see getResponseData). */
 type UploadResponseBody = Record<string, unknown>;
@@ -176,30 +179,27 @@ export function AvatarUpload({
   return (
     <div className={cn('flex flex-col items-start gap-3', className)}>
       <div className="flex items-center gap-4">
+        {/* ds-allow DS005: 头像热区尺寸来自 size 属性，Button 只有固定三档高度，圆形预览做不到 */}
         <button
           type="button"
           onClick={openPicker}
-          className="group relative overflow-hidden rounded-full ring-2 ring-transparent transition-all hover:ring-primary"
+          className="group relative overflow-hidden rounded-full ring-2 ring-transparent outline-none hover:ring-ring focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
           style={{ width: size, height: size }}
           title="更换头像"
+          aria-label="更换头像"
         >
           <Avatar className="size-full">
             {currentUrl ? <AvatarImage src={currentUrl} alt={uname} /> : null}
-            <AvatarFallback className="text-2xl">{makeInitials(uname || '?')}</AvatarFallback>
+            <AvatarFallback className="text-lg">{makeInitials(uname || '?')}</AvatarFallback>
           </Avatar>
-          <span
-            className={cn(
-              'absolute inset-0 flex items-center justify-center bg-black/40 text-xs font-medium text-white opacity-0',
-              'transition-opacity group-hover:opacity-100',
-            )}
-          >
-            <Upload className="mr-1 size-3.5" />
+          <span className="invisible absolute inset-0 flex items-center justify-center gap-1.5 bg-scrim text-xs font-medium text-bg group-hover:visible group-focus-visible:visible">
+            <Upload className="size-3.5" />
             更换
           </span>
         </button>
-        <div className="space-y-1.5">
-          <Button type="button" variant="outline" size="sm" onClick={openPicker}>
-            <Upload className="size-3.5 mr-1" />
+        <div className="flex flex-col gap-1.5">
+          <Button type="button" variant="secondary" size="sm" onClick={openPicker}>
+            <Upload />
             上传图片
           </Button>
           <div>
@@ -207,13 +207,13 @@ export function AvatarUpload({
               使用第三方头像
             </Button>
           </div>
-          <p className="text-[11px] text-muted-foreground">≤ 8MB · JPG/PNG/WebP/GIF</p>
+          <p className="text-2xs text-fg-subtle">≤ 8MB · JPG/PNG/WebP/GIF</p>
         </div>
       </div>
 
       <input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" onChange={handleFile} />
 
-      {errorMsg ? <p className="text-xs text-destructive">{errorMsg}</p> : null}
+      {errorMsg ? <p className="text-xs text-danger-fg">{errorMsg}</p> : null}
 
       {/* Third-party providers (gravatar / qq / github / url) */}
       {showProviderTab ? (
@@ -230,15 +230,15 @@ export function AvatarUpload({
       {/* Crop dialog */}
       {pickedFile && previewUrl ? (
         <Dialog open onOpenChange={(o) => !o && closeCrop()}>
-          <DialogContent className="w-full max-w-[min(100%,540px)]" onClose={closeCrop}>
+          <DialogContent size="md" onClose={closeCrop}>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-1.5">
-                <Crop className="size-4" />
+                <Crop className="size-4" aria-hidden="true" />
                 裁剪头像
               </DialogTitle>
             </DialogHeader>
             <CropPanel srcUrl={previewUrl} outputSize={outputSize} busy={busy} onCancel={closeCrop} onConfirm={handleCroppedBlob} />
-            {errorMsg ? <p className="text-xs text-destructive">{errorMsg}</p> : null}
+            {errorMsg ? <p className="text-xs text-danger-fg">{errorMsg}</p> : null}
           </DialogContent>
         </Dialog>
       ) : null}
@@ -341,6 +341,75 @@ function CropPanel({
     dragRef.current.mode = null;
   };
 
+  const keyboardStep = (shiftKey: boolean) => Math.max(1, (shiftKey ? 40 : 10) / (scale || 1));
+
+  const moveCrop = (dx: number, dy: number) => {
+    setCrop((current) => {
+      if (imgSize.w <= 0 || imgSize.h <= 0) return current;
+      return {
+        ...current,
+        x: Math.max(0, Math.min(imgSize.w - current.size, current.x + dx)),
+        y: Math.max(0, Math.min(imgSize.h - current.size, current.y + dy)),
+      };
+    });
+  };
+
+  const scaleCrop = (delta: number) => {
+    setCrop((current) => {
+      if (imgSize.w <= 0 || imgSize.h <= 0) return current;
+      const maxSize = Math.min(imgSize.w, imgSize.h);
+      const minSize = Math.min(32, maxSize);
+      const nextSize = Math.max(minSize, Math.min(maxSize, current.size + delta));
+      if (nextSize === current.size) return current;
+      const centerX = current.x + current.size / 2;
+      const centerY = current.y + current.size / 2;
+      return {
+        size: nextSize,
+        x: Math.max(0, Math.min(imgSize.w - nextSize, centerX - nextSize / 2)),
+        y: Math.max(0, Math.min(imgSize.h - nextSize, centerY - nextSize / 2)),
+      };
+    });
+  };
+
+  const onMoveKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const step = keyboardStep(event.shiftKey);
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      moveCrop(-step, 0);
+    } else if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      moveCrop(step, 0);
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      moveCrop(0, -step);
+    } else if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      moveCrop(0, step);
+    }
+  };
+
+  const onResizeKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const step = keyboardStep(event.shiftKey);
+    const maxSize = Math.min(imgSize.w, imgSize.h);
+    if (event.key === 'ArrowUp' || event.key === 'ArrowRight') {
+      event.preventDefault();
+      event.stopPropagation();
+      scaleCrop(step);
+    } else if (event.key === 'ArrowDown' || event.key === 'ArrowLeft') {
+      event.preventDefault();
+      event.stopPropagation();
+      scaleCrop(-step);
+    } else if (event.key === 'Home') {
+      event.preventDefault();
+      event.stopPropagation();
+      scaleCrop(-maxSize);
+    } else if (event.key === 'End') {
+      event.preventDefault();
+      event.stopPropagation();
+      scaleCrop(maxSize);
+    }
+  };
+
   const exportCrop = useCallback(() => {
     if (!imgRef.current) return;
     const canvas = document.createElement('canvas');
@@ -348,7 +417,8 @@ function CropPanel({
     canvas.height = outputSize;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    ctx.fillStyle = '#fff';
+    // ds-allow DS003: canvas 填充不能使用工具类，读不到 --surface 时才用白底回退
+    ctx.fillStyle = readToken('--surface', '#ffffff');
     ctx.fillRect(0, 0, outputSize, outputSize);
     ctx.drawImage(imgRef.current, crop.x, crop.y, crop.size, crop.size, 0, 0, outputSize, outputSize);
     canvas.toBlob(
@@ -363,10 +433,10 @@ function CropPanel({
   return (
     <div className="space-y-3">
       <div className="flex w-full justify-center">
-        <div ref={frameRef} className="flex w-full max-w-[540px] justify-center">
+        <div ref={frameRef} className="flex w-full max-w-xl justify-center">
           <div
             ref={containerRef}
-            className="relative inline-block overflow-hidden rounded-md bg-muted/20 touch-none"
+            className="relative inline-block touch-none overflow-hidden rounded-md bg-surface-sunken"
             style={{ width: displayW, height: displayH || 200, maxWidth: '100%' }}
           >
           <img
@@ -379,50 +449,55 @@ function CropPanel({
             draggable={false}
           />
           {loaded ? (
-            <>
-              {/* Dim overlay */}
-              <div className="absolute inset-0" style={{ background: 'rgba(0,0,0,0.45)' }} />
-              {/* Crop hole */}
+            <div
+              role="application"
+              tabIndex={0}
+              aria-label="移动裁剪区域"
+              aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown"
+              className="absolute cursor-move rounded-full ring-2 ring-surface outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+              style={{
+                left: dCrop.x,
+                top: dCrop.y,
+                width: dCrop.size,
+                height: dCrop.size,
+                boxShadow: '0 0 0 9999px var(--scrim)',
+              }}
+              onPointerDown={(e) => onPointerDown(e, 'move')}
+              onPointerMove={onPointerMove}
+              onPointerUp={onPointerUp}
+              onKeyDown={onMoveKeyDown}
+            >
               <div
-                className="absolute outline outline-2 outline-white"
-                style={{
-                  left: dCrop.x,
-                  top: dCrop.y,
-                  width: dCrop.size,
-                  height: dCrop.size,
-                  background: 'transparent',
-                  boxShadow: '0 0 0 9999px rgba(0,0,0,0.45)',
-                  borderRadius: '50%',
-                  cursor: 'move',
+                role="slider"
+                tabIndex={0}
+                aria-label="缩放裁剪区域"
+                aria-valuemin={Math.min(32, Math.min(imgSize.w, imgSize.h) || 32)}
+                aria-valuemax={Math.round(Math.min(imgSize.w, imgSize.h) || 32)}
+                aria-valuenow={Math.round(crop.size)}
+                aria-valuetext={`${Math.round(crop.size)} 像素`}
+                aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight Home End"
+                className="absolute -top-1.5 -left-1.5 size-3 cursor-nw-resize rounded-sm bg-surface shadow-sm ring-1 ring-line-strong outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  onPointerDown(e, 'resize');
                 }}
-                onPointerDown={(e) => onPointerDown(e, 'move')}
-                onPointerMove={onPointerMove}
-                onPointerUp={onPointerUp}
-              >
-                {/* Resize handle (top-left) */}
-                <div
-                  className="absolute -left-1.5 -top-1.5 size-3 cursor-nw-resize rounded-sm bg-white shadow"
-                  onPointerDown={(e) => {
-                    e.stopPropagation();
-                    onPointerDown(e, 'resize');
-                  }}
-                  onPointerMove={(e) => {
-                    e.stopPropagation();
-                    onPointerMove(e);
-                  }}
-                  onPointerUp={(e) => {
-                    e.stopPropagation();
-                    onPointerUp();
-                  }}
-                />
-              </div>
-            </>
+                onPointerMove={(e) => {
+                  e.stopPropagation();
+                  onPointerMove(e);
+                }}
+                onPointerUp={(e) => {
+                  e.stopPropagation();
+                  onPointerUp();
+                }}
+                onKeyDown={onResizeKeyDown}
+              />
+            </div>
           ) : null}
           </div>
         </div>
       </div>
 
-      <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+      <div className="flex items-center justify-between text-2xs text-fg-subtle tabular">
         <span>
           原图 {imgSize.w}×{imgSize.h}
         </span>
@@ -432,11 +507,11 @@ function CropPanel({
       </div>
 
       <div className="flex justify-end gap-2">
-        <Button variant="outline" onClick={onCancel}>
+        <Button type="button" variant="secondary" onClick={onCancel}>
           取消
         </Button>
-        <Button onClick={exportCrop} disabled={busy || !loaded}>
-          {busy ? <Loader2 className="size-3.5 mr-1 animate-spin" /> : <Upload className="size-3.5 mr-1" />}
+        <Button type="button" variant="primary" onClick={exportCrop} disabled={busy || !loaded}>
+          {busy ? <Loader2 className="animate-spin" /> : <Upload />}
           {busy ? '上传中…' : '确认并上传'}
         </Button>
       </div>
@@ -480,21 +555,21 @@ function ProviderPicker({ endpoint, onClose, onSubmitted }: { endpoint: string; 
   };
 
   return (
-    <div className="w-full max-w-md rounded-md border bg-card p-3 space-y-2 text-sm">
-      <p className="font-medium">使用第三方头像</p>
-      <div className="flex gap-1.5">
-        {(['gravatar', 'qq', 'github', 'url'] as const).map((p) => (
-          <button
-            key={p}
-            type="button"
-            onClick={() => setProvider(p)}
-            className={cn('rounded px-2 py-1 text-xs', provider === p ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-accent')}
-          >
-            {p}
-          </button>
-        ))}
-      </div>
-      <input
+    <div className="flex w-full max-w-md flex-col gap-3 rounded-md bg-surface-sunken p-3">
+      <p className="text-sm font-semibold text-fg">使用第三方头像</p>
+      <MiniTabs
+        aria-label="头像来源"
+        size="sm"
+        value={provider}
+        onValueChange={setProvider}
+        items={[
+          { value: 'gravatar', label: 'gravatar' },
+          { value: 'qq', label: 'qq' },
+          { value: 'github', label: 'github' },
+          { value: 'url', label: 'url' },
+        ]}
+      />
+      <Input
         value={value}
         onChange={(e) => setValue(e.target.value)}
         placeholder={
@@ -507,14 +582,13 @@ function ProviderPicker({ endpoint, onClose, onSubmitted }: { endpoint: string; 
             } as const
           )[provider]
         }
-        className="w-full rounded border bg-background px-2 py-1.5 text-sm"
       />
-      {err ? <p className="text-xs text-destructive">{err}</p> : null}
+      {err ? <p className="text-xs text-danger-fg">{err}</p> : null}
       <div className="flex justify-end gap-2">
-        <Button variant="outline" size="sm" onClick={onClose}>
+        <Button type="button" variant="secondary" size="sm" onClick={onClose}>
           取消
         </Button>
-        <Button size="sm" onClick={handleSubmit} disabled={busy}>
+        <Button type="button" variant="soft" size="sm" onClick={() => void handleSubmit()} disabled={busy}>
           {busy ? '保存中…' : '保存'}
         </Button>
       </div>
@@ -697,6 +771,7 @@ export function FileUploader({
 
   return (
     <div className={cn('space-y-2', className)}>
+      {/* ds-allow DS005: 拖放区要整宽虚线并同时接收 dragover、drop 与点击，Button 禁止用 className 改高度、内边距和边框 */}
       <button
         type="button"
         onDragOver={(e) => {
@@ -707,15 +782,15 @@ export function FileUploader({
         onDrop={onDrop}
         onClick={() => fileInputRef.current?.click()}
         className={cn(
-          'flex w-full cursor-pointer flex-col items-center justify-center gap-1.5 rounded-md border border-dashed',
-          'bg-muted/10 px-4 py-6 text-xs text-muted-foreground transition-colors',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
-          dragOver && 'border-primary bg-primary/5 text-foreground',
+          'flex w-full cursor-pointer flex-col items-center justify-center gap-1.5 rounded-md border border-dashed border-line',
+          'bg-surface-sunken px-4 py-6 text-xs text-fg-subtle',
+          'outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
+          dragOver && 'border-brand bg-brand-soft text-fg',
         )}
       >
         <Upload className="size-4" />
         <span>拖拽文件到此处，或点击选择</span>
-        <span className="text-[10px]">
+        <span className="text-2xs">
           {maxFileSize === null && maxFiles === null
             ? '文件大小与数量以服务器限制为准'
             : [maxFileSize === null ? null : `最大 ${Math.round(maxFileSize / (1024 * 1024))}MB`, maxFiles === null ? null : `最多 ${maxFiles} 个`]
@@ -736,25 +811,25 @@ export function FileUploader({
       />
 
       {ingestError ? (
-        <p role="alert" className="text-xs text-destructive">
+        <p role="alert" className="text-xs text-danger-fg">
           {ingestError}
         </p>
       ) : null}
 
       {items.length ? (
-        <ul aria-label="上传进度" className="space-y-1">
+        <ul aria-label="上传进度" className="flex flex-col gap-1">
           {items.map((it) => (
-            <li key={it.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded border bg-card px-2 py-1.5 text-xs">
-              <span className="min-w-0 flex-1 basis-40 truncate font-mono">{it.name}</span>
-              <Badge variant="outline" className="text-[9px]">
+            <li key={it.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-line bg-surface px-2 py-1.5 text-xs text-fg">
+              <span className="min-w-0 flex-1 truncate font-mono">{it.name}</span>
+              <Badge tone="neutral" variant="outline" size="sm">
                 {Math.round(it.size / 1024)} KB
               </Badge>
               {it.status === 'done' ? (
-                <Badge variant="default" className="text-[9px]">
+                <Badge tone="success" variant="soft" size="sm">
                   已上传
                 </Badge>
               ) : it.status === 'failed' ? (
-                <span role="alert" className="max-w-56 text-right text-destructive">
+                <span role="alert" className="max-w-60 text-right text-danger-fg">
                   {it.error || '上传失败'}
                 </span>
               ) : (
@@ -764,22 +839,25 @@ export function FileUploader({
                   aria-valuemin={0}
                   aria-valuemax={100}
                   aria-valuenow={it.progress}
-                  className="h-1.5 w-20 overflow-hidden rounded-full bg-muted"
+                  className="h-1.5 w-20 overflow-hidden rounded-full bg-surface-active"
                 >
-                  <div className="h-full bg-primary transition-all" style={{ width: `${it.progress}%` }} />
+                  <div className="h-full bg-brand" style={{ width: `${it.progress}%` }} />
                 </div>
               )}
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="sm"
+                iconOnly
+                aria-label="移除"
+                title="移除"
                 onClick={() => {
                   uppyRef.current?.removeFile(it.id);
                   setItems((prev) => prev.filter((x) => x.id !== it.id));
                 }}
-                className="text-muted-foreground hover:text-destructive"
-                title="移除"
               >
-                <X className="size-3" />
-              </button>
+                <X />
+              </Button>
             </li>
           ))}
         </ul>

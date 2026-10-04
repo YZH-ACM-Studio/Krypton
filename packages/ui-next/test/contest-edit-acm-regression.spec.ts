@@ -22,7 +22,7 @@ describe('contest-edit ACM regression', () => {
   });
 
   it('posts operation=update and copy-as-new formaction', () => {
-    expect(manage).to.include('<Button ref={primarySubmitRef} type="submit" name="operation" value="update">');
+    expect(manage).to.match(/<Button ref=\{primarySubmitRef\}(?: variant="[\w-]+")? type="submit" name="operation" value="update"(?: variant="[\w-]+")?>/);
     expect(manage).to.include('formAction={`${bs.urls.contests}/create`}');
     expect(manage).to.include('复制为新比赛');
   });

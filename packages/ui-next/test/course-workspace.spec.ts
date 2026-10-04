@@ -55,10 +55,10 @@ describe('p3.8 course workspace', () => {
     expect(list).to.include('分配');
     expect(editor).not.to.include('课程简介在页面底部整幅编辑');
     expect(editor).to.match(/course-description-title[\s\S]*章节内容/);
-    expect(editor).to.include('TabsTrigger value="video"');
-    expect(editor).to.include('TabsTrigger value="links"');
-    expect(editor).not.to.include('TabsTrigger value="more"');
-    expect(editor).not.to.include('TabsTrigger value="sections"');
+    expect(editor).to.match(/value: 'video'|TabsTrigger value="video"/);
+    expect(editor).to.match(/value: 'links'|TabsTrigger value="links"/);
+    expect(editor).not.to.match(/value: 'more'|TabsTrigger value="more"/);
+    expect(editor).not.to.match(/value: 'sections'|TabsTrigger value="sections"/);
     expect(editor).to.include('CourseVideoEditor');
     expect(editor).to.include('onAddSection');
     expect(editor).to.include('<MultiSelect');

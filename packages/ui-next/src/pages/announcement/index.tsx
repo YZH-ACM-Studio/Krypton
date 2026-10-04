@@ -8,14 +8,15 @@
  *   admin_announce_categories.html → AdminAnnounceCategoriesPage
  */
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowUpDown, Calendar, Eye, EyeOff, GripVertical, Megaphone, Pencil, Pin, PinOff, Plus, Save, Trash2 } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
+import { ArrowUpDown, Calendar, Eye, EyeOff, GripVertical, Pencil, Pin, PinOff, Plus, Save, Trash2 } from 'lucide-react';
+import { Badge, type BadgeTone } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { FormField, FormRow } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { MiniTabs } from '@/components/ui/mini-tabs';
+import { Page, PageHeader } from '@/components/ui/page';
 import { Pagination } from '@/components/ui/pagination';
 import { SimpleSelect } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -26,7 +27,6 @@ import { ModuleWorkspace, type ModuleWorkspaceNavItem } from '@/components/manag
 import { Switch } from '@/components/ui/switch';
 import { useBootstrap } from '@/lib/bootstrap';
 import { PRIV } from '@/lib/perms';
-import { cn } from '@/lib/cn';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
 
 interface Category {
@@ -57,15 +57,19 @@ interface AnnouncementDoc {
   updatedAt: string;
 }
 
-const COLOR_CLASSES: Record<string, string> = {
-  gray: 'bg-muted text-muted-foreground border-border',
-  amber: 'bg-amber-100 text-amber-900 border-amber-300 dark:bg-amber-950/40 dark:text-amber-200 dark:border-amber-700/50',
-  blue: 'bg-blue-100 text-blue-900 border-blue-300 dark:bg-blue-950/40 dark:text-blue-200 dark:border-blue-700/50',
-  purple: 'bg-purple-100 text-purple-900 border-purple-300 dark:bg-purple-950/40 dark:text-purple-200 dark:border-purple-700/50',
-  green: 'bg-emerald-100 text-emerald-900 border-emerald-300 dark:bg-emerald-950/40 dark:text-emerald-200 dark:border-emerald-700/50',
-  rose: 'bg-rose-100 text-rose-900 border-rose-300 dark:bg-rose-950/40 dark:text-rose-200 dark:border-rose-700/50',
-  sky: 'bg-sky-100 text-sky-900 border-sky-300 dark:bg-sky-950/40 dark:text-sky-200 dark:border-sky-700/50',
+const CATEGORY_TONE: Record<string, BadgeTone> = {
+  gray: 'neutral',
+  amber: 'warning',
+  blue: 'info',
+  purple: 'violet',
+  green: 'success',
+  rose: 'danger',
+  sky: 'info',
 };
+
+function categoryTone(color: string): BadgeTone {
+  return CATEGORY_TONE[color] ?? 'neutral';
+}
 
 const ANNOUNCEMENT_WORKSPACE_NAV: Array<ModuleWorkspaceNavItem & { systemOnly: boolean }> = [
   {
@@ -90,17 +94,10 @@ function announcementWorkspaceNav(canManageCategories: boolean): ModuleWorkspace
 
 function CategoryChip({ category, size = 'sm' }: { category: { name: string; color: string } | undefined; size?: 'sm' | 'md' }) {
   if (!category) return null;
-  const colorClass = COLOR_CLASSES[category.color] || COLOR_CLASSES.gray;
   return (
-    <span
-      className={cn(
-        'inline-flex max-w-full min-w-0 items-center rounded-md border font-medium',
-        size === 'sm' ? 'px-1.5 py-0.5 text-[10px]' : 'px-2 py-0.5 text-xs',
-        colorClass,
-      )}
-    >
+    <Badge tone={categoryTone(category.color)} variant="outline" size={size === 'sm' ? 'sm' : 'md'} className="max-w-24 min-w-0">
       <span className="min-w-0 truncate">{category.name}</span>
-    </span>
+    </Badge>
   );
 }
 
@@ -135,19 +132,18 @@ export function AnnounceListPage() {
   };
 
   return (
-    <div className="w-full min-w-0 space-y-5">
-      <header className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <Megaphone className="size-5 shrink-0 text-primary" />
-          <h1 className="min-w-0 truncate text-xl font-semibold">公告</h1>
-        </div>
-        <Button asChild variant="outline" size="sm">
-          <a href={toggleSortUrl()} className="gap-1.5">
-            <ArrowUpDown className="size-3.5" />
-            {currentSort === 'desc' ? '最新优先' : '最早优先'}
-          </a>
-        </Button>
-      </header>
+    <Page width="wide">
+      <PageHeader
+        title="公告"
+        actions={(
+          <Button asChild variant="secondary" size="sm">
+            <a href={toggleSortUrl()}>
+              <ArrowUpDown />
+              {currentSort === 'desc' ? '最新优先' : '最早优先'}
+            </a>
+          </Button>
+        )}
+      />
 
       <div className="min-w-0 max-w-full overflow-x-auto">
         <MiniTabs
@@ -167,18 +163,18 @@ export function AnnounceListPage() {
       <Card className="min-w-0">
         <CardContent className="p-0">
           {data.docs.length === 0 ? (
-            <p className="py-12 text-center text-sm text-muted-foreground">暂无公告</p>
+            <p className="py-12 text-center text-sm text-fg-muted">暂无公告</p>
           ) : (
-            <ul className="divide-y">
+            <ul className="divide-y divide-line">
               {data.docs.map((doc) => {
                 const cat = catMap.get(doc.category);
                 return (
                   <li key={doc._id} className="min-w-0">
-                    <a href={`/announce/${doc._id}`} className="flex min-w-0 items-center gap-3 px-5 py-3.5 transition-colors hover:bg-accent/40">
-                      {doc.pin ? <Pin className="size-3.5 shrink-0 text-amber-600" /> : <span className="size-3.5 shrink-0" />}
+                    <a href={`/announce/${doc._id}`} className="flex min-w-0 items-center gap-3 px-5 py-3.5 transition-colors hover:bg-surface-hover">
+                      {doc.pin ? <Pin className="size-3.5 shrink-0 text-warning-fg" /> : <span className="size-3.5 shrink-0" />}
                       <CategoryChip category={cat} />
                       <span className="min-w-0 flex-1 truncate text-sm font-medium">{doc.title}</span>
-                      <span className="shrink-0 text-xs text-muted-foreground">
+                      <span className="shrink-0 text-xs text-fg-subtle">
                         <DateTime value={doc.publishAt} mode="date" />
                       </span>
                     </a>
@@ -195,7 +191,7 @@ export function AnnounceListPage() {
           <Pagination current={data.page} total={pcount} baseUrl={baseQuery} />
         </div>
       )}
-    </div>
+    </Page>
   );
 }
 
@@ -208,33 +204,37 @@ export function AnnounceDetailPage() {
     category: Category | null;
   };
   return (
-    <div className="mx-auto w-full min-w-0 max-w-3xl space-y-5">
-      <Button variant="ghost" size="sm" asChild>
-        <a href="/announce" className="gap-1.5">
-          <ArrowUpDown className="size-3.5 rotate-90" />
-          返回公告列表
-        </a>
-      </Button>
-      <Card className="min-w-0 overflow-x-auto">
-        <CardHeader className="space-y-2 border-b">
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            {data.doc.pin && <Pin className="size-4 shrink-0 text-amber-600" />}
+    <Page width="prose">
+      <PageHeader
+        title={data.doc.title}
+        meta={(
+          <>
+            {data.doc.pin ? <Pin className="size-3.5 shrink-0 text-warning-fg" /> : null}
             <CategoryChip category={data.category || undefined} size="md" />
-            <span className="min-w-0 break-words text-xs text-muted-foreground">
+            <span className="min-w-0 break-words">
               <DateTime value={data.doc.publishAt} />
             </span>
-            <span className="ml-auto text-xs text-muted-foreground">
-              <Eye className="mr-1 inline size-3" />
+            <span className="inline-flex items-center gap-1 tabular">
+              <Eye className="size-3.5" />
               {data.doc.views}
             </span>
-          </div>
-          <CardTitle className="min-w-0 break-words text-2xl">{data.doc.title}</CardTitle>
-        </CardHeader>
-        <CardContent className="p-6">
+          </>
+        )}
+        actions={(
+          <Button variant="ghost" size="sm" asChild>
+            <a href="/announce">
+              <ArrowUpDown className="rotate-90" />
+              返回公告列表
+            </a>
+          </Button>
+        )}
+      />
+      <Card className="min-w-0 overflow-x-auto">
+        <CardContent>
           <MarkdownView content={data.doc.content} />
         </CardContent>
       </Card>
-    </div>
+    </Page>
   );
 }
 
@@ -295,13 +295,13 @@ export function AdminAnnounceListPage() {
       bypassPrivGate
       actions={
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={() => void handleSaveOrder()} className="min-h-10 gap-1" disabled={savingOrder}>
-            <Save className="size-3.5" />
+          <Button variant="secondary" onClick={() => void handleSaveOrder()} className="min-h-10" disabled={savingOrder}>
+            <Save />
             {savingOrder ? '保存中…' : '保存顺序'}
           </Button>
-          <Button asChild className="min-h-10 gap-1">
+          <Button asChild variant="primary" className="min-h-10">
             <a href="/admin/announce/new">
-              <Plus className="size-3.5" />
+              <Plus />
               新建公告
             </a>
           </Button>
@@ -309,7 +309,7 @@ export function AdminAnnounceListPage() {
       }
     >
       {orderError ? (
-        <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+        <p role="alert" className="rounded-lg border border-danger-line bg-danger-soft px-4 py-3 text-sm text-danger-fg">
           {orderError}
         </p>
       ) : null}
@@ -355,11 +355,11 @@ export function AdminAnnounceListPage() {
                     }}
                   >
                     <TableCell className="pl-5">
-                      <GripVertical className="size-3.5 cursor-grab text-muted-foreground" />
+                      <GripVertical className="size-3.5 cursor-grab text-fg-subtle" />
                     </TableCell>
-                    <TableCell>{doc.pin ? <Pin className="size-4 text-amber-600" /> : null}</TableCell>
+                    <TableCell>{doc.pin ? <Pin className="size-4 text-warning-fg" /> : null}</TableCell>
                     <TableCell>
-                      <Badge variant="outline" className="text-[10px]">
+                      <Badge variant="outline" tone="neutral" size="sm">
                         {doc.scope === 'global' ? '全局' : '当前域'}
                       </Badge>
                     </TableCell>
@@ -367,31 +367,31 @@ export function AdminAnnounceListPage() {
                       <CategoryChip category={cat} />
                     </TableCell>
                     <TableCell className="text-sm font-medium">
-                      <a href={`/announce/${doc._id}`} className="inline-flex min-h-10 items-center hover:text-primary">
+                      <a href={`/announce/${doc._id}`} className="inline-flex min-h-10 min-w-0 items-center text-fg hover:text-brand-fg">
                         {doc.title}
                       </a>
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
+                    <TableCell className="text-xs text-fg-subtle">
                       <DateTime value={doc.publishAt} mode="date" />
                     </TableCell>
                     <TableCell>
                       {doc.hidden ? (
-                        <Badge variant="destructive" className="gap-0.5 text-[10px]">
-                          <EyeOff className="size-2.5" />
+                        <Badge tone="danger" size="sm">
+                          <EyeOff className="size-3" />
                           隐藏
                         </Badge>
                       ) : new Date(doc.publishAt) > new Date() ? (
-                        <Badge variant="outline" className="gap-0.5 text-[10px]">
-                          <Calendar className="size-2.5" />
+                        <Badge tone="info" size="sm">
+                          <Calendar className="size-3" />
                           定时
                         </Badge>
                       ) : doc.unpublishAt && new Date(doc.unpublishAt) <= new Date() ? (
-                        <Badge variant="outline" className="gap-0.5 text-[10px]">
+                        <Badge tone="neutral" size="sm">
                           已下线
                         </Badge>
                       ) : (
-                        <Badge variant="secondary" className="gap-0.5 text-[10px]">
-                          <Eye className="size-2.5" />
+                        <Badge tone="success" size="sm">
+                          <Eye className="size-3" />
                           已发布
                         </Badge>
                       )}
@@ -426,7 +426,7 @@ export function AdminAnnounceListPage() {
               })}
               {items.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={8} className="py-12 text-center text-sm text-muted-foreground">
+                  <TableCell colSpan={8} className="py-12 text-center text-sm text-fg-muted">
                     暂无公告，点击右上角新建。
                   </TableCell>
                 </TableRow>
@@ -450,6 +450,16 @@ interface EditorBody {
 const ANNOUNCE_EDITOR_MIN_HEIGHT = 480;
 const ANNOUNCE_EDITOR_MIN_HEIGHT_SHORT = 240;
 const SHORT_MARKDOWN_QUERY = '(max-height: 56rem)';
+
+/** datetime-local and the server both read `YYYY-MM-DDTHH:mm` as local time. */
+function toDateTimeLocalValue(value: string | Date): string {
+  const date = typeof value === 'string' ? new Date(value) : value;
+  if (!Number.isFinite(date.getTime())) {
+    throw new RangeError(`公告时间无效: ${String(value)}`);
+  }
+  const pad = (part: number) => String(part).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
 
 function useShortScreenMarkdownMinHeight(): number {
   const [minHeight, setMinHeight] = useState(ANNOUNCE_EDITOR_MIN_HEIGHT);
@@ -476,10 +486,8 @@ export function AdminAnnounceEditorPage() {
   const [scope, setScope] = useState<'global' | 'domain'>(data.doc?.scope || 'domain');
   const [pin, setPin] = useState(!!data.doc?.pin);
   const [hidden, setHidden] = useState(!!data.doc?.hidden);
-  const [publishAt, setPublishAt] = useState(
-    data.doc?.publishAt ? new Date(data.doc.publishAt).toISOString().slice(0, 16) : new Date().toISOString().slice(0, 16),
-  );
-  const [unpublishAt, setUnpublishAt] = useState(data.doc?.unpublishAt ? new Date(data.doc.unpublishAt).toISOString().slice(0, 16) : '');
+  const [publishAt, setPublishAt] = useState(() => toDateTimeLocalValue(data.doc?.publishAt || new Date()));
+  const [unpublishAt, setUnpublishAt] = useState(() => (data.doc?.unpublishAt ? toDateTimeLocalValue(data.doc.unpublishAt) : ''));
 
   return (
     <ModuleWorkspace
@@ -490,7 +498,7 @@ export function AdminAnnounceEditorPage() {
       activeKey="announcements"
       bypassPrivGate
       actions={
-        <Button asChild variant="outline" className="min-h-10">
+        <Button asChild variant="secondary" className="min-h-10">
           <a href="/admin/announce">返回列表</a>
         </Button>
       }
@@ -504,10 +512,10 @@ export function AdminAnnounceEditorPage() {
         <input type="hidden" name="pin" value={pin ? 'true' : 'false'} />
         <input type="hidden" name="hidden" value={hidden ? 'true' : 'false'} />
 
-        <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1fr)_22rem] xl:items-start">
+        <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1fr)_20rem] xl:items-start">
           <Card className="min-w-0">
             <CardHeader>
-              <CardTitle className="text-base">公告内容</CardTitle>
+              <CardTitle className="text-lg">公告内容</CardTitle>
             </CardHeader>
             <CardContent className="space-y-5">
               <FormField label="标题" required htmlFor="ann-title">
@@ -530,7 +538,7 @@ export function AdminAnnounceEditorPage() {
           <div className="min-w-0 space-y-5">
             <Card className="min-w-0">
               <CardHeader>
-                <CardTitle className="text-base">发布设置</CardTitle>
+                <CardTitle className="text-lg">发布设置</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 <FormField label="分类" required htmlFor="ann-cat">
@@ -581,7 +589,7 @@ export function AdminAnnounceEditorPage() {
 
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">展示状态</CardTitle>
+                <CardTitle className="text-lg">展示状态</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
                 <label className="flex min-h-10 cursor-pointer items-center gap-2 text-sm">
@@ -597,12 +605,12 @@ export function AdminAnnounceEditorPage() {
           </div>
         </div>
 
-        <div className="sticky bottom-0 z-10 -mx-1 flex min-w-0 flex-wrap justify-end gap-2 border-t bg-background/95 px-1 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))] backdrop-blur">
+        <div className="sticky bottom-0 z-20 -mx-1 flex min-w-0 flex-wrap justify-end gap-2 border-t border-line bg-bg px-1 pt-4 pb-4">
           <Button type="button" variant="ghost" asChild className="min-h-10">
             <a href="/admin/announce">取消</a>
           </Button>
-          <Button type="submit" className="min-h-10 gap-1">
-            <Save className="size-3.5" />
+          <Button type="submit" variant="primary" className="min-h-10">
+            <Save />
             {isNew ? '创建' : '保存'}
           </Button>
         </div>
@@ -627,8 +635,8 @@ export function AdminAnnounceCategoriesPage() {
       activeKey="categories"
       requiredPriv={PRIV.PRIV_EDIT_SYSTEM}
       actions={
-        <Button onClick={() => setCreating(true)} className="min-h-10 gap-1">
-          <Plus className="size-3.5" />
+        <Button variant="primary" onClick={() => setCreating(true)} className="min-h-10">
+          <Plus />
           新增分类
         </Button>
       }
@@ -654,12 +662,12 @@ export function AdminAnnounceCategoriesPage() {
                     <CategoryChip category={c} />
                   </TableCell>
                   <TableCell className="text-sm font-medium">{c.name}</TableCell>
-                  <TableCell className="font-mono text-xs text-muted-foreground">{c.key}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{c.color}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{c.order}</TableCell>
+                  <TableCell className="font-mono text-xs text-fg-subtle">{c.key}</TableCell>
+                  <TableCell className="text-xs text-fg-subtle">{c.color}</TableCell>
+                  <TableCell className="text-xs tabular text-fg-subtle">{c.order}</TableCell>
                   <TableCell>
                     {c.builtin && (
-                      <Badge variant="secondary" className="text-[10px]">
+                      <Badge tone="neutral" variant="outline" size="sm">
                         内建
                       </Badge>
                     )}
@@ -713,7 +721,7 @@ function CategoryEditorDialog({ category, onClose }: { category: Category | null
 
   return (
     <Dialog open onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="w-full sm:w-[480px]" onClose={onClose}>
+      <DialogContent size="md" onClose={onClose}>
         <DialogHeader>
           <DialogTitle>{isNew ? '新增分类' : '编辑分类'}</DialogTitle>
         </DialogHeader>
@@ -758,16 +766,16 @@ function CategoryEditorDialog({ category, onClose }: { category: Category | null
               <Switch name="hidden" value="true" checked={hidden} onChange={(e) => setHidden(e.target.checked)} className="mt-0.5 shrink-0" />
               <span className="min-w-0 break-words leading-5">隐藏（仍可用于已有公告，但不出现在新建下拉里）</span>
             </label>
-            <div className="rounded-md border bg-muted/30 p-3">
-              <p className="mb-2 text-xs text-muted-foreground">预览：</p>
+            <div className="rounded-md border border-line bg-surface-sunken p-3">
+              <p className="mb-2 text-xs text-fg-subtle">预览：</p>
               <CategoryChip category={{ name: name || '示例', color }} size="md" />
             </div>
           </DialogBody>
-          <DialogFooter className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3 flex-row">
+          <DialogFooter className="flex flex-row justify-end gap-2 border-t border-line bg-surface-sunken px-5 py-3">
             <Button type="button" variant="ghost" onClick={onClose} className="min-h-10">
               取消
             </Button>
-            <Button type="submit" className="min-h-10">
+            <Button type="submit" variant="primary" className="min-h-10">
               保存
             </Button>
           </DialogFooter>

@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { DateTime } from '@/components/ui/datetime';
+import { Stat } from '@/components/ui/display';
 import { confirmFormSubmit } from '@/components/ui/dialog';
 import { FormField, FormRow, FormSection } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
@@ -738,11 +739,11 @@ function statusLabel(status: CollectRequestStatus): string {
   return '已归档';
 }
 
-function StatusBadge({ status }: { status: CollectRequestStatus }) {
-  if (status === 'published') return <Badge className="bg-emerald-500 text-white hover:bg-emerald-500/90">已发布</Badge>;
-  if (status === 'draft') return <Badge variant="outline">草稿</Badge>;
-  if (status === 'closed') return <Badge variant="secondary">已关闭</Badge>;
-  return <Badge variant="outline">已归档</Badge>;
+function collectStatusBadge(status: CollectRequestStatus) {
+  if (status === 'published') return <Badge tone="success">已发布</Badge>;
+  if (status === 'draft') return <Badge tone="neutral">草稿</Badge>;
+  if (status === 'closed') return <Badge tone="warning">已关闭</Badge>;
+  return <Badge tone="neutral">已归档</Badge>;
 }
 
 function CollaboratorSelect({
@@ -785,7 +786,7 @@ export function AdminCollectListPage() {
       description="圈班级、设槽位和截止时间；学生按槽交文件。不打分、不退回。"
       actions={
         data.canCreate ? (
-          <Button asChild className="min-h-10">
+          <Button asChild variant="primary" className="min-h-10">
             <a href="/admin/collect/create">
               <Plus className="mr-1 size-4" />
               新建
@@ -810,7 +811,7 @@ export function AdminCollectListPage() {
             <TableBody>
               {data.requests.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="py-12 text-center text-sm text-muted-foreground">
+                  <TableCell colSpan={6} className="py-12 text-center text-sm text-fg-muted">
                     还没有文件收集，点击右上角「新建」开始创建
                   </TableCell>
                 </TableRow>
@@ -818,7 +819,7 @@ export function AdminCollectListPage() {
                 data.requests.map((item) => (
                   <TableRow key={item._id}>
                     <TableCell className="min-w-0">
-                      <a href={`/admin/collect/${item._id}/edit`} className="break-words font-medium hover:underline">
+                      <a href={`/admin/collect/${item._id}/edit`} className="block min-w-0 break-words font-medium text-fg hover:underline">
                         {item.title}
                       </a>
                     </TableCell>
@@ -827,9 +828,9 @@ export function AdminCollectListPage() {
                       <DateTime value={item.dueAt} mode="datetime" />
                     </TableCell>
                     <TableCell>
-                      <StatusBadge status={item.status} />
+                      {collectStatusBadge(item.status)}
                     </TableCell>
-                    <TableCell className="text-sm">
+                    <TableCell className="text-sm tabular">
                       {item.submitted}/{item.total}
                     </TableCell>
                     <TableCell className="min-w-0">
@@ -1023,9 +1024,9 @@ export function AdminCollectEditPage() {
       title={isEdit ? '编辑文件收集' : '新建文件收集'}
       description={isEdit ? '修改说明和截止时间；已有人提交后不能改槽位或上限。' : '先保存草稿，圈好同校班级后再发布。'}
       actions={
-        <Button asChild variant="outline" className="min-h-10">
+        <Button asChild variant="secondary" className="min-h-10">
           <a href="/admin/collect">
-            <ArrowLeft className="mr-1 size-4" />
+            <ArrowLeft />
             返回列表
           </a>
         </Button>
@@ -1083,7 +1084,7 @@ export function AdminCollectEditPage() {
                   onChange={(e) => setDescription(e.target.value)}
                   disabled={!canEdit}
                   placeholder="交什么、命名要求、注意事项"
-                  className="min-h-[8rem]"
+                  className="min-h-32"
                 />
               </FormField>
               <FormField label="截止时间" required htmlFor="collect-due">
@@ -1136,9 +1137,9 @@ export function AdminCollectEditPage() {
                 </FormField>
                 <FormField label="用户组" required hint="只显示所选学校的班级 / 队伍">
                   {schoolId ? (
-                    <div className="max-h-64 space-y-1 overflow-y-auto rounded-md border p-3">
+                    <div className="max-h-64 space-y-1 overflow-y-auto rounded-md border border-line p-3">
                       {schoolGroups.length === 0 ? (
-                        <p className="text-sm text-muted-foreground">这所学校还没有可用用户组</p>
+                        <p className="text-sm text-fg-muted">这所学校还没有可用用户组</p>
                       ) : (
                         schoolGroups.map((group) => {
                           const checked = groupIds.includes(group._id);
@@ -1159,7 +1160,7 @@ export function AdminCollectEditPage() {
                       )}
                     </div>
                   ) : (
-                    <p className="text-sm text-muted-foreground">请先选择学校</p>
+                    <p className="text-sm text-fg-muted">请先选择学校</p>
                   )}
                 </FormField>
               </FormRow>
@@ -1175,17 +1176,17 @@ export function AdminCollectEditPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             {slotsLocked ? (
-              <p role="note" className="rounded-lg border border-amber-300/60 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+              <p role="note" className="rounded-lg border border-warning-line bg-warning-soft px-4 py-3 text-sm text-warning-fg">
                 已有人提交，不能改槽位
               </p>
             ) : null}
             {slots.map((slot, index) => (
-              <div key={slot.id} className="space-y-3 rounded-lg border p-4">
+              <div key={slot.id} className="space-y-3 rounded-lg border border-line p-4">
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-sm font-medium">槽位 {index + 1}</p>
                   {canEdit && !slotsLocked && slots.length > 1 ? (
-                    <Button type="button" variant="ghost" size="sm" className="min-h-10 text-destructive" onClick={() => removeSlot(slot.id)}>
-                      <Trash2 className="mr-1 size-3.5" />
+                    <Button type="button" variant="danger-soft" size="sm" className="min-h-10" onClick={() => removeSlot(slot.id)}>
+                      <Trash2 />
                       删除
                     </Button>
                   ) : null}
@@ -1235,8 +1236,8 @@ export function AdminCollectEditPage() {
               </div>
             ))}
             {canEdit && !slotsLocked ? (
-              <Button type="button" variant="outline" className="min-h-10" onClick={addSlot}>
-                <Plus className="mr-1 size-4" />
+              <Button type="button" variant="secondary" className="min-h-10" onClick={addSlot}>
+                <Plus />
                 添加槽位
               </Button>
             ) : null}
@@ -1250,7 +1251,7 @@ export function AdminCollectEditPage() {
           <CardContent>
             <FormSection>
               {slotsLocked ? (
-                <p role="note" className="text-sm text-muted-foreground">
+                <p role="note" className="text-sm text-fg-muted">
                   已有人提交，不能改槽位或类型上限。
                 </p>
               ) : null}
@@ -1300,7 +1301,7 @@ export function AdminCollectEditPage() {
           <CardContent>
             <FormSection>
               {slotsLocked ? (
-                <p role="note" className="rounded-lg border border-amber-300/60 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+                <p role="note" className="rounded-lg border border-warning-line bg-warning-soft px-4 py-3 text-sm text-warning-fg">
                   已有人提交，不能改文件名格式或打包目录
                 </p>
               ) : null}
@@ -1333,7 +1334,7 @@ export function AdminCollectEditPage() {
                   <Button
                     key={token}
                     type="button"
-                    variant="outline"
+                    variant="secondary"
                     size="sm"
                     className="min-h-10 font-mono"
                     disabled={namesLocked}
@@ -1343,14 +1344,14 @@ export function AdminCollectEditPage() {
                   </Button>
                 ))}
               </div>
-              <p className="break-all rounded-md bg-muted px-3 py-2 font-mono text-xs leading-6">
-                <span className="text-muted-foreground">预览文件名 </span>
+              <p className="break-all rounded-md bg-surface-sunken px-3 py-2 font-mono text-xs">
+                <span className="text-fg-subtle">预览文件名 </span>
                 {namePreview.assigned}
                 <br />
-                <span className="text-muted-foreground">预览打包 </span>
+                <span className="text-fg-subtle">预览打包 </span>
                 {namePreview.pack}
                 <br />
-                <span className="text-muted-foreground">
+                <span className="text-fg-subtle">
                   示例 24000001 / 张三 / 实验报告 / 1 / pdf / lab.pdf
                 </span>
               </p>
@@ -1410,7 +1411,7 @@ export function AdminCollectEditPage() {
                   />
                 </FormField>
               </FormRow>
-              <label className="flex min-h-10 cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2.5">
+              <label className="flex min-h-10 cursor-pointer items-start gap-2.5 rounded-lg border border-line px-3 py-2.5">
                 <Switch
                   checked={requireCourseExamComplete}
                   disabled={!canEdit || (!selectedCourse?.hasExam && !requireCourseExamComplete)}
@@ -1423,7 +1424,7 @@ export function AdminCollectEditPage() {
                 />
                 <span className="min-w-0">
                   <span className="block text-sm font-medium">须先完成课程结业考试才能提交</span>
-                  <span className="mt-0.5 block text-xs text-muted-foreground">
+                  <span className="mt-0.5 block text-xs text-fg-subtle">
                     {selectedCourse?.hasExam
                       ? '开启后学生必须先交卷，才能上传或确认这份收集。不是每门课都要开。'
                       : '先给课程绑定结业考试后才能开启。'}
@@ -1436,17 +1437,17 @@ export function AdminCollectEditPage() {
         </div>
 
         {canEdit ? (
-          <div className="flex flex-wrap justify-end gap-2 border-t pt-4">
+          <div className="flex flex-wrap justify-end gap-2 border-t border-line pt-4">
             <Button type="button" variant="ghost" asChild className="min-h-10">
               <a href="/admin/collect">取消</a>
             </Button>
-            <Button type="submit" name="operation" value={isEdit ? 'update' : 'create'} className="min-h-10">
-              <Save className="mr-1 size-3.5" />
+            <Button type="submit" name="operation" value={isEdit ? 'update' : 'create'} variant={!isEdit || status === 'draft' ? 'secondary' : 'primary'} className="min-h-10">
+              <Save />
               保存
             </Button>
             {!isEdit || status === 'draft' ? (
-              <Button type="submit" name="operation" value="publish" className="min-h-10">
-                <FolderUp className="mr-1 size-3.5" />
+              <Button type="submit" name="operation" value="publish" variant="primary" className="min-h-10">
+                <FolderUp />
                 发布
               </Button>
             ) : null}
@@ -1458,7 +1459,7 @@ export function AdminCollectEditPage() {
           <input type="hidden" name="id" value={initial._id} />
           <input type="hidden" name="revision" value={String(initial.revision)} />
           <input type="hidden" name="operation" value="close" />
-          <Button type="submit" variant="outline" className="min-h-10">
+          <Button type="submit" variant="secondary" className="min-h-10">
             关闭
           </Button>
         </form>
@@ -1468,7 +1469,7 @@ export function AdminCollectEditPage() {
           <input type="hidden" name="id" value={initial._id} />
           <input type="hidden" name="revision" value={String(initial.revision)} />
           <input type="hidden" name="operation" value="reopen" />
-          <Button type="submit" variant="outline" className="min-h-10">
+          <Button type="submit" variant="secondary" className="min-h-10">
             重新开放
           </Button>
         </form>
@@ -1485,8 +1486,8 @@ export function AdminCollectEditPage() {
           <input type="hidden" name="id" value={initial._id} />
           <input type="hidden" name="revision" value={String(initial.revision)} />
           <input type="hidden" name="operation" value="delete" />
-          <Button type="submit" variant="destructive" className="min-h-10">
-            <Trash2 className="mr-1 size-3.5" />
+          <Button type="submit" variant="danger-soft" className="min-h-10">
+            <Trash2 />
             删除
           </Button>
         </form>
@@ -1503,8 +1504,8 @@ export function AdminCollectEditPage() {
           <input type="hidden" name="id" value={initial._id} />
           <input type="hidden" name="revision" value={String(initial.revision)} />
           <input type="hidden" name="operation" value="archive" />
-          <Button type="submit" variant="outline" className="min-h-10">
-            <Archive className="mr-1 size-3.5" />
+          <Button type="submit" variant="danger-soft" className="min-h-10">
+            <Archive />
             归档
           </Button>
         </form>
@@ -1560,9 +1561,9 @@ export function AdminCollectStatsPage() {
         </span>
       }
       actions={
-        <Button asChild variant="outline" className="min-h-10">
+        <Button asChild variant="secondary" className="min-h-10">
           <a href="/admin/collect">
-            <ArrowLeft className="mr-1 size-4" />
+            <ArrowLeft />
             返回列表
           </a>
         </Button>
@@ -1570,20 +1571,20 @@ export function AdminCollectStatsPage() {
     >
       <div
         aria-label="打包"
-        className="sticky top-0 z-10 flex max-w-full flex-wrap items-center gap-2 rounded-xl border bg-background/95 p-2 shadow-sm backdrop-blur"
+        className="sticky top-0 z-10 flex max-w-full flex-wrap items-center gap-2 rounded-lg border border-line bg-surface p-2 shadow-xs"
       >
         {data.canNudge ? (
           <form method="post" action={`/admin/collect/${data.request._id}`}>
             <input type="hidden" name="operation" value="nudge" />
-            <Button type="submit" variant="outline" className="min-h-10" disabled={data.missingCount === 0}>
-              <Bell className="mr-1 size-4" />
+            <Button type="submit" variant="secondary" className="min-h-10" disabled={data.missingCount === 0}>
+              <Bell />
               催未交
             </Button>
           </form>
         ) : null}
         {data.canPack ? (
-          <Button type="button" variant="outline" className="min-h-10" disabled={packing} onClick={() => void packDownload()}>
-            <FileDown className="mr-1 size-4" />
+          <Button type="button" variant="primary" className="min-h-10" disabled={packing} onClick={() => void packDownload()}>
+            <FileDown />
             {packing ? '打包中…' : '打包下载'}
           </Button>
         ) : null}
@@ -1596,8 +1597,8 @@ export function AdminCollectStatsPage() {
             }}
           >
             <input type="hidden" name="operation" value="delete" />
-            <Button type="submit" variant="destructive" className="min-h-10">
-              <Trash2 className="mr-1 size-4" />
+            <Button type="submit" variant="danger-soft" className="min-h-10">
+              <Trash2 />
               删除
             </Button>
           </form>
@@ -1611,43 +1612,28 @@ export function AdminCollectStatsPage() {
             }}
           >
             <input type="hidden" name="operation" value="archive" />
-            <Button type="submit" variant="outline" className="min-h-10">
-              <Archive className="mr-1 size-4" />
+            <Button type="submit" variant="danger-soft" className="min-h-10">
+              <Archive />
               归档
             </Button>
           </form>
         ) : null}
         {data.request.canEdit ? (
-          <Button asChild variant="outline" className="min-h-10">
+          <Button asChild variant="secondary" className="min-h-10">
             <a href={`/admin/collect/${data.request._id}/edit`}>编辑</a>
           </Button>
         ) : null}
       </div>
       {packError ? (
-        <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+        <p role="alert" className="rounded-lg border border-danger-line bg-danger-soft px-4 py-3 text-sm text-danger-fg">
           {packError}
         </p>
       ) : null}
 
       <div className="grid gap-4 sm:grid-cols-3">
-        <Card>
-          <CardContent>
-            <p className="text-xs text-muted-foreground">应交</p>
-            <p className="mt-1 text-2xl font-semibold">{data.dueCount}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent>
-            <p className="text-xs text-muted-foreground">已交</p>
-            <p className="mt-1 text-2xl font-semibold">{data.submittedCount}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent>
-            <p className="text-xs text-muted-foreground">未交</p>
-            <p className="mt-1 text-2xl font-semibold">{data.missingCount}</p>
-          </CardContent>
-        </Card>
+        <Stat label="应交" value={data.dueCount} />
+        <Stat label="已交" value={data.submittedCount} />
+        <Stat label="未交" value={data.missingCount} />
       </div>
 
       <Card>
@@ -1658,14 +1644,14 @@ export function AdminCollectStatsPage() {
                 <TableHead>学号</TableHead>
                 <TableHead>姓名</TableHead>
                 <TableHead>状态</TableHead>
-                <TableHead className="max-w-[16rem] min-w-0">文件</TableHead>
+                <TableHead className="max-w-64 min-w-0">文件</TableHead>
                 <TableHead>时间</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {currentRows.length === 0 && leftGroupRows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="py-12 text-center text-sm text-muted-foreground">
+                  <TableCell colSpan={5} className="py-12 text-center text-sm text-fg-muted">
                     还没有进度
                   </TableCell>
                 </TableRow>
@@ -1675,7 +1661,7 @@ export function AdminCollectStatsPage() {
               ))}
               {leftGroupRows.length > 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="bg-muted/40 text-xs font-medium text-muted-foreground">
+                  <TableCell colSpan={5} className="bg-surface-sunken text-xs font-medium text-fg-subtle">
                     已退组（已交）
                   </TableCell>
                 </TableRow>
@@ -1712,24 +1698,24 @@ function ProgressFileLink({
   const showOriginal = Boolean(file.assignedName && file.assignedName !== file.originalName);
   const others = showDuplicates ? duplicateOtherCount(file) : null;
   return (
-    <div className="max-w-[16rem] min-w-0 space-y-0.5">
+    <div className="max-w-64 min-w-0 space-y-0.5">
       <div className="flex flex-wrap items-center gap-1.5">
         <a
           href={file.url}
-          className={muted ? 'break-all text-xs text-muted-foreground hover:underline' : 'break-all text-xs text-primary hover:underline'}
+          className={muted ? 'min-w-0 break-all text-xs text-fg-subtle hover:underline' : 'min-w-0 break-all text-xs text-brand-fg hover:underline'}
           rel="noopener"
         >
           {prefix}
           {file.slotTitle} / {primary}
-          <span className={muted ? 'ml-1' : 'ml-1 text-muted-foreground'}>({formatSize(file.size)})</span>
+          <span className={muted ? 'ml-1' : 'ml-1 text-fg-subtle'}>({formatSize(file.size)})</span>
         </a>
         {others !== null && others > 0 ? (
-          <Badge variant="outline" title={file.duplicateStudentIds?.join('、') || undefined}>
+          <Badge tone="warning" title={file.duplicateStudentIds?.join('、') || undefined}>
             与 {others} 人相同
           </Badge>
         ) : null}
       </div>
-      {showOriginal ? <p className="break-all text-[11px] text-muted-foreground">原名 {file.originalName}</p> : null}
+      {showOriginal ? <p className="break-all text-2xs text-fg-subtle">原名 {file.originalName}</p> : null}
     </div>
   );
 }
@@ -1741,14 +1727,14 @@ function ProgressTableRow({ row }: { row: ProgressRow }) {
       <TableCell className="text-sm">{row.realName || '—'}</TableCell>
       <TableCell>
         {row.status === 'submitted' ? (
-          <Badge className="bg-emerald-500 text-white hover:bg-emerald-500/90">已交文件</Badge>
+          <Badge tone="success">已交文件</Badge>
         ) : (
-          <Badge variant="outline">未交文件</Badge>
+          <Badge tone="warning">未交文件</Badge>
         )}
       </TableCell>
-      <TableCell className="max-w-[16rem] min-w-0 break-all">
+      <TableCell className="max-w-64 min-w-0 break-all">
         {row.files.length === 0 && row.history.length === 0 ? (
-          <span className="text-xs text-muted-foreground">—</span>
+          <span className="text-xs text-fg-subtle">—</span>
         ) : (
           <div className="space-y-1">
             {row.files.map((file) => (

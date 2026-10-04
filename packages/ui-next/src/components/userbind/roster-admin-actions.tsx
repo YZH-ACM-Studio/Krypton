@@ -94,14 +94,14 @@ function EditStudentDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="w-full sm:w-[440px]" onClose={onClose}>
+      <DialogContent size="md" onClose={onClose}>
         <DialogHeader>
           <DialogTitle>编辑学生记录</DialogTitle>
         </DialogHeader>
         <form
           method="post"
           action="/admin/userbind/students"
-          className="flex flex-col"
+          className="flex min-w-0 flex-col"
           onSubmit={(event) => {
             const form = event.currentTarget;
             const yearInput = form.elements.namedItem('enrollmentYear');
@@ -118,12 +118,12 @@ function EditStudentDialog({
             }
           }}
         >
-          <DialogBody className="space-y-4 p-5">
+          <DialogBody className="min-w-0 space-y-5">
             <input type="hidden" name="operation" value="updateStudent" />
             <input type="hidden" name="studentRecordId" value={student._id} />
             <input type="hidden" name="returnTo" value={returnTo} />
-            <p className="text-sm text-muted-foreground">
-              学号 <span className="font-mono text-foreground">{student.studentId}</span> 不可在此修改。
+            <p className="min-w-0 text-sm break-all text-fg-muted">
+              学号 <span className="font-mono text-fg">{student.studentId}</span> 不可在此修改。
             </p>
             <FormField label="姓名" required htmlFor={`edit-realName-${student._id}`}>
               <Input id={`edit-realName-${student._id}`} name="realName" defaultValue={student.realName} required maxLength={32} />
@@ -138,11 +138,11 @@ function EditStudentDialog({
               />
             </FormField>
           </DialogBody>
-          <DialogFooter className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3 flex-row">
-            <Button type="button" variant="ghost" onClick={onClose}>
+          <DialogFooter>
+            <Button type="button" variant="secondary" onClick={onClose}>
               取消
             </Button>
-            <Button type="submit">保存</Button>
+            <Button type="submit" variant="primary">保存</Button>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -176,12 +176,12 @@ export function RenameEntityDialog({
         else setName(currentName);
       }}
     >
-      <DialogContent className="w-full sm:w-[440px]" onClose={onClose}>
+      <DialogContent size="md" onClose={onClose}>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
         <form method="post" action={action} className="flex flex-col">
-          <DialogBody className="space-y-4 p-5">
+          <DialogBody className="space-y-5">
             <input type="hidden" name="operation" value="rename" />
             {Object.entries(hidden).map(([key, value]) => (
               <input key={key} type="hidden" name={key} value={value} />
@@ -190,11 +190,11 @@ export function RenameEntityDialog({
               <Input id="rename-entity-name" name="name" value={name} onChange={(e) => setName(e.target.value)} required autoFocus />
             </FormField>
           </DialogBody>
-          <DialogFooter className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3 flex-row">
-            <Button type="button" variant="ghost" onClick={onClose}>
+          <DialogFooter>
+            <Button type="button" variant="secondary" onClick={onClose}>
               取消
             </Button>
-            <Button type="submit" disabled={!name.trim()}>
+            <Button type="submit" variant="primary" disabled={!name.trim()}>
               保存
             </Button>
           </DialogFooter>

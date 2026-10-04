@@ -6,18 +6,19 @@
 import { useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { FormField, FormRow } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
+import { Page, PageHeader } from '@/components/ui/page';
+import { Panel } from '@/components/ui/panel';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Textarea } from '@/components/ui/textarea';
 import { useBootstrap } from '@/lib/bootstrap';
 
 const LIST_PATH = '/user-groups';
 const REMOVE_FORM_ID = 'teacher-group-remove-members';
-const CONTROL_CLASS =
-  'flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
+const SELECT_CLASS = 'h-(--control-md) w-full min-w-0 rounded-md border border-line-strong bg-surface px-2.5 text-sm text-fg shadow-xs hover:border-fg-disabled focus-visible:border-brand focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40';
 
 interface TeacherGroupSchool {
   _id: string;
@@ -230,6 +231,11 @@ function boundLabel(bound: boolean): string {
   return bound ? '已绑定' : '未绑定';
 }
 
+function archiveBadge(archived: boolean) {
+  if (archived) return <Badge tone="neutral" variant="outline">已归档</Badge>;
+  return <Badge tone="neutral">未归档</Badge>;
+}
+
 function ConfirmedPostForm({
   action,
   operation,
@@ -238,8 +244,8 @@ function ConfirmedPostForm({
   message,
   triggerLabel,
   confirmLabel,
-  triggerVariant = 'destructive',
-  size = 'default',
+  triggerVariant = 'danger-soft',
+  size = 'md',
 }: {
   action: string;
   operation: string;
@@ -248,8 +254,8 @@ function ConfirmedPostForm({
   message: string;
   triggerLabel: string;
   confirmLabel: string;
-  triggerVariant?: 'destructive' | 'outline';
-  size?: 'default' | 'sm';
+  triggerVariant?: 'danger-soft' | 'secondary';
+  size?: 'md' | 'sm';
 }) {
   const formRef = useRef<HTMLFormElement>(null);
   const [open, setOpen] = useState(false);
@@ -279,12 +285,12 @@ function ConfirmedPostForm({
             <DialogDescription>{message}</DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+            <Button type="button" variant="secondary" onClick={() => setOpen(false)}>
               取消
             </Button>
             <Button
               type="button"
-              variant="destructive"
+              variant="danger"
               onClick={() => {
                 const form = formRef.current;
                 if (!form) throw new Error('确认提交时找不到表单');
@@ -304,25 +310,25 @@ function ConfirmedPostForm({
 function ImportFailureTable({ label, rows }: { label: string; rows: readonly TeacherGroupImportRow[] }) {
   return (
     <div className="space-y-2">
-      <h3 className="text-sm font-semibold">{label}</h3>
+      <h3 className="text-sm font-semibold text-fg">{label}</h3>
       <Table aria-label={label}>
         <TableHeader>
           <TableRow>
-            <TableHead className="pl-5">学号</TableHead>
+            <TableHead>学号</TableHead>
             <TableHead>原因</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {rows.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={2} className="py-4 text-center text-sm text-muted-foreground">
+              <TableCell colSpan={2} className="py-4 text-center text-sm text-fg-muted">
                 无
               </TableCell>
             </TableRow>
           ) : (
             rows.map((row, index) => (
               <TableRow key={`${index}:${row.studentId}:${row.reason}`}>
-                <TableCell className="pl-5 font-mono text-sm">{row.studentId}</TableCell>
+                <TableCell className="font-mono text-sm">{row.studentId}</TableCell>
                 <TableCell>{row.reason}</TableCell>
               </TableRow>
             ))
@@ -336,13 +342,13 @@ function ImportFailureTable({ label, rows }: { label: string; rows: readonly Tea
 function TeacherGroupImportReportView({ report }: { report: TeacherGroupImportReport }) {
   return (
     <div className="space-y-4">
-      <h3 className="text-sm font-semibold">导入结果</h3>
+      <h3 className="text-sm font-semibold text-fg">导入结果</h3>
       <ul className="grid gap-2 text-sm sm:grid-cols-2">
-        <li>新建 {report.created}</li>
-        <li>加入已有 {report.attached}</li>
-        <li>已是成员 {report.alreadyMember}</li>
-        <li>自动绑定 {report.autoBound}</li>
-        <li>已经绑定 {report.alreadyBound}</li>
+        <li className="tabular">新建 {report.created}</li>
+        <li className="tabular">加入已有 {report.attached}</li>
+        <li className="tabular">已是成员 {report.alreadyMember}</li>
+        <li className="tabular">自动绑定 {report.autoBound}</li>
+        <li className="tabular">已经绑定 {report.alreadyBound}</li>
       </ul>
       <ImportFailureTable label="导入失败" rows={report.failed} />
       <ImportFailureTable label="自动绑定跳过" rows={report.autoBindSkipped} />
@@ -356,7 +362,7 @@ function ArchiveGroupForm({ archived, action }: { archived: boolean; action: str
   return (
     <form method="post" action={action}>
       <input type="hidden" name="operation" value={operation} />
-      <Button type="submit" variant="outline">
+      <Button type="submit" variant="secondary">
         {label}
       </Button>
     </form>
@@ -368,86 +374,75 @@ export function TeacherUserGroupsPage() {
   const payload = readTeacherGroupListPayload(data);
   if (payload.noScopeMessage !== null && payload.noScopeMessage.length > 0) {
     return (
-      <main className="mx-auto w-full min-w-0 max-w-5xl px-4 py-8">
-        <p>{payload.noScopeMessage}</p>
-      </main>
+      <Page width="wide">
+        <p className="text-sm text-fg">{payload.noScopeMessage}</p>
+      </Page>
     );
   }
   return (
-    <main className="mx-auto w-full min-w-0 max-w-5xl space-y-6 px-4 py-8">
-      <header>
-        <h1 className="text-2xl font-semibold tracking-tight">我的用户组</h1>
-        <p className="mt-1 text-sm text-muted-foreground">在你的学校范围内新建用户组，并维护组里的学生。</p>
-      </header>
-      <Card>
-        <CardHeader>
-          <h2 className="text-base font-semibold">新建用户组</h2>
-        </CardHeader>
-        <CardContent>
-          <form method="post" action={LIST_PATH} className="space-y-4">
-            <input type="hidden" name="operation" value="create" />
-            <FormRow columns={2}>
-              <FormField label="学校" htmlFor="teacher-group-school">
-                <select id="teacher-group-school" name="schoolId" required defaultValue="" className={CONTROL_CLASS}>
-                  <option value="" disabled>
-                    选择学校
+    <Page width="wide">
+      <PageHeader title="我的用户组" description="在你的学校范围内新建用户组，并维护组里的学生。" />
+      <Panel title="新建用户组">
+        <form method="post" action={LIST_PATH} className="space-y-5">
+          <input type="hidden" name="operation" value="create" />
+          <FormRow columns={2}>
+            <FormField label="学校" htmlFor="teacher-group-school">
+              {/* ds-allow DS005: SimpleSelect 不渲染原生 option，这张表单必须把 disabled 的「选择学校」和 name=schoolId 落在同一个 select 上。 */}
+              <select id="teacher-group-school" name="schoolId" required defaultValue="" className={SELECT_CLASS}>
+                <option value="" disabled>
+                  选择学校
+                </option>
+                {payload.schools.map((school) => (
+                  <option key={school._id} value={school._id}>
+                    {school.name}
                   </option>
-                  {payload.schools.map((school) => (
-                    <option key={school._id} value={school._id}>
-                      {school.name}
-                    </option>
-                  ))}
-                </select>
-              </FormField>
-              <FormField label="用户组名称" htmlFor="teacher-group-name">
-                <Input id="teacher-group-name" name="name" required placeholder="如 计网2025春-1班" />
-              </FormField>
-            </FormRow>
-            <div className="flex justify-end">
-              <Button type="submit">创建用户组</Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardContent className="p-0">
-          <Table aria-label="我的用户组">
-            <TableHeader>
+                ))}
+              </select>
+            </FormField>
+            <FormField label="用户组名称" htmlFor="teacher-group-name">
+              <Input id="teacher-group-name" name="name" required placeholder="如 计网2025春-1班" />
+            </FormField>
+          </FormRow>
+          <div className="flex justify-end">
+            <Button type="submit" variant="primary">创建用户组</Button>
+          </div>
+        </form>
+      </Panel>
+      <Panel flush>
+        <Table aria-label="我的用户组">
+          <TableHeader>
+            <TableRow>
+              <TableHead>组名</TableHead>
+              <TableHead>学校</TableHead>
+              <TableHead>成员数</TableHead>
+              <TableHead>是否已归档</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {payload.groups.length === 0 ? (
               <TableRow>
-                <TableHead className="pl-5">组名</TableHead>
-                <TableHead>学校</TableHead>
-                <TableHead>成员数</TableHead>
-                <TableHead>是否已归档</TableHead>
+                <TableCell colSpan={4} className="py-8 text-center text-sm text-fg-muted">
+                  还没有用户组。
+                </TableCell>
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {payload.groups.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={4} className="py-8 text-center text-sm text-muted-foreground">
-                    还没有用户组。
+            ) : (
+              payload.groups.map((group) => (
+                <TableRow key={group._id}>
+                  <TableCell className="font-medium">
+                    <a href={teacherGroupPath(group._id)} className="text-fg hover:text-brand-fg">
+                      {group.name}
+                    </a>
                   </TableCell>
+                  <TableCell>{group.schoolName}</TableCell>
+                  <TableCell className="tabular">{group.memberCount}</TableCell>
+                  <TableCell>{archiveBadge(group.archived)}</TableCell>
                 </TableRow>
-              ) : (
-                payload.groups.map((group) => (
-                  <TableRow key={group._id}>
-                    <TableCell className="pl-5 font-medium">
-                      <a href={teacherGroupPath(group._id)} className="hover:text-primary">
-                        {group.name}
-                      </a>
-                    </TableCell>
-                    <TableCell>{group.schoolName}</TableCell>
-                    <TableCell>{group.memberCount}</TableCell>
-                    <TableCell>
-                      <Badge variant={group.archived ? 'outline' : 'secondary'}>{group.archived ? '已归档' : '未归档'}</Badge>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-    </main>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </Panel>
+    </Page>
   );
 }
 
@@ -456,29 +451,26 @@ export function TeacherUserGroupDetailPage() {
   const payload = readTeacherGroupDetailPayload(data);
   const action = teacherGroupPath(payload.group._id);
   return (
-    <main className="mx-auto w-full min-w-0 max-w-5xl space-y-6 px-4 py-8">
-      <header>
-        <a href={LIST_PATH} className="text-sm text-muted-foreground hover:text-foreground">
-          返回我的用户组
-        </a>
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-          <h1 className="text-2xl font-semibold tracking-tight">{payload.group.name}</h1>
-          <Badge variant={payload.group.archived ? 'outline' : 'secondary'}>{payload.group.archived ? '已归档' : '未归档'}</Badge>
-        </div>
-        <p className="mt-1 text-sm text-muted-foreground">{payload.group.schoolName}</p>
-      </header>
+    <Page width="wide">
+      <PageHeader
+        title={payload.group.name}
+        description={payload.group.schoolName}
+        breadcrumb={(
+          <a href={LIST_PATH} className="text-sm text-fg-muted hover:text-fg">
+            返回我的用户组
+          </a>
+        )}
+        meta={archiveBadge(payload.group.archived)}
+      />
 
-      <Card>
-        <CardHeader>
-          <h2 className="text-base font-semibold">基本信息</h2>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <form method="post" action={action} className="space-y-3">
+      <Panel title="基本信息">
+        <div className="space-y-5">
+          <form method="post" action={action} className="space-y-5">
             <input type="hidden" name="operation" value="rename" />
             <FormField label="用户组名称" htmlFor="teacher-group-rename">
               <Input id="teacher-group-rename" name="name" required defaultValue={payload.group.name} />
             </FormField>
-            <Button type="submit" variant="outline">
+            <Button type="submit" variant="secondary">
               保存名称
             </Button>
           </form>
@@ -493,12 +485,12 @@ export function TeacherUserGroupDetailPage() {
               confirmLabel="确认删除用户组"
             />
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </Panel>
 
-      <Card>
-        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3 space-y-0">
-          <h2 className="text-base font-semibold">成员（{payload.members.length}）</h2>
+      <Panel
+        title={`成员（${payload.members.length}）`}
+        actions={(
           <ConfirmedPostForm
             action={action}
             operation="clearMembers"
@@ -507,18 +499,19 @@ export function TeacherUserGroupDetailPage() {
             triggerLabel="清空成员"
             confirmLabel="确认清空成员"
           />
-        </CardHeader>
-        <CardContent className="space-y-3">
+        )}
+      >
+        <div className="space-y-4">
           <form id={REMOVE_FORM_ID} method="post" action={action}>
             <input type="hidden" name="operation" value="remove" />
-            <Button type="submit" variant="outline">
+            <Button type="submit" variant="secondary">
               移出选中成员
             </Button>
           </form>
           <Table aria-label="成员">
             <TableHeader>
               <TableRow>
-                <TableHead className="pl-5">选择</TableHead>
+                <TableHead>选择</TableHead>
                 <TableHead>学号</TableHead>
                 <TableHead>姓名</TableHead>
                 <TableHead>绑定</TableHead>
@@ -528,14 +521,14 @@ export function TeacherUserGroupDetailPage() {
             <TableBody>
               {payload.members.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="py-6 text-center text-sm text-muted-foreground">
+                  <TableCell colSpan={5} className="py-6 text-center text-sm text-fg-muted">
                     这个组还没有成员。
                   </TableCell>
                 </TableRow>
               ) : (
                 payload.members.map((member) => (
                   <TableRow key={member._id}>
-                    <TableCell className="pl-5">
+                    <TableCell>
                       <Checkbox
                         size="sm"
                         name="studentRecordIds"
@@ -566,31 +559,28 @@ export function TeacherUserGroupDetailPage() {
               )}
             </TableBody>
           </Table>
-        </CardContent>
-      </Card>
+        </div>
+      </Panel>
 
-      <Card>
-        <CardHeader>
-          <h2 className="text-base font-semibold">添加成员</h2>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <form method="get" action={action} className="flex flex-col gap-3 sm:flex-row sm:items-end">
+      <Panel title="添加成员">
+        <div className="space-y-5">
+          <form method="get" action={action} className="flex flex-col gap-2 sm:flex-row sm:items-end">
             <FormField label="搜索学生" htmlFor="teacher-group-member-query" className="min-w-0 flex-1">
               <Input id="teacher-group-member-query" name="q" defaultValue={payload.q} placeholder="学号或姓名" />
             </FormField>
-            <Button type="submit" variant="outline">
+            <Button type="submit" variant="secondary">
               搜索
             </Button>
           </form>
-          <form method="post" action={action} className="space-y-3">
+          <form method="post" action={action} className="space-y-4">
             <input type="hidden" name="operation" value="add" />
             {payload.candidates.length === 0 ? (
-              <p className="text-sm text-muted-foreground">没有可加入的学生。</p>
+              <p className="text-sm text-fg-muted">没有可加入的学生。</p>
             ) : (
               <Table aria-label="可加入的学生">
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="pl-5">选择</TableHead>
+                    <TableHead>选择</TableHead>
                     <TableHead>学号</TableHead>
                     <TableHead>姓名</TableHead>
                     <TableHead>绑定</TableHead>
@@ -599,7 +589,7 @@ export function TeacherUserGroupDetailPage() {
                 <TableBody>
                   {payload.candidates.map((candidate) => (
                     <TableRow key={candidate._id}>
-                      <TableCell className="pl-5">
+                      <TableCell>
                         <Checkbox
                           size="sm"
                           name="studentRecordIds"
@@ -615,33 +605,30 @@ export function TeacherUserGroupDetailPage() {
                 </TableBody>
               </Table>
             )}
-            <Button type="submit">加入选中学生</Button>
+            <Button type="submit" variant="primary">加入选中学生</Button>
           </form>
-        </CardContent>
-      </Card>
+        </div>
+      </Panel>
 
-      <Card>
-        <CardHeader>
-          <h2 className="text-base font-semibold">批量导入</h2>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <form method="post" action={action} className="space-y-3">
+      <Panel title="批量导入">
+        <div className="space-y-5">
+          <form method="post" action={action} className="space-y-5">
             <input type="hidden" name="operation" value="importText" />
             <FormField label="学号和姓名" htmlFor="teacher-group-import-text" hint="每行一条，学号和姓名用空格分开。">
-              <textarea
+              <Textarea
                 id="teacher-group-import-text"
                 name="text"
                 rows={8}
                 spellCheck={false}
                 placeholder="20240001 张三"
-                className="w-full rounded-md border bg-background p-3 font-mono text-sm"
+                className="font-mono"
               />
             </FormField>
-            <Button type="submit">导入</Button>
+            <Button type="submit" variant="secondary">导入</Button>
           </form>
           {payload.importReport !== null ? <TeacherGroupImportReportView report={payload.importReport} /> : null}
-        </CardContent>
-      </Card>
-    </main>
+        </div>
+      </Panel>
+    </Page>
   );
 }

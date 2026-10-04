@@ -17,15 +17,19 @@
  *   - no duplicate studentId within the batch
  */
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { CheckCircle2, FileText, Search, X, type LucideIcon } from 'lucide-react';
+import { CheckCircle2, FileText, Search, X } from 'lucide-react';
 import { cn } from '@/lib/cn';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { Alert } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { FormField } from '@/components/ui/form';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import { DataTable } from '@/components/ui/data-table';
+import { FormField } from '@/components/ui/form';
+import { Input } from '@/components/ui/input';
+import { MiniTabs } from '@/components/ui/mini-tabs';
+import { Panel } from '@/components/ui/panel';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Textarea } from '@/components/ui/textarea';
 
 const STUDENT_ID_RE = /^[a-zA-Z0-9._-]{1,64}$/;
 const REAL_NAME_MAX = 32;
@@ -152,39 +156,33 @@ export function RosterImporter({
   const clearSelection = () => setSelectedIds(new Set());
 
   return (
-    <Card className={className}>
-      {(title || description) && (
-        <CardHeader>
-          <CardTitle className="text-base">{title}</CardTitle>
-          {description && <p className="text-xs text-muted-foreground">{description}</p>}
-        </CardHeader>
-      )}
-      <CardContent className="space-y-4">
+    <Panel className={className} title={title} description={description}>
+      <div className="space-y-4">
         {enableSearch && (
-          <div className="flex max-w-full flex-wrap gap-1 overflow-x-auto rounded-md border bg-muted/30 p-1">
-            <TabBtn active={mode === 'text'} onClick={() => setMode('text')} icon={FileText}>
-              名单导入
-            </TabBtn>
-            <TabBtn active={mode === 'search'} onClick={() => setMode('search')} icon={Search}>
-              搜索导入
-            </TabBtn>
-          </div>
+          <MiniTabs
+            value={mode}
+            onValueChange={setMode}
+            items={[
+              { value: 'text', label: '名单导入', icon: FileText },
+              { value: 'search', label: '搜索导入', icon: Search },
+            ]}
+          />
         )}
 
         {mode === 'text' && (
-          <form method="post" action={action} className="space-y-3">
+          <form method="post" action={action} className="space-y-4">
             {Object.entries(hiddenFields).map(([k, v]) => (
               <input key={k} type="hidden" name={k} value={v} />
             ))}
             <FormField label="学生名单" required hint="每行一条 学号 姓名 — 学号 1-64 位字母/数字/._-；姓名最多 32 字符。以 # 开头的行会被忽略。">
-              <textarea
+              <Textarea
                 name="text"
                 rows={8}
                 required
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 spellCheck={false}
-                className="w-full rounded-md border bg-background p-3 font-mono text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                className="font-mono"
                 placeholder={'202301001 张三\n202301002 李四'}
               />
             </FormField>
@@ -192,18 +190,18 @@ export function RosterImporter({
             {parsedRows.length > 0 && <PreviewTable rows={parsedRows} />}
 
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-xs text-muted-foreground">
-                {validCount > 0 && <span className="text-emerald-700 dark:text-emerald-400">{validCount} 行有效</span>}
+              <p className="text-xs text-fg-subtle">
+                {validCount > 0 && <span className="text-success-fg"><span className="tabular">{validCount}</span> 行有效</span>}
                 {validCount > 0 && invalidCount > 0 && '；'}
-                {invalidCount > 0 && <span className="text-rose-700 dark:text-rose-400">{invalidCount} 行无效</span>}
+                {invalidCount > 0 && <span className="text-danger-fg"><span className="tabular">{invalidCount}</span> 行无效</span>}
                 {parsedRows.length === 0 && '暂无输入'}
                 {checked && parsedRows.length > 0 && ' · 已检查'}
               </p>
               <div className="flex flex-wrap items-center gap-2">
-                <Button type="button" variant="outline" disabled={parsedRows.length === 0} onClick={() => setChecked(true)}>
+                <Button type="button" variant="secondary" disabled={parsedRows.length === 0} onClick={() => setChecked(true)}>
                   检查名单
                 </Button>
-                <Button type="submit" disabled={validCount === 0}>
+                <Button type="submit" variant="primary" disabled={validCount === 0}>
                   {submitLabel}
                 </Button>
               </div>
@@ -212,35 +210,35 @@ export function RosterImporter({
         )}
 
         {mode === 'search' && enableSearch && (
-          <div className="space-y-3">
+          <div className="space-y-4">
             {/* Search uses GET to the same page with q= to populate searchResults. */}
             <form method="get" action={searchUrl || action} className="flex flex-wrap gap-2">
               {Object.entries(searchHiddenFields).map(([k, v]) => (
                 <input key={k} type="hidden" name={k} value={v} />
               ))}
-              <Input name={searchParamName} placeholder="搜索学号或姓名" defaultValue={searchQuery} />
-              <Button type="submit" variant="outline" className="gap-1">
-                <Search className="size-4" />
+              <Input name={searchParamName} placeholder="搜索学号或姓名" defaultValue={searchQuery} className="min-w-0 flex-1" />
+              <Button type="submit" variant="secondary">
+                <Search />
                 搜索
               </Button>
             </form>
 
             {searchQuery && (
-              <p className="text-xs text-muted-foreground">
-                关键词「{searchQuery}」找到 {searchResults.length} 名学生
+              <p className="text-xs text-fg-subtle">
+                关键词「{searchQuery}」找到 <span className="tabular">{searchResults.length}</span> 名学生
                 {searchResultHint && <>（{searchResultHint}）</>}
                 {searchResults.length > 0 && (
                   <>
                     {' · '}
-                    <button type="button" className="underline" onClick={selectAll}>
+                    <Button type="button" variant="link" size="sm" onClick={selectAll}>
                       全选
-                    </button>
+                    </Button>
                     {selectedIds.size > 0 && (
                       <>
                         {' · '}
-                        <button type="button" className="underline" onClick={clearSelection}>
+                        <Button type="button" variant="link" size="sm" onClick={clearSelection}>
                           清除选择
-                        </button>
+                        </Button>
                       </>
                     )}
                   </>
@@ -249,29 +247,32 @@ export function RosterImporter({
             )}
 
             {searchResults.length > 0 && (
-              <ScrollArea className="max-h-64 rounded-md border bg-muted/20" viewportClassName="space-y-1 p-2">
-                {searchResults.map((s) => (
-                  <label
-                    key={s._id}
-                    className={cn(
-                      'flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm transition-colors',
-                      selectedIds.has(s._id) ? 'bg-primary/10' : 'hover:bg-muted/60',
-                    )}
-                  >
-                    <Checkbox checked={selectedIds.has(s._id)} onChange={() => toggleSelect(s._id)} />
-                    <span className="flex-1 font-mono">{s.studentId}</span>
-                    <span className="text-foreground">{s.realName}</span>
-                    {s.boundUserId && (
-                      <Badge variant="outline" className="text-[10px]">
-                        已绑定 UID {s.boundUserId}
-                      </Badge>
-                    )}
-                  </label>
-                ))}
+              <ScrollArea viewportLayout="block" className="max-h-64 rounded-md border border-line bg-surface-sunken">
+                <ul className="w-full min-w-0 space-y-1 p-2">
+                  {searchResults.map((s) => (
+                    <li key={s._id} className="min-w-0">
+                      <label
+                        className={cn(
+                          'flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm',
+                          selectedIds.has(s._id) ? 'bg-brand-soft/60' : 'hover:bg-surface-hover',
+                        )}
+                      >
+                        <Checkbox checked={selectedIds.has(s._id)} onChange={() => toggleSelect(s._id)} />
+                        <span className="min-w-0 flex-1 truncate font-mono">{s.studentId}</span>
+                        <span className="min-w-0 flex-1 truncate text-fg">{s.realName}</span>
+                        {s.boundUserId && (
+                          <Badge tone="neutral" variant="outline" size="sm">
+                            已绑定 UID {s.boundUserId}
+                          </Badge>
+                        )}
+                      </label>
+                    </li>
+                  ))}
+                </ul>
               </ScrollArea>
             )}
 
-            <form method="post" action={action} className="space-y-3">
+            <form method="post" action={action} className="space-y-4">
               {Object.entries(hiddenFields).map(([k, v]) => (
                 <input key={k} type="hidden" name={k} value={v} />
               ))}
@@ -279,69 +280,66 @@ export function RosterImporter({
                 Array.from(selectedIds).map((id) => <input key={id} type="hidden" name={searchSelectFieldName} value={String(id)} />)}
 
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-xs text-muted-foreground">{selectedIds.size > 0 ? `已选 ${selectedIds.size} 人` : '从结果中勾选要添加的学生'}</p>
-                <Button type="submit" disabled={selectedIds.size === 0}>
+                <p className="text-xs text-fg-subtle">{selectedIds.size > 0 ? <>已选 <span className="tabular">{selectedIds.size}</span> 人</> : '从结果中勾选要添加的学生'}</p>
+                <Button type="submit" variant="primary" disabled={selectedIds.size === 0}>
                   {submitLabel}
                 </Button>
               </div>
             </form>
           </div>
         )}
-      </CardContent>
-    </Card>
-  );
-}
-
-function TabBtn({ active, onClick, icon: Icon, children }: { active: boolean; onClick: () => void; icon: LucideIcon; children: ReactNode }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        'flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition-colors',
-        active ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
-      )}
-    >
-      <Icon className="size-3.5" />
-      {children}
-    </button>
+      </div>
+    </Panel>
   );
 }
 
 function PreviewTable({ rows }: { rows: ParsedRow[] }) {
   if (rows.length === 0) return null;
   return (
-    <ScrollArea className="max-h-56 rounded-md border bg-card" orientation="both">
-      <table className="w-full min-w-[32rem] text-xs">
-        <thead className="sticky top-0 bg-muted/60 text-muted-foreground">
-          <tr>
-            <th className="px-2 py-1.5 text-left">行</th>
-            <th className="px-2 py-1.5 text-left">学号</th>
-            <th className="px-2 py-1.5 text-left">姓名</th>
-            <th className="px-2 py-1.5 text-left">状态</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.line} className={cn('border-t border-border/50', r.status === 'ok' ? 'bg-background' : 'bg-rose-500/5')}>
-              <td className="px-2 py-1 font-mono text-muted-foreground">{r.line}</td>
-              <td className="px-2 py-1 font-mono">{r.studentId || '—'}</td>
-              <td className="px-2 py-1">{r.realName || '—'}</td>
-              <td className="px-2 py-1">
-                {r.status === 'ok' ? (
-                  <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400">
-                    <CheckCircle2 className="size-3" /> 有效
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-1 text-rose-700 dark:text-rose-400" title={r.reason}>
-                    <X className="size-3" /> {r.reason}
-                  </span>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <ScrollArea
+      orientation="both"
+      viewportLayout="block"
+      className="max-h-56 rounded-md border border-line [&_tr:has(.invalid)]:bg-danger-soft [&_[data-slot=data-table]>div]:overflow-visible"
+    >
+      <DataTable
+        mobile="scroll"
+        stickyHeader
+        rows={rows}
+        rowKey={(row) => String(row.line)}
+        columns={[
+          {
+            key: 'line',
+            header: '行',
+            width: '4rem',
+            cell: (row) => <span className="font-mono text-fg-subtle tabular">{row.line}</span>,
+          },
+          {
+            key: 'studentId',
+            header: '学号',
+            cell: (row) => <span className="font-mono">{row.studentId || '—'}</span>,
+          },
+          {
+            key: 'realName',
+            header: '姓名',
+            cell: (row) => row.realName || '—',
+          },
+          {
+            key: 'status',
+            header: '状态',
+            cell: (row) => (row.status === 'ok' ? (
+              <span className="inline-flex items-center gap-1.5 text-success-fg">
+                <CheckCircle2 className="size-3.5 shrink-0" />
+                有效
+              </span>
+            ) : (
+              <span className="invalid inline-flex min-w-0 items-center gap-1.5 text-danger-fg" title={row.reason}>
+                <X className="size-3.5 shrink-0" />
+                {row.reason}
+              </span>
+            )),
+          },
+        ]}
+      />
     </ScrollArea>
   );
 }
@@ -375,32 +373,27 @@ export function ImportResultPanel({ report }: { report: ImportResult }) {
       ? `新建 ${report.created || 0} · 加入已有 ${report.attached || 0} · 已是成员 ${report.alreadyMember || 0} · 已绑定 ${report.alreadyBound || 0} · 本次新绑定 ${report.autoBound || 0}`
       : `成功插入 ${report.inserted || 0} 条 · 已绑定 ${report.alreadyBound || 0} 人 · 本次新绑定 ${report.autoBound || 0} 人`;
   return (
-    <Card className="border-emerald-500/30 bg-emerald-500/5">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base text-emerald-700 dark:text-emerald-300">
-          <CheckCircle2 className="size-4" /> 导入结果
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-2 text-sm">
-        <p className="font-medium">{ok}</p>
+    <Alert tone="success" title="导入结果">
+      <div className="min-w-0 space-y-2">
+        <p className="font-medium text-fg">{ok}</p>
         {failed.length > 0 && (
-          <details className="rounded-md border border-rose-500/30 bg-rose-500/5 p-3">
-            <summary className="cursor-pointer text-xs font-medium text-rose-700 dark:text-rose-300">{failed.length} 条未导入（点击展开）</summary>
-            <ul className="mt-2 space-y-0.5 font-mono text-[11px]">
+          <details className="min-w-0 rounded-md border border-danger-line bg-danger-soft p-3">
+            <summary className="cursor-pointer text-xs font-medium text-danger-fg">{failed.length} 条未导入（点击展开）</summary>
+            <ul className="mt-2 min-w-0 space-y-0.5 font-mono text-2xs break-all">
               {failed.map((d, i) => (
                 <li key={i}>
-                  <span className="text-rose-700 dark:text-rose-300">{d.studentId || '(空)'}</span>: {d.reason}
+                  <span className="text-danger-fg">{d.studentId || '(空)'}</span>: {d.reason}
                 </li>
               ))}
             </ul>
           </details>
         )}
         {report.preflightInvalid && report.preflightInvalid.length > 0 && (
-          <details className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3">
-            <summary className="cursor-pointer text-xs font-medium text-amber-700 dark:text-amber-300">
+          <details className="min-w-0 rounded-md border border-warning-line bg-warning-soft p-3">
+            <summary className="cursor-pointer text-xs font-medium text-warning-fg">
               {report.preflightInvalid.length} 行未通过格式校验
             </summary>
-            <ul className="mt-2 space-y-0.5 font-mono text-[11px]">
+            <ul className="mt-2 min-w-0 space-y-0.5 font-mono text-2xs break-all">
               {report.preflightInvalid.map((p, i) => (
                 <li key={i}>
                   第 {p.line} 行: {p.studentId || '(空)'} — {p.reason}
@@ -410,11 +403,11 @@ export function ImportResultPanel({ report }: { report: ImportResult }) {
           </details>
         )}
         {report.autoBindSkipped && report.autoBindSkipped.length > 0 && (
-          <details className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3">
-            <summary className="cursor-pointer text-xs font-medium text-amber-700 dark:text-amber-300">
+          <details className="min-w-0 rounded-md border border-warning-line bg-warning-soft p-3">
+            <summary className="cursor-pointer text-xs font-medium text-warning-fg">
               {report.autoBindSkipped.length} 人未自动绑定
             </summary>
-            <ul className="mt-2 space-y-0.5 font-mono text-[11px]">
+            <ul className="mt-2 min-w-0 space-y-0.5 font-mono text-2xs break-all">
               {report.autoBindSkipped.map((p, i) => (
                 <li key={i}>
                   {p.studentId || '(空)'}: {p.reason}
@@ -423,7 +416,7 @@ export function ImportResultPanel({ report }: { report: ImportResult }) {
             </ul>
           </details>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </Alert>
   );
 }

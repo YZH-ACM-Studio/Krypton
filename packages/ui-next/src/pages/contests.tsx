@@ -408,7 +408,7 @@ export function ContestsPage() {
     <Page width="wide">
       <PageHeader
         title="比赛"
-        description={`${tdocs.length} 场比赛`}
+        description={tpcount <= 1 ? `${tdocs.length} 场比赛` : undefined}
         actions={(
           <>
             <Button asChild variant="primary">
@@ -1183,6 +1183,15 @@ function formatDuration(begin: number, end: number): string {
 /*  Contest scoreboard (kept; only URL bug fixed)                   */
 /* ────────────────────────────────────────────────────────────────── */
 
+/** 橙色待定标记前的非负数字才是封榜前分数；`-` 或单独的 `+n` 不是。 */
+function scoreBeforeFreeze(raw: string): number | null {
+  const markerAt = raw.search(/<span style="color:\s*orange"/i);
+  const head = (markerAt >= 0 ? raw.slice(0, markerAt) : raw).replace(/<[^>]*>/g, '').trim();
+  if (!/^\d+(?:\.\d+)?$/.test(head)) return null;
+  const numeric = Number(head);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
 export function ContestScoreboardPage() {
   const bs = useBootstrap();
   const data = bs.page.data as ContestsPageData;
@@ -1407,8 +1416,8 @@ export function ContestScoreboardPage() {
         );
       } else {
         nodes.push(
-          <span key={`pending-${key++}`} className="font-semibold text-info-fg">
-            {match[1]}
+          <span key={`pending-${key++}`} className="bg-info-soft font-semibold text-info-fg" title={match[1]}>
+            ?
           </span>,
         );
       }
@@ -1431,21 +1440,23 @@ export function ContestScoreboardPage() {
     return 'text-success-fg';
   }
 
-  // 格子文案仍用服务端下发的值；只按 §7.3 上色，不把封榜提交改写成「?」。
+  // 封榜前已有分数保持 scoreTone；没有封榜前分数的新提交才整格 info。
   function recordTone(cell: ScoreboardCell): string {
     const raw = cellText(cell);
     const plain = plainCellText(cell);
     if (!plain || plain === '—' || plain === '-') return '';
     const accepted = raw.includes('icon-check') || (plain.startsWith('+') && raw.includes('\n'));
-    if (/color:\s*orange/i.test(raw) && !accepted) return 'bg-info-soft text-info-fg';
+    const keptScore = scoreBeforeFreeze(raw);
+    if (/color:\s*orange/i.test(raw) && !accepted && keptScore === null) return 'bg-info-soft text-info-fg';
     if (accepted) return 'bg-success-soft text-success-fg';
-    if (plain.startsWith('-')) return 'bg-danger-soft text-danger-fg';
-    const ratio = cell.scorePercentage ?? cell.score;
+    if (plain.startsWith('-') && keptScore === null) return 'bg-danger-soft text-danger-fg';
+    const ratio = cell.scorePercentage ?? cell.score ?? keptScore;
     const numeric = typeof ratio === 'number' && Number.isFinite(ratio) ? ratio : Number(plain);
     if (!Number.isFinite(numeric)) return '';
-    if (numeric <= 0) return 'bg-danger-soft text-danger-fg';
-    if (numeric >= 100) return 'bg-success-soft text-success-fg';
-    return 'bg-warning-soft text-warning-fg';
+    const tone = scoreTone(numeric);
+    if (tone === 'danger') return 'bg-danger-soft text-danger-fg';
+    if (tone === 'warning') return 'bg-warning-soft text-warning-fg';
+    return 'bg-success-soft text-success-fg';
   }
 
   function cellChrome(cell: ScoreboardCell, scored: boolean) {
@@ -1798,7 +1809,7 @@ export function ContestScoreboardPage() {
                             teamMode && cell.type === 'time' && 'text-right',
                             columnIndex === 0 && 'sticky left-0 z-10 w-24',
                             participantColumn > 0 && columnIndex === participantColumn && 'sticky left-24 z-10',
-                            pinned && (isCurrent ? 'bg-brand-soft/60' : 'bg-surface group-hover:bg-surface-hover'),
+                            pinned && (isCurrent ? 'bg-brand-soft' : 'bg-surface group-hover:bg-surface-hover'),
                             cellChrome(cell, scored),
                           )}
                         >

@@ -1,10 +1,13 @@
 import { ReactFlowProvider } from '@xyflow/react';
-import { ArrowLeft, Loader2, Plus, Trash2 } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
+import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { confirmDialog } from '@/components/ui/dialog';
+import { FormField } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { MultiSelect } from '@/components/ui/multi-select';
+import { Page, PageHeader } from '@/components/ui/page';
 import { SimpleSelect } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { useBootstrap } from '@/lib/bootstrap';
@@ -186,8 +189,8 @@ export function CourseMindmapEditPage() {
   const removeNode = async (node = selected) => {
     if (rejectUnsaved()) return;
     if (!node || node._id === payload.config.rootNodeId) return;
-    const accepted = await confirmDialog(`确定删除节点「${node.topic}」？它的钉选会一起删除。`, {
-      title: '删除节点',
+    const accepted = await confirmDialog('它的钉选会一起删除。', {
+      title: `删除节点「${node.topic.trim() || '此节点'}」？`,
       confirmLabel: '删除',
       destructive: true,
     });
@@ -216,39 +219,35 @@ export function CourseMindmapEditPage() {
 
   return (
     <ReactFlowProvider>
-      <section className="grid min-w-0 gap-4">
-        <header className="flex flex-wrap items-center justify-between gap-3">
-          <div className="min-w-0">
-            <a href={`/course/${payload.course.docId}/edit#course-mindmap-settings`} className="inline-flex min-h-11 items-center gap-1.5 text-sm text-muted-foreground">
-              <ArrowLeft className="size-4" strokeWidth={1.75} />
-              返回课程
-            </a>
-            <h1 className="truncate text-xl font-semibold">{payload.course.title}</h1>
-          </div>
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <Input aria-label="导图名称" value={mapTitle} onChange={(event) => setMapTitle(event.target.value)} className="min-h-11 w-56" />
-            <SimpleSelect
-              value={layout}
-              onValueChange={(value) => setLayout(value === 'DOWN' ? 'DOWN' : 'RIGHT')}
-              options={[
-                { value: 'RIGHT', label: '向右展开' },
-                { value: 'DOWN', label: '向下展开' },
-              ]}
-              ariaLabel="布局方向"
-              className="min-h-11"
-            />
-            <Button type="button" className="min-h-11" disabled={busy} onClick={() => void saveMap()}>
-              {busy ? <Loader2 className="size-4 animate-spin" /> : null}
-              保存导图
-            </Button>
-          </div>
-        </header>
-        {error ? (
-          <p role="alert" className="rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-            {error}
-          </p>
-        ) : null}
-        <div className="grid min-h-[36rem] min-w-0 gap-4 xl:grid-cols-[18rem_minmax(0,1fr)_22rem]">
+      <Page width="full">
+        <PageHeader
+          title={payload.course.title}
+          actions={(
+            <>
+              <Button asChild variant="ghost" size="sm">
+                <a href={`/course/${payload.course.docId}/edit#course-mindmap-settings`}>
+                  <ArrowLeft strokeWidth={1.75} />
+                  返回课程
+                </a>
+              </Button>
+              <Input aria-label="导图名称" value={mapTitle} onChange={(event) => setMapTitle(event.target.value)} className="w-56" />
+              <SimpleSelect
+                value={layout}
+                onValueChange={(value) => setLayout(value === 'DOWN' ? 'DOWN' : 'RIGHT')}
+                options={[
+                  { value: 'RIGHT', label: '向右展开' },
+                  { value: 'DOWN', label: '向下展开' },
+                ]}
+                ariaLabel="布局方向"
+              />
+              <Button type="button" variant="primary" size="sm" loading={busy} onClick={() => void saveMap()}>
+                保存导图
+              </Button>
+            </>
+          )}
+        />
+        {error ? <Alert tone="danger">{error}</Alert> : null}
+        <div className="grid min-h-96 min-w-0 gap-4 xl:grid-cols-[18rem_minmax(0,1fr)_22rem]">
           <MindmapOutline
             nodes={payload.nodes}
             rootId={payload.config.rootNodeId}
@@ -274,26 +273,24 @@ export function CourseMindmapEditPage() {
               void removeNode(node);
             }}
           />
-          <div className="min-h-[24rem] min-w-0 overflow-hidden rounded-xl border bg-card">
+          {/* Specified height: min-height does not resolve MindmapCanvas h-full below xl. */}
+          <div className="h-96 min-w-0 overflow-hidden rounded-lg border border-line bg-surface md:h-144">
             <MindmapCanvas nodes={payload.nodes} config={payload.config} selectedId={selectedId} onSelect={selectNode} />
           </div>
-          <aside className="grid content-start gap-3 rounded-xl border bg-card p-4">
+          <aside className="grid content-start gap-3 rounded-lg border border-line bg-surface p-4">
             {selected ? (
               <>
-                <label className="grid gap-1.5 text-sm font-medium">
-                  节点名称
-                  <Input value={topic} onChange={(event) => setTopic(event.target.value)} className="min-h-11" />
-                </label>
-                <label className="grid gap-1.5 text-sm font-medium">
-                  说明
+                <FormField label="节点名称">
+                  <Input value={topic} onChange={(event) => setTopic(event.target.value)} />
+                </FormField>
+                <FormField label="说明">
                   <Textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={3} />
-                </label>
-                <label className="grid gap-1.5 text-sm font-medium">
-                  颜色
-                  <SimpleSelect value={color} onValueChange={setColor} options={COLORS} ariaLabel="节点颜色" className="min-h-11" />
-                </label>
+                </FormField>
+                <FormField label="颜色">
+                  <SimpleSelect value={color} onValueChange={setColor} options={COLORS} ariaLabel="节点颜色" />
+                </FormField>
                 <div className="grid gap-1.5">
-                  <span className="text-sm font-medium">钉选题目</span>
+                  <span className="text-sm font-medium text-fg">钉选题目</span>
                   <MultiSelect
                     options={pinOptions}
                     value={pins}
@@ -303,36 +300,36 @@ export function CourseMindmapEditPage() {
                     placeholder="搜索本课已保存的题目"
                     emptyText="没有可钉的题目"
                   />
-                  <p className="text-xs text-muted-foreground">只显示已经保存在课程章节里的题目。同一题可以钉在多个节点上。</p>
+                  <p className="text-xs text-fg-subtle">只显示已经保存在课程章节里的题目。同一题可以钉在多个节点上。</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <Button type="button" className="min-h-11" disabled={busy} onClick={() => void saveNode()}>
+                  <Button type="button" variant="secondary" size="sm" disabled={busy} onClick={() => void saveNode()}>
                     保存节点
                   </Button>
                   {selected._id !== payload.config.rootNodeId ? (
-                    <Button type="button" variant="destructive" className="min-h-11" disabled={busy} onClick={() => void removeNode()}>
-                      <Trash2 className="size-4" />
+                    <Button type="button" variant="danger-soft" size="sm" disabled={busy} onClick={() => void removeNode()}>
+                      <Trash2 />
                       删除节点
                     </Button>
                   ) : null}
                 </div>
-                <div className="grid gap-1.5 border-t pt-3">
-                  <span className="text-sm font-medium">子节点</span>
+                <div className="grid gap-1.5 border-t border-line-subtle pt-3">
+                  <span className="text-sm font-medium text-fg">子节点</span>
                   <div className="flex gap-2">
-                    <Input aria-label="子节点名称" value={childTopic} onChange={(event) => setChildTopic(event.target.value)} className="min-h-11" placeholder="新节点名称" />
-                    <Button type="button" variant="outline" className="min-h-11" disabled={busy || !childTopic.trim()} onClick={() => void createChild()}>
-                      <Plus className="size-4" />
+                    <Input aria-label="子节点名称" value={childTopic} onChange={(event) => setChildTopic(event.target.value)} placeholder="新节点名称" />
+                    <Button type="button" variant="secondary" size="sm" className="shrink-0" disabled={busy || !childTopic.trim()} onClick={() => void createChild()}>
+                      <Plus />
                       添加
                     </Button>
                   </div>
                 </div>
               </>
             ) : (
-              <p className="text-sm text-muted-foreground">选择一个节点后编辑。</p>
+              <p className="text-sm text-fg-muted">选择一个节点后编辑。</p>
             )}
           </aside>
         </div>
-      </section>
+      </Page>
     </ReactFlowProvider>
   );
 }

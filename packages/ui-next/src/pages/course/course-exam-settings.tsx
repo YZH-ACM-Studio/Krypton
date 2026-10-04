@@ -114,8 +114,8 @@ export function CourseExamSettings({
           maxItems={1}
           minHeight={44}
         />
-        <p className="text-xs text-muted-foreground">最多绑定一场本域选择题考试。不选则取消结业考试。</p>
-        <p className="text-xs text-muted-foreground">绑定会被拒绝：client_required 考试、比赛分配名单、空试卷、没有已确认视频，或考试范围未覆盖课程班级。</p>
+        <p className="text-xs text-fg-subtle">最多绑定一场本域选择题考试。不选则取消结业考试。</p>
+        <p className="text-xs text-fg-subtle">绑定会被拒绝：client_required 考试、比赛分配名单、空试卷、没有已确认视频，或考试范围未覆盖课程班级。</p>
       </div>
 
       <input type="hidden" name="courseExamContestId" value={examId} />
@@ -134,7 +134,7 @@ export function CourseExamSettings({
                 onChange={() => setWatchGate('all')}
                 label="全部章"
                 description="本课全部已确认视频都看完"
-                wrapperClassName="min-h-11 w-full rounded-lg border px-3 py-2.5"
+                wrapperClassName="w-full rounded-lg border border-line px-3 py-2"
               />
               <RadioGroupItem
                 value="chapter"
@@ -142,7 +142,7 @@ export function CourseExamSettings({
                 onChange={() => setWatchGate('chapter')}
                 label="指定章"
                 description="该章及其小节的视频都看完"
-                wrapperClassName="min-h-11 w-full rounded-lg border px-3 py-2.5"
+                wrapperClassName="w-full rounded-lg border border-line px-3 py-2"
               />
               <RadioGroupItem
                 value="percent"
@@ -150,7 +150,7 @@ export function CourseExamSettings({
                 onChange={() => setWatchGate('percent')}
                 label="整课百分比"
                 description="整课已确认视频达到设定比例"
-                wrapperClassName="min-h-11 w-full rounded-lg border px-3 py-2.5"
+                wrapperClassName="w-full rounded-lg border border-line px-3 py-2"
               />
             </RadioGroup>
           </div>
@@ -166,8 +166,6 @@ export function CourseExamSettings({
                 }}
                 options={chapterOptions}
                 ariaLabel="选择结业考试章节"
-                className="min-h-11"
-                contentClassName="[&_[role=option]]:min-h-10"
               />
             </label>
           ) : null}
@@ -185,9 +183,8 @@ export function CourseExamSettings({
                   setPercent(clampPercent(Number(event.target.value)));
                   onDirty();
                 }}
-                className="min-h-11 text-base sm:text-sm"
               />
-              <span className="block text-xs text-muted-foreground">1–100 的整数，默认 100。按条数比例向下取整。</span>
+              <span className="block text-xs text-fg-subtle">1–100 的整数，默认 100。按条数比例向下取整。</span>
             </label>
           ) : null}
         </div>

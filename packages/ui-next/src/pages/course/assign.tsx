@@ -125,7 +125,7 @@ export function CourseAssignForm({
       }}
     >
       <label className="block space-y-1.5">
-        <span className="text-xs font-medium">课程负责人</span>
+        <span className="text-sm font-medium text-fg">课程负责人</span>
         <MultiSelect<DomainUserOption>
           value={owner}
           onChange={setOwner}
@@ -141,7 +141,7 @@ export function CourseAssignForm({
         />
       </label>
       <label className="block space-y-1.5">
-        <span className="text-xs font-medium">协作教师</span>
+        <span className="text-sm font-medium text-fg">协作教师</span>
         <MultiSelect<DomainUserOption>
           value={maintainers}
           onChange={setMaintainers}
@@ -156,12 +156,12 @@ export function CourseAssignForm({
         />
       </label>
       {error ? (
-        <p role="alert" className="text-xs text-destructive">
+        <p role="alert" className="text-xs text-danger-fg">
           {error}
         </p>
       ) : null}
-      {saved ? <p className="text-xs text-emerald-700 dark:text-emerald-400">分配已保存。课件权限跟随新的负责人和协作教师。</p> : null}
-      <Button type="button" className="min-h-11 w-full" disabled={busy || owner.length !== 1} onClick={submit}>
+      {saved ? <p className="text-xs text-success-fg">分配已保存。课件权限跟随新的负责人和协作教师。</p> : null}
+      <Button type="button" variant="secondary" className="w-full" disabled={busy || owner.length !== 1} onClick={submit}>
         {busy ? '保存中' : '保存分配'}
       </Button>
     </div>
@@ -190,12 +190,12 @@ export function CourseAssignDialog({
     .map((uid) => users[String(uid)] || { _id: uid, uname: `UID ${uid}` });
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg" onClose={() => onOpenChange(false)}>
+      <DialogContent onClose={() => onOpenChange(false)}>
         <DialogHeader>
           <DialogTitle>分配课程</DialogTitle>
         </DialogHeader>
         <DialogBody className="space-y-3 px-6 py-4">
-          <p className="text-sm text-muted-foreground">
+          <p className="text-sm text-fg-muted">
             把「{course.title || '未命名课程'}」转给指定教师。负责人和协作教师都可以编辑内容并管理课件。
           </p>
           {owner ? (
@@ -211,7 +211,7 @@ export function CourseAssignDialog({
               }}
             />
           ) : (
-            <p role="alert" className="text-sm text-destructive">
+            <p role="alert" className="text-sm text-danger-fg">
               课程负责人无效
             </p>
           )}

@@ -1,11 +1,15 @@
 import { useMemo, useState } from 'react';
-import { ArrowLeft, ChevronDown, Download, Search } from 'lucide-react';
+import { ArrowLeft, ChevronDown, Download } from 'lucide-react';
 import { StatsGroupFilterForm, type StatsGroupChoice } from '@/components/stats-group-filter';
-import { Badge } from '@/components/ui/badge';
+import { Alert } from '@/components/ui/alert';
+import { Badge, type BadgeTone } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
+import { Progress, Stat } from '@/components/ui/display';
+import { EmptyState } from '@/components/ui/empty-state';
+import { SearchInput } from '@/components/ui/input';
 import { MiniTabs } from '@/components/ui/mini-tabs';
+import { Page, PageHeader } from '@/components/ui/page';
+import { Panel } from '@/components/ui/panel';
 import { cn } from '@/lib/cn';
 import { useBootstrap } from '@/lib/bootstrap';
 import { coveragePercent } from '@/lib/course-video-watch';
@@ -131,20 +135,24 @@ function statusLabel(status: WatchMemberStatus): string {
   return '未开始';
 }
 
-function videoTone(status: string): string {
-  if (status === '已看完') return 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300';
-  if (status === '进行中') return 'bg-amber-500/15 text-amber-800 dark:text-amber-300';
-  return 'bg-muted text-muted-foreground';
+function videoTone(status: string): BadgeTone {
+  if (status === '已看完') return 'success';
+  if (status === '进行中') return 'warning';
+  return 'neutral';
+}
+
+function memberTone(status: WatchMemberStatus): BadgeTone {
+  if (status === 'done') return 'success';
+  if (status === 'in_progress') return 'warning';
+  return 'neutral';
 }
 
 function WatchProgress({ done, total }: { done: number; total: number }) {
   const percent = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
   return (
     <div className="flex min-w-0 items-center gap-3">
-      <div className="h-2 min-w-24 flex-1 overflow-hidden rounded-full bg-muted">
-        <div className="h-full rounded-full bg-primary" style={{ width: `${percent}%` }} />
-      </div>
-      <span className="w-16 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+      <Progress value={percent} className="min-w-24 flex-1" />
+      <span className="w-16 shrink-0 text-right text-xs tabular text-fg-subtle">
         {done}/{total}
       </span>
     </div>
@@ -175,49 +183,43 @@ export function CourseVideoStatsPage() {
   const visible = useMemo(() => filterWatchMembers(members, filter, query), [members, filter, query]);
 
   return (
-    <main className="w-full min-w-0 pb-10">
-      <header className="mb-6 flex flex-wrap items-center gap-3 border-b pb-5">
-        <Button asChild variant="ghost" size="icon" className="-ml-2 size-10">
-          <a href={`/course/${tid}`} aria-label="返回课程">
-            <ArrowLeft className="size-4" strokeWidth={1.75} />
-          </a>
-        </Button>
-        <div className="min-w-0 flex-1">
-          <p className="text-sm text-muted-foreground">观看统计</p>
-          <h1 className="truncate text-xl font-semibold tracking-tight">{title}</h1>
-        </div>
-        {rosterBlocked ? null : (
-          <Button asChild variant="outline" size="sm" className="min-h-11 gap-1.5">
-            <a href={`/course/${tid}/videos.csv${groupIds.length ? `?groupIds=${encodeURIComponent(groupIds.join(','))}` : ''}`}>
-              <Download className="size-3.5" strokeWidth={1.75} />
-              导出 CSV
-            </a>
-          </Button>
+    <Page width="wide">
+      <PageHeader
+        title={title}
+        description="观看统计"
+        actions={(
+          <>
+            <Button asChild variant="ghost" size="sm" iconOnly>
+              <a href={`/course/${tid}`} aria-label="返回课程">
+                <ArrowLeft strokeWidth={1.75} />
+              </a>
+            </Button>
+            {rosterBlocked ? null : (
+              <Button asChild variant="secondary" size="sm">
+                <a href={`/course/${tid}/videos.csv${groupIds.length ? `?groupIds=${encodeURIComponent(groupIds.join(','))}` : ''}`}>
+                  <Download strokeWidth={1.75} />
+                  导出 CSV
+                </a>
+              </Button>
+            )}
+          </>
         )}
-      </header>
-      {rosterWarning && !rosterBlocked ? (
-        <p role="alert" className="mb-6 rounded-lg border border-amber-500/35 bg-amber-500/[0.06] px-3 py-2 text-sm text-amber-800 dark:text-amber-300">
-          {rosterWarning}
-        </p>
-      ) : null}
+      />
+      {rosterWarning && !rosterBlocked ? <Alert tone="warning">{rosterWarning}</Alert> : null}
       {rosterBlocked ? (
-        <Card>
-          <CardContent className="flex flex-col items-start gap-3 p-6">
-            <p className="text-sm font-medium">
-              {invalidGroups ? '课程绑定的班级引用已失效，无法出观看名单' : '没有绑定班级，无法出观看名单'}
-            </p>
-            <p className="text-sm text-muted-foreground">
-              {invalidGroups
-                ? '请先在编辑页重新选择可见班级。'
-                : '全站可见的课不会把所有用户列进统计。请先在编辑页选择可见班级。'}
-            </p>
-            <Button asChild className="min-h-11">
+        <EmptyState
+          title={invalidGroups ? '课程绑定的班级引用已失效，无法出观看名单' : '没有绑定班级，无法出观看名单'}
+          description={invalidGroups
+            ? '请先在编辑页重新选择可见班级。'
+            : '全站可见的课不会把所有用户列进统计。请先在编辑页选择可见班级。'}
+          action={(
+            <Button asChild variant="primary">
               <a href={`/course/${tid}/edit`}>去设置班级</a>
             </Button>
-          </CardContent>
-        </Card>
+          )}
+        />
       ) : (
-        <div className="space-y-6">
+        <div className="flex flex-col gap-6">
           <StatsGroupFilterForm
             action={`/course/${tid}/videos`}
             groups={groups}
@@ -225,126 +227,93 @@ export function CourseVideoStatsPage() {
             hint="不选则统计本课全部班级。选择后只看这些用户组里已绑定的学生。"
           />
           {groupIds.length ? (
-            <p className="text-sm text-muted-foreground">已按所选用户组过滤，共 {members.length} 名已绑定学生。</p>
+            <p className="text-sm text-fg-muted">已按所选用户组过滤，共 {members.length} 名已绑定学生。</p>
           ) : null}
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <Card>
-              <CardContent className="p-4">
-                <p className="text-xs text-muted-foreground">学生</p>
-                <p className="mt-1 text-2xl font-semibold tabular-nums">{members.length}</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4">
-                <p className="text-xs text-muted-foreground">已完成</p>
-                <p className="mt-1 text-2xl font-semibold tabular-nums">{doneCount}</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4">
-                <p className="text-xs text-muted-foreground">进行中</p>
-                <p className="mt-1 text-2xl font-semibold tabular-nums">{inProgressCount}</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4">
-                <p className="text-xs text-muted-foreground">未开始</p>
-                <p className="mt-1 text-2xl font-semibold tabular-nums">{notStartedCount}</p>
-              </CardContent>
-            </Card>
-          </div>
+          <Panel>
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <Stat label="学生" value={members.length} />
+              <Stat label="已完成" value={doneCount} />
+              <Stat label="进行中" value={inProgressCount} />
+              <Stat label="未开始" value={notStartedCount} />
+            </div>
+          </Panel>
 
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="max-w-full overflow-x-auto">
-            <MiniTabs<WatchMemberFilter>
-              value={filter}
-              onValueChange={setFilter}
-              size="md"
-              aria-label="完成状态"
-              items={[
-                { value: 'all', label: '全部', count: members.length },
-                { value: 'incomplete', label: '未完成', count: inProgressCount + notStartedCount },
-                { value: 'done', label: '已完成', count: doneCount },
-              ]}
-            />
-            </div>
-            <div className="relative w-full sm:max-w-xs">
-              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="搜索学号或姓名"
-                className="min-h-11 pl-9"
-                aria-label="搜索学生"
+            <div className="max-w-full min-w-0 overflow-x-auto">
+              <MiniTabs<WatchMemberFilter>
+                value={filter}
+                onValueChange={setFilter}
+                size="md"
+                aria-label="完成状态"
+                items={[
+                  { value: 'all', label: '全部', count: members.length },
+                  { value: 'incomplete', label: '未完成', count: inProgressCount + notStartedCount },
+                  { value: 'done', label: '已完成', count: doneCount },
+                ]}
               />
             </div>
+            <SearchInput
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="搜索学号或姓名"
+              aria-label="搜索学生"
+              className="w-full sm:max-w-xs"
+            />
           </div>
 
-          <p className="text-sm text-muted-foreground">
+          <p className="text-sm text-fg-muted">
             {videos.length ? `共 ${videos.length} 个已确认视频。点开学生查看每条进度。` : '还没有已确认视频。'}
           </p>
 
           {!visible.length ? (
-            <Card>
-              <CardContent className="py-10 text-center text-sm text-muted-foreground">
-                {members.length ? '没有符合筛选的学生。' : '名单为空。'}
-              </CardContent>
-            </Card>
+            <EmptyState compact title={members.length ? '没有符合筛选的学生。' : '名单为空。'} />
           ) : (
-            <Card className="overflow-hidden py-0">
-              <ul>
+            <Panel flush>
+              <ul className="divide-y divide-line-subtle">
                 {visible.map((member) => {
                   const status = watchMemberStatus(member);
                   const open = openUid === member.uid;
                   const name = member.realName || member.uname;
                   return (
-                    <li key={member.uid} className="border-b border-border/60 last:border-b-0">
+                    <li key={member.uid}>
+                      {/* ds-allow DS005: 学生行同时放姓名、状态、进度和展开，固定高度的 Button 会裁掉这几列 */}
                       <button
                         type="button"
-                        className="flex min-h-11 w-full items-center gap-4 px-4 py-3 text-left hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        className="flex min-h-12 w-full items-center gap-4 px-4 py-3 text-left hover:bg-surface-hover outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                         aria-expanded={open}
                         onClick={() => setOpenUid(open ? null : member.uid)}
                       >
                         <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <p className="truncate text-sm font-medium">{name}</p>
-                            <Badge
-                              variant="outline"
-                              className={cn(
-                                'font-normal',
-                                status === 'done' && 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
-                                status === 'in_progress' && 'border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300',
-                              )}
-                            >
-                              {statusLabel(status)}
-                            </Badge>
+                          <div className="flex min-w-0 flex-wrap items-center gap-2">
+                            <p className="min-w-0 truncate text-sm font-medium text-fg">{name}</p>
+                            <Badge tone={memberTone(status)} className="shrink-0">{statusLabel(status)}</Badge>
                           </div>
-                          <p className="mt-0.5 text-xs tabular-nums text-muted-foreground">{member.studentId || `UID ${member.uid}`}</p>
+                          <p className="mt-0.5 text-xs tabular text-fg-subtle">{member.studentId || `UID ${member.uid}`}</p>
                         </div>
-                        <div className="hidden w-56 sm:block">
+                        <div className="hidden w-56 shrink-0 sm:block">
                           <WatchProgress done={member.done} total={member.total} />
                         </div>
-                        <span className="text-xs tabular-nums text-muted-foreground sm:hidden">
+                        <span className="shrink-0 text-xs tabular text-fg-subtle sm:hidden">
                           {member.done}/{member.total}
                         </span>
-                        <ChevronDown className={cn('size-4 shrink-0 text-muted-foreground transition-transform', open && 'rotate-180')} />
+                        <ChevronDown className={cn('size-4 shrink-0 text-fg-subtle transition-transform duration-(--dur-2)', open && 'rotate-180')} />
                       </button>
                       {open ? (
-                        <div className="border-t bg-muted/20 px-4 py-3">
+                        <div className="border-t border-line-subtle bg-surface-sunken px-4 py-3">
                           <div className="mb-3 sm:hidden">
                             <WatchProgress done={member.done} total={member.total} />
                           </div>
                           {!member.videos.length ? (
-                            <p className="text-sm text-muted-foreground">没有可统计的视频。</p>
+                            <p className="text-sm text-fg-muted">没有可统计的视频。</p>
                           ) : (
                             <ul className="space-y-2">
                               {member.videos.map((video) => (
-                                <li key={video.videoId} className="rounded-lg border bg-card px-3 py-2">
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    <p className="min-w-0 flex-1 truncate text-sm font-medium">{video.title}</p>
-                                    <span className={cn('rounded-md px-2 py-0.5 text-xs', videoTone(video.status))}>{video.status}</span>
+                                <li key={video.videoId} className="rounded-lg border border-line bg-surface px-3 py-2">
+                                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                                    <p className="min-w-0 flex-1 truncate text-sm font-medium text-fg">{video.title}</p>
+                                    <Badge tone={videoTone(video.status)} size="sm" className="shrink-0">{video.status}</Badge>
                                   </div>
-                                  <p className="mt-1 text-xs text-muted-foreground">
+                                  <p className="mt-1 text-xs text-fg-subtle">
                                     覆盖 {coveragePercent(video.coverageRatio)}% · {video.maxRate}× · 拖{video.seekForwardAttempts}
                                     {video.overdue ? ` · ${video.overdue}` : ''}
                                   </p>
@@ -358,10 +327,10 @@ export function CourseVideoStatsPage() {
                   );
                 })}
               </ul>
-            </Card>
+            </Panel>
           )}
         </div>
       )}
-    </main>
+    </Page>
   );
 }

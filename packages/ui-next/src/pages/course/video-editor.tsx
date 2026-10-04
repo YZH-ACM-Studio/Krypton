@@ -1,12 +1,14 @@
 import { useRef, useState } from 'react';
 import { Film, Trash2 } from 'lucide-react';
 import { FileUploader } from '@/components/uploader';
+import { Alert } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+import { confirmDialog } from '@/components/ui/dialog';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Panel } from '@/components/ui/panel';
 import { Switch } from '@/components/ui/switch';
 import { fetchHydroResponse, readHydroResponseError } from '@/lib/error-presenter';
-import { cn } from '@/lib/cn';
 import type { CourseAuthorVideo } from './types';
 
 const MAX_BYTES = 512 * 1024 * 1024;
@@ -83,6 +85,13 @@ export function CourseVideoEditor({
   };
 
   const remove = async (video: CourseAuthorVideo) => {
+    const name = video.title.trim() || video.filename;
+    const accepted = await confirmDialog('删除后不能恢复。', {
+      title: `删除视频「${name}」？`,
+      confirmLabel: '删除',
+      destructive: true,
+    });
+    if (!accepted) return;
     setError('');
     try {
       await postForm({ operation: 'delete', videoId: video.id });
@@ -95,42 +104,37 @@ export function CourseVideoEditor({
 
   if (locked) {
     return (
-      <Card>
-        <CardContent className="flex flex-col items-center gap-2 px-6 py-12 text-center">
-          <Film className="size-8 text-muted-foreground" strokeWidth={1.5} />
-          <p className="text-sm font-medium">先保存课程，再上传视频</p>
-          <p className="text-sm text-muted-foreground">保存后这一章就可以拖入 mp4 / webm。</p>
-        </CardContent>
-      </Card>
+      <EmptyState
+        compact
+        icon={<Film strokeWidth={1.5} />}
+        title="先保存课程，再上传视频"
+        description="保存后这一章就可以拖入 mp4 / webm。"
+      />
     );
   }
 
   return (
     <div className="space-y-3">
-      {error ? (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      ) : null}
+      {error ? <Alert tone="danger">{error}</Alert> : null}
       {videos.length ? (
         <ul className="space-y-2">
           {videos.map((video) => (
             <li key={video.id}>
-              <Card>
-                <CardContent className="flex flex-wrap items-center gap-3 p-3">
-                  <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
+              <Panel>
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="grid size-8 shrink-0 place-items-center rounded-md bg-surface-active text-fg-subtle">
                     <Film className="size-4" strokeWidth={1.75} />
                   </span>
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">{video.title}</p>
-                    <p className="truncate text-xs text-muted-foreground">{video.filename}</p>
+                    <p className="truncate text-sm font-medium text-fg">{video.title}</p>
+                    <p className="truncate text-xs text-fg-subtle">{video.filename}</p>
                   </div>
                   {video.confirmed ? (
-                    <Badge variant="secondary">{durationLabel(video.durationMs)}</Badge>
+                    <Badge tone="neutral">{durationLabel(video.durationMs)}</Badge>
                   ) : (
-                    <Badge variant="outline">待确认</Badge>
+                    <Badge tone="warning">待确认</Badge>
                   )}
-                  <Button type="button" variant="outline" size="sm" className="min-h-11" onClick={() => setPending(video)}>
+                  <Button type="button" variant="secondary" size="sm" onClick={() => setPending(video)}>
                     预览
                   </Button>
                   <ReplaceVideoButton
@@ -144,16 +148,16 @@ export function CourseVideoEditor({
                   />
                   <Button
                     type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="size-11 text-destructive hover:bg-destructive/10"
+                    variant="danger-soft"
+                    size="sm"
+                    iconOnly
                     onClick={() => void remove(video)}
                     aria-label={`删除${video.title}`}
                   >
-                    <Trash2 className="size-3.5" strokeWidth={1.75} />
+                    <Trash2 strokeWidth={1.75} />
                   </Button>
-                </CardContent>
-              </Card>
+                </div>
+              </Panel>
             </li>
           ))}
         </ul>
@@ -179,15 +183,15 @@ export function CourseVideoEditor({
           }}
         />
       ) : (
-        <p className="text-sm text-muted-foreground">本章最多 8 个视频。</p>
+        <p className="text-sm text-fg-muted">本章最多 8 个视频。</p>
       )}
       {pending ? (
-        <Card>
-          <CardContent className="space-y-2 p-3">
-            <p className="text-sm font-medium">{pending.confirmed ? '预览' : '打开预览以确认时长'}</p>
+        <Panel>
+          <div className="space-y-2">
+            <p className="text-sm font-medium text-fg">{pending.confirmed ? '预览' : '打开预览以确认时长'}</p>
             <video
               ref={previewRef}
-              className={cn('w-full rounded-lg bg-black')}
+              className="w-full rounded-lg bg-surface-sunken"
               src={`/course/${courseId}/video/${pending.id}/play`}
               controls
               preload="metadata"
@@ -196,8 +200,8 @@ export function CourseVideoEditor({
                 if (!pending.confirmed && durationMs > 0) void confirmDuration(pending, durationMs).catch((err) => setError(err.message));
               }}
             />
-          </CardContent>
-        </Card>
+          </div>
+        </Panel>
       ) : null}
     </div>
   );
@@ -218,14 +222,14 @@ function ReplaceVideoButton({
   const [requireRewatch, setRequireRewatch] = useState(true);
   if (!open) {
     return (
-      <Button type="button" variant="ghost" size="sm" className="min-h-11" onClick={() => setOpen(true)}>
+      <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(true)}>
         替换
       </Button>
     );
   }
   return (
-    <div className="w-full basis-full space-y-2 rounded-lg border bg-background p-2">
-      <label className="flex min-h-11 items-center gap-2 text-xs">
+    <div className="w-full basis-full space-y-2 rounded-lg border border-line bg-surface-sunken p-2">
+      <label className="flex min-h-10 items-center gap-2 text-xs text-fg">
         <Switch checked={requireRewatch} onChange={() => setRequireRewatch((current) => !current)} />
         替换后要求重看
       </label>
@@ -246,7 +250,7 @@ function ReplaceVideoButton({
           }
         }}
       />
-      <Button type="button" variant="ghost" size="sm" className="min-h-11 w-full" onClick={() => setOpen(false)}>
+      <Button type="button" variant="ghost" size="sm" className="w-full" onClick={() => setOpen(false)}>
         取消
       </Button>
     </div>

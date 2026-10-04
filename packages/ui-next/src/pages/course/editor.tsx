@@ -1,13 +1,13 @@
 import {
   ArrowLeft,
   Check,
+  ChevronDown,
   Copy,
   Download,
   FileText,
   EyeOff,
   Layers,
   ListTree,
-  Loader2,
   Network,
   Plus,
   Save,
@@ -20,15 +20,17 @@ import { type FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } 
 import { MarkdownEditor } from '@/components/markdown-renderer';
 import { ProblemPicker } from '@/components/problem-picker';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
 import { confirmDialog, confirmFormSubmit } from '@/components/ui/dialog';
+import { Spinner, StatusDot } from '@/components/ui/display';
 import { Input } from '@/components/ui/input';
 import { MultiSelect } from '@/components/ui/multi-select';
+import { Alert } from '@/components/ui/alert';
+import { Toolbar, Workspace } from '@/components/ui/page';
+import { PageTabs, type PageTabItem } from '@/components/ui/page-tabs';
+import { Panel } from '@/components/ui/panel';
 import { SimpleSelect } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Sheet, SheetBody, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs-compound';
 import { FileUploader } from '@/components/uploader';
 import type { DomainUserOption } from '@/components/domain-user-search';
 import { useBootstrap } from '@/lib/bootstrap';
@@ -139,27 +141,30 @@ function SettingsGroup({
 }) {
   const headingId = id ? `${id}-title` : undefined;
   const heading = (
-    <div className="flex items-center gap-2.5">
-      <span aria-hidden="true" className="grid size-7 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
+    <div className="flex min-w-0 items-center gap-2">
+      <span aria-hidden="true" className="grid size-6 shrink-0 place-items-center rounded-md bg-surface-active text-fg-subtle">
         <Icon className="size-3.5" strokeWidth={1.75} />
       </span>
-      <h2 id={headingId} className="text-sm font-medium leading-5">
+      <h2 id={headingId} className="min-w-0 truncate text-sm font-semibold text-fg">
         {title}
       </h2>
     </div>
   );
   if (collapsible) {
     return (
-      <details id={id} className={cn('rounded-xl border bg-card text-card-foreground shadow-sm', className)}>
-        <summary className="cursor-pointer list-none px-4 py-3 [&::-webkit-details-marker]:hidden">{heading}</summary>
-        <div className="space-y-3 border-t px-4 py-3">{children}</div>
+      <details id={id} className={cn('group rounded-lg border border-line bg-surface shadow-xs', className)}>
+        <summary className="flex cursor-pointer list-none items-center gap-2 rounded-lg px-4 py-3 outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden [&>div]:min-w-0 [&>div]:flex-1">
+          {heading}
+          <ChevronDown aria-hidden="true" className="size-4 shrink-0 text-fg-subtle transition-transform duration-(--dur-2) ease-(--ease-out) group-open:rotate-180" />
+        </summary>
+        <div className="space-y-3 border-t border-line-subtle px-4 py-3">{children}</div>
       </details>
     );
   }
   return (
-    <section id={id} aria-labelledby={headingId} className={cn('rounded-xl border bg-card p-4 text-card-foreground shadow-sm', className)}>
+    <section id={id} aria-labelledby={headingId} className={cn('rounded-lg border border-line bg-surface p-4 shadow-xs', className)}>
       <div className="mb-3">{heading}</div>
-      {description ? <p className="mb-3 text-sm text-muted-foreground">{description}</p> : null}
+      {description ? <p className="mb-3 text-sm text-fg-muted">{description}</p> : null}
       <div className="space-y-3">{children}</div>
     </section>
   );
@@ -168,15 +173,15 @@ function SettingsGroup({
 function SaveIndicator({ state }: { state: SaveState }) {
   const label = state === 'saving' ? '正在保存…' : state === 'dirty' ? '有未保存更改' : '已保存';
   return (
-    <div aria-live="polite" aria-label={label} className="krypton-course-meta inline-flex shrink-0 items-center gap-1.5">
+    <div aria-live="polite" aria-label={label} className="inline-flex shrink-0 items-center gap-1.5 text-xs text-fg-subtle">
       {state === 'saving' ? (
-        <Loader2 className="size-3.5 animate-spin text-primary" strokeWidth={2} />
+        <Spinner className="size-3.5 text-brand-fg" />
       ) : state === 'dirty' ? (
-        <span aria-hidden="true" className="size-1.5 rounded-full bg-amber-500" />
+        <StatusDot tone="warning" />
       ) : (
-        <Check className="size-3.5 text-emerald-600 dark:text-emerald-400" strokeWidth={2.5} />
+        <Check className="size-3.5 text-success-fg" strokeWidth={2.5} />
       )}
-      <span className={cn('hidden sm:inline', state === 'dirty' && 'text-amber-700 dark:text-amber-400')}>{label}</span>
+      <span className={cn('hidden sm:inline', state === 'dirty' && 'text-warning-fg')}>{label}</span>
     </div>
   );
 }
@@ -228,7 +233,7 @@ export function CourseEditPage() {
   const [saveError, setSaveError] = useState('');
   const [copying, setCopying] = useState(false);
   const [outlineOpen, setOutlineOpen] = useState(false);
-  const [chapterTab, setChapterTab] = useState('video');
+  const [chapterTab, setChapterTab] = useState<'video' | 'notes' | 'problems' | 'links'>('video');
   const [courseFiles, setCourseFiles] = useState<CourseFile[]>(data.files || []);
   const [fileError, setFileError] = useState('');
   const pendingSectionSelect = useRef<{ chapterId: number; sectionId: number } | null>(null);
@@ -425,6 +430,12 @@ export function CourseEditPage() {
   };
 
   const deleteFile = async (filename: string) => {
+    const accepted = await confirmDialog('删除后不能恢复。', {
+      title: `删除课件「${filename}」？`,
+      confirmLabel: '删除',
+      destructive: true,
+    });
+    if (!accepted) return;
     setFileError('');
     const body = new URLSearchParams({ operation: 'delete_files' });
     body.append('files', filename);
@@ -470,8 +481,9 @@ export function CourseEditPage() {
   };
   const deleteOwnedMindmap = async () => {
     if (!isEdit || !ownedMindmap || saveState !== 'idle') return;
-    const accepted = await confirmDialog('确定删除本课导图？节点和钉选都会删掉，不能恢复。题目本身不会删除，之后可以再绑定公开导图。', {
-      title: '删除本课导图',
+    const mapTitle = ownedMindmap.title.trim() || '本课导图';
+    const accepted = await confirmDialog('节点和钉选都会删掉，不能恢复。题目本身不会删除，之后可以再绑定公开导图。', {
+      title: `删除本课导图「${mapTitle}」？`,
       confirmLabel: '删除',
       destructive: true,
     });
@@ -567,94 +579,76 @@ export function CourseEditPage() {
   const unitPids = editingSection ? editingSection.pids : activeChapter.pids;
   const videoCount = unitVideos.length;
   const sectionCount = chapters.reduce((sum, chapter) => sum + chapter.sections.length, 0);
+  const chapterTabItems: PageTabItem<'video' | 'notes' | 'problems' | 'links'>[] = [
+    { value: 'video', label: '视频', ...(videoCount > 0 ? { count: videoCount } : {}) },
+    { value: 'notes', label: '讲义' },
+    { value: 'problems', label: '题目', ...(unitPids.length > 0 ? { count: unitPids.length } : {}) },
+    ...(!editingSection ? [{ value: 'links' as const, label: '关联' }] : []),
+  ];
 
   return (
-    <main className="w-full min-w-0 pb-10">
-      {/* Sticky action bar is a single h-14 row. Copy/delete collapse to
-          icons on narrow viewports and can overflow; save stays outside. */}
-      <header
-        className={cn(
-          'krypton-course-panel sticky top-0 z-30 mb-6 flex h-14 items-center gap-2 px-3',
-          'bg-card/85 backdrop-blur-xl',
+    <Workspace className="w-full min-w-0">
+      <Toolbar
+        className="min-h-10 shrink-0 border-b border-line bg-surface px-2"
+        end={(
+          <>
+            <Button type="button" variant="ghost" size="sm" className="lg:hidden" onClick={() => setOutlineOpen(true)}>
+              <ListTree strokeWidth={1.75} />
+              章节
+            </Button>
+            <SaveIndicator state={saveState} />
+            {isEdit && data.canCreate ? (
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={saveState !== 'idle' || copying}
+                onClick={() => void copyCourse()}
+                title={saveState === 'dirty' ? '请先保存课程修改。复制使用已保存的章节，不会带走未保存草稿、课件、报名或真实性策略。' : '复制为新课程'}
+                aria-label="复制为新课程"
+              >
+                {copying ? <Spinner /> : <Copy strokeWidth={1.75} />}
+                <span className="hidden lg:inline">复制为新课程</span>
+              </Button>
+            ) : null}
+            {isEdit ? (
+              <form
+                method="post"
+                action={`/course/${tid}/edit`}
+                className="shrink-0"
+                onSubmit={(event) => {
+                  const title = course.title?.trim() || '该课程';
+                  void confirmFormSubmit(event, '课件、视频和观看记录会一并删除，不能恢复。', {
+                    title: `删除课程「${title}」？`,
+                    confirmLabel: '删除',
+                    destructive: true,
+                  });
+                }}
+              >
+                <input type="hidden" name="operation" value="delete" />
+                <Button type="submit" variant="danger-soft" size="sm" formNoValidate disabled={copying} aria-label="删除课程">
+                  <Trash2 strokeWidth={1.75} />
+                  <span className="hidden lg:inline">删除课程</span>
+                </Button>
+              </form>
+            ) : null}
+            <Button form="course-editor-form" type="submit" variant="primary" size="sm" disabled={saveState === 'saving' || copying}>
+              <Save strokeWidth={1.75} />
+              {saveState === 'saving' ? '保存中' : '保存课程'}
+            </Button>
+          </>
         )}
       >
-        <Button asChild variant="ghost" size="icon" className="size-10 shrink-0">
+        <span className="min-w-0 truncate text-sm font-semibold text-fg">{isEdit ? course.title || '编辑课程' : '新建课程'}</span>
+        <Button asChild variant="ghost" size="sm" iconOnly>
           <a href={isEdit ? `/course/${tid}` : '/course'} aria-label={isEdit ? '返回课程' : '返回课程列表'}>
-            <ArrowLeft className="size-4" strokeWidth={1.75} />
+            <ArrowLeft strokeWidth={1.75} />
           </a>
         </Button>
-        {isEdit ? <CourseMark seed={tid} title={course.title || ''} className="size-9 text-sm" /> : null}
-        <div className="min-w-0 flex-1">
-          <p className="krypton-course-eyebrow truncate">课程工作区</p>
-          <h1 className="krypton-course-title mt-0.5 truncate">{isEdit ? course.title || '编辑课程' : '新建课程'}</h1>
-        </div>
-        <div className="flex min-w-0 items-center gap-1.5 overflow-x-auto">
-          <Button type="button" variant="outline" size="sm" className="h-10 shrink-0 gap-1.5 lg:hidden" onClick={() => setOutlineOpen(true)}>
-            <ListTree className="size-3.5" strokeWidth={1.75} />
-            章节
-          </Button>
-          <SaveIndicator state={saveState} />
-          {isEdit && data.canCreate ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              disabled={saveState !== 'idle' || copying}
-              onClick={() => void copyCourse()}
-              className="size-10 shrink-0 lg:h-10 lg:w-auto lg:gap-1.5 lg:px-3"
-              title={saveState === 'dirty' ? '请先保存课程修改。复制使用已保存的章节，不会带走未保存草稿、课件、报名或真实性策略。' : '复制为新课程'}
-              aria-label="复制为新课程"
-            >
-              {copying ? <Loader2 className="size-4 animate-spin" strokeWidth={1.75} /> : <Copy className="size-4" strokeWidth={1.75} />}
-              <span className="hidden lg:inline">复制为新课程</span>
-            </Button>
-          ) : null}
-          {isEdit ? (
-            <form
-              method="post"
-              action={`/course/${tid}/edit`}
-              className="shrink-0"
-              onSubmit={(event) => {
-                const title = course.title || '该课程';
-                void confirmFormSubmit(
-                  event,
-                  `确定删除课程「${title}」？课件、视频和观看记录会一并删除，不能恢复。`,
-                  { destructive: true },
-                );
-              }}
-            >
-              <input type="hidden" name="operation" value="delete" />
-              <Button
-                type="submit"
-                variant="destructive"
-                size="icon"
-                formNoValidate
-                disabled={copying}
-                className="size-10 shrink-0 lg:h-10 lg:w-auto lg:gap-1.5 lg:px-3"
-                aria-label="删除课程"
-              >
-                <Trash2 className="size-3.5" strokeWidth={1.75} />
-                <span className="hidden lg:inline">删除课程</span>
-              </Button>
-            </form>
-          ) : null}
-        </div>
-        <Button
-          form="course-editor-form"
-          type="submit"
-          disabled={saveState === 'saving' || copying}
-          className={cn('h-10 shrink-0 gap-1.5 active:scale-[0.97]', saveState === 'dirty' && 'shadow-md')}
-        >
-          <Save className="size-4" strokeWidth={1.75} />
-          {saveState === 'saving' ? '保存中' : '保存课程'}
-        </Button>
-      </header>
+        {isEdit ? <CourseMark seed={tid} title={course.title || ''} className="size-6 text-xs" /> : null}
+      </Toolbar>
 
-      {saveError ? (
-        <div role="alert" className="mb-5 rounded-xl border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-          {saveError}
-        </div>
-      ) : null}
+      {saveError ? <Alert tone="danger" className="mx-2 mt-2 shrink-0">{saveError}</Alert> : null}
 
       <form
         id="course-editor-form"
@@ -662,124 +656,104 @@ export function CourseEditPage() {
         action={formAction}
         onSubmit={submit}
         onChange={markDirty}
-        className="grid min-w-0 gap-6 lg:grid-cols-[18rem_minmax(0,1fr)] xl:grid-cols-[18rem_minmax(0,1fr)_21rem] xl:gap-7"
+        className="min-h-0 min-w-0 flex-1 overflow-y-auto"
       >
+        <div className="grid min-w-0 gap-6 p-4 lg:grid-cols-[18rem_minmax(0,1fr)] xl:grid-cols-[18rem_minmax(0,1fr)_20rem]">
         {isEdit ? <input type="hidden" name="tid" value={tid} /> : null}
         <input type="hidden" name="chapters" value={chaptersJson} />
         <input type="hidden" name="description" value={course.description || ''} />
 
-        <aside className="hidden self-start lg:sticky lg:top-14 lg:block lg:max-h-[calc(100dvh-8rem)]">
-          <div className="krypton-course-panel flex max-h-[inherit] flex-col overflow-hidden">
-            <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border/50 px-3 py-2.5">
-              <div className="flex items-center gap-2">
-                <span aria-hidden="true" className="grid size-7 place-items-center rounded-lg bg-primary/10 text-primary">
+        <aside className="hidden self-start lg:sticky lg:top-0 lg:block">
+          <div className="overflow-hidden rounded-lg border border-line bg-surface">
+            <div className="flex items-center justify-between gap-2 border-b border-line px-3 py-2">
+              <div className="flex min-w-0 items-center gap-2">
+                <span aria-hidden="true" className="grid size-6 shrink-0 place-items-center rounded-md bg-brand-soft text-brand-fg">
                   <Layers className="size-3.5" strokeWidth={1.75} />
                 </span>
-                <div>
-                  <p className="text-[13px] font-semibold leading-4">章节目录</p>
-                  <p className="krypton-course-meta">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-fg">章节目录</p>
+                  <p className="truncate text-xs text-fg-subtle">
                     {chapters.length} 章{sectionCount ? ` · ${sectionCount} 节` : ''}
                   </p>
                 </div>
               </div>
-              <Button type="button" variant="ghost" size="sm" className="min-h-11 gap-1 px-2" onClick={addChapter}>
-                <Plus className="size-3.5" strokeWidth={2} />
+              <Button type="button" variant="ghost" size="sm" className="shrink-0" onClick={addChapter}>
+                <Plus strokeWidth={2} />
                 添加
               </Button>
             </div>
-            <ScrollArea className="min-h-0 flex-1">
-              <div className="p-1.5">
-                <ChapterOutline
-                  chapters={chapters}
-                  activeId={activeChapter._id}
-                  activeSectionId={activeSectionId}
-                  onSelect={openChapter}
-                  onMove={moveChapter}
-                  onRemove={removeChapter}
-                  onAddSection={addSection}
-                  onMoveSection={moveSection}
-                  onRemoveSection={removeSection}
-                />
-              </div>
-            </ScrollArea>
+            <div className="p-1.5">
+              <ChapterOutline
+                chapters={chapters}
+                activeId={activeChapter._id}
+                activeSectionId={activeSectionId}
+                onSelect={openChapter}
+                onMove={moveChapter}
+                onRemove={removeChapter}
+                onAddSection={addSection}
+                onMoveSection={moveSection}
+                onRemoveSection={removeSection}
+              />
+            </div>
           </div>
         </aside>
 
         <section className="min-w-0 space-y-5" aria-labelledby="chapter-editor-title">
-          <details className="rounded-xl border bg-card shadow-sm">
-            <summary className="cursor-pointer list-none px-4 py-3 text-sm font-medium [&::-webkit-details-marker]:hidden">
-              <span id="course-description-title">课程简介</span>
-              <span className="ml-2 font-normal text-muted-foreground">选填</span>
+          <details className="group rounded-lg border border-line bg-surface shadow-xs">
+            <summary className="flex cursor-pointer list-none items-center gap-2 rounded-lg px-4 py-3 text-sm font-medium text-fg outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
+              <span className="min-w-0 flex-1">
+                <span id="course-description-title">课程简介</span>
+                <span className="ml-2 font-normal text-fg-subtle">选填</span>
+              </span>
+              <ChevronDown aria-hidden="true" className="size-4 shrink-0 text-fg-subtle transition-transform duration-(--dur-2) ease-(--ease-out) group-open:rotate-180" />
             </summary>
-            <div className="border-t px-4 py-3">
+            <div className="border-t border-line-subtle px-4 py-3">
               <MarkdownEditor name="content" value={course.content || ''} minHeight={160} />
             </div>
           </details>
           <h2 id="chapter-editor-title" className="sr-only">
             章节内容
           </h2>
-          <Card>
-            <CardContent className="p-4 sm:p-5">
-              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                {editingSection ? (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => selectChapter(activeChapter._id)}
-                      className="hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    >
-                      第 {activeIndex + 1} 章
-                    </button>
-                    {` · 第 ${sectionIndex + 1} 节`}
-                  </>
-                ) : (
-                  `第 ${activeIndex + 1} 章 / 共 ${chapters.length} 章`
-                )}
-              </p>
-              <label className="mt-2 block">
-                <span id="active-chapter-title" className="sr-only">
-                  {editingSection ? '小节标题' : '章节标题'}
-                </span>
-                <input
-                  value={editingSection ? editingSection.title : activeChapter.title}
-                  onChange={(event) =>
-                    editingSection
-                      ? updateSection(activeChapter._id, editingSection._id, { title: event.target.value })
-                      : updateChapter(activeChapter._id, { title: event.target.value })
-                  }
-                  required
-                  placeholder={editingSection ? '小节标题' : '章节标题'}
-                  className={cn(
-                    'w-full rounded-md border-0 bg-transparent px-0 text-2xl font-semibold tracking-tight',
-                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                    'placeholder:text-muted-foreground/45',
-                  )}
-                />
-              </label>
-            </CardContent>
-          </Card>
-
-          <Tabs value={chapterTab} onValueChange={setChapterTab} className="space-y-4">
-            <TabsList className="flex h-10 w-full min-w-0 overflow-x-auto">
-              <TabsTrigger value="video" className="min-h-10 min-w-0 flex-1 shrink-0">
-                视频
-                {videoCount ? <span className="tabular-nums text-muted-foreground">{videoCount}</span> : null}
-              </TabsTrigger>
-              <TabsTrigger value="notes" className="min-h-10 min-w-0 flex-1 shrink-0">
-                讲义
-              </TabsTrigger>
-              <TabsTrigger value="problems" className="min-h-10 min-w-0 flex-1 shrink-0">
-                题目
-                {unitPids.length ? <span className="tabular-nums text-muted-foreground">{unitPids.length}</span> : null}
-              </TabsTrigger>
-              {editingSection ? null : (
-                <TabsTrigger value="links" className="min-h-10 min-w-0 flex-1 shrink-0">
-                  关联
-                </TabsTrigger>
+          <Panel>
+            <p className="text-xs font-medium text-fg-subtle">
+              {editingSection ? (
+                <>
+                  <Button type="button" variant="link" size="sm" onClick={() => selectChapter(activeChapter._id)}>
+                    第 {activeIndex + 1} 章
+                  </Button>
+                  {` · 第 ${sectionIndex + 1} 节`}
+                </>
+              ) : (
+                `第 ${activeIndex + 1} 章 / 共 ${chapters.length} 章`
               )}
-            </TabsList>
+            </p>
+            <label className="mt-2 block">
+              <span id="active-chapter-title" className="sr-only">
+                {editingSection ? '小节标题' : '章节标题'}
+              </span>
+              <Input
+                value={editingSection ? editingSection.title : activeChapter.title}
+                onChange={(event) =>
+                  editingSection
+                    ? updateSection(activeChapter._id, editingSection._id, { title: event.target.value })
+                    : updateChapter(activeChapter._id, { title: event.target.value })
+                }
+                required
+                aria-labelledby="active-chapter-title"
+                placeholder={editingSection ? '小节标题' : '章节标题'}
+                className="text-lg font-semibold"
+              />
+            </label>
+          </Panel>
 
-            <TabsContent value="video" className="space-y-3">
+          <div className="space-y-4">
+            <PageTabs
+              aria-label="章节内容"
+              value={chapterTab}
+              onValueChange={setChapterTab}
+              items={chapterTabItems}
+            />
+            {chapterTab === 'video' ? (
               <CourseVideoEditor
                 key={editingSection ? `section-video-${activeChapter._id}-${editingSection._id}` : `chapter-video-${activeChapter._id}`}
                 courseId={tid}
@@ -793,9 +767,8 @@ export function CourseEditPage() {
                 }
                 locked={!isEdit || !tid}
               />
-            </TabsContent>
-
-            <TabsContent value="notes">
+            ) : null}
+            {chapterTab === 'notes' ? (
               <section data-course-slot="chapterContent" aria-labelledby="chapter-content-title">
                 <h3 id="chapter-content-title" className="sr-only">
                   {editingSection ? '小节讲义' : '章节讲义'}
@@ -811,9 +784,8 @@ export function CourseEditPage() {
                   minHeight={280}
                 />
               </section>
-            </TabsContent>
-
-            <TabsContent value="problems">
+            ) : null}
+            {chapterTab === 'problems' ? (
               <ProblemPicker
                 value={unitPids}
                 onChange={(pids) =>
@@ -822,10 +794,9 @@ export function CourseEditPage() {
                     : updateChapterPids(activeChapter._id, pids)
                 }
               />
-            </TabsContent>
-
-            {editingSection ? null : (
-              <TabsContent value="links">
+            ) : null}
+            {chapterTab === 'links' ? (
+              editingSection ? null : (
                 <ChapterLinks
                   courseId={tid}
                   chapterId={activeChapter._id}
@@ -839,33 +810,28 @@ export function CourseEditPage() {
                   canCreateQuiz={Boolean(isEdit && data.canCreateQuiz)}
                   quizNeedsSave={saveState !== 'idle'}
                 />
-              </TabsContent>
-            )}
-          </Tabs>
+              )
+            ) : null}
+          </div>
         </section>
 
-        {/* Settings rail. Four titled groups instead of one long undivided
-            stack, so course identity, mindmap, audience and files stop
-            reading as a single anonymous column of labels. */}
-        <aside className="self-start lg:col-span-2 xl:sticky xl:top-14 xl:col-span-1 xl:max-h-[calc(100dvh-8rem)]">
-          <ScrollArea className="xl:max-h-[inherit]">
+        <aside className="self-start lg:col-span-2 xl:sticky xl:top-0 xl:col-span-1">
             <div className="space-y-4">
           <SettingsGroup title="课程" icon={Layers}>
             <label className="block space-y-1.5">
-              <span className="text-sm font-medium">名称</span>
-              <Input name="title" defaultValue={course.title || ''} required className="min-h-11 text-base sm:text-sm" />
+              <span className="text-sm font-medium text-fg">名称</span>
+              <Input name="title" defaultValue={course.title || ''} required />
             </label>
             <label className="block space-y-1.5">
-              <span className="text-sm font-medium">学期</span>
-              <Input name="term" defaultValue={course.term || ''} className="min-h-11 text-base sm:text-sm" placeholder="2026 秋" />
+              <span className="text-sm font-medium text-fg">学期</span>
+              <Input name="term" defaultValue={course.term || ''} placeholder="2026 秋" />
             </label>
             <label className="block space-y-1.5">
-              <span className="text-sm font-medium">看完截止</span>
+              <span className="text-sm font-medium text-fg">看完截止</span>
               <Input
                 type="datetime-local"
                 name="courseVideoDueAt"
                 defaultValue={dueAtInputValue(course.courseVideoDueAt)}
-                className="min-h-11 text-base sm:text-sm"
               />
             </label>
           </SettingsGroup>
@@ -873,14 +839,14 @@ export function CourseEditPage() {
           <SettingsGroup id="course-mindmap-settings" title="知识导图" icon={Network} collapsible>
             {isEdit && ownedMindmap ? (
               <div className="space-y-3">
-                <p className="text-sm font-medium">{ownedMindmap.title}</p>
-                <p className="text-sm text-muted-foreground">这是本课专属导图。学生进入课程就能看到当前结构。要改绑公开导图，需要先删除它。</p>
+                <p className="text-sm font-medium text-fg">{ownedMindmap.title}</p>
+                <p className="text-sm text-fg-muted">这是本课专属导图。学生进入课程就能看到当前结构。要改绑公开导图，需要先删除它。</p>
                 <input type="hidden" name="mindmapId" value={ownedMindmap._id} />
                 <div className="flex flex-wrap gap-2">
-                  <Button asChild type="button" variant="outline" className="min-h-11">
+                  <Button asChild type="button" variant="secondary" size="sm">
                     <a href={`/course/${tid}/mindmap`}>编辑本课导图</a>
                   </Button>
-                  <Button type="button" variant="destructive" className="min-h-11" disabled={saveState !== 'idle' || copying} onClick={() => void deleteOwnedMindmap()}>
+                  <Button type="button" variant="danger-soft" size="sm" disabled={saveState !== 'idle' || copying} onClick={() => void deleteOwnedMindmap()}>
                     删除本课导图
                   </Button>
                 </div>
@@ -899,14 +865,12 @@ export function CourseEditPage() {
                     ...(data.mindmaps || []).map((map) => ({ value: map._id, label: `${map.title} · 已公开` })),
                   ]}
                   ariaLabel="选择课程知识导图"
-                  className="min-h-11"
-                  contentClassName="[&_[role=option]]:min-h-10"
                 />
                 {isEdit ? (
                   <Button
                     type="button"
-                    variant="outline"
-                    className="min-h-11"
+                    variant="secondary"
+                    size="sm"
                     disabled={saveState !== 'idle' || copying}
                     title={saveState === 'dirty' ? '请先保存课程' : '创建本课导图'}
                     onClick={() => void createOwnedMindmap()}
@@ -914,7 +878,7 @@ export function CourseEditPage() {
                     创建本课导图
                   </Button>
                 ) : (
-                  <p className="text-sm text-muted-foreground">保存课程后才能创建本课导图。</p>
+                  <p className="text-sm text-fg-muted">保存课程后才能创建本课导图。</p>
                 )}
               </div>
             )}
@@ -949,19 +913,19 @@ export function CourseEditPage() {
               emptyText="没有匹配的班级"
               minHeight={44}
             />
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-fg-subtle">
               {selectedGroups.size ? `已选 ${selectedGroups.size} 个班级` : '未选班级时，课程对全站可见。'}
             </p>
             {data.canManageOwnGroups ? (
               <a
                 href="/user-groups"
-                className="inline-flex min-h-10 items-center text-sm font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="inline-flex min-h-10 items-center text-sm font-medium text-brand-fg underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
               >
                 管理我的用户组
               </a>
             ) : null}
             <input type="hidden" name="courseHidden" value={courseHidden ? 'true' : 'false'} />
-            <label className="flex min-h-10 cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2.5">
+            <label className="flex min-h-10 cursor-pointer items-start gap-2 rounded-lg border border-line px-3 py-2">
               <Switch
                 checked={courseHidden}
                 onCheckedChange={(checked) => {
@@ -972,11 +936,11 @@ export function CourseEditPage() {
                 aria-label="对学生隐藏"
               />
               <span className="min-w-0">
-                <span className="flex items-center gap-1.5 text-sm font-medium">
-                  <EyeOff className="size-3.5 text-muted-foreground" strokeWidth={1.75} />
+                <span className="flex items-center gap-1.5 text-sm font-medium text-fg">
+                  <EyeOff className="size-3.5 text-fg-subtle" strokeWidth={1.75} />
                   对学生隐藏
                 </span>
-                <span className="mt-0.5 block text-xs text-muted-foreground">隐藏后学生看不到列表，也无法打开链接。老师仍可编辑。</span>
+                <span className="mt-0.5 block text-xs text-fg-subtle">隐藏后学生看不到列表，也无法打开链接。老师仍可编辑。</span>
               </span>
             </label>
           </SettingsGroup>
@@ -989,11 +953,7 @@ export function CourseEditPage() {
 
           <SettingsGroup id="course-files-editor" title="课件下载" icon={FileText} collapsible>
             <div data-course-slot="files" className="space-y-3">
-              {fileError ? (
-                <p role="alert" className="text-xs text-destructive">
-                  {fileError}
-                </p>
-              ) : null}
+              {fileError ? <Alert tone="danger">{fileError}</Alert> : null}
               {isEdit && data.canManageFiles ? (
                 <FileUploader
                   endpoint={fileEndpoint}
@@ -1004,35 +964,29 @@ export function CourseEditPage() {
                   }}
                 />
               ) : !isEdit ? (
-                <p className="text-sm text-muted-foreground">先保存课程，再上传课件。</p>
+                <p className="text-sm text-fg-muted">先保存课程，再上传课件。</p>
               ) : null}
               {courseFiles.length ? (
                 <div className="space-y-0.5">
                   {courseFiles.map((file) => (
-                    <div key={file.name} className="krypton-course-row flex min-h-11 items-center gap-2 px-2 py-1.5 text-xs">
-                      <FileText className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.75} />
-                      <span className="min-w-0 flex-1 truncate font-medium">{file.name}</span>
-                      <a
-                        href={`/course/${tid}/file/${encodeURIComponent(file.name)}`}
-                        className={cn(
-                          'inline-flex size-9 items-center justify-center rounded-md text-muted-foreground',
-                          'transition-colors duration-150 hover:bg-muted hover:text-foreground',
-                          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary motion-reduce:transition-none',
-                        )}
-                        aria-label={`下载${file.name}`}
-                      >
-                        <Download className="size-3.5" strokeWidth={1.75} />
-                      </a>
+                    <div key={file.name} className="flex min-h-12 items-center gap-2 rounded-md px-2 py-1.5 text-xs">
+                      <FileText className="size-3.5 shrink-0 text-fg-subtle" strokeWidth={1.75} />
+                      <span className="min-w-0 flex-1 truncate font-medium text-fg">{file.name}</span>
+                      <Button asChild variant="ghost" size="sm" iconOnly>
+                        <a href={`/course/${tid}/file/${encodeURIComponent(file.name)}`} aria-label={`下载${file.name}`}>
+                          <Download strokeWidth={1.75} />
+                        </a>
+                      </Button>
                       {data.canManageFiles ? (
                         <Button
                           type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="size-9 text-destructive hover:bg-destructive/10"
+                          variant="danger-soft"
+                          size="sm"
+                          iconOnly
                           onClick={() => deleteFile(file.name)}
                           aria-label={`删除${file.name}`}
                         >
-                          <Trash2 className="size-3.5" strokeWidth={1.75} />
+                          <Trash2 strokeWidth={1.75} />
                         </Button>
                       ) : null}
                     </div>
@@ -1055,16 +1009,16 @@ export function CourseEditPage() {
             ) : null}
           </div>
             </div>
-          </ScrollArea>
         </aside>
+        </div>
       </form>
 
       <Sheet open={outlineOpen} onOpenChange={setOutlineOpen}>
-        <SheetContent side="left" className="w-[23rem] max-w-[calc(100vw-1rem)]">
+        <SheetContent side="left">
           <SheetHeader className="flex items-center justify-between gap-2 pr-12">
             <SheetTitle>章节目录</SheetTitle>
-            <Button type="button" variant="ghost" size="sm" className="min-h-11 gap-1" onClick={addChapter}>
-              <Plus className="size-3.5" strokeWidth={2} />
+            <Button type="button" variant="ghost" size="sm" className="shrink-0" onClick={addChapter}>
+              <Plus strokeWidth={2} />
               添加
             </Button>
           </SheetHeader>
@@ -1083,6 +1037,6 @@ export function CourseEditPage() {
           </SheetBody>
         </SheetContent>
       </Sheet>
-    </main>
+    </Workspace>
   );
 }

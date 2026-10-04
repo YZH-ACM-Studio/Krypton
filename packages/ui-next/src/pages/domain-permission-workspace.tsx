@@ -1,15 +1,19 @@
 import { useMemo, useState } from 'react';
-import { AlertTriangle, KeyRound, LockKeyhole, Plus, RotateCcw, Save, Search, ShieldCheck, Trash2, Users } from 'lucide-react';
+import { LockKeyhole, Plus, RotateCcw, Save, Search, Trash2, Users } from 'lucide-react';
 import { AdminPage } from '@/components/admin/admin-page';
+import { Alert } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { StatusDot } from '@/components/ui/display';
+import { EmptyState } from '@/components/ui/empty-state';
+import { FormField } from '@/components/ui/form';
+import { Input, SearchInput } from '@/components/ui/input';
+import { Panel } from '@/components/ui/panel';
 import { SimpleSelect } from '@/components/ui/select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useBootstrap } from '@/lib/bootstrap';
-import { cn } from '@/lib/cn';
 import {
   composeDomainPermissionMask,
   diffDomainPermissionDraft,
@@ -95,60 +99,38 @@ async function postRoleOperation(endpoint: string, fields: Record<string, string
 
 function MutationError({ message }: { message: string | null }) {
   if (!message) return null;
-  return (
-    <div
-      role="alert"
-      className="flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-sm text-destructive"
-    >
-      <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-      <span>{message}</span>
-    </div>
-  );
+  return <Alert tone="danger">{message}</Alert>;
 }
 
-function PermissionRow({
+function permissionRowId(key: string) {
+  return `domain-permission-bit-${key}`;
+}
+
+function PermissionMarks({
   permission,
   checked,
-  disabled,
   includers,
-  onToggle,
 }: {
   permission: DomainPermissionItem;
   checked: boolean;
-  disabled: boolean;
   includers: DomainPermissionItem[];
-  onToggle: () => void;
 }) {
   return (
-    <label
-      className={cn(
-        'group flex min-h-16 items-start gap-3 px-1 py-3 sm:px-2',
-        disabled ? 'cursor-default' : 'cursor-pointer rounded-lg transition-[background-color] duration-150 ease-out hover:bg-muted/45',
-      )}
-    >
-      <Checkbox className="mt-0.5" checked={checked} disabled={disabled} onCheckedChange={onToggle} />
-      <span className="min-w-0 flex-1 space-y-1">
-        <span className="flex flex-wrap items-center gap-1.5">
-          <span className="text-sm font-medium leading-5">{permission.name}</span>
-          {permission.risk === 'high' ? (
-            <Badge variant="destructive" className="h-5 px-1.5 text-[10px] font-medium">
-              高风险
-            </Badge>
-          ) : null}
-          {permission.includes.length > 0 ? (
-            <Badge variant="outline" className="h-5 px-1.5 text-[10px] font-medium text-muted-foreground">
-              包含 {permission.includes.map((item) => item.name).join('、')}
-            </Badge>
-          ) : null}
-          {includers.length > 0 && !checked ? (
-            <Badge variant="secondary" className="h-5 px-1.5 text-[10px] font-medium">
-              已由 {includers.map((item) => item.name).join('、')} 包含
-            </Badge>
-          ) : null}
-        </span>
-        <span className="block text-xs leading-5 text-muted-foreground">{permission.detail}</span>
-      </span>
-    </label>
+    <>
+      {permission.risk === 'high' ? (
+        <Badge tone="danger" variant="soft" size="sm">高风险</Badge>
+      ) : null}
+      {permission.includes.length > 0 ? (
+        <Badge variant="outline" size="sm">
+          包含 {permission.includes.map((item) => item.name).join('、')}
+        </Badge>
+      ) : null}
+      {includers.length > 0 && !checked ? (
+        <Badge tone="neutral" variant="soft" size="sm">
+          已由 {includers.map((item) => item.name).join('、')} 包含
+        </Badge>
+      ) : null}
+    </>
   );
 }
 
@@ -303,120 +285,125 @@ export function DomainPermissionWorkspace({ domainName, endpoint, initialRoles, 
 
   const defaultRole = roles.find((role) => role.id === 'default');
   const defaultPermissionCount = defaultRole ? permissionKeysFromMask(parseDomainRoleMask(roleMasks.default, 'default'), allPermissions).size : 0;
+  const dialogOpen = saveOpen || createOpen || deleteRole !== null;
+  const headerPrimary = !selectedDirty && !dialogOpen;
+  const savePrimary = selectedDirty && !dialogOpen;
 
   return (
-    <AdminPage bypassPrivGate hideSidebar contentClassName="min-h-full">
-      <section className="min-h-full space-y-5" aria-labelledby="domain-permission-title">
-        <header className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
-          <div className="space-y-1">
-            <p className="text-xs font-medium tracking-wide text-muted-foreground">{domainName} · 当前域</p>
-            <h1 id="domain-permission-title" className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-              <KeyRound className="size-5 text-primary" />
-              角色与权限
-            </h1>
-            <p className="max-w-[70ch] text-sm leading-6 text-muted-foreground">
-              管理当前域的角色权限。这里的域权限不会授予全站管理员能力，账号禁用与全站权限仍在账号管理中维护。
-            </p>
-          </div>
-          <Button
-            type="button"
-            className="min-h-10 gap-1.5"
-            onClick={() => {
-              setMutationError(null);
-              setCreateOpen(true);
-            }}
-          >
-            <Plus className="size-4" />
-            新建角色
-          </Button>
-        </header>
+    <AdminPage
+      bypassPrivGate
+      hideSidebar
+      title="角色与权限"
+      description={(
+        <>
+          {domainName} · 当前域
+          <br />
+          管理当前域的角色权限。这里的域权限不会授予全站管理员能力，账号禁用与全站权限仍在账号管理中维护。
+        </>
+      )}
+      actions={(
+        <Button
+          type="button"
+          variant={headerPrimary ? 'primary' : 'secondary'}
+          onClick={() => {
+            setMutationError(null);
+            setCreateOpen(true);
+          }}
+        >
+          <Plus aria-hidden="true" />
+          新建角色
+        </Button>
+      )}
+    >
+      <section className="flex min-w-0 flex-col gap-5" aria-labelledby="domain-permission-title">
+        <span id="domain-permission-title" className="sr-only">角色与权限</span>
+        <Alert tone="info">
+          权限包含标记只说明实际能力，不会替你勾选或写入其它权限位。root 始终拥有全部域权限，且不可修改或删除。
+        </Alert>
 
-        <div className="flex items-start gap-2 rounded-xl border border-primary/20 bg-primary/5 px-3.5 py-3 text-sm leading-6">
-          <ShieldCheck className="mt-0.5 size-4 shrink-0 text-primary" />
-          <p>权限包含标记只说明实际能力，不会替你勾选或写入其它权限位。root 始终拥有全部域权限，且不可修改或删除。</p>
-        </div>
-
-        <div className="rounded-2xl border bg-card/20 shadow-sm lg:grid lg:grid-cols-[17rem_minmax(0,1fr)]">
-          <aside className="hidden overflow-hidden border-r bg-muted/20 lg:block lg:rounded-l-2xl" aria-label="角色列表">
-            <div className="border-b px-4 py-3">
-              <p className="text-sm font-semibold">角色</p>
-              <p className="mt-0.5 text-xs text-muted-foreground">{roles.length} 个角色</p>
+        <div className="min-w-0 rounded-lg border border-line bg-surface shadow-xs lg:grid lg:grid-cols-[17rem_minmax(0,1fr)]">
+          <aside className="hidden min-w-0 overflow-hidden border-r border-line bg-surface-sunken lg:block" aria-label="角色列表">
+            <div className="border-b border-line px-4 py-3">
+              <p className="text-sm font-semibold text-fg">角色</p>
+              <p className="mt-0.5 text-xs text-fg-subtle">{roles.length} 个角色</p>
             </div>
-            <ScrollArea className="max-h-[calc(100dvh-15rem)]">
-            <div className="space-y-1 p-2">
+            <div className="flex flex-col gap-1 p-2">
               {roles.map((role) => {
                 const roleMask = parseDomainRoleMask(roleMasks[role.id], role.id);
                 const permissionCount = permissionKeysFromMask(roleMask, allPermissions).size;
                 const active = role.id === selectedRole.id;
                 return (
-                  <button
+                  <Button
                     key={role.id}
                     type="button"
+                    variant={active ? 'secondary' : 'ghost'}
+                    aria-pressed={active}
+                    className="h-auto! w-full min-w-0 max-w-full whitespace-normal py-1.5"
                     onClick={() => {
                       setMutationError(null);
                       setSelectedRoleId(role.id);
                     }}
-                    className={cn(
-                      'w-full rounded-xl px-3 py-2.5 text-left outline-none transition-[background-color,color,box-shadow,scale] duration-150 ease-out active:scale-[0.985]',
-                      'focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
-                      active
-                        ? 'bg-background text-foreground shadow-sm ring-1 ring-border/70'
-                        : 'text-muted-foreground hover:bg-background/65 hover:text-foreground',
-                    )}
                   >
-                    <span className="flex items-center gap-2">
-                      <span className="min-w-0 flex-1 truncate text-sm font-medium">{role.id}</span>
-                      <span className="shrink-0 text-[10px] font-medium text-muted-foreground">{roleTypeLabel(role)}</span>
-                      {dirtyRoles.has(role.id) ? <span className="size-2 rounded-full bg-primary" title="有未保存修改" /> : null}
+                    <span className="flex w-full min-w-0 flex-col gap-0.5 text-left">
+                      <span className="min-w-0 truncate">{role.id}</span>
+                      <span className="flex min-w-0 items-center gap-1.5 text-2xs text-fg-subtle">
+                        {dirtyRoles.has(role.id) ? (
+                          <span className="inline-flex shrink-0" title="有未保存修改">
+                            <StatusDot tone="warning" />
+                            <span className="sr-only">有未保存修改</span>
+                          </span>
+                        ) : null}
+                        <span className="shrink-0">{roleTypeLabel(role)}</span>
+                        <span className="min-w-0 truncate tabular">
+                          {role.memberCount} 人
+                          <span aria-hidden="true"> · </span>
+                          {permissionCount} 项权限
+                        </span>
+                      </span>
                     </span>
-                    <span className="mt-1 flex items-center gap-2 text-[11px] tabular-nums">
-                      <span>{role.memberCount} 人</span>
-                      <span aria-hidden="true">·</span>
-                      <span>{permissionCount} 项权限</span>
-                    </span>
-                  </button>
+                  </Button>
                 );
               })}
             </div>
-            </ScrollArea>
           </aside>
 
           <main className="min-w-0">
-            <div className="border-b p-4 lg:hidden">
-              <label className="mb-1.5 block text-xs font-medium text-muted-foreground">当前角色</label>
-              <SimpleSelect
-                value={selectedRole.id}
-                onValueChange={(value) => {
-                  setMutationError(null);
-                  setSelectedRoleId(value);
-                }}
-                className="min-h-11"
-                options={roles.map((role) => ({
-                  value: role.id,
-                  label: `${role.id} · ${role.memberCount} 人${dirtyRoles.has(role.id) ? ' · 未保存' : ''}`,
-                }))}
-              />
+            <div className="border-b border-line p-4 lg:hidden">
+              <FormField label="当前角色" htmlFor="domain-permission-role">
+                <SimpleSelect
+                  id="domain-permission-role"
+                  value={selectedRole.id}
+                  onValueChange={(value) => {
+                    setMutationError(null);
+                    setSelectedRoleId(value);
+                  }}
+                  options={roles.map((role) => ({
+                    value: role.id,
+                    label: `${role.id} · ${role.memberCount} 人${dirtyRoles.has(role.id) ? ' · 未保存' : ''}`,
+                  }))}
+                />
+              </FormField>
             </div>
 
-            <div className="space-y-5 p-4 sm:p-6">
+            <div className="flex min-w-0 flex-col gap-5 p-4 sm:p-6">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div className="min-w-0 space-y-2">
+                <div className="flex min-w-0 flex-col gap-2">
                   <div className="flex flex-wrap items-center gap-2">
-                    <h2 className="text-xl font-semibold tracking-tight">{selectedRole.id}</h2>
-                    <Badge variant={selectedRole.type === 'custom' ? 'outline' : 'secondary'}>{roleTypeLabel(selectedRole)}</Badge>
+                    <h2 className="min-w-0 truncate text-lg font-semibold tracking-tight text-balance text-fg">{selectedRole.id}</h2>
+                    <Badge variant={selectedRole.type === 'custom' ? 'outline' : 'soft'}>{roleTypeLabel(selectedRole)}</Badge>
                     {!selectedRole.editable ? (
-                      <Badge variant="outline" className="gap-1 text-muted-foreground">
-                        <LockKeyhole className="size-3" />
+                      <Badge tone="neutral" variant="soft">
+                        <LockKeyhole aria-hidden="true" className="size-3.5" />
                         只读
                       </Badge>
                     ) : null}
                   </div>
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm text-fg-muted">
                     <span className="inline-flex items-center gap-1.5">
-                      <Users className="size-3.5" />
+                      <Users aria-hidden="true" className="size-3.5 shrink-0 text-fg-subtle" />
                       {selectedRole.memberCount} 名当前成员
                     </span>
-                    <span>
+                    <span className="tabular">
                       {selectedKeys.size} / {allPermissions.length} 项显式权限
                     </span>
                   </div>
@@ -424,92 +411,118 @@ export function DomainPermissionWorkspace({ domainName, endpoint, initialRoles, 
                 {selectedRole.deletable ? (
                   <Button
                     type="button"
-                    variant="outline"
-                    className="min-h-10 gap-1.5 text-destructive hover:text-destructive"
+                    variant="danger-soft"
+                    className="shrink-0"
                     onClick={() => {
                       setMutationError(null);
                       setDeleteRole(selectedRole);
                     }}
                   >
-                    <Trash2 className="size-4" />
+                    <Trash2 aria-hidden="true" />
                     删除角色
                   </Button>
                 ) : null}
               </div>
 
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  type="search"
-                  value={query}
-                  onChange={(event) => setQuery(event.currentTarget.value)}
-                  placeholder="搜索权限名称、说明或分组"
-                  className="min-h-11 pl-9"
-                  aria-label="搜索权限"
-                />
-              </div>
+              <SearchInput
+                value={query}
+                onChange={(event) => setQuery(event.currentTarget.value)}
+                placeholder="搜索权限名称、说明或分组"
+                aria-label="搜索权限"
+              />
 
               <MutationError message={!saveOpen && !createOpen && !deleteRole ? mutationError : null} />
 
               {filteredFamilies.length ? (
-                <div className="space-y-7">
+                <div className="flex min-w-0 flex-col gap-6">
                   {filteredFamilies.map((family) => (
-                    <section key={family.key} aria-labelledby={`permission-family-${family.key}`}>
-                      <div className="mb-1 flex items-center justify-between gap-2">
-                        <h3 id={`permission-family-${family.key}`} className="text-sm font-semibold">
+                    <section key={family.key} className="flex min-w-0 flex-col gap-2" aria-labelledby={`permission-family-${family.key}`}>
+                      <div className="flex items-center justify-between gap-2">
+                        <h3 id={`permission-family-${family.key}`} className="min-w-0 truncate text-sm font-semibold text-fg">
                           {family.label}
                         </h3>
-                        <span className="text-xs tabular-nums text-muted-foreground">{family.permissions.length} 项</span>
+                        <span className="shrink-0 text-xs tabular text-fg-subtle">{family.permissions.length} 项</span>
                       </div>
-                      <div className="divide-y border-y">
-                        {family.permissions.map((permission) => (
-                          <PermissionRow
-                            key={permission.key}
-                            permission={permission}
-                            checked={selectedKeys.has(permission.key)}
-                            disabled={!selectedRole.editable}
-                            includers={permissionIncluders(permission.key, selectedKeys, allPermissions)}
-                            onToggle={() => togglePermission(permission.key)}
-                          />
-                        ))}
+                      <div className="min-w-0 [&_.krypton-table-shell]:max-h-96 [&_[data-radix-scroll-area-viewport]>div]:!block">
+                        <Table orientation="both">
+                          <TableHeader className="sticky top-0 z-10">
+                            <TableRow>
+                              <TableHead className="sticky top-0 z-10 w-12 bg-surface-sunken">
+                                <span className="sr-only">勾选</span>
+                              </TableHead>
+                              <TableHead className="sticky top-0 z-10 bg-surface-sunken">权限</TableHead>
+                              <TableHead className="sticky top-0 z-10 bg-surface-sunken">说明</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {family.permissions.map((permission) => {
+                              const checked = selectedKeys.has(permission.key);
+                              const includers = permissionIncluders(permission.key, selectedKeys, allPermissions);
+                              return (
+                                <TableRow key={permission.key}>
+                                  <TableCell>
+                                    <Checkbox
+                                      size="sm"
+                                      id={permissionRowId(permission.key)}
+                                      checked={checked}
+                                      disabled={!selectedRole.editable}
+                                      onCheckedChange={() => togglePermission(permission.key)}
+                                    />
+                                  </TableCell>
+                                  <TableCell>
+                                    <label
+                                      htmlFor={permissionRowId(permission.key)}
+                                      className="flex min-w-0 items-center gap-2 whitespace-nowrap"
+                                    >
+                                      <span className="font-medium">{permission.name}</span>
+                                      <PermissionMarks permission={permission} checked={checked} includers={includers} />
+                                    </label>
+                                  </TableCell>
+                                  <TableCell>
+                                    <label htmlFor={permissionRowId(permission.key)} className="block whitespace-nowrap text-fg-muted">
+                                      {permission.detail}
+                                    </label>
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })}
+                          </TableBody>
+                        </Table>
                       </div>
                     </section>
                   ))}
                 </div>
               ) : (
-                <div className="rounded-xl border border-dashed px-4 py-12 text-center text-sm text-muted-foreground">
-                  没有匹配“{query.trim()}”的权限。
-                </div>
+                <EmptyState compact icon={<Search />} title={`没有匹配“${query.trim()}”的权限。`} />
               )}
-
-              {selectedDirty && selectedRole.editable ? (
-                <div className="sticky bottom-2 z-10 flex flex-col gap-3 rounded-xl border bg-background p-3 shadow-lg sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-                  <div>
-                    <p className="text-sm font-medium">{selectedRole.id} 有未保存修改</p>
-                    <p className="text-xs text-muted-foreground">
-                      新增 {selectedDiff.added.length} 项，移除 {selectedDiff.removed.length} 项
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Button type="button" variant="ghost" className="min-h-10 gap-1.5" onClick={() => updateDraft(new Set(originalKeys))}>
-                      <RotateCcw className="size-3.5" />
-                      撤销草稿
-                    </Button>
-                    <Button
-                      type="button"
-                      className="min-h-10 gap-1.5"
-                      onClick={() => {
-                        setMutationError(null);
-                        setSaveOpen(true);
-                      }}
-                    >
-                      <Save className="size-3.5" />
-                      预览并保存
-                    </Button>
-                  </div>
-                </div>
-              ) : null}
             </div>
+            {selectedDirty && selectedRole.editable ? (
+              <div className="sticky bottom-2 z-20 flex flex-col gap-3 border-t border-line bg-surface px-4 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:px-6">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-fg">{selectedRole.id} 有未保存修改</p>
+                  <p className="text-xs tabular text-fg-subtle">
+                    新增 {selectedDiff.added.length} 项，移除 {selectedDiff.removed.length} 项
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" variant="ghost" onClick={() => updateDraft(new Set(originalKeys))}>
+                    <RotateCcw aria-hidden="true" />
+                    撤销草稿
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={savePrimary ? 'primary' : 'secondary'}
+                    onClick={() => {
+                      setMutationError(null);
+                      setSaveOpen(true);
+                    }}
+                  >
+                    <Save aria-hidden="true" />
+                    预览并保存
+                  </Button>
+                </div>
+              </div>
+            ) : null}
           </main>
         </div>
       </section>
@@ -523,50 +536,50 @@ export function DomainPermissionWorkspace({ domainName, endpoint, initialRoles, 
           }
         }}
       >
-        <DialogContent className="sm:w-[620px] sm:rounded-2xl" onClose={busy ? undefined : () => setSaveOpen(false)}>
+        <DialogContent size="lg" onClose={busy ? undefined : () => setSaveOpen(false)}>
           <DialogHeader>
             <DialogTitle>确认保存角色权限</DialogTitle>
-            <p className="mt-1 text-sm text-muted-foreground">
+            <DialogDescription>
               角色 {selectedRole.id} · 当前影响 {selectedRole.memberCount} 名成员
-            </p>
+            </DialogDescription>
           </DialogHeader>
-          <DialogBody className="space-y-4 px-6 py-5">
+          <DialogBody className="flex flex-col gap-5">
             <MutationError message={mutationError} />
             <div className="grid gap-4 sm:grid-cols-2">
-              <div>
-                <p className="mb-2 text-sm font-medium text-emerald-600 dark:text-emerald-400">新增 {selectedDiff.added.length} 项</p>
+              <div className="min-w-0">
+                <p className="mb-2 text-sm font-medium text-success-fg">新增 {selectedDiff.added.length} 项</p>
                 {selectedDiff.added.length ? (
-                  <ul className="space-y-1.5 text-sm">
+                  <ul className="flex flex-col gap-1.5 text-sm text-fg">
                     {selectedDiff.added.map((permission) => (
-                      <li key={permission.key}>{permission.name}</li>
+                      <li key={permission.key} className="min-w-0 break-words">{permission.name}</li>
                     ))}
                   </ul>
                 ) : (
-                  <p className="text-sm text-muted-foreground">无新增权限</p>
+                  <p className="text-sm text-fg-muted">无新增权限</p>
                 )}
               </div>
-              <div>
-                <p className="mb-2 text-sm font-medium text-destructive">移除 {selectedDiff.removed.length} 项</p>
+              <div className="min-w-0">
+                <p className="mb-2 text-sm font-medium text-danger-fg">移除 {selectedDiff.removed.length} 项</p>
                 {selectedDiff.removed.length ? (
-                  <ul className="space-y-1.5 text-sm">
+                  <ul className="flex flex-col gap-1.5 text-sm text-fg">
                     {selectedDiff.removed.map((permission) => (
-                      <li key={permission.key}>{permission.name}</li>
+                      <li key={permission.key} className="min-w-0 break-words">{permission.name}</li>
                     ))}
                   </ul>
                 ) : (
-                  <p className="text-sm text-muted-foreground">无移除权限</p>
+                  <p className="text-sm text-fg-muted">无移除权限</p>
                 )}
               </div>
             </div>
           </DialogBody>
-          <div className="flex justify-end gap-2 border-t px-6 py-4">
-            <Button type="button" variant="ghost" className="min-h-10" disabled={busy} onClick={() => setSaveOpen(false)}>
+          <DialogFooter>
+            <Button type="button" variant="secondary" disabled={busy} onClick={() => setSaveOpen(false)}>
               取消
             </Button>
-            <Button type="button" className="min-h-10" disabled={busy} onClick={() => void handleSave()}>
+            <Button type="button" variant="primary" disabled={busy} onClick={() => void handleSave()}>
               {busy ? '保存中…' : '确认保存'}
             </Button>
-          </div>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -579,33 +592,32 @@ export function DomainPermissionWorkspace({ domainName, endpoint, initialRoles, 
           }
         }}
       >
-        <DialogContent className="sm:w-[520px] sm:rounded-2xl" onClose={busy ? undefined : () => setCreateOpen(false)}>
+        <DialogContent size="md" onClose={busy ? undefined : () => setCreateOpen(false)}>
           <DialogHeader>
             <DialogTitle>新建域角色</DialogTitle>
-            <p className="mt-1 text-sm text-muted-foreground">新角色将复制当前 default 的 {defaultPermissionCount} 项权限，创建后可继续调整。</p>
+            <DialogDescription>新角色将复制当前 default 的 {defaultPermissionCount} 项权限，创建后可继续调整。</DialogDescription>
           </DialogHeader>
-          <DialogBody className="space-y-4 px-6 py-5">
+          <DialogBody className="flex flex-col gap-5">
             <MutationError message={mutationError} />
-            <label className="block space-y-1.5">
-              <span className="text-sm font-medium">角色名</span>
+            <FormField label="角色名" htmlFor="domain-permission-new-role">
               <Input
+                id="domain-permission-new-role"
                 autoFocus
                 value={newRoleName}
                 onChange={(event) => setNewRoleName(event.currentTarget.value)}
                 placeholder="仅限字母、数字和下划线"
-                className="min-h-11"
                 maxLength={32}
               />
-            </label>
+            </FormField>
           </DialogBody>
-          <div className="flex justify-end gap-2 border-t px-6 py-4">
-            <Button type="button" variant="ghost" className="min-h-10" disabled={busy} onClick={() => setCreateOpen(false)}>
+          <DialogFooter>
+            <Button type="button" variant="secondary" disabled={busy} onClick={() => setCreateOpen(false)}>
               取消
             </Button>
-            <Button type="button" className="min-h-10" disabled={busy || !newRoleName.trim()} onClick={() => void handleCreate()}>
+            <Button type="button" variant="primary" disabled={busy || !newRoleName.trim()} onClick={() => void handleCreate()}>
               {busy ? '创建中…' : '创建角色'}
             </Button>
-          </div>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -618,27 +630,24 @@ export function DomainPermissionWorkspace({ domainName, endpoint, initialRoles, 
           }
         }}
       >
-        <DialogContent className="sm:w-[520px] sm:rounded-2xl" onClose={busy ? undefined : () => setDeleteRole(null)}>
+        <DialogContent size="md" onClose={busy ? undefined : () => setDeleteRole(null)}>
           <DialogHeader>
             <DialogTitle>删除自定义角色</DialogTitle>
           </DialogHeader>
-          <DialogBody className="space-y-4 px-6 py-5">
+          <DialogBody className="flex flex-col gap-5">
             <MutationError message={mutationError} />
-            <div className="rounded-xl border border-destructive/25 bg-destructive/5 p-4">
-              <p className="font-medium">删除 {deleteRole?.id}</p>
-              <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                当前 {deleteRole?.memberCount ?? 0} 名成员将立即回落到 default 角色。此操作不会删除账号或其它角色。
-              </p>
-            </div>
+            <Alert tone="danger" title={`删除 ${deleteRole?.id ?? ''}`}>
+              当前 {deleteRole?.memberCount ?? 0} 名成员将立即回落到 default 角色。此操作不会删除账号或其它角色。
+            </Alert>
           </DialogBody>
-          <div className="flex justify-end gap-2 border-t px-6 py-4">
-            <Button type="button" variant="ghost" className="min-h-10" disabled={busy} onClick={() => setDeleteRole(null)}>
+          <DialogFooter>
+            <Button type="button" variant="secondary" disabled={busy} onClick={() => setDeleteRole(null)}>
               取消
             </Button>
-            <Button type="button" variant="destructive" className="min-h-10" disabled={busy} onClick={() => void handleDelete()}>
+            <Button type="button" variant="danger" disabled={busy} onClick={() => void handleDelete()}>
               {busy ? '删除中…' : '确认删除'}
             </Button>
-          </div>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </AdminPage>
@@ -670,12 +679,17 @@ export function DomainRolePage() {
   const endpoint = useBootstrap().urls.domainPermission;
   return (
     <AdminPage bypassPrivGate hideSidebar>
-      <div className="rounded-xl border p-6 text-sm">
-        角色管理已合并到权限管理。
-        <a className="ml-1 font-medium text-primary underline-offset-4 hover:underline" href={endpoint}>
-          前往角色与权限
-        </a>
-      </div>
+      <Panel>
+        <p className="text-sm text-fg">
+          角色管理已合并到权限管理。
+          <a
+            className="ml-1 font-medium text-brand-fg underline underline-offset-2 decoration-brand-line hover:decoration-current focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            href={endpoint}
+          >
+            前往角色与权限
+          </a>
+        </p>
+      </Panel>
     </AdminPage>
   );
 }

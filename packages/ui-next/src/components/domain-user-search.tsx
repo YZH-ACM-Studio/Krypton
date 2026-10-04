@@ -88,7 +88,7 @@ export function DomainUserMultiSelect({
   placeholder = '搜索 UID / OJ 用户 / 学号 / 姓名',
   emptyText = '没有匹配的用户',
   maxItems,
-  minHeight = 44,
+  minHeight,
   disabled,
 }: {
   domainId: string;
@@ -109,9 +109,9 @@ export function DomainUserMultiSelect({
       getKey={(user) => String(user._id)}
       getLabel={domainUserSearchLabel}
       renderChip={(user) => (
-        <span className="inline-flex max-w-full items-center gap-1">
-          <span className="truncate">{user.displayName || user.uname || `UID ${user._id}`}</span>
-          <span className="font-mono text-[10px] text-muted-foreground">#{user._id}</span>
+        <span className="inline-flex max-w-full min-w-0 items-center gap-1">
+          <span className="min-w-0 truncate">{user.displayName || user.uname || `UID ${user._id}`}</span>
+          <span className="shrink-0 font-mono text-2xs text-fg-subtle">#{user._id}</span>
         </span>
       )}
       renderOption={(user) => <DomainUserSearchOption user={user} />}
@@ -119,7 +119,7 @@ export function DomainUserMultiSelect({
       placeholder={placeholder}
       emptyText={emptyText}
       maxItems={maxItems}
-      minHeight={minHeight}
+      {...(minHeight == null ? {} : { minHeight })}
       disabled={disabled}
     />
   );
@@ -137,11 +137,11 @@ export function DomainUserSearchOption({ user }: { user: DomainUserOption }) {
   const studentIdentity = [user.studentId ? `学号 ${user.studentId}` : '', user.realName].filter(Boolean).join(' · ');
   return (
     <span className="flex min-w-0 flex-col">
-      <span className="truncate text-sm font-medium">
-        {ojName}
-        <span className="ml-2 font-mono text-[11px] text-muted-foreground">UID {user._id}</span>
+      <span className="flex min-w-0 items-baseline gap-2">
+        <span className="min-w-0 truncate text-sm font-medium">{ojName}</span>
+        <span className="shrink-0 font-mono text-2xs text-fg-subtle">UID {user._id}</span>
       </span>
-      {studentIdentity || user.mail ? <span className="truncate text-[11px] text-muted-foreground">{studentIdentity || user.mail}</span> : null}
+      {studentIdentity || user.mail ? <span className="min-w-0 truncate text-2xs text-fg-subtle">{studentIdentity || user.mail}</span> : null}
     </span>
   );
 }
